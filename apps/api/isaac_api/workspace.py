@@ -1966,6 +1966,71 @@ _RUN_ORIGIN_KEYS = frozenset(
     }
 )
 
+#: How an acquisition identity is SPELLED since 2026-10-11: ``<stem>@sha256:<digest>``.
+#:
+#: **THE CONTAINER IS NO LONGER PART OF IT** (QA finding ``C-02``). It was
+#: ``<archive>:<archive path>@<digest>``, and the archive is the name the CONTAINER was
+#: staged under — so the same files staged once as a folder and once as a ZIP were two
+#: different acquisitions, and a record ended with 18 runs for 9 measurements. What an
+#: acquisition IS is its bytes and its name: the member's content digest, plus the
+#: file's own basename (the unit's ``stem``). The basename is kept because
+#: ``bl15.relate`` keeps two files with DIFFERENT names and the SAME bytes as two
+#: measurements (two aborted acquisitions writing identical empty files are not one), and
+#: suppresses a same-bytes copy only when it carries the same basename — so within one
+#: reading ``(stem, digest)`` is unique, and two distinct acquisitions sharing a legacy
+#: number (``Q16``) have different bytes and stay distinct.
+ACQUISITION_IDENTITY_SEPARATOR = "@sha256:"
+
+_SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+
+
+def acquisition_identity(stem: object, content_sha256: object) -> str | None:
+    """``<stem>@sha256:<digest>``, or ``None`` when either half is missing or malformed."""
+    if not isinstance(stem, str) or not stem or not isinstance(content_sha256, str):
+        return None
+    if not _SHA256_HEX.match(content_sha256):
+        return None
+    return f"{stem}{ACQUISITION_IDENTITY_SEPARATOR}{content_sha256}"
+
+
+def acquisition_key(
+    identity: object, *, stem: object = None, content_sha256: object = None
+) -> str | None:
+    """The key an identity is MATCHED on, whichever way it was spelled. ``None`` if blank.
+
+    A current identity is its own key. A LEGACY one (``<archive>:<path>@<digest>``,
+    written before 2026-10-11 into run origins and import sessions alike) is re-spelled
+    from its digest and its stem — the digest from ``content_sha256`` or the identity's
+    own tail, the stem as the caller supplies it, because the legacy string's archive
+    and path cannot be told apart by splitting on ``:`` (both may contain one). An
+    identity neither form can be read from is returned UNCHANGED, so it still matches
+    itself exactly and never anything else — a legacy row whose digest is missing is
+    container-scoped exactly as it always was, rather than guessed into a match.
+    """
+    if not isinstance(identity, str) or not identity:
+        return None
+    head, separator, tail = identity.rpartition(ACQUISITION_IDENTITY_SEPARATOR)
+    if separator and head and _SHA256_HEX.match(tail):
+        return identity
+    digest = content_sha256 if isinstance(content_sha256, str) else None
+    if digest is None or not _SHA256_HEX.match(digest):
+        legacy_tail = identity.rsplit("@", 1)[-1] if "@" in identity else ""
+        digest = legacy_tail if _SHA256_HEX.match(legacy_tail) else None
+    return acquisition_identity(stem, digest) or identity
+
+
+def _origin_key(row: object) -> str | None:
+    """:func:`acquisition_key` of one stored run-origin row."""
+    if not isinstance(row, dict):
+        return None
+    stem = row.get("stem")
+    if not isinstance(stem, str) or not stem:
+        path = row.get("acquisition_path")
+        stem = path.rsplit("/", 1)[-1] if isinstance(path, str) and path else None
+    return acquisition_key(
+        row.get("acquisition_identity"), stem=stem, content_sha256=row.get("content_sha256")
+    )
+
 
 def _convention_rules_state_payload(exp: "Experiment") -> list | None:
     """What to store at ``convention_rules``, or ``None``. ONE function for both uses."""
@@ -3731,7 +3796,9 @@ class Experiment:
     #: Raw rule entries this build could not read, carried verbatim and written back.
     unreadable_convention_rules: list = field(default_factory=list)
     #: ``run_id -> the acquisition it was created from`` — a DURABLE INTERNAL IDENTITY
-    #: (archive, archive path and content digest), added 2026-09-22 so two acquisitions
+    #: (~~archive, archive path and content digest~~ — since 2026-10-11 the file's name
+    #: and content digest, :data:`ACQUISITION_IDENTITY_SEPARATOR`, with rows written in
+    #: the old spelling still matched by :func:`acquisition_key`), added 2026-09-22 so two acquisitions
     #: sharing a legacy number (``Q16``: the two `32` files) are never confused, and so
     #: a re-run of an import finds the run a measurement already has by WHAT IT IS
     #: rather than by the label it happens to carry. Provenance, not science: inert to
@@ -4430,7 +4497,12 @@ class Experiment:
             return False
         existing = self.historical_run_origins.get(run_id)
         if existing is not None:
-            if existing.get("acquisition_identity") != clean.get("acquisition_identity"):
+            # COMPARED BY KEY, NOT BY SPELLING (2026-10-11). A row written before the
+            # identity stopped naming its container spells the same acquisition
+            # differently; comparing the raw strings raised here — a 500 out of the batch
+            # route — the first time such a run was re-imported. The existing row is KEPT
+            # as written either way: it is a fact about how the run was made.
+            if _origin_key(existing) != _origin_key(clean):
                 raise ValueError(
                     f"run {run_id!r} already records a different origin; not overwritten"
                 )
@@ -4438,13 +4510,48 @@ class Experiment:
         self.historical_run_origins[run_id] = clean
         return True
 
+    def run_origin_key(self, run_id: str) -> str | None:
+        """The acquisition key this run is recorded as made from, or ``None``.
+
+        ``None`` for a run with no recorded origin — one added by hand — AND for one whose
+        stored entry this build could not read: what that entry says is unknown, so it is
+        not evidence that the run belongs to any particular measurement.
+        """
+        return _origin_key(self.historical_run_origins.get(run_id))
+
+    def run_origin_view(self, run_id: str) -> dict | None:
+        """What a surface may show of a run's recorded origin, or ``None``.
+
+        ``acquisition_identity`` is the MATCHING KEY (:func:`acquisition_key`), not the
+        stored spelling, so a client comparing it with an import's own measurement key
+        compares two strings and re-implements no rule.
+        """
+        origin = self.historical_run_origins.get(run_id)
+        key = _origin_key(origin)
+        if key is None:
+            return None
+        legacy = origin.get("legacy_number")
+        return {
+            "acquisition_identity": key,
+            "stem": origin.get("stem") if isinstance(origin.get("stem"), str) else None,
+            "legacy_number": legacy if isinstance(legacy, int) and not isinstance(legacy, bool) else None,
+        }
+
     def run_for_acquisition(self, acquisition_identity: str):
-        """The run created from this acquisition, or ``None``. Matches by identity only."""
-        for run_id, origin in self.historical_run_origins.items():
-            if origin.get("acquisition_identity") == acquisition_identity:
-                run = self.get_run(run_id)
-                if run is not None:
-                    return run
+        """The run created from this acquisition, or ``None``. Matches by identity only.
+
+        ~~Matched on the stored string~~ — 2026-10-11: matched on :func:`acquisition_key`
+        of both sides, so a run recorded under the legacy, container-naming spelling is
+        still found by the same acquisition arriving in another container. In RUN ORDER,
+        so the answer is deterministic even on a record that the pre-2026-10-11 defect
+        left holding two runs made from one acquisition: the earlier is returned.
+        """
+        wanted = acquisition_key(acquisition_identity)
+        if wanted is None:
+            return None
+        for run in self.runs:
+            if _origin_key(self.historical_run_origins.get(run.id)) == wanted:
+                return run
         return None
 
     def replace_proposal(self, proposal: "IngestionProposal") -> None:

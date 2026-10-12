@@ -13,7 +13,13 @@ The workflow this module exists to make honest, and the order is the product's:
 
     New Import -> Sources -> Parse -> Reconstruct -> Review -> Add to Experiments
 
-The last step is ``HIST-005`` and is **not built**; see
+~~The last step is ``HIST-005`` and is **not built**; see
+:data:`CANDIDATE_NOT_PROPOSABLE_NO_EXPERIMENT_CREATION`.~~ — **STALE SINCE 2026-09-15 and
+struck 2026-10-11:** ``HIST-005`` IS built (:data:`UNBUILT_STEP` is ``None``). ``POST
+/api/imports/{id}/add-to-experiment`` sends every sendable candidate to a record in one
+write and, with ``create_runs``, creates one ordinary run per measurement; the Add stage
+can create the destination record. What stays true is narrower: a STRUCTURAL candidate
+("an experiment / a run exists here") is still never itself a proposal — see
 :data:`CANDIDATE_NOT_PROPOSABLE_NO_EXPERIMENT_CREATION`.
 
 THE ONE RULE THAT MATTERS MOST: NO BYTES ARRIVE FROM OUTSIDE
@@ -808,11 +814,17 @@ RECONSTRUCTION_APPLIED = False
 #: Why a structural candidate is not proposable. Named rather than implied: the
 #: proposal contract targets ONE field path, so "an experiment exists here" has
 #: no proposal shape, and creating an experiment from an import is ``HIST-005``.
+#:
+#: ~~"Nothing in this build creates an experiment or a run from an import."~~ —
+#: FALSE SINCE ``HIST-005`` shipped (2026-09-15) and corrected 2026-10-11: the Add
+#: stage creates the record, and ``create_runs`` makes one run per measurement. The
+#: sentence a scientist reads now says what is still true — this candidate is not a
+#: proposal — and where the record and its runs ARE made.
 CANDIDATE_NOT_PROPOSABLE_NO_EXPERIMENT_CREATION = (
-    "Nothing in this build creates an experiment or a run from an import. A "
-    "proposal is about one value at one official field path, so this candidate "
-    "has no proposal to become. Create the experiment yourself and propose the "
-    "field candidates onto it."
+    "This says an experiment or a run exists, not what one value is, so it has no "
+    "proposal to become. Make the record in the Add to Experiment step — for an "
+    "archive it can also make one run per measurement — and send the field values "
+    "onto it there."
 )
 
 #: Why a disagreeing candidate is not proposable.
@@ -843,11 +855,17 @@ CANDIDATE_NOT_PROPOSABLE_NO_WRITE_PATH = (
 #: would assert a UTC instant nothing states; converting it would guess the zone. It is
 #: kept as evidence. A reading that carries its zone (the epoch line, converted to UTC
 #: by a named rule) is proposable as before.
+#:
+#: ~~"Where the file also states the instant as an epoch, that UTC value is the one
+#: offered."~~ — no longer unconditional (2026-10-11, QA ``C-09``): the two are now
+#: compared (``bl15.reconstruct._cross_check_local_clock``), and when they are further
+#: apart than any real time-zone offset the epoch is a conflict instead.
 CANDIDATE_NOT_PROPOSABLE_LOCAL_TIME = (
     "This time is written in the instrument's local clock and names no time zone, so "
     "it cannot go into a UTC field without guessing the zone. It is kept as evidence. "
     "Where the file also states the instant as an epoch, that UTC value is the one "
-    "offered."
+    "offered — unless the two are further apart than any time zone could explain, and "
+    "then they are a conflict for you to decide."
 )
 
 
@@ -1664,7 +1682,11 @@ class UnitReading:
     candidate_ids: tuple[str, ...] = ()
     # --- added 2026-09-22 ------------------------------------------------------
     #: A DURABLE INTERNAL IDENTITY for the acquisition this unit is built around:
-    #: ``<archive>:<archive path>@<member digest>``. **Never the legacy number** — two
+    #: ~~``<archive>:<archive path>@<member digest>``~~ — since 2026-10-11
+    #: ``<stem>@sha256:<member digest>`` (:func:`workspace.acquisition_identity`), so it
+    #: names the FILE and not the container it arrived in; a session written earlier
+    #: keeps the old spelling and is matched through :func:`workspace.acquisition_key`.
+    #: **Never the legacy number** — two
     #: distinct acquisitions carry legacy number 32 in the real archive (``Q16``, which
     #: the domain owner cannot settle), so a run is matched to its measurement by WHAT
     #: IT IS. The digest is the member digest the walk computes for deduplication; it is
@@ -2136,6 +2158,16 @@ class ArchiveReading:
             if candidate_id in unit.candidate_ids:
                 return unit
         return None
+
+    def units_by_candidate(self) -> dict[str, UnitReading]:
+        """:meth:`unit_of_candidate` for every candidate at once — the FIRST unit wins,
+        exactly as that method answers — so a batch over a thousand candidates does not
+        rescan every unit for each one."""
+        out: dict[str, UnitReading] = {}
+        for unit in self.units:
+            for candidate_id in unit.candidate_ids:
+                out.setdefault(candidate_id, unit)
+        return out
 
     def by_source_type(self) -> dict[str, int]:
         """``source_type -> accepted entry count``, counted from :attr:`manifest`.
@@ -3014,7 +3046,14 @@ def _archive_semantics(
         ] if unit.legacy_number is not None else []
         people.extend(dict(row) for row in beamtime_contributors)
         per_unit[unit.stem] = {
-            "acquisition_identity": f"{archive_name}:{unit.acquisition_path}@{digest}",
+            # ~~`f"{archive_name}:{unit.acquisition_path}@{digest}"`~~ — 2026-10-11 (QA
+            # `C-02`): the archive NAME is the container's, so a folder and a ZIP of the
+            # same files were two acquisitions. Now the file's own name and its bytes
+            # (`ws.ACQUISITION_IDENTITY_SEPARATOR`). Only when no digest exists — an entry
+            # the walk did not record — is the old container-scoped spelling kept, so
+            # such a unit still matches itself and is never content-matched to anything.
+            "acquisition_identity": ws.acquisition_identity(unit.stem, digest)
+            or f"{archive_name}:{unit.acquisition_path}@{digest}",
             "legacy_number_shared": shared,
             "applicability": applies.to_state() if applies is not None else {},
             "signal_selection": selection.to_state(),
@@ -5303,13 +5342,106 @@ def send_plan(session: "ImportSession") -> dict:
     Reasons are not repeated here — each candidate already carries its own.
     """
     sendable, not_sent = batch_partition(session)
+    units = (
+        session.archive_reading.units_by_candidate()
+        if session.archive_reading is not None
+        else {}
+    )
     return {
         "sendable": [c.candidate_id for c in sendable],
         "not_sent": {row["candidate_id"]: row["error"] for row in not_sent},
         "no_run_when_creating_runs": [
             c.candidate_id for c in sendable if has_no_run_when_creating_runs(session, c)
         ],
+        # 2026-10-11 (QA `C-01`) — WHICH MEASUREMENT each sendable run-owned value was read
+        # from, as the key a run's `historical_origin` carries. Published so a send form can
+        # preselect the run made from that measurement, and say before submitting how many
+        # measurements one named run would be asked to hold, by comparing strings — the
+        # matching rule stays here and in `routes`, never in a client.
+        "measurement_of": {
+            c.candidate_id: key
+            for c in sendable
+            if _target_scope(c.target_field_path) == "run"
+            and (key := measurement_key(units.get(c.candidate_id))) is not None
+        },
     }
+
+
+def measurement_key(unit: "UnitReading | None") -> str | None:
+    """The acquisition key one measurement is matched on, or ``None``.
+
+    :func:`workspace.acquisition_key` of the unit's identity with the unit's own stem, so
+    a session written before 2026-10-11 — whose identities still name their container —
+    yields the same key as a fresh reading of the same files.
+    """
+    if unit is None:
+        return None
+    return ws.acquisition_key(unit.acquisition_identity, stem=unit.stem)
+
+
+def candidate_measurement(session: "ImportSession", candidate_id: object) -> "UnitReading | None":
+    """The measurement a candidate was read from, when it has a matching key, or ``None``.
+
+    ``None`` for a beamtime-scope value (it belongs to the whole import), for anything the
+    fixture provider built, and for a unit whose identity is blank — none of which names
+    a measurement for a run's recorded origin to agree or disagree with.
+    """
+    reading = session.archive_reading
+    if reading is None:
+        return None
+    unit = reading.unit_of_candidate(candidate_id)
+    return unit if measurement_key(unit) is not None else None
+
+
+def candidate_source_basis(session: "ImportSession", candidate, unit=None) -> str | None:
+    """What makes two sends of a candidate sends of THE SAME SOURCE, or ``None``.
+
+    Part of the cross-session exactly-once key (2026-10-11, QA ``C-02``): a proposal is
+    not minted again when the record already holds one with the same run, field, value
+    AND source — whichever import session or container it arrived through.
+
+    * a value read from one MEASUREMENT: that acquisition's key (:func:`measurement_key`)
+      — its file's name and bytes, never the archive or the session;
+    * a BEAMTIME-scope value read from an archive (no measurement owns it): the
+      statements it cites — key and literal verbatim, and WHERE each was said as the
+      cited file's content digest plus the locator inside that file. ~~"the locator
+      carrying the member path inside the archive, which a folder and a ZIP of the same
+      files share"~~ — they share it only when the ZIP has one wrapper folder; an
+      independent review measured ``outer/inner/`` giving every member another path
+      (2026-10-11), so the path is no longer part of it. A cited file with no recorded
+      digest falls back to its path, container-scoped exactly as before;
+    * anything else — a candidate the deterministic fake provider built from a committed
+      example source — ``None``. Its candidate ids are minted per session and it has no
+      acquisition at all, so only the per-session key applies, as before.
+    """
+    reading = session.archive_reading
+    if reading is None:
+        return None
+    if unit is None:
+        unit = reading.unit_of_candidate(candidate.candidate_id)
+    key = measurement_key(unit)
+    if key is not None:
+        return f"acquisition:{key}"
+    if candidate.candidate_id in reading.shared_candidate_ids:
+        from .bl15 import reconstruct as rc  # local: keeps import order flexible
+
+        digest_of_path = {
+            row.get("archive_path"): row.get("content_sha256")
+            for row in reading.manifest
+            if isinstance(row.get("archive_path"), str)
+        }
+        statements = []
+        for statement in candidate.supporting_statements:
+            locator = str(statement.get("locator"))
+            located = rc.split_statement_locator(locator, digest_of_path)
+            if located is None:
+                where, within = locator, ""
+            else:
+                path, within = located
+                where = digest_of_path.get(path) or path
+            statements.append((str(statement.get("key")), str(statement.get("value")), where, within))
+        return "beamtime:" + json.dumps(sorted(statements), ensure_ascii=False)
+    return None
 
 
 def candidates_of(session: ImportSession) -> Iterable[SemanticCandidate]:

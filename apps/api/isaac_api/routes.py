@@ -16,6 +16,7 @@ import os
 import re
 import threading
 import time
+from collections import defaultdict
 from datetime import datetime, timezone
 from types import MappingProxyType
 from typing import Annotated, Any, Literal, Mapping, NamedTuple, Sequence
@@ -8549,6 +8550,13 @@ def _run_view(exp: Experiment, run: "ws.Run") -> dict:
         "rev": run.rev,
         "version": run.version_token(),
         "record_id": run.record_id,
+        # WHICH ACQUISITION THIS RUN WAS RECORDED AS MADE FROM, or `null` for a run added
+        # by hand (2026-10-11, QA `C-01`). Provenance, not science — it is not part of the
+        # run's authoritative content and moves no version. Served so a historical-import
+        # send form can preselect the run made from a value's own measurement by comparing
+        # this `acquisition_identity` with the send plan's `measurement_of` — one string
+        # against another, so no client re-implements the matching rule.
+        "historical_origin": exp.run_origin_view(run.id),
         "fields": copy.deepcopy(fields) if isinstance(fields, dict) else {},
         "inherited": {
             address: {
@@ -26808,9 +26816,17 @@ def _mint_nominal_offer(
 
 
 def _run_origin(unit, import_id: str, session) -> dict:
-    """The durable origin row for a run made from ``unit``. See ``historical_run_origins``."""
-    identity = unit.acquisition_identity or ""
-    digest = identity.rsplit("@", 1)[-1] if "@" in identity else ""
+    """The durable origin row for a run made from ``unit``. See ``historical_run_origins``.
+
+    ``acquisition_identity`` is the unit's MATCHING KEY (``hist.measurement_key``), so a
+    run made today from a session written before 2026-10-11 is recorded in the current,
+    container-free spelling. ~~The digest was ``identity.rsplit("@", 1)[-1]``~~ — which
+    would read ``sha256:<digest>`` out of the current spelling; it is now taken from the
+    key's own tail, and stays ``""`` for a unit the walk recorded no digest for.
+    """
+    identity = hist.measurement_key(unit) or ""
+    head, separator, tail = identity.rpartition(ws.ACQUISITION_IDENTITY_SEPARATOR)
+    digest = tail if separator and head else ""
     reading = session.archive_reading
     return {
         "acquisition_identity": identity,
@@ -26824,7 +26840,7 @@ def _run_origin(unit, import_id: str, session) -> dict:
     }
 
 
-def _dqn_request_key(unit, row: Mapping) -> str:
+def _dqn_request_key(identity: str, row: Mapping, notes_digest: str | None = None) -> str:
     """A stable exactly-once key for one Data Quality Note on one acquisition.
 
     Keyed on the ACQUISITION'S identity (never the legacy number, which two acquisitions
@@ -26833,10 +26849,389 @@ def _dqn_request_key(unit, row: Mapping) -> str:
     version prefixed the import id, so importing the same archive a second time (a new
     session) minted every remark again (measured 6 -> 12). The same remark from the same
     file about the same acquisition is now the same key however it arrives.
+
+    ~~"however it arrives"~~ — **NOT TRUE UNTIL 2026-10-11 (QA ``C-02``)**, and not true
+    on the first attempt either. The identity named the archive's CONTAINER, so a folder
+    then a ZIP of the same files minted every remark again; and once that was fixed, an
+    independent review measured the SECOND dependency — ~~"the source path"~~ — doing the
+    same thing: a ZIP whose files sit under ``outer/inner/`` gives the notes file another
+    archive path, and the 6 remarks became 12. The key is now ``v2`` and names no path at
+    all: the acquisition's own key, the notes FILE's content digest, and the row's
+    locator inside that file (``line 22 table 0 row 1 …`` — no path in it, measured). A
+    remark whose notes file has no recorded digest falls back to the path, which is
+    exactly as container-scoped as before and never content-matched. The spelling
+    ``origin/main`` wrote is :func:`_dqn_legacy_request_key`.
     """
-    basis = f"{unit.acquisition_identity}|{row.get('source_path')}|{row.get('locator')}"
+    where = notes_digest or row.get("source_path")
+    basis = f"v2|{identity}|{where}|{row.get('locator')}"
     digest = hashlib.sha256(basis.encode("utf-8")).hexdigest()[:32]
     return f"historical-dqn:{digest}"
+
+
+def _dqn_legacy_request_key(identity: str, row: Mapping) -> str:
+    """The key a record written before 2026-10-11 holds a remark under. Read, never minted."""
+    basis = f"{identity}|{row.get('source_path')}|{row.get('locator')}"
+    digest = hashlib.sha256(basis.encode("utf-8")).hexdigest()[:32]
+    return f"historical-dqn:{digest}"
+
+
+def _dqn_legacy_identities(unit, reading, origin: Mapping | None) -> set[str]:
+    """Every OTHER spelling a Data Quality Note for ``unit`` may have been keyed under.
+
+    A record written before 2026-10-11 keyed its remarks on the container-naming identity,
+    so the current key alone would mint each of them again on the first re-import after
+    this change. Three spellings can be known here, and each is checked rather than
+    guessed: the unit's own stored identity (a session written before the change), the
+    identity the target run's origin row records (the container the record was first
+    imported from, whichever one this is), and the old spelling for THIS container.
+    Each is checked with :func:`_dqn_legacy_request_key`, the formula they were minted by.
+    """
+    out: set[str] = set()
+    if unit.acquisition_identity:
+        out.add(unit.acquisition_identity)
+    if origin is not None and isinstance(origin.get("acquisition_identity"), str):
+        out.add(origin["acquisition_identity"])
+    key = hist.measurement_key(unit) or ""
+    head, separator, digest = key.rpartition(ws.ACQUISITION_IDENTITY_SEPARATOR)
+    if separator and head and reading is not None:
+        out.add(f"{reading.archive_name}:{unit.acquisition_path}@{digest}")
+    out.discard(key)
+    return out
+
+
+#: The prefix of the CROSS-SESSION exactly-once key an import-minted note carries
+#: (2026-10-11, QA ``C-02``). See :func:`_import_content_key`.
+_IMPORT_CONTENT_KEY_PREFIX = "historical-proposal:"
+
+#: What a content key names when the value belongs to no single measurement.
+_BEAMTIME_MARKER = "beamtime"
+
+_CONTENT_KEY_TAIL = re.compile(r"^[0-9a-f]{32}$")
+
+
+def _import_content_key(source_basis: str | None, run_id, path: str, value) -> str | None:
+    """The key that says "this exact proposal is already on the record", or ``None``.
+
+    **WHY IT EXISTS.** A proposal's own ``client_request_key`` is
+    ``import:<import id>:<candidate id>`` — exactly-once within ONE import session, which
+    is what it was built for. A second session of the same archive, or the same files
+    staged in another container, has another import id, so every proposal was minted
+    again (measured: 9 -> 18 on the semantics corpus). This key is the same string for
+    the same RUN, the same FIELD, the same VALUE and the same SOURCE
+    (``hist.candidate_source_basis``), and names no session — so it identifies the
+    proposal by what it says rather than by which request made it.
+
+    IT IS CARRIED ON THE NOTE, NOT ON THE PROPOSAL. The proposal keeps its per-session key
+    unchanged, so every guarantee that key already gives — a hand send and a batch from
+    one session mint one proposal between them — holds exactly as before; the note is
+    minted in the same write as its proposal, and ``notes.Note.client_request_key`` is an
+    existing field that this route was leaving unset. No field is added to either object.
+
+    **THE MEASUREMENT IS IN CLEAR, the rest is hashed** — ``historical-proposal:<measurement
+    key or "beamtime">#<32 hex>`` — added the same day after an independent review: a run
+    a scientist added by hand has no recorded origin, so the only durable answer to "which
+    measurement's values does this run already hold?" is the notes on it, and a hash alone
+    could not give it (:func:`_marker_of_note_key`). The key is never served.
+    """
+    if source_basis is None:
+        return None
+    try:
+        canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    except (TypeError, ValueError):  # pragma: no cover - a proposable value serialises
+        return None
+    marker = (
+        source_basis[len("acquisition:") :]
+        if source_basis.startswith("acquisition:")
+        else _BEAMTIME_MARKER
+    )
+    basis = json.dumps([source_basis, run_id, path, canonical], ensure_ascii=False)
+    tail = hashlib.sha256(basis.encode("utf-8")).hexdigest()[:32]
+    return f"{_IMPORT_CONTENT_KEY_PREFIX}{marker}#{tail}"
+
+
+def _marker_of_note_key(key: object) -> str | None:
+    """The measurement key a content-keyed note names, or ``None`` (beamtime, or not one)."""
+    if not isinstance(key, str) or not key.startswith(_IMPORT_CONTENT_KEY_PREFIX):
+        return None
+    head, separator, tail = key[len(_IMPORT_CONTENT_KEY_PREFIX) :].rpartition("#")
+    if not separator or not head or not _CONTENT_KEY_TAIL.match(tail) or head == _BEAMTIME_MARKER:
+        return None
+    return head
+
+
+#: The proposal states in which a value is CLAIMED for its run — waiting for a person, or
+#: accepted by one. Withdrawn, rejected and superseded proposals claim nothing.
+_HOLDING_STATES = frozenset({proposals.STATE_OPEN, proposals.STATE_ACCEPTED})
+
+
+class _ImportSendIndex:
+    """Every lookup an import send makes against the record, built ONCE per request.
+
+    ~~Each candidate re-sorted and re-serialised every proposal on the record~~ — the first
+    version of :func:`_identical_import_proposal` did, while holding the record lock, so a
+    batch over N candidates on a record holding P proposals cost N×P (found by independent
+    review, 2026-10-11). This reads the notes and proposals once and is kept current as the
+    batch mints (:meth:`add`), so a later candidate in the same batch sees an earlier one.
+
+    It answers three questions: the per-session key (``import:<import>:<candidate>``),
+    the cross-session content key and its legacy fallback (:meth:`identical`), and which
+    MEASUREMENTS a run already holds values from (:meth:`other_measurements_on`). "Earliest
+    wins" everywhere, matching ``proposals.find_by_client_request_key``.
+
+    **WHAT A RUN HOLDS IS WHAT ITS LIVE PROPOSALS CLAIM** — :data:`_HOLDING_STATES`, open or
+    accepted. ~~Every import note and proposal on the run counted~~ — an independent
+    re-review measured the consequence (2026-10-11): send measurement 1's start time to a
+    run added by hand, WITHDRAW it, and measurement 2's start time was refused with "That
+    run already holds a value read from another measurement", which was false — the
+    scientist had corrected exactly the C-01 mistake and could never use that run again.
+    THE RULE FOR NOTES: a note never marks a run on its own. It is evidence — it keeps the
+    source's words whatever happens to the proposal, and survives a rejection on purpose —
+    and the PROPOSAL is the claim that a value belongs to this run. So a note contributes
+    only through a live proposal citing it (its content key names the measurement exactly),
+    and a note whose proposals were all withdrawn, rejected or superseded contributes
+    nothing. The exactly-once answers (:meth:`by_request_key`, :meth:`identical`) are NOT
+    filtered by state: a value already sent stays sent whatever was decided about it.
+    """
+
+    def __init__(self, exp: Experiment):
+        self._exp = exp
+        self._by_request_key: dict[str, object] = {}
+        self._note_id_of_key: dict[str, str] = {}
+        self._proposal_of_note: dict[str, object] = {}
+        self._legacy: dict[tuple, object] = {}
+        #: ``run_id -> {("key", measurement key) | ("stem", stem)}``.
+        self._markers_on_run: dict[str, set] = defaultdict(set)
+        notes_by_id = {}
+        for note in exp.notes:
+            notes_by_id[note.id] = note
+            self._index_note(note)
+        for proposal in exp.sorted_proposals():
+            self._index_proposal(proposal, notes_by_id.get(proposal.note_id))
+
+    def _index_note(self, note) -> None:
+        key = note.client_request_key
+        if not (isinstance(key, str) and key.startswith(_IMPORT_CONTENT_KEY_PREFIX)):
+            return
+        self._note_id_of_key.setdefault(key, note.id)
+
+    def _index_proposal(self, proposal, note) -> None:
+        key = proposal.client_request_key
+        if key is not None:
+            self._by_request_key.setdefault(key, proposal)
+        self._proposal_of_note.setdefault(proposal.note_id, proposal)
+        if not (isinstance(key, str) and key.startswith("import:") and key.count(":") >= 2):
+            return
+        candidate_id = key.split(":", 2)[2]
+        try:
+            value = json.dumps(proposal.proposed_value, sort_keys=True, default=str)
+        except (TypeError, ValueError):  # pragma: no cover - a stored value serialises
+            value = None
+        if value is not None:
+            self._legacy.setdefault(
+                (proposal.run_id, proposal.target_field_path, candidate_id, value), proposal
+            )
+        if proposal.run_id is None or proposal.state not in _HOLDING_STATES:
+            return
+        # THE MEASUREMENT THIS LIVE PROPOSAL CLAIMS FOR ITS RUN: exactly, from its note's
+        # content key; or — for a proposal minted before content keys — through its
+        # candidate id, `<stem>::<concept>`, because a different stem is a different file
+        # (`bl15.relate` keeps two names apart even when their bytes agree).
+        marker = _marker_of_note_key(note.client_request_key if note is not None else None)
+        if marker is not None:
+            self._markers_on_run[proposal.run_id].add(("key", marker))
+        elif "::" in candidate_id:
+            stem = candidate_id.split("::", 1)[0]
+            if stem and stem != "shared":
+                self._markers_on_run[proposal.run_id].add(("stem", stem))
+
+    def add(self, note, proposal) -> None:
+        """Record what the batch just minted, so later candidates see it."""
+        self._index_note(note)
+        self._index_proposal(proposal, note)
+
+    def by_request_key(self, key: str):
+        return self._by_request_key.get(key)
+
+    def identical(self, candidate, *, run_id, content_key, measurement_key):
+        """See :func:`_identical_import_proposal`, whose two answers these are."""
+        if content_key is not None:
+            note_id = self._note_id_of_key.get(content_key)
+            if note_id is not None and note_id in self._proposal_of_note:
+                return self._proposal_of_note[note_id]
+        if (
+            run_id is None
+            or measurement_key is None
+            or self._exp.run_origin_key(run_id) != measurement_key
+        ):
+            return None
+        try:
+            wanted = json.dumps(candidate.proposed_value, sort_keys=True, default=str)
+        except (TypeError, ValueError):  # pragma: no cover - a proposable value serialises
+            return None
+        return self._legacy.get(
+            (run_id, candidate.target_field_path, candidate.candidate_id, wanted)
+        )
+
+    def other_measurements_on(self, run_id: str, unit) -> list[tuple[str, str]]:
+        """The measurements OTHER than ``unit``'s whose import values ``run_id`` holds."""
+        key = hist.measurement_key(unit)
+        return sorted(
+            (kind, value)
+            for kind, value in self._markers_on_run.get(run_id, ())
+            if not ((kind == "key" and value == key) or (kind == "stem" and value == unit.stem))
+        )
+
+
+def _identical_import_proposal(
+    exp: Experiment,
+    candidate,
+    *,
+    run_id: str | None,
+    content_key: str | None,
+    measurement_key: str | None,
+    index: "_ImportSendIndex | None" = None,
+):
+    """A proposal already on ``exp`` that says exactly what this candidate would, or ``None``.
+
+    1. The note carrying ``content_key`` — the current, exact answer.
+    2. **A record written before content keys existed**, matched only where the run PINS
+       the acquisition: a proposal on a run whose recorded origin IS this candidate's
+       measurement, at the same path, with the same value, minted by an import from the
+       same candidate id (``import:<any session>:<candidate id>``). The run's origin says
+       which file it was; the candidate id says which statement of that file. Nowhere else
+       is a legacy proposal matched, because nothing else could say it came from the same
+       acquisition — and a duplicate is a smaller harm than hiding a distinct value.
+
+    Answered by an :class:`_ImportSendIndex` — the caller's, when it holds one.
+    """
+    return (index or _ImportSendIndex(exp)).identical(
+        candidate, run_id=run_id, content_key=content_key, measurement_key=measurement_key
+    )
+
+
+# --- C-01 (2026-10-11): a run-owned value goes only to its own measurement's run ---------
+#
+# THE DEFECT, MEASURED BY AN INDEPENDENT QA AUDIT IN A REAL BROWSER. With "Make one run per
+# measurement" off, `add-to-experiment` sent EVERY measurement's run-owned values to the one
+# named run — nine acquisition start times from nine files, as nine competing proposals on
+# one run — and the single-candidate send put measurement #2's value on the run made from
+# measurement #1 without a word.
+#
+# THE RULE, WHICH BOTH OPERATIONS NOW APPLY — A RUN HOLDS ONE MEASUREMENT'S VALUES:
+#
+# * A run-owned value is NEVER proposed onto a run the record has RECORDED as made from a
+#   DIFFERENT measurement (`historical_run_origins`, matched by `ws.acquisition_key`) —
+#   `422 run_is_another_measurement`, `because: "recorded_origin"`, nothing written.
+# * Nor onto a run that ALREADY HOLDS an import's value read from a different measurement —
+#   a LIVE one, open or accepted (`_HOLDING_STATES`); a withdrawn, rejected or superseded
+#   proposal claims nothing — the same code, `because: "values_already_on_it"`. ~~"a run with no recorded origin ...
+#   stays the scientist's choice for any one measurement, so sending values one at a time
+#   to such a run is allowed"~~ — WITHDRAWN the same day after an independent review: one
+#   at a time, nine sends put nine measurements' start times on one hand-made run, which is
+#   the C-01 end state reached by a longer road. The hand-made run's identity is NOT
+#   changed to enforce this (no origin is recorded for it, because it was not made from
+#   anything); what it holds is read off the notes and proposals already on it
+#   (`_ImportSendIndex.other_measurements_on`).
+# * In the batch, each measurement's run-owned values go to the run recorded as made from
+#   THAT measurement whenever one exists, whatever `run_id` says; only the values whose
+#   measurement has no run of its own go to the named run.
+# * The named run may receive the values of AT MOST ONE measurement. A batch that would put
+#   two or more measurements' values on it is refused WHOLE —
+#   `422 values_from_several_measurements`, naming every measurement — because a run holds
+#   one acquisition and choosing which of them it is would be guessing.
+#
+# WHAT IS NOT CHANGED: a value the record already holds is reported as already sent and
+# counts against nothing; a beamtime-scope value names no measurement and is not counted;
+# and the run is STILL never inferred from the only run that happens to exist — only from a
+# recorded origin, which is a durable fact this application wrote, never a guess.
+
+
+def _measurement_row(unit, candidate_ids) -> dict:
+    """One measurement as a refusal names it: its key, its file, its legacy number."""
+    return {
+        "acquisition_identity": hist.measurement_key(unit),
+        "stem": unit.stem,
+        "legacy_number": unit.legacy_number,
+        "label": unit.label,
+        "candidate_ids": list(candidate_ids),
+    }
+
+
+def _values_words(groups) -> tuple[str, str]:
+    """``("this value", "its")`` for one value, ``("these values", "their")`` otherwise."""
+    count = sum(len(ids) for _unit, ids in groups)
+    return ("this value", "its") if count == 1 else ("these values", "their")
+
+
+def _run_from_another_measurement(exp: Experiment, run_id: str, groups) -> JSONResponse | None:
+    """``422 run_is_another_measurement`` when ``run_id`` was made from a measurement
+    other than one of ``groups`` (``[(unit, candidate ids), ...]``), else ``None``."""
+    origin = exp.run_origin_key(run_id)
+    if origin is None:
+        return None
+    other = [(unit, ids) for unit, ids in groups if hist.measurement_key(unit) != origin]
+    if not other:
+        return None
+    run = exp.get_run(run_id)
+    rows = [_measurement_row(unit, ids) for unit, ids in other]
+    run_origin = exp.run_origin_view(run_id) or {}
+    made_from = run_origin.get("stem") or "another measurement"
+    these, their = _values_words(other)
+    extra = {"candidate_measurement": rows[0]} if len(groups) == 1 else {}
+    return _proposal_refusal(
+        "run_is_another_measurement",
+        (
+            f"That run was made from {made_from}, and {these} "
+            f"{'was' if these == 'this value' else 'were'} read from a different "
+            "measurement — a run holds one measurement's values. Send "
+            f"{these} to {their} own measurement's run"
+            + ("" if these == "this value" else ", or make one run per measurement")
+            + ". Nothing was written."
+        ),
+        because="recorded_origin",
+        run_id=run_id,
+        run_label=run.label if run is not None else None,
+        run_origin=run_origin or None,
+        measurements=rows,
+        **extra,
+    )
+
+
+def _run_holds_another_measurement(
+    exp: Experiment, index: _ImportSendIndex, run_id: str, groups
+) -> JSONResponse | None:
+    """``422 run_is_another_measurement`` when ``run_id`` — one with NO recorded origin —
+    already holds an import's values read from a measurement other than ``groups``'."""
+    if exp.run_origin_key(run_id) is not None:
+        return None  # a recorded origin is the answer; `_run_from_another_measurement` gives it
+    held: set = set()
+    for unit, _ids in groups:
+        held.update(index.other_measurements_on(run_id, unit))
+    if not held:
+        return None
+    run = exp.get_run(run_id)
+    rows = [_measurement_row(unit, ids) for unit, ids in groups]
+    these, their = _values_words(groups)
+    holds = [
+        {"acquisition_identity": value} if kind == "key" else {"stem": value}
+        for kind, value in sorted(held)
+    ]
+    extra = {"candidate_measurement": rows[0]} if len(groups) == 1 else {}
+    return _proposal_refusal(
+        "run_is_another_measurement",
+        (
+            "That run already holds a value read from another measurement, and a run holds "
+            f"one measurement's values. Send {these} to {their} own measurement's run — "
+            "make one per measurement, or add a run yourself for "
+            f"{'it' if these == 'this value' else 'each'}. Nothing was written."
+        ),
+        because="values_already_on_it",
+        run_id=run_id,
+        run_label=run.label if run is not None else None,
+        run_holds=holds,
+        measurements=rows,
+        **extra,
+    )
 
 
 def _import_extended_context(
@@ -26902,8 +27297,19 @@ def _mint_import_candidate(
     filename: str,
     statement: Mapping,
     client_request_key: str,
+    source_basis: str | None = None,
+    measurement_key: str | None = None,
+    index: "_ImportSendIndex | None" = None,
 ) -> JSONResponse | tuple[object | None, object, bool]:
     """Put ONE import candidate's note and proposal on ``exp``. In memory only.
+
+    ``source_basis`` and ``measurement_key`` (2026-10-11, QA ``C-02``) make the guard
+    exactly-once ACROSS import sessions and archive containers as well as within one —
+    see :func:`_import_content_key` and :func:`_identical_import_proposal`. Both callers
+    pass ``hist.candidate_source_basis`` / ``hist.measurement_key``; ``None`` keeps only
+    the per-session key, which is right for a candidate with no acquisition. ``index`` is
+    the caller's :class:`_ImportSendIndex` (a batch builds ONE and passes it to every
+    candidate); without one, one is built for this call.
 
     Returns either a typed refusal to hand straight back to the caller, or
     ``(note, proposal, deduplicated)`` — where ``note`` is ``None`` exactly when
@@ -26947,9 +27353,11 @@ def _mint_import_candidate(
     # convenience for the surface and not the guard: if this route's session
     # write never landed, the record's own proposal list still answers "this
     # candidate was already sent" and no second proposal is minted.
-    existing = proposals.find_by_client_request_key(
-        exp.sorted_proposals(), client_request_key
-    )
+    if index is None:
+        index = _ImportSendIndex(exp)
+    # ~~`proposals.find_by_client_request_key(exp.sorted_proposals(), key)`~~ — the same
+    # earliest-wins lookup, answered from the request's one index (2026-10-11).
+    existing = index.by_request_key(client_request_key)
     if existing is not None:
         # THE EXISTING PROPOSAL IS HANDED BACK, NOT RENDERED HERE. The single-
         # candidate route answers 200 with it; the batch route counts it as
@@ -26957,6 +27365,23 @@ def _mint_import_candidate(
         # this helper would have forced the batch to parse a response body to
         # find out what happened, which is how a surface comes to report a
         # number it did not derive.
+        return (None, existing, True)
+
+    # ~~"IT DOES NOT DEPEND ON THE SESSION"~~ — it did: the key above carries the import
+    # id, so a SECOND session of the same archive, or the same files staged in another
+    # container, minted every proposal again (QA `C-02`, 2026-10-11). The content key is
+    # the same for the same run, field, value and source however the import arrived, and
+    # it is checked HERE — still before every capacity bound, for the reason above.
+    content_key = _import_content_key(source_basis, run_id, path, candidate.proposed_value)
+    existing = _identical_import_proposal(
+        exp,
+        candidate,
+        run_id=run_id,
+        content_key=content_key,
+        measurement_key=measurement_key,
+        index=index,
+    )
+    if existing is not None:
         return (None, existing, True)
 
     if len(exp.proposals) >= _MAX_PROPOSALS_PER_RECORD:
@@ -27026,6 +27451,9 @@ def _mint_import_candidate(
             run_id=run_id,
             candidate_field_path=path,
             candidate_rule=candidate.rule,
+            # THE CROSS-SESSION KEY (2026-10-11), carried by the note minted in the same
+            # write as its proposal — see `_import_content_key` for why the note.
+            client_request_key=content_key,
         )
     except notes.UnsupportedNote as refusal:
         # The model's own refusals reach the client as a typed 422, never a
@@ -27110,6 +27538,7 @@ def _mint_import_candidate(
         )
 
     exp.add_proposal(proposal)
+    index.add(note, proposal)
     return (note, proposal, False)
 
 
@@ -27141,14 +27570,22 @@ def _mint_import_candidate(
         "same candidate and the same record returns the EXISTING proposal with "
         "`deduplicated: true` and stores nothing, so a retry, a double click or a "
         "session you discarded and rebuilt cannot produce two proposals for one "
-        "candidate.\n\n"
+        "candidate. The same holds ACROSS import sessions and archive containers: when "
+        "the record already holds a proposal with the same run, field, value and source "
+        "acquisition — the same files read in another session, or staged as a ZIP rather "
+        "than a folder — that proposal is returned and nothing is minted.\n\n"
         "THE RECORD'S OWN `ETag` IS REQUIRED in `If-Match`, because this rewrites the "
         "record — omitted is `428`, malformed is `400`, stale is `412` with nothing "
         "written. It is the RECORD's, never the session's: an import session has no "
         "revision contract and serves no validator of its own.\n\n"
         "`run_id` is required for every candidate whose target is written on a run, "
         "and is refused for the ones written on the record. It is never inferred from "
-        "the only run that happens to exist.\n\n"
+        "the only run that happens to exist. A run this record holds as MADE FROM a "
+        "different measurement than the candidate was read from is refused "
+        "(`422 run_is_another_measurement`, naming both), because the proposal would put "
+        "one acquisition's value on another's run. A run you added yourself takes one "
+        "measurement's values: once it holds an import's value from one measurement, a "
+        "value from another is refused the same way.\n\n"
         "REFUSED, AND EACH FOR A REASON THE BODY NAMES: a candidate whose sources "
         "disagree (nothing was chosen, so there is nothing to propose); a structural "
         "candidate, which is about whether an experiment or a run exists rather than "
@@ -27374,6 +27811,39 @@ def post_import_candidate_proposal(
                 target_field_path=path,
             )
 
+        # A RUN-OWNED VALUE NEVER GOES ONTO ANOTHER MEASUREMENT'S RUN (2026-10-11, QA
+        # `C-01`). The auditor sent measurement #2's start time to the run made from
+        # measurement #1 and it was accepted silently: a run whose recorded origin is a
+        # DIFFERENT acquisition was treated like any run. ~~A run with NO recorded origin —
+        # one a scientist added by hand — stays the scientist's choice~~ — for ONE
+        # measurement only (independent review, 2026-10-11): one at a time, nine sends
+        # filled one hand-made run with nine measurements' start times. Such a run is now
+        # refused once it already holds an import's value from another measurement — read
+        # off what is on it, never by giving it an origin it was not made from. A value
+        # the record ALREADY holds is not refused here; the mint below reports it as sent.
+        # A value no single measurement owns names no measurement to clash.
+        unit = hist.candidate_measurement(session, candidate.candidate_id)
+        measurement = hist.measurement_key(unit)
+        source_basis = hist.candidate_source_basis(session, candidate, unit)
+        index = _ImportSendIndex(exp)
+        if run_id is not None and measurement is not None:
+            groups = [(unit, [candidate.candidate_id])]
+            refused_for_origin = _run_from_another_measurement(exp, run_id, groups)
+            if refused_for_origin is not None:
+                return refused_for_origin
+            already = index.by_request_key(client_request_key) or index.identical(
+                candidate,
+                run_id=run_id,
+                content_key=_import_content_key(
+                    source_basis, run_id, path, candidate.proposed_value
+                ),
+                measurement_key=measurement,
+            )
+            if already is None:
+                refused_for_contents = _run_holds_another_measurement(exp, index, run_id, groups)
+                if refused_for_contents is not None:
+                    return refused_for_contents
+
         precondition = _check_if_match(if_match, exp)
         if precondition is not None:
             return precondition
@@ -27385,6 +27855,9 @@ def post_import_candidate_proposal(
             filename=filename,
             statement=statement,
             client_request_key=client_request_key,
+            source_basis=source_basis,
+            measurement_key=measurement,
+            index=index,
         )
         if isinstance(minted, JSONResponse):
             return minted
@@ -27490,8 +27963,16 @@ def post_import_candidate_proposal(
         "malformed is `400`, stale is `412` with nothing written. It is the "
         "RECORD's, never the session's: an import session has no revision "
         "contract and serves no validator of its own.\n\n"
-        "`run_id` NAMES THE RUN FOR THE CANDIDATES WRITTEN ON A RUN, and is "
-        "ignored for the ones written on the record. **This differs from the "
+        "`run_id` NAMES THE RUN FOR THE CANDIDATES WRITTEN ON A RUN WHOSE MEASUREMENT HAS "
+        "NO RUN OF ITS OWN HERE, and is ignored for the ones written on the record. A "
+        "run-owned value whose measurement already has a run on this record — one this "
+        "record holds as made from that acquisition — goes to THAT run, whatever "
+        "`run_id` says; with every measurement in that position no `run_id` is needed. "
+        "The named run may take the values of AT MOST ONE measurement: a batch that "
+        "would put two or more measurements' values on it is refused whole "
+        "(`422 values_from_several_measurements`, naming each), and one whose named run "
+        "was made from a different measurement, or already holds another measurement's "
+        "values, is refused (`422 run_is_another_measurement`). **This differs from the "
         "single-candidate operation on purpose**, and the difference is named "
         "rather than left to be discovered: there, a `run_id` given for a "
         "record-scoped target is REFUSED, because the caller named one candidate "
@@ -27506,12 +27987,17 @@ def post_import_candidate_proposal(
         "is reported under `sent` with `already_sent: true` and mints no second "
         "proposal; each measurement that already has a run on this record is reported "
         "under `runs_already_present` and no second run is made. The run key is the "
-        "measurement's durable acquisition identity — its archive path and content "
-        "digest, never the legacy file number alone, because two distinct "
-        "acquisitions can share one — recorded on the record the first time a run is "
-        "made from it. A run made before identities were recorded is matched by its "
-        "label only when that label is unambiguous; otherwise a new run is made "
-        "rather than guessing which was meant.\n\n"
+        "measurement's durable acquisition identity — the acquisition file's own name "
+        "and its content digest, never the legacy file number alone, because two "
+        "distinct acquisitions can share one, and never the archive's name, so the same "
+        "files staged as a folder or as a ZIP, or imported in another session, are the "
+        "same acquisitions — recorded on the record the first time a run is made from "
+        "it. A run recorded under the earlier identity, which named the archive, is "
+        "still matched by its digest and file name. A run made before identities were "
+        "recorded is matched by its label only when that label is unambiguous; "
+        "otherwise a new run is made rather than guessing which was meant. A candidate "
+        "whose identical proposal — same run, field, value and source acquisition — is "
+        "already on this record from ANY import session is reported as already sent.\n\n"
         "THE IMPORT IS READ UNDER THIS RECORD'S RULES ONLY. A reviewed convention "
         "rule confirmed on another record never shapes what is minted here: when the "
         "import was last read for a different record, or under rules this record no "
@@ -27532,8 +28018,11 @@ def post_import_candidate_proposal(
         "path this build has no write operation for. None of those is fixable by "
         "retrying, which is why they do not refuse the batch.\n\n"
         "REFUSED WHOLE, WITH NOTHING WRITTEN, in the cases that ARE fixable by "
-        "the caller: a run-scoped candidate is sendable and no `run_id` was given "
-        "(`422 target_requires_a_run`, naming them); no candidate is sendable at "
+        "the caller: a run-scoped candidate is sendable, its measurement has no run "
+        "here, and no `run_id` was given (`422 target_requires_a_run`, naming them); "
+        "the named run would receive values from two or more measurements "
+        "(`422 values_from_several_measurements`) or was made from a different one "
+        "(`422 run_is_another_measurement`); no candidate is sendable at "
         "all (`422 nothing_to_send`, with the same `not_sent` report, so the "
         "answer explains itself); or the record is at one of its note or proposal "
         "ceilings, where a partial batch would be a record filled to the brim "
@@ -27849,28 +28338,118 @@ def post_import_add_to_experiment(
             if _PROPOSAL_WRITER_SCOPE[_proposal_writer_for(candidate.target_field_path)]
             == "run"
         ]
-        if needs_a_run and run_id is None and not create_runs:
-            return JSONResponse(
-                status_code=422,
-                content={
-                    "error": "target_requires_a_run",
-                    "message": (
-                        "Some of this import's values are applied through a run's "
-                        "writer, so this request must name the run they are "
-                        "about; it is never inferred. THE WHOLE BATCH IS REFUSED "
-                        "and nothing was written — sending only the rest would "
-                        "silently leave the run's values behind. Name a run and "
-                        "send again."
-                    ),
-                    "candidates": [
-                        {
-                            "candidate_id": candidate.candidate_id,
-                            "target_field_path": candidate.target_field_path,
-                        }
-                        for candidate in needs_a_run
-                    ],
-                },
-            )
+        # ONE LOOKUP OF EVERY CANDIDATE'S MEASUREMENT, used for the routing below and for
+        # the cross-session exactly-once key in the mint loop.
+        unit_of = (
+            session.archive_reading.units_by_candidate()
+            if session.archive_reading is not None
+            else {}
+        )
+        # ONE INDEX OF WHAT THE RECORD ALREADY HOLDS, for every lookup below and every
+        # mint in the loop — see `_ImportSendIndex` for the N×P cost it replaces.
+        index = _ImportSendIndex(exp)
+
+        # --- C-01: WHICH RUN EACH RUN-OWNED VALUE GOES TO, when no run is created ------
+        #
+        # See the block comment above `_measurement_row` for the rule. Decided here,
+        # inside the lock and BEFORE `If-Match`, because it reads the record's recorded
+        # origins and a refusal must leave nothing written.
+        route_of: dict[str, str] = {}
+        if not create_runs:
+            for_named_run: list = []
+            for candidate in needs_a_run:
+                unit = unit_of.get(candidate.candidate_id)
+                key = hist.measurement_key(unit)
+                own = exp.run_for_acquisition(key) if key is not None else None
+                if own is not None:
+                    route_of[candidate.candidate_id] = own.id
+                else:
+                    for_named_run.append(candidate)
+            if for_named_run and run_id is None:
+                # ~~"Some of this import's values ..."~~ for EVERY run-owned value — now
+                # only for the ones whose measurement has no run of its own on this record;
+                # the others already have the run their origin names.
+                return JSONResponse(
+                    status_code=422,
+                    content={
+                        "error": "target_requires_a_run",
+                        "message": (
+                            "Some of this import's values are applied through a run's "
+                            "writer, so this request must name the run they are "
+                            "about; it is never inferred. THE WHOLE BATCH IS REFUSED "
+                            "and nothing was written — sending only the rest would "
+                            "silently leave the run's values behind. Name a run and "
+                            "send again."
+                        ),
+                        "candidates": [
+                            {
+                                "candidate_id": candidate.candidate_id,
+                                "target_field_path": candidate.target_field_path,
+                            }
+                            for candidate in for_named_run
+                        ],
+                    },
+                )
+            if for_named_run:
+                groups: dict[str, tuple] = {}
+                for candidate in for_named_run:
+                    unit = unit_of.get(candidate.candidate_id)
+                    key = hist.measurement_key(unit)
+                    if key is None:
+                        continue  # a beamtime-scope value names no measurement
+                    # A VALUE THE RECORD ALREADY HOLDS GOES NOWHERE: the mint loop reports
+                    # it as already sent, by these same two checks, and puts nothing on
+                    # the named run — so it is not one of the measurements that run would
+                    # hold. Without this, a scientist who sent values one at a time and
+                    # then ran the batch for the rest was refused for values already sent.
+                    already = index.by_request_key(
+                        f"import:{import_id}:{candidate.candidate_id}"
+                    ) or index.identical(
+                        candidate,
+                        run_id=run_id,
+                        content_key=_import_content_key(
+                            hist.candidate_source_basis(session, candidate, unit),
+                            run_id,
+                            candidate.target_field_path,
+                            candidate.proposed_value,
+                        ),
+                        measurement_key=key,
+                    )
+                    if already is not None:
+                        continue
+                    groups.setdefault(key, (unit, []))[1].append(candidate.candidate_id)
+                refused_for_origin = _run_from_another_measurement(
+                    exp, run_id, list(groups.values())
+                )
+                if refused_for_origin is not None:
+                    return refused_for_origin
+                if len(groups) > 1:
+                    named = exp.get_run(run_id)
+                    return _proposal_refusal(
+                        "values_from_several_measurements",
+                        (
+                            f"This would put values read from {len(groups)} different "
+                            f"measurements onto one run ({named.label if named else run_id}"
+                            "), and a run holds one measurement's values. THE WHOLE BATCH "
+                            "IS REFUSED and nothing was written. Make one run per "
+                            "measurement, or send each value to its own measurement's "
+                            "run."
+                        ),
+                        run_id=run_id,
+                        measurements=[
+                            _measurement_row(unit, ids) for unit, ids in groups.values()
+                        ],
+                    )
+                # …AND NOT ONTO A RUN ALREADY HOLDING ANOTHER MEASUREMENT'S VALUES, which a
+                # run added by hand can (2026-10-11, independent review) — see the block
+                # comment above `_measurement_row`.
+                refused_for_contents = _run_holds_another_measurement(
+                    exp, index, run_id, list(groups.values())
+                )
+                if refused_for_contents is not None:
+                    return refused_for_contents
+                for candidate in for_named_run:
+                    route_of[candidate.candidate_id] = run_id
 
         precondition = _check_if_match(if_match, exp)
         if precondition is not None:
@@ -27963,11 +28542,11 @@ def post_import_add_to_experiment(
             for unit in units:
                 label_counts[unit.label] = label_counts.get(unit.label, 0) + 1
             for unit in units:
-                already = (
-                    exp.run_for_acquisition(unit.acquisition_identity)
-                    if unit.acquisition_identity
-                    else None
-                )
+                # THE MATCHING KEY, not the stored spelling (2026-10-11, QA `C-02`): the
+                # same files in another container, or in a session written before the
+                # identity stopped naming its container, are the same acquisition.
+                unit_key = hist.measurement_key(unit)
+                already = exp.run_for_acquisition(unit_key) if unit_key else None
                 matched_by = "acquisition_identity" if already is not None else None
                 if already is None:
                     fallback = existing_by_label.get(unit.label)
@@ -27979,7 +28558,7 @@ def post_import_add_to_experiment(
                         already, matched_by = fallback, "label_before_origins_existed"
                 if already is not None:
                     run_of_stem[unit.stem] = already.id
-                    if unit.acquisition_identity and exp.record_run_origin(
+                    if unit_key and exp.record_run_origin(
                         already.id, _run_origin(unit, import_id, session)
                     ):
                         origins_recorded += 1
@@ -27990,7 +28569,7 @@ def post_import_add_to_experiment(
                             "ordinal": already.ordinal,
                             "stem": unit.stem,
                             "matched_by": matched_by,
-                            "acquisition_identity": unit.acquisition_identity,
+                            "acquisition_identity": unit_key,
                         }
                     )
                     continue
@@ -28019,7 +28598,7 @@ def post_import_add_to_experiment(
                 inherits = not exp.runs
                 run = exp.add_run(label=unit.label, draft=_seed_for_new_run(exp))
                 run_of_stem[unit.stem] = run.id
-                if unit.acquisition_identity and exp.record_run_origin(
+                if unit_key and exp.record_run_origin(
                     run.id, _run_origin(unit, import_id, session)
                 ):
                     origins_recorded += 1
@@ -28032,8 +28611,8 @@ def post_import_add_to_experiment(
                         "acquisition_path": unit.acquisition_path,
                         "legacy_number": unit.legacy_number,
                         # THE DURABLE IDENTITY this run was made from — never the
-                        # legacy number alone (2026-09-22, `Q16`).
-                        "acquisition_identity": unit.acquisition_identity,
+                        # legacy number alone (2026-09-22, `Q16`) — as its matching key.
+                        "acquisition_identity": unit_key,
                         "legacy_number_shared": unit.legacy_number_shared,
                         "scan_count": unit.scan_count,
                         "source_count": unit.source_count,
@@ -28069,14 +28648,17 @@ def post_import_add_to_experiment(
             scope_of_target = _PROPOSAL_WRITER_SCOPE[
                 _proposal_writer_for(candidate.target_field_path)
             ]
-            candidate_run_id = run_id if scope_of_target == "run" else None
+            # ~~`run_id if scope_of_target == "run" else None`~~ — the ONE named run for
+            # every run-owned value, which is QA finding `C-01` (2026-10-11). The run is
+            # now the one `route_of` resolved above, per value.
+            candidate_run_id = (
+                route_of.get(candidate.candidate_id) if scope_of_target == "run" else None
+            )
+            unit = unit_of.get(candidate.candidate_id)
             if create_runs and scope_of_target == "run":
                 # THE RUN IS RESOLVED FROM THE CANDIDATE'S OWN MEASUREMENT, which
                 # is what makes this operation put each value on the run it was
                 # read from rather than all of them on one.
-                unit = session.archive_reading.unit_of_candidate(
-                    candidate.candidate_id
-                )
                 candidate_run_id = (
                     run_of_stem.get(unit.stem) if unit is not None else None
                 )
@@ -28134,6 +28716,11 @@ def post_import_add_to_experiment(
                 # OTHER and not merely each to itself: a candidate sent by hand
                 # and then included in a batch mints one proposal, not two.
                 client_request_key=f"import:{import_id}:{candidate.candidate_id}",
+                # …and, since 2026-10-11, with respect to every OTHER session and
+                # container too (QA `C-02`) — see `_import_content_key`.
+                source_basis=hist.candidate_source_basis(session, candidate, unit),
+                measurement_key=hist.measurement_key(unit),
+                index=index,
             )
             if isinstance(minted, JSONResponse):
                 # A CEILING OR A TYPED REFUSAL ENDS THE WHOLE BATCH, and nothing
@@ -28154,7 +28741,11 @@ def post_import_add_to_experiment(
                     "rule": candidate.rule,
                     "proposal_id": proposal.proposal_id,
                     "note_id": proposal.note_id,
-                    "run_id": candidate_run_id,
+                    # THE RUN THE PROPOSAL IS ON, read off it (2026-10-11). ~~The run this
+                    # request resolved~~ — which, for a candidate ALREADY sent, may not be
+                    # where the existing proposal sits; the report then named a run the
+                    # value was never proposed on.
+                    "run_id": proposal.run_id,
                     "already_sent": deduplicated,
                 }
             )
@@ -28290,14 +28881,42 @@ def post_import_add_to_experiment(
         dqn_captured = 0
         dqn_already = 0
         if create_runs and reading_for_nominal is not None:
+            # THE NOTES FILE'S CONTENT DIGEST, per archive path — what the `v2` key names
+            # instead of the path (`_dqn_request_key`). And every note key on the record,
+            # read ONCE rather than rescanned per remark per spelling.
+            digest_of_path = {
+                row.get("archive_path"): row.get("content_sha256")
+                for row in reading_for_nominal.manifest
+                if isinstance(row.get("archive_path"), str)
+                and isinstance(row.get("content_sha256"), str)
+                and row.get("content_sha256")
+            }
+            note_keys = {n.client_request_key for n in exp.notes if n.client_request_key}
             for unit in reading_for_nominal.units:
                 target_run = run_of_stem.get(unit.stem)
+                unit_key = hist.measurement_key(unit) or unit.acquisition_identity
+                legacy = (
+                    _dqn_legacy_identities(
+                        unit,
+                        reading_for_nominal,
+                        exp.historical_run_origins.get(target_run),
+                    )
+                    if target_run is not None
+                    else set()
+                )
                 for row in unit.data_quality_notes:
                     dqn_available += 1
                     if target_run is None:
                         continue
-                    key = _dqn_request_key(unit, row)
-                    if notes.find_by_client_request_key(exp.notes, key) is not None:
+                    key = _dqn_request_key(
+                        unit_key, row, digest_of_path.get(row.get("source_path"))
+                    )
+                    # A REMARK KEPT BEFORE 2026-10-11 WAS KEYED ON THE CONTAINER-NAMING
+                    # IDENTITY AND THE NOTES FILE'S PATH; each spelling that can be known is
+                    # checked, so a record written then is not given every remark again.
+                    if key in note_keys or any(
+                        _dqn_legacy_request_key(i, row) in note_keys for i in sorted(legacy)
+                    ):
                         dqn_already += 1
                         continue
                     text = (
@@ -28327,6 +28946,7 @@ def post_import_add_to_experiment(
                         run_id=target_run,
                         client_request_key=key,
                     )
+                    note_keys.add(key)
                     dqn_captured += 1
 
         # A CREATED RUN IS A WRITE EVEN IF EVERY CANDIDATE WAS ALREADY SENT, and

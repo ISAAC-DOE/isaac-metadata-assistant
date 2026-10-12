@@ -628,7 +628,12 @@ def test_a_structural_candidate_cannot_be_proposed_and_says_why(client):
     response = _propose(client, import_id, candidate["candidate_id"], eid)
     assert response.status_code == 422, response.text
     assert response.json()["error"] == "candidate_not_proposable"
-    assert "creates an experiment or a run from an import" in response.json()["message"]
+    # ~~"creates an experiment or a run from an import"~~ — the server's sentence said
+    # NOTHING in this build did, which stopped being true when `HIST-005` shipped; it was
+    # corrected 2026-10-11 to say what is still true. Pinned to the constant, plus the
+    # clause that carries the reason, so a reworded reason still has to keep it.
+    assert response.json()["message"] == hist.CANDIDATE_NOT_PROPOSABLE_NO_EXPERIMENT_CREATION
+    assert "has no proposal to become" in response.json()["message"]
 
 
 def test_a_recognised_path_with_no_write_route_cannot_be_proposed(client):

@@ -345,8 +345,11 @@ export const IMPORT_COPY = {
    * values a run owns; the values the record owns ignore it.
    */
   addWholeRunNote:
-    'Used only for the values a run owns. The values the record owns ignore it. If ' +
-    'this import has a value a run owns and no run is named, nothing is sent at all.',
+    'Used only for the values a run owns; the values the record owns ignore it. A run ' +
+    'holds one measurement’s values: a value whose measurement already has its own run ' +
+    'on this record goes to that run, and the run named here takes the values of one ' +
+    'other measurement at most — none, if it already holds another measurement’s. If a ' +
+    'value a run owns has no run to go to, nothing is sent at all.',
 
   /** The heading over the report of what the batch did. */
   addWholeResultTitle: 'What was sent',
@@ -541,6 +544,23 @@ export const IMPORT_STAGE_COPY = {
   addSummaryTitle: 'What Will Be Sent',
   addResultTitle: 'What Happened',
   createRuns: 'Make one run per measurement',
+  /**
+   * 2026-10-11 (QA `C-01`). Said BEFORE submit, from the send plan's `measurement_of`
+   * and the chosen record's runs: how many measurements would need the one named run.
+   * The server refuses the batch in exactly that case; this only says so first.
+   */
+  severalMeasurements: (n: number) =>
+    `These values were read from ${n.toLocaleString('en-US')} measurements that have no ` +
+    'run of their own on this record, and one run holds one measurement’s values — so ' +
+    'naming one run for all of them is refused. Make one run per measurement, or give ' +
+    'each measurement a run of its own and send each value to its own measurement’s run.',
+  namedRunIsAnotherMeasurement:
+    'That run was made from another measurement, so it cannot take these values. Choose ' +
+    'a run you added yourself, or make one run per measurement.',
+  /** The single-candidate form, when it chose the run made from the value's measurement. */
+  ownRunPreselected: 'Chosen for you: the run made from this value’s own measurement.',
+  /** Appended to a run option that another measurement's values may not be sent to. */
+  otherMeasurementRun: ' — made from another measurement',
   openProposals: 'Open Proposals on This Record',
   acceptanceNote:
     'Accepting a proposal needs a reviewer this deployment can identify, and it cannot identify one yet. The proposals stay open on the record until it can.',
