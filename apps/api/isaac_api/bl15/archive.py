@@ -118,6 +118,7 @@ from typing import Iterable
 from .inventory import (
     REFUSAL_ABSOLUTE_PATH,
     REFUSAL_COMPRESSION_RATIO,
+    REFUSAL_OS_METADATA,
     REFUSAL_PATH_TOO_LONG,
     REFUSAL_PATH_TRAVERSAL,
     REFUSAL_SYMLINK,
@@ -138,6 +139,7 @@ __all__ = [
     "common_root_prefix",
     "decode_source_bytes",
     "inventory_folder",
+    "is_os_metadata",
     "inventory_zip",
     "read_source_decoded",
     "read_source_head",
@@ -604,6 +606,18 @@ def _folder_candidates(
             if truncated:
                 return
             relative = f"{prefix}{entry.name}"
+            if is_os_metadata(relative):
+                # NOT WALKED AND NOT READ, but reported — one row per artefact, the
+                # folder as one row (its contents are Finder's, not the scientist's).
+                record(
+                    relative,
+                    REFUSAL_OS_METADATA,
+                    _DS_STORE_DETAIL
+                    if entry.name in OS_METADATA_FILES
+                    else "a folder macOS Finder adds to an archive; its contents are "
+                    "not part of the archive's content and were not read",
+                )
+                continue
             verdict = _normalise_member_name(relative, limits)
             try:
                 is_symlink = entry.is_symlink()
@@ -662,6 +676,40 @@ def _folder_candidates(
     return candidates, refused, truncated
 
 
+#: The folder macOS Finder adds to every ZIP it makes: an AppleDouble ``._<name>`` beside
+#: each member, holding resource forks and extended attributes — never a source.
+OS_METADATA_DIRECTORY = "__MACOSX"
+
+#: Files an operating system's file manager writes into a folder on its own account.
+OS_METADATA_FILES = frozenset({".DS_Store"})
+
+
+def is_os_metadata(name: object) -> bool:
+    """Whether ``name`` is one of the well-known OS artefacts above. Decided by NAME only.
+
+    Added 2026-10-11 after an independent review: a ZIP made by macOS Finder carries a
+    ``__MACOSX/`` tree mirroring every file, and the walk read each ``._…`` member as a
+    source. Worse, that tree sits beside the wrapper folder, so :func:`common_root_prefix`
+    saw TWO top-level folders and stripped nothing — every archive path in the corpus
+    then differed from the same files read as a folder. Deterministic and deliberately
+    narrow: exactly these two names, nothing guessed from content.
+    """
+    segments = [s for s in re.split(r"[\\/]+", str(name)) if s not in ("", ".")]
+    if not segments:
+        return False
+    return OS_METADATA_DIRECTORY in segments or segments[-1] in OS_METADATA_FILES
+
+
+def _os_metadata_refusal(archive_path: str, detail: str) -> dict:
+    return {"archive_path": archive_path, "reason": REFUSAL_OS_METADATA, "detail": detail}
+
+
+_DS_STORE_DETAIL = (
+    "a folder-view settings file macOS Finder writes; it is not part of the archive's "
+    "content and was not read"
+)
+
+
 def common_root_prefix(names: Iterable[str]) -> str | None:
     """The ONE wrapper directory a "compress this folder" ZIP adds, or ``None``.
 
@@ -707,16 +755,33 @@ def _zip_candidates(
     ceiling = _name_scan_ceiling(limits)
 
     infos = sorted(zf.infolist(), key=lambda i: i.filename)
+    # OS ARTEFACTS ARE LEFT OUT OF THE WRAPPER DECISION, or a Finder ZIP's `__MACOSX/`
+    # beside its one folder would read as two top-level folders and nothing would be
+    # stripped (2026-10-11). `_locate_zip_member` applies the identical filter.
     prefix = (
-        common_root_prefix(i.filename for i in infos if not i.is_dir())
+        common_root_prefix(
+            i.filename for i in infos if not i.is_dir() and not is_os_metadata(i.filename)
+        )
         if strip_common_root
         else None
     )
+    finder_members = 0
 
     for info in infos:
         if truncated:
             break
         raw = info.filename
+        if is_os_metadata(raw):
+            if OS_METADATA_DIRECTORY in re.split(r"[\\/]+", str(raw)):
+                finder_members += 0 if info.is_dir() else 1
+            elif not info.is_dir():
+                # THE SAME PATH EVERY OTHER MEMBER GETS — normalised, wrapper stripped —
+                # so the row names the file where the reading names everything else.
+                shown = _normalise_member_name(raw, limits).archive_path or _display_name(raw)
+                if prefix and shown.startswith(prefix + "/"):
+                    shown = shown[len(prefix) + 1 :]
+                refused.append(_os_metadata_refusal(shown, _DS_STORE_DETAIL))
+            continue
         verdict = _normalise_member_name(raw, limits)
         if verdict.reason:
             refused.append(
@@ -791,6 +856,16 @@ def _zip_candidates(
             )
         )
 
+    if finder_members:
+        # ONE ROW FOR THE WHOLE TREE, with its measured size, rather than one per resource
+        # fork: a 1,192-file corpus would otherwise list 1,192 rows of Finder bookkeeping.
+        refused.append(
+            _os_metadata_refusal(
+                f"{OS_METADATA_DIRECTORY}/",
+                f"{finder_members} member(s) macOS Finder adds to a ZIP (resource forks "
+                "and folder settings); not part of the archive's content and not read",
+            )
+        )
     return candidates, refused, truncated
 
 
@@ -1214,7 +1289,7 @@ def _locate_zip_member(
     Recomputing is cheap (names only) and cannot drift from what the walk did,
     since it is the same function over the same input.
     """
-    infos = [i for i in zf.infolist() if not i.is_dir()]
+    infos = [i for i in zf.infolist() if not i.is_dir() and not is_os_metadata(i.filename)]
     prefix = common_root_prefix(i.filename for i in infos)
     wanted = f"{prefix}/{archive_path}" if prefix else archive_path
     for info in infos:

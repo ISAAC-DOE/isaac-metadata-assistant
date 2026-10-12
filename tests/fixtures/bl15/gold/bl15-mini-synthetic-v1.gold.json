@@ -17,7 +17,7 @@
       "3.5/3.7 -- one root readme.txt as beamtime-scope context, and a notes file whose broad claim contradicts its own sample section",
       "the beamtime notes file begins with a UTF-8 BOM, exactly as the real one does"
     ],
-    "synthetic_marking": "Every file carries a SYNTHETIC FIXTURE line, every sample name is SYN1/SYN2, every motor is prefixed `syn`, every energy is a round invented number and every timestamp is in 2099. Nothing here came from an instrument."
+    "synthetic_marking": "Every file carries a SYNTHETIC FIXTURE line, every sample name is SYN1/SYN2, every motor is prefixed `syn`, every energy is a round invented number and every timestamp is in 2099 except one: the alignment scan's `#E` epoch, 2098-12-31T22:40Z, which is 80 minutes before the first measurement (its `#D` line says 2099). Every `#E` was moved back exactly 365 days on 2026-10-11 because they had said 2100; that one kept its 80-minute lead. Nothing here came from an instrument."
   },
 
   "needs_domain_review_concepts": [

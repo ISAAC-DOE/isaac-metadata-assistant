@@ -1675,6 +1675,20 @@ function CandidateSendForm({
   const [experimentId, setExperimentId] = useState('');
   const [runId, setRunId] = useState('');
   const key = `propose:${candidate.candidate_id}`;
+  const runs = useRecordRuns(experimentId);
+  /* THE RUN MADE FROM THIS VALUE'S OWN MEASUREMENT, PRESELECTED (2026-10-11, QA `C-01`).
+     The form used to default to "No run" even when the record held the run created from
+     exactly this measurement, and measurement #2's value went onto #1's run without a
+     word. The match is the server's: the send plan's key against each run's recorded
+     origin. Never "the only run" — a run with no recorded origin is never chosen here. */
+  const measurement = session.send_plan?.measurement_of?.[candidate.candidate_id] ?? null;
+  const ownRun =
+    measurement !== null && runs !== null ? (runs.find((r) => r.origin === measurement)?.id ?? null) : null;
+  useEffect(() => {
+    // A NEW RECORD (or its runs arriving) resets the choice, to that record's own run
+    // for this measurement when it has one — the reset `RunPicker` used to do itself.
+    setRunId(ownRun ?? '');
+  }, [experimentId, runs, ownRun]);
   return (
     <form
       className="hi-send"
@@ -1707,10 +1721,12 @@ function CandidateSendForm({
         onCreated={setExperimentId}
       />
       <RunPicker
-        experimentId={experimentId}
+        runs={runs}
         value={runId}
         onChange={setRunId}
         label="Which run? (required for a value a run owns)"
+        measurement={measurement}
+        preselected={ownRun}
       />
       <button type="submit" className="btn btn-secondary" disabled={busy !== null || !experimentId.trim()}>
         {busy === key ? 'Sending…' : IMPORT_COPY.actionPropose}
@@ -1766,33 +1782,37 @@ function RecordPicker({
   );
 }
 
-/**
- * A run CHOSEN FROM THE RECORD'S OWN RUNS, never a typed id — and only when the
- * record has any. Blank means "no run", which is correct for every value the record
- * itself owns.
- */
-function RunPicker({
-  experimentId,
-  value,
-  onChange,
-  label,
-}: {
-  experimentId: string;
-  value: string;
-  onChange: (id: string) => void;
+/** One run of the chosen record, with the measurement it was recorded as made from. */
+interface RunOption {
+  id: string;
   label: string;
-}) {
-  const [runs, setRuns] = useState<{ id: string; label: string }[] | null>(null);
+  /** `historical_origin.acquisition_identity` — the server's matching key — or `null`. */
+  origin: string | null;
+}
+
+/**
+ * THE CHOSEN RECORD'S RUNS, read once per record — lifted out of `RunPicker`
+ * (2026-10-11) because both send forms now need the runs' recorded origins, not only
+ * the picker. `null` while there is no record or the read is in flight; `[]` when the
+ * record has none or the read failed, which leaves the picker absent exactly as before.
+ */
+function useRecordRuns(experimentId: string): RunOption[] | null {
+  const [runs, setRuns] = useState<RunOption[] | null>(null);
   useEffect(() => {
     let alive = true;
     setRuns(null);
-    onChange('');
     if (!experimentId.trim()) return;
     api
       .listRuns(experimentId)
       .then((res) => {
         if (!alive) return;
-        setRuns((res.runs ?? []).map((r) => ({ id: r.id, label: r.label || r.id })));
+        setRuns(
+          (res.runs ?? []).map((r) => ({
+            id: r.id,
+            label: r.label || r.id,
+            origin: r.historical_origin?.acquisition_identity ?? null,
+          })),
+        );
       })
       .catch(() => {
         if (alive) setRuns([]);
@@ -1800,21 +1820,55 @@ function RunPicker({
     return () => {
       alive = false;
     };
-    // `onChange` is a state setter; re-running on it would clear a choice on render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [experimentId]);
-  if (!experimentId.trim() || runs === null || runs.length === 0) return null;
+  return runs;
+}
+
+/**
+ * A run CHOSEN FROM THE RECORD'S OWN RUNS, never a typed id — and only when the
+ * record has any. Blank means "no run", which is correct for every value the record
+ * itself owns.
+ *
+ * `measurement` (2026-10-11, QA `C-01`) is the send plan's key for the value's own
+ * measurement. A run RECORDED as made from a different one cannot take it — the server
+ * refuses with `run_is_another_measurement` — so that option is shown, labelled and
+ * disabled rather than offered. The match is string equality on the server's own key;
+ * no matching rule is re-implemented here.
+ */
+function RunPicker({
+  runs,
+  value,
+  onChange,
+  label,
+  measurement = null,
+  preselected = null,
+}: {
+  runs: RunOption[] | null;
+  value: string;
+  onChange: (id: string) => void;
+  label: string;
+  measurement?: string | null;
+  /** The run the form chose for the reader because it was made from `measurement`. */
+  preselected?: string | null;
+}) {
+  if (runs === null || runs.length === 0) return null;
   return (
     <label className="hi-field">
       <span className="hi-field-label">{label}</span>
       <select className="hi-input" value={value} onChange={(event) => onChange(event.target.value)}>
         <option value="">No run — a value the record owns</option>
-        {runs.map((run) => (
-          <option key={run.id} value={run.id}>
-            {run.label}
-          </option>
-        ))}
+        {runs.map((run) => {
+          const another = measurement !== null && run.origin !== null && run.origin !== measurement;
+          return (
+            <option key={run.id} value={run.id} disabled={another}>
+              {another ? `${run.label}${STAGE.otherMeasurementRun}` : run.label}
+            </option>
+          );
+        })}
       </select>
+      {preselected !== null && value === preselected && (
+        <span className="hi-note">{STAGE.ownRunPreselected}</span>
+      )}
     </label>
   );
 }
@@ -1911,6 +1965,33 @@ function AddStage({
   const key = `add-whole:${importId}`;
   const step = data.workflow.find((s) => s.id === 'add_to_experiments');
   const acceptance = data.capabilities?.proposal_acceptance;
+
+  /* THE RULE, SAID BEFORE SUBMIT (2026-10-11, QA `C-01`). A run holds one measurement's
+     values: the server sends each value to the run recorded as made from its own
+     measurement, and the named run takes the values of at most one measurement that has
+     no run of its own. These counts are read off the send plan's `measurement_of` and the
+     chosen record's runs — the server's keys compared as strings — and only FORESHADOW
+     the server's refusal; the server still decides. */
+  const runs = useRecordRuns(experimentId);
+  useEffect(() => {
+    setRunId(''); // a new record: the old record's run means nothing here
+  }, [experimentId]);
+  const measurementOf = data.send_plan?.measurement_of ?? {};
+  const ownRuns = new Set((runs ?? []).map((r) => r.origin).filter((o): o is string => o !== null));
+  const homeless = new Set(
+    sendable.map((id) => measurementOf[id]).filter((m): m is string => Boolean(m) && !ownRuns.has(m)),
+  );
+  const namedOrigin = runs?.find((r) => r.id === runId)?.origin ?? null;
+  const routingWarning =
+    // NOTHING TO SAY WITHOUT A PICKER: a record with no runs offers no run to name, so a
+    // warning about naming one would describe a control that is not on the screen.
+    createRuns || runs === null || runs.length === 0
+      ? null
+      : homeless.size > 1
+        ? STAGE.severalMeasurements(homeless.size)
+        : homeless.size === 1 && namedOrigin !== null
+          ? STAGE.namedRunIsAnotherMeasurement
+          : null;
 
   return (
     <>
@@ -2019,13 +2100,18 @@ function AddStage({
               )}
               {!createRuns && (
                 <RunPicker
-                  experimentId={experimentId}
+                  runs={runs}
                   value={runId}
                   onChange={setRunId}
                   label="Which run? (for the values a run owns)"
                 />
               )}
               <p className="hi-note">{IMPORT_COPY.addWholeRunNote}</p>
+              {routingWarning !== null && (
+                <p className="hi-note" role="note">
+                  {routingWarning}
+                </p>
+              )}
               <button
                 type="submit"
                 className="btn btn-primary"

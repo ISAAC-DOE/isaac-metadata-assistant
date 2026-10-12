@@ -28,9 +28,11 @@ schema at runtime. A path literal in this file would be a second, unchecked opin
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 from dataclasses import replace
 
@@ -330,7 +332,8 @@ def _candidates_from_evidence(
 
     See :func:`_reconcile_same_field` — added 2026-09-23 because two concepts map to
     the one acquisition-start UTC field and were each proposed, as competing open
-    proposals, without ever being compared.
+    proposals, without ever being compared — and :func:`_cross_check_local_clock`,
+    added 2026-10-11 because the zone-less half of that pair was STILL never compared.
     """
     candidates = list(
         _candidates_by_concept(
@@ -342,7 +345,218 @@ def _candidates_from_evidence(
             unregistered=unregistered,
         )
     )
-    return _reconcile_same_field(candidates)
+    return _cross_check_local_clock(_reconcile_same_field(candidates), items, source_ids)
+
+
+#: THE WIDEST GAP A REAL UTC OFFSET CAN EXPLAIN between a zone-less wall-clock reading
+#: and the UTC instant it is the local spelling of (2026-10-11, QA finding ``C-09``).
+#:
+#: Civil time zones run from UTC−12:00 to UTC+14:00, so ``local − UTC`` lies in
+#: [−12 h, +14 h]. The bound is **14 h EITHER WAY** — the wider of the two, applied
+#: symmetrically — so it can only ever be generous to agreement: a gap inside it is NOT
+#: claimed as agreement (no zone is named, so none is assumed), it is merely not
+#: evidence of disagreement, and nothing changes. A gap outside it cannot be one instant
+#: read in two zones, so it is a disagreement for a scientist.
+LOCAL_CLOCK_MAX_OFFSET = timedelta(hours=14)
+
+_MONTHS = {
+    name: number
+    for number, name in enumerate(
+        ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"),
+        start=1,
+    )
+}
+
+#: A SPEC ``#D`` line: ``Fri Jan 01 00:00:00 2099``. The weekday is optional and is NOT
+#: consulted — it is redundant with the date, and checking it would be a second,
+#: unrequested consistency rule (the synthetic corpora's ``Fri Jan 01 2099`` is in fact a
+#: Thursday).
+_SPEC_DATE = re.compile(
+    r"^(?:[A-Za-z]{3}\s+)?([A-Za-z]{3})\s+(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})\s+(\d{4})$"
+)
+
+
+def zone_less_wall_clock(literal: object) -> datetime | None:
+    """The wall-clock time a ZONE-LESS date literal states, or ``None``.
+
+    Read for COMPARISON ONLY — never proposed, never converted into a zone, never
+    written anywhere. ``None`` for a literal that names its zone (that reading is
+    comparable as an instant, and :func:`_reconcile_same_field` already compares it) and
+    for one this build cannot read, which then decides nothing either way.
+    """
+    if not isinstance(literal, str):
+        return None
+    text = literal.strip()
+    match = _SPEC_DATE.match(text)
+    if match is not None:
+        month = _MONTHS.get(match.group(1).lower())
+        if month is None:
+            return None
+        try:
+            return datetime(
+                int(match.group(6)),
+                month,
+                int(match.group(2)),
+                int(match.group(3)),
+                int(match.group(4)),
+                int(match.group(5)),
+            )
+        except ValueError:
+            return None
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is None else None
+
+
+def _cross_check_local_clock(
+    candidates: list[SemanticCandidate],
+    items: Sequence[ev.SourceEvidence],
+    source_ids: Mapping[str, str],
+) -> list[SemanticCandidate]:
+    """Compare a file's EPOCH with the zone-less DATE LINE its own header states.
+
+    **THE DEFECT THIS CLOSES (``C-09``, 2026-10-11).** ``mapping.py`` has promised of the
+    acquisition time since it was written: *"if they disagree, both are read and the
+    disagreement is a conflict for a scientist"*. :func:`_reconcile_same_field` made that
+    true only for readings that are both PROPOSABLE — and the ``#D`` line never is
+    (:data:`CANDIDATE_NOT_PROPOSABLE_LOCAL_TIME`), so it was never compared at all. The
+    synthetic mini corpus says ``#E 4102444800`` (2100-01-01T00:00Z) beside ``#D Fri Jan
+    01 00:00:00 2099``, and its epoch was offered as "Ready to Send".
+
+    **WHAT IS COMPARED, AND ONLY THAT.** The epoch (``#E``, normalised to UTC by a named
+    rule) against each MEASUREMENT-scope ``acquisition_timestamp`` reading of the SAME
+    SOURCE FILE — the header ``#D``, the other spelling of the same instant. A scan's
+    ``#D`` is that scan's own start, legitimately hours or days later, and is not this
+    comparison. A zone-less reading may differ from UTC only by a real offset
+    (:data:`LOCAL_CLOCK_MAX_OFFSET`); beyond it, the epoch candidate becomes a conflict
+    carrying both readings verbatim — the epoch as the UTC instant it states, the date
+    line as written — and nothing is chosen. Within it NOTHING changes: the local time is
+    not converted, reconciled or credited as agreement.
+    """
+    epochs = [
+        item
+        for item in items
+        if item.concept == ev.CONCEPT_ACQUISITION_EPOCH and isinstance(item.normalized_value, str)
+    ]
+    if not epochs:
+        return candidates
+    walls: dict[str, list[tuple[ev.SourceEvidence, datetime]]] = defaultdict(list)
+    for item in items:
+        if item.concept == ev.CONCEPT_ACQUISITION_TIMESTAMP and item.scope == ev.SCOPE_MEASUREMENT:
+            wall = zone_less_wall_clock(item.raw_literal)
+            if wall is not None:
+                walls[item.source_path].append((item, wall))
+    clashing_epochs: list[ev.SourceEvidence] = []
+    clashing_walls: list[ev.SourceEvidence] = []
+    for epoch in epochs:
+        try:
+            instant = datetime.fromisoformat(epoch.normalized_value.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if instant.tzinfo is None:
+            continue
+        utc_wall = instant.astimezone(timezone.utc).replace(tzinfo=None)
+        for local, wall in walls.get(epoch.source_path, ()):
+            if abs(wall - utc_wall) > LOCAL_CLOCK_MAX_OFFSET:
+                if epoch not in clashing_epochs:
+                    clashing_epochs.append(epoch)
+                if local not in clashing_walls:
+                    clashing_walls.append(local)
+    if not clashing_epochs:
+        return candidates
+
+    entry = mp.mapping_for(ev.CONCEPT_ACQUISITION_EPOCH)
+    path = entry.official_path if entry is not None else None
+    if path is None:  # pragma: no cover - the registry maps the epoch
+        return candidates
+    instants = {_comparable(e.normalized_value, path) for e in clashing_epochs}
+    out = list(candidates)
+    # THE CANDIDATE OFFERING THAT INSTANT — the epoch's own, or the reading that offered
+    # the same instant in its place (`SAME_FIELD_ALREADY_OFFERED`). One that is already
+    # not proposable (a disagreement of its own, a no-run measurement) is left as it is:
+    # it offers nothing, so there is nothing to withhold.
+    for index, candidate in enumerate(out):
+        if not (
+            candidate.proposable
+            and candidate.target_field_path == path
+            and _comparable(candidate.proposed_value, path) in instants
+        ):
+            continue
+        disputed = clashing_epochs + clashing_walls
+        distinct = list(dict.fromkeys(_reading_of(i) for i in disputed))
+        known = {
+            (s.get("key"), s.get("locator"), s.get("value")) for s in candidate.supporting_statements
+        }
+        extra = tuple(
+            s
+            for s in (statement_for(i).to_state() for i in clashing_walls)
+            if (s.get("key"), s.get("locator"), s.get("value")) not in known
+        )
+        out[index] = replace(
+            candidate,
+            proposed_value=None,
+            unresolved_reason=UNRESOLVED_SOURCES_DISAGREE,
+            rule=(
+                "The file states its start twice and the two cannot be one instant: the "
+                f"epoch line reads {clashing_epochs[0].normalized_value} (UTC), and the "
+                "date line, which names no time zone, reads "
+                f"{clashing_walls[0].raw_literal}. They are "
+                f"{_gap_words(clashing_epochs[0], clashing_walls[0])} apart — more than "
+                "14 hours, the largest real time-zone offset. Nothing here picks one."
+            ),
+            supporting_source_ids=tuple(
+                sorted(
+                    set(candidate.supporting_source_ids)
+                    | set(_ids_for(tuple(i.source_path for i in clashing_walls), source_ids))
+                )
+            ),
+            supporting_statements=tuple(candidate.supporting_statements) + extra,
+            # THE ROW CONTRACT `_candidates_by_concept` USES for a disagreement —
+            # `{value, source_ids, locators}` — so the review surface, the Conflicts
+            # stage and a confirmed resolution (`historical_import._apply_resolution`,
+            # which matches `value` against `reading_of`) all read it unchanged.
+            disagreement=tuple(
+                {
+                    "value": value,
+                    "source_ids": _sources_stating(disputed, value),
+                    "locators": _locators_stating(disputed, value),
+                }
+                for value in distinct
+            ),
+        )
+        break
+    return out
+
+
+def _gap_words(epoch: ev.SourceEvidence, local: ev.SourceEvidence) -> str:
+    """How far apart the two readings are — EXACTLY, in words a scientist reads at a glance.
+
+    ~~``f"{hours:.1f} hours"``~~ — just over the bound that read "14.0 hours apart … no
+    real time-zone offset exceeds 14 hours", a sentence contradicting itself (independent
+    review, 2026-10-11). Written to the second, and only as precisely as the gap needs:
+    ``365 days``, ``1 day, 2 h 5 min``, ``14 h 0 min 1 s``. Every unit between the largest
+    and the smallest non-zero one is written, so nothing is rounded and no figure can read
+    as the bound it exceeds; a fractional second is written, never truncated.
+    """
+    instant = datetime.fromisoformat(str(epoch.normalized_value).replace("Z", "+00:00"))
+    wall = zone_less_wall_clock(local.raw_literal)
+    if wall is None:  # pragma: no cover - only called for a reading that parsed
+        return "more than 14 hours"
+    gap = abs(wall - instant.astimezone(timezone.utc).replace(tzinfo=None))
+    hours, rest = divmod(gap.seconds, 3600)
+    minutes, seconds = divmod(rest, 60)
+    second_text = (
+        f"{seconds}.{gap.microseconds:06d}".rstrip("0") if gap.microseconds else str(seconds)
+    )
+    units = [(hours, f"{hours} h"), (minutes, f"{minutes} min"), (seconds or gap.microseconds, f"{second_text} s")]
+    present = [index for index, (amount, _text) in enumerate(units) if amount]
+    clock = (
+        " ".join(text for _amount, text in units[present[0] : present[-1] + 1]) if present else ""
+    )
+    days = f"{gap.days} day{'s' if gap.days != 1 else ''}" if gap.days else ""
+    return ", ".join(part for part in (days, clock) if part)
 
 
 #: Why the second of two readings of ONE field that agree is not sent as well.
@@ -943,7 +1157,34 @@ def reading_of(item: ev.SourceEvidence) -> str:
 def statement_locator(item: ev.SourceEvidence) -> str:
     """The ``locator`` :func:`statement_for` gives ``item`` — the key that links a
     supporting statement back to the evidence it was built from."""
-    return f"{item.source_path} · {item.locator}"
+    return f"{item.source_path}{_LOCATOR_JOIN}{item.locator}"
+
+
+_LOCATOR_JOIN = " · "
+
+
+def split_statement_locator(locator: str, archive_paths) -> tuple[str, str] | None:
+    """Undo :func:`statement_locator` against KNOWN archive paths: ``(path, within)``.
+
+    Defined HERE, beside the format it inverts, so no caller parses this module's
+    punctuation (``routes._import_statement_filename``'s rule). The longest known path
+    the locator begins with wins, so ``a/b.txt`` is never mistaken for ``a``; ``None`` when
+    no known path matches, and the caller then keeps the locator whole. Added 2026-10-11
+    so a beamtime statement can be identified by WHICH BYTES said it rather than by where
+    the container happened to put the file.
+    """
+    best = None
+    for path in archive_paths:
+        if (
+            isinstance(path, str)
+            and path
+            and locator.startswith(f"{path}{_LOCATOR_JOIN}")
+            and (best is None or len(path) > len(best))
+        ):
+            best = path
+    if best is None:
+        return None
+    return best, locator[len(best) + len(_LOCATOR_JOIN) :]
 
 
 def _sources_stating(group: Sequence[ev.SourceEvidence], reading: str) -> list[str]:

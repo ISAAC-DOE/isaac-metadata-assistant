@@ -150,6 +150,10 @@ _RUN_BOOKKEEPING_KEYS = frozenset(
         "updated_utc",
         "rev",
         "version",
+        # PROVENANCE, NOT CONTENT (added 2026-10-11): which acquisition a historical import
+        # recorded the run as made from — `null` here, and never a value either sentence
+        # could have written.
+        "historical_origin",
     }
 )
 
