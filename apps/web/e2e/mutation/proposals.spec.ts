@@ -961,14 +961,27 @@ test('an unsaved correction survives a background change-feed refresh', async ({
   // Behind "More Actions" now (P2 resolution).
   await card.getByRole('button', { name: 'More Actions' }).click();
   await card.getByRole('button', { name: 'Correct the Value, Then Accept' }).click();
-  // A text value is corrected as plain text (QA A-29) — no longer a JSON box.
+  // `system.technique` is a closed list in the official schema, so the correction is
+  // a CHOICE over that list (QA A-10), not a text box. `STM` is a member, so it is the
+  // preselected value; the reader then chooses a different member.
   const editor = card.getByLabel('The corrected value', { exact: true });
   await expect(editor).toBeVisible();
+  expect(await editor.evaluate((el) => el.tagName)).toBe('SELECT');
   // Prefilled once, from the proposed value, exactly as stored.
   await expect(editor).toHaveValue('STM');
 
   const typed = 'AFM';
-  await editor.fill(typed);
+  // A member of the schema's own enum, read from the served schema rather than
+  // assumed, and different from the proposed value — otherwise "it survived" would be
+  // indistinguishable from "it was never changed".
+  const schemaRes = await request.get(`${MUT_API_BASE}/schema`);
+  const techniques = ((await schemaRes.json()) as {
+    schema: { properties: { system: { properties: { technique: { enum: string[] } } } } };
+  }).schema.properties.system.properties.technique.enum;
+  expect(techniques, 'AFM must be a schema member for this choice to be offered').toContain(typed);
+  expect(typed).not.toBe('STM');
+  await editor.selectOption(typed);
+  await expect(editor).toHaveValue(typed);
   const readsBeforeTheSecondClient = listReads.length;
 
   // A SECOND CLIENT changes this record. This is what puts a `proposal` entry in the
@@ -1002,6 +1015,10 @@ test('an unsaved correction survives a background change-feed refresh', async ({
    */
   await expect(editor, 'the silent refresh destroyed an unsaved correction').toHaveValue(typed);
   await expect(editor).toBeVisible();
+  // The CHOSEN OPTION is still the selected one — not merely a value attribute.
+  expect(
+    await editor.evaluate((el) => (el as HTMLSelectElement).selectedOptions[0]?.value),
+  ).toBe(typed);
 });
 
 // ---------------------------------------------------------------------------
