@@ -52,6 +52,8 @@ import type {
 } from '../lib/types';
 import { BackendDown, LoadingPanel } from './FetchStates';
 import { ChevronDown, ChevronRight } from './icons';
+import { sourceTypeWords } from './EvidenceRow';
+import { formatWhen } from '../lib/labels';
 import './assets.css';
 // The collapsed mount reuses `FieldGroup`'s shell (`.field-group` / `.fg-header`
 // / `.fg-body`) rather than inventing a second disclosure idiom for this screen.
@@ -860,13 +862,20 @@ function AssetCard({
             <ol className="asset-evidence-list">
               {asset.evidence.map((entry, index) => (
                 <li key={index}>
-                  <span className="asset-evidence-kind">{entry.source_type}</span>
+                  <span className="asset-evidence-kind" title={entry.source_type}>
+                    {sourceTypeWords(entry.source_type)}
+                  </span>
                   {entry.question ? <span> · {entry.question}</span> : null}
                   {entry.source_file ? (
                     <span className="mono"> · {entry.source_file}</span>
                   ) : null}
                   {entry.timestamp ? (
-                    <span className="mono asset-evidence-when"> · {entry.timestamp}</span>
+                    <span className="asset-evidence-when">
+                      {' · '}
+                      <time dateTime={entry.timestamp} title={entry.timestamp}>
+                        {formatWhen(entry.timestamp) ?? entry.timestamp}
+                      </time>
+                    </span>
                   ) : null}
                 </li>
               ))}

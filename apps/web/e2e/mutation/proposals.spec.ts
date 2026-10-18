@@ -961,12 +961,13 @@ test('an unsaved correction survives a background change-feed refresh', async ({
   // Behind "More Actions" now (P2 resolution).
   await card.getByRole('button', { name: 'More Actions' }).click();
   await card.getByRole('button', { name: 'Correct the Value, Then Accept' }).click();
-  const editor = card.getByLabel('The corrected value, as JSON');
+  // A text value is corrected as plain text (QA A-29) — no longer a JSON box.
+  const editor = card.getByLabel('The corrected value', { exact: true });
   await expect(editor).toBeVisible();
-  // Prefilled once, from the proposed value, as JSON.
-  await expect(editor).toHaveValue('"STM"');
+  // Prefilled once, from the proposed value, exactly as stored.
+  await expect(editor).toHaveValue('STM');
 
-  const typed = '"AFM"';
+  const typed = 'AFM';
   await editor.fill(typed);
   const readsBeforeTheSecondClient = listReads.length;
 

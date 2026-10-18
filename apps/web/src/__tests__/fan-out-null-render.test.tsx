@@ -9,6 +9,8 @@ import {
   exportReadyRoutes,
   fanOutExportSuccess,
   fanOutExportedRoutes,
+  fanOutRunArtifacts,
+  runArtifactsNone,
   stubFetchRoutes,
 } from '../test/apiFixtures';
 
@@ -243,21 +245,41 @@ describe('a fan-out never states something false', () => {
     // `onRefresh()` was never called either, so the screen could not recover; the
     // user's retry then got a 409 "This record already exists on disk", flatly
     // contradicting "nothing was written" seconds earlier.
+    // A RECORD THAT FANS OUT HAS RUNS. The ready fixture's detail says `run_count: 0`,
+    // which is a record that could never reach this branch; the Exported Run Records
+    // list (QA audit A-02) is mounted on `run_count > 0`, so the fixture says so. Its
+    // `/run-artifacts` answers NOTHING EXPORTED until the export lands, then the two
+    // runs — the read that replaced the export response as the place filenames live.
+    const ready = exportReadyRoutes('demo');
+    const readyDetail = (ready['GET /api/experiments/demo'] as { body: Record<string, unknown> })
+      .body;
+    let exportedYet = false;
     const calls = stubFetchRoutes({
-      ...exportReadyRoutes('demo'),
-      'POST /api/experiments/demo/export': { body: fanOutExportSuccess },
+      ...ready,
+      'GET /api/experiments/demo': { body: { ...readyDetail, run_count: FAN_OUT_RUN_IDS.length } },
+      'GET /api/experiments/demo/run-artifacts': () => ({
+        body: exportedYet ? fanOutRunArtifacts('demo') : runArtifactsNone('demo'),
+      }),
+      'POST /api/experiments/demo/export': () => {
+        exportedYet = true;
+        return { body: fanOutExportSuccess };
+      },
     });
-    const { findByText, queryByText, getByText } = renderAt('/record/demo/export');
+    const { findByText, queryByText, findAllByRole } = renderAt('/record/demo/export');
 
     const exportBtn = (await findByText('Export Official Record + Sidecar')).closest('button')!;
     const before = calls.filter((c) => c === 'GET /api/experiments/demo').length;
     fireEvent.click(exportBtn);
 
-    // What it must SAY: two records were written, named.
+    // What it must SAY: two records were written, named — and now RETRIEVABLE, each
+    // with its own Download and View (A-02), rather than a filename list with neither.
     expect(await findByText(/2 official records/i)).toBeInTheDocument();
     for (const runId of FAN_OUT_RUN_IDS) {
-      expect(getByText(new RegExp(`${runId}\\.json`))).toBeInTheDocument();
+      expect(await findByText(`${runId}.json`)).toBeInTheDocument();
     }
+    expect(
+      await findAllByRole('button', { name: /^Download official record for Run \d$/ }),
+    ).toHaveLength(2);
     // …and what it must not say.
     expect(queryByText(/refused by the gated validation/i)).toBeNull();
     expect(queryByText(/nothing was written/i)).toBeNull();

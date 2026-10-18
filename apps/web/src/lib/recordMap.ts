@@ -110,6 +110,14 @@ const PATH_ACRONYMS: Readonly<Record<string, string>> = {
   xanes: 'XANES',
   xas: 'XAS',
 };
+/** A trailing unit token, matched case-sensitively — the server's `serialize._label`
+ *  keeps the same list, so a Record Fields row and every other surface agree. */
+const PATH_UNITS: Readonly<Record<string, string>> = {
+  mm: 'mm',
+  nm: 'nm',
+  K: 'K',
+  eV: 'eV',
+};
 const GENERIC_LAST_SEGMENTS = new Set([
   'status',
   'name',
@@ -128,16 +136,24 @@ const GENERIC_LAST_SEGMENTS = new Set([
 /** Exported (final review of #279, P1) for Extended Context's concept keys: the same
  *  casing-and-separators-only humanizer, so no second vocabulary is invented. */
 export function humanizeSegment(segment: string): string {
-  return segment
-    .split('_')
-    .filter((word) => word !== '')
-    .map((word) => {
+  const words = segment.split('_').filter((word) => word !== '');
+  return words
+    .map((word, index) => {
+      /* A TRAILING unit token, as the schema writes it (QA A-16): `pellet_diameter_mm`
+         read "Pellet Diameter Mm". Parenthesised, never re-worded. */
+      if (index > 0 && index === words.length - 1 && PATH_UNITS[word] !== undefined) {
+        return `(${PATH_UNITS[word]})`;
+      }
       const acronym = PATH_ACRONYMS[word.toLowerCase()];
       if (acronym !== undefined) return acronym;
+      /* A word the schema spells in MIXED case is kept as spelled (QA A-16):
+         `CuO2_mass_fraction` read "Cuo2 Mass Fraction" — a formula, lowercased. */
+      if (/[A-Z]/.test(word.slice(1))) return word.charAt(0).toUpperCase() + word.slice(1);
       return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
     })
     .join(' ');
 }
+
 
 function blockName(block: string): string {
   return block in RECORD_MAP_BLOCK_LABEL ? recordMapBlockLabel(block) : humanizeSegment(block);

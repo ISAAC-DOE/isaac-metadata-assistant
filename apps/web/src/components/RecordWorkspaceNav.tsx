@@ -133,7 +133,38 @@ export function captureSummaryLine(summary: ApiCaptureSummary | null): string | 
   return parts.length === 0 ? LABELS.captureNavEmpty : parts.join(' · ');
 }
 
+/**
+ * The `to` for a rail row, as a full location rather than a bare query string.
+ *
+ * ~~`to={{ search: railDestination(search, id) }}`~~ — QA audit A-05 (2026-10-11): a
+ * search-only `to` resolves against the CURRENT path, and the rail is rendered on the
+ * record's sub-screens too. On `/record/<id>/complete` and `/record/<id>/export` the
+ * Capture, Proposals, Runs and Activity rows therefore pointed at
+ * `/record/<id>/complete?view=runs` — the screen the reader was already on — so a click
+ * changed the address bar and nothing else. The pathname is now always the record's own
+ * screen, which is where every `?view=` destination is rendered.
+ *
+ * THE CURRENT SEARCH IS COPIED ONLY ON THAT SCREEN. There, `?run=`, `?compare=` and
+ * `?at=` are the record screen's own state and survive a trip between destinations, as
+ * {@link railDestination} documents. A sub-screen's query string means nothing to the
+ * record screen, so leaving one starts from a clean address.
+ */
+export function railLocation(
+  recordId: string,
+  currentPathname: string,
+  currentSearch: string,
+  view: RecordViewId,
+): { pathname: string; search: string } {
+  const pathname = ROUTES.record(recordId);
+  return {
+    pathname,
+    search: railDestination(currentPathname === pathname ? currentSearch : '', view),
+  };
+}
+
 interface RecordNavProps {
+  /** The record these destinations belong to — every row links to ITS screen. */
+  recordId: string;
   /**
    * The destination currently rendered — already resolved, never re-derived here.
    * `null` on the record's SUB-SCREENS (`/complete`, `/export`): those are workflow
@@ -155,24 +186,25 @@ function DestinationRow({
   id,
   label,
   active,
-  search,
+  recordId,
   onNavigate,
   count,
 }: {
   id: RecordViewId;
   label: string;
   active: RecordViewId | null;
-  search: string;
+  recordId: string;
   onNavigate: () => void;
   /** A server count to show as a badge, or `null`/absent for none. */
   count?: { value: number; description: string } | null;
 }) {
   const countId = useId();
+  const location = useLocation();
   const isActive = id === active;
   return (
     <li className="workspace-nav-row">
       <Link
-        to={{ search: railDestination(search, id) }}
+        to={railLocation(recordId, location.pathname, location.search, id)}
         className={`workspace-nav-item${isActive ? ' active' : ''}`}
         /* `page`, not `step`: the spine owns `step`, and giving the same word to an
            ungated destination would tell a screen reader these are pipeline
@@ -206,8 +238,12 @@ const labelOf = (id: RecordViewId) =>
  * question the rail answers, before "where am I in the pipeline?". Being FIRST and
  * being a STEP are different claims, and only the first was asked for.
  */
-export function RecordCaptureNav({ active, captureSummary = null, onNavigate }: RecordNavProps) {
-  const location = useLocation();
+export function RecordCaptureNav({
+  recordId,
+  active,
+  captureSummary = null,
+  onNavigate,
+}: RecordNavProps) {
   /*
    * THE PROPOSALS BADGE IS THE SERVER'S `proposals_open`, AND IT IS WITHHELD ON THE
    * PROPOSALS VIEW ITSELF. There the two panels read their own lists and update the
@@ -228,7 +264,7 @@ export function RecordCaptureNav({ active, captureSummary = null, onNavigate }: 
             id={id}
             label={labelOf(id)}
             active={active}
-            search={location.search}
+            recordId={recordId}
             onNavigate={onNavigate}
             count={id === 'proposals' ? proposalsCount : null}
           />
@@ -244,19 +280,21 @@ export function RecordCaptureNav({ active, captureSummary = null, onNavigate }: 
  * than a `?view=` destination and is never marked active here).
  */
 export function RecordWorkspaceNav({
+  recordId,
   active,
   onNavigate,
   evidenceTrail = null,
 }: RecordNavProps & {
   /**
-   * The Evidence Trail row, or `null` to omit it — Export Readiness omits it because
+   * The Evidence Trail row, or `null` to omit it. ~~Export Readiness omits it because
    * that screen already uses the words "Evidence Trail" for the exported sidecar
-   * artifact. `count` is `null` when the screen has not read the evidence, which
-   * renders no count rather than a guessed one.
+   * artifact.~~ — it no longer does (QA audit A-20, 2026-10-11): the rail is the same on
+   * every record screen, and a label shared with an artifact card is a test-query
+   * problem rather than a reason to remove a destination. `count` is `null` when the
+   * screen has not read the evidence, which renders no count rather than a guessed one.
    */
   evidenceTrail?: { recordId: string; count: number | null } | null;
 }) {
-  const location = useLocation();
   const rows = RECORD_WORKSPACES.filter(
     (w) =>
       !CAPTURE_GROUP.includes(w.id) && !URL_ONLY.includes(w.id) && !SPINE_REACHED.includes(w.id),
@@ -271,7 +309,7 @@ export function RecordWorkspaceNav({
             id={workspace.id}
             label={workspace.label}
             active={active}
-            search={location.search}
+            recordId={recordId}
             onNavigate={onNavigate}
           />
         ))}

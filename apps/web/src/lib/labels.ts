@@ -1008,6 +1008,12 @@ export const LABELS = {
   actionSave: 'Save',
   actionRevalidate: 'Re-Validate',
   actionDownload: 'Download',
+  /** The heading of the durable Confirmed Answers panel (QA audit A-01/A-04). */
+  confirmedAnswersHeading: 'Confirmed Answers',
+  /** The heading of the per-run exported files list on Export Readiness (A-02). */
+  exportedRunRecordsHeading: 'Exported Run Records',
+  /** A run row's own statement that its file predates later changes (A-06). */
+  chipChangedSinceExport: 'Changed Since Export',
   actionViewJson: 'View JSON',
   actionView: 'View',
   actionOpenSource: 'Open Source File',
@@ -1135,6 +1141,7 @@ export const LABELS = {
   createExperimentDescriptionHint:
     'A note for you. It is stored with the record and is never read as a scientific value.',
   createExperimentSubmit: 'Create Experiment',
+  createExperimentCreating: 'Creating the experiment…',
   createExperimentCancel: 'Cancel',
   /** Shown when the title is empty. States the fix, not the failure. */
   createExperimentTitleRequired: 'Give the experiment a title to create it.',

@@ -688,6 +688,22 @@
   color: var(--fail-text);
 }
 
+/* The in-flight line (QA A-29). While EMPTY it takes no layout space but stays in
+   the accessibility tree — `display: none` would make the first announcement an
+   insertion, which is the unreliable case the permanent mount exists to avoid. */
+.create-experiment-status {
+  margin: 0;
+  font-size: var(--font-size-body);
+  color: var(--text-secondary);
+}
+.create-experiment-status:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
 .create-experiment-actions {
   display: flex;
   flex-wrap: wrap;

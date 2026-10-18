@@ -104,6 +104,7 @@ import { StatusChip } from './StatusChip';
 import { SemanticStatus } from './SemanticStatus';
 import { HelpTip } from './HelpTip';
 import { RunInheritedPanel } from './RunInheritedPanel';
+import { RunConfirmedAnswers } from './ConfirmedAnswersPanel';
 import { RunRenameForm } from './RunRenameForm';
 import { RunSection } from './RunSection';
 import { FindingList } from './RunFindingList';
@@ -1265,6 +1266,20 @@ export function RunCard({
               <InheritedEmpty tally={tally} />
             )}
           </RunSection>
+
+          {/*
+            A-01 / A-04 (QA audit, 2026-10-11) — THIS RUN'S CONFIRMED REDUCED SPECTRUM, QC
+            VERDICT AND DESCRIPTOR, which no run screen showed after the visit that
+            answered them. Read and corrected through the run's own correction operation;
+            mounted on open, so a card nobody expands here makes no extra read. A
+            correction moves this run's version, so the card re-reads itself — its
+            autosave would otherwise hold a token the server has already retired.
+          */}
+          <RunConfirmedAnswers
+            experimentId={experimentId}
+            runId={run.id}
+            onCorrected={() => autosave.refresh()}
+          />
 
           {/*
             THE RENAME CLOSES THE CARD RATHER THAN OPENING IT, and it is the same

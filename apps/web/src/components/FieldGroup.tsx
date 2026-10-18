@@ -114,6 +114,11 @@ export function FieldGroup({
             <span className="fg-summary fg-status-group">
               <span className="fg-count">
                 {total} field{total === 1 ? '' : 's'}
+                {/* Where the record's own count leaves off (QA C-28): these rows are
+                    held by each run, not missing from the record. Omitted when EVERY
+                    row is a run's — the status then says it once. */}
+                {status.onRuns > 0 && status.onRuns < total && ` · ${status.onRuns} on each run`}
+                {status.atExport > 0 && status.atExport < total && ` · ${status.atExport} set at export`}
               </span>
               <SemanticStatus state={status.state} label={status.label} size="sm" />
             </span>

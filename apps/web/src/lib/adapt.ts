@@ -333,17 +333,73 @@ function summarize(fields: DraftField[], needsYouCount: number): string {
 export function fieldGroupStatus(
   fields: readonly DraftField[],
   needsYouCount: number,
-): { state: 'needsReview' | 'missing' | 'complete'; label: string } {
+): {
+  state: 'needsReview' | 'missing' | 'complete' | 'notShownHere';
+  label: string;
+  /** Unrecorded rows whose value is entered on each RUN, not on the record (QA C-28). */
+  onRuns: number;
+  /** Unrecorded rows the EXPORTER stamps — no route accepts them (review minor). */
+  atExport: number;
+} {
+  /*
+   * A RUN-LEVEL ROW IS NOT THE RECORD'S GAP (QA C-28). This is the RECORD's draft,
+   * and a path the server classifies `level: 'run'` is entered on each run, not here —
+   * so after every run's start time was accepted the Timestamps card still read
+   * "Missing". Such a row is counted as "on each run" and leaves the record's own
+   * count, unless the record's draft does carry it (a seeded draft can), when it is
+   * recorded here. The classification is the server's (`capture.level`).
+   *
+   * NOR IS AN EXPORT-STAMPED ROW (review minor). `timestamps.created_utc` is accepted
+   * by no route, and the exporter keeps a value the draft holds and stamps the export
+   * time otherwise (`captureHint`'s own sentence for that path) — so counting it as
+   * "1 Missing" handed the scientist a gap nothing lets them fill.
+   */
+  const runLevel = (f: DraftField) => f.capture?.level === 'run' && !isRecorded(f);
+  const stampedAtExport = (f: DraftField) => f.path === EXPORT_STAMPED_PATH && !isRecorded(f);
+  const onRuns = fields.filter(runLevel).length;
+  const atExport = fields.filter(stampedAtExport).length;
+  const own = fields.filter((f) => !runLevel(f) && !stampedAtExport(f));
   if (needsYouCount > 0) {
-    return { state: 'needsReview', label: `${needsYouCount} Need${needsYouCount === 1 ? 's' : ''} You` };
+    return {
+      state: 'needsReview',
+      label: `${needsYouCount} Need${needsYouCount === 1 ? 's' : ''} You`,
+      onRuns,
+      atExport,
+    };
   }
-  const recorded = fields.filter(isRecorded).length;
-  if (recorded === 0) return { state: 'missing', label: 'Missing' };
-  if (recorded < fields.length) {
-    return { state: 'missing', label: `${fields.length - recorded} Remaining` };
+  if (own.length === 0) {
+    return {
+      state: 'notShownHere',
+      // A group split between the two places names BOTH (re-review): "Entered on
+      // Each Run" alone was false of a Timestamps card whose third field is stamped.
+      label:
+        onRuns > 0 && atExport > 0
+          ? 'On Each Run · At Export'
+          : onRuns > 0
+            ? 'Entered on Each Run'
+            : 'Set at Export',
+      onRuns,
+      atExport,
+    };
   }
-  return { state: 'complete', label: 'All Recorded' };
+  const recorded = own.filter(isRecorded).length;
+  const elsewhere = onRuns + atExport > 0;
+  if (recorded === 0) {
+    return {
+      state: 'missing',
+      label: elsewhere ? `${own.length} Missing` : 'Missing',
+      onRuns,
+      atExport,
+    };
+  }
+  if (recorded < own.length) {
+    return { state: 'missing', label: `${own.length - recorded} Remaining`, onRuns, atExport };
+  }
+  return { state: 'complete', label: 'All Recorded', onRuns, atExport };
 }
+
+/** The one path the exporter stamps when the draft holds none (`export.py`). */
+const EXPORT_STAMPED_PATH = 'timestamps.created_utc';
 
 /**
  * Map the grouped draft into `FieldGroupData`, enriching each field with the raw

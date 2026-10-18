@@ -1147,7 +1147,7 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * rule recognises, NOT by widening the list. This is the THIRD recorded
    * instance of that miss, and the second the test caught rather than a human.
    */
-  it('describes the contract it claims to: 93 operations, MEASURED on the merged tree', () => {
+  it('describes the contract it claims to: 95 operations, MEASURED on the merged tree', () => {
     // FOUR slices have now raised this from 52 for real, different additions — the
     // asset slice, the transcript slice, run removal, and the two CONFLICT
     // RESOLUTION operations. Both sides of this merge conflict carried a number
@@ -1875,7 +1875,13 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // `POST /api/imports/{import_id}/rules` and
     // `GET /api/experiments/{experiment_id}/convention-rules`. The TITLE above is
     // edited in the same change, per this block's standing instruction.
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(93);
+    //
+    // 93 -> 95, 2026-10-11, from an independent QA audit: TWO new READ operations —
+    // `GET /api/experiments/{experiment_id}/run-artifacts` (A-02, every exported run's
+    // record and sidecar) and `GET /api/experiments/{experiment_id}/structured-answers`
+    // (A-01/A-04, the confirmed spectrum, QC verdict and descriptor). The TITLE above is
+    // edited in the same change.
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(95);
     // 84,501 -> 84,584 (+83): the assistant seam's own description was corrected, in
     // ONE operation and with the paragraph count unchanged. It read "so every request
     // is answered `501`" while the paragraph two below it documented the `422` — a
@@ -2579,6 +2585,27 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // values, and exactly-once across sessions). The total is the one this assertion
     // measured, never apportioned.
     //
+    // (sibling change, measured on its own branch from 174,788) 174,788 -> 176,751 (+1,963), 2026-10-11, the QA-audit export/re-edit slice: TWO
+    // new operations (`GET .../run-artifacts`, `GET .../structured-answers`) and ONE
+    // description re-transcribed (`GET .../artifacts`, whose last sentence said the
+    // per-run files were "not listed here yet" and now names the read that lists
+    // them). Measured by this assertion (`expected 176751 to be 174788`), not
+    // apportioned.
+    //
+    // 176,751 -> 177,028 (+277), same slice, after its independent review: TWO of the new
+    // descriptions changed — `GET .../run-artifacts` now says its files are resolved from
+    // the run's id (not "the run's own record id"), and `GET .../structured-answers`
+    // gained the `exported` paragraph and the form-carriage clause on `editable`. Measured
+    // by this assertion (`expected 177028 to be 176751`), not apportioned.
+    //
+    // 177,028 -> 177,251 (+223), after the slice's re-review: `GET .../structured-answers`
+    // gained its `confirmation` sentence, in the same paragraph. Measured
+    // (`expected 177251 to be 177028`), not apportioned.
+    //
+    // The two changes met in one merge on 2026-10-12; they re-transcribed DISJOINT operations, and
+    // the combined total below was READ from this assertion's own failure output after the
+    // merge, not derived by adding the deltas.
+    //
     // 176,738 -> 178,643 (+1,905), 2026-10-12: ONE description re-transcribed from
     // `create_app().openapi()`, NO operation added, and its paragraph count UNCHANGED at 14
     // — the new sentences (the "Also read from the archive" notes, creating runs as an act
@@ -2595,7 +2622,11 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // now names "Propose a Value From This Note"; the HERFD suggestion is no longer listed
     // in the note, and the text says the build's conclusions are not. MEASURED
     // (`expected 178795`), never apportioned.
-    expect(total).toBe(178795);
+    //
+    // The hosted-import change and the export change met in one merge on 2026-10-12 (each
+    // re-transcribed DISJOINT operations); the combined total below was READ from this
+    // assertion's own failure output after the merge, not derived by adding the deltas.
+    expect(total).toBe(181258);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never
@@ -2917,7 +2948,15 @@ describe('the Full Description rule over the REAL generated contract', () => {
       //
       // 342 -> 343 (+1), same day: `POST .../add-to-experiment` 12 -> 13, the new
       // read-under-the-destination's-rules paragraph. Measured with the characters.
-      343,
+      //
+      // 343 -> 347 (+4), 2026-10-11: the two new operations' post-lead paragraphs
+      // (`GET .../run-artifacts` and `GET .../structured-answers`); the re-transcribed
+      // `GET .../artifacts` keeps its paragraph count. Measured by this assertion
+      // (`expected 347 to be 343`), with the characters.
+      //
+      // 347 -> 348 (+1), after the slice's review: `GET .../structured-answers` gained
+      // the `exported` paragraph. Measured (`expected 348 to be 347`), with the characters.
+      348,
     );
     // 211 -> 235 (+24): the four new operations carry a lead plus 24 post-lead
     // paragraphs between them. It is asserted separately from the character total

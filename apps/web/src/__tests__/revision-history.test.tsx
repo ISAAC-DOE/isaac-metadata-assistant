@@ -43,6 +43,8 @@ import {
   workingStateSentence,
 } from '../lib/revisionHistory';
 import { stubFetchRoutes } from '../test/apiFixtures';
+import { __resetHealthCache } from '../lib/useHealth';
+import { availabilityHeading, HISTORY_NOT_KEPT_LINE } from '../lib/revisionHistory';
 import type {
   ApiLifecycle,
   ApiRevisionActor,
@@ -191,6 +193,10 @@ function diff(overrides: Partial<ApiRevisionDiff> = {}): ApiRevisionDiff {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  // The shared health read is cached per module (`useHealth.ts`), and since B-25 the
+  // panel consults it before reading. Reset per test so one test's deployment cannot
+  // decide another's — an unstubbed health is UNKNOWN, and the panel then reads.
+  __resetHealthCache();
 });
 
 /**
@@ -401,8 +407,15 @@ describe('the lifecycle', () => {
     });
     await renderOpen();
 
-    // The record's own state is UNCHANGED...
-    expect(await screen.findByText('Ready to Submit')).toBeTruthy();
+    // The record's own state is UNCHANGED — still the READY state, never lowered…
+    // ~~`findByText('Ready to Submit')`~~ — INVERTED 2026-10-11 (QA audit A-23): the
+    // chip read "Ready to Submit" on the same line as "Submitting is unavailable in this
+    // deployment", offering and withdrawing one act in one breath. It now reads "Ready"
+    // where the deployment blocks submission; the state is not lowered (asserted below
+    // on `data-state`), the chip only stops naming the act the line beside it withdraws.
+    const chip = await screen.findByText('Ready', { selector: '.revhist-chip' });
+    expect(chip.getAttribute('data-state')).toBe('ready_to_submit');
+    expect(screen.queryByText('Ready to Submit')).toBeNull();
     // ...and the deployment fact is its own block with its own heading.
     const block = screen.getByRole('note', {
       name: /Submitting is unavailable in this deployment/i,
@@ -956,12 +969,32 @@ describe('REV-002 · Last Submitted Revision versus Current Working Changes', ()
     expect(within(card).getByText(SUBMITTED_REVISION_HEADING)).toBeInTheDocument();
     expect(within(card).getByText(WORKING_CHANGES_HEADING)).toBeInTheDocument();
     expect(within(card).getByText(SUBMITTED_IMMUTABLE_NOTE)).toBeInTheDocument();
-    // Verbatim, from the response. A client-authored list would go quietly false
-    // the day the server's scope changes.
-    expect(
-      within(card).getByText('export_unit_ids_drafts_and_conflict_decisions'),
-    ).toBeInTheDocument();
+    // FROM THE RESPONSE — and now in WORDS (QA A-15), the identifier itself kept in
+    // `title`. This used to assert the raw token as the visible text, which pinned the
+    // defect; it is inverted rather than deleted. The words come from an EXACT-match
+    // map, so a scope this build does not know is still shown verbatim (next test).
+    const scope = within(card).getByText(
+      "Each export unit's id and draft, and the record's conflict decisions",
+    );
+    expect(scope.getAttribute('title')).toBe('export_unit_ids_drafts_and_conflict_decisions');
+    expect(within(card).queryByText('export_unit_ids_drafts_and_conflict_decisions')).toBeNull();
     expect(within(card).getByText(/Renaming this record does not count/)).toBeInTheDocument();
+  });
+
+  it('§5 · a scope this build does not know is shown VERBATIM, never described', async () => {
+    stubFetchRoutes({
+      [`GET /api/experiments/${EXP}/revisions`]: {
+        body: history({
+          signature_scope: 'a_scope_this_build_has_never_seen',
+          current_content_signature: SIG_SUBMITTED,
+          revisions: [submittedAt(4, SIG_SUBMITTED)],
+          total: 1,
+          returned: 1,
+        }),
+      },
+    } as never);
+    await renderOpen();
+    expect(await screen.findByText('a_scope_this_build_has_never_seen')).toBeInTheDocument();
   });
 
   it('§6 · POLARITY — the four verdicts are reachable and pairwise distinct', () => {
@@ -1207,7 +1240,103 @@ describe('the collapsed submission history', () => {
     });
     render(<RevisionHistoryPanel experimentId={EXP} />);
     await screen.findByRole('button', { name: 'Submission Details' });
-    expect(statusLine().textContent).toContain('Ready to Submit');
+    // ~~`toContain('Ready to Submit')`~~ — INVERTED 2026-10-11 (A-23); see the lifecycle
+    // test above. Beside, not instead of: the record's ready state is still on the line.
+    expect(statusLine().textContent).not.toContain('Ready to Submit');
+    expect(statusLine().querySelector('.revhist-chip')?.textContent).toBe('Ready');
     expect(statusLine().textContent).toContain('Submitting is unavailable in this deployment');
+  });
+
+  it('CONTROL — a deployment that CAN submit still shows the server label verbatim', async () => {
+    stubFetchRoutes({ [LIST]: { body: history() } });
+    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await screen.findByRole('button', { name: 'Submission Details' });
+    expect(statusLine().querySelector('.revhist-chip')?.textContent).toBe('Ready to Submit');
+  });
+});
+
+
+/* ── 10. B-25 · a deployment that keeps NO submission history is not a failure ──
+ *
+ * QA audit, 2026-10-11: `GET .../revisions` answered `503` on every Export Readiness and
+ * Evidence Graph load of a filesystem deployment, logging a console error and reading
+ * "Submission history could not be read". The server's `503` is right and unchanged; a
+ * client that already knows the deployment has no application database
+ * (`experiment_storage.configured: false`) simply does not ask, and says so calmly. A
+ * database that IS configured and failing is still read, and still shown as a failure.
+ */
+describe('B-25 · no submission history store, by configuration', () => {
+  const healthWith = (experiment_storage: Record<string, unknown>) => ({
+    body: { status: 'ok', mode: 'synthetic-only', core: 'isaac_records', version: '0', experiment_storage },
+  });
+
+  it('makes NO history request and says so calmly when the deployment has no database', async () => {
+    const calls = stubFetchRoutes({
+      'GET /api/health': healthWith({
+        configured: false,
+        backend: 'filesystem',
+        durable: false,
+        state: 'ephemeral',
+      }),
+      // Registered so that a request, if made, would SUCCEED — the assertion is on the
+      // request not being made at all, not on a failure being swallowed.
+      [LIST]: { body: history() },
+    });
+    render(<RevisionHistoryPanel experimentId={EXP} />);
+    expect(await screen.findByText(HISTORY_NOT_KEPT_LINE)).toBeTruthy();
+    expect(calls).not.toContain(LIST);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(document.body.textContent).not.toMatch(/could not be read/i);
+    // It claims nothing about the record — not that it was never submitted.
+    expect(document.body.textContent).not.toMatch(/never (been )?submitted/i);
+  });
+
+  it('a CONFIGURED database that fails is still read, and still shown as a failure', async () => {
+    const calls = stubFetchRoutes({
+      'GET /api/health': healthWith({
+        configured: true,
+        backend: 'postgres',
+        durable: false,
+        state: 'unavailable',
+      }),
+      [LIST]: {
+        status: 503,
+        body: history({
+          availability: {
+            state: 'unavailable',
+            reason: 'database_unavailable',
+            message: 'This deployment could not complete the read of its application database.',
+          },
+          revisions: undefined,
+          total: undefined,
+          returned: undefined,
+        }),
+      },
+    } as never);
+    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await screen.findByRole('button', { name: 'Submission Details' });
+    expect(calls).toContain(LIST);
+    expect(document.querySelector('.revhist-status')!.textContent).toContain(
+      'Submission history could not be read',
+    );
+  });
+
+  it('an UNKNOWN deployment (no health) still reads, exactly as before', async () => {
+    const calls = stubFetchRoutes({ [LIST]: { body: history() } });
+    render(<RevisionHistoryPanel experimentId={EXP} />);
+    await screen.findByRole('button', { name: 'Submission Details' });
+    expect(calls).toContain(LIST);
+  });
+
+  it('the heading for a no_durable_storage 503 names configuration, not a failed read', () => {
+    expect(
+      availabilityHeading({ state: 'unavailable', reason: 'no_durable_storage', message: 'x' }),
+    ).toBe('This deployment keeps no submission history');
+    expect(
+      availabilityHeading({ state: 'unavailable', reason: 'tables_absent', message: 'x' }),
+    ).toBe('Submission history could not be read');
+    expect(
+      availabilityHeading({ state: 'unavailable', reason: 'database_unavailable', message: 'x' }),
+    ).toBe('Submission history could not be read');
   });
 });

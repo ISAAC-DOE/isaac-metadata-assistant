@@ -1762,7 +1762,7 @@ def _tools() -> tuple[Tool, ...]:
                 "dropped the `200` withholds the identical-value reason altogether, so "
                 "no sentence in it can be read as acknowledging the key that vanished. "
                 "If you need certainty that a key landed, read `changed_fields`.\n\n"
-                "Four refusals, all `422`, all writing "
+                "Five refusals, all `422`, all writing "
                 "nothing and moving no question:\n\n"
                 "- `unrecognized_field` — the key names no answer this operation "
                 "takes and no asset URI the record knows (a mistyped key is the "
@@ -1776,6 +1776,12 @@ def _tools() -> tuple[Tool, ...]:
                 "closes that field with. `keys` names every offending one and "
                 "`allowed` maps each to the complete list the schema permits, read "
                 "from the schema document rather than restated here.\n"
+                "- `official_shape_mismatch` — a `series` or `descriptor` of the right "
+                "type whose shape the official ISAAC schema refuses at that field (a "
+                "series item missing `independent_variables` or `channels`, a channel "
+                "role outside the schema's list, a descriptor without `uncertainty`). "
+                "`schema_errors` names each failing record path and quotes the "
+                "schema's own message verbatim; fix those parts and resend.\n"
                 "- `already_answered` — described above.\n\n"
                 "Two further narrow drops, stated because a silent drop is exactly "
                 "what you must not have to guess at: a BLANK value (`null` or `\"\"`) is "
@@ -1857,7 +1863,10 @@ def _tools() -> tuple[Tool, ...]:
                             "official verdicts and `evidence` — if sent — is a string; "
                             "a bare verdict string is refused. `descriptor` is a "
                             "non-empty object. Each of those refusals is `422 "
-                            "invalid_field_value` naming the key."
+                            "invalid_field_value` naming the key. A `series` or "
+                            "`descriptor` of the right type is then checked against the "
+                            "official ISAAC schema's own rule for that field, and a "
+                            "mismatch is `422 official_shape_mismatch`."
                         ),
                     },
                     "correcting": {

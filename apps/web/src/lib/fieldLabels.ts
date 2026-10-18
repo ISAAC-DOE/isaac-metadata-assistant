@@ -25,10 +25,19 @@ export function officialPathOf(path: string): string {
   return path.trim().replace(/^\$\./, '').replace(/^fields\./, '');
 }
 
+/**
+ * Paths whose human name is the product's own established word, not a humanized path
+ * (QA A-16): the QC verdict was "QC Status" on a finding and "QC Verdict" on every
+ * blocker summary (`adapt.ts` `PENDING_LABELS`) for the same field. One name wins.
+ */
+const NAMED_PATHS: ReadonlyMap<string, string> = new Map([
+  ['measurement.qc.status', 'QC Verdict'],
+]);
+
 export function fieldLabel(path: string): string | null {
   const trimmed = officialPathOf(path);
   if (trimmed === '' || trimmed === '$') return null;
-  return RUN_FIELD_LABEL.get(trimmed) ?? fieldPathLabel(trimmed);
+  return RUN_FIELD_LABEL.get(trimmed) ?? NAMED_PATHS.get(trimmed) ?? fieldPathLabel(trimmed);
 }
 
 /** Whether `path` is one of the run-level fields the Runs editor has an input for (seven

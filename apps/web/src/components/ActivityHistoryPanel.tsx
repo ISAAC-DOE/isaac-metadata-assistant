@@ -3,6 +3,7 @@ import './activityHistory.css';
 import { Disclosure } from './Disclosure';
 import { api } from '../lib/api';
 import { LABELS, humanizeActivityToken as humanizeToken } from '../lib/labels';
+import { fieldLabel } from '../lib/fieldLabels';
 import type { ApiActivityEvent, ApiActivityResponse } from '../lib/types';
 
 /**
@@ -804,6 +805,16 @@ function ChangeBody({ event }: { event: ApiActivityEvent }) {
   );
 }
 
+/**
+ * An activity event's field address, in words. A namespaced draft address
+ * (`block:tags`, `field:sample.material.name`) loses only its namespace and is read
+ * through the same label every other surface uses; anything it cannot read is shown
+ * verbatim rather than guessed at.
+ */
+export function activityFieldLabel(path: string): string {
+  return fieldLabel(path.replace(/^(?:field|block):/, '')) ?? path;
+}
+
 function EventRow({ event, showActor }: { event: ApiActivityEvent; showActor: boolean }) {
   const showsChange = event.before.present || event.after.present;
   const basis = showActor ? actorBasisNote(event) : null;
@@ -818,7 +829,14 @@ function EventRow({ event, showActor }: { event: ApiActivityEvent; showActor: bo
         <span className="activity-action">{humanizeToken(event.action)}</span>
         <span className="activity-object">{humanizeToken(event.object_type)}</span>
       </p>
-      {event.field_path && <p className="activity-field">{event.field_path}</p>}
+      {/* THE FIELD IN WORDS (QA A-15): this showed the stored address verbatim —
+          `block:tags`, `field:sample.material.name`. The address is kept, exactly,
+          in `title` for a curator who maps by it. */}
+      {event.field_path && (
+        <p className="activity-field" title={event.field_path}>
+          {activityFieldLabel(event.field_path)}
+        </p>
+      )}
       {showsChange && <ChangeBody event={event} />}
       {/* THE METADATA LINE. Order follows the scan ranking `ACT-003b` states —
           actor, then time, then channel — rather than the sketch beside it, which

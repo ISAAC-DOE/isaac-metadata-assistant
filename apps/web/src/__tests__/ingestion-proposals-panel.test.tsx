@@ -280,14 +280,21 @@ describe('the read states', () => {
      * `isaac_propose_field_value`. The empty state is corrected to name all three
      * rather than assert none exist.
      */
+    /*
+     * INVERTED (QA A-26). This used to REQUIRE "Capture notes above" — false on the
+     * focused Proposals view, where nothing is above — and the tool name
+     * `isaac_propose_field_value`, which is agent documentation, not a scientist's
+     * word. The three ways a proposal is created are still all named.
+     */
     stubFetchRoutes({ [LIST]: { body: page([]) } });
     renderPanel();
 
-    await screen.findByText(/No proposals yet\. Capture notes above/);
-    expect(
-      screen.getByText(/ask a colleague’s agent to propose a value/),
-    ).toBeTruthy();
-    expect(screen.getByText(/isaac_propose_field_value/)).toBeTruthy();
+    const empty = await screen.findByText(/No proposals yet\./);
+    expect(empty.textContent).toMatch(/finishing a transcript capture/);
+    expect(empty.textContent).toMatch(/proposing a value from a note in Unmapped Notes/);
+    expect(empty.textContent).toMatch(/a connected AI agent can propose one/);
+    expect(empty.textContent).not.toMatch(/above/);
+    expect(screen.queryByText(/isaac_propose_field_value/)).toBeNull();
     // An empty record must NOT offer a "show all" escape hatch — nothing is filtered.
     expect(screen.queryByRole('button', { name: 'Show All Proposals' })).toBeNull();
   });
@@ -296,7 +303,7 @@ describe('the read states', () => {
     stubFetchRoutes({ [LIST]: { body: page([], { unreadable_entries: 2 }) } });
     renderPanel();
 
-    await screen.findByText(/No proposals yet\. Capture notes above/);
+    await screen.findByText(/No proposals yet\./);
     // BOTH surfaces carry it: an empty state is where a reader stops looking, so it
     // cannot be the one place the number is left out.
     const disclosures = screen.getAllByText(
@@ -1417,10 +1424,11 @@ describe('the review write', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Correct the Value, Then Accept' }),
     );
-    const box = screen.getByLabelText('The corrected value, as JSON') as HTMLTextAreaElement;
-    // Prefilled with the candidate as JSON, so the type is never guessed.
-    expect(box.value).toBe('"CuO"');
-    fireEvent.change(box, { target: { value: '"Cu2O"' } });
+    // QA A-29: a TEXT target is corrected as plain text. This used to be a JSON box
+    // prefilled with `"CuO"` (quotes and all) — the defect, now inverted.
+    const box = screen.getByLabelText('The corrected value') as HTMLInputElement;
+    expect(box.value).toBe('CuO');
+    fireEvent.change(box, { target: { value: 'Cu2O' } });
     fireEvent.click(screen.getByRole('button', { name: 'Accept the Corrected Value' }));
 
     await waitFor(() => expect(posts().length).toBe(1));
@@ -1429,8 +1437,37 @@ describe('the review write', () => {
     expect(sent.body.value).toBe('Cu2O');
   });
 
-  it('refuses to send an unparseable correction, and says nothing was written', async () => {
-    stubFetchRoutes({ [LIST]: { body: page([proposalFixture()]) } });
+  it('INVERTED (QA A-29): an unquoted correction to a TEXT field is sent as typed', async () => {
+    /* This test used to pin the defect: typing `Cu2O` into the correction box was
+       refused as "not valid JSON", so a scientist had to know to type `"Cu2O"`. A
+       text target now takes plain text; only a STRUCTURED value keeps JSON, and its
+       parse refusal is pinned in the next test. */
+    stubFetchRoutes({
+      [LIST]: { body: page([proposalFixture()]) },
+      [`POST /api/experiments/${EXP}/proposals/P1/review`]: {
+        body: { proposal: proposalFixture({ state: 'accepted' }), experiment_version: '1.8' },
+      },
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'More Actions' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Correct the Value, Then Accept' }),
+    );
+    fireEvent.change(screen.getByLabelText('The corrected value'), {
+      target: { value: 'Cu2O' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Accept the Corrected Value' }));
+
+    await waitFor(() => expect(posts().length).toBe(1));
+    expect(posts()[0].body.value).toBe('Cu2O');
+    expect(screen.queryByText(/not valid JSON/)).toBeNull();
+  });
+
+  it('refuses to send an unparseable STRUCTURED correction, and says nothing was written', async () => {
+    stubFetchRoutes({
+      [LIST]: { body: page([proposalFixture({ proposed_value: { formula: 'CuO' } })]) },
+    });
     renderPanel();
 
     // Behind "More Actions" now (P2 resolution) — opened before it is queried.
@@ -1449,7 +1486,11 @@ describe('the review write', () => {
   });
 
   it('refuses to send a null correction, because a null would clear the field', async () => {
-    stubFetchRoutes({ [LIST]: { body: page([proposalFixture()]) } });
+    // A STRUCTURED target — the only kind still entered as JSON, so the only one where
+    // typing `null` means null rather than the four letters.
+    stubFetchRoutes({
+      [LIST]: { body: page([proposalFixture({ proposed_value: { formula: 'CuO' } })]) },
+    });
     renderPanel();
 
     // Behind "More Actions" now (P2 resolution) — opened before it is queried.
@@ -1682,7 +1723,7 @@ describe('each refusal keeps the server\'s own distinction', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Correct the Value, Then Accept' }),
     );
-    fireEvent.change(screen.getByLabelText('The corrected value, as JSON'), {
+    fireEvent.change(screen.getByLabelText('The corrected value'), {
       target: { value: '"Cu2O-corrected-by-a-scientist"' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Accept the Corrected Value' }));
@@ -1695,7 +1736,7 @@ describe('each refusal keeps the server\'s own distinction', () => {
 
     // THE PROMISE, ASSERTED AS THE LIVE VALUE OF THE REAL TEXTAREA.
     expect(
-      (screen.getByLabelText('The corrected value, as JSON') as HTMLTextAreaElement).value,
+      (screen.getByLabelText('The corrected value') as HTMLTextAreaElement).value,
     ).toBe('"Cu2O-corrected-by-a-scientist"');
   });
 
@@ -1714,7 +1755,7 @@ describe('each refusal keeps the server\'s own distinction', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Correct the Value, Then Accept' }),
     );
-    fireEvent.change(screen.getByLabelText('The corrected value, as JSON'), {
+    fireEvent.change(screen.getByLabelText('The corrected value'), {
       target: { value: '"Cu2O"' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Accept the Corrected Value' }));
@@ -1722,7 +1763,7 @@ describe('each refusal keeps the server\'s own distinction', () => {
 
     // The proposal surviving is not the promise; what they typed surviving is.
     expect(
-      (screen.getByLabelText('The corrected value, as JSON') as HTMLTextAreaElement).value,
+      (screen.getByLabelText('The corrected value') as HTMLTextAreaElement).value,
     ).toBe('"Cu2O"');
   });
 });
@@ -1809,7 +1850,7 @@ describe('a background change-feed update', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Correct the Value, Then Accept' }),
     );
-    fireEvent.change(screen.getByLabelText('The corrected value, as JSON'), {
+    fireEvent.change(screen.getByLabelText('The corrected value'), {
       target: { value: '"half-typed-by-a-scien' },
     });
     await screen.findByText(/Showing 1 of 1 proposal on this record/);
@@ -1832,7 +1873,7 @@ describe('a background change-feed update', () => {
     // AND THE LIVE VALUE OF THE REAL TEXTAREA IS UNTOUCHED. Not a class name, not a
     // banner's presence, not a mock's call count.
     expect(
-      (screen.getByLabelText('The corrected value, as JSON') as HTMLTextAreaElement).value,
+      (screen.getByLabelText('The corrected value') as HTMLTextAreaElement).value,
     ).toBe('"half-typed-by-a-scien');
   });
 
@@ -1976,7 +2017,7 @@ describe('a background change-feed update', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Correct the Value, Then Accept' }),
     );
-    fireEvent.change(screen.getByLabelText('The corrected value, as JSON'), {
+    fireEvent.change(screen.getByLabelText('The corrected value'), {
       target: { value: '"half-typed-by-a-scien' },
     });
 
@@ -1986,7 +2027,7 @@ describe('a background change-feed update', () => {
 
     // The editor is not even open, let alone holding what was typed. This is what the
     // positive test above would look like on a build that blanked the list to refresh.
-    expect(screen.queryByLabelText('The corrected value, as JSON')).toBeNull();
+    expect(screen.queryByLabelText('The corrected value')).toBeNull();
   });
 
   /*
@@ -2022,7 +2063,7 @@ describe('a background change-feed update', () => {
       fireEvent.click(
         screen.getByRole('button', { name: 'Correct the Value, Then Accept' }),
       );
-      fireEvent.change(screen.getByLabelText('The corrected value, as JSON'), {
+      fireEvent.change(screen.getByLabelText('The corrected value'), {
         target: { value: '"half-typed-by-a-scien' },
       });
       await screen.findByText(/Showing 1 of 1 proposal on this record/);
@@ -2047,7 +2088,7 @@ describe('a background change-feed update', () => {
       expect(screen.getByText('Proposed value')).toBeTruthy();
       expect(screen.getByRole('button', { name: 'Fewer Actions' })).toBeTruthy();
       expect(
-        (screen.getByLabelText('The corrected value, as JSON') as HTMLTextAreaElement)
+        (screen.getByLabelText('The corrected value') as HTMLTextAreaElement)
           .value,
       ).toBe('"half-typed-by-a-scien');
 
@@ -2086,7 +2127,7 @@ describe('a background change-feed update', () => {
       // silent too, so it must not destroy on its way back up any more than the
       // failure did on its way down.
       expect(
-        (screen.getByLabelText('The corrected value, as JSON') as HTMLTextAreaElement)
+        (screen.getByLabelText('The corrected value') as HTMLTextAreaElement)
           .value,
       ).toBe('"half-typed-by-a-scien');
       view.unmount();
@@ -2545,7 +2586,7 @@ describe('"Fewer Actions" cannot discard an open Supersede/Withdraw or Correct-t
       screen.getByRole('button', { name: 'Correct the Value, Then Accept' }),
     );
     const editorBox = (await screen.findByLabelText(
-      'The corrected value, as JSON',
+      'The corrected value',
     )) as HTMLTextAreaElement;
     fireEvent.change(editorBox, { target: { value: '"CuO2"' } });
 
@@ -2554,7 +2595,7 @@ describe('"Fewer Actions" cannot discard an open Supersede/Withdraw or Correct-t
     // editor and its typed text must both still be in the document.
     expect(screen.getByRole('button', { name: 'Fewer Actions' })).toBeDisabled();
     expect(
-      (screen.getByLabelText('The corrected value, as JSON') as HTMLTextAreaElement).value,
+      (screen.getByLabelText('The corrected value') as HTMLTextAreaElement).value,
     ).toBe('"CuO2"');
     // The disclosure region itself — "More Actions"'s own group — is untouched.
     expect(screen.getByRole('group', { name: 'More actions' })).toBeInTheDocument();
@@ -2562,7 +2603,7 @@ describe('"Fewer Actions" cannot discard an open Supersede/Withdraw or Correct-t
     // Cancelling the editor (the same way every other editor on this card is
     // ever cleared) is what re-enables the collapse — not a forced unmount.
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(screen.queryByLabelText('The corrected value, as JSON')).toBeNull();
+    expect(screen.queryByLabelText('The corrected value')).toBeNull();
     expect(screen.getByRole('button', { name: 'Fewer Actions' })).not.toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Fewer Actions' }));
