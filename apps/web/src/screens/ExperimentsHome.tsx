@@ -1213,8 +1213,15 @@ function CreateExperimentControl({
         </p>
       )}
 
+      {/* WHILE THE CREATE IS IN FLIGHT (QA A-29): a disabled button alone read as a
+          dead control on a slow server. Permanently mounted and empty until then —
+          a live region inserted together with its content is announced unreliably. */}
+      <p className="create-experiment-status" role="status">
+        {busy ? LABELS.createExperimentCreating : ''}
+      </p>
+
       <div className="create-experiment-actions">
-        <button type="submit" className="btn btn-primary" disabled={busy}>
+        <button type="submit" className="btn btn-primary" disabled={busy} aria-busy={busy || undefined}>
           {LABELS.createExperimentSubmit}
         </button>
         <button type="button" className="btn btn-secondary" onClick={close} disabled={busy}>

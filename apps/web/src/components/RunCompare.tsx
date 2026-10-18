@@ -849,7 +849,10 @@ function ContextSide({ run, side }: { run: ApiRunView; side: SideContext }) {
         recognisable as one instead of looking like a current answer.
       */}
       <p className="rc-context-rev">
-        Revision {run.rev} · version <span className="mono">{run.version}</span>
+        {/* The opaque concurrency token is not shown as text (QA A-15) — it means
+            nothing to a person. The revision number says the same moment; the exact
+            token stays on `title` for the curator comparing two reads. */}
+        <span title={`Version token ${run.version}`}>Revision {run.rev}</span>
         {updated !== undefined ? (
           <>
             {' '}

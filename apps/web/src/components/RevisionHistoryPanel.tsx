@@ -289,13 +289,32 @@ function SubmittedVersusWorking({ history }: { history: ApiRevisionHistory }) {
         <div className="revhist-working-row">
           <dt className="revhist-working-label">What a submission covers</dt>
           <dd className="revhist-working-value">
-            <span className="mono revhist-working-scope">{history.signature_scope}</span>
+            {/* IN WORDS WHEN THIS BUILD KNOWS THE SCOPE (QA A-15), the identifier
+                itself kept in `title` for the curator who maps by it. An unknown
+                scope — a server that has moved on — is shown verbatim, never
+                described from a guess, so this cannot drift from what is enforced. */}
+            {SIGNATURE_SCOPE_WORDS[history.signature_scope] !== undefined ? (
+              <span className="revhist-working-scope" title={history.signature_scope}>
+                {SIGNATURE_SCOPE_WORDS[history.signature_scope]}
+              </span>
+            ) : (
+              <span className="mono revhist-working-scope">{history.signature_scope}</span>
+            )}
           </dd>
         </div>
       </dl>
     </section>
   );
 }
+
+/**
+ * The scope identifiers this build can say in words — an exact-match map, so a
+ * scope it does not know falls through to the verbatim identifier.
+ */
+const SIGNATURE_SCOPE_WORDS: Readonly<Record<string, string>> = {
+  export_unit_ids_drafts_and_conflict_decisions:
+    "Each export unit's id and draft, and the record's conflict decisions",
+};
 
 /* ── the lifecycle ─────────────────────────────────────────────────────────── */
 

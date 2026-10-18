@@ -129,10 +129,34 @@ _GROUP_ORDER = list(_GROUP_TITLES.keys())
 _OTHER = "Other"
 
 
+#: Words whose case is fixed, not title-cased — the same short list the web client's
+#: path humanizer keeps (``apps/web/src/lib/recordMap.ts`` ``PATH_ACRONYMS``).
+_LABEL_ACRONYMS = {"utc": "UTC", "qc": "QC", "id": "ID", "uri": "URI", "url": "URL"}
+#: A TRAILING unit token, matched case-sensitively as the schema writes it.
+_LABEL_UNITS = {"mm": "mm", "nm": "nm", "K": "K", "eV": "eV"}
+
+
 def _label(path: str) -> str:
-    """Humanize the last path segment (e.g. ``sample.material.formula`` -> ``Formula``)."""
-    last = path.split(".")[-1]
-    return last.replace("_", " ").strip().title()
+    """Humanize the last path segment (e.g. ``sample.material.formula`` -> ``Formula``).
+
+    ~~``str.title()``~~ — QA A-16: it lowercases every letter after a word's first, so
+    the schema's ``CuO2_mass_fraction`` read "Cuo2 Mass Fraction", ``_mm`` read "Mm" and
+    ``_utc`` "Utc". A word carrying an uppercase letter after its first is now kept as
+    the schema spells it, a known acronym keeps its case, and a trailing unit token is
+    shown as a unit. Presentation only: every output word is an input word.
+    """
+    words = [word for word in path.split(".")[-1].split("_") if word]
+    out: list[str] = []
+    for index, word in enumerate(words):
+        if index > 0 and index == len(words) - 1 and word in _LABEL_UNITS:
+            out.append(f"({_LABEL_UNITS[word]})")
+        elif word.lower() in _LABEL_ACRONYMS:
+            out.append(_LABEL_ACRONYMS[word.lower()])
+        elif any(char.isupper() for char in word[1:]):
+            out.append(word[:1].upper() + word[1:])
+        else:
+            out.append(word[:1].upper() + word[1:].lower())
+    return " ".join(out)
 
 
 def _source_types(evidence) -> list[str]:

@@ -15117,6 +15117,36 @@ def post_proposal(
         }
 
 
+@functools.lru_cache(maxsize=1)
+def _run_enum_fields() -> Mapping[str, tuple]:
+    """Run-level writable field paths the vendored schema CLOSES with an enum -> values.
+
+    The run-level counterpart of :func:`_record_enum_fields`, read from the same
+    document at runtime and never transcribed. Over v1.05 it yields exactly
+    ``context.environment``. An unreadable schema yields an EMPTY mapping, which means
+    "no enum known" and leaves an acceptance exactly as permissive as the run edit
+    route already is — it never refuses on the strength of a set it could not read.
+    Read-only because it is shared, for the reason its sibling gives.
+    """
+    try:
+        schema = json.loads(schema_path(REPO_ROOT).read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # unreadable or unparseable vendored schema
+        return MappingProxyType({})
+    found: dict[str, tuple] = {}
+    for path in sorted(RUN_WRITABLE_FIELD_PATHS):
+        node: object = schema
+        for segment in path.split("."):
+            properties = node.get("properties") if isinstance(node, dict) else None
+            if not isinstance(properties, dict) or segment not in properties:
+                node = None
+                break
+            node = properties[segment]
+        values = node.get("enum") if isinstance(node, dict) else None
+        if isinstance(values, list):
+            found[path] = tuple(values)
+    return MappingProxyType(found)
+
+
 def _apply_accepted_proposal(
     exp: Experiment, run, proposal, value, at: str
 ) -> tuple[str, JSONResponse | None]:
@@ -15232,6 +15262,30 @@ def _apply_accepted_proposal(
         _apply_record_fields(exp.draft, {proposal.target_field_path: value}, at)
         return writer, None
     if writer == proposals.APPLIED_VIA_RUN_FIELD:
+        allowed = _run_enum_fields().get(proposal.target_field_path)
+        if allowed is not None and value not in allowed:
+            # THE SAME REFUSAL AS THE RECORD-ENUM BRANCH ABOVE, AT A RUN FIELD (QA
+            # A-10, measured). A transcript reads the phrase exactly as written, so
+            # "The environment was in situ." proposes `"in situ"` — and accepting it
+            # as proposed stored a value outside the schema's own enum: the run
+            # editor's select then read "Not set" and Check Run failed. The run edit
+            # route still stores what it is sent (a pre-existing permissiveness the
+            # run editor's select hides, pinned by `test_run_api.py`), so this gate
+            # is the acceptance's own — an accepted value must be one a scientist
+            # could have CHOSEN in that editor. Nothing is mapped: the member is
+            # chosen by a person through "Correct the Value, Then Accept".
+            return writer, _proposal_refusal(
+                "not_an_allowed_value",
+                (
+                    "The official schema closes this field with an enum, and this "
+                    "value is not one of its members. The allowed values are read "
+                    "from the vendored schema rather than transcribed, so this "
+                    "refusal reports what the schema says and not what this "
+                    "application believes. Nothing was written."
+                ),
+                key=proposal.target_field_path,
+                allowed=list(allowed),
+            )
         existing = run.draft.get("fields")
         fields = existing if isinstance(existing, dict) else {}
         wrote = _apply_run_field(fields, proposal.target_field_path, value, at)

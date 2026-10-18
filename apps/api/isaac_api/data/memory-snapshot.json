@@ -10276,11 +10276,11 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "a6512bdaeb1868534ee4e83b1bd684dd8723d6f0e756908ba30ed8aa5b586b7f"
+        "sha256": "bbbd1544327980d0127849bdb3ee308ca165747874598dbbc3b844295320fb4b"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
-        "sha256": "556b4921b8b7b773d876edbe128b8fbd0952faba2af42b3d825029f02a5fba68"
+        "sha256": "1c0988d8e6d321f64452bdb8ad08d2d501f81feaef8cd3e546c32b750d2d3ea8"
       },
       {
         "path": "apps/api/isaac_api/sources.py",
@@ -10420,7 +10420,7 @@
       },
       {
         "path": "apps/web/src/components/EvidenceRow.tsx",
-        "sha256": "4d5502c6f34b05fc1edbf1d88a98f6365c0c8e2c036087ee6f0f2762515e0112"
+        "sha256": "8aaa77f87da3da543b486ea1c870d2b3839cf4a560df3ee3b4e24b17550215b3"
       },
       {
         "path": "apps/web/src/components/EvidenceTrailPanel.tsx",
@@ -10440,11 +10440,11 @@
       },
       {
         "path": "apps/web/src/components/FieldGroup.tsx",
-        "sha256": "8637b7a37b8f2a68fadb51c9dd5be5b195311f4e6de201c484965a967602c00a"
+        "sha256": "0f83c33a539fe74bfdc84f0a96c33a58b2e0e888c8571a6621b9481a8ff4132a"
       },
       {
         "path": "apps/web/src/components/FieldRow.tsx",
-        "sha256": "b81e370378f98c4161228cbbaf0d34328c1466822c71521b01a433d296624d5a"
+        "sha256": "80fefbe6042777c998ecd6950c45ad98fa7b63b06f57f7248cb6af8f8df27f69"
       },
       {
         "path": "apps/web/src/components/GovernanceBanner.tsx",
@@ -10500,7 +10500,7 @@
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
-        "sha256": "97e731f8bb364a8d7bd0f782bac6458993be10d915f10f28bb36cb73088d4156"
+        "sha256": "c7fed6f79914ba42f00202fe1c44956956e0ec85eff8024a0b12e280d539053f"
       },
       {
         "path": "apps/web/src/lib/api.ts",
@@ -10512,7 +10512,7 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "18f0521e97990cf11eaa61c7ab6a6b3d667857644e77005f70aeec9c1655b200"
+        "sha256": "c1f062c5743cd9f180bb7669bae637df3192d80364550cf704959ce6eb25e6a1"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
@@ -10540,7 +10540,7 @@
       },
       {
         "path": "apps/web/src/screens/ExperimentsHome.tsx",
-        "sha256": "8f613175ec0723288d9d44fcba3fcb90b57424331e421f639c4fe4a0eadd4185"
+        "sha256": "2b22fc50ed96ac366e70e30ce2a495b6bd271118f19e2248a312dbb013fa1d8c"
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
@@ -10564,7 +10564,7 @@
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "3fb94cd73e72291a3f649d77466a1110d75f85b63ce22587517488f4b886353c"
+        "sha256": "1ef5de48b2315b14bf7cc091cfb726195b8158ddcfc7d15191e95416969b7d67"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "7927d54118b325246cb71c331567a9b7c460dd3f2228a904a964429601b17bc9"
+    "served_manifest_fingerprint": "52885c4ec36f6cdc83248ba57d9a403b710b3737132eca305fb879326c9370ed"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

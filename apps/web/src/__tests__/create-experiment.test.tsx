@@ -582,6 +582,36 @@ describe('My Experiments · Create Experiment', () => {
     await waitFor(() => expect(document.querySelector('.queue-empty-state')).toBeNull());
   });
 
+  it('QA A-29: says the experiment is being created while the request is in flight', async () => {
+    /* The create used to show only a disabled button for the whole round trip, so a
+       slow server read as a dead control. The status line is permanently mounted (a
+       live region inserted with its content is announced unreliably) and empty until
+       the request is in flight. */
+    let release: (value: unknown) => void = () => {};
+    stubFetchRoutes({
+      ...bundleRoutes(NEW_ID),
+      ...emptyRoutes(EPHEMERAL),
+      'POST /api/experiments': () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    } as never);
+    renderAt();
+    await screen.findByRole('heading', { name: LABELS.emptyExperimentsTitle });
+    fireEvent.click(screen.getByRole('button', { name: LABELS.actionCreateExperiment }));
+    fireEvent.change(await screen.findByLabelText(LABELS.createExperimentTitleLabel), {
+      target: { value: 'Synthetic in-flight probe (fake)' },
+    });
+    const status = document.querySelector('.create-experiment-status') as HTMLElement;
+    expect(status.getAttribute('role')).toBe('status');
+    expect(status.textContent).toBe('');
+    fireEvent.click(screen.getByRole('button', { name: LABELS.createExperimentSubmit }));
+    await waitFor(() => expect(status.textContent).toBe(LABELS.createExperimentCreating));
+    const submit = screen.getByRole('button', { name: LABELS.createExperimentSubmit });
+    expect(submit.getAttribute('aria-busy')).toBe('true');
+    release({ status: 201, body: created });
+  });
+
   it('omits an empty note rather than sending a blank string', async () => {
     stubFetchRoutes({
       ...bundleRoutes(NEW_ID),

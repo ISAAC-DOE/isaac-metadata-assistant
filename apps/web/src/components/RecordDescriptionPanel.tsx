@@ -50,6 +50,7 @@
  * a reader believe it erased something.
  */
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { enumOptionLabel } from '../lib/runFields';
 
 import { api, ApiError } from '../lib/api';
 import {
@@ -177,13 +178,33 @@ const BLANK_IS_NOT_A_DELETE =
   'Emptying a box does not remove a stored value — this screen has no way to un-say a ' +
   'confirmed value, so a blank box is simply not sent.';
 
-export function RecordDescriptionPanel({ experimentId }: { experimentId: string }) {
-  const [expanded, setExpanded] = useState(false);
+export function RecordDescriptionPanel({
+  experimentId,
+  linked = false,
+}: {
+  experimentId: string;
+  /**
+   * A link named this section (`?at=block:record-description`, minted by a Record
+   * Fields row whose value is typed here — QA A-08). It OPENS the section; the
+   * screen brings it into view. It never closes it.
+   */
+  linked?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(linked);
+  useEffect(() => {
+    if (linked) setExpanded(true);
+  }, [linked]);
   const bodyId = useId();
   const Chevron = expanded ? ChevronDown : ChevronRight;
 
   return (
-    <section className="field-group" aria-label="Record Description">
+    /* `data-record-section`, deliberately NOT `data-draft-block`: the second marks the
+       four DRAFT sections for the e2e disclosure openers, and this is not one. */
+    <section
+      className="field-group"
+      aria-label="Record Description"
+      data-record-section="record-description"
+    >
       {/* A REAL HEADING LANDMARK — see `FieldGroup`'s own note for the measurement.
           `h2` at the level of this workspace's other sections, so the outline under
           the screen's single `h1` stays contiguous. A transparent wrapper: `.fg-heading`
@@ -635,7 +656,7 @@ function FieldRow({
           <option value="">— not set —</option>
           {facts.allowed.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {enumOptionLabel(option)}
             </option>
           ))}
         </select>
@@ -744,7 +765,7 @@ function ContributorsEditor({
               <option value="">— not set —</option>
               {(roles ?? []).map((role) => (
                 <option key={role} value={role}>
-                  {role}
+                  {enumOptionLabel(role)}
                 </option>
               ))}
               {/* A STORED ROLE THIS BUILD DOES NOT OFFER IS STILL SHOWN, so selecting a
