@@ -88,6 +88,67 @@ describe('P24.4 · Source Index — list', () => {
   });
 });
 
+/*
+ * B-44 — EVERY SOURCE SHOWED "not on disk", AND IT READ AS "THE FILE IS MISSING".
+ *
+ * Measured against the sanitized-snapshot reader (`memory.SanitizedSnapshotSource`), which
+ * serves `on_disk` AS BAKED — uniformly `false`, because the snapshot is a projection and
+ * cannot check a filesystem it does not have. So on a checkout where every one of those
+ * files exists, all of them carried a "not on disk" badge: a missing-file claim the server
+ * could not know. A badge that is on EVERY row distinguishes nothing, so it carries no
+ * information about any row. The Concepts tab already ruled this way (`onDiskSpread`) and
+ * the Source Index did not.
+ *
+ * The rule, matching Concepts exactly: a per-row badge appears ONLY when the marker tells
+ * the visible rows apart (some on disk, some not — a live check, so each row's claim is
+ * known). When every row says "not carried", that is ONE fact about the deployment, stated
+ * once in words about the deployment; when every row says "carried", nothing needs saying.
+ */
+describe('B-44 · Source Index — "not on disk" only where it is known', () => {
+  const withOnDisk = (rule: (i: number) => boolean) => ({
+    ...memoryFilesAvailable,
+    files: memoryFilesAvailable.files.map((f, i) => ({ ...f, on_disk: rule(i) })),
+  });
+
+  async function open(body: unknown) {
+    stubFetchRoutes({
+      'GET /api/memory/concepts': { body: memoryConceptsUnavailable },
+      'GET /api/graph/status': { body: graphStatusUnavailable },
+      'GET /api/memory/files': { body },
+    });
+    const view = renderScreen();
+    await view.findByText('Source Index');
+    return view;
+  }
+
+  it('shows NO per-row badge when the marker is uniformly false, and says so once, about the deployment', async () => {
+    const { container, queryByText } = await open(withOnDisk(() => false));
+    expect(container.querySelectorAll('.source-index-badge')).toHaveLength(0);
+    expect(queryByText('not on disk')).toBeNull();
+    const note = container.querySelector('.source-index-uniform-note');
+    expect(note?.textContent).toBe(
+      'This deployment does not carry any of the files listed below — open them in the project to read them.',
+    );
+    // it does NOT claim any file is missing from the project
+    expect(note?.textContent).not.toMatch(/missing|not found|deleted|does not exist/i);
+  });
+
+  it('shows no badge and no note when every file is carried', async () => {
+    const { container } = await open(withOnDisk(() => true));
+    expect(container.querySelectorAll('.source-index-badge')).toHaveLength(0);
+    expect(container.querySelector('.source-index-uniform-note')).toBeNull();
+  });
+
+  it('keeps the badge on exactly the rows that differ when the marker is mixed', async () => {
+    const mixed = withOnDisk((i) => i !== 0);
+    const { container } = await open(mixed);
+    expect(container.querySelectorAll('.source-index-badge')).toHaveLength(1);
+    expect(container.querySelector('.source-index-uniform-note')).toBeNull();
+    const row = container.querySelector('.source-index-badge')!.closest('li')!;
+    expect(row.textContent).toContain(mixed.files[0].path);
+  });
+});
+
 describe('P24.4 · Source Index — detail (real leads)', () => {
   it('activating a row (click, then keyboard) fetches its provenance and renders related concepts, related files, rationales, and local_reference', async () => {
     stubFetchRoutes({

@@ -342,6 +342,52 @@
   font-weight: 500;
 }
 
+/* B-22 — the chip's claims, shown on focus and on hover. The wrapper is what the pointer
+   hovers, so the popover is reachable without it closing under the cursor. `position:
+   absolute` against the wrapper takes no space in the top bar, so no layout measurement of
+   the bar moves. Existing tokens only; the text colour is `--text-primary` (13.3:1 on the
+   surface), not a muted tone, because this is the reading surface for a disclosure. */
+.mode-chip-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.mode-chip-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 60;
+  box-sizing: border-box;
+  width: min(340px, calc(100vw - 32px));
+  padding: var(--space-sm) var(--space-md);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-screen);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: var(--line-height-normal);
+  text-align: left;
+  white-space: normal;
+}
+/* The claims are a continuation of "Workspace —" in the accessible name, so they start
+   lower-case. As a standalone block that reads as a typo; the capital is presentation only
+   and the text node is unchanged (the test compares it to the accessible name). */
+/* HOVER BRIDGE (WCAG 1.4.13 "hoverable"): the popover sits 6px below the chip, outside the
+   hover wrapper, so a pointer moving down onto it crossed a gap and closed it. This invisible
+   strip is part of the popover (a child), so the pointer is never outside both. */
+.mode-chip-popover::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -8px;
+  height: 8px;
+}
+.mode-chip-popover::first-letter {
+  text-transform: uppercase;
+}
+
 /* ---- LeftNav (230px) ----------------------------------------------- */
 .leftnav {
   flex: none;

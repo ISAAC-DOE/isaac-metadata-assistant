@@ -15,6 +15,7 @@ import { CaptureWorkspace } from '../components/CaptureWorkspace';
 import { CaptureRecordMap } from '../components/CaptureRecordMap';
 import { RenameExperimentPanel } from '../components/RenameExperimentPanel';
 import { MoveExperimentPanel } from '../components/MoveExperimentPanel';
+import { DiscardExperimentPanel } from '../components/DiscardExperimentPanel';
 import { RecordDescriptionPanel } from '../components/RecordDescriptionPanel';
 import { RECORD_DESCRIPTION_ADDRESS } from '../components/FieldCaptureControl';
 import { RunsSection } from '../components/RunsSection';
@@ -24,6 +25,7 @@ import { UnmappedNotesPanel } from '../components/UnmappedNotesPanel';
 import { IngestionProposalsPanel, type OpenProposalsSummary } from '../components/IngestionProposalsPanel';
 import { AssetReferencesPanel } from '../components/AssetReferencesPanel';
 import { ExtendedContextPanel } from '../components/ExtendedContextPanel';
+import { ConfirmedAnswersPanel } from '../components/ConfirmedAnswersPanel';
 import { ValidateReview } from '../components/ValidateReview';
 import { disposeExperiment, flushExperiment } from '../lib/runAutosaveStore';
 import { AssistantPanel, type AgentPrompt } from '../components/AssistantPanel';
@@ -450,7 +452,15 @@ export function RecordWorkbench() {
         }
         mainPad="pad"
       >
-        <h1 className="sr-only">{LABELS.screenReview}</h1>
+        {/* B-23: the page heading names the state on screen. It read "Review Record"
+            above a panel reading "Record Not Found" — the breadcrumb and the tab title had
+            already been corrected for this (see `useSettledErrorTitle`), and the one
+            heading a screen reader navigates by had not. Same rule as the breadcrumb: only
+            when the API said the record is NOT THERE; any other error keeps the screen's
+            name, since the record may well exist. */}
+        <h1 className="sr-only">
+          {settled.recordAbsent && settled.title !== null ? settled.title : LABELS.screenReview}
+        </h1>
         {bundle.status === 'loading' ? (
           <LoadingPanel label="Loading the record from the ISAAC API…" />
         ) : (
@@ -1387,6 +1397,20 @@ function LoadedWorkbench({
           <ExtendedContextPanel experimentId={id} />
 
           {/*
+            CONFIRMED ANSWERS (QA audit A-01/A-04, 2026-10-11) — the reduced spectrum,
+            QC verdict and descriptor this record holds, for the record or for each run,
+            each correctable through the existing correction operation. Before this, a
+            confirmed one appeared on NO screen after the visit that answered it, and
+            Complete and Export Readiness sent the reader to each other in a loop.
+
+            BELOW THE BLOCKS, for the reason the Extended Context note above gives: the
+            first `.fg-header` must stay the first draft block. It SELF-FETCHES, and a
+            correction re-reads the record silently (`onAgentRefresh`, for the reason
+            the rename panel below states), so the bundle never shows a stale version.
+          */}
+          <ConfirmedAnswersPanel experimentId={id} onCorrected={() => onAgentRefresh()} />
+
+          {/*
             ── THE RECORD IDENTITY GROUP ──────────────────────────────────────
             Four sections about the WHOLE record — what it is called, what it is,
             what it holds, and what it points at — rather than about the science
@@ -1476,6 +1500,11 @@ function LoadedWorkbench({
             />
             <RecordInfoPanel detail={detail} groups={bundle.groups} artifacts={bundle.artifacts} />
             <RecordLinksPanel artifacts={bundle.artifacts} />
+            {/* THE ONE REMOVAL (B-08). Last in the identity column on purpose: it is the
+                only control here with no undo, so it follows everything a reader is
+                likely to want and nothing is placed after it. Same silent refresh as the
+                rename and the folder, for the identical reason given above. */}
+            <DiscardExperimentPanel detail={detail} onSaved={onAgentRefresh} />
           </div>
 
           {/*

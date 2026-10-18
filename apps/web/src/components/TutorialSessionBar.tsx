@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { Compass } from './icons';
 import { ResetDemoDialog } from './ResetDemoDialog';
+import { EXAMPLE_RECORD_IDS } from '../lib/exampleRecords';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { useTutorialState } from '../lib/tutorialController';
@@ -92,10 +93,21 @@ export function TutorialSessionBar() {
         would have duplicated that CSS and let the two drift.
       */}
       <div className="page-actions">
+        {/*
+          B-06 — "OPEN THE WORKED EXAMPLE" OPENS THE EXAMPLE'S RECORD. It used to
+          navigate to /load, which is not a worked example but a screen holding a
+          button that runs one: the label promised a record and delivered an on-ramp.
+          (The walkthrough card still says "Not on this screen" if the current step's own
+          control is elsewhere — true wherever the reader goes; it is not what this fixes.)
+          The id is the one `POST /api/demo/run` (draft_only) works on and the "Open the
+          Record" button that run ends in opens — `EXAMPLE_RECORD_IDS[0]`, the canonical
+          new-draft example — so this lands where the run would have. The bar exists only
+          while a session is open, so the record is in the scope every request carries.
+        */}
         <button
           type="button"
           className="btn btn-primary"
-          onClick={() => navigate(ROUTES.load)}
+          onClick={() => navigate(ROUTES.record(EXAMPLE_RECORD_IDS[0]))}
         >
           {LABELS.actionRunDemo}
         </button>

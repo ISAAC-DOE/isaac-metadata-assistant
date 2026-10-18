@@ -160,6 +160,38 @@ jobs:
           [ "$code" != "200" ] || fail "7 root leak: GET / returned 200 (base should be /krish)"
           echo "7 root leak check OK (GET / -> $code)"
 
+          # 8. Historical Import has something to read. Both lists are filtered by
+          #    EXISTENCE in the image, so an image whose Dockerfile left the fixtures
+          #    out answers [] here and 200 everywhere else — measured 2026-10-12, when
+          #    the hosted screen offered nothing. Names must match
+          #    historical_import.ARCHIVE_FIXTURES / FIXTURE_DIR
+          #    (apps/api/tests/test_hosted_image_imports.py keeps them in step).
+          #    The mini corpus is WITHHELD from the image (its notes file shares a
+          #    sentence with tests/fixtures/bl15/notes/, whose governance call is
+          #    pending), so it must NOT be offered — and the default is the
+          #    semantics corpus.
+          resp=$(curl -s -o "$BODY" -w '%{http_code} %{content_type}' "$BASE_URL/api/imports" || true)
+          code=${resp%% *}; ct=${resp#* }
+          [ "$code" = "200" ] || fail "8 imports: expected 200 got '$code'"
+          case "$ct" in *json*) ;; *) fail "8 imports: content-type not JSON ('$ct')";; esac
+          for archive in bl15_synthetic_semantics_corpus; do
+            jq -e --arg a "$archive" '.available_archives | index($a) != null' "$BODY" >/dev/null \
+              || fail "8 imports: archive '$archive' not offered (got $(jq -c '.available_archives' "$BODY"))"
+            jq -e --arg a "$archive" '.archive_display_names[$a] | type == "string"' "$BODY" >/dev/null \
+              || fail "8 imports: archive '$archive' has no display name"
+          done
+          for withheld in bl15_synthetic_mini_corpus; do
+            jq -e --arg a "$withheld" '.available_archives | index($a) == null' "$BODY" >/dev/null \
+              || fail "8 imports: withheld archive '$withheld' is offered by the image"
+          done
+          [ "$(jq -r '.default_archive' "$BODY")" = "bl15_synthetic_semantics_corpus" ] \
+            || fail "8 imports: default archive is '$(jq -r '.default_archive' "$BODY")', not the semantics corpus"
+          for source in SYNTHETIC-bundle-a.txt SYNTHETIC-bundle-b.txt; do
+            jq -e --arg s "$source" '.available_fixtures | index($s) != null' "$BODY" >/dev/null \
+              || fail "8 imports: example source '$source' not offered (got $(jq -c '.available_fixtures' "$BODY"))"
+          done
+          echo "8 Historical Import sources OK"
+
           echo "ALL SMOKE CHECKS PASSED"
 
       - name: Container logs on failure (safe app logs only)

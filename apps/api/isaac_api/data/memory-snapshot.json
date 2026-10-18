@@ -10276,7 +10276,7 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "bbbd1544327980d0127849bdb3ee308ca165747874598dbbc3b844295320fb4b"
+        "sha256": "b1d3ba7778355755924b1172fa6a2b0af7908172b40f3b30b5232dab06cf6dfd"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
@@ -10288,7 +10288,7 @@
       },
       {
         "path": "apps/api/isaac_api/workspace.py",
-        "sha256": "c917858bc00d4b901579f0f75799b490c6bbe3293b904f760421397a7adf6ba6"
+        "sha256": "f92102dedc0942f2acf2872a7eb5a503e6b48c6c026e75fe08b6f5877e51288f"
       },
       {
         "path": "apps/api/tests/test_api.py",
@@ -10332,7 +10332,7 @@
       },
       {
         "path": "apps/web/src/__tests__/api.test.ts",
-        "sha256": "1531ce365353c9a1e11a3505f10c804c993e5e9c6d3fa76c98867fde22973508"
+        "sha256": "a85387c7a2598fb232146996eed0672cd2afe14eb1420150c5a8c739c213b7e7"
       },
       {
         "path": "apps/web/src/__tests__/assistant.test.tsx",
@@ -10340,7 +10340,7 @@
       },
       {
         "path": "apps/web/src/__tests__/completion-export.test.tsx",
-        "sha256": "05fac11860f7e768240eea67e67f95c6ef870b7c297693ce7846455b3a16c8f9"
+        "sha256": "c979f5bf1ed3e857c585a18a5688a2b2eadd31273e3a6553a297b5d98fd3f805"
       },
       {
         "path": "apps/web/src/__tests__/evidence.test.tsx",
@@ -10348,7 +10348,7 @@
       },
       {
         "path": "apps/web/src/__tests__/help-and-honesty.test.tsx",
-        "sha256": "4c0b06427d20282bb75d3b2b8e06823ad133f838d2c0ddef796d3dfc67206470"
+        "sha256": "4af4c72dbbfb615704e58e7d84a4c5a76e208dda3eb5468747b545ae4b16d8cf"
       },
       {
         "path": "apps/web/src/__tests__/interaction-states.test.ts",
@@ -10360,7 +10360,7 @@
       },
       {
         "path": "apps/web/src/__tests__/live-screens.test.tsx",
-        "sha256": "5b3f9946e4fa7b093f6923adcae577ba6b77fa7c3d2e71967ea14f1691115eba"
+        "sha256": "38fea00f0059a00e5162d6cf5f3a726ce263d56226f500e962dc6905b9fd60e1"
       },
       {
         "path": "apps/web/src/__tests__/memory-concepts.test.tsx",
@@ -10372,7 +10372,7 @@
       },
       {
         "path": "apps/web/src/__tests__/memory-sources.test.tsx",
-        "sha256": "456dbef5dc0e1d8f1f46467376ae3e61f46af7e1507045822e9f108e0a3a4e35"
+        "sha256": "ec891ae3bc2cc711a744f88177c5da7b8ca572ec98ee55f72d5ff4df292273d4"
       },
       {
         "path": "apps/web/src/__tests__/memory-status.test.tsx",
@@ -10400,7 +10400,7 @@
       },
       {
         "path": "apps/web/src/components/AdvisoryChip.tsx",
-        "sha256": "a005d7ca4497bee628b209620b263b84a5c400be9eca1ef790c4adcd1a6e239d"
+        "sha256": "fabd2b8aa869252109192775e231e2b3e214f5678cdd2f16ffbdc4eaa8a18da0"
       },
       {
         "path": "apps/web/src/components/AppShell.tsx",
@@ -10408,11 +10408,11 @@
       },
       {
         "path": "apps/web/src/components/ArtifactCard.tsx",
-        "sha256": "84429687da032ec70087560fe3eb1587043f962786fd25e1557108cabeb2e2cd"
+        "sha256": "157333968a0710780ba8f96d8951f85f6d0fc016adf6384368df86302e18bcb6"
       },
       {
         "path": "apps/web/src/components/AssistantPanel.tsx",
-        "sha256": "2e09d67fb6f1048fd6a53c8d31d1c6441573d92822bd971a485670130724302c"
+        "sha256": "67267e74d1a7c6a90ab1cfff9d7aa8d3b0994d0261c87229e92b6fa59170f1ed"
       },
       {
         "path": "apps/web/src/components/CoverageBadge.tsx",
@@ -10432,11 +10432,11 @@
       },
       {
         "path": "apps/web/src/components/ExperimentRow.tsx",
-        "sha256": "af45be5f0d2d446a9d3c049d0abac281352686c3a1863edd3736444e67b18739"
+        "sha256": "55a395be332be5f7e8a324e0cf9788ed8f83666271b8061279aca592048ee9a4"
       },
       {
         "path": "apps/web/src/components/FetchStates.tsx",
-        "sha256": "2417c1ecc5c9e39429ca07d79f6528b2a57f2dc19a54aaf7b39b52a443fbda41"
+        "sha256": "b7bb849443686356903824ef2c06fb8f013f87e9f222cbce0d15b8d45ce1bc88"
       },
       {
         "path": "apps/web/src/components/FieldGroup.tsx",
@@ -10476,7 +10476,7 @@
       },
       {
         "path": "apps/web/src/components/StatusBar.tsx",
-        "sha256": "3ceaab6a3805c74be58d1b300c53c234370a8af7a6c3a626fc4aef1141812c68"
+        "sha256": "042429c47c1c11808b65a58b164950ae5555d938724fcbf3cdc099d8be48eabe"
       },
       {
         "path": "apps/web/src/components/StatusChip.tsx",
@@ -10484,7 +10484,7 @@
       },
       {
         "path": "apps/web/src/components/TopBar.tsx",
-        "sha256": "94b80823aaac5f4f85a691009a8d4924c23d3cc836910298468bb0b53963c6aa"
+        "sha256": "439b13127481f428886dbaf66c53064c4276ef97ed69b1e016fb4fd5a92bfbb4"
       },
       {
         "path": "apps/web/src/components/VerdictCard.tsx",
@@ -10504,7 +10504,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "350e84addd99fcde81137751ffb549f653819cd52d1fb3762480b45ff4ac315f"
+        "sha256": "6006783d8e746be79a33c8de982576d8b07aa04d3bc41f0b07165d910f5e3fc5"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10512,7 +10512,7 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "c1f062c5743cd9f180bb7669bae637df3192d80364550cf704959ce6eb25e6a1"
+        "sha256": "11c8fb07b7e3dbcbf2c6d1ec6b12e8009218fa8e43391a092799a261f6259ce1"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "376e75512864d7e945e69c034e4b856a0fe47b3163d74231f267fe205a616e47"
+        "sha256": "78c62ea1b598ae6b4990dffbae27e7479f0605f2518aceb0501059d19e703acb"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10536,15 +10536,15 @@
       },
       {
         "path": "apps/web/src/screens/EvidenceExplorer.tsx",
-        "sha256": "1d565ffe5affb7b1044c287a55b71f18716c4adac640be3bc1f8cc7beececa41"
+        "sha256": "9d3312b2c221f2a0b01b70c0901828822010eba585d17e3587544c3ca67f27d1"
       },
       {
         "path": "apps/web/src/screens/ExperimentsHome.tsx",
-        "sha256": "2b22fc50ed96ac366e70e30ce2a495b6bd271118f19e2248a312dbb013fa1d8c"
+        "sha256": "0a512e302ab3b1a1278f7ff151e74ebbb2b286951446add0d2da8fed79a50b2f"
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
-        "sha256": "a0ce24a550157356bcb3fc7032eee3c225607d17bffbb0a3341e279d84729e06"
+        "sha256": "3283fcba69df4f8af0d872d6ff16da10e55a4a1a25acb17cca103d58bd60a406"
       },
       {
         "path": "apps/web/src/screens/GovernancePage.tsx",
@@ -10552,27 +10552,27 @@
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
-        "sha256": "7aa6730b0c52b8a72b72e30da9efe39ae294042b99357c893247da0bab395c8e"
+        "sha256": "e4e791d31bb5092e2b31f5dba8606658dfc6a61735162d2b52c882b4933186e6"
       },
       {
         "path": "apps/web/src/screens/LoadMaterials.tsx",
-        "sha256": "4c0370822cc886ee942a1271aa1e34540394345f1198fbd06badf94baf9d77bd"
+        "sha256": "365cc319d151564cce4ce1f07c5e779c0ff2c1bbf92130ed95b9b53795a8664d"
       },
       {
         "path": "apps/web/src/screens/ProjectMemory.tsx",
-        "sha256": "e4ccab1703d02162d8e8ee35e9ede053300730dea4af8c019b09d62b9edb0d75"
+        "sha256": "707b6daddc299a25fc82afb48502bc03010482e93140cb6827569233557e2d6f"
       },
       {
         "path": "apps/web/src/screens/RecordWorkbench.tsx",
-        "sha256": "1ef5de48b2315b14bf7cc091cfb726195b8158ddcfc7d15191e95416969b7d67"
+        "sha256": "11c2aebafe071fd7ffac7b0cd2b5e54921b08e169b3be4a9181de79b431431cc"
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
-        "sha256": "4934783a8016aa4d1dc729da408e3ced025fb6f8c6d086f7810d8ceb1d34f0c0"
+        "sha256": "35675fa0292cbc692d7e35031b72c748bd24bf166833d5792775c7ecd8b2b933"
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "2a9e632a8d844a6d30a4c1384e83001bac605ec4541fa5cf1074c9a6710fd780"
+        "sha256": "a05070a10440bc325c1d91f31e386a2ef2f5694a5d34e5231524e6d79e71d2ec"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "52885c4ec36f6cdc83248ba57d9a403b710b3737132eca305fb879326c9370ed"
+    "served_manifest_fingerprint": "c82cb72ed3b3297152f4d532a18b4f7ebc49bb5203bc6488964fb53cb0b4d7aa"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

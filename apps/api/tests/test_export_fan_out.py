@@ -43,6 +43,7 @@ import re
 
 import pytest
 
+import isaac_api.dependencies as dependencies
 import isaac_api.routes as routes
 import isaac_api.workspace as ws
 from isaac_records.export import export_draft
@@ -1185,7 +1186,7 @@ def test_the_three_workflow_call_sites_agree_on_a_fully_exported_fan_out(client)
         DETAIL   workflow:        export: 'current'
         DETAIL exported: False | record_id: None | status: done
         ... and any later mutation: reopened_steps: ['export'],
-            "Updated 1 field(s); reopened: Export."
+            "Updated 1 field; reopened: Export."
 
     The export step did not reopen. A false ``reopened_steps`` is a claim about the
     scientist's work that did not happen.
@@ -2288,7 +2289,11 @@ def test_a_genuine_change_to_a_fan_out_record_is_still_reported_as_stale(client)
 
     detail = client.get(f"/api/experiments/{experiment_id}").json()
     assert detail["artifact"]["state"] == "stale"
-    assert detail["artifact"]["reason"].startswith("The record changed after export")
+    # ~~`.startswith("The record changed after export")`~~ — the reason was rewritten on
+    # 2026-10-11 (QA audit A-06) because its remedy named a control that does not
+    # exist. Asserted by identity with the one definition rather than by a new prefix,
+    # so a further rewording cannot strand this test on stale prose again.
+    assert detail["artifact"]["reason"] == dependencies.STALE_REASON
 
 
 def test_a_partially_exported_fan_out_is_still_incomplete_not_current(client):

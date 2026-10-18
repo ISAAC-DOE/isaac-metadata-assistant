@@ -2,7 +2,8 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { AppRoutes } from '../App';
-import { RUN_COMMAND } from '../lib/api';
+import { RUN_COMMAND, setTutorialScope } from '../lib/api';
+import { __bootTutorialStore } from '../lib/tutorialController';
 import { NEEDSYOU_VISIBLE, NEEDSYOU_VISIBLE_GROUPS } from '../screens/RecordWorkbench';
 import {
   EXP_ID,
@@ -151,6 +152,12 @@ describe('S2 · Load Materials', () => {
 
   it('the example run renders the real POST /api/demo/run steps — the old mock figures are gone', async () => {
     stubFetchRoutes({ 'POST /api/demo/run': { body: demoRunDraftOnly } });
+    // INSIDE A WORKED EXAMPLE (B-05): outside one the card offers "Launch Guided Demo"
+    // instead, because the run endpoint refuses any unscoped request. This test used
+    // to press the run button from the ordinary workspace, which only ever "worked"
+    // because the server was stubbed to say yes.
+    setTutorialScope('session-for-load-tests');
+    __bootTutorialStore();
     const { findByText, getByText, queryByText } = renderAt('/load');
 
     fireEvent.click(getByText('Run the Worked Example'));

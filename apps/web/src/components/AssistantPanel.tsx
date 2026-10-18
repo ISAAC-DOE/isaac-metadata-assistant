@@ -48,6 +48,7 @@ import {
   ASSISTANT_PREFILL_DRAFT_KEPT,
   CAPABILITIES_DRAFT_KEPT_NOTE,
   CAPABILITIES_INSERT_NOTE,
+  CAPABILITIES_RUN_NOTE,
   CAPABILITIES_MEMORY_SCOPE_NOTE,
   CAPABILITIES_TRIGGER_LABEL,
   capabilityGroupsFor,
@@ -624,6 +625,20 @@ export function AssistantPanel({
   // state (never an auto-announced pending-summary card).
   const [liveAnswer, setLiveAnswer] = useState<Msg | null>(null);
   const [liveQuestion, setLiveQuestion] = useState<string | null>(null);
+  /*
+   * THE LIVE TURN, READ FRESH. `archiveLive` and `appendAgentMessage` are called from
+   * handlers that outlive the render that created them (`onConfirm` awaits a network write
+   * and only then appends), so reading `liveAnswer` from their closure archived the turn
+   * that was live when the button was PRESSED — not the one live when the write finished.
+   * Measured: Confirm in flight, a Suggested Question picked meanwhile, Confirm resolves →
+   * the earlier turn archived twice and the new answer lost. The ref is refreshed every
+   * render and cleared the moment a turn is archived, so a turn is archived exactly once.
+   */
+  const liveRef = useRef<{ answer: Msg | null; question: string | null }>({
+    answer: null,
+    question: null,
+  });
+  liveRef.current = { answer: liveAnswer, question: liveQuestion };
   const [loading, setLoading] = useState(false);
 
   // A11Y FIX — every Agent Action result and every Confirm outcome (ok /
@@ -815,40 +830,73 @@ export function AssistantPanel({
   // `loadSession` and announcing ITS `.text` (or the same withheld-message copy
   // the render uses, via `AGENT_MESSAGE_WITHHELD_TEXT`, when the scrubber
   // dropped it) closes that gap without weakening the scrubber itself.
-  const appendAgentMessage = useCallback(
-    (text: string, source: AssistantSource, rev: number | undefined) => {
-      const cls = classifyAnswer(source, availability);
-      // Captured BEFORE the write so the announcement can find THIS entry by
-      // id rather than by array position. Matching on `messages[length - 1]`
-      // would announce the PREVIOUS message's (already-announced) text if the
-      // storage write itself were silently dropped (quota, private browsing) —
-      // consistent with the rendered log in that case, but a wrong text for a
-      // live region to speak. Matching by id instead makes that class of bug
-      // announce nothing rather than something stale.
-      const id = uid();
+  /*
+   * B-03 — IT SETTLES THE LIVE TURN INTO THE LOG FIRST, AND THIS IS A PLAIN FUNCTION, NOT
+   * A `useCallback`, ON PURPOSE. A question (typed or a Suggested Question) lives as the
+   * LIVE turn, rendered AFTER the archived log. This door wrote an agent result straight
+   * into the archive without moving the live turn there first, so the conversation read
+   * [agent answer] then [the question asked before it, its answer] — the newest turn at
+   * the TOP — which every other turn avoids by archiving first (`submitQuestion`, `ask`).
+   * Archiving needs the CURRENT `liveAnswer`/`liveQuestion`, which a memoized callback
+   * would have captured stale, so the function is redefined each render; it is only ever
+   * called from event handlers, never as an effect or memo dependency.
+   *
+   * `userLine` is the reader's own side of an Agent ACTION — the action's label, written as
+   * a "You" turn between the settled turn and the answer. Confirm outcomes and
+   * Apply-to-Graph pass none: they are results of a control on a card, not a question the
+   * reader asked, and inventing a line for them would put words in the reader's mouth.
+   */
+  function appendAgentMessage(
+    text: string,
+    source: AssistantSource,
+    rev: number | undefined,
+    userLine?: string,
+  ) {
+    if (liveRef.current.answer) {
+      archiveLive();
+      setLiveAnswer(null);
+      setLiveQuestion(null);
+      setActiveIndex(null);
+    }
+    if (userLine !== undefined) {
       appendMessage(experimentId, {
-        role: 'assistant',
-        text,
-        answeredFrom: source,
+        role: 'user',
+        text: userLine,
         recordRev: rev,
-        resultType: cls.resultType,
-        authority: cls.authority,
-        actionability: cls.actionability,
-        id,
+        id: uid(),
         timestamp: Date.now(),
       });
-      const refreshed = loadSession(experimentId).messages;
-      setMessages(refreshed);
-      focusNewestRef.current = true;
-      const stored = refreshed.find((m) => m.id === id);
-      const announceText =
-        stored && stored.textWithheld === true && stored.text === undefined
-          ? AGENT_MESSAGE_WITHHELD_TEXT
-          : stored?.text;
-      if (announceText) announceAgentMessage(announceText);
-    },
-    [experimentId, availability, announceAgentMessage],
-  );
+    }
+    const cls = classifyAnswer(source, availability);
+    // Captured BEFORE the write so the announcement can find THIS entry by
+    // id rather than by array position. Matching on `messages[length - 1]`
+    // would announce the PREVIOUS message's (already-announced) text if the
+    // storage write itself were silently dropped (quota, private browsing) —
+    // consistent with the rendered log in that case, but a wrong text for a
+    // live region to speak. Matching by id instead makes that class of bug
+    // announce nothing rather than something stale.
+    const id = uid();
+    appendMessage(experimentId, {
+      role: 'assistant',
+      text,
+      answeredFrom: source,
+      recordRev: rev,
+      resultType: cls.resultType,
+      authority: cls.authority,
+      actionability: cls.actionability,
+      id,
+      timestamp: Date.now(),
+    });
+    const refreshed = loadSession(experimentId).messages;
+    setMessages(refreshed);
+    focusNewestRef.current = true;
+    const stored = refreshed.find((m) => m.id === id);
+    const announceText =
+      stored && stored.textWithheld === true && stored.text === undefined
+        ? AGENT_MESSAGE_WITHHELD_TEXT
+        : stored?.text;
+    if (announceText) announceAgentMessage(announceText);
+  }
 
   // Run ONE typed intent against the live context. Pure (no fetch, no mutation) —
   // the result is appended chronologically, version-bound to the rev it ran
@@ -860,7 +908,7 @@ export function AssistantPanel({
     if (!INTENTS.includes(prompt.intent)) return;
     const result = runIntent(prompt.intent, agentContext, prompt.opts ?? {});
     const source: AssistantSource = EVIDENCE_INTENTS.has(prompt.intent) ? 'files' : 'workflow';
-    appendAgentMessage(result.text, source, agentContext.recordRev);
+    appendAgentMessage(result.text, source, agentContext.recordRev, prompt.label);
   }
 
   // --- proposal staleness (a proposal is actionable ONLY when it is grounded in
@@ -1049,7 +1097,9 @@ export function AssistantPanel({
   // scrolls into history when a new turn begins. A null live answer (the resting
   // empty state) archives nothing.
   function archiveLive() {
+    const { answer: liveAnswer, question: liveQuestion } = liveRef.current;
     if (!liveAnswer) return;
+    liveRef.current = { answer: null, question: null };
     if (liveQuestion) {
       appendMessage(experimentId, {
         role: 'user',
@@ -2306,6 +2356,13 @@ export function AssistantPanel({
                   </div>
                 ))}
               </div>
+              {/* B-10: said only when a group that RUNS on a pick is actually here — see
+                  `CAPABILITIES_RUN_NOTE`. The insert note after it is about examples. A
+                  separate paragraph, not a longer string, so each sentence is findable
+                  (and testable) on its own. */}
+              {(prompts.length > 0 || shownAgentPrompts.length > 0) && (
+                <p className="assistant-capabilities-note">{CAPABILITIES_RUN_NOTE}</p>
+              )}
               <p className="assistant-capabilities-note">
                 {composerHasDraft ? CAPABILITIES_DRAFT_KEPT_NOTE : CAPABILITIES_INSERT_NOTE}
               </p>

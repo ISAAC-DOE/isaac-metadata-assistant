@@ -109,6 +109,8 @@ import threading
 import pytest
 from fastapi.testclient import TestClient
 
+from official_series import official_series
+
 import isaac_api.activity as activity
 import isaac_api.conflict_resolution as cr
 import isaac_api.identity as identity
@@ -2033,11 +2035,18 @@ def test_a_decision_racing_an_edit_that_changes_the_competing_set(client, monkey
 # concurrency test ends up proving that the server dislikes something.
 
 #: A well-formed reduced spectrum, and a second one that differs observably.
-_SERIES_A = [{"energy_eV": 8979.0, "mu": 0.11, "series_id": "race-a"}]
-_SERIES_B = [{"energy_eV": 8999.0, "mu": 1.23, "series_id": "race-b"}]
+#:
+#: ~~`[{"energy_eV": 8979.0, "mu": 0.11, "series_id": "race-a"}]`~~ — "well-formed" was
+#: true of the storability rule and false of the official schema, which refuses that item
+#: (`independent_variables`/`channels` required, no extra keys). Since 2026-10-11 the
+#: routes ask the schema's own rule (QA audit A-03), so each racer now carries an
+#: official-shaped item; the same two numbers and the same `series_id` keep them
+#: observably different, which is all the races below need.
+_SERIES_A = official_series("race-a", 8979.0, 0.11)
+_SERIES_B = official_series("race-b", 8999.0, 1.23)
 #: A third, for the answer-versus-correction race: a correction that re-sends the
 #: stored value is a no-op, and a no-op cannot lose a compare-and-swap.
-_SERIES_C = [{"energy_eV": 9009.0, "mu": 0.77, "series_id": "race-c"}]
+_SERIES_C = official_series("race-c", 9009.0, 0.77)
 #: A STORABLE QC verdict — a mapping, screened by `isaac_records.complete.is_qc_shaped`
 #: on the `/answers` path. A bare `"valid"` is dropped by `_answers_to_apply_shape`
 #: (measured: 200, `rev` unmoved, `qc` still null), which would make a racer holding it

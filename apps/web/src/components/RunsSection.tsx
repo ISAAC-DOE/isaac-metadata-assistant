@@ -1557,7 +1557,7 @@ function RunsBrowser({
           setRemoveNote(
             `Removed ${res.removed_run_label}. ` +
               `${res.remaining_run_count} ${res.remaining_run_count === 1 ? 'run' : 'runs'} ` +
-              `remain in this record.` +
+              `${res.remaining_run_count === 1 ? 'remains' : 'remain'} in this record.` +
               numbering +
               (dropped === 0
                 ? ''

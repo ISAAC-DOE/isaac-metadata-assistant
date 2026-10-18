@@ -33,6 +33,8 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+from official_series import official_series
+
 from isaac_api.app import create_app
 
 from conftest import tutorial_client, tutorial_ws
@@ -178,12 +180,27 @@ def test_a_correctly_typed_series_answer_still_applies(client):
 # into a typed 422 rather than a silent 200, which its own description requires.
 
 
+# ~~`[{"energy_eV": 8979.0, "mu": 0.1, "series_id": "s1"}]`~~ and ~~`{"value": 8981.2,
+# "unit": "eV", "uncertainty": {"sigma": 0.3}}`~~ — CORRECTED 2026-10-11 (QA audit A-03).
+# Both were named "valid" and NEITHER was: the official schema refuses the series item
+# (`independent_variables` and `channels` are required, `additionalProperties` is false)
+# and the descriptor (`name`, `kind`, `source` are required). They passed only because
+# the routes asked the storability rule alone; they now also ask the schema's own rule
+# for the path (`isaac_api.official_shape`), so a fixture that calls itself valid has to
+# be. The subject of this file — WRONG-TYPED values — is unchanged.
 def _valid_series() -> list[dict]:
-    return [{"energy_eV": 8979.0, "mu": 0.1, "series_id": "s1"}]
+    return official_series("s1", 8979.0, 0.1)
 
 
 def _valid_descriptor() -> dict:
-    return {"value": 8981.2, "unit": "eV", "uncertainty": {"sigma": 0.3}}
+    return {
+        "name": "inflection_point_energy",
+        "kind": "absolute",
+        "source": "manual",
+        "value": 8981.2,
+        "unit": "eV",
+        "uncertainty": {"sigma": 0.3},
+    }
 
 
 def _answer_the_open_questions(client: TestClient) -> None:
@@ -661,7 +678,7 @@ def test_changed_fields_names_only_what_the_apply_shape_carried(client):
     inv = res.json()["invalidation"]
     assert inv["changed"] is True
     assert inv["changed_fields"] == [uri, "qc"], inv["changed_fields"]
-    assert "Updated 2 field(s)" in inv["reason"], inv["reason"]
+    assert "Updated 2 fields;" in inv["reason"], inv["reason"]
 
     after = tutorial_ws().load_experiment(rid).draft
     assert "totally_made_up_field" not in json.dumps(after)

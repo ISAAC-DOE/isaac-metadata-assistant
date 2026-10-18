@@ -83,8 +83,16 @@ export const SOURCE_KIND_LABELS: Readonly<Record<string, string>> = {
  * An archive's id as a reader names it — `bl15_synthetic_mini_corpus` becomes
  * "BL15 synthetic mini corpus" (2026-09-23). The exact id stays one press away behind a
  * `?`, because it is what an operator types and what the server logs.
+ *
+ * THE SERVER'S NAME WINS (2026-10-12). `GET /api/imports` and the session view publish
+ * `archive_display_names` — a scientist-facing name for every committed archive — and a
+ * name there is used verbatim. ~~Humanising the id~~ is now only the fallback, for a
+ * staged archive (whose only honest name is its file's) and for a server that predates
+ * the map; humanised, an id still read as a code with spaces in it.
  */
-export function archiveLabel(id: string): string {
+export function archiveLabel(id: string, names?: Readonly<Record<string, string>> | null): string {
+  const named = names?.[id];
+  if (typeof named === 'string' && named.trim()) return named;
   const bare = id.startsWith('staged:') ? id.slice('staged:'.length) : id;
   const words = bare
     .split(/[_\s]+/)
@@ -345,8 +353,11 @@ export const IMPORT_COPY = {
    * values a run owns; the values the record owns ignore it.
    */
   addWholeRunNote:
-    'Used only for the values a run owns. The values the record owns ignore it. If ' +
-    'this import has a value a run owns and no run is named, nothing is sent at all.',
+    'Used only for the values a run owns; the values the record owns ignore it. A run ' +
+    'holds one measurement’s values: a value whose measurement already has its own run ' +
+    'on this record goes to that run, and the run named here takes the values of one ' +
+    'other measurement at most — none, if it already holds another measurement’s. If a ' +
+    'value a run owns has no run to go to, nothing is sent at all.',
 
   /** The heading over the report of what the batch did. */
   addWholeResultTitle: 'What was sent',
@@ -541,12 +552,53 @@ export const IMPORT_STAGE_COPY = {
   addSummaryTitle: 'What Will Be Sent',
   addResultTitle: 'What Happened',
   createRuns: 'Make one run per measurement',
+  /**
+   * 2026-10-11 (QA `C-01`). Said BEFORE submit, from the send plan's `measurement_of`
+   * and the chosen record's runs: how many measurements would need the one named run.
+   * The server refuses the batch in exactly that case; this only says so first.
+   */
+  severalMeasurements: (n: number) =>
+    `These values were read from ${n.toLocaleString('en-US')} measurements that have no ` +
+    'run of their own on this record, and one run holds one measurement’s values — so ' +
+    'naming one run for all of them is refused. Make one run per measurement, or give ' +
+    'each measurement a run of its own and send each value to its own measurement’s run.',
+  namedRunIsAnotherMeasurement:
+    'That run was made from another measurement, so it cannot take these values. Choose ' +
+    'a run you added yourself, or make one run per measurement.',
+  /** The single-candidate form, when it chose the run made from the value's measurement. */
+  ownRunPreselected: 'Chosen for you: the run made from this value’s own measurement.',
+  /** Appended to a run option that another measurement's values may not be sent to. */
+  otherMeasurementRun: ' — made from another measurement',
   openProposals: 'Open Proposals on This Record',
   acceptanceNote:
     'Accepting a proposal needs a reviewer this deployment can identify, and it cannot identify one yet. The proposals stay open on the record until it can.',
   runsPresent: 'Measurements that already had a run',
   runsCreated: 'Runs created',
   dqnCaptured: 'Data Quality Notes kept as run notes',
+  /**
+   * 2026-10-12 — what the import READ and did not send, kept as notes (`readings_notes`):
+   * one per measurement on its run, and the beamtime's own statements on the record, one
+   * note per source file. The label is the server's (`readings_notes.label`) where it is
+   * sent; this is the same words for the sentence around it.
+   */
+  readingsKept: 'Also read from the archive, kept as notes',
+  /* ~~"map any line of it to a field in note review"~~ — false (review I2, 2026-10-12):
+     note review's map takes ONE field for the whole note. */
+  readingsNever:
+    'A note is never a field value: to use one of its values, choose Propose a Value From This Note on the record.',
+  /**
+   * CREATING THE RUNS IS AN ACT BY ITSELF (2026-10-12). Said before submit when no value
+   * can be sent yet but the archive offers measurements as Runs — the server then answers
+   * 200 with nothing sent, rather than refusing the batch.
+   */
+  runsOnlyLead: (n: number) =>
+    `No value here can be sent as a proposal yet — each one needs your decision first. You ` +
+    `can still put ${n === 1 ? 'this measurement' : `these ${n.toLocaleString('en-US')} measurements`} ` +
+    'on a record: one run each, with what was read from each kept as a note on its run.',
+  /** Said in the report when runs were made and no value was sent. */
+  runsOnlyResult:
+    'No value was sent as a proposal — each one still needs your decision. The runs were ' +
+    'made, and what was read from each measurement is kept as a note on its run.',
   reread: 'This import was re-read under this record’s own reading rules first.',
   searchLabel: 'Search measurements',
   whereFrom: 'Where each value came from',

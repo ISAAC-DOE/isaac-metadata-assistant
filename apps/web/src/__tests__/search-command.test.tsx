@@ -62,12 +62,48 @@ async function openAndType(view: ReturnType<typeof renderTopBar>, query = 'xanes
   return { dialog, box, trigger };
 }
 
+/** Report a platform for the duration of one test, then put the real one back. */
+function withPlatform(platform: string, run: () => void): void {
+  const original = Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform');
+  Object.defineProperty(Navigator.prototype, 'platform', { configurable: true, get: () => platform });
+  try {
+    run();
+  } finally {
+    if (original) Object.defineProperty(Navigator.prototype, 'platform', original);
+  }
+}
+
 describe('P26.5 · SearchDialog — visible trigger + ⌘K', () => {
-  it('renders a visible "Search" trigger with a ⌘K hint in the TopBar', () => {
-    const view = renderTopBar();
-    const trigger = view.getByRole('button', { name: /search/i });
-    expect(trigger).toBeTruthy();
-    expect(view.getByText(/⌘K/)).toBeTruthy();
+  it('renders a visible "Search" trigger with a ⌘K hint in the TopBar, on an Apple platform', () => {
+    // B-A17 INVERTED THE OLD VERSION OF THIS TEST (it asserted ⌘K unconditionally), not
+    // deleted it: it passed only because jsdom happens to report no platform, and the hint
+    // was a literal. The Apple case is now stated, and the other case has its own test.
+    withPlatform('MacIntel', () => {
+      const view = renderTopBar();
+      const trigger = view.getByRole('button', { name: /search/i });
+      expect(trigger).toBeTruthy();
+      expect(view.getByText(/⌘K/)).toBeTruthy();
+    });
+  });
+
+  it('prints "Ctrl K", never ⌘K, on a platform with no Command key', () => {
+    for (const platform of ['Win32', 'Linux x86_64', '']) {
+      withPlatform(platform, () => {
+        const view = renderTopBar();
+        const hint = view.container.querySelector('.topbar-search-kbd');
+        expect(hint?.textContent, `platform ${JSON.stringify(platform)}`).toBe('Ctrl K');
+        expect(view.container.textContent).not.toContain('⌘');
+        view.unmount();
+      });
+    }
+  });
+
+  it('the shortcut itself is unchanged: both modifiers have always opened it', async () => {
+    withPlatform('Win32', () => {
+      const view = renderTopBar();
+      fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
+      expect(view.queryByRole('dialog')).not.toBeNull();
+    });
   });
 
   it('⌘K (metaKey) opens the dialog', async () => {

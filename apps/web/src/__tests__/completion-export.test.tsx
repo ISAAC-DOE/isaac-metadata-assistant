@@ -189,7 +189,7 @@ describe('S4 · Guided Completion (live)', () => {
             changed_fields: ['series'],
             reopened_steps: [],
             artifact: { state: 'none' as const, reason: null },
-            reason: 'Updated 1 field(s); no downstream steps reopened.',
+            reason: 'Updated 1 field; no downstream steps reopened.',
           },
         },
       },
@@ -434,7 +434,10 @@ describe('S6 · Ready to Export (live)', () => {
     const cards = container.querySelectorAll('.artifact');
     expect(cards).toHaveLength(2);
     expect(getByText('Official Record')).toBeInTheDocument();
-    expect(getByText('Evidence Trail')).toBeInTheDocument();
+    // SCOPED TO THE CARDS (QA audit A-20, 2026-10-11): the record rail now offers its
+    // Evidence Trail row on this screen too, as it does on every record screen, so the
+    // words appear twice — once as the sidecar card's title, once as a navigation link.
+    expect(within(cards[1] as HTMLElement).getByText('Evidence Trail')).toBeInTheDocument();
     expect(getByText('assistant convention — not official')).toBeInTheDocument();
     expect(getByText(/Review the sidecar before sharing/)).toBeInTheDocument();
 
@@ -537,7 +540,10 @@ describe('S6 · Ready to Export (live)', () => {
     expect(getByText('Coverage loading…')).toBeInTheDocument();
     // the sidecar artifact card renders with NO invented path-count badge (it
     // used to fall back to a hardcoded 26 while audit data was unavailable)
-    const sidecarCard = getByText('Evidence Trail').closest('.artifact')!;
+    // The CARD's title, not the rail's Evidence Trail link (A-20 — see above).
+    const sidecarCard = getByText('Evidence Trail', { selector: '.artifact-title' }).closest(
+      '.artifact',
+    )!;
     expect(sidecarCard.querySelector('.artifact-pathcount')).toBeNull();
     expect(container.querySelectorAll('.artifact-pathcount')).toHaveLength(0);
   });
@@ -565,20 +571,32 @@ describe('S6 · Ready to Export (live)', () => {
       ...(detailRoute.body as object),
       artifact: {
         state: 'stale',
+        // The server's own reason, verbatim (`dependencies.STALE_REASON`). It used to
+        // end "regenerate the record (or reset the demo) to refresh it", naming a
+        // control that does not exist — QA audit A-06.
         reason:
-          'The record changed after export; the exported artifact no longer reflects the current record. Records are immutable — regenerate the record (or reset the demo) to refresh it.',
+          'This record has changed since it was exported. The exported file is fixed — official records are written once and never rewritten — so it does not include the later changes.',
       },
     };
     stubFetchRoutes(routes);
     const { container, findByText } = renderAt('/record/demo/export');
 
     // the honest advisory renders: text + icon (never color-only), role=status
-    expect(await findByText('Exported artifact is out of date.')).toBeInTheDocument();
+    expect(
+      await findByText('The exported file no longer matches this record.'),
+    ).toBeInTheDocument();
     const note = container.querySelector('.artifact-stale-note')!;
     expect(note).not.toBeNull();
     expect(note.getAttribute('role')).toBe('status');
     expect(note.querySelector('svg')).not.toBeNull();
-    expect(note.textContent).toMatch(/no longer reflects the current record/);
+    expect(note.textContent).toMatch(/does not include the later changes/);
+    // A-06 — NO REMEDY IS OFFERED, because none exists: an exported file is never
+    // rewritten. The old sentence's "regenerate" named a control nowhere on screen.
+    expect(container.textContent).not.toMatch(/regenerate/i);
+    // …and the affected FILES say so themselves, not only the banner above them.
+    const cardNotes = container.querySelectorAll('.artifact .artifact-card-stale');
+    expect(cardNotes).toHaveLength(2);
+    expect(cardNotes[0].textContent).toMatch(/does not include them/);
   });
 
   it('P28.2 · shows NO stale advisory when the exported artifact is current', async () => {
@@ -618,7 +636,7 @@ describe('P27.5 · optimistic-concurrency conflict UX', () => {
                   changed_fields: [pendingResponse.pending[1].id],
                   reopened_steps: [],
                   artifact: { state: 'none' as const, reason: null },
-                  reason: 'Updated 1 field(s); no downstream steps reopened.',
+                  reason: 'Updated 1 field; no downstream steps reopened.',
                 },
               };
         },
@@ -830,8 +848,9 @@ describe('S6 · Ready to Export — grounded assistant (P25.4)', () => {
       expect(el!.textContent).toContain('may be blocking export');
       return el as HTMLElement;
     })) as HTMLElement;
+    // INVERTED (B-04 review): this pinned the bare locations only; each issue now carries the validator's message.
     expect(reply.textContent).toContain(
-      '2 validation issues may be blocking export: the record itself, assets → 0 → sha256.',
+      "2 validation issues may be blocking export: the record itself — 'sample' is a required property; assets → 0 → sha256 — too short.",
     );
     // the primary answer carries NO raw locator …
     expect(reply.textContent).not.toContain('$');

@@ -1,4 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { render, screen, fireEvent, within, act } from '@testing-library/react';
 import { MemoryRouter, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom';
 
@@ -257,19 +259,55 @@ describe('Settings — tabs', () => {
    */
   const ADVANCED_TABS = ['API Access', 'Endpoint Explorer', 'Connect Your Agent'];
 
-  it('shows the Advanced marker exactly once, on the first tab of the group', () => {
+  /*
+   * B-22 — THE MARKER IS NO LONGER A DOM NODE INSIDE THE TAB, and these three tests were
+   * INVERTED rather than deleted (the first two assertions of the old one are kept in
+   * spirit: once, and on the first tab of the group, hidden from assistive technology).
+   *
+   * It was `<span aria-hidden="true">Advanced</span>` inside the first grouped button.
+   * The accessible name was always right ("API Access" — `ariaSnapshot` says so), but any
+   * reader of the tab's TEXT saw the two run together: `textContent` "AdvancedAPI
+   * Access", `innerText` "ADVANCEDAPI Access" (inline spans add no space, and the gap
+   * was a CSS margin). That is what an audit that reads text instead of the accessibility
+   * tree reports, and it is also what a copy-paste of the row gives.
+   *
+   * It is now generated content — `.section-tab-group-start::before` showing the tab's
+   * `data-group` — declared with the empty alt-text form (`content: … / ""`) so no engine
+   * puts it in the name. The DOM, the text and the name all read "API Access".
+   */
+  it('shows the Advanced marker exactly once, on the first tab of the group, as generated content', () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
 
-    const markers = pageTablist().querySelectorAll('.section-tab-group');
-    expect(markers, 'the row says "Advanced" once, where the group starts').toHaveLength(1);
-    expect(markers[0].textContent).toBe('Advanced');
+    const marked = pageTablist().querySelectorAll('[data-group]');
+    expect(marked, 'the row says "Advanced" once, where the group starts').toHaveLength(1);
+    expect(marked[0].getAttribute('data-group')).toBe('Advanced');
     // On the FIRST grouped tab, not floating in the middle of the group.
-    expect(markers[0].closest('[role="tab"]')).toBe(tab('API Access'));
-    // Hidden from assistive technology, which is what makes assertion 3 below
-    // true: it is a sighted-only marker and the group reaches a reader another
-    // way.
-    expect(markers[0]).toHaveAttribute('aria-hidden', 'true');
+    expect(marked[0]).toBe(tab('API Access'));
+    expect(marked[0].classList.contains('section-tab-group-start')).toBe(true);
+    // No marker NODE anywhere: nothing for text extraction to run into a label.
+    expect(pageTablist().querySelector('.section-tab-group')).toBeNull();
+  });
+
+  it('no tab\'s text carries the group word — textContent is the label, exactly', () => {
+    stubFetchRoutes(fullRoutes());
+    renderSettings();
+    for (const name of [...ADVANCED_TABS, 'Overview', 'Data & Privacy', 'About', 'Help & Tutorial']) {
+      expect(tab(name).textContent, `${name}: raw text is the visible label`).toBe(name);
+    }
+  });
+
+  it('the generated marker uses the empty alt-text form, so it is never part of an accessible name', () => {
+    const css = readFileSync(
+      resolve(__dirname, '..', 'screens/screens.css'),
+      'utf8',
+    );
+    const rule = /\.section-tab-group-start::before\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(rule, 'the ::before rule exists').not.toBe('');
+    expect(rule).toMatch(/content:\s*attr\(data-group\)\s*\/\s*""/);
+    // The marker keeps its presentation (small caps) — it is a visual label only; the group
+    // reaches a screen reader through `aria-describedby`, asserted in the next test.
+    expect(rule).toMatch(/text-transform:\s*uppercase/);
   });
 
   it('describes every Advanced tab as Advanced, not just the first', () => {
@@ -293,7 +331,7 @@ describe('Settings — tabs', () => {
     renderSettings();
     for (const name of ['Overview', 'Data & Privacy', 'About', 'Help & Tutorial']) {
       expect(tab(name), `${name}: no group description`).not.toHaveAttribute('aria-describedby');
-      expect(tab(name).querySelector('.section-tab-group'), `${name}: no marker`).toBeNull();
+      expect(tab(name), `${name}: no marker`).not.toHaveAttribute('data-group');
     }
   });
 

@@ -666,7 +666,11 @@ describe('the record screen live-refresh request graph', () => {
       ...(pendingResponse.pending[0] as Record<string, unknown>),
       id: `synthetic-blocker-${i}`,
       blocker_key: `synthetic-blocker-${i}`,
-      about: `synthetic_field_${i}`,
+      // A dotted locator, not a bare `synthetic_field_N` key (B-02): a bare identifier is now
+      // shown humanized ("Synthetic Field 0"), exactly as the server shows it, and this test
+      // is about WHICH NUMBER the chip reports — so its labels must be ones that render
+      // verbatim.
+      about: `synthetic.field_${i}`,
       question: `Confirm synthetic field ${i}?`,
     })) as unknown as ApiPendingItem[];
 
@@ -690,8 +694,8 @@ describe('the record screen live-refresh request graph', () => {
     // A WINDOWED bundle: ten entries fetched, thirty outstanding — exactly the state a
     // live refresh leaves the screen in.
     expect(chipText(reviewBundle({ pending: ALL.slice(0, 10), pendingTotal: 30 }))).toBe(
-      '30 fields still need you: synthetic_field_0, synthetic_field_1, ' +
-        'synthetic_field_2, …and 27 more.',
+      '30 fields still need you: synthetic.field_0, synthetic.field_1, ' +
+        'synthetic.field_2, …and 27 more.',
     );
 
     /*
@@ -700,8 +704,8 @@ describe('the record screen live-refresh request graph', () => {
      * thirty-entry array.
      */
     expect(chipText(reviewBundle({ pending: ALL, pendingTotal: 30 }))).toBe(
-      '30 fields still need you: synthetic_field_0, synthetic_field_1, ' +
-        'synthetic_field_2, …and 27 more.',
+      '30 fields still need you: synthetic.field_0, synthetic.field_1, ' +
+        'synthetic.field_2, …and 27 more.',
     );
 
     /*
@@ -713,8 +717,8 @@ describe('the record screen live-refresh request graph', () => {
     const noTotal = reviewBundle({ pending: ALL.slice(0, 4) });
     delete (noTotal as unknown as Record<string, unknown>).pendingTotal;
     expect(chipText(noTotal)).toBe(
-      '4 fields still need you: synthetic_field_0, synthetic_field_1, ' +
-        'synthetic_field_2, …and 1 more.',
+      '4 fields still need you: synthetic.field_0, synthetic.field_1, ' +
+        'synthetic.field_2, …and 1 more.',
     );
   });
 

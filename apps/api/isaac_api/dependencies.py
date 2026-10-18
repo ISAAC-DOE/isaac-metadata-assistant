@@ -22,15 +22,33 @@ import json
 
 from isaac_records.export import transform
 
+from .assistant_paths import count as _count
 from .workflow import CANONICAL_LABELS, derive_workflow
 from .record_attribution import without_server_stamp
 from .workspace import ExportUnit, without_sibling_links
 
-_STALE_REASON = (
-    "The record changed after export; the exported artifact no longer reflects "
-    "the current record. Records are immutable — regenerate the record (or reset "
-    "the workspace) to refresh it."
+#: ~~"The record changed after export; the exported artifact no longer reflects the
+#: current record. Records are immutable — regenerate the record (or reset the
+#: workspace) to refresh it."~~ — **STRUCK 2026-10-11 (QA audit A-06), because its
+#: remedy named a control that does not exist.** There is no "regenerate" anywhere in
+#: this build, and there must not be one: an exported unit is never rewritten
+#: (``routes._RUN_REMOVE_DESCRIPTION``, the export route's own immutability guard). And
+#: "reset the workspace" is the worked-example reset, which removes nothing a scientist
+#: created — so the only two remedies the sentence offered were one that is absent and
+#: one that does not apply. A reader who followed it found neither, while the export
+#: screen beside it went on saying "Exported" and the workflow step "Complete", which is
+#: what made the sentence read as an instruction the screen had forgotten to provide.
+#:
+#: The replacement states the two facts that ARE true and offers no remedy, because
+#: there is none: the written file is fixed, and it does not carry what changed after.
+STALE_REASON = (
+    "This record has changed since it was exported. The exported file is fixed — "
+    "official records are written once and never rewritten — so it does not include "
+    "the later changes."
 )
+#: The pre-2026-10-11 private name, kept as an alias so a reader grepping for it finds
+#: the constant rather than nothing.
+_STALE_REASON = STALE_REASON
 #: PUBLIC (P4): the single definition of the missing/unreadable-artifact reason.
 #: ``routes.get_artifacts`` reports the same absence with the same vocabulary, so
 #: this string must have exactly ONE definition — a second copy in the route would
@@ -111,7 +129,7 @@ def artifact_state(exp, *, units: list[ExportUnit] | None = None) -> dict:
         without_server_stamp(ondisk)
     ):
         return {"state": "current", "reason": None}
-    return {"state": "stale", "reason": _STALE_REASON}
+    return {"state": "stale", "reason": STALE_REASON}
 
 
 #: A fan-out whose runs are not all exported yet. Deliberately NOT the "record
@@ -156,19 +174,40 @@ def _fan_out_artifact_state(exp, *, units: list[ExportUnit] | None = None) -> di
         return {"state": "stale", "reason": _INCOMPLETE_REASON}
 
     for unit in units:
-        record_path = unit.record_path()
-        if record_path is None:
-            return {"state": "stale", "reason": MISSING_REASON}
-        try:
-            ondisk = json.loads(record_path.read_text(encoding="utf-8"))
-            now0 = ondisk["timestamps"]["created_utc"]
-            current = transform(unit.draft, record_id=unit.target_id, now=now0)
-        except Exception:
-            return {"state": "stale", "reason": MISSING_REASON}
-        current = without_server_stamp(without_sibling_links(current))
-        ondisk = without_server_stamp(without_sibling_links(ondisk))
-        if _canonical(current) != _canonical(ondisk):
-            return {"state": "stale", "reason": _STALE_REASON}
+        verdict = unit_artifact_state(unit)
+        if verdict["state"] != "current":
+            return verdict
+    return {"state": "current", "reason": None}
+
+
+def unit_artifact_state(unit: ExportUnit) -> dict:
+    """The freshness of ONE exported unit's written record — the per-run half of
+    :func:`_fan_out_artifact_state`, extracted so a per-run listing can say WHICH run
+    changed rather than only that one did (QA audit A-06: the export screen said the
+    artifact was out of date and every row beneath it still read "Exported").
+
+    ``{"state": "none"|"current"|"stale", "reason": str|None}`` with the same three
+    labels and the same two reasons as the record-level signal. ``none`` is a unit that
+    has never been exported. Never throws. The comparison is exactly the one the
+    fan-out loop always made — sibling links and the server stamp excluded on both
+    sides — because it IS that loop's body; :func:`_fan_out_artifact_state` now calls
+    this rather than holding a second copy.
+    """
+    if unit.current_record_id() is None:
+        return {"state": "none", "reason": None}
+    record_path = unit.record_path()
+    if record_path is None:
+        return {"state": "stale", "reason": MISSING_REASON}
+    try:
+        ondisk = json.loads(record_path.read_text(encoding="utf-8"))
+        now0 = ondisk["timestamps"]["created_utc"]
+        current = transform(unit.draft, record_id=unit.target_id, now=now0)
+    except Exception:
+        return {"state": "stale", "reason": MISSING_REASON}
+    current = without_server_stamp(without_sibling_links(current))
+    ondisk = without_server_stamp(without_sibling_links(ondisk))
+    if _canonical(current) != _canonical(ondisk):
+        return {"state": "stale", "reason": STALE_REASON}
     return {"state": "current", "reason": None}
 
 
@@ -299,9 +338,9 @@ def build_invalidation(
     if not changed:
         reason = NO_OP_IDENTICAL_REASON if identical else NO_OP_UNKNOWN_REASON
     elif reopened:
-        reason = f"Updated {len(changed_fields)} field(s); reopened: {_labels(reopened)}."
+        reason = f"Updated {_count(len(changed_fields), 'field')}; reopened: {_labels(reopened)}."
     else:
-        reason = f"Updated {len(changed_fields)} field(s); no downstream steps reopened."
+        reason = f"Updated {_count(len(changed_fields), 'field')}; no downstream steps reopened."
 
     return {
         "changed": changed,
