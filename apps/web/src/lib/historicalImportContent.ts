@@ -581,6 +581,19 @@ export const IMPORT_STAGE_COPY = {
    * note per source file. The label is the server's (`readings_notes.label`) where it is
    * sent; this is the same words for the sentence around it.
    */
+  /**
+   * LEFT FOR A PERSON TO CHOOSE (2026-10-12). The domain owner's rule: a value is taken
+   * from the metadata the import reads, or left blank for a person. The rule sentence,
+   * the "where" sentence and every count come from the server (`left_for_a_person`);
+   * these are only the words around them.
+   */
+  leftTitle: 'Left for You to Choose',
+  leftCount: (left: number, runs: number) =>
+    `blank on ${left.toLocaleString('en-US')} of ${runs.toLocaleString('en-US')} ${runs === 1 ? 'run' : 'runs'}`,
+  leftOffered: (offered: number) =>
+    `${offered.toLocaleString('en-US')} proposed from what the files state`,
+  leftPerMeasurement: 'By measurement',
+  leftNone: 'Nothing left blank',
   readingsKept: 'Also read from the archive, kept as notes',
   /* ~~"map any line of it to a field in note review"~~ — false (review I2, 2026-10-12):
      note review's map takes ONE field for the whole note. */

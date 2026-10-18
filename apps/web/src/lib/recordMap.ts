@@ -192,7 +192,7 @@ export interface RecordMapRow {
   /** The unit the schema's path name already encodes (`_K`). Display only. */
   unit?: string;
   /**
-   * True only for the five paths `RUN_FIELDS` offers a control for — the ONE
+   * True only for the paths `RUN_FIELDS` offers a control for (seven since 2026-10-12) — the ONE
    * condition under which a row may be a button that focuses an input. Every
    * other row is inert, and must not look otherwise.
    */
@@ -300,7 +300,8 @@ export interface RecordMapCheck {
 }
 
 /**
- * The five run-level field rows, in the order the editor offers them.
+ * The run-level field rows (`RUN_FIELDS` — seven since 2026-10-12), in the order the
+ * editor offers them.
  *
  * ORDERING IS THE EDITOR'S, NOT A PRIORITY. Re-sorting by state would move a
  * row under the reader as they fill it in, and the map exists to be read

@@ -829,7 +829,7 @@ def test_a_second_submission_needs_a_second_revision_number(client, db):
 def test_which_run_level_writes_leave_a_record_submittable(client):
     """RE-DERIVES the comment on :data:`_SAFE_RUN_FIELD` rather than trusting it.
 
-    All five run-writable paths are driven on their own record. The three ``context.*``
+    All seven run-writable paths are driven on their own record (five until 2026-10-12). The five ``context.*``
     ones each leave the record un-submittable *when written alone*, because the official
     schema declares ``context.required == ["environment", "temperature_K"]``, so the
     first write of either creates a ``context`` object missing its sibling. THAT IS NOT
@@ -845,6 +845,11 @@ def test_which_run_level_writes_leave_a_record_submittable(client):
         ("context.environment", "ex_situ"),
         ("context.temperature_K", 301),
         ("context.thermodynamics.atmosphere", "air"),
+        # 2026-10-12: the two closed enums a person chooses on a run. Written ALONE each
+        # creates a `context` missing its two required siblings, exactly like the three
+        # above — the control below shows that with them, the record submits.
+        ("context.electrochemistry.reaction", "OER"),
+        ("context.electrochemistry.cell_type", "three_electrode"),
     ):
         eid = _built(client, f"writable {path}", runs=("R",))
         run_id = ws.load_experiment(eid).sorted_runs()[0].id
@@ -865,6 +870,8 @@ def test_which_run_level_writes_leave_a_record_submittable(client):
         "timestamps.acquired_end_utc",
     }, outcomes
     assert {p for p, s in outcomes.items() if s == 409} == {
+        "context.electrochemistry.cell_type",
+        "context.electrochemistry.reaction",
         "context.environment",
         "context.temperature_K",
         "context.thermodynamics.atmosphere",
@@ -883,6 +890,30 @@ def test_which_run_level_writes_leave_a_record_submittable(client):
         headers={"If-Match": _run_etag(client, eid, run_id)},
     )
     assert paired.status_code == 200, paired.text
+    assert _submit(client, eid).status_code == 200
+
+    # AND THE ELECTROCHEMISTRY PAIR WITH THEM (2026-10-12): a run carrying the required
+    # context plus a chosen reaction and cell type — `context.electrochemistry` holding
+    # only those two — validates against the official schema and submits. The schema's
+    # conditional rules on `electrochemistry` key on `record_domain: performance` and on a
+    # `control_mode`, neither of which this sets.
+    eid = _built(client, "context plus electrochemistry", runs=("R",))
+    run_id = ws.load_experiment(eid).sorted_runs()[0].id
+    assert _submit(client, eid).status_code == 200
+    full = client.patch(
+        f"/api/experiments/{eid}/runs/{run_id}",
+        json={
+            "confirmed_by_user": True,
+            "fields": {
+                "context.environment": "operando",
+                "context.temperature_K": 301,
+                "context.electrochemistry.reaction": "OER",
+                "context.electrochemistry.cell_type": "three_electrode",
+            },
+        },
+        headers={"If-Match": _run_etag(client, eid, run_id)},
+    )
+    assert full.status_code == 200, full.text
     assert _submit(client, eid).status_code == 200
 
 

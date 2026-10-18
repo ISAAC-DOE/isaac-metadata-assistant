@@ -48,6 +48,7 @@ import {
 } from '../lib/importStages';
 import type {
   ApiImportAddedToExperiment,
+  ApiImportLeftForAPerson,
   ApiImportCandidate,
   ApiImportListResponse,
   ApiImportSession,
@@ -2083,6 +2084,8 @@ function AddStage({
             )}
           </div>
 
+          <LeftForAPerson left={data.left_for_a_person ?? null} />
+
           {sendable.length === 0 && !runsOnly ? (
             <p className="hi-body hi-empty-inline">
               {plan.alreadySent.length > 0
@@ -2179,6 +2182,54 @@ function AddStage({
   );
 }
 
+/**
+ * WHAT THIS IMPORT DOES NOT FILL ON THE RUNS (2026-10-12) — the environment, the reaction
+ * and the cell type, each either proposed from what a file states or left blank for a
+ * person, with the server's own rule sentence and where to set them. Every number is the
+ * server's; nothing here decides what was stated.
+ */
+export function LeftForAPerson({
+  left,
+  headingLevel = 'h4',
+}: {
+  left: ApiImportLeftForAPerson | null;
+  headingLevel?: 'h4' | 'h5';
+}) {
+  if (left === null || left.runs === 0) return null;
+  const Heading = headingLevel;
+  const rows = Object.entries(left.by_measurement ?? {}).filter(([, fields]) => fields.length > 0);
+  return (
+    <section className="hi-left-for-person" aria-label={STAGE.leftTitle}>
+      <Heading className="hi-block-title">{STAGE.leftTitle}</Heading>
+      <p className="hi-note">{left.rule}</p>
+      <ul className="hi-add-blocked">
+        {left.fields.map((field) => (
+          <li key={field.path}>
+            <strong>{field.label}</strong>{' '}
+            {field.left > 0 ? STAGE.leftCount(field.left, left.runs) : STAGE.leftNone}
+            {field.offered > 0 ? ` · ${STAGE.leftOffered(field.offered)}` : ''}
+          </li>
+        ))}
+      </ul>
+      <p className="hi-note">{left.where}</p>
+      {rows.length > 0 && (
+        <Disclosure className="hi-disclosure" summary={STAGE.leftPerMeasurement} meta={String(rows.length)}>
+          <ul className="hi-addwhole-sent">
+            {rows.map(([stem, fields]) => (
+              <li key={stem}>
+                <span className="hi-candidate-target">{stem}</span>
+                <span className="hi-sub">
+                  {fields.map((f) => `${f.label} — ${left.reasons[f.reason] ?? f.reason}`).join(' · ')}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Disclosure>
+      )}
+    </section>
+  );
+}
+
 function AddResult({
   result,
   acceptanceUnavailable,
@@ -2232,6 +2283,7 @@ function AddResult({
             . {STAGE.readingsNever}
           </p>
         )}
+      <LeftForAPerson left={result.left_for_a_person ?? null} headingLevel="h5" />
       <p>
         <Link className="btn btn-secondary" to={ROUTES.recordView(result.experiment_id, 'proposals')}>
           {STAGE.openProposals}

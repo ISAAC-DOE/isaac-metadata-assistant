@@ -31,7 +31,8 @@ export function fieldLabel(path: string): string | null {
   return RUN_FIELD_LABEL.get(trimmed) ?? fieldPathLabel(trimmed);
 }
 
-/** Whether `path` is one of the five run-level fields the Runs editor has an input for. */
+/** Whether `path` is one of the run-level fields the Runs editor has an input for (seven
+ *  since 2026-10-12, when the reaction and the cell type joined; `RUN_FIELDS`). */
 export function isRunFieldPath(path: string): boolean {
   return RUN_FIELD_LABEL.has(officialPathOf(path));
 }

@@ -41,7 +41,7 @@ import { act, configure, render, fireEvent, screen, within } from '@testing-libr
 import { MemoryRouter } from 'react-router-dom';
 
 import { AppRoutes } from '../App';
-import { RUN_FIELDS } from '../lib/runFields';
+import { COUNTED_RUN_FIELDS, RUN_FIELDS } from '../lib/runFields';
 import { __resetRunAutosaveStore } from '../lib/runAutosaveStore';
 import {
   bundleRoutes,
@@ -360,9 +360,10 @@ describe('the run body is sections, not one dump', () => {
 
   it('carries its count in the button\'s own accessible name, so a collapsed section says what is in it', async () => {
     const card = await showRun(RUN_WITH_UNCLASSIFIED);
-    // Two of the five carry a value in this fixture; the denominator is the list length.
+    // Two of the counted fields carry a value in this fixture; the denominator is the
+    // counted list's length (the electrochemistry pair is offered, not counted — 2026-10-12).
     expect(sectionButton(card, 'Conditions for this run').textContent).toContain(
-      `2 of ${RUN_FIELDS.length} recorded`,
+      `2 of ${COUNTED_RUN_FIELDS.length} recorded`,
     );
     expect(sectionButton(card, 'Values this run inherits').textContent).toContain(
       '1 inherited · 0 overridden on this run',

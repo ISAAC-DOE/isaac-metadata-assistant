@@ -82,13 +82,15 @@ def test_a_created_record_renders_its_fields_instead_of_nothing(client):
     # The measured after-state, written out rather than derived from the constant, so
     # this reads as the observation it is. Before: 0 groups, 0 rows.
     assert titles == ["System & Instrument", "Timestamps", "Sample", "Environment & Context"]
+    # 26 -> 28 on 2026-10-12: the reaction and the cell type, which a person now chooses
+    # on a run (the domain owner's answer that day), are rows a record can hold.
     assert counts == {
         "System & Instrument": 13,
         "Timestamps": 3,
         "Sample": 7,
-        "Environment & Context": 3,
+        "Environment & Context": 5,
     }
-    assert total == 26
+    assert total == 28
 
 
 def test_the_skeleton_is_exactly_what_a_seeded_record_already_carries(client, tmp_path, monkeypatch):
@@ -109,11 +111,16 @@ def test_the_skeleton_is_exactly_what_a_seeded_record_already_carries(client, tm
     seeded_rows = _rows(seeded, seed_id)
 
     assert created_paths == set(seeded_rows)
-    assert len(created_paths) == 26
+    assert len(created_paths) == 28
     # And every one of the seeded record's is a value it HOLDS, so none of its rows is a
-    # skeleton row. Without this the equality above would also pass if the seeded record
-    # had quietly started rendering skeletons of its own.
-    assert all(row["present"] is True for row in seeded_rows.values())
+    # skeleton row — EXCEPT the two paths added on 2026-10-12 (the reaction and the cell
+    # type a person chooses on a run), which no committed fixture sheet carries. So a
+    # seeded record now shows exactly those two as empty rows, and nothing else changed.
+    # Without this the equality above would also pass if the seeded record had quietly
+    # started rendering skeletons of its own.
+    chosen = set(r.RUN_CHOSEN_ENUM_PATH_NAMES)
+    assert {p for p, row in seeded_rows.items() if row["present"] is not True} == chosen
+    assert all(row["present"] is True for p, row in seeded_rows.items() if p not in chosen)
 
 
 def test_a_skeleton_row_claims_nothing_the_record_does_not_hold(client):
@@ -217,6 +224,8 @@ _PROBE_VALUES = {
     "system.domain": "experimental",
     "system.technique": "XAS",
     "context.environment": "ambient",
+    "context.electrochemistry.reaction": "OER",
+    "context.electrochemistry.cell_type": "three_electrode",
     "context.temperature_K": 300,
     "system.configuration.n_scans": 3,
     "sample.composition.CuO2_mass_fraction": 0.5,
@@ -314,6 +323,8 @@ def test_the_four_buckets_are_the_measured_ones(client):
         "system.technique",
     }
     assert run_field == {
+        "context.electrochemistry.cell_type",
+        "context.electrochemistry.reaction",
         "context.environment",
         "context.temperature_K",
         "context.thermodynamics.atmosphere",
@@ -388,7 +399,7 @@ def test_answering_an_enum_field_turns_its_row_from_skeleton_into_a_value(client
     assert row["capture"]["record_writable"] is True
     # And the row count is unchanged: a filled path replaces its own skeleton rather
     # than joining it.
-    assert len(_rows(client, exp_id)) == 26
+    assert len(_rows(client, exp_id)) == 28
 
 
 def test_a_malformed_persisted_field_does_not_gain_an_invented_clean_row(client):
@@ -406,7 +417,7 @@ def test_a_malformed_persisted_field_does_not_gain_an_invented_clean_row(client)
 
     rows = _rows(client, exp_id)
     assert "sample.material.name" not in rows
-    assert len(rows) == 25
+    assert len(rows) == 27
 
 
 def test_this_file_creates_its_records_and_never_borrows_a_seed(client):

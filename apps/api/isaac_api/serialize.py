@@ -236,10 +236,14 @@ def draft_to_groups(draft: dict, capture=None) -> dict:
     a record COULD hold beside what it does.
 
     ORDER IS STABLE AND PUTS WHAT THE RECORD HOLDS FIRST: present rows in the draft's
-    own key order (unchanged), then absent rows sorted by path. On a record whose
+    own key order (unchanged), then absent rows sorted by path. ~~On a record whose
     draft already carries every capture path — every committed fixture record does —
     the response is byte-identical to what it was before ``present``/``capture``
-    joined each row.
+    joined each row.~~ — no longer true of the committed fixture records since
+    2026-10-12: the reaction and the cell type a person chooses on a run joined the
+    capture paths and no fixture sheet carries them, so every seeded record now shows
+    those two as absent rows (pinned by ``test_api.test_draft_grouping``). A record
+    that does carry every capture path is still unchanged by the skeleton.
     """
     fields = draft.get("fields") or {}
     buckets: dict[str, list[dict]] = {}

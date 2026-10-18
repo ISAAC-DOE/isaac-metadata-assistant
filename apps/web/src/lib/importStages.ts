@@ -369,6 +369,12 @@ export function conflictViews(session: ApiImportSession): ConflictView[] {
     if (candidate.kind !== 'field' || candidate.disagreement.length === 0) continue;
     // A structural conflict's `run` candidate is the SAME conflict as the one above.
     const values = candidate.disagreement.map((d) => d.value);
+    /* A DOMAIN OWNER'S STANDING RULE (2026-10-12) says which KIND of source each reading
+       is: the readings it uses are the recorded ones, every other reading of the
+       disagreement is the one it is chosen over. Read off the server's own
+       `reading_used`, never re-derived. */
+    const standing = candidate.standing_resolution ?? null;
+    const used = new Set((standing?.reading_used ?? []).map((row) => row.value));
     out.push({
       key: candidate.candidate_id,
       kind: 'field',
@@ -377,14 +383,22 @@ export function conflictViews(session: ApiImportSession): ConflictView[] {
       explanation: null,
       readings: candidate.disagreement.map((d) => ({
         value: d.value,
-        role: null,
-        roleMeaning: null,
+        role: standing ? (used.has(d.value) ? standing.chosen_source_role : standing.over_source_role) : null,
+        roleMeaning: standing
+          ? used.has(d.value)
+            ? standing.chosen_source_role_meaning
+            : standing.over_source_role_meaning
+          : null,
         sources: d.source_ids.map((id, i) => ({ path: sourceName.get(id) ?? id, locator: d.locators[i] ?? d.locators[0] ?? '' })),
         sourceType: null,
       })),
       distinct: distinctTokens(values),
       recommendation: null,
-      resolution: candidate.resolved_by_rule ? { rule_id: candidate.resolved_by_rule, applied: true } : null,
+      resolution: standing
+        ? { ...standing, chosen_value: [...new Set(standing.reading_used.map((row) => row.value))].join(' · ') }
+        : candidate.resolved_by_rule
+          ? { rule_id: candidate.resolved_by_rule, applied: true }
+          : null,
       target: { candidate_id: candidate.candidate_id },
       resolvable: archiveIds.has(candidate.candidate_id),
       forbidden: false,

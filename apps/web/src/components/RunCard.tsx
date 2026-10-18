@@ -18,7 +18,7 @@
  * siblings.
  *
  * EXPANDED it is TWO COLLAPSIBLE SECTIONS, and it used to be one flat list. The
- * first is the short form over the five run-level fields the run may hold itself;
+ * first is the short form over the run-level fields (seven since 2026-10-12) the run may hold itself;
  * the second is what it inherits from its record. Each carries a count of something
  * enumerated in its own button, so a collapsed section says what is in it, and each
  * can be put away — a card with fourteen inherited rows above a five-field form was
@@ -120,6 +120,9 @@ import {
   pickerValueToIso,
 } from '../lib/runDatetime';
 import {
+  COUNTED_RUN_FIELDS,
+  ELECTROCHEMISTRY_GROUP_TITLE,
+  ELECTROCHEMISTRY_RUN_FIELDS,
   RUN_FIELDS,
   enumOptionLabel,
   envelopeText,
@@ -154,14 +157,15 @@ type CheckState =
   | { status: 'error'; message: string };
 
 /**
- * A RUN'S STATE ON THE LIST, from its own five fields and nothing else.
+ * A RUN'S STATE ON THE LIST, from its own run-level fields (`RUN_FIELDS`) and nothing else.
  *
- * Deliberately NOT "Complete": five of five run fields is not a valid record
+ * Deliberately NOT "Complete": every run field recorded is not a valid record
  * (most of a record is inherited, and only official validation decides), so the
  * full state says what it measures — every run field is recorded.
  */
 function RunFillStatus({ filled }: { filled: number }) {
-  const total = RUN_FIELDS.length;
+  // OVER THE COUNTED FIELDS (2026-10-12): the electrochemistry pair is not required.
+  const total = COUNTED_RUN_FIELDS.length;
   if (filled >= total) return <SemanticStatus state="complete" label="All Recorded" size="sm" />;
   if (filled === 0) return <SemanticStatus state="missing" label="Nothing Recorded" size="sm" />;
   /* PR #277 REVIEW (minor) — ONE STATUS PLUS THE COUNT. This chip used to read
@@ -559,6 +563,243 @@ export function RunCard({
       .filter((part): part is string => part !== null && part !== '')
       .join(' · ') || null;
 
+  /* ONE RUN FIELD'S CONTROL. A function rather than an inline map (2026-10-12) so the
+     counted fields and the "if it applies" electrochemistry group render the SAME
+     control from one definition. */
+  const renderRunField = (spec: RunFieldSpec) => {
+      const fieldId = `${baseId}-${spec.path}`;
+      const errorId = `${fieldId}-error`;
+      const hintId = `${fieldId}-hint`;
+      const isoId = `${fieldId}-iso`;
+      const error = fieldErrors[spec.path];
+      const value = draft[spec.path] ?? envelopeText(run.fields?.[spec.path]);
+      /*
+        ── THE ACQUISITION TIMESTAMPS GET A REAL PICKER ────────────
+        The project owner, 2026-09-15: *"that acquisition start,
+        acquisition end, no idea, like why."* He should not be
+        hand-typing `2026-01-31T09:00:00Z`.
+
+        IT IS THE SAME STORED STRING. The picker's value is routed
+        through `pickerValueToIso` and then through the SAME
+        `onFieldChange` / `parseRunField` / autosave path a typed
+        entry has always used, so the PATCH body is byte-identical to
+        the one the text box produced. Nothing about the contract
+        moves; only the way a person enters it.
+
+        AND THE TEXT PATH DOES NOT GO AWAY. `datetime-local` cannot
+        hold three things the record legitimately can — an explicit
+        `+02:00` offset, fractional seconds, and a half-typed string
+        the reader is still holding — and a browser BLANKS a value it
+        cannot parse rather than keeping it. So the ISO box stays,
+        beside the picker, and it OPENS BY ITSELF whenever the stored
+        value is one the picker cannot represent (`pickerValue ===
+        null`), with the reason stated. See `lib/runDatetime.ts` for
+        which values those are and why each one is `null` rather than
+        a silent reinterpretation.
+
+        NO `start <= end` CHECK IS ADDED HERE. `runFields.ts` records
+        that as a deliberate open decision with the measurement behind
+        it (an inverted window PATCHes 200, Check Run reports nothing,
+        official validation passes). A picker makes an inverted window
+        EASIER to produce — two clicks rather than two typed strings —
+        and that is a disclosure, not a licence to close it in the one
+        writer that happens to be a browser.
+      */
+      const isDatetime = spec.kind === 'datetime';
+      const pickerValue = isDatetime ? isoToPickerValue(value) : null;
+      const isoOpen = isoOverrides[spec.path] ?? (isDatetime && pickerValue === null);
+      const describedBy =
+        [error ? errorId : null, spec.hint || isDatetime ? hintId : null]
+          .filter(Boolean)
+          .join(' ') || undefined;
+      return (
+        <div
+          className="run-field"
+          key={spec.path}
+          /* The address a `Go to Field` link (a validation blocker, a
+             Compare Runs cell) scrolls to — `RECORD_ADDRESS_PARAM`. The
+             same attribute `RunInheritedPanel` publishes for its rows,
+             so `RunsSection`'s one effect serves both halves. */
+          data-address={`field:${spec.path}`}
+        >
+          {/*
+            THE HUMAN LABEL, AND ITS `?` (owner QA R2, 2026-09-22). The
+            official path used to sit visibly under every control; it is
+            now behind the label's `?`, with what the field holds — never
+            removed (`UX-014`: it is how a curator maps a field). The
+            tip is named generically and DESCRIBED by the label, so its
+            name never answers to the field's own ("Temperature").
+          */}
+          <div className="run-field-label-row">
+            <label className="run-field-label" htmlFor={fieldId} id={`${fieldId}-label`}>
+              {spec.label}
+              {spec.unit ? <span className="run-field-unit"> ({spec.unit})</span> : null}
+            </label>
+            <HelpTip
+              subject={spec.label}
+              label="Official Field Details"
+              describedBy={`${fieldId}-label`}
+            >
+              <span>
+                Official field: <code className="run-field-path">{spec.path}</code>
+              </span>
+              {isDatetime ? (
+                <span className="run-field-hint" id={hintId}>
+                  {RUN_DATETIME_ZONE_HINT}
+                </span>
+              ) : (
+                spec.hint && (
+                  <span className="run-field-hint" id={hintId}>
+                    {spec.hint}
+                  </span>
+                )
+              )}
+            </HelpTip>
+          </div>
+          <div className="run-field-control">
+            {spec.kind === 'enum' ? (
+              <select
+                id={fieldId}
+                ref={(el) => {
+                  fieldControls.current[spec.path] = el;
+                }}
+                data-run-field-path={spec.path}
+                className="run-input"
+                value={value}
+                aria-invalid={error !== undefined || undefined}
+                aria-describedby={describedBy}
+                onChange={(e) => onFieldChange(spec, e.target.value)}
+              >
+                {/* The empty option is how a value is CLEARED. It is not
+                    a placeholder: choosing it sends `null`. */}
+                <option value="">Not set</option>
+                {spec.options?.map((option) => (
+                  <option key={option} value={option}>
+                    {enumOptionLabel(option)}
+                  </option>
+                ))}
+              </select>
+            ) : isDatetime ? (
+              /*
+                THE LABEL IS UNCHANGED — no `(UTC)` suffix on it. The
+                zone is stated visibly beside the control and in the
+                hint the control is `aria-describedby`'d to, so both
+                readers get it; putting it in the LABEL would rename
+                the field ("Acquisition start (UTC)") and every
+                surface, test and script that addresses this control
+                by its name would be addressing a name that no longer
+                exists.
+              */
+              <span className="run-field-datetime">
+                <input
+                  id={fieldId}
+                  ref={(el) => {
+                    fieldControls.current[spec.path] = el;
+                  }}
+                  data-run-field-path={spec.path}
+                  className="run-input"
+                  type="datetime-local"
+                  /* Seconds granularity. Without it the control
+                     offers minutes only and would silently truncate a
+                     stored `:37` the moment the reader touched it. */
+                  step="1"
+                  value={pickerValue ?? ''}
+                  /* A value the picker cannot represent is not shown
+                     as an empty box pretending the field is empty —
+                     the control is disabled, the ISO box below is
+                     open with the real value in it, and the note says
+                     which of the two the record holds. */
+                  disabled={pickerValue === null}
+                  aria-invalid={error !== undefined || undefined}
+                  aria-describedby={describedBy}
+                  onChange={(e) => onFieldChange(spec, pickerValueToIso(e.target.value))}
+                />
+                <span className="run-field-zone">UTC</span>
+              </span>
+            ) : (
+              <input
+                id={fieldId}
+                ref={(el) => {
+                  fieldControls.current[spec.path] = el;
+                }}
+                data-run-field-path={spec.path}
+                className="run-input"
+                type="text"
+                inputMode={spec.kind === 'number' ? 'decimal' : undefined}
+                value={value}
+                aria-invalid={error !== undefined || undefined}
+                aria-describedby={describedBy}
+                onChange={(e) => onFieldChange(spec, e.target.value)}
+              />
+            )}
+            {/*
+              WHAT IS ACTUALLY STORED, in both spellings, so a reader
+              never has to trust that the picker and the record agree
+              — they can see the string. It renders only when there IS
+              a value, and `formatStoredDatetime` hands back an
+              unreadable one verbatim rather than re-spelling a guess.
+            */}
+            {isDatetime && value !== '' && (
+              <span className="run-field-readback">
+                {formatStoredDatetime(value)}
+                {' · stored as '}
+                <code className="mono">{value}</code>
+              </span>
+            )}
+            {/*
+              THE TEXT PATH, NEXT TO THE PICKER AND NOT INSTEAD OF IT.
+              A `<details>` with `open` DRIVEN rather than native, so
+              it can open ITSELF when the stored value is one the
+              picker cannot hold; `onToggle` records the reader's own
+              choice, which then wins over that default for as long as
+              this card is mounted.
+            */}
+            {isDatetime && (
+              <details
+                className="run-field-iso"
+                open={isoOpen}
+                onToggle={(e) =>
+                  setIsoOverrides((prev) => ({
+                    ...prev,
+                    [spec.path]: (e.target as HTMLDetailsElement).open,
+                  }))
+                }
+              >
+                <summary className="run-field-iso-summary">
+                  {RUN_DATETIME_TEXT_SUMMARY}
+                </summary>
+                {pickerValue === null && value !== '' && (
+                  <span className="run-field-hint">
+                    {RUN_DATETIME_UNPICKABLE}
+                  </span>
+                )}
+                <label className="run-field-iso-label" htmlFor={isoId}>
+                  {spec.label} — ISO 8601 text
+                </label>
+                <input
+                  id={isoId}
+                  data-run-field-iso-path={spec.path}
+                  className="run-input"
+                  type="text"
+                  value={value}
+                  aria-invalid={error !== undefined || undefined}
+                  aria-describedby={describedBy}
+                  onChange={(e) => onFieldChange(spec, e.target.value)}
+                />
+                {spec.hint && <span className="run-field-hint">{spec.hint}</span>}
+              </details>
+            )}
+            {error && (
+              <span className="run-field-error" id={errorId}>
+                <TriangleAlert size={13} strokeWidth={2.2} aria-hidden="true" />
+                {error}
+              </span>
+            )}
+          </div>
+        </div>
+      );
+  };
+
   return (
     <article className="run-card" data-run-id={run.id} data-compact={compact || undefined}>
       {/*
@@ -638,7 +879,7 @@ export function RunCard({
                   so the words "run fields" are part of it for a screen reader and
                   the denominator is always shown. */}
               <span className="run-card-progress">
-                {filled} of {RUN_FIELDS.length}{' '}
+                {filled} of {COUNTED_RUN_FIELDS.length}{' '}
                 <span className="run-card-progress-scope">
                   <span className="sr-only">run fields </span>recorded
                 </span>
@@ -700,10 +941,11 @@ export function RunCard({
 
               "1 of 3 set" said none of that, and the disclosure is MORE necessary now
               rather than less. The gap it originally named — this screen offered three
-              of the five paths `RUN_WRITABLE_FIELD_PATHS` accepts — is closed: the
-              screen offers all five. The gap that MATTERS is the one that remains and
-              is much larger: a valid ISAAC record needs far more than five fields, most
-              of them inherited from the experiment. So "5 of 5" is still displayable on
+              of the paths `RUN_WRITABLE_FIELD_PATHS` accepts — is closed: the screen
+              offers all of them (seven since 2026-10-12). The gap that MATTERS is the
+              one that remains and is much larger: a valid ISAAC record needs far more
+              than these, most of them inherited from the experiment. So "5 of 5" (the counted fields; the electrochemistry pair is not counted) is
+              still displayable on
               a run whose Check Run fails, which is exactly the completion claim the bare
               number was never entitled to make.
 
@@ -712,7 +954,7 @@ export function RunCard({
               that is true of five as it was of three.
             */}
             <span className="run-card-progress">
-              {filled} of {RUN_FIELDS.length}{' '}
+              {filled} of {COUNTED_RUN_FIELDS.length}{' '}
               <span className="run-card-progress-scope">
                 <span className="sr-only">run fields </span>recorded
               </span>
@@ -960,247 +1202,28 @@ export function RunCard({
               `RUN_FIELDS` entries this run carries a value for and the denominator is
               that list's own length, so both halves are read off the list rendered
               below. It is deliberately NOT a completion figure: a valid ISAAC record
-              needs far more than these five, most of them entered on the record — the
+              needs far more than these, most of them entered on the record — the
               same disclosure the collapsed header carries, for the same reason.
             */
             /* The title already says whose fields these are; the count stays a count of
                what is listed below (owner QA R2 — the old tail wrapped to two lines). */
-            summary={`${filled} of ${RUN_FIELDS.length} recorded`}
+            summary={`${filled} of ${COUNTED_RUN_FIELDS.length} recorded`}
           >
             <div className="run-fields">
-              {RUN_FIELDS.map((spec) => {
-                const fieldId = `${baseId}-${spec.path}`;
-                const errorId = `${fieldId}-error`;
-                const hintId = `${fieldId}-hint`;
-                const isoId = `${fieldId}-iso`;
-                const error = fieldErrors[spec.path];
-                const value = draft[spec.path] ?? envelopeText(run.fields?.[spec.path]);
-                /*
-                  ── THE ACQUISITION TIMESTAMPS GET A REAL PICKER ────────────
-                  The project owner, 2026-09-15: *"that acquisition start,
-                  acquisition end, no idea, like why."* He should not be
-                  hand-typing `2026-01-31T09:00:00Z`.
-
-                  IT IS THE SAME STORED STRING. The picker's value is routed
-                  through `pickerValueToIso` and then through the SAME
-                  `onFieldChange` / `parseRunField` / autosave path a typed
-                  entry has always used, so the PATCH body is byte-identical to
-                  the one the text box produced. Nothing about the contract
-                  moves; only the way a person enters it.
-
-                  AND THE TEXT PATH DOES NOT GO AWAY. `datetime-local` cannot
-                  hold three things the record legitimately can — an explicit
-                  `+02:00` offset, fractional seconds, and a half-typed string
-                  the reader is still holding — and a browser BLANKS a value it
-                  cannot parse rather than keeping it. So the ISO box stays,
-                  beside the picker, and it OPENS BY ITSELF whenever the stored
-                  value is one the picker cannot represent (`pickerValue ===
-                  null`), with the reason stated. See `lib/runDatetime.ts` for
-                  which values those are and why each one is `null` rather than
-                  a silent reinterpretation.
-
-                  NO `start <= end` CHECK IS ADDED HERE. `runFields.ts` records
-                  that as a deliberate open decision with the measurement behind
-                  it (an inverted window PATCHes 200, Check Run reports nothing,
-                  official validation passes). A picker makes an inverted window
-                  EASIER to produce — two clicks rather than two typed strings —
-                  and that is a disclosure, not a licence to close it in the one
-                  writer that happens to be a browser.
-                */
-                const isDatetime = spec.kind === 'datetime';
-                const pickerValue = isDatetime ? isoToPickerValue(value) : null;
-                const isoOpen = isoOverrides[spec.path] ?? (isDatetime && pickerValue === null);
-                const describedBy =
-                  [error ? errorId : null, spec.hint || isDatetime ? hintId : null]
-                    .filter(Boolean)
-                    .join(' ') || undefined;
-                return (
-                  <div
-                    className="run-field"
-                    key={spec.path}
-                    /* The address a `Go to Field` link (a validation blocker, a
-                       Compare Runs cell) scrolls to — `RECORD_ADDRESS_PARAM`. The
-                       same attribute `RunInheritedPanel` publishes for its rows,
-                       so `RunsSection`'s one effect serves both halves. */
-                    data-address={`field:${spec.path}`}
-                  >
-                    {/*
-                      THE HUMAN LABEL, AND ITS `?` (owner QA R2, 2026-09-22). The
-                      official path used to sit visibly under every control; it is
-                      now behind the label's `?`, with what the field holds — never
-                      removed (`UX-014`: it is how a curator maps a field). The
-                      tip is named generically and DESCRIBED by the label, so its
-                      name never answers to the field's own ("Temperature").
-                    */}
-                    <div className="run-field-label-row">
-                      <label className="run-field-label" htmlFor={fieldId} id={`${fieldId}-label`}>
-                        {spec.label}
-                        {spec.unit ? <span className="run-field-unit"> ({spec.unit})</span> : null}
-                      </label>
-                      <HelpTip
-                        subject={spec.label}
-                        label="Official Field Details"
-                        describedBy={`${fieldId}-label`}
-                      >
-                        <span>
-                          Official field: <code className="run-field-path">{spec.path}</code>
-                        </span>
-                        {isDatetime ? (
-                          <span className="run-field-hint" id={hintId}>
-                            {RUN_DATETIME_ZONE_HINT}
-                          </span>
-                        ) : (
-                          spec.hint && (
-                            <span className="run-field-hint" id={hintId}>
-                              {spec.hint}
-                            </span>
-                          )
-                        )}
-                      </HelpTip>
-                    </div>
-                    <div className="run-field-control">
-                      {spec.kind === 'enum' ? (
-                        <select
-                          id={fieldId}
-                          ref={(el) => {
-                            fieldControls.current[spec.path] = el;
-                          }}
-                          data-run-field-path={spec.path}
-                          className="run-input"
-                          value={value}
-                          aria-invalid={error !== undefined || undefined}
-                          aria-describedby={describedBy}
-                          onChange={(e) => onFieldChange(spec, e.target.value)}
-                        >
-                          {/* The empty option is how a value is CLEARED. It is not
-                              a placeholder: choosing it sends `null`. */}
-                          <option value="">Not set</option>
-                          {spec.options?.map((option) => (
-                            <option key={option} value={option}>
-                              {enumOptionLabel(option)}
-                            </option>
-                          ))}
-                        </select>
-                      ) : isDatetime ? (
-                        /*
-                          THE LABEL IS UNCHANGED — no `(UTC)` suffix on it. The
-                          zone is stated visibly beside the control and in the
-                          hint the control is `aria-describedby`'d to, so both
-                          readers get it; putting it in the LABEL would rename
-                          the field ("Acquisition start (UTC)") and every
-                          surface, test and script that addresses this control
-                          by its name would be addressing a name that no longer
-                          exists.
-                        */
-                        <span className="run-field-datetime">
-                          <input
-                            id={fieldId}
-                            ref={(el) => {
-                              fieldControls.current[spec.path] = el;
-                            }}
-                            data-run-field-path={spec.path}
-                            className="run-input"
-                            type="datetime-local"
-                            /* Seconds granularity. Without it the control
-                               offers minutes only and would silently truncate a
-                               stored `:37` the moment the reader touched it. */
-                            step="1"
-                            value={pickerValue ?? ''}
-                            /* A value the picker cannot represent is not shown
-                               as an empty box pretending the field is empty —
-                               the control is disabled, the ISO box below is
-                               open with the real value in it, and the note says
-                               which of the two the record holds. */
-                            disabled={pickerValue === null}
-                            aria-invalid={error !== undefined || undefined}
-                            aria-describedby={describedBy}
-                            onChange={(e) => onFieldChange(spec, pickerValueToIso(e.target.value))}
-                          />
-                          <span className="run-field-zone">UTC</span>
-                        </span>
-                      ) : (
-                        <input
-                          id={fieldId}
-                          ref={(el) => {
-                            fieldControls.current[spec.path] = el;
-                          }}
-                          data-run-field-path={spec.path}
-                          className="run-input"
-                          type="text"
-                          inputMode={spec.kind === 'number' ? 'decimal' : undefined}
-                          value={value}
-                          aria-invalid={error !== undefined || undefined}
-                          aria-describedby={describedBy}
-                          onChange={(e) => onFieldChange(spec, e.target.value)}
-                        />
-                      )}
-                      {/*
-                        WHAT IS ACTUALLY STORED, in both spellings, so a reader
-                        never has to trust that the picker and the record agree
-                        — they can see the string. It renders only when there IS
-                        a value, and `formatStoredDatetime` hands back an
-                        unreadable one verbatim rather than re-spelling a guess.
-                      */}
-                      {isDatetime && value !== '' && (
-                        <span className="run-field-readback">
-                          {formatStoredDatetime(value)}
-                          {' · stored as '}
-                          <code className="mono">{value}</code>
-                        </span>
-                      )}
-                      {/*
-                        THE TEXT PATH, NEXT TO THE PICKER AND NOT INSTEAD OF IT.
-                        A `<details>` with `open` DRIVEN rather than native, so
-                        it can open ITSELF when the stored value is one the
-                        picker cannot hold; `onToggle` records the reader's own
-                        choice, which then wins over that default for as long as
-                        this card is mounted.
-                      */}
-                      {isDatetime && (
-                        <details
-                          className="run-field-iso"
-                          open={isoOpen}
-                          onToggle={(e) =>
-                            setIsoOverrides((prev) => ({
-                              ...prev,
-                              [spec.path]: (e.target as HTMLDetailsElement).open,
-                            }))
-                          }
-                        >
-                          <summary className="run-field-iso-summary">
-                            {RUN_DATETIME_TEXT_SUMMARY}
-                          </summary>
-                          {pickerValue === null && value !== '' && (
-                            <span className="run-field-hint">
-                              {RUN_DATETIME_UNPICKABLE}
-                            </span>
-                          )}
-                          <label className="run-field-iso-label" htmlFor={isoId}>
-                            {spec.label} — ISO 8601 text
-                          </label>
-                          <input
-                            id={isoId}
-                            data-run-field-iso-path={spec.path}
-                            className="run-input"
-                            type="text"
-                            value={value}
-                            aria-invalid={error !== undefined || undefined}
-                            aria-describedby={describedBy}
-                            onChange={(e) => onFieldChange(spec, e.target.value)}
-                          />
-                          {spec.hint && <span className="run-field-hint">{spec.hint}</span>}
-                        </details>
-                      )}
-                      {error && (
-                        <span className="run-field-error" id={errorId}>
-                          <TriangleAlert size={13} strokeWidth={2.2} aria-hidden="true" />
-                          {error}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+              {COUNTED_RUN_FIELDS.map(renderRunField)}
+            </div>
+            {/* THE REACTION AND THE CELL TYPE (2026-10-12): offered on every run and
+                counted on none — only an electrochemical measurement has them, and the
+                schema requires neither, so a run can read "All Recorded" without them. */}
+            <div
+              className="run-fields-group"
+              role="group"
+              aria-labelledby={`${baseId}-electrochemistry`}
+            >
+              <p className="run-fields-group-title" id={`${baseId}-electrochemistry`}>
+                {ELECTROCHEMISTRY_GROUP_TITLE}
+              </p>
+              <div className="run-fields">{ELECTROCHEMISTRY_RUN_FIELDS.map(renderRunField)}</div>
             </div>
           </RunSection>
 

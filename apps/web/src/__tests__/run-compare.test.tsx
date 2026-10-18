@@ -105,6 +105,8 @@ const env = (v: string) => ({ value: v, status: 'verified', evidence: [] });
  *   context.thermodynamics.atmosphere   `He` vs nothing               → absent-on-one
  *   timestamps.acquired_start_utc       neither records one           → same (both absent)
  *   timestamps.acquired_end_utc         neither records one           → same (both absent)
+ *   context.electrochemistry.reaction   neither records one           → same (both absent; added 2026-10-12)
+ *   context.electrochemistry.cell_type  neither records one           → same (both absent; added 2026-10-12)
  *   field:sample.material.name          SAME value, inherited vs overridden → provenance
  *   field:system.instrument.name        different value AND inherited vs overridden → value
  *   field:sample.form                   same value + source, different evidence → evidence
@@ -438,16 +440,17 @@ describe('agreement is reported, not only difference', () => {
     await selectTwo();
 
     const summary = document.querySelector('.rc-summary');
-    expect(summary?.textContent).toContain('10 addresses listed');
+    // +2 on 2026-10-12: the reaction and the cell type, which neither run records.
+    expect(summary?.textContent).toContain('12 addresses listed');
     expect(summary?.textContent).toContain('6 differ in some way');
-    expect(summary?.textContent).toContain('3 the same on both runs');
-    expect(summary?.textContent).toContain('2 of those where neither run records a value');
+    expect(summary?.textContent).toContain('5 the same on both runs');
+    expect(summary?.textContent).toContain('4 of those where neither run records a value');
 
     // The rows themselves are hidden until asked for — and the caption SAYS they
     // are, rather than presenting a partial table as the whole comparison.
     expect(document.querySelector('[data-address="context.environment"]')).toBeNull();
     expect(screen.getByRole('table').querySelector('caption')?.textContent).toContain(
-      '3 further addresses are the same on both runs and are not listed',
+      '5 further addresses are the same on both runs and are not listed',
     );
 
     showAgreeing();
@@ -470,16 +473,16 @@ describe('agreement is reported, not only difference', () => {
 
     const summary = document.querySelector('.rc-summary')?.textContent ?? '';
     expect(summary).toContain('1 this table could not compare');
-    // 6 + 3 + 1 = 10, and the three headline numbers are stated separately rather
+    // 6 + 5 + 1 = 12, and the three headline numbers are stated separately rather
     // than being made to sum by absorbing the third into one of the others.
     expect(summary).toContain('6 differ in some way');
-    expect(summary).toContain('3 the same on both runs');
+    expect(summary).toContain('5 the same on both runs');
     expect(summary).not.toContain('7 differ in some way');
 
     expect(screen.getByRole('table').querySelector('caption')?.textContent).toContain(
       '1 this table could not compare',
     );
-    expect(live()).toContain('6 of 10 addresses differ; 3 are the same; 1 could not be compared');
+    expect(live()).toContain('6 of 12 addresses differ; 5 are the same; 1 could not be compared');
   });
 
   it('two identical runs report no difference and say what that claim covers', async () => {
@@ -487,9 +490,9 @@ describe('agreement is reported, not only difference', () => {
     await selectTwo();
 
     const summary = document.querySelector('.rc-summary')?.textContent ?? '';
-    expect(summary).toContain('6 addresses listed');
+    expect(summary).toContain('8 addresses listed');
     expect(summary).toContain('0 differ in some way');
-    expect(summary).toContain('6 the same on both runs');
+    expect(summary).toContain('8 the same on both runs');
     /*
       THE CLAIM WIDENED WITH THE COMPARISON, and it had to. The sentence used to
       say "with the same status and the same number of evidence entries" while the
@@ -498,7 +501,7 @@ describe('agreement is reported, not only difference', () => {
       overstatement this whole summary is written against.
     */
     expect(summary).toContain(
-      'These two runs record the same value, from the same source, in the same review state, with the same status and the same cited entries, at every one of the 6 addresses this table was able to compare.',
+      'These two runs record the same value, from the same source, in the same review state, with the same status and the same cited entries, at every one of the 8 addresses this table was able to compare.',
     );
     // The honest limit of the claim, which is the half a "these runs are identical"
     // banner would drop.
@@ -514,10 +517,10 @@ describe('agreement is reported, not only difference', () => {
 
     const summary = document.querySelector('.rc-summary')?.textContent ?? '';
     expect(summary).toContain('0 differ in some way');
-    // The denominator is what was COMPARED (9), never the row count (10).
-    expect(summary).toContain('at every one of the 9 addresses this table was able to compare');
+    // The denominator is what was COMPARED (11), never the row count (12).
+    expect(summary).toContain('at every one of the 11 addresses this table was able to compare');
     expect(summary).toContain('1 further address could not be compared and is listed below');
-    expect(summary).not.toContain('every one of the 10 addresses');
+    expect(summary).not.toContain('every one of the 12 addresses');
     expect(category('field:assets.files')).toBe('incomparable');
   });
 });
@@ -633,7 +636,7 @@ describe('the selection is in the URL and is spoken', () => {
 
     // It names the runs and the counts, not "selection changed".
     expect(live()).toContain('Comparing Run 1 and Run 2');
-    expect(live()).toContain('6 of 10 addresses differ; 3 are the same');
+    expect(live()).toContain('6 of 12 addresses differ; 5 are the same');
     expect(live()).toContain('Only the addresses that differ are listed');
 
     // The toggle is a selection change too, and is announced as one.
@@ -1753,13 +1756,13 @@ describe('no causal or evaluative language in the widened states', () => {
     await selectTwo();
     await contextBand();
     await waitFor(() => expect(live()).toContain('carry a conflict'));
-    expect(live()).toContain('0 of 10 addresses differ');
+    expect(live()).toContain('0 of 12 addresses differ');
     expect(live()).toContain(
       "1 of them carry a conflict recorded against one run's own citations",
     );
     // The two numbers are spoken separately. A reader who cannot see the panel is
     // never told a difference count that quietly includes a conflict.
-    expect(live()).not.toContain('1 of 10 addresses differ');
+    expect(live()).not.toContain('1 of 12 addresses differ');
   });
 });
 

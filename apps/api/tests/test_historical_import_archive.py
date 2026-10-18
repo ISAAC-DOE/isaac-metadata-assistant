@@ -745,12 +745,14 @@ def test_the_session_serves_the_shape_the_review_surface_consumes(session):
     assert review["inventory"] == archive["inventory"]
     assert review["relationships"] == archive["relationships"]
 
-    # THE REGISTRY IS SERVED WHOLE — ~~45~~ 47 entries since 2026-09-22 (the
-    # temperature and contributor statements), static and cheap — and REGENERATED
-    # per call rather than cached, so a status correction cannot be published stale.
+    # THE REGISTRY IS SERVED WHOLE — ~~45~~ ~~47~~ 50 entries since 2026-10-12 (the
+    # temperature and contributor statements on 2026-09-22; the logbook's environment,
+    # reaction and cell-type statements on 2026-10-12), static and cheap — and
+    # REGENERATED per call rather than cached, so a status correction cannot be
+    # published stale.
     mapping = review["mapping"]
-    assert len(mapping["concepts"]) == 47
-    assert mapping["coverage"]["concepts_total"] == 47
+    assert len(mapping["concepts"]) == 50
+    assert mapping["coverage"]["concepts_total"] == 50
     assert mapping["temperature_absent_reason"]
     assert mapping["assets_blocked_reason"]
     assert mapping["cycling_state_no_field_reason"]
