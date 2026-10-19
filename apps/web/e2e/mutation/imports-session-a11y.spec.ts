@@ -53,8 +53,11 @@ import { expect, test } from './own-session-fixtures';
 async function expectClean(
   page: Page,
   step: string,
-  where: { include?: string; exclude?: string[] } = { include: 'main' },
+  /* A selector to scan (main's `SHOWN` panel), or a region with exclusions (the
+     per-measurement and per-bucket scans). Both default to `main`. */
+  where: string | { include?: string; exclude?: string[] } = 'main',
 ) {
+  const region = typeof where === 'string' ? { include: where } : where;
   /*
    * RETRY THE SCAN, DO NOT MERELY WAIT BEFORE IT. Added 2026-09-16.
    *
@@ -89,7 +92,7 @@ async function expectClean(
    */
   let results!: Awaited<ReturnType<typeof scan>>;
   await expect(async () => {
-    results = await scan(page, { include: where.include ?? 'main', exclude: where.exclude });
+    results = await scan(page, { include: region.include ?? 'main', exclude: region.exclude });
   }).toPass({ timeout: 15_000 });
   expect(
     results.violations.map(formatViolation).join('\n\n'),
@@ -141,6 +144,32 @@ async function openEverything(page: Page): Promise<number> {
   }
   return total;
 }
+
+/**
+ * THE ARCHIVE A TEST WALKS, CHOSEN BY NAME — never "whatever the picker opens on".
+ *
+ * ADDED 2026-10-13 (PR #285's CI failure). The picker's default became the multi-operator
+ * corpus (`default_archive`: the one the hosted image ships), and the every-disclosure walk
+ * below then scanned a 200-candidate session instead of the 100-candidate one it was written
+ * for. MEASURED, not assumed — a production build, 1280x800, the spec's own axe tags:
+ *
+ *   | stage, everything opened | mini corpus           | multi-operator corpus  |
+ *   | Runs & Candidates        | 4,670 nodes, axe 9.8 s | 11,726 nodes, axe 41.6 s |
+ *   | Review                   | 4,435 nodes, axe 13.8 s | 10,781 nodes             |
+ *
+ * while what a SCIENTIST waits for stayed small on both: a stage tab 0.07-0.2 s, opening
+ * every disclosure in a stage 0.14-0.5 s, read 0.3-1.8 s, reconstruct 0.4-0.6 s (the
+ * disclosures' bodies are already rendered, `hidden`; opening one is a toggle). So the
+ * failure was the TEST's budget — `expectClean`'s 15 s for one scan — and not the product.
+ * The full walk therefore stays on the corpus it was written for, chosen explicitly, and the
+ * hosted default gets its own lighter scan with every stage collapsed (the last test here).
+ */
+async function chooseArchive(page: Page, key: string) {
+  await page.getByRole('combobox', { name: /which archive/i }).selectOption(key);
+}
+
+const MINI = 'bl15_synthetic_mini_corpus';
+const HOSTED_DEFAULT = 'bl15_synthetic_semantics_corpus';
 
 test.describe('the import session state, which the read-only sweep cannot reach', () => {
   test('an open import session carries no axe violation, at every stage', async ({ page }) => {
@@ -268,7 +297,10 @@ test.describe('the import session state, which the read-only sweep cannot reach'
       await expect(page.locator('.bl15-highlights')).toHaveCount(0);
 
       /* One press: the archive is added, read and reconstructed (QA `C-21`), and the reader
-         lands on Runs & Candidates. */
+         lands on Runs & Candidates. The every-disclosure walk uses the corpus it was written
+         for, chosen by name (the picker's default is the hosted multi-operator corpus,
+         scanned collapsed by the last test). */
+      await chooseArchive(page, MINI);
       await page.getByRole('button', { name: 'Add an Archive', exact: true }).click();
       await expect(page.locator('.bl15-runs table').first()).toBeVisible();
       expect(await openEverything(page), 'no measurement opened — the table is empty').toBeGreaterThan(0);
@@ -312,6 +344,12 @@ test.describe('the import session state, which the read-only sweep cannot reach'
     await expect(page.getByRole('heading', { name: 'Imports', level: 2 })).toBeVisible();
     await page.getByRole('button', { name: 'Start an Import' }).click();
     await expect(page.getByRole('button', { name: 'Back to imports' })).toBeVisible();
+
+    // NEGATIVE CONTROL FIRST: the review must not exist before an archive does, or
+    // the scans below would prove nothing about the archive at all.
+    await expect(page.locator('.bl15-highlights')).toHaveCount(0);
+
+    await chooseArchive(page, MINI);
     await page.getByRole('button', { name: 'Add an Archive', exact: true }).click();
     await expect(page.locator('.bl15-runs table').first()).toBeVisible();
     await openStage(page, 'Source Bundle');
@@ -345,6 +383,7 @@ test.describe('the import session state, which the read-only sweep cannot reach'
     await expect(page.getByRole('heading', { name: 'Imports', level: 2 })).toBeVisible();
     await page.getByRole('button', { name: 'Start an Import' }).click();
     await expect(page.getByRole('button', { name: 'Back to imports' })).toBeVisible();
+    await chooseArchive(page, MINI);
     await page.getByRole('button', { name: 'Add an Archive', exact: true }).click();
     await expect(page.locator('.bl15-runs table').first()).toBeVisible();
     await openStage(page, 'Conflicts');
@@ -393,6 +432,8 @@ test.describe('the import session state, which the read-only sweep cannot reach'
     await page.goto('/imports');
     await page.getByRole('button', { name: 'Start an Import' }).click();
     await expect(page.getByRole('button', { name: 'Back to imports' })).toBeVisible();
+    // The archive the scans above walked, so this guards THOSE scans.
+    await chooseArchive(page, MINI);
     await page.getByRole('button', { name: 'Add an Archive', exact: true }).click();
     await expect(page.locator('.bl15-runs table').first()).toBeVisible();
     await openStage(page, 'What ISAAC Read');
@@ -469,5 +510,62 @@ test.describe('the import session state, which the read-only sweep cannot reach'
     // NO STRAY REQUEST after the session is gone (the `GET … 404` the audit measured).
     await page.waitForTimeout(500);
     expect(failures).toEqual([]);
+  });
+
+  /*
+   * ── THE HOSTED DEFAULT, SCANNED TOO — every stage, collapsed ──────────────
+   *
+   * ADDED 2026-10-13. The hosted image ships ONLY the multi-operator corpus, so it is the
+   * archive every hosted scientist meets, and the picker opens on it. The every-disclosure
+   * walks above stay on the mini corpus for the budget reason `chooseArchive` records (and
+   * since 2026-10-18 also scan the opened Runs and Review stages in parts);
+   * this scans the hosted default as a scientist first sees each stage — everything
+   * collapsed — so its own shapes (nine measurements, three operators, the Run-32 pair,
+   * every HERFD channel combination) are not left unscanned.
+   */
+  test('the hosted default archive is axe-clean at every stage, collapsed', async ({ page }) => {
+    /*
+     * THE SHOWN STAGE'S PANEL IS SCANNED, NOT ALL OF `main` — and that is what makes this
+     * the LIGHTER scan the brief asked for rather than a raised timeout. Every stage is
+     * mounted at once (hidden ones `hidden`), so on this corpus `main` holds ~24,700
+     * elements against the mini corpus's ~10,300, and axe walks all of them on every scan
+     * even when only one panel is shown — measured on an idle host: a collapsed
+     * Review/Add scan of `main` took 7-20 s here, past `expectClean`'s 15 s. The session
+     * chrome around the panel (its head, its tabs) is the SAME component the walks above
+     * scan within `main`, so what this test adds is the corpus-specific content, which is
+     * all inside the panel shown. Nothing is opened: this is each stage as a hosted
+     * scientist first sees it.
+     */
+    const SHOWN = '[role="tabpanel"]:not([hidden])';
+    await page.goto('/imports');
+    await expect(page.getByRole('heading', { name: 'Imports', level: 2 })).toBeVisible();
+    await page.getByRole('button', { name: 'Start an Import' }).click();
+    await expect(page.getByRole('button', { name: 'Back to imports' })).toBeVisible();
+
+    // NOT CHOSEN — the picker's own default, which is the point of this test.
+    await expect(page.getByRole('combobox', { name: /which archive/i })).toHaveValue(HOSTED_DEFAULT);
+    /* ONE PRESS (QA `C-21`, 2026-10-18): adding the archive reads and reconstructs it and
+       lands the reader on Runs & Candidates — the separate Read and Reconstruct presses
+       this test was written with no longer exist. */
+    await page.getByRole('button', { name: 'Add an Archive', exact: true }).click();
+    await expect(page.locator('.bl15-runs table').first()).toBeVisible();
+    // NOT VACUOUS: the multi-operator corpus's nine measurements are in the table.
+    // (One table per sample group, so the rows are counted across all of them.)
+    expect(await page.locator('.bl15-runs tr.bl15-row').count()).toBeGreaterThanOrEqual(9);
+    await expectClean(page, 'Runs & Candidates (hosted default), collapsed', SHOWN);
+
+    await openStage(page, 'Source Bundle');
+    // The row names the archive in words, never its id.
+    await expect(page.locator(`${SHOWN} table.hi-table`)).toContainText('three operators');
+    await expectClean(page, 'Source Bundle (hosted default), collapsed', SHOWN);
+
+    await openStage(page, 'What ISAAC Read');
+    await expect(page.locator('.bl15-highlights')).toBeVisible();
+    await expectClean(page, 'What ISAAC Read (hosted default), collapsed', SHOWN);
+
+    for (const stage of ['Conflicts', 'Review', 'Add to Experiment']) {
+      await openStage(page, stage);
+      await expectClean(page, `${stage} (hosted default), collapsed`, SHOWN);
+    }
   });
 });

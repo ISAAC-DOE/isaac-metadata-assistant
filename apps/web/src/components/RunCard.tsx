@@ -617,6 +617,10 @@ export function RunCard({
         <div
           className="run-field"
           key={spec.path}
+          /* WHETHER THIS FIELD IS IN THE FILL COUNT (2026-10-12): the electrochemistry
+             pair is offered and not counted, so a test comparing the "of N" with the
+             controls on screen counts only these. */
+          data-run-field-counted={spec.group === undefined ? 'true' : 'false'}
           /* The address a `Go to Field` link (a validation blocker, a
              Compare Runs cell) scrolls to — `RECORD_ADDRESS_PARAM`. The
              same attribute `RunInheritedPanel` publishes for its rows,
@@ -1218,6 +1222,7 @@ export function RunCard({
                 schema requires neither, so a run can read "All Recorded" without them. */}
             <div
               className="run-fields-group"
+              data-run-field-group="electrochemistry"
               role="group"
               aria-labelledby={`${baseId}-electrochemistry`}
             >
