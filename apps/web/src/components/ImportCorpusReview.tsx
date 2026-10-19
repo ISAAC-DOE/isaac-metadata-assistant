@@ -6,6 +6,8 @@ import { HelpTip } from './HelpTip';
 import { SemanticStatus } from './SemanticStatus';
 import { ImportCandidateRow } from './ImportCandidateRow';
 import { SignalSelection } from './ImportRules';
+import { Breakable } from './Breakable';
+import { LazyDisclosure } from './LazyDisclosure';
 import {
   BL15_COLUMNS,
   BL15_COPY,
@@ -35,8 +37,9 @@ import {
 } from '../lib/bl15Review';
 import { IMPORT_STAGE_COPY, archiveLabel } from '../lib/historicalImportContent';
 import {
-  BASIS_LABELS,
+  BASIS_PHRASES,
   candidateBucket,
+  fileNumberRange,
   REVIEW_BUCKET_ORDER,
   SCOPE_LABELS,
   type CandidateReview,
@@ -53,7 +56,7 @@ import type {
 } from '../lib/types';
 
 const COPY = IMPORT_STAGE_COPY;
-type ActFn = (name: string, run: () => Promise<unknown>) => Promise<void>;
+type ActFn = (name: string, run: () => Promise<unknown>) => Promise<unknown>;
 
 /**
  * BL15-2 LARGE-CORPUS REVIEW — `BL15R-012`, REBUILT AS STAGE PIECES (owner QA H1,
@@ -145,14 +148,25 @@ export function CorpusReadOverview({
             <li key={row.id}>
               <span className="bl15-digest-value">{row.value.toLocaleString('en-US')}</span>
               <span className="bl15-digest-label">{row.label}</span>
-              {/* The expression, not a restatement of the label. A reader can check
-                  the number against the payload with this alone. */}
-              <span className="bl15-derived">
-                Derived from <code>{row.derivedFrom}</code>.
-              </span>
             </li>
           ))}
         </ul>
+        {/* THE EXPRESSIONS, ONE PRESS FURTHER IN (2026-10-18, QA `C-05`). Fifteen
+            "Derived from inventory.…" lines under the counts read as developer prose;
+            they are what lets a reader check each number against the payload, so they
+            are kept — together, behind their own disclosure, still in the DOM. */}
+        <Disclosure className="bl15-more" summary={COPY.derivations}>
+          <ul className="bl15-digest">
+            {digest.map((row) => (
+              <li key={row.id}>
+                <span className="bl15-digest-label">{row.label}</span>
+                <span className="bl15-derived">
+                  Derived from <code>{row.derivedFrom}</code>.
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Disclosure>
         <p className="bl15-note" role="note">
           {BL15_COPY.manifestNote}
         </p>
@@ -391,11 +405,25 @@ export function ArchiveRuns({
     for (const u of review.relationships.units) out.set(u.stem, u);
     return out;
   }, [review.relationships.units]);
+  /*
+   * A ROW'S STATE AGREES WITH ITS OWN CELLS (2026-10-18, QA `C-08`). `unitState` reads
+   * the archive's STRUCTURAL conflicts only, so a measurement whose filter two sources
+   * state differently read "Values Read" — whose note says nothing disagreed — beside a
+   * Filter cell reading "2 sources disagree". A field value whose sources conflict (the
+   * server's own `review_status`) now makes the row a conflict too.
+   */
   const states = useMemo(() => {
     const out = new Map<string, string>();
-    for (const u of review.relationships.units) out.set(u.stem, unitState(u, index.get(u.stem)));
+    for (const u of review.relationships.units) {
+      const base = unitState(u, index.get(u.stem));
+      const fieldConflict = (rowsByStem.get(u.stem)?.candidate_ids ?? []).some((id) => {
+        const c = candidatesById.get(id);
+        return c !== undefined && c.kind === 'field' && candidateBucket(c) === 'conflict';
+      });
+      out.set(u.stem, fieldConflict && (base === 'values_read' || base === 'no_values') ? 'conflict' : base);
+    }
     return out;
-  }, [review.relationships.units, index]);
+  }, [review.relationships.units, index, rowsByStem, candidatesById]);
 
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Bl15FilterId>('all');
@@ -482,10 +510,10 @@ export function ArchiveRuns({
                 </h4>
                 <span className="bl15-group-meta">
                   {groupUnits.length === group.measurement_count
-                    ? `${group.measurement_count} measurements`
-                    : `${groupUnits.length} of ${group.measurement_count} measurements`}
-                  {group.legacy_low !== null && group.legacy_high !== null
-                    ? ` · legacy ${group.legacy_low}–${group.legacy_high}`
+                    ? `${group.measurement_count} ${group.measurement_count === 1 ? 'measurement' : 'measurements'}`
+                    : `${groupUnits.length} of ${group.measurement_count} ${group.measurement_count === 1 ? 'measurement' : 'measurements'}`}
+                  {fileNumberRange(group.legacy_low, group.legacy_high)
+                    ? ` · ${fileNumberRange(group.legacy_low, group.legacy_high)}`
                     : ''}
                 </span>
                 {token !== null && group.contiguous && (
@@ -494,8 +522,10 @@ export function ArchiveRuns({
               </div>
               {conventions.size > 0 && (
                 <p className="bl15-group-convention">
-                  {[...conventions].map(nameOf).join(' + ')}
-                  {bases.size === 1 ? ` · ${BASIS_LABELS[[...bases][0] as string] ?? ''}` : ''}
+                  Read with {[...conventions].map(nameOf).join(' + ')}
+                  {bases.size === 1 && BASIS_PHRASES[[...bases][0] as string]
+                    ? ` — ${BASIS_PHRASES[[...bases][0] as string]}`
+                    : ''}
                 </p>
               )}
               {/* A BROKEN RANGE IS AN UNCERTAINTY, so it stays on the surface; a
@@ -598,7 +628,9 @@ function UnitsTable({
                     onClick={() => toggle(u.stem)}
                   >
                     <span className="bl15-legacy-number">{u.legacy_number ?? '—'}</span>
-                    <span className="bl15-stem">{u.stem}</span>
+                    <span className="bl15-stem">
+                      <Breakable text={u.stem} />
+                    </span>
                   </button>
                 </th>
                 {(['sample', 'medium', 'state', 'filter', 'potential'] as Bl15ColumnId[]).map((col, ci) => (
@@ -709,8 +741,11 @@ function RunDetail({
         <p className="bl15-run-line">
           <span className="bl15-run-key">{COPY.fields.convention}</span>
           <span>
-            {applies.profile_ids.map(nameOf).join(' + ')} · {SCOPE_LABELS[applies.scope] ?? applies.scope} ·{' '}
-            {BASIS_LABELS[applies.basis] ?? applies.basis}
+            {applies.profile_ids.map(nameOf).join(' + ')}
+            {BASIS_PHRASES[applies.basis] ? ` — ${BASIS_PHRASES[applies.basis]}` : ''}{' '}
+            <HelpTip subject={`the convention for ${unit.stem}`} label="Where This Convention Was Set">
+              Set at: {SCOPE_LABELS[applies.scope] ?? applies.scope}.
+            </HelpTip>
           </span>
         </p>
       )}
@@ -955,14 +990,12 @@ function MappingReview({ review }: { review: Bl15CorpusReview }) {
                         <span className="bl15-concept-name">{conceptLabel(c.concept)}</span>
                         {c.official_path && <code className="bl15-path">{c.official_path}</code>}
                       </p>
-                      {/* The registry's own sentence, verbatim. */}
-                      <p className="bl15-concept-reason">{c.reason}</p>
-                      {/* The placement's NAME, and not its decision-record level: "(level 4)"
-                          is `DEC-41`'s numbering, a raw token to a scientist, and the name
-                          already says where the information goes (review of #279). */}
-                      {c.placement_name && (
-                        <p className="bl15-concept-extra">Where this information lands: {c.placement_name}.</p>
-                      )}
+                      {/* THE SHORT REASON FIRST (2026-10-18, QA `C-05`), the registry's
+                          full rationale behind "Why, in detail" — verbatim, still in the
+                          DOM. A server that predates the summary shows the rationale. */}
+                      <p className="bl15-concept-reason">{c.summary ?? c.reason}</p>
+                      {/* AN UNCERTAINTY STAYS ON THE SURFACE, named by its subject (the id
+                          in parentheses is the traceable handle). */}
                       {c.unresolved_questions && c.unresolved_questions.length > 0 && (
                         <p className="bl15-concept-open">
                           <span className="bl15-concept-open-lead">Still waiting on a domain answer:</span>{' '}
@@ -971,6 +1004,22 @@ function MappingReview({ review }: { review: Bl15CorpusReview }) {
                       )}
                       {c.allowed_values.length > 0 && (
                         <p className="bl15-concept-extra">The schema allows: {c.allowed_values.join(', ')}.</p>
+                      )}
+                      {c.summary !== undefined && (
+                        <LazyDisclosure className="bl15-more" summary={COPY.whyInDetail}>
+                          {() => (
+                            <>
+                              <p className="hi-sub">{COPY.whyInDetailLead}</p>
+                              <p className="bl15-concept-reason">{c.reason}</p>
+                            </>
+                          )}
+                        </LazyDisclosure>
+                      )}
+                      {/* The placement's NAME, and not its decision-record level: "(level 4)"
+                          is `DEC-41`'s numbering, a raw token to a scientist, and the name
+                          already says where the information goes (review of #279). */}
+                      {c.placement_name && (
+                        <p className="bl15-concept-extra">Where this information lands: {c.placement_name}.</p>
                       )}
                       {c.requires_siblings.length > 0 && (
                         <p className="bl15-concept-extra">

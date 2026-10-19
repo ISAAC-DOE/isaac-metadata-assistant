@@ -1909,3 +1909,335 @@
   font-size: var(--font-size-meta);
   color: var(--text-secondary);
 }
+
+/* ==========================================================================
+ * 2026-10-18 — THE STREAMLINED IMPORT (owner direction: "less clutter, intuitive,
+ * information as compact widgets, explanations behind info affordances").
+ * Tokens only, so no ratchet in `type-scale-and-spacing.test.ts` moves.
+ * ========================================================================== */
+
+/* ---- the landing widget ------------------------------------------------- */
+
+.hi-screen > .widget {
+  max-width: 880px;
+}
+
+/* The inline start row: the name field and `Start an Import` share one baseline and
+   one height (QA `C-29`: the field used to be shorter than its own button). */
+.hi-new {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-sm) var(--space-md);
+  margin: 0;
+}
+
+.hi-new-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  flex: 1 1 18rem;
+  max-width: 42ch;
+  min-width: 0;
+}
+
+.hi-new-field .hi-field-label {
+  margin: 0;
+}
+
+.hi-new .btn {
+  flex: none;
+}
+
+.hi-screen .widget .hi-list-row {
+  padding: var(--space-md) 0;
+}
+
+.hi-screen .widget .hi-list-row:last-child {
+  border-bottom: 0;
+}
+
+.hi-list-title {
+  text-decoration: none;
+}
+
+.hi-list-title:hover,
+.hi-list-title:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* The six-stage meter: one segment per stage, the reached ones filled. Decoration of
+   the stage name beside it, which says the same thing in words. */
+.hi-meter-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-xs);
+  flex: none;
+}
+
+.hi-meter {
+  display: inline-grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: var(--space-2xs);
+  width: 7.5rem;
+}
+
+.hi-meter-seg {
+  height: var(--space-xs);
+  border-radius: var(--radius-pill);
+  background: var(--border);
+}
+
+.hi-meter-seg.is-reached {
+  background: var(--action);
+}
+
+.hi-meter-label {
+  font-size: var(--font-size-meta);
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.hi-meter-sent {
+  color: var(--text-secondary);
+}
+
+@media (max-width: 560px) {
+  .hi-list-row {
+    flex-wrap: wrap;
+  }
+  .hi-meter-wrap {
+    align-items: flex-start;
+  }
+  .hi-meter-label {
+    text-align: left;
+  }
+}
+
+.hi-how-it-works > :last-child {
+  margin-bottom: 0;
+}
+
+/* ---- a link to an import that is gone (QA `C-14`) ------------------------ */
+
+.hi-gone {
+  max-width: var(--hi-prose);
+}
+
+/* ---- inputs match the buttons beside them (QA `C-29`) -------------------- */
+
+.hi-input {
+  min-height: 2.1875rem; /* 35px — the height of the `.btn` beside it */
+  line-height: var(--line-height-snug);
+}
+
+select.hi-input {
+  padding-right: var(--space-lg);
+}
+
+.hi-form-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/* ---- files from this computer (QA `C-16`) -------------------------------- */
+
+.hi-files {
+  margin: var(--space-lg) 0 0;
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-hair);
+}
+
+.hi-files .hi-stage-sub-head {
+  margin-bottom: var(--space-xs);
+}
+
+.hi-files-next {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  margin: 0 0 var(--space-md);
+  font-size: var(--font-size-body);
+  color: var(--text-secondary);
+}
+
+/* ---- the short reason, and "Why, in detail" (QA `C-05`/`C-06`) ----------- */
+
+.hi-blocked-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.hi-blocked-wrap > .hi-blocked {
+  margin: 0;
+}
+
+.hi-why .hi-rule {
+  max-width: var(--hi-prose);
+}
+
+/* A value read and not sent (QA `C-07`): the reading in the value's place, quieter. */
+.hi-cand-reading {
+  color: var(--text-secondary);
+}
+
+.hi-cand-read-note {
+  color: var(--text-muted);
+  font-size: var(--font-size-meta);
+}
+
+/* ---- Add to Experiment ---------------------------------------------------- */
+
+.hi-add-headline {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--font-size-body);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.hi-add-headline strong {
+  color: var(--text-strong);
+  font-weight: var(--font-weight-semibold);
+}
+
+.hi-sent-so-far {
+  margin: var(--space-md) 0;
+}
+
+.hi-technique {
+  margin: var(--space-lg) 0 0;
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-hair);
+}
+
+.hi-technique-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-sm) var(--space-md);
+}
+
+.hi-technique-row .hi-field {
+  flex: 1 1 16rem;
+  margin: 0;
+}
+
+.hi-technique-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-xs);
+  margin: 0 0 var(--space-sm);
+  font-size: var(--font-size-body);
+}
+
+.hi-technique-evidence .hi-field-label {
+  display: inline;
+  margin: 0;
+}
+
+.hi-technique-status {
+  margin: var(--space-sm) 0 0;
+  font-size: var(--font-size-body);
+  color: var(--text-secondary);
+}
+
+.hi-technique-status:empty {
+  margin: 0;
+}
+
+/* ---- where a rule is kept, when no record exists yet (QA `C-13`) --------- */
+
+.hi-scope-needs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  margin: 0 0 var(--space-sm);
+}
+
+.hi-scope-needs .hi-note {
+  margin: 0;
+}
+
+/* ---- discard, confirmed (QA `C-15`) --------------------------------------- */
+
+.hi-discard {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm) var(--space-lg);
+}
+
+.hi-discard > .hi-note {
+  margin: 0;
+}
+
+.hi-discard-dialog {
+  max-width: 30rem;
+}
+
+.hi-discard-dialog-body {
+  padding: var(--space-md) var(--space-lg) 0;
+}
+
+.hi-discard-dialog-name {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--font-size-body);
+  color: var(--text-strong);
+}
+
+/* ---- an open import on a phone (review, 2026-10-18) ------------------------
+ * At 390px the stage's own heading started ~918px down the page: the page intro, a
+ * six-number summary at headline size, the durability sentence and a 2×3 tab grid all
+ * came first. On a narrow screen, with an import open:
+ *   · the page intro is not repeated (the landing says it; every stage has its own lead);
+ *   · the summary is a tight three-column grid at a smaller size;
+ *   · the stage tabs are three across, with less padding.
+ * The durability sentence stays visible — it is a consequence, not a definition. */
+@media (max-width: 560px) {
+  .hi-screen.is-session .hi-page-head .hi-lead {
+    display: none;
+  }
+  .hi-screen.is-session .hi-section {
+    padding: var(--space-md);
+  }
+  .hi-session-head .hi-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-xs) var(--space-sm);
+    margin-bottom: var(--space-sm);
+  }
+  .hi-session-head .hi-summary-item dd {
+    font-size: var(--font-size-heading-sm);
+  }
+  .hi-session-head .hi-durability {
+    font-size: var(--font-size-meta);
+    margin-bottom: 0;
+  }
+  .hi-stages {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .hi-stage-tab {
+    padding: var(--space-xs);
+  }
+  /* The title and "Back to imports" share one row instead of stacking. */
+  .hi-session-head .hi-section-head {
+    flex-wrap: nowrap;
+    align-items: center;
+  }
+  .hi-session-head .hi-section-head > .hi-section-title {
+    min-width: 0;
+    font-size: var(--font-size-heading-sm);
+  }
+  .hi-session-head .hi-section-head > .btn {
+    flex: none;
+    padding: var(--space-xs) var(--space-sm);
+  }
+}

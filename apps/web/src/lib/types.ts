@@ -4461,6 +4461,13 @@ export interface ApiImportCandidate {
   disagreement: ApiImportDisagreement[];
   unresolved_reason: string | null;
   not_proposable_reason: string | null;
+  /**
+   * 2026-10-18 (QA `C-05`/`C-06`) — the SHORT, plain sentence a scientist reads beside a
+   * value that cannot be sent, derived by the server (`hist.plain_reason`). The full
+   * `not_proposable_reason` above is the engineering rationale and stays behind "Why, in
+   * detail". `null` for a candidate that can be sent; absent from an older server.
+   */
+  not_proposable_summary?: string | null;
   /** DERIVED by the server and served anyway, so no client recomputes the rule. */
   proposable: boolean;
   /**
@@ -4992,6 +4999,11 @@ export interface ApiImportUnsentCandidate {
    * it, read off the candidate rather than composed a second time.
    */
   reason: string;
+  /**
+   * 2026-10-18 — the SHORT sentence a scientist reads first (`hist.plain_reason`); the
+   * full `reason` above stays one press away. Absent from a server that predates it.
+   */
+  summary?: string | null;
 }
 
 /**

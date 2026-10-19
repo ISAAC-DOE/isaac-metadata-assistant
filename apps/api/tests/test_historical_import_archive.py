@@ -529,7 +529,10 @@ def test_the_run_label_is_the_legacy_number_then_verbatim_tokens(session):
 
     assert (
         labels["03_02_SYN2_base_after1500Cycling_ffilter35_1200mV_zz9"]
-        == "Legacy 3 · 02 · SYN2 · base · after1500Cycling · ffilter35 · 1200mV"
+        # ~~"… · ffilter35 · 1200mV"~~ — until 2026-10-18 the unrecognised `zz9` was
+        # DROPPED, which is how two runs came to differ only by legacy number (QA
+        # `C-19`). It is kept now, verbatim, after the recognised tokens.
+        == "Legacy 3 · 02 · SYN2 · base · after1500Cycling · ffilter35 · 1200mV · zz9"
     )
     assert (
         labels["01_01_SYN1_acid_beforeCycling_filter10_060mV"]

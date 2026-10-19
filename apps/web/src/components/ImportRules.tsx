@@ -1,7 +1,7 @@
-import { useId, useState } from 'react';
+import { useRef, useState } from 'react';
 import { HelpTip } from './HelpTip';
 import { SemanticStatus } from './SemanticStatus';
-import { ExperimentPicker } from './ImportConflicts';
+import { ExperimentPicker, RuleScopeFields, type RuleScope } from './ImportScope';
 import { api } from '../lib/api';
 import { IMPORT_STAGE_COPY } from '../lib/historicalImportContent';
 import {
@@ -19,8 +19,9 @@ import type {
   ApiImportUnitRow,
 } from '../lib/types';
 
-type ActFn = (name: string, run: () => Promise<unknown>) => Promise<void>;
-type Scope = 'import' | 'experiment' | 'profile';
+/* An act resolves `true` when it succeeded (2026-10-18), so a form can say so in place. */
+type ActFn = (name: string, run: () => Promise<unknown>) => Promise<unknown>;
+type Scope = RuleScope;
 const COPY = IMPORT_STAGE_COPY;
 
 /**
@@ -161,7 +162,7 @@ function RuleRow({ rule, conventionName }: { rule: ApiConventionRule; convention
     <li className="hi-rule">
       <RuleSummary rule={rule} conventionName={conventionName} />
       <p className="hi-sub">
-        {COPY.confirmedBy}{' '}
+        {COPY.confirmedBy}:{' '}
         {rule.confirmed_by === 'unattributed' ? COPY.unattributed : rule.confirmed_by}
         {rule.version_is_current === false ? ' · its convention version has changed, so it no longer applies' : ''}
       </p>
@@ -210,39 +211,6 @@ function AdoptForm({
         {busy === key ? 'Adopting…' : COPY.adopt}
       </button>
     </form>
-  );
-}
-
-/** Scope choice shared by every rule form: only here, an experiment, or a convention. */
-function ScopeChoice({
-  scope,
-  setScope,
-  experimentId,
-  setExperimentId,
-  destinations,
-}: {
-  scope: Scope;
-  setScope: (s: Scope) => void;
-  experimentId: string;
-  setExperimentId: (id: string) => void;
-  destinations: ProposalDestinations;
-}) {
-  const name = useId();
-  return (
-    <>
-      <fieldset className="hi-resolve-group">
-        <legend className="hi-field-label">{COPY.resolve.scope}</legend>
-        {(['import', 'experiment', 'profile'] as Scope[]).map((option) => (
-          <label key={option} className="hi-choice">
-            <input type="radio" name={name} checked={scope === option} onChange={() => setScope(option)} />
-            <span>{COPY.scopeOptions[option]}</span>
-          </label>
-        ))}
-      </fieldset>
-      {scope !== 'import' && (
-        <ExperimentPicker value={experimentId} onChange={setExperimentId} destinations={destinations} />
-      )}
-    </>
   );
 }
 
@@ -315,7 +283,7 @@ function BindingForm({
           <input className="hi-input" inputMode="numeric" value={to} onChange={(e) => setTo(e.target.value)} />
         </label>
       </div>
-      <ScopeChoice
+      <RuleScopeFields
         scope={scope}
         setScope={setScope}
         experimentId={experimentId}
@@ -371,6 +339,11 @@ export function SignalSelection({
   );
   const [scope, setScope] = useState<Scope>('import');
   const [experimentId, setExperimentId] = useState('');
+  /* SAID WHERE IT WAS PRESSED (2026-10-18, QA `C-26`). Confirming used to move focus to
+     the stage heading — the top of a long table — so the reader saw nothing change where
+     they had pressed. The result is now stated here, and focus lands on it. */
+  const [recorded, setRecorded] = useState(false);
+  const recordedRef = useRef<HTMLParagraphElement>(null);
   const key = `signal:${unit.stem}`;
   const channels = Object.keys(assign);
   const valid = channels.length > 0 && channels.every((c) => /^[A-Z][a-z]?$/.test(assign[c]?.element ?? ''));
@@ -389,13 +362,18 @@ export function SignalSelection({
             : 'No live channel'}
       </p>
       <p className="hi-sub">{selection.reason}</p>
+      {recorded && (
+        <p className="hi-sent" ref={recordedRef} tabIndex={-1}>
+          {COPY.signalRecorded}
+        </p>
+      )}
       {canConfirm && (
         <form
           className="hi-resolve"
           onSubmit={(event) => {
             event.preventDefault();
             if (!valid) return;
-            void onAct(key, async () => {
+            void Promise.resolve(onAct(key, async () => {
               const version = scope !== 'import' ? (await api.getExperiment(experimentId)).version : undefined;
               await api.recordImportRule(importId, {
                 kind: 'signal_assignment',
@@ -410,6 +388,10 @@ export function SignalSelection({
                   })),
                 },
               });
+            })).then((ok) => {
+              if (ok === false) return;
+              setRecorded(true);
+              window.setTimeout(() => recordedRef.current?.focus(), 0);
             });
           }}
         >
@@ -445,7 +427,7 @@ export function SignalSelection({
               </label>
             </div>
           ))}
-          <ScopeChoice
+          <RuleScopeFields
             scope={scope}
             setScope={setScope}
             experimentId={experimentId}

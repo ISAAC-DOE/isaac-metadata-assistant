@@ -718,6 +718,29 @@ is_official_field_value (false), is_evidence (false)}`.
 
 ---
 
+### 10.5 Additions of 2026-10-18 (the streamlined import, QA `C-05`…`C-29`)
+
+* **A short reason beside every full one.** `reconstruction.candidates[]` gains
+  `not_proposable_summary` — one plain sentence (≤ ~160 characters, no decision or
+  question id, no date, no revision history, nothing specific to one archive) derived by
+  `historical_import.plain_reason` from the same facts `not_proposable_reason` was set
+  from; `null` exactly when the candidate can be sent. `mapping.concepts[]` gains
+  `summary` (`bl15.mapping.CONCEPT_SUMMARIES`), and the batch's `not_sent[]` rows gain
+  `summary`. **`not_proposable_reason` and `reason` are unchanged** — the full engineering
+  rationale, which the screen keeps behind "Why, in detail". Pinned by
+  `apps/api/tests/test_import_plain_reasons.py`, over every committed archive and example
+  source, with negative controls proving each ban fires on the full reasons.
+* **Run labels keep unrecognised filename tokens** (`C-19`): `06_03_ZZ3_alk_fresh_…`
+  becomes "Legacy 6 · 03 · ZZ3 · f30 · 900mV · alk · fresh", verbatim and after the
+  recognised tokens, so two runs no longer differ only by their legacy number.
+* **An import-minted note reads as a reading** (`C-23`): ~~`<file> (<locator>): <key> =
+  <value>`~~ is now `<reading>: <value as written>[ (read as <proposed value>)] — from
+  <archive name> · <locator>`. The raw value is still first and is still the excerpt;
+  "read as" appears only when a named rule turned the literal into something else, with a
+  unit only when the target field's own name states one (`routes._FIELD_NAME_UNITS`).
+  Exactly-once keys do not read the text, so no proposal or note is re-minted.
+* **The client URL** is `/imports?import=<id>&stage=<stage>` (`ROUTES.importSession`).
+
 ## 11. Not done, and open
 
 * ~~**Q6, Q7, Q8** are still Angel's. Their fields stay missing.~~ — answered 2026-10-12

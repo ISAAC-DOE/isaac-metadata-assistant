@@ -75,9 +75,11 @@ export const BL15_COPY = {
     'Statements this archive made that the official ISAAC record has no field for. ' +
     'Each one keeps the source’s own words, which source they came from, and where ' +
     'in it.',
+  /* ~~"Every level-4 statement … is in the companion"~~ (2026-10-18, QA `C-23`): a
+     decision record's numbering and an internal artifact's name, said to a scientist. */
   extendedContextNoneLeftOut:
-    'Every level-4 statement this reading found is in the companion. Nothing was ' +
-    'left out.',
+    'Every statement this reading found that has no official field is kept in the ' +
+    'extended context, with its source. Nothing was left out.',
   evidenceTitle: 'Supporting sources',
   searchLabel: 'Search measurements',
   searchPlaceholder: 'Legacy number, sample, filename…',

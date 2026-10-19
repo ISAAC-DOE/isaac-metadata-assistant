@@ -827,7 +827,26 @@ class ConceptMapping:
             # 2026-09-22 — how many values the concept is expected to have, so a
             # surface can say "varies by scan" from the registry rather than guess it.
             "cardinality": cardinality_for(self.concept),
+            # 2026-10-18 — the SHORT, plain sentence a scientist reads beside a value
+            # this row governs. `reason` above stays exactly what it was: the
+            # engineering rationale, served beside the summary and shown behind
+            # "Why, in detail". See `CONCEPT_SUMMARIES`.
+            "summary": self.summary,
         }
+
+    @property
+    def summary(self) -> str:
+        """The scientist-facing one-liner for this row (:data:`CONCEPT_SUMMARIES`).
+
+        A missing entry is a programming error, not a state a reader should meet, and
+        ``test_import_plain_reasons.py`` fails on one; at runtime the row's own first
+        sentence would be no better (it is the long rationale's opening), so the
+        fallback names the absence plainly instead.
+        """
+        return CONCEPT_SUMMARIES.get(
+            self.concept,
+            "ISAAC keeps this reading as evidence. Why, in detail, is below.",
+        )
 
 
 # --- the registry ------------------------------------------------------------
@@ -1609,6 +1628,231 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
 )
 
 MAPPINGS: dict[str, ConceptMapping] = {m.concept: m for m in _MAPPINGS}
+
+# --- the scientist-facing summary of each row (2026-10-18) -------------------------
+#
+# WHY A SECOND SENTENCE EXISTS AT ALL. Each row's ``reason`` is the registry's
+# ENGINEERING rationale, and it was served to the import screen verbatim. An independent
+# browser audit (QA ``C-05``/``C-06``) measured what that put in front of a scientist: a
+# median of ~350 characters per reason and up to 1,318, struck-through revision history,
+# decision and question ids, ALL-CAPS asides, the same extension-namespace paragraph
+# repeated on about ten rows — and FACTS ABOUT THE ARCHIVE THE REGISTRY WAS MEASURED ON
+# stated as though they described the import on screen ("nine declared targets were never
+# acquired" beside an import with one; "roughly a hundred and eighty motor positions"
+# beside one with ten).
+#
+# So every row also carries ONE short sentence, written for the person deciding:
+#
+#   * at most ~160 characters;
+#   * no decision or question id, no date, no revision history, no ALL-CAPS emphasis;
+#   * nothing specific to any one archive — a figure belongs in a summary only when it is
+#     computed from the import being shown, and none of these is;
+#   * truthful on its own, and never stronger than the rationale it summarises.
+#
+# The rationale is NOT shortened, moved or reworded: engineers and reviewers still read
+# it in full, and the screen keeps it one press away ("Why, in detail"). Both the shape
+# and the bans are enforced by ``apps/api/tests/test_import_plain_reasons.py``.
+CONCEPT_SUMMARIES: dict[str, str] = {
+    ev.CONCEPT_ACQUISITION_TIMESTAMP: (
+        "The start time the file's header states. It is sent only with a time zone; a "
+        "local time is kept as evidence."
+    ),
+    ev.CONCEPT_ACQUISITION_EPOCH: (
+        "The header's Unix time, converted to UTC by a named rule. It can be sent as the "
+        "acquisition start time."
+    ),
+    ev.CONCEPT_POTENTIAL_MAGNITUDE: (
+        "The potential in the file name, converted to volts. What it is measured against "
+        "is a separate question."
+    ),
+    ev.CONCEPT_PH: (
+        "The pH the notes state. It goes forward only with the basis the schema asks for "
+        "beside it."
+    ),
+    ev.CONCEPT_FLOW_RATE: (
+        "The flow rate the notes state, with its unit kept separately. The schema also "
+        "needs the feed's phase and makeup."
+    ),
+    ev.CONCEPT_POTENTIAL_REFERENCE: (
+        "What the potential is measured against. When no source states it, it stays "
+        "blank for you to fill in."
+    ),
+    ev.CONCEPT_ELECTROLYTE_OR_MEDIUM: (
+        "'Acid' or 'base' names a kind of medium, not an electrolyte, and the schema also "
+        "needs its concentration. Nothing is filled in."
+    ),
+    ev.CONCEPT_GAS_CONDITION: (
+        "Whether a gas is the cell's feed or its atmosphere is a judgement about the "
+        "experiment, so nothing is filled in."
+    ),
+    ev.CONCEPT_SAMPLE_NAME: (
+        "A sample token is shorthand for a material or an electrode, and only you can "
+        "say which. Nothing is filled in."
+    ),
+    ev.CONCEPT_SAMPLE_OR_ELECTRODE_NUMBER: (
+        "A sample or electrode number, read from the file name. Which schema field it "
+        "belongs in is yours to decide."
+    ),
+    ev.CONCEPT_LOADING_OR_THICKNESS: (
+        "This part of a file name can mean a thickness or a loading, and the schema has "
+        "no clear home for either. It is yours to decide."
+    ),
+    ev.CONCEPT_ELEMENT: (
+        "The schema has no absorbing-element field, so the element is kept as a reading "
+        "and not put in the record."
+    ),
+    ev.CONCEPT_CYCLING_STATE: (
+        "The schema has no field for cycling history, so it is kept as a reading and not "
+        "put in the record."
+    ),
+    ev.CONCEPT_BEFORE_AFTER_STATE: (
+        "Whether a measurement came before or after a treatment has no schema field. It "
+        "is kept as a reading."
+    ),
+    ev.CONCEPT_FILTER: (
+        "A filter setting is beamline-specific, and this build cannot write the schema's "
+        "place for such settings. It is kept as a reading."
+    ),
+    ev.CONCEPT_EMISSION_ENERGY: (
+        "The emission energy has no general schema field, and this build cannot write "
+        "the schema's place for such settings. It is kept as a reading."
+    ),
+    ev.CONCEPT_LEGACY_NUMBER: (
+        "The file number is the archive's own label. It names the measurement for you "
+        "and is not written into a record field."
+    ),
+    ev.CONCEPT_NEW_SPOT: (
+        "Moving to a new spot on the same sample has no schema field, and it is not a "
+        "replicate. It is kept as a reading."
+    ),
+    ev.CONCEPT_MONOCHROMATOR_CALIBRATION: (
+        "The calibration has no schema field, and linking it needs a calibration record "
+        "to point at. It is kept as a reading."
+    ),
+    ev.CONCEPT_SPECTROMETER_CONFIG: (
+        "Spectrometer settings are station configuration, and this build cannot write "
+        "the schema's place for them. They are kept as a reading."
+    ),
+    ev.CONCEPT_BEAMSIZE: (
+        "Beam size is station configuration, and this build cannot write the schema's "
+        "place for it. It is kept as a reading."
+    ),
+    ev.CONCEPT_UNKNOWN_TOKEN: (
+        "A part of the file name no convention recognises. It is kept as a reading rather "
+        "than dropped."
+    ),
+    ev.CONCEPT_SCAN_COMMAND: (
+        "This build does not publish a historical file as an official asset, so the scan "
+        "command is kept as a reading."
+    ),
+    ev.CONCEPT_ENERGY_GRID: (
+        "The scan grid is read, but the schema also needs its signal channels named, "
+        "which is a scientific choice. Nothing is filled in."
+    ),
+    ev.CONCEPT_DETECTOR_COLUMN: (
+        "Column names are read, but which column is the primary signal is a scientific "
+        "choice, so nothing is filled in."
+    ),
+    ev.CONCEPT_ACQUISITION_METHOD: (
+        "The files name a method, not one of the schema's techniques, so the technique is "
+        "yours to choose in Add to Experiment."
+    ),
+    ev.CONCEPT_REPEAT_MARKER: (
+        "A repeat label can mean a replicate or a failed first try, and a link needs a "
+        "target record. It is yours to decide."
+    ),
+    ev.CONCEPT_QUALITY_NOTE: (
+        "Remarks about data quality are kept word for word. They never set a QC verdict; "
+        "that stays your call."
+    ),
+    ev.CONCEPT_SAMPLE_PREPARATION: (
+        "Preparation is described for several samples at once; how much of it belongs to "
+        "one sample is yours to decide."
+    ),
+    ev.CONCEPT_ECHEM_PROCEDURE: (
+        "The electrochemical program is written as prose; which parts belong in which "
+        "schema field is yours to decide."
+    ),
+    ev.CONCEPT_BEAMTIME_DATES: (
+        "The beamtime's dates describe the whole campaign, not one measurement, so they "
+        "are not written as a measurement's times."
+    ),
+    ev.CONCEPT_BEAMTIME_PURPOSE: (
+        "The campaign's aim has no schema field. Its words are kept as a reading rather "
+        "than cut down to keywords."
+    ),
+    ev.CONCEPT_MOTOR_POSITION: (
+        "Motor positions are instrument state with no schema field. Where a plan and a "
+        "recording disagree, the recording is used."
+    ),
+    ev.CONCEPT_SAMPLE_POSITION: (
+        "Stage positions have no schema field. Where a plan and a recording disagree, the "
+        "recorded position is used; both are kept."
+    ),
+    ev.CONCEPT_COUNTING_TIME: (
+        "Dwell time per point has no schema field. It is kept as a reading."
+    ),
+    ev.CONCEPT_SCAN_COUNT: (
+        "A planned scan count and the scans actually found can differ, and neither has a "
+        "field. Both are kept as readings."
+    ),
+    ev.CONCEPT_POINT_COUNT: (
+        "The number of points follows from the scan itself, so it is not recorded a second "
+        "time."
+    ),
+    ev.CONCEPT_EDGE: (
+        "The schema has no absorption-edge field, so the edge is kept as a reading and not "
+        "put in the record."
+    ),
+    ev.CONCEPT_DRY_STATE: (
+        "A dry condition has no field of its own. A dry sample may get a separate ex situ "
+        "proposal for you to review."
+    ),
+    ev.CONCEPT_STEP_NUMBER: (
+        "A step in the electrochemical program. It ties a file to its notes and is not a "
+        "record field."
+    ),
+    ev.CONCEPT_TRIGGER: (
+        "A trigger keeps the instruments in step and says nothing about the sample, so "
+        "there is nothing to record."
+    ),
+    ev.CONCEPT_TEMPERATURE_STATEMENT: (
+        "What a source says about temperature is kept in its own words. It is never turned "
+        "into a number for you."
+    ),
+    ev.CONCEPT_CONTRIBUTOR_STATEMENT: (
+        "A person named in the notes is kept as provenance. Who they are on a record, and "
+        "in what role, is yours to decide."
+    ),
+    ev.CONCEPT_ENVIRONMENT_STATEMENT: (
+        "Proposed only when the logbook names exactly one of the schema's environments; "
+        "otherwise left for you to choose."
+    ),
+    ev.CONCEPT_REACTION_STATEMENT: (
+        "Proposed only when the logbook names exactly one of the schema's reactions; "
+        "otherwise left for you to choose."
+    ),
+    ev.CONCEPT_CELL_TYPE_STATEMENT: (
+        "Proposed only when the logbook names exactly one of the schema's cell types; "
+        "otherwise left for you to choose."
+    ),
+    ev.CONCEPT_SPEC_USER_STRING: (
+        "The beamline account name is never used as an ISAAC identity. It is kept as a raw "
+        "reading only."
+    ),
+    ev.CONCEPT_SPEC_FILE_DECLARATION: (
+        "The name a file gives itself inside. It is used to spot disagreements with its "
+        "file name, not written to a record."
+    ),
+    ev.CONCEPT_ACQUISITION_TARGET: (
+        "The name a macro planned to write. It links a plan to a measurement and is not a "
+        "record field."
+    ),
+    ev.CONCEPT_NOTE_FILE_NUMBER_ROW: (
+        "A row of the notes' file-number table. It corroborates the files and is not itself "
+        "a record field."
+    ),
+}
 
 # --- cardinality: how many values a concept is EXPECTED to have -----------------
 #

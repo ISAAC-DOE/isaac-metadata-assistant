@@ -27556,30 +27556,101 @@ def get_experiment_convention_rules(
     }
 
 
-def _import_note_text(statement: Mapping, filename: str) -> str:
+#: A schema field's own unit, read off its NAME (`potential_setpoint_V` is in volts) — the
+#: one place a unit may come from without a source stating it, because the field defines
+#: it. Used only to say what a converted reading is in, never to convert anything.
+_FIELD_NAME_UNITS: tuple[tuple[str, str], ...] = (
+    ("_mV_s", "mV/s"),
+    ("_eV", "eV"),
+    ("_bar", "bar"),
+    ("_Pa", "Pa"),
+    ("_V", "V"),
+    ("_K", "K"),
+    ("_M", "M"),
+    ("_s", "s"),
+)
+
+
+def _field_name_unit(path: str | None) -> str | None:
+    """The unit a schema field's name states, or ``None``."""
+    if not path:
+        return None
+    last = path.rsplit(".", 1)[-1]
+    for suffix, unit in _FIELD_NAME_UNITS:
+        if last.endswith(suffix):
+            return unit
+    return None
+
+
+def _import_note_read_as(candidate, statement: Mapping) -> str | None:
+    """How the import READ the value, when a named rule turned the literal into
+    something else — ``2100-01-01T00:00:00Z`` for an epoch, ``0.1 V`` for ``100mV`` — or
+    ``None`` when the value was taken as written.
+
+    It is the candidate's own ``proposed_value``, i.e. exactly what the proposal beside
+    the note carries; nothing is computed here. A unit is appended only when the target
+    field's own name states one.
+    """
+    if candidate is None:
+        return None
+    value = getattr(candidate, "proposed_value", None)
+    if value is None or isinstance(value, (dict, list, bool)):
+        return None
+    shown = str(value)
+    if shown == str(statement.get("value")):
+        return None
+    unit = _field_name_unit(getattr(candidate, "target_field_path", None))
+    return f"{shown} {unit}" if unit else shown
+
+
+def _import_note_label(statement: Mapping) -> str:
+    """The reading's name as a scientist reads it: a concept humanised ("Acquisition
+    epoch"), or — for an example source, whose key IS the file's own word — the key,
+    verbatim."""
+    return hist._reading_label(str(statement.get("key")))
+
+
+def _import_note_text(statement: Mapping, filename: str, read_as: str | None = None) -> str:
     """The words an import-minted note carries, and where they were read from.
 
     A note is stored verbatim and is what keeps the content safe from every
-    proposal outcome, so it carries the SOURCE's own words — the key and the value
-    as the file wrote them — prefixed by the file and line they were read from.
-    The prefix is part of the note rather than a separate field because a note has
-    exactly one text and a reader meeting it later needs to know which file said
-    this.
+    proposal outcome, so it carries the SOURCE's own words — the value exactly as the
+    file wrote it — together with the file and line it was read from. The source is
+    part of the note rather than a separate field because a note has exactly one text
+    and a reader meeting it later needs to know which file said this.
+
+    ~~``f"{filename} ({locator}): {key} = {value}"``~~ — the shape until 2026-10-18
+    (QA ``C-23``). It read, on a record, ``bl15_synthetic_semantics_corpus (…#E):
+    acquisition_epoch = 4102444800``: an archive key, a concept code and a bare epoch.
+    It now reads ``Acquisition epoch: 4102444800 (read as 2100-01-01T00:00:00Z) — from
+    <archive name> · <member> · line 2 header #E``. THE RAW VALUE IS UNCHANGED AND STILL
+    FIRST — the excerpt (``_import_note_value_span``) is that literal, exactly as before —
+    and ``read as`` appears only when a named rule turned it into something else.
     """
-    return f"{filename} ({statement.get('locator')}): {statement.get('key')} = {statement.get('value')}"
+    label = _import_note_label(statement)
+    value = str(statement.get("value"))
+    text = f"{label}: {value}"
+    if read_as:
+        text += f" (read as {read_as})"
+    source = hist.archive_display_names().get(filename, filename)
+    where = " · ".join(part for part in (source, str(statement.get("locator") or "")) if part)
+    if where:
+        text += f" — from {where}"
+    return text
 
 
-def _import_note_value_span(statement: Mapping, filename: str) -> tuple[int, int]:
+def _import_note_value_span(statement: Mapping, filename: str, read_as: str | None = None) -> tuple[int, int]:
     """`(start_char, end_char)` of the VALUE inside `_import_note_text`.
 
     Computed from the same two pieces the text is built from rather than searched
     for, so it cannot point at the wrong occurrence when a value happens to
     appear in its own key or in the filename. `excerpt_of` therefore derives
-    exactly the proposed value on read, and no copy of the words is stored twice.
+    exactly the value as the source wrote it on read, and no copy of the words is
+    stored twice. (``filename`` and ``read_as`` come AFTER the value, so they cannot
+    move it; they are accepted so the signature matches the text's.)
     """
-    text = _import_note_text(statement, filename)
-    value = str(statement.get("value"))
-    return len(text) - len(value), len(text)
+    start = len(_import_note_label(statement)) + len(": ")
+    return start, start + len(str(statement.get("value")))
 
 
 def _import_statement_filename(session, candidate, statement: Mapping) -> str:
@@ -28511,8 +28582,9 @@ def _mint_import_candidate(
         error, message, extra = problem
         return _proposal_refusal(error, message, **extra)
 
-    text = _import_note_text(statement, filename)
-    start_char, end_char = _import_note_value_span(statement, filename)
+    read_as = _import_note_read_as(candidate, statement)
+    text = _import_note_text(statement, filename, read_as)
+    start_char, end_char = _import_note_value_span(statement, filename, read_as)
     # THE PER-NOTE BYTE BOUND, AND `_note_text_refusal` IS ITS THIRD CALLER.
     #
     # A note's own size limit is enforced at the ROUTE — `notes.Note` does not
@@ -29846,6 +29918,13 @@ def post_import_add_to_experiment(
                                 if candidate.candidate_id
                                 in session.archive_reading.shared_candidate_ids
                                 else _IMPORT_CANDIDATE_UNIT_IS_NOT_A_RUN
+                            ),
+                            # 2026-10-18 — the short sentence a scientist reads first.
+                            "summary": (
+                                hist.PLAIN_REASON_BEAMTIME_SCOPE
+                                if candidate.candidate_id
+                                in session.archive_reading.shared_candidate_ids
+                                else hist.PLAIN_REASON_NOT_A_RUN
                             ),
                         }
                     )

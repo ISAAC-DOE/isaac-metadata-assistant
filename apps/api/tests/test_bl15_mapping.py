@@ -459,6 +459,10 @@ def test_to_state_is_complete_and_round_trips_as_json():
             # (`mp.RULE_CARDINALITY`), so a surface can say "varies by scan" from the
             # registry instead of calling per-scan variation a disagreement.
             "cardinality",
+            # ADDED 2026-10-18 (QA `C-05`/`C-06`) — the SHORT scientist-facing sentence
+            # served beside `reason`, which stays the full engineering rationale
+            # (`mp.CONCEPT_SUMMARIES`; shape pinned in `test_import_plain_reasons.py`).
+            "summary",
         }, concept
         json.dumps(state)
 
