@@ -552,7 +552,8 @@ async def storage_unavailable_handler(request, exc) -> JSONResponse:
 #: DERIVED, NOT PICKED, and deliberately a second number rather than a reuse of
 #: :data:`_MAX_VALUE_DEPTH`. That constant's own docstring says in as many words:
 #: *"IF THIS GUARD IS EVER REUSED FOR ANOTHER FIELD SET, re-derive it"* — it is
-#: measured headroom for five run-level SCALARS, and this bounds a whole REQUEST
+#: measured headroom for the run-level SCALARS (five then; seven, all still scalars,
+#: since 2026-10-12), and this bounds a whole REQUEST
 #: BODY, which legitimately wraps such a value in one or two more containers. What
 #: is shared is the PREDICATE (:func:`_value_depth_within`), which is the part that
 #: must not exist twice; the limit is a property of what is being bounded.
@@ -8890,11 +8891,64 @@ def _run_field_question(path: str) -> str:
 #:
 #: FAIL-CLOSED. A field a future extractor emits is not writable here until
 #: somebody classifies it, which is the same default ``field_level`` already takes.
+#: THE RUN-LEVEL FIELDS A PERSON CHOOSES FROM THE SCHEMA'S OWN LIST (2026-10-12).
+#:
+#: THE DOMAIN OWNER'S ANSWER THAT DAY, relayed by the project owner: the reaction under
+#: study and the electrochemical cell are taken from the metadata when it states them
+#: and are otherwise "left blank for a human to select the appropriate value". Until
+#: then this build had NO input for either — measured: neither path was in this module's
+#: writable set, so ``PATCH .../runs/{id}`` answered ``422 unrecognized_field`` at both,
+#: and the Run editor had no control. A person could not select them at all.
+#:
+#: THE PATHS ARE NAMED, AND EVERYTHING ELSE ABOUT THEM IS DERIVED. They are not in
+#: ``extract.structured.FIELD_MAP`` — a campaign sheet has no such row, and widening the
+#: extractor (part of the truth core's package) to make a run editor work would be the
+#: wrong change — so they join the run-writable set beside the extractor's paths, under
+#: the SAME gates the rest of it has: each must resolve through the vendored schema's
+#: ``properties`` to a node that declares a string ``enum``, and ``workspace.field_level``
+#: must classify it as the RUN's. The allowed VALUES are that enum, read at runtime and
+#: never transcribed; a value outside it is refused ``422 not_an_allowed_value`` by the
+#: run edit route and by proposal acceptance. FAIL-CLOSED: an unreadable schema, or a
+#: refresh that removes either path or its enum, drops the path from the writable set.
+#:
+#: WHAT IT DOES NOT CHANGE: ``context.environment``'s pre-existing acceptance of an
+#: off-enum value at the run edit route is untouched (several tests write "vacuum" and
+#: "ambient" there on purpose); the official validator still refuses such a record.
+RUN_CHOSEN_ENUM_PATH_NAMES: tuple[str, ...] = (
+    "context.electrochemistry.reaction",
+    "context.electrochemistry.cell_type",
+)
+
+
+@functools.lru_cache(maxsize=1)
+def _run_chosen_enum_fields() -> Mapping[str, tuple]:
+    """``path -> the schema's own enum`` for :data:`RUN_CHOSEN_ENUM_PATH_NAMES`. Read-only."""
+    try:
+        schema = json.loads(schema_path(REPO_ROOT).read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # unreadable or unparseable vendored schema
+        return MappingProxyType({})
+    found: dict[str, tuple] = {}
+    for path in RUN_CHOSEN_ENUM_PATH_NAMES:
+        node: object = schema
+        for segment in path.split("."):
+            properties = node.get("properties") if isinstance(node, dict) else None
+            node = properties.get(segment) if isinstance(properties, dict) else None
+        values = node.get("enum") if isinstance(node, dict) else None
+        if (
+            isinstance(values, list)
+            and values
+            and all(isinstance(v, str) for v in values)
+            and ws.field_level(path) == ws.LEVEL_RUN
+        ):
+            found[path] = tuple(values)
+    return MappingProxyType(found)
+
+
 RUN_WRITABLE_FIELD_PATHS: frozenset[str] = frozenset(
     path
     for path, _coercer in EXTRACTOR_FIELD_MAP.values()
     if ws.field_level(path) == ws.LEVEL_RUN
-)
+) | frozenset(_run_chosen_enum_fields())
 
 
 #: THE COMPLETE SET OF NAMESPACED ADDRESSES A RUN MAY RECORD AN OVERRIDE AT.
@@ -9298,8 +9352,9 @@ def _echoable_key(raw: object, placeholder: str = UNRENDERABLE_KEY_PLACEHOLDER) 
 
 #: The deepest nesting a stored run-level value may carry.
 #:
-#: MEASURED, not picked. All five members of :data:`RUN_WRITABLE_FIELD_PATHS` are
-#: declared ``string`` or ``number`` scalars by ``schema/isaac_record_v1.json``, and the
+#: MEASURED, not picked. All seven members of :data:`RUN_WRITABLE_FIELD_PATHS` (five
+#: until 2026-10-12) are declared ``string`` or ``number`` scalars by
+#: ``schema/isaac_record_v1.json``, and the
 #: deepest WHOLE DOCUMENT anywhere in this repository — every committed record and every
 #: fixture — nests 7 levels. 32 is therefore more than four times the deepest real
 #: document and unreachable by any shape the schema declares at these paths, while
@@ -9310,7 +9365,7 @@ def _echoable_key(raw: object, placeholder: str = UNRENDERABLE_KEY_PLACEHOLDER) 
 #: ``sample.composition``, ``system.configuration``,
 #: ``context.transport.feed.partial_pressures``, ``measurement.series.items.conditions``
 #: and ``assets.items.citation`` among them — where the instance depth a valid record may
-#: carry is UNBOUNDED. 32 is measured headroom for the five run-level scalars and nothing
+#: carry is UNBOUNDED. 32 is measured headroom for the seven run-level scalars and nothing
 #: more.
 _MAX_VALUE_DEPTH = 32
 
@@ -9325,9 +9380,10 @@ _MAX_VALUE_DEPTH = 32
 #: and no verdict was falsified, so it is resource exhaustion rather than a wedge — on a
 #: pod whose workspace is an ``emptyDir`` this project does not own.
 #:
-#: 64 KiB is ~2,000x the longest value the schema can legitimately put at any of the five
-#: writable paths: all five are declared ``string`` or ``number`` scalars, and the longest
-#: plausible one is a 32-character ISO-8601 timestamp with an offset. It is also a quarter
+#: 64 KiB is ~2,000x the longest value the schema can legitimately put at any of the seven
+#: writable paths: all seven are declared ``string`` or ``number`` scalars, and the longest
+#: plausible one is a 32-character ISO-8601 timestamp with an offset (the longest enum
+#: member of the two added 2026-10-12 is 22 characters). It is also a quarter
 #: of ``csv_ingest.MAX_BODY_BYTES`` (256 KiB) and an eighth of
 #: ``MAX_VALIDATE_RECORD_BYTES`` (512 KiB), the two limits this repository already
 #: enforces — deliberately in their style rather than as a new kind of number.
@@ -10087,6 +10143,31 @@ def patch_run(
                     "key": None,
                     "keys": [],
                     "message": "No run-level field and no new label was named in the request.",
+                },
+            )
+
+        # A PERSON-CHOSEN CLOSED ENUM (2026-10-12): the value must be one of the schema's
+        # own members, read at runtime. `null` CLEARS the field and is not a value.
+        chosen = _run_chosen_enum_fields()
+        off_enum = sorted(
+            key
+            for key, value in raw_fields.items()
+            if key in chosen and value is not None and value not in chosen[key]
+        )
+        if off_enum:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "not_an_allowed_value",
+                    "key": off_enum[0],
+                    "keys": off_enum,
+                    "allowed": {key: list(chosen[key]) for key in off_enum},
+                    "message": (
+                        "The official ISAAC schema closes each of these fields with a "
+                        "fixed list of values, and what was sent is not one of them. "
+                        "Nothing was written. The values the schema allows are in "
+                        "`allowed`, keyed by field."
+                    ),
                 },
             )
 
@@ -12038,7 +12119,11 @@ def post_run_remove(
 #: which is a guess with a plausible shape, and plausible shapes get believed.
 NOTE_MAPPABLE_FIELD_PATHS: frozenset[str] = frozenset(
     path for path, _coercer in EXTRACTOR_FIELD_MAP.values()
-)
+) | frozenset(_run_chosen_enum_fields())
+# ^ 2026-10-12: plus the two person-chosen run fields (:data:`RUN_CHOSEN_ENUM_PATH_NAMES`)
+# — 25 -> 27 — so a historical import can PROPOSE a value the logbook states for them,
+# and a note can name them, through the one proposal route whose acceptance keeps its
+# trusted-actor gate. Every one of the 27 is still a real official path.
 
 
 #: THE MAPPABLE PATHS SOME WRITE OPERATION IN THIS BUILD WILL ACCEPT A VALUE AT.
@@ -12815,7 +12900,7 @@ def _notes_payload(exp: Experiment, *, selected: list["notes.Note"]) -> dict:
         # client offers and the request the server accepts cannot disagree.
         "mappable_field_paths": sorted(NOTE_MAPPABLE_FIELD_PATHS),
         # AND THE SERVER'S OWN ANSWER TO "AND MAY I THEN ENTER ITS VALUE?", which is a
-        # DIFFERENT question and has a different answer for 7 of the 25. Served for
+        # DIFFERENT question and has a different answer for 7 of the 27. Served for
         # exactly the reason the line above is: the panel tells a person what to do
         # next after mapping, and the only alternative to being told is transcribing
         # the two write routes' admissible sets into the frontend, where they are free
@@ -12875,7 +12960,7 @@ _NOTE_LIST_DESC = (
         "`.../edit`) for a record-level one, and `POST "
         "/api/experiments/{experiment_id}/runs/{run_id}/overrides` to record ONE "
         "run's divergence from a record-level value. MAPPING A NOTE AND ENTERING "
-        "ITS VALUE ARE DIFFERENT ACTS, and for 7 of the 25 mappable paths the "
+        "ITS VALUE ARE DIFFERENT ACTS, and for 7 of the 27 mappable paths the "
         "second one has no route at all: every write operation refuses them. "
         "Mapping to such a path is still correct and still keeps the content on "
         "the record in full — this key says only that no request can then put a "
@@ -12884,7 +12969,7 @@ _NOTE_LIST_DESC = (
         "JSON type, a required sibling property or the no-guessing rules may still "
         "refuse the particular value. The record-level paths "
         "are writable on a record with no runs at all, through the record's own "
-        "answers operation; only the 5 run-level paths need a run to exist. "
+        "answers operation; only the 7 run-level paths need a run to exist. "
         "`record_writable_field_paths` is the sub-subset a RECORD-level operation "
         "also accepts — `POST /api/experiments/{experiment_id}/answers` to answer and "
         "`POST /api/experiments/{experiment_id}/edit` to correct. It is DERIVED from "
@@ -13569,7 +13654,7 @@ def get_note(
         "application makes a person do through a separate confirmed write; a "
         "mapped note says where the content belongs, not what the field should "
         "hold. WHETHER SUCH A WRITE EXISTS FOR THE MAPPED PATH IS A SEPARATE "
-        "QUESTION, and for 7 of the 25 mappable paths the answer is no — `GET "
+        "QUESTION, and for 7 of the 27 mappable paths the answer is no — `GET "
         ".../notes` reports `value_writable_field_paths`, the subset some write "
         "operation accepts a value at. Mapping outside it is still a correct and "
         "useful act and the content stays on the record in full, but no request "
@@ -15330,8 +15415,11 @@ def _run_enum_fields() -> Mapping[str, tuple]:
     """Run-level writable field paths the vendored schema CLOSES with an enum -> values.
 
     The run-level counterpart of :func:`_record_enum_fields`, read from the same
-    document at runtime and never transcribed. Over v1.05 it yields exactly
-    ``context.environment``. An unreadable schema yields an EMPTY mapping, which means
+    document at runtime and never transcribed. Over v1.05 it yields
+    ``context.environment`` and — since the reaction and the cell type became
+    run-writable (2026-10-12, :data:`RUN_CHOSEN_ENUM_PATH_NAMES`) —
+    ``context.electrochemistry.reaction`` and ``…cell_type``: it is the ONE acceptance
+    gate for every run-level enum. An unreadable schema yields an EMPTY mapping, which means
     "no enum known" and leaves an acceptance exactly as permissive as the run edit
     route already is — it never refuses on the strength of a set it could not read.
     Read-only because it is shared, for the reason its sibling gives.
@@ -15482,6 +15570,12 @@ def _apply_accepted_proposal(
             # is the acceptance's own — an accepted value must be one a scientist
             # could have CHOSEN in that editor. Nothing is mapped: the member is
             # chosen by a person through "Correct the Value, Then Accept".
+            #
+            # ONE GATE FOR EVERY RUN ENUM (merge, 2026-10-12): `_run_enum_fields` reads
+            # the enum of every member of `RUN_WRITABLE_FIELD_PATHS`, so it covers the
+            # reaction and the cell type a person chooses (`RUN_CHOSEN_ENUM_PATH_NAMES`)
+            # as well as the environment; the separate `_run_chosen_enum_fields` check
+            # that stood here was the same job and is removed.
             return writer, _proposal_refusal(
                 "not_an_allowed_value",
                 (
@@ -27747,6 +27841,15 @@ def _dqn_request_key(identity: str, row: Mapping, notes_digest: str | None = Non
     return f"historical-dqn:{digest}"
 
 
+def _left_for_a_person_summary(session) -> dict | None:
+    """``hist.left_for_a_person`` without its per-measurement list — the batch report's
+    copy, which names fields and counts; the session view keeps the full list."""
+    full = hist.left_for_a_person(session)
+    if full is None:
+        return None
+    return {key: value for key, value in full.items() if key != "by_measurement"}
+
+
 def _readings_note_key(
     identity: str, *, run_id: str | None = None, measurement: str | None = None
 ) -> str:
@@ -30308,6 +30411,9 @@ def post_import_add_to_experiment(
             "writes_field_values": False,
         },
         "run_origins_recorded": origins_recorded,
+        # 2026-10-12: what this import does NOT fill on the runs — the environment,
+        # reaction and cell type left for a person to choose, per field, with where.
+        "left_for_a_person": _left_for_a_person_summary(session),
         "reread_for_target": reread_for_target,
         "extended_context": {
             "available": context_available,

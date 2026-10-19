@@ -179,7 +179,17 @@ different rule and is unchanged.
 
 ---
 
-### 2.1 Per-scan variation is not a conflict — `bl15.mapping.cardinality.v2`
+### 2.1 Per-scan variation is not a conflict — `bl15.mapping.cardinality.v2` (now v3)
+
+> **v3, 2026-10-12, from the domain owner's answers that day (relayed by the project
+> owner).** `sample_position` joins `motor_position` as `per_scan_item` — each stage motor of
+> each scan is its own reading (*"can be read directly scan to scan"*); v2 compared the four
+> stage motors with each other, so `Sx 12.5` "disagreed" with `Sy 2.0`. A macro's move now
+> carries its motor as its item, positions are compared on their number (`13` and `13.0` are
+> one position), and a relative move (`mvr`) is kept without being compared. The four
+> quantities v2 reverted to per-measurement STAY per-measurement — the domain owner
+> confirmed it (**Q21 answered**: acquisition settings are kept the same for every scan).
+> See §2.4 for the standing rule a plan-versus-recording position disagreement now meets.
 
 > **v2, 2026-09-23, after an independent review.** v1 kept a measurement-level reading
 > (a macro's plan, a file-level header) in a group of its own, so a plan and the header's
@@ -264,6 +274,34 @@ view publishes `send_plan` — `{sendable, not_sent: {id: error}, no_run_when_cr
 — computed by `hist.batch_partition`, the SAME function `POST …/add-to-experiment`
 partitions with, so the Add stage's prediction and the batch's report are one
 categorisation (`test_import_send_plan.py` holds it as a property over both corpora).
+
+### 2.4 Standing domain-owner rules, and the logbook (2026-10-12)
+
+**A standing rule** is the confirmed-resolution layer of §2, confirmed by the domain owner
+for a whole class of disagreement and shipped, named and versioned, with the build
+(`bl15/resolution.py`, `STANDING_RESOLUTIONS`). There is one:
+`bl15.resolution.recorded_motor_position.v1` — where a run file's planned move disagrees
+with the position the raw acquisition file recorded for the same motor, the recorded
+position is the reading used. It chooses by source ROLE (`instrument_header` over
+`planned_acquisition`), applies only when those are the only two roles in the dispute and
+the recordings agree among themselves, keeps every reading, and writes nothing. On the wire
+the candidate carries `resolved_by_rule` (the rule id), `review_status: "resolved"` and
+`standing_resolution` (`{rule_id, rule_version, authority: "domain_owner_rule", layer,
+chosen_source_role, over_source_role, statement, attribution, reading_used, …}`).
+
+**The logbook** is read for `context.environment`, `context.electrochemistry.reaction` and
+`…cell_type` by `bl15/conditions.py` (rules `bl15.notes.*_statement.v1`): an explicit term
+naming exactly one of the schema's own options, read at runtime, becomes a proposal citing
+the sentence; section scope overrides beamtime scope for that section only; a beamtime
+sentence that names samples applies only to those, and only where the logbook's "Sample N"
+sections and the filenames' sample token agree — otherwise (and for "except", "only some",
+a sample code) to none, kept as `shared::unscoped::<concept>`; two options in one scope are
+a conflict; a term with no option, several, or in a negating or hedged sentence is kept and
+fills nothing; an abbreviation in an all-capitals clause, or a term in a path or file name,
+is not a statement. A dry/no-electrolyte filename proposes `ex_situ`
+(`bl15.environment.dry_sample_is_ex_situ.v1`), and that proposal and a logbook environment
+are reconciled by §2.2's same-field rule — a disagreement is a conflict. What is left is
+served as `left_for_a_person`.
 
 ## 3. Reviewed convention rules — learning without silent promotion
 
@@ -682,7 +720,16 @@ is_official_field_value (false), is_evidence (false)}`.
 
 ## 11. Not done, and open
 
-* **Q6, Q7, Q8** are still Angel's. Their fields stay missing.
+* ~~**Q6, Q7, Q8** are still Angel's. Their fields stay missing.~~ — answered 2026-10-12
+  (§2.4): each is read only from an explicit source and otherwise left for a person.
+  **Still open from that reply:** the Q8 tension (three_electrode for the whole experiment
+  beside a flowing configuration for samples 7–8) and the schema-vocabulary gap (no
+  `cell_type` member for a two-electrode cell, a battery or a generic electrolyzer).
+* **The Conflicts stage reads only the first window of candidates**
+  (`ARCHIVE_PAGE_WINDOW`, 200) from the session view, so a field conflict past the window
+  — measured on a 247-candidate synthetic archive, for the last measurement — is counted
+  in the Add stage's `left_for_a_person` but not listed on the Conflicts stage. Found
+  2026-10-12; not changed by that slice.
 * **Energy-window evidence** for the HERFD selector would need a cited edge-energy table;
   none is committed, so the selector abstains.
 * **Whether a nominal temperature rule should ever be enabled**, and under which

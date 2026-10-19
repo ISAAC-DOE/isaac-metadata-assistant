@@ -35,7 +35,68 @@ the enumerated form above is both.)*
 
 ---
 
-# ADDED 2026-09-23 — ONE NEW QUESTION, Q21, AND IT IS OPEN
+# RECONCILED 2026-10-12 — ANGEL ANSWERED Q6, Q7, Q8 AND Q21, AND THE TWO OPEN CONFLICT CLASSES
+
+**Read this section first; the 2026-09-23 and 2026-09-22 sections below are preserved
+unedited as the state they described.** After this reply **no numbered question in this
+packet is open** (`bl15.mapping.open_domain_questions()` is empty). None of the answers
+became a value written by the build: each became a RULE about what is read from a source
+and what is left for a person, and the build implements each rule.
+
+| source | what it is | what a reader can verify |
+|---|---|---|
+| **Angel, relayed by the project owner 2026-10-12** | domain-owner answers A–G, below, including a follow-up the same day | **nothing in-repo.** An OWNER RELAY of a domain owner's words — the evidentiary class `DEC-47` records. No transcript is committed; **only Krish can confirm the relay, and only Angel the content.** Every registry row it moved carries this attribution (`bl15/mapping.py`'s `ANGEL_2026_10_12`) |
+
+## The answers, quoted, and what the build now does
+
+| | Angel's words (quoted as relayed) | What the build does |
+|---|---|---|
+| **A — the general rule** | *"those markers or descriptors or values need to be extracted by the skill within the metadata available. If not available, then the claude skill needs to leave it blank for a human to select the appropriate value."* | Nothing is defaulted. For every measurement offered as a Run, the import now states which of the environment, reaction and cell type it leaves for a person, why, and where to set them (`left_for_a_person` on the session view and the Add report; the Add stage's "Left for You to Choose"). |
+| **B — Q6/Q7/Q8 for one beamtime** | For the April 2025 BL15-2 IrOx HERFD archive: environment *"operando"*; reaction *"OER"*; cell type *"three_electrode"*; *"and ex_situ for the dry or reference standard samples"*. | **Recorded as answers about ONE beamtime, never filled in.** They are facts about that beamtime, not readings a file states, so by answer A the import proposes them for no archive. |
+| **C — dry samples** | (part of B) | A measurement whose OWN filename says it was dry, or had no electrolyte (`NoElectrolyte`), gets an environment **proposal** of `ex_situ` (`bl15.environment.dry_sample_is_ex_situ.v1`, determinism `inferred`). "As-is" alone does NOT qualify — an as-received electrode can be measured in electrolyte (the multi-operator corpus's `fresh` reads as as-is in an alkaline medium at 1000 mV). **The name may say nothing else about the conditions** (tightened after an independent review the same day, which measured `dry_O2Sat`, `dry_pH13`, `dry_10mLmin`, `dry_O2` and `dry_alk` all proposed `ex_situ`): only identity tokens — the legacy number, the sample number, the sample name, the filter, a loading or thickness, and "as-is" — may stand beside it; any other token (an unrecognised one, a pH, a gas or saturation, a flow rate, an electrolyte, a potential, a cycling state), or a header declaring a different name, leaves it for a person. Reference standards and alignment scans are never Runs (unchanged). |
+| **D — Q21** | *"Typically no. Acquisition settings are maintain the same for all runs so that experimental conditions and results can be compared apples to apples (unless in very specific cases that should be registered somewhere in the logbook or run files; most likely settings to be explored: energy grid, counting time, filters; very unlikely thing to change due to not being able to compare sample to sample: emission energy)."* | **Confirmed, not pending.** Emission energy, energy grid, counting time, scan command and filter stay ONE value per measurement (`bl15.mapping.cardinality.v3`). A difference WITHIN one measurement is a conflict for review and its warrant now says so plainly; different measurements are never compared (each candidate is one measurement's). |
+| **E — timestamps** | *"not sure about the timestamps, those should be real discrepancies."* | The acquisition-timestamp disagreements stay conflicts, and their warrant says they are a real discrepancy to review. Nothing picks one. |
+| **F — sample positions** | *"Sample positions or motor positions are always recorded in the raw data files and can be read directly scan to scan; the manually written run files are written by users and they can make mistakes in updating the position with a move command e.g., "mv Sx 13.0" but the real motor position will be recorded no matter what on the original raw SPEC file."* | Two changes. (1) `sample_position` is read per motor and per scan (`cardinality.v3`, like `motor_position`): under v2 the four stage motors were compared with EACH OTHER, so `Sx 12.5` "disagreed" with `Sy 2.0`. (2) A planned move that disagrees with the recorded position of the same motor is shown **resolved** by a standing domain-owner rule, `bl15.resolution.recorded_motor_position.v1`: the recorded position is the reading used, both readings are kept verbatim, the rule is named with its provenance, and no field is written (a sample position has no official field — Q19). Two RECORDINGS that disagree stay an open conflict; a relative move (`mvr`) is a change, not a position, and is kept without being compared. |
+| **G — the logbook (follow-up, same day)** | *"the skill should be able to know if it is a three electrode or two electrode or electrolyzer or battery or whatever it is from the logbook that it will ingest. Then, if the information is not there, it can leave it blank for the user to select. Same for 'operando' and for the type of reaction under study 'OER' or 'HER' or 'ORR' etc."* | A bounded, versioned lexicon (`bl15.notes.environment_statement.v1`, `…reaction_statement.v1`, `…cell_type_statement.v1`, in `bl15/conditions.py`) reads a logbook sentence that names exactly ONE of the vendored schema's own options (read at runtime) and turns it into a **proposal** citing the sentence and its locator. A sample section's statement applies to that section's file numbers and overrides the beamtime one for that section only; two options in one scope are a conflict; a term with no option (*two-electrode*, *battery*, a generic *electrolyzer*), with several (*water oxidation*: OER or water_splitting), in a negating sentence (*not*, *none*, *nothing*, *neither/nor*, *without*, *replaced* …) or in a hedged one (a `?`, *possibly*, *maybe*, *might*, *planned*, *to be*, *TBD*, *check* …) fills nothing and is kept verbatim. An abbreviation in an all-capitals clause (*"NOTE: GIVE HER THE CELL KEYS"*) and a term touching a path or a file extension (`/data/OER/2099`, `OER.dat`) are not statements at all. A sentence before any sample section that NAMES samples (*"only samples 3 and 4 were run in a flow cell"*) applies only to those samples, and only where the logbook's own "Sample N" sections agree with the filenames' sample token (`DEC-47`); otherwise — and for any "except", "only some" or sample-code sentence — it applies to no measurement and is kept as one beamtime reading. (All four refinements came from the same independent review.) A Notes cell is never read for this (it is a Data Quality Note). A dry-filename `ex_situ` and a logbook environment that disagree are a conflict — neither wins. |
+
+## Question by question
+
+| Q | Was | Now (2026-10-12) |
+|---|---|---|
+| **Q6** | OPEN — environment member | **CONDITIONALLY RESOLVED** (answers A, B, C, G): proposed only from a dry/no-electrolyte filename or an explicit logbook statement; otherwise left for a person. `operando` is never filled in automatically. |
+| **Q7** | OPEN — reaction member | **CONDITIONALLY RESOLVED** (A, B, G): read from an explicit logbook statement naming one schema option; otherwise left for a person. |
+| **Q8** | OPEN — JK cell type | **CONDITIONALLY RESOLVED** (A, B, G). **A TENSION IS RECORDED, NOT RESOLVED:** Angel's *three_electrode* is for the whole experiment, while the beamtime document states that samples 7–8 used a flowing configuration (this packet's own §1 Q8 and the 2026-09-17 table: *"Samples 7–8 are explicitly a flow cell"*). Whether that family was a three-electrode cell under flow, or a flow cell, is the domain owner's to say; the build reads whichever the logbook states and decides neither. |
+| **Q21** | OPEN — which quantities vary per scan | **CLOSED BY THE DOMAIN OWNER** (D): one value per measurement. Added to the registry, which had never recorded it. |
+| *(unnumbered)* timestamp conflicts | open for the domain owner (`docs/evidence/bl15-real-regression-2026-09-22.md`) | **real discrepancies** (E) — kept as conflicts |
+| *(unnumbered)* sample-position conflicts | open for the domain owner (same) | **resolved by a standing rule** (F) — recorded position used, both kept |
+
+## Open, and named rather than implied
+
+* **A schema-vocabulary gap, for the domain owner and upstream — not something this build
+  decides.** `context.electrochemistry.cell_type` has no member for a two-electrode cell,
+  a battery or a generic electrolyzer, all three of which answer G names. A logbook that
+  says so is kept verbatim and fills nothing. Requesting members is upstream's decision
+  (`CLAUDE.md` §1).
+* **The Q8 tension above.**
+* **Not measured on the real archive.** The real corpus is not on this machine, so the
+  effect of `cardinality.v3` and the standing position rule on its 9 sample-position
+  conflicts, and of the lexicon on its notes, is unmeasured. The synthetic tests are
+  `apps/api/tests/test_angel_2026_10_12_answers.py`.
+
+## A person can now choose the reaction and the cell type
+
+Measured before: neither `context.electrochemistry.reaction` nor `…cell_type` had any
+input — `PATCH …/runs/{id}` answered `422 unrecognized_field` and the Run editor had no
+control. Both are now run-writable closed enums (`routes.RUN_CHOSEN_ENUM_PATH_NAMES`): the
+allowed values are the vendored schema's own enum, read at runtime; an off-list value is
+refused `422 not_an_allowed_value` by the run edit route and by proposal acceptance; the
+Run editor offers both as selects under "Conditions for this run". A run carrying the
+required context plus a reaction and cell type validates against the official schema and
+submits (`test_submit_declares_the_record_a_person_built.py`).
+
+---
+
+# ADDED 2026-09-23 — ONE NEW QUESTION, Q21, AND IT IS OPEN *(answered 2026-10-12 — see above)*
 
 **Q21. Which acquisition quantities are expected to VARY from scan to scan within one
 measurement, and which are one value for the whole measurement?** The build must decide,
@@ -61,8 +122,8 @@ numbering, and their `Q21` is a different question.)*
 
 # RECONCILED 2026-09-22 — ANGEL ANSWERED FIVE MORE, AND WITHDREW `DEC-43`'S 298 K
 
-**Read this section first; the 2026-09-17 reconciliation below is preserved unedited as the
-state it described.** Of that section's eight remaining Angel questions, **five now have a
+*(Superseded as the current state by the 2026-10-12 reconciliation above: Q6, Q7 and Q8, "still open" below, were answered that day.)* **Read this section first;** *(as of 2026-09-22)* the 2026-09-17 reconciliation below is preserved unedited as the
+state it described. Of that section's eight remaining Angel questions, **five now have a
 disposition and three (Q6, Q7, Q8) are still open.** None of the five closed by writing a
 value: each closed with a *rule about what happens when a source is silent or sources
 disagree*, and the build now implements each rule.

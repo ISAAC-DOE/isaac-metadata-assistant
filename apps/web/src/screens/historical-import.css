@@ -1861,6 +1861,15 @@
   margin: 0 0 var(--space-md);
 }
 
+/* LEFT FOR YOU TO CHOOSE (2026-10-12) — the same block rhythm as the summary above. */
+.hi-left-for-person {
+  margin: 0 0 var(--space-md);
+}
+
+.hi-left-for-person .hi-note {
+  margin: var(--space-xs) 0 0;
+}
+
 .hi-add-blocked {
   display: flex;
   flex-direction: column;

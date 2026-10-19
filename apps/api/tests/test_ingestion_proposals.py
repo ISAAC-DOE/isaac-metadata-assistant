@@ -2317,8 +2317,11 @@ def test_the_target_set_is_the_writable_set_and_is_derived():
     number that used to be true.
     """
     assert routes.PROPOSAL_TARGET_PATHS is routes.NOTE_MAPPABLE_PATHS_A_VALUE_CAN_BE_WRITTEN_AT
-    assert len(routes.PROPOSAL_TARGET_PATHS) == 18
-    assert len(routes.NOTE_MAPPABLE_FIELD_PATHS) == 25
+    # 18 of 25 -> 20 of 27 on 2026-10-12: the reaction and the cell type a person
+    # chooses on a run joined both sets together, so the seven without a route are the
+    # same seven.
+    assert len(routes.PROPOSAL_TARGET_PATHS) == 20
+    assert len(routes.NOTE_MAPPABLE_FIELD_PATHS) == 27
     assert SEVEN == sorted(
         [
             "system.configuration.detector_model",

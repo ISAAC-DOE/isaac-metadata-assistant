@@ -2,7 +2,8 @@
  * THE RUN-LEVEL FIELD SET THE RUN WORKSPACE EDITS — and the evidence for every
  * entry in it.
  *
- * FIVE fields — the whole of the writable set, and not one more. Two independent sources had to agree before a path
+ * SEVEN fields — the whole of the writable set, and not one more (five until 2026-10-12;
+ * see the reaction and cell type below). Two independent sources had to agree before a path
  * could appear here, and NOTHING is here because it seemed useful:
  *
  *   1. `routes.RUN_WRITABLE_FIELD_PATHS` decides what can be written per run. It is
@@ -44,9 +45,22 @@
  * `RUN_WRITABLE_FIELD_PATHS`, so the PATCH route accepted them before this file
  * offered them. What changed is only whether a scientist can reach them.
  *
+ * TWO MORE, 2026-10-12 — `context.electrochemistry.reaction` and
+ * `context.electrochemistry.cell_type`. The domain owner's answer that day (relayed by the
+ * project owner) is that the reaction and the cell are read from the metadata when it
+ * states them and are otherwise left blank "for a human to select". Measured before:
+ * neither path was writable and this editor had no control, so a person could not
+ * select them at all. They are now in `RUN_WRITABLE_FIELD_PATHS` (`routes.
+ * RUN_CHOSEN_ENUM_PATH_NAMES`) and the server refuses any value outside the schema's own
+ * enum with `422 not_an_allowed_value`. Both are OPTIONAL: an empty select is a real
+ * state, and a run that is not electrochemistry simply leaves them "Not set". They are
+ * tagged `group: 'electrochemistry'`, rendered in their own "Electrochemistry · if it
+ * applies" group, and NOT counted by `runFilledCount` — the fill count is over the
+ * other five (`COUNTED_RUN_FIELDS`), so such a run can still read "All Recorded".
+ *
  * WHAT IS STILL DELIBERATELY ABSENT, and why each absence is a decision:
- *   * `context.electrochemistry.*` is under a run-level PREFIX but is NOT in the
- *     writable set — measured, not assumed — so the route would 422 every path in it.
+ *   * the REST of `context.electrochemistry.*` is under a run-level PREFIX but is NOT in
+ *     the writable set — measured, not assumed — so the route would 422 every path in it.
  *     That puts it in the same category as `system.configuration.*` below rather than
  *     the category this bullet used to claim: the earlier wording said it "is
  *     run-level by prefix", which implied it could be offered and was being held back
@@ -83,6 +97,13 @@ export interface RunFieldSpec {
   unit?: string;
   /** A format hint. It describes a FORMAT; it never suggests a value. */
   hint?: string;
+  /**
+   * A field that applies only to SOME measurements (2026-10-12: the reaction and the cell
+   * type, which only an electrochemical measurement has, and which the schema requires
+   * of none). Shown in its own group and NOT counted toward a run's "All Recorded", so a
+   * run that is not electrochemistry can read complete. Absent = counted.
+   */
+  group?: 'electrochemistry';
 }
 
 /**
@@ -98,8 +119,18 @@ export interface RunFieldSpec {
  */
 export function enumOptionLabel(option: string): string {
   const spaced = option.replace(/_+/g, ' ').trim();
-  return spaced === '' ? option : spaced.charAt(0).toUpperCase() + spaced.slice(1);
+  if (spaced === '') return option;
+  /* TWO ABBREVIATIONS WRITTEN IN CAPITALS (2026-10-12): the schema spells the cell types
+     `gde_cell` and `mea_cell`, and "Gde cell" reads as a word that does not exist. The
+     change is CASING ONLY, so every output word is still an input word. */
+  const cased = spaced
+    .split(' ')
+    .map((word) => (UPPERCASE_WORDS.has(word) ? word.toUpperCase() : word))
+    .join(' ');
+  return cased.charAt(0).toUpperCase() + cased.slice(1);
 }
+
+const UPPERCASE_WORDS: ReadonlySet<string> = new Set(['gde', 'mea']);
 
 export const RUN_FIELDS: readonly RunFieldSpec[] = [
   {
@@ -165,7 +196,42 @@ export const RUN_FIELDS: readonly RunFieldSpec[] = [
     kind: 'datetime',
     hint: 'ISO 8601 UTC, e.g. YYYY-MM-DDTHH:MM:SSZ',
   },
+  /* THE TWO A PERSON CHOOSES (2026-10-12) — see the file header. Options TRANSCRIBED
+     from the vendored schema, exactly as Environment's are, and pinned against it by
+     `apps/api/tests/test_angel_2026_10_12_answers.py` so a schema refresh fails a test
+     instead of offering a stale list. The server refuses anything else. */
+  {
+    path: 'context.electrochemistry.reaction',
+    label: 'Reaction',
+    kind: 'enum',
+    group: 'electrochemistry',
+    // schema/isaac_record_v1.json → properties.context.properties.electrochemistry
+    // .properties.reaction.enum
+    options: ['CO2RR', 'CORR', 'OER', 'HER', 'ORR', 'NRR', 'N2RR', 'AOR', 'FOR', 'water_splitting', 'surface_oxidation', 'stripping_voltammetry', 'None', 'NO3RR', 'urea_synthesis'],
+  },
+  {
+    path: 'context.electrochemistry.cell_type',
+    label: 'Cell type',
+    kind: 'enum',
+    group: 'electrochemistry',
+    // schema/isaac_record_v1.json → properties.context.properties.electrochemistry
+    // .properties.cell_type.enum
+    options: ['flow_cell', 'microfluidic_flow_cell', 'h_cell', 'beaker_cell', 'gde_cell', 'mea_cell', 'zero_gap_cell', 'coin_cell', 'three_electrode', 'scanning_droplet_cell'],
+  },
 ] as const;
+
+/** The run fields a run's fill count is OVER — every field except an "if it applies" one. */
+export const COUNTED_RUN_FIELDS: readonly RunFieldSpec[] = RUN_FIELDS.filter(
+  (spec) => spec.group === undefined,
+);
+
+/** The reaction and the cell type: offered on every run, counted on none. */
+export const ELECTROCHEMISTRY_RUN_FIELDS: readonly RunFieldSpec[] = RUN_FIELDS.filter(
+  (spec) => spec.group === 'electrochemistry',
+);
+
+/** The heading of that group in the run editor. */
+export const ELECTROCHEMISTRY_GROUP_TITLE = 'Electrochemistry · if it applies';
 
 /**
  * A deliberately permissive ISO-8601 date-time shape.
@@ -249,7 +315,10 @@ export function envelopeText(env: ApiRunFieldEnvelope | undefined): string {
 
 /** How many of {@link RUN_FIELDS} this run has a value for. */
 export function runFilledCount(run: ApiRunView): number {
-  return RUN_FIELDS.filter((spec) => envelopeValue(run.fields?.[spec.path]) !== null).length;
+  // OVER THE COUNTED FIELDS ONLY (2026-10-12): the reaction and the cell type apply only
+  // to an electrochemical measurement, so setting them neither raises nor completes this.
+  return COUNTED_RUN_FIELDS.filter((spec) => envelopeValue(run.fields?.[spec.path]) !== null)
+    .length;
 }
 
 /**

@@ -1045,6 +1045,12 @@ class SemanticCandidate:
     variation_total: int | None = None
     #: How many distinct scans (or, for ``per_source``, files) the variation spans.
     variation_scans: int | None = None
+    #: THE DOMAIN OWNER'S STANDING RULE that resolves this disagreement, when one
+    #: reaches it (``bl15.resolution.STANDING_RESOLUTIONS``, 2026-10-12): which source's
+    #: reading is used and why, who confirmed the rule and how that reached this
+    #: repository, and the readings it uses. Set together with :attr:`resolved_by_rule`
+    #: (the rule's id). Every competing reading stays in :attr:`disagreement`.
+    standing_resolution: Mapping[str, Any] | None = None
 
     # --- UI statuses, DERIVED (2026-09-22) ----------------------------------------
 
@@ -1134,6 +1140,9 @@ class SemanticCandidate:
             "variation_basis": self.variation_basis,
             "variation_total": self.variation_total,
             "variation_scans": self.variation_scans,
+            "standing_resolution": (
+                dict(self.standing_resolution) if self.standing_resolution else None
+            ),
             # DERIVED, and serialised anyway. A client that recomputed it would be
             # a second expression of the rule, free to drift from this one.
             "proposable": self.proposable,
@@ -1215,6 +1224,9 @@ class SemanticCandidate:
             else None,
             variation_total=_as_count(state.get("variation_total")),
             variation_scans=_as_count(state.get("variation_scans")),
+            standing_resolution=dict(state["standing_resolution"])
+            if isinstance(state.get("standing_resolution"), Mapping)
+            else None,
         )
 
 
@@ -2709,15 +2721,24 @@ def read_archive(
     rules_applied: set[str] = set(semantics["rules_applied"])
     rules_applied.update(b.rule_ref for b in bindings if b.rule_ref)
 
+    source_id_map = {path: source.source_id for path in evidence_by_source}
     for unit_candidates in report.units:
         unit = by_stem.get(unit_candidates.stem)
+        per_unit = semantics["units"].get(unit_candidates.stem, {})
         bounded: list[SemanticCandidate] = []
-        for candidate in unit_candidates.candidates:
+        # THE LOGBOOK'S environment / reaction / cell statements for this measurement
+        # (2026-10-12) join its own candidates, so the same-field reconciliation below
+        # compares them with the filename's dry-sample reading — and neither can win
+        # silently.
+        logbook = rc.logbook_candidates(
+            unit_candidates.stem, per_unit.get("logbook_statements") or {}, source_id_map
+        )
+        for candidate in (*unit_candidates.candidates, *logbook):
             candidate_total += 1
             if len(candidates) + len(bounded) >= MAX_CANDIDATES_PER_SESSION:
                 continue
             candidate, derived = _apply_resolution(candidate, resolutions, evidence_index)
-            if candidate.resolved_by_rule:
+            if candidate.resolved_by_rule and candidate.standing_resolution is None:
                 rules_applied.add(candidate.resolved_by_rule)
             bounded.append(_bound_candidate(candidate, writable))
             if derived is not None and len(candidates) + len(bounded) < MAX_CANDIDATES_PER_SESSION:
@@ -2729,7 +2750,6 @@ def read_archive(
             bounded = [_no_run_for(c) for c in bounded]
         bounded = rc._reconcile_same_field(bounded)
         label_tokens = _label_tokens_for(unit, evidence_by_source)
-        per_unit = semantics["units"].get(unit_candidates.stem, {})
         units.append(
             UnitReading(
                 stem=unit_candidates.stem,
@@ -2768,6 +2788,16 @@ def read_archive(
             bounded_derived = _bound_candidate(derived, writable)
             candidates.append(bounded_derived)
             shared_ids.append(bounded_derived.candidate_id)
+
+    # (review I3) logbook sentences about samples this build cannot map onto measurements
+    # deterministically: ONE beamtime candidate per field, no value, the sentence kept.
+    for unscoped in rc.logbook_unscoped_candidates(semantics["logbook_unscoped"], source_id_map):
+        candidate_total += 1
+        if len(candidates) >= MAX_CANDIDATES_PER_SESSION:
+            continue
+        bounded_unscoped = _bound_candidate(unscoped, writable)
+        candidates.append(bounded_unscoped)
+        shared_ids.append(bounded_unscoped.candidate_id)
 
     column_readings, column_capped, column_thinned = _column_readings(evidence_by_source)
     # `DEC-41` LEVEL 4, PRODUCED HERE BECAUSE HERE IS WHERE THE EVIDENCE OBJECTS
@@ -2970,6 +3000,18 @@ def _archive_semantics(
     unbound_quality: list[dict] = []
     contributors_by_number: dict[int, list[dict]] = {}
     beamtime_contributors: list[dict] = []
+    # THE LOGBOOK'S STATEMENTS ABOUT THE ENVIRONMENT, REACTION AND CELL (2026-10-12),
+    # scoped exactly as contributors are: a sample section's to its file numbers, one
+    # made before any section to the whole beamtime.
+    from .bl15 import conditions as cond
+
+    logbook_by_number: dict[str, dict[int, list]] = {concept: {} for concept in cond.FIELDS}
+    logbook_beamtime: dict[str, list] = {concept: [] for concept in cond.FIELDS}
+    # (review I3) a beamtime sentence NAMING samples applies to those samples only, and
+    # only where the mapping onto the convention's confirmed sample token (`DEC-47`) is
+    # deterministic; one about an unnamed subset applies to none. Both are kept.
+    logbook_named: dict[str, list] = {concept: [] for concept in cond.FIELDS}
+    logbook_unscoped: list = []
     table_row_file: dict[tuple[str, int, int], int] = {}
     procedure_rows: list[tuple[str, tuple[int, int], Any]] = []
 
@@ -3062,6 +3104,18 @@ def _archive_semantics(
                     beamtime_contributors.append(
                         {**person, "basis": "named at beamtime scope; inherited by every measurement"}
                     )
+            elif concept in cond.FIELDS and item.source_type == ev.SOURCE_TYPE_BEAMTIME_NOTES:
+                value = item.normalized_value if isinstance(item.normalized_value, Mapping) else {}
+                if value.get("section") is None and value.get("unscoped"):
+                    logbook_unscoped.append(item)
+                elif value.get("section") is None and value.get("named_samples"):
+                    logbook_named[concept].append(item)
+                elif value.get("section") is None:
+                    logbook_beamtime[concept].append(item)
+                else:
+                    for number in value.get("file_numbers") or []:
+                        if isinstance(number, int) and not isinstance(number, bool):
+                            logbook_by_number[concept].setdefault(number, []).append(item)
     for path, key, item in procedure_rows:
         number = table_row_file.get((path, key[0], key[1]))
         if number is not None:
@@ -3074,6 +3128,42 @@ def _archive_semantics(
     for unit in relationships.units:
         if unit.legacy_number is not None:
             legacy_counts[unit.legacy_number] = legacy_counts.get(unit.legacy_number, 0) + 1
+
+    # -- (review I3) which named-sample sentences map deterministically --------------
+    # The convention's confirmed reading (`DEC-47`): a filename's second numeric token is
+    # the sample/electrode instance number. A sentence naming "samples 3 and 4" maps onto
+    # the measurements whose token is 3 or 4 — and only if, for every sample it names,
+    # the logbook's own "Sample N" section (when it has one) lists exactly those
+    # measurements. Otherwise the document numbers its samples differently from its file
+    # names, which sample the sentence means is a reading this build does not make, and
+    # the sentence applies to none.
+    def _group_number(unit) -> int | None:
+        token = unit.group_token
+        return int(token) if isinstance(token, str) and token.isdigit() else None
+
+    legacy_by_group: dict[int, set[int]] = {}
+    for unit in relationships.units:
+        group = _group_number(unit)
+        if group is not None and unit.legacy_number is not None:
+            legacy_by_group.setdefault(group, set()).add(unit.legacy_number)
+    named_applies: dict[str, list[tuple[Any, frozenset[int]]]] = {c: [] for c in cond.FIELDS}
+    for concept, items in logbook_named.items():
+        for item in items:
+            value = item.normalized_value if isinstance(item.normalized_value, Mapping) else {}
+            named = [n for n in value.get("named_samples") or [] if isinstance(n, int)]
+            files = value.get("named_sample_file_numbers") or {}
+            deterministic = bool(named) and all(
+                n in legacy_by_group
+                and (
+                    files.get(str(n)) is None
+                    or set(files.get(str(n)) or ()) == legacy_by_group[n]
+                )
+                for n in named
+            )
+            if deterministic:
+                named_applies[concept].append((item, frozenset(named)))
+            else:
+                logbook_unscoped.append(item)
 
     rules_applied: set[str] = set()
     resolutions = cr.resolutions_by_target(rules)
@@ -3119,6 +3209,24 @@ def _archive_semantics(
             "signal_selection": selection.to_state(),
             "data_quality_notes": quality,
             "contributors": people,
+            # Per field: this measurement's own sample section's statements, else the
+            # beamtime's — a section's statement overrides the beamtime's for that
+            # section only. SourceEvidence objects, used to build candidates; never
+            # serialised from here.
+            "logbook_statements": {
+                concept: (
+                    list(logbook_by_number[concept].get(unit.legacy_number, ()))
+                    if unit.legacy_number is not None
+                    else []
+                )
+                or list(logbook_beamtime[concept])
+                + [
+                    item
+                    for item, named in named_applies[concept]
+                    if _group_number(unit) in named
+                ]
+                for concept in cond.FIELDS
+            },
         }
 
     # -- conflicts, annotated with their layers ----------------------------------------
@@ -3197,6 +3305,7 @@ def _archive_semantics(
     return {
         "units": per_unit,
         "relationships_state": rel_state,
+        "logbook_unscoped": logbook_unscoped,
         "beamtime_elements": beamtime_elements,
         "temperature_statements": temperature_statements,
         "unbound_data_quality_notes": unbound_quality,
@@ -4973,6 +5082,9 @@ def session_view(session: ImportSession) -> dict:
         # (2026-09-23) What the batch will do with each candidate, from the batch's
         # own partition — so the Add stage predicts exactly what it then reports.
         "send_plan": send_plan(session),
+        # (2026-10-12) Which of the environment, reaction and cell type this import
+        # leaves for a person to choose, per measurement, and where to choose them.
+        "left_for_a_person": left_for_a_person(session),
         # --- added 2026-09-22 ----------------------------------------------------
         # The registered naming CONVENTIONS a scientist can bind a subset of Runs to —
         # each with its historical aliases, and none of them a person.
@@ -5405,6 +5517,114 @@ def has_no_run_when_creating_runs(session: "ImportSession", candidate: SemanticC
     return unit is None or not unit.run_candidate
 
 
+#: The field names a scientist reads, in the order a run editor shows them.
+_PERSON_CHOICE_LABELS: Mapping[str, str] = {
+    "context.environment": "Environment",
+    "context.electrochemistry.reaction": "Reaction",
+    "context.electrochemistry.cell_type": "Cell type",
+}
+#: Why a field is left, in a sentence. Keys are served; the sentence is the label.
+PERSON_CHOICE_REASONS: Mapping[str, str] = {
+    "not_stated": "No file this import read states it.",
+    "stated_not_settled": (
+        "A file mentions it, but not in a way that names exactly one of the schema's "
+        "options — its words are kept with the import's readings."
+    ),
+    "sources_disagree": "The sources state different values, and nothing was chosen.",
+    # (re-review, 2026-10-12) a logbook sentence that names samples this import could not
+    # match to measurements is applied to NONE — which is not "no file states it".
+    "stated_unmatched": (
+        "The logbook mentions it, but not for measurements this import could match — the "
+        "sentence is kept with the import's readings and, once added, in the record's "
+        "\u201cAlso read from the archive\u201d note."
+    ),
+}
+#: Where a person sets them — the run editor's own words.
+PERSON_CHOICE_WHERE = (
+    "Choose them on each run: open the record's Runs, open the run, and set them under "
+    "Conditions for this run."
+)
+
+
+def left_for_a_person(session: "ImportSession") -> dict | None:
+    """The domain owner's 2026-10-12 rule, made visible: what this import does NOT fill.
+
+    For every measurement offered as a Run, each of the environment, the reaction and
+    the cell type is either OFFERED — a candidate this import can send as a proposal (a
+    dry-sample filename, an explicit logbook statement) — or LEFT FOR A PERSON, with the
+    reason. Nothing here proposes or writes anything; it reports. ``None`` for a session
+    with no archive reading. The counts are over Runs only: an alignment scan or a
+    reference standard is never a Run, so it has no run to set these on.
+    """
+    from .bl15 import mapping as mp  # local: keeps import order flexible
+
+    reading = session.archive_reading
+    if reading is None:
+        return None
+    by_id = {c.candidate_id: c for c in candidates_of(session)}
+    by_measurement: dict[str, list[dict]] = {}
+    tally: dict[str, dict[str, int]] = {
+        path: {"left": 0, "offered": 0} for path in mp.PERSON_CHOICE_PATHS
+    }
+    runs = 0
+    # The fields a logbook sentence spoke to that matched NO measurement (`shared::unscoped`).
+    unmatched = {
+        c.target_field_path
+        for c in by_id.values()
+        if c.candidate_id.startswith("shared::unscoped::")
+    }
+    for unit in reading.units:
+        if not unit.run_candidate:
+            continue
+        runs += 1
+        mine = [by_id[cid] for cid in unit.candidate_ids if cid in by_id]
+        offered = {c.target_field_path for c in mine if c.proposable}
+        disputed = {
+            c.target_field_path
+            for c in mine
+            if c.unresolved_reason is not None and c.resolved_by_rule is None
+        }
+        mentioned = {c.target_field_path for c in mine if c.kind == CANDIDATE_KIND_FIELD}
+        left: list[dict] = []
+        for path in mp.PERSON_CHOICE_PATHS:
+            if path in offered:
+                tally[path]["offered"] += 1
+                continue
+            reason = (
+                "sources_disagree"
+                if path in disputed
+                else "stated_not_settled"
+                if path in mentioned
+                else "stated_unmatched"
+                if path in unmatched
+                else "not_stated"
+            )
+            tally[path]["left"] += 1
+            left.append({"path": path, "label": _PERSON_CHOICE_LABELS[path], "reason": reason})
+        by_measurement[unit.stem] = left
+    return {
+        "rule": mp.LEFT_FOR_A_PERSON_RULE,
+        "attribution": mp.ANGEL_2026_10_12,
+        "where": PERSON_CHOICE_WHERE,
+        "reasons": dict(PERSON_CHOICE_REASONS),
+        "runs": runs,
+        "fields": [
+            {
+                "path": path,
+                "label": _PERSON_CHOICE_LABELS[path],
+                "left": tally[path]["left"],
+                "offered": tally[path]["offered"],
+                # The schema's own options, read at runtime — what a person picks from.
+                "options": list(mp.schema_enum(path)),
+            }
+            for path in mp.PERSON_CHOICE_PATHS
+        ],
+        "by_measurement": by_measurement,
+        # SAID ON THE WIRE: nothing here is a value, and nothing was filled in.
+        "fills_anything": False,
+    }
+
+
 def send_plan(session: "ImportSession") -> dict:
     """What the batch WILL do with each candidate, published before anything is sent.
 
@@ -5619,6 +5839,10 @@ _READING_LABELS: Mapping[str, str] = {
     "beamsize": "Beam size",
     "legacy_run_or_file_number": "Legacy run or file number",
     "contributor_statement": "Named in the notes",
+    "sample_position": "Sample position",
+    "environment_statement": "Environment, as the logbook says it",
+    "reaction_statement": "Reaction, as the logbook says it",
+    "cell_type_statement": "Cell type, as the logbook says it",
 }
 
 #: The order lines are listed in: what the sample WAS first, then how it was measured,
@@ -5634,6 +5858,9 @@ _READING_ORDER: tuple[str, ...] = (
     "potential_reference_basis",
     "filter",
     "acquisition_method",
+    "environment_statement",
+    "reaction_statement",
+    "cell_type_statement",
     "scan_command",
     "energy_grid",
     "counting_time",

@@ -100,12 +100,21 @@ def test_the_proposable_set_is_exactly_these_five_and_the_number_is_the_point():
     fabrication would never have seen it: **a mapping error is not a fabrication**, and
     that is the whole reason this registry is checked separately from the harness.
     """
+    # FIVE -> EIGHT ON 2026-10-12, and each of the three is the LOGBOOK's own words: the
+    # domain owner's answer that day is that the environment, the reaction and the cell
+    # type are read from the logbook when it states them and left blank otherwise. Each
+    # maps only to a member the vendored schema declares, read at runtime
+    # (`mp.schema_enum`); a term with no member proposes nothing. No filename token and
+    # no other concept became proposable.
     assert sorted(c for c, m in mp.MAPPINGS.items() if m.proposable) == [
         "acquisition_epoch",
         "acquisition_timestamp",
+        "cell_type_statement",
+        "environment_statement",
         "flow_rate",
         "ph",
         "potential_magnitude",
+        "reaction_statement",
     ]
     cov = mp.coverage()
     # 45 -> 47 ON 2026-09-22, and the proposable five did NOT move. The two concepts
@@ -115,8 +124,9 @@ def test_the_proposable_set_is_exactly_these_five_and_the_number_is_the_point():
     # the count that answers "what can reach a field today" is unchanged and the
     # needs-review count rises by exactly two. Raising the total did not raise the
     # honest number, which is the point of pinning both.
-    assert cov["concepts_total"] == 47
-    assert cov["deterministic"] + cov["normalized"] == 5
+    # 47 -> 50 on 2026-10-12 (the three logbook statements, all `normalized`).
+    assert cov["concepts_total"] == 50
+    assert cov["deterministic"] + cov["normalized"] == 8
     assert cov["needs_domain_review"] == 17
     assert cov["not_expressible"] == 24
     assert cov["blocked_by_build"] == 1

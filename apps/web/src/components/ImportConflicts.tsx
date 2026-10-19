@@ -250,6 +250,11 @@ function ConflictRow({
 }) {
   const resolved = isResolved(conflict);
   const chosen = resolved ? String(conflict.resolution?.chosen_value ?? '') : '';
+  /* A DOMAIN OWNER'S STANDING RULE (2026-10-12) is not "a rule you recorded" — it was
+     confirmed by the domain owner and ships with the build — so it says so, with the
+     rule's own sentence. */
+  const standing = resolved && conflict.resolution?.authority === 'domain_owner_rule' ? conflict.resolution : null;
+  const [standingLead] = splitFirstSentence(String(standing?.statement ?? ''));
   return (
     <li className={`hi-conflict${resolved ? ' is-resolved' : ''}`} hidden={hidden}>
       {/* ONE LINE, AS THE BRIEF WROTE IT: the state, each source's reading, and what
@@ -275,7 +280,9 @@ function ConflictRow({
         {/* The open state is said once, on the kind; a row says so only when it differs. */}
         {resolved && (
           <span className="hi-conflict-state">
-            {`Resolved by a rule you recorded${chosen ? `: ${chosen}` : ''}. Every reading is still kept.`}
+            {standing
+              ? `Resolved by the domain owner's rule: ${standingLead.replace(/\.$/, '')}${chosen ? ` (${chosen})` : ''}. Every reading is still kept.`
+              : `Resolved by a rule you recorded${chosen ? `: ${chosen}` : ''}. Every reading is still kept.`}
           </span>
         )}
         {/* Which acquisition, so a long list of rows can be told apart. */}
@@ -328,7 +335,22 @@ function ConflictRow({
           </li>
           <li className="hi-layer">
             <h5 className="hi-layer-title">{COPY.layers.confirmed}</h5>
-            {resolved ? (
+            {standing ? (
+              <>
+                <p className="hi-sub">{String(standing.statement ?? '')}</p>
+                {/* THE PROVENANCE IS DETAIL, NOT THE SENTENCE (review, 2026-10-12): a
+                    scientist reads who confirmed it; how that reached the repository —
+                    an owner relay, with no transcript — sits behind the `?`. */}
+                <p className="hi-sub">
+                  Confirmed by the domain owner.{' '}
+                  <HelpTip subject="who confirmed this rule">
+                    Rule {String(standing.rule_id ?? '')}, version {String(standing.rule_version ?? '')}.{' '}
+                    {String(standing.attribution ?? '')}
+                  </HelpTip>{' '}
+                  Nothing is written to the record.
+                </p>
+              </>
+            ) : resolved ? (
               <p className="hi-sub">
                 {chosen ? `${chosen} — ` : ''}recorded as a reading rule. {COPY.confirmedBy}{' '}
                 {COPY.unattributed}.
