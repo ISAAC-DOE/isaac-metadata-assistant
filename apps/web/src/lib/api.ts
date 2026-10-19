@@ -1732,20 +1732,31 @@ export const api = {
    * `DEC-44` authorizes summarizing this history in the same sentence that forbids
    * a summary from becoming its source of truth.
    *
-   * IT SENDS NO PARAMETERS, AND THAT IS THE POINT RATHER THAN AN OMISSION. The
-   * server owns the time window: it computes `since_utc` from the instant it serves
-   * the request and reports it back beside `days`, so the caller renders its label
-   * FROM THE SAME PAYLOAD the count came out of and the two cannot disagree. A
-   * client-supplied window would be a second clock, and two clocks disagree. The
-   * route does accept `window_days` for an API consumer that needs a different
-   * span; this client deliberately does not use it.
+   * ~~IT SENDS NO PARAMETERS, AND THAT IS THE POINT RATHER THAN AN OMISSION.~~ —
+   * SUPERSEDED 2026-10-12 by the Statistics widget redesign, which gives the
+   * Workspace Activity widget a 7 · 30 · 365-day range control. The struck
+   * sentence's REASON still holds and is what the change is built around: the
+   * server owns the window BOUNDARY. It computes `since_utc` from the instant it
+   * serves the request and reports it back beside `days`, so the caller renders its
+   * label FROM THE SAME PAYLOAD the count came out of and the two cannot disagree.
+   *
+   * What a caller now chooses is the SPAN (`window_days`, a route parameter the
+   * server has always validated, 1–365) and never an instant, so no second clock is
+   * introduced: the boundary is still computed on the server, and the label is
+   * still read from `window.days` in the response rather than from the value that
+   * was asked for. The default call sends NO parameter, so its URL is the one it
+   * always was.
    *
    * WORKSPACE-SCOPED, so it is NOT one of the per-record literals
    * `backend-down-state.test.tsx` derives its sub-read inventory from — it names no
    * experiment and cannot 404 for one.
    */
-  getActivitySummary(): Promise<ApiActivitySummary> {
-    return getJson<ApiActivitySummary>('/activity/summary');
+  getActivitySummary(windowDays?: number): Promise<ApiActivitySummary> {
+    return getJson<ApiActivitySummary>(
+      windowDays === undefined
+        ? '/activity/summary'
+        : `/activity/summary?window_days=${enc(String(windowDays))}`,
+    );
   },
 
   listNotes(

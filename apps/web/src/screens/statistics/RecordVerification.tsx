@@ -1,11 +1,11 @@
 import './statistics.css';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { ShieldCheck, Table2 } from '../../components/icons';
+import { Widget } from '../../components/Widget';
+import { BarChartHorizontal, Columns2, List, ShieldCheck, Table2, Workflow } from '../../components/icons';
 import { api } from '../../lib/api';
 import {
   ORACLE_LABELS,
-  VALIDATOR_SERIES,
   VERIFICATION_CACHE_TTL_SECONDS,
   corpusDisclosure,
   corpusSizeMismatch,
@@ -38,24 +38,16 @@ import {
   type VerificationReport,
   type VerificationView,
 } from '../../lib/verificationContract';
-import {
-  axisTicks,
-  horizontalBars,
-  niceMax,
-  round,
-  shareLabel,
-} from './chartGeometry';
+import { round } from './chartGeometry';
 import {
   ChartEmpty,
   ChartError,
   ChartFrame,
-  ChartLegend,
   ChartLoading,
   ChartSourceUnavailable,
   StatsBarChart,
-  useChartWidth,
 } from './StatsCharts';
-import { FigureList, StatCard, StatsSection, UnavailableNote } from './StatsPrimitives';
+import { FigureList, StatCard, UnavailableNote } from './StatsPrimitives';
 
 /**
  * Statistics · Record Verification — the rendered view of
@@ -356,11 +348,49 @@ export function RecordVerification({ verification }: RecordVerificationProps) {
 
   return (
     <>
-      <StatsSection
+      <Widget
         id="stats-verification"
         title="Record Verification"
-        sub="Aggregate results of an automated program run over a corpus of official ISAAC records. Every figure is a count across the whole corpus; no individual record is named. How the program works is set out under How Verification Works, at the foot of this page."
+        sub="Aggregate results over a corpus of official records; no record is named."
         icon={<Table2 size={18} strokeWidth={2} aria-hidden="true" />}
+        span="full"
+        info={
+          <VerificationInfo
+            corpusDescription={
+              report !== null
+                ? corpusDisclosure(report.metadata.verification_mode).description
+                : null
+            }
+            validatorRoles={
+              report !== null
+                ? validatorComparison(report.official_validation, report.format_shadow)
+                : []
+            }
+          />
+        }
+        /* THE CORPUS LEADS, before any count — it qualifies every figure in the
+           widget, and a public-corpus result read as the authorized sample would
+           misattribute all of them at once. `lead` renders above everything else
+           in the body. */
+        lead={
+          report !== null ? (
+            /* ONE HEADER LINE (2026-10-18): which corpus ran, how old the report
+               is, and the control that re-reads it — before any count. */
+            <div className="stats-verify-header">
+              <CorpusBanner
+                report={report}
+                disclosure={corpusDisclosure(report.metadata.verification_mode)}
+              />
+              <FreshnessStrip
+                report={report}
+                refreshing={refreshing}
+                refreshFailed={refreshFailed}
+                onRefresh={refresh}
+              />
+            </div>
+          ) : undefined
+        }
+        views={report !== null ? reportViews(report) : undefined}
       >
         {/* Present from the FIRST render, so a change to its text is what gets
             announced — a live region that appears together with its message is
@@ -380,12 +410,7 @@ export function RecordVerification({ verification }: RecordVerificationProps) {
 
         {view !== null &&
           (view.kind === 'report' ? (
-            <VerificationReportBody
-              report={view.report}
-              refreshing={refreshing}
-              refreshFailed={refreshFailed}
-              onRefresh={refresh}
-            />
+            <VerificationReportBody report={view.report} />
           ) : view.kind === 'notReady' && view.status === 'running' ? (
             /* The one not-ready status a reader is meant to WAIT OUT, so it gets
                a designed state of its own rather than the shared not-available
@@ -404,9 +429,220 @@ export function RecordVerification({ verification }: RecordVerificationProps) {
               <NotReadyBody view={view} />
             </>
           ))}
-      </StatsSection>
+      </Widget>
 
       {report !== null && <SafeguardsSection report={report} />}
+    </>
+  );
+}
+
+/**
+ * The four views of a readable report, in DESCENDING WEIGHT: the two validators
+ * side by side, the mutation harness, the format-issue breakdowns, and `About
+ * This Run` — provenance for everything else rather than a finding of its own.
+ *
+ * ── WHY THESE ARE VIEWS AND NOT FOUR STACKED BLOCKS (2026-10-12) ───────────
+ *
+ * Stacked, they made this one section ~3,000px — the owner's "not a good way to
+ * portray those statistics". As views they share one headline row (the four
+ * cards) and one corpus line, and each is one click away. Each view keeps every
+ * figure, heading, chart, data table and caveat it had; nothing inside them was
+ * rewritten, and `About This Run` still carries the report's OWN limitations
+ * list as it arrived.
+ */
+function reportViews(report: VerificationReport) {
+  const [official, shadow] = validatorComparison(report.official_validation, report.format_shadow);
+  const disclosure = corpusDisclosure(report.metadata.verification_mode);
+  return [
+    {
+      id: 'validators',
+      label: 'Validators',
+      icon: <Columns2 size={14} strokeWidth={2} aria-hidden="true" />,
+      content: <ValidatorComparison groups={[official, shadow] as const} />,
+    },
+    {
+      id: 'mutation',
+      label: 'Mutation',
+      icon: <Workflow size={14} strokeWidth={2} aria-hidden="true" />,
+      content: <MutationPanel report={report} />,
+    },
+    {
+      id: 'issues',
+      label: 'Format Issues',
+      icon: <BarChartHorizontal size={14} strokeWidth={2} aria-hidden="true" />,
+      content: (
+        <div className="stats-group">
+          <h3>Where the Stricter Checks Disagreed</h3>
+          {/* `shadowErrorCodeLabel` — the wire vocabulary is untouched; only the
+              presentation is mapped, and an unmapped code still renders as
+              itself. */}
+          <IssueDistribution
+            caption="Format issues by check name"
+            categoryHeader="Check"
+            histogram={report.format_shadow.failures_by_error_code}
+            emptyTitle="No Format Issues by Check Name"
+            labelFor={shadowErrorCodeLabel}
+          />
+          <IssueDistribution
+            caption="Format issues by position in the ISAAC schema"
+            categoryHeader="Schema Position"
+            histogram={report.format_shadow.failures_by_schema_path}
+            emptyTitle="No Format Issues by Schema Position"
+            note="These positions are places in the ISAAC schema, not places inside any record."
+          />
+        </div>
+      ),
+    },
+    {
+      id: 'run',
+      label: 'About This Run',
+      icon: <List size={14} strokeWidth={2} aria-hidden="true" />,
+      content: <RunDetails report={report} disclosure={disclosure} />,
+    },
+  ];
+}
+
+/**
+ * THE PROSE THAT USED TO BE THREE DISCLOSURES AT THE FOOT OF THE PAGE — How
+ * Verification Works, the validator half of How to Interpret Results, and
+ * Mutation Methodology — plus the cached-report paragraph of Known Limitations.
+ * Verbatim, except where a sentence pointed at a place on the page that no
+ * longer exists; each such edit says so beside it.
+ *
+ * PROSE ONLY. This is the widget's info panel, and an info panel may never hold
+ * a measurement (`statistics-page.test.tsx` asserts it). The figures every
+ * paragraph refers to are stated, visibly, in the widget.
+ */
+function VerificationInfo({
+  corpusDescription,
+  validatorRoles,
+}: {
+  corpusDescription: string | null;
+  /** Each validator's role sentence, from `validatorComparison` — one source. */
+  validatorRoles: readonly ValidatorComparisonGroup[];
+}) {
+  return (
+    <>
+      {/* The two sentences the widget's supporting line carried until
+          2026-10-18, and the corpus's own description, which sat in the boxed
+          banner. The banner is now one line — the corpus NAME and the wire token
+          stay visible there, before any count. */}
+      <p>
+        Aggregate results of an automated program run over a corpus of official ISAAC records.
+        Every figure is a count across the whole corpus; no individual record is named.
+      </p>
+      {corpusDescription !== null ? (
+        <>
+          <p className="widget-info-heading">Corpus Evaluated</p>
+          <p>{corpusDescription}</p>
+        </>
+      ) : null}
+      <p className="widget-info-heading">How Verification Works</p>
+      <p>
+        An automated program runs three things over a corpus of official ISAAC records: ISAAC&rsquo;s
+        own official-schema validator; a stricter format-aware second validator; and a harness that
+        injects small deterministic changes into a copy of each record and checks that the validator
+        reacts the way that change was designed to make it react. The report it produces is
+        aggregate: it carries no record identifier, title, field value, evidence entry or per-record
+        outcome, so there is no slot on this screen for one.
+      </p>
+      {/* "the control in Record Verification" -> the control's own name: this
+          paragraph now lives INSIDE Record Verification. */}
+      <p>
+        This report is produced by a program run that is kept off the request path, so it is read as
+        a cached result and states its own age. Nothing on this screen polls: it is read once when
+        the page opens, and again only when the control beside the report's age is pressed.
+      </p>
+      <p>
+        Record Verification reports a cached result. Once it is older than the lifetime the API holds
+        one for, the next read starts a fresh run and is still answered with the earlier result — so
+        a superseded report looks no different from a current one. Its age is stated with it, and a
+        note appears beside the age once it is past that lifetime.
+      </p>
+      {/* THE TWO-CORPORA PARAGRAPH IS DELIBERATELY NOT HERE. It names the
+          authorized sample, and this widget must not name the corpus that did
+          NOT run, in any form (`record-verification.test.tsx`, "the other corpus
+          is not named"). It is in the page's own info panel on this tab, outside
+          this widget — exactly where it sat when it was a disclosure at the foot
+          of the page. */}
+
+      <p className="widget-info-heading">How to Interpret Results</p>
+      {/* Each validator's role sentence, which sat on its own line inside the
+          side-by-side chart until 2026-10-18; the short tag beside each name
+          stays visible. */}
+      {validatorRoles.map((role) => (
+        <p key={role.key}>
+          <strong>{role.label}</strong> — {role.role}
+        </p>
+      ))}
+      <p>
+        The two validators are never added together. Each states its own number of records, and the
+        shared scale in the side-by-side comparison runs to the largest single count rather than to any
+        total. The official validator is the authority; the format shadow is advisory, reports issues
+        the official schema tolerates, and gates nothing.
+      </p>
+      {/* Was a visible paragraph under the side-by-side chart until 2026-10-18. */}
+      <p>
+        The official validator is the authority: this widget reports its result and never changes
+        it. The format shadow is advisory — it reports issues the official schema tolerates, it can
+        never make a record invalid, and it gates nothing.
+      </p>
+      <p>
+        In the side-by-side comparison the bars share one scale, which runs to the largest single
+        count, not to any total, and the two validators are never added together: each states its
+        own number of records. Each bar&rsquo;s filled part is that validator&rsquo;s passing records.
+      </p>
+      <p>
+        A zero is the good reading wherever this page counts things that went wrong. The harness
+        self-checks and the two statement counts under Verification Safeguards all count events
+        nobody wants, so a zero there is stated calmly and affirmatively rather than as an empty
+        panel.
+      </p>
+      <p>
+        Where a breakdown withholds small categories, the bars you can see are not the whole
+        distribution. The withheld occurrences are carried by a bar of their own and the number of
+        withheld categories is stated beside that chart, so the visible shares deliberately do not
+        add to 100%.
+      </p>
+      <p>
+        Nothing on this screen validates, exports or gates anything. It reports what a program
+        measured; it decides nothing about any record.
+      </p>
+
+      <p className="widget-info-heading">Mutation Methodology</p>
+      <p>
+        Each trial pairs one change type with one record. The harness works on a copy, applies the
+        change to that copy, and compares what the validator then reports against what the change
+        was designed to make it report. Change Types Defined counts the kinds of change the harness
+        has available; Trials Attempted counts the pairings it tried. They are different quantities
+        and neither is a share of the other.
+      </p>
+      <p>
+        A trial recorded as skipped for not applying is counted in its own row rather than folded
+        into either the expected or the unexpected group, so a skip can never be read as a change
+        that behaved as designed.
+      </p>
+      <p>
+        The seven trial counts are meant to satisfy two accounting identities. Both are printed as
+        arithmetic beside the figures, computed from the values that actually arrived, and stated
+        plainly when they do not hold — a single tidy total would have hidden exactly that.
+      </p>
+      <p>
+        The run also checks itself. The rows under Checks on the Verification Run Itself are counts
+        of trials that tripped one of those checks; the backend calls them oracles, a word that means
+        nothing on a product screen, so each row is named for what it counts instead. Whether the
+        source records in this process were in fact left unmodified is one of those checks, and it
+        is reported as a measurement in Verification Safeguards rather than promised in advance.
+      </p>
+      {/* THE SCOPE OF THAT MEASUREMENT, STATED RATHER THAN ASSUMED: the backend
+          compares each record object with itself before and after its trials;
+          nothing re-reads a stored copy afterwards. */}
+      <p>
+        That check compares the records as this process held them, before and after each trial. It
+        is not a re-read of stored records, and nothing on this page establishes one. What is
+        separately measured about writing is in the same panel: the transaction was read-only, and
+        the counts of statements that would have changed data or structure are printed there.
+      </p>
     </>
   );
 }
@@ -646,41 +882,31 @@ function NotReadyBody({ view }: { view: Exclude<VerificationView, { kind: 'repor
  * establish. Collapsing measurements is the thing this reorganisation
  * deliberately does not do.
  */
-function VerificationReportBody({
-  report,
-  refreshing,
-  refreshFailed,
-  onRefresh,
-}: {
-  report: VerificationReport;
-  refreshing: boolean;
-  refreshFailed: boolean;
-  onRefresh: () => void;
-}) {
-  const disclosure = corpusDisclosure(report.metadata.verification_mode);
+function VerificationReportBody({ report }: { report: VerificationReport }) {
   const [official, shadow] = validatorComparison(
     report.official_validation,
     report.format_shadow,
   );
-  const groups = [official, shadow] as const;
   const mutations = report.mutations;
 
   return (
     <>
-      <CorpusBanner report={report} disclosure={disclosure} />
-      <FreshnessStrip
-        report={report}
-        refreshing={refreshing}
-        refreshFailed={refreshFailed}
-        onRefresh={onRefresh}
-      />
+      {/* The corpus line and the freshness strip are the widget's `lead` — one
+          header row rendered above this. */}
 
       {/* Four headline figures with no shared scale and no ordering between
           them — the KPI form, deliberately not a chart, for the same reason
           `WorkspaceGlance` gives. FOUR, and no more: a fifth card is how a row
           of headlines becomes a second, worse copy of the sections below it.
           `stats-cards-headline` is a NARROW-WIDTH treatment only (two-up rather
-          than one-up under 560px); it changes no count and no wording. */}
+          than one-up under 560px); it changes no count and no wording.
+          ONE INLINE ROW SINCE 2026-10-18 (`stats-cards-inline`): label and
+          value, no box and no sentence under each. Each card's full sentence is
+          kept for assistive technology (`StatCard`'s `compact`), and what the
+          sentences explain is the widget's info panel — the four sentences
+          stacked under four numbers were the densest part of the tab. The
+          mutation figure keeps a short visible unit, because "7550" alone does
+          not say what it counts or that none behaved unexpectedly. */}
       {/*
         NOTHING EXAMINED MEANS NOTHING PASSED, AND THESE CARDS USED TO SAY OTHERWISE.
 
@@ -730,15 +956,24 @@ function VerificationReportBody({
         const nothingExamined =
           ' No records were examined, so this is not a pass — nothing was checked.';
         return (
-          <div className="stats-cards stats-cards-headline">
+          <div className="stats-cards stats-cards-headline stats-cards-inline">
             <StatCard
               label="Records Evaluated"
               value={String(report.corpus.records_scanned)}
+              compact
               note="records in the corpus this run examined."
             />
             <StatCard
               label="Official Validation"
+              /* THE ONE CARD ON THIS TAB THAT MAY WEAR THE RESERVED VERDICT GREEN
+                 — it states the official validator's result, which is what that
+                 colour is reserved for. Every other `good` tone on this tab is
+                 drawn calm and neutral (see `statistics.css`): the format shadow
+                 is ADVISORY, and the harness and the safeguards are checks on the
+                 run, not the verdict. `data-tone` keeps its meaning everywhere. */
+              verdict
               value={`${report.official_validation.passing} of ${official.total}`}
+              compact
               note={
                 official.total > 0
                   ? `records satisfying the official ISAAC schema; ${report.official_validation.failing} do not.`
@@ -753,6 +988,7 @@ function VerificationReportBody({
             <StatCard
               label="Format Shadow"
               value={`${report.format_shadow.records_passing} of ${shadow.total}`}
+              compact
               note={
                 shadow.total > 0
                   ? `records with no format issue found by the stricter second validator; ${report.format_shadow.records_failing} have at least one.`
@@ -767,6 +1003,11 @@ function VerificationReportBody({
             <StatCard
               label="Mutation Verification"
               value={String(mutations.trials_attempted)}
+              unit={
+                mutations.trials_attempted > 0
+                  ? `trials · ${mutations.unexpected_outcomes} unexpected`
+                  : 'trials — none ran'
+              }
               note={
                 mutations.trials_attempted > 0
                   ? `trials run; ${mutations.unexpected_outcomes} behaved unexpectedly.`
@@ -821,35 +1062,8 @@ function VerificationReportBody({
         </p>
       )}
 
-      <ValidatorComparison groups={groups} />
-
-      <MutationPanel report={report} />
-
-      <div className="stats-block stats-group">
-        <h3>Where the Stricter Checks Disagreed</h3>
-        {/* `shadowErrorCodeLabel` — the codes were reaching the bar label, the
-            table row header and the `sr-only` summary raw
-            (`ADDITIONAL_PROPERTIES`, `REQUIRED_MISSING`, …) under a caption that
-            called them a "check name". The wire vocabulary is untouched; only
-            the presentation is mapped, and an unmapped code still renders as
-            itself. */}
-        <IssueDistribution
-          caption="Format issues by check name"
-          categoryHeader="Check"
-          histogram={report.format_shadow.failures_by_error_code}
-          emptyTitle="No Format Issues by Check Name"
-          labelFor={shadowErrorCodeLabel}
-        />
-        <IssueDistribution
-          caption="Format issues by position in the ISAAC schema"
-          categoryHeader="Schema Position"
-          histogram={report.format_shadow.failures_by_schema_path}
-          emptyTitle="No Format Issues by Schema Position"
-          note="These positions are places in the ISAAC schema, not places inside any record."
-        />
-      </div>
-
-      <RunDetails report={report} disclosure={disclosure} />
+      {/* The validators, the mutation harness, the format-issue breakdowns and
+          About This Run are the widget's four VIEWS — see `reportViews`. */}
     </>
   );
 }
@@ -884,11 +1098,13 @@ function FreshnessStrip({
   onRefresh: () => void;
 }) {
   return (
-    <div className="stats-block stats-verify-freshness">
+    <div className="stats-verify-freshness">
       <div className="stats-verify-freshness-row">
+        {/* `Report Generated` — the instant behind this age — is the first row
+            of About This Run again since 2026-10-18. The AGE is what a reader
+            acts on before the counts, so it is the half that stays up here. */}
         <FigureList
           rows={[
-            { label: 'Report Generated', value: report.metadata.generated_at, mono: true },
             { label: 'Report Age', value: formatAgeSeconds(report.metadata.cache_age_seconds) },
           ]}
         />
@@ -918,15 +1134,26 @@ function CorpusBanner({
   disclosure: CorpusDisclosure;
 }) {
   const mismatch = corpusSizeMismatch(disclosure.mode, report.metadata.corpus_size);
+  /* ONE LINE SINCE 2026-10-18: the product name and the wire token, together
+     and before any count, exactly as before. The corpus's descriptive
+     paragraph is the widget's info panel ("Corpus Evaluated"); the two
+     qualifiers that can change what the figures mean — an unrecognised token,
+     a size that disagrees with the label — stay visible here. */
   return (
-    <div className="stats-block stats-verify-corpus" data-known={String(disclosure.known)}>
-      <p className="stats-mini-label">Corpus Evaluated</p>
-      <p className="stats-verify-corpus-label">{disclosure.label}</p>
-      <p className="stats-verify-corpus-mode">
-        <span className="stats-verify-corpus-mode-label">Reported as</span>{' '}
-        <span className="mono">{disclosure.mode}</span>
+    <div className="stats-verify-corpus" data-known={String(disclosure.known)}>
+      {/* The two connective labels are `sr-only` since 2026-10-18: a sighted
+          reader sees the corpus name and the token as a chip, at the very top of
+          the widget; a screen reader still hears "Corpus Evaluated … Reported
+          as …", and the info panel's "Corpus Evaluated" paragraph says what the
+          corpus is. */}
+      <p className="stats-verify-corpus-line">
+        <span className="stats-mini-label sr-only">Corpus Evaluated</span>{' '}
+        <span className="stats-verify-corpus-label">{disclosure.label}</span>{' '}
+        <span className="stats-verify-corpus-mode">
+          <span className="stats-verify-corpus-mode-label sr-only">Reported as</span>{' '}
+          <span className="mono">{disclosure.mode}</span>
+        </span>
       </p>
-      <p className="stats-note">{disclosure.description}</p>
       {!disclosure.known && (
         <p className="stats-note">
           The figures below are shown as they arrived, under the labels this report gave them.
@@ -967,52 +1194,61 @@ function StalenessNote({ report }: { report: VerificationReport }) {
 
 /* ---- official vs shadow ------------------------------------------------- */
 
-/** Height of one bar within a group, in px. */
-const GROUP_BAR_HEIGHT = 18;
+/**
+ * The short visible qualifier beside each validator's name. The full role
+ * sentence each group carries (`validatorComparison`'s `role`) is the widget's
+ * info panel since 2026-10-18; this word keeps the qualifier BESIDE the figure
+ * it qualifies, so the shadow's stricter count can never be read as a verdict.
+ */
+const VALIDATOR_ROLE_TAG: Readonly<Record<string, string>> = {
+  official: 'the authority',
+  shadow: 'advisory · gates nothing',
+};
 
 /**
- * The two validators as a GROUPED horizontal bar chart on one shared axis.
+ * The two validators as TWO COMPACT ROWS on one shared scale (2026-10-18).
  *
- * FORM. Two groups of two comparable counts is the grouped bar's exact case: the
- * eye compares passing against not-passing WITHIN a validator, and either of
- * them ACROSS the two validators, from one scale. A single stacked bar per
- * validator answers only the first question; two separate charts answer only the
- * second.
+ * ── WHAT THIS REPLACED, AND WHY THE REPLACEMENT IS NOT A STEP BACK ──────────
  *
- * WHAT IT DELIBERATELY DOES NOT DO IS SUM THE GROUPS. Each group's own total is
- * printed on the group, the shared axis is a nice maximum over the largest
- * single value, and no denominator spanning both validators exists anywhere in
- * this component — the shadow reports its own count of records and this file
- * must not assume it equals the official one.
+ * Until 2026-10-18 this was a grouped horizontal bar chart: two groups, two
+ * bars each, a tick axis and a legend — ~380px for four numbers, which the
+ * owner read as the densest part of the tab. It had replaced an older bare
+ * progress track (`StageBars`) that could not be read as a number, and that
+ * is the failure this form must not repeat. It does not, because THE NUMBERS
+ * ARE THE ROW: each row states `passing of total` and `not passing` as real
+ * text, so the bar is an accessory to a stated figure rather than the only
+ * carrier of one. The axis existed to make bar lengths readable as values;
+ * once every value is printed, an axis is a second statement of the same four
+ * numbers.
  *
- * NON-COLOUR IDENTITY IS COMPLETE. Every bar carries its series name and its
- * value as real text on its own row, each group carries its name and its role as
- * a sentence, and the legend pairs each swatch with its series name. Remove
- * every fill and nothing is lost.
+ * WHAT IT STILL DOES:
+ * - ONE SHARED SCALE. Each track's length is that validator's own total
+ *   against the LARGEST single total — never a sum — and its fill is its own
+ *   passing share. So the eye compares passing within a validator (the fill)
+ *   and the two validators against each other (the tracks), from one scale.
+ * - NO SUM. Each row prints its own denominator, and no figure spanning both
+ *   validators exists anywhere in this component.
+ * - BOTH TEXT EQUIVALENTS. `ChartFrame` keeps the always-present summary
+ *   sentence and the data table, so this is still a `figure.stats-chart` with a
+ *   caption, a summary and a table.
+ * - NO COLOUR-ONLY IDENTITY. Only ONE series is filled (passing); the rest of
+ *   the track is the not-passing remainder, and the row says both numbers in
+ *   words — so no legend is needed to tell two fills apart.
  */
 function ValidatorComparison({ groups }: { groups: readonly ValidatorComparisonGroup[] }) {
-  const [attach, width] = useChartWidth();
-  const largest = Math.max(0, ...groups.flatMap((group) => [group.passing, group.failing]));
-  const domainMax = niceMax(largest);
-  const ticks = axisTicks(domainMax);
+  const largest = Math.max(0, ...groups.map((group) => group.total));
   const summary = validatorComparisonSummary(groups);
+  const percent = (part: number, whole: number) =>
+    whole > 0 ? `${round((part / whole) * 1000) / 10}%` : '0%';
 
   return (
-    <div className="stats-block stats-group">
-      <h3>Official Validation and the Format Shadow, Side by Side</h3>
+    <div className="stats-block stats-verify-compare">
       <ChartFrame
         caption="Records passing and not passing, by validator"
+        /* The view's own tab names it, and each row names its validator and
+           states its figures; the caption is kept for assistive technology. */
+        captionHidden
         summary={summary}
-        note="Bars share one scale, marked beneath them. The scale runs to the largest single count, not to any total, and the two validators are never added together: each states its own number of records."
-        legend={
-          <ChartLegend
-            items={VALIDATOR_SERIES.map((series, i) => ({
-              key: series.key,
-              label: series.label,
-              slot: i + 1,
-            }))}
-          />
-        }
         tableRowHeader="Validator"
         tableColumns={['Passing', 'Not Passing', 'Records Counted']}
         tableRows={groups.map((group) => ({
@@ -1021,87 +1257,43 @@ function ValidatorComparison({ groups }: { groups: readonly ValidatorComparisonG
           cells: [String(group.passing), String(group.failing), String(group.total)],
         }))}
       >
-        <div className="stats-chart-plot" ref={attach}>
+        <dl className="stats-verify-compare-rows">
           {groups.map((group) => (
-            <div className="stats-verify-chartgroup" key={group.key}>
-              <p className="stats-verify-chartgroup-label">
+            <div className="stats-verify-chartgroup" data-validator={group.key} key={group.key}>
+              <dt className="stats-verify-chartgroup-label">
                 {group.label}
-                <span className="stats-verify-chartgroup-total mono">
-                  {group.total} records
+                <span className="stats-verify-role-tag">{VALIDATOR_ROLE_TAG[group.key]}</span>
+              </dt>
+              <dd className="stats-verify-compare-bar" aria-hidden="true">
+                <span
+                  className="stats-verify-compare-track"
+                  style={{ width: percent(group.total, largest) }}
+                >
+                  {/* `stats-chart-bar`: this span IS the data mark — it
+                      encodes the passing share — so it carries the class the
+                      chart colour policy (`stats-charts.test.tsx`) allows the
+                      series colour on. */}
+                  <span
+                    className="stats-verify-compare-fill stats-chart-bar"
+                    data-slot="1"
+                    style={{ width: percent(group.passing, group.total) }}
+                  />
                 </span>
-              </p>
-              <p className="stats-verify-chartgroup-role">{group.role}</p>
-              {VALIDATOR_SERIES.map((series, i) => {
-                const value = series.key === 'passing' ? group.passing : group.failing;
-                const marks = horizontalBars(
-                  [{ key: series.key, value }],
-                  domainMax,
-                  { width, height: GROUP_BAR_HEIGHT },
-                );
-                const mark = marks[0];
-                const share = shareLabel(value, group.total);
-                return (
-                  <div className="stats-chart-row" key={series.key}>
-                    <span className="stats-chart-row-label">
-                      {series.label}
-                      {share === null ? '' : ` · ${share}`}
-                    </span>
-                    <span className="stats-chart-row-value mono">{value}</span>
-                    <svg
-                      className="stats-chart-track"
-                      width={width}
-                      height={GROUP_BAR_HEIGHT}
-                      viewBox={`0 0 ${width} ${GROUP_BAR_HEIGHT}`}
-                      aria-hidden="true"
-                      focusable="false"
-                    >
-                      {ticks.map((tick) => (
-                        <line
-                          key={tick}
-                          className="stats-chart-grid"
-                          x1={round((tick / domainMax) * width)}
-                          x2={round((tick / domainMax) * width)}
-                          y1={0}
-                          y2={GROUP_BAR_HEIGHT}
-                        />
-                      ))}
-                      {mark !== undefined && (
-                        <rect
-                          className="stats-chart-bar"
-                          data-slot={String(i + 1)}
-                          x={0}
-                          y={round(mark.y)}
-                          width={round(Math.max(0, mark.width))}
-                          height={round(mark.height)}
-                          rx={2}
-                        />
-                      )}
-                    </svg>
-                  </div>
-                );
-              })}
+              </dd>
+              <dd className="stats-verify-compare-value mono">
+                {`${group.passing} of ${group.total} passing · ${group.failing} not passing`}
+              </dd>
             </div>
           ))}
-          <div className="stats-chart-axis" aria-hidden="true">
-            {ticks.map((tick) => (
-              <span
-                className="stats-chart-tick"
-                key={tick}
-                data-anchor={tick === 0 ? 'start' : tick === domainMax ? 'end' : 'middle'}
-                style={{ left: `${round((tick / domainMax) * 100)}%` }}
-              >
-                {tick}
-              </span>
-            ))}
-          </div>
-        </div>
+        </dl>
       </ChartFrame>
-      <p className="stats-note">{summary}</p>
-      <p className="stats-note">
-        The official validator is the authority: this section reports its result and never changes
-        it. The format shadow is advisory — it reports issues the official schema tolerates, it can
-        never make a record invalid, and it gates nothing.
-      </p>
+      {/* ~~`<p className="stats-note">{summary}</p>`~~ — the summary sentence was
+          rendered TWICE, once `sr-only` inside the figure and once visibly here,
+          beneath the chart it restates. The figure's own copy stays; the visible
+          echo is removed (2026-10-12). */}
+      {/* The scale note, the "official validator is the authority" paragraph
+          and each validator's full role sentence are in the widget's info panel
+          since 2026-10-18; the short role tag stays beside each name. */}
     </div>
   );
 }
@@ -1429,9 +1621,18 @@ function FigureGroup({
  *
  * THE INTRO SENTENCE IS UNCHANGED, to the byte. "A safeguard that does not apply
  * is not a safeguard that held." is the sentence that keeps `not_applicable`
- * from being read as an affirmative, and it is rendered as visible copy inside
- * the section — not as the section's supporting line, where a future tidy-up of
- * subtitles could shorten it away.
+ * from being read as an affirmative. ~~It is rendered as visible copy inside the
+ * section — not as the section's supporting line, where a future tidy-up of
+ * subtitles could shorten it away.~~ — STALE since the 2026-10-18 density round:
+ * it IS the widget's supporting line now, byte for byte, and the risk that
+ * sentence named is answered by a test instead (`statistics-page.test.tsx`,
+ * "keeps Verification Safeguards visible, with its 'does not apply' sentence
+ * intact"), which fails if the line is shortened.
+ *
+ * A CHIP NEVER STANDS ALONE WHERE "VERIFIED" IS NARROWER THAN THE WORD. Three
+ * verified rows carry a short visible qualifier beside the chip
+ * (`safeguardQualifier`): by construction, one property, in memory. Only the
+ * full reasons are one press away.
  *
  * The two counts are separate, and a 0 is stated calmly and affirmatively —
  * these count statements that would have changed something, so none is the good
@@ -1440,26 +1641,71 @@ function FigureGroup({
 function SafeguardsSection({ report }: { report: VerificationReport }) {
   const rows = safeguardRows(report.safeguards);
   const counts = safeguardCountRows(report.safeguards);
+  /*
+   * A COMPACT CHECKLIST SINCE 2026-10-18: one row per safeguard — its name,
+   * its state WORD and, where "Verified" is narrower than the word, a visible
+   * qualifier — with each row's full reason one press away ("Show Reasons").
+   * The reasons are `hidden`, not removed: every row still carries its own
+   * `.stats-verify-safeguard-detail`, so "not applicable" never loses the reason
+   * that keeps it from reading as "skipped", and the e2e a11y helper opens them
+   * (`data-widget-reveal`) so they are still scanned.
+   */
+  const [reasonsShown, setReasonsShown] = useState(false);
+  const allZero = counts.every((c) => c.value === 0);
 
   return (
-    <StatsSection
+    <Widget
       id="stats-safeguards"
       title="Verification Safeguards"
+      /* THE SENTENCE THAT KEEPS `not_applicable` FROM READING AS A PASS, to the
+         byte, as the widget's one visible line. It used to close the intro
+         paragraph; the rest of that paragraph is now the info panel. */
+      sub="A safeguard that does not apply is not a safeguard that held."
       icon={<ShieldCheck size={18} strokeWidth={2} aria-hidden="true" />}
+      span="full"
+      info={
+        <>
+          <p>
+            What the run did and did not check about itself. Each safeguard states one of three
+            things: it was checked, it does not apply to this run, or it was not checked.
+          </p>
+          {/* From the retired `How to Interpret Results` disclosure. */}
+          <p>
+            The three safeguard states have three distinct words and none of them stands in for
+            another: a check that never arose is reported as not applicable, never as verified. A
+            zero in the statement counts is the good reading — they count statements that would
+            have changed something.
+          </p>
+        </>
+      }
+      footer={
+        <button
+          type="button"
+          className="stats-verify-reasons-toggle"
+          data-widget-reveal=""
+          aria-expanded={reasonsShown}
+          aria-controls="stats-safeguard-list stats-safeguard-counts"
+          onClick={() => setReasonsShown((shown) => !shown)}
+        >
+          {reasonsShown ? 'Hide Reasons' : 'Show Reasons'}
+        </button>
+      }
     >
-      <p className="stats-note">
-        What the run did and did not check about itself. Each safeguard states one of three
-        things: it was checked, it does not apply to this run, or it was not checked. A
-        safeguard that does not apply is not a safeguard that held.
-      </p>
-      <dl className="stats-verify-safeguards">
+      <dl className="stats-verify-safeguards" id="stats-safeguard-list">
         {rows.map((row) => (
           <div className="stats-verify-safeguard" data-tone={row.tone} key={row.key}>
             <dt className="stats-verify-safeguard-label">{row.label}</dt>
             <dd className="stats-verify-state" data-state={row.state}>
               {row.stateLabel}
             </dd>
-            <dd className="stats-verify-safeguard-detail">{row.detail}</dd>
+            {/* VISIBLE, beside the chip it narrows — never behind "Show
+                Reasons" (review fix, 2026-10-18). */}
+            {row.qualifier !== null ? (
+              <dd className="stats-verify-qualifier">{row.qualifier}</dd>
+            ) : null}
+            <dd className="stats-verify-safeguard-detail" hidden={!reasonsShown}>
+              {row.detail}
+            </dd>
           </div>
         ))}
       </dl>
@@ -1476,23 +1722,39 @@ function SafeguardsSection({ report }: { report: VerificationReport }) {
         the rest of this pass fixes. Zero denominators are not all alike; this one has
         no denominator.
       */}
-      <div className="stats-verify-group" data-tone={counts.every((c) => c.value === 0) ? 'good' : 'attention'}>
-        <p className="stats-mini-label">Statements Counted During the Run</p>
-        <p className="stats-verify-group-note">
-          {counts.every((c) => c.value === 0)
+      {/*
+        TWO MORE ROWS OF THE SAME LIST SINCE 2026-10-18 — each count is a row
+        whose "state" is the number itself, laid out exactly like the six above.
+        The group keeps its label and its sentence, because the tone is a
+        judgement and a judgement must be stated in words: the label is
+        `sr-only` (the rows' own names say what they count), and the sentence
+        is one of the reasons — shown with them, and shown ALWAYS when a count
+        is not zero, because that is news a reader must not have to ask for.
+        Each row's wire name sits in its reason, as the backend's own word.
+      */}
+      <div
+        className="stats-verify-group stats-verify-countgroup"
+        data-tone={allZero ? 'good' : 'attention'}
+      >
+        <p className="stats-mini-label sr-only">Statements Counted During the Run</p>
+        <dl className="stats-verify-safeguards stats-verify-counts" id="stats-safeguard-counts">
+          {counts.map((c) => (
+            <div className="stats-verify-count" key={c.key}>
+              <dt className="stats-verify-safeguard-label">{c.label}</dt>
+              <dd className="stats-verify-count-value mono">{String(c.value)}</dd>
+              <dd className="stats-verify-safeguard-detail" hidden={!reasonsShown}>
+                <span className="stats-figure-hint mono">{c.key}</span>
+              </dd>
+            </div>
+          ))}
+        </dl>
+        <p className="stats-verify-group-note" hidden={allZero && !reasonsShown}>
+          {allZero
             ? 'The run counted no statement that would have changed data or structure.'
             : 'The run counted at least one statement that would have changed data or structure.'}
         </p>
-        <FigureList
-          rows={counts.map((c) => ({
-            label: c.label,
-            value: String(c.value),
-            mono: true,
-            hint: c.key,
-          }))}
-        />
       </div>
-    </StatsSection>
+    </Widget>
   );
 }
 
@@ -1514,10 +1776,11 @@ function SafeguardsSection({ report }: { report: VerificationReport }) {
  * this list is data the report sent, and that disclosure is authored copy about
  * the application.
  *
- * `Report Generated` and `Report Age` USED TO BE THE FIRST TWO ROWS HERE and are
- * now in the freshness strip at the top of the section, beside the control that
- * re-reads the report. They are not duplicated: a figure stated twice on one
- * screen is a figure that can disagree with itself.
+ * `Report Generated` and `Report Age` USED TO BE THE FIRST TWO ROWS HERE and
+ * both moved to the freshness strip at the top of the section. Since 2026-10-18
+ * only the AGE stays there, beside the control that re-reads the report;
+ * `Report Generated` is this view's first row again. Neither is duplicated: a
+ * figure stated twice on one screen is a figure that can disagree with itself.
  */
 function RunDetails({
   report,
@@ -1531,6 +1794,7 @@ function RunDetails({
       <h3>About This Run</h3>
       <FigureList
         rows={[
+          { label: 'Report Generated', value: report.metadata.generated_at, mono: true },
           { label: 'Run Duration', value: formatDurationMs(report.metadata.duration_ms) },
           { label: 'Corpus Size', value: String(report.metadata.corpus_size), mono: true },
           { label: 'Verification Mode', value: report.metadata.verification_mode, mono: true },

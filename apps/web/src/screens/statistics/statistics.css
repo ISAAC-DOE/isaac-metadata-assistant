@@ -434,11 +434,20 @@
  * not available — never the red `--fail-*` family, which is reserved for a
  * genuine validation failure.
  */
-.statistics .stat-card[data-tone='good'] {
+/*
+ * THE RESERVED VERDICT GREEN IS PAINTED ON A VERDICT CARD ONLY (2026-10-12).
+ * `data-tone='good'` used to tint every card it reached — the advisory format
+ * shadow and the mutation harness included — so the Build tab carried twelve
+ * green boxes and the design system's one reserved colour meant nothing. It now
+ * applies where `data-verdict='true'` marks the official validator's own result;
+ * every other `good` keeps its meaning in `data-tone` and in words, and is drawn
+ * in the calm neutral treatment.
+ */
+.statistics .stat-card[data-tone='good'][data-verdict='true'] {
   background: var(--pass-bg);
   border-color: var(--pass-border);
 }
-.statistics .stat-card[data-tone='good'] .stat-card-value {
+.statistics .stat-card[data-tone='good'][data-verdict='true'] .stat-card-value {
   color: var(--pass-text);
 }
 .statistics .stat-card[data-tone='attention'] {
@@ -470,7 +479,10 @@
    no horizontal overflow at 375px. */
 .statistics .stats-figures {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  /* `min(150px, 100%)`: a column never demands more than its container has, so
+     a figure list in a narrow box wraps to one column instead of overflowing it
+     (review fix, 2026-10-18 — the 320px Overview scrolled sideways). */
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
   gap: 12px 22px;
   margin: 0;
 }
@@ -1487,9 +1499,12 @@
   border-radius: var(--radius-inner);
   background: var(--surface-subtle);
 }
+/* `good` here is a check on the RUN, not the verdict, so it is drawn calm: the
+   plain surface, with the group's own sentence carrying the good news. See the
+   verdict-card note above for why the reserved green is not spent on it. */
 .statistics .stats-verify-group[data-tone='good'] {
-  border-color: var(--pass-border);
-  background: var(--pass-bg);
+  border-color: var(--border);
+  background: var(--surface);
 }
 /* The cautionary tint is the AMBER family, not the red one. A non-zero count
    here is something to look at, not a failure of the application, and dressing
@@ -1530,9 +1545,12 @@
   border-radius: var(--radius-inner);
   background: var(--surface-subtle);
 }
+/* A safeguard that was CHECKED is drawn on the plain surface; its state word
+   carries "Verified". Distinct from `not_applicable` below, which keeps the
+   blue-grey coverage tint, so the two states never share a treatment. */
 .statistics .stats-verify-safeguard[data-tone='good'] {
-  border-color: var(--pass-border);
-  background: var(--pass-bg);
+  border-color: var(--border);
+  background: var(--surface);
 }
 /* `not_applicable` — the NEUTRAL treatment, and the one rule in this file that
    is load-bearing rather than cosmetic. It is not the affirmative tint. A
@@ -1847,7 +1865,11 @@
 /* The arithmetic, in words. Wraps rather than scrolls: it is a sentence with
    numbers in it, not a code block, and a horizontal scroller at 320px would
    hide the right-hand side of an equation whose whole point is both sides. */
+/* A measure, measured: at the Build tab's full width the two lines below ran
+   ~165 characters per line (critique, 2026-10-12), so each carries a 68ch cap
+   inside its own rule. */
 .statistics .stats-verify-identity-statement {
+  max-width: 68ch;
   font-size: 12.5px;
   font-weight: var(--font-weight-semibold);
   line-height: 1.5;
@@ -1857,6 +1879,7 @@
 /* The backend's own field names for the same terms. Quieter than the words
    above — it is the traceability route, not the reading. */
 .statistics .stats-verify-identity-keys {
+  max-width: 68ch;
   font-size: 11px;
   line-height: 1.5;
   color: var(--text-secondary);
@@ -2021,4 +2044,429 @@
   .statistics .stats-recent-title {
     white-space: normal;
   }
+}
+
+/* ==== the widget grid (2026-10-12) ==========================================
+ *
+ * `components/widget.css` owns the widget itself; this block owns only what is
+ * Statistics-specific about laying widgets out and about the figures inside
+ * them. Tokens only — no raw literal in a ratcheted axis.
+ */
+
+/* At most TWO columns on this page: each track is at least half the row, so a
+   1,246px column holds two widgets (not three narrow ones) and a phone holds
+   one. The charts inside need the width more than the page needs a third
+   column. */
+.statistics .widget-grid {
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(min(100%, max(22rem, calc((100% - var(--space-lg)) / 2))), 1fr)
+  );
+}
+
+/* The read-meta row's tools: the page's own info toggle beside Refresh. */
+.statistics .stats-meta-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/* ---- the headline figure ---------------------------------------------------- */
+
+.statistics .stat-card.stat-card-headline {
+  gap: var(--space-2xs);
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.statistics .stat-card-headline .stat-card-label {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+}
+.statistics .stat-card-headline .stat-card-value {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-heading-lg);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
+  font-variant-numeric: tabular-nums lining-nums;
+  color: var(--text-heading);
+}
+.statistics .stat-card.stat-card-headline[data-tone='attention'],
+.statistics .stat-card.stat-card-headline[data-tone='quiet'] {
+  background: transparent;
+}
+.statistics .stat-card-headline[data-tone='attention'] .stat-card-value {
+  color: var(--advisory-text);
+}
+.statistics .stat-card-headline[data-tone='quiet'] .stat-card-value {
+  font-size: var(--font-size-heading-sm);
+  color: var(--cover-text);
+}
+
+/* ---- figures inside a widget ---------------------------------------------------- */
+
+/* A widget's cells sit UNDER its headline, so they are set one step smaller —
+   the headline reads first, the breakdown second. */
+.statistics .widget .stats-cards .stat-card-value {
+  font-size: var(--font-size-heading-md);
+}
+.statistics .widget .stats-cards {
+  gap: var(--space-sm);
+}
+/* A widget spaces its own children with `gap`; a view panel does the same for
+   the blocks inside it. `:not([hidden])`, so this can never out-rank the rule
+   that hides an inactive panel, whatever order the two sheets load in. */
+.statistics .widget-view-panel:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+.statistics .widget > .stats-note,
+.statistics .widget-view-panel > .stats-note {
+  margin: 0;
+}
+.statistics .widget .stats-figures {
+  margin-top: 0;
+}
+.statistics .widget .stats-group > h3 {
+  margin-top: 0;
+}
+.statistics .widget-foot .stats-note {
+  font-size: var(--font-size-body);
+}
+
+/* A headline may carry its companions — the counts that sit beside it rather
+   than beneath it — as a figure list on the same row. */
+.statistics .widget-headline {
+  align-items: flex-end;
+  gap: var(--space-md) var(--space-xl);
+}
+.statistics .widget-headline > .stats-figures {
+  flex: 1 1 min(16rem, 100%);
+  min-width: 0;
+  max-width: 34rem;
+}
+
+/* ==== the density round (2026-10-18) =========================================
+ *
+ * Build & Verification as a precise instrument rather than a report: one header
+ * line, one compact stat row, thin validator bars, and the safeguards as a
+ * checklist. Overrides only — every rule above still describes the markup it was
+ * written for, and these come later at equal specificity. Tokens only.
+ */
+
+/* ---- Record Verification: the one header line ---------------------------- */
+.statistics .stats-verify-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm) var(--space-lg);
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--border-faint);
+}
+.statistics .stats-verify-header .stats-verify-corpus {
+  flex: 1 1 18rem;
+  gap: var(--space-xs);
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.statistics .stats-verify-corpus-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2xs) var(--space-sm);
+  margin: 0;
+}
+.statistics .stats-verify-corpus-line .stats-mini-label {
+  margin: 0;
+}
+.statistics .stats-verify-corpus-line .stats-verify-corpus-label {
+  font-size: var(--font-size-body);
+}
+.statistics .stats-verify-header .stats-verify-freshness {
+  flex: 0 1 auto;
+  gap: var(--space-xs);
+}
+.statistics .stats-verify-header .stats-verify-freshness-row {
+  align-items: center;
+  gap: var(--space-sm) var(--space-lg);
+}
+.statistics .stats-verify-header .stats-verify-freshness-row .stats-figures {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  gap: var(--space-xs) var(--space-lg);
+}
+.statistics .stats-verify-header .stats-figure {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-xs);
+}
+
+/* ---- the compact stat row ------------------------------------------------ */
+.statistics .stat-card.stat-card-compact {
+  gap: var(--space-2xs);
+  padding: var(--space-sm) var(--space-md);
+}
+.statistics .stat-card-compact .stat-card-value {
+  font-size: var(--font-size-heading-md);
+}
+.statistics .stat-card-unit {
+  margin: 0;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-snug);
+  color: var(--text-secondary);
+}
+
+/* ---- the validators: thin bars, one compact block ------------------------- */
+.statistics .stats-verify-chartgroup {
+  margin-bottom: var(--space-xs);
+}
+
+/* ---- Verification Safeguards as a checklist ------------------------------- */
+.statistics .stats-verify-safeguards {
+  gap: 0 var(--space-xl);
+}
+.statistics .stats-verify-safeguard,
+.statistics .stats-verify-safeguard[data-tone='good'],
+.statistics .stats-verify-safeguard[data-tone='neutral'],
+.statistics .stats-verify-safeguard[data-tone='attention'] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-2xs) var(--space-md);
+  padding: var(--space-sm) 0;
+  border: 0;
+  border-bottom: 1px solid var(--border-faint);
+  border-radius: 0;
+  background: transparent;
+}
+/* The state WORD becomes a chip, and the three states keep three treatments —
+   `not_applicable` stays the blue-grey coverage tint, never the checked one. */
+.statistics .stats-verify-safeguard .stats-verify-state {
+  padding: 0 var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+}
+.statistics .stats-verify-safeguard[data-tone='neutral'] .stats-verify-state {
+  border-color: var(--cover-border);
+  background: var(--cover-bg);
+}
+.statistics .stats-verify-safeguard[data-tone='attention'] .stats-verify-state {
+  border-color: var(--needsyou-border);
+  background: var(--needsyou-bg);
+}
+.statistics .stats-verify-safeguard .stats-verify-safeguard-detail {
+  grid-column: 1 / -1;
+}
+/* The qualifier sits under the name, beside the chip it narrows — visible, in
+   the secondary text colour, never behind "Show Reasons" (review fix,
+   2026-10-18). */
+.statistics .stats-verify-safeguard .stats-verify-qualifier {
+  grid-column: 1;
+  grid-row: 2;
+  margin: 0;
+  font-size: var(--font-size-body);
+  color: var(--text-secondary);
+}
+.statistics .stats-verify-safeguard .stats-verify-safeguard-detail[hidden] {
+  display: none;
+}
+/* The statement counts read as two more rows of the same list: the same grid,
+   the same row rule, and the count where the state word sits. */
+.statistics [aria-labelledby='stats-safeguards'] .stats-verify-countgroup,
+.statistics [aria-labelledby='stats-safeguards'] .stats-verify-countgroup[data-tone='good'],
+.statistics [aria-labelledby='stats-safeguards'] .stats-verify-countgroup[data-tone='attention'] {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.statistics .stats-verify-count {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-2xs) var(--space-md);
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--border-faint);
+}
+.statistics .stats-verify-count .stats-verify-safeguard-detail {
+  grid-column: 1 / -1;
+}
+.statistics .stats-verify-count .stats-verify-safeguard-detail[hidden],
+.statistics .stats-verify-countgroup .stats-verify-group-note[hidden] {
+  display: none;
+}
+.statistics .stats-verify-count-value {
+  margin: 0;
+  padding: 0 var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text-heading);
+  font-weight: var(--font-weight-semibold);
+}
+.statistics .stats-verify-countgroup[data-tone='attention'] .stats-verify-count-value {
+  border-color: var(--needsyou-border);
+  background: var(--needsyou-bg);
+}
+.statistics .stats-verify-countgroup .stats-verify-group-note {
+  margin: var(--space-sm) 0 0;
+}
+
+/* ---- the inline stat row (2026-10-18) ------------------------------------ */
+.statistics .stats-cards.stats-cards-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs) var(--space-xl);
+}
+.statistics .stats-cards-inline .stat-card,
+.statistics .stats-cards-inline .stat-card[data-tone] {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2xs) var(--space-sm);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.statistics .stats-cards-inline .stat-card-value {
+  font-size: var(--font-size-heading-sm);
+}
+/* The verdict keeps its reserved green as a quiet chip on the VALUE alone. */
+.statistics .stats-cards-inline .stat-card[data-verdict='true'][data-tone='good'] .stat-card-value {
+  padding: 0 var(--space-xs);
+  border: 1px solid var(--pass-border);
+  border-radius: var(--radius-token);
+  background: var(--pass-bg);
+  color: var(--pass-text);
+}
+
+/* `attention` keeps its advisory tint the same way, on the value alone. */
+.statistics .stats-cards-inline .stat-card[data-tone='attention'] .stat-card-value {
+  padding: 0 var(--space-xs);
+  border: 1px solid var(--needsyou-border);
+  border-radius: var(--radius-token);
+  background: var(--needsyou-bg);
+}
+
+/* ---- the validators as two compact rows (2026-10-18) --------------------- */
+.statistics .stats-verify-compare .stats-chart {
+  gap: var(--space-sm);
+}
+.statistics .stats-verify-compare-rows {
+  display: grid;
+  gap: var(--space-sm);
+  margin: 0;
+}
+.statistics .stats-verify-compare-rows .stats-verify-chartgroup {
+  display: grid;
+  grid-template-columns: minmax(15rem, 20rem) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2xs) var(--space-md);
+  margin: 0;
+}
+.statistics .stats-verify-compare-rows .stats-verify-chartgroup-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-sm);
+  margin: 0;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
+}
+.statistics .stats-verify-role-tag {
+  font-weight: var(--font-weight-regular);
+  color: var(--text-secondary);
+}
+.statistics .stats-verify-compare-bar {
+  margin: 0;
+}
+.statistics .stats-verify-compare-track {
+  display: block;
+  height: var(--space-sm);
+  border-radius: var(--radius-pill);
+  background: var(--border-faint);
+  overflow: hidden;
+}
+.statistics .stats-verify-compare-fill.stats-chart-bar {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--stats-series);
+}
+.statistics .stats-verify-compare-value {
+  margin: 0;
+  color: var(--text-secondary);
+}
+/* Narrow: one column — name, bar, then the figures — so a long name and the
+   mono figures never compete for one line. */
+@media (max-width: 640px) {
+  .statistics .stats-verify-compare-rows .stats-verify-chartgroup {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ONE STYLE FOR THE IN-WIDGET DISCLOSURE CONTROLS (review, 2026-10-18): "Show
+   Reasons" reads exactly like "Show the data table" — semibold action text, no
+   underline. Footer LINKS keep their underline on purpose: they navigate away,
+   and a disclosure that looked like a link would promise a page change. */
+.statistics .stats-verify-reasons-toggle {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--action);
+  font: inherit;
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+}
+.statistics .stats-verify-reasons-toggle:hover {
+  color: var(--action-hover);
+}
+.statistics .stats-verify-reasons-toggle:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-token);
+}
+
+/* ONE-LINE STATE (2026-10-18 density round): a state that used to be a boxed
+   panel with a paragraph — Project Memory's freshness, Platform Metrics'
+   absence — is now its label and one clause; the explanation is behind the
+   widget's info toggle. Neutral, like the panel it replaces. */
+.statistics .stats-state-line {
+  margin-top: var(--space-sm);
+}
+
+/* ONE ROW OF FOUR (2026-10-18): Open Questions' four record figures, which
+   wrapped the fourth onto a row of its own in three auto-fit columns. Two-up
+   on a narrow column, so a label still gets room to wrap. */
+.statistics .stats-figures-row .stats-figures {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-sm) var(--space-md);
+}
+@media (max-width: 640px) {
+  .statistics .stats-figures-row .stats-figures {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Tighter list rows on the activity views (2026-10-18). */
+.statistics .stats-recent-row {
+  padding: var(--space-xs) 0;
+}
+
+/* DEC-35, visible (review fix 2026-10-18): the unattributed-actor sentence takes
+   the footer's full width on its own line, beneath the coverage line. */
+.statistics .widget-foot .stats-activity-unattributed {
+  flex-basis: 100%;
+  /* A full-width footer line: a wider measure than the 68ch body note, so a
+     two-sentence disclosure does not stack into a narrow column. */
+  max-width: 100ch;
 }

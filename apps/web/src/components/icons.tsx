@@ -5,6 +5,17 @@
  */
 import {
   BookMarked,
+  // THE WIDGET GLYPHS (`components/Widget.tsx`). `Info` is the widget's
+  // "about these figures" affordance — a plain circled i, never a question mark
+  // (that is `HelpTip`'s field-definition `?`, a different job). The other four
+  // name a VIEW of the same figures and nothing more: `Clock` an order in time,
+  // `ListOrdered` a ranking, `BarChartHorizontal` a breakdown, `Workflow` the
+  // workflow steps. None of them is a verdict, a trend or a gauge.
+  Info,
+  Clock,
+  ListOrdered,
+  BarChartHorizontal,
+  Workflow,
   Check,
   User,
   UserCheck,
@@ -199,6 +210,11 @@ export function sourceIcon(sourceType: string | undefined): LucideIcon {
 }
 
 export {
+  Info,
+  Clock,
+  ListOrdered,
+  BarChartHorizontal,
+  Workflow,
   Check,
   UserCheck,
   CornerDownRight,

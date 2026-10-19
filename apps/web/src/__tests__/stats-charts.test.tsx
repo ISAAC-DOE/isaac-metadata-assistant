@@ -1169,9 +1169,12 @@ describe('the chart palette declared on .statistics', () => {
      * · 54 declarations reach the literal-colour tier — the 48 above plus the six
      *   shorthands (`border` ×2, `border-top`, `border-bottom`, `outline`,
      *   `box-shadow`), which round 3 read not at all.
+     * · +1 to each since 2026-10-18: Record Verification's compact validator row
+     *   fills its passing share with `background: var(--stats-series)` on a
+     *   `.stats-chart-bar` span — a data mark, under the data-ink policy.
      */
-    expect(seen.length, 'the colour scan found almost nothing — it is broken').toBe(51);
-    expect(scanned.length, 'the literal-colour tier read almost nothing — it is broken').toBe(54);
+    expect(seen.length, 'the colour scan found almost nothing — it is broken').toBe(52);
+    expect(scanned.length, 'the literal-colour tier read almost nothing — it is broken').toBe(55);
     expect(LITERAL_COLOUR_EXCEPTIONS, 'the exception list has grown').toHaveLength(1);
     expect(seen, 'the ramp fills must be covered').toContain(
       'stats-chart-segment fill var(--stats-ramp-3)',
@@ -1259,8 +1262,10 @@ describe('the chart palette declared on .statistics', () => {
     // Vacuity guard: 19 (selector-part, reference) pairs measured — 5 segment
     // fills, 5 swatch backgrounds, 5 tooltip-key backgrounds, the series colour on
     // the line rule and on the unslotted tooltip key, and the bar/marker rule,
-    // which is one declaration counted once per class in its group.
-    expect(references.length, 'no data-ink reference was inspected').toBe(19);
+    // which is one declaration counted once per class in its group. 20 since
+    // 2026-10-18: Record Verification's compact validator rows fill their
+    // passing share with the series colour, on a `stats-chart-bar` span.
+    expect(references.length, 'no data-ink reference was inspected').toBe(20);
   });
 });
 
