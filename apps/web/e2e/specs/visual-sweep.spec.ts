@@ -516,10 +516,24 @@ const STATES: readonly VisualState[] = [
       await expect(page.locator('section.tutorial-offer')).toHaveCount(0);
       await expect(page.locator('.exp-row')).toHaveCount(0);
       await expect(page.getByRole('heading', { name: 'My Experiments' })).toBeVisible();
+      // The empty state itself, by the region its own heading names — the content
+      // this state exists to picture, not merely the page around it.
+      const empty = page.getByRole('region', { name: 'Start Your First Experiment' });
+      await expect(empty).toBeVisible({ timeout: 20_000 });
+      await expect(
+        empty.getByRole('heading', { level: 2, name: 'Start Your First Experiment' })
+      ).toBeVisible();
+      await expect(empty).toContainText('Start fresh, or bring in work you already have.');
       // The empty state's own primary. It did not exist when this sweep was
       // written; the heading stood in for it because the screen offered nothing.
-      const launch = page.getByRole('button', { name: 'Start Guided Walkthrough' }).first();
+      // ~~`'Start Guided Walkthrough'`~~ (CI, PR #291): the control is named by this
+      // browser's completion flag since the one-name change — Start before the
+      // walkthrough is finished, Replay after — and `markCompleted()` above is the
+      // finished state, so it reads Replay. Exactly one, inside the empty state.
+      const launch = empty.getByRole('button', { name: 'Replay Guided Walkthrough' });
+      await expect(launch).toHaveCount(1);
       await expect(launch).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByRole('button', { name: 'Start Guided Walkthrough' })).toHaveCount(0);
       return launch;
     },
   },
