@@ -907,7 +907,20 @@ function currentRoute(): string {
  *
  * `build` is a thunk rather than a string for reason 1.
  */
-export function CopyDiagnostics({ build }: { build: () => string }) {
+/** What Copy Diagnostics copies, said once. Exported so a surface that carries
+ *  the control in a compact footer can state it in that surface's own info panel
+ *  instead (`showNote={false}`) without authoring it a second time. */
+export const COPY_DIAGNOSTICS_NOTE =
+  'Copies this build’s version, route, viewport and Project Memory provenance as text you can paste into a bug report. Nothing is uploaded.';
+
+export function CopyDiagnostics({
+  build,
+  showNote = true,
+}: {
+  build: () => string;
+  /** `false` only where the caller states `COPY_DIAGNOSTICS_NOTE` itself. */
+  showNote?: boolean;
+}) {
   const [outcome, setOutcome] = useState<'idle' | 'copied' | 'manual'>('idle');
   const [report, setReport] = useState<string | null>(null);
   const [message, setMessage] = useState('');
@@ -976,10 +989,7 @@ export function CopyDiagnostics({ build }: { build: () => string }) {
         )}
         {outcome === 'copied' ? 'Diagnostics Copied' : 'Copy Diagnostics'}
       </button>
-      <p className="fetch-state-diagnostics-note">
-        Copies this build&rsquo;s version, route, viewport and Project Memory provenance as text you
-        can paste into a bug report. Nothing is uploaded.
-      </p>
+      {showNote && <p className="fetch-state-diagnostics-note">{COPY_DIAGNOSTICS_NOTE}</p>}
       {/* Present from first render so a change to its text is what gets
           announced — a live region that appears WITH its message is unreliable. */}
       <p className="sr-only" role="status">
@@ -1024,14 +1034,17 @@ export function DiagnosticsPanel({
   memory,
   route,
   tab,
+  showNote,
 }: {
   app?: DiagnosticsApp | null;
   memory?: DiagnosticsMemory | null;
   route?: string;
   tab?: string | null;
+  showNote?: boolean;
 }) {
   return (
     <CopyDiagnostics
+      showNote={showNote}
       build={() =>
         buildDiagnosticsReport({
           generatedAt: new Date(),

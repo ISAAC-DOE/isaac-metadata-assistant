@@ -27,7 +27,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 
-import { SchemaBrowser } from '../components/SchemaBrowser';
+import { SchemaBrowser, sourceLineFor } from '../components/SchemaBrowser';
 import {
   fieldsCitingVocabulary,
   vocabularySourceSlug,
@@ -272,9 +272,11 @@ describe('SchemaBrowser — Fields master list', () => {
     stubSchema();
     render(<SchemaBrowser />);
     await findRow('record_id');
-    expect(
-      screen.getAllByText(/ISAAC AI-Ready Scientific Record v1\.05 \(fixture\) — v1\.05/).length,
-    ).toBeGreaterThan(0);
+    // The title already carries its version, so it is stated ONCE (2026-10-12):
+    // the line used to read "… v1.05 (fixture) — v1.05".
+    const lines = screen.getAllByText(/ISAAC AI-Ready Scientific Record v1\.05 \(fixture\)/);
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) expect(line.textContent?.match(/v1\.05/g)).toHaveLength(1);
     expect(
       screen.getAllByText(/vendored official schema \(read-only reference\)/).length,
     ).toBeGreaterThan(0);
@@ -606,9 +608,8 @@ describe('SchemaBrowser — Fields detail panel', () => {
     stubSchema();
     render(<SchemaBrowser />);
     fireEvent.click(rowButton(await findRow('record_id')));
-    expect(
-      within(detail()).getByText(/ISAAC AI-Ready Scientific Record v1\.05 \(fixture\) — v1\.05/),
-    ).toBeInTheDocument();
+    const line = within(detail()).getByText(/ISAAC AI-Ready Scientific Record v1\.05 \(fixture\)/);
+    expect(line.textContent?.match(/v1\.05/g)).toHaveLength(1);
   });
 });
 
@@ -928,5 +929,32 @@ describe('SchemaBrowser — loading + backend-down', () => {
     render(<SchemaBrowser />);
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(/not running|unreachable/i);
+  });
+});
+
+// --- the source line states the version once (2026-10-12) --------------------
+
+describe('SchemaBrowser — the source line', () => {
+  it('does not repeat a version the title already carries', () => {
+    expect(sourceLineFor('ISAAC AI-Ready Scientific Record v1.05', '1.05')).toBe(
+      'ISAAC AI-Ready Scientific Record v1.05 — vendored official schema (read-only reference)',
+    );
+  });
+  it('still names the version when the title does not', () => {
+    expect(sourceLineFor('ISAAC record', '1.05')).toBe(
+      'ISAAC record — v1.05 — vendored official schema (read-only reference)',
+    );
+    expect(sourceLineFor(null, '1.05')).toBe(
+      'ISAAC official schema — v1.05 — vendored official schema (read-only reference)',
+    );
+  });
+  it('keeps the long description in the DOM behind the info toggle, one line visible', async () => {
+    stubFetchRoutes({ 'GET /api/schema': { body: schemaBrowserFixture } });
+    render(<SchemaBrowser />);
+    expect(screen.getByText('A read-only reference for the canonical official ISAAC schema.')).toBeVisible();
+    const info = screen.getByText(/not the portal Ontology system/i);
+    expect(info.closest('[hidden]')).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'About Schema Reference' }));
+    expect(info.closest('[hidden]')).toBeNull();
   });
 });

@@ -401,138 +401,13 @@
   max-width: var(--content-max, 640px);
   margin-top: 24px;
 }
-/* P2 — Governance & Safety → Policy.
-   The Policy tab is a `.placeholder`, so its prose was capped at 68ch by the
-   rule above while <main> ran to the `wide` mode's 1200px: one narrow column
-   with the tab underline stretching far past it. These two rules use the page
-   width WITHOUT lengthening a line — the measure moves from "one column of
-   68ch" to "as many 68ch-or-less columns as fit".
-   `auto-fit` + `minmax(min(…), 1fr)` rather than a viewport media query: the
-   number of columns has to answer to the width of THIS container (which the
-   left rail, the width mode and the gutters all change), not to the window.
-   The `min(…, 100%)` floor is the same guard `.settings-points` documents — a
-   bare track minimum cannot shrink below itself and overflows a narrow card. */
-.gov-policy {
-  margin-top: 18px;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
-  gap: 22px 32px;
-  align-items: start;
-}
-.gov-policy-col {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
-}
-/* The single-column case: without this a section would run the full 1200px.
-   Scoped to the Policy sections, never a bare `p` rule — `layout-width-modes`
-   forbids a global prose measure, and rightly: paragraphs inside cards, grids
-   and detail panels are already bounded by their containers. */
-.gov-policy-section p {
-  max-width: 68ch;
-}
-.gov-policy-section h2 {
-  font-size: var(--font-size-body);
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-heading);
-  letter-spacing: -0.005em;
-}
-/* The canonical-home pointer that leads the tab. Quieter than the policy
-   sections it introduces, because it is navigation, not policy. */
-/*
- * THE CANONICAL-HOME POINTER IS A CALLOUT, NOT A PARAGRAPH — and the change is
- * a measurement, not a preference.
- *
- * Measured 2026-09-15 in real Chromium at 1728px: this paragraph rendered SIX
- * lines at 557px inside a 1200px `wide` main, stranding 643px of empty gutter
- * beside a tall narrow column. That is the defect the project owner reported
- * twice — "the text is still stopping midway through half the block" — and the
- * sibling `.gov-policy` block two rules below had ALREADY been given the
- * two-column treatment for exactly this reason. This pointer was left behind.
- *
- * IT IS FIXED AS A CALLOUT RATHER THAN BY WIDENING THE MEASURE, because the
- * content is a POINTER and not prose: "the canonical home for this is over
- * there". A bounded, tinted box at a readable measure makes the space beside it
- * read as deliberate framing instead of a broken column, and a 1200px line
- * would be worse to read, not better — the owner ruled out spanning the
- * viewport explicitly. Nothing is hidden and no sentence is cut: this is
- * placement only.
- *
- * `e2e/specs/wide-prose.spec.ts` measures the result at 1440 and 1728.
- */
-/*
- * THE BOX IS THE FIX, NOT THE PARAGRAPH — and the reason is a specificity
- * measurement that also explains why the owner's complaint survived an earlier
- * attempt at it.
- *
- * `.screen-main[data-width="wide"] .placeholder > p` sets `max-width: 68ch`.
- * Measured in Chrome: that rule wins against a bare `.gov-canonical`
- * (`computedMaxWidth: 556.816px`), so capping the PARAGRAPH wider is inert. And
- * capping it wider would not have helped anyway: the defect is the gap between
- * the paragraph and its CONTAINER, and the container is the 1200px `wide` main.
- *
- * THAT `68ch` RULE IS THE ROOT CAUSE OF THIS WHOLE DEFECT FAMILY. It is the
- * `38em -> 68ch` change a prior slice made in answer to this same report, and it
- * could not have worked: it narrows the text and leaves the box it sits in
- * exactly as wide. It is deliberately NOT touched here — it applies to every
- * `wide` and `full` screen in the app, and changing it mid-flight would move
- * surfaces two other slices are editing. Fixing it globally is its own slice
- * with its own before/after measurement.
- *
- * So the pointer gets its own bounded container at the app's own `readable`
- * measure (AppShell: `readable` -> 760px). The paragraph then fills the box it
- * is in, and the space beside it reads as deliberate framing — which is what a
- * pointer callout is — instead of a broken column. Nothing is hidden and no
- * sentence is cut: this is placement only.
- *
- * Measured at 1728px: 643px of stranded gutter before, ~0 after.
- * `e2e/specs/wide-prose.spec.ts` holds it at 1440 and 1728.
- */
-/*
- * NO COLOURED LEFT RAIL. My first version used `border-left: 3px solid
- * var(--action)` and `__tests__/no-vertical-rail.test.ts` refused it — correctly.
- * That rule is documented as "permanent and system-wide" (`no-vertical-rail-rule.md`)
- * and the guard's own comment names the only allowed border-left: a neutral
- * full-width divider, which is not a rail.
- *
- * So the callout is a TINTED CARD WITH A NEUTRAL BORDER instead, which reads the
- * same way (bounded, subordinate, clearly a pointer) without the banned device.
- * The guard was not widened and no exemption was added.
- */
-.gov-canonical-box {
-  max-width: 760px;
-  margin-top: 14px;
-  padding: var(--space-sm) var(--space-md);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-inner);
-  background: var(--action-tint);
-}
-/* Inside the box the paragraph fills it. The `68ch` rule above still wins on
-   `max-width`, which is now harmless: 68ch is wider than the box. */
-.gov-canonical-box > .gov-canonical {
-  margin: 0;
-  color: var(--text-primary);
-}
-/* UNDERLINED, and this is an accessibility fix rather than a style preference.
-   `base.css` sets `text-decoration: none` on every link, which is fine for the
-   standalone button-shaped links elsewhere in the app but not for a link sitting
-   INSIDE a sentence: colour alone then carries "this is a link", which fails
-   WCAG 1.4.1 (Use of Color) for anyone who cannot perceive the hue difference
-   against the surrounding prose.
+/* ~~P2 — Governance & Safety → Policy~~ (`.gov-policy`, `.gov-policy-section`
+   and the canonical-home callout `.gov-canonical-box`) — RETIRED 2026-10-12 with
+   the tab. The policy text moved to Settings › Privacy & Governance, where it is
+   rows of the question widgets (`screens/settings/settings-widgets.css`);
+   `.gov-policy-section` survives only as a class on those rows, a hook the
+   claim-parity guards read the policy's paragraphs by, and carries no style. */
 
-   MEASURED, not predicted. This slice shipped the link without an underline and
-   linux CI answered with `link-in-text-block` firing on 1 node at ALL FIVE
-   viewports — a rule not baselined anywhere in this project. It is fixed here
-   rather than baselined: a genuinely new failure is a defect, and adding it to
-   the baseline would be the exact move the baseline file exists to prevent.
-
-   Scoped to this link, deliberately. Making every link in the app underlined is
-   a design decision nobody asked for, and would move several baselines at once. */
-.gov-canonical a {
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
 .placeholder-card {
   margin-top: 18px;
   padding: 18px 20px;
@@ -627,63 +502,6 @@
   outline: 2px solid var(--action);
   outline-offset: 2px;
   border-radius: var(--radius-token);
-}
-
-/*
- * A GROUP MARKER INSIDE A FLAT TABLIST — the Settings row only, 2026-09-15.
- *
- * The divider is a NEUTRAL 1px `--border-faint`, which is what the
- * no-vertical-rail rule allows and explicitly names as "not a rail": no status
- * or accent colour touches a left border here. It separates the scientist-facing
- * tabs from the developer group without adding a child to the tablist, because
- * `role="tablist"` may only own `role="tab"` children and a stray wrapper is how
- * `aria-required-children` gets broken.
- *
- * The eyebrow is `--font-size-meta` (11px) painting `--text-muted` (#5b6570,
- * 5.93:1 on white) rather than `--text-tertiary`: nothing in this app qualifies
- * for the WCAG large-text exemption, so 4.5:1 is the bar for an 11px label and
- * the lighter grey would miss it.
- */
-.section-tab-group-start {
-  margin-left: var(--space-sm);
-  padding-left: var(--space-md);
-  border-left: 1px solid var(--border-faint);
-}
-
-.section-tab-group-start::before {
-  /* B-22 — the group word, as GENERATED content from the tab's `data-group`, so it is not
-     a DOM node and is never read into the tab's text or name.
-
-     TWO DECLARATIONS, IN THIS ORDER, ON PURPOSE. The second adds the empty alt-text
-     (`/ ""`), which tells every engine that supports it that this content has no text
-     alternative — so it is excluded from the accessible name (Chrome, Safari, Firefox 128+).
-     An engine that does not understand the slash form drops that declaration and keeps the
-     first, which shows the same word; the worst case there is the old behaviour of the
-     word being in the name, never a missing marker.
-
-     Inline, not a block above the label: a block would make this one tab taller than its
-     six siblings and pull the whole shared `.section-tabs` row out of alignment on all four
-     pages that use it. MEASURED in Chrome: all seven tabs report the same `top` and the
-     same 30.5px height with the marker in place.
-
-     The marker sits EQUIDISTANT between the divider and the label it precedes (12px each
-     side). It was 16px/8px first, which put it nearer the label than the boundary and
-     invited reading "ADVANCED API Access" as one tab name. */
-  content: attr(data-group);
-  content: attr(data-group) / "";
-  margin-right: var(--space-md);
-  font-size: var(--font-size-meta);
-  font-weight: var(--font-weight-semibold);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-/* The marker does not brighten with its tab: it names the group, not the
-   selection, and a reader should not have to re-read it as part of the label. */
-.section-tab.active.section-tab-group-start::before,
-.section-tab:hover.section-tab-group-start::before {
-  color: var(--text-muted);
 }
 
 /* P33 S3 (D6): the assistant right rail on the Project Memory screen — the
@@ -1990,37 +1808,7 @@
   outline-offset: 2px;
   border-radius: var(--radius-token);
 }
-.settings-card-head {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-}
-.settings-card-icon {
-  flex: none;
-  margin-top: 2px;
-  color: var(--text-slate);
-}
-.settings-card-head h2 {
-  font-size: var(--font-size-heading-sm);
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-heading);
-}
-.settings-card-sub {
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--text-tertiary);
-  line-height: 1.5;
-  max-width: 68ch;
-}
 
-.settings-subheading {
-  margin: 18px 0 0;
-  font-size: 11px;
-  font-weight: var(--font-weight-semibold);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-slate);
-}
 .settings-source-line {
   margin-top: 12px;
   font-size: 11.5px;
@@ -2112,13 +1900,7 @@
   text-align: right;
   overflow-wrap: anywhere;
 }
-.settings-figures-caption {
-  margin-top: 8px;
-  font-size: 11px;
-  color: var(--text-tertiary);
-  line-height: 1.55;
-  max-width: 74ch;
-}
+
 .settings-commit-short {
   font-weight: var(--font-weight-semibold);
 }
@@ -2135,38 +1917,6 @@
   font-weight: 400;
   color: var(--text-tertiary);
   text-align: right;
-}
-
-/* P36V PR3 — Overview's "Boundaries at a Glance": a Title Case label beside a
-   ONE-LINE summary. Deliberately NOT `.settings-points` (the card grid Data &
-   Privacy uses for the canonical definitions) so a summary can never be mistaken
-   for the definition, and so adding a definition paragraph back here would look
-   as wrong as it reads. */
-.settings-summary-list {
-  margin: 10px 0 0;
-  display: flex;
-  flex-direction: column;
-}
-.settings-summary-row {
-  display: grid;
-  grid-template-columns: minmax(0, 200px) minmax(0, 1fr);
-  gap: 4px 16px;
-  align-items: baseline;
-  padding: 7px 0;
-  border-bottom: 1px solid var(--border-faint);
-}
-.settings-summary-label {
-  font-size: 12px;
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-heading);
-}
-.settings-summary-text {
-  margin: 0;
-  min-width: 0;
-  font-size: 12px;
-  line-height: 1.55;
-  color: var(--text-secondary);
-  overflow-wrap: anywhere;
 }
 
 /* Data & Privacy edge cases: the quietest thing in a definition card, so the
@@ -2193,103 +1943,11 @@
   overflow-wrap: anywhere;
 }
 
-/* Boundary statements — a titled list, not a wall of prose. */
-/* `min(420px, 100%)` — NOT a bare 420px: a bare track minimum cannot shrink
-   below its floor, so on a ~340px-wide card the tiles overflowed their own
-   container by 5px (measured at 375×812). The min() clamps the floor to the
-   container, so the grid collapses to one column instead of overflowing.
-
-   THE FLOOR WAS 260px AND THAT WAS TOO LOW. At 1440px this card's content box
-   is ~1100px wide, which `auto-fit` filled with FOUR tracks — 233px of text
-   inside each once the 13px padding and the border are taken off, or about 36
-   characters a line at 12px. The definitions in here run to 250 words; 36
-   characters is a newspaper column, and the brief for this tab asked for
-   readable line lengths. 420px is the same floor `.gov-policy` already uses one
-   screen away, and it yields TWO columns at 1440 and the same two the 768
-   breakpoint already produced — the layout that was already proven, applied at
-   the width that needed it.
-
-   `align-items: start` is the other half. A CSS grid stretches every item in a
-   row to the tallest, so a four-line card sat in a 450px box beside a 250-word
-   one, with 380px of empty tinted panel under it. Each card is now its own
-   height. */
-.settings-points {
-  margin: 14px 0 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
-  align-items: start;
-  gap: 12px;
-}
-.settings-points > li {
-  min-width: 0;
-  padding: 11px 13px;
-  border: 1px solid var(--border-faint);
-  border-radius: var(--radius-inner, 8px);
-  background: var(--surface-subtle);
-}
-.settings-points h3 {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--text-heading);
-}
-
-/* Data & Privacy concept rows, 2026-09-16. Twelve always-expanded definitions
-   rendered 2.5 viewports of prose at 1280x900 and 7.4 at 375x812 (measured), so
-   each `detail` now sits behind its own native `<details>`. NOTHING IS DELETED:
-   the whole paragraph is inside, verbatim, and the `<summary>` carries only the
-   heading — a topic, never a claim. See `PrivacyBody`'s doc comment for why that
-   distinction is what keeps `settingsContent.ts`' never-hide-a-caveat rule intact.
-
-   The row must LOOK openable, so the summary keeps the native disclosure
-   triangle, takes the pointer, and tints its heading on hover.
-
-   `list-style-position: inside` is declared rather than inherited: it puts the
-   marker in the summary's own content box, so the triangle stays inside the
-   card's 13px padding and the paragraph below needs no compensating indent. An
-   `outside` marker would hang over the card border, and correcting that with
-   negative margins would have to be re-tuned on every nested child. */
-/* No padding of its own, deliberately: `type-scale-and-spacing`'s UX-001 ratchet
-   counts every hand-authored `padding`/`margin`/`gap` length, and a `1px` here
-   pushed the axis 2400 -> 2401 for no gain. The row is already a full-card-width
-   target (measured 453 x 22 at 1280) sitting inside `.settings-points > li`'s own
-   11px/13px padding, so the literal bought nothing the card had not paid for. */
-.settings-concept > summary {
-  display: list-item;
-  list-style-position: inside;
-  cursor: pointer;
-  border-radius: var(--radius-inner, 8px);
-}
-.settings-concept > summary::marker {
-  color: var(--text-muted);
-}
-/* `<h3>` is a block, so it would otherwise drop below the marker's line box. */
-.settings-concept > summary > h3 {
-  display: inline;
-}
-.settings-concept > summary:hover > h3 {
-  color: var(--action);
-}
-.settings-concept > summary:focus-visible {
-  outline: 2px solid var(--action);
-  outline-offset: 2px;
-}
-/* A wider track must not simply become a wider line. With two columns at 1440
-   the track carries ~500px of text, which is ~85 characters at 12px — past the
-   comfortable measure in the other direction. `68ch` is the cap
-   `.gov-policy-section p` already uses for the same kind of definition prose,
-   and it is scoped to these cards rather than declared on a bare `p`, which
-   `layout-width-modes` forbids. */
-.settings-points p {
-  margin-top: 5px;
-  font-size: 12px;
-  line-height: 1.55;
-  color: var(--text-secondary);
-  max-width: 68ch;
-  overflow-wrap: anywhere;
-}
+/* ~~Boundary statements — `ul.settings-points`, its `li` cards, `h3` and `p`~~ —
+   RETIRED 2026-10-12 with Data & Privacy's twelve-card list. The class name now
+   belongs to the Privacy & Governance widget rows (`settings-widgets.css`), and
+   leaving these rules here would have restyled them at (0,1,1) — measured: the
+   row headings rendered at 12px/700 over the token rungs the new sheet sets. */
 
 .settings-jump {
   margin-top: 16px;
@@ -2332,52 +1990,6 @@
  */
 a.settings-jump-btn {
   text-decoration: none;
-}
-
-/*
- * The one-line scoping note above the advanced-surfaces group.
- *
- * It says what those destinations are NOT ("not part of recording an
- * experiment") because that is the question a scientist who just lost two
- * navigation items will have, and because the alternative — saying nothing —
- * leaves the demotion looking like a removal.
- */
-.settings-advanced-note {
-  margin-top: var(--space-xs);
-  max-width: 80ch;
-  color: var(--text-secondary);
-  /* UX-001's declared axes. The first draft of this rule invented
-     `--text-sm`/`--leading-normal`, which are declared NOWHERE — the exact
-     phantom-custom-property class that shipped nine times in
-     `capture.css`/`transcriptCapture.css` and made the primary input of the
-     capture surface borderless. Caught here by reading `tokens.css` rather than
-     by the ratchet, because a fallback value hides a phantom from the renderer
-     while still seeding the name for the next file to copy bare. */
-  font-size: var(--font-size-body);
-  line-height: var(--line-height-normal);
-}
-
-.settings-provenance-note {
-  margin-top: 8px;
-  /* The prose inside is capped at 74ch; without a matching cap on the box the
-     panel would stretch the full 1200px measure around a half-empty column. */
-  max-width: 80ch;
-  padding: 12px 14px;
-  border-radius: var(--radius-inner, 8px);
-  border: 1px solid var(--border-hair);
-  background: var(--surface-subtle);
-  color: var(--text-secondary);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.settings-provenance-note p {
-  font-size: 12px;
-  line-height: 1.55;
-  max-width: 74ch;
-}
-.settings-provenance-note strong {
-  color: var(--text-heading);
 }
 
 /* P36V PR3 — About's Technical Details: the full commit sha, the raw response
@@ -2997,75 +2609,7 @@ a.settings-jump-btn {
   min-width: 0;
   max-width: 90ch;
 }
-/*
- * *** `flex: none` PINNED THIS AT MAX-CONTENT AND OVERFLOWED EVERY NARROW
- * WIDTH. *** Found by CI's Linux width sweep, which is the only thing that
- * could: jsdom computes no layout, and the desktop projects have room to spare.
- *
- * Measured at 390px: `div.api-access-banner-action` right edge **389** against a
- * card content edge of **379**, forcing `main#main` to `scrollWidth 378 vs
- * clientWidth 368`. Also failing at 375 and 320. The cause is that this holds
- * TWO jump buttons side by side — `Endpoint Explorer` and `Connect Your Agent` —
- * and `flex: none` forbade the container from shrinking, so they could never
- * wrap however little room was left.
- *
- * It now shrinks (`0 1 auto` + `min-width: 0`) and wraps its own buttons, and
- * below the existing 900px breakpoint it takes a full row of its own — which is
- * what the `flex-wrap: wrap` already on `.api-access-banner` was there to allow.
- */
-.api-access-banner-action {
-  flex: 0 1 auto;
-  min-width: 0;
-  margin-left: auto;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.api-access-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
-  gap: 20px 28px;
-  align-items: start;
-}
-.api-access-col,
-.api-access-full {
-  min-width: 0;
-}
-/* Collapsed by default so the requirements never lead the column. Same audit-
-   trail treatment as About's Technical Details. */
-.api-keys-technical {
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-faint);
-  font-size: 11.5px;
-  color: var(--text-secondary);
-}
-.api-keys-technical > summary {
-  cursor: pointer;
-  color: var(--action);
-}
-.api-keys-technical > summary:focus-visible {
-  outline: 2px solid var(--action);
-  outline-offset: 2px;
-  border-radius: var(--radius-inner, 8px);
-}
-@media (max-width: 900px) {
-  .api-access-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .api-access-banner-action {
-    margin-left: 0;
-    /* Its own row. The banner already wraps, so giving the action a full basis
-       moves it below the prose instead of competing with it for a line. */
-    flex-basis: 100%;
-  }
-}
-.api-keys-heading {
-  margin: 0 0 6px;
-  font-size: var(--font-size-body);
-  font-weight: 700;
-  color: var(--text-heading);
-}
+
 .api-keys-lead {
   margin: 0;
   max-width: 74ch;
@@ -3109,86 +2653,7 @@ a.settings-jump-btn {
   line-height: 1.6;
   color: var(--text-secondary);
 }
-.api-keys-create {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 10px 14px;
-}
-.api-keys-create-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex: none;
-  padding: 7px 13px;
-  font-size: 12.5px;
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-disabled);
-  background: var(--surface-subtle);
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-control);
-  cursor: not-allowed;
-}
-.api-keys-create-reason {
-  margin: 0;
-  flex: 1 1 300px;
-  min-width: 0;
-  max-width: 66ch;
-  font-size: 11.5px;
-  line-height: 1.6;
-  color: var(--text-tertiary);
-}
-/* The bottom third of this surface was the worst dead zone on it: a dashed box at
-   the full inner measure (~1160px) whose only content was a centred ~420px island
-   of text (`max-width: 62ch` plus `margin: … auto`), leaving roughly 740px blank
-   either side of it. The box itself is the empty LIST's own area and legitimately
-   spans the section, so the fix is to stop centring a narrow column inside it:
-   icon and text sit on one left-aligned row, and the body's cap is raised so the
-   cap is no longer what decides the width. ~105 characters of copy cannot fill
-   1160px under any layout — what changes is that the leftover space is now the
-   empty region's own space rather than symmetric whitespace framing an island. */
-.api-keys-empty {
-  display: flex;
-  align-items: flex-start;
-  gap: 4px 12px;
-  padding: 16px;
-  text-align: left;
-  background: var(--surface-subtle);
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-inner);
-}
-.api-keys-empty-icon {
-  flex: none;
-  margin-top: 1px;
-  color: var(--text-quaternary);
-}
-.api-keys-empty-text {
-  min-width: 0;
-}
-.api-keys-empty-title {
-  margin: 0;
-  font-size: 12.5px;
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-strong);
-}
-.api-keys-empty-body {
-  margin: 3px 0 0;
-  max-width: 100ch;
-  font-size: 11.5px;
-  line-height: 1.6;
-  color: var(--text-tertiary);
-}
-.api-keys-requirements {
-  margin: 10px 0 0;
-  padding-left: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  max-width: 74ch;
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--text-secondary);
-}
+
 .api-keys-note {
   margin: 10px 0 0;
   max-width: 74ch;
@@ -3257,28 +2722,6 @@ a.settings-jump-btn {
   flex-wrap: wrap;
   gap: 4px;
   margin-top: 8px;
-}
-.api-samples-tabs-tab {
-  padding: 3px 10px;
-  font-size: 11px;
-  font-weight: var(--font-weight-medium);
-  color: var(--text-tertiary);
-  background: none;
-  border: 1px solid var(--border-faint);
-  border-radius: var(--radius-pill);
-}
-.api-samples-tabs-tab:hover {
-  color: var(--text-secondary);
-}
-.api-samples-tabs-tab.active {
-  color: var(--action-hover);
-  font-weight: var(--font-weight-semibold);
-  background: var(--action-tint);
-  border-color: var(--action-selected-border);
-}
-.api-samples-tabs-tab:focus-visible {
-  outline: 2px solid var(--action);
-  outline-offset: 1px;
 }
 .api-samples-panel {
   margin-top: 8px;
@@ -3354,8 +2797,7 @@ a.settings-jump-btn {
  * declarations through a selector list keeps one visual definition while
  * leaving `details.api-connect` resolving to exactly one element.
  */
-.api-connect,
-.api-quickstart-drawer {
+.api-connect {
   margin-top: 22px;
   padding-top: 16px;
   border-top: 1px solid var(--border-faint);
@@ -3431,10 +2873,7 @@ a.settings-jump-btn {
   .api-quickstart-row {
     grid-template-columns: minmax(0, 1fr);
   }
-  .api-keys-create-btn {
-    width: 100%;
-    justify-content: center;
-  }
+  
 }
 
 /* ---- Responsive (P33 S6 · RESP-1) — additive, narrow widths only ---- */
@@ -3547,11 +2986,7 @@ a.settings-jump-btn {
   .settings-commit-note {
     text-align: left;
   }
-  /* The label/summary pair stacks rather than sharing a 200px sidebar column. */
-  .settings-summary-row {
-    grid-template-columns: 1fr;
-    gap: 2px;
-  }
+  
   .settings-search-input-wrap {
     max-width: 100%;
   }

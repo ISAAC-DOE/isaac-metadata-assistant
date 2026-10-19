@@ -9,7 +9,7 @@ import { GuidedCompletion } from './screens/GuidedCompletion';
 import { EvidenceExplorer } from './screens/EvidenceExplorer';
 import { ExportReadiness } from './screens/ExportReadiness';
 import { ProjectMemory } from './screens/ProjectMemory';
-import { GovernancePage } from './screens/GovernancePage';
+import { GovernanceRoute } from './screens/GovernancePage';
 import { StatisticsPage } from './screens/statistics/StatisticsPage';
 import { SettingsPage } from './screens/SettingsPage';
 import { NotFound } from './screens/NotFound';
@@ -41,7 +41,7 @@ export function AppRoutes() {
         <Route path={ROUTE_PATTERNS.evidence} element={<EvidenceExplorer />} />
         <Route path={ROUTE_PATTERNS.export} element={<ExportReadiness />} />
         <Route path={ROUTE_PATTERNS.memory} element={<ProjectMemory />} />
-        <Route path={ROUTE_PATTERNS.governance} element={<GovernancePage />} />
+        <Route path={ROUTE_PATTERNS.governance} element={<GovernanceRoute />} />
         <Route path={ROUTE_PATTERNS.statistics} element={<StatisticsPage />} />
         <Route path={ROUTE_PATTERNS.settings} element={<SettingsPage />} />
         {/*

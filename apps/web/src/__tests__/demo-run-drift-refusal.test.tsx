@@ -261,8 +261,10 @@ describe('S2 · demo run — 409 tutorial_scope_required is a refusal, not a fai
     // the worked-example panel.
     expect(text).toMatch(/this browser tab is not in one/i);
     expect(text).not.toMatch(/none is open/i);
-    // WHERE the reader goes, named as a product surface.
-    expect(text).toMatch(/Help & Tutorial/i);
+    // WHERE the reader goes, named as a product surface — the Guided Walkthrough
+    // widget since the Help & Tutorial tab became one (2026-10-12).
+    expect(text).toContain(LABELS.settingsTabHelp);
+    expect(text).not.toMatch(/Help & Tutorial/i);
     // It must not misdescribe a healthy server, and must not claim a loss.
     expect(text).not.toMatch(/not running|unreachable|not responding|offline|\bdown\b/i);
     expect(text).not.toMatch(/lost|deleted|corrupt|error|failed/i);
@@ -284,7 +286,7 @@ describe('S2 · demo run — 409 tutorial_scope_required is a refusal, not a fai
     );
   });
 
-  it('offers a keyboard-reachable control that lands on Settings → Help & Tutorial', async () => {
+  it('offers a keyboard-reachable control that lands on Settings → Guided Walkthrough', async () => {
     // The destination is stubbed too, so this asserts the control lands on a LIVE
     // Help & Tutorial panel rather than that a pathname string changed.
     const view = runDemoWith({ status: 409, body: scopeRequiredBody }, settingsRoutes());
@@ -303,7 +305,9 @@ describe('S2 · demo run — 409 tutorial_scope_required is a refusal, not a fai
     // The destination really rendered the control the copy sends the reader to,
     // rather than merely a pathname changing.
     await waitFor(() =>
-      expect(view.getByRole('button', { name: LABELS.actionReplayTutorial })).toBeInTheDocument(),
+      /* Not finished in this browser → Start; the destination's control reads
+         by completion state since 2026-10-18. */
+      expect(view.getByRole('button', { name: LABELS.actionStartWalkthrough })).toBeInTheDocument(),
     );
   });
 

@@ -16,32 +16,73 @@
 export const SETTINGS_TAB_PARAM = 'tab';
 
 /*
- * `help` (R0) is the Help & Tutorial tab — the one permanent home of the guided
- * walkthrough's replay control. It is a tab id like the other five, so it is
- * deep-linkable (`/settings?tab=help`) by exactly the same mechanism, and the
- * walkthrough's own last step links to it rather than describing where to find it.
+ * ── FOUR TABS SINCE 2026-10-12 (`DEC-28`'s regroup, built) ──────────────────
+ *
+ * Settings was seven tabs — Overview · Data & Privacy · About · Help & Tutorial
+ * · API Access · Endpoint Explorer · Connect Your Agent — and a measured audit
+ * found 9,168 words across them, the same seven build facts on two tabs and the
+ * same twelve boundaries stated three times. `DEC-28` had already named the
+ * target: Overview / Privacy & Governance / Integrations / Advanced. These are
+ * those four, and each is a grid of question widgets.
+ *
+ * EVERY RETIRED TAB ID STILL RESOLVES, and that is the reason the alias table
+ * below exists rather than a rename. Each of the seven old ids is a URL a reader
+ * may hold (`/settings?tab=help` is printed by the walkthrough itself, `?tab=mcp`
+ * by the voice-capture view, `?tab=explorer` by Statistics). An alias lands on
+ * the tab that now holds the material AND names the widget to bring into view,
+ * so an old link arrives at the thing it pointed at, not merely at its tab.
+ *
+ * `privacy` is both a canonical id and the old one — Data & Privacy became
+ * Privacy & Governance in place, so its links needed no alias at all.
  */
-/*
- * `mcp` is Connect Your Agent — the surface that describes ISAAC's agent
- * (machine-callable tool) interface to a human. It sits with the other two
- * "reaching this build as a program" tabs rather than at the end, because it
- * reports state like the five before it and offers no action; `help` stays last
- * for the reason given above.
- */
-export const SETTINGS_TAB_IDS = [
-  'overview',
-  'privacy',
-  'about',
-  'api',
-  'explorer',
-  'mcp',
-  'help',
-] as const;
+export const SETTINGS_TAB_IDS = ['overview', 'privacy', 'integrations', 'advanced'] as const;
 
 export type SettingsTabId = (typeof SETTINGS_TAB_IDS)[number];
 
 export function isSettingsTab(value: string | null | undefined): value is SettingsTabId {
   return SETTINGS_TAB_IDS.includes(value as SettingsTabId);
+}
+
+/**
+ * The retired tab ids, each mapped to the tab that holds its material now and the
+ * widget on that tab it should bring into view. The widget id is the DOM id of
+ * that widget's HEADING (each widget is a region named by its heading), so the
+ * page scrolls the region that heading names into view.
+ */
+export const SETTINGS_TAB_ALIASES = {
+  about: { tab: 'overview', widget: 'settings-build-heading' },
+  help: { tab: 'overview', widget: 'settings-help-heading' },
+  api: { tab: 'integrations', widget: 'settings-apiaccess-heading' },
+  mcp: { tab: 'integrations', widget: 'settings-agent-heading' },
+  explorer: { tab: 'advanced', widget: 'settings-apidocs-heading' },
+} as const satisfies Record<string, { tab: SettingsTabId; widget: string }>;
+
+export type SettingsTabAlias = keyof typeof SETTINGS_TAB_ALIASES;
+
+/** Every value `?tab=` may carry and still mean something: the four tabs, plus
+ *  the five retired ids that alias onto them. */
+export type SettingsTabLink = SettingsTabId | SettingsTabAlias;
+
+export function isSettingsTabAlias(value: string | null | undefined): value is SettingsTabAlias {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(SETTINGS_TAB_ALIASES, value);
+}
+
+/**
+ * What a `?tab=` value resolves to: the tab to select and, for a retired id, the
+ * widget it pointed at. An absent, empty or unrecognised value falls back to
+ * `overview` without throwing, exactly as before — so there is still no dead
+ * route, and no value that used to open a tab now opens nothing.
+ */
+export function resolveSettingsTab(value: string | null | undefined): {
+  tab: SettingsTabId;
+  widget: string | null;
+} {
+  if (isSettingsTab(value)) return { tab: value, widget: null };
+  if (isSettingsTabAlias(value)) {
+    const alias = SETTINGS_TAB_ALIASES[value];
+    return { tab: alias.tab, widget: alias.widget };
+  }
+  return { tab: 'overview', widget: null };
 }
 
 /**
@@ -448,7 +489,9 @@ export const ROUTES = {
   statistics: '/statistics',
   settings: '/settings',
   /**
-   * A deep link to one Settings & API tab, e.g. `/settings?tab=explorer`.
+   * A deep link to one Settings tab, e.g. `/settings?tab=advanced`. A retired
+   * tab id (`explorer`, `mcp`, `help`, …) is still accepted, and lands on the
+   * tab that holds that material now (see `SETTINGS_TAB_ALIASES`).
    *
    * Deliberately NOT used for switching tabs from inside `SettingsPage`. That
    * screen switches by copying the current `URLSearchParams` and calling
@@ -464,7 +507,7 @@ export const ROUTES = {
    * `__tests__/settings-page.test.tsx`, which asserts that activating a tab in the
    * app produces exactly the query string this helper builds for that tab.
    */
-  settingsTab: (tab: SettingsTabId) => `/settings?${SETTINGS_TAB_PARAM}=${tab}`,
+  settingsTab: (tab: SettingsTabLink) => `/settings?${SETTINGS_TAB_PARAM}=${tab}`,
   /** A deep link to one Statistics tab, e.g. `/statistics?tab=mine`. Same
    *  division of labour as `settingsTab`: whole-URL links use this, while the
    *  page itself switches tabs by copying its own `URLSearchParams` so any other

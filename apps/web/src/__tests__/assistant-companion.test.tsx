@@ -187,7 +187,7 @@ function renderedUrls(container: HTMLElement): string[] {
 // --- it actually reaches a screen a scientist opens -------------------------
 
 describe('the section is mounted on a real tab, not merely written', () => {
-  it('renders inside Settings → Connect Your Agent, from a ?tab= deep link', async () => {
+  it('renders inside Settings → Integrations → Connect Your Agent, from a ?tab= deep link', async () => {
     /*
      * The claim `artifact_link.py` existed for four commits without: a validated
      * link with NO consumer is not a feature. This asserts the whole path — the
@@ -209,7 +209,13 @@ describe('the section is mounted on a real tab, not merely written', () => {
         <SettingsPage />
       </MemoryRouter>,
     );
-    const panel = await screen.findByRole('tabpanel', { name: 'Connect Your Agent' });
+    /* Since 2026-10-12 the section is the Connect Your Agent widget's "Open in
+       Claude" VIEW, on the Integrations tab the old `?tab=mcp` link lands on.
+       The view is mounted (it reads on mount, asserted below) and shown when
+       chosen — which is what a reader does, so it is what this does. */
+    const panel = await screen.findByRole('tabpanel', { name: 'Integrations' });
+    const agent = within(panel).getByRole('region', { name: 'Connect Your Agent' });
+    fireEvent.click(within(agent).getByRole('button', { name: 'Open in Claude' }));
     expect(
       within(panel).getByRole('heading', { name: COPY.heading }),
     ).toBeInTheDocument();
@@ -255,7 +261,7 @@ describe('the section is mounted on a real tab, not merely written', () => {
 
     // Come back. It remounts, and reads again — the whole benefit, stated
     // exactly.
-    fireEvent.click(screen.getByRole('tab', { name: 'Connect Your Agent' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Integrations' }));
     await screen.findByText(COPY.unconfiguredLabel);
     await waitFor(() =>
       expect(calls.filter((key) => key === ROUTE).length).toBe(afterFirst + 1),
@@ -858,8 +864,13 @@ describe('the styling contract', () => {
     // and a guard that named only two files would report a false "undeclared".
     // `.mono` lives in `styles/base.css`, which the first version of this list
     // omitted and was told about.
+    /* `screens/settings/settings-widgets.css` joined 2026-10-12: the section's
+       BARE form — its body as a view of the Connect Your Agent widget — takes
+       two classes from the Settings widget sheet, which the page already loads.
+       Still no stylesheet of this component's own. */
     const css = [
       'screens/screens.css',
+      'screens/settings/settings-widgets.css',
       'styles/tokens.css',
       'styles/base.css',
     ]

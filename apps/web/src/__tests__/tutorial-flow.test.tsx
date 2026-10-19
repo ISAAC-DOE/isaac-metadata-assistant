@@ -23,6 +23,7 @@ import { MemoryRouter } from 'react-router-dom';
 
 import { AppRoutes } from '../App';
 import { HelpAndTutorialPanel } from '../screens/settings/HelpAndTutorial';
+import { SETTINGS_WIDGET_COPY } from '../lib/settingsContent';
 import { LABELS } from '../lib/labels';
 import {
   TUTORIAL_ID,
@@ -592,7 +593,10 @@ describe('R0 · replay from Settings & API → Help & Tutorial', () => {
     renderAt('/settings?tab=help');
 
     const replay = await screen.findByRole('button', { name: LABELS.actionReplayTutorial });
-    expect(screen.getByText('Finished in this browser.')).toBeInTheDocument();
+    // The state is the Guided Walkthrough widget's headline since 2026-10-12.
+    expect(screen.getByText(SETTINGS_WIDGET_COPY.walkthroughFinished)).toBeInTheDocument();
+    // Finished in this browser → the control REPLAYS, and is not also offered as Start.
+    expect(screen.queryByRole('button', { name: LABELS.actionStartWalkthrough })).toBeNull();
 
     fireEvent.click(replay);
 
@@ -602,12 +606,26 @@ describe('R0 · replay from Settings & API → Help & Tutorial', () => {
     expect(isTutorialCompleted()).toBe(true);
   }, 30000);
 
+  /* 2026-10-18 (review): this test found the Replay control beside "Not
+     Finished in This Browser" and passed — a control offering to REPEAT what the
+     reader never did. Both states are now pinned: not finished → Start, finished →
+     Replay (above), read from the same browser-local flag as the state line. */
   it('reports honestly when the walkthrough has NOT been finished in this browser', async () => {
     stubFetchRoutes(readOnlyRoutes() as never);
     renderAt('/settings?tab=help');
-    await screen.findByRole('button', { name: LABELS.actionReplayTutorial });
-    expect(screen.getByText('Not finished in this browser yet.')).toBeInTheDocument();
+    const start = await screen.findByRole('button', { name: LABELS.actionStartWalkthrough });
+    expect(start).toHaveTextContent('Start Guided Walkthrough');
+    expect(screen.getByText(SETTINGS_WIDGET_COPY.walkthroughNotFinished)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: LABELS.actionReplayTutorial })).toBeNull();
   });
+
+  it('starts the walkthrough from the Start control exactly as Replay does', async () => {
+    stubFetchRoutes(readOnlyRoutes() as never);
+    renderAt('/settings?tab=help');
+    fireEvent.click(await screen.findByRole('button', { name: LABELS.actionStartWalkthrough }));
+    const first = await markForStep(0);
+    expect(first.textContent).toContain(`Step 1 of ${TOTAL}`);
+  }, 30000);
 
   /*
    * THE COPY THIS ASSERTION PINS WAS CORRECTED, AND THE ASSERTIONS GREW WITH IT.
@@ -632,7 +650,7 @@ describe('R0 · replay from Settings & API → Help & Tutorial', () => {
   it('says the completion flag is browser-local, and scopes what replay does not touch', async () => {
     stubFetchRoutes(readOnlyRoutes() as never);
     renderAt('/settings?tab=help');
-    await screen.findByRole('button', { name: LABELS.actionReplayTutorial });
+    await screen.findByRole('button', { name: LABELS.actionStartWalkthrough });
     const panel = screen.getByRole('tabpanel');
     // The build has no identity it trusts, so the copy must not imply a profile
     // that follows the reader to another machine.
@@ -676,7 +694,8 @@ describe('R0 · replay from Settings & API → Help & Tutorial', () => {
     // The assistant transcript is not denied — the reader is sent to the surface that
     // actually describes it, so the narrowing is not a silent omission.
     expect(panel.textContent).toMatch(/assistant panel/i);
-    expect(panel.textContent).toMatch(/Data & Privacy/i);
+    // Data & Privacy became Privacy & Governance (2026-10-12); the pointer follows it.
+    expect(panel.textContent).toMatch(/Privacy & Governance/i);
     /*
      * THE `resume_failed` EXCEPTION, WHICH WAS UNPINNED.
      *

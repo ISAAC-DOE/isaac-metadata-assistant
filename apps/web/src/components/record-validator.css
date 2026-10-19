@@ -13,22 +13,13 @@
    the FALLBACK: mounted on a screen that does not opt into a width mode, this
    card renders exactly as before. */
 .rec-val {
-  padding: 20px 24px;
   max-width: var(--content-max, 760px);
 }
 
-.rec-val-head {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-}
-.rec-val-icon {
-  flex: none;
-  margin-top: 2px;
-  color: var(--text-slate);
-}
 /*
- * `width: fit-content` is a FOCUS-INDICATOR fix, not a typographic one.
+ * `width: fit-content` is a FOCUS-INDICATOR fix, not a typographic one — kept
+ * from the pre-widget header (2026-10-12: the heading is now the shared
+ * Widget's title).
  *
  * WHAT WAS REPORTED, AND WHAT IT ACTUALLY IS. Review saw "a 2px solid blue
  * outline around the `<h2>` on plain page load" and read it as a text input,
@@ -39,37 +30,30 @@
  * because `GovernancePage.tsx` moves focus to this heading on ARRIVAL (it is
  * `tabIndex={-1}` for exactly that), and per the `:focus-visible` heuristic a
  * programmatic focus matches when the previous focus did — i.e. whenever a
- * keyboard was last used, which on a real visit it usually was. Measured in
- * Chrome: `h.matches(':focus-visible') === true` after a Tab press followed by
- * the arrival focus.
+ * keyboard was last used, which on a real visit it usually was — and Chrome
+ * also matches it for a programmatic focus on a page nobody has interacted
+ * with yet, which is the plain-load case the report saw.
  *
  * SO THE INDICATOR MUST STAY. This heading is where keyboard and screen-reader
  * arrivals land; hiding the landing would trade a cosmetic complaint for a
  * WCAG 2.4.7 failure, and switching an already-correct selector would change
- * nothing at all.
+ * nothing at all. (2026-10-12: the plain-load ring the audit reported again is
+ * now closed at its CAUSE, not here — `GovernancePage` focuses with
+ * `focusVisible: false` on the first history entry only, so a deep link draws no
+ * ring while an in-app keyboard arrival still does.)
  *
  * WHAT IS ACTUALLY WRONG IS THE SHAPE. An `h2` is a block, so the ring spanned
- * the full 514px of the header and sat directly above a labelled textarea — a
+ * the full width of the header and sat directly above a labelled textarea — a
  * full-width rounded blue box in a form, which is a text field. `fit-content`
  * makes it hug the three words instead, and it then reads as what it is: focus
  * landed on a heading.
  */
-.rec-val-head h2 {
+.rec-val .widget-title {
   width: fit-content;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-heading);
-}
-.rec-val-sub {
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--text-tertiary);
-  line-height: 1.5;
-  max-width: 68ch;
 }
 
 .rec-val-scope-note {
-  margin-top: 12px;
+  margin: 0;
   font-size: 12px;
   line-height: 1.5;
   padding: 9px 12px;
@@ -80,26 +64,9 @@
   max-width: 72ch;
 }
 
-/* P36R S8 — the purpose disclosure. A <details>, so the four real uses are
-   available without the Validator growing into the visual centre of the app:
-   it stays a secondary Governance utility. */
-.rec-val-purpose {
-  margin-top: 12px;
-}
-.rec-val-purpose > summary {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--action);
-  cursor: pointer;
-  width: fit-content;
-}
-.rec-val-purpose > summary:focus-visible {
-  outline: 2px solid var(--action);
-  outline-offset: 2px;
-  border-radius: var(--radius-token);
-}
+/* The purpose list now sits in the widget's info panel (2026-10-12). */
 .rec-val-purpose-list {
-  margin: 8px 0 0;
+  margin: var(--space-xs) 0 0;
   padding-left: 18px;
   font-size: 12px;
   line-height: 1.6;
@@ -172,10 +139,7 @@
   border: 0;
 }
 
-.rec-val-result {
-  margin-top: 16px;
-}
-.rec-val-empty {
+.rec-val-idle-hint {
   font-size: 12.5px;
   color: var(--text-tertiary);
 }

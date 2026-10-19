@@ -365,7 +365,9 @@ const surface = (id: string) => SURFACES.find((s) => s.id === id)!;
 const experimentsSurface = surface('experiments');
 const experimentsExampleSurface = surface('experiments-example');
 const evidenceGraphSurface = surface('evidence-graph');
-const connectSurface = surface('settings-connect');
+/* `settings-connect` was retired from the surface catalogue 2026-10-12: `?tab=mcp`
+   lands on Integrations, which `settings-api` scans whole. This sweep's own
+   `settings-connect` STATE still photographs that link, by path (below). */
 
 /**
  * Two run ids that resolve in NO record. Used to photograph the Compare Runs
@@ -594,34 +596,41 @@ const STATES: readonly VisualState[] = [
   },
   {
     id: 'settings',
-    what: 'Settings & API → Overview — runtime status and the boundaries',
+    what: 'Settings → Overview — Data Safety, This Build, Guided Walkthrough',
     async reach({ page, app }) {
       await app.goto('/settings');
       await settled(page);
-      /* `Runtime Status` -> `System Status`, 2026-09-15. This spec keeps its OWN
-         readiness gate rather than reading `e2e/surfaces.ts`, so the Settings
-         density rename had to be applied here too — and this is the THIRD
-         independent copy of that gate (the surface catalog, `statistics-nav`'s
-         assertions, and this). A future rename must sweep all three. */
-      const heading = page.getByRole('heading', { name: 'System Status' });
+      /* `System Status` -> `This Build`, 2026-10-12 (Settings became widgets).
+         This spec keeps its OWN readiness gate rather than reading
+         `e2e/surfaces.ts`, so the rename is applied here too — the surface
+         catalog and this are the two copies of that gate. */
+      const heading = page.getByRole('heading', { name: 'This Build' });
       await expect(heading).toBeVisible({ timeout: 20_000 });
       return heading;
     },
   },
   {
     id: 'settings-replay',
-    what: 'Settings & API → Help & Tutorial — the one permanent home of the replay control',
+    what: 'Settings → Overview → Guided Walkthrough (via ?tab=help) — the one permanent home of the replay control',
     async reach({ page, app }) {
       await app.goto('/settings?tab=help');
       await settled(page);
-      const replay = page.getByRole('button', { name: 'Replay Tutorial' });
+      // Start before this browser has finished the walkthrough, Replay after
+      // (2026-10-18) — the same control either way, so either name reaches it.
+      const replay = page.getByRole('button', { name: /^(Start|Replay) Guided Walkthrough$/ });
       await expect(replay).toBeVisible({ timeout: 20_000 });
       return replay;
     },
+    // 2026-10-18: the widget, not the page. Since Settings became widgets this state
+    // shares its PAGE with `settings` (`?tab=help` is an alias for Overview), and at
+    // 1280px the walkthrough widget is already in the first viewport, so the default
+    // app frame attached a byte-identical image (measured: sha256 781aa20e7b82 for
+    // both). The Guided Walkthrough widget IS this state.
+    frame: ({ page }) => page.locator('section.settings-widget-walkthrough'),
   },
   {
     id: 'endpoint-explorer',
-    what: 'Settings & API → Endpoint Explorer — the OpenAPI browser, master + detail',
+    what: 'Settings → Advanced → Endpoint Explorer (via ?tab=explorer) — the OpenAPI browser, master + detail',
     async reach({ page, app }) {
       await app.goto('/settings?tab=explorer');
       // The DETAIL pane, not the group list: the list heading renders first and
@@ -647,10 +656,17 @@ const STATES: readonly VisualState[] = [
      * "whichever banner is up" cannot tell a reviewer which one it was.
      */
     id: 'settings-connect',
-    what: 'Settings & API → Connect Your Agent — the agent interface, stated as unconfigured',
+    what: 'Settings → Integrations (via ?tab=mcp) — the agent interface, stated as unconfigured',
     async reach({ page, app }) {
-      await app.open(connectSurface);
-      const heading = page.getByRole(connectSurface.ready.role, { name: connectSurface.ready.name }).first();
+      await app.goto('/settings?tab=mcp');
+      await settled(page);
+      /* The Connect Your Agent widget's headline — THIS BUILD'S REAL STATE
+         (`MCP_ENDPOINT` is `null`). The day a deployment publishes an address the
+         widget renders a different headline, and this must be revisited rather
+         than loosened into a regex that matches both. */
+      const heading = page
+        .getByRole('heading', { name: 'Requires Organization Configuration' })
+        .first();
       await expect(heading).toBeVisible({ timeout: 20_000 });
       return heading;
     },
@@ -1206,7 +1222,7 @@ const STATES: readonly VisualState[] = [
     async reach({ page, app, tutorial }) {
       await app.goto('/settings?tab=help');
       await settled(page);
-      await page.getByRole('button', { name: 'Replay Tutorial' }).click();
+      await page.getByRole('button', { name: 'Replay Guided Walkthrough' }).click();
 
       const mark = page.locator('.tutorial-mark');
       await expect(mark).toBeVisible({ timeout: 25_000 });
@@ -1358,7 +1374,7 @@ test.describe('visual state sweep', () => {
     // removed surfaces as a `TypeError` reading `.path` of undefined, inside a
     // 20-minute browser run, at whichever width got there first. Here it is a
     // sub-second failure naming the id.
-    for (const id of ['experiments', 'experiments-example', 'evidence-graph', 'settings-connect']) {
+    for (const id of ['experiments', 'experiments-example', 'evidence-graph', 'settings-api']) {
       expect(
         SURFACES.find((s) => s.id === id),
         `visual-sweep opens the catalogued surface "${id}", which is no longer in SURFACES. ` +

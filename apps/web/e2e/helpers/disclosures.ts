@@ -239,7 +239,38 @@ export const BL15_REVIEW_DISCLOSURES: Readonly<Record<string, number>> = Object.
  * limitation, named here rather than introduced here.
  */
 export const SETTINGS_CONCEPT_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze({
-  'settings-privacy': 12,
+  /*
+   * ~~'settings-privacy': 12~~ — 2026-10-12. The twelve `details.settings-concept`
+   * rows are gone: Privacy & Governance is four question WIDGETS, each concept's
+   * state is a VISIBLE row (scanned with no help from this file), and the twelve
+   * definitions moved into the four widgets' Details. SETTING THIS TO ZERO ALONE
+   * WOULD HAVE BEEN THE COVERAGE LOSS THIS FILE EXISTS TO REFUSE, so the
+   * declaration moved with the definitions: `SETTINGS_DEFINITION_DISCLOSURES`
+   * below opens those four, restoring exactly the definitions this entry opened.
+   */
+});
+
+/**
+ * How many widget Details disclosures holding the Privacy & Governance
+ * DEFINITIONS each surface mounts — the successor of `SETTINGS_CONCEPT_DISCLOSURES`.
+ *
+ * The four question widgets each keep their concepts' full definitions (and the
+ * governance policy's Workspace Scope paragraph) behind one `Full Definitions`
+ * Details, a `button[aria-expanded]` over a `hidden` body. Opened here so the
+ * definitions are scanned as they were when they were `<details>` rows. The
+ * nested `details.settings-more` drawers stay CLOSED, unchanged — they were closed
+ * before too, so the scanned DOM stays comparable.
+ *
+ * Other widget Details, info panels and collapsible views on the Settings tabs
+ * (Integrations' reference views, Technical Details, This Build's info) are NOT
+ * opened. Their content sat in closed `<details>` before this change too —
+ * Connect Your Agent's four drawers, Quick Start's drawer, the Connect an Agent
+ * guide, Technical Details — and none was opened by this helper, so leaving them
+ * closed keeps the scanned DOM what it was. That is a real, pre-existing coverage
+ * gap, named here rather than introduced here.
+ */
+export const SETTINGS_DEFINITION_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze({
+  'settings-privacy': 4,
 });
 
 /**
@@ -387,6 +418,24 @@ export async function openUnreachableDisclosures(page: Page, surfaceId: string):
     const one = concepts.nth(i);
     await one.locator('> summary').click();
     await expect(one).toHaveAttribute('open', '');
+  }
+
+  /* The Privacy & Governance definitions — the four widget Details that replaced
+     the twelve rows above. Same mechanism: declared count, opened by index,
+     asserted open. */
+  const definitions = page.locator('.settings-grid-privacy .widget-details .disclosure-trigger');
+  const expectedDefinitions = SETTINGS_DEFINITION_DISCLOSURES[surfaceId] ?? 0;
+  const definitionCount = await definitions.count();
+  expect(
+    definitionCount,
+    `surface "${surfaceId}" mounts ${definitionCount} Privacy & Governance definition ` +
+      `disclosures; SETTINGS_DEFINITION_DISCLOSURES in e2e/helpers/disclosures.ts declares ` +
+      `${expectedDefinitions}. A definition left closed here is exempt from every axe scan.`
+  ).toBe(expectedDefinitions);
+  for (let i = 0; i < definitionCount; i++) {
+    const one = definitions.nth(i);
+    if ((await one.getAttribute('aria-expanded')) === 'false') await one.click();
+    await expect(one).toHaveAttribute('aria-expanded', 'true');
   }
 
   await openDraftBlocks(page, surfaceId);

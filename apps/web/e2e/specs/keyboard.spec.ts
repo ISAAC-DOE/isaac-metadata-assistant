@@ -227,10 +227,22 @@ test('@interaction the assistant drawer trap moves focus to the composer at 768p
   expect(toggleFocused).toBe(false);
 });
 
-test('@interaction the unavailable API-key action is disabled AND says why', async ({ page, app }) => {
+/*
+ * INVERTED 2026-10-18 (Settings widget redesign, DEC-28), not deleted. This test was
+ * `the unavailable API-key action is disabled AND says why`: it required a really-
+ * `disabled` "Create API Key" button beside the refusal. The redesign's cross-page rule
+ * is that an absent capability is a STATE, never a disabled control — a button that
+ * cannot be pressed says "this exists, you just may not use it", the opposite of the
+ * truth in a build with no credential operation at all. So the half that pinned the
+ * button is inverted (no such button, enabled or disabled), and the half that pinned
+ * the explanation is kept: the absence is still stated, in a visible heading, plus the
+ * one fact a developer needs next.
+ */
+test('@interaction the unavailable API-key action is a stated state, not a disabled button', async ({ page, app }) => {
   await app.goto('/settings?tab=api');
-  const create = page.getByRole('button', { name: /Create API Key/i });
-  await expect(create).toBeDisabled();
-  // The refusal is stated in prose, not implied by the greyed-out button.
-  await expect(page.getByRole('heading', { name: /API Key Management Is Not Available in This Build/i })).toBeVisible();
+  // The refusal is stated in prose — the heading is the state.
+  await expect(page.getByRole('heading', { name: /No API Keys in This Build/i })).toBeVisible();
+  await expect(page.getByText(/At most one credential exists/i)).toBeVisible();
+  // …and no control pretends otherwise: no Create button at all, disabled or not.
+  await expect(page.getByRole('button', { name: /Create API Key/i })).toHaveCount(0);
 });

@@ -31,7 +31,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, within, cleanup } from '@testing-library/react';
+import { render, screen, within, cleanup, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import { SettingsPage } from '../screens/SettingsPage';
@@ -40,12 +40,19 @@ import {
   MCP_CAPABILITIES_ALLOWED,
   MCP_CAPABILITIES_REFUSED,
   MCP_CONNECT_COPY,
+  MCP_WIDGET_COPY,
   MCP_ENDPOINT,
   MCP_PERMISSIONS,
   MCP_SETUP_STEPS,
   mcpDeploymentState,
 } from '../lib/mcpConnectContent';
-import { SETTINGS_TAB_IDS, ROUTES, isSettingsTab } from '../lib/routes';
+import {
+  SETTINGS_TAB_IDS,
+  ROUTES,
+  isSettingsTab,
+  isSettingsTabAlias,
+  resolveSettingsTab,
+} from '../lib/routes';
 import {
   stubFetchRoutes,
   aboutResponse,
@@ -91,9 +98,13 @@ function renderSettings(entry = ROUTES.settingsTab('mcp')) {
 }
 
 /** The panel alone, so the endpoint branch can be driven without a deployment. */
-function renderPanel(endpoint?: string | null) {
+function renderPanel(endpoint?: string | null, options: { withCompanion?: boolean } = {}) {
   return render(
-    <ConnectYourAgentPanel endpoint={endpoint} onOpenExplorer={() => {}} />,
+    <ConnectYourAgentPanel
+      endpoint={endpoint}
+      onOpenExplorer={() => {}}
+      withCompanion={options.withCompanion}
+    />,
   );
 }
 
@@ -128,24 +139,33 @@ function visibleText(container: HTMLElement): string {
 // --- the tab exists, and is reachable the way every other tab is -------------
 
 describe('Connect Your Agent — the tab', () => {
-  it('is a registered Settings tab id', () => {
-    expect(SETTINGS_TAB_IDS).toContain('mcp');
-    expect(isSettingsTab('mcp')).toBe(true);
+  /* A TAB UNTIL 2026-10-12, A WIDGET SINCE. Settings is four tabs of question
+     widgets, and Connect Your Agent is the first widget of Integrations. `mcp`
+     is still a working `?tab=` value — an ALIAS onto Integrations — because the
+     voice-capture view and older links print it. These three are the old "it is
+     a tab" assertions, inverted to what is true now rather than deleted. */
+  it('is a retired tab id that still resolves, onto Integrations', () => {
+    expect(SETTINGS_TAB_IDS).not.toContain('mcp');
+    expect(isSettingsTab('mcp')).toBe(false);
+    expect(isSettingsTabAlias('mcp')).toBe(true);
+    expect(resolveSettingsTab('mcp')).toEqual({ tab: 'integrations', widget: 'settings-agent-heading' });
   });
 
-  it('renders as a tab in the page tablist', () => {
-    renderSettings(ROUTES.settingsTab('overview'));
-    expect(screen.getByRole('tab', { name: TAB_LABEL })).toBeInTheDocument();
+  it('renders as a named widget region on the Integrations tab', () => {
+    renderSettings(ROUTES.settingsTab('integrations'));
+    expect(screen.queryByRole('tab', { name: TAB_LABEL })).toBeNull();
+    expect(screen.getByRole('region', { name: TAB_LABEL })).toBeInTheDocument();
   });
 
-  it('opens from a ?tab= deep link, with its real content and not an empty panel', () => {
+  it('opens from the ?tab=mcp deep link, with its real content and not an empty panel', () => {
     renderSettings();
-    expect(screen.getByRole('tab', { name: TAB_LABEL })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Integrations' })).toHaveAttribute('aria-selected', 'true');
 
-    const panel = screen.getByRole('tabpanel', { name: TAB_LABEL });
-    expect(panel).toHaveAttribute('id', 'settings-tabpanel-mcp');
-    expect(panel).toHaveAttribute('aria-labelledby', 'settings-tab-mcp');
-    expect(within(panel).getByText(MCP_CONNECT_COPY.statusLabel)).toBeInTheDocument();
+    const panel = screen.getByRole('tabpanel', { name: 'Integrations' });
+    expect(panel).toHaveAttribute('id', 'settings-tabpanel-integrations');
+    expect(panel).toHaveAttribute('aria-labelledby', 'settings-tab-integrations');
+    const widget = within(panel).getByRole('region', { name: TAB_LABEL });
+    expect(within(widget).getByText(MCP_CONNECT_COPY.statusLabel)).toBeInTheDocument();
   });
 
   it('the deep link helper builds the URL the page actually reads', () => {
@@ -180,6 +200,8 @@ describe('Connect Your Agent — the unconfigured state', () => {
 
   it('says there is no endpoint rather than showing a placeholder address', () => {
     const { container } = renderPanel();
+    // The endpoint answer is in the widget's Details since 2026-10-12: one press.
+    fireEvent.click(screen.getByRole('button', { name: MCP_WIDGET_COPY.detailsSummary }));
     expect(screen.getByRole('heading', { name: MCP_CONNECT_COPY.endpointHeading })).toBeInTheDocument();
     expect(norm(visibleText(container))).toContain(norm(MCP_CONNECT_COPY.endpointNone));
   });
@@ -304,7 +326,8 @@ describe('Connect Your Agent — negative controls', () => {
      * exactly the one that would not see it.
      */
     renderSettings();
-    assertNothingAcceptsTyping(screen.getByRole('tabpanel', { name: TAB_LABEL }));
+    // The widget region — its own chrome and the shared Widget primitive's.
+    assertNothingAcceptsTyping(screen.getByRole('region', { name: TAB_LABEL }));
   });
 
   it('names no credential value and no environment variable that would hold one', () => {
@@ -555,15 +578,29 @@ describe('Connect Your Agent — accessibility', () => {
     }
   });
 
-  it('the one control on the tab is a real, keyboard-operable button with a name', () => {
-    renderPanel();
-    const explorer = screen.getByRole('button', { name: /Endpoint Explorer/i });
-    expect(explorer).toHaveAttribute('type', 'button');
-    expect(explorer).not.toBeDisabled();
-    // A native button: reachable and activatable by keyboard without a
-    // hand-rolled key handler.
-    expect(explorer.tagName).toBe('BUTTON');
-    expect(explorer).not.toHaveAttribute('tabindex', '-1');
+  /* "THE ONE CONTROL" BECAME SEVERAL, and every one is the same kind of thing:
+     the widget's info toggle, its four view toggles, its Details trigger, and —
+     inside Details — the Endpoint Explorer jump. None acts on anything outside
+     this page; each is a real, named, keyboard-operable native button. */
+  it('every control on the widget is a real, keyboard-operable button with a name', () => {
+    renderPanel(undefined, { withCompanion: false });
+    const buttons = screen.getAllByRole('button', { hidden: true });
+    expect(buttons.map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim())).toEqual([
+      'About Connect Your Agent',
+      MCP_WIDGET_COPY.viewCanDo,
+      MCP_WIDGET_COPY.viewPermissions,
+      MCP_WIDGET_COPY.viewSetup,
+      MCP_WIDGET_COPY.detailsSummary,
+      'Endpoint Explorer',
+    ]);
+    for (const button of buttons) {
+      expect(button).toHaveAttribute('type', 'button');
+      expect(button).not.toBeDisabled();
+      // A native button: reachable and activatable by keyboard without a
+      // hand-rolled key handler.
+      expect(button.tagName).toBe('BUTTON');
+      expect(button).not.toHaveAttribute('tabindex', '-1');
+    }
   });
 
   it('renders no link off this build and no external URL', () => {
@@ -1354,7 +1391,11 @@ describe('Connect Your Agent — parity with the backend it describes', () => {
     expect(AUDIT_SOURCE).toContain('None of them is approved, narrowed, or conditionally approved');
     // The status the page shows is the phrase the audit prescribes for it.
     expect(AUDIT_SOURCE).toContain('Requires organization configuration');
-    expect(MCP_CONNECT_COPY.statusLabel).toBe('Requires organization configuration');
+    // The audit prescribes the WORDS. Since 2026-10-18 the page renders them in its
+    // Title Case heading register, so the pin compares the words, and asserts the
+    // casing separately rather than letting either drift.
+    expect(MCP_CONNECT_COPY.statusLabel.toLowerCase()).toBe('requires organization configuration');
+    expect(MCP_CONNECT_COPY.statusLabel).toBe('Requires Organization Configuration');
   });
 });
 

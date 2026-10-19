@@ -170,6 +170,9 @@ test.describe('@interaction the first-run offer', () => {
     // of the Settings control that starts the walkthrough; a second control under that
     // name here is the defect this assertion has always guarded against.
     await expect(page.getByRole('button', { name: 'Replay Tutorial' })).toHaveCount(0);
+    // 2026-10-18: the Settings control now reads `Replay Guided Walkthrough`; both
+    // names are asserted absent, so the check never passes on a retired name alone.
+    await expect(page.getByRole('button', { name: 'Replay Guided Walkthrough' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Start Tutorial' })).toHaveCount(0);
   });
 });
@@ -206,6 +209,9 @@ test.describe("@interaction the empty workspace's own primary", () => {
     await expect(launch).toBeEnabled();
     await expect(page.getByRole('button', { name: 'Start Tutorial' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Replay Tutorial' })).toHaveCount(0);
+    // 2026-10-18: the Settings control now reads `Replay Guided Walkthrough`; both
+    // names are asserted absent, so the check never passes on a retired name alone.
+    await expect(page.getByRole('button', { name: 'Replay Guided Walkthrough' })).toHaveCount(0);
 
     // It STARTS the walkthrough rather than navigating to somewhere that might. This is
     // the assertion the control it replaced could not have passed: that one's entire
@@ -725,7 +731,8 @@ test.describe('@interaction a step whose target is missing', () => {
     );
 
     await page.goto('/settings?tab=help', { waitUntil: 'domcontentloaded' });
-    await page.getByRole('button', { name: 'Replay Tutorial' }).click();
+    // The Settings control reads Start until this browser has finished (2026-10-18).
+    await page.getByRole('button', { name: /^(Start|Replay) Guided Walkthrough$/ }).click();
 
     await expect(mark(page)).toBeVisible({ timeout: 25_000 });
     expect(tutorial.sessionsCreated().length, 'the session itself is real').toBe(1);

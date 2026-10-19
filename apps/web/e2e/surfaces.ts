@@ -426,13 +426,14 @@ export const SURFACES: readonly Surface[] = [
     scope: 'ordinary',
     ready: { role: 'heading', name: 'Page not found' },
   },
-  {
-    id: 'governance',
-    name: 'Governance & Safety — Policy',
-    path: '/governance',
-    scope: 'ordinary',
-    ready: { role: 'heading', name: 'Governance & Safety' },
-  },
+  /*
+   * ~~`governance` — "Governance & Safety — Policy", path `/governance`~~ — RETIRED
+   * 2026-10-12, and the retirement is a de-duplication, not a coverage loss. The
+   * Policy tab moved to Settings › Privacy & Governance (`DEC-28`), and
+   * `/governance` (no tab, or `?tab=policy`) now REDIRECTS there, so this entry
+   * would scan exactly the DOM `settings-privacy` already scans. It recorded no
+   * baseline cell, so no count moves with it.
+   */
   {
     id: 'validator',
     name: 'Governance & Safety — Validator',
@@ -520,41 +521,52 @@ export const SURFACES: readonly Surface[] = [
     scope: 'ordinary',
     ready: { role: 'heading', name: 'Record Verification' },
   },
+  /*
+   * ── SETTINGS IS FOUR TABS OF WIDGETS SINCE 2026-10-12 ─────────────────────
+   *
+   * Seven tabs became Overview · Privacy & Governance · Integrations · Advanced.
+   * Every retired `?tab=` id is an alias onto one of the four, so the entries
+   * below KEEP their ids and their paths — `settings-api` still opens
+   * `?tab=api`, `settings-explorer` still opens `?tab=explorer` — which means
+   * the e2e sweep exercises the aliases in a real browser, and the
+   * `settings-explorer` cells keep their measured history instead of being
+   * re-keyed under a name no darwin run has seen. What each path now SCANS is
+   * the tab its alias lands on, and the names say so.
+   *
+   * TWO ENTRIES ARE RETIRED as exact duplicates, and neither recorded a cell:
+   * `settings-about` (`?tab=about` lands on Overview, which `settings` scans)
+   * and `settings-connect` (`?tab=mcp` lands on Integrations, which
+   * `settings-api` scans).
+   */
   {
     id: 'settings',
     name: 'Settings — Overview',
     path: '/settings',
     scope: 'ordinary',
-    /* `Runtime Status` -> `System Status`, 2026-09-15: the Settings density work
-       renamed this heading and this gate did not move with it, so the surface
-       never became ready at four viewports. The gate follows the heading a
-       reader actually sees. */
-    ready: { role: 'heading', name: 'System Status' },
+    /* The gate follows a heading a reader actually sees, and one that renders
+       only after `/api/about` resolves would be stricter still — `This Build`
+       renders at once, so the gate is the widget's own title. */
+    ready: { role: 'heading', name: 'This Build' },
   },
   {
     id: 'settings-privacy',
-    name: 'Settings — Data & Privacy',
+    name: 'Settings — Privacy & Governance',
     path: '/settings?tab=privacy',
     scope: 'ordinary',
-    ready: { role: 'heading', name: 'Settings' },
-  },
-  {
-    id: 'settings-about',
-    name: 'Settings — About',
-    path: '/settings?tab=about',
-    scope: 'ordinary',
-    ready: { role: 'heading', name: 'Identity' },
+    /* The first concept row, which renders only once `/api/about` has resolved,
+       so the scan cannot race the widgets' rows. */
+    ready: { role: 'heading', name: 'Synthetic-Only Mode' },
   },
   {
     id: 'settings-api',
-    name: 'Settings — API Access',
+    name: 'Settings — Integrations (via ?tab=api)',
     path: '/settings?tab=api',
     scope: 'ordinary',
-    ready: { role: 'heading', name: 'How Access Works Today' },
+    ready: { role: 'heading', name: 'No API Keys in This Build' },
   },
   {
     id: 'settings-explorer',
-    name: 'Settings — Endpoint Explorer',
+    name: 'Settings — Advanced (via ?tab=explorer)',
     path: '/settings?tab=explorer',
     scope: 'ordinary',
     // Wait for the DETAIL pane, not the group list: the list heading renders
@@ -562,42 +574,15 @@ export const SURFACES: readonly Surface[] = [
     // h2/h3 above it (an intermittent heading-order failure at zoom-200).
     ready: { role: 'heading', name: /\/api\/about/ },
   },
-  {
-    /*
-     * Connect Your Agent — the SEVENTH Settings tab, and until this entry it was
-     * a Settings surface nothing in this suite opened.
-     *
-     * The tab was declared in `TABBED_SURFACES` below when it shipped, which
-     * exercises the tablist structure, the arrow keys and the deep link — and
-     * nothing else. `SURFACES` is what drives `specs/a11y-axe.spec.ts`,
-     * `a11y-narrow.spec.ts`, `layout-widths.spec.ts`, `zoom-200.spec.ts` and
-     * `structure.spec.ts`, so roughly two hundred lines of new markup — a
-     * `<dl>` capability grid, a `role="status"` banner, an `<ol>` of setup
-     * steps and an inert `<code>` command — had been through neither axe nor a
-     * 320px probe. The a11y guard could not notice: `a11y-axe.spec.ts:227`
-     * asserts `allScanPairs().length === SURFACES.length * SCAN_PROJECT_IDS.length`,
-     * and both sides are derived from this array, so a surface that is never
-     * added satisfies it forever. The same reasoning was applied to the tab's
-     * UNIT test when it shipped (`settings-page.test.tsx`: "A new Settings
-     * surface that is not in SURFACES is a surface nothing checks") and was not
-     * carried across to this catalogue.
-     *
-     * ORDINARY scope, and it is the honest one: the panel reads nothing at all
-     * and renders identically inside a worked-example session.
-     *
-     * `ready` waits on the panel's own status heading rather than the page
-     * `h1`, which is painted by the shell before any tab body is. The name is
-     * this build's real state — `MCP_ENDPOINT` is `null`, so
-     * `mcpDeploymentState` resolves to `requires-configuration` — and the day a
-     * deployment publishes an address the panel renders the other banner and
-     * this locator must be revisited rather than loosened.
-     */
-    id: 'settings-connect',
-    name: 'Settings — Connect Your Agent',
-    path: '/settings?tab=mcp',
-    scope: 'ordinary',
-    ready: { role: 'heading', name: 'Requires organization configuration' },
-  },
+  /*
+   * ~~`settings-connect` — "Settings — Connect Your Agent", `?tab=mcp`~~ — RETIRED
+   * 2026-10-12 as a duplicate: `?tab=mcp` now lands on Integrations, which
+   * `settings-api` scans whole (the Connect Your Agent widget included). Its
+   * cells were all deleted earlier (2026-09-15, a real palette fix), so no
+   * count moves with it. The reasoning that ADDED it — a Settings surface no
+   * suite opens is a surface nothing checks — is unchanged and is satisfied by
+   * `settings-api`.
+   */
 ] as const;
 
 /**
@@ -638,9 +623,11 @@ export const TABBED_SURFACES = [
   },
   {
     id: 'governance',
-    path: '/governance',
+    /* Policy moved to Settings (2026-10-12) and a bare `/governance` redirects
+       there, so the tablist is reached by naming one of its two tabs. */
+    path: '/governance?tab=validator',
     tablistName: 'Governance & Safety sections',
-    tabs: ['Policy', 'Validator', 'Schema Reference'],
+    tabs: ['Validator', 'Schema Reference'],
     panelIdPrefix: 'governance-tabpanel-',
   },
   {
@@ -659,15 +646,11 @@ export const TABBED_SURFACES = [
        entry with `toHaveAccessibleName`, an EXACT match, and the tab COUNT the
        APG-structure spec asserts is derived from this array, so the list stays
        the single place a tab is declared. */
-    tabs: [
-      'Overview',
-      'Data & Privacy',
-      'About',
-      'Help & Tutorial',
-      'API Access',
-      'Endpoint Explorer',
-      'Connect Your Agent',
-    ],
+    /* FOUR TABS SINCE 2026-10-12 — Overview · Privacy & Governance ·
+       Integrations · Advanced. The tab COUNT the APG-structure spec asserts is
+       derived from this array, so the list stays the single place a tab is
+       declared. */
+    tabs: ['Overview', 'Privacy & Governance', 'Integrations', 'Advanced'],
     panelIdPrefix: 'settings-tabpanel-',
   },
   {
