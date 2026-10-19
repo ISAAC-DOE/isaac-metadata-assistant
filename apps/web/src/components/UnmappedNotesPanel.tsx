@@ -65,6 +65,7 @@ import { mutationFailureCopy, staleWriteCurrentVersion } from '../lib/mutationEr
 import { markSelfMintedProposals } from '../lib/selfMintedProposals';
 import { noteSourceLabel } from '../lib/noteSource';
 import { formatWhen } from '../lib/labels';
+import { fieldLabel } from '../lib/fieldLabels';
 import { RECORD_PROPOSAL_PARAM } from '../lib/routes';
 import { RUN_FIELDS, enumOptionLabel, type RunFieldSpec } from '../lib/runFields';
 /*
@@ -1783,7 +1784,7 @@ function NoteCard({
             <option value="">Choose a field…</option>
             {mappablePaths.map((path) => (
               <option key={path} value={path}>
-                {path}
+                {fieldLabel(path) ?? path}
               </option>
             ))}
           </select>
@@ -1958,9 +1959,10 @@ function NoteCard({
             {/* No pre-selection, even when `note.candidate_field_path` names one —
                 the same rule the Map form follows: a person chooses. */}
             <option value="">Choose a field…</option>
+            {/* The field in words (QA A-15); the official path is the value sent. */}
             {proposalCapabilities.targetFieldPaths.map((path) => (
               <option key={path} value={path}>
-                {path}
+                {fieldLabel(path) ?? path}
               </option>
             ))}
           </select>

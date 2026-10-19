@@ -56,6 +56,26 @@ COPY tests/fixtures/synthetic/ tests/fixtures/synthetic/
 # already published on GitHub, so shipping them in the image discloses nothing.
 # Without this line the deployed pod finds no corpus and reports `unavailable`.
 COPY tests/fixtures/official/ tests/fixtures/official/
+# What Historical Import reads. Measured 2026-10-12: without these lines the deployed
+# pod's `GET /api/imports` answers `available_fixtures: []` and `available_archives: []`
+# — both lists are filtered by existence, so an image that left them out offers a
+# scientist nothing to read, and nothing reports why. Two directories:
+#   * historical_import/ — `historical_import.FIXTURE_DIR`, the two example sources;
+#     each file's first line reads "SYNTHETIC FIXTURE";
+#   * bl15/semantics/multi_operator_corpus/ — the multi-operator archive. Its readme,
+#     notes file and both macros say "SYNTHETIC" in their first line, each SPEC
+#     acquisition in a `#C SYNTHETIC FIXTURE` header line, and its per-scan `.dat`
+#     exports carry no marker of their own — they are covered by that corpus's row in
+#     tests/fixtures/bl15/README.md, which also records the independent review that no
+#     sentence of the real archive is reproduced in it.
+# NOT COPIED, deliberately: bl15/notes/ (a governance flag on it is pending the owner),
+# and bl15/gold/mini_corpus/ — its notes file shares a sentence with bl15/notes/, so it
+# waits on the same decision. The mini corpus stays registered and readable locally;
+# the image simply does not offer it, because `archive_names()` filters by existence.
+# `test_hosted_image_imports.py` parses these lines, fails if the image lacks a
+# directory it should carry or carries one it must not, and checks each file's marker.
+COPY tests/fixtures/historical_import/ tests/fixtures/historical_import/
+COPY tests/fixtures/bl15/semantics/multi_operator_corpus/ tests/fixtures/bl15/semantics/multi_operator_corpus/
 COPY scripts/check_graphify_freshness.py scripts/check_graphify_freshness.py
 
 RUN pip install --no-cache-dir ".[api]"

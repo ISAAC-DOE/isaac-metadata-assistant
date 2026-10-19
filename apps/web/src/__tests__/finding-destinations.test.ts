@@ -75,6 +75,25 @@ describe('where a finding can send the reader — only where something real exis
     expect(goToDestination(undefined, R, 'context.temperature_K')).toBeNull();
   });
 
+  it('QA A-14: a record-level field on a RUN → that run’s own row, where its value is shown', () => {
+    /* A finding on a run's export unit at `system.technique` is about the value that
+       RUN carries there — an override it holds, or the record's value it inherits.
+       It used to open the record-level System block, which shows the record's value
+       and not a run's override, so the bad value was nowhere on the screen. The run's
+       inherited-values row shows which of the two it is. */
+    const d = goToDestination(E, R, 'system.technique')!;
+    expect(d.label).toBe('Go to Run Value');
+    expect(d.href).toContain('run=RUN1');
+    expect(decodeURIComponent(d.href)).toContain('at=field:system.technique');
+    expect(goToDestination(E, R, 'sample.material.name')?.href).toContain('view=runs');
+  });
+
+  it('the same record-level field with NO run still opens the record section', () => {
+    expect(goToDestination(E, null, 'system.technique')?.label).toBe('Go to Section');
+    // A PARENT of record fields on a run is the record's own requirement, not a run value.
+    expect(goToDestination(E, R, 'system')?.label).toBe('Go to Section');
+  });
+
   it('a run field WITHOUT a run offers no run form (there is no run to open)', () => {
     // `context.temperature_K` with no run: not a Record Fields section path either,
     // because `context` IS one — so it goes to that section instead.

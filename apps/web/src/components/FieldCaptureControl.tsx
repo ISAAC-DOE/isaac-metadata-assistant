@@ -1,4 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { Link, useInRouterContext } from 'react-router-dom';
+import { RECORD_ADDRESS_PARAM, RECORD_VIEW_PARAM } from '../lib/routes';
+import { enumOptionLabel } from '../lib/runFields';
 import { api } from '../lib/api';
 import { mutationFailureCopy, statusOf } from '../lib/mutationErrors';
 import type { DraftField, DraftFieldCapture } from '../lib/types';
@@ -145,11 +148,13 @@ export function captureHint(
     // slice widened the record routes from the 2 schema-enum paths to 14: the twelve
     // sample and facility paths are free-text or numeric, and always will be.
     //
-    // NOT YET OFFERED HERE, and said plainly rather than implied: this component
-    // renders a `<select>`, so it has no control for a free-text path. A text input for
-    // those twelve is a real addition and belongs in its own reviewed slice; until then
-    // this sentence must not suggest the value is unavailable or that waiting helps.
-    return 'A value for this field is entered and confirmed on this record. The official schema declares no fixed list of values here, so it is typed rather than chosen — and this screen does not offer that input yet.';
+    // ~~NOT YET OFFERED HERE … "this screen does not offer that input yet"~~ — FALSE,
+    // corrected 2026-10-12 (QA A-08). This component renders only a `<select>`, but
+    // the input for these twelve paths EXISTS on the same view: Record Description
+    // (`RecordDescriptionPanel`, shipped in `7822b13`) types every one of them. The
+    // sentence therefore names it — and `FieldRow` links to it and drops the sentence
+    // once the row holds a value.
+    return 'A value for this field is entered and confirmed on this record. The official schema declares no fixed list of values here, so it is typed rather than chosen — in Record Description, on the Record Fields view.';
   }
   if (capture.run_field_writable) {
     return 'A value for this field is entered on a run rather than on the record — in the Runs section on this screen.';
@@ -164,6 +169,35 @@ export function captureHint(
     return 'There is nothing to type here: no operation in this version accepts a value at this path. When the record is exported, the exporter keeps a value the draft already holds and stamps the export time only when it holds none.';
   }
   return 'There is nothing to type here: no operation in this version accepts a value at this path.';
+}
+
+/** The `?at=` address `RecordWorkbench` opens Record Description for (QA A-08). */
+export const RECORD_DESCRIPTION_ADDRESS = 'block:record-description';
+
+/**
+ * THE INPUT A FREE-TEXT ROW'S SENTENCE NAMES, ONE CLICK AWAY (QA A-08).
+ *
+ * It lives HERE, with the capture control, and not in `FieldRow`: it is a way to
+ * ENTER a value, and `help-claim-parity.test.tsx` (QA-013 §1) keeps `FieldRow` free of
+ * links precisely so nobody can claim a field row links to its EVIDENCE trail. This
+ * link goes to an input on the same view, never to evidence, so that claim — and the
+ * Help copy built on it — is unchanged. Outside a router it renders nothing.
+ */
+export function RecordDescriptionLink() {
+  const inRouter = useInRouterContext();
+  if (!inRouter) return null;
+  return (
+    <Link
+      className="field-capture-link"
+      to={{
+        search: `?${RECORD_VIEW_PARAM}=fields&${RECORD_ADDRESS_PARAM}=${encodeURIComponent(
+          RECORD_DESCRIPTION_ADDRESS,
+        )}`,
+      }}
+    >
+      Open Record Description
+    </Link>
+  );
 }
 
 /**
@@ -327,6 +361,7 @@ export function FieldCaptureControl({
       <div className="field-capture-controls">
         <select
           ref={selectRef}
+          data-field-capture-path={field.path}
           id={selectId}
           className="field-capture-select"
           value={choice}
@@ -348,9 +383,10 @@ export function FieldCaptureControl({
               not hold. Choosing it sends nothing; see the header on why a blank is not
               a delete here. */}
           <option value="">— not recorded —</option>
+          {/* Words for a person, the schema's token as the value (QA A-15). */}
           {choices.map((value) => (
             <option key={value} value={value}>
-              {value}
+              {enumOptionLabel(value)}
             </option>
           ))}
         </select>

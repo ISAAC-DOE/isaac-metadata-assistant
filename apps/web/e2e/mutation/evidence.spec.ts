@@ -119,7 +119,10 @@ test.describe('R4 · evidence', () => {
       'Two sources are preserved side by side'
     );
     await expect(page.locator('.sidecar-entry')).toContainText(HASH_A);
-    await expect(page.locator('.sidecar-entry .src-token')).toContainText(['file_listing', 'user_confirmation']);
+    // The chips read the source type in WORDS (QA A-15); the stored token is each
+    // chip's `data-source-type`, asserted too so the evidence is not merely relabelled.
+    await expect(page.locator('.sidecar-entry .src-token')).toContainText(['File Listing', 'User Confirmation']);
+    await expect(page.locator('.sidecar-entry .src-token').first()).toHaveAttribute('data-source-type', 'file_listing');
   });
 
   test("correcting a confirmed value moves the field's VALUE to the correction and keeps the superseded answer only as a dated citation", async ({

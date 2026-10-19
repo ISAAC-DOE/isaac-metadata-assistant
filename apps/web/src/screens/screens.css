@@ -274,6 +274,24 @@
 .needsyou-compact .needsyou-text { margin-top: 0; }
 .needsyou-compact .needsyou-action { align-self: center; }
 
+/* PROPOSALS WAITING (QA C-24): one line under the questions, with its own action.
+   The count is the server's; the line is absent when there are none. On the
+   compact form it is a full-width row of the wrapping body. */
+.needsyou-proposals {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs) var(--space-sm);
+  margin: var(--space-sm) 0 0;
+  font-size: var(--font-size-body);
+  color: var(--advisory-text);
+}
+.needsyou-compact .needsyou-proposals {
+  flex-basis: 100%;
+  margin-top: var(--space-xs);
+}
+.needsyou-compact .needsyou-body > .needsyou-proposals:only-child { margin-top: 0; }
+
 /* ---- the Record Identity group (Record Fields workspace) ------------
  *
  * FOUR SECTIONS ABOUT THE WHOLE RECORD, marked off from the four scientific
@@ -1448,7 +1466,13 @@
 .completion-actions {
   margin-top: 18px;
   display: flex;
+  /* QA item 10: at 390px the two buttons measured 484px in a 368px column. */
+  flex-wrap: wrap;
   gap: 10px;
+}
+.completion-actions > .btn {
+  max-width: 100%;
+  white-space: normal;
 }
 /* "That answer could not be applied" — calm, factual, nothing changed. */
 .completion-submit-error {

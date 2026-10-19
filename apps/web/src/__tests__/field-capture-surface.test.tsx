@@ -728,14 +728,51 @@ describe('the sentence a record-writable path with no choices gets', () => {
     expect(hint).not.toContain('right now');
   });
 
-  it('says the value is enterable on the record and that no input is offered yet', () => {
-    /* Both halves matter. Dropping the first would leave a scientist thinking the
-       field is somebody else's; dropping the second would send them looking for a
-       control this component does not render. */
+  it('INVERTED (QA A-08): names the input that EXISTS, and never says "not offered yet"', () => {
+    /* This test used to require "this screen does not offer that input yet" — which
+       was FALSE: Record Description, on the same Record Fields view, has had a typed
+       input for every one of these paths since `7822b13`. The sentence now points at
+       it. The first half still matters: dropping "on this record" would leave a
+       scientist thinking the field is somebody else's. */
     const hint = captureHint(RECORD_FREE_TEXT as never) ?? '';
     expect(hint).toContain('entered and confirmed on this record');
-    expect(hint.toLowerCase()).toContain('no fixed list');
-    expect(hint.toLowerCase()).toContain('not offer');
+    expect(hint).toContain('typed');
+    expect(hint).toContain('Record Description');
+    expect(hint.toLowerCase()).not.toContain('not offer');
+    expect(hint.toLowerCase()).not.toContain('yet');
+  });
+
+  it('QA A-08: once the value is recorded, the row stops saying where to enter one', () => {
+    /* MUTATION: computing the hint without the recorded-value gate puts "a value for
+       this field is entered…" beneath a row that already shows the confirmed value. */
+    const capture = { experimentId: ID, version: 'v1', onSaved: () => {} };
+    const field = recorded(
+      'sample.material.name',
+      'Material Name',
+      'Synthetic CuO (fake)',
+      RECORD_FREE_TEXT as never,
+    );
+    const { container } = render(<FieldRow field={field as never} capture={capture} />);
+    expect(container.querySelector('.field-capture-hint')).toBeNull();
+  });
+
+  it('QA A-08: an empty row on the record screen LINKS to the input that exists', () => {
+    const capture = { experimentId: ID, version: 'v1', onSaved: () => {} };
+    render(
+      <MemoryRouter
+        initialEntries={[`/record/${ID}`]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <FieldRow
+          field={skeleton('sample.material.name', 'Material Name', RECORD_FREE_TEXT as never) as never}
+          capture={capture}
+        />
+      </MemoryRouter>,
+    );
+    const link = screen.getByRole('link', { name: /Open Record Description/ });
+    expect(decodeURIComponent(link.getAttribute('href') ?? '')).toBe(
+      `/record/${ID}?view=fields&at=block:record-description`,
+    );
   });
 
   it('still routes the two ENUM paths to the control, so this did not widen by accident', () => {
@@ -744,5 +781,33 @@ describe('the sentence a record-writable path with no choices gets', () => {
     const withChoices = { ...RECORD_FREE_TEXT, choices: ['experimental', 'computational'] };
     expect(canEnterOnRecord(withChoices as never)).toBe(true);
     expect(canEnterOnRecord(RECORD_FREE_TEXT as never)).toBe(false);
+  });
+});
+
+describe('a link to ONE record field lands on its control (review minor)', () => {
+  /*
+   * "Go to Field" for a record-scoped proposal used to open the field's SECTION and
+   * leave focus on its header. `?view=fields&at=field:<path>` now opens the section
+   * and hands focus to that field's own control.
+   */
+  it('opens the section and focuses the field’s own select', async () => {
+    stubFetchRoutes({
+      ...bundleRoutes(ID),
+      [`GET ${BASE}/draft`]: { body: CREATED_DRAFT },
+    });
+    render(
+      <MemoryRouter
+        initialEntries={[`/record/${ID}?view=fields&at=field:system.domain`]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <AppRoutes />
+      </MemoryRouter>,
+    );
+    await waitFor(() =>
+      expect(document.activeElement?.getAttribute('data-field-capture-path')).toBe(
+        'system.domain',
+      ),
+    );
+    expect(document.activeElement?.tagName).toBe('SELECT');
   });
 });

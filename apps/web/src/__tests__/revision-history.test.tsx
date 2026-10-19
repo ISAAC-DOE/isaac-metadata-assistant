@@ -969,12 +969,32 @@ describe('REV-002 · Last Submitted Revision versus Current Working Changes', ()
     expect(within(card).getByText(SUBMITTED_REVISION_HEADING)).toBeInTheDocument();
     expect(within(card).getByText(WORKING_CHANGES_HEADING)).toBeInTheDocument();
     expect(within(card).getByText(SUBMITTED_IMMUTABLE_NOTE)).toBeInTheDocument();
-    // Verbatim, from the response. A client-authored list would go quietly false
-    // the day the server's scope changes.
-    expect(
-      within(card).getByText('export_unit_ids_drafts_and_conflict_decisions'),
-    ).toBeInTheDocument();
+    // FROM THE RESPONSE — and now in WORDS (QA A-15), the identifier itself kept in
+    // `title`. This used to assert the raw token as the visible text, which pinned the
+    // defect; it is inverted rather than deleted. The words come from an EXACT-match
+    // map, so a scope this build does not know is still shown verbatim (next test).
+    const scope = within(card).getByText(
+      "Each export unit's id and draft, and the record's conflict decisions",
+    );
+    expect(scope.getAttribute('title')).toBe('export_unit_ids_drafts_and_conflict_decisions');
+    expect(within(card).queryByText('export_unit_ids_drafts_and_conflict_decisions')).toBeNull();
     expect(within(card).getByText(/Renaming this record does not count/)).toBeInTheDocument();
+  });
+
+  it('§5 · a scope this build does not know is shown VERBATIM, never described', async () => {
+    stubFetchRoutes({
+      [`GET /api/experiments/${EXP}/revisions`]: {
+        body: history({
+          signature_scope: 'a_scope_this_build_has_never_seen',
+          current_content_signature: SIG_SUBMITTED,
+          revisions: [submittedAt(4, SIG_SUBMITTED)],
+          total: 1,
+          returned: 1,
+        }),
+      },
+    } as never);
+    await renderOpen();
+    expect(await screen.findByText('a_scope_this_build_has_never_seen')).toBeInTheDocument();
   });
 
   it('§6 · POLARITY — the four verdicts are reachable and pairwise distinct', () => {
