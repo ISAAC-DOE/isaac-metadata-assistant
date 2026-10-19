@@ -232,6 +232,20 @@
   color: var(--text-muted);
 }
 
+/* The input a free-text hint names, one click away (QA A-08). An ordinary inline
+   link in the action colour; underlined so it never reads as plain prose. */
+.field-capture-link {
+  color: var(--action);
+  font-weight: var(--font-weight-semibold);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.field-capture-link:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+
 .field-capture {
   display: flex;
   flex-direction: column;

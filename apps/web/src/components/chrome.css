@@ -874,6 +874,17 @@
     min-height: calc(100vh - 20px - var(--assistant-trigger-reserve));
     margin-bottom: var(--assistant-trigger-reserve);
   }
+  /*
+   * AND MID-PAGE, NOT ONLY AT THE END (QA A-24/A-25). The reserve above guarantees
+   * the LAST content can scroll clear of the trigger; it says nothing about a
+   * control the reader reaches while the page is mid-scroll. Measured: "Review &
+   * Answer" (390px) and "Go to Complete Metadata" (1024px) sat under the trigger
+   * at ordinary scroll offsets, and keyboard focus could land on them there —
+   * focus that is obscured (WCAG 2.4.11). `scroll-padding-bottom` makes the bottom
+   * band the trigger owns part of what the browser treats as OUT of view, so focus
+   * navigation and every `scrollIntoView` bring a control up above it.
+   */
+  html { scroll-padding-bottom: var(--assistant-trigger-reserve); }
 
   /* Responsive equivalent of the shared top gutter — ONE redeclaration of the
      token, so every preset (.pad / none / .centered) tracks it together. */

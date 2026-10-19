@@ -13,7 +13,9 @@
   border-radius: var(--radius-token);
   background: var(--missing-bg);
   border: 1px solid var(--border);
-  font-family: var(--font-mono);
+  /* The UI face, not mono: the chip now reads the source type in WORDS (QA A-15);
+     the stored token is in its `title`. */
+  font-family: var(--font-ui);
   font-size: 10.5px;
   color: var(--text-muted);
 }

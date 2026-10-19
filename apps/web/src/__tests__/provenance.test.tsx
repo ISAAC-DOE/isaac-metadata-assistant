@@ -423,8 +423,12 @@ describe('EvidenceRow keeps every existing detail and adds the origin', () => {
         evidence={ev('derivation', { rule: 'the edge follows from the element', source_file: 'notes.txt' })}
       />,
     );
-    // Existing detail — unchanged.
-    expect(view.getByText('derivation')).toBeTruthy();
+    // Existing detail — the source type now reads in WORDS (QA A-15); the stored
+    // token is kept, exactly, in the chip's `title`. This asserted the raw token as
+    // visible text, which pinned the defect, and is inverted rather than deleted.
+    expect(view.getByText('Derivation').closest('.src-token')?.getAttribute('title')).toBe(
+      'derivation',
+    );
     expect(view.getByText(/rule: the edge follows/)).toBeTruthy();
     expect(view.getByText('notes.txt')).toBeTruthy();
     // New dimension, added beside it.

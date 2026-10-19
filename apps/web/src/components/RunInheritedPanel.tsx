@@ -88,7 +88,10 @@ import {
 import { mutationFailureCopy } from '../lib/mutationErrors';
 import { fieldPathLabel } from '../lib/recordMap';
 import { HelpTip } from './HelpTip';
-import type { ApiRunView } from '../lib/types';
+import type { ApiRunView, JsonSchemaNode } from '../lib/types';
+import { recordFieldFacts } from '../lib/recordFields';
+import { enumOptionLabel } from '../lib/runFields';
+import { formatWhen } from '../lib/labels';
 
 /** The outcome of the last write, for the panel's one live region. */
 type Outcome =
@@ -204,6 +207,52 @@ export function RunInheritedPanel({
     setFocusRequest(null);
   }, [focusRequest]);
 
+  /*
+   * A FIELD THE SCHEMA CLOSES WITH A LIST IS A CHOICE (QA A-10). The override for
+   * `system.technique` was a free-text box, and "ZZ-not-a-technique" was recorded —
+   * the override route stores what it is sent (pre-existing; see
+   * `apps/api/tests/test_system_enum_fields.py`). The list is READ from the vendored
+   * schema the server serves, never transcribed, and only when a form opens. Until
+   * it arrives — and whenever the schema declares no list or cannot be read — the
+   * row keeps its text box, so a field left open is never given an invented choice.
+   *
+   * HELD HERE, NOT IN THE FORM (review I-2), because the swap moves focus: the form
+   * opens with focus in the text box, and the select that replaces it used to leave
+   * focus on <body>. When the box being replaced HAS focus, the select is handed it
+   * through the same focus-request path every other move in this panel uses.
+   */
+  const [choices, setChoices] = useState<{
+    address: string;
+    allowed: readonly string[] | null;
+  } | null>(null);
+  useEffect(() => {
+    if (editing === null || !editing.startsWith('field:')) return;
+    const address = editing;
+    let live = true;
+    api.getSchema().then(
+      (body) => {
+        if (!live) return;
+        const facts = recordFieldFacts(
+          body.schema as JsonSchemaNode | undefined,
+          address.slice('field:'.length),
+        );
+        const allowed = facts.allowed !== null && facts.allowed.length > 0 ? facts.allowed : null;
+        const box = controls.current.get(FOCUS_KEYS.formInput(address));
+        const boxHadFocus = box !== undefined && document.activeElement === box;
+        setChoices({ address, allowed });
+        if (allowed !== null && boxHadFocus) focusAfter(FOCUS_KEYS.formInput(address));
+      },
+      () => {
+        if (live) setChoices({ address, allowed: null });
+      },
+    );
+    return () => {
+      live = false;
+    };
+    // `focusAfter` is a stable setter wrapper; the read is keyed on the form opened.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing]);
+
   if (rows.length === 0) return null;
 
   const closeForm = () => {
@@ -247,6 +296,19 @@ export function RunInheritedPanel({
   };
 
   const submitOverride = (row: OverrideRow) => {
+    /* NEVER SUBMIT A VALUE THE CONTROL DOES NOT OFFER (review I-3): a stored value
+       outside the schema's list is displayed as such and refused here, so it is never
+       re-confirmed by a reader who did not choose it. */
+    const offered = choices !== null && choices.address === row.address ? choices.allowed : null;
+    if (offered !== null && !offered.includes(text)) {
+      setEntryError(
+        text === ''
+          ? 'Choose one of the values the official schema allows for this field first.'
+          : 'Choose one of the values the official schema allows for this field. The ' +
+              'value this run holds is not one of them, so it is not recorded again.',
+      );
+      return;
+    }
     const built = buildOverridePayload(row, text);
     if (!built.ok) {
       setEntryError(built.error);
@@ -608,6 +670,7 @@ export function RunInheritedPanel({
             {editing === row.address && (
               <OverrideForm
                 row={row}
+                choices={choices !== null && choices.address === row.address ? choices.allowed : null}
                 text={text}
                 onText={(next) => {
                   setText(next);
@@ -715,8 +778,12 @@ function OutcomeText({ outcome }: { outcome: Outcome }) {
       // asserting a time nothing in the response carried.
       return (
         <>
-          Override recorded for {path} on this run at {outcome.recordedUtc}. The record's own
-          value is unchanged.
+          Override recorded for {path} on this run at{' '}
+          {/* A person's date; the server's exact instant on `<time>` (review minor). */}
+          <time dateTime={outcome.recordedUtc} title={outcome.recordedUtc}>
+            {formatWhen(outcome.recordedUtc) ?? outcome.recordedUtc}
+          </time>
+          . The record's own value is unchanged.
         </>
       );
     case 'unchanged':
@@ -868,6 +935,7 @@ function FailureNotice({
 
 function OverrideForm({
   row,
+  choices,
   text,
   onText,
   confirmed,
@@ -879,6 +947,8 @@ function OverrideForm({
   bindControl,
 }: {
   row: OverrideRow;
+  /** The schema's closed list for this field, or `null` for a text box. */
+  choices: readonly string[] | null;
   text: string;
   onText: (next: string) => void;
   confirmed: boolean;
@@ -894,6 +964,7 @@ function OverrideForm({
   const errorId = `${inputId}-error`;
   const hintId = `${inputId}-hint`;
   const numeric = overrideValueKind(row.resolution) === 'number';
+  const outsideTheList = choices !== null && text !== '' && !choices.includes(text);
   return (
     <form
       className="run-inherited-form"
@@ -911,7 +982,11 @@ function OverrideForm({
         context.
       */}
       <label className="run-inherited-form-label" htmlFor={inputId}>
-        This run's own value for <span className="run-inherited-path-inline">{row.path}</span>
+        {/* The field in words (QA A-15); its official path stays one `?` away on the row. */}
+        This run's own value for{' '}
+        <span className="run-inherited-path-inline" title={row.path}>
+          {fieldPathLabel(row.path)}
+        </span>
       </label>
       <p className="run-inherited-form-context" id={hintId}>
         {row.recordText !== null ? (
@@ -931,18 +1006,47 @@ function OverrideForm({
         This records only that you entered this value on this run — it is not a check that
         the value is right.
       </p>
-      <input
-        id={inputId}
-        className="run-input"
-        ref={bindControl(FOCUS_KEYS.formInput(row.address))}
-        type="text"
-        inputMode={numeric ? 'decimal' : undefined}
-        value={text}
-        autoComplete="off"
-        aria-invalid={error !== null || undefined}
-        aria-describedby={error !== null ? `${hintId} ${errorId}` : hintId}
-        onChange={(e) => onText(e.target.value)}
-      />
+      {choices !== null ? (
+        <select
+          id={inputId}
+          className="run-input"
+          ref={bindControl(FOCUS_KEYS.formInput(row.address))}
+          value={text}
+          aria-invalid={error !== null || undefined}
+          aria-describedby={error !== null ? `${hintId} ${errorId}` : hintId}
+          onChange={(e) => onText(e.target.value)}
+        >
+          {/* EMPTY ON OPEN, for the reason the box's own note gives above. */}
+          <option value="">Choose a value…</option>
+          {/* A STORED VALUE OUTSIDE THE LIST IS SHOWN AS WHAT IT IS (review I-3) —
+              never a select reading "Choose a value…" while holding it. Disabled, and
+              refused on submit, so it is never re-confirmed by a reader who did not
+              choose it. */}
+          {outsideTheList && (
+            <option value={text} disabled>
+              {`${text} — not an allowed value`}
+            </option>
+          )}
+          {choices.map((option) => (
+            <option key={option} value={option}>
+              {enumOptionLabel(option)}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          id={inputId}
+          className="run-input"
+          ref={bindControl(FOCUS_KEYS.formInput(row.address))}
+          type="text"
+          inputMode={numeric ? 'decimal' : undefined}
+          value={text}
+          autoComplete="off"
+          aria-invalid={error !== null || undefined}
+          aria-describedby={error !== null ? `${hintId} ${errorId}` : hintId}
+          onChange={(e) => onText(e.target.value)}
+        />
+      )}
       {error !== null && (
         <span className="run-field-error" id={errorId}>
           <TriangleAlert size={13} strokeWidth={2.2} aria-hidden="true" />

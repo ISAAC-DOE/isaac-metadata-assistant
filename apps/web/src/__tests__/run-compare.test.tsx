@@ -1087,7 +1087,11 @@ describe('what else the record holds about each run', () => {
     expect(band.textContent).toContain('1 address on this run cite more than one answer');
     // The run's own revision, so a stale screen is recognisable as one.
     expect(band.textContent).toContain('Revision 0');
-    expect(band.textContent).toContain('r1.0');
+    // The opaque concurrency token is no longer printed (QA A-15) — it means nothing
+    // to a person, and the revision says the same moment. It stays on the revision's
+    // `title`, exactly. This asserted it as visible text and is inverted, not deleted.
+    expect(band.textContent).not.toContain('r1.0');
+    expect(band.querySelector('[title="Version token r1.0"]')?.textContent).toBe('Revision 0');
 
     // NEITHER NUMBER IS SUBTRACTED FROM THE OTHER. Two runs' outstanding work is
     // stated side by side; "Run 2 is further along" is the sentence this refuses.

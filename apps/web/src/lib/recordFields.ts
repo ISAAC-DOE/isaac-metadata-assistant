@@ -91,7 +91,9 @@ export const RECORD_FIELDS: readonly RecordFieldSpec[] = [
   { path: 'sample.sample_form', label: 'Sample form', group: 'sample' },
   {
     path: 'sample.composition.CuO2_mass_fraction',
-    label: 'CuO₂ mass fraction',
+    // The schema's own spelling (QA A-16): every other surface reads this path as
+    // "CuO2 …", and a subscript here made one field look like two.
+    label: 'CuO2 mass fraction',
     group: 'sample',
   },
   {

@@ -1,7 +1,9 @@
 import { useEffect, useId, useState, type ReactNode } from 'react';
+import { useInRouterContext, useNavigate } from 'react-router-dom';
 
 import { api } from '../lib/api';
 import { RUN_FIELDS } from '../lib/runFields';
+import { RECORD_ADDRESS_PARAM, ROUTES } from '../lib/routes';
 import {
   RECORD_MAP_STATE_LABEL,
   blockRows,
@@ -288,11 +290,40 @@ function Row({
   );
 }
 
-export function RunSchemaMirror({
+type RunSchemaMirrorProps = {
+  run: ApiRunView | null;
+  headerControl?: ReactNode;
+  check?: ApiRunCheckResponse | null;
+};
+
+/*
+ * `useNavigate` THROWS outside a router, and this pane is also rendered on its own
+ * (its tests, and any caller without one). So the router is detected once, by the
+ * hook that does not throw, and only the routed variant asks for a navigator. A
+ * mounted pane never moves between the two — a router does not appear or vanish
+ * under a rendered tree.
+ */
+export function RunSchemaMirror(props: RunSchemaMirrorProps) {
+  return useInRouterContext() ? (
+    <RoutedRunSchemaMirror {...props} />
+  ) : (
+    <RunSchemaMirrorBody {...props} navigate={null} />
+  );
+}
+
+function RoutedRunSchemaMirror(props: RunSchemaMirrorProps) {
+  const navigate = useNavigate();
+  return <RunSchemaMirrorBody {...props} navigate={navigate} />;
+}
+
+function RunSchemaMirrorBody({
   run,
   check,
   headerControl,
+  navigate,
 }: {
+  /** Opens this run's editor when no visible control for a field exists (QA A-11). */
+  navigate: ((to: string) => void) | null;
   run: ApiRunView | null;
   /**
    * A control that REPLACES the run name in the card's own header — the run picker
@@ -399,16 +430,39 @@ export function RunSchemaMirror({
      * BY DATA ATTRIBUTE, not by id, and the precedent is this section's own:
      * `RunsSection` already brings a linked address into view with
      * `document.querySelector('[data-address=…]')`. The run editor publishes
-     * `data-run-field-path` on each of its five controls; a card that is not
-     * rendering them (a compact row renders none) simply yields no match and
-     * this does nothing, which is the honest outcome.
+     * `data-run-field-path` on each of its five controls.
+     *
+     * ~~"a card that is not rendering them (a compact row renders none) simply
+     * yields no match and this does nothing, which is the honest outcome"~~ —
+     * QA A-11 measured that as a button that does nothing, on three views. A
+     * compact row renders no inputs, and the Runs workspace stays mounted but
+     * `hidden` behind Capture and Proposals, so the first match could be an input
+     * nobody can see (`focus()` on it is a no-op) or another run's. A match must
+     * be VISIBLE and THIS run's; otherwise the button opens this run's editor at
+     * the field (`?at=field:<path>`, which `RunsSection` brings into view).
      */
-    const el = document.querySelector<HTMLElement>(
-      `[data-run-field-path="${CSS.escape(path)}"]`,
-    );
-    if (el === null) return;
-    el.focus();
-    if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center' });
+    const el =
+      Array.from(
+        document.querySelectorAll<HTMLElement>(`[data-run-field-path="${CSS.escape(path)}"]`),
+      ).find(
+        (candidate) =>
+          candidate.closest('[hidden]') === null &&
+          (run === null ||
+            (candidate.closest('[data-run-id]')?.getAttribute('data-run-id') ?? run.id) ===
+              run.id),
+      ) ?? null;
+    if (el !== null) {
+      el.focus();
+      if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center' });
+      return;
+    }
+    if (run !== null && navigate !== null) {
+      navigate(
+        `${ROUTES.recordRun(run.experiment_id, run.id)}&${RECORD_ADDRESS_PARAM}=${encodeURIComponent(
+          `field:${path}`,
+        )}`,
+      );
+    }
   };
   const editable = (row: RecordMapRow) =>
     row.editable ? () => focusField(row.path) : undefined;

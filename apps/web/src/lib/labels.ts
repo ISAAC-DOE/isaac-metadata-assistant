@@ -1214,6 +1214,7 @@ export const LABELS = {
   createExperimentDescriptionHint:
     'A note for you. It is stored with the record and is never read as a scientific value.',
   createExperimentSubmit: 'Create Experiment',
+  createExperimentCreating: 'Creating the experiment…',
   createExperimentCancel: 'Cancel',
   /** Shown when the title is empty. States the fix, not the failure. */
   createExperimentTitleRequired: 'Give the experiment a title to create it.',

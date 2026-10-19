@@ -350,6 +350,8 @@ function stub(
     experiments?: unknown;
     /** `GET /api/experiments/{id}/runs`. Absent keeps the old answer (no runs). */
     runs?: unknown;
+    /** `POST /api/imports/{id}/sources` — 2026-10-12. Absent: the request is unexpected. */
+    sources?: unknown;
   } = {},
 ) {
   seen.length = 0;
@@ -371,6 +373,9 @@ function stub(
       /* MATCHED BEFORE THE BARE `/api/imports/{id}` GET BELOW, which its own
          regex would otherwise not catch — but order still matters here because a
          future looser pattern would. */
+      if (routes.sources !== undefined && /\/api\/imports\/[^/]+\/sources$/.test(url) && method === 'POST') {
+        return json(routes.sources);
+      }
       if (/\/api\/imports\/[^/]+\/add-to-experiment$/.test(url)) {
         if (routes.onAdd) return routes.onAdd();
         return json(routes.added ?? null);
@@ -2193,5 +2198,245 @@ describe('§16 · a run-owned value goes to its own measurement’s run', () => 
     expect(within(panel).getByText(IMPORT_STAGE_COPY.namedRunIsAnotherMeasurement)).toBeTruthy();
     fireEvent.change(picker, { target: { value: 'R-FREE' } });
     expect(within(panel).queryByText(IMPORT_STAGE_COPY.namedRunIsAnotherMeasurement)).toBeNull();
+  });
+});
+
+/* --------------------------------------------------------------------------
+ * §17 · the archives by NAME, and making runs when nothing can be sent (2026-10-12)
+ *
+ * Three defects measured on the hosted build's own shape: the picker rendered the
+ * server's id humanised ("Bl15 synthetic semantics corpus") because the server sent no
+ * name; an archive import whose every value needs a decision offered NO way to put its
+ * measurements on a record (the server refused `nothing_to_send` and the screen showed
+ * only "Nothing in this import can be sent yet"); and the report said nothing about
+ * what the import read and did not send, which the server now keeps as notes.
+ * -------------------------------------------------------------------------- */
+
+const NAMES = {
+  bl15_synthetic_mini_corpus: 'Example BL15-2 beamtime — small (synthetic)',
+  bl15_synthetic_semantics_corpus:
+    'Example BL15-2 beamtime — three operators, conflicts and detector signals (synthetic)',
+};
+
+function archiveSession(overrides: Partial<ApiImportSession> = {}): ApiImportSession {
+  return session({
+    reconstruction: { ...session().reconstruction!, candidates: [DISAGREEING, NO_WRITE_PATH, STRUCTURAL] },
+    send_plan: {
+      sendable: [],
+      not_sent: {
+        [DISAGREEING.candidate_id]: 'candidate_unresolved',
+        [NO_WRITE_PATH.candidate_id]: 'candidate_not_proposable',
+        [STRUCTURAL.candidate_id]: 'candidate_not_proposable',
+      },
+      no_run_when_creating_runs: [],
+      measurement_of: {},
+    },
+    archive: {
+      archive_name: 'bl15_synthetic_semantics_corpus',
+      root_label: 'bl15_synthetic_semantics_corpus',
+      units_page: { rows: [], total: 9, limit: 50, truncated: false },
+      shared_candidate_ids: [],
+      candidate_total: 3,
+      candidates_truncated: false,
+      run_candidate_unit_count: 9,
+      statements_read: 0,
+    },
+    ...overrides,
+  });
+}
+
+const RUNS_ONLY_REPORT = {
+  experiment_id: '01RECORD00000000000000001',
+  run_id: null,
+  create_runs: true,
+  sent: [],
+  not_sent: [],
+  counts: { candidates: 3, sent: 0, already_sent: 0, not_sent: 3, runs_created: 9, runs_already_present: 0 },
+  created_runs: [],
+  runs_already_present: [],
+  experiment_version: '8',
+  data_quality_notes: {
+    label: 'Data Quality Notes',
+    available: 6,
+    captured_as_run_notes: 6,
+    already_present: 0,
+    writes_qc_status: false,
+  },
+  readings_notes: {
+    label: 'Also read from the archive',
+    measurements: 9,
+    captured_as_run_notes: 9,
+    already_present: 0,
+    beamtime_notes_captured: 2,
+    beamtime_notes_already_present: 0,
+    not_listed: 0,
+    writes_field_values: false,
+  },
+};
+
+describe('§17 · archives by name, and runs when nothing can be sent', () => {
+  it('MUTATION-GUARDED: the archive picker shows the server’s names, never an id', async () => {
+    /** MUTATION: dropping `data.archive_display_names` from the picker makes this RED. */
+    const archives = ['bl15_synthetic_mini_corpus', 'bl15_synthetic_semantics_corpus'];
+    stub({
+      list: listResponse({ available_archives: archives, archive_display_names: NAMES }),
+      detail: session({
+        available_archives: archives,
+        archive_display_names: NAMES,
+        default_archive: 'bl15_synthetic_semantics_corpus',
+      }),
+    });
+    renderScreen();
+    fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+    await sessionOpen();
+    const picker = within(goTo(IMPORT_STAGE_COPY.sources.title)).getByRole('combobox', { name: /which archive/i });
+    const options = [...picker.querySelectorAll('option')];
+    expect(options.map((o) => o.textContent)).toEqual([NAMES.bl15_synthetic_mini_corpus, NAMES.bl15_synthetic_semantics_corpus]);
+    expect(options.map((o) => o.value)).toEqual(archives);
+    expect(options.some((o) => (o.textContent ?? '').includes('_'))).toBe(false);
+    /* MUTATION-GUARDED: the picker opens on the SERVER's default — the archive the hosted
+       image ships — not on whichever id sorts first. Dropping `default_archive` makes
+       this RED (the mini corpus sorts first). */
+    expect((picker as HTMLSelectElement).value).toBe('bl15_synthetic_semantics_corpus');
+  });
+
+  it('falls back to the humanised id only when the server names nothing', async () => {
+    stub({ list: listResponse(), detail: session() });
+    renderScreen();
+    fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+    await sessionOpen();
+    const picker = within(goTo(IMPORT_STAGE_COPY.sources.title)).getByRole('combobox', { name: /which archive/i });
+    expect(picker.querySelector('option')?.textContent).toBe('BL15 synthetic mini corpus');
+  });
+
+  it('MUTATION-GUARDED: with nothing sendable, an archive still offers to make its runs, and sends `create_runs`', async () => {
+    /**
+     * MUTATION: restoring the old `sendable.length === 0 ?` branch (no `runsOnly`) makes
+     * this RED — the screen then shows only "Nothing in this import can be sent yet".
+     */
+    stub({
+      list: listResponse(),
+      detail: archiveSession(),
+      experiments: { experiments: [{ id: '01RECORD00000000000000001', title: 'Cu K-edge campaign, 2019' }] },
+      added: RUNS_ONLY_REPORT,
+    });
+    renderScreen();
+    fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+    await sessionOpen();
+    const panel = goTo(IMPORT_STAGE_COPY.add.title);
+    expect(within(panel).getByText(IMPORT_STAGE_COPY.runsOnlyLead(9))).toBeTruthy();
+    const box = within(panel).getByRole('checkbox', { name: IMPORT_STAGE_COPY.createRuns }) as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    expect(box.disabled).toBe(true);
+    // No run picker: the runs are what this batch makes.
+    expect(within(panel).queryByRole('combobox', { name: /which run/i })).toBeNull();
+    await chooseRecordAndAdd();
+    await screen.findByText(IMPORT_COPY.addWholeResultTitle);
+    const batch = seen.filter((r) => r.url.includes('/add-to-experiment'));
+    expect(batch).toHaveLength(1);
+    expect(JSON.parse(String(batch[0].body))).toEqual({
+      experiment_id: '01RECORD00000000000000001',
+      create_runs: true,
+    });
+    // THE REPORT SAYS RUNS WERE MADE AND NOTHING WAS SENT — not "0 sent" alone.
+    expect(screen.getByText(IMPORT_STAGE_COPY.runsOnlyResult)).toBeTruthy();
+    expect(screen.getByText(/9 runs created/)).toBeTruthy();
+  });
+
+  it('MUTATION-GUARDED: the report states the "Also read from the archive" notes in the server’s numbers', async () => {
+    /** MUTATION: not rendering `readings_notes` makes this RED. */
+    stub({
+      list: listResponse(),
+      detail: archiveSession(),
+      experiments: { experiments: [{ id: '01RECORD00000000000000001', title: 'Cu K-edge campaign, 2019' }] },
+      added: { ...RUNS_ONLY_REPORT, readings_notes: { ...RUNS_ONLY_REPORT.readings_notes, captured_as_run_notes: 7, already_present: 2 } },
+    });
+    renderScreen();
+    fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+    await sessionOpen();
+    await chooseRecordAndAdd();
+    await screen.findByText(IMPORT_COPY.addWholeResultTitle);
+    const line = document.querySelector('.hi-readings-kept') as HTMLElement;
+    expect(line).not.toBeNull();
+    expect(line.textContent).toContain(IMPORT_STAGE_COPY.readingsKept);
+    expect(line.textContent).toContain('7 new on runs');
+    expect(line.textContent).toContain('2 already there');
+    expect(line.textContent).toContain('for the whole beamtime, 2 new');
+    expect(line.textContent).toContain(IMPORT_STAGE_COPY.readingsNever);
+    /* I2 (review): the per-value act is "Propose a Value From This Note"; note review's
+       map takes ONE field for the whole note, so "map any line of it" was false. */
+    expect(IMPORT_STAGE_COPY.readingsNever).toContain('Propose a Value From This Note');
+    expect(IMPORT_STAGE_COPY.readingsNever).not.toMatch(/\bmap\b/i);
+  });
+
+  it('MUTATION-GUARDED: an archive read but not yet reconstructed offers no form — reconstruct first', async () => {
+    /**
+     * MUTATION: dropping `reconstructed` from `runsOnly` makes this RED. Measured in a real
+     * browser: before a reconstruction the archive has measurements and no candidate, and
+     * the batch then made runs whose notes listed almost nothing.
+     */
+    stub({ list: listResponse(), detail: archiveSession({ reconstruction: null, send_plan: undefined }) });
+    renderScreen();
+    fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+    await sessionOpen();
+    const panel = goTo(IMPORT_STAGE_COPY.add.title);
+    expect(within(panel).queryByRole('button', { name: IMPORT_COPY.actionAddWhole })).toBeNull();
+    expect(within(panel).queryByText(IMPORT_STAGE_COPY.runsOnlyLead(9))).toBeNull();
+    expect(within(panel).getByText(/read and reconstruct its sources first/)).toBeTruthy();
+  });
+
+  it('MUTATION-GUARDED: an archive added AFTER the session opened still defaults to one run per measurement', async () => {
+    /**
+     * MUTATION: removing the `useEffect` that follows the archive's arrival makes this RED
+     * — every stage is mounted when the session opens, so `useState(archive)` read `false`.
+     * Measured in a real browser: the box stayed unchecked and the batch was refused.
+     */
+    const routes: Parameters<typeof stub>[0] = {
+      list: listResponse(),
+      detail: session({ reconstruction: { ...session().reconstruction!, candidates: [DISAGREEING, NO_WRITE_PATH, STRUCTURAL] } }),
+      experiments: { experiments: [{ id: '01RECORD00000000000000001', title: 'Cu K-edge campaign, 2019' }] },
+      sources: { source: {}, import: archiveSession() },
+    };
+    /* WITH A SENDABLE VALUE, so the box is a real choice — with nothing sendable it is held
+       on regardless (`runsOnly`), which would let this test pass without the effect. */
+    const withValue = archiveSession({
+      reconstruction: { ...session().reconstruction!, candidates: [SENDABLE, DISAGREEING, NO_WRITE_PATH, STRUCTURAL] },
+      send_plan: {
+        sendable: [SENDABLE.candidate_id],
+        not_sent: {},
+        no_run_when_creating_runs: [],
+        measurement_of: {},
+      },
+    });
+    stub(routes);
+    renderScreen();
+    fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+    await sessionOpen();
+    expect(within(goTo(IMPORT_STAGE_COPY.add.title)).queryByRole('checkbox', { name: IMPORT_STAGE_COPY.createRuns })).toBeNull();
+    // The archive arrives: the next read of the session carries it.
+    routes!.detail = withValue;
+    fireEvent.click(within(goTo(IMPORT_STAGE_COPY.sources.title)).getByRole('button', { name: IMPORT_COPY.actionAddArchive }));
+    const panel = goTo(IMPORT_STAGE_COPY.add.title);
+    const box = (await within(panel).findByRole('checkbox', { name: IMPORT_STAGE_COPY.createRuns })) as HTMLInputElement;
+    expect(box.disabled).toBe(false);
+    expect(box.checked).toBe(true);
+    // …and a box the scientist clears stays cleared.
+    fireEvent.click(box);
+    expect(box.checked).toBe(false);
+  });
+
+  it('without an archive, nothing sendable still offers no form — there is nothing to make', async () => {
+    stub({
+      list: listResponse(),
+      detail: session({
+        reconstruction: { ...session().reconstruction!, candidates: [DISAGREEING, NO_WRITE_PATH, STRUCTURAL] },
+      }),
+    });
+    renderScreen();
+    fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+    await sessionOpen();
+    const panel = goTo(IMPORT_STAGE_COPY.add.title);
+    expect(within(panel).queryByRole('button', { name: IMPORT_COPY.actionAddWhole })).toBeNull();
+    expect(within(panel).getByText(/Nothing in this import can be sent yet/)).toBeTruthy();
   });
 });

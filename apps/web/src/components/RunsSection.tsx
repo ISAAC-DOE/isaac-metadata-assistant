@@ -1750,22 +1750,80 @@ function RunsBrowser({
    * `scrollIntoView` is feature-detected because jsdom does not implement it; the
    * mark is removed on cleanup so a second link does not leave two.
    */
+  /* Which arrival has already been SCROLLED to — once per run + address, for the
+     reason the field-focus effect below states: `focusedRun` is a new object after
+     every save, and re-scrolling on each one yanked the page away from the field the
+     reader was typing in (independent review, IMPORTANT 1). The MARK is re-applied
+     every time; only the scroll is once. */
+  const addressScrolledRef = useRef<string | null>(null);
   useEffect(() => {
     if (!focused || focusAddress === null || focusAddress === '' || focusedRun === undefined) {
+      if (!focused || focusAddress === null || focusAddress === '') {
+        addressScrolledRef.current = null;
+      }
       return;
     }
-    const target = document.querySelector(
-      `[data-address="${CSS.escape(focusAddress)}"]`,
-    );
+    /* NOT INSIDE A HIDDEN WORKSPACE (QA A-11/A-14): the record screen keeps its other
+       workspaces mounted-but-`hidden`, so the first `[data-address]` in the document
+       can belong to a panel nobody can see. */
+    const target =
+      Array.from(
+        document.querySelectorAll(`[data-address="${CSS.escape(focusAddress)}"]`),
+      ).find((el) => el.closest('[hidden]') === null) ?? null;
     if (target === null) return;
     target.setAttribute('data-linked-address', 'true');
-    if (typeof (target as HTMLElement).scrollIntoView === 'function') {
+    const arrival = `${focusRunId ?? ''}|${focusAddress}`;
+    if (
+      addressScrolledRef.current !== arrival &&
+      typeof (target as HTMLElement).scrollIntoView === 'function'
+    ) {
+      addressScrolledRef.current = arrival;
       (target as HTMLElement).scrollIntoView({ block: 'center' });
     }
     return () => {
       target.removeAttribute('data-linked-address');
     };
-  }, [focused, focusAddress, focusedRun]);
+  }, [focused, focusAddress, focusRunId, focusedRun]);
+
+  /*
+   * A LINK NAMED "Go to Field" LANDS ON THE FIELD (QA A-09/A-11): the run editor's own
+   * control, when the address is one of the five it renders — measured, focus had
+   * stayed on the run's heading. It waits for `cardFocusId` to clear, because opening
+   * a run hands focus to its heading first (`focusOnMount`), and focusing the field
+   * before that would be undone. An inherited row renders no such control, so
+   * nothing moves focus there.
+   */
+  /*
+   * ONCE PER ARRIVAL (independent review, IMPORTANT 1). `focusedRun` is a NEW object
+   * after every autosave and feed refresh while `?at=` stays in the URL, so an effect
+   * that focused on each run was measured pulling the caret back to the linked field
+   * while the reader typed in another (Temperature held "29" of "298"). The arrival is
+   * keyed on run + address and handed off exactly once; leaving the address (or the
+   * run) resets it, so following the same link again lands again.
+   */
+  const fieldFocusHandledRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focused || focusAddress === null || !focusAddress.startsWith('field:')) {
+      fieldFocusHandledRef.current = null;
+      return;
+    }
+    const arrival = `${focusRunId ?? ''}|${focusAddress}`;
+    if (fieldFocusHandledRef.current === arrival) return;
+    if (focusedRun === undefined || cardFocusId !== null) return;
+    const target =
+      Array.from(
+        document.querySelectorAll(`[data-address="${CSS.escape(focusAddress)}"]`),
+      ).find((el) => el.closest('[hidden]') === null) ?? null;
+    if (target === null) return; // not rendered yet — try again on the next render
+    fieldFocusHandledRef.current = arrival;
+    /* The field's own control; on an inherited-values row, which has none, the row's
+       action — "Override for this run" / "Change this run's value" — which is where a
+       value is entered there (review minor: it used to stay on the run heading). */
+    (
+      target.querySelector<HTMLElement>('[data-run-field-path]') ??
+      target.querySelector<HTMLElement>('.run-inherited-actions button')
+    )?.focus({ preventScroll: true });
+  }, [focused, focusAddress, focusRunId, focusedRun, cardFocusId]);
 
   const countFocus: CountFocus = !focused
     ? 'none'
