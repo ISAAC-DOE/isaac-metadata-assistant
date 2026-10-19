@@ -1192,6 +1192,9 @@ def test_the_five_paths_the_run_workspace_offers_are_all_still_writable(
             "confirmed_by_user": True,
             "fields": {
                 "context.environment": "in_situ",
+                # 2026-10-12: the two closed enums a person chooses.
+                "context.electrochemistry.reaction": "OER",
+                "context.electrochemistry.cell_type": "three_electrode",
                 "context.temperature_K": 300.0,
                 "context.thermodynamics.atmosphere": "5% H2 in Ar",
                 "timestamps.acquired_start_utc": "2026-01-01T00:00:00Z",
@@ -1202,6 +1205,8 @@ def test_the_five_paths_the_run_workspace_offers_are_all_still_writable(
     assert response.status_code == 200, response.text
     stored = _stored_run(client, experiment_id, run["id"]).draft["fields"]
     assert stored["context.environment"]["value"] == "in_situ"
+    assert stored["context.electrochemistry.reaction"]["value"] == "OER"
+    assert stored["context.electrochemistry.cell_type"]["value"] == "three_electrode"
     assert stored["context.temperature_K"]["value"] == 300.0
     # Verbatim — the atmosphere path has no enum in the official schema, so the
     # route must not case-fold, normalise or vocabulary-check what was sent.
@@ -1229,12 +1234,23 @@ def test_the_run_writable_paths_are_derived_from_the_extractor_field_map():
     expected = {
         path for path, _coercer in FIELD_MAP.values() if ws.field_level(path) == ws.LEVEL_RUN
     }
-    assert routes.RUN_WRITABLE_FIELD_PATHS == expected
+    # PLUS THE TWO PERSON-CHOSEN CLOSED ENUMS (2026-10-12), which are NOT the extractor's
+    # — a campaign sheet has no such row — and pass the same two gates by another route:
+    # the vendored schema closes each with a string enum, and `field_level` makes it the
+    # run's. Named, then checked; never a transcribed value list.
+    chosen = set(routes.RUN_CHOSEN_ENUM_PATH_NAMES)
+    assert set(routes._run_chosen_enum_fields()) == chosen
+    for path in chosen:
+        assert ws.field_level(path) == ws.LEVEL_RUN
+        assert path not in {p for p, _c in FIELD_MAP.values()}
+    assert routes.RUN_WRITABLE_FIELD_PATHS == expected | chosen
     # The measured set at this commit. Stated literally as well as derived,
     # because a derivation that silently emptied itself would satisfy the
     # comparison above and refuse everything.
-    assert expected == {
+    assert expected | chosen == {
         "context.environment",
+        "context.electrochemistry.reaction",
+        "context.electrochemistry.cell_type",
         "context.temperature_K",
         "context.thermodynamics.atmosphere",
         "timestamps.acquired_start_utc",

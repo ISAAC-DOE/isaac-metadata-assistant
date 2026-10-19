@@ -490,4 +490,10 @@ def _read_move(
             normalization_rule=RULE_MOTOR_MOVE,
             scope=scope,
             measurement_stem=stem,
+            # THE MOTOR IS THE ITEM (2026-10-12, `bl15.mapping.cardinality.v3`), exactly
+            # as `bl15.spec` names a `#P` position by its `#O` motor. Without it a planned
+            # `mv Sx …` could not be compared with the recorded `Sx` of the same
+            # measurement, and two motors moved by one line were compared with each
+            # other instead.
+            item=motor,
         )

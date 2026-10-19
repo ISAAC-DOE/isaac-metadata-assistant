@@ -752,7 +752,8 @@ def test_add_to_experiment_creates_one_ordinary_run_per_reviewed_measurement(cli
     # composing prose out of a token in the one string a run is identified by.
     labels = {row["label"] for row in runs}
     assert (
-        "Legacy 3 · 02 · SYN2 · base · after1500Cycling · ffilter35 · 1200mV" in labels
+        # The unrecognised `zz9` is kept in the label since 2026-10-18 (QA `C-19`).
+        "Legacy 3 · 02 · SYN2 · base · after1500Cycling · ffilter35 · 1200mV · zz9" in labels
     ), labels
     assert (
         "Legacy 1 · 01 · SYN1 · acid · beforeCycling · filter10 · 060mV" in labels
@@ -856,13 +857,21 @@ def test_the_proposals_and_notes_are_present_and_each_names_its_source_file(clie
         # from a `source_id` on the statement, which `bl15.reconstruct` does not
         # put there. A test asserting only "the note mentions a file" would have
         # passed on that: the member path was always in the locator.
-        prefix, bracket, remainder = text.partition(" (")
-        assert bracket, text
+        #
+        # THE SHAPE CHANGED 2026-10-18 (QA `C-23`) and the property did not: the note
+        # now reads `<reading>: <value as written> — from <archive> · <member> ·
+        # <locator>` rather than `<archive> (<member> · <locator>): <key> = <value>`.
+        # Both halves this assertion exists for are still asserted — the archive BY
+        # NAME, then a real member path.
+        reading, from_, remainder = text.partition(" — from ")
+        assert from_, text
+        assert ": " in reading, text
+        prefix, separator, remainder = remainder.partition(" · ")
+        assert separator, text
         assert prefix == "BL15-2 corpus", text
         member, separator, _locator = remainder.partition(" · ")
         assert separator, text
         assert member in archive_paths, text
-        assert "): " in remainder, text
 
     # EVERY RUN-SCOPED PROPOSAL IS ON A RUN THIS BATCH CREATED, and it is the run
     # of the measurement the value was read from — not all of them on one run.

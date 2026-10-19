@@ -34,7 +34,7 @@ export const BL15_COPY = {
     'A complete file-by-file list is not part of this report. What is listed in full is what was left out: every source attached to no measurement, and every source the archive walk refused.',
   groupsTitle: 'Measurements by Sample',
   groupsLead:
-    'Grouped by the second filename token. Whether that token always means the sample or electrode instance is an open question for a domain owner, not something this import established.',
+    'Grouped by the second filename token, which the domain owner has confirmed is the sample or electrode instance in the BL15-2 filename convention. The grouping is read from the names, not from the notes.',
   ungroupedLabel: 'No sample token',
   ungroupedNote:
     'These measurements carry no second numeric token, so no sample grouping can be read from their names.',
@@ -75,9 +75,11 @@ export const BL15_COPY = {
     'Statements this archive made that the official ISAAC record has no field for. ' +
     'Each one keeps the source’s own words, which source they came from, and where ' +
     'in it.',
+  /* ~~"Every level-4 statement … is in the companion"~~ (2026-10-18, QA `C-23`): a
+     decision record's numbering and an internal artifact's name, said to a scientist. */
   extendedContextNoneLeftOut:
-    'Every level-4 statement this reading found is in the companion. Nothing was ' +
-    'left out.',
+    'Every statement this reading found that has no official field is kept in the ' +
+    'extended context, with its source. Nothing was left out.',
   evidenceTitle: 'Supporting sources',
   searchLabel: 'Search measurements',
   searchPlaceholder: 'Legacy number, sample, filename…',
@@ -193,6 +195,13 @@ export const BL15_CONCEPT_LABELS: Record<string, string> = {
   legacy_run_or_file_number: 'Legacy run or file number',
   acquisition_timestamp: 'Acquisition timestamp',
   beamtime_purpose: 'Beamtime purpose',
+  /* 2026-10-12 — the logbook's own words about these three, and the one environment a
+     filename can imply (a dry sample). Each names the field it is for. */
+  environment_statement: 'Environment from the logbook',
+  reaction_statement: 'Reaction from the logbook',
+  cell_type_statement: 'Cell type from the logbook',
+  environment: 'Environment',
+  sample_position: 'Sample position',
 };
 
 /** Humanise an unknown id without inventing words: underscores to spaces. */

@@ -104,8 +104,11 @@ export function archiveLabel(id: string, names?: Readonly<Record<string, string>
 }
 
 export const IMPORT_COPY = {
-  /** The eyebrow above the page title. Names the goal, not the mechanism. */
-  eyebrow: 'Recover Historical Science',
+  /*
+   * ~~`eyebrow: 'Recover Historical Science'`~~ — RETIRED 2026-10-18. A label above
+   * the page's own `<h1>` restated it in capitals; the design rules this redesign
+   * follows ban the pattern outright, and the heading already names the destination.
+   */
 
   /**
    * The lead. It says what the destination is FOR and immediately says the one
@@ -139,11 +142,42 @@ export const IMPORT_COPY = {
    * own"). `__tests__/historical-import.test.tsx`'s M-9 test still asserts both
    * substrings are in `.hi-lead` itself, unchanged.
    */
+  /*
+   * ONE SENTENCE, 2026-10-18 (owner direction: "less clutter"). It keeps both halves
+   * M-9 requires beside the decision to start — the honest limit ("one layout",
+   * "reference") and how to read every candidate ("a suggestion you accept, correct or
+   * refuse") — and loses only the restatement between them. The longer account of the
+   * stages moved into the Imports widget's info panel, where it is still in the DOM.
+   */
   lead:
-    'Reconstruct candidate experiment metadata from files your work is already ' +
-    'scattered across — today it reads one layout and records anything else as a ' +
-    'reference. Nothing here becomes a value on its own: each candidate is a ' +
-    'suggestion you accept, correct or refuse.',
+    'Rebuild a past experiment’s metadata as suggestions you accept, correct or ' +
+    'refuse — ISAAC reads one layout today and records any other file as a reference.',
+
+  /** The Imports widget's one-line description (the question it answers). */
+  landingSub: 'Each import is a working area for one past experiment’s files.',
+  /** The inline name field's label, kept visible beside the control it names. */
+  nameLabel: 'Name (optional)',
+  namePlaceholder: 'e.g. Cu K-edge campaign, 2019',
+  /** The info panel's heading line: what an import goes through, in the stage names. */
+  howItWorksLead:
+    'An import moves through six stages. Nothing in it changes a record until you send it.',
+  /** A list row's progress meter, said in words for a screen reader and beside it. */
+  meterLabel: (stage: string, index: number, total: number) =>
+    `Reached stage ${index} of ${total}: ${stage}`,
+  meterNotStarted: 'Not started',
+  /** A row's one supporting fact, only when something has gone to a record. */
+  rowSent: (n: number) => `${n.toLocaleString('en-US')} sent to records`,
+
+  /**
+   * A LINK TO AN IMPORT THAT IS NOT THERE (2026-10-18, QA `C-14`). The session is now in
+   * the URL, so a bookmark or a reload can name an import a server restart has ended —
+   * the defect `routes.ts` used to give as the reason for not linking at all. It is
+   * answered rather than avoided.
+   */
+  goneTitle: 'This import is no longer here',
+  goneBody:
+    'Import sessions are working areas, and a server restart or a discard ends them. ' +
+    'Anything already sent to a record is still on that record.',
 
   /**
    * THE SCOPED FILE CLAIM. Both halves are true and neither is an absolute.
@@ -283,6 +317,14 @@ export const IMPORT_COPY = {
   actionRemoveSource: 'Remove',
   actionDiscard: 'Discard This Import',
   actionOpen: 'Open',
+  /**
+   * THE ONE CONTROL THAT CREATES A DESTINATION, in one place (2026-10-18). It used to be a
+   * literal in `HistoricalImport.tsx`'s `NewDestinationButton`; the rule-scope fields now
+   * offer the same act when a stored rule needs a record (QA `C-13`), so both read this
+   * one string — and `product-facing-language.test.tsx`'s one-string, one-occurrence
+   * exemption moved here with it.
+   */
+  actionNewRecord: 'New record from this import',
 
   /**
    * The one thing a reader has to be told before they discard. The session is
@@ -291,6 +333,21 @@ export const IMPORT_COPY = {
   discardNote:
     'Discarding removes this working area. Every proposal you have already sent stays on ' +
     'the record it was sent to, and so does the note behind it.',
+
+  /*
+   * THE CONFIRMATION (2026-10-18, QA `C-15`). Discard was one click with no question
+   * asked. The dialog says what is LOST and what is KEPT, in that order, before the
+   * button that does it — and names the import.
+   */
+  discardDialogTitle: 'Discard this import?',
+  discardWhatGoes:
+    'Lost: this working area — its sources, what was read from them, and any choice ' +
+    'you recorded only for this import.',
+  discardWhatStays:
+    'Kept: everything already sent to a record — its proposals, notes and runs — and ' +
+    'any reading rule you saved on a record.',
+  discardKeep: 'Keep It',
+  discardPending: 'Discarding…',
 
   /** What a candidate that cannot be sent says, when the server gave no reason. */
   notProposableFallback:
@@ -412,6 +469,17 @@ export const IMPORT_STAGE_COPY = {
     help: 'There is no ranking of sources. A macro is the plan, a header is what the instrument recorded, a filename is a human label, and the notes are a later reading.',
     none: 'No source disagrees with another in this import.',
     noValue: 'No value has been selected.',
+    /* 2026-10-18 (QA `C-12`): one side of these is the ABSENCE of a source, so there is
+       nothing to choose between — and the screen used to ask "Which reading is right?". */
+    notedKind: 'Noted — nothing to choose. One source states this and the other is silent; the finding is kept.',
+    notedRow:
+      'Nothing to choose: one source states this and no other source says anything about it. The finding is kept, and no value is chosen.',
+    /* 2026-10-18 (QA `C-22`): two acquisitions under one legacy number can never be
+       resolved (the server forbids it), so this is preserved rather than open work. */
+    preservedKind: 'Preserved — both acquisitions are kept, and nothing will be chosen.',
+    toDecide: (n: number) => `${n.toLocaleString('en-US')} to decide`,
+    notedCount: (n: number) => `${n.toLocaleString('en-US')} noted`,
+    preservedCount: (n: number) => `${n.toLocaleString('en-US')} preserved`,
     review: 'Review Sources',
     fieldKindTitle: 'A field with more than one stated value',
     fieldKindMeaning:
@@ -442,6 +510,10 @@ export const IMPORT_STAGE_COPY = {
     stale: 'Stale Rule',
     suggested: 'Suggested',
     sent: 'Sent',
+    /* 2026-10-18 (QA `C-12`/`C-22`) — a conflict with nothing to choose, and one the
+       server forbids choosing. Both shown; neither counted as work to do. */
+    noted: 'Noted',
+    preserved: 'Preserved',
     variesByScan: 'Varies by Scan',
     severalPerScan: 'Several per Scan',
     variesByFile: 'Varies by File',
@@ -476,6 +548,11 @@ export const IMPORT_STAGE_COPY = {
   },
   summaryTitle: 'At a Glance',
   statementsTitle: 'What It Said',
+  /* 2026-10-18 (QA `C-21`): adding a readable source reads it, so this is a re-read. */
+  readAgain: 'Read Again',
+  /* 2026-10-18 (QA `C-16`): why nothing here can be read, and what to do instead. */
+  nothingToRead:
+    'Nothing in this bundle can be read here: a file recorded from this computer, like any other reference, is kept by name only. Add an archive or an example source in Source Bundle to see what ISAAC reads — the references stay either way.',
   skippedTitle: 'Passed Over',
   sourcesColumn: {
     file: 'File',
@@ -499,6 +576,7 @@ export const IMPORT_STAGE_COPY = {
   qualityTitle: 'Data Quality Notes',
   qualityNote: 'Kept word for word. Never read as a QC verdict.',
   allCounts: 'All counts, and where each came from',
+  derivations: 'How each count is derived',
   mapping: 'What the official schema can take',
   ceiling: 'What cannot be finished here',
   extended: 'Kept in the extended context',
@@ -535,7 +613,9 @@ export const IMPORT_STAGE_COPY = {
   suggestionsTitle: 'Suggested From Other Experiments',
   adopt: 'Adopt for This Experiment',
   confirmedBy: 'Confirmed by',
-  unattributed: 'Unattributed',
+  /* ~~'Unattributed'~~ (2026-10-18, QA `C-23`): the wire's sentinel, shown as a word. What
+     it means is said instead; the sentinel is still what the server records. */
+  unattributed: 'not recorded — this build cannot yet identify who confirms a rule',
   /* The owner's own three phrases (QA H1). A rule for an Experiment or a convention
      is stored on the Experiment chosen just below, so "this" is that one. */
   scopeOptions: {
@@ -544,10 +624,18 @@ export const IMPORT_STAGE_COPY = {
     profile: 'Use as a rule for this convention',
   },
   whichExperiment: 'Which experiment?',
+  /* 2026-10-18 (QA `C-13`): what each scope means, and why a stored one needs a record. */
+  scopeHelp:
+    'Only here: this import alone, and gone if it is discarded. For an experiment: kept on that record and used by every import sent to it. For a convention: kept on that record, and offered — never applied — to imports for other records read with the same convention.',
+  scopeNeedsRecord:
+    'A rule for an experiment or a convention is kept on a record, and this workspace has none yet.',
+
   bindingTitle: 'Read Some Runs With Another Convention',
   bindingOne: 'One naming convention is registered in this build, so there is nothing to switch to.',
   bindingSubmit: 'Record This Convention',
   signalConfirm: 'Confirm This Channel',
+  /* 2026-10-18 (QA `C-26`): said where the reader pressed it, not only in a live region. */
+  signalRecorded: 'Recorded. This import was read again with this channel assignment.',
   signalAssign: 'Record Channel Assignment',
   addSummaryTitle: 'What Will Be Sent',
   addResultTitle: 'What Happened',
@@ -570,8 +658,57 @@ export const IMPORT_STAGE_COPY = {
   /** Appended to a run option that another measurement's values may not be sent to. */
   otherMeasurementRun: ' — made from another measurement',
   openProposals: 'Open Proposals on This Record',
+  /* RETIRED from the report 2026-10-18 (QA `C-17`): `acceptanceBefore` says it once,
+     before a send. Kept so a test can assert the report no longer repeats it. */
   acceptanceNote:
     'Accepting a proposal needs a reviewer this deployment can identify, and it cannot identify one yet. The proposals stay open on the record until it can.',
+  /* 2026-10-18 (QA `C-17`): the same fact, said BEFORE sending rather than only after. */
+  acceptanceBefore:
+    'Sending works, and accepting does not yet: accepting a proposal needs a reviewer this deployment can identify, and it cannot identify one. Sent proposals stay open on the record until it can.',
+  /* 2026-10-18 (QA `C-25`): the report's counts, worded so they agree with each other. */
+  /* ~~"N proposals on this record"~~ (review, 2026-10-18): it counts only THIS send. */
+  sentNow: (n: number) => `${n.toLocaleString('en-US')} sent now`,
+  newAndAlready: (fresh: number, already: number) =>
+    `${fresh.toLocaleString('en-US')} new · ${already.toLocaleString('en-US')} already there`,
+  sentNowTitle: 'Sent now',
+  couldNotBeSent: 'Could not be sent',
+  sentSoFarTitle: 'Sent From This Import',
+  sentSoFarRow: (n: number) =>
+    `${n.toLocaleString('en-US')} ${n === 1 ? 'proposal' : 'proposals'} on`,
+  willNotBeSent: 'What will not be sent',
+  sendAnother: 'You can send this import to another record too: choose it above.',
+  readyHere: (n: number) => `${n.toLocaleString('en-US')} ready to send`,
+  alreadyHere: (n: number) => `${n.toLocaleString('en-US')} already on this record`,
+  alreadyElsewhere: (n: number) => `${n.toLocaleString('en-US')} already sent elsewhere`,
+  /* 2026-10-18 (QA `C-10`): the technique is the scientist's choice from the schema's own
+     list. Nothing is preselected and nothing is inferred from the files. */
+  techniqueTitle: 'Technique',
+  techniqueLead:
+    'The files name a method, not one of the schema’s techniques, so the technique is yours to choose. It is saved as your answer on the record chosen above.',
+  techniqueLabel: 'Technique of this experiment',
+  techniqueChoose: 'Choose a technique…',
+  techniqueShortList: 'Short list',
+  techniqueAll: 'Every technique the schema allows',
+  techniqueHelp:
+    'The short list is the four techniques ISAAC’s reading notes name for this kind of acquisition. Any technique in the official schema can be chosen. Nothing is chosen for you.',
+  techniqueEvidence: 'What the files say',
+  techniqueNoEvidence: 'No file in this import names a method.',
+  techniqueSave: 'Save Technique',
+  techniqueSaved: (value: string, title: string) => `Saved on ${title}: ${value}.`,
+  techniqueCurrent: (value: string) => `This record’s technique: ${value}.`,
+  techniqueUnavailable:
+    'The list of techniques could not be read, so this cannot be chosen here. Set it on the record instead.',
+  techniqueNeedsRecord: 'It is set on the record chosen above — choose one, or make one there, first.',
+  /* 2026-10-18 (QA `C-16`): what this deployment can read, said where files are chosen. */
+  filesTitle: 'Files From This Computer',
+  filesNotReadable:
+    'Not readable here — a file you choose is recorded by name and size only.',
+  filesNotReadableHelp:
+    'Real files are read only from a staging area on the server, which an operator turns on. It is off in this deployment, so ISAAC never receives a file you choose here — only its name, size and type, and a checksum if you compute one in your browser.',
+  filesReadable:
+    'Files an operator staged on the server are listed under Add an Archive. A file you choose here is still recorded by name and size only.',
+  filesTryExample: 'To see the whole workflow, add the example archive:',
+  filesTryExampleAction: 'Add the Example Archive',
   runsPresent: 'Measurements that already had a run',
   runsCreated: 'Runs created',
   dqnCaptured: 'Data Quality Notes kept as run notes',
@@ -581,6 +718,19 @@ export const IMPORT_STAGE_COPY = {
    * note per source file. The label is the server's (`readings_notes.label`) where it is
    * sent; this is the same words for the sentence around it.
    */
+  /**
+   * LEFT FOR A PERSON TO CHOOSE (2026-10-12). The domain owner's rule: a value is taken
+   * from the metadata the import reads, or left blank for a person. The rule sentence,
+   * the "where" sentence and every count come from the server (`left_for_a_person`);
+   * these are only the words around them.
+   */
+  leftTitle: 'Left for You to Choose',
+  leftCount: (left: number, runs: number) =>
+    `blank on ${left.toLocaleString('en-US')} of ${runs.toLocaleString('en-US')} ${runs === 1 ? 'run' : 'runs'}`,
+  leftOffered: (offered: number) =>
+    `${offered.toLocaleString('en-US')} proposed from what the files state`,
+  leftPerMeasurement: 'By measurement',
+  leftNone: 'Nothing left blank',
   readingsKept: 'Also read from the archive, kept as notes',
   /* ~~"map any line of it to a field in note review"~~ — false (review I2, 2026-10-12):
      note review's map takes ONE field for the whole note. */
@@ -602,6 +752,14 @@ export const IMPORT_STAGE_COPY = {
   reread: 'This import was re-read under this record’s own reading rules first.',
   searchLabel: 'Search measurements',
   whereFrom: 'Where each value came from',
+  /* 2026-10-18 (QA `C-05`/`C-06`): the full engineering reason, one press away. */
+  whyInDetail: 'Why, in detail',
+  whyInDetailLead:
+    'The full reason, as ISAAC’s mapping notes record it. Figures in it describe the archive this build was measured on, not necessarily this import.',
+  /* 2026-10-18 (QA `C-07`): a value read and not offered for sending is shown as what
+     the source says, not as "No value has been selected". */
+  readNotSent: 'read, not sent',
+  notRead: 'Not read',
   sharedLegacy: 'Shares its legacy number with another acquisition — both are kept, and neither is preferred.',
   discardTitle: 'This Working Area',
   fields: {

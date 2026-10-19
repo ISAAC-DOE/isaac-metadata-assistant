@@ -114,6 +114,11 @@ def _run(client, experiment_id: str) -> str:
 #: WHICH ROUTE ACCEPTS THE PATH, so a value refused for being the wrong TYPE would
 #: measure the wrong thing.
 _NUMERIC = {
+    # NOT numeric, and named here for the same reason the numbers are: the probe must
+    # send a value the path can hold, so a refusal measures the ROUTE (2026-10-12 — the
+    # two person-chosen closed enums refuse any value the schema does not list).
+    "context.electrochemistry.reaction": "OER",
+    "context.electrochemistry.cell_type": "three_electrode",
     "context.temperature_K": 300,
     "sample.composition.CuO2_mass_fraction": 0.5,
     "sample.composition.sucrose_mass_fraction": 0.5,
@@ -223,9 +228,10 @@ def test_the_served_writable_set_is_what_the_write_routes_actually_do(client):
     # THE PROBE'S OWN SHAPE, asserted rather than described: 25 paths x 6 routes. The
     # prose above used to say "five" while claiming to be exhaustive, so the count is
     # now a measurement of what actually ran.
-    assert len(observed) == 25
+    # 25 -> 27 on 2026-10-12: the reaction and the cell type a person chooses on a run.
+    assert len(observed) == 27
     assert {len(row) for row in observed.values()} == {6}
-    assert sum(len(row) for row in observed.values()) == 150
+    assert sum(len(row) for row in observed.values()) == 162
 
     assert sorted(served["value_writable_field_paths"]) == sorted(accepted), observed
 
@@ -397,6 +403,8 @@ def test_the_record_level_routes_accept_exactly_the_record_level_paths(client):
     ]
     assert refused_value == ["system.technique"]
     assert sorted(refused_unknown) == [
+        "context.electrochemistry.cell_type",
+        "context.electrochemistry.reaction",
         "context.environment",
         "context.temperature_K",
         "context.thermodynamics.atmosphere",
@@ -794,7 +802,8 @@ def test_no_surface_still_says_every_accepting_route_is_a_runs(client):
     # AND THE POSITIVE CLAIM IS STILL MADE, so this cannot be satisfied by deleting the
     # paragraph and saying nothing — which is how a disclosure quietly disappears.
     assert "The record-level paths are writable on a record with no runs at all" in listing
-    assert "only the 5 run-level paths need a run to exist" in listing
+    # 5 -> 7 on 2026-10-12 (the reaction and the cell type a person chooses on a run).
+    assert "only the 7 run-level paths need a run to exist" in listing
     assert "`record_writable_field_paths`" in listing
 
     # ── WHITESPACE- AND STRIKE-ROBUST, 2026-08-30, and the reason is a real near-miss ──

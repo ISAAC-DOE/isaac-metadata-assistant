@@ -282,8 +282,13 @@ export interface Bl15ConceptMapping {
   concept: string;
   status: string;
   official_path: string | null;
-  /** WHY this status, in a sentence a scientist reads. Rendered verbatim. */
+  /**
+   * WHY this status — the registry's ENGINEERING rationale, in full. Shown behind "Why,
+   * in detail", never as the line a scientist reads first (2026-10-18, QA `C-05`).
+   */
   reason: string;
+  /** 2026-10-18 — the short, plain sentence for this row (`mapping.CONCEPT_SUMMARIES`). */
+  summary?: string;
   rule: string | null;
   requires_siblings: string[];
   allowed_values: string[];

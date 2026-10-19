@@ -309,7 +309,10 @@ QUESTION_OPEN_NEEDS_DOMAIN_OWNER = "open_needs_domain_owner"
 #: The domain owner answered with a RULE whose outcome depends on each Run's evidence —
 #: Q11: the HERFD primary signal is selected per Run by :mod:`bl15.signals`, which
 #: suggests a channel only when the evidence supports one and otherwise leaves it
-#: unresolved for review.
+#: unresolved for review. **Since 2026-10-12 also Q6, Q7 and Q8**: the environment, the
+#: reaction and the cell type are read only where a measurement's own sources state them
+#: explicitly (a dry / no-electrolyte filename for the environment; an explicit logbook
+#: statement for any of the three) and are otherwise LEFT BLANK FOR A PERSON TO CHOOSE.
 QUESTION_CONDITIONALLY_RESOLVED = "conditionally_resolved"
 #: The domain owner's answer is that, when a source does not state it, the field stays
 #: MISSING and the user updates it later — never guessed (Q9 when no basis is stated;
@@ -342,6 +345,37 @@ QUESTION_DISPOSITIONS: frozenset[str] = frozenset(
 ANGEL_2026_09_22 = (
     "Angel (domain owner), relayed by the project owner on 2026-09-22. No transcript is "
     "committed; only Krish can confirm the relay and only Angel the content."
+)
+
+#: Where the 2026-10-12 answers came from — Q6, Q7, Q8, Q21, the acquisition-timestamp
+#: and sample-position disagreements, and the same day's follow-up about the logbook.
+#: The same evidentiary class as :data:`ANGEL_2026_09_22`: an OWNER RELAY of a domain
+#: owner's words, with no transcript committed.
+ANGEL_2026_10_12 = (
+    "Angel (domain owner), relayed by the project owner on 2026-10-12. No transcript is "
+    "committed; only Krish can confirm the relay and only Angel the content."
+)
+
+#: The domain owner's general rule, 2026-10-12, in the words the build quotes beside every
+#: field it leaves for a person: what is not in the metadata is left blank.
+LEFT_FOR_A_PERSON_RULE = (
+    "Markers, descriptors and values are taken from the metadata the import reads. When "
+    "the metadata does not state one, it is left blank for a person to choose — never "
+    "guessed and never filled in from another experiment."
+)
+
+#: The three logbook lexicons (2026-10-12), named and versioned here because the
+#: registry rows below cite them; the lexicons themselves live in :mod:`bl15.conditions`.
+RULE_LOGBOOK_ENVIRONMENT = "bl15.notes.environment_statement.v1"
+RULE_LOGBOOK_REACTION = "bl15.notes.reaction_statement.v1"
+RULE_LOGBOOK_CELL_TYPE = "bl15.notes.cell_type_statement.v1"
+
+#: The official paths a person is asked to choose when no source states them — the
+#: domain owner's 2026-10-12 answer, in the order a run editor shows them.
+PERSON_CHOICE_PATHS: tuple[str, ...] = (
+    "context.environment",
+    "context.electrochemistry.reaction",
+    "context.electrochemistry.cell_type",
 )
 
 #: The scientist-facing name for what the corpus calls quality remarks.
@@ -432,27 +466,45 @@ _QUESTIONS: tuple[DomainQuestion, ...] = (
     DomainQuestion(
         "Q6",
         "context.environment member",
-        QUESTION_OPEN_NEEDS_DOMAIN_OWNER,
-        "Partial. The dry / as-received acquisitions are stated as such. The member "
-        "for the electrochemical acquisitions is one word only Angel can say. NOT "
-        "addressed by his 2026-09-22 reply, so still open — and per that reply's "
-        "general rule the field stays missing until he or a scientist supplies it.",
+        QUESTION_CONDITIONALLY_RESOLVED,
+        "Answered 2026-10-12 (it was not addressed by the 2026-09-22 reply). For the "
+        "beamtime the domain owner supplied, the electrochemical measurements were "
+        "operando and the dry or reference-standard samples ex situ; and, as a general "
+        "rule, a value is taken from the metadata the import reads or left blank for a "
+        "person. So the build PROPOSES ex_situ only for a measurement whose own filename "
+        "states it was measured dry or with no electrolyte "
+        "(bl15.environment.dry_sample_is_ex_situ.v1), reads an explicit logbook "
+        "statement (bl15.notes.environment_statement.v1), and otherwise leaves the "
+        "environment blank for a person to choose. 'operando' is a fact about one "
+        "beamtime, not a reading a file states, so it is never filled in automatically.",
+        attribution=ANGEL_2026_10_12,
     ),
     DomainQuestion(
         "Q7",
         "context.electrochemistry.reaction member",
-        QUESTION_OPEN_NEEDS_DOMAIN_OWNER,
-        "Narrowed. The document names the reaction in prose and three enum members "
-        "remain compatible; choosing between them is a scientific call. NOT addressed "
-        "by the 2026-09-22 reply; still open, and the field stays missing meanwhile.",
+        QUESTION_CONDITIONALLY_RESOLVED,
+        "Answered 2026-10-12 (it had been narrowed, not answered). For the beamtime the domain "
+        "owner supplied the reaction was OER; as a general rule the reaction is read "
+        "only where the logbook names it explicitly as one of the schema's own options "
+        "(bl15.notes.reaction_statement.v1) and is otherwise left blank for a person to "
+        "choose. A phrase that fits more than one option ('water oxidation': OER or "
+        "water_splitting) chooses nothing.",
+        attribution=ANGEL_2026_10_12,
     ),
     DomainQuestion(
         "Q8",
         "cell_type per sample group",
-        QUESTION_OPEN_NEEDS_DOMAIN_OWNER,
-        "Partial. One sample family is explicitly a flow cell; the other family's "
-        "enum member is still Angel's. NOT addressed by the 2026-09-22 reply; still "
-        "open, and the field stays missing meanwhile.",
+        QUESTION_CONDITIONALLY_RESOLVED,
+        "Answered 2026-10-12 (it had been partial): three_electrode for the "
+        "beamtime the domain owner supplied. That sits beside the beamtime document's "
+        "own statement that one sample family used a flowing configuration — a TENSION "
+        "recorded for the domain owner and not resolved here. As a general rule the cell "
+        "type is read only where the logbook names it explicitly as one of the schema's "
+        "own options (bl15.notes.cell_type_statement.v1) and is otherwise left blank for "
+        "a person. 'two-electrode', 'battery' and a generic 'electrolyzer' are not "
+        "options the schema offers, so such a statement is kept verbatim and fills "
+        "nothing — a schema-vocabulary gap for the domain owner and upstream.",
+        attribution=ANGEL_2026_10_12,
     ),
     DomainQuestion(
         "Q9",
@@ -568,6 +620,20 @@ _QUESTIONS: tuple[DomainQuestion, ...] = (
         QUESTION_CLOSED_BY_PRODUCT_DECISION,
         "DEC-41. A custom Run condition is a placement, and placement is decided.",
     ),
+    DomainQuestion(
+        "Q21",
+        "which acquisition quantities vary from scan to scan",
+        QUESTION_CLOSED_BY_DOMAIN_OWNER,
+        "Answered 2026-10-12: typically none. Acquisition settings are kept the same "
+        "for every scan so samples can be compared; a change is a specific case that "
+        "should be recorded in the logbook or run files (most likely the energy grid, "
+        "counting time or filters; very unlikely the emission energy). So emission "
+        "energy, energy grid, counting time, scan command and filter stay ONE value per "
+        "measurement, and a difference within one measurement is a discrepancy for "
+        "review; different measurements may differ. Added to this registry on "
+        "2026-10-12 — it was asked in the packet on 2026-09-23 and never recorded here.",
+        attribution=ANGEL_2026_10_12,
+    ),
 )
 
 DOMAIN_QUESTIONS: dict[str, DomainQuestion] = {
@@ -578,9 +644,13 @@ DOMAIN_QUESTIONS: dict[str, DomainQuestion] = {
 def open_domain_questions() -> tuple[str, ...]:
     """The question ids still waiting on a domain owner, sorted by number.
 
-    ~~Eight as of 2026-09-17.~~ **Three as of 2026-09-22** — Q6, Q7 and Q8, which the
-    domain owner's reply that day did not address. The other five of the eight closed in
-    five different ways (see the dispositions added that day). Exposed as a function
+    ~~Eight as of 2026-09-17.~~ ~~Three as of 2026-09-22 — Q6, Q7 and Q8.~~ **None as of
+    2026-10-12**: the domain owner answered Q6, Q7, Q8 and Q21 that day (each recorded
+    with :data:`ANGEL_2026_10_12`). An empty tuple is a real answer — no numbered packet
+    question is waiting on him — and NOT a claim that every concept has a field: the
+    registry's ``needs_domain_review`` rows remain, for the reasons each one states.
+    The five that closed on 2026-09-22 closed in five different ways (see the
+    dispositions added that day). Exposed as a function
     rather than a constant so a disposition change moves it, and pinned by test so a
     change has to be deliberate.
     """
@@ -757,7 +827,26 @@ class ConceptMapping:
             # 2026-09-22 — how many values the concept is expected to have, so a
             # surface can say "varies by scan" from the registry rather than guess it.
             "cardinality": cardinality_for(self.concept),
+            # 2026-10-18 — the SHORT, plain sentence a scientist reads beside a value
+            # this row governs. `reason` above stays exactly what it was: the
+            # engineering rationale, served beside the summary and shown behind
+            # "Why, in detail". See `CONCEPT_SUMMARIES`.
+            "summary": self.summary,
         }
+
+    @property
+    def summary(self) -> str:
+        """The scientist-facing one-liner for this row (:data:`CONCEPT_SUMMARIES`).
+
+        A missing entry is a programming error, not a state a reader should meet, and
+        ``test_import_plain_reasons.py`` fails on one; at runtime the row's own first
+        sentence would be no better (it is the long rationale's opening), so the
+        fallback names the absence plainly instead.
+        """
+        return CONCEPT_SUMMARIES.get(
+            self.concept,
+            "ISAAC keeps this reading as evidence. Why, in detail, is below.",
+        )
 
 
 # --- the registry ------------------------------------------------------------
@@ -1274,7 +1363,10 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
         reason=(
             "An acquisition header records roughly a hundred and eighty motor "
             "positions. They are genuine instrument state and the schema has no field "
-            "for any of them. " + SYSTEM_CONFIGURATION_CAUTION
+            "for any of them. Where a run file's planned move disagrees with the "
+            "position the acquisition file recorded, the recorded position is the "
+            "reading used (the domain owner's rule); both are kept. "
+            + SYSTEM_CONFIGURATION_CAUTION
         ),
         candidate_homes=("system.configuration",),
             domain_questions=("Q19",),
@@ -1288,7 +1380,11 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "electrode from another, which makes them scientifically load-bearing here "
             "and still gives them no schema field. The library block holds plate "
             "coordinates for combinatorial samples, which is a different thing from a "
-            "stage position and must not be reused for it."
+            "stage position and must not be reused for it. Each motor of each scan is its "
+            "own reading, and when a run file's planned move disagrees with the position "
+            "the acquisition file recorded, the RECORDED position is the reading used — "
+            "the domain owner's rule: the raw file records the real motor position "
+            "whatever a hand-written move said. Both readings are kept."
         ) + " " + SYSTEM_CONFIGURATION_CAUTION,
         candidate_homes=("system.configuration",),
             domain_questions=("Q19",),
@@ -1346,11 +1442,14 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
         status=STATUS_NOT_EXPRESSIBLE,
         official_path=None,
         reason=(
-            "A dry or as-received measurement is a condition with no schema field. It "
-            "interacts with the environment enum — an ex-situ reading is plausible for "
-            "these — but the enum describes the MEASUREMENT context and this token "
-            "describes the sample's state, and conflating them would assert something "
-            "no source states."
+            "A dry or as-received measurement is a condition with no schema field of its "
+            "own. The domain owner has confirmed that a dry sample is measured ex situ, "
+            "so a measurement whose own filename says it was dry or "
+            "had no electrolyte gets a SEPARATE environment proposal of ex_situ "
+            "(bl15.environment.dry_sample_is_ex_situ.v1) — a proposal a person accepts "
+            "or rejects, never a written value. 'As-is' alone is NOT dry: an as-received "
+            "electrode can be measured in electrolyte. The token itself still has no "
+            "field and is kept as a reading."
         ),
         candidate_homes=("measurement.series[].conditions",),
             domain_questions=("Q6", "Q20"),
@@ -1420,6 +1519,60 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
             "curated_record",
         ),
     ),
+    # ---- added 2026-10-12: what the LOGBOOK states about the experiment -------
+    #
+    # The domain owner's follow-up answer that day (relayed by the project owner): the
+    # cell type, the environment and the reaction under study are read from the logbook
+    # when it states them, and are otherwise left blank for a person to choose. Each is
+    # NORMALIZED — a stored, versioned lexicon applied to the logbook's own words — and
+    # each maps only to a member the vendored schema itself declares (read at runtime by
+    # `schema_enum`, never transcribed here). A term with no member or more than one is
+    # kept verbatim and proposes nothing.
+    ConceptMapping(
+        concept=ev.CONCEPT_ENVIRONMENT_STATEMENT,
+        status=STATUS_NORMALIZED,
+        official_path="context.environment",
+        reason=(
+            "What the logbook says, in its own words, about the measurement environment. "
+            "It becomes a proposal only when a sentence names exactly one of the "
+            "schema's own environment options and nothing contradicts it in the same "
+            "part of the logbook; otherwise the sentence is kept and the environment is "
+            "left blank for a person to choose."
+        ),
+        rule=RULE_LOGBOOK_ENVIRONMENT,
+        requires_siblings=("context.temperature_K",),
+        domain_questions=("Q6",),
+    ),
+    ConceptMapping(
+        concept=ev.CONCEPT_REACTION_STATEMENT,
+        status=STATUS_NORMALIZED,
+        official_path="context.electrochemistry.reaction",
+        reason=(
+            "What the logbook says, in its own words, about the reaction under study. It "
+            "becomes a proposal only when a sentence names exactly one of the schema's "
+            "own reaction options — by its abbreviation or its full name. A phrase that "
+            "fits more than one option, or none, is kept verbatim and the reaction is "
+            "left blank for a person to choose."
+        ),
+        rule=RULE_LOGBOOK_REACTION,
+        requires_siblings=("context.environment", "context.temperature_K"),
+        domain_questions=("Q7",),
+    ),
+    ConceptMapping(
+        concept=ev.CONCEPT_CELL_TYPE_STATEMENT,
+        status=STATUS_NORMALIZED,
+        official_path="context.electrochemistry.cell_type",
+        reason=(
+            "What the logbook says, in its own words, about the electrochemical cell. It "
+            "becomes a proposal only when a sentence names exactly one of the schema's "
+            "own cell types. A two-electrode cell, a battery or a generic electrolyzer is "
+            "not one of the options the schema offers, so such a sentence is kept "
+            "verbatim and the cell type is left blank for a person to choose."
+        ),
+        rule=RULE_LOGBOOK_CELL_TYPE,
+        requires_siblings=("context.environment", "context.temperature_K"),
+        domain_questions=("Q8",),
+    ),
     # ---- structural and provenance-only: examined and deliberately refused --
     ConceptMapping(
         concept=ev.CONCEPT_SPEC_USER_STRING,
@@ -1476,6 +1629,231 @@ _MAPPINGS: tuple[ConceptMapping, ...] = (
 
 MAPPINGS: dict[str, ConceptMapping] = {m.concept: m for m in _MAPPINGS}
 
+# --- the scientist-facing summary of each row (2026-10-18) -------------------------
+#
+# WHY A SECOND SENTENCE EXISTS AT ALL. Each row's ``reason`` is the registry's
+# ENGINEERING rationale, and it was served to the import screen verbatim. An independent
+# browser audit (QA ``C-05``/``C-06``) measured what that put in front of a scientist: a
+# median of ~350 characters per reason and up to 1,318, struck-through revision history,
+# decision and question ids, ALL-CAPS asides, the same extension-namespace paragraph
+# repeated on about ten rows — and FACTS ABOUT THE ARCHIVE THE REGISTRY WAS MEASURED ON
+# stated as though they described the import on screen ("nine declared targets were never
+# acquired" beside an import with one; "roughly a hundred and eighty motor positions"
+# beside one with ten).
+#
+# So every row also carries ONE short sentence, written for the person deciding:
+#
+#   * at most ~160 characters;
+#   * no decision or question id, no date, no revision history, no ALL-CAPS emphasis;
+#   * nothing specific to any one archive — a figure belongs in a summary only when it is
+#     computed from the import being shown, and none of these is;
+#   * truthful on its own, and never stronger than the rationale it summarises.
+#
+# The rationale is NOT shortened, moved or reworded: engineers and reviewers still read
+# it in full, and the screen keeps it one press away ("Why, in detail"). Both the shape
+# and the bans are enforced by ``apps/api/tests/test_import_plain_reasons.py``.
+CONCEPT_SUMMARIES: dict[str, str] = {
+    ev.CONCEPT_ACQUISITION_TIMESTAMP: (
+        "The start time the file's header states. It is sent only with a time zone; a "
+        "local time is kept as evidence."
+    ),
+    ev.CONCEPT_ACQUISITION_EPOCH: (
+        "The header's Unix time, converted to UTC by a named rule. It can be sent as the "
+        "acquisition start time."
+    ),
+    ev.CONCEPT_POTENTIAL_MAGNITUDE: (
+        "The potential in the file name, converted to volts. What it is measured against "
+        "is a separate question."
+    ),
+    ev.CONCEPT_PH: (
+        "The pH the notes state. It goes forward only with the basis the schema asks for "
+        "beside it."
+    ),
+    ev.CONCEPT_FLOW_RATE: (
+        "The flow rate the notes state, with its unit kept separately. The schema also "
+        "needs the feed's phase and makeup."
+    ),
+    ev.CONCEPT_POTENTIAL_REFERENCE: (
+        "What the potential is measured against. When no source states it, it stays "
+        "blank for you to fill in."
+    ),
+    ev.CONCEPT_ELECTROLYTE_OR_MEDIUM: (
+        "'Acid' or 'base' names a kind of medium, not an electrolyte, and the schema also "
+        "needs its concentration. Nothing is filled in."
+    ),
+    ev.CONCEPT_GAS_CONDITION: (
+        "Whether a gas is the cell's feed or its atmosphere is a judgement about the "
+        "experiment, so nothing is filled in."
+    ),
+    ev.CONCEPT_SAMPLE_NAME: (
+        "A sample token is shorthand for a material or an electrode, and only you can "
+        "say which. Nothing is filled in."
+    ),
+    ev.CONCEPT_SAMPLE_OR_ELECTRODE_NUMBER: (
+        "A sample or electrode number, read from the file name. Which schema field it "
+        "belongs in is yours to decide."
+    ),
+    ev.CONCEPT_LOADING_OR_THICKNESS: (
+        "This part of a file name can mean a thickness or a loading, and the schema has "
+        "no clear home for either. It is yours to decide."
+    ),
+    ev.CONCEPT_ELEMENT: (
+        "The schema has no absorbing-element field, so the element is kept as a reading "
+        "and not put in the record."
+    ),
+    ev.CONCEPT_CYCLING_STATE: (
+        "The schema has no field for cycling history, so it is kept as a reading and not "
+        "put in the record."
+    ),
+    ev.CONCEPT_BEFORE_AFTER_STATE: (
+        "Whether a measurement came before or after a treatment has no schema field. It "
+        "is kept as a reading."
+    ),
+    ev.CONCEPT_FILTER: (
+        "A filter setting is beamline-specific, and this build cannot write the schema's "
+        "place for such settings. It is kept as a reading."
+    ),
+    ev.CONCEPT_EMISSION_ENERGY: (
+        "The emission energy has no general schema field, and this build cannot write "
+        "the schema's place for such settings. It is kept as a reading."
+    ),
+    ev.CONCEPT_LEGACY_NUMBER: (
+        "The file number is the archive's own label. It names the measurement for you "
+        "and is not written into a record field."
+    ),
+    ev.CONCEPT_NEW_SPOT: (
+        "Moving to a new spot on the same sample has no schema field, and it is not a "
+        "replicate. It is kept as a reading."
+    ),
+    ev.CONCEPT_MONOCHROMATOR_CALIBRATION: (
+        "The calibration has no schema field, and linking it needs a calibration record "
+        "to point at. It is kept as a reading."
+    ),
+    ev.CONCEPT_SPECTROMETER_CONFIG: (
+        "Spectrometer settings are station configuration, and this build cannot write "
+        "the schema's place for them. They are kept as a reading."
+    ),
+    ev.CONCEPT_BEAMSIZE: (
+        "Beam size is station configuration, and this build cannot write the schema's "
+        "place for it. It is kept as a reading."
+    ),
+    ev.CONCEPT_UNKNOWN_TOKEN: (
+        "A part of the file name no convention recognises. It is kept as a reading rather "
+        "than dropped."
+    ),
+    ev.CONCEPT_SCAN_COMMAND: (
+        "This build does not publish a historical file as an official asset, so the scan "
+        "command is kept as a reading."
+    ),
+    ev.CONCEPT_ENERGY_GRID: (
+        "The scan grid is read, but the schema also needs its signal channels named, "
+        "which is a scientific choice. Nothing is filled in."
+    ),
+    ev.CONCEPT_DETECTOR_COLUMN: (
+        "Column names are read, but which column is the primary signal is a scientific "
+        "choice, so nothing is filled in."
+    ),
+    ev.CONCEPT_ACQUISITION_METHOD: (
+        "The files name a method, not one of the schema's techniques, so the technique is "
+        "yours to choose in Add to Experiment."
+    ),
+    ev.CONCEPT_REPEAT_MARKER: (
+        "A repeat label can mean a replicate or a failed first try, and a link needs a "
+        "target record. It is yours to decide."
+    ),
+    ev.CONCEPT_QUALITY_NOTE: (
+        "Remarks about data quality are kept word for word. They never set a QC verdict; "
+        "that stays your call."
+    ),
+    ev.CONCEPT_SAMPLE_PREPARATION: (
+        "Preparation is described for several samples at once; how much of it belongs to "
+        "one sample is yours to decide."
+    ),
+    ev.CONCEPT_ECHEM_PROCEDURE: (
+        "The electrochemical program is written as prose; which parts belong in which "
+        "schema field is yours to decide."
+    ),
+    ev.CONCEPT_BEAMTIME_DATES: (
+        "The beamtime's dates describe the whole campaign, not one measurement, so they "
+        "are not written as a measurement's times."
+    ),
+    ev.CONCEPT_BEAMTIME_PURPOSE: (
+        "The campaign's aim has no schema field. Its words are kept as a reading rather "
+        "than cut down to keywords."
+    ),
+    ev.CONCEPT_MOTOR_POSITION: (
+        "Motor positions are instrument state with no schema field. Where a plan and a "
+        "recording disagree, the recording is used."
+    ),
+    ev.CONCEPT_SAMPLE_POSITION: (
+        "Stage positions have no schema field. Where a plan and a recording disagree, the "
+        "recorded position is used; both are kept."
+    ),
+    ev.CONCEPT_COUNTING_TIME: (
+        "Dwell time per point has no schema field. It is kept as a reading."
+    ),
+    ev.CONCEPT_SCAN_COUNT: (
+        "A planned scan count and the scans actually found can differ, and neither has a "
+        "field. Both are kept as readings."
+    ),
+    ev.CONCEPT_POINT_COUNT: (
+        "The number of points follows from the scan itself, so it is not recorded a second "
+        "time."
+    ),
+    ev.CONCEPT_EDGE: (
+        "The schema has no absorption-edge field, so the edge is kept as a reading and not "
+        "put in the record."
+    ),
+    ev.CONCEPT_DRY_STATE: (
+        "A dry condition has no field of its own. A dry sample may get a separate ex situ "
+        "proposal for you to review."
+    ),
+    ev.CONCEPT_STEP_NUMBER: (
+        "A step in the electrochemical program. It ties a file to its notes and is not a "
+        "record field."
+    ),
+    ev.CONCEPT_TRIGGER: (
+        "A trigger keeps the instruments in step and says nothing about the sample, so "
+        "there is nothing to record."
+    ),
+    ev.CONCEPT_TEMPERATURE_STATEMENT: (
+        "What a source says about temperature is kept in its own words. It is never turned "
+        "into a number for you."
+    ),
+    ev.CONCEPT_CONTRIBUTOR_STATEMENT: (
+        "A person named in the notes is kept as provenance. Who they are on a record, and "
+        "in what role, is yours to decide."
+    ),
+    ev.CONCEPT_ENVIRONMENT_STATEMENT: (
+        "Proposed only when the logbook names exactly one of the schema's environments; "
+        "otherwise left for you to choose."
+    ),
+    ev.CONCEPT_REACTION_STATEMENT: (
+        "Proposed only when the logbook names exactly one of the schema's reactions; "
+        "otherwise left for you to choose."
+    ),
+    ev.CONCEPT_CELL_TYPE_STATEMENT: (
+        "Proposed only when the logbook names exactly one of the schema's cell types; "
+        "otherwise left for you to choose."
+    ),
+    ev.CONCEPT_SPEC_USER_STRING: (
+        "The beamline account name is never used as an ISAAC identity. It is kept as a raw "
+        "reading only."
+    ),
+    ev.CONCEPT_SPEC_FILE_DECLARATION: (
+        "The name a file gives itself inside. It is used to spot disagreements with its "
+        "file name, not written to a record."
+    ),
+    ev.CONCEPT_ACQUISITION_TARGET: (
+        "The name a macro planned to write. It links a plan to a measurement and is not a "
+        "record field."
+    ),
+    ev.CONCEPT_NOTE_FILE_NUMBER_ROW: (
+        "A row of the notes' file-number table. It corroborates the files and is not itself "
+        "a record field."
+    ),
+}
+
 # --- cardinality: how many values a concept is EXPECTED to have -----------------
 #
 # ADDED 2026-09-22, AFTER A MEASUREMENT: on the synthetic multi-operator corpus, 36 of
@@ -1508,16 +1886,18 @@ CARDINALITIES: frozenset[str] = frozenset(
 )
 
 RULE_CARDINALITY = (
-    "bl15.mapping.cardinality.v2: a concept's readings are compared at the level its "
+    "bl15.mapping.cardinality.v3: a concept's readings are compared at the level its "
     "cardinality names. Two readings about DIFFERENT scans may differ only when each "
     "source itself states which scan it is about — the SPEC scan number on its own #S "
     "line; a scan export's file index is never taken as one. A per-scan-item concept is "
     "compared within the same column or motor of the same scan, a per-source concept "
     "within the same token of the same file. Every statement about the whole "
     "measurement, or whose scan is not established, is compared with every reading of "
-    "the same item, so a plan that disagrees with a recording is a conflict. Values that "
-    "differ across two or more established scans are kept as one reading per scan; any "
-    "other difference is a conflict. Nothing is chosen and nothing is dropped."
+    "the same item, so a plan that disagrees with a recording is a conflict. A stage or "
+    "motor position is compared on its number, motor by motor; a relative move states a "
+    "change, not a position, and is kept without being compared. Values that differ "
+    "across two or more established scans are kept as one reading per scan; any other "
+    "difference is a conflict. Nothing is dropped."
 )
 
 #: THE DECLARED CARDINALITIES, each with the reason it is not the default.
@@ -1528,28 +1908,44 @@ RULE_CARDINALITY = (
 #: * ``detector_column`` — a `#L` line lists SEVERAL columns; each column position is
 #:   its own item.
 #: * ``motor_position`` — a `#P` line gives SEVERAL motors; each motor is its own item.
+#: * ``sample_position`` — **v3, 2026-10-12.** The same shape as ``motor_position``:
+#:   ``Sx``/``Sy``/``Sz``/``Sr`` are four motors, and the domain owner's answer that day
+#:   is that positions "are always recorded in the raw data files and can be read
+#:   directly scan to scan". Under v2 this concept was one value per MEASUREMENT, so the
+#:   four motors were compared with EACH OTHER and ``Sx 12.5`` "disagreed" with
+#:   ``Sy 2.0`` in every acquisition that recorded both (measured on a synthetic copy of
+#:   the multi-operator corpus). A macro's planned move now carries its motor as its item
+#:   (``bl15.macros``), so it is compared with the recorded position of the SAME motor —
+#:   and that disagreement is resolved by the domain owner's standing rule
+#:   (``bl15.resolution``), never silently.
 #: * ``unknown_token`` — an unrecognised piece of ONE file's own name, at one token
 #:   position; two files' pieces, or two positions of one name, are different facts,
 #:   not two accounts of one.
 #:
-#: REVERTED TO PER-MEASUREMENT IN v2 (2026-09-23): ``counting_time``,
-#: ``scan_command``, ``energy_grid`` and ``emission_energy``. v1 declared them per scan,
-#: and an independent review measured the cost: a macro's planned counting time or
-#: emission energy and the header's recorded value for the SAME, only scan read as
-#: variation. The domain answers so far treat counting time and emission energy as read
-#: "for a measurement", so they are compared as one value until the domain owner says
-#: which acquisition quantities are expected to vary per scan — asked as Q21 in
-#: ``docs/bl15-2-domain-questions-2026-09-16.md``.
+#: REVERTED TO PER-MEASUREMENT IN v2 (2026-09-23), AND CONFIRMED BY THE DOMAIN OWNER ON
+#: 2026-10-12: ``counting_time``, ``scan_command``, ``energy_grid`` and
+#: ``emission_energy``. v1 declared them per scan, and an independent review measured the
+#: cost: a macro's planned counting time or emission energy and the header's recorded
+#: value for the SAME, only scan read as variation. ~~They are compared as one value until
+#: the domain owner says which acquisition quantities are expected to vary per scan —
+#: asked as Q21~~ — answered (Q21, :data:`ANGEL_2026_10_12`): "typically no";
+#: acquisition settings are kept the same so samples compare "apples to apples", and a
+#: change is a specific case that belongs in the logbook or run files. So a difference
+#: WITHIN one measurement is a discrepancy for review, and different measurements are
+#: never compared with each other (each candidate is one measurement's).
 #:
 #: DELIBERATELY NOT HERE, though some of their readings are stated per scan:
 #: ``filter`` (a condition of the measurement — a scan header's filter motor disagreeing
 #: with the filename's filter index is a real question for a scientist) and
 #: ``acquisition_timestamp`` (it feeds ``timestamps.acquired_start_utc``, one value per
-#: run, and choosing between scans' dates is a decision, not a reading).
+#: run, and choosing between scans' dates is a decision, not a reading — and since
+#: 2026-10-12 the domain owner's answer is that timestamp disagreements "should be real
+#: discrepancies", so they stay conflicts).
 CONCEPT_CARDINALITY: dict[str, str] = {
     ev.CONCEPT_ACQUISITION_TARGET: CARDINALITY_PER_SCAN,
     ev.CONCEPT_DETECTOR_COLUMN: CARDINALITY_PER_SCAN_ITEM,
     ev.CONCEPT_MOTOR_POSITION: CARDINALITY_PER_SCAN_ITEM,
+    ev.CONCEPT_SAMPLE_POSITION: CARDINALITY_PER_SCAN_ITEM,
     ev.CONCEPT_UNKNOWN_TOKEN: CARDINALITY_PER_SOURCE,
 }
 
@@ -1706,6 +2102,31 @@ def _schema() -> dict:
     return json.loads(
         (root / "schema" / "isaac_record_v1.json").read_text(encoding="utf-8")
     )
+
+
+@lru_cache(maxsize=None)
+def schema_enum(path: str) -> tuple[str, ...]:
+    """The string enum members the vendored schema declares at ``path``, or ``()``.
+
+    READ AT RUNTIME, NEVER TRANSCRIBED (2026-10-12): the logbook lexicons
+    (:mod:`bl15.conditions`) and the dry-sample rule may only name a value this returns,
+    so a schema refresh that drops a member makes the term propose nothing rather than a
+    value the schema no longer allows. An unreadable schema, a path the schema does not
+    declare, or a path with no enum answers ``()`` — fail-closed.
+    """
+    try:
+        node: object = _schema()
+    except (OSError, ValueError):
+        return ()
+    for segment in path.split("."):
+        properties = node.get("properties") if isinstance(node, dict) else None
+        if not isinstance(properties, dict) or segment not in properties:
+            return ()
+        node = properties[segment]
+    values = node.get("enum") if isinstance(node, dict) else None
+    if not isinstance(values, list):
+        return ()
+    return tuple(v for v in values if isinstance(v, str))
 
 
 @lru_cache(maxsize=1)

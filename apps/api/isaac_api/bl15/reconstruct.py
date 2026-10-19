@@ -41,14 +41,23 @@ from ..historical_import import (
     CANDIDATE_KIND_RUN,
     CANDIDATE_NOT_PROPOSABLE_LOCAL_TIME,
     DETERMINISM_DETERMINISTIC,
+    DETERMINISM_INFERRED,
     UNRESOLVED_SOURCES_DISAGREE,
     EvidenceStatement,
     SemanticCandidate,
     is_zoned_utc_value,
+    plain_reason_of,
 )
+from . import conditions as cond
 from . import evidence as ev
 from . import mapping as mp
-from .relate import Conflict, MeasurementUnit, Relationships
+from . import resolution as res
+from .relate import (
+    CONFLICT_DECLARATION_VS_FILENAME,
+    Conflict,
+    MeasurementUnit,
+    Relationships,
+)
 
 #: Why a structural candidate cannot become a proposal. The existing pipeline already
 #: refuses one and says why; this is the same sentence for a run.
@@ -313,6 +322,10 @@ def _candidates_for_unit(
         unregistered=unregistered,
     )
 
+    dry = dry_sample_environment(unit, items, source_ids)
+    if dry is not None:
+        yield dry
+
     for index, conflict in enumerate(unit.conflicts):
         yield _candidate_from_conflict(
             conflict, f"{unit.stem}::conflict::{index}", source_ids
@@ -504,7 +517,7 @@ def _cross_check_local_clock(
                 "date line, which names no time zone, reads "
                 f"{clashing_walls[0].raw_literal}. They are "
                 f"{_gap_words(clashing_epochs[0], clashing_walls[0])} apart — more than "
-                "14 hours, the largest real time-zone offset. Nothing here picks one."
+                "14 hours, the largest real time-zone offset." + _TIMESTAMP
             ),
             supporting_source_ids=tuple(
                 sorted(
@@ -605,8 +618,8 @@ def _reconcile_same_field(candidates: list[SemanticCandidate]) -> list[SemanticC
             unresolved_reason=UNRESOLVED_SOURCES_DISAGREE,
             rule=(
                 f"{len(members)} readings target {path} — "
-                f"{', '.join(_concept_of(c) for c in members)} — and they do not agree. "
-                "Nothing here picks one."
+                f"{', '.join(_concept_of(c) for c in members)} — and they do not agree."
+                + (_TIMESTAMP if path.startswith("timestamps.") else " Nothing here picks one.")
             ),
             supporting_source_ids=tuple(
                 sorted({sid for c in members for sid in c.supporting_source_ids})
@@ -642,6 +655,87 @@ def _comparable(value, path: str) -> str:
         if parsed.tzinfo is not None:
             return parsed.astimezone(timezone.utc).isoformat()
     return str(value)
+
+
+#: WHAT A DIFFERENCE WITHIN ONE MEASUREMENT MEANS, per concept, in the domain owner's
+#: terms (2026-10-12). Appended to a disagreement's warrant. Each says what is true now
+#: and asks nothing: these were "pending the domain owner" until that day (Q21, and the
+#: timestamp question), and they are confirmed.
+_ACQUISITION_SETTING = (
+    " Acquisition settings are kept the same for every scan of a measurement so that "
+    "measurements can be compared; a deliberate change belongs in the logbook or run "
+    "files. So two values within one measurement are a discrepancy for you to review. "
+    "Different measurements may use different settings, and are never compared here."
+)
+_TIMESTAMP = (
+    " Two different start times for one measurement are a real discrepancy for you to "
+    "review; nothing here picks one."
+)
+WITHIN_ONE_MEASUREMENT: Mapping[str, str] = {
+    ev.CONCEPT_EMISSION_ENERGY: _ACQUISITION_SETTING,
+    ev.CONCEPT_ENERGY_GRID: _ACQUISITION_SETTING,
+    ev.CONCEPT_COUNTING_TIME: _ACQUISITION_SETTING,
+    ev.CONCEPT_SCAN_COMMAND: _ACQUISITION_SETTING,
+    ev.CONCEPT_FILTER: _ACQUISITION_SETTING,
+    ev.CONCEPT_ACQUISITION_TIMESTAMP: _TIMESTAMP,
+    ev.CONCEPT_ACQUISITION_EPOCH: _TIMESTAMP,
+}
+
+
+def _standing_resolution(
+    concept: str,
+    group: Sequence[ev.SourceEvidence],
+    disputed: Sequence[ev.SourceEvidence],
+    cardinality: str,
+    source_ids: Mapping[str, str],
+) -> dict | None:
+    """The domain owner's standing rule for ONE disagreement, or ``None`` where it does
+    not reach. See :data:`bl15.resolution.STANDING_RESOLUTIONS`.
+
+    IT REACHES ONLY A DISAGREEMENT BETWEEN EXACTLY ITS TWO ROLES — a plan and a
+    recording — and only when the RECORDINGS AGREE AMONG THEMSELVES at the concept's own
+    cardinality. Two acquisition files recording different positions for the same motor
+    of the same scan is not a plan-versus-recording question, so the rule says nothing
+    and the conflict stays open. Every reading stays a source fact; the readings the
+    rule uses are named in ``reading_used``.
+    """
+    rule = res.standing_resolution_for(concept)
+    if rule is None:
+        return None
+    roles = {res.role_of_evidence(item) for item in disputed}
+    # DEFENCE, AND NOT SEPARATELY REACHABLE TODAY (an independent review, 2026-10-12, found
+    # no test kills its removal, and none can): the only readers that emit a position are
+    # a macro (planned) and an acquisition file or scan export (recorded), so a dispute
+    # holds no third role, and one between recordings alone is already refused by the
+    # recordings-agree check below. It stays so a future reader of positions — a notes
+    # line, a filename — cannot be resolved by a rule written about plans and recordings.
+    if roles != {rule.chosen_source_role, rule.over_source_role}:
+        return None
+    recorded = [i for i in group if res.role_of_evidence(i) == rule.chosen_source_role]
+    if not recorded:
+        return None
+    still, _keyed, _scans = _compare(recorded, cardinality, concept)
+    if still:
+        return None
+    used: dict[tuple, dict] = {}
+    for item in disputed:
+        if res.role_of_evidence(item) != rule.chosen_source_role:
+            continue
+        key = (item.scan, item.item)
+        row = used.setdefault(
+            key,
+            {
+                "scan": item.scan,
+                "item": item.item,
+                "value": _reading_of(item),
+                "source_ids": [],
+                "locators": [],
+            },
+        )
+        row["source_ids"] = sorted(set(row["source_ids"]) | set(_ids_for((item.source_path,), source_ids)))
+        row["locators"].append(statement_locator(item))
+    rows = [used[k] for k in sorted(used, key=lambda k: (str(k[1] or ""), _key_order(("scan", k[0], k[1]))))]
+    return rule.to_state(reading_used=rows)
 
 
 def _candidates_by_concept(
@@ -692,13 +786,18 @@ def _candidates_by_concept(
         disputed, keyed, scans = _compare(group, cardinality, concept)
         if disputed:
             distinct = sorted({_reading_of(i) for i in disputed})
+            # THE DOMAIN OWNER'S STANDING RULE (2026-10-12), applied where it reaches:
+            # a planned motor move against the recorded position of the same motor.
+            standing = _standing_resolution(concept, group, disputed, cardinality, source_ids)
             yield SemanticCandidate(
                 candidate_id=f"{candidate_prefix}::{concept}",
                 kind=CANDIDATE_KIND_FIELD,
                 determinism=DETERMINISM_DETERMINISTIC,
+                resolved_by_rule=standing["rule_id"] if standing else None,
+                standing_resolution=standing,
                 rule=(
                     f"{len(group)} source(s) state {concept.replace('_', ' ')}, and they "
-                    "do not agree."
+                    "do not agree." + WITHIN_ONE_MEASUREMENT.get(concept, "")
                     if cardinality == mp.CARDINALITY_PER_MEASUREMENT
                     else (
                         f"{len(group)} source(s) state {concept.replace('_', ' ')}, and "
@@ -904,7 +1003,11 @@ def _shared_evidence(
     out: list[ev.SourceEvidence] = []
     for path in sorted(unattached):
         for item in evidence_by_source.get(path, ()):
-            if item.scope == ev.SCOPE_BEAMTIME:
+            # A LOGBOOK STATEMENT ABOUT THE ENVIRONMENT, REACTION OR CELL is applied PER
+            # MEASUREMENT (:func:`logbook_candidates`), because each one is a run's field
+            # — a beamtime-wide one is inherited by every measurement there, never sent
+            # as a value for the import as a whole.
+            if item.scope == ev.SCOPE_BEAMTIME and item.concept not in cond.FIELDS:
                 out.append(item)
     return out
 
@@ -920,9 +1023,43 @@ def _reading_of(item: ev.SourceEvidence) -> str:
     concept still compares on what the file says. Comparing literals alone would
     manufacture disagreements out of the corpus's two unit conventions.
     """
+    if (
+        item.concept == ev.CONCEPT_SAMPLE_POSITION
+        and item.item
+        and item.normalized_value is not None
+        and not isinstance(item.normalized_value, Mapping)
+    ):
+        # A RECORDED STAGE POSITION NAMES ITS MOTOR (2026-10-12), so `Sx 12.5` and a
+        # plan's `Sx 13.0` read side by side as two accounts of the same motor.
+        return f"{item.item} {_text_of(item.normalized_value)}"
     if item.normalized_value is not None:
         return f"{_text_of(item.normalized_value)}{f' {item.unit}' if item.unit else ''}"
     return item.raw_literal
+
+
+#: The concepts whose readings are motor POSITIONS, compared on their number
+#: (`bl15.mapping.cardinality.v3`).
+_POSITION_CONCEPTS = frozenset({ev.CONCEPT_SAMPLE_POSITION, ev.CONCEPT_MOTOR_POSITION})
+
+
+def _is_move(value) -> bool:
+    return isinstance(value, Mapping) and set(value) == {"motor", "value", "relative"}
+
+
+def _is_relative_move(item: ev.SourceEvidence) -> bool:
+    """A macro's ``mvr``: a move BY an amount, which is not a position. (``bl15.macros``
+    reads ``mv``, ``mvr`` and ``umv``; ``umvr`` is not one of its verbs.)"""
+    return _is_move(item.normalized_value) and bool(item.normalized_value.get("relative"))
+
+
+def _position_number(item: ev.SourceEvidence):
+    """The number a position reading states — a recorded value, or a planned move's target."""
+    value = item.normalized_value
+    if _is_move(value):
+        value = value.get("value")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
 
 
 def _text_of(value) -> str:
@@ -937,6 +1074,12 @@ def _text_of(value) -> str:
     if isinstance(value, Mapping):
         if set(value) == {"measurement_stem", "scan_index"}:
             return f"{value['measurement_stem']} · scan {value['scan_index']}"
+        if _is_move(value):
+            # A MOVE IS WRITTEN AS THE COMMAND SAYS IT (2026-10-12) — `Sx 13.0`, or
+            # `Sz by -0.3 (relative move)` — never as `motor Sx; relative False; …`.
+            if value.get("relative"):
+                return f"{value['motor']} by {_text_of(value['value'])} (relative move)"
+            return f"{value['motor']} {_text_of(value['value'])}"
         return "; ".join(f"{str(k).replace('_', ' ')} {_text_of(v)}" for k, v in sorted(value.items()))
     if isinstance(value, (list, tuple)):
         return ", ".join(_text_of(v) for v in value)
@@ -992,9 +1135,13 @@ def _compare(
     per_item = cardinality == mp.CARDINALITY_PER_SCAN_ITEM
     scan_groups: dict[tuple, list[ev.SourceEvidence]] = defaultdict(list)
     loose: dict[str | None, list[ev.SourceEvidence]] = defaultdict(list)
+    #: A RELATIVE MOVE is a change, not a position (v3): kept, and compared with nothing.
+    moves_by: dict[str | None, list[ev.SourceEvidence]] = defaultdict(list)
     for item in group:
         slot = item.item if per_item else None
-        if item.scope == ev.SCOPE_SCAN and item.scan is not None:
+        if concept in _POSITION_CONCEPTS and _is_relative_move(item):
+            moves_by[slot].append(item)
+        elif item.scope == ev.SCOPE_SCAN and item.scan is not None:
             scan_groups[(item.scan, slot)].append(item)
         else:
             loose[slot].append(item)
@@ -1008,8 +1155,11 @@ def _compare(
                 seen.add(member.evidence_id)
                 disputed.append(member)
 
+    same = (
+        (lambda i: _projection(i, concept)) if concept in _POSITION_CONCEPTS else _reading_of
+    )
     for members in scan_groups.values():
-        if len({_reading_of(i) for i in members}) > 1:
+        if len({same(i) for i in members}) > 1:
             dispute(members)
     for slot, members in loose.items():
         related = members + [
@@ -1023,6 +1173,8 @@ def _compare(
     }
     for slot, members in loose.items():
         groups[("measurement", None, slot)] = members
+    for slot, members in moves_by.items():
+        groups[("measurement", None, f"{slot} (relative move)" if slot else "relative move")] = members
     scans = len({scan for (scan, _slot) in scan_groups})
     return disputed, groups, scans
 
@@ -1040,6 +1192,12 @@ def _projection(item: ev.SourceEvidence, concept: str) -> str:
         if isinstance(value, Mapping) and value.get("measurement_stem"):
             return str(value["measurement_stem"])
         return item.raw_literal
+    if concept in _POSITION_CONCEPTS:
+        # ON THE NUMBER (v3, 2026-10-12): a header's `13` and a plan's `13.0` are one
+        # position. `repr(float)` is exact, so nothing is rounded into agreement.
+        number = _position_number(item)
+        if number is not None:
+            return repr(number)
     return _reading_of(item)
 
 
@@ -1240,8 +1398,373 @@ def _candidate_state(candidate: SemanticCandidate) -> dict:
         "disagreement": [dict(d) for d in candidate.disagreement],
         "unresolved_reason": candidate.unresolved_reason,
         "not_proposable_reason": candidate.not_proposable_reason,
+        # 2026-10-18 — the short sentence beside the full one (`hist.plain_reason`).
+        "not_proposable_summary": plain_reason_of(candidate),
         "proposable": candidate.proposable,
         "distinct_sources": candidate.distinct_sources,
         "agreement": candidate.agreement,
         "review_status": candidate.review_status,
     }
+
+
+# --- the domain owner's 2026-10-12 answers: environment, reaction, cell type ----------
+#
+# "those markers or descriptors or values need to be extracted by the skill within the
+# metadata available. If not available, then the claude skill needs to leave it blank for
+# a human to select the appropriate value." — Angel (domain owner), relayed by the project
+# owner. So there are exactly two ways a value reaches these three fields from an import,
+# both PROPOSALS, both citing what a source said; everything else is left for a person.
+
+#: The one inferred environment. Named and versioned; see :func:`dry_sample_environment`.
+RULE_DRY_SAMPLE_IS_EX_SITU = "bl15.environment.dry_sample_is_ex_situ.v1"
+
+#: The field and the member the rule names. The member is CHECKED against the vendored
+#: schema at runtime (`mp.schema_enum`) — the rule proposes nothing if the schema stops
+#: offering it.
+_ENVIRONMENT_PATH = "context.environment"
+_EX_SITU = "ex_situ"
+
+
+#: What may stand beside a dry / no-electrolyte statement in a measurement's own name and
+#: still let the rule apply: tokens that IDENTIFY the measurement or the sample — never one
+#: that states a condition of the measurement.
+_IDENTITY_BESIDE_DRY = frozenset(
+    {
+        ev.CONCEPT_LEGACY_NUMBER,
+        ev.CONCEPT_SAMPLE_OR_ELECTRODE_NUMBER,
+        ev.CONCEPT_SAMPLE_NAME,
+        ev.CONCEPT_FILTER,
+        # a property of the sample (an overlayer thickness or a weight loading), not of
+        # the measurement's environment
+        ev.CONCEPT_LOADING_OR_THICKNESS,
+        ev.CONCEPT_DRY_STATE,
+    }
+)
+
+
+def _may_stand_beside_dry(item: ev.SourceEvidence) -> bool:
+    """Whether one token of a measurement's own name leaves the dry rule applicable."""
+    if item.concept in _IDENTITY_BESIDE_DRY:
+        return True
+    if item.concept == ev.CONCEPT_ELECTROLYTE_OR_MEDIUM:
+        return item.normalized_value == "none"
+    # "As received" describes the sample's history, and with no electrolyte it is still
+    # dry; any OTHER before/after reading (after cycling …) is a condition.
+    if item.concept == ev.CONCEPT_BEFORE_AFTER_STATE:
+        return item.normalized_value == "as_is"
+    return False
+
+
+def dry_sample_environment(
+    unit: MeasurementUnit,
+    items: Sequence[ev.SourceEvidence],
+    source_ids: Mapping[str, str],
+) -> SemanticCandidate | None:
+    """``context.environment = ex_situ`` for a measurement whose OWN NAME says it was dry.
+
+    **THE RULE.** A measurement's own filename (the acquisition file's name, read under
+    the convention in force) states that the sample was DRY, or that there was NO
+    ELECTROLYTE (``NoElectrolyte`` reads as the medium ``none``). A sample with no
+    electrolyte cannot be under reaction conditions, so it was measured outside them —
+    ex situ — and the domain owner confirmed exactly that for "the dry or reference
+    standard samples" on 2026-10-12. Either statement alone qualifies, because each says
+    the same thing: there was no liquid. It is DETERMINISTIC in the sense the import
+    uses (a stored rule over what a source states) and labelled ``inferred``, because no
+    source writes the word "ex situ".
+
+    **WHAT DOES NOT QUALIFY, AND WHY** — each leaves the environment for a person:
+
+    * an "as-is" (as received) token ALONE. It describes the sample's history, not the
+      measurement: an as-received electrode can be measured in electrolyte under
+      potential, which is not ex situ. Measured: the multi-operator corpus's
+      ``07_03_ZZ3_alk_fresh_f30_1000mV`` reads ``fresh`` as as-is in an alkaline medium
+      at 1000 mV under its second convention;
+    * a name that says ANYTHING ELSE about the conditions — an electrolyte, a potential,
+      a pH, a gas or saturation, a flow rate, a cycling state, or a token no convention
+      recognises (:data:`_IDENTITY_BESIDE_DRY` is the whole allowlist). Dry and in
+      electrolyte, or dry under a gas flow, is a reading this rule does not settle;
+    * a measurement whose name is itself disputed — its file header declares a different
+      name. Which name is right decides whether the token applies at all.
+
+    Never written: the candidate is a PROPOSAL a person accepts or rejects, and
+    acceptance keeps its trusted-actor gate. ``None`` when the name states neither.
+    """
+    own = [
+        item
+        for item in items
+        if item.source_path == unit.acquisition_path
+        and item.parser_id in res._FILENAME_PARSER_IDS
+    ]
+    stating = [
+        item
+        for item in own
+        if (item.concept == ev.CONCEPT_DRY_STATE)
+        or (
+            item.concept == ev.CONCEPT_ELECTROLYTE_OR_MEDIUM
+            and item.normalized_value == "none"
+        )
+    ]
+    if not stating:
+        return None
+    # CONSERVATIVE BY ALLOWLIST (2026-10-12, review I4): the name may say NOTHING ELSE
+    # about the measurement's conditions. Only identity tokens and the dry statement
+    # itself may stand beside it; anything else — an unrecognised token, a pH, a gas or
+    # saturation, a flow rate, an electrolyte, a medium, a potential, a cycling state —
+    # leaves the environment for a person. `dry_O2Sat`, `dry_pH13`, `dry_10mLmin`,
+    # `dry_O2` and `dry_alk` were proposed ex_situ by the first version, which looked only
+    # for an electrolyte or a potential.
+    contrary = [item for item in own if not _may_stand_beside_dry(item)]
+    renamed = any(c.kind == CONFLICT_DECLARATION_VS_FILENAME for c in unit.conflicts)
+    # EACH TOKEN ONCE (re-review, 2026-10-12): one token can be read as two concepts —
+    # `afterCV` is a cycling state AND its before/after half — and was named twice.
+    said = ", ".join(f"`{literal}`" for literal in dict.fromkeys(i.raw_literal for i in stating))
+    statements = tuple(statement_for(item).to_state() for item in (*stating, *contrary))
+    common = dict(
+        candidate_id=f"{unit.stem}::environment",
+        kind=CANDIDATE_KIND_FIELD,
+        determinism=DETERMINISM_INFERRED,
+        supporting_source_ids=_ids_for((unit.acquisition_path,), source_ids),
+        supporting_statements=statements,
+        target_field_path=_ENVIRONMENT_PATH,
+        distinct_sources=1,
+    )
+    if contrary or renamed:
+        why = (
+            "its name also states "
+            + ", ".join(f"`{literal}`" for literal in dict.fromkeys(i.raw_literal for i in contrary))
+            + ", which this rule does not read as dry"
+            if contrary
+            else "its own file header declares a different name, so which name is right "
+            "is still a question"
+        )
+        return SemanticCandidate(
+            **common,
+            rule=(
+                f"{RULE_DRY_SAMPLE_IS_EX_SITU}: this measurement's name says {said}, but "
+                f"{why}. The rule does not apply."
+            ),
+            not_proposable_reason=(
+                f"The name says {said}, but {why}, so this import does not say the sample "
+                "was measured dry. The environment is left blank for a person to choose."
+            ),
+        )
+    if _EX_SITU not in mp.schema_enum(_ENVIRONMENT_PATH):
+        return SemanticCandidate(
+            **common,
+            rule=f"{RULE_DRY_SAMPLE_IS_EX_SITU}: the schema does not offer `{_EX_SITU}`.",
+            not_proposable_reason=(
+                "The official schema this build carries does not offer ex_situ as an "
+                "environment, so nothing is proposed."
+            ),
+        )
+    return SemanticCandidate(
+        **common,
+        rule=(
+            f"{RULE_DRY_SAMPLE_IS_EX_SITU}: this measurement's own name says {said} — the "
+            "sample had no electrolyte, so it was not measured under reaction "
+            "conditions, and the domain owner has confirmed that a dry sample is measured "
+            "ex situ. This is a proposal for a person to accept or reject; nothing is "
+            "written."
+        ),
+        proposed_value=_EX_SITU,
+    )
+
+
+def logbook_candidates(
+    stem: str,
+    statements: Mapping[str, Sequence[ev.SourceEvidence]],
+    source_ids: Mapping[str, str],
+) -> list[SemanticCandidate]:
+    """ONE candidate per field the LOGBOOK speaks to for this measurement. See
+    :mod:`bl15.conditions`.
+
+    ``statements`` holds, per logbook concept, the statements that APPLY to this
+    measurement — its own sample section's, or the beamtime-wide ones when its section
+    says nothing about that field (a section's statement overrides the beamtime's for
+    that section only; the caller decides that, from the notes reader's file numbers).
+
+    * exactly one schema option, and nothing else said about the field → a PROPOSAL of
+      that option, citing every sentence that says it;
+    * two or more different options → a CONFLICT: every sentence kept, nothing chosen;
+    * a term that is not an option, fits several, or sits in a negating sentence → no
+      value, the sentence kept, the field left blank for a person — with the reason.
+
+    A logbook that says nothing about a field produces nothing for it.
+    """
+    out: list[SemanticCandidate] = []
+    for concept, (path, rule_id, name) in cond.FIELDS.items():
+        items = list(statements.get(concept) or ())
+        if not items:
+            continue
+        readings = [
+            (item, item.normalized_value if isinstance(item.normalized_value, Mapping) else {})
+            for item in items
+        ]
+        allowed = set(mp.schema_enum(path))
+        members = sorted(
+            {
+                str(value.get("member"))
+                for _item, value in readings
+                if value.get("status") == cond.STATUS_MEMBER
+                and value.get("member") in allowed
+            }
+        )
+        unusable = [
+            (item, value)
+            for item, value in readings
+            if not (value.get("status") == cond.STATUS_MEMBER and value.get("member") in allowed)
+        ]
+        scope = (
+            "the sample section that lists this measurement"
+            if any(value.get("section") for _item, value in readings)
+            else "the whole beamtime (no sample section says otherwise)"
+        )
+        common = dict(
+            candidate_id=f"{stem}::{concept}",
+            kind=CANDIDATE_KIND_FIELD,
+            determinism=DETERMINISM_DETERMINISTIC,
+            supporting_source_ids=_ids_for(tuple(i.source_path for i in items), source_ids),
+            supporting_statements=tuple(statement_for(i).to_state() for i in items),
+            target_field_path=path,
+            distinct_sources=len({i.source_path for i in items}),
+        )
+        if len(members) > 1:
+            out.append(
+                SemanticCandidate(
+                    **common,
+                    rule=(
+                        f"{rule_id}: the logbook states more than one {name} for this "
+                        f"measurement ({', '.join(members)}), in {scope}. Every sentence is "
+                        "kept and nothing is chosen."
+                    ),
+                    disagreement=tuple(
+                        {
+                            "value": member,
+                            "source_ids": list(
+                                _ids_for(
+                                    tuple(
+                                        i.source_path
+                                        for i, v in readings
+                                        if v.get("member") == member
+                                    ),
+                                    source_ids,
+                                )
+                            ),
+                            "locators": [
+                                statement_locator(i) for i, v in readings if v.get("member") == member
+                            ],
+                        }
+                        for member in members
+                    ),
+                    unresolved_reason=UNRESOLVED_SOURCES_DISAGREE,
+                )
+            )
+            continue
+        if len(members) == 1 and not unusable:
+            first = next(item for item, value in readings if value.get("member") == members[0])
+            term = next(
+                str(value.get("term")) for _item, value in readings if value.get("member") == members[0]
+            )
+            out.append(
+                SemanticCandidate(
+                    **common,
+                    rule=(
+                        f"{rule_id}: the logbook says “{term}” ({statement_locator(first)}), "
+                        f"which is the schema's {name} option `{members[0]}`; it is stated in "
+                        f"{scope}. This is a proposal for a person to accept or reject; "
+                        "nothing is written."
+                    ),
+                    proposed_value=members[0],
+                )
+            )
+            continue
+        _item, value = unusable[0]
+        term = str(value.get("term") or "")
+        status = value.get("status")
+        if status == cond.STATUS_AMBIGUOUS:
+            why = (
+                f"“{term}” fits more than one of the schema's {name} options "
+                f"({', '.join(str(o) for o in value.get('options') or [])}), so nothing is "
+                "chosen."
+            )
+        elif status == cond.STATUS_NEGATED:
+            why = (
+                f"The logbook mentions “{term}” in a sentence that negates or contrasts it, "
+                "which this build does not interpret."
+            )
+        elif status == cond.STATUS_HEDGED:
+            why = (
+                f"The logbook mentions “{term}” in a sentence that is a question, a plan or "
+                "a guess rather than a statement of what was done, so nothing is filled in."
+            )
+        elif status == cond.STATUS_NOT_UNDER_STUDY:
+            why = (
+                f"The logbook names “{term}” as a reaction that was suppressed, avoided or "
+                "competing — not the reaction under study — so nothing is filled in."
+            )
+        elif status == cond.STATUS_SUBSET:
+            why = (
+                f"The logbook says “{term}” about only part of this sample section, and "
+                "which part is not something this build decides."
+            )
+        elif members:
+            why = (
+                f"The logbook names `{members[0]}` and also says “{term}”, which is not one "
+                f"of the schema's {name} options, so nothing is filled in."
+            )
+        else:
+            why = (
+                f"The logbook says “{term}”, which is not one of the {name} options the "
+                "official schema offers, so nothing is filled in."
+            )
+        out.append(
+            SemanticCandidate(
+                **common,
+                rule=f"{rule_id}: {why} The sentence is kept as it was written.",
+                not_proposable_reason=f"{why} It is left blank for a person to choose.",
+            )
+        )
+    return out
+
+
+def logbook_unscoped_candidates(
+    items: Sequence[ev.SourceEvidence],
+    source_ids: Mapping[str, str],
+) -> list[SemanticCandidate]:
+    """ONE beamtime-level candidate per field for logbook sentences about samples this
+    build cannot map onto measurements (review I3, 2026-10-12).
+
+    A sentence before any sample section that NAMES particular samples ("only samples 3
+    and 4 were run in a flow cell") is not about every measurement, and is applied to the
+    named ones only when the logbook's numbering and the filenames' sample token agree
+    (``historical_import``). When they do not — or the sentence singles out an unnamed
+    subset ("only some", "except", a sample code) — it is applied to NO measurement. It is
+    still a reading, so it is kept here, verbatim, with no value, and the fields it speaks
+    to stay left for a person on every run.
+    """
+    by_concept: dict[str, list[ev.SourceEvidence]] = defaultdict(list)
+    for item in items:
+        if item.concept in cond.FIELDS:
+            by_concept[item.concept].append(item)
+    out: list[SemanticCandidate] = []
+    for concept, group in sorted(by_concept.items()):
+        path, rule_id, name = cond.FIELDS[concept]
+        why = (
+            f"The logbook's sentence names particular samples, or only some of them, and "
+            f"this import cannot say which measurements those are, so the {name} it "
+            "states is applied to none of them."
+        )
+        out.append(
+            SemanticCandidate(
+                candidate_id=f"shared::unscoped::{concept}",
+                kind=CANDIDATE_KIND_FIELD,
+                determinism=DETERMINISM_DETERMINISTIC,
+                rule=f"{rule_id}: {why} The sentence is kept as it was written.",
+                supporting_source_ids=_ids_for(tuple(i.source_path for i in group), source_ids),
+                supporting_statements=tuple(statement_for(i).to_state() for i in group),
+                target_field_path=path,
+                not_proposable_reason=f"{why} It is left blank for a person to choose on each run.",
+                distinct_sources=len({i.source_path for i in group}),
+            )
+        )
+    return out

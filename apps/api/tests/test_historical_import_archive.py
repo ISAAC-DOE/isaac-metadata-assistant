@@ -529,7 +529,10 @@ def test_the_run_label_is_the_legacy_number_then_verbatim_tokens(session):
 
     assert (
         labels["03_02_SYN2_base_after1500Cycling_ffilter35_1200mV_zz9"]
-        == "Legacy 3 · 02 · SYN2 · base · after1500Cycling · ffilter35 · 1200mV"
+        # ~~"… · ffilter35 · 1200mV"~~ — until 2026-10-18 the unrecognised `zz9` was
+        # DROPPED, which is how two runs came to differ only by legacy number (QA
+        # `C-19`). It is kept now, verbatim, after the recognised tokens.
+        == "Legacy 3 · 02 · SYN2 · base · after1500Cycling · ffilter35 · 1200mV · zz9"
     )
     assert (
         labels["01_01_SYN1_acid_beforeCycling_filter10_060mV"]
@@ -745,12 +748,14 @@ def test_the_session_serves_the_shape_the_review_surface_consumes(session):
     assert review["inventory"] == archive["inventory"]
     assert review["relationships"] == archive["relationships"]
 
-    # THE REGISTRY IS SERVED WHOLE — ~~45~~ 47 entries since 2026-09-22 (the
-    # temperature and contributor statements), static and cheap — and REGENERATED
-    # per call rather than cached, so a status correction cannot be published stale.
+    # THE REGISTRY IS SERVED WHOLE — ~~45~~ ~~47~~ 50 entries since 2026-10-12 (the
+    # temperature and contributor statements on 2026-09-22; the logbook's environment,
+    # reaction and cell-type statements on 2026-10-12), static and cheap — and
+    # REGENERATED per call rather than cached, so a status correction cannot be
+    # published stale.
     mapping = review["mapping"]
-    assert len(mapping["concepts"]) == 47
-    assert mapping["coverage"]["concepts_total"] == 47
+    assert len(mapping["concepts"]) == 50
+    assert mapping["coverage"]["concepts_total"] == 50
     assert mapping["temperature_absent_reason"]
     assert mapping["assets_blocked_reason"]
     assert mapping["cycling_state_no_field_reason"]

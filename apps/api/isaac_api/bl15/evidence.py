@@ -111,6 +111,20 @@ CONCEPT_TEMPERATURE_STATEMENT = "temperature_statement"
 #: Measured: the supplied archive carries no such labelled line.
 CONCEPT_CONTRIBUTOR_STATEMENT = "contributor_statement"
 
+#: What the LOGBOOK (the beamtime notes) says, in its own words, about the measurement
+#: environment, the reaction under study, or the electrochemical cell — **ADDED
+#: 2026-10-12** for the domain owner's answer that day, relayed by the project owner:
+#: *"the skill should be able to know if it is a three electrode or two electrode or
+#: electrolyzer or battery or whatever it is from the logbook that it will ingest. Then,
+#: if the information is not there, it can leave it blank for the user to select. Same
+#: for 'operando' and for the type of reaction under study."* Read by a bounded,
+#: versioned lexicon (``bl15.notes``) that maps ONLY an unambiguous, explicit term to one
+#: of the vendored schema's OWN enum members; a term with no member, or with more than
+#: one, is kept verbatim and maps to nothing. The sentence is always the literal.
+CONCEPT_ENVIRONMENT_STATEMENT = "environment_statement"
+CONCEPT_REACTION_STATEMENT = "reaction_statement"
+CONCEPT_CELL_TYPE_STATEMENT = "cell_type_statement"
+
 #: A token a reader SAW and could not name. **It is a first-class concept, not a
 #: failure.** ``HIST-004``'s banned pattern is "Upload -> Spinner -> Mysterious
 #: JSON", and silently dropping the third of a filename a profile does not
@@ -166,6 +180,9 @@ CONCEPTS: frozenset[str] = frozenset(
         CONCEPT_QUALITY_NOTE,
         CONCEPT_TEMPERATURE_STATEMENT,
         CONCEPT_CONTRIBUTOR_STATEMENT,
+        CONCEPT_ENVIRONMENT_STATEMENT,
+        CONCEPT_REACTION_STATEMENT,
+        CONCEPT_CELL_TYPE_STATEMENT,
         CONCEPT_UNKNOWN_TOKEN,
     }
 )

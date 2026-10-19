@@ -29,7 +29,16 @@ external service or model provider. Workspace and staging copy are ephemeral scr
 
 **v1 → v2.** Under v1 the four quantities `emission_energy`, `energy_grid`, `counting_time` and `scan_command` were treated as per-scan, which made 15 of their readings "varies" (44 varies / 31 conflicts). The final independent review showed v1 could also hide a planned-vs-recorded disagreement on a single scan; v2 always compares measurement-level readings with scan-level ones, requires ≥ 2 established scans for variation, and returns those four to per-measurement **pending the domain owner (Q21)** — hence 29 varies / 46 conflicts. Every other row is unchanged between v1 and v2.
 
-**Open, for the domain owner:** whether the 9 `acquisition_timestamp` and 9 `sample_position`
+**Answered 2026-10-12 (domain owner, relayed by the project owner; see
+`docs/bl15-2-domain-questions-2026-09-16.md` §"RECONCILED 2026-10-12"):** timestamp
+disagreements are real discrepancies and stay conflicts; a sample position recorded in the raw
+file is the real one, so a planned move disagreeing with it is now shown resolved by
+`bl15.resolution.recorded_motor_position.v1`; and the four acquisition quantities stay one value
+per measurement (Q21). **Not re-measured on the real archive** — it is not on the machine where
+that change was made — so the counts in the table above are still v2's. The paragraph below is
+the state on 2026-09-23.
+
+~~**Open, for the domain owner:**~~ whether the 9 `acquisition_timestamp` and 9 `sample_position`
 conflicts — and now the 15 readings of the four quantities above (Q21) — are genuine source disagreements or legitimate scan-to-scan variation. The pipeline
 surfaces them as conflicts (conservative: preserve every reading, choose nothing); promoting
 either concept to a per-scan cardinality is a scientific decision, not an engineering one.
