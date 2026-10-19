@@ -646,7 +646,10 @@ describe('§6 · reading rules are attributed honestly and adopted only on purpo
       <ImportRules rules={rulesView({ import: [rule()] })} profiles={PROFILES} importId="IMPZZ" busy={null} onAct={runAct} destinations={DEST} />,
     );
     const row = container.querySelector('.hi-rule')!;
-    expect(row.textContent).toContain(`${C.confirmedBy} ${C.unattributed}`);
+    // ~~`Confirmed by Unattributed`~~ (2026-10-18, QA `C-23`): the wire's sentinel shown as
+    // a word. The row now says what it MEANS — and still never names anyone.
+    expect(row.textContent).toContain(`${C.confirmedBy}: ${C.unattributed}`);
+    expect(C.unattributed).toMatch(/cannot yet identify/);
     expect(row.textContent).not.toContain('unattributed');
   });
 

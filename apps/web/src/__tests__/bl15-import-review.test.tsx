@@ -225,9 +225,14 @@ describe('BL15 review · §2 the digest is derived, never literal', () => {
       expect(row).toBeDefined();
       expect(h.querySelector('dd')?.textContent).toBe(row.value.toLocaleString('en-US'));
     }
-    // EVERY row, with its expression, behind one closed disclosure.
-    const rows = container.querySelectorAll('.bl15-digest > li');
+    // EVERY row behind one closed disclosure, and — since 2026-10-18 (QA `C-05`: fifteen
+    // "Derived from inventory.…" lines read as developer prose) — every row's expression
+    // one press further in, in its own disclosure. Both lists hold every row.
+    const lists = container.querySelectorAll('.bl15-digest');
+    expect(lists.length).toBe(2);
+    const rows = lists[0]!.querySelectorAll(':scope > li');
     expect(rows.length).toBe(digest.length);
+    expect(lists[1]!.querySelectorAll(':scope > li').length).toBe(digest.length);
     expect(rows[0].closest('.disclosure-body')?.hasAttribute('hidden')).toBe(true);
     // The expression is in the DOM even while shut — the shared `Disclosure` hides
     // its body rather than unmounting it, which is what lets a reader check the number.
@@ -303,7 +308,8 @@ describe('BL15 review · §4 sample groups, including the bucket with no token',
     expect(screen.getByText(`Sample ${g.group_token}`)).toBeInTheDocument();
     expect(
       screen.getByText(
-        new RegExp(`${g.measurement_count} measurements.*legacy ${g.legacy_low}`),
+        // ~~`legacy ${low}`~~ (QA `C-23`): the range reads "files 3–5", or "file 3" alone.
+        new RegExp(`${g.measurement_count} measurements?.*files? ${g.legacy_low}`),
       ),
     ).toBeInTheDocument();
   });
@@ -899,6 +905,9 @@ describe('BL15 review · §12 every summary is a topic, never a claim', () => {
     // about) is a separate span and is not a claim either.
     const allowed = new Set<string>([
       C.allCounts,
+      // 2026-10-18 (QA `C-05`): the count expressions, and the registry's full rationale.
+      C.derivations,
+      C.whyInDetail,
       C.mapping,
       C.ceiling,
       C.extended,

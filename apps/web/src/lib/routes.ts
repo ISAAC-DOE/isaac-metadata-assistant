@@ -15,6 +15,14 @@
  */
 export const SETTINGS_TAB_PARAM = 'tab';
 
+/**
+ * The open import and its stage on `/imports` (2026-10-18, QA `C-14`). Two parameters
+ * rather than one `?tab=`, because the import is the subject and the stage is a view of
+ * it — the same split `/record/<id>?view=` makes, with the record in the path.
+ */
+export const IMPORT_SESSION_PARAM = 'import';
+export const IMPORT_STAGE_PARAM = 'stage';
+
 /*
  * `help` (R0) is the Help & Tutorial tab — the one permanent home of the guided
  * walkthrough's replay control. It is a tab id like the other five, so it is
@@ -426,22 +434,24 @@ export const RECORD_ADDRESS_PARAM = 'at';
 export const ROUTES = {
   experiments: '/experiments',
   /**
-   * HISTORICAL IMPORT — one of the three primary destinations, and a route with
-   * NO parameters of its own.
+   * HISTORICAL IMPORT — one of the three primary destinations.
    *
-   * A session is addressed in component state rather than in the URL, and that
-   * is a deliberate DEPARTURE from the `?tab=`/`?view=`/`?run=` convention above
-   * — which is why it needs a sentence rather than a silent omission. Everything
-   * that convention exists for is a view a scientist would LINK A COLLEAGUE TO:
-   * a record's graph, one run, a comparison, one proposal. An import session is
-   * none of those. It is not durable (the server says so in every response's
-   * `durability`), it holds no scientific state, and its useful output is the
-   * PROPOSAL it mints on a record — which already has its own deep link,
-   * `ROUTES.recordProposal`. A `?import=` parameter would therefore be a link to
-   * a working area that may not exist by the time it is followed, which is a
-   * worse defect than not being linkable.
+   * ~~"a route with NO parameters of its own … A `?import=` parameter would therefore
+   * be a link to a working area that may not exist by the time it is followed, which
+   * is a worse defect than not being linkable."~~ — WITHDRAWN 2026-10-18 (owner QA
+   * `C-14`). The cost of NOT linking was measured and was the larger one: a reload
+   * returned the reader to the list mid-import, and Back left the feature entirely. The
+   * open import and its stage are now `?import=<id>&stage=<stage>`
+   * (`IMPORT_SESSION_PARAM`, `IMPORT_STAGE_PARAM`), and the case the old argument
+   * feared is ANSWERED rather than avoided: a link to an import that no longer exists
+   * says so in words and offers the way back (`IMPORT_COPY.goneTitle`).
    */
   imports: '/imports',
+  /** One open import, optionally at one stage — `?import=<id>&stage=<stage>`. */
+  importSession: (importId: string, stage?: string) =>
+    `/imports?${IMPORT_SESSION_PARAM}=${encodeURIComponent(importId)}${
+      stage ? `&${IMPORT_STAGE_PARAM}=${encodeURIComponent(stage)}` : ''
+    }`,
   load: '/load',
   memory: '/memory',
   governance: '/governance',

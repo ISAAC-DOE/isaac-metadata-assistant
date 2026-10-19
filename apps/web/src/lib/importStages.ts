@@ -55,6 +55,29 @@ export function stepIndex(session: Pick<ApiImportSession, 'workflow'>, stepId: s
   return session.workflow.findIndex((step) => step.id === stepId);
 }
 
+/**
+ * HOW MANY OF THE SIX STAGES A SESSION HAS REACHED, from the server's `furthest_step`
+ * and its own step order — the list row's progress meter (2026-10-18). `0` for a session
+ * with no sources. Never a completion claim: the server reaches `add_to_experiments`
+ * only when every sendable candidate has been sent.
+ */
+export function stagesReached(
+  workflow: ApiImportSession['workflow'],
+  furthestStep: string,
+): number {
+  const reached = workflow.findIndex((step) => step.id === furthestStep);
+  if (reached < 0) return 0;
+  /* THE STAGE THAT OWNS THE STEP, and no further (review, 2026-10-18): `reconstruct` is owned
+     by Runs & Candidates; Conflicts is a VIEW of the same step, and counting it read as
+     "4 of 6 · Conflicts" straight after a read, before the reader had looked at one. */
+  const owner = IMPORT_STAGES.findIndex((stage) => STAGE_WORKFLOW_STEP[stage] === furthestStep);
+  if (owner >= 0) return owner + 1;
+  return IMPORT_STAGES.filter((stage) => {
+    const mine = workflow.findIndex((step) => step.id === STAGE_WORKFLOW_STEP[stage]);
+    return mine >= 0 && mine < reached;
+  }).length;
+}
+
 /** Whether the session has reached a stage's step — a fact the server derives. */
 export function stageReached(session: ApiImportSession, stage: ImportStageId): boolean {
   const reached = stepIndex(session, session.furthest_step);
@@ -171,12 +194,46 @@ export function candidateLabel(candidate: ApiImportCandidate): string {
   return 'Unplaced value';
 }
 
+/**
+ * A schema field's own unit, read off its NAME — `potential_setpoint_V` is in volts
+ * (2026-10-18, QA `C-07`: a potential showed as a bare "0.06"). The field defines the
+ * unit, so stating it beside a value the field will hold invents nothing. The same table
+ * as the server's `routes._FIELD_NAME_UNITS`.
+ */
+export const FIELD_NAME_UNITS: readonly (readonly [string, string])[] = [
+  ['_mV_s', 'mV/s'],
+  ['_eV', 'eV'],
+  ['_bar', 'bar'],
+  ['_Pa', 'Pa'],
+  ['_V', 'V'],
+  ['_K', 'K'],
+  ['_M', 'M'],
+  ['_s', 's'],
+];
+
+export function fieldNameUnit(path: string | null | undefined): string | null {
+  if (!path) return null;
+  const last = path.split('.').pop() ?? path;
+  for (const [suffix, unit] of FIELD_NAME_UNITS) if (last.endsWith(suffix)) return unit;
+  return null;
+}
+
 /** A candidate's value as text, or `null` when no value has been selected. */
 export function candidateValue(candidate: ApiImportCandidate): string | null {
   const v = candidate.proposed_value;
   if (v === null || v === undefined) return null;
   if (typeof v === 'object') return JSON.stringify(v);
-  return String(v);
+  const unit = typeof v === 'number' ? fieldNameUnit(candidate.target_field_path) : null;
+  return unit ? `${String(v)} ${unit}` : String(v);
+}
+
+/**
+ * What the sources SAY, for a candidate with no value offered and no disagreement — the
+ * first supporting statement's literal, exactly as written. `null` when nothing was read.
+ */
+export function candidateReading(candidate: ApiImportCandidate): string | null {
+  const first = candidate.supporting_statements.find((s) => String(s.value ?? '').trim() !== '');
+  return first ? String(first.value) : null;
 }
 
 /** How many distinct files stand behind a candidate, from the server's own count. */
@@ -219,7 +276,8 @@ export function summaryItems(session: ApiImportSession): SummaryItem[] {
   if (session.reconstruction !== null) {
     out.push({ id: 'candidates', value: candidates.length, label: candidates.length === 1 ? 'candidate' : 'candidates' });
   }
-  out.push({ id: 'conflicts', value: conflicts, label: conflicts === 1 ? 'conflict' : 'conflicts' });
+  /* Only what a person still has to DECIDE (2026-10-18, QA `C-22`) — see `conflictDisposition`. */
+  out.push({ id: 'conflicts', value: conflicts, label: 'to decide' });
   if (session.reconstruction !== null) {
     out.push({ id: 'needs-review', value: counts.needsReview, label: 'need review' });
     // WHAT CAN STILL GO FORWARD: the batch's own sendable set, less what this import has
@@ -409,8 +467,46 @@ export function conflictViews(session: ApiImportSession): ConflictView[] {
   return out;
 }
 
+/**
+ * WHAT A CONFLICT ASKS OF THE READER — four answers, and only one of them is work
+ * (2026-10-18, QA `C-12`/`C-22`).
+ *
+ *   * `open` — two or more sources STATE different things, and a person decides which.
+ *   * `resolved` — a recorded rule (a scientist's, or a domain owner's standing rule) chose.
+ *   * `preserved` — two acquisitions under one legacy number. The server forbids choosing
+ *     (`resolution_forbidden`), so this can never be cleared; counting it as open work
+ *     left the Conflicts tab unable ever to reach zero.
+ *   * `noted` — one source states something and the only other "reading" is the ABSENCE
+ *     of a source (`absence_of_a_source`: no macro declared it, no file of that name was
+ *     acquired). There is nothing to choose between, and the screen used to ask "Which
+ *     reading is right?" anyway, offering "nothing was stated" as an answer.
+ *
+ * Every one of them is still SHOWN, with every reading and the server's explanation; only
+ * `open` is counted as something to decide. Derived from the readings' own roles and the
+ * server's `forbidden` flag — nothing here decides what a reading means.
+ */
+export type ConflictDisposition = 'open' | 'resolved' | 'preserved' | 'noted';
+
+export const ABSENCE_ROLE = 'absence_of_a_source';
+
+export function conflictDisposition(view: ConflictView): ConflictDisposition {
+  if (isResolved(view)) return 'resolved';
+  if (view.forbidden) return 'preserved';
+  const stated = view.readings.filter((r) => r.role !== ABSENCE_ROLE);
+  if (stated.length < view.readings.length && stated.length <= 1) return 'noted';
+  return 'open';
+}
+
+/** How many conflicts of each disposition a session holds. */
+export function conflictTally(session: ApiImportSession): Record<ConflictDisposition, number> {
+  const out: Record<ConflictDisposition, number> = { open: 0, resolved: 0, preserved: 0, noted: 0 };
+  for (const view of conflictViews(session)) out[conflictDisposition(view)] += 1;
+  return out;
+}
+
+/** The conflicts a person still has to DECIDE — `open` only (see `conflictDisposition`). */
 export function conflictCount(session: ApiImportSession): number {
-  return conflictViews(session).filter((c) => !isResolved(c)).length;
+  return conflictTally(session).open;
 }
 
 export function isResolved(view: ConflictView): boolean {
@@ -436,6 +532,28 @@ export function shortConventionName(displayName: string): string {
   const cut = displayName.split(' — ')[0] ?? displayName;
   return cut.trim();
 }
+
+/**
+ * A sample group's file-number range in words (2026-10-18, QA `C-23`): "legacy 3–3" read
+ * as jargon twice over. The leading filename number is the scientist's own handle (the
+ * registry's words), so it is called a file number, and a range of one is one number.
+ */
+export function fileNumberRange(low: number | null, high: number | null): string | null {
+  if (low === null || high === null) return null;
+  return low === high ? `file ${low}` : `files ${low}–${high}`;
+}
+
+/**
+ * HOW A MEASUREMENT WAS READ, in one plain phrase (2026-10-18, QA `C-23`): "Build default ·
+ * Acquisition system" was the applicability's two internal tokens. The convention's own
+ * short name stays; the basis is said as what it means for the reader.
+ */
+export const BASIS_PHRASES: Readonly<Record<string, string>> = {
+  build_default: 'this build’s default convention',
+  import_session_choice: 'chosen for this import',
+  confirmed_rule: 'a rule you recorded',
+  mixed: 'more than one basis',
+};
 
 export const SCOPE_LABELS: Readonly<Record<string, string>> = {
   facility: 'Facility',
@@ -542,7 +660,9 @@ export const UNSENT_CATEGORY_LABELS: Readonly<Record<UnsentCategory, string>> = 
    * reuse those words: "8 findings" here beside "5 findings" there was two sets under one
    * name. A measurement is not a disagreement either, so it has its own row.
    */
-  structural: "Disagreements about one measurement's identity — decided in Conflicts, never sent as values",
+  /* ~~"Disagreements about … — decided in Conflicts"~~ (review, 2026-10-18): some of these
+     are one source against an absence, which Conflicts shows as noted, with nothing to decide. */
+  structural: "Findings about one measurement's identity — shown in Conflicts, never sent as values",
   measurement: 'Measurements this import found — not values (the Runs you create come from them)',
   experiment: 'The experiment this import describes — not a value',
   not_a_run: 'Values of a measurement that is not a Run (an alignment scan or a standard)',

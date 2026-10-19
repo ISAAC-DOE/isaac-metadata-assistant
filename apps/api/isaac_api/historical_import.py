@@ -963,6 +963,187 @@ def _no_run_for(candidate: "SemanticCandidate") -> "SemanticCandidate":
     return candidate
 
 
+# --- the SHORT reason a scientist reads (2026-10-18, QA `C-05`/`C-06`) -----------------
+#
+# Every `not_proposable_reason` above, and every one `bl15.reconstruct` and the mapping
+# registry set, is the FULL reason: what the build does and why, written for whoever has
+# to maintain it. The import screen showed it verbatim beside every value it could not
+# send — a median of ~350 characters, up to 1,318, with revision history and decision ids
+# in it. The screen now shows ONE short sentence and keeps the full reason one press away.
+#
+# The short sentence is DERIVED here from the same facts the full one was set from, and
+# never stored: a session persisted before this existed gets one on its next read, and a
+# reworded full reason cannot leave a stale short one behind in a session document. It is
+# keyed on the full reason's identity (the constant it is), or for the registry's rows on
+# the concept the candidate carries, and only for the dynamic logbook sentences on what
+# they all end with. Anything unrecognised gets `PLAIN_REASON_FALLBACK`, which is true of
+# every candidate it can reach and which a test forbids on the committed corpora.
+
+#: Said for a candidate whose full reason this table does not recognise. True of every
+#: candidate that is not proposable, and deliberately says nothing more.
+PLAIN_REASON_FALLBACK = "This value cannot be sent as a proposal. Why, in detail, is below."
+
+PLAIN_REASON_DISAGREEMENT = (
+    "The sources disagree, so no value was chosen. Decide which reading is right in "
+    "Conflicts."
+)
+PLAIN_REASON_NOT_A_VALUE = (
+    "This says a measurement or experiment exists; it is not a value. The record and its "
+    "runs are made in Add to Experiment."
+)
+PLAIN_REASON_STRUCTURAL = (
+    "The sources disagree about which measurement this is. It is decided in Conflicts and "
+    "is never sent as a value."
+)
+#: A structural finding whose only other "reading" is the ABSENCE of a source (no macro
+#: declared the measurement) — the Conflicts stage shows it as "Noted — nothing to choose",
+#: so the short reason must not call it a disagreement to decide (review, 2026-10-18).
+PLAIN_REASON_NOTED = (
+    "One source states this and no other source mentions it, so there is nothing to "
+    "choose. The finding is kept; it is not a value."
+)
+PLAIN_REASON_NO_WRITE_PATH = (
+    "This is an official ISAAC field, but this build cannot write it yet. The reading is "
+    "kept here with its source."
+)
+PLAIN_REASON_LOCAL_TIME = (
+    "This time names no time zone, so it cannot go into a UTC field without guessing. It "
+    "is kept as evidence."
+)
+PLAIN_REASON_NOT_A_RUN = (
+    "This belongs to an alignment scan or a standard, which is not offered as a run. The "
+    "reading is kept."
+)
+PLAIN_REASON_BEAMTIME_SCOPE = (
+    "This was stated for the whole beamtime, not one measurement, so it has no run of its "
+    "own. Send it to the run you mean from Review."
+)
+PLAIN_REASON_VARIES = (
+    "This differs from scan to scan, as expected, so there is no single value to send. "
+    "Each scan's reading is kept."
+)
+PLAIN_REASON_SAME_FIELD_OFFERED = (
+    "Another reading of this field states the same value and is the one sent. This one is "
+    "kept as a second witness."
+)
+PLAIN_REASON_SAME_FIELD_CONFLICT = (
+    "Another reading of this field states a different value. Nothing is sent until you "
+    "decide in Conflicts."
+)
+PLAIN_REASON_LEFT_FOR_A_PERSON = (
+    "The files do not settle this clearly enough to fill it in, so it is left for you to "
+    "choose."
+)
+PLAIN_REASON_NO_EX_SITU = (
+    "The schema copy in this build offers no ex situ environment, so nothing is proposed."
+)
+PLAIN_REASON_NO_REGISTRY_ENTRY = (
+    "ISAAC has no mapping for this kind of reading yet, so it is kept as evidence."
+)
+
+
+def _plain_reason_table() -> dict[str, str]:
+    """``full reason -> short reason`` for every CONSTANT reason, built at call time.
+
+    At call time because ``bl15.reconstruct`` imports this module; importing it at the
+    top of this one would be a cycle.
+    """
+    from .bl15 import reconstruct as rc
+
+    return {
+        CANDIDATE_NOT_PROPOSABLE_DISAGREEMENT: PLAIN_REASON_DISAGREEMENT,
+        rc.DISAGREEMENT_NOT_PROPOSABLE: PLAIN_REASON_DISAGREEMENT,
+        CANDIDATE_NOT_PROPOSABLE_NO_EXPERIMENT_CREATION: PLAIN_REASON_NOT_A_VALUE,
+        rc.RUN_CANDIDATE_NOT_PROPOSABLE: PLAIN_REASON_NOT_A_VALUE,
+        CANDIDATE_NOT_PROPOSABLE_NO_WRITE_PATH: PLAIN_REASON_NO_WRITE_PATH,
+        CANDIDATE_NOT_PROPOSABLE_LOCAL_TIME: PLAIN_REASON_LOCAL_TIME,
+        CANDIDATE_NOT_PROPOSABLE_NOT_A_RUN: PLAIN_REASON_NOT_A_RUN,
+        rc.VARIES_NOT_PROPOSABLE: PLAIN_REASON_VARIES,
+    }
+
+
+def _is_noted_finding(disagreement: Sequence[Mapping]) -> bool:
+    """One stated reading against the ABSENCE of a source — nothing to choose between.
+
+    The same test the screen applies (`importStages.conflictDisposition`): a reading whose
+    source is a parenthesised description — ``(the macros in this import)`` — is the
+    absence of a source (`bl15.resolution.role_of`), and with at most one STATED reading
+    beside it there is no choice to make.
+    """
+    absent = 0
+    stated = 0
+    for row in disagreement:
+        ids = [str(i) for i in (row.get("source_ids") or [])]
+        if ids and all(i.startswith("(") for i in ids):
+            absent += 1
+        else:
+            stated += 1
+    return absent > 0 and stated <= 1
+
+
+def plain_reason_of(candidate: "SemanticCandidate") -> str | None:
+    """:func:`plain_reason` for a candidate, reading the facts it carries — ONE place, so the
+    session view, the batch's ``not_sent`` rows and the reconstruction's own wire shape
+    cannot say different things about the same candidate."""
+    return plain_reason(
+        candidate.not_proposable_reason,
+        candidate_id=candidate.candidate_id,
+        kind=candidate.kind,
+        unresolved=candidate.unresolved_reason is not None,
+        noted=candidate.kind != CANDIDATE_KIND_FIELD
+        and candidate.unresolved_reason is not None
+        and _is_noted_finding(candidate.disagreement),
+    )
+
+
+def plain_reason(
+    reason: str | None,
+    *,
+    candidate_id: str = "",
+    kind: str = CANDIDATE_KIND_FIELD,
+    unresolved: bool = False,
+    noted: bool = False,
+) -> str | None:
+    """The short, scientist-facing sentence for a full ``not_proposable_reason``.
+
+    ``None`` exactly when there is no reason to summarise and nothing unresolved. It never
+    returns the full reason itself, and never reads anything but its arguments.
+    """
+    from .bl15 import mapping as bl15_mapping
+    from .bl15 import reconstruct as rc
+
+    if reason is None and not unresolved:
+        return None
+    if kind != CANDIDATE_KIND_FIELD:
+        if unresolved:
+            return PLAIN_REASON_NOTED if noted else PLAIN_REASON_STRUCTURAL
+        return PLAIN_REASON_NOT_A_VALUE
+    if unresolved:
+        return PLAIN_REASON_DISAGREEMENT
+    table = _plain_reason_table()
+    if reason in table:
+        return table[reason]
+    text = reason or ""
+    if text.startswith(rc.SAME_FIELD_ALREADY_OFFERED.split("{other}")[0]):
+        return PLAIN_REASON_SAME_FIELD_OFFERED
+    if text.startswith(rc.SAME_FIELD_IN_CONFLICT.split("{other}")[0]):
+        return PLAIN_REASON_SAME_FIELD_CONFLICT
+    parts = candidate_id.split("::")
+    concept = parts[-2] if len(parts) >= 2 and parts[-1] == "resolved" else parts[-1]
+    entry = bl15_mapping.MAPPINGS.get(concept)
+    if entry is not None and text == entry.reason:
+        return entry.summary
+    if text.startswith("This reading has no entry in the mapping registry"):
+        return PLAIN_REASON_NO_REGISTRY_ENTRY
+    if "does not offer ex_situ" in text:
+        return PLAIN_REASON_NO_EX_SITU
+    if text.rstrip().endswith(
+        ("left blank for a person to choose.", "left blank for a person to choose on each run.")
+    ):
+        return PLAIN_REASON_LEFT_FOR_A_PERSON
+    return PLAIN_REASON_FALLBACK
+
+
 def is_zoned_utc_value(path: str | None, value: Any) -> bool:
     """Whether ``value`` may be proposed at ``path`` as far as TIME ZONES go.
 
@@ -1133,6 +1314,9 @@ class SemanticCandidate:
             "disagreement": [dict(d) for d in self.disagreement],
             "unresolved_reason": self.unresolved_reason,
             "not_proposable_reason": self.not_proposable_reason,
+            # 2026-10-18 — DERIVED (`plain_reason`), like `proposable` below: the short
+            # sentence a scientist reads, with the full reason above kept beside it.
+            "not_proposable_summary": plain_reason_of(self),
             "supporting_statement_total": self.supporting_statement_total,
             "distinct_sources": self.distinct_sources,
             "resolved_by_rule": self.resolved_by_rule,
@@ -3532,14 +3716,26 @@ def _label_tokens_for(
     """
     if unit is None:
         return []
+    from .bl15 import evidence as ev
+
     first: dict[str, str] = {}
+    unrecognised: list[str] = []
     for item in evidence_by_source.get(unit.acquisition_path, ()):
+        # EVERY UNRECOGNISED TOKEN, in the order the name states them (2026-10-18, QA
+        # `C-19`). They used to be dropped, so `06_03_ZZ3_alk_fresh_…` and
+        # `08_03_ZZ3_alk_cycled_…` both became "Legacy N · 03 · ZZ3 · f30 · 1000mV" and
+        # two runs differed only by their legacy number. A token no convention reads is
+        # still the scientist's own word for the measurement, so it is kept, verbatim,
+        # after the recognised ones — and never interpreted.
+        if item.concept == ev.CONCEPT_UNKNOWN_TOKEN:
+            unrecognised.append(item.raw_literal)
+            continue
         if item.concept in first:
             continue
         first[item.concept] = item.raw_literal
     return [
         (concept, first[concept]) for concept in _LABEL_CONCEPTS if concept in first
-    ]
+    ] + [(ev.CONCEPT_UNKNOWN_TOKEN, literal) for literal in unrecognised]
 
 
 def _legacy_int(text: object) -> int | None:
@@ -5485,6 +5681,7 @@ def batch_partition(session: "ImportSession") -> tuple[list[SemanticCandidate], 
                     "error": "candidate_unresolved",
                     "reason": candidate.not_proposable_reason
                     or CANDIDATE_NOT_PROPOSABLE_DISAGREEMENT,
+                    "summary": plain_reason_of(candidate),
                 }
             )
         elif not candidate.proposable:
@@ -5496,6 +5693,12 @@ def batch_partition(session: "ImportSession") -> tuple[list[SemanticCandidate], 
                     "error": "candidate_not_proposable",
                     "reason": candidate.not_proposable_reason
                     or CANDIDATE_NOT_PROPOSABLE_NO_EXPERIMENT_CREATION,
+                    "summary": plain_reason(
+                        candidate.not_proposable_reason
+                        or CANDIDATE_NOT_PROPOSABLE_NO_EXPERIMENT_CREATION,
+                        candidate_id=candidate.candidate_id,
+                        kind=candidate.kind,
+                    ),
                 }
             )
         else:

@@ -1,7 +1,7 @@
 import './screens.css';
 import './historical-import.css';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
@@ -12,11 +12,15 @@ import { ArchiveRuns, CorpusReadOverview } from '../components/ImportCorpusRevie
 import { ImportCandidateRow } from '../components/ImportCandidateRow';
 import { ImportConflicts } from '../components/ImportConflicts';
 import { ImportRules } from '../components/ImportRules';
+import { ImportScopeProvider } from '../components/ImportScope';
+import { TechniqueChooser, type TechniqueEvidence } from '../components/ImportTechnique';
 import { Disclosure } from '../components/Disclosure';
 import { HelpTip } from '../components/HelpTip';
 import { SemanticStatus } from '../components/SemanticStatus';
+import { Widget } from '../components/Widget';
+import { Breakable } from '../components/Breakable';
 import { LABELS } from '../lib/labels';
-import { ROUTES } from '../lib/routes';
+import { IMPORT_SESSION_PARAM, IMPORT_STAGE_PARAM, ROUTES } from '../lib/routes';
 import { api, ApiError } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
 import { useProposalDestinations, type ProposalDestinations } from '../lib/importDestinations';
@@ -28,9 +32,10 @@ import {
   SOURCE_KIND_LABELS,
 } from '../lib/historicalImportContent';
 import {
+  candidateConcept,
   candidateLabel,
   candidateReview,
-  conflictCount,
+  conflictTally,
   conflictViews,
   defaultStage,
   groupUnsent,
@@ -39,12 +44,14 @@ import {
   plural,
   STAGE_WORKFLOW_STEP,
   stageReached,
+  stagesReached,
   summaryItems,
   planFor,
   REVIEW_BUCKET_ORDER,
   REVIEW_BUCKET_STATE,
   reviewCounts,
   type ImportStageId,
+  type ReviewBucket,
 } from '../lib/importStages';
 import type {
   ApiImportAddedToExperiment,
@@ -53,6 +60,7 @@ import type {
   ApiImportListResponse,
   ApiImportSession,
   ApiImportSource,
+  ApiImportSummary,
   ApiImportWorkflowStep,
 } from '../lib/types';
 
@@ -99,24 +107,65 @@ import type {
  *   candidates exist, which sources support each candidate, what was read versus
  *   inferred, where sources disagree, and what is unresolved.
  *
- * ── WHY THE SESSION IS IN COMPONENT STATE AND NOT IN THE URL ────────────────
+ * ── THE SESSION IS IN THE URL (2026-10-18, QA `C-14`) ───────────────────────
  *
- * A deliberate departure from the `?view=`/`?run=`/`?proposal=` convention, and
- * `lib/routes.ts` carries the argument: an import session is not durable, holds
- * no scientific state, and its useful output is the PROPOSAL it mints — which
- * already has its own deep link. A `?import=` would be a link to a working area
- * that may not exist when it is followed.
+ * ~~"WHY THE SESSION IS IN COMPONENT STATE AND NOT IN THE URL … A `?import=` would be
+ * a link to a working area that may not exist when it is followed."~~ — WITHDRAWN.
+ * Measured, the cost of not linking was the larger one: a reload put the reader back
+ * on the list mid-import, and Back left the feature. The open import and its stage are
+ * `?import=<id>&stage=<stage>` (`ROUTES.importSession`): deep-linkable, reload-safe,
+ * and Back/Forward walk the stages a reader CHOSE — automatic moves replace the entry
+ * rather than adding one. A link to an import that no longer exists says so
+ * (`IMPORT_COPY.goneTitle`) instead of failing as a backend error.
  *
- * ── ONE VOCABULARY, AND IT IS THE SERVER'S ──────────────────────────────────
+ * ── ONE VOCABULARY (2026-10-18, QA `C-20`) ──────────────────────────────────
  *
- * The workflow steps, their labels, the unbuilt step's disclosure and the
- * durability sentence all come from the response. A second copy in the browser
- * would be free to drift from the operation that enforces it, which is the
- * defect the retired step names already recorded once.
+ * The server's six workflow steps describe what the BACKEND does (Parse, Reconstruct);
+ * the stage tabs carry the owner's names for what a scientist is LOOKING AT. The
+ * landing's "how it works" strip used the first and the tabs the second, so one
+ * sequence had two sets of names. Every surface now uses the stage names; the server's
+ * steps still decide how far a session has REACHED (`STAGE_WORKFLOW_STEP`), and the
+ * server's own sentence still discloses any step it declares unbuilt.
  */
 export function HistoricalImport() {
   const list = useFetch<ApiImportListResponse>(() => api.listImports(), []);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [params, setParams] = useSearchParams();
+  /* `?import=` with no value is no import (review, 2026-10-18: it crashed the screen). */
+  const openId = params.get(IMPORT_SESSION_PARAM) || null;
+  const rawStage = params.get(IMPORT_STAGE_PARAM);
+  /* An unrecognised stage falls back to the derived one without throwing. */
+  const stage = (IMPORT_STAGES as readonly string[]).includes(rawStage ?? '')
+    ? (rawStage as ImportStageId)
+    : null;
+  const reloadList = list.reload;
+  /* THE LIST IS RE-READ WHENEVER IT COMES BACK INTO VIEW — by Back as well as by "Back to
+     imports" — so a row never shows a session's stage from before the reader opened it. */
+  const wasOpen = useRef(openId !== null);
+  useEffect(() => {
+    if (wasOpen.current && openId === null) reloadList();
+    wasOpen.current = openId !== null;
+  }, [openId, reloadList]);
+
+  const open = useCallback((id: string) => setParams({ [IMPORT_SESSION_PARAM]: id }), [setParams]);
+  const close = useCallback(() => setParams({}), [setParams]);
+  /*
+   * A STAGE THE READER CHOSE IS A HISTORY ENTRY; ONE AN ACT MOVED THEM TO IS NOT. So
+   * Back walks the tabs a reader pressed and then leaves the import — never through the
+   * automatic step from Source Bundle to Runs & Candidates that an add triggers.
+   */
+  const setStage = useCallback(
+    (next: ImportStageId, how: { replace?: boolean } = {}) => {
+      setParams(
+        (prev) => {
+          const out = new URLSearchParams(prev);
+          out.set(IMPORT_STAGE_PARAM, next);
+          return out;
+        },
+        { replace: how.replace === true },
+      );
+    },
+    [setParams],
+  );
 
   return (
     <AppShell
@@ -127,84 +176,43 @@ export function HistoricalImport() {
       width="wide"
     >
       {/*
-        ONE CONTAINER, ONE RHYTHM.
-        =========================
-
-        `.hi-screen` is the vertical-rhythm owner this screen did not have. Its
-        four (or six) blocks used to be sibling `div.placeholder`s, and the gaps
-        between them measured 8px, 4px and 0px — each one the residue of
-        whichever element that block happened to end with, not a decision.
-        `.hi-screen` sets ONE gap (`--space-lg`, 16px — the top of
-        `spacing-layout.md:19`'s "gaps between cards 10–16px" band) and
-        `historical-import.css` zeroes the last child's margin inside each
-        section, so the spacing is a property of the container and survives any
-        future edit to a section's contents.
-
-        `.placeholder` is gone from this file entirely, and its name was the
-        clearest statement of the problem: a class that declares a measure and
-        calls itself a placeholder is not a section system.
+        ONE CONTAINER, ONE RHYTHM. `.hi-screen` sets ONE gap between its blocks and
+        `historical-import.css` zeroes the last child's margin inside each, so the
+        spacing is a property of the container and survives any edit to a block.
       */}
-      <div className="hi-screen">
+      <div className={`hi-screen${openId !== null ? ' is-session' : ''}`}>
         <header className="hi-page-head">
-          <span className="eyebrow">{IMPORT_COPY.eyebrow}</span>
-          {/* The ONE `<h1>` on this surface. `e2e/specs/structure.spec.ts` holds
-              every surface to exactly one, and it reads `LABELS.navImports` — the
-              same string the nav item and the `document.title` segment read, so
-              the destination cannot end up with three names.
-
-              `.page-title` is `screens.css`'s shared page-title class — 22px/600,
-              `typography.md:46`'s "Page title (H2) 22px / 600". It used to inherit
-              that size from `.placeholder > h1`; stating it through the shared
-              class instead means dropping `.placeholder` does not silently hand
-              the heading back to the UA's `2em`/bold default. */}
+          {/* The ONE `<h1>` on this surface — `LABELS.navImports`, the same string the
+              nav item and the `document.title` segment read. The eyebrow above it is
+              gone (2026-10-18): it restated the heading in capitals. */}
           <h1 className="page-title">{LABELS.navImports}</h1>
           <p className="hi-lead">{IMPORT_COPY.lead}</p>
         </header>
 
-        {/*
-          `LoadingPanel`, NOT a hand-rolled `role="status"` div — and the reason is
-          an INVARIANT rather than consistency for its own sake.
-
-          The first version of this screen rendered
-          `<div className="placeholder" role="status">Loading imports…</div>`. It
-          looked right and announced correctly, and it was INVISIBLE to
-          `e2e/specs/layout-widths.spec.ts`, which asserts
-          `locator('div.fetch-state[role="status"]')` has count 0 before it
-          measures a surface — i.e. "no screen is still loading". A loading panel
-          outside that class is a loading panel that sweep cannot wait for, so it
-          would one day measure a skeleton and report it as this surface. Found
-          while diagnosing that sweep's timeouts, not by a failing test.
-
-          THE WRAPPER IS A `div`, NOT A `section`, HERE AND EVERYWHERE ON THIS
-          SCREEN. `.hi-section` is a presentational grouping — a card with a
-          measure, a padding and a rhythm — and an unnamed `<section>` is exposed
-          as a generic container anyway, so the element would buy nothing while
-          inviting a future `aria-labelledby` that would mint a `region` landmark
-          per card. The accessibility tree is byte-for-byte what it was before
-          this redesign, which is why the a11y baseline (zero recorded cells for
-          `imports`) does not move.
-        */}
-        {list.status === 'loading' && (
-          <div className="hi-section">
-            <LoadingPanel label="Loading imports…" />
-          </div>
-        )}
-        {list.status === 'error' && (
-          <div className="hi-section">
-            <BackendDown error={list.error} onRetry={list.reload} />
-          </div>
-        )}
-        {list.status === 'data' && openId === null && (
-          <ImportList data={list.data} onOpen={setOpenId} onChanged={list.reload} />
-        )}
-        {list.status === 'data' && openId !== null && (
+        {openId !== null ? (
           <ImportSessionView
+            key={openId}
             importId={openId}
-            onClose={() => {
-              setOpenId(null);
-              list.reload();
-            }}
+            stage={stage}
+            onStage={setStage}
+            onClose={close}
           />
+        ) : (
+          <>
+            {/* `LoadingPanel`, NOT a hand-rolled `role="status"` div: the width sweep
+                waits on `div.fetch-state[role="status"]` before it measures a surface. */}
+            {list.status === 'loading' && (
+              <div className="hi-section">
+                <LoadingPanel label="Loading imports…" />
+              </div>
+            )}
+            {list.status === 'error' && (
+              <div className="hi-section">
+                <BackendDown error={list.error} onRetry={list.reload} />
+              </div>
+            )}
+            {list.status === 'data' && <ImportsLanding data={list.data} onOpen={open} onChanged={list.reload} />}
+          </>
         )}
       </div>
     </AppShell>
@@ -212,10 +220,28 @@ export function HistoricalImport() {
 }
 
 /* --------------------------------------------------------------------------
- * The list, and starting one.
+ * The landing — ONE widget: start an import, and the imports already started.
  * -------------------------------------------------------------------------- */
 
-function ImportList({
+/**
+ * THE LANDING, AS ONE WIDGET (2026-10-18, owner direction + design spec).
+ *
+ * It was three cards: `New Import` (a label, a full-width field and a button), `Imports`
+ * (each row "1 source · 1 read · 100 candidates · 0 sent to review"), and a collapsed
+ * "How Historical Import works". It is now the shared `Widget`:
+ *
+ *   * the header is the list's own `<h2>Imports</h2>` — LOAD-BEARING: `e2e/surfaces.ts`
+ *     gates this surface on it and `imports-session-a11y.spec.ts` asserts it at level 2;
+ *   * the inline name field and `Start an Import` sit directly under the title, the one
+ *     primary action on the page;
+ *   * each row is its name, when it was started, and a six-step progress meter read
+ *     from the server's `furthest_step` — in the stage names the session uses;
+ *   * "How it works" is the widget's info panel ("How Historical Import works", the name
+ *     the stepper probe in `pill-shape.spec.ts` presses): the six stages, the server's
+ *     own durability sentence, and any step the server declares unbuilt — hidden until
+ *     asked for, and still in the DOM.
+ */
+function ImportsLanding({
   data,
   onOpen,
   onChanged,
@@ -244,258 +270,175 @@ function ImportList({
   }, [label, onChanged, onOpen]);
 
   return (
-    <>
-      {/*
-        SECTION ONE — `New Import`, FIRST. The action a reader came here for.
-
-        WHY THIS IS NOW FIRST, AND WHY "HOW IT WORKS" IS NOW LAST (below). The
-        owner, of this exact page: "the text is still stopping midway through
-        half the block, and it's not really something that looks good" — the
-        landing used to open with a six-line paragraph and THEN a full
-        stepper-plus-note block before a reader ever reached a control. This
-        screen's own job is simple (one sentence in `.hi-lead` now says it):
-        reconstruct candidate metadata from files already on hand. State,
-        action, and value belong before explanation — the design direction
-        this repo has recorded elsewhere as "state -> action -> blocker ->
-        value -> source before explanation" — so `New Import` and `Imports`
-        (the record of past sessions) now render immediately after the intro,
-        and the longer "how the six stages work" explanation moves to a
-        collapsed disclosure at the end of this list (see the closing
-        `<details>` below).
-
-        MEASURED BEFORE: `IMPORT_COPY.actionStart` ("Start an Import") rendered
-        TWICE, 78px apart — once as this section's `<h2>` and once as the label of
-        the primary button inside it. A section title that repeats its own primary
-        action's verb tells the reader nothing the button did not already say, and
-        it makes the same string an ambiguous target for anything (a test, a
-        screen reader user cycling headings, a person) looking for "the control".
-
-        THE RULE APPLIED HERE AND ONE MORE TIME BELOW: a section is titled by
-        its SUBJECT and the button keeps the verb. So `New Import` names the thing;
-        `Start an Import` remains the only place that verb appears.
-      */}
-      <div className="hi-section hi-landing-col">
-        <h2 className="hi-section-title">New Import</h2>
-        <label className="hi-field">
-          <span className="hi-field-label">Name this import (optional)</span>
-          <input
-            className="hi-input"
-            type="text"
-            value={label}
-            maxLength={200}
-            onChange={(event) => setLabel(event.target.value)}
-            placeholder="e.g. Cu K-edge campaign, 2019"
-          />
-        </label>
-        <button type="button" className="btn btn-primary" onClick={start} disabled={busy}>
-          <Plus size={14} strokeWidth={2.2} aria-hidden="true" />
-          {busy ? 'Starting…' : IMPORT_COPY.actionStart}
-        </button>
-        {error !== null && <Refusal error={error} />}
-      </div>
-
-      {/*
-        SECTION TWO — `Imports`.
-
-        THE HEADING STRING IS LOAD-BEARING AND MUST NOT BE "IMPROVED".
-        `e2e/surfaces.ts:141` declares this surface's ready gate as
-        `{ role: 'heading', name: 'Imports' }` and
-        `e2e/mutation/imports-session-a11y.spec.ts:64` asserts it at `level: 2` —
-        both because it is inside the `status === 'data'` branch and so cannot
-        render over a skeleton. Renaming it, or changing its level, silently turns
-        thirteen sweeps into measurements of a loading state. (This is also why
-        moving it above `New Import` keeps it exactly as it was rather than
-        touching its text or level — only its ORDER on the page changed.)
-      */}
-      <div className="hi-section hi-landing-col">
-        <h2 className="hi-section-title">Imports</h2>
-        {data.total === 0 ? (
-          /*
-            THE EMPTY STATE IS NOW A BOX, and it is `/experiments`' box.
-
-            MEASURED BEFORE: a 20x20 icon flush-left at x=275 with no container at
-            all, then a `<strong>`, then a paragraph at a third body measure
-            (895.9px). Three fragments, no card, nothing holding them together.
-
-            It now reuses the shape `components/queue.css` already ships for the
-            same job — bordered box, icon in a tinted ~30px square, Title Case
-            title, one-sentence body, consistent gutters — rather than inventing a
-            third card language. The icon drops 20px -> 18px to match
-            `.queue-empty-action-mark`'s glyph inside its 30px square.
-
-            The two strings are UNCHANGED (`IMPORT_COPY.emptyTitle` /
-            `emptyBody`); only the box around them is new.
-          */
-          <div className="hi-empty">
-            <span className="hi-empty-mark" aria-hidden="true">
-              <Inbox size={18} strokeWidth={1.75} />
-            </span>
-            <div className="hi-empty-main">
-              <h3 className="hi-empty-title">{IMPORT_COPY.emptyTitle}</h3>
-              <p className="hi-empty-body">{IMPORT_COPY.emptyBody}</p>
-            </div>
-          </div>
-        ) : (
-          <ul className="hi-list">
-            {data.imports.map((row) => (
-              <li key={row.import_id} className="hi-list-row">
-                <div className="hi-list-main">
-                  <span className="hi-list-title">{row.label || 'Unnamed import'}</span>
-                  <span className="hi-list-meta">
-                    {row.source_count} source{row.source_count === 1 ? '' : 's'} ·{' '}
-                    {row.parsed_source_count} read · {row.candidate_count} candidate
-                    {row.candidate_count === 1 ? '' : 's'} · {row.proposed_count} sent to
-                    review
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => onOpen(row.import_id)}
-                >
-                  {IMPORT_COPY.actionOpen}
-                  {/* WHICH import, for a screen reader: a list of identical "Open"
-                      buttons names none of them (independent review, 2026-09-23). */}
-                  <span className="sr-only"> {row.label || 'Unnamed import'}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {/*
-        SECTION THREE — the explanation, collapsed, LAST.
-
-        A NATIVE `<details>`, the repo's own idiom for exactly this move (see
-        `RecordValidator.tsx`'s `.rec-val-purpose`, `HelpPanel.tsx`'s
-        `.help-more`, `FetchStates.tsx`'s `.fetch-state-technical`): keyboard-
-        operable (Tab to the `<summary>`, Enter/Space to toggle), and exposed
-        to a screen reader as a native disclosure widget with its own
-        expanded/collapsed state — no ARIA authored by hand, and none needed.
-
-        NOTHING IS DELETED. The six-stage stepper and the server's own
-        durability sentence are exactly what rendered here before this slice;
-        only their POSITION (last, not first) and their default VISIBILITY
-        (collapsed, not always-open) changed. `CLAUDE.md`'s own rule for this
-        exact situation — never delete a scientific caveat or honesty claim,
-        only relocate it behind progressive disclosure — is what this is: the
-        durability sentence stays reachable by keyboard and to a screen
-        reader, and "Nothing here becomes a value on its own" (the OTHER
-        claim this slice had to preserve) never left the always-visible
-        `.hi-lead` above, so it did not need this disclosure at all.
-      */}
-      <div className="hi-section hi-landing-col">
-        {/* The shared `Disclosure` since 2026-09-23 (it was a native `<details>` with
-            an 11px triangle); collapsed by default exactly as before. */}
-        <Disclosure className="hi-how-it-works" summary="How Historical Import works">
-          <WorkflowStrip steps={data.workflow} furthest={null} />
-          {/* THE SERVER'S OWN SENTENCE about what a session is and is not. Same
-              string, same `role="note"`, same server source as before — only
-              now the last child of a collapsed disclosure rather than of an
-              always-visible heading. */}
+    <Widget
+      id="hi-imports"
+      title="Imports"
+      sub={IMPORT_COPY.landingSub}
+      infoLabel="How Historical Import works"
+      info={
+        <div className="hi-how-it-works">
+          <p className="hi-body">{IMPORT_COPY.howItWorksLead}</p>
+          <WorkflowStrip workflow={data.workflow} furthest={null} />
+          {/* THE SERVER'S OWN SENTENCE about what a session is and is not. */}
           <p className="hi-note" role="note">
             {data.durability}
           </p>
-        </Disclosure>
+        </div>
+      }
+      lead={
+        <form
+          className="hi-new"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void start();
+          }}
+        >
+          <label className="hi-new-field">
+            <span className="hi-field-label">{IMPORT_COPY.nameLabel}</span>
+            <input
+              className="hi-input"
+              type="text"
+              value={label}
+              maxLength={200}
+              onChange={(event) => setLabel(event.target.value)}
+              placeholder={IMPORT_COPY.namePlaceholder}
+            />
+          </label>
+          <button type="submit" className="btn btn-primary" disabled={busy}>
+            <Plus size={14} strokeWidth={2.2} aria-hidden="true" />
+            {busy ? 'Starting…' : IMPORT_COPY.actionStart}
+          </button>
+        </form>
+      }
+    >
+      {error !== null && <Refusal error={error} />}
+      {data.total === 0 ? (
+        <div className="hi-empty">
+          <span className="hi-empty-mark" aria-hidden="true">
+            <Inbox size={18} strokeWidth={1.75} />
+          </span>
+          <div className="hi-empty-main">
+            <h3 className="hi-empty-title">{IMPORT_COPY.emptyTitle}</h3>
+            <p className="hi-empty-body">{IMPORT_COPY.emptyBody}</p>
+          </div>
+        </div>
+      ) : (
+        <ul className="hi-list">
+          {data.imports.map((row) => (
+            <ImportRow key={row.import_id} row={row} workflow={data.workflow} />
+          ))}
+        </ul>
+      )}
+    </Widget>
+  );
+}
+
+/** "18 Oct 2026, 07:52" — when a session started, in the reader's own clock. */
+function startedText(utc: string): string {
+  const when = new Date(utc);
+  if (Number.isNaN(when.getTime())) return '';
+  return when.toLocaleString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+/**
+ * ONE IMPORT, AS A ROW: its name (a real link to it), when it started, and how far it
+ * has got — six segments, filled from the server's `furthest_step`, labelled with the
+ * stage it has reached. The meter is DECORATION OF A STATED FACT: the stage name and an
+ * `sr-only` sentence say the same thing in words.
+ */
+function ImportRow({ row, workflow }: { row: ApiImportSummary; workflow: ApiImportWorkflowStep[] }) {
+  const reached = stagesReached(workflow, row.furthest_step);
+  const total = IMPORT_STAGES.length;
+  const name = row.label || 'Unnamed import';
+  const stageName = reached > 0 ? STAGE[IMPORT_STAGES[reached - 1]!].title : IMPORT_COPY.meterNotStarted;
+  const started = startedText(row.created_utc);
+  return (
+    <li className="hi-list-row">
+      <div className="hi-list-main">
+        <Link className="hi-list-title" to={ROUTES.importSession(row.import_id)}>
+          {name}
+        </Link>
+        {started && <span className="hi-list-meta">Started {started}</span>}
       </div>
-    </>
+      <div className="hi-meter-wrap">
+        <span className="hi-meter" aria-hidden="true">
+          {IMPORT_STAGES.map((stage, index) => (
+            <span key={stage} className={`hi-meter-seg${index < reached ? ' is-reached' : ''}`} />
+          ))}
+        </span>
+        <span className="hi-meter-label">
+          <span aria-hidden="true">{reached > 0 ? `${reached} of ${total} · ${stageName}` : stageName}</span>
+          <span className="sr-only">
+            {reached > 0 ? IMPORT_COPY.meterLabel(stageName, reached, total) : IMPORT_COPY.meterNotStarted}
+          </span>
+          {row.proposed_count > 0 && <span className="hi-meter-sent"> · {IMPORT_COPY.rowSent(row.proposed_count)}</span>}
+        </span>
+      </div>
+    </li>
   );
 }
 
 /* --------------------------------------------------------------------------
- * The workflow strip — the server's steps, in the server's order.
+ * The workflow strip — the six stages, in the session's own names.
  * -------------------------------------------------------------------------- */
 
 /**
- * The six steps, with the reached one marked and the unbuilt one stated.
+ * The six stages, with the reached one marked and any step the server declares unbuilt
+ * stated in the server's own words.
  *
- * IT IS NOT A WORKFLOW SPINE AND MUST NOT BE READ AS ONE. The record screen's
- * spine is server-DERIVED and GATED — it decides what a scientist may do next.
- * This strip is a description of a sequence: nothing here is locked, no step
- * blocks another, and `aria-current="step"` marks only where the session has
- * reached. Modelling an import as a gated pipeline would claim a completion
- * criterion nobody defined, which is the argument `workflow.py` already makes
- * for submission and `CLAUDE.md` §11 records for capture.
+ * IT IS NOT A WORKFLOW SPINE AND MUST NOT BE READ AS ONE: nothing here is locked, no
+ * stage blocks another, and `aria-current="step"` marks only where a session has
+ * reached. Since 2026-10-18 (QA `C-20`) its labels are the STAGE names the tabs use —
+ * Source Bundle … Add to Experiment — not the server's step labels (Parse, Reconstruct),
+ * so one sequence has one set of names. A dot per stage on a connecting line is the
+ * owner's shape for it (`.hi-step-node`, the record spine's disc vocabulary).
  */
 function WorkflowStrip({
-  steps,
+  workflow,
   furthest,
 }: {
-  steps: ApiImportWorkflowStep[];
+  workflow: ApiImportWorkflowStep[];
   furthest: string | null;
 }) {
-  /*
-   * THE DISCLOSURE SITS BELOW THE ROW, NOT INSIDE IT, and that is unchanged
-   * from the pill-row version this replaces — only the NODE's own shape and
-   * the connector between nodes changed.
-   *
-   * WHAT CHANGED, AND WHY. The owner, of this exact row: "it should be a
-   * little bit cleaner, and I think it should be like a circle-dotted thing
-   * instead." The pill row (bordered/filled chips joined by a `›` chevron)
-   * had already been through one correction — the SAME owner had previously
-   * said of it "are they supposed to be clickable or something?", because a
-   * bordered, filled chip is this app's shape for `.section-tab` and for
-   * filter chips, both of which ARE controls. Removing the border and fill
-   * (the prior fix, still in `.hi-step`'s base rule) answered "is it a
-   * button" but not "is it clean" — six one-word labels chained by `›` still
-   * read as a breadcrumb, not as a sequence with a position in it. A dot per
-   * step, joined by a line, is the vocabulary this app already uses for
-   * exactly that job: `components/workflow.css`'s record-screen spine
-   * (`.spine-disc` + `.spine-step::before`) is a disc-and-connector stepper,
-   * and `.trail-dot` (`evidence.css`) is the same disc vocabulary at its
-   * smallest size. `.hi-step-node` below reuses that vocabulary rather than
-   * inventing a third.
-   *
-   * THE UNBUILT NODE IS DASHED, NOT THE UNBUILT STEP'S CONNECTOR. Only the
-   * CIRCLE for "Add to Experiments" is dashed; the line reaching it is the
-   * same solid `--border-strong` every other segment uses, because the
-   * dashing is a claim about that ONE step ("not built"), not about how far
-   * the sequence has got.
-   *
-   * NARROW WIDTH: see `.hi-steps-wrap`'s `container-type` in
-   * historical-import.css. Below the container's own measured 560px this
-   * renders as a VERTICAL stepper (dot beside label, rows stacked, a
-   * vertical connector) rather than the six-across horizontal row, which is
-   * this file's own established pattern for "the safe direction to fail in"
-   * (see `experiment-graph.css`'s `@container` comment) — a container query
-   * responds to the CARD's rendered width, not the window's, which matters
-   * here because a sidebar sits between them (see
-   * `viewport-media-query-wrong-box` in this repo's own session memory).
-   */
-  const unbuilt = steps.filter((step) => !step.built && step.disclosure !== null);
+  const stepOf = (stage: ImportStageId) => workflow.find((step) => step.id === STAGE_WORKFLOW_STEP[stage]);
+  const unbuiltSteps = workflow.filter((step) => !step.built && step.disclosure !== null);
   return (
     <div className="hi-steps-wrap">
-      <ol className="hi-steps" aria-label="Historical import workflow">
-        {steps.map((step) => {
-          const reached = furthest !== null && step.id === furthest;
+      <ol className="hi-steps" aria-label="Historical import stages">
+        {IMPORT_STAGES.map((stage) => {
+          const step = stepOf(stage);
+          const unbuilt = step !== undefined && !step.built && step.disclosure !== null;
+          const reached = furthest !== null && step?.id === furthest;
           return (
             <li
-              key={step.id}
-              className={`hi-step${reached ? ' reached' : ''}${step.built ? '' : ' unbuilt'}`}
+              key={stage}
+              className={`hi-step${reached ? ' reached' : ''}${unbuilt ? ' unbuilt' : ''}`}
               aria-current={reached ? 'step' : undefined}
-              aria-describedby={
-                !step.built && step.disclosure !== null ? `hi-step-note-${step.id}` : undefined
-              }
+              aria-describedby={unbuilt && step ? `hi-step-note-${step.id}` : undefined}
             >
-              {/* THE UNBUILT STEP OFFERS NO CONTROL -- not a disabled one. A
-                  disabled button implies the act exists and is temporarily
-                  unavailable, which is the claim section 15 forbids. The dot
-                  itself carries no text and is `aria-hidden`: the state it
-                  shows (reached / unbuilt / plain) is decorative reinforcement
-                  of what the LABEL and `aria-current`/`aria-describedby`
-                  already say, never the only way to know it. */}
+              {/* THE UNBUILT STAGE OFFERS NO CONTROL — not a disabled one. The dot is
+                  `aria-hidden` reinforcement of what the label already says. */}
               <span className="hi-step-node" aria-hidden="true" />
-              <span className="hi-step-label">{step.label}</span>
+              <span className="hi-step-label">{STAGE[stage].title}</span>
             </li>
           );
         })}
       </ol>
-      {unbuilt.map((step) => (
-        <p className="hi-steps-disclosure" id={`hi-step-note-${step.id}`} key={step.id}>
-          <span className="hi-steps-disclosure-subject">{step.label}:</span> {step.disclosure}
-        </p>
-      ))}
+      {unbuiltSteps.map((step) => {
+        const stage = IMPORT_STAGES.find((s) => STAGE_WORKFLOW_STEP[s] === step.id);
+        return (
+          <p className="hi-steps-disclosure" id={`hi-step-note-${step.id}`} key={step.id}>
+            <span className="hi-steps-disclosure-subject">{stage ? STAGE[stage].title : step.label}:</span>{' '}
+            {step.disclosure}
+          </p>
+        );
+      })}
     </div>
   );
 }
@@ -504,82 +447,71 @@ function WorkflowStrip({
  * One session — SIX STAGES, ONE IN FOCUS (owner QA H1, 2026-09-22).
  * -------------------------------------------------------------------------- */
 
-type ActFn = (name: string, run: () => Promise<unknown>) => Promise<void>;
-type ActWithNext = (name: string, run: () => Promise<unknown>, next?: ImportStageId) => Promise<void>;
+/** An act resolves `true` when it succeeded, so a control can say so where it was pressed. */
+type ActFn = (name: string, run: () => Promise<unknown>) => Promise<boolean>;
+type ActWithNext = (name: string, run: () => Promise<unknown>, next?: ImportStageId) => Promise<boolean>;
 
 const STAGE = IMPORT_STAGE_COPY;
+
+/** Acts whose result is said WHERE THEY WERE PRESSED, so focus stays there (QA `C-26`). */
+const IN_PLACE_ACTS = /^(signal:|create:scope)/;
 
 /**
  * AN OPENED IMPORT, AS A FOCUSED STAGE FLOW.
  *
- * ── WHAT THIS REPLACED ──────────────────────────────────────────────────────
- *
- * Every stage used to render at once, one card after another: the sources, what
- * was read, the whole corpus review, every candidate as a full card, and the batch
- * send. Measured at 1440px on the synthetic five-measurement archive: 43,994 px of
- * page, each of 101 candidates headed by a raw schema path and carrying its
- * normalisation rule in full, with internal tokens (`sources_disagree`,
- * `deterministic_fake`) on the surface.
- *
- * ── WHAT IT IS NOW ─────────────────────────────────────────────────────────
- *
  *  1. THE SUMMARY FIRST — the counts a reader decides from, before any detail.
- *  2. SIX STAGES AS TABS — Source Bundle · What ISAAC Read · Runs & Candidates ·
- *     Conflicts · Review · Add to Experiment — the owner's names, one in focus.
- *     Each shows ONE heading and ONE sentence; its explanation is behind a `?`.
+ *  2. SIX STAGES AS TABS, one in focus, its name in the URL (`?stage=`).
  *  3. EVERY STAGE STAYS MOUNTED, the inactive ones `hidden`, so a half-typed form
- *     survives a trip to another stage and every guard that reads the DOM still
- *     reaches the text (the record screen's workspaces follow the same rule).
+ *     survives a trip to another stage and every guard that reads the DOM still reaches
+ *     the text.
  *
- * The tabs are a real ARIA tablist: arrow keys move between them, Home/End jump,
- * and each panel is labelled by its tab. `aria-current="step"` still marks how far
- * the session has got — a fact the SERVER derives — on the stage that owns that step.
+ * ── FEWER CLICKS, NO DECISION LOST (2026-10-18, QA `C-21`) ──────────────────
+ *
+ * Reconstruct added no decision — for an archive the candidates already existed at the
+ * read — and each "Next:" button only moved a tab. So adding a source this build can
+ * read now READS AND RECONSTRUCTS IN THE SAME ACT and moves the reader to Runs &
+ * Candidates; the per-stage "Next:" buttons are gone. Measured on the example archive:
+ * Start an Import to proposals on a record went from 11 clicks (9 at the fewest) to 5.
+ * The "never yank the reader off a stage they chose" guard is unchanged: an act moves
+ * the reader only if they are still where it started.
  */
 function ImportSessionView({
   importId,
+  stage: stageParam,
+  onStage,
   onClose,
 }: {
   importId: string;
+  stage: ImportStageId | null;
+  onStage: (stage: ImportStageId, how?: { replace?: boolean }) => void;
   onClose: () => void;
 }) {
   const session = useFetch(() => api.getImport(importId), [importId]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
-  const [stage, setStage] = useState<ImportStageId | null>(null);
   const destinations = useProposalDestinations();
-  /* The stage on screen, kept for `act`: see "PINNED" below. */
+  /* The stage on screen, and whether the URL names one, kept for `act`. */
   const activeRef = useRef<ImportStageId | null>(null);
+  const stageParamRef = useRef<ImportStageId | null>(stageParam);
+  stageParamRef.current = stageParam;
   const [announcement, setAnnouncement] = useState('');
-  const pendingFocus = useRef<string | null>(null);
+  /* WHERE FOCUS GOES AFTER AN ACT: a selector AND the stage whose panel holds it. */
+  const pendingFocus = useRef<{ selector: string; stage: ImportStageId } | null>(null);
   const [focusTick, setFocusTick] = useState(0);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
 
-  /*
-   * THE RELOAD IS SILENT, which it was not until 2026-09-22 — and the stage flow is
-   * why it has to be. A full reload put this component into `loading` and unmounted
-   * every stage, so an open measurement, a half-chosen resolution or the stage in
-   * focus were all lost on every act. `reloadSilent` re-reads the session and
-   * replaces the data in place; a failed re-read is disclosed beside the stages
-   * rather than swapping the page for a spinner.
-   */
   const act: ActWithNext = useCallback(
     async (name, run, next) => {
       /*
-       * PINNED. Until a reader picks a stage, the one shown is DERIVED from the
-       * session — so without this, adding the first source re-derived it and swept
-       * the reader from Source Bundle to What ISAAC Read mid-task, table and all
-       * (caught by the import-session a11y spec). An act keeps the reader where they
-       * are unless it names where to go next.
+       * PINNED. Until a reader picks a stage, the one shown is DERIVED from the session
+       * — so without this, adding the first source re-derived it mid-task. The pin
+       * REPLACES the history entry: it records where the reader already is.
        */
-      setStage((current) => current ?? activeRef.current);
-      /*
-       * WHERE THE READER WAS WHEN THEY PRESSED IT (2026-09-23 — main's CI went red on
-       * #280). An act can take seconds, and a reader may open another stage while it
-       * runs; the import-session a11y spec does exactly that, opening Conflicts right
-       * after pressing Reconstruct. The act used to apply its `next` regardless, so
-       * the response landing took the reader off the tab they had just chosen. Now an
-       * act moves the reader — and takes focus — ONLY if they are still on the stage
-       * where it started. It is still announced either way, without claiming a move.
-       */
+      if (stageParamRef.current === null && activeRef.current !== null) {
+        onStage(activeRef.current, { replace: true });
+      }
+      /* WHERE THE READER WAS WHEN THEY PRESSED IT: an act moves the reader — and takes
+         focus — only if they are still on the stage where it started. */
       const startedOn = activeRef.current;
       setBusy(name);
       setError(null);
@@ -587,40 +519,46 @@ function ImportSessionView({
         await run();
         session.reloadSilent();
         const stayed = activeRef.current === startedOn;
-        if (next && stayed) setStage(next);
-        /* SAID AND FOCUSED (independent review, 2026-09-23): an act's result is
-           announced in the stage's one polite region, and focus moves to what the act
-           produced — its report or the stage heading — instead of being dropped when
-           the control that had it re-renders away. Never to a stage the reader left. */
+        if (next && stayed && next !== startedOn) onStage(next, { replace: true });
         setAnnouncement(announcementFor(name, stayed));
-        if (stayed) {
-          pendingFocus.current = name.startsWith('add-whole') ? '.hi-addwhole-result .hi-block-title' : '.hi-stage-title';
+        if (stayed && !IN_PLACE_ACTS.test(name) && startedOn !== null) {
+          /* THE TARGET STAGE TRAVELS WITH THE REQUEST (independent review, 2026-10-18). The
+             stage now lives in the URL, and with `v7_startTransition` the move lands a render
+             LATER than this effect's next run — so focusing "the panel that is shown" found
+             the Source Bundle heading about to hide, and focus fell to <body>. */
+          pendingFocus.current = {
+            selector: name.startsWith('add-whole') ? '.hi-addwhole-result .hi-block-title' : '.hi-stage-title',
+            stage: next ?? startedOn,
+          };
           setFocusTick((n) => n + 1);
         }
+        return true;
       } catch (err) {
         setError(err instanceof ApiError ? err : new ApiError(String(err)));
+        return false;
       } finally {
         setBusy(null);
       }
     },
-    [session],
+    [session, onStage],
   );
 
   /*
-   * HIST-005's REPORT LIVES HERE, above the stages, because it cannot be re-derived
-   * from the reloaded session: it is the server's statement about ONE request — its
-   * counts and its reason per candidate it would not send — which the session never
-   * stores. Reconstructing it would be composing a report rather than relaying one.
+   * HIST-005's REPORT LIVES HERE, above the stages, because it cannot be re-derived from
+   * the reloaded session: it is the server's statement about ONE request. What the
+   * session DOES remember — every candidate it sent, and where — is shown from the
+   * session itself, so a reload keeps it (QA `C-25`).
    */
   const [addedResult, setAddedResult] = useState<ApiImportAddedToExperiment | null>(null);
 
-  /* Focus lands after the re-render that shows the act's result; until the target is
-     on screen (a report renders a moment later), the request waits. */
+  /* Focus lands after the re-render that SHOWS the target stage's panel — never in a panel
+     that is hidden, or about to be. Until that render, the request waits. */
   useEffect(() => {
-    const selector = pendingFocus.current;
-    if (!selector) return;
-    const panel = document.querySelector('[role="tabpanel"]:not([hidden])');
-    const target = panel?.querySelector<HTMLElement>(selector);
+    const want = pendingFocus.current;
+    if (!want) return;
+    const panel = document.getElementById(panelId(importId, want.stage));
+    if (!panel || panel.hidden) return;
+    const target = panel.querySelector<HTMLElement>(want.selector);
     if (target) {
       target.focus();
       pendingFocus.current = null;
@@ -628,8 +566,14 @@ function ImportSessionView({
   });
   void focusTick;
 
+  const label = session.status === 'data' ? session.data.import.label : '';
+  const createRecord = useCallback(async () => {
+    const created = await api.createExperiment({ title: label || 'Imported experiment' });
+    await destinations.reload();
+    return created.id;
+  }, [label, destinations]);
+
   if (session.status === 'loading') {
-    // Same reason as the list's, above.
     return (
       <div className="hi-section">
         <LoadingPanel label="Loading this import…" />
@@ -637,6 +581,19 @@ function ImportSessionView({
     );
   }
   if (session.status === 'error') {
+    /* A LINK TO AN IMPORT THAT IS NOT THERE (QA `C-14`) is a fact about the import, not
+       a backend that is down — said in words, with the way back. */
+    if (session.error.status === 404) {
+      return (
+        <div className="hi-section hi-gone" role="status">
+          <h2 className="hi-section-title">{IMPORT_COPY.goneTitle}</h2>
+          <p className="hi-body">{IMPORT_COPY.goneBody}</p>
+          <button type="button" className="btn btn-secondary" onClick={onClose}>
+            Back to imports
+          </button>
+        </div>
+      );
+    }
     return (
       <div className="hi-section">
         <BackendDown error={session.error} onRetry={session.reload} />
@@ -648,20 +605,34 @@ function ImportSessionView({
   }
 
   const data: ApiImportSession = session.data.import;
-  const active: ImportStageId = stage ?? defaultStage(data);
+  const active: ImportStageId = stageParam ?? defaultStage(data);
   activeRef.current = active;
   const summary = summaryItems(data);
+  const scope = {
+    targetId: data.rules?.target_experiment_id ?? null,
+    createRecord,
+    onAct: act as ActFn,
+    busy,
+  };
+
+  const discard = async () => {
+    setBusy('discard');
+    setError(null);
+    try {
+      await api.deleteImport(importId);
+      /* NOT through `act`: an act re-reads the session afterwards, and this one has just
+         removed it — the stray `GET … 404` the audit measured (QA `C-15`). */
+      setConfirmDiscard(false);
+      onClose();
+    } catch (err) {
+      setError(err instanceof ApiError ? err : new ApiError(String(err)));
+      setBusy(null);
+    }
+  };
 
   return (
-    <>
-      {/*
-        THE SESSION HEADER: what this is, a way out, and the counts a reader
-        decides from. `Import Session` is the word the server's own durability
-        sentence uses for this thing; the durability sentence itself stays visible
-        (a working area a restart can end is a consequence, not a definition).
-      */}
+    <ImportScopeProvider value={scope}>
       <div className="hi-section hi-session-head">
-        <span className="eyebrow hi-session-eyebrow">Import Session</span>
         <div className="hi-section-head">
           <h2 className="hi-section-title">{data.label || 'Unnamed import'}</h2>
           <button type="button" className="btn btn-secondary" onClick={onClose}>
@@ -689,7 +660,7 @@ function ImportSessionView({
       </div>
 
       <div className="hi-section hi-stages-card">
-        <StageTabs session={data} active={active} onSelect={setStage} />
+        <StageTabs session={data} active={active} onSelect={(next, replace) => onStage(next, { replace })} />
         <p className="sr-only" role="status" aria-live="polite">
           {announcement}
         </p>
@@ -708,31 +679,13 @@ function ImportSessionView({
             )}
             {id === 'read' && <ReadStage data={data} busy={busy} onAct={act} importId={importId} />}
             {id === 'runs' && (
-              <RunsStage
-                data={data}
-                busy={busy}
-                onAct={act}
-                importId={importId}
-                destinations={destinations}
-              />
+              <RunsStage data={data} busy={busy} onAct={act} importId={importId} destinations={destinations} />
             )}
             {id === 'conflicts' && (
-              <ConflictsStage
-                data={data}
-                busy={busy}
-                onAct={act}
-                importId={importId}
-                destinations={destinations}
-              />
+              <ConflictsStage data={data} busy={busy} onAct={act} importId={importId} destinations={destinations} />
             )}
             {id === 'review' && (
-              <ReviewStage
-                data={data}
-                busy={busy}
-                onAct={act}
-                importId={importId}
-                destinations={destinations}
-              />
+              <ReviewStage data={data} busy={busy} onAct={act} importId={importId} destinations={destinations} />
             )}
             {id === 'add' && (
               <AddStage
@@ -743,55 +696,136 @@ function ImportSessionView({
                 destinations={destinations}
                 result={addedResult}
                 onResult={setAddedResult}
-                onGoTo={setStage}
+                onGoTo={(next) => onStage(next)}
               />
-            )}
-            {/* THE WAY ON. A tab strip alone leaves a first-time reader to guess that
-                reading happens one tab over; this names the next stage and moves
-                focus to its tab, so a keyboard reader lands where they asked to go. */}
-            {IMPORT_STAGES.indexOf(id) < IMPORT_STAGES.length - 1 && (
-              <div className="hi-stage-next">
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => {
-                    const next = IMPORT_STAGES[IMPORT_STAGES.indexOf(id) + 1]!;
-                    setStage(next);
-                    window.setTimeout(() => document.getElementById(tabId(importId, next))?.focus(), 0);
-                  }}
-                >
-                  Next: {STAGE[IMPORT_STAGES[IMPORT_STAGES.indexOf(id) + 1]!].title}
-                </button>
-              </div>
             )}
           </div>
         ))}
       </div>
 
       {/*
-        THE SAME RULE AS `New Import`: the section is titled by its subject and the
-        button keeps the verb. `This Working Area` is the server's own words for
-        what a session is (`IMPORT_COPY.discardNote`). The consequence stays in the
-        open beside the destructive button, never behind a disclosure.
+        THE WORKING AREA, AND ITS ONE DESTRUCTIVE ACT. The consequence stays in the open
+        beside the button, and the button now ASKS (QA `C-15`) — a dialog saying what is
+        lost and what is kept, before anything is removed.
       */}
       <div className="hi-section hi-discard">
-        <h3 className="hi-section-title">{STAGE.discardTitle}</h3>
         <p className="hi-note">{IMPORT_COPY.discardNote}</p>
         <button
           type="button"
-          className="btn btn-danger"
+          className="btn btn-danger-quiet"
           disabled={busy !== null}
-          onClick={() =>
-            act('discard', async () => {
-              await api.deleteImport(importId);
-              onClose();
-            })
-          }
+          onClick={() => setConfirmDiscard(true)}
         >
           {IMPORT_COPY.actionDiscard}
         </button>
       </div>
-    </>
+      {confirmDiscard && (
+        <DiscardDialog
+          name={data.label || 'Unnamed import'}
+          busy={busy === 'discard'}
+          error={busy === 'discard' ? null : error}
+          onKeep={() => setConfirmDiscard(false)}
+          onConfirm={() => void discard()}
+        />
+      )}
+    </ImportScopeProvider>
+  );
+}
+
+/**
+ * DISCARD, CONFIRMED (2026-10-18, QA `C-15`). The repository's existing dialog shell
+ * (`.artifact-modal`, as `DiscardExperimentPanel` uses it): `role="alertdialog"`,
+ * `aria-modal`, focus moved IN on open to the SAFE button, Tab contained, Escape = keep,
+ * and focus returned to the opener on close.
+ */
+function DiscardDialog({
+  name,
+  busy,
+  error,
+  onKeep,
+  onConfirm,
+}: {
+  name: string;
+  busy: boolean;
+  error: ApiError | null;
+  onKeep: () => void;
+  onConfirm: () => void;
+}) {
+  const keepRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const opener = useRef<Element | null>(null);
+  useEffect(() => {
+    opener.current = document.activeElement;
+    keepRef.current?.focus();
+    return () => {
+      if (opener.current instanceof HTMLElement && opener.current.isConnected) opener.current.focus();
+    };
+  }, []);
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!busy) onKeep();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const modal = dialogRef.current;
+      if (modal === null) return;
+      const items = Array.from(modal.querySelectorAll<HTMLElement>('button:not([disabled])'));
+      if (items.length === 0) return;
+      const first = items[0]!;
+      const last = items[items.length - 1]!;
+      const active = document.activeElement;
+      if (e.shiftKey) {
+        if (active === first || !modal.contains(active)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !modal.contains(active)) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => document.removeEventListener('keydown', onKeyDown, true);
+  }, [busy, onKeep]);
+
+  return (
+    <div className="artifact-modal-backdrop" onClick={() => !busy && onKeep()}>
+      <div
+        ref={dialogRef}
+        className="artifact-modal hi-discard-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="hi-discard-title"
+        aria-describedby="hi-discard-body"
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="artifact-modal-head">
+          <span id="hi-discard-title" className="artifact-modal-title">
+            {IMPORT_COPY.discardDialogTitle}
+          </span>
+        </div>
+        <div className="hi-discard-dialog-body" id="hi-discard-body">
+          <p className="hi-discard-dialog-name">
+            <strong>{name}</strong>
+          </p>
+          <p className="reset-disclosure">{IMPORT_COPY.discardWhatGoes}</p>
+          <p className="reset-disclosure">{IMPORT_COPY.discardWhatStays}</p>
+          {error !== null && <Refusal error={error} />}
+        </div>
+        <div className="reset-dialog-actions">
+          <button ref={keepRef} type="button" className="btn btn-secondary" onClick={onKeep} disabled={busy}>
+            {IMPORT_COPY.discardKeep}
+          </button>
+          <button type="button" className="btn btn-danger" onClick={onConfirm} disabled={busy}>
+            {busy ? IMPORT_COPY.discardPending : IMPORT_COPY.actionDiscard}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -810,11 +844,12 @@ function StageTabs({
 }: {
   session: ApiImportSession;
   active: ImportStageId;
-  onSelect: (stage: ImportStageId) => void;
+  /** `replace` for an arrow-key move: walking the tabs by keyboard is not a history step. */
+  onSelect: (stage: ImportStageId, replace?: boolean) => void;
 }) {
   const candidates = session.reconstruction?.candidates ?? [];
   const counts = reviewCounts(session);
-  const conflicts = conflictCount(session);
+  const tally = conflictTally(session);
   const measurements = session.corpus_digest?.measurement_units;
   const furthestStage = IMPORT_STAGES.filter((s) => STAGE_WORKFLOW_STEP[s] === session.furthest_step)[0];
   const unbuilt = (s: ImportStageId) =>
@@ -822,15 +857,14 @@ function StageTabs({
 
   const meta: Record<ImportStageId, string> = {
     sources: plural(session.sources.length, 'source', 'sources'),
-    read:
-      session.corpus_digest
-        ? plural(session.corpus_digest.statements_read, 'statement', 'statements')
-        : `${session.source_counts.parsed} of ${session.source_counts.total} read`,
+    /* ~~"223 statements"~~ (QA `C-23`): a count of parser statements is the build's unit,
+       not the reader's. Sources read is what this stage is about. */
+    read: `${session.source_counts.parsed} of ${session.source_counts.total} read`,
     runs:
       measurements !== undefined && measurements !== null
         ? plural(measurements, 'measurement', 'measurements')
         : plural(candidates.length, 'candidate', 'candidates'),
-    conflicts: conflicts === 0 ? 'none' : plural(conflicts, 'open', 'open'),
+    conflicts: tally.open === 0 ? 'none to decide' : STAGE.conflicts.toDecide(tally.open),
     review: `${counts.needsReview.toLocaleString('en-US')} need review`,
     add: unbuilt('add') ? STAGE.stateLabels.notBuilt : `${counts.ready.toLocaleString('en-US')} ready`,
   };
@@ -845,7 +879,7 @@ function StageTabs({
           ? IMPORT_STAGES[IMPORT_STAGES.length - 1]
           : IMPORT_STAGES[(i + delta + IMPORT_STAGES.length) % IMPORT_STAGES.length];
     if (next === undefined) return;
-    onSelect(next);
+    onSelect(next, true);
     refs.current.get(next)?.focus();
   };
 
@@ -868,9 +902,11 @@ function StageTabs({
             aria-current={id === furthestStage ? 'step' : undefined}
             tabIndex={selected ? 0 : -1}
             className={`hi-stage-tab${stageReached(session, id) ? ' is-reached' : ''}${
-              id === 'conflicts' && conflicts > 0 ? ' has-conflicts' : ''
+              id === 'conflicts' && tally.open > 0 ? ' has-conflicts' : ''
             }`}
-            onClick={() => onSelect(id)}
+            onClick={() => {
+              if (!selected) onSelect(id);
+            }}
             onKeyDown={(event) => {
               if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
                 event.preventDefault();
@@ -901,20 +937,20 @@ function StageTabs({
   );
 }
 
-/** What an act says in the stage's polite region when it succeeds. */
 /**
  * The act's one polite sentence. `stayed` is false when the reader opened another stage
  * while it ran: the act then moved nothing, so the sentence names no stage it "shows"
  * and points at no report "below" (2026-09-23).
  */
 function announcementFor(name: string, stayed = true): string {
-  if (name === 'add-archive') return 'Archive added to the source bundle.';
-  if (name === 'add-fixture') return 'Example source added to the source bundle.';
+  const showing = stayed ? ` Showing ${STAGE.runs.title}.` : '';
+  if (name === 'add-archive' || name === 'add-default-archive') return `Archive added and read.${showing}`;
+  if (name === 'add-fixture') return `Example source added and read.${showing}`;
   if (name === 'add-reference' || name === 'record-staged-file') return 'Recorded as a source.';
   if (name.startsWith('remove:')) return 'Source removed.';
-  if (name === 'parse') return 'Sources read.';
+  if (name === 'parse') return `Sources read.${showing}`;
   if (name === 'reconstruct') {
-    return stayed ? 'Candidates reconstructed. Showing Runs & Candidates.' : 'Candidates reconstructed.';
+    return stayed ? `Candidates reconstructed.${showing}` : 'Candidates reconstructed.';
   }
   if (name.startsWith('add-whole') && !name.endsWith(':create')) {
     return stayed ? 'Sent to the record. The report is below.' : 'Sent to the record. The report is in Add to Experiment.';
@@ -948,6 +984,15 @@ function StageHead({ stage, lead }: { stage: ImportStageId; lead?: string }) {
  * Stage 1 — Source Bundle.
  * -------------------------------------------------------------------------- */
 
+/**
+ * Read every source and reconstruct, as ONE step (2026-10-18, QA `C-21`): reconstruction
+ * takes no decision of its own, so the reader is never asked to press for it separately.
+ */
+async function readAndReconstruct(importId: string): Promise<void> {
+  await api.parseImport(importId);
+  await api.reconstructImport(importId);
+}
+
 function SourceBundleStage({
   data,
   busy,
@@ -965,11 +1010,23 @@ function SourceBundleStage({
   const [fixture, setFixture] = useState(data.available_fixtures[0] ?? '');
   /* THE SERVER'S DEFAULT (2026-10-12): the archive the hosted image ships, so the picker
      never opens on one a scientist there could not have been offered. */
-  const [archive, setArchive] = useState(
+  const defaultArchive =
     data.default_archive && data.available_archives.includes(data.default_archive)
       ? data.default_archive
-      : (data.available_archives[0] ?? ''),
-  );
+      : (data.available_archives[0] ?? '');
+  const [archive, setArchive] = useState(defaultArchive);
+  const ingestion = data.capabilities?.historical_file_ingestion;
+  const hasArchive = data.sources.some((s) => s.kind === 'archive');
+
+  const addArchive = (name: string, actName: string) =>
+    onAct(
+      actName,
+      async () => {
+        await api.addImportSource(importId, { kind: 'archive', archiveName: name });
+        await readAndReconstruct(importId);
+      },
+      'runs',
+    );
 
   return (
     <>
@@ -1022,10 +1079,10 @@ function SourceBundleStage({
 
       {/*
         THE ACTIONS, IN THE ORDER A READER REACHES FOR THEM. The two kinds this build
-        actually READS — an archive and an example source — first, side by side;
-        then staging a file from this computer (browser-local, its privacy statement
-        on every row and in the drop zone itself); then, behind a disclosure, a
-        pointer to a file that must stay where it is.
+        actually READS — an archive and an example source — first; adding either now
+        reads and reconstructs it in the same act and moves to Runs & Candidates. Then
+        files from this computer, with what this deployment can do with them said first;
+        then, behind a disclosure, a pointer to a file that must stay where it is.
       */}
       <div className="hi-forms">
         {data.available_archives.length > 0 && (
@@ -1033,9 +1090,7 @@ function SourceBundleStage({
             className="hi-form"
             onSubmit={(event) => {
               event.preventDefault();
-              void onAct('add-archive', () =>
-                api.addImportSource(importId, { kind: 'archive', archiveName: archive }),
-              );
+              void addArchive(archive, 'add-archive');
             }}
           >
             <h4 className="hi-group-title">{IMPORT_COPY.actionAddArchive}</h4>
@@ -1052,10 +1107,12 @@ function SourceBundleStage({
                 ))}
               </select>
             </label>
-            <button type="submit" className="btn btn-secondary" disabled={busy !== null || !archive}>
-              {IMPORT_COPY.actionAddArchive}
-            </button>
-            <HelpTip subject="reading an archive">{IMPORT_COPY.addArchiveNote}</HelpTip>
+            <div className="hi-form-actions">
+              <button type="submit" className="btn btn-secondary" disabled={busy !== null || !archive}>
+                {busy === 'add-archive' ? 'Adding and reading…' : IMPORT_COPY.actionAddArchive}
+              </button>
+              <HelpTip subject="reading an archive">{IMPORT_COPY.addArchiveNote}</HelpTip>
+            </div>
           </form>
         )}
 
@@ -1064,8 +1121,13 @@ function SourceBundleStage({
             className="hi-form"
             onSubmit={(event) => {
               event.preventDefault();
-              void onAct('add-fixture', () =>
-                api.addImportSource(importId, { kind: 'synthetic_fixture', fixtureName: fixture }),
+              void onAct(
+                'add-fixture',
+                async () => {
+                  await api.addImportSource(importId, { kind: 'synthetic_fixture', fixtureName: fixture });
+                  await readAndReconstruct(importId);
+                },
+                'runs',
               );
             }}
           >
@@ -1080,36 +1142,67 @@ function SourceBundleStage({
                 ))}
               </select>
             </label>
-            <button type="submit" className="btn btn-secondary" disabled={busy !== null || !fixture}>
-              {IMPORT_COPY.actionAddFixture}
-            </button>
+            <div className="hi-form-actions">
+              <button type="submit" className="btn btn-secondary" disabled={busy !== null || !fixture}>
+                {busy === 'add-fixture' ? 'Adding and reading…' : IMPORT_COPY.actionAddFixture}
+              </button>
+            </div>
           </form>
         )}
       </div>
 
-      {/* THE FILE PICKER. `ImportFileStaging` takes `onRecord` as a prop and so
-          cannot import the API client: it cannot send a byte by construction. What
-          reaches ISAAC is a file's name, size, type and — only if asked — a
-          checksum computed in this tab. `POST /api/uploads` stays an unconditional
-          403 and nothing here calls it, whatever `historical_file_ingestion` says:
-          that capability opens a server-side staging directory, never this route. */}
-      <ImportFileStaging
-        busy={busy !== null}
-        onRecord={async (input) => {
-          /* NOT routed through `onAct`: a refusal must land on the ROW that caused
-             it, not in one banner for a list. `onAct` is used afterwards only for
-             its reload. */
-          await api.addImportSource(importId, {
-            kind: 'reference',
-            filename: input.filename,
-            reference: input.reference,
-            ...(input.mediaType === '' ? {} : { mediaType: input.mediaType }),
-            sizeBytes: input.sizeBytes,
-            ...(input.sha256 === null ? {} : { sha256: input.sha256 }),
-          });
-          await onAct('record-staged-file', async () => {});
-        }}
-      />
+      {/*
+        FILES FROM THIS COMPUTER — WHAT THIS DEPLOYMENT CAN DO WITH THEM, SAID FIRST
+        (2026-10-18, QA `C-16`). Choosing a file used to lead nowhere: it was recorded by
+        name, the read stage then said nothing here could be read, and nothing said why or
+        what to do instead. The state comes from the server's own capability
+        (`historical_file_ingestion`): real files are read only from a staging area on the
+        server that an operator turns on. When it is off, the next step is offered in place.
+
+        `ImportFileStaging` takes `onRecord` as a prop and so cannot import the API
+        client: it cannot send a byte by construction. What reaches ISAAC is a file's
+        name, size, type and — only if asked — a checksum computed in this tab.
+        `POST /api/uploads` stays an unconditional 403 and nothing here calls it.
+      */}
+      <section className="hi-files" aria-labelledby={`hi-files-${importId}`}>
+        <div className="hi-stage-sub-head">
+          <h4 className="hi-group-title" id={`hi-files-${importId}`}>
+            {STAGE.filesTitle}
+          </h4>
+          {!ingestion?.enabled && <HelpTip subject={STAGE.filesTitle}>{STAGE.filesNotReadableHelp}</HelpTip>}
+        </div>
+        <p className="hi-note">{ingestion?.enabled ? STAGE.filesReadable : STAGE.filesNotReadable}</p>
+        {!ingestion?.enabled && !hasArchive && defaultArchive && (
+          <p className="hi-files-next">
+            {STAGE.filesTryExample}{' '}
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={busy !== null}
+              onClick={() => void addArchive(defaultArchive, 'add-default-archive')}
+            >
+              {busy === 'add-default-archive' ? 'Adding and reading…' : STAGE.filesTryExampleAction}
+            </button>
+          </p>
+        )}
+        <ImportFileStaging
+          busy={busy !== null}
+          onRecord={async (input) => {
+            /* NOT routed through `onAct`: a refusal must land on the ROW that caused
+               it, not in one banner for a list. `onAct` is used afterwards only for
+               its reload. */
+            await api.addImportSource(importId, {
+              kind: 'reference',
+              filename: input.filename,
+              reference: input.reference,
+              ...(input.mediaType === '' ? {} : { mediaType: input.mediaType }),
+              sizeBytes: input.sizeBytes,
+              ...(input.sha256 === null ? {} : { sha256: input.sha256 }),
+            });
+            await onAct('record-staged-file', async () => {});
+          }}
+        />
+      </section>
 
       <Disclosure className="hi-disclosure" summary="Add an external reference instead">
         <p className="hi-note">
@@ -1225,8 +1318,12 @@ function SourceRow({
           </span>
         ) : (
           <>
-            <span className="hi-filename">{source.filename}</span>
-            <span className="hi-reference">{source.reference}</span>
+            <span className="hi-filename">
+              <Breakable text={source.filename} />
+            </span>
+            <span className="hi-reference">
+              <Breakable text={source.reference} />
+            </span>
           </>
         )}
         {source.sha256 !== null && <span className="hi-sub">checksum recorded · not verified</span>}
@@ -1269,17 +1366,23 @@ function ReadStage({
   importId: string;
 }) {
   const counts = data.source_counts;
+  /* WHETHER A READ WOULD CHANGE ANYTHING (2026-10-18): adding a readable source now reads
+     it, so the control is the primary act only while something is unread (a source added
+     before this build, or a pointer recorded beside an archive); otherwise it is a quiet
+     "Read Again". */
+  const read = counts.parsed > 0 || Boolean(data.corpus_review);
+  const unread = counts.unparsed > 0 || (read && data.reconstruction === null);
   return (
     <>
       <StageHead stage="read" />
       <div className="hi-stage-action">
         <button
           type="button"
-          className="btn btn-primary"
+          className={unread || !read ? 'btn btn-primary' : 'btn btn-secondary'}
           disabled={busy !== null || counts.parsable_by_this_build === 0}
-          onClick={() => onAct('parse', () => api.parseImport(importId), 'read')}
+          onClick={() => onAct('parse', () => readAndReconstruct(importId), 'runs')}
         >
-          {busy === 'parse' ? 'Reading…' : IMPORT_COPY.actionParse}
+          {busy === 'parse' ? 'Reading…' : read && !unread ? STAGE.readAgain : IMPORT_COPY.actionParse}
         </button>
         <p className="hi-counts">
           {counts.total} source{counts.total === 1 ? '' : 's'} · {counts.parsed} read ·{' '}
@@ -1287,12 +1390,11 @@ function ReadStage({
           {counts.parsable_by_this_build} readable by this build
         </p>
       </div>
-      {/* NEVER A BARE DISABLED BUTTON: the sentence beside it says why. */}
+      {/* NEVER A BARE DISABLED BUTTON: the sentence beside it says why — and, for a bundle
+          of files recorded from this computer, why they cannot be read here and what to do
+          instead (QA `C-16`). */}
       {counts.parsable_by_this_build === 0 && (
-        <p className="hi-note">
-          Nothing in this bundle can be read by this build yet. Add an example source or an
-          archive, or keep the references — they are stored either way.
-        </p>
+        <p className="hi-note">{STAGE.nothingToRead}</p>
       )}
 
       {data.corpus_review && (
@@ -1310,7 +1412,11 @@ function ReadStage({
             <li key={parsed.source_id}>
               <Disclosure
                 className="hi-parsed"
-                summary={<span className="hi-filename">{parsed.filename}</span>}
+                summary={
+                  <span className="hi-filename">
+                    <Breakable text={parsed.filename} />
+                  </span>
+                }
                 meta={`${plural(parsed.statements.length, 'statement', 'statements')} read · ${plural(
                   parsed.skipped.length,
                   'line',
@@ -1371,6 +1477,52 @@ function useFilenameOf(data: ApiImportSession) {
   );
 }
 
+/** How many rows a long list shows before `Show N more` (QA `C-27`). */
+const PAGE_SIZE = 25;
+
+/**
+ * A LONG LIST, PAGED (2026-10-18, QA `C-27`). The Review stage's Unmapped bucket held 93
+ * candidate rows, every one mounted with its nested disclosures, and opening it took
+ * seconds. A list longer than one page now mounts nothing until its bucket is first
+ * opened, then shows {@link PAGE_SIZE} rows and a real `Show N more` button. The bucket's
+ * header states the full count first, so a row not yet shown is never an unstated one.
+ * A list of one page or fewer is mounted whole, exactly as before.
+ */
+function PagedList<T>({
+  items,
+  open,
+  render,
+  label,
+}: {
+  items: readonly T[];
+  /** Whether the list's container has ever been opened. */
+  open: boolean;
+  render: (item: T) => ReactNode;
+  label: string;
+}) {
+  const [shown, setShown] = useState(PAGE_SIZE);
+  if (items.length > PAGE_SIZE && !open) return null;
+  const rest = items.length - shown;
+  return (
+    <>
+      <ul className="hi-cands">{items.slice(0, shown).map(render)}</ul>
+      {rest > 0 && (
+        <button
+          type="button"
+          className="btn btn-ghost hi-show-more"
+          onClick={() => setShown((n) => n + PAGE_SIZE)}
+        >
+          Show {Math.min(PAGE_SIZE, rest)} more
+          <span className="sr-only">
+            {' '}
+            of {rest} remaining in {label}
+          </span>
+        </button>
+      )}
+    </>
+  );
+}
+
 function RunsStage({
   data,
   busy,
@@ -1393,41 +1545,42 @@ function RunsStage({
   const fields = candidates.filter((c) => c.kind === 'field');
   /* The session's one review categorisation — a sent candidate reads Sent in this stage too. */
   const runsReview = candidateReview(data);
+  const read = data.parsed.length > 0 || Boolean(data.corpus_review);
 
   return (
     <>
       <StageHead stage="runs" lead={archive ? STAGE.runs.leadArchive : STAGE.runs.leadFixture} />
-      <div className="hi-stage-action">
-        <button
-          type="button"
-          className="btn btn-primary"
-          /* AN ARCHIVE HAS SOMETHING TO RECONSTRUCT FROM even though `parsed` is empty:
-             the whole chain runs at the READ, so the candidates already exist. */
-          disabled={busy !== null || (data.parsed.length === 0 && !data.corpus_review)}
-          onClick={() => onAct('reconstruct', () => api.reconstructImport(importId), 'runs')}
-        >
-          {busy === 'reconstruct' ? 'Reconstructing…' : IMPORT_COPY.actionReconstruct}
-        </button>
-        {reconstruction !== null && (
-          <p className="hi-counts">
-            {plural(candidates.length, 'candidate', 'candidates')} · nothing was applied
-          </p>
-        )}
-      </div>
+      {/*
+        RECONSTRUCT IS NOT A STEP OF ITS OWN ANY MORE (2026-10-18, QA `C-21`): adding a
+        readable source reads AND reconstructs it. The control remains only for a session
+        that was read without being reconstructed — one started before this build, or a
+        read that stopped part-way — and is then the one thing to do here.
+      */}
+      {reconstruction === null && read && (
+        <div className="hi-stage-action">
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={busy !== null}
+            onClick={() => onAct('reconstruct', () => api.reconstructImport(importId), 'runs')}
+          >
+            {busy === 'reconstruct' ? 'Reconstructing…' : IMPORT_COPY.actionReconstruct}
+          </button>
+        </div>
+      )}
       {/* THE PRECONDITION AND THE NEXT ACT, never the internal state. */}
-      {data.parsed.length === 0 && !data.corpus_review && (
+      {!read && (
         <p className="hi-note">
-          Nothing has been read yet, so there is nothing to reconstruct from. Read a source
-          first. Reconstruction is deterministic in this build — it reads the statements
-          already parsed and calls no model.
+          Nothing has been read yet, so there is nothing to reconstruct from. Add an archive
+          or an example source in Source Bundle — it is read as soon as it is added.
+          Reconstruction is deterministic in this build — it reads the statements already
+          parsed and calls no model.
         </p>
       )}
 
       {reconstruction === null && !archive ? (
         <p className="hi-body hi-empty-inline">
-          {data.source_counts.parsed > 0 || data.corpus_review
-            ? IMPORT_COPY.emptyCandidatesReadBody
-            : IMPORT_COPY.emptyCandidatesBody}
+          {read ? IMPORT_COPY.emptyCandidatesReadBody : IMPORT_COPY.emptyCandidatesBody}
         </p>
       ) : archive && data.corpus_review && data.archive ? (
         <ArchiveRuns
@@ -1438,7 +1591,7 @@ function RunsStage({
           filenameOf={filenameOf}
           importId={importId}
           busy={busy}
-          onAct={onAct}
+          onAct={onAct as ActFn}
           destinations={destinations}
           candidateReview={runsReview}
         />
@@ -1525,11 +1678,13 @@ function ConflictsStage({
   destinations: ProposalDestinations;
 }) {
   const views = conflictViews(data);
+  const tally = conflictTally(data);
   /* PER-SCAN VARIATION IS NOT A CONFLICT, and a reader who remembers seeing more
      "conflicts" before is told where those values went — neutrally, with a count. */
   const varying = (data.reconstruction?.candidates ?? []).filter((c) => c.agreement === 'varies').length;
-  /* THE TWO SETS THIS STAGE HOLDS, NAMED (2026-09-23): the tab's number is their sum;
-     Review counts only the field values; Add counts only what it cannot send. */
+  /* THE TWO SETS THIS STAGE HOLDS, NAMED (2026-09-23), and since 2026-10-18 (QA
+     `C-12`/`C-22`) what each asks: only the ones TO DECIDE are counted as work; what is
+     noted (one side is silent) or preserved (it may never be chosen) is shown and said. */
   const structural = views.filter((v) => v.kind === 'structural').length;
   const field = views.length - structural;
   return (
@@ -1537,8 +1692,14 @@ function ConflictsStage({
       <StageHead stage="conflicts" />
       {views.length > 0 && (
         <p className="hi-counts">
-          {plural(structural, 'finding', 'findings')} about which measurement a file is ·{' '}
-          {plural(field, 'field value', 'field values')} whose sources disagree
+          {STAGE.conflicts.toDecide(tally.open)}
+          {tally.noted > 0 ? ` · ${STAGE.conflicts.notedCount(tally.noted)}` : ''}
+          {tally.preserved > 0 ? ` · ${STAGE.conflicts.preservedCount(tally.preserved)}` : ''}
+          {tally.resolved > 0 ? ` · ${tally.resolved.toLocaleString('en-US')} resolved` : ''}{' '}
+          <HelpTip subject="what these conflicts are about" label="What These Conflicts Are About">
+            {plural(structural, 'finding', 'findings')} about which measurement a file is ·{' '}
+            {plural(field, 'field value', 'field values')} whose sources disagree.
+          </HelpTip>
         </p>
       )}
       {varying > 0 && (
@@ -1588,7 +1749,11 @@ function ReviewStage({
      legacy number and label — the handle the Runs stage already uses. */
   const contextOf = new Map<string, string>();
   for (const row of data.archive?.units_page.rows ?? []) {
-    const handle = row.legacy_number !== null ? `#${row.legacy_number} · ${row.label}` : row.label;
+    /* The run label already opens with "Legacy N" (2026-10-18): "#1 · Legacy 1 · …" said it twice. */
+    const handle =
+      row.legacy_number !== null && !row.label.startsWith('Legacy ')
+        ? `#${row.legacy_number} · ${row.label}`
+        : row.label;
     for (const id of row.candidate_ids) contextOf.set(id, handle);
   }
 
@@ -1615,42 +1780,35 @@ function ReviewStage({
             <HelpTip subject={STAGE.bucketTitles.ready}>{IMPORT_COPY.reviewLead}</HelpTip>
           </div>
           {buckets.map((b) => (
-            <Disclosure
+            <ReviewBucketList
               key={b}
-              className="hi-bucket"
-              headingLevel={4}
-              defaultOpen={b === 'ready'}
-              summary={STAGE.bucketTitles[b]}
-              meta={counts[b].toLocaleString('en-US')}
-            >
-              <ul className="hi-cands">
-                {fields
-                  .filter((c) => review.bucketOf(c) === b)
-                  .map((candidate) => {
-                    const already = review.sentOf(candidate.candidate_id);
-                    return (
-                      <ImportCandidateRow
-                        key={candidate.candidate_id}
-                        candidate={candidate}
-                        filenameOf={filenameOf}
-                        already={already}
-                        alreadyTitle={already ? titleOf(already.experiment_id) : undefined}
-                        bucket={b}
-                        context={contextOf.get(candidate.candidate_id)}
-                      >
-                        <CandidateSendForm
-                          candidate={candidate}
-                          session={data}
-                          busy={busy}
-                          onAct={onAct}
-                          importId={importId}
-                          destinations={destinations}
-                        />
-                      </ImportCandidateRow>
-                    );
-                  })}
-              </ul>
-            </Disclosure>
+              bucket={b}
+              count={counts[b]}
+              candidates={fields.filter((c) => review.bucketOf(c) === b)}
+              render={(candidate) => {
+                const already = review.sentOf(candidate.candidate_id);
+                return (
+                  <ImportCandidateRow
+                    key={candidate.candidate_id}
+                    candidate={candidate}
+                    filenameOf={filenameOf}
+                    already={already}
+                    alreadyTitle={already ? titleOf(already.experiment_id) : undefined}
+                    bucket={b}
+                    context={contextOf.get(candidate.candidate_id)}
+                  >
+                    <CandidateSendForm
+                      candidate={candidate}
+                      session={data}
+                      busy={busy}
+                      onAct={onAct}
+                      importId={importId}
+                      destinations={destinations}
+                    />
+                  </ImportCandidateRow>
+                );
+              }}
+            />
           ))}
         </>
       )}
@@ -1665,6 +1823,37 @@ function ReviewStage({
         />
       )}
     </>
+  );
+}
+
+/** One review bucket: its count always visible, its rows paged once it is opened. */
+function ReviewBucketList({
+  bucket,
+  count,
+  candidates,
+  render,
+}: {
+  bucket: ReviewBucket;
+  count: number;
+  candidates: ApiImportCandidate[];
+  render: (candidate: ApiImportCandidate) => ReactNode;
+}) {
+  const [open, setOpen] = useState(bucket === 'ready');
+  const [everOpened, setEverOpened] = useState(bucket === 'ready');
+  return (
+    <Disclosure
+      className="hi-bucket"
+      headingLevel={4}
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (next) setEverOpened(true);
+      }}
+      summary={STAGE.bucketTitles[bucket]}
+      meta={count.toLocaleString('en-US')}
+    >
+      <PagedList items={candidates} open={everOpened} render={render} label={STAGE.bucketTitles[bucket]} />
+    </Disclosure>
   );
 }
 
@@ -1924,7 +2113,7 @@ function NewDestinationButton({
         });
       }}
     >
-      {busy === actKey ? 'Creating…' : 'New record from this import'}
+      {busy === actKey ? 'Creating…' : IMPORT_COPY.actionNewRecord}
     </button>
   );
 }
@@ -1934,14 +2123,41 @@ function NewDestinationButton({
  * -------------------------------------------------------------------------- */
 
 /**
+ * What the import read about HOW the measurements were made — the acquisition-method
+ * readings, verbatim, with how many places state each. Shown beside the technique picker
+ * as evidence; never mapped to a technique (a macro's name is not one).
+ */
+function techniqueEvidence(data: ApiImportSession): TechniqueEvidence[] {
+  const places = new Map<string, number>();
+  for (const candidate of data.reconstruction?.candidates ?? []) {
+    if (candidateConcept(candidate) !== 'acquisition_method') continue;
+    for (const statement of candidate.supporting_statements) {
+      const value = String(statement.value ?? '').trim();
+      if (value) places.set(value, (places.get(value) ?? 0) + 1);
+    }
+  }
+  return [...places.entries()].map(([value, n]) => ({ value, places: n }));
+}
+
+/**
  * ADD EVERY READY CANDIDATE TO ONE RECORD, IN ONE REQUEST — and say beforehand what
  * will and will not go, in words.
  *
  * ONE request because a client loop would be N writes that could each fail alone,
  * leaving a record holding part of an import with nothing able to say which part.
- * The report renders what the SERVER said — every count, the reason per candidate it
- * would not send, `already_sent`, and how each measurement's run was found — never
- * what was asked for.
+ * The report renders what the SERVER said, never what was asked for.
+ *
+ * ── WHAT CHANGED 2026-10-18 ─────────────────────────────────────────────────
+ *
+ *   * `C-17`: when no reviewer can be identified, that is said BEFORE sending — from the
+ *     session's own `proposal_acceptance` capability — not only in the report after.
+ *   * `C-25`: the form stays usable after a send, so the same import can go to another
+ *     record; what is ready is counted against the CHOSEN record; what this import has
+ *     sent is listed from the session itself, so a reload keeps it; and the report's
+ *     numbers agree with each other ("4 proposals on this record: 2 new · 2 already
+ *     there", not "2 sent · 2 already there" beside "Sent candidates 4").
+ *   * `C-10`: the record's technique — the one choice the copy promised and no control
+ *     offered — is chosen here, from the schema's own list, nothing preselected.
  */
 function AddStage({
   data,
@@ -1968,25 +2184,17 @@ function AddStage({
   const [createRunsChoice, setCreateRuns] = useState(archive);
   /* EVERY STAGE IS MOUNTED WHEN THE SESSION OPENS (hidden until chosen), so `useState`'s
      initial value was read while the bundle held no archive yet — measured in a real
-     browser 2026-10-12: an archive added in the same session left "Make one run per
-     measurement" UNCHECKED, and the batch then refused `target_requires_a_run`. The
-     default now follows the archive's ARRIVAL; it never re-checks a box the scientist
-     cleared, because `archive` does not change again. */
+     browser 2026-10-12. The default follows the archive's ARRIVAL; it never re-checks a
+     box the scientist cleared, because `archive` does not change again. */
   useEffect(() => {
     if (archive) setCreateRuns(true);
   }, [archive]);
   const runUnits = data.archive?.run_candidate_unit_count ?? 0;
-  /* CREATING THE RUNS IS AN ACT BY ITSELF (2026-10-12). With nothing sendable the server
-     used to refuse the batch whole, so a scientist whose every value needs a decision
-     could not get the measurements onto a record at all. Now `create_runs` alone is a
-     batch: the runs, their Data Quality Notes and their "Also read from the archive"
-     notes. So the form is offered whenever the archive has measurements to make runs
-     from — and, with nothing to send, ONLY with runs made, because without them the
-     server would still answer `nothing_to_send`. */
+  /* CREATING THE RUNS IS AN ACT BY ITSELF (2026-10-12): with nothing sendable, an
+     archive's measurements can still be put on a record as runs. */
   const withRuns = planFor(data, true);
-  /* …and only once the import has been RECONSTRUCTED: before that it has measurements and
-     no candidate, and the notes the batch writes are built from the candidates. The
-     server refuses that case too ("reconstruct it first"). */
+  /* …and only once the import has been RECONSTRUCTED: the notes the batch writes are
+     built from the candidates. */
   const reconstructed = (data.reconstruction?.candidates.length ?? 0) > 0;
   const runsOnly =
     archive &&
@@ -1998,25 +2206,32 @@ function AddStage({
   /* ONE PLAN, the batch's own partition (`send_plan`) — so what this stage says will
      happen is what the report then says did (2026-09-23). */
   const plan = planFor(data, archive && createRuns);
-  const sendable = plan.willSend;
   const blocked = groupUnsent(plan.unsent);
   const blockedTotal = plan.unsent.length;
-  const sentTo = new Map<string, number>();
-  for (const id of plan.alreadySent) {
-    const target = data.proposed[id]?.experiment_id;
-    if (target) sentTo.set(target, (sentTo.get(target) ?? 0) + 1);
+  /* COUNTED AGAINST THE CHOSEN RECORD (QA `C-25`). A candidate this import sent to one
+     record is still sendable to ANOTHER — the server's exactly-once guard is per record —
+     so with a record chosen, "already" means already on THAT record. */
+  const sendableAll = [...plan.willSend, ...plan.alreadySent];
+  const alreadyHere = experimentId
+    ? sendableAll.filter((id) => data.proposed[id]?.experiment_id === experimentId)
+    : [];
+  const readyHere = experimentId ? sendableAll.length - alreadyHere.length : plan.willSend.length;
+  const sentTo = new Map<string, string[]>();
+  for (const [id, row] of Object.entries(data.proposed ?? {})) {
+    const list = sentTo.get(row.experiment_id);
+    if (list) list.push(id);
+    else sentTo.set(row.experiment_id, [id]);
   }
   const titleOf = (id: string) => recordTitle(destinations, id) ?? 'a record';
   const key = `add-whole:${importId}`;
   const step = data.workflow.find((s) => s.id === 'add_to_experiments');
   const acceptance = data.capabilities?.proposal_acceptance;
+  const techniqueTarget = experimentId || result?.experiment_id || [...sentTo.keys()][0] || '';
+  const shortList =
+    data.corpus_review?.mapping.concepts.find((c) => c.concept === 'acquisition_method')?.allowed_values ?? [];
 
   /* THE RULE, SAID BEFORE SUBMIT (2026-10-11, QA `C-01`). A run holds one measurement's
-     values: the server sends each value to the run recorded as made from its own
-     measurement, and the named run takes the values of at most one measurement that has
-     no run of its own. These counts are read off the send plan's `measurement_of` and the
-     chosen record's runs — the server's keys compared as strings — and only FORESHADOW
-     the server's refusal; the server still decides. */
+     values; these counts only FORESHADOW the server's refusal; the server still decides. */
   const runs = useRecordRuns(experimentId);
   useEffect(() => {
     setRunId(''); // a new record: the old record's run means nothing here
@@ -2024,12 +2239,10 @@ function AddStage({
   const measurementOf = data.send_plan?.measurement_of ?? {};
   const ownRuns = new Set((runs ?? []).map((r) => r.origin).filter((o): o is string => o !== null));
   const homeless = new Set(
-    sendable.map((id) => measurementOf[id]).filter((m): m is string => Boolean(m) && !ownRuns.has(m)),
+    plan.willSend.map((id) => measurementOf[id]).filter((m): m is string => Boolean(m) && !ownRuns.has(m)),
   );
   const namedOrigin = runs?.find((r) => r.id === runId)?.origin ?? null;
   const routingWarning =
-    // NOTHING TO SAY WITHOUT A PICKER: a record with no runs offers no run to name, so a
-    // warning about naming one would describe a control that is not on the screen.
     createRuns || runs === null || runs.length === 0
       ? null
       : homeless.size > 1
@@ -2038,146 +2251,187 @@ function AddStage({
           ? STAGE.namedRunIsAnotherMeasurement
           : null;
 
+  const showForm =
+    !(sendableAll.length === 0 && !runsOnly) && !(sendableAll.length === 1 && !(archive && runUnits > 0));
+
+  if (step && !step.built && step.disclosure !== null) {
+    return (
+      <>
+        <StageHead stage="add" />
+        {/* THE UNBUILT STEP OFFERS NO CONTROL — not a disabled one. */}
+        <p className="hi-steps-disclosure" id={`hi-step-note-${step.id}`}>
+          <span className="hi-steps-disclosure-subject">{STAGE.add.title}:</span> {step.disclosure}
+        </p>
+      </>
+    );
+  }
+
   return (
     <>
       <StageHead stage="add" />
 
-      {step && !step.built && step.disclosure !== null ? (
-        /* THE UNBUILT STEP OFFERS NO CONTROL — not a disabled one. The server's own
-           sentence says why. */
-        <p className="hi-steps-disclosure" id={`hi-step-note-${step.id}`}>
-          <span className="hi-steps-disclosure-subject">{step.label}:</span> {step.disclosure}
+      <div className="hi-add-summary">
+        <h4 className="hi-block-title">{STAGE.addSummaryTitle}</h4>
+        <p className="hi-add-headline">
+          <strong>{STAGE.readyHere(readyHere)}</strong>
+          {experimentId && alreadyHere.length > 0 ? ` · ${STAGE.alreadyHere(alreadyHere.length)}` : ''}
+          {!experimentId && plan.alreadySent.length > 0
+            ? ` · ${plan.alreadySent.length.toLocaleString('en-US')} already sent`
+            : ''}
+          {blockedTotal > 0 ? ` · ${blockedTotal.toLocaleString('en-US')} will not be` : ''}
+        </p>
+        {/* SAID BEFORE SENDING (QA `C-17`), from the server's own capability — the same
+            decision the accept route makes, never a copy of it. */}
+        {acceptance?.available === false && (
+          <p className="hi-note" role="note">
+            {STAGE.acceptanceBefore}
+          </p>
+        )}
+        {blocked.length > 0 && (
+          <Disclosure className="hi-disclosure" summary={STAGE.willNotBeSent} meta={String(blockedTotal)}>
+            <ul className="hi-add-blocked">
+              {blocked.map((group) => (
+                <li key={group.category}>
+                  <span className="hi-add-blocked-count">{group.rows.length.toLocaleString('en-US')}</span>{' '}
+                  {group.label}
+                </li>
+              ))}
+            </ul>
+          </Disclosure>
+        )}
+      </div>
+
+      <LeftForAPerson left={data.left_for_a_person ?? null} />
+
+      {/* WHAT THIS IMPORT HAS SENT, FROM THE SESSION ITSELF (QA `C-25`), so a reload keeps
+          it: the session remembers each send even though the last report is not kept. */}
+      {/* Not shown while the report below says the same about the same one record. */}
+      {sentTo.size > 0 && !(result !== null && sentTo.size === 1 && sentTo.has(result.experiment_id)) && (
+        <section className="hi-sent-so-far" aria-label={STAGE.sentSoFarTitle}>
+          <h4 className="hi-block-title">{STAGE.sentSoFarTitle}</h4>
+          <ul className="hi-add-blocked">
+            {[...sentTo.entries()].map(([id, ids]) => (
+              <li key={id}>
+                {STAGE.sentSoFarRow(ids.length)}{' '}
+                <Link to={ROUTES.recordView(id, 'proposals')}>{titleOf(id)}</Link>
+              </li>
+            ))}
+          </ul>
+          {sendableAll.length > 0 && <p className="hi-sub">{STAGE.sendAnother}</p>}
+        </section>
+      )}
+
+      {sendableAll.length === 0 && !runsOnly ? (
+        <p className="hi-body hi-empty-inline">
+          Nothing in this import can be sent yet. Resolve its field conflicts, or read and
+          reconstruct its sources first.
+        </p>
+      ) : sendableAll.length === 1 && !(archive && runUnits > 0) ? (
+        /* ONE CANDIDATE: this panel and that candidate's own form would do the
+           same thing by two routes, so the one route is offered. */
+        <p className="hi-body">
+          One candidate can be sent. Send it from its row in Review.{' '}
+          <button type="button" className="btn btn-ghost" onClick={() => onGoTo('review')}>
+            {STAGE.review.title}
+          </button>
         </p>
       ) : (
-        <>
-          <div className="hi-add-summary">
-            <h4 className="hi-block-title">{STAGE.addSummaryTitle}</h4>
-            <p className="hi-counts">
-              {plural(sendable.length, 'candidate can', 'candidates can')} be sent
-              {blockedTotal > 0 ? ` · ${blockedTotal.toLocaleString('en-US')} will not be` : ''}
-              {plan.alreadySent.length > 0
-                ? ` · ${plan.alreadySent.length.toLocaleString('en-US')} already sent`
-                : ''}
-            </p>
-            {/* WHAT THIS IMPORT ALREADY SENT survives a reload: the session remembers
-                each send (`proposed`), even though the last report is not kept. */}
-            {sentTo.size > 0 && (
-              <ul className="hi-add-blocked">
-                {[...sentTo.entries()].map(([id, count]) => (
-                  <li key={id}>
-                    <span className="hi-add-blocked-count">{count.toLocaleString('en-US')}</span> already
-                    sent to{' '}
-                    <Link to={ROUTES.recordView(id, 'proposals')}>{titleOf(id)}</Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {blocked.length > 0 && (
-              <ul className="hi-add-blocked">
-                {blocked.map((group) => (
-                  <li key={group.category}>
-                    <span className="hi-add-blocked-count">{group.rows.length.toLocaleString('en-US')}</span>{' '}
-                    {group.label}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <LeftForAPerson left={data.left_for_a_person ?? null} />
-
-          {sendable.length === 0 && !runsOnly ? (
-            <p className="hi-body hi-empty-inline">
-              {plan.alreadySent.length > 0
-                ? 'Everything this import can send has been sent.'
-                : 'Nothing in this import can be sent yet. Resolve its field conflicts, or read and reconstruct its sources first.'}
-            </p>
-          ) : sendable.length === 1 && !(archive && runUnits > 0) ? (
-            /* ONE CANDIDATE: this panel and that candidate's own form would do the
-               same thing by two routes, so the one route is offered. */
-            <p className="hi-body">
-              One candidate can be sent. Send it from its row in Review.{' '}
-              <button type="button" className="btn btn-ghost" onClick={() => onGoTo('review')}>
-                {STAGE.review.title}
-              </button>
-            </p>
-          ) : (
-            <form
-              className="hi-send hi-addwhole"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void onAct(key, async () => {
-                  const detail = await api.getExperiment(experimentId);
-                  const added = await api.addImportToExperiment(importId, {
-                    experimentId,
-                    // THE RECORD'S OWN VERSION, read immediately before the write.
-                    experimentVersion: detail.version,
-                    ...(!createRuns && runId.trim() ? { runId: runId.trim() } : {}),
-                    ...(createRuns ? { createRuns: true } : {}),
-                  });
-                  onResult(added);
-                  setRunId('');
-                });
-              }}
-            >
-              <h4 className="hi-block-title">{IMPORT_COPY.actionAddWhole}</h4>
-              {runsOnly && <p className="hi-note">{STAGE.runsOnlyLead(runUnits)}</p>}
-              <RecordPicker
-                label="Which record?"
-                value={experimentId}
-                onChange={setExperimentId}
-                destinations={destinations}
+        <form
+          className="hi-send hi-addwhole"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void onAct(key, async () => {
+              const detail = await api.getExperiment(experimentId);
+              const added = await api.addImportToExperiment(importId, {
+                experimentId,
+                // THE RECORD'S OWN VERSION, read immediately before the write.
+                experimentVersion: detail.version,
+                ...(!createRuns && runId.trim() ? { runId: runId.trim() } : {}),
+                ...(createRuns ? { createRuns: true } : {}),
+              });
+              onResult(added);
+              setRunId('');
+            });
+          }}
+        >
+          <h4 className="hi-block-title">{IMPORT_COPY.actionAddWhole}</h4>
+          {runsOnly && <p className="hi-note">{STAGE.runsOnlyLead(runUnits)}</p>}
+          <RecordPicker
+            label="Which record?"
+            value={experimentId}
+            onChange={setExperimentId}
+            destinations={destinations}
+          />
+          <NewDestinationButton
+            session={data}
+            busy={busy}
+            onAct={onAct}
+            actKey={`${key}:create`}
+            reloadDestinations={destinations.reload}
+            onCreated={setExperimentId}
+          />
+          {archive && (
+            <label className="hi-choice">
+              <input
+                type="checkbox"
+                checked={createRuns}
+                /* With nothing to send, making the runs IS the act — the lead above
+                   says so — so the choice is shown and held on. */
+                disabled={runsOnly}
+                onChange={(event) => setCreateRuns(event.target.checked)}
               />
-              <NewDestinationButton
-                session={data}
-                busy={busy}
-                onAct={onAct}
-                actKey={`${key}:create`}
-                reloadDestinations={destinations.reload}
-                onCreated={setExperimentId}
-              />
-              {archive && (
-                <label className="hi-choice">
-                  <input
-                    type="checkbox"
-                    checked={createRuns}
-                    /* With nothing to send, making the runs IS the act — the lead above
-                       says so — so the choice is shown and held on. */
-                    disabled={runsOnly}
-                    onChange={(event) => setCreateRuns(event.target.checked)}
-                  />
-                  <span>{STAGE.createRuns}</span>
-                </label>
-              )}
-              {!createRuns && (
-                <RunPicker
-                  runs={runs}
-                  value={runId}
-                  onChange={setRunId}
-                  label="Which run? (for the values a run owns)"
-                />
-              )}
-              <p className="hi-note">{IMPORT_COPY.addWholeRunNote}</p>
-              {routingWarning !== null && (
-                <p className="hi-note" role="note">
-                  {routingWarning}
-                </p>
-              )}
-              <button
-                type="submit"
-                className="btn btn-primary"
-                disabled={busy !== null || !experimentId.trim()}
-              >
-                {busy === key ? 'Sending…' : IMPORT_COPY.actionAddWhole}
-              </button>
-            </form>
+              <span>{STAGE.createRuns}</span>
+            </label>
           )}
-
-          {result !== null && (
-            <AddResult result={result} acceptanceUnavailable={acceptance?.available === false} />
+          {!createRuns && (
+            <RunPicker
+              runs={runs}
+              value={runId}
+              onChange={setRunId}
+              label="Which run? (for the values a run owns)"
+            />
           )}
-        </>
+          <p className="hi-note">{IMPORT_COPY.addWholeRunNote}</p>
+          {routingWarning !== null && (
+            <p className="hi-note" role="note">
+              {routingWarning}
+            </p>
+          )}
+          {/* THE TECHNIQUE, ABOVE THE PRIMARY SEND (review, 2026-10-18), and on the record
+              chosen in THIS form — it is that record's answer, saved by its own button. */}
+          {archive && (
+            <TechniqueChooser
+              experimentId={experimentId}
+              recordTitle={experimentId ? titleOf(experimentId) : undefined}
+              evidence={techniqueEvidence(data)}
+              shortList={shortList}
+            />
+          )}
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={busy !== null || !experimentId.trim()}
+          >
+            {busy === key ? 'Sending…' : IMPORT_COPY.actionAddWhole}
+          </button>
+        </form>
       )}
+
+      {/* With no send form on the stage, the technique still has a home — on the record this
+          import last sent to, when there is one. */}
+      {archive && !showForm && (
+        <TechniqueChooser
+          experimentId={techniqueTarget}
+          recordTitle={techniqueTarget ? titleOf(techniqueTarget) : undefined}
+          evidence={techniqueEvidence(data)}
+          shortList={shortList}
+        />
+      )}
+
+      {result !== null && (
+        <AddResult result={result} recordName={titleOf(result.experiment_id)} />
+      )}
+
     </>
   );
 }
@@ -2230,23 +2484,32 @@ export function LeftForAPerson({
   );
 }
 
+/**
+ * THE BATCH'S REPORT — every number the server's own, and worded so the numbers agree
+ * (2026-10-18, QA `C-25`). The report read "2 sent · 2 already there" above a list titled
+ * "Sent candidates 4": the list held both kinds and its title named one. Now the list is
+ * "Proposals on this record", its count is the sum, and the line above says how it splits.
+ * "Left for You to Choose" is not repeated here: the stage already shows it above.
+ */
 function AddResult({
   result,
-  acceptanceUnavailable,
+  recordName,
 }: {
   result: ApiImportAddedToExperiment;
-  /** The server's own `proposal_acceptance` capability says no reviewer can be identified. */
-  acceptanceUnavailable: boolean;
+  recordName: string;
 }) {
   const groups = groupUnsent(result.not_sent);
+  const onRecord = result.sent.length;
   return (
     <div className="hi-addwhole-result">
       <h4 className="hi-block-title" tabIndex={-1}>
         {IMPORT_COPY.addWholeResultTitle}
       </h4>
-      {/* EVERY NUMBER FROM `counts`, AND ALL OF THEM. */}
+      {/* EVERY NUMBER FROM THE SERVER, AND ALL OF THEM: `sent` + `already_sent` is the
+          list below, `not_sent` the groups after it, `candidates` the import's total. */}
       <p className="hi-counts">
-        {result.counts.sent} sent · {result.counts.already_sent} already there ·{' '}
+        <strong>{STAGE.sentNow(onRecord)}</strong> to {recordName}:{' '}
+        {STAGE.newAndAlready(result.counts.sent, result.counts.already_sent)} ·{' '}
         {result.counts.not_sent} could not be sent · {result.counts.candidates} candidate
         {result.counts.candidates === 1 ? '' : 's'} in this import
         {typeof result.counts.runs_created === 'number' ? ` · ${result.counts.runs_created} runs created` : ''}
@@ -2283,15 +2546,13 @@ function AddResult({
             . {STAGE.readingsNever}
           </p>
         )}
-      <LeftForAPerson left={result.left_for_a_person ?? null} headingLevel="h5" />
       <p>
         <Link className="btn btn-secondary" to={ROUTES.recordView(result.experiment_id, 'proposals')}>
           {STAGE.openProposals}
         </Link>
       </p>
-      {/* SAID WHERE THE READER GOES TO REVIEW, and only when the server says so:
-          accepting needs an identified reviewer this deployment cannot yet provide. */}
-      {acceptanceUnavailable && <p className="hi-note">{STAGE.acceptanceNote}</p>}
+      {/* ~~The acceptance note, repeated here~~ (2026-10-18, QA `C-17`): it is said once,
+          on the stage above, BEFORE a send, from the same capability. */}
       {result.runs_already_present && result.runs_already_present.length > 0 && (
         <Disclosure
           className="hi-disclosure"
@@ -2309,7 +2570,7 @@ function AddResult({
         </Disclosure>
       )}
       {result.sent.length > 0 && (
-        <Disclosure className="hi-disclosure" summary="Sent candidates" meta={String(result.sent.length)}>
+        <Disclosure className="hi-disclosure" summary={STAGE.sentNowTitle} meta={String(onRecord)}>
           <ul className="hi-addwhole-sent">
             {result.sent.map((row) => (
               <li key={row.candidate_id}>
@@ -2322,7 +2583,7 @@ function AddResult({
                 </span>
                 {/* THE SERVER'S OWN `already_sent`, never inferred from a second click. */}
                 <span className="hi-sub">
-                  {row.already_sent ? 'already there' : 'sent'}
+                  {row.already_sent ? 'already there' : 'new'}
                   {row.run_id !== null ? ' · on a run' : ''}
                 </span>
                 <Link to={ROUTES.recordProposal(result.experiment_id, row.proposal_id)}>
@@ -2334,6 +2595,9 @@ function AddResult({
         </Disclosure>
       )}
       {groups.length > 0 && (
+        /* ONE DISCLOSURE FOR WHAT WAS NOT SENT (2026-10-18): seven group rows under the
+           report repeated the stage's own "What will not be sent" above it. */
+        <Disclosure className="hi-disclosure" summary={STAGE.couldNotBeSent} meta={String(result.not_sent.length)}>
         <ul className="hi-addwhole-unsent">
           {groups.map((group) => (
             <li key={group.category}>
@@ -2352,9 +2616,10 @@ function AddResult({
                           target_field_path: row.target_field_path,
                         } as ApiImportCandidate)}
                       </span>
-                      {/* WHY NOT, IN THE SERVER'S WORDS — the sentence the candidate's
-                          own row shows. */}
-                      <span className="hi-blocked-reason">{row.reason}</span>
+                      {/* WHY NOT — the server's SHORT sentence (QA `C-05`). The full one
+                          is on the candidate's own row, behind "Why, in detail"; it is not
+                          repeated here, and nothing on this element carries it. */}
+                      <span className="hi-blocked-reason">{row.summary ?? row.reason}</span>
                     </li>
                   ))}
                 </ul>
@@ -2362,6 +2627,7 @@ function AddResult({
             </li>
           ))}
         </ul>
+        </Disclosure>
       )}
     </div>
   );

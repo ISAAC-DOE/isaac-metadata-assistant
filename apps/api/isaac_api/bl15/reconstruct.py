@@ -46,6 +46,7 @@ from ..historical_import import (
     EvidenceStatement,
     SemanticCandidate,
     is_zoned_utc_value,
+    plain_reason_of,
 )
 from . import conditions as cond
 from . import evidence as ev
@@ -1397,6 +1398,8 @@ def _candidate_state(candidate: SemanticCandidate) -> dict:
         "disagreement": [dict(d) for d in candidate.disagreement],
         "unresolved_reason": candidate.unresolved_reason,
         "not_proposable_reason": candidate.not_proposable_reason,
+        # 2026-10-18 — the short sentence beside the full one (`hist.plain_reason`).
+        "not_proposable_summary": plain_reason_of(candidate),
         "proposable": candidate.proposable,
         "distinct_sources": candidate.distinct_sources,
         "agreement": candidate.agreement,
