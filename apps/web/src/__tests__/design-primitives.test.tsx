@@ -65,8 +65,9 @@ describe('SemanticStatus', () => {
     expect(src).not.toMatch(/--pass-/);
     const success = /\[data-tone='success'\]\s*\{([^}]*)\}/.exec(src)![1];
     expect(success).toMatch(/--verified-text/);
-    // `--verified-text` on its own tint is the recorded 4.21:1 exception; on
-    // `--surface` it clears AA, so the pill sits on white.
+    // `--verified-text` on its own tint WAS the recorded 4.21:1 exception (retired
+    // 2026-10-18: #2b7570 is 4.69:1 there); on `--surface` it clears AA either way,
+    // so the pill sits on white.
     expect(success).toMatch(/background:\s*var\(--surface\)/);
   });
 

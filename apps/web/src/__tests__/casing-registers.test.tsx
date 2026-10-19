@@ -1063,14 +1063,15 @@ const HARDCODED_LABEL_SLOT_CEILING: Readonly<Record<string, number>> = {
   'screens/graph/GraphFilters.tsx': 1,
   'screens/graph/GraphHelp.tsx': 1,
   'screens/settings/ApiDocs.tsx': 3,
-  'screens/settings/ConnectAnAgent.tsx': 1,
+  // ~~'screens/settings/ConnectAnAgent.tsx': 1~~ — dropped 2026-10-12: the guide's
+  // drawer title is now the `PROGRAM_AN_AGENT` constant, so the file has no literal.
   'screens/statistics/RecordVerification.tsx': 5,
   'screens/statistics/StatisticsPage.tsx': 7,
   'screens/statistics/StatsPrimitives.tsx': 1,
 };
 
 /** The seed total, so a whole-tree regression is one number a reader can check. */
-const HARDCODED_LABEL_SLOT_TOTAL = 151;
+const HARDCODED_LABEL_SLOT_TOTAL = 150; // 151 -> 150, 2026-10-12: ConnectAnAgent.tsx's one literal became a constant.
 
 describe('UX-CASE §3 · no NEW hardcoded label-slot literal', () => {
   let live: Record<string, number> = {};

@@ -60,9 +60,12 @@ describe('RecordValidator — stated purpose (P36R S8 copy)', () => {
     ).toBeInTheDocument();
   });
 
-  it('lists the four things it is for, as a secondary disclosure', () => {
+  it('lists the four things it is for, behind the widget info toggle', () => {
     render(<RecordValidator />);
-    fireEvent.click(screen.getByText(/when to use this/i));
+    // "When to use this" moved from a <details> into the widget's info panel
+    // (2026-10-12): explanation, not state. One press opens it.
+    fireEvent.click(screen.getByRole('button', { name: 'About Standalone Validator' }));
+    expect(screen.getByText(/when to use this/i)).toBeVisible();
     expect(screen.getByText(/Inspect an external JSON object/i)).toBeInTheDocument();
     expect(screen.getByText(/Confirm API and CLI validation parity/i)).toBeInTheDocument();
     expect(screen.getByText(/Diagnose structured schema errors by path/i)).toBeInTheDocument();
@@ -84,10 +87,11 @@ describe('RecordValidator — stated purpose (P36R S8 copy)', () => {
   it('offers no propose/approve/edit/save affordance — only Upload and Validate', () => {
     render(<RecordValidator />);
     expect(screen.queryByRole('button', { name: /propose|approve|edit|delete|save|add to/i })).toBeNull();
-    expect(screen.getAllByRole('button').map((b) => b.textContent?.trim())).toEqual([
-      'Upload JSON File',
-      'Validate',
-    ]);
+    // Read by ACCESSIBLE NAME: the one control added since — the widget's info
+    // toggle — is an icon button whose name is its label, and it proposes nothing.
+    expect(
+      screen.getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim()),
+    ).toEqual(['About Standalone Validator', 'Upload JSON File', 'Validate']);
   });
 });
 

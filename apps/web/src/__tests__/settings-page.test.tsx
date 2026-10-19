@@ -1,22 +1,33 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { render, screen, fireEvent, within, act } from '@testing-library/react';
+import { render, screen, fireEvent, within, act, waitFor } from '@testing-library/react';
 import { MemoryRouter, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom';
 
 import { SettingsPage } from '../screens/SettingsPage';
 import { titleCase } from '../lib/labels';
-import { SETTINGS_TAB_IDS, ROUTES, isSettingsTab } from '../lib/routes';
+import {
+  SETTINGS_TAB_ALIASES,
+  SETTINGS_TAB_IDS,
+  ROUTES,
+  isSettingsTab,
+  isSettingsTabAlias,
+  resolveSettingsTab,
+} from '../lib/routes';
 import {
   ABOUT_RESPONSE_FIELDS,
   API_ACCESS_COPY,
   API_ACCESS_ROWS,
   API_KEY_REQUIREMENTS,
+  GOVERNANCE_POLICY,
+  OVERVIEW_SAFETY_ROWS,
+  PRIVACY_QUESTIONS,
   REPO_DOCS,
   SETTINGS_SOURCE_ENDPOINTS,
   settingsAboutCopy,
   settingsConcepts,
   settingsFactsFrom,
+  syntheticWorkspaceRow,
 } from '../lib/settingsContent';
 import {
   stubFetchRoutes,
@@ -130,6 +141,13 @@ function fullRoutes() {
 
 const tab = (name: string) => screen.getByRole('tab', { name });
 
+/** Let every stubbed read settle (the stubs resolve on the next tick). */
+async function flushReads() {
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 30));
+  });
+}
+
 /** Rendered text and authored strings compared on equal terms: JSX collapses a
  *  wrapped literal to single spaces, so both sides are normalized the same way. */
 const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
@@ -197,196 +215,184 @@ afterEach(() => {
 // --- tab structure ------------------------------------------------------------
 
 describe('Settings — tabs', () => {
-  it('renders exactly the seven specified tabs, with Overview selected by default', () => {
+  /*
+   * FOUR TABS SINCE 2026-10-12 (`DEC-28`'s regroup, built). The seven-tab row —
+   * Overview · Data & Privacy · About · Help & Tutorial · [Advanced] API Access ·
+   * Endpoint Explorer · Connect Your Agent — measured 9,168 words with the same
+   * build facts on two tabs and the same boundaries on three. Its material now
+   * sits in four tabs of question widgets, and every retired id is an ALIAS
+   * (asserted in the deep-link suite below), so no URL a reader holds went dead.
+   *
+   * Asserted on the ACCESSIBLE name, as before, so a decorative node inside a
+   * tab could never be pinned into its name.
+   */
+  it('renders exactly the four specified tabs, with Overview selected by default', () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
 
-    /* REORDERED 2026-09-15 into two groups — the four scientist-facing tabs,
-       then the three developer ones under an "Advanced" marker.
-
-       Help & Tutorial MOVED FROM LAST TO FOURTH, and the reason it needs a
-       permanent home is unchanged by the move: the first-run walkthrough offer
-       on My Experiments disappears for good once the walkthrough is finished,
-       so this is the only way back to it. Being LAST was never that reason — and
-       a reader looking for the walkthrough is not a reader looking for an API
-       key, which is what the three tabs after it are about.
-
-       Asserted on the ACCESSIBLE name, not `textContent`: the first Advanced tab
-       also renders a visible `aria-hidden` group marker, and asserting raw text
-       here would pin "AdvancedAPI Access" — a string that is not any tab's name
-       and that a reader never hears. */
     const tabs = screen.getAllByRole('tab');
     expect(tabs.map(accessibleTextOf)).toEqual([
       'Overview',
+      'Privacy & Governance',
+      'Integrations',
+      'Advanced',
+    ]);
+    expect(tab('Overview')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('id', 'settings-tabpanel-overview');
+    // Every retired tab label is gone from the row — the material moved, the tabs went.
+    for (const retired of [
+      'API',
+      'API Keys',
+      'Documentation',
       'Data & Privacy',
       'About',
       'Help & Tutorial',
       'API Access',
       'Endpoint Explorer',
       'Connect Your Agent',
-    ]);
-    expect(tab('Overview')).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tabpanel')).toHaveAttribute('id', 'settings-tabpanel-overview');
-    // The renamed tab and the retired nested sub-tablist are both gone.
-    expect(screen.queryByRole('tab', { name: 'API' })).toBeNull();
-    expect(screen.queryByRole('tab', { name: 'API Keys' })).toBeNull();
-    expect(screen.queryByRole('tab', { name: 'Documentation' })).toBeNull();
+    ]) {
+      expect(screen.queryByRole('tab', { name: retired }), retired).toBeNull();
+    }
   });
-
-  /**
-   * The `keys | docs` sub-tablist is deleted, not hidden. Asserting the tablist
-   * COUNT on every tab is stronger than asserting the two old labels are absent:
-   * it fails for any nested page-level tablist, whatever it is called.
-   *
-   * The count is a PRE-LOAD fact, though. The code-sample language tabs inside
-   * the Endpoint Explorer sit behind a collapsed `<details>` — hidden in a real
-   * browser, but jsdom applies no such UA style, so once the contract has loaded
-   * they ARE in the accessibility tree and this page has two tablists. Hence the
-   * name-scoped resolution below.
-   */
-  /* ── the Advanced group · a LABEL on a flat tablist ───────────────────────
-   *
-   * The owner asked for Settings "simplified with developer material under
-   * Advanced". Three things have to be true at once for that to be honest, and
-   * each gets its own test below rather than one test asserting a rendering:
-   *
-   *   1. the word is VISIBLE, once, where the group starts;
-   *   2. it reaches a screen reader for EVERY tab in the group, because arrow
-   *      keys never show the third tab's reader the first tab's marker;
-   *   3. it changed no tab's NAME, because a name is the handle every suite and
-   *      every deep link resolves a tab by. The first attempt here appended the
-   *      group to `aria-label` and broke 98 assertions across three suites.
-   */
-  const ADVANCED_TABS = ['API Access', 'Endpoint Explorer', 'Connect Your Agent'];
 
   /*
-   * B-22 — THE MARKER IS NO LONGER A DOM NODE INSIDE THE TAB, and these three tests were
-   * INVERTED rather than deleted (the first two assertions of the old one are kept in
-   * spirit: once, and on the first tab of the group, hidden from assistive technology).
-   *
-   * It was `<span aria-hidden="true">Advanced</span>` inside the first grouped button.
-   * The accessible name was always right ("API Access" — `ariaSnapshot` says so), but any
-   * reader of the tab's TEXT saw the two run together: `textContent` "AdvancedAPI
-   * Access", `innerText` "ADVANCEDAPI Access" (inline spans add no space, and the gap
-   * was a CSS margin). That is what an audit that reads text instead of the accessibility
-   * tree reports, and it is also what a copy-paste of the row gives.
-   *
-   * It is now generated content — `.section-tab-group-start::before` showing the tab's
-   * `data-group` — declared with the empty alt-text form (`content: … / ""`) so no engine
-   * puts it in the name. The DOM, the text and the name all read "API Access".
+   * THE "ADVANCED" GROUP MARKER IS RETIRED, AND THESE ASSERTIONS ARE ITS
+   * INVERSION RATHER THAN ITS DELETION. Until 2026-10-12 three of seven tabs
+   * carried a visible "Advanced" group label (generated content on the first
+   * grouped tab) and an `aria-describedby` description on all three, because
+   * the group was a LABEL on a flat tablist. Advanced is now a TAB, so a group
+   * label would name a tab after itself. What this pins is that the scaffolding
+   * went with the row and did not linger as an orphan.
    */
-  it('shows the Advanced marker exactly once, on the first tab of the group, as generated content', () => {
+  it('carries no group marker, description, or orphaned group node — Advanced is a tab now', () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
-
-    const marked = pageTablist().querySelectorAll('[data-group]');
-    expect(marked, 'the row says "Advanced" once, where the group starts').toHaveLength(1);
-    expect(marked[0].getAttribute('data-group')).toBe('Advanced');
-    // On the FIRST grouped tab, not floating in the middle of the group.
-    expect(marked[0]).toBe(tab('API Access'));
-    expect(marked[0].classList.contains('section-tab-group-start')).toBe(true);
-    // No marker NODE anywhere: nothing for text extraction to run into a label.
-    expect(pageTablist().querySelector('.section-tab-group')).toBeNull();
-  });
-
-  it('no tab\'s text carries the group word — textContent is the label, exactly', () => {
-    stubFetchRoutes(fullRoutes());
-    renderSettings();
-    for (const name of [...ADVANCED_TABS, 'Overview', 'Data & Privacy', 'About', 'Help & Tutorial']) {
-      expect(tab(name).textContent, `${name}: raw text is the visible label`).toBe(name);
+    expect(pageTablist().querySelectorAll('[data-group]')).toHaveLength(0);
+    expect(pageTablist().querySelector('.section-tab-group-start')).toBeNull();
+    expect(document.getElementById('settings-tab-group-advanced')).toBeNull();
+    for (const t of screen.getAllByRole('tab')) {
+      expect(t, `${t.textContent}: no group description`).not.toHaveAttribute('aria-describedby');
+      /* The label exactly — nothing to run into it. Since 2026-10-18 a tab may
+         carry a SHORT form for a narrow row beside its full label; the short form
+         is `aria-hidden`, so the full label alone is still the tab's name. */
+      const full = t.querySelector('.section-tab-label-full');
+      const short = t.querySelector('.section-tab-label-short');
+      expect(short === null || short.getAttribute('aria-hidden') === 'true', 'short label hidden').toBe(true);
+      expect((full ?? t).textContent).toBe(accessibleTextOf(t));
     }
+    // The retired generated-content rule is gone from the stylesheet too, not
+    // merely unreferenced.
+    const css = readFileSync(resolve(__dirname, '..', 'screens/screens.css'), 'utf8');
+    expect(css).not.toMatch(/\.section-tab-group-start::before/);
   });
 
-  it('the generated marker uses the empty alt-text form, so it is never part of an accessible name', () => {
-    const css = readFileSync(
-      resolve(__dirname, '..', 'screens/screens.css'),
-      'utf8',
-    );
-    const rule = /\.section-tab-group-start::before\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
-    expect(rule, 'the ::before rule exists').not.toBe('');
-    expect(rule).toMatch(/content:\s*attr\(data-group\)\s*\/\s*""/);
-    // The marker keeps its presentation (small caps) — it is a visual label only; the group
-    // reaches a screen reader through `aria-describedby`, asserted in the next test.
-    expect(rule).toMatch(/text-transform:\s*uppercase/);
-  });
-
-  it('describes every Advanced tab as Advanced, not just the first', () => {
+  it('the tablist owns exactly four tabs and nothing else', () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
-
-    for (const name of ADVANCED_TABS) {
-      const id = tab(name).getAttribute('aria-describedby');
-      expect(id, `${name}: points at a description`).toBeTruthy();
-      const described = document.getElementById(id as string);
-      expect(described, `${name}: the description element exists`).not.toBeNull();
-      expect(described?.textContent).toBe('Advanced');
-    }
-    // One description element, shared — not three copies of one word.
-    const ids = new Set(ADVANCED_TABS.map((n) => tab(n).getAttribute('aria-describedby')));
-    expect(ids.size).toBe(1);
-  });
-
-  it('leaves the four scientist-facing tabs ungrouped and undescribed', () => {
-    stubFetchRoutes(fullRoutes());
-    renderSettings();
-    for (const name of ['Overview', 'Data & Privacy', 'About', 'Help & Tutorial']) {
-      expect(tab(name), `${name}: no group description`).not.toHaveAttribute('aria-describedby');
-      expect(tab(name), `${name}: no marker`).not.toHaveAttribute('data-group');
-    }
-  });
-
-  it('changed no tab name: the tablist still owns exactly seven tabs and nothing else', () => {
-    stubFetchRoutes(fullRoutes());
-    renderSettings();
-
-    /* WHY THIS IS ASSERTED OVER THE DOM CHILDREN and not over `getAllByRole`:
-       `role="tablist"` may only own `role="tab"` children, and the obvious way
-       to render a group marker — a wrapper or a separator element beside the
-       buttons — breaks `aria-required-children` in a way no name assertion
-       would notice. The marker is INSIDE the first grouped button and the
-       shared description is OUTSIDE the tablist, so every direct child here is
-       a tab. */
+    /* Asserted over the DOM children: `role="tablist"` may only own `role="tab"`
+       children (`aria-required-children`), which a name assertion would not see. */
     const children = Array.from(pageTablist().children);
-    expect(children).toHaveLength(7);
+    expect(children).toHaveLength(4);
     for (const child of children) {
       expect(child.getAttribute('role'), `${child.textContent}: a tablist child is a tab`).toBe('tab');
     }
-    // And the description is not one of them.
-    expect(pageTablist().querySelector('#settings-tab-group-advanced')).toBeNull();
-    expect(document.getElementById('settings-tab-group-advanced')).not.toBeNull();
+  });
 
-    // Every name is still exactly the visible label, group or no group.
-    for (const name of [...ADVANCED_TABS, 'Overview', 'Data & Privacy', 'About', 'Help & Tutorial']) {
-      expect(tab(name), `${name}: resolvable by its plain name`).toBeInTheDocument();
+  /*
+   * ~~The count above holds only while the stubbed fetches are still
+   * unresolved~~ — FIXED 2026-10-18 (independent review), and the old comment
+   * is the defect it describes: this test counted BEFORE the reads resolved, so
+   * it passed vacuously while the loaded Advanced tab carried a second, nested
+   * tablist (the Endpoint Explorer's Code Examples). That switch is now a toggle
+   * group, and this test waits for every read — and for the Explorer's detail
+   * pane, where Code Examples render — before it counts. `getAllByRole` counts
+   * a tablist inside a CLOSED `<details>` too only if it is in the accessibility
+   * tree, so the count is also taken over the DOM, which cannot miss one.
+   */
+  it('has exactly ONE tablist on every tab, once every read has resolved', async () => {
+    for (const id of [...SETTINGS_TAB_IDS, ...Object.keys(SETTINGS_TAB_ALIASES)]) {
+      stubFetchRoutes(fullRoutes());
+      const view = renderSettings(`/settings?tab=${id}`);
+      await flushReads();
+      if (id === 'advanced' || id === 'explorer') {
+        await screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 });
+        expect(view.container.querySelector('details.api-samples'), `${id}: Code Examples mounted`).not.toBeNull();
+      }
+      const lists = screen.getAllByRole('tablist');
+      expect(lists, `${id}: expected one tablist`).toHaveLength(1);
+      expect(view.container.querySelectorAll('[role="tablist"]'), `${id}: DOM tablists`).toHaveLength(1);
+      expect(lists[0], `${id}: the one tablist is the page's`).toBe(pageTablist());
+      view.unmount();
     }
   });
 
-  it('has exactly ONE tablist on every tab — the nested sub-tablist is gone', () => {
+  /*
+   * THE WIDGETS' VIEW SWITCHES ARE TOGGLE GROUPS, and that is the property that
+   * lets them exist at all on a page that refuses a second tablist. Pinned once
+   * the data has loaded, when every switch on every tab is mounted.
+   */
+  /* Re-pointed 2026-10-18 from the retired local `.settings-switch` to the shared
+     widget switch (`.widget-views`) — and given a FLOOR per tab, because a
+     selector that matches nothing makes every assertion in the loop vacuous,
+     which is exactly how this test would have survived the rename silently. */
+  it('every in-widget view switch is a group of aria-pressed buttons, never a tablist', async () => {
+    const floor: Record<string, number> = { overview: 1, privacy: 0, integrations: 2, advanced: 1 };
     for (const id of SETTINGS_TAB_IDS) {
       stubFetchRoutes(fullRoutes());
-      const view = renderSettings(ROUTES.settingsTab(id));
-      const lists = screen.getAllByRole('tablist');
-      expect(lists, `${id}: expected one tablist`).toHaveLength(1);
-      /* Resolve the PAGE tablist by its accessible name, not as `lists[0]`.
-         The count above holds only while the stubbed fetches are still
-         unresolved: once the Endpoint Explorer has its contract, the detail
-         pane's Code Examples section renders a SECOND, nested (non-page-level)
-         tablist of its own. Positional indexing would then silently assert about
-         whichever tablist happened to come first in the DOM, so this guard would
-         read as "the page tablist is named correctly" while actually only
-         meaning "there happens to be one tablist right now". Do not simplify it
-         back to `lists[0]`. */
-      expect(pageTablist(), `${id}: page tablist resolved by name`).toBeInTheDocument();
+      const view = renderSettings(`/settings?tab=${id}`);
+      await flushReads();
+      if (id === 'advanced') await screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 });
+      const groups = Array.from(view.container.querySelectorAll('.widget-views'));
+      expect(groups.length, `${id}: view switches found`).toBeGreaterThanOrEqual(floor[id]);
+      for (const group of groups) {
+        expect(group.getAttribute('role'), `${id}: a switch is a group`).toBe('group');
+        expect(group.getAttribute('aria-label'), `${id}: the switch is named`).toBeTruthy();
+        for (const option of Array.from(group.children)) {
+          expect(option.tagName).toBe('BUTTON');
+          expect(option.getAttribute('role')).toBeNull();
+          expect(['true', 'false']).toContain(option.getAttribute('aria-pressed'));
+          // Every option names the panel it shows, and that panel is mounted.
+          const controls = option.getAttribute('aria-controls');
+          expect(controls && document.getElementById(controls), `${id}: panel mounted`).toBeTruthy();
+        }
+      }
       view.unmount();
     }
+  });
+
+  /*
+   * WCAG 2.4.11 at 320px (re-review, 2026-10-18), SOLVED BY LAYOUT, NOT BY
+   * SCROLLING. The narrow tab row used to scroll sideways, and `?tab=advanced`
+   * left the selected tab off-screen; a `scrollIntoView` fixed that, and then CI's
+   * layout sweep refused the sideways-scrolling region outright (on CI's font the
+   * row measured ~317px against a 312px box at 390). So the row now always FITS:
+   * one row of short labels down to 441px, two rows of two below. jsdom computes
+   * no layout, so the rules that guarantee it are what is pinned — and the
+   * absence of the scroll machinery, so a horizontal scroller cannot creep back.
+   */
+  it('keeps the narrow tab row from ever scrolling sideways', () => {
+    const css = readFileSync(resolve(__dirname, '..', 'screens/settings/settings-widgets.css'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '');
+    const rulesFor = (selector: string) =>
+      [...css.matchAll(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'g'))]
+        .map((m) => m[1])
+        .join('\n');
+    const tabRow = rulesFor('.settings-section-tabs');
+    expect(tabRow).not.toMatch(/overflow-x\s*:\s*(auto|scroll)/);
+    expect(tabRow).toMatch(/display\s*:\s*grid/);
+    expect(tabRow).toMatch(/grid-template-columns\s*:\s*repeat\(2,/);
+    expect(css).toMatch(/@media \(max-width: 440px\)/);
+    stubFetchRoutes(fullRoutes());
+    renderSettings('/settings?tab=advanced');
+    expect(pageTablist()).not.toHaveAttribute('data-overflowing');
   });
 
   it('uses a roving tabindex: only the selected tab is in the tab order', () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
     expect(tab('Overview')).toHaveAttribute('tabindex', '0');
-    expect(tab('API Access')).toHaveAttribute('tabindex', '-1');
-    expect(tab('Endpoint Explorer')).toHaveAttribute('tabindex', '-1');
+    expect(tab('Integrations')).toHaveAttribute('tabindex', '-1');
+    expect(tab('Advanced')).toHaveAttribute('tabindex', '-1');
     expect(screen.getAllByRole('tab').filter((t) => t.getAttribute('tabindex') === '0')).toHaveLength(1);
   });
 
@@ -394,8 +400,8 @@ describe('Settings — tabs', () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
     expect(tab('Overview')).toHaveAttribute('aria-controls', 'settings-tabpanel-overview');
-    expect(tab('About')).not.toHaveAttribute('aria-controls');
-    expect(tab('Endpoint Explorer')).not.toHaveAttribute('aria-controls');
+    expect(tab('Privacy & Governance')).not.toHaveAttribute('aria-controls');
+    expect(tab('Advanced')).not.toHaveAttribute('aria-controls');
   });
 
   it('every tab renders exactly one panel, labelled by its own tab', () => {
@@ -405,13 +411,9 @@ describe('Settings — tabs', () => {
       const panels = screen.getAllByRole('tabpanel');
       expect(panels, `${id}: expected one panel`).toHaveLength(1);
       /* Resolve the SETTINGS panel by its accessible name — each panel is
-         `aria-labelledby` its own tab, so the name is that tab's label — rather
-         than as `panels[0]` or an unscoped `getByRole('tabpanel')`. The count
-         above is only true pre-load: once the Endpoint Explorer has its
-         contract, the detail pane's Code Examples section renders its own nested
-         tabpanel, at which point an unscoped query is ambiguous and a positional
-         one can resolve the wrong element. Name-scoping is what makes this guard
-         assert the thing it claims. */
+         `aria-labelledby` its own tab — rather than positionally: once the
+         Endpoint Explorer has its contract, its Code Examples section renders a
+         nested tabpanel of its own. */
       const panel = screen.getByRole('tabpanel', { name: selectedTabLabel() });
       expect(panel, `${id}: panel resolved by name`).toHaveAttribute(
         'id',
@@ -425,10 +427,10 @@ describe('Settings — tabs', () => {
   it('clicking a tab switches the rendered panel', () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
-    openTab('About');
-    expect(tab('About')).toHaveAttribute('aria-selected', 'true');
+    openTab('Privacy & Governance');
+    expect(tab('Privacy & Governance')).toHaveAttribute('aria-selected', 'true');
     expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
-    expect(screen.getByRole('tabpanel')).toHaveAttribute('id', 'settings-tabpanel-about');
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('id', 'settings-tabpanel-privacy');
   });
 
   it('Arrow / Home / End move the selection (automatic activation)', () => {
@@ -436,32 +438,23 @@ describe('Settings — tabs', () => {
     renderSettings();
 
     fireEvent.keyDown(tab('Overview'), { key: 'ArrowRight' });
-    expect(tab('Data & Privacy')).toHaveAttribute('aria-selected', 'true');
+    expect(tab('Privacy & Governance')).toHaveAttribute('aria-selected', 'true');
 
-    // End is the LAST tab — Connect Your Agent since the 2026-09-15 regroup.
-    fireEvent.keyDown(tab('Data & Privacy'), { key: 'End' });
-    expect(tab('Connect Your Agent')).toHaveAttribute('aria-selected', 'true');
+    fireEvent.keyDown(tab('Privacy & Governance'), { key: 'End' });
+    expect(tab('Advanced')).toHaveAttribute('aria-selected', 'true');
 
-    fireEvent.keyDown(tab('Connect Your Agent'), { key: 'Home' });
+    fireEvent.keyDown(tab('Advanced'), { key: 'Home' });
     expect(tab('Overview')).toHaveAttribute('aria-selected', 'true');
 
+    // Wraps from the first tab to the last…
     fireEvent.keyDown(tab('Overview'), { key: 'ArrowLeft' });
-    expect(tab('Connect Your Agent')).toHaveAttribute('aria-selected', 'true');
+    expect(tab('Advanced')).toHaveAttribute('aria-selected', 'true');
 
-    // ArrowLeft from the last tab reaches the one before it, so the wrap is
-    // walking all seven entries rather than a stale shorter array. It also
-    // crosses no group boundary special-case: the group is a LABEL, and the
-    // roving order is still one flat list of seven.
-    fireEvent.keyDown(tab('Connect Your Agent'), { key: 'ArrowLeft' });
-    expect(tab('Endpoint Explorer')).toHaveAttribute('aria-selected', 'true');
-
-    // ...and crossing back over the boundary reaches the scientist-facing side,
-    // which is the assertion that would fail if the marker had been made a
-    // tablist child and shifted the indices.
-    fireEvent.keyDown(tab('Endpoint Explorer'), { key: 'ArrowLeft' });
-    expect(tab('API Access')).toHaveAttribute('aria-selected', 'true');
-    fireEvent.keyDown(tab('API Access'), { key: 'ArrowLeft' });
-    expect(tab('Help & Tutorial')).toHaveAttribute('aria-selected', 'true');
+    // …and walks back through all four, so the wrap is over the real list.
+    fireEvent.keyDown(tab('Advanced'), { key: 'ArrowLeft' });
+    expect(tab('Integrations')).toHaveAttribute('aria-selected', 'true');
+    fireEvent.keyDown(tab('Integrations'), { key: 'ArrowLeft' });
+    expect(tab('Privacy & Governance')).toHaveAttribute('aria-selected', 'true');
   });
 
   it('keyboard selection moves focus with it, so the arrow keys stay usable', () => {
@@ -469,8 +462,8 @@ describe('Settings — tabs', () => {
     renderSettings();
     tab('Overview').focus();
     fireEvent.keyDown(tab('Overview'), { key: 'End' });
-    expect(tab('Connect Your Agent')).toHaveFocus();
-    expect(tab('Connect Your Agent')).toHaveAttribute('tabindex', '0');
+    expect(tab('Advanced')).toHaveFocus();
+    expect(tab('Advanced')).toHaveAttribute('tabindex', '0');
   });
 
   it('states plainly that there is nothing to configure (no invented settings)', () => {
@@ -508,18 +501,56 @@ describe('Settings — deep-linkable tabs (?tab=)', () => {
     }
   });
 
-  it('?tab=api opens API Access with its real content, not an empty panel', async () => {
-    stubFetchRoutes(fullRoutes());
-    renderSettings('/settings?tab=api');
-    expect(tab('API Access')).toHaveAttribute('aria-selected', 'true');
-    expect(await screen.findByText(API_ACCESS_COPY.emptyTitle)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Create API Key/i })).toBeDisabled();
+  /*
+   * EVERY RETIRED TAB ID STILL RESOLVES (2026-10-12). Seven ids became four tabs,
+   * and the five that no longer name a tab are URLs a reader may hold — the
+   * walkthrough prints `?tab=help`, the voice-capture view links `?tab=mcp`,
+   * Statistics links `?tab=explorer`. Each must land on the tab holding that
+   * material AND bring the widget it named into view; "lands on a tab" alone
+   * would pass with the reader parked two widgets away from what they clicked.
+   */
+  it.each([
+    ['about', 'overview', 'This Build'],
+    ['help', 'overview', 'Guided Walkthrough'],
+    ['api', 'integrations', 'API Access'],
+    ['mcp', 'integrations', 'Connect Your Agent'],
+    ['explorer', 'advanced', 'Endpoint Explorer'],
+  ] as const)('the retired id ?tab=%s lands on %s and scrolls its widget into view', async (alias, canonical, widget) => {
+    const scrolled: Element[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this);
+    };
+    try {
+      stubFetchRoutes(fullRoutes());
+      renderSettings(`/settings?tab=${alias}`);
+      expect(isSettingsTabAlias(alias)).toBe(true);
+      expect(resolveSettingsTab(alias).tab).toBe(canonical);
+      expect(screen.getByRole('tabpanel')).toHaveAttribute('id', `settings-tabpanel-${canonical}`);
+      const region = screen.getByRole('region', { name: widget });
+      await waitFor(() => expect(scrolled).toContain(region));
+      // Nothing is rewritten: the URL a reader followed is the URL they keep.
+      expect(search()).toBe(`?tab=${alias}`);
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
   });
 
-  it('?tab=explorer opens the Endpoint Explorer with the contract rendered', async () => {
+  it('?tab=api opens Integrations with the key state as a STATE, not a disabled button', async () => {
+    stubFetchRoutes(fullRoutes());
+    renderSettings('/settings?tab=api');
+    expect(tab('Integrations')).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByText(API_ACCESS_COPY.statusHeading)).toBeInTheDocument();
+    // INVERTED, 2026-10-12. This test used to require a `disabled` Create API
+    // Key button. An absent capability is now stated, never offered as a control
+    // that cannot be pressed — so the button must NOT exist.
+    expect(screen.queryByRole('button', { name: /Create API Key/i })).toBeNull();
+  });
+
+  it('?tab=explorer opens Advanced with the contract rendered', async () => {
     stubFetchRoutes(fullRoutes());
     renderSettings('/settings?tab=explorer');
-    expect(tab('Endpoint Explorer')).toHaveAttribute('aria-selected', 'true');
+    expect(tab('Advanced')).toHaveAttribute('aria-selected', 'true');
     expect(
       await screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 }),
     ).toBeInTheDocument();
@@ -542,29 +573,34 @@ describe('Settings — deep-linkable tabs (?tab=)', () => {
     expect(screen.queryByText(/not found/i)).not.toBeInTheDocument();
   });
 
-  it('the tab id guard accepts exactly the five ids and nothing else', () => {
+  it('the tab id guard accepts exactly the four ids, and the alias guard exactly the five retired ones', () => {
     for (const id of SETTINGS_TAB_IDS) expect(isSettingsTab(id)).toBe(true);
-    for (const bad of ['', 'API', 'docs', 'keys', 'overview ', null, undefined]) {
+    expect([...SETTINGS_TAB_IDS]).toEqual(['overview', 'privacy', 'integrations', 'advanced']);
+    expect(Object.keys(SETTINGS_TAB_ALIASES).sort()).toEqual(['about', 'api', 'explorer', 'help', 'mcp']);
+    for (const alias of Object.keys(SETTINGS_TAB_ALIASES)) {
+      expect(isSettingsTab(alias), `${alias} is an alias, not a tab`).toBe(false);
+      expect(isSettingsTabAlias(alias)).toBe(true);
+    }
+    for (const bad of ['', 'API', 'docs', 'keys', 'overview ', 'toString', null, undefined]) {
       expect(isSettingsTab(bad), `must reject ${JSON.stringify(bad)}`).toBe(false);
+      expect(isSettingsTabAlias(bad), `must not alias ${JSON.stringify(bad)}`).toBe(false);
     }
   });
 
   /**
-   * `ROUTES.settingsTab` has NO in-app consumer by design (see `lib/routes.ts`):
+   * `ROUTES.settingsTab` has NO in-page consumer by design (see `lib/routes.ts`):
    * the page switches tabs with `setSearchParams` over a copy of the current
-   * params, which preserves any other query parameter, whereas navigating to a URL
-   * built by the helper would drop them. This test is the anti-drift guard that
-   * arrangement requires — the helper and the real mechanism must produce the same
-   * query string for EVERY tab, so the helper cannot rot into a stale convention.
+   * params, which preserves any other query parameter. This is the anti-drift
+   * guard: the helper and the real mechanism produce the same query string for
+   * EVERY tab.
    */
   it('the link helper and the page’s own tab mechanism agree for every tab', () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
     for (const [id, label] of [
-      ['privacy', 'Data & Privacy'],
-      ['about', 'About'],
-      ['api', 'API Access'],
-      ['explorer', 'Endpoint Explorer'],
+      ['privacy', 'Privacy & Governance'],
+      ['integrations', 'Integrations'],
+      ['advanced', 'Advanced'],
       ['overview', 'Overview'],
     ] as const) {
       openTab(label);
@@ -582,34 +618,34 @@ describe('Settings — deep-linkable tabs (?tab=)', () => {
     renderSettings();
     await screen.findByText('0.1.0');
 
-    openTab('Data & Privacy');
-    openTab('API Access');
-    expect(tab('API Access')).toHaveAttribute('aria-selected', 'true');
+    openTab('Privacy & Governance');
+    openTab('Integrations');
+    expect(tab('Integrations')).toHaveAttribute('aria-selected', 'true');
 
     back();
-    expect(tab('Data & Privacy')).toHaveAttribute('aria-selected', 'true');
+    expect(tab('Privacy & Governance')).toHaveAttribute('aria-selected', 'true');
     expect(search()).toBe('?tab=privacy');
 
     back();
     expect(tab('Overview')).toHaveAttribute('aria-selected', 'true');
 
     forward();
-    expect(tab('Data & Privacy')).toHaveAttribute('aria-selected', 'true');
+    expect(tab('Privacy & Governance')).toHaveAttribute('aria-selected', 'true');
     forward();
-    expect(tab('API Access')).toHaveAttribute('aria-selected', 'true');
+    expect(tab('Integrations')).toHaveAttribute('aria-selected', 'true');
   });
 
   it('a deep-linked tab survives a refresh (a fresh mount at the same URL)', async () => {
     stubFetchRoutes(fullRoutes());
-    const first = renderSettings('/settings?tab=explorer');
+    const first = renderSettings('/settings?tab=advanced');
     await screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 });
     first.unmount();
 
     // Re-mounting at the same entry is what a reload does: no client state
     // carries over, so the tab can only come back from the URL.
     stubFetchRoutes(fullRoutes());
-    renderSettings('/settings?tab=explorer');
-    expect(tab('Endpoint Explorer')).toHaveAttribute('aria-selected', 'true');
+    renderSettings('/settings?tab=advanced');
+    expect(tab('Advanced')).toHaveAttribute('aria-selected', 'true');
     expect(
       await screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 }),
     ).toBeInTheDocument();
@@ -618,14 +654,14 @@ describe('Settings — deep-linkable tabs (?tab=)', () => {
   it('an in-app deep link into one tab preserves every other query parameter', () => {
     stubFetchRoutes(fullRoutes());
     renderSettings('/settings?keep=me&tab=about');
-    expect(tab('About')).toHaveAttribute('aria-selected', 'true');
-    openTab('API Access');
+    expect(tab('Overview')).toHaveAttribute('aria-selected', 'true');
+    openTab('Integrations');
     expect(search()).toContain('keep=me');
-    expect(search()).toContain('tab=api');
+    expect(search()).toContain('tab=integrations');
   });
 
-  /** Every page-level fetch is issued ONCE, so the five tabs are pure client
-   *  state: no tab switch, and no Back/Forward, may re-hit the backend. */
+  /** Every page-level fetch is issued ONCE, so the tabs are pure client state:
+   *  no tab switch, and no Back/Forward, may re-hit the backend. */
   it('switching tabs never re-hits the backend', async () => {
     const hits = stubFetchRoutes(fullRoutes());
     renderSettings();
@@ -633,20 +669,21 @@ describe('Settings — deep-linkable tabs (?tab=)', () => {
     const initial = [...hits];
     expect(initial.filter((h) => h === ABOUT_URL)).toHaveLength(1);
     expect(initial.filter((h) => h === OPENAPI_URL)).toHaveLength(1);
-    // The graph status is issued once at mount too. The `hits` equality below
-    // catches a re-fetch on a tab switch, but NOT a double-issue at mount —
-    // that would already be in `initial`. Pin it explicitly, as for the other
-    // two page-level fetches.
     expect(initial.filter((h) => h === GRAPH_STATUS_URL)).toHaveLength(1);
 
-    for (const name of ['Data & Privacy', 'About', 'API Access', 'Endpoint Explorer', 'Overview']) {
+    for (const name of ['Privacy & Governance', 'Advanced', 'Overview']) {
       openTab(name);
     }
     await screen.findByText('0.1.0');
     back();
     forward();
 
-    expect(hits).toEqual(initial);
+    // Integrations is opened on its own and its one SECTION-level read — the
+    // companion link, re-read per mount by design (see `AssistantCompanion.tsx`)
+    // — is the only request any tab switch may add.
+    const pageLevel = (list: string[]) =>
+      list.filter((h) => h !== 'GET /api/runtime/assistant-companion');
+    expect(pageLevel(hits)).toEqual(pageLevel(initial));
   });
 });
 
@@ -656,7 +693,8 @@ describe('Settings — Overview', () => {
   it('shows a loading state before the fetch resolves', () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
-    expect(screen.getByText('Loading app info…')).toBeInTheDocument();
+    // Both widgets that wait on `/api/about` say so, each inside itself.
+    expect(screen.getAllByText('Loading app info…').length).toBeGreaterThan(0);
   });
 
   it('summarizes the runtime from the live endpoint, never a hardcoded claim', async () => {
@@ -673,27 +711,91 @@ describe('Settings — Overview', () => {
   });
 
   /**
-   * P36V PR3 — Overview is a SUMMARY. Each boundary appears as its one-line
-   * `summary`, and the canonical definitions (asserted in the Data & Privacy
-   * suite, and counted in the "appears exactly once" suite) render nowhere here.
+   * Overview is a SUMMARY, and since 2026-10-12 a narrower one. It used to carry
+   * all twelve boundary summaries ("Boundaries at a Glance"); Privacy & Governance
+   * now shows every one of them as a visible row, so Overview's Data Safety widget
+   * carries only the four question-level lines `OVERVIEW_SAFETY_ROWS` names —
+   * each a concept summary, never a new sentence — and renders no definition.
+   * INVERTED from "every boundary on Overview": that requirement was the second
+   * copy the redesign exists to remove.
    */
-  it('names every boundary as a one-line summary, not a second copy of the definition', async () => {
+  it('carries the four Data Safety lines — vetted summaries only — and no definition', async () => {
     stubFetchRoutes(fullRoutes());
     const { container } = renderSettings();
     await screen.findByText('0.1.0');
 
     const concepts = settingsConcepts(settingsFactsFrom(aboutResponse));
+    const byId = new Map(concepts.map((c) => [c.id, c]));
+    const rows = Array.from(container.querySelectorAll('.settings-row'));
+    expect(rows.map((r) => r.querySelector('dt')?.textContent)).toEqual(
+      OVERVIEW_SAFETY_ROWS.map((r) => r.label),
+    );
+    rows.forEach((row, i) => {
+      const expected = OVERVIEW_SAFETY_ROWS[i].items
+        .map((item) =>
+          'concept' in item ? byId.get(item.concept)!.summary : GOVERNANCE_POLICY[item.policy].summary,
+        )
+        .join(' ');
+      expect(norm(row.querySelector('dd')?.textContent ?? '')).toBe(norm(expected));
+    });
     const text = norm(container.textContent ?? '');
     for (const concept of concepts) {
-      expect(text, `Overview must summarize "${concept.heading}"`).toContain(norm(concept.summary));
-      expect(text, `Overview must NOT define "${concept.heading}"`).not.toContain(
-        norm(concept.detail),
+      expect(text, `Overview must NOT define "${concept.heading}"`).not.toContain(norm(concept.detail));
+    }
+    // Nor does it carry a governance paragraph in full — only its one-line form.
+    for (const id of ['reviewTools', 'diagnostic'] as const) {
+      expect(text, `Overview must NOT carry the full ${id} paragraph`).not.toContain(
+        norm(GOVERNANCE_POLICY[id].text),
       );
     }
-    // Every boundary is labelled, so a summary is never an orphan sentence.
-    for (const concept of concepts) {
-      expect(screen.getByText(concept.heading)).toBeInTheDocument();
-    }
+    // And it points at the canonical home rather than restating the rest.
+    const link = screen.getByRole('link', { name: 'All Boundaries' });
+    expect(link.getAttribute('href')).toBe('/settings?tab=privacy');
+  });
+
+  /*
+   * HONESTY BY OMISSION, closed 2026-10-18 (independent review). Under the
+   * question "What Leaves", a row that named only telemetry and model calls read
+   * as "nothing leaves" — while a downloaded export is, by the canonical
+   * Exporting a Record boundary, beyond this app, and the read-only diagnostic
+   * returns aggregate output. Under "What Enters", a row that named only the
+   * refused upload read as "no file is read" — while the Validator and CSV
+   * reconciliation DO read a file the reader chooses. Each question must name
+   * every path its answer is true or false of, in its one-line form.
+   */
+  it('What Enters names the two review tools that read a chosen file', async () => {
+    stubFetchRoutes(fullRoutes());
+    const { container } = renderSettings();
+    await screen.findByText('0.1.0');
+    const row = Array.from(container.querySelectorAll('.settings-row')).find(
+      (r) => r.querySelector('dt')?.textContent === 'What Enters',
+    )!;
+    const text = row.querySelector('dd')?.textContent ?? '';
+    expect(text).toMatch(/upload route refuses every request/i);
+    expect(text).toMatch(/\bValidator\b/);
+    expect(text).toMatch(/CSV reconciliation/i);
+    expect(text).toMatch(/read a file you pick or text you paste/i);
+    expect(text).toMatch(/only the outcome/i);
+  });
+
+  it('What Leaves names the download and the diagnostic, not only what does NOT leave', async () => {
+    stubFetchRoutes(fullRoutes());
+    const { container } = renderSettings();
+    await screen.findByText('0.1.0');
+    const row = Array.from(container.querySelectorAll('.settings-row')).find(
+      (r) => r.querySelector('dt')?.textContent === 'What Leaves',
+    )!;
+    const text = row.querySelector('dd')?.textContent ?? '';
+    // The export: what crosses out of the app, said in the canonical boundary's words.
+    expect(text).toMatch(/downloading one happens in your browser and puts the copy beyond this app/i);
+    // The diagnostic's aggregate output, with every bound a reader needs beside it.
+    expect(text).toMatch(/protected, read-only diagnostic/i);
+    expect(text).toMatch(/sanitized aggregates only/i);
+    expect(text).toMatch(/no record displayed/i);
+    expect(text).toMatch(/nothing sent to a model/i);
+    // ...and still the two negatives it had.
+    expect(text).toMatch(/measures and transmits nothing about your session/i);
+    expect(text).toMatch(/No language model at all/i);
   });
 
   /**
@@ -726,10 +828,13 @@ describe('Settings — Overview', () => {
       screen.queryByText(/restarting the backend process does not by itself clear it/i),
     ).not.toBeInTheDocument();
 
+    expect(screen.queryByText(/outside the application/i)).not.toBeInTheDocument();
+    // The access caveat is the Authentication Boundary row's, on Privacy &
+    // Governance — Overview no longer carries that row (see the test above).
+    openTab('Privacy & Governance');
     expect(
       screen.getByText(/this screen cannot report whether access is restricted/i),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/outside the application/i)).not.toBeInTheDocument();
   });
 
   /**
@@ -752,14 +857,15 @@ describe('Settings — Overview', () => {
     const labels = Array.from(container.querySelectorAll('.settings-figure-label')).map(
       (el) => el.textContent,
     );
+    // The same seven rows, now in This Build's two views (Build, then Runtime).
     expect(labels).toEqual([
       'App Version',
       'Build Commit',
       'Record Schema',
+      'Core',
       'Runtime Mode',
       'Data Regime',
       'Persistence',
-      'Core',
     ]);
 
     /*
@@ -783,11 +889,20 @@ describe('Settings — Overview', () => {
       ['App Version', 'fixed for this build'],
       ['Build Commit', 'read per request'],
       ['Record Schema', 'fixed for this build'],
+      ['Core', 'fixed for this build'],
       ['Runtime Mode', 'read per request'],
       ['Data Regime', 'fixed for this build'],
       ['Persistence', 'read per request'],
-      ['Core', 'fixed for this build'],
     ]);
+    /* THE PRESENTATION OF THE PROVENANCE CHANGED, NOT ITS DECISION (2026-10-12).
+       The seven visible sublabels became one clock mark on each live row, with
+       the legend in the widget's info; the words remain for assistive
+       technology. So: every live row — and only a live row — carries the mark. */
+    for (const row of Array.from(container.querySelectorAll('.settings-figure'))) {
+      const live = row.querySelector('.settings-figure-source')?.textContent === 'read per request';
+      expect(row.querySelector('.settings-provenance-mark') !== null, row.textContent ?? '').toBe(live);
+      expect(row.querySelector('.settings-figure-source')).toHaveClass('sr-only');
+    }
     const text = norm(container.textContent ?? '').toLowerCase();
     expect(text).not.toContain('authentication: active');
     expect(text).not.toContain('authentication is active');
@@ -847,7 +962,7 @@ describe('Settings — Overview', () => {
       'GET /api/runtime/assistant-companion': { body: assistantCompanionUnconfigured },
     });
     renderSettings();
-    fireEvent.click(tab('Data & Privacy'));
+    fireEvent.click(tab('Privacy & Governance'));
     const resets = await screen.findByText(/Experiment records survive a restart/i);
     const text = resets.textContent ?? '';
     // (1) the durable arm, not the fallback.
@@ -871,10 +986,11 @@ describe('Settings — Overview', () => {
       'GET /api/runtime/assistant-companion': { body: assistantCompanionUnconfigured },
     });
     renderSettings();
-    fireEvent.click(tab('Data & Privacy'));
+    fireEvent.click(tab('Privacy & Governance'));
+    // Both the visible row (the summary) and the definition name the value.
     expect(
-      await screen.findByText(/reports persistence as "somehow-else"/i),
-    ).toBeInTheDocument();
+      (await screen.findAllByText(/reports persistence as "somehow-else"/i)).length,
+    ).toBeGreaterThan(0);
     expect(screen.queryByText(/Experiment records survive a restart/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/reports that storage as ephemeral/i)).not.toBeInTheDocument();
   });
@@ -922,7 +1038,7 @@ describe('Settings — Overview', () => {
       'GET /api/runtime/assistant-companion': { body: assistantCompanionUnconfigured },
     });
     renderSettings();
-    fireEvent.click(tab('Data & Privacy'));
+    fireEvent.click(tab('Privacy & Governance'));
     const resets = await screen.findByText(/reports persistence as unavailable/i);
     const text = resets.textContent ?? '';
     // The bad news, still stated before the reader acts — but as a RECORDED
@@ -1067,24 +1183,20 @@ describe('Settings — Overview', () => {
   });
 
   /**
-   * The jump nav now has FOUR entries because there are four deeper tabs, and
-   * each one is asserted to land on its own tab AND to write its own `?tab=`
-   * value — stronger than the single "browse the api" click it replaces, which
-   * only checked that one button changed one `aria-selected`.
+   * THE JUMP NAV IS RETIRED (2026-10-12), and this is its inversion. Overview
+   * ended in four jump buttons into the deeper tabs, beside a tablist that
+   * already offered all of them — a second navigation for the same four places.
+   * The one onward move that is part of a question stays, as a real link inside
+   * the widget that raises it.
    */
-  it.each([
-    ['Data & Privacy Detail', 'privacy', 'Data & Privacy'],
-    ['Version & Provenance', 'about', 'About'],
-    ['API Access', 'api', 'API Access'],
-    ['Endpoint Explorer', 'explorer', 'Endpoint Explorer'],
-  ])('links into the deeper tabs: %s', async (label, id, tabName) => {
+  it('has no jump-button navigation; Data Safety links to the canonical home instead', async () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
     await screen.findByText('0.1.0');
-    const nav = screen.getByRole('navigation', { name: 'More settings detail' });
-    fireEvent.click(within(nav).getByRole('button', { name: label }));
-    expect(tab(tabName)).toHaveAttribute('aria-selected', 'true');
-    expect(search()).toBe(`?tab=${id}`);
+    expect(screen.queryByRole('navigation', { name: 'More settings detail' })).toBeNull();
+    fireEvent.click(screen.getByRole('link', { name: 'All Boundaries' }));
+    expect(tab('Privacy & Governance')).toHaveAttribute('aria-selected', 'true');
+    expect(search()).toBe('?tab=privacy');
   });
 
   it('shows a backend-unreachable state without crashing', async () => {
@@ -1098,11 +1210,11 @@ describe('Settings — Overview', () => {
 
 // --- Data & Privacy -----------------------------------------------------------
 
-describe('Settings — Data & Privacy', () => {
+describe('Settings — Privacy & Governance', () => {
   it('covers storage, reset, telemetry, models, memory, truth, and access — in Title Case', async () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
-    openTab('Data & Privacy');
+    openTab('Privacy & Governance');
     await screen.findByText(/two things are stored/i);
 
     const concepts = settingsConcepts(settingsFactsFrom(aboutResponse));
@@ -1143,11 +1255,23 @@ describe('Settings — Data & Privacy', () => {
       'Record Truth Boundary',
       'Authentication Boundary',
     ]);
+    const merged = new Set<string>(PRIVACY_QUESTIONS.flatMap((q) => q.merged ?? []));
     for (const concept of concepts) {
-      // The canonical definition is HERE, under its own heading, exactly once.
-      const heading = screen.getByRole('heading', { name: concept.heading });
-      expect(heading).toBeInTheDocument();
-      expect(heading.tagName).toBe('H3');
+      /* The canonical definition is HERE, under its own heading, exactly once.
+         A concept shown as part of the merged Synthetic-Only Mode row
+         (2026-10-18) has no visible row heading of its own — its definition's
+         <h4> is in Details, which `getByRole` does not reach while closed — so
+         its heading is asserted on the definition instead. */
+      if (merged.has(concept.id)) {
+        const def = Array.from(document.querySelectorAll('.settings-definition-heading')).filter(
+          (h) => h.textContent === concept.heading,
+        );
+        expect(def, concept.heading).toHaveLength(1);
+      } else {
+        const heading = screen.getByRole('heading', { name: concept.heading });
+        expect(heading).toBeInTheDocument();
+        expect(heading.tagName).toBe('H3');
+      }
       expect(screen.getByText(concept.detail)).toBeInTheDocument();
     }
   });
@@ -1176,7 +1300,7 @@ describe('Settings — Data & Privacy', () => {
   it('counts the per-walkthrough directory as well as the workspace', async () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
-    openTab('Data & Privacy');
+    openTab('Privacy & Governance');
     await screen.findByText(/two things are stored/i);
 
     const stored = screen.getByText(/two things are stored/i).textContent ?? '';
@@ -1211,7 +1335,7 @@ describe('Settings — Data & Privacy', () => {
   it('is the one canonical home of the definitions Overview only summarizes', async () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
-    openTab('Data & Privacy');
+    openTab('Privacy & Governance');
     await screen.findByText(/two things are stored/i);
 
     // Slice 2A (I5) sweep. Both needles named copy that has been retired for
@@ -1260,7 +1384,7 @@ describe('Settings — Data & Privacy', () => {
   it('puts only secondary edge cases behind collapsed disclosures', async () => {
     stubFetchRoutes(fullRoutes());
     const { container } = renderSettings();
-    openTab('Data & Privacy');
+    openTab('Privacy & Governance');
     await screen.findByText(/two things are stored/i);
 
     const disclosures = Array.from(
@@ -1289,65 +1413,141 @@ describe('Settings — Data & Privacy', () => {
   });
 
   /*
-   * ── THE OUTER DISCLOSURE LAYER, 2026-09-16 ──────────────────────────────────
+   * ── THE TWO LAYERS, RE-CUT 2026-10-12 — AN INVERSION OF THE 2026-09-16 TEST ──
    *
-   * Each concept's whole `detail` now sits behind its own `details.settings-concept`,
-   * because twelve always-expanded definitions rendered 2.5 viewports of prose at
-   * 1280x900 and 7.4 at 375x812 (measured in Chromium). Nothing was deleted,
-   * shortened, merged or reworded — the test above still passes unchanged, and so
-   * does every claim-parity guard, because `querySelectorAll` and Testing
-   * Library's text queries reach inside a closed `<details>`.
+   * The 2026-09-16 layer put each concept's whole `detail` behind its own
+   * `details.settings-concept`, whose `<summary>` was the heading and nothing else
+   * — and this test pinned that shape. Privacy & Governance now shows each
+   * concept as a VISIBLE ROW (heading + `summary`, `DEC-35`: a privacy state is
+   * never behind a disclosure) and keeps every `detail` in its question widget's
+   * Details. What that test protected is unchanged and is what is asserted here:
    *
-   * THESE TWO TESTS ARE WHAT MAKES THAT SAFE, and they are not decoration. The
-   * rule the test above enforces is that a caveat may never hide BESIDE a claim
-   * it qualifies. This layer does not break it only because a `<summary>` here
-   * carries the `heading` and NOTHING else — a heading is a TOPIC, not an
-   * assertion, so shutting a row leaves no claim standing unqualified.
-   *
-   * That property is one edit away from being lost. `concept.summary` is a vetted
-   * one-liner and would look like the obvious thing to put in a `<summary>`; for
-   * `no-telemetry` it reads "This application measures and transmits nothing about
-   * your session", while its `detail` carries the server-log, access-log and
-   * identity-gateway scope that stops exactly that sentence from overstating the
-   * code. Promoting it would restore that overstatement behind a shut drawer —
-   * a regression no existing test could see, since every string would still be
-   * in the DOM.
+   *   1. no `summary` line is ever the LABEL of a disclosure (the Details trigger
+   *      reads "Full Definitions" — a topic, not a claim);
+   *   2. every definition is present, verbatim, under its own heading;
+   *   3. every concept appears in exactly ONE widget, once as a row and once as
+   *      a definition, so nothing is duplicated and nothing is dropped.
    */
-  it('gives every concept a disclosure whose summary is the heading and nothing else', async () => {
+  it('shows every concept once as a visible row and once as a definition in its widget', async () => {
     stubFetchRoutes(fullRoutes());
     const { container } = renderSettings();
-    openTab('Data & Privacy');
+    openTab('Privacy & Governance');
     await screen.findByText(/two things are stored/i);
 
     const concepts = settingsConcepts(settingsFactsFrom(aboutResponse));
-    const rows = Array.from(
-      container.querySelectorAll('ul.settings-points > li > details.settings-concept'),
-    ) as HTMLDetailsElement[];
+    // The four widgets hold all twelve, each exactly once.
+    const placed = PRIVACY_QUESTIONS.flatMap((q) => q.concepts);
+    expect(new Set(placed).size).toBe(placed.length);
+    expect([...placed].sort()).toEqual(concepts.map((c) => c.id).sort());
 
-    // One row per concept, in the tab's own order, each collapsed.
-    expect(rows).toHaveLength(concepts.length);
-    rows.forEach((d) => expect(d.open).toBe(false));
+    const rowHeadings = Array.from(container.querySelectorAll('.settings-point-heading')).map(
+      (h) => h.textContent,
+    );
+    const defHeadings = Array.from(container.querySelectorAll('.settings-definition-heading')).map(
+      (h) => h.textContent,
+    );
+    /* MERGED ROWS (2026-10-18, review): Synthetic-Only Mode and No Real
+       Experiment Data in the Workspace stated one boundary twice, one above the
+       other, and are ONE visible row — `syntheticWorkspaceRow`'s sentence, which
+       names both concepts in `data-concepts`. Each keeps its own definition. */
+    const mergedIds = PRIVACY_QUESTIONS.flatMap((q) => q.merged ?? []);
+    expect(mergedIds).toEqual(['synthetic-data-only', 'no-real-experiment-data']);
+    const mergedRow = container.querySelector('.settings-point[data-concepts]')!;
+    expect(mergedRow.getAttribute('data-concepts')).toBe(mergedIds.join(' '));
+    expect(mergedRow.closest('[hidden]')).toBeNull();
+    const mergedCopy = syntheticWorkspaceRow(settingsFactsFrom(aboutResponse));
+    expect(mergedRow.querySelector('.settings-point-heading')?.textContent).toBe(mergedCopy.heading);
+    expect(mergedRow.querySelector('.settings-point-text')?.textContent).toBe(mergedCopy.text);
+    // Each concept's load-bearing caveat survives the merge, visibly.
+    expect(mergedCopy.text).toMatch(/upload route refuses every request outright/i);
+    expect(mergedCopy.text).toMatch(/cannot tell real data from synthetic/i);
+    expect(mergedCopy.text).toMatch(/whoever operates it/i);
 
-    rows.forEach((row, i) => {
-      const concept = concepts[i];
-      const summary = row.querySelector(':scope > summary');
-      expect(summary).not.toBeNull();
-      // EXACT equality, not `toContain`: a summary that merely INCLUDES the
-      // heading could carry a claim after it and still pass.
-      expect(summary?.textContent).toBe(concept.heading);
-      // The heading keeps its level and its element — `<h3>` inside a first
-      // `<summary>` is the spec's own allowance, so nothing that queries
-      // `.settings-points h3` or a level-3 heading role has to change.
-      expect(summary?.querySelector('h3')?.textContent).toBe(concept.heading);
-      // The definition is present, verbatim, inside the row.
-      expect(row.querySelector(':scope > p')?.textContent).toBe(concept.detail);
-    });
+    for (const concept of concepts) {
+      expect(defHeadings.filter((h) => h === concept.heading), concept.heading).toHaveLength(1);
+      if (mergedIds.includes(concept.id)) {
+        // Its definition is in the merged row's widget's Details, verbatim.
+        const def = Array.from(container.querySelectorAll('.settings-definition')).find(
+          (el) => el.querySelector('.settings-definition-heading')?.textContent === concept.heading,
+        )!;
+        expect(def.querySelector('.settings-definition-text')?.textContent).toBe(concept.detail);
+        expect(def.closest('section.widget')).toBe(mergedRow.closest('section.widget'));
+        continue;
+      }
+      expect(rowHeadings.filter((h) => h === concept.heading), concept.heading).toHaveLength(1);
+      const row = Array.from(container.querySelectorAll('.settings-point')).find(
+        (el) => el.querySelector('.settings-point-heading')?.textContent === concept.heading,
+      )!;
+      // The row is VISIBLE (no closed disclosure, nothing `hidden` above it)…
+      expect(row.closest('[hidden]'), `${concept.heading}: row hidden`).toBeNull();
+      expect(row.querySelector('.settings-point-text')?.textContent).toBe(concept.summary);
+      // …and its definition is in the same widget's Details, verbatim.
+      const def = Array.from(container.querySelectorAll('.settings-definition')).find(
+        (el) => el.querySelector('.settings-definition-heading')?.textContent === concept.heading,
+      )!;
+      expect(def.querySelector('.settings-definition-text')?.textContent).toBe(concept.detail);
+      expect(def.closest('section.widget')).toBe(row.closest('section.widget'));
+      expect(def.closest('.disclosure-body'), `${concept.heading}: definition is in Details`).not.toBeNull();
+    }
+    // Every Details trigger is the same topic label — never a claim.
+    const triggers = Array.from(container.querySelectorAll('.widget-details .disclosure-trigger'));
+    expect(triggers).toHaveLength(PRIVACY_QUESTIONS.length);
+    for (const trigger of triggers) {
+      expect(trigger.querySelector('.disclosure-summary')?.textContent).toBe('Full Definitions');
+      for (const concept of concepts) {
+        expect(norm(trigger.textContent ?? '')).not.toContain(norm(concept.summary));
+      }
+    }
+  });
+
+  /*
+   * GOVERNANCE & SAFETY → POLICY MOVED HERE (2026-10-12). The two paragraphs that
+   * carry a STATE are visible rows; Workspace Scope is a definition. The
+   * diagnostic paragraph is the one place every bound of the diagnostic is
+   * stated in a single visible block, which is why it is a row.
+   */
+  /* ~~two visible rows carrying the full paragraphs~~ — 2026-10-18 (review):
+     each visible row carries the paragraph's ONE-LINE form, and the paragraph,
+     verbatim, is in the same widget's Details. The diagnostic's line must keep
+     every bound a reader needs at a glance visible (`DEC-35`). */
+  it('carries the governance policy: two visible one-line rows, their paragraphs and one definition in Details', async () => {
+    stubFetchRoutes(fullRoutes());
+    const { container } = renderSettings();
+    openTab('Privacy & Governance');
+    await screen.findByText(/two things are stored/i);
+    for (const id of ['reviewTools', 'diagnostic'] as const) {
+      const row = container.querySelector(`.settings-point[data-policy="${id}"]`)!;
+      expect(row, id).not.toBeNull();
+      expect(row.closest('[hidden]'), `${id}: visible`).toBeNull();
+      expect(row.querySelector('h3')?.textContent).toBe(GOVERNANCE_POLICY[id].heading);
+      expect(row.querySelector('p')?.textContent).toBe(GOVERNANCE_POLICY[id].summary);
+      const full = container.querySelector(`.settings-definition[data-policy="${id}"]`)!;
+      expect(full.querySelector('p')?.textContent).toBe(GOVERNANCE_POLICY[id].text);
+      expect(full.closest('.disclosure-body'), `${id}: paragraph in Details`).not.toBeNull();
+      expect(full.closest('section.widget')).toBe(row.closest('section.widget'));
+    }
+    const diagnosticLine = GOVERNANCE_POLICY.diagnostic.summary;
+    expect(diagnosticLine).toMatch(/read-only/i);
+    expect(diagnosticLine).toMatch(/aggregates only/i);
+    expect(diagnosticLine).toMatch(/no record displayed/i);
+    expect(diagnosticLine).toMatch(/nothing sent to a model/i);
+    const scope = container.querySelector('.settings-definition[data-policy="workspaceScope"]')!;
+    expect(scope.querySelector('p')?.textContent).toBe(GOVERNANCE_POLICY.workspaceScope.text);
+    // The wayfinding phrase that stopped being true in the move is gone.
+    expect(container.textContent).not.toMatch(/the Validator on the next tab/i);
+    // …and the clause the move found FALSE is gone: this application's own
+    // tables may be in PostgreSQL since durable Create Experiment persistence.
+    expect(container.textContent).not.toMatch(/PostgreSQL is used only by that diagnostic path/i);
+    // The reader can get to the Validator the review-tools row names.
+    expect(screen.getByRole('link', { name: 'Open the Validator' }).getAttribute('href')).toBe(
+      '/governance?tab=validator',
+    );
   });
 
   it('never promotes a concept summary line into a disclosure summary', async () => {
     stubFetchRoutes(fullRoutes());
     const { container } = renderSettings();
-    openTab('Data & Privacy');
+    openTab('Privacy & Governance');
     await screen.findByText(/two things are stored/i);
 
     const concepts = settingsConcepts(settingsFactsFrom(aboutResponse));
@@ -1373,7 +1573,7 @@ describe('Settings — Data & Privacy', () => {
   it('says there is no language model and nothing typed leaves the app', async () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
-    openTab('Data & Privacy');
+    openTab('Privacy & Governance');
     expect(
       await screen.findByText(/there is no language model in this build/i),
     ).toBeInTheDocument();
@@ -1395,7 +1595,7 @@ describe('Settings — Data & Privacy', () => {
   it('states only what the code enforces about uploads, storage lifetime, and access', async () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
-    openTab('Data & Privacy');
+    openTab('Privacy & Governance');
     await screen.findByText(/two things are stored/i);
 
     // Governance: refusal is a blanket upload block, NOT real-data detection —
@@ -1423,7 +1623,7 @@ describe('Settings — Data & Privacy', () => {
   it('keeps Project Memory advisory and the schema authoritative', async () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
-    openTab('Data & Privacy');
+    openTab('Privacy & Governance');
     expect(
       await screen.findByText(/never a correctness ruling — and it cannot mark a record valid/i),
     ).toBeInTheDocument();
@@ -1433,67 +1633,79 @@ describe('Settings — Data & Privacy', () => {
   it('shows a backend-unreachable state without crashing', async () => {
     stubFetchDown();
     renderSettings();
-    openTab('Data & Privacy');
+    openTab('Privacy & Governance');
     const alerts = await screen.findAllByRole('alert');
     expect(alerts.length).toBeGreaterThan(0);
   });
 });
 
-// --- About --------------------------------------------------------------------
+// --- This Build + Technical Details (was About) --------------------------------
 
-describe('Settings — About', () => {
-  /**
-   * P36V PR3: About is IDENTITY and PROVENANCE only. Runtime Mode / Data Regime
-   * / Persistence used to be repeated here as three of six identical rows —
-   * they are runtime status, so they now live on Overview alone.
-   */
-  it('renders identity only: version, short commit, schema, core — no runtime status', async () => {
+/**
+ * ABOUT IS RETIRED AS A TAB (2026-10-12) — and was the second copy of four of
+ * Overview's seven build facts. Its material moved, and each guard below follows
+ * it rather than being dropped:
+ *
+ *   · identity rows → This Build's Build view (Overview);
+ *   · Truth vs. Memory, No-Guessing and the identity caption → This Build's info;
+ *   · the raw values (full SHA, response fields, source endpoints, doc paths) →
+ *     Advanced → Technical Details, a developer surface (`DEC-56`);
+ *   · `?tab=about` → Overview, scrolled to This Build.
+ */
+describe('Settings — This Build and Technical Details (was About)', () => {
+  it('This Build splits the seven facts into a Build view (identity) and a Runtime view', async () => {
     stubFetchRoutes(fullRoutes());
     const { container } = renderSettings();
-    openTab('About');
     expect(await screen.findByText('0.1.0')).toBeInTheDocument();
-    expect(screen.getByText('v1.05')).toBeInTheDocument();
-    expect(screen.getByText('isaac_records')).toBeInTheDocument();
-
-    expect(
-      Array.from(container.querySelectorAll('.settings-figure dt')).map((dt) => dt.textContent),
-    ).toEqual(['App Version', 'Build Commit', 'ISAAC Record Schema', 'Core']);
-    // The runtime values Overview owns are not restated here.
-    expect(screen.queryAllByText('synthetic-only')).toHaveLength(0);
-    expect(screen.queryByText('ephemeral')).not.toBeInTheDocument();
+    const build = screen.getByRole('region', { name: 'This Build' });
+    const views = Array.from(build.querySelectorAll('.widget-view-panel'));
+    const labelsIn = (el: Element) =>
+      Array.from(el.querySelectorAll('.settings-figure-label')).map((l) => l.textContent);
+    expect(labelsIn(views[0])).toEqual(['App Version', 'Build Commit', 'Record Schema', 'Core']);
+    expect(labelsIn(views[1])).toEqual(['Runtime Mode', 'Data Regime', 'Persistence']);
+    // Build is shown; Runtime is one press away, mounted but hidden.
+    expect(views[0]).not.toHaveAttribute('hidden');
+    expect(views[1]).toHaveAttribute('hidden');
+    fireEvent.click(within(build).getByRole('button', { name: 'Runtime' }));
+    expect(views[1]).not.toHaveAttribute('hidden');
+    expect(views[0]).toHaveAttribute('hidden');
+    expect(within(build).getByRole('button', { name: 'Runtime' })).toHaveAttribute('aria-pressed', 'true');
+    // The headline states the identity a reader came for, once.
+    expect(build.querySelector('.widget-headline .widget-figure')?.textContent).toBe('ISAAC 0.1.0');
+    expect(build.querySelector('.widget-headline .widget-figure-unit')?.textContent).toBe('Schema v1.05');
+    expect(container.querySelectorAll('.settings-figure')).toHaveLength(7);
   });
 
   /**
-   * The short sha is prominent; the FULL sha renders in exactly one place on the
-   * whole page — inside this collapsed disclosure. Rendering it inline again
-   * fails this test.
+   * The short sha is on Overview; the FULL sha renders in exactly one place on
+   * the whole page — inside Technical Details' collapsed Details on Advanced.
    */
-  it('shows the short commit inline and the full SHA only inside Technical Details', async () => {
+  it('shows the short commit on Overview and the full SHA only inside Technical Details', async () => {
     stubFetchRoutes(fullRoutes());
-    const { container } = renderSettings();
-    openTab('About');
+    renderSettings();
     await screen.findByText('0.1.0');
-
     const short = screen.getByText('fakecommit00');
-    expect(short.closest('details')).toBeNull();
+    expect(short.closest('.disclosure-body, details')).toBeNull();
+    expect(screen.queryByText('fakecommit0000settingsp364')).toBeNull();
 
+    openTab('Advanced');
+    const technical = screen.getByRole('region', { name: 'Technical Details' });
     const full = screen.getAllByText('fakecommit0000settingsp364');
     expect(full).toHaveLength(1);
-    const drawer = container.querySelector('details.settings-technical') as HTMLDetailsElement;
-    expect(drawer).not.toBeNull();
-    expect(drawer.open).toBe(false);
-    expect(drawer.querySelector('summary')?.textContent).toBe('Technical Details'); // Title Case
-    expect(full[0].closest('details')).toBe(drawer);
+    const body = full[0].closest('.disclosure-body') as HTMLElement;
+    expect(body).not.toBeNull();
+    expect(technical.contains(body)).toBe(true);
+    expect(body).toHaveAttribute('hidden');
+    // Title Case trigger, collapsed by default.
+    const trigger = within(technical).getByRole('button', { name: 'Raw Values' });
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('Technical Details carries the raw field names, source endpoints, and doc paths', async () => {
     stubFetchRoutes(fullRoutes());
-    const { container } = renderSettings();
-    openTab('About');
-    await screen.findByText('0.1.0');
-
-    const drawer = container.querySelector('details.settings-technical') as HTMLElement;
-    const labels = Array.from(drawer.querySelectorAll('dt')).map((dt) => dt.textContent);
+    renderSettings('/settings?tab=advanced');
+    const technical = screen.getByRole('region', { name: 'Technical Details' });
+    const labels = Array.from(technical.querySelectorAll('dt')).map((dt) => dt.textContent);
     expect(labels).toEqual([
       'Build Commit (Full)',
       'Response Fields',
@@ -1501,16 +1713,24 @@ describe('Settings — About', () => {
       'Repository Documentation',
     ]);
     for (const field of [...ABOUT_RESPONSE_FIELDS, ...SETTINGS_SOURCE_ENDPOINTS, ...REPO_DOCS]) {
-      const el = within(drawer).getByText(field);
+      const el = within(technical).getByText(field);
       // Raw identifiers render verbatim as inert <code>, never re-cased or linked.
       expect(el.tagName).toBe('CODE');
       expect(el.closest('a')).toBeNull();
     }
-    // The visible surface keeps the provenance CLAIM; only the raw path moved.
-    expect(
-      screen.getByText(/rendered verbatim — this screen computes none of these values/i),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/not served as pages by this app/i)).toBeInTheDocument();
+    expect(within(technical).getByText(/not served as pages by this app/i)).toBeInTheDocument();
+  });
+
+  it('This Build keeps the provenance claim, behind its info toggle', async () => {
+    stubFetchRoutes(fullRoutes());
+    renderSettings();
+    await screen.findByText('0.1.0');
+    const build = screen.getByRole('region', { name: 'This Build' });
+    const info = build.querySelector('.widget-info') as HTMLElement;
+    expect(info).toHaveAttribute('hidden');
+    expect(info.textContent).toMatch(/rendered verbatim — this screen computes none of these values/i);
+    fireEvent.click(within(build).getByRole('button', { name: 'About This Build' }));
+    expect(info).not.toHaveAttribute('hidden');
   });
 
   it('renders an honest "not set" state when no build commit was injected (never fabricates one)', async () => {
@@ -1521,21 +1741,19 @@ describe('Settings — About', () => {
       'GET /api/runtime/assistant-companion': { body: assistantCompanionUnconfigured },
     });
     renderSettings();
-    openTab('About');
     expect(await screen.findByText(/not set \(no build identity injected\)/i)).toBeInTheDocument();
   });
 
   it('states the truth-vs-memory authority boundary and the no-guessing policy', async () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
-    openTab('About');
     await screen.findByText('0.1.0');
     const copy = settingsAboutCopy(settingsFactsFrom(aboutResponse));
     expect(screen.getByText('Truth vs. Memory.')).toBeInTheDocument();
     expect(screen.getByText(norm(copy.truthVsMemory))).toBeInTheDocument();
     expect(screen.getByText('No-Guessing.')).toBeInTheDocument();
     expect(screen.getByText(/nothing scientific is invented/i)).toBeInTheDocument();
-    // About names the two PLANES; it does not restate Data & Privacy's rulings.
+    // It names the two PLANES; it does not restate Privacy & Governance's rulings.
     expect(screen.getByText(/is the truth plane/i)).toBeInTheDocument();
     expect(
       screen.queryByText(/decided only by the official isaac v1\.05 schema/i),
@@ -1547,9 +1765,7 @@ describe('Settings — About', () => {
 
   it('lists in-repo documentation as plain references, not fetched/rendered content', async () => {
     stubFetchRoutes(fullRoutes());
-    renderSettings();
-    openTab('About');
-    await screen.findByText('0.1.0');
+    renderSettings('/settings?tab=advanced');
     expect(screen.getByText('CLAUDE.md')).toBeInTheDocument();
     expect(screen.getByText('AGENTS.md')).toBeInTheDocument();
     // Inert names: no links, and the doc names are not anchors.
@@ -1559,8 +1775,7 @@ describe('Settings — About', () => {
 
   it('shows a backend-unreachable state without crashing', async () => {
     stubFetchDown();
-    renderSettings();
-    openTab('About');
+    renderSettings('/settings?tab=about');
     const alerts = await screen.findAllByRole('alert');
     expect(alerts.length).toBeGreaterThan(0);
   });
@@ -1583,9 +1798,9 @@ describe('Settings — About', () => {
  */
 const ENDPOINT_COUNT = 7;
 
-/** Open the Endpoint Explorer tab. It is one click now, not two. */
+/** Open the Endpoint Explorer — the Advanced tab's main widget since 2026-10-12. */
 async function openApiDocs() {
-  openTab('Endpoint Explorer');
+  openTab('Advanced');
   return screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 });
 }
 
@@ -1601,7 +1816,7 @@ describe('Settings — API browser', () => {
   it('shows a loading state before the fetch resolves', () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
-    openTab('Endpoint Explorer');
+    openTab('Advanced');
     expect(screen.getByText('Loading the API contract…')).toBeInTheDocument();
   });
 
@@ -1663,14 +1878,13 @@ describe('Settings — API browser', () => {
   it('shows the OpenAPI contract identity verbatim, never a hand-written duplicate', async () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
-    openTab('API Access');
+    openTab('Integrations');
     expect(
       await screen.findByText(
         /OpenAPI 3\.1\.0 · ISAAC Metadata Assistant API · v0\.1\.0/,
       ),
     ).toBeInTheDocument();
 
-    openTab('Endpoint Explorer');
     await openApiDocs();
     expect(screen.getByText(/this app's own\s+generated contract/i)).toBeInTheDocument();
     expect(
@@ -1727,7 +1941,8 @@ describe('Settings — API browser', () => {
     expect(screen.getAllByText('/api/experiments/{id}')).toHaveLength(1);
     // Nothing renders a per-row <details> accordion any more.
     expect(
-      detail.closest('.settings-card')?.querySelectorAll('.api-browser-row details'),
+      // The Explorer is a widget since 2026-10-12, not a `.settings-card`.
+      detail.closest('section.widget')?.querySelectorAll('.api-browser-row details'),
     ).toHaveLength(0);
   });
 
@@ -1863,7 +2078,7 @@ describe('Settings — API browser', () => {
   it('shows a backend-unreachable state without crashing', async () => {
     stubFetchDown();
     renderSettings();
-    openTab('Endpoint Explorer');
+    openTab('Advanced');
     const alerts = await screen.findAllByRole('alert');
     expect(alerts.length).toBeGreaterThan(0);
   });
@@ -1986,34 +2201,27 @@ const SURFACES: { name: string; open: () => void; settle: () => Promise<unknown>
     settle: () => screen.findByText('0.1.0'),
   },
   {
-    name: 'Data & Privacy',
-    open: () => openTab('Data & Privacy'),
+    name: 'Privacy & Governance',
+    open: () => openTab('Privacy & Governance'),
     settle: () => screen.findByText(/two things are stored/i),
   },
-  { name: 'About', open: () => openTab('About'), settle: () => screen.findByText('0.1.0') },
-  {
-    name: 'API Access',
-    open: () => openTab('API Access'),
-    settle: () => screen.findByText(API_ACCESS_COPY.emptyTitle),
-  },
-  {
-    name: 'Endpoint Explorer',
-    open: () => openTab('Endpoint Explorer'),
-    settle: () => screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 }),
-  },
   /*
-   * Connect Your Agent joined the list rather than being left out of it. The
-   * forbidden-substring guard below is the reason: that tab describes an
-   * authentication model and an authorization boundary, which is exactly the
-   * copy most likely to reach for the name of the identity layer in front of a
-   * deployment or for the word for a bearer credential. A new Settings surface
-   * that is not in SURFACES is a surface nothing checks.
+   * Integrations holds what were two tabs — API Access and Connect Your Agent —
+   * and stays in SURFACES for the reason Connect Your Agent was added: that copy
+   * describes an authentication model and an authorization boundary, which is
+   * exactly the copy most likely to reach for the name of the identity layer in
+   * front of a deployment or for the word for a bearer credential. It settles on
+   * the contract-derived Quick Start view, so the whole widget pair is mounted.
    */
   {
-    name: 'Connect Your Agent',
-    open: () => openTab('Connect Your Agent'),
-    settle: () =>
-      screen.findByRole('heading', { name: 'Requires organization configuration', level: 3 }),
+    name: 'Integrations',
+    open: () => openTab('Integrations'),
+    settle: () => screen.findByText(/OpenAPI 3\.1\.0 · ISAAC Metadata Assistant API/),
+  },
+  {
+    name: 'Advanced',
+    open: () => openTab('Advanced'),
+    settle: () => screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 }),
   },
 ];
 
@@ -2037,7 +2245,7 @@ describe('Settings — no sensitive infrastructure detail is rendered', () => {
     stubFetchRoutes(fullRoutes());
     const { container } = renderSettings();
     await screen.findByText('0.1.0');
-    openTab('Endpoint Explorer');
+    openTab('Advanced');
     await screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 });
 
     expect(container.querySelectorAll('script')).toHaveLength(0);
@@ -2056,46 +2264,78 @@ describe('Settings — no sensitive infrastructure detail is rendered', () => {
 
 /** Normalized rendered text of each surface, mounted one at a time (only the
  *  active panel is ever in the DOM, so cross-surface duplication has to be
- *  counted this way rather than read off a single render). */
-async function textOfEverySurface(): Promise<string[]> {
-  const out: string[] = [];
-  for (const surface of SURFACES) {
-    stubFetchRoutes(fullRoutes());
-    const view = renderSettings();
-    surface.open();
-    await surface.settle();
-    out.push(norm(view.container.textContent ?? ''));
-    view.unmount();
+ *  counted this way rather than read off a single render).
+ *
+ *  MEASURED ONCE AND SHARED (2026-10-12). Every `it.each` row below used to
+ *  re-render every surface, which is 40-odd rows × the surfaces — and at seven
+ *  tabs it was timing out at vitest's 5 s per-test deadline on a loaded host
+ *  (two rows did at `8eab31ca`, before this change). The text of a surface does
+ *  not depend on which canonical string is being counted, so it is computed once
+ *  and each row counts against the same four strings. */
+let surfaceTextOnce: Promise<string[]> | null = null;
+function textOfEverySurface(): Promise<string[]> {
+  if (surfaceTextOnce === null) {
+    surfaceTextOnce = (async () => {
+      const out: string[] = [];
+      for (const surface of SURFACES) {
+        stubFetchRoutes(fullRoutes());
+        const view = renderSettings();
+        surface.open();
+        await surface.settle();
+        out.push(norm(view.container.textContent ?? ''));
+        view.unmount();
+      }
+      return out;
+    })();
   }
-  return out;
+  return surfaceTextOnce;
 }
 
 /**
- * THE anti-regression guard for the deduplication slice. Six claims used to be
- * authored two or three times across these tabs — two of them character-for-
- * character. Every canonical string is now counted across every surface and must
- * appear exactly once: copying a definition back into Overview or About, or
- * paraphrasing one into a second tab (including either API sub-tab) under a
- * different heading, fails here.
+ * THE anti-regression guard for the deduplication slice, re-stated for four tabs
+ * (2026-10-12). Claims used to be authored two or three times across the tabs —
+ * two of them character-for-character. Every canonical string is counted across
+ * every surface:
+ *
+ *   · every DEFINITION, every `more` drawer, the about-copy, and every API-access
+ *     string must appear EXACTLY ONCE;
+ *   · every concept SUMMARY must appear exactly once on Privacy & Governance —
+ *     its canonical home, where every boundary is a visible row — and on Overview
+ *     ONLY if it is one of the four Data Safety lines, and then exactly once.
+ *
+ * The second rule is the old "exactly once" rule narrowed on purpose, and the
+ * narrowing is the whole design: Overview's Data Safety widget is a glance at
+ * four questions, built from the vetted summaries rather than from new
+ * sentences, and it links to the canonical home for the rest. It may carry no
+ * other summary and no definition at all.
  */
 describe('Settings — every canonical string appears exactly once across the tabs', () => {
   const facts = settingsFactsFrom(aboutResponse);
   const concepts = settingsConcepts(facts);
   const about = settingsAboutCopy(facts);
+  const overviewIds = new Set<string>(
+    OVERVIEW_SAFETY_ROWS.flatMap((r) => r.items.flatMap((i) => ('concept' in i ? [i.concept] : []))),
+  );
+  const overviewPolicies = new Set<string>(
+    OVERVIEW_SAFETY_ROWS.flatMap((r) => r.items.flatMap((i) => ('policy' in i ? [i.policy] : []))),
+  );
+  /* Concepts shown on Privacy as ONE merged row (2026-10-18): their own summary
+     lines are not rendered there; the merged sentence is, once. */
+  const mergedIds = new Set<string>(PRIVACY_QUESTIONS.flatMap((q) => q.merged ?? []));
 
   const canonical: { what: string; text: string }[] = [
-    ...concepts.map((c) => ({ what: `${c.heading} — summary`, text: c.summary })),
     ...concepts.map((c) => ({ what: `${c.heading} — definition`, text: c.detail })),
     ...concepts
       .filter((c) => c.more)
       .map((c) => ({ what: `${c.heading} — ${c.more!.label}`, text: c.more!.text })),
+    ...Object.values(GOVERNANCE_POLICY).map((p) => ({ what: `Policy — ${p.heading}`, text: p.text })),
     { what: 'About — truth vs. memory', text: about.truthVsMemory },
     { what: 'About — no-guessing', text: about.noGuessing },
     { what: 'About — identity caption', text: about.identityCaption },
     /* P36V-1 slice 13 — the API surfaces joined the guard. Before it, the
-       key-unavailable reason was authored in FOUR places (the API-Keys lead, an
-       access row, Quick Start's authentication note and Connect an Agent) and
-       the browser-session / headless-credential boundary in two of them. */
+       key-unavailable reason was authored in FOUR places. The 2026-10-12 widget
+       retired three of the strings (the disabled button's reason and the empty
+       list's title and body) with the controls they described. */
     ...Object.entries(API_ACCESS_COPY).map(([key, text]) => ({
       what: `API Access — ${key}`,
       text,
@@ -2114,18 +2354,50 @@ describe('Settings — every canonical string appears exactly once across the ta
     ).toBe(1);
   });
 
-  it('the full commit SHA is rendered exactly once, on About', async () => {
-    const perSurface = await textOfEverySurface();
-    const counts = perSurface.map((t) => countOccurrences(t, aboutResponse.build_commit));
-    // One entry per SURFACES row, in order; the 1 is About's Technical Details.
-    expect(counts).toEqual([0, 0, 1, 0, 0, 0]);
+  it.each(concepts.map((c) => [c.heading, c]))(
+    '%s — summary: once on Privacy & Governance, and on Overview only as a Data Safety line',
+    async (_heading, concept) => {
+      const [overview, privacy, integrations, advanced] = await textOfEverySurface();
+      const needle = norm(concept.summary);
+      expect(countOccurrences(privacy, needle), 'Privacy & Governance').toBe(
+        mergedIds.has(concept.id) ? 0 : 1,
+      );
+      expect(countOccurrences(overview, needle), 'Overview').toBe(overviewIds.has(concept.id) ? 1 : 0);
+      expect(countOccurrences(integrations, needle), 'Integrations').toBe(0);
+      expect(countOccurrences(advanced, needle), 'Advanced').toBe(0);
+    },
+  );
+
+  it('the merged Synthetic-Only Mode row is rendered once, on Privacy & Governance only', async () => {
+    const [overview, privacy, integrations, advanced] = await textOfEverySurface();
+    const needle = norm(syntheticWorkspaceRow(facts).text);
+    expect(mergedIds.size).toBe(2);
+    expect(countOccurrences(privacy, needle)).toBe(1);
+    expect(countOccurrences(overview, needle) + countOccurrences(integrations, needle)).toBe(0);
+    expect(countOccurrences(advanced, needle)).toBe(0);
   });
 
-  it('Overview renders no definition, and About renders no data/privacy definition', async () => {
-    const [overview, , about_] = await textOfEverySurface();
+  it.each(
+    (['reviewTools', 'diagnostic'] as const).map((id) => [id, GOVERNANCE_POLICY[id].summary]),
+  )('policy %s — its one-line form: once on Privacy, and on Overview only as a Data Safety line', async (id, summary) => {
+    const [overview, privacy, integrations, advanced] = await textOfEverySurface();
+    const needle = norm(summary as string);
+    expect(countOccurrences(privacy, needle), 'Privacy & Governance').toBe(1);
+    expect(countOccurrences(overview, needle), 'Overview').toBe(overviewPolicies.has(id as string) ? 1 : 0);
+    expect(countOccurrences(integrations, needle) + countOccurrences(advanced, needle)).toBe(0);
+  });
+
+  it('the full commit SHA is rendered exactly once, in Advanced → Technical Details', async () => {
+    const perSurface = await textOfEverySurface();
+    const counts = perSurface.map((t) => countOccurrences(t, aboutResponse.build_commit));
+    // One entry per SURFACES row, in order; the 1 is Technical Details.
+    expect(counts).toEqual([0, 0, 0, 1]);
+  });
+
+  it('Overview renders no definition', async () => {
+    const [overview] = await textOfEverySurface();
     for (const concept of concepts) {
       expect(overview, `Overview leaked "${concept.heading}"`).not.toContain(norm(concept.detail));
-      expect(about_, `About leaked "${concept.heading}"`).not.toContain(norm(concept.detail));
     }
   });
 
@@ -2136,54 +2408,53 @@ describe('Settings — every canonical string appears exactly once across the ta
     }
     expect(titleCase(about.truthVsMemoryLabel)).toBe(about.truthVsMemoryLabel);
     expect(titleCase(about.noGuessingLabel)).toBe(about.noGuessingLabel);
+    for (const q of PRIVACY_QUESTIONS) expect(titleCase(q.title), q.title).toBe(q.title);
+    for (const r of OVERVIEW_SAFETY_ROWS) expect(titleCase(r.label), r.label).toBe(r.label);
   });
 
-  it('the page introduction is the single agreed sentence, under an accurate eyebrow', () => {
+  /* INVERTED 2026-10-18 (re-review, Overview trims), not deleted: it required the
+     intro sentence "View this build's runtime status, data boundaries, provenance,
+     and API access." — which the four tab labels directly beneath it already say.
+     What it also pinned is kept: the eyebrow is accurate, the retired
+     "Local Configuration" stays gone, and the "nothing to configure" claim still
+     renders — now as the first line of This Build's info. */
+  it('the page needs no introduction sentence, and keeps an accurate eyebrow and the no-settings claim', () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
     expect(
-      screen.getByText(
-        "View this build's runtime status, data boundaries, provenance, and API access.",
-      ),
-    ).toBeInTheDocument();
-    // Slice C: the eyebrow no longer promises configuration this page does not
-    // offer — the "nothing to configure" claim below is what the page really is.
+      screen.queryByText("View this build's runtime status, data boundaries, provenance, and API access."),
+    ).toBeNull();
     expect(screen.getByText('About This Build')).toBeInTheDocument();
     expect(screen.queryByText('Local Configuration')).not.toBeInTheDocument();
-    // The "nothing to configure" claim was not deleted — it moved into Overview.
-    expect(screen.getByText(/no user-adjustable settings/i)).toBeInTheDocument();
+    const claim = screen.getByText(/no user-adjustable settings/i);
+    expect(claim.closest('.widget-info'), 'the claim is This Build’s info').not.toBeNull();
   });
 
   /** Each API-access claim belongs to ONE tab. Counting only the total would
    *  pass if a string moved to the wrong surface, so the surface is pinned too. */
-  it('the API-access copy renders on the API tabs and nowhere else', async () => {
-    const [overview, privacy, about_, apiAccess, explorer, connectAgent] =
-      await textOfEverySurface();
-    const onApiAccess = [
+  it('the API-access copy renders on Integrations and nowhere else', async () => {
+    const [overview, privacy, integrations, advanced] = await textOfEverySurface();
+    const onIntegrations = [
       API_ACCESS_COPY.statusHeading,
       API_ACCESS_COPY.statusBody,
-      API_ACCESS_COPY.createDisabledReason,
+      API_ACCESS_COPY.credentialLine,
       API_ACCESS_COPY.requirementsNote,
-      API_ACCESS_COPY.emptyTitle,
-      API_ACCESS_COPY.emptyBody,
       ...API_ACCESS_ROWS.map((r) => r.detail),
       ...API_KEY_REQUIREMENTS,
     ];
-    for (const text of onApiAccess) {
-      expect(apiAccess, `API Access must own: ${text.slice(0, 48)}`).toContain(norm(text));
+    for (const text of onIntegrations) {
+      expect(integrations, `Integrations must own: ${text.slice(0, 48)}`).toContain(norm(text));
       for (const [name, other] of [
         ['Overview', overview],
-        ['Data & Privacy', privacy],
-        ['About', about_],
-        ['Endpoint Explorer', explorer],
-        ['Connect Your Agent', connectAgent],
+        ['Privacy & Governance', privacy],
+        ['Advanced', advanced],
       ] as const) {
         expect(other, `${name} leaked: ${text.slice(0, 48)}`).not.toContain(norm(text));
       }
     }
-    // The Auth legend is the mirror case: Explorer's alone.
-    expect(explorer).toContain(norm(API_ACCESS_COPY.authMarkerLegend));
-    expect(apiAccess).not.toContain(norm(API_ACCESS_COPY.authMarkerLegend));
+    // The Auth legend is the mirror case: the Explorer's alone.
+    expect(advanced).toContain(norm(API_ACCESS_COPY.authMarkerLegend));
+    expect(integrations).not.toContain(norm(API_ACCESS_COPY.authMarkerLegend));
   });
 
   it('the heading outline never skips a level on any surface', async () => {

@@ -1,5 +1,8 @@
 /**
- * Settings → API Access → Connect an Agent (P36V PR3 slice C; P36V-1 slice 13).
+ * Settings → Integrations → API Access → Program an Agent (2026-10-12; it was
+ * "Settings → API Access → Connect an Agent", P36V PR3 slice C; P36V-1 slice 13).
+ * Since the widget redesign it renders BARE as the widget's second view; the
+ * drawer form below is kept for the claim-parity guards that render it alone.
  *
  * Eight short sections, collapsed behind one disclosure so the API Access tab
  * stays a reference surface rather than becoming a single-page manual. The
@@ -64,34 +67,52 @@ function mediaTypeSentence(mediaTypes: string[]): string {
   return `Operations that declare a request body declare ${mediaTypes.join(', ')}. Send only the fields the contract names for that operation: some reject an unnamed key outright and others ignore it, so each operation's own description in the Endpoint Explorer is the authority on which.`;
 }
 
+/**
+ * ~~"Connect an Agent"~~ — the guide's name, 2026-10-12. It sat one word from the
+ * "Connect Your Agent" surface and the two describe DIFFERENT mechanisms (this one
+ * the HTTP API, that one the machine-callable tool interface) with different
+ * answers about authentication. They are now two widgets side by side on one tab,
+ * so the near-collision would be read in a single glance; the guide is named for
+ * what it covers — a program you write — and keeps every sentence.
+ */
+export const PROGRAM_AN_AGENT = 'Program an Agent';
+
 export function ConnectAnAgent({
   facts,
-  open,
+  open = false,
   onOpenChange,
   summaryId,
   onOpenExplorer,
+  bare = false,
 }: {
   facts: ConnectAnAgentFacts;
-  /** Controlled so Quick Start's link can open it and move focus here. */
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  summaryId: string;
-  /** Selects the Endpoint Explorer tab — the guide's first step is there. */
+  /** Controlled, for the drawer form. Ignored when `bare`. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  summaryId?: string;
+  /** Opens the Endpoint Explorer — the guide's first step is there. */
   onOpenExplorer: () => void;
+  /**
+   * Render the guide without its drawer (2026-10-12): inside the API Access
+   * widget it is the Program an Agent VIEW, which the reader opened by choosing
+   * it. Every sentence renders identically in both forms; only the wrapper and
+   * the heading's element differ.
+   */
+  bare?: boolean;
 }) {
   const sections: { heading: string; body: string; action?: string }[] = [
     {
       heading: 'Choose an Endpoint',
-      body: "Start on the Endpoint Explorer tab. Each operation there carries its purpose, its declared parameters, its request body when it has one, and every response the contract documents — all generated from this app's own contract, so an agent never has to work from a guess about what exists.",
+      body: "Start in the Endpoint Explorer, under Advanced. Each operation there carries its purpose, its declared parameters, its request body when it has one, and every response the contract documents — all generated from this app's own contract, so an agent never has to work from a guess about what exists.",
       action: 'Open the Endpoint Explorer',
     },
     {
       heading: 'Set the Base URL',
-      body: `Call the paths exactly as the Endpoint Explorer tab lists them; each one is already complete. The samples write the origin as $${SAMPLE_BASE_ENV} and never hard-code one, because the correct origin is wherever this page is being served from — the caller's to supply, not this screen's to publish.`,
+      body: `Call the paths exactly as the Endpoint Explorer lists them; each one is already complete. The samples write the origin as $${SAMPLE_BASE_ENV} and never hard-code one, because the correct origin is wherever this page is being served from — the caller's to supply, not this screen's to publish.`,
     },
     {
       heading: 'Configure Authentication',
-      body: `When a deployment enables authentication, every call carries an "Authorization: Bearer" header holding that deployment's credential; the liveness check is the one operation that stays reachable without it. Quick Start on this tab reports how many operations document a 401, the access rows at the top of this tab say what that one credential is and is not, and the Endpoint Explorer marks each operation.`,
+      body: `When a deployment enables authentication, every call carries an "Authorization: Bearer" header holding that deployment's credential; the liveness check is the one operation that stays reachable without it. Quick Start, the other view of this widget, reports how many operations document a 401; How Access Works Today says what that one credential is and is not; and the Endpoint Explorer marks each operation.`,
     },
     {
       heading: 'Send Structured Requests',
@@ -142,36 +163,23 @@ export function ConnectAnAgent({
     },
   ];
 
-  return (
-    <details
-      className="api-connect"
-      open={open}
-      onToggle={(e) => onOpenChange((e.currentTarget as HTMLDetailsElement).open)}
-    >
-      <summary className="api-connect-summary" id={summaryId}>
-        <h3 className="api-connect-title">Connect an Agent</h3>
-      </summary>
+  const content = (
+    <>
       <p className="api-connect-lead">
         What a program calling this API has to get right — short, and only what this build actually
         supports.{' '}
         {/* The cross-reference to the OTHER agent surface, appended to the lead
             rather than given a paragraph of its own: this guide and the Connect
-            Your Agent tab describe different protocols under near-identical
-            names and make auth claims that do not reconcile unless a reader
-            knows which path each is about. Authored in `API_ACCESS_COPY` — see
-            the note on `connectMcpPointer` for the pair. */}
+            Your Agent widget describe different protocols and make auth claims
+            that do not reconcile unless a reader knows which path each is about.
+            Authored in `API_ACCESS_COPY` — see the note on `connectMcpPointer`. */}
         {API_ACCESS_COPY.connectMcpPointer}
       </p>
-      {/* FINDING B — the precondition, stated INSIDE the guide.
-          Slice 13 (see the note at the top of this file) moved the tab's shared
-          boundaries out to the access rows, which was right for claims this
-          guide merely restated. It was wrong for this one: a reader can open
-          this disclosure on its own and follow eight steps to an integration
-          that cannot be made on the deployment serving the page, with the
-          disqualifying fact one component away. A precondition has to sit with
-          the procedure it disqualifies.
-          Authored once, in `API_ACCESS_COPY`, so the duplication guard counts
-          it like every other canonical string on this tab. */}
+      {/* FINDING B — the precondition, stated INSIDE the guide. A reader can open
+          this guide on its own and follow eight steps to an integration that
+          cannot be made on the deployment serving the page, so the disqualifying
+          fact has to sit with the procedure it disqualifies. Authored once, in
+          `API_ACCESS_COPY`. */}
       <p className="api-connect-prerequisite">{API_ACCESS_COPY.connectPrerequisite}</p>
       <div className="api-connect-body">
         {sections.map((section) => (
@@ -186,6 +194,28 @@ export function ConnectAnAgent({
           </section>
         ))}
       </div>
+    </>
+  );
+
+  if (bare) {
+    return (
+      <div className="api-connect-bare">
+        <h3 className="settings-view-heading">{PROGRAM_AN_AGENT}</h3>
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <details
+      className="api-connect"
+      open={open}
+      onToggle={(e) => onOpenChange?.((e.currentTarget as HTMLDetailsElement).open)}
+    >
+      <summary className="api-connect-summary" id={summaryId}>
+        <h3 className="api-connect-title">{PROGRAM_AN_AGENT}</h3>
+      </summary>
+      {content}
     </details>
   );
 }

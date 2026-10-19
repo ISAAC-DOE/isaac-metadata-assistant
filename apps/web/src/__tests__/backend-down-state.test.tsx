@@ -1443,6 +1443,7 @@ describe('an example-record 404 with no worked-example session open', () => {
        rename break a test that is not about the rename. The claim under test —
        that the walkthrough's home is still named in words — survives a rename,
        and now the assertion does too. */
-    expect(view.container.textContent).toContain(`${LABELS.navSettings} \u2192 Help & Tutorial`);
+    // The walkthrough's home is the Guided Walkthrough widget since 2026-10-12.
+    expect(view.container.textContent).toContain(`${LABELS.navSettings} \u2192 ${LABELS.settingsTabHelp}`);
   });
 });

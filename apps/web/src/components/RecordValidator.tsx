@@ -1,6 +1,7 @@
 import './record-validator.css';
 import { useRef, useState } from 'react';
 import { VerdictCard } from './VerdictCard';
+import { Widget } from './Widget';
 import { LoadingPanel, BackendDown } from './FetchStates';
 import { Upload, FileJson, TriangleAlert } from './icons';
 import { api, ApiError } from '../lib/api';
@@ -188,30 +189,58 @@ export function RecordValidator() {
   }
 
   return (
-    <section
-      className="rec-val card"
-      aria-labelledby="rec-val-heading"
-      data-tutorial-anchor={TUTORIAL_ANCHORS.standaloneValidator}
-    >
-      <header className="rec-val-head">
-        <FileJson size={18} strokeWidth={2} aria-hidden="true" className="rec-val-icon" />
-        <div>
-          {/* P36V S-B — `tabIndex={-1}` makes the heading a programmatic focus
-              target (never a tab stop) so an arrival from elsewhere — the
-              Assistant's Open Validator action, or a `?tab=validator` deep link —
-              can land the reader on the Validator's own heading. Presentation and
-              behaviour are otherwise unchanged. */}
-          <h2 id="rec-val-heading" tabIndex={-1}>
-            Standalone Validator
-          </h2>
-          <p className="rec-val-sub">
-            <strong>Validate a record without adding it to My Experiments.</strong> Paste or upload a
-            candidate ISAAC record — checked against the official schema, the same gate{' '}
-            <code className="mono">isaac validate --official</code> runs.
-          </p>
-        </div>
-      </header>
+    /* ── ONE WIDGET SINCE 2026-10-12 ─────────────────────────────────────────
+       The Validator is a Widget like the Settings surfaces it is launched from:
+       the title, a one-line description, the state as the headline ("no record
+       checked yet" until there is a verdict), the always-visible privacy line,
+       the input, and Validate as the page's one primary action. The parity
+       statement (`isaac validate --official`) and "When to use this" are
+       explanation, not state, so they are behind the info toggle — still in the
+       DOM, still read by every guard that reads it.
 
+       The widget section carries the walkthrough's anchor attribute, and the
+       heading is a programmatic focus target (`tabIndex={-1}` — never a tab
+       stop) so an arrival from elsewhere — the Assistant's Open Validator action,
+       or a `?tab=validator` deep link — can land the reader on the Validator's own
+       heading. Both were a wrapper `<div>` and a ref callback until the shared
+       Widget gained `headingProps` and `data-*` passthrough (2026-10-18). */
+      <Widget
+        id="rec-val-heading"
+        className="rec-val"
+        data-tutorial-anchor={TUTORIAL_ANCHORS.standaloneValidator}
+        headingProps={{ tabIndex: -1 }}
+        title="Standalone Validator"
+        icon={<FileJson size={18} strokeWidth={2} />}
+        sub="Validate a record without adding it to My Experiments."
+        info={
+          <>
+            <p>
+              Paste or upload a candidate ISAAC record — checked against the official schema, the
+              same gate <code className="mono">isaac validate --official</code> runs.
+            </p>
+            <p className="widget-info-heading">When to Use This</p>
+            <ul className="rec-val-purpose-list">
+              <li>Inspect an external JSON object that is not — and need not become — a record here.</li>
+              <li>
+                Confirm API and CLI validation parity: this route reuses the same{' '}
+                <code className="mono">validate_official</code> gate as{' '}
+                <code className="mono">isaac validate --official</code>.
+              </li>
+              <li>Diagnose structured schema errors by path before fixing a draft.</li>
+              <li>Independently verify an artifact you already exported.</li>
+            </ul>
+            <p className="rec-val-purpose-note">
+              To build a record — draft, evidence, guided completion, export — start from My
+              Experiments instead. Nothing checked here is created, saved, or changed.
+            </p>
+          </>
+        }
+        headline={
+          phase === 'idle' ? (
+            <span className="widget-state rec-val-empty">No Record Checked Yet</span>
+          ) : undefined
+        }
+      >
       {/* Was "Synthetic/local validator", which asserted the reader's machine on
           a build that also runs hosted; then "Synthetic-mode validator", a claim
           about the BUILD's configured mode.
@@ -222,29 +251,11 @@ export function RecordValidator() {
           real data from synthetic by looking at it, and nothing here tries to.
           What is left is verified against `routes.py::post_validate_record`: the
           body is "never written anywhere and its content is never logged; only the
-          outcome and error count are". */}
+          outcome and error count are". It stays VISIBLE: it is a privacy state. */}
       <p className="rec-val-scope-note" id="rec-val-scope-note-id">
         The record is checked in memory and discarded. Nothing here is uploaded to a model, indexed,
         or stored.
       </p>
-
-      <details className="rec-val-purpose">
-        <summary>When to use this</summary>
-        <ul className="rec-val-purpose-list">
-          <li>Inspect an external JSON object that is not — and need not become — a record here.</li>
-          <li>
-            Confirm API and CLI validation parity: this route reuses the same{' '}
-            <code className="mono">validate_official</code> gate as{' '}
-            <code className="mono">isaac validate --official</code>.
-          </li>
-          <li>Diagnose structured schema errors by path before fixing a draft.</li>
-          <li>Independently verify an artifact you already exported.</li>
-        </ul>
-        <p className="rec-val-purpose-note">
-          To build a record — draft, evidence, guided completion, export — start from My Experiments
-          instead. Nothing checked here is created, saved, or changed.
-        </p>
-      </details>
 
       <div className="rec-val-input-row">
         <label className="rec-val-label" htmlFor="rec-val-textarea">
@@ -386,10 +397,8 @@ export function RecordValidator() {
           </div>
         )}
 
-        {phase === 'idle' && (
-          <p className="rec-val-empty">No record checked yet — paste or upload JSON, then Validate.</p>
-        )}
+        {phase === 'idle' && <p className="rec-val-idle-hint">Paste or upload JSON, then Validate.</p>}
       </div>
-    </section>
+      </Widget>
   );
 }

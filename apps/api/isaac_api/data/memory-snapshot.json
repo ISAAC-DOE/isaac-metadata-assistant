@@ -10276,11 +10276,11 @@
       },
       {
         "path": "apps/api/isaac_api/routes.py",
-        "sha256": "b1d3ba7778355755924b1172fa6a2b0af7908172b40f3b30b5232dab06cf6dfd"
+        "sha256": "e42d97b87f5c40354aacc21028a61bf5bd39150230e1d2fad8da6bc4d92e5240"
       },
       {
         "path": "apps/api/isaac_api/serialize.py",
-        "sha256": "1c0988d8e6d321f64452bdb8ad08d2d501f81feaef8cd3e546c32b750d2d3ea8"
+        "sha256": "df20c659dff9a09fe42f3da9da3ee64d78352d49703106053188b656a6c02e8f"
       },
       {
         "path": "apps/api/isaac_api/sources.py",
@@ -10292,7 +10292,7 @@
       },
       {
         "path": "apps/api/tests/test_api.py",
-        "sha256": "3f8d17fe94dd79bd306cc3030b09a9b38d4e8ee5eea48dbe0d0230ec1f9cb3b8"
+        "sha256": "6ee36c572249e185c926aaf6d189448cb81ddb6dcab466a6d05caf1ea221e9d5"
       },
       {
         "path": "apps/api/tests/test_build_memory_snapshot.py",
@@ -10328,7 +10328,7 @@
       },
       {
         "path": "apps/web/src/App.tsx",
-        "sha256": "203cd683539702bebd2e85ca5e87dc08c3740f30cb0c036f507173faebba81e2"
+        "sha256": "922dedfc33c1f43dcaa5dec3fae8c5e280d071e669afa0e5147b2bab23976148"
       },
       {
         "path": "apps/web/src/__tests__/api.test.ts",
@@ -10436,7 +10436,7 @@
       },
       {
         "path": "apps/web/src/components/FetchStates.tsx",
-        "sha256": "b7bb849443686356903824ef2c06fb8f013f87e9f222cbce0d15b8d45ce1bc88"
+        "sha256": "b0ae770ea702ac82574d9b75b9f4a51c5350d48845a6d9d5137edaad90a87521"
       },
       {
         "path": "apps/web/src/components/FieldGroup.tsx",
@@ -10504,7 +10504,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "6006783d8e746be79a33c8de982576d8b07aa04d3bc41f0b07165d910f5e3fc5"
+        "sha256": "6b67239b3188a1fd57f68509f583fd81545928dc57e0b7ff3584fe5a585c787a"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10512,11 +10512,11 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "6c4e385950b6984a6c944080de913239c5cb439ad056f66c1b1d9be884350279"
+        "sha256": "e9021ed9fd3bac71f54f27f7376fbbdcc645b55b716a7b64d2f618e627821cdc"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
-        "sha256": "a65f8b1d30dd2c227f0a95c1b9d056d42aa73bb42433591963df9b0ae8380ee5"
+        "sha256": "275d144f0e122180f9cf5b5f8f3608c94ad6677b836731f3176d92d306ac53a4"
       },
       {
         "path": "apps/web/src/lib/status.ts",
@@ -10524,7 +10524,7 @@
       },
       {
         "path": "apps/web/src/lib/types.ts",
-        "sha256": "78c62ea1b598ae6b4990dffbae27e7479f0605f2518aceb0501059d19e703acb"
+        "sha256": "e96c93c72caae583e42697b120fcaff1a20c17416d470ee363ad03bdab24ab02"
       },
       {
         "path": "apps/web/src/lib/useFetch.ts",
@@ -10548,7 +10548,7 @@
       },
       {
         "path": "apps/web/src/screens/GovernancePage.tsx",
-        "sha256": "593875fa539a4614e9e892468a0be28d551125ecfd0c424de4edddfe1ecff196"
+        "sha256": "72c4a6f2ce1c3f7134413c60345e155cf4aa4c2927c5670dcb094f59bc258513"
       },
       {
         "path": "apps/web/src/screens/GuidedCompletion.tsx",
@@ -10568,11 +10568,11 @@
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
-        "sha256": "35675fa0292cbc692d7e35031b72c748bd24bf166833d5792775c7ecd8b2b933"
+        "sha256": "6f09c931afa6b853744a6560fb49b318c4705f6844daaa4ea166610058362799"
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "a05070a10440bc325c1d91f31e386a2ef2f5694a5d34e5231524e6d79e71d2ec"
+        "sha256": "6450a9a1b66835d1494e075894152c17067c9fbe163bb0a74c1ed875d77faf4d"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "9dccd69a3f27e6fa1ef54593947f5b7d174a805c5e3174eaf62caa078786ff85"
+    "served_manifest_fingerprint": "3ef496ecf60a8ca7e21cbdb59f87f5c261e6bbf16aad9e856480134dafda4831"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

@@ -653,44 +653,74 @@ describe('the headline cards', () => {
 /* ============================================ 4 · official vs shadow ======= */
 
 describe('the official / shadow comparison', () => {
-  it('draws a grouped chart, not a progress bar', async () => {
+  /*
+   * ~~`draws a grouped chart, not a progress bar`~~ — INVERTED 2026-10-18, and
+   * the property it protected is asserted rather than dropped. That test pinned
+   * a tick axis as "what makes it a chart rather than a row of tracks", because
+   * the predecessor (`StageBars`) drew tracks whose lengths could not be read as
+   * numbers. The compact form answers that defect differently: EVERY FIGURE IS
+   * PRINTED AS TEXT ON ITS OWN ROW, so a bar's length is never the only carrier
+   * of a number — and that is what these tests now pin. The shared scale is
+   * still asserted, as track lengths against the largest single total.
+   */
+  it('draws two compact rows on one shared scale, with no axis to read', async () => {
     const { container } = await renderReport(verificationReportOk);
     const groups = container.querySelectorAll('.stats-verify-chartgroup');
     expect(groups).toHaveLength(2);
-    // A shared, labelled value axis is what makes it a chart rather than a row
-    // of tracks.
-    expect(container.querySelectorAll('.stats-chart-axis').length).toBeGreaterThan(0);
-    // Four bars: two series in each of two groups.
-    const bars = Array.from(groups).flatMap((group) =>
-      Array.from(group.querySelectorAll('rect.stats-chart-bar')),
+    const compare = container.querySelector('.stats-verify-compare') as HTMLElement;
+    expect(compare.querySelector('.stats-chart-axis')).toBeNull();
+    // ONE filled series per row: the passing share of that validator's own total.
+    const fills = Array.from(groups).map(
+      (group) => (group.querySelector('.stats-verify-compare-fill') as HTMLElement).style.width,
     );
-    expect(bars).toHaveLength(4);
-  });
-
-  it('labels every bar with its series name and value as real text', async () => {
-    const { container } = await renderReport(verificationReportOk);
-    const groups = container.querySelectorAll('.stats-verify-chartgroup');
-    const official = groups[0] as HTMLElement;
-    const rows = official.querySelectorAll('.stats-chart-row');
-    expect(rows).toHaveLength(2);
-    expect(rows[0]!.querySelector('.stats-chart-row-label')!.textContent).toMatch(/^Passing/);
-    expect(rows[0]!.querySelector('.stats-chart-row-value')!.textContent).toBe('9');
-    expect(rows[1]!.querySelector('.stats-chart-row-label')!.textContent).toMatch(/^Not Passing/);
-    expect(rows[1]!.querySelector('.stats-chart-row-value')!.textContent).toBe('1');
-  });
-
-  it('carries an accessible legend pairing each swatch with a series NAME', async () => {
-    const { container } = await renderReport(verificationReportOk);
-    const legend = container.querySelector('.stats-chart-legend');
-    expect(legend).not.toBeNull();
-    const labels = Array.from(legend!.querySelectorAll('.stats-chart-legend-label')).map(
-      (node) => node.textContent,
+    expect(fills).toEqual(['90%', '60%']);
+    // The TRACK is the validator's own total against the largest single total —
+    // never against a sum of the two.
+    const tracks = Array.from(groups).map(
+      (group) => (group.querySelector('.stats-verify-compare-track') as HTMLElement).style.width,
     );
-    expect(labels).toEqual(['Passing', 'Not Passing']);
-    // The swatch itself carries nothing a reader needs.
-    legend!.querySelectorAll('.stats-chart-swatch').forEach((swatch) => {
-      expect(swatch).toHaveAttribute('aria-hidden', 'true');
+    expect(tracks).toEqual(['100%', '100%']);
+    // The bar is decoration; the row's text is the figure.
+    groups.forEach((group) => {
+      expect(group.querySelector('.stats-verify-compare-bar')).toHaveAttribute('aria-hidden', 'true');
     });
+  });
+
+  it('states every figure as real text on its own row', async () => {
+    const { container } = await renderReport(verificationReportOk);
+    const values = Array.from(container.querySelectorAll('.stats-verify-compare-value')).map(
+      (n) => n.textContent,
+    );
+    expect(values).toEqual(['9 of 10 passing · 1 not passing', '6 of 10 passing · 4 not passing']);
+    const labels = Array.from(
+      container.querySelectorAll('.stats-verify-chartgroup-label'),
+    ).map((n) => n.firstChild?.textContent);
+    expect(labels).toEqual(['Official Validation', 'Format Shadow']);
+  });
+
+  /*
+   * ~~`carries an accessible legend pairing each swatch with a series NAME`~~ —
+   * INVERTED 2026-10-18. A legend exists so two fills can be told apart without
+   * matching colours; this form draws ONE fill and states both series in words
+   * on every row, so there is nothing for a legend to disambiguate, and a
+   * one-swatch legend would only restate the row.
+   */
+  it('needs no legend, because only one series is filled and both are named in words', async () => {
+    const { container } = await renderReport(verificationReportOk);
+    const compare = container.querySelector('.stats-verify-compare') as HTMLElement;
+    expect(compare.querySelector('.stats-chart-legend')).toBeNull();
+    for (const value of compare.querySelectorAll('.stats-verify-compare-value')) {
+      expect(value.textContent).toMatch(/passing/);
+      expect(value.textContent).toMatch(/not passing/);
+    }
+  });
+
+  it('keeps a short role beside each validator, so the shadow cannot read as a verdict', async () => {
+    const { container } = await renderReport(verificationReportOk);
+    const tags = Array.from(container.querySelectorAll('.stats-verify-role-tag')).map(
+      (n) => n.textContent,
+    );
+    expect(tags).toEqual(['the authority', 'advisory · gates nothing']);
   });
 
   it('carries a textual summary naming both denominators separately', async () => {
@@ -1671,5 +1701,43 @@ describe('a report over an empty corpus claims no passes', () => {
     await renderReport(verificationReportOk);
     expect(cardByLabel('Mutation Verification').getAttribute('data-tone')).toBe('good');
     expect(document.querySelector('.stats-empty-note')).toBeNull();
+  });
+});
+
+
+/* ── REVIEW FIX 4, 2026-10-18 ───────────────────────────────────────────────
+ *
+ * The density round turned the safeguards into a chip checklist and put every
+ * reason behind "Show Reasons" — including the three QUALIFIERS that make a
+ * "Verified" narrower than the word. A chip reading "Verified" beside "Export
+ * Gate Unchanged", with "guaranteed by construction rather than measured on
+ * this run" one press away, reads as a measurement it is not. Each qualifier is
+ * visible again, outside every `[hidden]` ancestor; the full reason stays where
+ * it was.
+ */
+describe('a qualified Verified keeps its qualifier visible', () => {
+  const rowOf = (label: string) =>
+    screen.getByText(label, { selector: '.stats-verify-safeguard-label' }).closest(
+      '.stats-verify-safeguard',
+    ) as HTMLElement;
+
+  it('shows each of the three qualifiers beside its chip, not behind Show Reasons', async () => {
+    await renderReport(verificationReportOk);
+    const expected: Record<string, string> = {
+      'Export Gate Unchanged': 'by construction — not measured on this run',
+      'Official Validator Unchanged': 'one property compared — not the schema byte for byte',
+      'Source Records Unchanged in Memory': 'in memory — no stored record was re-read',
+    };
+    for (const [label, qualifier] of Object.entries(expected)) {
+      const row = rowOf(label);
+      const node = row.querySelector('.stats-verify-qualifier');
+      expect(node, `${label} must carry a visible qualifier`).not.toBeNull();
+      expect(node!.textContent).toBe(qualifier);
+      expect(node!.closest('[hidden]'), `${label}'s qualifier must not be hidden`).toBeNull();
+      // The full reason is still there, one press away.
+      expect(row.querySelector('.stats-verify-safeguard-detail')).toHaveAttribute('hidden');
+    }
+    // A plain Verified carries none — the qualifier is not decoration.
+    expect(rowOf('No Record Values in This Report').querySelector('.stats-verify-qualifier')).toBeNull();
   });
 });

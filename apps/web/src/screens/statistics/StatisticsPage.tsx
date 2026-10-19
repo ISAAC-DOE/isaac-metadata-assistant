@@ -9,20 +9,26 @@ import { LeftNav } from '../../components/LeftNav';
 import { BackendDown, LoadingPanel } from '../../components/FetchStates';
 import { LABELS, formatInstant, humanizeActivityToken } from '../../lib/labels';
 import { StatusChip } from '../../components/StatusChip';
+import { Widget, WidgetGrid } from '../../components/Widget';
 import {
   BarChart3,
+  BarChartHorizontal,
   CircleDashed,
   CircleHelp,
+  Clock,
   FileJson,
   History,
   Inbox,
+  Info,
   LayoutList,
   List,
+  ListOrdered,
   Network,
   Settings,
   Shield,
   ShieldCheck,
   Table2,
+  Workflow,
 } from '../../components/icons';
 import { api } from '../../lib/api';
 import { useFetch, type FetchState } from '../../lib/useFetch';
@@ -62,6 +68,7 @@ import {
   deriveSchemaFacts,
   deriveWorkflowStages,
   deriveWorkspaceTotals,
+  type MemoryFreshness,
   type RecentWorkItem,
 } from '../../lib/statisticsModel';
 import { RovingTabs } from '../settings/apiShared';
@@ -71,16 +78,14 @@ import {
   ChartLoading,
   ChartSourceUnavailable,
   StatsBarChart,
-  StatsColumnChart,
   StatsComparisonRows,
   StatsStackedBar,
-  TechnicalDetails,
 } from './StatsCharts';
 import {
   FigureList,
+  HeadlineFigure,
   MiniBreakdown,
   StatCard,
-  StatsSection,
   UnavailableNote,
 } from './StatsPrimitives';
 import { MyStats } from './MyStats';
@@ -88,6 +93,41 @@ import { RecordVerification, useVerificationReport } from './RecordVerification'
 
 /**
  * Statistics — the read-only insights surface, in THREE tabs.
+ *
+ * ── THE 2026-10-12 WIDGET REDESIGN — READ THIS BEFORE THE HISTORY BELOW ────
+ *
+ * The project owner's verdict on the 2026-09-15 layout: still "a whole bunch of
+ * spam", and Build & Verification "is not a good way to portray those
+ * statistics". The direction: WIDGETS — each answers one question, states one
+ * headline, and keeps its breakdowns and timelines one click away INSIDE the
+ * widget. Every tab is now a `WidgetGrid` of `components/Widget.tsx` cards.
+ *
+ *   · Overview — Records (status · workflow · export gate), Open Questions,
+ *     Evidence Support, Workspace Activity (a real 7 · 30 · 365-day range, plus
+ *     the most-recently-updated list that used to be Recent Work), Historical
+ *     Imports, and the no-analytics claim.
+ *   · Build & Verification — Record Verification (validators · mutation ·
+ *     format issues · about this run), Verification Safeguards, Runtime,
+ *     Project Memory, Record Schema, API Surface, Platform Metrics.
+ *   · My Stats — the gate, and the prepared views behind one expansion.
+ *
+ * WHAT MOVED, AND THE RULE IT MOVED BY. The four free-standing prose
+ * disclosures (How Verification Works, How to Interpret Results, Mutation
+ * Methodology, Known Limitations), the Technical Details region and the two
+ * Overview restatement disclosures are GONE AS CONTAINERS; every paragraph they
+ * held is now inside the info panel of the widget whose figures it explains,
+ * verbatim unless a note at the site says otherwise. The rule that governed the
+ * old disclosures governs the info panels unchanged — PROSE MAY BE COLLAPSED, A
+ * MEASUREMENT MAY NOT — and a sentence that QUALIFIES a figure (the
+ * non-addability lines, the subset line, the truncation caveat, the unreadable
+ * counts) stays visible beside that figure.
+ *
+ * WHAT A VIEW IS. A widget's view switcher swaps between named presentations of
+ * the same source — a breakdown, a ranking, a list — and its headline stays
+ * visible whichever is selected. That is a different act from collapsing a
+ * finding behind an explanation, which is why measurements may live in a view
+ * and may not live in an info panel. Inactive views are `hidden`, not
+ * unmounted.
  *
  * ── THE 2026-09-15 REDESIGN, AND THE OBLIGATION IT DISCHARGES ──────────────
  *
@@ -502,9 +542,10 @@ function leadSentence(scope: string | null, tab: StatisticsTabId): string {
  * `BackendDown`, because there is then nothing left to localize.
  *
  * `/api/about` is the ONE deliberate exception, and it is quieter rather than
- * louder: its failure costs two supporting cards in the collapsed Technical
- * Details region, so it states itself with this note at its only reader. An alarm
- * panel there would out-shout the figures beside it that were read successfully.
+ * louder: its failure costs two small facts — the `Runtime` widget's two cards
+ * (in the collapsed Technical Details region until 2026-10-12) — so it states
+ * itself with this note at its only reader. An alarm panel there would out-shout
+ * the widgets beside it whose figures were read successfully.
  *
  * `/api/schema` WAS A SECOND, UNDOCUMENTED EXCEPTION and is no longer one. It has
  * a single reader, so this rule always prescribed a full `BackendDown` for it, and
@@ -696,7 +737,23 @@ export function StatisticsPage() {
    * hard-coded (see `Round`) precisely so a read could be added without that
    * sentence going wrong.
    */
-  const activity = useFetch(() => track(api.getActivitySummary()), [scope]);
+  /*
+   * THE RANGE IS THE READER'S SPAN, AND THE SERVER'S BOUNDARY (2026-10-12).
+   *
+   * The Workspace Activity widget offers 7 · 30 · 365 days. `undefined` is the
+   * default and sends NO parameter, so the default read is byte-for-byte the URL
+   * it always was; a chosen span is sent as `window_days`. The widget's label is
+   * still read from the RESPONSE's `window.days`, never from this state, so a
+   * figure and its window cannot disagree even while a re-read is in flight.
+   *
+   * A range change is a ROUND OF ONE — `track` opens a new round when the page
+   * is idle — so the "N of M reads failed" sentence stays true of what it counts.
+   */
+  const [activityDays, setActivityDays] = useState<number | undefined>(undefined);
+  const activity = useFetch(
+    () => track(api.getActivitySummary(activityDays)),
+    [scope, activityDays],
+  );
   /*
    * The SIXTH read, and it is deliberately NOT a `useFetch` and NOT tracked.
    *
@@ -800,7 +857,10 @@ export function StatisticsPage() {
       width="wide"
     >
       <div className="placeholder">
-        <span className="eyebrow">Workspace Insights</span>
+        {/* ~~`<span className="eyebrow">Workspace Insights</span>`~~ — REMOVED
+            2026-10-12. A kicker above the page heading restated the heading in
+            smaller type; the heading carries its own weight, and the lead
+            sentence beneath it says what the tab is for. */}
         <h1>Statistics</h1>
         <p>{leadSentence(scope, activeTab)}</p>
 
@@ -832,6 +892,7 @@ export function StatisticsPage() {
           tabIndex={0}
         >
           <ReadMeta
+            tab={activeTab}
             lastSuccess={lastSuccess}
             lastAttempt={lastAttempt}
             round={round}
@@ -848,24 +909,30 @@ export function StatisticsPage() {
               onRetry={retryAll}
             />
           ) : (
-            <>
+            <WidgetGrid>
               {/* THE HEADLINE FIGURES ARE THE LEDE. They used to be the fourth
                   thing on this tab, roughly 3,700 px down, behind an
-                  engineering QA program. */}
-              <WorkspaceGlance records={records} imports={imports} />
-              <WorkflowDistribution records={records} />
+                  engineering QA program. Since 2026-10-12 the first widget
+                  carries them, with the workflow distribution and the export
+                  gate one click away inside it rather than two sections below. */}
+              <RecordsWidget records={records} />
               <OpenQuestions records={records} />
-              <EvidenceAndValidation records={records} />
-              <RecentWork records={records} />
-              {/* `ACT-004`. It sits beside Recent Work because both answer "what
-                  happened lately", and the two are DIFFERENT questions rather than
-                  two renderings of one: Recent Work orders records by when their
-                  state last changed, this counts the acts their own append-only
-                  histories recorded. Each section's `sub` says which. */}
-              <WorkspaceActivity activity={activity} />
+              <EvidenceSupport records={records} />
+              {/* `ACT-004`, and RECENT WORK INSIDE IT. They answer "what happened
+                  lately" from two different reads — the acts the append-only
+                  histories recorded, and the order records last changed in — so
+                  they are two VIEWS of one widget, each captioned with its own
+                  source and scope, rather than two widgets listing four of the
+                  same five records. */}
+              <WorkspaceActivity
+                activity={activity}
+                records={records}
+                requestedDays={activityDays}
+                onRequestDays={setActivityDays}
+              />
               <HistoricalImports imports={imports} />
               <NoAnalytics />
-            </>
+            </WidgetGrid>
           )}
         </div>
       )}
@@ -879,6 +946,7 @@ export function StatisticsPage() {
           tabIndex={0}
         >
           <ReadMeta
+            tab={activeTab}
             lastSuccess={lastSuccess}
             lastAttempt={lastAttempt}
             round={round}
@@ -895,28 +963,28 @@ export function StatisticsPage() {
               onRetry={retryAll}
             />
           ) : (
-            <>
-              {/* `RecordVerification` renders TWO sections — itself and, when a
+            <WidgetGrid>
+              {/* `RecordVerification` renders TWO widgets — itself and, when a
                   readable report is on screen, `Verification Safeguards` — so
                   the first two `h2`s of this tab come out of one component. */}
               <RecordVerification verification={verification} />
+              {/* THE BUILD FACTS ARE NO LONGER COLLAPSED. They sat inside one
+                  closed `Technical Details` region, which made four small,
+                  self-describing facts cost a click AND a scroll; as widgets
+                  each states its own headline and keeps its breakdown inside.
+                  The prose that region's supporting line carried is in each
+                  widget's info panel. */}
+              {/* PAIRED BY HEIGHT (review, 2026-10-18): Project Memory and Record
+                  Schema share a row, API Surface takes one, and the two short
+                  facts — this build's runtime and the wider platform's absent
+                  figures — share the last, so no short widget sits beside a
+                  tall one over a block of empty space. */}
+              <ProjectMemoryFacts graph={graph} />
+              <RecordSchemaFacts schema={schema} />
+              <ApiSurface openapi={openapi} />
+              <RuntimeFacts about={about} />
               <PlatformMetrics />
-              {/* ---- the collapsed disclosures, all supporting copy ---------- */}
-              <HowVerificationWorks />
-              <HowToInterpretResults />
-              <MutationMethodology />
-              <KnownLimitations />
-              <TechnicalDetails
-                id="stats-technical"
-                title="Technical Details"
-                sub="What this build reports about itself: the runtime mode, the served memory snapshot, the official record schema, and the shape of the API."
-              >
-                <RuntimeFacts about={about} />
-                <RecordSchemaFacts schema={schema} />
-                <ProjectMemoryFacts graph={graph} />
-                <ApiSurface openapi={openapi} />
-              </TechnicalDetails>
-            </>
+            </WidgetGrid>
           )}
         </div>
       )}
@@ -958,6 +1026,7 @@ export function StatisticsPage() {
  * region that appears together with its message is unreliable.
  */
 function ReadMeta({
+  tab,
   lastSuccess,
   lastAttempt,
   round,
@@ -967,6 +1036,7 @@ function ReadMeta({
   refreshMessage,
   onRefresh,
 }: {
+  tab: StatisticsTabId;
   lastSuccess: Date | null;
   lastAttempt: Date | null;
   round: Round;
@@ -976,6 +1046,16 @@ function ReadMeta({
   refreshMessage: string;
   onRefresh: () => void;
 }) {
+  /*
+   * THE PAGE'S OWN INFO PANEL (2026-10-12). Two paragraphs of the retired
+   * `Known Limitations` disclosure are about the PAGE rather than about any one
+   * widget — what every figure here is read from, and that nothing here writes —
+   * so they sit behind an info toggle beside the read clock and the Refresh they
+   * describe, on both data tabs. The other two paragraphs went to the widgets
+   * they qualify: server-side logging to the no-analytics widget, the cached
+   * report to Record Verification. Prose only, per the info-panel rule.
+   */
+  const [aboutOpen, setAboutOpen] = useState(false);
   return (
     <>
       <div className="stats-meta">
@@ -1005,9 +1085,47 @@ function ReadMeta({
             <span className="stats-meta-label">Reading From the API</span>
           </p>
         )}
-        <button type="button" className="btn btn-secondary" onClick={onRefresh} aria-busy={refreshing}>
-          {refreshing ? 'Refreshing…' : 'Refresh'}
-        </button>
+        <div className="stats-meta-tools">
+          <button
+            type="button"
+            className="widget-info-toggle"
+            aria-label="About These Figures"
+            title="About These Figures"
+            aria-expanded={aboutOpen}
+            aria-controls="stats-page-about"
+            onClick={() => setAboutOpen((open) => !open)}
+          >
+            <Info size={16} strokeWidth={2} aria-hidden="true" />
+          </button>
+          <button type="button" className="btn btn-secondary" onClick={onRefresh} aria-busy={refreshing}>
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
+      </div>
+      <div className="widget-info stats-page-about" id="stats-page-about" hidden={!aboutOpen}>
+        <p>
+          Every figure on this page is read from this build&rsquo;s own API and describes either
+          this workspace or this build. None of them is a platform-wide figure; Platform Metrics,
+          on the Build &amp; Verification tab, states why this deployment can produce none.
+        </p>
+        <p>
+          This page mutates nothing and gates nothing. Refresh re-issues the same read-only reads
+          and does nothing else, and no control on this screen writes, validates or exports
+          anything.
+        </p>
+        {tab === 'build' ? (
+          /* From the retired `How Verification Works` disclosure, and kept OUT of
+             the Record Verification widget on purpose: it names the corpus that
+             did not run, which that widget must never do. */
+          <p>
+            Two corpora can produce the verification report, and they carry very different weight —
+            a public reference preflight over already-published upstream example records, and an
+            authorized sample of the records this application holds. Which one ran is stated at
+            the top of Record Verification before any count — as a product name AND as the value
+            the report itself sent, verbatim — and a value this build does not recognise becomes
+            its own label rather than being mapped onto either shipped one.
+          </p>
+        ) : null}
       </div>
       {/* The failure of a round is stated in the page's own words, next to the
           timestamp it qualifies. Suppressed when EVERY read failed, because
@@ -1062,74 +1180,182 @@ type ImportsFetch = Fetched<unknown>;
 type ActivityFetch = Fetched<ApiActivitySummary>;
 
 /**
- * The at-a-glance row — the KPI form, deliberately not a chart.
+ * RECORDS — where the records in this workspace stand. One widget, three views.
+ *
+ * ── WHAT IT REPLACED, 2026-10-12 ───────────────────────────────────────────
+ *
+ * Three sections answered this one question from one read: `Workspace at a
+ * Glance` (six tiles), `Workflow Distribution` (a chart) and the `Export Gate`
+ * half of `Evidence and Validation` (a five-row list). They are now the Status,
+ * Workflow and Export Gate views of one widget, under ONE headline — the API's
+ * own workspace total. Nothing was computed for the merge: every figure is the
+ * one its section stated, from the same derivation.
+ *
+ * THE TWO GLANCE TILES THAT WERE RESTATEMENTS ARE GONE FROM HERE. `Open
+ * Questions` was `deriveOpenQuestions`' own total and `Historical Imports` was
+ * the import list's `total`; each is now the HEADLINE of its own widget, which
+ * is where the tile's figure always pointed. A figure stated twice on one screen
+ * is a figure that can disagree with itself.
+ *
+ * ── THE STATUS VIEW IS STILL THE KPI FORM, DELIBERATELY NOT A CHART ────────
  *
  * Headline numbers with no shared scale and no ordering between them are a row
- * of stat tiles; a bar chart of "Total / Need Attention / Ready / Exported"
- * would put a total and its own subsets on one axis, which invites reading the
- * parts as a partition of the whole when `Total Records` is the API's workspace
+ * of figures; a bar chart of "Total / Needs Attention / Ready / Exported" would
+ * put a total and its own subsets on one axis, which invites reading the parts
+ * as a partition of the whole when `Total Records` is the API's workspace
  * denominator and the other three describe only the records received.
  *
- * ── IT IS THE FIRST THING ON THE TAB NOW, AND IT GAINED TWO TILES ─────────
+ * ── THE TRUNCATION CAVEAT IS VISIBLE, AND IT PRECEDES THE FIGURES ──────────
  *
- * `Open Questions` and `Historical Imports` are here because the four
- * questions this tab exists to answer are *how much is recorded, how much is
- * ready, how much still needs attention, and what have I brought in* — and two
- * of those four were answerable only by scrolling to a section further down.
- * Neither tile is a new measurement: `Open Questions` is `deriveOpenQuestions`'
- * own total, restated at the top and still stated in full in its own section,
- * and `Historical Imports` is the import list's own `total`.
+ * It is in the widget body, above the headline's companions and above every
+ * view, because it qualifies every count in them except `Total Records` — and it
+ * names that exception rather than excluding the figures it sits above.
  *
- * THE IMPORT TILE COUNTS SESSIONS AND IS NEVER ADDED TO A RECORD COUNT. An
- * import session is a working area; this build creates no experiment from one
- * automatically, so a reader must not add the two tiles together. The tile's
- * own note says `sessions`, and the Historical Imports section below states it
- * again beside the figure.
+ * EACH READ STATES ITS OWN STATE. A records read that has not settled says it
+ * is reading; one that failed carries the page's one alarm for this source, at
+ * this — its first — reader. Neither ever shows `0`.
  *
- * EACH TILE STATES ITS OWN READ STATE. The records read and the imports read
- * are independent, so one dead source empties its own tiles and leaves the
- * others standing — the page's partial-failure rule applied at tile
- * granularity. A tile whose read has not settled says it is reading; a tile
- * whose read failed says the figure is not available. Neither ever shows `0`,
- * which would be a figure nobody measured.
- *
- * The two runtime cards this section used to carry (`Runtime Mode`,
- * `Persistence`) moved into `Technical Details` on the Build tab: they are
- * facts about the build, not about the workspace.
+ * The runtime facts it once carried (`Runtime Mode`, `Persistence`) are the
+ * `Runtime` widget on the Build tab: they describe the build, not the workspace.
  */
-function WorkspaceGlance({ records, imports }: { records: RecordsFetch; imports: ImportsFetch }) {
+function RecordsWidget({ records }: { records: RecordsFetch }) {
+  const body = records.status === 'data' ? records.data : null;
+  const totals = body === null ? null : deriveWorkspaceTotals(body);
   return (
-    <StatsSection
-      id="stats-glance"
-      title="Workspace at a Glance"
-      sub="Counts for the records this workspace holds right now."
+    <Widget
+      id="stats-records"
+      title="Records"
+      sub="Where the records in this workspace stand right now."
       icon={<LayoutList size={18} strokeWidth={2} aria-hidden="true" />}
+      span="full"
+      info={
+        <>
+          <p className="widget-info-heading">How Each Record Is Placed</p>
+          {/* The three Status cards' sentences, which sat under their numbers
+              until 2026-10-18 (each card still carries its own for assistive
+              technology). */}
+          <p>
+            {LABELS.groupNeedsAttention} means open questions remain. {LABELS.groupReady} means no
+            open questions remain and the export dry-run passes. Exported means an official record
+            has been written.
+          </p>
+          <p>
+            Status and export-gate positions are recomputed from the current drafts on every read
+            and are never stored, so there is no saved verdict and no not-yet-run state to report.
+            The workflow view counts each record once, at its first unsatisfied step of the five.
+          </p>
+          <p>
+            Ready Now means no open questions remain and the official export dry-run passes.
+            Blocked by the Export Gate means no open questions remain but the dry-run does not pass.
+            Blocked by Open Questions means the gate has not been reached yet. Stale Artifacts is a
+            subset of Exported — a record whose exported file no longer matches its draft is counted
+            in both — which is why the export-gate positions are not charted on a shared scale.
+          </p>
+          <p>
+            The workflow bars share one scale, marked beneath them. The scale runs to the largest
+            bucket, not to the total, so small differences stay visible.
+          </p>
+        </>
+      }
+      lead={
+        body !== null && totals !== null && body.records.length !== totals.total ? (
+          /* ABOVE every figure it qualifies — the `lead` slot renders before the
+             headline — and it names the one exception rather than excluding it. */
+          <div className="stats-block-lead">
+            <UnavailableNote>
+              This page received {count(body.records.length)} of the {count(totals.total)} records
+              the API reports. Total Records below is the API&rsquo;s own workspace total; every
+              other count on this page — the cards beside it and every breakdown further down —
+              describes only the {count(body.records.length)} records received.
+            </UnavailableNote>
+          </div>
+        ) : undefined
+      }
+      headline={
+        totals !== null && totals.total > 0 ? (
+          <HeadlineFigure label="Total Records" value={count(totals.total)} />
+        ) : null
+      }
+      views={
+        body !== null && totals !== null && totals.total > 0
+          ? [
+              {
+                id: 'status',
+                label: 'Status',
+                icon: <LayoutList size={14} strokeWidth={2} aria-hidden="true" />,
+                content: <RecordStatusCells body={body} />,
+              },
+              {
+                id: 'workflow',
+                label: 'Workflow',
+                icon: <Workflow size={14} strokeWidth={2} aria-hidden="true" />,
+                content: <WorkflowBars records={body.records} />,
+              },
+              {
+                id: 'gate',
+                label: 'Export Gate',
+                icon: <ShieldCheck size={14} strokeWidth={2} aria-hidden="true" />,
+                content: <ExportGateFigures records={body.records} />,
+              },
+            ]
+          : undefined
+      }
+      footer={
+        totals !== null && totals.total > 0 ? (
+          <Link to={ROUTES.experiments}>Open My Experiments</Link>
+        ) : undefined
+      }
     >
       {records.status === 'loading' && <LoadingPanel label="Loading the workspace summary…" />}
       {records.status === 'error' && <BackendDown error={records.error} onRetry={records.reload} />}
-      {records.status === 'data' && <GlanceRecordCards body={records.data} imports={imports} />}
-    </StatsSection>
+      {body !== null && totals !== null && totals.total === 0 && (
+        /* NOT defensive: the ORDINARY scope starts with no records, so opening
+           Statistics without a walkthrough reaches this as the normal case. The
+           sentence is measured (`totals.total === 0`, from the same body). */
+        <div className="stats-empty">
+          <p className="stats-empty-title">No Records Yet</p>
+          <p className="stats-note">
+            The workspace holds no records, so there is nothing to summarise here.
+          </p>
+          <p className="stats-actions">
+            <Link to={ROUTES.experiments}>Go to My Experiments</Link>
+          </p>
+        </div>
+      )}
+    </Widget>
   );
 }
 
 /**
- * The two runtime facts `/api/about` reports about this build, inside Technical
- * Details.
+ * The two runtime facts `/api/about` reports about this build.
  *
  * Each is stated only if the response actually carried a usable string. A
  * malformed field becomes the same unavailable literal every other absent figure
  * on this page uses, in the neutral `quiet` tone — not an error, and not a
  * guessed default such as "Synthetic-Only", which would be the one substitution
  * this project forbids outright. Rendering never throws on this body.
+ *
+ * `/api/about` IS THE PAGE'S ONE QUIET SOURCE: its failure costs two small facts,
+ * so it states itself with the compact note rather than an alarm panel.
  */
 function RuntimeFacts({ about }: { about: AboutFetch }) {
   return (
-    <StatsSection
+    <Widget
       id="stats-runtime"
       title="Runtime"
-      sub="What this build reports about its own data regime and storage."
+      /* NO SUPPORTING LINE SINCE 2026-10-18: "This build's data regime and
+         storage." restated the two labels beneath it word for word. It shares
+         the tab's last row with Platform Metrics, the other short widget. */
       icon={<Settings size={18} strokeWidth={2} aria-hidden="true" />}
-      headingLevel={3}
+      info={
+        /* The two sentences that sat under the two values until 2026-10-18.
+           When a value is NOT usable its sentence stays visible beside it,
+           because then it qualifies the figure rather than defining it. */
+        <p>
+          Runtime Mode is the data regime this build reports, and Persistence is the storage class
+          this build reports.
+        </p>
+      }
     >
       {about.status === 'loading' && (
         <LoadingPanel label="Loading the runtime mode and persistence…" />
@@ -1141,7 +1367,7 @@ function RuntimeFacts({ about }: { about: AboutFetch }) {
         />
       )}
       {about.status === 'data' && <GlanceRuntimeCards body={about.data} />}
-    </StatsSection>
+    </Widget>
   );
 }
 
@@ -1149,10 +1375,11 @@ function GlanceRuntimeCards({ body }: { body: ApiAboutResponse }) {
   const runtimeMode = titleCaseTokenOrNull(body.runtime_mode);
   const persistence = titleCaseTokenOrNull(body.persistence);
   return (
-    <div className="stats-cards stats-cards-pair">
+    <div className="stats-cards stats-cards-pair stats-cards-inline">
       <StatCard
         label="Runtime Mode"
         value={runtimeMode ?? UNAVAILABLE}
+        compact={runtimeMode !== null}
         note={
           runtimeMode === null
             ? 'the API answered without a usable runtime mode, so none is stated.'
@@ -1163,6 +1390,7 @@ function GlanceRuntimeCards({ body }: { body: ApiAboutResponse }) {
       <StatCard
         label="Persistence"
         value={persistence ?? UNAVAILABLE}
+        compact={persistence !== null}
         note={
           persistence === null
             ? 'the API answered without a usable storage class, so none is stated.'
@@ -1174,166 +1402,48 @@ function GlanceRuntimeCards({ body }: { body: ApiAboutResponse }) {
   );
 }
 
-function GlanceRecordCards({
-  body,
-  imports,
-}: {
-  body: { records: RuntimeRecord[]; total: number };
-  imports: ImportsFetch;
-}) {
-  const totals = deriveWorkspaceTotals(body);
-  const questions = deriveOpenQuestions(body.records);
-
-  /* NOT defensive any more, and the comment here said it was. It read "the workspace
-     always holds its canonical synthetic records ... so this branch is not reachable
-     through the shipped product", which stopped being true when the five examples moved
-     into a worked-example session: the ORDINARY scope starts with no records, so opening
-     Statistics without a walkthrough open reaches this branch as the normal case. The
-     rendered sentence is measured (`totals.total === 0`, derived from the same body the
-     cards are built from), so it stays as it is — only the claim about reachability was
-     wrong. */
-  if (totals.total === 0) {
-    return (
-      <div className="stats-empty">
-        <p className="stats-empty-title">No Records Yet</p>
-        <p className="stats-note">
-          The workspace holds no records, so there is nothing to summarise here.
-        </p>
-        <p className="stats-actions">
-          <Link to={ROUTES.experiments}>Go to My Experiments</Link>
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <>
-      {/* ABOVE the grid, and it names the exception explicitly.
-          Two things were wrong with this note when it sat BELOW the cards and
-          said "every breakdown below describes only the records received":
-          `Need Attention`, `Ready to Export` and `Exported` are in the grid the
-          note followed, so the very counts most at risk of being read as
-          workspace-wide were the ones its own wording excluded — while sitting
-          beside a `Total Records` that IS workspace-wide. It now precedes what it
-          qualifies and states the one figure it does not apply to. */}
-      {body.records.length !== totals.total && (
-        <div className="stats-block stats-block-lead">
-          <UnavailableNote>
-            This page received {count(body.records.length)} of the {count(totals.total)} records the
-            API reports. Total Records below is the API&rsquo;s own workspace total; every other
-            count on this page — the cards beside it and every breakdown further down — describes
-            only the {count(body.records.length)} records received.
-          </UnavailableNote>
-        </div>
-      )}
-      <div className="stats-cards stats-cards-glance">
-        <StatCard
-          label="Total Records"
-          value={count(totals.total)}
-          note="the workspace total the API reports."
-        />
-        <StatCard
-          label={LABELS.groupNeedsAttention}
-          value={count(totals.needsAttention)}
-          note="open questions remain."
-          tone={totals.needsAttention > 0 ? 'attention' : 'neutral'}
-        />
-        <StatCard
-          label={LABELS.groupReady}
-          value={count(totals.readyToExport)}
-          note="no open questions and the export dry-run passes."
-          tone={totals.readyToExport > 0 ? 'good' : 'neutral'}
-        />
-        <StatCard
-          label="Exported"
-          value={count(totals.exported)}
-          note="an official record has been written."
-        />
-        {/* QUESTIONS, not records — the note says so, and the section below
-            states the same total with its four record-counted companions. */}
-        <StatCard
-          label="Open Questions"
-          value={count(questions.totalOpenQuestions)}
-          note="questions still awaiting an answer, across the records received."
-          tone={questions.totalOpenQuestions > 0 ? 'attention' : 'neutral'}
-        />
-        <ImportSessionsCard imports={imports} />
-        {totals.unknownStatus > 0 && (
-          <StatCard
-            label="Unrecognized Status"
-            value={count(totals.unknownStatus)}
-            note="a status this page cannot place; counted, not folded into a known bucket."
-            tone="attention"
-          />
-        )}
-      </div>
-    </>
-  );
-}
-
 /**
- * The one headline tile fed by a different read, so it states its own state.
+ * The Status view: the three record-counted positions beside the headline total.
  *
- * A failed or unsettled import read must not empty the five record tiles
- * beside it, and it must not render `0` — which would claim the workspace holds
- * no import session when what is true is that this page did not read one. The
- * `quiet` tone is this page's existing not-available treatment and is
- * deliberately not an error treatment: the section below carries the alarm and
- * the Retry for this source.
+ * `Ready to Export` IS NO LONGER TINTED IN THE RESERVED VERDICT GREEN. It is a
+ * workflow POSITION, not a validation verdict — `RecordStatusWord` below already
+ * refuses that green for the same word on the same screen — and the design
+ * system reserves PASS green for the deterministic verdict alone. It reads in
+ * the neutral tone; `Needs Attention` keeps the advisory tone, which is what it
+ * is.
  */
-function ImportSessionsCard({ imports }: { imports: ImportsFetch }) {
-  if (imports.status === 'loading') {
-    return (
-      <StatCard
-        label="Historical Imports"
-        value="Reading…"
-        note="the import sessions have not been read yet."
-        tone="quiet"
-      />
-    );
-  }
-  if (imports.status === 'error') {
-    return (
-      <StatCard
-        label="Historical Imports"
-        value={UNAVAILABLE}
-        note="the import sessions could not be read, so no count is stated."
-        tone="quiet"
-      />
-    );
-  }
-  const totals = deriveImportTotals(imports.data);
+function RecordStatusCells({ body }: { body: { records: RuntimeRecord[]; total: number } }) {
+  const totals = deriveWorkspaceTotals(body);
   return (
-    <StatCard
-      label="Historical Imports"
-      value={countOrUnavailable(totals.sessions)}
-      note="import sessions — working areas, never records."
-      tone={totals.sessions === null ? 'quiet' : 'neutral'}
-    />
-  );
-}
-
-/* ---- 2 · Workflow Distribution ---------------------------------------- */
-
-function WorkflowDistribution({ records }: { records: RecordsFetch }) {
-  return (
-    <StatsSection
-      id="stats-workflow"
-      title="Workflow Distribution"
-      sub="Where the records stand in the five-step workflow. Each record is counted once, at its first unsatisfied step."
-      icon={<BarChart3 size={18} strokeWidth={2} aria-hidden="true" />}
-    >
-      {records.status === 'loading' && (
-        <ChartLoading label="Loading the workflow distribution…" />
-      )}
-      {records.status === 'error' && (
-        <ChartError
-          message="The workspace records could not be read, so there is no workflow distribution to show."
-          onRetry={records.reload}
+    <div className="stats-cards stats-cards-glance">
+      <StatCard
+        label={LABELS.groupNeedsAttention}
+        value={count(totals.needsAttention)}
+        compact
+        note="open questions remain."
+        tone={totals.needsAttention > 0 ? 'attention' : 'neutral'}
+      />
+      <StatCard
+        label={LABELS.groupReady}
+        value={count(totals.readyToExport)}
+        compact
+        note="no open questions and the export dry-run passes."
+      />
+      <StatCard
+        label="Exported"
+        value={count(totals.exported)}
+        compact
+        note="an official record has been written."
+      />
+      {totals.unknownStatus > 0 && (
+        <StatCard
+          label="Unrecognized Status"
+          value={count(totals.unknownStatus)}
+          note="a status this page cannot place; counted, not folded into a known bucket."
+          tone="attention"
         />
       )}
-      {records.status === 'data' && <WorkflowBars records={records.data.records} />}
-    </StatsSection>
+    </div>
   );
 }
 
@@ -1347,12 +1457,11 @@ function WorkflowDistribution({ records }: { records: RecordsFetch }) {
  * would turn five records into five indistinguishable 20% slices and hide the
  * zeros the canonical axis is deliberately keeping.
  *
- * AND IT IS NOT THE ROW OF PROGRESS BARS THIS SECTION USED TO DRAW. The old
- * `StageBars` scaled every bar against the TOTAL, drew no axis and offered no
- * table, so six buckets over five records were six near-empty tracks that could
- * not be read as numbers. The scale is now a nice maximum over the LARGEST
- * bucket, gridlines and tick labels are shared across the rows, and the figure
- * carries both a summary sentence and a data table.
+ * AND IT IS NOT THE ROW OF PROGRESS BARS THIS SECTION USED TO DRAW. The scale is
+ * a nice maximum over the LARGEST bucket, gridlines and tick labels are shared
+ * across the rows, and the figure carries both a summary sentence and a data
+ * table. Its scale note moved into the Records widget's info panel; the chart's
+ * caption still names how many records were counted.
  */
 function WorkflowBars({ records }: { records: RuntimeRecord[] }) {
   if (records.length === 0) {
@@ -1371,28 +1480,72 @@ function WorkflowBars({ records }: { records: RuntimeRecord[] }) {
       unit="records"
       total={records.length}
       categoryHeader="Workflow Step"
-      note="Bars share one scale, marked beneath them. The scale runs to the largest bucket, not to the total, so small differences stay visible."
     />
   );
 }
 
-/* ---- 3 · Open Questions ------------------------------------------------ */
+/* ---- Open Questions ---------------------------------------------------- */
 
 /**
  * The one figure the safe record projection carries that this page used to
  * discard: `pending_count`.
  *
- * It is the quantity that DRIVES the status distribution above — `needs_attention`
- * is exactly "open questions remain" — so the page stated the consequence four
+ * It is the quantity that DRIVES the status distribution — `needs_attention` is
+ * exactly "open questions remain" — so the page stated the consequence four
  * times and never the cause. Nothing new is fetched for it.
+ *
+ * SINCE 2026-10-12 THE QUESTION TOTAL IS THE HEADLINE, and the four record
+ * tallies sit beneath it. The non-addability line is VISIBLE, one line, beside
+ * them, because it qualifies those figures; the longer explanation that used to
+ * be a `How These Five Are Counted` disclosure is the widget's info panel,
+ * verbatim.
  */
 function OpenQuestions({ records }: { records: RecordsFetch }) {
+  const questions =
+    records.status === 'data' && records.data.records.length > 0
+      ? deriveOpenQuestions(records.data.records)
+      : null;
   return (
-    <StatsSection
+    <Widget
       id="stats-questions"
       title="Open Questions"
-      sub="How many answers the records are still waiting for, counted in questions rather than in records."
+      sub="Answers the records are still waiting for."
       icon={<CircleHelp size={18} strokeWidth={2} aria-hidden="true" />}
+      info={
+        <>
+          {/* THE RECORD COUNT IS DELIBERATELY NOT REPEATED HERE. An info panel
+              may hold prose and never a figure — it is closed by default, so a
+              figure inside it would be a hidden figure. The figures it names are
+              stated, visibly, beside the headline. */}
+          {/* The supporting line's second half until 2026-10-18. */}
+          <p>
+            This widget counts in questions rather than in records: one record can be waiting on
+            several answers.
+          </p>
+          <p>
+            Total Open Questions counts QUESTIONS across the records received. Records With Open
+            Questions, Records With a Blocked Step and Records With a Reopened Step count RECORDS.
+            Most on One Record is the largest single record&rsquo;s question count, and is neither
+            a total nor a share of one.
+          </p>
+          <p>
+            A blocked step and a reopened step are separate axes and overlap each other and the
+            question counts, so none of these five may be added together. Each reports only whether
+            a record has at least one such step — the workspace projection reduces all five steps to
+            one flag apiece, so it does not name the step. No question text, field name or answer is
+            read here.
+          </p>
+        </>
+      }
+      headline={
+        questions !== null ? (
+          <HeadlineFigure
+            label="Total Open Questions"
+            value={count(questions.totalOpenQuestions)}
+            tone={questions.totalOpenQuestions > 0 ? 'attention' : 'neutral'}
+          />
+        ) : null
+      }
     >
       {records.status === 'loading' && <LoadingPanel label="Loading the open-question counts…" />}
       {records.status === 'error' && (
@@ -1402,7 +1555,7 @@ function OpenQuestions({ records }: { records: RecordsFetch }) {
         />
       )}
       {records.status === 'data' && <OpenQuestionFigures records={records.data.records} />}
-    </StatsSection>
+    </Widget>
   );
 }
 
@@ -1429,13 +1582,11 @@ function OpenQuestionFigures({ records }: { records: RuntimeRecord[] }) {
 
   return (
     <>
+      {/* ONE ROW OF FOUR since 2026-10-18 (`stats-figures-row`), rather than
+          three columns that wrapped the fourth onto a row of its own. */}
+      <div className="stats-figures-row">
       <FigureList
         rows={[
-          {
-            label: 'Total Open Questions',
-            value: count(questions.totalOpenQuestions),
-            mono: true,
-          },
           {
             label: 'Records With Open Questions',
             value: count(questions.recordsWithOpenQuestions),
@@ -1454,167 +1605,172 @@ function OpenQuestionFigures({ records }: { records: RuntimeRecord[] }) {
           },
         ]}
       />
+      </div>
       {questions.recordsWithUnreadableCount > 0 && (
-        <div className="stats-block">
-          <UnavailableNote>
-            <p>
-              {count(questions.recordsWithUnreadableCount)} of the{' '}
-              {count(questions.recordsCounted)} records received carried no usable question count,
-              so they contribute nothing to the total above. Nothing was assumed for them, and they
-              were not counted as zero.
-            </p>
-          </UnavailableNote>
-        </div>
+        <UnavailableNote>
+          <p>
+            {count(questions.recordsWithUnreadableCount)} of the {count(questions.recordsCounted)}{' '}
+            records received carried no usable question count, so they contribute nothing to the
+            total above. Nothing was assumed for them, and they were not counted as zero.
+          </p>
+        </UnavailableNote>
       )}
-      {/*
-        ── THE CAVEAT STAYS VISIBLE; THE RESTATEMENT IS DISCLOSED ──────────
-        Two paragraphs used to sit here, and between them they said one thing a
-        reader must not miss (these five are on different axes and may not be
-        added) and several things that explain why. The operative sentence is
-        now one line and is still visible, because this file's own rule is that
-        a sentence qualifying a specific figure is part of what the figure
-        MEANS and may not be collapsed. Everything that merely restates it is
-        behind the disclosure, verbatim — nothing was deleted.
-      */}
+      {/* THE CAVEAT STAYS VISIBLE. It qualifies the five figures directly — a
+          sentence that qualifies a figure is part of what the figure MEANS — so
+          it is one line beside them, and only its restatement is in the info. */}
+      {/* One line since 2026-10-18: both halves of the caveat — the units and
+          the prohibition on adding — in fewer words. The longer wording is the
+          info panel's second and third paragraphs. */}
       <p className="stats-note">
-        Total Open Questions counts QUESTIONS; the other four count RECORDS. None of the five may be
-        added together.
+        The total counts QUESTIONS; the other four count RECORDS. Never add them.
       </p>
-      <TechnicalDetails
-        variant="prose"
-        id="stats-questions-reading"
-        title="How These Five Are Counted"
-        sub="Which figure counts questions, which count records, and why they do not sum."
-      >
-        {/* THE RECORD COUNT IS DELIBERATELY NOT REPEATED HERE. The paragraph
-            this replaces read "across the {'{'}count(questions.recordsCounted){'}'} records
-            received" — a MEASUREMENT, and this file's rule is that a closed
-            disclosure may hold prose and never a figure, because a closed
-            disclosure is not scanned by axe and is skipped by a reader
-            scanning the page. The figure it named is still stated, visibly,
-            in the list above. */}
-        <p className="stats-note">
-          Total Open Questions counts QUESTIONS across the records received. Records With Open
-          Questions, Records With a Blocked Step and Records With a Reopened Step count RECORDS.
-          Most on One Record is the largest single record&rsquo;s question count, and is neither a
-          total nor a share of one.
-        </p>
-        <p className="stats-note">
-          A blocked step and a reopened step are separate axes and overlap each other and the
-          question counts, so none of these five may be added together. Each reports only whether a
-          record has at least one such step — the workspace projection reduces all five steps to one
-          flag apiece, so it does not name the step. No question text, field name or answer is read
-          here.
-        </p>
-      </TechnicalDetails>
     </>
   );
 }
 
-/* ---- 4 · Evidence and Validation -------------------------------------- */
+/* ---- Evidence Support -------------------------------------------------- */
 
-function EvidenceAndValidation({ records }: { records: RecordsFetch }) {
+/**
+ * EVIDENCE SUPPORT — how well the records' fields are supported by evidence.
+ *
+ * It was the left half of `Evidence and Validation`; the right half (the export
+ * gate) is now the Records widget's Export Gate view, because both halves of
+ * that section answered different questions and the section's own `sub` had to
+ * say so. `Evidence support and schema validation are separate signals.` is
+ * kept, in the info panel, for the reason it was written.
+ *
+ * TWO VIEWS OF ONE COUNT. `Composition` is the stacked bar — the part-to-whole
+ * job, which the six mutually exclusive classes genuinely support — and
+ * `Counts` is the chip row, with the app's own status glyph and colour per
+ * class. They are two forms of one count, not two counts, so they are views.
+ *
+ * NO ROW OF ZEROS. When the records counted carry no classified field there is
+ * no composition to draw and six zero chips would read as six findings, so the
+ * widget states the zero once, as a headline and a sentence.
+ */
+function EvidenceSupport({ records }: { records: RecordsFetch }) {
+  const evidence =
+    records.status === 'data' && records.data.records.length > 0
+      ? deriveEvidenceTotals(records.data.records)
+      : null;
   return (
-    <StatsSection
+    <Widget
       id="stats-evidence"
-      title="Evidence and Validation"
-      sub="Two separate readings of the same records: how well their fields are supported by evidence, and where each record stands against the export gate."
+      title="Evidence Support"
+      sub="How well the records' fields are supported by evidence."
       icon={<ShieldCheck size={18} strokeWidth={2} aria-hidden="true" />}
+      info={
+        <>
+          <p>
+            Evidence support and schema validation are separate signals. This widget counts how
+            each classified field is supported; the export-gate positions, in the Records widget,
+            follow the official export dry-run instead.
+          </p>
+          <p>One record contributes many fields.</p>
+          {/* ~~"The five classes are mutually exclusive …"~~ — FALSE, found by
+              independent review 2026-10-18: there are SIX (`EVIDENCE_CLASSES`),
+              and the total is the sum of all six. The sentence states no count
+              now, and names the class a reader would otherwise miss. */}
+          <p>
+            Every field counted falls in exactly one class — {LABELS.chipEvUnreadable}, a field
+            whose stored evidence could not be read, included — so the classes sum to the total.
+            Segment shade in the composition marks position in the class order — it is not a
+            magnitude and it does not rank severity. The class name carries the meaning.
+          </p>
+        </>
+      }
+      headline={
+        evidence !== null ? (
+          <>
+            <HeadlineFigure label="Total Fields Counted" value={count(evidence.totalFields)} />
+            <FigureList
+              rows={[
+                { label: 'Records Counted', value: count(evidence.recordsCounted), mono: true },
+              ]}
+            />
+          </>
+        ) : null
+      }
+      views={
+        evidence !== null && evidence.totalFields > 0
+          ? [
+              {
+                id: 'composition',
+                label: 'Composition',
+                icon: <BarChartHorizontal size={14} strokeWidth={2} aria-hidden="true" />,
+                content: (
+                  <StatsStackedBar
+                    caption="Share of classified fields by evidence-support class"
+                    rows={EVIDENCE_CLASSES.map((cls) => ({
+                      key: cls.key,
+                      label: evidenceClassLabel(cls.key),
+                      value: evidence[cls.field],
+                    }))}
+                    total={evidence.totalFields}
+                    unit="fields"
+                    categoryHeader="Evidence-Support Class"
+                  />
+                ),
+              },
+              {
+                id: 'counts',
+                label: 'Counts',
+                icon: <List size={14} strokeWidth={2} aria-hidden="true" />,
+                content: (
+                  /* EVIDENCE_CLASSES order is severity precedence, not count
+                     order — iterated as given, never re-sorted. */
+                  <MiniBreakdown
+                    label="Fields by Evidence-Support Class"
+                    items={EVIDENCE_CLASSES.map((cls) => {
+                      const n = evidence[cls.field];
+                      return {
+                        key: cls.key,
+                        chip: <StatusChip kind={EVIDENCE_CLASS_CHIP[cls.key]} />,
+                        count: n,
+                        noun: n === 1 ? 'field' : 'fields',
+                      };
+                    })}
+                  />
+                ),
+              },
+            ]
+          : undefined
+      }
     >
-      {records.status === 'loading' && (
-        <ChartLoading label="Loading evidence and export-gate counts…" />
-      )}
+      {records.status === 'loading' && <ChartLoading label="Loading the evidence counts…" />}
       {records.status === 'error' && (
         <ChartError
-          message="The workspace records could not be read, so neither the evidence counts nor the export-gate counts can be stated."
+          message="The workspace records could not be read, so no evidence count can be stated."
           onRetry={records.reload}
         />
       )}
-      {records.status === 'data' && (
-        <div className="stats-columns">
-          <EvidenceGroup records={records.data.records} />
-          <ExportGateGroup records={records.data.records} />
-        </div>
-      )}
-    </StatsSection>
-  );
-}
-
-/**
- * FORM CHOICE — chips for the counts, and ONE stacked bar for the composition.
- *
- * These are two different questions and they are answered separately rather than
- * twice. The chip row states each class's COUNT with the app's own status glyph
- * and colour, which is where those hues belong (a `StatusChip` carries an icon
- * and a label, so colour is never alone). The stacked bar states each class's
- * SHARE of one whole, which is the part-to-whole job and the one thing a row of
- * counts cannot show at a glance: the five classes are mutually exclusive and
- * exhaustive over classified fields, so they genuinely sum to the total.
- */
-function EvidenceGroup({ records }: { records: RuntimeRecord[] }) {
-  const evidence = deriveEvidenceTotals(records);
-  return (
-    <div className="stats-group">
-      <h3>Evidence Support</h3>
-      {evidence.recordsCounted === 0 ? (
+      {records.status === 'data' && records.data.records.length === 0 && (
         <p className="stats-note">
           No records were returned, so no fields were classified and no count is stated.
         </p>
-      ) : (
+      )}
+      {evidence !== null && (
         <>
-          {/* EVIDENCE_CLASSES order is severity precedence, not count order —
-              iterated as given, never re-sorted. */}
-          <MiniBreakdown
-            label="Fields by Evidence-Support Class"
-            items={EVIDENCE_CLASSES.map((cls) => {
-              const n = evidence[cls.field];
-              return {
-                key: cls.key,
-                chip: <StatusChip kind={EVIDENCE_CLASS_CHIP[cls.key]} />,
-                count: n,
-                noun: n === 1 ? 'field' : 'fields',
-              };
-            })}
-          />
-          {/* A composition needs a whole. With no classified field there is no
-              denominator, so the stack is omitted rather than drawn empty — the
-              chip row above still states the five zeros as measurements. */}
-          {evidence.totalFields > 0 && (
-            <div className="stats-block">
-              <StatsStackedBar
-                caption="Share of classified fields by evidence-support class"
-                rows={EVIDENCE_CLASSES.map((cls) => ({
-                  key: cls.key,
-                  label: evidenceClassLabel(cls.key),
-                  value: evidence[cls.field],
-                }))}
-                total={evidence.totalFields}
-                unit="fields"
-                categoryHeader="Evidence-Support Class"
-                note="Segment shade marks position in the order above — it is not a magnitude and it does not rank severity. The class name carries the meaning."
-              />
-            </div>
+          {evidence.totalFields === 0 ? (
+            <p className="stats-note">
+              None of the records counted carries a classified field yet, so there is no
+              composition to show.
+            </p>
+          ) : (
+            <p className="stats-note">
+              Every number here counts FIELDS across the records counted, not records.
+            </p>
           )}
-          <FigureList
-            rows={[
-              { label: 'Total Fields Counted', value: count(evidence.totalFields), mono: true },
-              { label: 'Records Counted', value: count(evidence.recordsCounted), mono: true },
-            ]}
-          />
-          <p className="stats-note">
-            Every number in this group counts FIELDS across the records counted, not records. One
-            record contributes many fields.
-          </p>
         </>
       )}
-    </div>
+    </Widget>
   );
 }
 
 /**
  * The evidence-class name as words, for the legend and the data table.
  *
- * The chip row above renders `StatusChip`, which supplies its own label from
+ * The chip row renders `StatusChip`, which supplies its own label from
  * `LABELS`; a chart legend cannot embed a chip (a swatch keys the ramp step), so
  * it needs the class name as a plain string. Derived from the backend's own
  * histogram key rather than authored per class, so a class added to
@@ -1691,65 +1847,45 @@ function schemaSectionLabel(section: string): string {
  * overlap is with exactly ONE row. The decision not to chart is unchanged; only
  * the reason is stated at its real strength.
  */
-function ExportGateGroup({ records }: { records: RuntimeRecord[] }) {
+function ExportGateFigures({ records }: { records: RuntimeRecord[] }) {
   const gate = deriveExportGate(records);
+  if (records.length === 0) {
+    return (
+      <p className="stats-note">
+        No records were returned, so there is no export-gate position to state.
+      </p>
+    );
+  }
   return (
-    <div className="stats-group">
-      <h3>Export Gate</h3>
-      {records.length === 0 ? (
-        <p className="stats-note">
-          No records were returned, so there is no export-gate position to state.
-        </p>
-      ) : (
-        <>
-          <FigureList
-            rows={[
-              { label: 'Exported', value: count(gate.exported), mono: true },
-              { label: 'Ready Now', value: count(gate.readyNow), mono: true },
-              {
-                label: 'Blocked by the Export Gate',
-                value: count(gate.blockedByGate),
-                mono: true,
-              },
-              {
-                label: 'Blocked by Open Questions',
-                value: count(gate.blockedByQuestions),
-                mono: true,
-              },
-              { label: 'Stale Artifacts', value: count(gate.staleArtifacts), mono: true },
-            ]}
-          />
-          {/* The SUBSET caveat is the one a reader cannot be allowed to miss —
-              adding Stale Artifacts to the four above double-counts a record —
-              so it stays visible in one line. The glossary of what each
-              position means, and the two supporting facts, are disclosed
-              verbatim below. */}
-          <p className="stats-note">
-            Stale Artifacts is a subset of Exported, not a fifth bucket, so these five may not be
-            added together.
-          </p>
-          <TechnicalDetails
-            variant="prose"
-            id="stats-gate-reading"
-            title="What Each Position Means"
-            sub="The definition behind each export-gate row, and what the positions are recomputed from."
-          >
-            <p className="stats-note">
-              Ready Now means no open questions remain and the official export dry-run passes.
-              Blocked by the Export Gate means no open questions remain but the dry-run does not
-              pass. Blocked by Open Questions means the gate has not been reached yet. Stale
-              Artifacts is a subset of Exported — a record whose exported file no longer matches its
-              draft is counted in both — which is why these five are not charted on a shared scale.
-            </p>
-            <p className="stats-note">
-              These positions are recomputed from the current drafts on every read and are never
-              stored, so there is no saved verdict and no not-yet-run state to report.
-            </p>
-            <p className="stats-note">Evidence support and schema validation are separate signals.</p>
-          </TechnicalDetails>
-        </>
-      )}
-    </div>
+    <>
+      <FigureList
+        rows={[
+          { label: 'Exported', value: count(gate.exported), mono: true },
+          { label: 'Ready Now', value: count(gate.readyNow), mono: true },
+          {
+            label: 'Blocked by the Export Gate',
+            value: count(gate.blockedByGate),
+            mono: true,
+          },
+          {
+            label: 'Blocked by Open Questions',
+            value: count(gate.blockedByQuestions),
+            mono: true,
+          },
+          { label: 'Stale Artifacts', value: count(gate.staleArtifacts), mono: true },
+        ]}
+      />
+      {/* The SUBSET caveat is the one a reader cannot be allowed to miss —
+          adding Stale Artifacts to the four above double-counts a record — so it
+          stays visible in one line beside the rows. The glossary of what each
+          position means, and the recomputed-on-every-read fact, are in the
+          Records widget's info panel, verbatim from the disclosure they used to
+          be (`What Each Position Means`). */}
+      <p className="stats-note">
+        Stale Artifacts is a subset of Exported, not a fifth bucket, so these five may not be
+        added together.
+      </p>
+    </>
   );
 }
 
@@ -1796,13 +1932,15 @@ const RECENT_WORK_ROWS = 5;
  * reads one way everywhere.
  */
 function RecentWork({ records }: { records: RecordsFetch }) {
+  /* ── A VIEW OF THE ACTIVITY WIDGET SINCE 2026-10-12, NOT A SECTION ────────
+     It answers "which record moved most recently" from the RECORDS read, beside
+     the activity views that count acts from the activity read. Two lists of four
+     of the same five records, in two sections, was the clutter; one widget with
+     each view captioned by its own source is the fix. Its states are its own:
+     the records read is a different source from the activity read, so a dead
+     records read is stated here and nowhere in the activity views. */
   return (
-    <StatsSection
-      id="stats-recent"
-      title="Recent Work"
-      sub="The records updated most recently, newest first."
-      icon={<List size={18} strokeWidth={2} aria-hidden="true" />}
-    >
+    <>
       {records.status === 'loading' && <LoadingPanel label="Loading the most recent updates…" />}
       {records.status === 'error' && (
         <SectionUnavailable
@@ -1811,7 +1949,7 @@ function RecentWork({ records }: { records: RecordsFetch }) {
         />
       )}
       {records.status === 'data' && <RecentWorkList records={records.data.records} />}
-    </StatsSection>
+    </>
   );
 }
 
@@ -1843,11 +1981,14 @@ function RecentWorkList({ records }: { records: RuntimeRecord[] }) {
         {count(recent.datedRecords)} records with a readable update time.
         {recent.undatedRecords > 0
           ? ` ${count(recent.undatedRecords)} more carried none and are not ordered here.`
-          : ''}
+          : ''}{' '}
+        {/* The ONE view of the Activity widget the range does not apply to —
+            `updated_utc` is the record's own field, not a recorded act — so the
+            caption says so rather than letting the range chips imply it. */}
+        This list is not limited by the range above.
       </p>
-      <p className="stats-actions">
-        <Link to={ROUTES.experiments}>Open My Experiments</Link>
-      </p>
+      {/* `Open My Experiments` is the Records widget's footer link now — one
+          link per destination on the page, not one per section that names it. */}
     </>
   );
 }
@@ -2034,16 +2175,33 @@ function changedCaption(total: number, returned: number, window: string): string
     return `${count(total)} ${total === 1 ? 'record' : 'records'} changed ${over}, and none are listed here.`;
   }
   if (total > returned) {
-    return `The ${count(returned)} busiest of the ${count(total)} records that changed ${over}. Open a record to see its own history.`;
+    /* "Open a record to see its own history." closed this caption until
+       2026-10-18; it is the widget's info panel now, beside the sentence that
+       says the record's own history is the record of what happened. */
+    return `The ${count(returned)} busiest of the ${count(total)} records that changed ${over}.`;
   }
   return `The ${count(total)} ${total === 1 ? 'record' : 'records'} that changed ${over}.`;
 }
 
 /**
+ * The three spans the range control offers, in DAYS — the unit the route's
+ * `window_days` parameter takes (1–365, validated server-side). `7` is the
+ * server's own default and is sent as no parameter at all. There is no "All"
+ * chip: every breakdown on the wire is window-scoped, so "All" could only
+ * re-label a 365-day window — and `Recorded Acts, All Time` already states the
+ * one all-time figure the payload carries.
+ */
+const ACTIVITY_RANGES = [
+  { value: '7', label: '7 Days' },
+  { value: '30', label: '30 Days' },
+  { value: '365', label: '365 Days' },
+] as const;
+
+/**
  * WORKSPACE ACTIVITY — a summary of the append-only history, never a replacement
- * for it.
+ * for it. Since 2026-10-12 a widget with a RANGE and four VIEWS.
  *
- * ── WHAT THIS SECTION IS, AND THE LINE IT MUST NOT CROSS ───────────────────
+ * ── WHAT THIS IS, AND THE LINE IT MUST NOT CROSS ───────────────────────────
  *
  * `DEC-44` authorizes exactly this in the same sentence that forbids its opposite:
  * *"Statistics may SUMMARIZE this history; Statistics must never be its source of
@@ -2054,130 +2212,267 @@ function changedCaption(total: number, returned: number, window: string): string
  * the dead end an Impeccable pass over the Activity panel already caught once
  * (`d308b827` — "the count named 150 facts a reader could not reach").
  *
+ * ── THE RANGE IS REAL, AND IT IS THE ONLY TIME DIMENSION ON THIS PAGE ──────
+ *
+ * The route has always accepted `window_days`; this widget is its first caller
+ * that sends one. Every label is built from the RESPONSE's `window.days` — never
+ * from the chip that was pressed — so the figure and its label cannot disagree
+ * even if a re-read is slower than a second press. There is NO per-day timeline:
+ * the payload carries no time buckets, and bucketing record timestamps in the
+ * browser would be a second clock this page forbids itself.
+ *
  * ── WHY IT IS HERE AND NOT ON MY STATS ─────────────────────────────────────
  *
  * `MyStats.tsx` enumerates six things that tab must never do, and the first is "no
  * workspace total presented as personal". Every figure below is a WORKSPACE total —
  * there is no per-person activity in this build and there cannot be, because no
- * event carries an actor. Putting it there would have been precisely the relabelled
- * workspace count that file exists to make unrepresentable.
+ * event carries an actor.
  *
- * ── ONE READ, AND EVERY COUNT COMES FROM THE SERVER ────────────────────────
+ * ── ONE READ PER RANGE, AND EVERY COUNT COMES FROM THE SERVER ──────────────
  *
- * `GET /api/activity/summary`. Not one figure below is computed from a fetched
- * array: `changed_records.total` is how many records changed and
- * `changed_records.returned` is how many rows arrived, and this component renders
+ * `changed_records.total` is how many records changed and
+ * `changed_records.returned` is how many rows arrived, and this widget renders
  * both rather than `rows.length` — `CLAUDE.md` §11's measured defect. Likewise
- * `actions_with_events` is the true number of distinct kinds, so "and N more" is
+ * `actions_with_events` is the true number of distinct kinds, so "N further" is
  * never derived from the four that are shown.
  *
- * ── THREE QUALIFICATIONS STAY VISIBLE, BESIDE THE FIGURES ──────────────────
+ * ── THE QUALIFICATIONS THAT STAY VISIBLE ───────────────────────────────────
  *
- * The density rule sends explanation behind a disclosure; the older rule outranks
- * it — *a sentence that qualifies a specific figure stays beside that figure*. The
- * scope line (these totals cover N records, and when truncated, which N), the
- * unreadable counts, and the attribution sentence are all qualifications of the
- * numbers above them, so all three are rendered in the flow. They are single lines.
+ * The coverage line (these figures cover N records, and when truncated, which N),
+ * the `incomplete` message and both unreadable counts qualify the figures and
+ * carry figures of their own, so they are in the visible flow — an info panel may
+ * hold no measurement. The UNATTRIBUTED sentence is prose about the deployment
+ * and carries no figure, so it is in the info panel; it is still rendered
+ * unconditionally there, for the reason it always was (a conditional would make
+ * its disappearance the signal that somebody had been named). The attributed
+ * count, when the seam is one day wired, renders visibly.
  *
- * ── THE FIGURE THIS SECTION REFUSES TO RENDER ──────────────────────────────
+ * ── THE FIGURE THIS WIDGET REFUSES TO RENDER ───────────────────────────────
  *
- * A number of collaborators. Every event in this build is `unattributed` — no
- * trusted authentication boundary exists, so `ACT-005` is blocked on `EXT-01` and
- * nothing may truthfully name a person. A "0 collaborators" figure would be a claim
- * about the PEOPLE where the true statement is about the DEPLOYMENT, so the wire
- * carries event counts and a (currently empty) list of names, and this section says
- * the true thing in words instead. The sentence is `LABELS.activityActorUnattributed`
- * — the SAME string the record's own Activity panel shows, not a second copy of one
- * claim.
+ * A number of collaborators. Every event in this build is `unattributed`, so a
+ * "0 collaborators" figure would be a claim about the PEOPLE where the true
+ * statement is about the DEPLOYMENT.
+ *
+ * ── `LATEST UPDATES` IS RECENT WORK, AND IT READS A DIFFERENT SOURCE ───────
+ *
+ * The fourth view is the list `Recent Work` used to be — records ordered by
+ * their own `updated_utc`, from the RECORDS read. It is a view here because both
+ * answer "what happened lately", and two sections listing four of the same five
+ * records was the clutter. It keeps its own states (the records read can fail
+ * independently of this one, and it then says so in this view and nowhere else)
+ * and its caption says the range does not limit it.
  */
-function WorkspaceActivity({ activity }: { activity: ActivityFetch }) {
+function WorkspaceActivity({
+  activity,
+  records,
+  requestedDays,
+  onRequestDays,
+}: {
+  activity: ActivityFetch;
+  records: RecordsFetch;
+  requestedDays: number | undefined;
+  onRequestDays: (days: number | undefined) => void;
+}) {
+  const summary = activity.status === 'data' ? activity.data : null;
+  const empty = summary !== null && summary.scope.experiments_in_scope === 0;
+  const live = summary !== null && !empty ? summary : null;
+
+  const latest = {
+    id: 'latest',
+    label: 'Latest Updates',
+    icon: <Clock size={14} strokeWidth={2} aria-hidden="true" />,
+    content: <RecentWork records={records} />,
+  };
+
   return (
-    <StatsSection
+    <Widget
       id="stats-activity"
       title="Workspace Activity"
-      sub="Recorded acts across this workspace's records. Each record's own activity history remains the record of what happened; this only counts it."
+      sub="Recorded acts, and the records updated most recently."
       icon={<History size={18} strokeWidth={2} aria-hidden="true" />}
+      span="full"
+      range={{
+        label: 'Time Range',
+        options: ACTIVITY_RANGES,
+        value: String(requestedDays ?? 7),
+        onChange: (value) => onRequestDays(value === '7' ? undefined : Number(value)),
+      }}
+      info={
+        <>
+          <p>
+            Counted across this workspace&rsquo;s records. Open a record to see its own history: each
+            record&rsquo;s own activity history
+            remains the record of what happened; this
+            widget only counts it. Every breakdown counts acts inside the selected range, and
+            Recorded Acts, All Time is the only figure here that is not limited by it.
+          </p>
+          {/* `LABELS.activityActorUnattributed` WAS HERE for one commit of the
+              2026-10-18 density round and is VISIBLE again, in the footer — an
+              independent review found the round had hidden a DEC-35 disclosure
+              the base showed. It qualifies every count in this widget. */}
+        </>
+      }
+      headline={
+        live !== null ? (
+          <>
+            <HeadlineFigure
+              label={`Changes in ${windowPhrase(live.window.days)}`}
+              value={count(live.totals.events_in_window)}
+            />
+            <FigureList
+              rows={[
+                {
+                  label: 'Records Changed',
+                  /* `changed_records.total`, NEVER `rows.length`. The list in
+                     the Records view is capped; this number is not. */
+                  value: count(live.changed_records.total),
+                  mono: true,
+                },
+                {
+                  label: 'Recorded Acts, All Time',
+                  value: count(live.totals.events_all_time),
+                  mono: true,
+                },
+              ]}
+            />
+          </>
+        ) : null
+      }
+      /* THE FOUR VIEWS ARE ALWAYS PRESENT, so the control bar — tabs and range —
+         never moves while a re-read for a new range is in flight. Until the
+         activity read has a body the three activity views render nothing of
+         their own: the widget body above says it is loading, or why it cannot. */
+      views={[
+        {
+          id: 'records',
+          label: 'Records',
+          icon: <ListOrdered size={14} strokeWidth={2} aria-hidden="true" />,
+          content: live !== null ? <ChangedRecords summary={live} /> : null,
+        },
+        {
+          id: 'kinds',
+          label: 'Kinds of Change',
+          icon: <BarChartHorizontal size={14} strokeWidth={2} aria-hidden="true" />,
+          content: live !== null ? <ActivityKinds summary={live} /> : null,
+        },
+        {
+          id: 'surfaces',
+          label: 'Surfaces',
+          icon: <Network size={14} strokeWidth={2} aria-hidden="true" />,
+          content: live !== null ? <ActivitySurfaces summary={live} /> : null,
+        },
+        latest,
+      ]}
+      footer={
+        <>
+          {live !== null ? (
+            <span className="stats-note">
+              {live.scope.truncated
+                ? `These figures cover the ${count(live.scope.experiments_summarized)} most recently created of the ${count(live.scope.experiments_in_scope)} records in this workspace; the rest are not counted here.`
+                : `These figures cover all ${count(live.scope.experiments_summarized)} records in this workspace.`}
+            </span>
+          ) : null}
+          {/* THE SAME SENTENCE THE RECORD'S OWN ACTIVITY PANEL SHOWS, not a
+              second copy — and VISIBLE (DEC-35). Rendered unconditionally,
+              because it states a property of the DEPLOYMENT: a conditional
+              would make its disappearance the signal that somebody had been
+              named. */}
+          <span className="stats-note stats-activity-unattributed">
+            {LABELS.activityActorUnattributed}
+          </span>
+        </>
+      }
     >
-      {activity.status === 'loading' && (
-        <LoadingPanel label="Loading the recorded activity…" />
-      )}
+      {activity.status === 'loading' && <LoadingPanel label="Loading the recorded activity…" />}
       {activity.status === 'error' && (
         <SectionUnavailable
           message="The workspace's recorded activity could not be read, so no counts are shown. Each record's own Activity view is unaffected."
           onRetry={activity.reload}
         />
       )}
-      {activity.status === 'data' && <ActivityFigures summary={activity.data} />}
-    </StatsSection>
+      {empty && (
+        /* THE EMPTY WORKSPACE IS ITS OWN ANSWER, and a different one from
+           "nothing has been recorded": a workspace with no records has nothing to
+           summarise. A grid of zeros would state a fact about activity when the
+           fact is about records. */
+        <p className="stats-note">
+          This workspace holds no records yet, so there is no recorded activity to summarise.
+        </p>
+      )}
+      {live !== null && <ActivityQualifications summary={live} />}
+    </Widget>
   );
 }
 
-function ActivityFigures({ summary }: { summary: ApiActivitySummary }) {
-  const { window: win, scope, totals, changed_records: changed, attribution } = summary;
-
-  /* THE EMPTY WORKSPACE IS ITS OWN ANSWER, and it is a different one from "nothing
-     has been recorded". A workspace with no records has nothing to summarise; a
-     workspace whose records have never been touched has been summarised and the
-     answer is zero. Rendering a grid of zeros for the first would state a fact about
-     activity when the fact is about records. */
-  if (scope.experiments_in_scope === 0) {
-    return (
-      <>
-        <p className="stats-note">
-          This workspace holds no records yet, so there is no recorded activity to
-          summarise.
-        </p>
-        <p className="stats-actions">
-          <Link to={ROUTES.experiments}>Open My Experiments</Link>
-        </p>
-      </>
-    );
-  }
-
-  const rankedActions = summary.ranked_actions.slice(0, ACTIVITY_KINDS_SHOWN);
-  const rankedChannels = summary.ranked_channels.slice(0, ACTIVITY_KINDS_SHOWN);
-  const moreActions = summary.actions_with_events - rankedActions.length;
-  /* DERIVED THE SAME WAY as `moreActions`, from the server's own count of distinct
-     kinds minus what is shown — so a slice and its disclosure cannot disagree. */
-  const moreChannels = summary.channels_with_events - rankedChannels.length;
-
+/** The qualifications that carry figures — visible, beside the headline they qualify. */
+function ActivityQualifications({ summary }: { summary: ApiActivitySummary }) {
+  const { totals, attribution } = summary;
   return (
     <>
-      <FigureList
-        rows={[
-          {
-            label: `Changes in ${windowPhrase(win.days)}`,
-            value: count(totals.events_in_window),
-            mono: true,
-          },
-          {
-            label: 'Records Changed',
-            /* `changed_records.total`, NEVER `rows.length`. The list below is
-               capped; this number is not. */
-            value: count(changed.total),
-            mono: true,
-          },
-          {
-            label: 'Recorded Acts, All Time',
-            value: count(totals.events_all_time),
-            mono: true,
-          },
-        ]}
-      />
+      {summary.incomplete ? <p className="stats-note">{summary.incomplete.message}</p> : null}
+      {totals.unreadable_entries > 0 && (
+        <p className="stats-note">{unreadableEntriesSentence(totals.unreadable_entries)}</p>
+      )}
+      {totals.events_with_unreadable_timestamp > 0 && (
+        <p className="stats-note">
+          {unreadableTimestampSentence(totals.events_with_unreadable_timestamp)}
+        </p>
+      )}
+      {attribution.attributed_events > 0 && (
+        <p className="stats-note">{attributedSentence(attribution.attributed_events)}</p>
+      )}
+    </>
+  );
+}
 
-      {/* BOTH BREAKDOWN LABELS NAME THE WINDOW, and both name it EXPLICITLY rather
-          than by reference to the label above. `by_action` and `by_channel` are
-          incremented only for events inside the window, so a label reading just
-          "What Changed" under a `Recorded Acts, All Time` figure invited a reader
-          to take a breakdown summing to 12 as a description of 5,000 — found by
-          independent review, reproduced in jsdom and over HTTP. The channel row
-          could have leaned on "those changes" (it renders only when the action row
-          does, because every counted event carries both), but a truth claim that
-          depends on two elements staying adjacent is one refactor from being
-          false. */}
-      {rankedActions.length > 0 && (
+/** The Records view — the busiest changed records, each a link into its own history. */
+function ChangedRecords({ summary }: { summary: ApiActivitySummary }) {
+  const { window: win, changed_records: changed } = summary;
+  return (
+    <>
+      {changed.total > 0 ? (
+        <ul className="stats-recent">
+          {changed.rows.map((row) => (
+            <li className="stats-recent-row" key={row.experiment_id}>
+              {/* THE DRILL-DOWN. The title is the link, and it goes to the
+                  record's OWN activity history — the source of truth this widget
+                  only counts. */}
+              <span className="stats-recent-title">
+                <Link to={ROUTES.recordView(row.experiment_id, 'activity')}>{row.title}</Link>
+              </span>
+              {/* ONE text node: the window is stated in the caption beneath, so
+                  the row needs only its own count. */}
+              <span className="stats-recent-state" data-tone="neutral">
+                {changeCount(row.events_in_window)}
+              </span>
+              <ActivityWhen recordedUtc={row.last_event_utc} />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {/* ONE CAPTION, ALL BRANCHES, AND IT IS CHOSEN BY `total` — never by
+          `rows.length`. See `changedCaption` for the two defects that shape it. */}
+      <p className="stats-note">
+        {changedCaption(changed.total, changed.returned, windowPhrase(win.days).toLowerCase())}
+      </p>
+    </>
+  );
+}
+
+/**
+ * The Kinds of Change view. BOTH BREAKDOWN LABELS NAME THE WINDOW EXPLICITLY:
+ * `by_action` and `by_channel` count only events inside the window, so a label
+ * reading just "What Changed" beside an all-time figure invited reading a
+ * breakdown summing to 12 as a description of 5,000.
+ */
+function ActivityKinds({ summary }: { summary: ApiActivitySummary }) {
+  const rankedActions = summary.ranked_actions.slice(0, ACTIVITY_KINDS_SHOWN);
+  const moreActions = summary.actions_with_events - rankedActions.length;
+  return (
+    <>
+      {rankedActions.length > 0 ? (
         <MiniBreakdown
-          label={`What Changed in ${windowPhrase(win.days)}`}
+          label={`What Changed in ${windowPhrase(summary.window.days)}`}
           items={rankedActions.map((entry) => ({
             key: entry.name,
             /* The server's token, turned into words by the ONE humanizer both
@@ -2191,17 +2486,34 @@ function ActivityFigures({ summary }: { summary: ApiActivitySummary }) {
             noun: plural(entry.count),
           }))}
         />
+      ) : (
+        <p className="stats-note">
+          {`No act was recorded in ${windowPhrase(summary.window.days).toLowerCase()}.`}
+        </p>
       )}
       {moreActions > 0 && (
         <p className="stats-note">
-          {furtherKindsSentence(moreActions, 'kind of change')} Open a record's Activity
-          view for its full history.
+          {furtherKindsSentence(moreActions, 'kind of change')} Open a record's Activity view for
+          its full history.
         </p>
       )}
+    </>
+  );
+}
 
-      {rankedChannels.length > 0 && (
+/**
+ * The Surfaces view. ITS OWN "N FURTHER" GUARD, derived the same way as the kinds'
+ * — from the server's count of distinct channels minus what is shown — so the
+ * view does not depend on two unrelated constants agreeing.
+ */
+function ActivitySurfaces({ summary }: { summary: ApiActivitySummary }) {
+  const rankedChannels = summary.ranked_channels.slice(0, ACTIVITY_KINDS_SHOWN);
+  const moreChannels = summary.channels_with_events - rankedChannels.length;
+  return (
+    <>
+      {rankedChannels.length > 0 ? (
         <MiniBreakdown
-          label={`Through Which Surface, in ${windowPhrase(win.days)}`}
+          label={`Through Which Surface, in ${windowPhrase(summary.window.days)}`}
           items={rankedChannels.map((entry) => ({
             key: entry.name,
             chip: (
@@ -2213,78 +2525,13 @@ function ActivityFigures({ summary }: { summary: ApiActivitySummary }) {
             noun: plural(entry.count),
           }))}
         />
+      ) : (
+        <p className="stats-note">
+          {`No act was recorded in ${windowPhrase(summary.window.days).toLowerCase()}.`}
+        </p>
       )}
-      {/* THE CHANNEL ROW'S OWN "AND N MORE" GUARD, which did not exist and was safe
-          only by COINCIDENCE: `ACTIVITY_CHANNELS` has exactly four members and
-          `ACTIVITY_KINDS_SHOWN` is four, so nothing could be dropped. A fifth
-          channel would have been silently omitted with no disclosure — the precise
-          defect the actions row above already had a guard for. `DEC-44` fixes the
-          vocabulary at four, so this is expected never to render; it is here so the
-          section does not depend on two unrelated constants agreeing. */}
       {moreChannels > 0 && (
         <p className="stats-note">{furtherKindsSentence(moreChannels, 'surface')}</p>
-      )}
-
-      {changed.total > 0 ? (
-        <ul className="stats-recent">
-          {changed.rows.map((row) => (
-            <li className="stats-recent-row" key={row.experiment_id}>
-              {/* THE DRILL-DOWN. The title is the link, as it is in Recent Work,
-                  and it goes to the record's OWN activity history — the source of
-                  truth this section only counts. */}
-              <span className="stats-recent-title">
-                <Link to={ROUTES.recordView(row.experiment_id, 'activity')}>
-                  {row.title}
-                </Link>
-              </span>
-              {/* ONE text node, not a visible number beside an `sr-only` gloss.
-                  The first draft split it that way and the window phrase then
-                  appeared TWICE in the row's text — once for the eye and once for
-                  a screen reader — which is a duplication a `textContent` sweep
-                  sees and a reader eventually does too. The window is already
-                  stated above the list and again below it, so the row needs only
-                  its own count. */}
-              <span className="stats-recent-state" data-tone="neutral">
-                {changeCount(row.events_in_window)}
-              </span>
-              <ActivityWhen recordedUtc={row.last_event_utc} />
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {/* ONE CAPTION, ALL BRANCHES, AND IT IS CHOSEN BY `total` — never by
-          `rows.length`. See `changedCaption` for the two defects that shape it. It
-          sits BELOW the list, where the note it replaces sat, so a reader meets the
-          rows and then their scope in the same order they always did. */}
-      <p className="stats-note">
-        {changedCaption(changed.total, changed.returned, windowPhrase(win.days).toLowerCase())}
-      </p>
-
-      {/* ── the qualifications, each beside the figures it qualifies ───────── */}
-      <p className="stats-note">
-        {scope.truncated
-          ? `These figures cover the ${count(scope.experiments_summarized)} most recently created of the ${count(scope.experiments_in_scope)} records in this workspace; the rest are not counted here.`
-          : `These figures cover all ${count(scope.experiments_summarized)} records in this workspace.`}
-      </p>
-      {summary.incomplete ? <p className="stats-note">{summary.incomplete.message}</p> : null}
-      {totals.unreadable_entries > 0 && (
-        <p className="stats-note">
-          {unreadableEntriesSentence(totals.unreadable_entries)}
-        </p>
-      )}
-      {totals.events_with_unreadable_timestamp > 0 && (
-        <p className="stats-note">
-          {unreadableTimestampSentence(totals.events_with_unreadable_timestamp)}
-        </p>
-      )}
-      {/* THE SAME SENTENCE THE RECORD'S OWN ACTIVITY PANEL SHOWS, not a second copy.
-          It is rendered unconditionally rather than only when
-          `attributed_events === 0`, because it states a property of the DEPLOYMENT:
-          a conditional would make its disappearance the signal that somebody had
-          been named, which is a thing this build cannot do. */}
-      <p className="stats-note">{LABELS.activityActorUnattributed}</p>
-      {attribution.attributed_events > 0 && (
-        <p className="stats-note">{attributedSentence(attribution.attributed_events)}</p>
       )}
     </>
   );
@@ -2329,230 +2576,358 @@ function ActivityWhen({ recordedUtc }: { recordedUtc: string }) {
  * integers before this component sees it.
  */
 function HistoricalImports({ imports }: { imports: ImportsFetch }) {
+  const totals = imports.status === 'data' ? deriveImportTotals(imports.data) : null;
+  const nothing = totals !== null && totals.sessions === 0 && totals.summariesReceived === 0;
   return (
-    <StatsSection
+    <Widget
       id="stats-imports"
       title="Historical Imports"
-      sub="Import sessions in this workspace, counted in sessions rather than in records."
+      sub="Import sessions in this workspace."
       icon={<Inbox size={18} strokeWidth={2} aria-hidden="true" />}
+      info={
+        <p>
+          A session is a working area holding source entries and the candidates read out of
+          them; nothing here creates an experiment or writes a value. A candidate sent to review
+          is an open proposal awaiting a person&rsquo;s judgement.
+        </p>
+      }
+      headline={
+        totals !== null && !nothing ? (
+          <>
+            <HeadlineFigure
+              label="Import Sessions"
+              value={countOrUnavailable(totals.sessions)}
+              tone={totals.sessions === null ? 'quiet' : 'neutral'}
+            />
+            <FigureList
+              rows={[
+                {
+                  label: 'Sessions With a Source Recorded',
+                  value: count(totals.sessionsWithSources),
+                  mono: true,
+                },
+                {
+                  label: 'Sessions With a Candidate Sent to Review',
+                  value: count(totals.sessionsWithProposals),
+                  mono: true,
+                },
+              ]}
+            />
+          </>
+        ) : null
+      }
+      footer={<Link to={ROUTES.imports}>{LABELS.navImports}</Link>}
     >
       {imports.status === 'loading' && <LoadingPanel label="Loading the import sessions…" />}
       {imports.status === 'error' && (
         <BackendDown error={imports.error} onRetry={imports.reload} />
       )}
       {imports.status === 'data' && <ImportFigures body={imports.data} />}
-    </StatsSection>
+    </Widget>
   );
 }
 
+/**
+ * The figures beneath the headline. An import session is NOT a record, and the
+ * one line that says so stays visible beside the counts; the fuller statement of
+ * what a session is moved to the info panel.
+ *
+ * NO FILENAME, DIGEST OR PATH CAN REACH THIS WIDGET. `GET /api/imports` serves
+ * summaries carrying counts and never the bundle, and `deriveImportTotals`
+ * reduces what arrives to four integers before this component sees it.
+ */
 function ImportFigures({ body }: { body: unknown }) {
   const totals = deriveImportTotals(body);
 
   if (totals.sessions === 0 && totals.summariesReceived === 0) {
     return (
-      <>
-        <p className="stats-note">
-          This workspace holds no import session, so there is nothing to summarise here.
-        </p>
-        <p className="stats-actions">
-          <Link to={ROUTES.imports}>{LABELS.navImports}</Link>
-        </p>
-      </>
+      <p className="stats-note">
+        This workspace holds no import session, so there is nothing to summarise here.
+      </p>
     );
   }
 
   return (
     <>
-      <FigureList
-        rows={[
-          { label: 'Import Sessions', value: countOrUnavailable(totals.sessions), mono: true },
-          {
-            label: 'Sessions With a Source Recorded',
-            value: count(totals.sessionsWithSources),
-            mono: true,
-          },
-          {
-            label: 'Sessions With a Candidate Sent to Review',
-            value: count(totals.sessionsWithProposals),
-            mono: true,
-          },
-        ]}
-      />
       {/* A caveat about the figures, so it is visible rather than disclosed:
           the API's own total and the summaries this page received are separate
           numbers, exactly as `Total Records` and the records received are. */}
       {totals.sessions !== null && totals.sessions !== totals.summariesReceived && (
-        <div className="stats-block">
-          <UnavailableNote>
-            This page received {count(totals.summariesReceived)} of the{' '}
-            {count(totals.sessions)} import sessions the API reports. The two counts beneath
-            Import Sessions describe only the summaries received.
-          </UnavailableNote>
-        </div>
+        <UnavailableNote>
+          This page received {count(totals.summariesReceived)} of the {count(totals.sessions)}{' '}
+          import sessions the API reports. The two counts beside Import Sessions describe only the
+          summaries received.
+        </UnavailableNote>
       )}
-      <p className="stats-note">
-        These count SESSIONS, never records: a session is a working area, and nothing here creates
-        an experiment or writes a value. A candidate sent to review is an open proposal awaiting a
-        person&rsquo;s judgement.
-      </p>
-      <p className="stats-actions">
-        <Link to={ROUTES.imports}>{LABELS.navImports}</Link>
-      </p>
+      <p className="stats-note">These count SESSIONS, never records.</p>
     </>
   );
 }
 
-/* ---- Technical Details · Record Schema --------------------------------- */
+/* ---- Build · Record Schema --------------------------------------------- */
 
 /**
  * The shape of the official ISAAC record schema this build validates against.
  *
- * A BUILD PROPERTY, not a workspace one, which is why it sits inside Technical
- * Details beside the runtime facts and the API surface: the numbers do not
- * change when a record does. Every figure is a count of the schema's own
- * structure — no record is read to produce any of them.
+ * A BUILD PROPERTY, not a workspace one: the numbers do not change when a record
+ * does. Every figure is a count of the schema's own structure — no record is read
+ * to produce any of them. Since 2026-10-12 a widget whose headline is the field
+ * total and whose two views are the counts and the by-section breakdown; the two
+ * qualifying paragraphs are its info panel, verbatim.
+ *
+ * `BackendDown` on failure — `/api/schema` has exactly ONE reader, so the page's
+ * one-alarm-per-source rule prescribes the full alarm here (a compact note would
+ * carry no `role` and a dead schema would announce nothing).
  */
 function RecordSchemaFacts({ schema }: { schema: SchemaFetch }) {
+  const facts = schema.status === 'data' ? deriveSchemaFacts(schema.data) : null;
+  const populated = facts !== null && facts.totalFields > 0;
   return (
-    <StatsSection
+    <Widget
       id="stats-schema"
       title="Record Schema"
-      sub="The shape of the official record schema this build validates against, and the controlled vocabularies served beside it."
+      sub="The official record schema this build validates against."
       icon={<Table2 size={18} strokeWidth={2} aria-hidden="true" />}
-      headingLevel={3}
+      info={
+        <>
+          <p>
+            Required Top-Level Fields counts what the schema&rsquo;s own root requires.
+            Requiredness deeper in the document is not added to it: a field marked required inside
+            an optional section is required only once that section is present, so a single total
+            across depths would state an obligation the schema does not impose.
+          </p>
+          <p>
+            Fields at Every Depth is counted through the schema&rsquo;s{' '}
+            <span className="mono">properties</span> and array items; fields declared only inside a{' '}
+            <span className="mono">oneOf</span> alternative are not listed, so this is a count of
+            the fields this view can enumerate rather than of every field the document can express.
+            The Schema Reference browser walks the document the same way, so the two screens state
+            the same number.
+          </p>
+          <p>
+            Vocabulary Terms counts the entries in the vocabulary files this build serves alongside
+            the schema. It is a property of those files, not a measurement of any stored data.
+          </p>
+        </>
+      }
+      headline={
+        populated ? (
+          <HeadlineFigure label="Fields at Every Depth" value={count(facts.totalFields)} />
+        ) : null
+      }
+      views={
+        populated
+          ? [
+              {
+                id: 'summary',
+                label: 'Summary',
+                icon: <List size={14} strokeWidth={2} aria-hidden="true" />,
+                content: <SchemaFigures facts={facts} part="summary" />,
+              },
+              {
+                id: 'rules',
+                label: 'Fields & Vocabulary',
+                icon: <ListOrdered size={14} strokeWidth={2} aria-hidden="true" />,
+                content: <SchemaFigures facts={facts} part="rules" />,
+              },
+              {
+                id: 'sections',
+                label: 'By Section',
+                icon: <BarChartHorizontal size={14} strokeWidth={2} aria-hidden="true" />,
+                content: (
+                  <StatsComparisonRows
+                    caption="Fields by top-level section, in the schema's own declaration order"
+                    rows={facts.bySection.map((row) => ({
+                      key: row.section,
+                      label: schemaSectionLabel(row.section),
+                      value: row.count,
+                    }))}
+                    unit="fields"
+                    total={facts.totalFields}
+                    categoryHeader="Section"
+                  />
+                ),
+              },
+            ]
+          : undefined
+      }
+      footer={
+        schema.status === 'data' ? (
+          <Link to={`${ROUTES.governance}?tab=schema`}>Open Schema Reference</Link>
+        ) : undefined
+      }
     >
       {schema.status === 'loading' && <LoadingPanel label="Loading the official record schema…" />}
-      {/*
-        `BackendDown`, MATCHING ITS TWO SIBLINGS IN THIS REGION, not the compact
-        note it used to render.
-
-        `/api/schema` has exactly ONE reader, so the rule stated on
-        `SectionUnavailable` — a full alarm at the first section that reads a dead
-        source, the compact note only at FURTHER readers — already prescribed this.
-        The compact note here was a violation of that rule rather than an exception
-        to it, and it had a consequence beyond tidiness: `SectionUnavailable` renders
-        no `role`, so a dead `/api/schema` announced nothing to a screen reader while
-        the banner above stated "1 of 5 reads failed". `/api/about`'s exception does
-        not transfer — its rationale is that its two cards sit BESIDE record cards
-        that were read successfully, whereas a dead schema empties this whole section
-        including its chart, exactly as a dead `/api/graph/status` empties Project
-        Memory and a dead `/api/openapi` empties API Surface.
-      */}
       {schema.status === 'error' && <BackendDown error={schema.error} onRetry={schema.reload} />}
-      {schema.status === 'data' && <SchemaBody body={schema.data} />}
-    </StatsSection>
+      {facts !== null && !populated && (
+        <p className="stats-note">
+          The schema this build served declares no fields, so there is no breakdown to show.
+        </p>
+      )}
+    </Widget>
   );
 }
 
 /**
- * FORM CHOICE — figures for the totals, comparison rows for the sections.
- *
- * The totals sit on different axes (sections, fields, rules, files, terms) and
- * are a labelled list for the same reason the export gate is. The section
- * breakdown IS one whole divided into named parts whose labels come from the
- * document and can be any length, which is the compact comparison row's case —
- * the same form the API surface uses for its groups, and for the same reason.
+ * FORM CHOICE — figures for the totals. They sit on different axes (sections,
+ * fields, rules, files, terms) and are a labelled list for the same reason the
+ * export gate is. The headline, `Fields at Every Depth`, is not repeated here.
  */
-function SchemaBody({ body }: { body: ApiSchemaResponse }) {
-  const facts = deriveSchemaFacts(body);
-
-  if (facts.totalFields === 0) {
-    return (
-      <>
-        <p className="stats-note">
-          The schema this build served declares no fields, so there is no breakdown to show.
-        </p>
-        <p className="stats-actions">
-          <Link to={`${ROUTES.governance}?tab=schema`}>Open Schema Reference</Link>
-        </p>
-      </>
-    );
-  }
-
-  return (
-    <>
-      <FigureList
-        rows={[
-          { label: 'Schema Title', value: stringOrUnavailable(facts.schemaTitle) },
-          { label: 'Schema Version', value: stringOrUnavailable(facts.schemaVersion), mono: true },
-          /* "FIELDS", NOT "SECTIONS". These two labelled the schema's top-level
-             properties as sections, and on the real document 5 of the 6 the root
-             requires are scalar strings — `isaac_record_version`, `record_id`,
-             `record_type` and so on — which are fields by any reading and are not
-             sections of anything. The model's own field names (`topLevelFields`,
-             `requiredTopLevelFields`) already said so. The chart below still says
-             "section", correctly: it groups each top-level field WITH ITS
-             DESCENDANTS, which is what makes a scalar field a one-field group. */
-          { label: 'Top-Level Fields', value: count(facts.topLevelFields), mono: true },
-          { label: 'Fields at Every Depth', value: count(facts.totalFields), mono: true },
-          {
-            label: 'Required Top-Level Fields',
-            value: count(facts.requiredTopLevelFields),
-            mono: true,
-          },
-          {
-            label: 'Fields With Enumerated Values',
-            value: count(facts.fieldsWithEnumeratedValues),
-            mono: true,
-          },
-          { label: 'Conditional Rules', value: count(facts.conditionalRules), mono: true },
-          { label: 'Vocabulary Files', value: count(facts.vocabularyFiles), mono: true },
-          { label: 'Vocabulary Terms', value: count(facts.vocabularyTerms), mono: true },
-        ]}
-      />
-      <div className="stats-block">
-        <StatsComparisonRows
-          caption="Fields by top-level section, in the schema's own declaration order"
-          rows={facts.bySection.map((row) => ({
-            key: row.section,
-            label: schemaSectionLabel(row.section),
-            value: row.count,
-          }))}
-          unit="fields"
-          total={facts.totalFields}
-          categoryHeader="Section"
-        />
-      </div>
-      <p className="stats-note">
-        Required Top-Level Fields counts what the schema&rsquo;s own root requires. Requiredness
-        deeper in the document is not added to it: a field marked required inside an optional
-        section is required only once that section is present, so a single total across depths would
-        state an obligation the schema does not impose. Fields at Every Depth is counted through the
-        schema&rsquo;s <span className="mono">properties</span> and array items; fields declared only
-        inside a <span className="mono">oneOf</span> alternative are not listed, so this is a count of
-        the fields this view can enumerate rather than of every field the document can express. The
-        Schema Reference browser walks the document the same way, so the two screens state the same
-        number.
-      </p>
-      <p className="stats-note">
-        Vocabulary Terms counts the entries in the vocabulary files this build serves alongside the
-        schema. It is a property of those files, not a measurement of any stored data.
-      </p>
-      <p className="stats-actions">
-        <Link to={`${ROUTES.governance}?tab=schema`}>Open Schema Reference</Link>
-      </p>
-    </>
-  );
+function SchemaFigures({
+  facts,
+  part,
+}: {
+  facts: ReturnType<typeof deriveSchemaFacts>;
+  /**
+   * SINCE 2026-10-18 THE EIGHT FIGURES ARE TWO VIEWS — which schema (title,
+   * version), and its fields, rules and vocabulary. Same rows, same order,
+   * same labels; only where the list is cut moved.
+   */
+  part: 'summary' | 'rules';
+}) {
+  const rows = [
+        { label: 'Schema Title', value: stringOrUnavailable(facts.schemaTitle) },
+        { label: 'Schema Version', value: stringOrUnavailable(facts.schemaVersion), mono: true },
+        /* "FIELDS", NOT "SECTIONS": on the real document 5 of the 6 top-level
+           properties the root requires are scalar strings, which are fields by
+           any reading. The By Section view still says "section", correctly — it
+           groups each top-level field WITH ITS DESCENDANTS. */
+        { label: 'Top-Level Fields', value: count(facts.topLevelFields), mono: true },
+        {
+          label: 'Required Top-Level Fields',
+          value: count(facts.requiredTopLevelFields),
+          mono: true,
+        },
+        {
+          label: 'Fields With Enumerated Values',
+          value: count(facts.fieldsWithEnumeratedValues),
+          mono: true,
+        },
+        { label: 'Conditional Rules', value: count(facts.conditionalRules), mono: true },
+        { label: 'Vocabulary Files', value: count(facts.vocabularyFiles), mono: true },
+        { label: 'Vocabulary Terms', value: count(facts.vocabularyTerms), mono: true },
+      ];
+  return <FigureList rows={part === 'summary' ? rows.slice(0, 2) : rows.slice(2)} />;
 }
 
-/* ---- Technical Details · Project Memory -------------------------------- */
+/* ---- Build · Project Memory ------------------------------------------- */
 
+/**
+ * What the served memory snapshot reports about itself. The memory and query
+ * plane — never the authority on record validity, which its supporting line
+ * says. The freshness line stays VISIBLE beside the counts, because it decides
+ * what those counts describe (the running build, or an earlier commit).
+ */
 function ProjectMemoryFacts({ graph }: { graph: GraphFetch }) {
+  const facts = graph.status === 'data' ? deriveMemoryFacts(graph.data) : null;
+  const freshness = facts !== null ? facts.freshness : null;
   return (
-    <StatsSection
+    <Widget
       id="stats-memory"
       title="Project Memory"
-      sub="What the served memory snapshot reports about itself. This is the memory and query plane — it is never the authority on record validity."
+      sub="The served memory snapshot — never the authority on validity."
       icon={<Network size={18} strokeWidth={2} aria-hidden="true" />}
-      headingLevel={3}
+      info={<MemoryInfo freshness={freshness} />}
+      /* TWO VIEWS SINCE 2026-10-18: what the snapshot serves, and the size of
+         the graph it carries. The same six figures under the same six labels;
+         the freshness state stays in the body, visible under both. */
+      views={facts !== null ? memoryViews(facts) : undefined}
+      footer={graph.status === 'data' ? <Link to={ROUTES.memory}>Open Project Memory</Link> : undefined}
     >
       {graph.status === 'loading' && <LoadingPanel label="Loading Project Memory provenance…" />}
       {graph.status === 'error' && (
         <BackendDown error={graph.error} onRetry={graph.reload} />
       )}
       {graph.status === 'data' && <MemoryBody graph={graph.data} />}
-    </StatsSection>
+    </Widget>
   );
+}
+
+/**
+ * The prose behind Project Memory's info toggle (2026-10-18 density round).
+ *
+ * The freshness STATE stays visible beside the counts — it decides what they
+ * describe — as one line. The sentence explaining HOW that state was reached
+ * moved here, worded for the state actually shown, so the panel never explains
+ * an undetermined comparison under a snapshot whose commits were both reported.
+ */
+function MemoryInfo({ freshness }: { freshness: MemoryFreshness | null }) {
+  return (
+    <>
+      <p>
+        The memory plane helps with context and navigation. It is never the authority on whether a
+        record is valid — the official schema and the validators are.
+      </p>
+      {freshness === 'undetermined' && (
+        <p>
+          Whether this snapshot describes the running build cannot be determined in this
+          environment: the two commits needed for the comparison were not both reported.
+        </p>
+      )}
+      {freshness === 'point_in_time' && (
+        <p>
+          The snapshot was built from a different commit than the one this build reports, so it
+          describes the repository at that point and not necessarily the running app. Both commits
+          are shown beside the counts.
+        </p>
+      )}
+      {freshness === 'current' && (
+        <p>
+          Freshness compares the commit the snapshot was built from with the commit this build
+          reports; here the two are the same.
+        </p>
+      )}
+    </>
+  );
+}
+
+function memoryViews(facts: ReturnType<typeof deriveMemoryFacts>) {
+  return [
+    {
+      id: 'snapshot',
+      label: 'Snapshot',
+      icon: <List size={14} strokeWidth={2} aria-hidden="true" />,
+      content: (
+        <FigureList
+          rows={[
+            {
+              // The served PATH SET (`file_count`), NOT the content manifest —
+              // the two are different sets and the label must name which one.
+              // Project Memory states the SAME field under this SAME label
+              // (`ProjectMemory.tsx` `MemoryFigures`); one number, one name.
+              label: 'Served Files (Path Set)',
+              value: countOrUnavailable(facts.servedFiles),
+              mono: true,
+            },
+            {
+              // Same label AND same rendering as Project Memory's own row for
+              // this field (`ProjectMemory.tsx` `MemoryFigures`): a `v` prefix,
+              // so a schema version in a column of counts cannot be read as a
+              // count.
+              label: 'Snapshot Schema Version',
+              value: versionOrUnavailable(facts.snapshotSchemaVersion),
+              mono: true,
+            },
+          ]}
+        />
+      ),
+    },
+    {
+      id: 'graph',
+      label: 'Graph',
+      icon: <Network size={14} strokeWidth={2} aria-hidden="true" />,
+      content: (
+        <FigureList
+          rows={[
+            { label: 'Concepts', value: countOrUnavailable(facts.concepts), mono: true },
+            { label: 'Communities', value: countOrUnavailable(facts.communities), mono: true },
+            { label: 'Nodes', value: countOrUnavailable(facts.nodes), mono: true },
+            { label: 'Edges', value: countOrUnavailable(facts.edges), mono: true },
+          ]}
+        />
+      ),
+    },
+  ];
 }
 
 function MemoryBody({ graph }: { graph: Parameters<typeof deriveMemoryFacts>[0] }) {
@@ -2566,35 +2941,11 @@ function MemoryBody({ graph }: { graph: Parameters<typeof deriveMemoryFacts>[0] 
 
   return (
     <>
-      <FigureList
-        rows={[
-          {
-            // The served PATH SET (`file_count`), NOT the content manifest —
-            // the two are different sets and the label must name which one.
-            // Project Memory states the SAME field under this SAME label
-            // (`ProjectMemory.tsx` `MemoryFigures`); one number, one name.
-            label: 'Served Files (Path Set)',
-            value: countOrUnavailable(facts.servedFiles),
-            mono: true,
-          },
-          { label: 'Concepts', value: countOrUnavailable(facts.concepts), mono: true },
-          { label: 'Communities', value: countOrUnavailable(facts.communities), mono: true },
-          { label: 'Nodes', value: countOrUnavailable(facts.nodes), mono: true },
-          { label: 'Edges', value: countOrUnavailable(facts.edges), mono: true },
-          {
-            // Same label AND same rendering as Project Memory's own row for this
-            // field (`ProjectMemory.tsx` `MemoryFigures`): a `v` prefix, so a
-            // schema version in a column of counts cannot be read as a count.
-            label: 'Snapshot Schema Version',
-            value: versionOrUnavailable(facts.snapshotSchemaVersion),
-            mono: true,
-          },
-        ]}
-      />
       {noCounts && (
         <div className="stats-block">
           <UnavailableNote>
-            This build served no snapshot overview, so none of the graph counts above is available.
+            This build served no snapshot overview, so none of the graph counts in this widget is
+            available.
             No count is inferred and none is shown as zero.
           </UnavailableNote>
         </div>
@@ -2602,10 +2953,9 @@ function MemoryBody({ graph }: { graph: Parameters<typeof deriveMemoryFacts>[0] 
 
       {facts.freshness === 'point_in_time' && (
         <>
-          <p className="stats-note">
-            <span className="stats-freshness-label">Point-in-Time Snapshot</span> — the snapshot was
-            built from a different commit than the one this build reports, so it describes the
-            repository at that earlier point and not necessarily the running app.
+          <p className="stats-note stats-state-line">
+            <span className="stats-freshness-label">Point-in-Time Snapshot</span> — built from a
+            different commit, so not necessarily the running app.
           </p>
           <FigureList
             rows={[
@@ -2624,121 +2974,133 @@ function MemoryBody({ graph }: { graph: Parameters<typeof deriveMemoryFacts>[0] 
         </>
       )}
       {facts.freshness === 'current' && (
-        <p className="stats-note">
+        <p className="stats-note stats-state-line">
           <span className="stats-freshness-label">Built From This Commit</span> — the snapshot's
           source commit matches the commit this build reports.
         </p>
       )}
+      {/* ONE LINE SINCE 2026-10-18. The state and its disclaimer stay visible;
+          why it could not be determined is behind the widget's info toggle. */}
       {facts.freshness === 'undetermined' && (
-        <div className="stats-block">
-          <UnavailableNote>
-            Whether this snapshot describes the running build cannot be determined in this
-            environment: the two commits needed for the comparison were not both reported. This is
-            not a claim that the snapshot is current.
-          </UnavailableNote>
-        </div>
+        <p className="stats-note stats-state-line">
+          <span className="stats-freshness-label">Freshness Undetermined</span> — not a claim that
+          the snapshot is current.
+        </p>
       )}
-
-      <p className="stats-actions">
-        <Link to={ROUTES.memory}>Open Project Memory</Link>
-      </p>
     </>
   );
 }
 
-/* ---- Technical Details · API Surface ----------------------------------- */
+/* ---- Build · API Surface ---------------------------------------------- */
 
+/**
+ * The shape of the API this build documents, read from its own generated
+ * contract. These are the operations that EXIST — not traffic, which this
+ * application records nowhere, and the supporting line says so where the
+ * headline is read.
+ *
+ * FORM CHOICE — ~~two different forms for two differently-shaped breakdowns of
+ * the same contract~~. Until 2026-10-18 By METHOD was a column chart: at most
+ * five short names (`GET`, `DELETE`), which sit under columns without
+ * wrapping. That was right on its own terms and is withdrawn for DENSITY, not
+ * for correctness: a column chart's plot and axis cost ~200px to show three
+ * numbers, it labelled only the largest column, and the two views of one
+ * widget drew the same quantity in two different forms. Both views are now
+ * compact comparison rows — every value printed as text on its own row, one
+ * shared scale, and the same data table and summary sentence as before.
+ *
+ * By GROUP: as many categories as the document has tags, with names that come
+ * from the contract itself and can be anything — the name gets a wrapping
+ * line of real text.
+ */
 function ApiSurface({ openapi }: { openapi: OpenApiFetch }) {
+  const surface = openapi.status === 'data' ? deriveApiSurface(openapi.data) : null;
+  const populated = surface !== null && surface.operationCount > 0;
   return (
-    <StatsSection
+    <Widget
       id="stats-api"
       title="API Surface"
-      sub="The shape of the API this build documents, read from its own generated contract. These are the operations that exist — not traffic, which is not recorded anywhere."
+      sub="Documented operations — not traffic, which is recorded nowhere."
+      /* Full width since 2026-10-18, so Project Memory and Record Schema — two
+         widgets of near-equal height — share the row above it. */
+      span="full"
       icon={<FileJson size={18} strokeWidth={2} aria-hidden="true" />}
-      headingLevel={3}
+      headline={
+        populated ? (
+          <>
+            <HeadlineFigure label="Documented Operations" value={count(surface.operationCount)} />
+          </>
+        ) : null
+      }
+      views={
+        populated
+          ? [
+              {
+                id: 'method',
+                label: 'By Method',
+                icon: <BarChart3 size={14} strokeWidth={2} aria-hidden="true" />,
+                content: (
+                  <StatsComparisonRows
+                    caption="Documented operations by HTTP method"
+                    /* The tab reads "By Method" under the headline "Documented
+                       Operations"; the caption restated both, so it is kept for
+                       assistive technology. By Group keeps its caption visible,
+                       because "in the contract's own tag order" says something
+                       neither the tab nor the headline does. */
+                    captionHidden
+                    rows={surface.byMethod.map((row) => ({
+                      key: row.method,
+                      label: row.method.toUpperCase(),
+                      value: row.count,
+                    }))}
+                    unit="operations"
+                    total={surface.operationCount}
+                    categoryHeader="HTTP Method"
+                  />
+                ),
+              },
+              {
+                id: 'group',
+                label: 'By Group',
+                icon: <BarChartHorizontal size={14} strokeWidth={2} aria-hidden="true" />,
+                /* `Groups` sat beside the headline until 2026-10-18; it is the
+                   count of the rows this view draws, so it is stated here. */
+                content: (
+                  <>
+                  <FigureList rows={[{ label: 'Groups', value: count(surface.groupCount), mono: true }]} />
+                  <StatsComparisonRows
+                    caption="Documented operations by group, in the contract's own tag order"
+                    rows={surface.byGroup.map((row) => ({
+                      key: row.group,
+                      label: row.group,
+                      value: row.count,
+                    }))}
+                    unit="operations"
+                    total={surface.operationCount}
+                    categoryHeader="Group"
+                  />
+                  </>
+                ),
+              },
+            ]
+          : undefined
+      }
+      footer={
+        openapi.status === 'data' ? (
+          <Link to={ROUTES.settingsTab('explorer')}>Open Endpoint Explorer</Link>
+        ) : undefined
+      }
     >
       {openapi.status === 'loading' && <LoadingPanel label="Loading the API contract…" />}
       {openapi.status === 'error' && (
         <BackendDown error={openapi.error} onRetry={openapi.reload} />
       )}
-      {openapi.status === 'data' && <ApiSurfaceBody doc={openapi.data} />}
-    </StatsSection>
-  );
-}
-
-/**
- * FORM CHOICE — two different forms for two differently-shaped breakdowns of the
- * same contract, because the shape of the LABELS decides the form.
- *
- * By METHOD: at most five categories whose names are three to six characters
- * (`GET`, `DELETE`). Columns are right — the names sit under the marks with no
- * wrapping, rotation or truncation, and heights compare against one baseline.
- * Only the sole maximum is labelled on its cap; the y-axis carries the rest
- * approximately and the table exactly.
- *
- * By GROUP: as many categories as the document has tags, with names that come
- * from the contract itself and can be anything. Compact comparison rows are
- * right — the name gets a wrapping line of real text, and the tracks stay short
- * enough that ten groups still fit without a per-row axis strip.
- */
-function ApiSurfaceBody({ doc }: { doc: Parameters<typeof deriveApiSurface>[0] }) {
-  const surface = deriveApiSurface(doc);
-
-  if (surface.operationCount === 0) {
-    return (
-      <>
+      {surface !== null && !populated && (
         <p className="stats-note">
           The contract this build served documents no operations, so there is no breakdown to show.
         </p>
-        <p className="stats-actions">
-          <Link to={ROUTES.settingsTab('explorer')}>Open Endpoint Explorer</Link>
-        </p>
-      </>
-    );
-  }
-
-  return (
-    <>
-      <FigureList
-        rows={[
-          {
-            label: 'Documented Operations',
-            value: count(surface.operationCount),
-            mono: true,
-          },
-          { label: 'Groups', value: count(surface.groupCount), mono: true },
-        ]}
-      />
-      <div className="stats-block">
-        <StatsColumnChart
-          caption="Documented operations by HTTP method"
-          rows={surface.byMethod.map((row) => ({
-            key: row.method,
-            label: row.method.toUpperCase(),
-            value: row.count,
-          }))}
-          unit="operations"
-          total={surface.operationCount}
-          categoryHeader="HTTP Method"
-        />
-      </div>
-      <div className="stats-block">
-        <StatsComparisonRows
-          caption="Documented operations by group, in the contract's own tag order"
-          rows={surface.byGroup.map((row) => ({
-            key: row.group,
-            label: row.group,
-            value: row.count,
-          }))}
-          unit="operations"
-          total={surface.operationCount}
-          categoryHeader="Group"
-        />
-      </div>
-      <p className="stats-actions">
-        <Link to={ROUTES.settingsTab('explorer')}>Open Endpoint Explorer</Link>
-      </p>
-    </>
+      )}
+    </Widget>
   );
 }
 
@@ -2770,35 +3132,78 @@ function PlatformMetrics({
 }) {
   const probe = source.platformRecordTotal();
 
+  /* ── A SLIM WIDGET SINCE 2026-10-12 ─────────────────────────────────────
+     It used to draw six planned-view cards beneath the absence, which made the
+     largest block on the Build tab a description of figures that do not exist.
+     The absence is now the widget's headline STATE, the one sentence that says
+     why stays visible, and the six planned views are one expansion away. It
+     still issues no request and joins no round. */
   return (
-    <StatsSection
+    <Widget
       id="stats-platform"
       title="Platform Metrics"
-      sub="Figures about the wider ISAAC platform, as distinct from this workspace and this build."
+      /* NO SUPPORTING LINE SINCE 2026-10-18: the one-line state beneath the
+         title says what this widget is about and that it states nothing; the
+         scope sentence is the first paragraph of its info panel. */
       icon={<CircleDashed size={18} strokeWidth={2} aria-hidden="true" />}
+      /* HALF WIDTH since 2026-10-18, beside Runtime: both are short facts
+         about where figures come from, and a full-width row for one line of
+         state left most of the row empty. */
+      span="auto"
+      info={
+        <>
+          <p>
+            Figures about the wider ISAAC platform, as distinct from this workspace and this
+            build.
+          </p>
+          {/* The full sentence for the state shown, which sat in a boxed panel
+              beneath the widget's header until 2026-10-18. */}
+          {probe.status === 'unavailable' && probe.reason === 'not_configured' && (
+            <p>{PORTAL_METRICS_UNAVAILABLE_COPY.not_configured}</p>
+          )}
+          <p>
+            Each planned view names the unit it would count. None of these figures is being
+            withheld from you and none of them is zero — this application has no source to read one
+            from, so it states that instead of a number.
+          </p>
+        </>
+      }
+      details={{
+        /* NO COUNT ON THE TRIGGER: this widget states no figure at all — the
+           absence IS its content — and a "6 planned" would be the one number on
+           it. */
+        summary: 'Planned Platform Views',
+        content: (
+          <ul className="stats-plan-grid">
+            {PORTAL_METRIC_VIEWS.map((view) => (
+              <li className="stats-plan-card" key={view.id}>
+                <h3 className="stats-plan-title">{view.title}</h3>
+                <p className="stats-plan-desc">{view.description}</p>
+              </li>
+            ))}
+          </ul>
+        ),
+      }}
     >
-      <ChartSourceUnavailable title={PORTAL_METRICS_UNAVAILABLE_TITLE}>
-        {probe.status === 'unavailable'
-          ? PORTAL_METRICS_UNAVAILABLE_COPY[probe.reason]
-          : /* Reachable only if a source is wired that this build does not ship.
-               It states the state it received and draws nothing, which is the
-               only honest thing to do with a payload no view here can read. */
-            `The platform metrics source reported "${probe.status}", and this page has no view built for it, so nothing is shown.`}
-      </ChartSourceUnavailable>
-      <ul className="stats-plan-grid">
-        {PORTAL_METRIC_VIEWS.map((view) => (
-          <li className="stats-plan-card" key={view.id}>
-            <h3 className="stats-plan-title">{view.title}</h3>
-            <p className="stats-plan-desc">{view.description}</p>
-          </li>
-        ))}
-      </ul>
-      <p className="stats-note">
-        Each description names the unit it would count. None of these figures is being withheld from
-        you and none of them is zero — this application has no source to read one from, so it states
-        that instead of a number.
-      </p>
-    </StatsSection>
+      {/* ONE LINE SINCE 2026-10-18 for the state this build actually produces;
+          its full sentence is the first paragraph behind the info toggle. The
+          other reasons are single sentences already, and are stated whole. */}
+      {probe.status === 'unavailable' && probe.reason === 'not_configured' ? (
+        <p className="stats-note stats-state-line">
+          <span className="stats-freshness-label">{PORTAL_METRICS_UNAVAILABLE_TITLE}</span> for this
+          deployment — no platform-wide figure is stated here.
+        </p>
+      ) : (
+        <ChartSourceUnavailable title={PORTAL_METRICS_UNAVAILABLE_TITLE}>
+          {probe.status === 'unavailable'
+            ? PORTAL_METRICS_UNAVAILABLE_COPY[probe.reason]
+            : /* Reachable only if a source is wired that this build does not ship.
+                 It states the state it received and draws nothing, which is the
+                 only honest thing to do with a payload no view here can read. */
+              `The platform metrics source reported "${probe.status}", and this page has no view built for it, so nothing is shown.`}
+        </ChartSourceUnavailable>
+      )}
+    </Widget>
   );
 }
 
@@ -2810,11 +3215,11 @@ function PlatformMetrics({
  * chart, no zero-filled placeholder. The shield is the privacy mark this app
  * already uses, and it is decorative.
  *
- * IT STAYS IN THE MAIN FLOW. Project Memory and the API surface moved into a
- * collapsed Technical Details region; this did not, because it is a claim about
- * what the application measures and stores, and a governance claim behind a
- * disclosure is a weaker claim. It sits directly after the record figures, where
- * a reader wondering why there is no traffic figure will look.
+ * IT STAYS IN THE MAIN FLOW, VISIBLE. Project Memory and the API surface were
+ * once moved into a collapsed region (and since 2026-10-12 are visible widgets
+ * on the Build tab); this claim never was, because it is a claim about what the
+ * application measures and stores, and a governance claim behind a disclosure is
+ * a weaker claim. Its SCOPE is one press of its own info toggle away.
  *
  * SCOPE IS THE WHOLE POINT of the copy below. An earlier version of this section
  * claimed the preview "does not track visits, users, source IPs, request
@@ -2834,7 +3239,8 @@ function PlatformMetrics({
  * ── REDUCED TO ONE SENTENCE, AND THE OTHER PARAGRAPH RELOCATED ─────────────
  *
  * Statistics is not where this application's privacy policy is explained — that
- * is `Settings › Data & Privacy`, which this section has always linked to. What
+ * is Settings' privacy tab (`?tab=privacy` — named Data & Privacy, and being renamed
+ * Privacy & Governance; the link text names neither), which this section has always linked to. What
  * has to stay HERE is the one claim a reader of this page needs: why there is no
  * traffic figure on a page of figures. So the body is now that single sentence.
  *
@@ -2850,12 +3256,39 @@ function PlatformMetrics({
  * ancestor, and a governance claim behind a disclosure is a weaker claim.
  */
 function NoAnalytics() {
+  /*
+   * ── THE CORRECTION NOW SITS ONE CLICK FROM THE CLAIM IT SCOPES (2026-10-12) ─
+   *
+   * The server-side-logging paragraph is the correction of a claim this section
+   * shipped falsely once (see the header above). It moved to `Known Limitations`
+   * on the Build tab in 2026-09-15, and this section pointed there with a
+   * cross-tab link — so the scope of a privacy claim on Overview lived on a
+   * different tab. It is now THIS widget's info panel, verbatim, and the visible
+   * supporting line still names the boundary at the claim itself. The claim
+   * stays visible, outside any disclosure, as it always has.
+   */
   return (
-    <StatsSection
+    <Widget
       id="stats-no-analytics"
       title="This Application Collects No Analytics"
-      sub="Scoped to this application — what it ships, measures and stores. Server-side logs belong to whoever operates the deployment; what this page can and cannot say about them is stated under Known Limitations, on the Build & Verification tab."
+      sub="Server-side logs belong to whoever operates the deployment."
       icon={<Shield size={18} strokeWidth={2} aria-hidden="true" />}
+      info={
+        <>
+        {/* The scope sentence that opened the supporting line until 2026-10-18;
+            the body claim below is itself worded about "this application". */}
+        <p>Scoped to this application — what it ships, measures and stores.</p>
+        <p>
+          Server-side logs are a different matter, and this page does not speak for them. The
+          backend writes a metadata-only outcome line per operation, the web server it runs under
+          writes an access line per request, and a hosted deployment sits behind an identity
+          gateway that keeps records of its own. Those belong to whoever operates the deployment,
+          the browser cannot see them, and nothing here is a claim about what they contain or how
+          long they are kept.
+        </p>
+        </>
+      }
+      footer={<Link to={ROUTES.settingsTab('privacy')}>Open Privacy Settings</Link>}
     >
       <p className="stats-note">
         This application ships no analytics SDK, no tracking pixel, and makes no third-party
@@ -2863,242 +3296,6 @@ function NoAnalytics() {
         shows no figure for visits, traffic or request volume — no such figure exists in this app
         to read.
       </p>
-      <p className="stats-actions">
-        <Link to={ROUTES.settingsTab('privacy')}>Open Data &amp; Privacy Settings</Link>
-        {/*
-          ── THE POINTER IS NOW A LINK, BECAUSE THE TARGET MOVED TABS ────────
-          The supporting line above used to end "under Known Limitations
-          BELOW", and that word was true of a one-tab page. `Known Limitations`
-          is now on `?tab=build`, so "below" would have been false — and this
-          is the one pointer on the page that must not go wrong: the paragraph
-          it points at is the CORRECTION of a claim this section shipped
-          falsely once (see the header), so a reader who cannot reach it is
-          left with the narrow claim and nothing to scope it.
-        */}
-        <Link to={ROUTES.statisticsTab('build')}>Read Known Limitations</Link>
-      </p>
-    </StatsSection>
-  );
-}
-
-/* ---- the collapsed disclosures ---------------------------------------- */
-
-/*
- * FIVE `<details>`, closed by default, at the foot of the General tab.
- *
- * ── THE RULE THAT DECIDES WHAT MAY GO IN ONE ───────────────────────────────
- *
- * PROSE MAY BE COLLAPSED; A MEASUREMENT MAY NOT. Everything below is authored
- * copy that explains how something works or what it does not establish. Nothing
- * below states a count, a state, a timestamp or any other figure — because a
- * disclosure is not scanned by axe when it is closed, is skipped by a reader
- * scanning headings, and reads as optional. Collapsing a finding is hiding it.
- *
- * That rule is why `Verification Safeguards` is a visible `h2` section
- * (`RecordVerification.tsx`) and why `About This Run` stays inside Record
- * Verification: six tri-state readings and eleven provenance rows respectively.
- *
- * ── AND WHY A CAVEAT STAYS BESIDE ITS FIGURE ───────────────────────────────
- *
- * A sentence that qualifies a specific number is not "supporting prose" — it is
- * part of what that number means. The histogram suppression disclosures, the
- * truncation caveat above the glance grid, the "these five may not be added
- * together" notes and the mutation panel's "reported below rather than promised
- * here" all stayed in place for that reason. Moving them here would leave the
- * visible figure reading as complete.
- *
- * They are `TechnicalDetails variant="prose"`, which is the SAME component the
- * build-internals region uses — one disclosure treatment on the surface — with a
- * different root class so the suites that address `details.stats-technical`
- * through strict-mode locators still resolve to exactly one element. See
- * `StatsCharts.tsx`.
- */
-
-/**
- * What the verification program actually does, moved out of the section's own
- * supporting line (which used to carry all three programs in one 60-word
- * sentence, directly above the corpus banner) and out of the re-read control
- * (which carried the cache-and-polling paragraph).
- */
-function HowVerificationWorks() {
-  return (
-    <TechnicalDetails
-      variant="prose"
-      id="stats-how-verification"
-      title="How Verification Works"
-      sub="What the program at the top of this page runs, and how its result reaches this screen."
-    >
-      <p className="stats-note">
-        An automated program runs three things over a corpus of official ISAAC records: ISAAC&rsquo;s
-        own official-schema validator; a stricter format-aware second validator; and a harness that
-        injects small deterministic changes into a copy of each record and checks that the validator
-        reacts the way that change was designed to make it react. The report it produces is
-        aggregate: it carries no record identifier, title, field value, evidence entry or per-record
-        outcome, so there is no slot on this screen for one.
-      </p>
-      <p className="stats-note">
-        This report is produced by a program run that is kept off the request path, so it is read as
-        a cached result and states its own age. Nothing on this screen polls: it is read once when
-        the page opens, and again only when the control in Record Verification is pressed.
-      </p>
-      <p className="stats-note">
-        Two corpora can produce this same report, and they carry very different weight — a public
-        reference preflight over already-published upstream example records, and an authorized
-        sample of the records this application holds. Which one ran is stated at the top of Record
-        Verification before any count — as a product name AND as the value the report itself sent,
-        verbatim — and a value this build does not recognise becomes its own label rather than
-        being mapped onto either shipped one.
-      </p>
-    </TechnicalDetails>
-  );
-}
-
-/**
- * How to read what the figures above mean — the reading rules that were
- * previously only implicit, or stated once beside one chart and nowhere else.
- *
- * Every sentence here restates something the visible page already carries; none
- * of them is the only place a caveat appears.
- */
-function HowToInterpretResults() {
-  return (
-    <TechnicalDetails
-      variant="prose"
-      id="stats-interpretation"
-      title="How to Interpret Results"
-      sub="The reading rules behind the figures above — what may be compared, what may not be added, and what a zero means."
-    >
-      <p className="stats-note">
-        The two validators are never added together. Each states its own number of records, and the
-        shared scale in the side-by-side chart runs to the largest single count rather than to any
-        total. The official validator is the authority; the format shadow is advisory, reports
-        issues the official schema tolerates, and gates nothing.
-      </p>
-      <p className="stats-note">
-        A zero is the good reading wherever this page counts things that went wrong. The harness
-        self-checks and the two statement counts under Verification Safeguards all count events
-        nobody wants, so a zero there is stated calmly and affirmatively rather than as an empty
-        panel.
-      </p>
-      <p className="stats-note">
-        A safeguard that does not apply is not a safeguard that held. The three safeguard states
-        have three distinct words and none of them stands in for another: a check that never arose
-        is reported as not applicable, never as verified.
-      </p>
-      <p className="stats-note">
-        Where a breakdown withholds small categories, the bars you can see are not the whole
-        distribution. The withheld occurrences are carried by a bar of their own and the number of
-        withheld categories is stated beside that chart, so the visible shares deliberately do not
-        add to 100%.
-      </p>
-      <p className="stats-note">
-        Nothing on this screen validates, exports or gates anything. It reports what a program
-        measured; it decides nothing about any record.
-      </p>
-    </TechnicalDetails>
-  );
-}
-
-/**
- * The harness vocabulary, glossed.
- *
- * DELIBERATELY NOT the mutation panel's own intro sentence, which stays visible
- * in Record Verification. That sentence exists so the panel makes no flat
- * "records are never altered" claim, and `record-verification.test.tsx` pins its
- * presence AND the absence of the claim it replaced. What is here is the naming
- * — what a change type is against what a trial is, what the two accounting
- * identities assert, and what the run's checks on itself are called.
- */
-function MutationMethodology() {
-  return (
-    <TechnicalDetails
-      variant="prose"
-      id="stats-mutation-method"
-      title="Mutation Methodology"
-      sub="What a change type, a trial and a self-check are, and how the seven trial counts are meant to add up."
-    >
-      <p className="stats-note">
-        Each trial pairs one change type with one record. The harness works on a copy, applies the
-        change to that copy, and compares what the validator then reports against what the change
-        was designed to make it report. Change Types Defined counts the kinds of change the harness
-        has available; Trials Attempted counts the pairings it tried. They are different quantities
-        and neither is a share of the other.
-      </p>
-      <p className="stats-note">
-        A trial recorded as skipped for not applying is counted in its own row rather than folded
-        into either the expected or the unexpected group, so a skip can never be read as a change
-        that behaved as designed.
-      </p>
-      <p className="stats-note">
-        The seven trial counts are meant to satisfy two accounting identities. Both are printed as
-        arithmetic beside the figures, computed from the values that actually arrived, and stated
-        plainly when they do not hold — a single tidy total would have hidden exactly that.
-      </p>
-      <p className="stats-note">
-        The run also checks itself. The rows under Checks on the Verification Run Itself are counts
-        of trials that tripped one of those checks; the backend calls them oracles, a word that
-        means nothing on a product screen, so each row is named for what it counts instead. Whether
-        the source records in this process were in fact left unmodified is one of those checks, and
-        it is reported as a measurement in Verification Safeguards rather than promised in advance.
-      </p>
-      {/* THE SCOPE OF THAT MEASUREMENT, STATED RATHER THAN ASSUMED. The
-          safeguard it points at is "Source Records Unchanged in Memory", and the
-          sentence has to carry the same limit the label now does: the backend
-          compares each record object with itself before and after its trials and
-          checks that the mutated clone shares no container with it. Nothing
-          re-reads a stored copy afterwards — on the datastore path the
-          connection is closed before the first record is even handed to the
-          sweep. Reported here because a reader who is told a check exists, and
-          not what it compares, supplies the stronger reading themselves. */}
-      <p className="stats-note">
-        That check compares the records as this process held them, before and after each trial. It
-        is not a re-read of stored records, and nothing on this page establishes one. What is
-        separately measured about writing is in the same panel: the transaction was read-only, and
-        the counts of statements that would have changed data or structure are printed there.
-      </p>
-    </TechnicalDetails>
-  );
-}
-
-/**
- * What this page does not establish.
- *
- * IT CARRIES THE SERVER-SIDE-LOGGING PARAGRAPH, verbatim, out of the
- * no-analytics section. That paragraph is the correction of a claim this app
- * shipped falsely once — see `NoAnalytics` — so it is relocated rather than
- * shortened, and the section it came from points here in its own supporting
- * line.
- */
-function KnownLimitations() {
-  return (
-    <TechnicalDetails
-      variant="prose"
-      id="stats-limitations"
-      title="Known Limitations"
-      sub="What the figures on this page do not establish, and what this page cannot speak for."
-    >
-      <p className="stats-note">
-        Server-side logs are a different matter, and this page does not speak for them. The backend
-        writes a metadata-only outcome line per operation, the web server it runs under writes an
-        access line per request, and a hosted deployment sits behind an identity gateway that keeps
-        records of its own. Those belong to whoever operates the deployment, the browser cannot see
-        them, and nothing here is a claim about what they contain or how long they are kept.
-      </p>
-      <p className="stats-note">
-        Record Verification reports a cached result. Once it is older than the lifetime the API
-        holds one for, the next read starts a fresh run and is still answered with the earlier
-        result — so a superseded report looks no different from a current one. Its age is stated
-        with it, and a note appears beside the age once it is past that lifetime.
-      </p>
-      <p className="stats-note">
-        Every figure on this page is read from this build&rsquo;s own API and describes either this
-        workspace or this build. None of them is a platform-wide figure; Platform Metrics states why
-        this deployment can produce none.
-      </p>
-      <p className="stats-note">
-        This page mutates nothing and gates nothing. Refresh re-issues the same read-only reads and
-        does nothing else, and no control on this screen writes, validates or exports anything.
-      </p>
-    </TechnicalDetails>
+    </Widget>
   );
 }

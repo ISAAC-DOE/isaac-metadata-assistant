@@ -69,6 +69,7 @@
  * they are sectioning containers rather than landmarks — the same rule the
  * sibling panel follows, for the same reason.
  */
+import type { ReactNode } from 'react';
 import { Compass, ChevronRight, ExternalLink } from '../../components/icons';
 import { api } from '../../lib/api';
 import { useFetch } from '../../lib/useFetch';
@@ -143,11 +144,20 @@ function readableText(value: unknown, fallback: string): string {
 const UNREADABLE_FIELD = 'This deployment sent a value here that could not be displayed.';
 
 export function AssistantCompanionSection({
-  /** Selects the Endpoint Explorer tab, so a reader can check every claim here
+  /** Opens the Endpoint Explorer, so a reader can check every claim here
    *  against the operation's own published description. */
   onOpenExplorer,
+  /**
+   * Render the section's body without its own drawer (2026-10-12). Inside the
+   * Connect Your Agent widget the section is a VIEW the reader chose, so a
+   * second disclosure inside it would be a click that buys nothing. The heading
+   * is kept as the view's first heading, so the outline is the same either way;
+   * every sentence below is rendered identically in both modes.
+   */
+  bare = false,
 }: {
   onOpenExplorer: () => void;
+  bare?: boolean;
 }) {
   const companion = useFetch(() => api.getAssistantCompanion(), []);
   const data = companion.status === 'data' ? companion.data : undefined;
@@ -186,10 +196,7 @@ export function AssistantCompanionSection({
       the DOM and the accessibility tree, so `assistant-companion.test.tsx`'s 25
       guards — which query by selector, not by visibility — still hold.
     */
-    <details className="api-connect">
-      <summary className="api-connect-summary">
-        <h3 className="api-connect-title">{COPY.heading}</h3>
-      </summary>
+    <Shell bare={bare}>
       <p className="api-keys-lead">{COPY.lead}</p>
 
       {/* THE STATE, said once, as a sentence.
@@ -316,6 +323,26 @@ export function AssistantCompanionSection({
         {COPY.verifyAction}
         <ChevronRight size={13} strokeWidth={2.2} aria-hidden="true" />
       </button>
+    </Shell>
+  );
+}
+
+/** The drawer, or — inside a widget view — the plain heading it would carry. */
+function Shell({ bare, children }: { bare: boolean; children: ReactNode }) {
+  if (bare) {
+    return (
+      <div className="settings-companion">
+        <h3 className="settings-view-heading">{COPY.heading}</h3>
+        {children}
+      </div>
+    );
+  }
+  return (
+    <details className="api-connect">
+      <summary className="api-connect-summary">
+        <h3 className="api-connect-title">{COPY.heading}</h3>
+      </summary>
+      {children}
     </details>
   );
 }

@@ -243,7 +243,7 @@ const ANCHORS: readonly string[] = [
   'screens/screens.css        .placeholder > h1               --font-size-heading-lg',
   'screens/screens.css        .source-index-heading           --font-size-heading-sm',
   'screens/screens.css        .concept-lookup-heading         --font-size-heading-sm',
-  'screens/screens.css        .settings-card-head h2          --font-size-heading-sm',
+  'screens/settings/settings-widgets.css  .settings-row-label  --font-size-meta, --font-weight-semibold',
   'screens/screens.css        .record-page-title (UX-002)     --space-2xs, --line-height-tight, --line-height-snug',
   'components/evidence.css    .sidecar-obj                    --line-height-relaxed',
   'components/signals.css     .verdict-word                   --font-weight-bold',
@@ -305,8 +305,16 @@ const CEILING = {
    * reads a NUMERIC `font-size` out of those rules to decide the WCAG
    * large-text threshold, so a rule whose size becomes a token drops out of
    * that sample.
+   *
+   * ~~1043~~ -> 1015, LOWERED 2026-10-12 in the same change that removed the
+   * literals: Settings became widgets, and the rules for its retired layout — the
+   * seven-tab group marker, the summary list, the access/create grid, the disabled
+   * Create control and the empty key list, the provenance note, the Policy tab's
+   * canonical-home box — were deleted with the elements, not left unreferenced.
+   * The replacement sheet (`screens/settings/settings-widgets.css`) is tokens only.
+   * Read from this file's own counter's failure message.
    */
-  fontSize: 1043,
+  fontSize: 1015,
   fontWeight: 282,
   lineHeight: 421,
   /*
@@ -317,8 +325,11 @@ const CEILING = {
    * rules whose elements are gone (`.vr-errors`' gap, `.run-finding-state`'s chip
    * padding, `.guided-path`'s chip padding, `.field-path`'s margin). Read from this
    * file's own counter's failure message, as the note above requires.
+   *
+   * -> 2318, LOWERED 2026-10-12 for the same deletion as `fontSize` above (the
+   * retired Settings and Policy layout rules), read from the counter.
    */
-  spacing: 2368,
+  spacing: 2318,
   /**
    * font-size declarations BELOW the 11px floor: 9.5px ×1, 10px ×14, 10.5px ×84.
    *

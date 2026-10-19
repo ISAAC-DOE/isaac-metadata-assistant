@@ -75,13 +75,13 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import { TopBar } from '../components/TopBar';
 import { GovernanceBanner } from '../components/GovernanceBanner';
 import { HelpPanel } from '../components/HelpPanel';
-import { GovernancePage } from '../screens/GovernancePage';
+import { SettingsPage } from '../screens/SettingsPage';
 import { API_ACCESS_COPY, settingsConcepts, type SettingsConcept } from '../lib/settingsContent';
 import { __resetHealthCache } from '../lib/useHealth';
 import { stubFetchDown, stubFetchRoutes } from '../test/apiFixtures';
@@ -550,17 +550,23 @@ describe('GovernanceBanner copy — scoped to the workspace, so it owes the diag
   });
 });
 
-describe('Governance & Safety → Policy copy — same distinction, full paragraph', () => {
+/* The policy moved to Settings → Privacy & Governance on 2026-10-12, verbatim
+   apart from two recorded corrections (`GOVERNANCE_POLICY`), and this suite
+   follows it: the same required and forbidden claims, over the same three
+   paragraphs, rendered where a reader now meets them. */
+describe('Settings → Privacy & Governance → the governance policy — same distinction, full paragraph', () => {
   function policyText(): string {
     render(
       <MemoryRouter
-        initialEntries={['/governance']}
+        initialEntries={['/settings?tab=privacy']}
         future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
       >
-        <GovernancePage />
+        <SettingsPage />
       </MemoryRouter>,
     );
-    return screen.getByRole('tabpanel').textContent ?? '';
+    return Array.from(document.querySelectorAll('.gov-policy-section'))
+      .map((el) => el.textContent ?? '')
+      .join(' ');
   }
 
   it.each(REQUIRED_CLAIMS)('states %s', (_what, pattern) => {
@@ -967,6 +973,61 @@ describe('Settings → Data & Privacy — no two cards contradict each other', (
       expect(resets.summary).not.toMatch(/there is no database|^no database/i);
     },
   );
+
+  /*
+   * ~~"there are now TWO databases a reader could be thinking of"~~ — CORRECTED
+   * 2026-10-18 (independent review of the Settings redesign). There is ONE. The
+   * durable experiment store (`db_write.py`) and the read-only diagnostic
+   * (`db_recon.py`) both gate on `PGDATABASE` being exactly
+   * `metadata_assistant`, pin the name from the same constant
+   * (`db_recon.EXPECTED_DATABASE`), and re-check `current_database()`. So the
+   * `durable` arm's "it is not where your experiment records go" and the
+   * `unavailable` arm's "is not the database this state is about" were false:
+   * it is the same database. What IS separate is the TABLE — the diagnostic
+   * reads the production-derived `records` table, which the write path refuses
+   * by identifier (`db_write._FORBIDDEN_TABLES`), while experiment records go
+   * into this application's own tables beside it. The comment above is kept
+   * because the clause it protects is still right; the premise it gave was not.
+   */
+  it.each(['durable', 'unavailable'])(
+    'says the diagnostic reads the SAME database as the experiment store when persistence is %s',
+    (persistence) => {
+      const resets = settingsConcepts({ ...SETTINGS_FACTS, persistence }).find(
+        (c) => c.id === 'what-resets',
+      )!;
+      expect(resets.detail).not.toMatch(/not where your experiment records go/i);
+      expect(resets.detail).not.toMatch(/not the database this state is about/i);
+      expect(resets.detail).not.toMatch(/neither of these/i);
+      expect(resets.detail).toMatch(/same configured database/i);
+      expect(resets.detail).toMatch(/this application never writes/i);
+      /* THE SCOPE OF WHAT IT READS, pinned (2026-10-18, re-review). The first
+         correction said the diagnostic "reads only the production-derived records
+         table" — also false: `db_recon.run_recon` reads `records`, the
+         `vocabulary_cache` table (a row count and up to 200 grouped values per
+         allowlisted column) and the database's table catalog
+         (`information_schema` / `pg_tables`). What it never reads is the CONTENT
+         of this application's own tables — no query in `db_recon.py` names one. */
+      expect(resets.detail).not.toMatch(/reads only (its|the) production-derived records table/i);
+      expect(resets.detail).toMatch(/production-derived records and vocabulary_cache tables/i);
+      expect(resets.detail).toMatch(/table catalog/i);
+      expect(resets.detail).toMatch(/never the contents of this application.s own tables/i);
+    },
+  );
+
+  it('the reads that what-resets names are the reads db_recon makes, and no app table is among them', () => {
+    const candidates = [
+      join(process.cwd(), '..', 'api', 'isaac_api', 'db_recon.py'),
+      join(process.cwd(), 'apps', 'api', 'isaac_api', 'db_recon.py'),
+    ];
+    const path = candidates.find((c) => existsSync(c));
+    expect(path, 'db_recon.py located').toBeTruthy();
+    const src = readFileSync(path as string, 'utf8');
+    expect(src).toMatch(/FROM records\b/);
+    expect(src).toMatch(/FROM vocabulary_cache\b/);
+    expect(src).toMatch(/information_schema\.tables/);
+    // No query reads the content of an application-owned table.
+    expect(src).not.toMatch(/FROM isaac_[a-z_]+/);
+  });
 });
 
 // --- 13: THE SWEEP GUARD ------------------------------------------------------

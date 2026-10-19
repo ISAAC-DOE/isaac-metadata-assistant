@@ -480,8 +480,14 @@ def test_proposing_mints_one_open_proposal_citing_one_note(client):
     assert proposal["note_id"] == note["id"]
     assert note["source"] == "historical_source_line"
     # THE SOURCE'S OWN WORDS, with the file and line they were read from.
-    assert note["text"].startswith(f"{BUNDLE_A} (line ")
-    assert note["text"].endswith("system.technique = XAS")
+    #
+    # ~~`startswith(f"{BUNDLE_A} (line ")` / `endswith("system.technique = XAS")`~~ — the
+    # shape until 2026-10-18 (QA `C-23`: on a record it read as a code, `archive (…#E):
+    # acquisition_epoch = 4102444800`). The note now leads with the reading's name and
+    # its value, then where it was read; what the assertions protect is unchanged — the
+    # file's own key and value are both in it, and so are the file and its line.
+    assert note["text"].startswith("system.technique: XAS")
+    assert f"— from {BUNDLE_A} · line " in note["text"]
 
 
 def test_the_excerpt_is_derived_and_is_exactly_the_proposed_value(client):

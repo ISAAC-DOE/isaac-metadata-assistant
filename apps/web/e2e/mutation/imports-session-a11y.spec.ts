@@ -50,7 +50,14 @@ import { expect, test } from './own-session-fixtures';
  * message would leave a reader guessing which state broke, and this screen's
  * steps look alike in a screenshot.
  */
-async function expectClean(page: Page, step: string, include = 'main') {
+async function expectClean(
+  page: Page,
+  step: string,
+  /* A selector to scan (main's `SHOWN` panel), or a region with exclusions (the
+     per-measurement and per-bucket scans). Both default to `main`. */
+  where: string | { include?: string; exclude?: string[] } = 'main',
+) {
+  const region = typeof where === 'string' ? { include: where } : where;
   /*
    * RETRY THE SCAN, DO NOT MERELY WAIT BEFORE IT. Added 2026-09-16.
    *
@@ -85,7 +92,7 @@ async function expectClean(page: Page, step: string, include = 'main') {
    */
   let results!: Awaited<ReturnType<typeof scan>>;
   await expect(async () => {
-    results = await scan(page, { include });
+    results = await scan(page, { include: region.include ?? 'main', exclude: region.exclude });
   }).toPass({ timeout: 15_000 });
   expect(
     results.violations.map(formatViolation).join('\n\n'),
@@ -195,38 +202,39 @@ test.describe('the import session state, which the read-only sweep cannot reach'
      * timeout, and never by a spinner, which would let the scan measure a
      * skeleton and report it as the step.
      */
+    /*
+     * SINCE 2026-10-18 (QA `C-21`) ADDING A READABLE SOURCE READS AND RECONSTRUCTS IT in
+     * the same act and lands the reader on Runs & Candidates — so the read and the
+     * reconstruction are no longer two presses, and each stage is scanned by VISITING it.
+     *
+     * ── THE WAIT THAT WAS VACUOUS ONCE, KEPT HONEST ───────────────────────
+     *
+     * `Candidate values` renders only after reconstruction, and the negative control
+     * asserts it is absent beforehand — so if it ever renders early this goes red
+     * instead of quietly measuring the wrong thing.
+     */
+    await expect(
+      page.getByRole('heading', { name: 'Candidate values' }),
+      'the post-reconstruction heading is already present BEFORE adding a source, so the ' +
+        'wait below would be satisfied by the previous state — pick a different marker',
+    ).toHaveCount(0);
     await page.getByRole('button', { name: 'Add an Example Source', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Candidate values' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: /Runs . Candidates/ })).toHaveAttribute('aria-selected', 'true');
+    expect(await openEverything(page)).toBeGreaterThan(0);
+    await expectClean(page, 'Runs & Candidates, after the add read and reconstructed it, every candidate open');
+
+    await openStage(page, 'Source Bundle');
     // The table only exists once a source is in the bundle.
     await expect(page.getByRole('table')).toBeVisible();
     await openEverything(page);
     await expectClean(page, 'Source Bundle, one entry in the table, every disclosure open');
 
     await openStage(page, 'What ISAAC Read');
-    await page.getByRole('button', { name: 'Read the Sources' }).click();
     // A parsed source's own row exists only after the read.
     await expect(page.locator('.hi-parsed-list > li').first()).toBeVisible();
     expect(await openEverything(page), 'the read stage opened nothing — nothing was read').toBeGreaterThan(0);
     await expectClean(page, 'What ISAAC Read, after the sources are read, every disclosure open');
-
-    /*
-     * ── THE WAIT THAT WAS VACUOUS ONCE, KEPT HONEST ───────────────────────
-     *
-     * The first version of this spec waited on a heading present BEFORE the
-     * click, so it measured the previous state. `Candidate values` renders only
-     * after reconstruction, and the negative control asserts it is absent
-     * beforehand — so if it ever renders early this goes red instead of quietly
-     * measuring the wrong thing.
-     */
-    await openStage(page, 'Runs & Candidates');
-    await expect(
-      page.getByRole('heading', { name: 'Candidate values' }),
-      'the post-reconstruction heading is already present BEFORE reconstructing, so the ' +
-        'wait below would be satisfied by the previous state — pick a different marker',
-    ).toHaveCount(0);
-    await page.getByRole('button', { name: 'Reconstruct Candidates' }).click();
-    await expect(page.getByRole('heading', { name: 'Candidate values' })).toBeVisible();
-    expect(await openEverything(page)).toBeGreaterThan(0);
-    await expectClean(page, 'Runs & Candidates, after reconstruction, every candidate open');
 
     for (const stage of ['Conflicts', 'Review', 'Add to Experiment']) {
       await openStage(page, stage);
@@ -272,7 +280,66 @@ test.describe('the import session state, which the read-only sweep cannot reach'
    * the overview, the measurements table with every measurement opened, every
    * conflict's four layers, Review and Add — because each is a different shape.
    */
-  test('an archive session renders the corpus review, axe-clean at every stage', async ({ page }) => {
+  /*
+   * THE RUNS STAGE IS TWO TESTS, each its own session (independent review, 2026-10-18): the
+   * stage around its opened measurements plus the first half of them, then the second half.
+   * Together they examine every element once; neither carries the whole stage's axe work.
+   */
+  for (const half of ['first', 'second'] as const) {
+    test(`an archive session renders the corpus review — Runs & Candidates, axe-clean measurement by measurement (${half} half)`, async ({ page }) => {
+      await page.goto('/imports');
+      await expect(page.getByRole('heading', { name: 'Imports', level: 2 })).toBeVisible();
+      await page.getByRole('button', { name: 'Start an Import' }).click();
+      await expect(page.getByRole('button', { name: 'Back to imports' })).toBeVisible();
+
+      // NEGATIVE CONTROL FIRST: the review must not exist before an archive does, or
+      // the scans below would prove nothing about the archive at all.
+      await expect(page.locator('.bl15-highlights')).toHaveCount(0);
+
+      /* One press: the archive is added, read and reconstructed (QA `C-21`), and the reader
+         lands on Runs & Candidates. The every-disclosure walk uses the corpus it was written
+         for, chosen by name (the picker's default is the hosted multi-operator corpus,
+         scanned collapsed by the last test). */
+      await chooseArchive(page, MINI);
+      await page.getByRole('button', { name: 'Add an Archive', exact: true }).click();
+      await expect(page.locator('.bl15-runs table').first()).toBeVisible();
+      expect(await openEverything(page), 'no measurement opened — the table is empty').toBeGreaterThan(0);
+      /*
+       * ONE MEASUREMENT AT A TIME, AND STILL EVERYTHING (independent review, 2026-10-18).
+       * With every measurement and every candidate open this stage is ~13,600 elements, and
+       * one axe pass over it took 13–42 s on a shared host against the 15 s retry window —
+       * so a slow machine, not a violation, could fail it. The window is NOT widened.
+       * Instead the stage is scanned as its parts: everything outside the measurements'
+       * opened detail rows, then each opened detail row on its own.
+       */
+      if (half === 'first') {
+        await expectClean(page, 'Runs & Candidates — the stage, around the opened measurements', {
+          include: 'main',
+          exclude: ['tr.bl15-evidence-row'],
+        });
+      }
+      const details = await page
+        .locator('[role="tabpanel"]:not([hidden]) tr.bl15-evidence-row:not([hidden])')
+        .evaluateAll((rows) => rows.map((row) => row.id));
+      expect(details.length, 'no measurement detail is open — the per-measurement scans would be vacuous').toBeGreaterThan(1);
+      const cut = Math.ceil(details.length / 2);
+      const mine = half === 'first' ? details.slice(0, cut) : details.slice(cut);
+      expect(mine.length).toBeGreaterThan(0);
+      for (const id of mine) {
+        await expectClean(page, `Runs & Candidates — measurement detail ${id}, every candidate open`, {
+          include: `[id="${id}"]`,
+        });
+      }
+    });
+  }
+
+  /*
+   * THE ARCHIVE WALK IS FOUR TESTS (independent review, 2026-10-18): two sessions for the
+   * Runs & Candidates stage scanned measurement by measurement, and two fresh ones for the
+   * other five stages — so no test carries the whole walk's axe work on a slow host. No
+   * timeout is raised, and coverage is the same as the single walk it replaced.
+   */
+  test('an archive session — Source Bundle and What ISAAC Read, axe-clean', async ({ page }) => {
     await page.goto('/imports');
     await expect(page.getByRole('heading', { name: 'Imports', level: 2 })).toBeVisible();
     await page.getByRole('button', { name: 'Start an Import' }).click();
@@ -284,32 +351,41 @@ test.describe('the import session state, which the read-only sweep cannot reach'
 
     await chooseArchive(page, MINI);
     await page.getByRole('button', { name: 'Add an Archive', exact: true }).click();
+    await expect(page.locator('.bl15-runs table').first()).toBeVisible();
+    await openStage(page, 'Source Bundle');
     await expect(page.getByRole('table')).toBeVisible();
-    await expectClean(page, 'an archive in the bundle, before reading');
+    await expectClean(page, 'an archive in the bundle, read');
 
     await openStage(page, 'What ISAAC Read');
-    await page.getByRole('button', { name: 'Read the Sources' }).click();
     /*
-     * THE REVIEW APPEARS AT THE READ, not at the reconstruction: `corpus_review` is
-     * served as soon as an archive reading exists. Waited on by the headline counts,
-     * which only it renders.
+     * THE REVIEW APPEARS AT THE READ: `corpus_review` is served as soon as an archive
+     * reading exists. Waited on by the headline counts, which only it renders.
      */
     await expect(page.locator('.bl15-highlights')).toBeVisible();
     expect(await openEverything(page)).toBeGreaterThan(0);
     await expectClean(page, 'What ISAAC Read — the corpus overview, every disclosure open');
 
-    await openStage(page, 'Runs & Candidates');
-    await expect(page.locator('.bl15-runs table').first()).toBeVisible();
-    expect(await openEverything(page), 'no measurement opened — the table is empty').toBeGreaterThan(0);
-    await expectClean(page, 'Runs & Candidates — every measurement and candidate open');
-
     /*
-     * Pressing Reconstruct is still exercised: a bundle may hold an archive AND
-     * example sources, and it must not take the review away.
+     * Reading again is still exercised: a bundle may be re-read, and it must not take the
+     * review away.
      */
-    await page.getByRole('button', { name: 'Reconstruct Candidates' }).click();
-    await expect(page.locator('.bl15-runs table').first()).toBeVisible();
+    await page.getByRole('button', { name: 'Read Again' }).click();
+    /* WAIT FOR THE ACT TO FINISH, not for something already on screen: a re-read, like an
+       add, moves the reader to Runs & Candidates when it lands. Ending the test while the
+       read was still in flight let teardown remove the session under it — a 500 in the
+       server log that no assertion saw (2026-10-18). */
+    await expect(page.getByRole('tab', { name: /Runs . Candidates/ })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('.bl15-highlights')).toHaveCount(1);
+  });
 
+  test('an archive session — Conflicts, Review and Add to Experiment, axe-clean', async ({ page }) => {
+    await page.goto('/imports');
+    await expect(page.getByRole('heading', { name: 'Imports', level: 2 })).toBeVisible();
+    await page.getByRole('button', { name: 'Start an Import' }).click();
+    await expect(page.getByRole('button', { name: 'Back to imports' })).toBeVisible();
+    await chooseArchive(page, MINI);
+    await page.getByRole('button', { name: 'Add an Archive', exact: true }).click();
+    await expect(page.locator('.bl15-runs table').first()).toBeVisible();
     await openStage(page, 'Conflicts');
     await expect(page.locator('.hi-conflict').first()).toBeVisible();
     // EVERY KIND IS COUNTED ON THE SURFACE with everything collapsed: a header with
@@ -324,11 +400,25 @@ test.describe('the import session state, which the read-only sweep cannot reach'
     await expect(page.locator('[role="tabpanel"]:not([hidden]) li.hi-conflict[hidden]')).toHaveCount(0);
     await expectClean(page, 'Conflicts — every conflict’s four layers open');
 
-    for (const stage of ['Review', 'Add to Experiment']) {
-      await openStage(page, stage);
-      await openEverything(page);
-      await expectClean(page, `${stage} (archive), every disclosure open`);
+    /* REVIEW IN PARTS, for the Runs stage's reason: the stage around its buckets, then each
+       opened bucket on its own — every element once, no single pass near the window. */
+    await openStage(page, 'Review');
+    await openEverything(page);
+    await expectClean(page, 'Review (archive), around its opened buckets', {
+      include: 'main',
+      exclude: ['.hi-bucket > .disclosure-body'],
+    });
+    const buckets = await page
+      .locator('[role="tabpanel"]:not([hidden]) .hi-bucket > .disclosure-body:not([hidden])')
+      .evaluateAll((bodies) => bodies.map((body) => body.id));
+    expect(buckets.length, 'no review bucket is open — the per-bucket scans would be vacuous').toBeGreaterThan(0);
+    for (const id of buckets) {
+      await expectClean(page, `Review (archive) — bucket ${id}, every row open`, { include: `[id="${id}"]` });
     }
+
+    await openStage(page, 'Add to Experiment');
+    await openEverything(page);
+    await expectClean(page, 'Add to Experiment (archive), every disclosure open');
   });
 
   test('VACUITY GUARD — the corpus review scan examined a real archive reading', async ({
@@ -345,8 +435,8 @@ test.describe('the import session state, which the read-only sweep cannot reach'
     // The archive the scans above walked, so this guards THOSE scans.
     await chooseArchive(page, MINI);
     await page.getByRole('button', { name: 'Add an Archive', exact: true }).click();
+    await expect(page.locator('.bl15-runs table').first()).toBeVisible();
     await openStage(page, 'What ISAAC Read');
-    await page.getByRole('button', { name: 'Read the Sources' }).click();
     await expect(page.locator('.bl15-highlights')).toBeVisible();
 
     const values = (await page.locator('.bl15-highlight dd').allInnerTexts()).map((t) =>
@@ -370,12 +460,65 @@ test.describe('the import session state, which the read-only sweep cannot reach'
     expect(measurements).toBeGreaterThan(0);
     expect(measurements).toBeLessThan(sources);
   });
+
+  /*
+   * ── THE SESSION IS IN THE URL, AND DISCARD ASKS FIRST (2026-10-18) ──────────
+   *
+   * QA `C-14`: a reload returned the reader to the list and Back left the feature. QA
+   * `C-15`: Discard was one click, followed by a stray `GET … 404`. Both are BROWSER
+   * behaviours — history, reload, focus and a real dialog — which jsdom cannot judge, so
+   * they are walked here, and the open dialog is axe-scanned like every other state.
+   */
+  test('the import survives a reload, Back walks its stages, and Discard asks before it removes', async ({
+    page,
+  }) => {
+    const failures: string[] = [];
+    page.on('response', (r) => {
+      if (r.url().includes('/api/') && r.status() >= 400) failures.push(`${r.status()} ${r.request().method()} ${r.url()}`);
+    });
+    await page.goto('/imports');
+    await page.getByRole('button', { name: 'Start an Import' }).click();
+    await expect(page.getByRole('button', { name: 'Back to imports' })).toBeVisible();
+    await page.getByRole('button', { name: 'Add an Archive', exact: true }).click();
+    await expect(page.locator('.bl15-runs table').first()).toBeVisible();
+    await expect(page).toHaveURL(/[?&]import=[^&]+/);
+    await expect(page).toHaveURL(/[?&]stage=runs/);
+
+    await openStage(page, 'Conflicts');
+    await expect(page).toHaveURL(/[?&]stage=conflicts/);
+    await page.reload();
+    await expect(page.getByRole('tab', { name: /Conflicts/ })).toHaveAttribute('aria-selected', 'true');
+    await page.goBack();
+    await expect(page.getByRole('tab', { name: /Runs . Candidates/ })).toHaveAttribute('aria-selected', 'true');
+
+    const discard = page.getByRole('button', { name: 'Discard This Import' });
+    await discard.click();
+    const dialog = page.getByRole('alertdialog', { name: 'Discard this import?' });
+    await expect(dialog).toBeVisible();
+    // Focus moves IN, to the safe button; Escape keeps the import.
+    await expect(dialog.getByRole('button', { name: 'Keep It' })).toBeFocused();
+    const results = await scan(page, { include: '.hi-discard-dialog' });
+    expect(results.violations.map(formatViolation).join('\n\n')).toBe('');
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Back to imports' })).toBeVisible();
+
+    await discard.click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Discard This Import' }).click();
+    await expect(page.getByRole('heading', { name: 'Imports', level: 2 })).toBeVisible();
+    await expect(page).not.toHaveURL(/[?&]import=/);
+    // NO STRAY REQUEST after the session is gone (the `GET … 404` the audit measured).
+    await page.waitForTimeout(500);
+    expect(failures).toEqual([]);
+  });
+
   /*
    * ── THE HOSTED DEFAULT, SCANNED TOO — every stage, collapsed ──────────────
    *
    * ADDED 2026-10-13. The hosted image ships ONLY the multi-operator corpus, so it is the
    * archive every hosted scientist meets, and the picker opens on it. The every-disclosure
-   * walk above stays on the mini corpus for the budget reason `chooseArchive` records;
+   * walks above stay on the mini corpus for the budget reason `chooseArchive` records (and
+   * since 2026-10-18 also scan the opened Runs and Review stages in parts);
    * this scans the hosted default as a scientist first sees each stage — everything
    * collapsed — so its own shapes (nine measurements, three operators, the Run-32 pair,
    * every HERFD channel combination) are not left unscanned.
@@ -401,23 +544,24 @@ test.describe('the import session state, which the read-only sweep cannot reach'
 
     // NOT CHOSEN — the picker's own default, which is the point of this test.
     await expect(page.getByRole('combobox', { name: /which archive/i })).toHaveValue(HOSTED_DEFAULT);
+    /* ONE PRESS (QA `C-21`, 2026-10-18): adding the archive reads and reconstructs it and
+       lands the reader on Runs & Candidates — the separate Read and Reconstruct presses
+       this test was written with no longer exist. */
     await page.getByRole('button', { name: 'Add an Archive', exact: true }).click();
-    // The row names the archive in words, never its id.
-    await expect(page.getByRole('table')).toContainText('three operators');
-
-    await openStage(page, 'What ISAAC Read');
-    await page.getByRole('button', { name: 'Read the Sources' }).click();
-    await expect(page.locator('.bl15-highlights')).toBeVisible();
-    await expectClean(page, 'What ISAAC Read (hosted default), collapsed', SHOWN);
-
-    await openStage(page, 'Runs & Candidates');
     await expect(page.locator('.bl15-runs table').first()).toBeVisible();
     // NOT VACUOUS: the multi-operator corpus's nine measurements are in the table.
     // (One table per sample group, so the rows are counted across all of them.)
     expect(await page.locator('.bl15-runs tr.bl15-row').count()).toBeGreaterThanOrEqual(9);
-    await page.getByRole('button', { name: 'Reconstruct Candidates' }).click();
-    await expect(page.locator('.bl15-runs table').first()).toBeVisible();
     await expectClean(page, 'Runs & Candidates (hosted default), collapsed', SHOWN);
+
+    await openStage(page, 'Source Bundle');
+    // The row names the archive in words, never its id.
+    await expect(page.locator(`${SHOWN} table.hi-table`)).toContainText('three operators');
+    await expectClean(page, 'Source Bundle (hosted default), collapsed', SHOWN);
+
+    await openStage(page, 'What ISAAC Read');
+    await expect(page.locator('.bl15-highlights')).toBeVisible();
+    await expectClean(page, 'What ISAAC Read (hosted default), collapsed', SHOWN);
 
     for (const stage of ['Conflicts', 'Review', 'Add to Experiment']) {
       await openStage(page, stage);

@@ -81,7 +81,10 @@ const IMPORT_SESSION_SURFACE = 'imports-session';
 /** Surfaces a scientist actually reads prose on. Kept small and explicit. */
 const PROSE_SURFACES: readonly { id: string; path: string; example: boolean }[] = [
   { id: 'imports', path: '/imports', example: false },
-  { id: 'governance', path: '/governance', example: false },
+  /* `governance` -> `settings-privacy`, 2026-10-12: the governance policy prose
+     this entry measured moved to Settings › Privacy & Governance, and
+     `/governance` now redirects there. */
+  { id: 'settings-privacy', path: '/settings?tab=privacy', example: false },
   { id: 'settings', path: '/settings', example: false },
   { id: 'experiments', path: '/experiments', example: false },
 ];

@@ -63,16 +63,20 @@ unable to see WHAT was passed over.
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from collections.abc import Sequence
 
+from . import conditions as cond
 from ._emit import EvidenceBuilder, oversize_reason, refusal
 from .evidence import (
     CONCEPT_BEAMSIZE,
     CONCEPT_BEAMTIME_DATES,
     CONCEPT_BEAMTIME_PURPOSE,
+    CONCEPT_CELL_TYPE_STATEMENT,
     CONCEPT_CONTRIBUTOR_STATEMENT,
     CONCEPT_ECHEM_PROCEDURE,
+    CONCEPT_ENVIRONMENT_STATEMENT,
     CONCEPT_ELECTROLYTE_OR_MEDIUM,
     CONCEPT_ELEMENT,
     CONCEPT_FILTER,
@@ -83,6 +87,7 @@ from .evidence import (
     CONCEPT_PH,
     CONCEPT_POTENTIAL_REFERENCE,
     CONCEPT_QUALITY_NOTE,
+    CONCEPT_REACTION_STATEMENT,
     CONCEPT_SAMPLE_NAME,
     CONCEPT_SAMPLE_PREPARATION,
     CONCEPT_SPECTROMETER_CONFIG,
@@ -274,6 +279,36 @@ RULE_CONTRIBUTOR_STATEMENT = (
     "convention and is never an ISAAC identity. Measured: zero such lines in the "
     "supplied archive."
 )
+#: THE LOGBOOK LEXICONS (2026-10-12), one sentence per field, each naming its id. See
+#: :mod:`bl15.conditions` for the terms and the three ways a term proposes nothing.
+_LOGBOOK_RULE_TAIL = (
+    "a line of the logbook that is not a table cell (a Notes cell is never read for "
+    "this — it is a Data Quality Note) is matched, on word boundaries, against the "
+    "vendored schema's own options for the field, read at runtime. A term that names "
+    "exactly one option reads as that option; a term with no option, more than one, or "
+    "in a sentence that negates it is kept verbatim and reads as none. Inside a "
+    "`Sample N` section the statement carries that section's file numbers; before any "
+    "section it is about the whole beamtime. The domain owner's answer, 2026-10-12: read "
+    "it when the logbook states it, otherwise leave it blank for a person."
+)
+RULE_ENVIRONMENT_STATEMENT = (
+    f"{cond.rule_for(CONCEPT_ENVIRONMENT_STATEMENT)}: the measurement environment — "
+    + _LOGBOOK_RULE_TAIL
+)
+RULE_REACTION_STATEMENT = (
+    f"{cond.rule_for(CONCEPT_REACTION_STATEMENT)}: the reaction under study — "
+    + _LOGBOOK_RULE_TAIL
+)
+RULE_CELL_TYPE_STATEMENT = (
+    f"{cond.rule_for(CONCEPT_CELL_TYPE_STATEMENT)}: the electrochemical cell — "
+    + _LOGBOOK_RULE_TAIL
+)
+_LOGBOOK_RULES = {
+    CONCEPT_ENVIRONMENT_STATEMENT: RULE_ENVIRONMENT_STATEMENT,
+    CONCEPT_REACTION_STATEMENT: RULE_REACTION_STATEMENT,
+    CONCEPT_CELL_TYPE_STATEMENT: RULE_CELL_TYPE_STATEMENT,
+}
+
 RULE_DATA_QUALITY_NOTE = (
     "bl15.notes.notes_column_data_quality_note.v1: in a `Step / File Number / E-chem "
     "Procedure / Notes` table, the FOURTH cell of a row — the `Notes` cell — together "
@@ -289,6 +324,9 @@ NORMALIZATION_RULES: frozenset[str] = frozenset(
     {
         RULE_TEMPERATURE_STATEMENT,
         RULE_CONTRIBUTOR_STATEMENT,
+        RULE_ENVIRONMENT_STATEMENT,
+        RULE_REACTION_STATEMENT,
+        RULE_CELL_TYPE_STATEMENT,
         RULE_DATA_QUALITY_NOTE,
         RULE_README_SECTION,
         RULE_README_ELEMENT,
@@ -559,6 +597,73 @@ def read_beamtime_notes(
     #: together when the section ends so each contributor carries the rows it names.
     section_file_numbers: list[int] = []
     section_contributors: list[tuple[int, str, str, str]] = []
+    #: The current section's logbook statements about the environment, reaction and
+    #: cell (2026-10-12), held — like its contributors — until the section's file
+    #: numbers are known.
+    section_conditions: list[tuple[str, str, "cond.LexiconHit"]] = []
+    #: The sample number of the section being read (`Sample N`), and every section's
+    #: file numbers by that number — so a beamtime sentence that NAMES samples can be
+    #: checked against the sections the document itself numbers (review I3, 2026-10-12).
+    section_sample_number: int | None = None
+    sections_by_number: dict[int, set[int]] = {}
+    #: Beamtime-level sentences naming sample numbers, held until every section is read.
+    named_beamtime: list[tuple[str, str, "cond.LexiconHit", tuple[int, ...]]] = []
+
+    def emit_condition(
+        locator: str,
+        line: str,
+        hit: "cond.LexiconHit",
+        numbers: list[int] | None,
+        *,
+        named: tuple[int, ...] = (),
+        unscoped: bool = False,
+    ) -> None:
+        builder.add(
+            locator=f"{locator} {cond.field_name(hit.concept)} statement",
+            # THE SENTENCE IS THE LITERAL — what the logbook says, exactly.
+            raw_literal=line,
+            concept=hit.concept,
+            determinism=DETERMINISM_NORMALIZED,
+            normalized_value={
+                **hit.to_state(),
+                "section": sample_label if numbers is not None else None,
+                "file_numbers": list(numbers or []),
+                # A BEAMTIME sentence that names particular samples is about THOSE, and
+                # carries the file numbers the document's own sections give each — so a
+                # reader can apply it only where the mapping is deterministic.
+                "named_samples": list(named),
+                "named_sample_file_numbers": {
+                    str(n): sorted(sections_by_number[n]) if n in sections_by_number else None
+                    for n in named
+                },
+                # A beamtime sentence about an unnamed subset ("only some", "except",
+                # a sample code) applies to NO measurement; it is kept, verbatim.
+                "unscoped": unscoped,
+            },
+            normalization_rule=_LOGBOOK_RULES[hit.concept],
+            scope=SCOPE_SAMPLE_GROUP if numbers is not None else SCOPE_BEAMTIME,
+        )
+
+    def read_conditions(locator: str, line: str) -> bool:
+        """Read one logbook line for the three fields. ``True`` if it stated any."""
+        hits = cond.read_line(line)
+        if not hits:
+            return False
+        scope = cond.scope_of_line(line)
+        for hit in hits:
+            if sample_label is not None:
+                if scope.subset_words and hit.status == cond.STATUS_MEMBER:
+                    # "only the second spot", "except …" inside a section: WHICH part
+                    # of the section is a reading this build does not make.
+                    hit = dataclasses.replace(hit, status=cond.STATUS_SUBSET, member=None)
+                section_conditions.append((locator, line, hit))
+            elif scope.named_samples and not scope.excluding:
+                named_beamtime.append((locator, line, hit, scope.named_samples))
+            elif scope.subset or scope.excluding:
+                emit_condition(locator, line, hit, None, unscoped=True)
+            else:
+                emit_condition(locator, line, hit, None)
+        return True
 
     def flush_note() -> None:
         nonlocal pending_note
@@ -589,6 +694,11 @@ def read_beamtime_notes(
 
     def flush_contributors() -> None:
         numbers = sorted(set(section_file_numbers))
+        if section_sample_number is not None:
+            sections_by_number.setdefault(section_sample_number, set()).update(numbers)
+        for locator, line, hit in section_conditions:
+            emit_condition(locator, line, hit, numbers)
+        section_conditions.clear()
         for number, raw_line, label, name in section_contributors:
             builder.add(
                 locator=f"line {number} (in `{sample_label}`) contributor",
@@ -665,6 +775,7 @@ def read_beamtime_notes(
 
         if awaiting_purpose:
             awaiting_purpose = False
+            read_conditions(where, line)
             builder.add(
                 locator=where,
                 raw_literal=line,
@@ -695,6 +806,7 @@ def read_beamtime_notes(
             continue
 
         if _BROAD_CLAIM.match(line):
+            read_conditions(where, line)
             builder.add(
                 locator=where,
                 raw_literal=line,
@@ -719,6 +831,8 @@ def read_beamtime_notes(
             row_file_number = None
             pending_step = None
             sample_label = line
+            section_sample_number = int(sample_match.group(1))
+            read_conditions(f"line {number} sample heading", line)
             name, medium, parenthetical = (
                 sample_match.group(2),
                 sample_match.group(3),
@@ -900,6 +1014,13 @@ def read_beamtime_notes(
 
         claimed = False
 
+        # THE LOGBOOK'S OWN WORDS ABOUT THE ENVIRONMENT, REACTION AND CELL (2026-10-12) —
+        # read from prose only. A tab-prefixed line is a table cell: an E-chem
+        # Procedure step, or a Notes cell, which is a Data Quality Note and is never
+        # parsed (the domain owner's 2026-09-22 answer).
+        if not _TABLE_CELL.match(raw) and read_conditions(where, line):
+            claimed = True
+
         if _ECHEM.search(line):
             builder.add(
                 locator=(
@@ -1006,6 +1127,11 @@ def read_beamtime_notes(
 
     flush_note()
     flush_contributors()
+    # The beamtime sentences that NAME samples, now that every section is known. Emitted
+    # at beamtime scope, with no section of their own.
+    sample_label = None
+    for locator, line, hit, named in named_beamtime:
+        emit_condition(locator, line, hit, None, named=named)
     _report_unread(builder, unread)
     return builder.result()
 

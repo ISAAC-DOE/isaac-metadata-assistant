@@ -178,7 +178,17 @@ function pickContrastBaselined(project: string): Surface {
  * negligible to the count. A SPLIT is fine here: only the platform-resolution
  * proof needs a scalar, and `expectedNodeCount` resolves a pair per platform.
  */
-const newForegroundSurface = SURFACES.find((s) => s.id === 'settings-explorer')!;
+/*
+ * ~~`settings-explorer` is the substitution~~ — RETIRED 2026-10-18. The
+ * `--verified-text` darkening took every `settings-explorer` contrast node to 0 and
+ * the cells are deleted, so this constant no longer names a surface with anything
+ * to recolour (CI: "expected at least one baselined contrast node NOT under an
+ * ancestor opacity"). The proof now takes its surface the way the two proofs above
+ * do — `pickContrastBaselined(project)`, chosen at run time — and opens the same
+ * disclosures, so the next contrast fix moves it along instead of turning CI red.
+ * At this change that is `evidence`, whose three remaining nodes are the
+ * `--src-derivation` key glyphs in the sidecar preview.
+ */
 
 test('@interaction the horizontal-scroll probe detects an injected overflow', async ({ page, app }) => {
   await app.open(experiments);
@@ -440,8 +450,12 @@ test('@interaction the a11y baseline reports a NEW foreground colour at an uncha
   page,
   app,
 }, testInfo) => {
-  await app.open(newForegroundSurface);
   const project = testInfo.project.name;
+  const newForegroundSurface = pickContrastBaselined(project);
+  await app.open(newForegroundSurface);
+  // The baseline describes the surface with its disclosures OPEN (see the proof
+  // above), and the remaining nodes may live inside one.
+  await openUnreachableDisclosures(page, newForegroundSurface.id);
 
   const clean = await scan(page);
   expect(
@@ -605,9 +619,21 @@ test('@interaction platform resolution is this machine\'s, is exact, and refuses
    * If this cell ever becomes a split too, the message below fires and any other
    * scalar `color-contrast` cell is the answer.
    */
+  /*
+   * ── 2026-10-18: `record-detail@desktop-1280x800` IS DELETED, AND THE CELL USED NOW
+   *    IS A REAL SPLIT. ──────────────────────────────────────────────────────────
+   * The `--verified-text` darkening took `record-detail` to 0 (CI: "needs
+   * record-detail@desktop-1280x800 to be a recorded SCALAR … reads undefined"), and
+   * the only `color-contrast` cells left are `evidence@*`, each
+   * `{ darwin: 68, linux: 3 }`. So this proof does what its own message has always
+   * said to do when the cell "has become a split of its own": it uses the split
+   * DIRECTLY. The two columns already differ, by far more than one node, which is
+   * the property the injection existed to manufacture — and a scalar cell, should
+   * one ever be chosen again, still takes the injection path, unchanged.
+   */
   const differing = {
     rule: 'color-contrast',
-    surface: 'record-detail',
+    surface: 'evidence',
     project: 'desktop-1280x800',
   } as const;
   const probeEntry = baselineEntryFor(differing.rule)!;
@@ -615,24 +641,32 @@ test('@interaction platform resolution is this machine\'s, is exact, and refuses
   const probeCounts = probeEntry.counts as Record<string, PlatformCount>;
   const probeOriginal = probeCounts[probeKey];
   expect(
-    typeof probeOriginal,
-    `this proof needs ${probeKey} to be a recorded SCALAR to build a split from; it reads ` +
-      `${JSON.stringify(probeOriginal)}. If it has become a split of its own, use it directly ` +
-      `instead of injecting one. If it has been deleted, pick another baselined cell.`
-  ).toBe('number');
-  const measured = probeOriginal as number;
+    probeOriginal,
+    `this proof needs ${probeKey} to be a recorded cell; if it has been deleted, pick another ` +
+      `baselined cell.`
+  ).toBeDefined();
+  const isSplit = typeof probeOriginal !== 'number';
+  const columns = isSplit
+    ? (probeOriginal as Record<BaselinePlatform, number>)
+    : ({ [platform]: probeOriginal as number, [other]: probeOriginal as number } as Record<
+        BaselinePlatform,
+        number
+      >);
+  const measured = columns[platform];
 
   try {
-    probeCounts[probeKey] = { [platform]: measured, [other]: measured + 1 } as Record<
-      BaselinePlatform,
-      number
-    >;
+    if (!isSplit) {
+      probeCounts[probeKey] = { [platform]: measured, [other]: measured + 1 } as Record<
+        BaselinePlatform,
+        number
+      >;
+    }
     const mine = expectedNodeCount(differing.rule, differing.surface, differing.project, platform);
     const theirs = expectedNodeCount(differing.rule, differing.surface, differing.project, other);
-    expect(mine, 'the injected split must put the cell\'s own measured number on this platform').toBe(
+    expect(mine, 'this platform\'s column must be the cell\'s own number for this platform').toBe(
       measured
     );
-    expect(theirs).toBe(measured + 1);
+    expect(theirs).toBe(isSplit ? columns[other] : measured + 1);
     expect(
       mine !== theirs,
       `the injected split did not take effect at ${probeKey}; both columns read ${mine}, so the ` +
@@ -655,8 +689,12 @@ test('@interaction platform resolution is this machine\'s, is exact, and refuses
 
   // Restored on BOTH columns — a `finally` that put back the wrong shape would
   // otherwise leak a split into every later test in this worker.
-  expect(expectedNodeCount(differing.rule, differing.surface, differing.project, platform)).toBe(measured);
-  expect(expectedNodeCount(differing.rule, differing.surface, differing.project, other)).toBe(measured);
+  expect(expectedNodeCount(differing.rule, differing.surface, differing.project, platform)).toBe(
+    columns[platform]
+  );
+  expect(expectedNodeCount(differing.rule, differing.surface, differing.project, other)).toBe(
+    columns[other]
+  );
 });
 
 test('@interaction tampering with THIS platform\'s count fails the audit; tampering with the other does not', async ({

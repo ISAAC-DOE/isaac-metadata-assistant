@@ -16,6 +16,7 @@ The second is the stronger of the two and is the one that would catch a well-mea
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -362,14 +363,22 @@ def test_nothing_is_deduplicated():
     assert len({e.locator for e in context.entries}) == 16
 
 
-def test_an_open_question_travels_with_the_companion():
-    """~~The legacy number's Q16~~ -> the dry state's Q6.
+def test_an_open_question_travels_with_the_companion(monkeypatch):
+    """~~The legacy number's Q16~~ -> ~~the dry state's Q6~~ -> Q6 held open here.
 
-    Q16 CLOSED on 2026-09-22 — the domain owner does not know, so the conflict is
-    preserved permanently — which means the legacy number no longer carries an OPEN
-    question and this property needs a concept that does. The property is unchanged:
-    an open question travels with the companion entry.
+    Q16 CLOSED on 2026-09-22, and Q6 — the last concept-attached open question — on
+    2026-10-12, when the domain owner answered it (relayed by the project owner). No
+    packet question is open now, so the property is asserted on Q6 re-opened for this
+    test only. The property is unchanged: an open question travels with the companion
+    entry, and the closed one (below) does not.
     """
+    monkeypatch.setitem(
+        mp.DOMAIN_QUESTIONS,
+        "Q6",
+        dataclasses.replace(
+            mp.DOMAIN_QUESTIONS["Q6"], disposition=mp.QUESTION_OPEN_NEEDS_DOMAIN_OWNER
+        ),
+    )
     item = a_reading(concept=ev.CONCEPT_DRY_STATE, raw="dry", normalized="dry", rule=None)
     entry = xc.entry_from_source_evidence(item, entry_id="e3")
     assert entry.unresolved_questions == ("Q6",)

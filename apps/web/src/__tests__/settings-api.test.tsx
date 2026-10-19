@@ -43,6 +43,23 @@ import {
  *     across all five tabs; this file asserts they render in the right PLACE and
  *     that the retired duplicates are gone for good.
  *
+ * ── 2026-10-12: TWO WIDGETS ON TWO TABS ────────────────────────────────────
+ *
+ * Settings became four tabs of question widgets. The API Access tab is now the
+ * API Access WIDGET on Integrations (beside Connect Your Agent), and the
+ * Endpoint Explorer is the main widget of Advanced. The old `?tab=api` and
+ * `?tab=explorer` links are aliases onto those tabs, so this file still opens
+ * each surface the way a reader's link does. What changed in the contract, and
+ * each is asserted below as an inversion rather than dropped:
+ *
+ *   · the absence of API keys is a STATE (the widget headline), and the
+ *     really-`disabled` Create button and the empty key list it sat over are
+ *     GONE — a control that cannot be pressed advertises a capability;
+ *   · Quick Start and the guide (renamed Program an Agent) are the widget's two
+ *     VIEWS, closed until chosen and mounted throughout;
+ *   · the access rows and the Technical Requirements are the widget's Details;
+ *   · the Explorer's Auth legend is the info toggle on the Auth column.
+ *
  * The two hardest things this file pins down are truthfulness claims that no
  * amount of rendering correctness would catch on its own:
  *
@@ -98,35 +115,6 @@ const screensCss = (
   Object.entries(cssFiles).find(([path]) => path.endsWith('/screens.css'))?.[1] ?? ''
 ).replace(/\/\*[\s\S]*?\*\//g, '');
 
-/* At-rule bodies removed, so `cssRule` can never silently read a
-   `@media (max-width: …)` override as if it were the base rule. */
-const screensCssTopLevel = screensCss.replace(
-  /@[a-zA-Z-]+[^{]*\{(?:[^{}]*\{[^{}]*\})*\s*\}/g,
-  '',
-);
-
-/**
- * Every top-level declaration block whose selector list CONTAINS `selector`,
- * concatenated. Comma-split and whitespace-normalised on both sides, so a grouped
- * selector or a Prettier reflow cannot break the match, and all matches are
- * returned rather than only the first — the predecessor read `.foo` from the first
- * block it found and was keyed to exact newline placement inside the selector.
- */
-function cssRule(selector: string): string {
-  const want = selector.replace(/\s+/g, ' ').trim();
-  return [...screensCssTopLevel.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
-    .filter((m) => m[1].split(',').some((s) => s.replace(/\s+/g, ' ').trim() === want))
-    .map((m) => m[2].replace(/\s+/g, ' ').trim())
-    .join(' ');
-}
-
-/** Computed style of the FIRST rendered match — the real cascade result in jsdom. */
-function computed(selector: string): CSSStyleDeclaration {
-  const el = document.querySelector(selector);
-  if (!el) throw new Error(`no rendered element for ${selector}`);
-  return getComputedStyle(el);
-}
-
 function routes() {
   return { [ABOUT_URL]: { body: aboutResponse }, [OPENAPI_URL]: { body: openApiFixture } };
 }
@@ -142,15 +130,45 @@ function renderSettings(entry: string) {
   );
 }
 
-/** Open Settings on the API Access tab, by the deep link a reader would follow. */
+/** The API Access widget — what used to be the whole API Access tab. */
+const keysRegion = () => screen.getByRole('region', { name: 'API Access' });
+/** Every assertion that used to read "the API Access tab" reads this widget:
+ *  the tab it sits on also holds Connect Your Agent, whose own file covers it. */
+const apiAccessPanel = keysRegion;
+const explorerPanel = () => document.getElementById('settings-tabpanel-advanced') as HTMLElement;
+const detailPane = () => document.getElementById('settings-api-detail') as HTMLElement;
+
+/** Press one of the widget's two view toggles, by its visible label. */
+function openView(label: 'Quick Start' | 'Program an Agent') {
+  /* By the toggle's own id: Quick Start's "next" nav also carries a
+     "Program an Agent" button, which switches to the same view. */
+  const toggle = document.getElementById(
+    label === 'Quick Start'
+      ? 'settings-apiaccess-heading-tab-quick-start'
+      : 'settings-apiaccess-heading-tab-program',
+  ) as HTMLButtonElement;
+  if (toggle.getAttribute('aria-pressed') !== 'true') fireEvent.click(toggle);
+}
+
+/** Open Settings by the retired `?tab=api` link a reader may hold, and open the
+ *  Quick Start view — the first thing a developer opens. */
 async function openApiAccess(extraRoutes: Record<string, unknown> = {}) {
   stubFetchRoutes({ ...routes(), ...extraRoutes } as Parameters<typeof stubFetchRoutes>[0]);
   const view = renderSettings(ROUTES.settingsTab('api'));
+  await screen.findByText(FACTS.contractLine);
+  openView('Quick Start');
   await screen.findByRole('heading', { name: 'Quick Start' });
   return view;
 }
 
-/** Open Settings on the Endpoint Explorer tab. */
+/** The Program an Agent guide, opened. */
+async function openGuide() {
+  await openApiAccess();
+  openView('Program an Agent');
+  return document.querySelector('.api-connect-bare') as HTMLElement;
+}
+
+/** Open Settings on the Endpoint Explorer, by the retired `?tab=explorer` link. */
 async function openExplorer(extraRoutes: Record<string, unknown> = {}) {
   stubFetchRoutes({ ...routes(), ...extraRoutes } as Parameters<typeof stubFetchRoutes>[0]);
   const view = renderSettings(ROUTES.settingsTab('explorer'));
@@ -159,13 +177,6 @@ async function openExplorer(extraRoutes: Record<string, unknown> = {}) {
   await screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 });
   return view;
 }
-
-const apiAccessPanel = () => document.getElementById('settings-tabpanel-api') as HTMLElement;
-const explorerPanel = () => document.getElementById('settings-tabpanel-explorer') as HTMLElement;
-/** The key/access half of the API Access tab — the surface that must never show
- *  key material. Quick Start's generated samples are deliberately outside it. */
-const keysRegion = () => document.querySelector('.api-access') as HTMLElement;
-const detailPane = () => document.getElementById('settings-api-detail') as HTMLElement;
 
 const groupHeadings = () =>
   Array.from(document.querySelectorAll('.api-browser-group-heading')).map((h) =>
@@ -193,44 +204,39 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// --- the two API tabs ---------------------------------------------------------
+// --- the two API surfaces -------------------------------------------------------
 
-describe('Settings → the two API tabs', () => {
+describe('Settings → the two API surfaces', () => {
   /**
-   * Replaces "adds exactly two sub-tabs inside the API tab". The sub-tabs are
-   * gone; what has to stay true is that the endpoint browser and the key/access
-   * surface are on DIFFERENT tabs and neither leaks into the other. That is a
-   * stronger statement than the two labels the old assertion listed.
+   * The endpoint browser and the key/access surface are on DIFFERENT tabs and
+   * neither leaks into the other — Integrations and Advanced since 2026-10-12.
    */
-  it('separates the key/access surface from the endpoint browser', async () => {
+  it('separates the key/access widget from the endpoint browser', async () => {
     const view = await openApiAccess();
-    expect(keysRegion()).toBeInTheDocument();
-    expect(within(apiAccessPanel()).getByRole('heading', { name: 'Quick Start' })).toBeInTheDocument();
+    const integrations = document.getElementById('settings-tabpanel-integrations') as HTMLElement;
+    expect(within(keysRegion()).getByRole('heading', { name: 'Quick Start' })).toBeInTheDocument();
     // The browser is NOT here: no endpoint list, no detail pane, no search box.
-    expect(apiAccessPanel().querySelector('.api-browser-list')).toBeNull();
-    expect(apiAccessPanel().querySelector('#settings-api-detail')).toBeNull();
-    expect(within(apiAccessPanel()).queryByLabelText('Search endpoints')).toBeNull();
+    expect(integrations.querySelector('.api-browser-list')).toBeNull();
+    expect(integrations.querySelector('#settings-api-detail')).toBeNull();
+    expect(within(integrations).queryByLabelText('Search endpoints')).toBeNull();
     view.unmount();
 
     const explorer = await openExplorer();
     expect(explorerPanel().querySelector('.api-browser-list')).not.toBeNull();
-    // ...and the key/access surface and Quick Start are NOT on the browser tab.
-    expect(explorerPanel().querySelector('.api-access')).toBeNull();
+    // ...and the key/access widget and Quick Start are NOT on the browser's tab.
+    expect(screen.queryByRole('region', { name: 'API Access' })).toBeNull();
     expect(within(explorerPanel()).queryByRole('heading', { name: 'Quick Start' })).toBeNull();
-    expect(
-      within(explorerPanel()).queryByRole('button', { name: /Create API Key/i }),
-    ).toBeNull();
     explorer.unmount();
   });
 
-  it('the key sections need no data, so they render while the contract is still loading', () => {
+  it('the key state needs no data, so it renders while the contract is still loading', () => {
     stubFetchRoutes(routes());
     renderSettings(ROUTES.settingsTab('api'));
     // Synchronously, before any fetch resolves:
-    expect(screen.getByText(API_ACCESS_COPY.emptyTitle)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Create API Key/i })).toBeDisabled();
-    // ...and the contract-derived half honestly says it is still loading.
-    expect(screen.getByText('Loading the API contract…')).toBeInTheDocument();
+    expect(within(keysRegion()).getByText(API_ACCESS_COPY.statusHeading)).toBeInTheDocument();
+    expect(within(keysRegion()).getByText(API_ACCESS_COPY.credentialLine)).toBeInTheDocument();
+    // ...and each contract-derived view honestly says it is still loading.
+    expect(within(keysRegion()).getAllByText('Loading the API contract…')).toHaveLength(2);
   });
 
   it('the endpoint browser waits for the contract rather than rendering an empty list', () => {
@@ -245,203 +251,175 @@ describe('Settings → the two API tabs', () => {
 // --- API Access: the honest unavailable state ---------------------------------
 
 describe('Settings → API Access — an honest unavailable state', () => {
-  it('renders all four regions, visually complete rather than broken', async () => {
+  it('is one widget: a state, one line, two views and Details — complete rather than broken', async () => {
     await openApiAccess();
-    // The key/access surface, in reading order. "What Would Be Required" is no
-    // longer a fourth always-visible section — slice 11 moved it into a
-    // collapsed disclosure, asserted separately below.
-    expect(Array.from(keysRegion().querySelectorAll('h3')).map((h) => h.textContent)).toEqual([
-      API_ACCESS_COPY.statusHeading,
-      'How Access Works Today',
-      'Create API Key',
-      'Your API Keys',
-    ]);
-    // The whole tab is those four plus the two contract-derived sections.
-    expect(Array.from(apiAccessPanel().querySelectorAll('h3')).map((h) => h.textContent)).toEqual([
-      API_ACCESS_COPY.statusHeading,
-      'How Access Works Today',
-      'Create API Key',
-      'Your API Keys',
-      'Quick Start',
-      'Connect an Agent',
-    ]);
-    // Not an error state and not a fake loading failure: no alert anywhere on
-    // the tab, and the key/access surface never claims something went wrong or
-    // invites a retry. (The copy DOES say "nothing failed to load" — that is the
-    // opposite claim, so the negatives below are phrased to catch a real failure
-    // claim, not that reassurance. The scope is the key surface, exactly as
-    // before: Connect an Agent legitimately discusses retrying a refused call.)
-    expect(within(apiAccessPanel()).queryByRole('alert')).not.toBeInTheDocument();
-    expect(keysRegion().textContent).not.toMatch(
+    const widget = keysRegion();
+    expect(widget.tagName).toBe('SECTION');
+    expect(within(widget).getByRole('heading', { level: 2 }).textContent).toBe('API Access');
+    // The state is a heading in the outline, so it is reachable by heading
+    // navigation, and it is the headline — nothing above it but the title.
+    const state = widget.querySelector('.widget-headline h3') as HTMLElement;
+    expect(state.textContent).toBe(API_ACCESS_COPY.statusHeading);
+    expect(within(widget).getByText(API_ACCESS_COPY.credentialLine)).toBeInTheDocument();
+    expect(
+      within(widget).getByRole('group', { name: 'API Access Views' }),
+    ).toBeInTheDocument();
+    expect(within(widget).getByRole('button', { name: 'How Access Works Today' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    // Not an error state and not a fake loading failure.
+    expect(within(widget).queryByRole('alert')).not.toBeInTheDocument();
+    const outsideViews = Array.from(widget.childNodes)
+      .filter((n) => !(n as HTMLElement).classList?.contains('widget-views-wrap'))
+      .map((n) => n.textContent ?? '')
+      .join(' ');
+    expect(outsideViews).not.toMatch(
       /something went wrong|could not load|try again|retry|temporarily unavailable/i,
     );
   });
 
   /**
-   * The status is stated ONCE, at the top, and it is the region every other
-   * section defers to. The old surface said it in four places (this lead, an
-   * access row, Quick Start's authentication note, and Connect an Agent) — the
-   * count assertions here are what stop that from coming back on this tab, and
-   * `settings-page.test.tsx` counts it across all five.
+   * The status is stated ONCE. The retired tab said "no keys / not available"
+   * six times — a heading and its paragraph, a disabled button's reason, and an
+   * empty list's title and body. The count assertions are what stop that coming
+   * back; `settings-page.test.tsx` counts every string across all four tabs.
    */
-  it('states the unavailability once, in a full-width banner at the top', async () => {
+  it('states the absence once, as the headline, with its proof behind the info toggle', async () => {
     await openApiAccess();
-    const banner = keysRegion().querySelector('.api-access-banner') as HTMLElement;
-    expect(banner).not.toBeNull();
-    // First child of the surface: nothing precedes the status.
-    expect(keysRegion().firstElementChild).toBe(banner);
-    // Its heading is in the OUTLINE (an h3), not an accessible name on the
-    // section: this surface had five nested `region` landmarks on one tab, which
-    // makes a landmark list useless for navigation. The heading is how a
-    // screen-reader user finds the status within the panel.
-    expect(within(banner).getByRole('heading', { level: 3 }).textContent).toBe(
-      API_ACCESS_COPY.statusHeading,
-    );
-    expect(banner).not.toHaveAttribute('aria-labelledby');
-    expect(within(banner).getByText(API_ACCESS_COPY.statusBody)).toBeInTheDocument();
+    const widget = keysRegion();
+    const info = widget.querySelector('.widget-info') as HTMLElement;
+    expect(info.textContent).toBe(API_ACCESS_COPY.statusBody);
+    expect(info).toHaveAttribute('hidden');
+    fireEvent.click(within(widget).getByRole('button', { name: 'About API Access' }));
+    expect(info).not.toHaveAttribute('hidden');
 
-    const text = norm(apiAccessPanel().textContent ?? '');
+    const text = norm(widget.textContent ?? '');
+    expect(countOccurrences(text, norm(API_ACCESS_COPY.statusHeading))).toBe(1);
     expect(countOccurrences(text, norm(API_ACCESS_COPY.statusBody))).toBe(1);
-    // The retired restatements are gone from the whole tab, not just moved.
+    // The retired restatements are gone from the widget, not just moved.
     expect(text).not.toMatch(/Unavailable\. This API has no operation that creates/i);
     expect(text).not.toMatch(/No key can be issued from this app/i);
     expect(text).not.toMatch(/API keys are unavailable here/i);
     expect(text).not.toMatch(/see API Keys/i);
+    expect(text).not.toMatch(/No keys to show/i);
+    expect(text).not.toMatch(/empty by design, not by circumstance/i);
+    expect(text).not.toMatch(/Disabled: there is no operation for this button to call/i);
   });
 
-  it('answers the capability questions once each, classifying key management as unavailable', async () => {
+  it('answers the capability questions once each, in Details', async () => {
     await openApiAccess();
+    const widget = keysRegion();
     expect(
-      Array.from(keysRegion().querySelectorAll('.api-keys-row dt')).map((dt) => dt.textContent),
+      Array.from(widget.querySelectorAll('.widget-details .settings-def dt')).map((dt) => dt.textContent),
     ).toEqual([
       'Current Access Model',
       'What an API Key Would Enable',
       'External Agent Access',
-      // Added when the client-side bearer seam was removed. Every row above says
-      // what the DEPLOYMENT may require; none said what this page actually
-      // sends, and the answer — nothing — is a decision worth stating rather
-      // than an absence a reader has to infer.
+      // Added when the client-side bearer seam was removed: every row above says
+      // what the DEPLOYMENT may require; this one says what this page sends.
       'What This Interface Sends',
       'Hosted Authentication Boundary',
     ]);
-    const text = norm(apiAccessPanel().textContent ?? '');
+    const text = norm(widget.textContent ?? '');
     for (const row of API_ACCESS_ROWS) {
-      expect(within(keysRegion()).getByText(row.detail)).toBeInTheDocument();
+      expect(within(widget).getByText(row.detail)).toBeInTheDocument();
       expect(countOccurrences(text, norm(row.detail)), `${row.term} duplicated`).toBe(1);
     }
-    // The four specific claims the authorizing brief requires answered.
     expect(
-      within(keysRegion()).getByText(/One credential belonging to the whole deployment/i),
+      within(widget).getByText(/One credential belonging to the whole deployment/i),
     ).toBeInTheDocument();
+    expect(within(widget).getByText(/Not through anything you can obtain here/i)).toBeInTheDocument();
     expect(
-      within(keysRegion()).getByText(/Not through anything you can obtain here/i),
-    ).toBeInTheDocument();
-    // The hosted-session boundary moved HERE from Connect an Agent, in full.
-    expect(
-      within(keysRegion()).getByText(
+      within(widget).getByText(
         /Signing in through a deployment's identity layer with a browser is not the same thing as headless authentication/i,
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(keysRegion()).getByText(
-        /an interactive session, not a credential a program can present on its own/i,
       ),
     ).toBeInTheDocument();
     // It never claims keys are available.
     expect(text).not.toMatch(/your key is|key created|copy your key/i);
     // Provider-neutral wherever that boundary is stated: no vendor, no protocol.
-    const lower = (apiAccessPanel().textContent ?? '').toLowerCase();
+    const lower = (widget.textContent ?? '').toLowerCase();
     for (const needle of ['authentik', 'ingress', 'k8s', 'kubernetes', 'vercel', 'railway', 'oauth', 'saml', 'sso']) {
       expect(lower.includes(needle), `named provider or protocol: ${needle}`).toBe(false);
     }
   });
 
-  it('the Create control is really disabled and announces WHY', async () => {
+  /**
+   * INVERTED 2026-10-12 — this test required a really-`disabled` "Create API
+   * Key" button with an associated reason. The cross-page rule the redesign
+   * follows is that an absent capability is a STATE, never a disabled button:
+   * a control a reader cannot press still says "this exists here". So the
+   * button, and every other disabled control, must be ABSENT — and the claim
+   * the button's reason made is still made, by the headline.
+   */
+  it('offers no control that cannot function — no Create button, no disabled control', async () => {
     await openApiAccess();
-    const create = screen.getByRole('button', { name: /Create API Key/i });
-    expect(create).toBeDisabled();
-
-    const describedBy = create.getAttribute('aria-describedby');
-    expect(describedBy).toBeTruthy();
-    const reason = document.getElementById(describedBy as string) as HTMLElement;
-    expect(reason).not.toBeNull();
-    expect(reason.textContent).toBe(API_ACCESS_COPY.createDisabledReason);
-    // `disabled` is never the only signal: the reason is always visible too, and
-    // the full explanation it defers to is the banner, on the same screen.
-    expect(reason.closest('details')).toBeNull();
-    expect(reason.textContent).toMatch(/there is no operation for this button to call/i);
-    expect(within(keysRegion()).getByText(API_ACCESS_COPY.statusBody)).toBeInTheDocument();
+    openView('Program an Agent');
+    expect(screen.queryByRole('button', { name: /Create API Key/i })).toBeNull();
+    for (const button of Array.from(keysRegion().querySelectorAll('button'))) {
+      expect(button.disabled, `disabled control: ${button.textContent}`).toBe(false);
+    }
+    expect(within(keysRegion()).getByText(API_ACCESS_COPY.statusHeading)).toBeInTheDocument();
   });
 
   /**
-   * Slice 11 — "What Would Be Required" was a five-item always-visible list; it
-   * is now a collapsed disclosure. Nothing was deleted: every requirement is
-   * still asserted, and the disclosure must really contain them.
+   * "What Would Be Required" stays collapsed — in the widget's Details now —
+   * and loses none of its five requirements.
    */
   it('keeps the backend/security requirements collapsed, and loses none of them', async () => {
     await openApiAccess();
-    const drawer = keysRegion().querySelector('details.api-keys-technical') as HTMLDetailsElement;
-    expect(drawer).not.toBeNull();
-    expect(drawer.open).toBe(false);
-    expect(drawer.querySelector('summary')?.textContent).toBe('Technical Requirements');
-    // The old always-visible heading is gone as a heading.
-    expect(
-      within(apiAccessPanel()).queryByRole('heading', { name: 'What Would Be Required' }),
-    ).toBeNull();
-
-    const items = Array.from(drawer.querySelectorAll('.api-keys-requirements li')).map(
-      (li) => li.textContent ?? '',
-    );
+    const widget = keysRegion();
+    const trigger = within(widget).getByRole('button', { name: 'How Access Works Today' });
+    const body = document.getElementById(trigger.getAttribute('aria-controls') as string) as HTMLElement;
+    expect(body).toHaveAttribute('hidden');
+    expect(within(body).getByRole('heading', { name: 'Technical Requirements', hidden: true })).toBeInTheDocument();
+    const items = Array.from(body.querySelectorAll('.settings-steps li')).map((li) => li.textContent ?? '');
     expect(items).toEqual([...API_KEY_REQUIREMENTS]);
     expect(items).toHaveLength(5);
     expect(items.join(' ')).toMatch(/holding a hash rather than the value/i);
     expect(items.join(' ')).toMatch(/Per-key identity/i);
     expect(items.join(' ')).toMatch(/Revocation and expiry/i);
     expect(items.join(' ')).toMatch(/Scopes/i);
-    expect(
-      within(drawer).getByText(/belong to a later, separately authorized phase/i),
-    ).toBeInTheDocument();
+    expect(within(body).getByText(/belong to a later, separately authorized phase/i)).toBeInTheDocument();
 
-    fireEvent.click(drawer.querySelector('summary') as HTMLElement);
-    expect(drawer.open).toBe(true);
+    fireEvent.click(trigger);
+    expect(body).not.toHaveAttribute('hidden');
   });
 
   it('generates no key, masks no key, and offers nothing to reveal or copy', async () => {
     await openApiAccess();
-    const text = keysRegion().textContent ?? '';
-
-    // No key-shaped string anywhere (no 24+ run of credential characters).
-    expect(text).not.toMatch(/[A-Za-z0-9_-]{24,}/);
-    // No masked placeholder standing in for a real value.
-    expect(text).not.toMatch(/[•*·]{4,}/);
-    expect(text).not.toMatch(/sk-|\bBearer\s+\S/);
-    // Nothing to reveal, regenerate, or copy — those controls do not exist.
-    expect(keysRegion().querySelectorAll('input')).toHaveLength(0);
-    expect(keysRegion().querySelectorAll('pre')).toHaveLength(0);
+    openView('Program an Agent');
+    const widget = keysRegion();
+    // The key/access half — everything outside the two contract-derived views —
+    // carries no key-shaped string, mask, or credential value.
+    const keyHalf = Array.from(widget.querySelectorAll('.widget-head, .widget-info, .widget-headline, .settings-state-line, .widget-details'))
+      .map((el) => el.textContent ?? '')
+      .join(' ');
+    expect(keyHalf).not.toMatch(/[A-Za-z0-9_-]{24,}/);
+    expect(keyHalf).not.toMatch(/[•*·]{4,}/);
+    expect(keyHalf).not.toMatch(/sk-|\bBearer\s+\S/);
+    // Nothing anywhere in the widget can reveal, regenerate, rotate or revoke a
+    // credential, and nothing accepts typing.
+    expect(widget.querySelectorAll('input, textarea, select')).toHaveLength(0);
     expect(
-      within(keysRegion()).queryByRole('button', { name: /copy|reveal|show|regenerate|rotate|revoke/i }),
+      within(widget).queryByRole('button', { name: /reveal|show key|regenerate|rotate|revoke/i }),
     ).not.toBeInTheDocument();
-    /* The only controls on this surface are the disabled one and the TWO nav
-       links. ~~one~~ — `Connect Your Agent` was added on 2026-09-15 because the
-       brief for this tab's default view requires it to answer how the agent
-       interface differs from the REST API, and it answered that nowhere: the
-       distinction is authored on the other tab only. It is a jump link and
-       carries no sentence, so no claim is duplicated.
-
-       THE PROPERTY THIS CASE EXISTS FOR IS UNCHANGED, and it is the reason the
-       list is asserted as an equality rather than as a `toContain`: no control
-       on this surface can reveal, copy, regenerate, rotate or revoke a
-       credential, and a third button that could would fail here. */
-    expect(within(keysRegion()).getAllByRole('button').map((b) => b.textContent?.trim())).toEqual([
+    /* The widget's own controls, outside its views, are EXACTLY these — asserted as
+       an equality so a sixth control that could reveal or copy a credential fails
+       here. The one copy control in the widget is Quick Start's sample copy, which
+       copies a command reading `$ISAAC_API_CREDENTIAL` from the environment —
+       never a value. */
+    const own = Array.from(widget.querySelectorAll('button')).filter(
+      (b) => !b.closest('.widget-view-panel'),
+    );
+    expect(own.map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim())).toEqual([
+      'About API Access',
+      'Quick Start',
+      'Program an Agent',
+      'How Access Works Today',
       'Endpoint Explorer',
-      'Connect Your Agent',
-      'Create API Key',
     ]);
-
-    // Across the WHOLE tab — Quick Start's generated samples included — the only
-    // credential token displayed is the ENVIRONMENT VARIABLE NAME the sample
-    // reads from, never a value and never a mask.
-    const all = apiAccessPanel().textContent ?? '';
+    const all = widget.textContent ?? '';
     expect(all).not.toMatch(/[•*·]{4,}/);
     expect(all).not.toMatch(/sk-/);
     expect(all).toContain('$ISAAC_API_CREDENTIAL');
@@ -453,11 +431,10 @@ describe('Settings → API Access — an honest unavailable state', () => {
     const cookieBefore = document.cookie;
 
     await openApiAccess();
-    // ...and after interacting with everything interactive on the surface.
-    fireEvent.click(screen.getByRole('button', { name: /Create API Key/i }));
-    fireEvent.click(
-      keysRegion().querySelector('details.api-keys-technical summary') as HTMLElement,
-    );
+    // ...and after interacting with everything interactive on the widget.
+    openView('Program an Agent');
+    fireEvent.click(within(keysRegion()).getByRole('button', { name: 'About API Access' }));
+    fireEvent.click(within(keysRegion()).getByRole('button', { name: 'How Access Works Today' }));
 
     expect(setItem).not.toHaveBeenCalled();
     expect(removeItem).not.toHaveBeenCalled();
@@ -466,159 +443,58 @@ describe('Settings → API Access — an honest unavailable state', () => {
     expect(document.cookie).toBe(cookieBefore);
   });
 
-  it('shows a polished empty state that says the list is empty BY DESIGN', async () => {
+  /**
+   * INVERTED 2026-10-12 — this test required "a polished empty state that says
+   * the list is empty BY DESIGN". A list that can never hold an item is the
+   * same absence stated a fifth and sixth time; the state is the headline now.
+   * What the retired paragraph claimed — there is never a key here to reveal,
+   * copy, or store — is still stated, once, in the info proof.
+   */
+  it('renders no empty key list: the absence is the headline, not a list with nothing in it', async () => {
     await openApiAccess();
-    const list = keysRegion().querySelector('.api-access-full') as HTMLElement;
-    expect(within(list).getByRole('heading', { name: 'Your API Keys' })).toBeInTheDocument();
-    expect(within(list).getByText(API_ACCESS_COPY.emptyTitle)).toBeInTheDocument();
+    const widget = keysRegion();
+    expect(within(widget).queryByRole('heading', { name: 'Your API Keys' })).toBeNull();
+    expect(widget.querySelector('table, ul.api-keys-list, .api-keys-empty')).toBeNull();
     expect(
-      within(list).getByText(/empty by design, not by circumstance — nothing failed to load/i),
+      within(widget).getByText(/there is never a key here to reveal, copy, or store/i),
     ).toBeInTheDocument();
-    // The claim the retired second paragraph made — that there is nowhere a key
-    // could be created or kept — is still made, once, by the status banner.
-    expect(
-      within(keysRegion()).getByText(
-        /there is never a key here to reveal, copy, or store/i,
-      ),
-    ).toBeInTheDocument();
-    // An empty state, not a table with zero rows.
-    expect(list.querySelector('table')).toBeNull();
   });
 
-  it('links into the Endpoint Explorer tab from the status banner', async () => {
+  it('links into the Endpoint Explorer from the widget footer', async () => {
     await openApiAccess();
-    const banner = keysRegion().querySelector('.api-access-banner') as HTMLElement;
-    fireEvent.click(within(banner).getByRole('button', { name: 'Endpoint Explorer' }));
-    expect(screen.getByRole('tab', { name: 'Endpoint Explorer' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
+    const foot = keysRegion().querySelector('.widget-foot') as HTMLElement;
+    fireEvent.click(within(foot).getByRole('button', { name: 'Endpoint Explorer' }));
+    expect(screen.getByRole('tab', { name: 'Advanced' })).toHaveAttribute('aria-selected', 'true');
     expect(
       await screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 }),
     ).toBeInTheDocument();
   });
 });
 
-// --- API Access: the layout the wide measure is spent on ----------------------
+// --- API Access: the retired layout -------------------------------------------
 
 /**
- * Slice 11, plan §2.7: `width="wide"` publishes `--content-max: 1200px`, but
- * every text block was capped at 62–74ch with no cap on its own box, so roughly
- * half the card was empty. jsdom does no layout, so this suite asserts the two
- * halves of the fix that CAN be asserted deterministically — the DOM structure
- * React renders, and the declarations in the stylesheet — and claims nothing
- * about measured pixels.
+ * Slice 11 spent the 1200px measure on a banner, a two-column access/create grid
+ * and a full-width key list, and this suite asserted that layout's computed
+ * styles. The widget replaced all of it (2026-10-12): the absence is a headline,
+ * the rows are Details, and the controls that needed a grid column are gone. Dead
+ * CSS is how a retired layer gets rebuilt by accident, so its rules are asserted
+ * GONE — not merely unused — together with the older flat-section and sub-tablist
+ * rules this suite already guarded.
  */
-describe('Settings → API Access — layout', () => {
-  it('renders the banner / two-column grid / full-width list structure', async () => {
-    await openApiAccess();
-    const surface = keysRegion();
-    expect(Array.from(surface.children).map((el) => el.className.split(' ')[0])).toEqual([
-      'api-access-banner',
-      'api-access-grid',
-      'api-access-full',
-    ]);
-
-    // The grid holds exactly the two columns, in the required order.
-    const grid = surface.querySelector('.api-access-grid') as HTMLElement;
-    const columns = Array.from(grid.querySelectorAll(':scope > .api-access-col'));
-    expect(columns).toHaveLength(2);
-    expect(columns[0].querySelector('h3')?.textContent).toBe('How Access Works Today');
-    expect(columns[1].querySelector('h3')?.textContent).toBe('Create API Key');
-    // Left column: the metadata rows. Right column: the control and the
-    // collapsed requirements — and NO field, because none could work.
-    expect(columns[0].querySelectorAll('.api-keys-row')).toHaveLength(API_ACCESS_ROWS.length);
-    expect(columns[1].querySelector('.api-keys-create-btn')).not.toBeNull();
-    expect(columns[1].querySelector('details.api-keys-technical')).not.toBeNull();
-    expect(columns[1].querySelectorAll('input, select, textarea')).toHaveLength(0);
-    // The banner's trailing edge carries the action, so the full measure holds
-    // content rather than whitespace.
-    expect(
-      surface.querySelector('.api-access-banner .api-access-banner-action button'),
-    ).not.toBeNull();
-  });
-
-  /**
-   * Asserted on the RENDERED elements, not on the stylesheet text. The previous
-   * version of this test read `screens.css` as a string and passed while
-   * `.api-keys-row > dd { max-width: 74ch }` was still resolving on the left
-   * column — roughly a fifth of the widest column blank, the same defect the grid
-   * was introduced to remove, surviving one level in. A substring in a file cannot
-   * detect that; the cascade result can.
-   */
-  it('caps each box, not only the text inside it, and every cap reaches the element', async () => {
-    await openApiAccess();
-
-    // Two columns at the wide measure, each free to shrink to 0 so a long token
-    // cannot push the grid wider than the page.
-    const grid = computed('.api-access-grid');
-    expect(grid.display).toBe('grid');
-    expect(grid.gridTemplateColumns).toBe('minmax(0, 1.4fr) minmax(0, 1fr)');
-    expect(computed('.api-access-col').minWidth).toMatch(/^0(px)?$/);
-    expect(computed('.api-access-full').minWidth).toMatch(/^0(px)?$/);
-
-    // The banner's prose box carries its own cap; the action is pushed away from
-    // it; and the lead inside it is NOT re-capped at the narrower row measure, so
-    // no gap opens between the last word and the action.
-    expect(computed('.api-access-banner-body').maxWidth).toBe('90ch');
-    expect(computed('.api-access-banner-action').marginLeft).toBe('auto');
-    expect(computed('.api-access-banner .api-keys-lead').maxWidth).toBe('none');
-
-    // The access rows: the COLUMN is the measure now. 74ch (~490–535px at 12px)
-    // inside a ~660px track left a fifth of it permanently blank; 92ch fills the
-    // track and still bounds the line if `--content-max` grows.
-    expect(computed('.api-keys-row > dd').maxWidth).toBe('92ch');
-
-    // The empty state is a left-aligned row, not a narrow centred island inside a
-    // full-measure dashed box (`max-width: 62ch` + `margin: … auto`, ~740px blank).
-    const empty = computed('.api-keys-empty');
-    expect(empty.display).toBe('flex');
-    expect(empty.textAlign).toBe('left');
-    const emptyBody = computed('.api-keys-empty-body');
-    expect(emptyBody.marginLeft).toBe('0px');
-    expect(emptyBody.maxWidth).toBe('100ch');
-  });
-
-  /** The `.settings-provenance-note` precedent this surface follows still exists
-   *  and is unchanged. It lives on the About tab, so it is read from the sheet
-   *  rather than rendered here — this test is about the API Access tab. */
-  it('still follows the .settings-provenance-note box-cap precedent', () => {
-    expect(cssRule('.settings-provenance-note')).toMatch(/max-width: 80ch/);
-  });
-
-  /**
-   * SOURCE-based on purpose, and the one place in this file that has to be: jsdom
-   * never evaluates `@media`, so a responsive declaration is invisible to
-   * `getComputedStyle` at any window size — there is no rendered value to read.
-   * The at-rule bodies are parsed out explicitly here rather than reached through
-   * `cssRule`, which deliberately cannot see inside an at-rule.
-   */
-  it('collapses to ONE column at tablet width, and the control goes full width below that', () => {
-    const rules = [...screensCss.matchAll(/@media([^{]+)\{((?:[^{}]*\{[^{}]*\})*)\s*\}/g)].map(
-      (m) => ({ query: m[1].replace(/\s+/g, ' ').trim(), body: m[2].replace(/\s+/g, ' ') }),
-    );
-    const tablet = rules.find((r) => r.query === '(max-width: 900px)');
-    expect(tablet, 'no (max-width: 900px) block').toBeDefined();
-    expect(tablet!.body).toMatch(
-      /\.api-access-grid\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\)/,
-    );
-    // The banner action stops being pushed to a trailing edge that no longer exists.
-    expect(tablet!.body).toMatch(/\.api-access-banner-action\s*\{[^}]*margin-left: 0/);
-
-    const narrow = rules.find((r) => r.query === '(max-width: 720px)');
-    expect(narrow, 'no (max-width: 720px) block').toBeDefined();
-    expect(narrow!.body).toMatch(/\.api-keys-create-btn\s*\{[^}]*width: 100%/);
-
-    // Nothing on this surface can scroll the page sideways: it renders no table
-    // and no code block, and the two containers that could overflow may shrink.
-    expect(screensCss).not.toMatch(/\.api-access[^{]*\{[^}]*overflow-x: scroll/);
-  });
-
-  /** Dead CSS is how a retired layer gets rebuilt by accident, so the rules for
-   *  the flat API-Keys stack and for the deleted `keys | docs` sub-tablist are
-   *  asserted gone — not merely unused. */
-  it('the retired flat-section and sub-tablist CSS is gone, not just unreferenced', () => {
+describe('Settings → API Access — the retired layout is gone', () => {
+  it('the retired grid, create-control, empty-list, flat-section and sub-tablist CSS is gone', () => {
     for (const dead of [
+      '.api-access-grid',
+      '.api-access-col',
+      '.api-access-full',
+      '.api-access-banner-action',
+      '.api-keys-create',
+      '.api-keys-empty',
+      '.api-keys-technical',
+      '.api-keys-heading',
+      '.api-quickstart-drawer',
+      '.settings-provenance-note',
       '.api-keys-section',
       '.api-keys-jump',
       '.api-subtabs',
@@ -627,6 +503,10 @@ describe('Settings → API Access — layout', () => {
     ]) {
       expect(screensCss, `dead rule still present: ${dead}`).not.toContain(dead);
     }
+  });
+
+  it('nothing on the widget can scroll the page sideways', () => {
+    expect(screensCss).not.toMatch(/\.api-access[^{]*\{[^}]*overflow-x: scroll/);
   });
 });
 
@@ -681,10 +561,11 @@ describe('Settings → API Access — Quick Start', () => {
     const claim = `${FACTS.authRequiredCount} of ${FACTS.operationCount} operations document a 401`;
     const text = norm(apiAccessPanel().textContent ?? '');
     expect(countOccurrences(text, claim)).toBe(1);
-    expect(text).toMatch(/the Endpoint Explorer tab marks which/i);
+    // The Explorer is no longer a tab of its own (2026-10-12); the pointer names it.
+    expect(text).toMatch(/the Endpoint Explorer marks which/i);
+    expect(text).not.toMatch(/Endpoint Explorer tab/i);
     // The stale positional phrasing is gone from both modules.
     expect(text).not.toMatch(/Endpoint Explorer above/i);
-    expect(text).not.toMatch(/Explorer marks which/i);
   });
 
   it('proposes a first request the reader can actually make, and says why that one', async () => {
@@ -707,7 +588,9 @@ describe('Settings → API Access — Quick Start', () => {
       'curl "$ISAAC_BASE_URL/api/health"',
     );
     // Non-visual signal: a polite status region, not colour or an icon alone.
-    const status = document.querySelector('[role="status"]') as HTMLElement;
+    // Scoped to the widget: the Connect Your Agent widget beside it has a status
+    // region of its own (its state), and the first match would be that one.
+    const status = keysRegion().querySelector('[role="status"]') as HTMLElement;
     expect(status.textContent).toBe('Copied the first-request sample.');
     // Visual signal too.
     expect(within(first).getByRole('button', { name: 'Copied the first-request sample' })).toBeInTheDocument();
@@ -725,21 +608,27 @@ describe('Settings → API Access — Quick Start', () => {
     const nav = screen.getByRole('navigation', { name: 'More API detail' });
     expect(within(nav).getAllByRole('button').map((b) => b.textContent?.trim())).toEqual([
       'Browse Every Endpoint',
-      'Connect an Agent',
+      'Program an Agent',
     ]);
     // No stale link to a surface that is no longer a destination.
     expect(within(nav).queryByRole('button', { name: 'API Keys' })).toBeNull();
 
-    const connect = document.querySelector('details.api-connect') as HTMLDetailsElement;
-    expect(connect.open).toBe(false);
-    fireEvent.click(within(nav).getByRole('button', { name: 'Connect an Agent' }));
-    expect((document.querySelector('details.api-connect') as HTMLDetailsElement).open).toBe(true);
+    // The guide is the widget's other VIEW now: the jump switches to it in place
+    // and moves focus to the toggle that says which view is open.
+    const guideToggle = document.getElementById('settings-apiaccess-heading-tab-program') as HTMLButtonElement;
+    expect(guideToggle).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(within(nav).getByRole('button', { name: 'Program an Agent' }));
+    expect(guideToggle).toHaveAttribute('aria-pressed', 'true');
+    expect(guideToggle).toHaveFocus();
+    expect((document.querySelector('.api-connect-bare') as HTMLElement).closest('[hidden]')).toBeNull();
 
-    fireEvent.click(within(nav).getByRole('button', { name: 'Browse Every Endpoint' }));
-    expect(screen.getByRole('tab', { name: 'Endpoint Explorer' })).toHaveAttribute(
-      'aria-selected',
-      'true',
+    openView('Quick Start');
+    fireEvent.click(
+      within(screen.getByRole('navigation', { name: 'More API detail' })).getByRole('button', {
+        name: 'Browse Every Endpoint',
+      }),
     );
+    expect(screen.getByRole('tab', { name: 'Advanced' })).toHaveAttribute('aria-selected', 'true');
     expect(
       await screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 }),
     ).toBeInTheDocument();
@@ -3143,35 +3032,42 @@ describe('Settings → Endpoint Explorer — code examples', () => {
     return details;
   }
 
-  /** The language tablist is `RovingTabs` from `settings/apiShared.tsx`. Slice 12
-   *  deleted the API sub-tab layer that was its other consumer, so this is now
-   *  the helper's only caller — and this suite is what keeps it honest rather
-   *  than letting it rot as an unused export. */
-  it('is collapsed by default and offers three compact language tabs', async () => {
+  /*
+   * ~~The language tablist is `RovingTabs` from `settings/apiShared.tsx`~~ —
+   * INVERTED 2026-10-18, not deleted. The independent review of the Settings
+   * redesign found the Advanced tab carrying a SECOND `role="tablist"` here,
+   * nested inside the page's own, on the one page that refuses one. The language
+   * switch is now a group of `aria-pressed` toggle buttons in the shared widget
+   * switch look. What these tests pinned about the tablist is restated for the
+   * group: three named options, exactly one pressed, every option names the ONE
+   * panel, and each option is its own tab stop (a toggle group has no roving
+   * tabindex and no arrow keys — those belong to the tabs pattern this is not).
+   * `RovingTabs` keeps its other caller (Statistics) and its own tests there.
+   */
+  const languages = (samples: HTMLElement) =>
+    within(samples).getByRole('group', { name: 'Code Example Language' });
+  const option = (samples: HTMLElement, name: string) =>
+    within(languages(samples)).getByRole('button', { name });
+
+  it('is collapsed by default and offers three compact language options', async () => {
     const samples = await openSamples();
-    const list = within(samples).getByRole('tablist', { name: 'Code example language' });
-    expect(within(list).getAllByRole('tab').map((t) => t.textContent)).toEqual([
-      'cURL',
-      'Python',
-      'JavaScript',
-    ]);
-    expect(within(list).getAllByRole('tab').filter((t) => t.getAttribute('tabindex') === '0')).toHaveLength(1);
-    expect(within(list).getByRole('tab', { name: 'cURL' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(samples).queryByRole('tablist')).toBeNull();
+    const buttons = within(languages(samples)).getAllByRole('button');
+    expect(buttons.map((t) => t.textContent)).toEqual(['cURL', 'Python', 'JavaScript']);
+    expect(buttons.filter((t) => t.getAttribute('aria-pressed') === 'true')).toHaveLength(1);
+    expect(option(samples, 'cURL')).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('the language tabs answer Arrow / Home / End, like every other tablist here', async () => {
+  it('every language option is its own tab stop, and none is a tab', async () => {
     const samples = await openSamples();
-    const list = within(samples).getByRole('tablist', { name: 'Code example language' });
-    const at = (name: string) => within(list).getByRole('tab', { name });
-
-    fireEvent.keyDown(at('cURL'), { key: 'ArrowRight' });
-    expect(at('Python')).toHaveAttribute('aria-selected', 'true');
-    expect(at('Python')).toHaveFocus();
-    fireEvent.keyDown(at('Python'), { key: 'End' });
-    expect(at('JavaScript')).toHaveAttribute('aria-selected', 'true');
-    fireEvent.keyDown(at('JavaScript'), { key: 'Home' });
-    expect(at('cURL')).toHaveAttribute('aria-selected', 'true');
-    expect(within(list).getAllByRole('tab').filter((t) => t.getAttribute('tabindex') === '0')).toHaveLength(1);
+    for (const button of within(languages(samples)).getAllByRole('button')) {
+      expect(button.getAttribute('role')).toBeNull();
+      expect(button.getAttribute('tabindex')).toBeNull();
+      expect(button.tagName).toBe('BUTTON');
+    }
+    fireEvent.click(option(samples, 'JavaScript'));
+    expect(option(samples, 'JavaScript')).toHaveAttribute('aria-pressed', 'true');
+    expect(option(samples, 'cURL')).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('shows one language at a time, generated from the endpoint contract', async () => {
@@ -3183,12 +3079,12 @@ describe('Settings → Endpoint Explorer — code examples', () => {
     expect(code()).toContain('-H "Content-Type: application/json"');
     expect(code()).toContain('--data "$ISAAC_REQUEST_BODY"');
 
-    fireEvent.click(within(samples).getByRole('tab', { name: 'Python' }));
+    fireEvent.click(option(samples, 'Python'));
     expect(code()).toContain('import urllib.request');
     expect(code()).toContain('/api/experiments/{id}/answers');
     expect(code()).not.toContain('curl');
 
-    fireEvent.click(within(samples).getByRole('tab', { name: 'JavaScript' }));
+    fireEvent.click(option(samples, 'JavaScript'));
     expect(code()).toContain('await fetch(url');
     expect(code()).not.toContain('import urllib.request');
   });
@@ -3196,7 +3092,7 @@ describe('Settings → Endpoint Explorer — code examples', () => {
   it('references no SDK, no dependency, and no host', async () => {
     const samples = await openSamples();
     for (const label of ['cURL', 'Python', 'JavaScript']) {
-      fireEvent.click(within(samples).getByRole('tab', { name: label }));
+      fireEvent.click(option(samples, label));
       const code = samples.querySelector('pre')?.textContent ?? '';
       expect(code).not.toMatch(/pip install|npm install|axios|requests\.|isaac[-_]client|@isaac/);
       expect(code).not.toMatch(/https?:\/\/|127\.0\.0\.1/);
@@ -3205,24 +3101,20 @@ describe('Settings → Endpoint Explorer — code examples', () => {
     expect(samples.textContent).toMatch(/Standard library only — no client library exists for this API/i);
   });
 
-  it('the code panel is a real tabpanel wired to its tab', async () => {
+  it('every language option names the ONE code panel, and that panel is mounted', async () => {
     const samples = await openSamples();
-    const panel = within(samples).getByRole('tabpanel');
-    const tab = within(samples).getByRole('tab', { name: 'cURL' });
-    expect(tab).toHaveAttribute('aria-controls', panel.id);
-    expect(panel).toHaveAttribute('aria-labelledby', tab.id);
-    // Only ONE panel exists, so only the SELECTED tab may claim to control one.
-    // `RovingTabs` (apiShared.tsx) implements this; restored here after the slice-12
-    // rewrite kept the positive half of the pair and dropped the negative half.
-    for (const name of ['Python', 'JavaScript']) {
-      expect(within(samples).getByRole('tab', { name })).not.toHaveAttribute('aria-controls');
+    const panel = samples.querySelector('.api-samples-panel') as HTMLElement;
+    expect(panel.id).toBeTruthy();
+    for (const name of ['cURL', 'Python', 'JavaScript']) {
+      expect(option(samples, name)).toHaveAttribute('aria-controls', panel.id);
     }
-    expect(within(samples).getAllByRole('tabpanel')).toHaveLength(1);
+    expect(samples.querySelectorAll('.api-samples-panel')).toHaveLength(1);
+    expect(within(samples).queryByRole('tabpanel')).toBeNull();
   });
 
   it('copies the shown sample, naming it, with a spoken confirmation', async () => {
     const samples = await openSamples();
-    fireEvent.click(within(samples).getByRole('tab', { name: 'Python' }));
+    fireEvent.click(option(samples, 'Python'));
     const copy = within(samples).getByRole('button', { name: 'Copy the Python sample' });
     fireEvent.click(copy);
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
@@ -3243,21 +3135,24 @@ describe('Settings → Endpoint Explorer — code examples', () => {
 
 // --- Connect an Agent ----------------------------------------------------------
 
-describe('Settings → API Access — Connect an Agent', () => {
-  async function openConnect() {
-    await openApiAccess();
-    const connect = document.querySelector('details.api-connect') as HTMLDetailsElement;
-    fireEvent.click(connect.querySelector('summary') as HTMLElement);
-    return connect;
-  }
+describe('Settings → API Access — Program an Agent (was Connect an Agent)', () => {
+  const openConnect = openGuide;
 
-  it('is a collapsed disclosure whose summary keeps the real heading', async () => {
+  /* RENAMED AND RE-HOUSED, 2026-10-12. The guide was a collapsed `<details>`
+     titled "Connect an Agent" — one word from the Connect Your Agent surface,
+     which describes a different mechanism and now sits in the widget beside it.
+     It is the API Access widget's Program an Agent view: closed until chosen,
+     mounted throughout, and its heading still opens the guide. */
+  it('is a view of the widget, closed until chosen, whose heading names it', async () => {
     await openApiAccess();
-    const connect = document.querySelector('details.api-connect') as HTMLDetailsElement;
-    expect(connect.open).toBe(false);
-    const heading = screen.getByRole('heading', { name: 'Connect an Agent' });
+    const guide = document.querySelector('.api-connect-bare') as HTMLElement;
+    expect(guide.closest('[hidden]')).not.toBeNull();
+    expect(document.querySelector('details.api-connect')).toBeNull();
+    openView('Program an Agent');
+    expect(guide.closest('[hidden]')).toBeNull();
+    const heading = screen.getByRole('heading', { name: 'Program an Agent' });
     expect(heading.tagName).toBe('H3');
-    expect(heading.closest('summary')).not.toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Connect an Agent' })).toBeNull();
   });
 
   it('carries exactly the eight required sections, in order', async () => {
@@ -3277,23 +3172,21 @@ describe('Settings → API Access — Connect an Agent', () => {
   });
 
   /**
-   * Slice 12 — the guide said "the Endpoint Explorer above" twice. The browser
-   * moved to its own tab, so that was false. It now names the TAB and carries a
-   * real control that goes there. The old assertions never checked the word
-   * "above" at all, so this is new coverage of a defect the suite let through.
+   * Slice 12 — the guide said "the Endpoint Explorer above" twice, which was
+   * false once the browser moved. It then named the TAB; since 2026-10-12 the
+   * Explorer is the Advanced tab's widget, so it names that, and still carries a
+   * real control that goes there.
    */
-  it('names the Endpoint Explorer TAB, never "above", and offers a control that goes there', async () => {
+  it('names where the Endpoint Explorer is, never "above", and offers a control that goes there', async () => {
     const connect = await openConnect();
     const text = norm(connect.textContent ?? '');
     expect(text).not.toMatch(/above/i);
-    expect(text).toMatch(/Start on the Endpoint Explorer tab/i);
-    expect(text).toMatch(/exactly as the Endpoint Explorer tab lists them/i);
+    expect(text).toMatch(/Start in the Endpoint Explorer, under Advanced/i);
+    expect(text).toMatch(/exactly as the Endpoint Explorer lists them/i);
+    expect(text).not.toMatch(/Endpoint Explorer tab/i);
 
     fireEvent.click(within(connect).getByRole('button', { name: 'Open the Endpoint Explorer' }));
-    expect(screen.getByRole('tab', { name: 'Endpoint Explorer' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
+    expect(screen.getByRole('tab', { name: 'Advanced' })).toHaveAttribute('aria-selected', 'true');
     expect(
       await screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 }),
     ).toBeInTheDocument();
@@ -3331,8 +3224,8 @@ describe('Settings → API Access — Connect an Agent', () => {
     const text = norm(connect.textContent ?? '');
     expect(text).not.toMatch(/Signing in through a deployment's identity layer/i);
     expect(text).not.toMatch(/an interactive session, not a credential a program can present/i);
-    // It routes the reader to where that boundary IS stated, on this same tab.
-    expect(text).toMatch(/the access rows at the top of this tab/i);
+    // It routes the reader to where that boundary IS stated, in this same widget.
+    expect(text).toMatch(/How Access Works Today says what that one credential is and is not/i);
     // ...and the caveat is genuinely there, exactly once on the tab.
     const tabText = norm(apiAccessPanel().textContent ?? '');
     const caveat = API_ACCESS_ROWS.find((r) => r.term === 'Hosted Authentication Boundary')!.detail;
@@ -3382,6 +3275,7 @@ describe('Settings → the API tabs — accessibility', () => {
     ['Endpoint Explorer', openExplorer],
   ] as const;
 
+
   it.each(OPENERS)('never skips a heading level on %s', async (_name, open) => {
     const view = await open();
     const levels = Array.from(view.container.querySelectorAll('h1, h2, h3, h4, h5, h6')).map(
@@ -3426,31 +3320,30 @@ describe('Settings → the API tabs — accessibility', () => {
 
   /**
    * Landmark inflation is its own accessibility defect: a landmark list that names
-   * five nested regions on one tab is no more navigable than none. API Access had
-   * exactly that — a banner, two grid columns and a key list, all inside the tab's
-   * own `settings-card` region. The four inner `<section>`s keep their sectioning
-   * role and their `<h3>`s but no accessible name, so they are not landmarks.
+   * five nested regions on one tab is no more navigable than none. The API
+   * Access widget is ONE named region; inside it only Quick Start — the one
+   * subsection a reader is sent to directly — keeps a name. Every other inner
+   * block is a heading in the outline, not a landmark.
    */
-  it('does not inflate landmarks: the API Access tab exposes TWO regions, not six', async () => {
-    const view = await openApiAccess();
-    const regions = Array.from(view.container.querySelectorAll('section[aria-labelledby]'));
-    // The card that names the tab, plus Quick Start — the one subsection a reader
-    // navigates to directly (both jump controls and Connect an Agent point at it).
-    // The banner, the two access/create columns and the key list are NOT landmarks.
-    expect(regions.map((r) => r.className.split(' ').slice(-1)[0])).toEqual([
-      'settings-card',
-      'api-quickstart',
-    ]);
-    expect(keysRegion().querySelectorAll('[aria-labelledby]')).toHaveLength(0);
-    // The headings survive: this is a name change, not a structure loss.
-    expect(
-      Array.from(keysRegion().querySelectorAll('h3')).map((h) => h.textContent),
-    ).toEqual([
-      API_ACCESS_COPY.statusHeading,
-      'How Access Works Today',
-      'Create API Key',
-      'Your API Keys',
-    ]);
+  /* RE-POINTED 2026-10-19, and the change is the fix for a real defect: the
+     shared Widget's view panels are regions named by their buttons, so the
+     `section.api-quickstart` named "Quick Start" inside the "Quick Start" panel
+     made TWO landmarks with ONE name (axe `landmark-unique`). The inner section
+     is now unnamed; the panel is the one named region per view, and no two
+     landmarks inside the widget share a name. */
+  it('does not inflate landmarks: one named region per view, no two with one name', async () => {
+    await openApiAccess();
+    const widget = keysRegion();
+    const inner = Array.from(widget.querySelectorAll('section[aria-labelledby]'));
+    expect(inner, 'no section inside the widget names itself').toEqual([]);
+    const panels = Array.from(widget.querySelectorAll('[role="region"]'));
+    const names = panels.map((p) =>
+      document.getElementById(p.getAttribute('aria-labelledby') ?? '')?.textContent?.trim(),
+    );
+    expect(names).toEqual(['Quick Start', 'Program an Agent']);
+    expect(new Set(names).size).toBe(names.length);
+    // The headings survive: a name change, not a structure loss.
+    expect(within(widget).getByRole('heading', { level: 3, name: API_ACCESS_COPY.statusHeading })).toBeInTheDocument();
   });
 
   /** No meaning is carried by colour alone: the method, the auth flag and the
@@ -3480,15 +3373,15 @@ describe('Settings → the API tabs — accessibility', () => {
     expect(rows()[0]).toHaveAttribute('aria-current', 'true');
   });
 
-  /** The disabled Create control must be DISCOVERABLE, not just disabled: it is
-   *  found by role, it is named, and its reason is both visible and associated. */
-  it('the disabled Create control is discoverable and explains itself', async () => {
+  /** INVERTED 2026-10-12: the disabled Create control was required to be
+   *  discoverable and to explain itself. It is gone — an absent capability is a
+   *  state — and what stays discoverable is the STATE: a named heading in the
+   *  widget's outline, reachable by heading navigation. */
+  it('the absence of keys is discoverable as a heading, and no Create control exists', async () => {
     await openApiAccess();
-    const create = screen.getByRole('button', { name: /Create API Key/i });
-    expect(create).toBeDisabled();
-    expect(create.tagName).toBe('BUTTON');
-    expect(create).toHaveAccessibleName('Create API Key');
-    expect(create).toHaveAccessibleDescription(API_ACCESS_COPY.createDisabledReason);
+    expect(screen.queryByRole('button', { name: /Create API Key/i })).toBeNull();
+    const state = within(keysRegion()).getByRole('heading', { name: API_ACCESS_COPY.statusHeading });
+    expect(state.tagName).toBe('H3');
   });
 });
 
@@ -3541,7 +3434,7 @@ describe('Settings → API Access — the deployment condition is carried, both 
   it('What an API Key Would Enable names the deployment it would NOT enable', async () => {
     const detail = row('What an API Key Would Enable');
     // The capability is still stated — this must not become a flat denial.
-    expect(detail).toMatch(/could call the operations listed on the Endpoint Explorer tab/i);
+    expect(detail).toMatch(/could call the operations listed in the Endpoint Explorer/i);
     // …but no longer as the first clause of the sentence, unqualified.
     expect(detail).toMatch(/^On a deployment that answers a program directly,/);
     // And the other branch is stated, in the same row, not one component away.
@@ -3553,10 +3446,8 @@ describe('Settings → API Access — the deployment condition is carried, both 
   });
 
   /** FINDING B — the precondition is INSIDE the guide it disqualifies. */
-  it('Connect an Agent states the precondition before its eight steps', async () => {
-    await openApiAccess();
-    const connect = document.querySelector('details.api-connect') as HTMLDetailsElement;
-    fireEvent.click(connect.querySelector('summary') as HTMLElement);
+  it('Program an Agent states the precondition before its eight steps', async () => {
+    const connect = await openGuide();
 
     const prerequisite = within(connect).getByText(API_ACCESS_COPY.connectPrerequisite);
     expect(prerequisite).toBeInTheDocument();
@@ -3601,12 +3492,12 @@ describe('Settings → API Access — the deployment condition is carried, both 
   /** FINDING E — the requirement that is not the application's to build. */
   it('Technical Requirements says the five app-owned items are not sufficient', async () => {
     await openApiAccess();
-    const drawer = keysRegion().querySelector('details.api-keys-technical') as HTMLElement;
+    const drawer = keysRegion().querySelector('.widget-details') as HTMLElement;
     const boundary = within(drawer).getByText(API_ACCESS_COPY.requirementsBoundary);
     expect(boundary).toBeInTheDocument();
     // It is a note, not a sixth requirement: the list is still the five
     // app-owned contracts and nothing else.
-    expect(drawer.querySelectorAll('.api-keys-requirements li')).toHaveLength(
+    expect(drawer.querySelectorAll('.settings-steps li')).toHaveLength(
       API_KEY_REQUIREMENTS.length,
     );
     expect(API_ACCESS_COPY.requirementsBoundary).toMatch(/One requirement is not ours/i);
@@ -3616,9 +3507,7 @@ describe('Settings → API Access — the deployment condition is carried, both 
   /** The overcorrection guard. None of the five may claim the API is unusable
    *  everywhere, or that the bearer seam is fake. */
   it('never claims the API itself is unreachable or the credential mechanism unreal', async () => {
-    await openApiAccess();
-    const connect = document.querySelector('details.api-connect') as HTMLDetailsElement;
-    fireEvent.click(connect.querySelector('summary') as HTMLElement);
+    await openGuide();
     const text = norm(apiAccessPanel().textContent ?? '');
     for (const pattern of [
       /cannot be called at all/i,
@@ -3637,11 +3526,8 @@ describe('Settings → API Access — the deployment condition is carried, both 
    *  these fixes is about the identity layer, which is the thing this copy may
    *  never name. */
   it('names no identity product or protocol while saying all of this', async () => {
-    await openApiAccess();
-    const connect = document.querySelector('details.api-connect') as HTMLDetailsElement;
-    fireEvent.click(connect.querySelector('summary') as HTMLElement);
-    const drawer = keysRegion().querySelector('details.api-keys-technical') as HTMLElement;
-    fireEvent.click(drawer.querySelector('summary') as HTMLElement);
+    await openGuide();
+    fireEvent.click(within(keysRegion()).getByRole('button', { name: 'How Access Works Today' }));
     const lower = (apiAccessPanel().textContent ?? '').toLowerCase();
     for (const needle of [
       'authentik',

@@ -152,6 +152,11 @@ test.describe('@interaction the ordinary workspace', () => {
     await expect(page.getByRole('button', { name: 'Start Guided Walkthrough' })).toBeEnabled();
     await expect(page.getByRole('button', { name: 'Replay Guided Walkthrough' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Go to Help & Tutorial' })).toHaveCount(0);
+    // 2026-10-18: that control's label now reads `Go to Guided Walkthrough` (the tab it
+    // named became the Guided Walkthrough widget). The literal above is kept, and the
+    // CURRENT label is asserted too — otherwise the absence check would pass vacuously
+    // on a name nothing renders any more.
+    await expect(page.getByRole('button', { name: 'Go to Guided Walkthrough' })).toHaveCount(0);
   });
 
   test('names itself "Workspace" in the mode chip, and claims only what this build enforces', async ({ page, app }) => {

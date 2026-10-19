@@ -701,6 +701,11 @@ describe('ordinary workspace — no example record, and no promise of one', () =
      * address exactly one control in the app.
      */
     expect(view.queryByRole('button', { name: LABELS.actionReplayTutorial })).toBeNull();
+    // ~~"...and its not-yet-finished form (2026-10-18)": `actionStartWalkthrough`
+    // absent~~ — that form IS `actionStartTutorial` since the two slices merged
+    // (one key, "Start Guided Walkthrough"), so an absence check here would
+    // contradict the exactly-one check below. The exactly-one check is the stronger
+    // form of it: a Settings control on this screen would make it two.
     expect(view.queryByRole('button', { name: LABELS.actionGoToHelpAndTutorial })).toBeNull();
     // ~~`queryByRole(actionStartTutorial)` toBeNull, then `getByRole(actionLaunchGuidedDemo)`~~
     // — since 2026-10-12 those are ONE name ("Start Guided Walkthrough"), because both
@@ -770,6 +775,9 @@ describe('ordinary workspace — no example record, and no promise of one', () =
     expect(
       screen.queryByRole('button', { name: LABELS.actionReplayTutorial }),
     ).toBeNull();
+    // The control reads Start for a reader who has not finished (2026-10-18), so
+    // that form is checked too — otherwise this tell could never fire.
+    expect(screen.queryByRole('button', { name: LABELS.actionStartTutorial })).toBeNull();
     // ...and the overlay the session is for is actually up.
     await waitFor(() => expect(document.querySelector('.tutorial-mark')).not.toBeNull());
   }, 30000);

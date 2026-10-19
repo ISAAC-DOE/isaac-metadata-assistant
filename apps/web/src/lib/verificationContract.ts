@@ -874,6 +874,32 @@ export function safeguardDetail(key: SafeguardStateKey, state: SafeguardState): 
   return 'Not applicable — this check does not apply to the corpus that was evaluated.';
 }
 
+/**
+ * THE SHORT VISIBLE QUALIFIER beside a `verified` chip that is narrower than the
+ * word — or `null` when "Verified" means exactly what it says.
+ *
+ * Three verified safeguards are not plain measurements: `export_gating_unchanged`
+ * is guaranteed by construction and observed on no run; `official_validator_unchanged`
+ * compared one property; `source_records_modified` compared copies in memory.
+ * Their full sentences ({@link safeguardDetail}) sit one press away, and an
+ * independent review (2026-10-18) found that a chip reading "Verified" with its
+ * qualifier hidden reads as a measurement it is not. So each carries a short
+ * form of its own sentence, rendered beside the chip — the same claim, never a
+ * different one (`verification-contract.test.ts` pins the shared words).
+ *
+ * Nothing that is not `verified` is qualified: "Not applicable" and "Unverified"
+ * already say less than a pass, and their reasons stay behind "Show Reasons".
+ */
+export function safeguardQualifier(key: SafeguardStateKey, state: SafeguardState): string | null {
+  if (state !== 'verified') return null;
+  if (key === 'export_gating_unchanged') return 'by construction — not measured on this run';
+  if (key === 'official_validator_unchanged') {
+    return 'one property compared — not the schema byte for byte';
+  }
+  if (key === 'source_records_modified') return 'in memory — no stored record was re-read';
+  return null;
+}
+
 export type SafeguardTone = 'good' | 'neutral' | 'attention';
 
 /**
@@ -898,6 +924,8 @@ export interface SafeguardRow {
   state: SafeguardState;
   stateLabel: string;
   detail: string;
+  /** See {@link safeguardQualifier}: visible beside the chip, or `null`. */
+  qualifier: string | null;
   tone: SafeguardTone;
 }
 
@@ -910,6 +938,7 @@ export function safeguardRows(safeguards: VerificationSafeguards): SafeguardRow[
       state,
       stateLabel: safeguardStateLabel(state),
       detail: safeguardDetail(key, state),
+      qualifier: safeguardQualifier(key, state),
       tone: safeguardTone(state),
     };
   });

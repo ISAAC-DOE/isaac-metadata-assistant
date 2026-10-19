@@ -734,7 +734,8 @@ test.describe('@interaction a step whose target is missing', () => {
     );
 
     await page.goto('/settings?tab=help', { waitUntil: 'domcontentloaded' });
-    await page.getByRole('button', { name: 'Replay Guided Walkthrough' }).click();
+    // The Settings control reads Start until this browser has finished (2026-10-18).
+    await page.getByRole('button', { name: /^(Start|Replay) Guided Walkthrough$/ }).click();
 
     await expect(mark(page)).toBeVisible({ timeout: 25_000 });
     expect(tutorial.sessionsCreated().length, 'the session itself is real').toBe(1);

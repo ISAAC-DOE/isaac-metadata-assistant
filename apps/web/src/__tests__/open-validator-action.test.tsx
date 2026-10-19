@@ -358,12 +358,17 @@ describe('P36V S-B · activating Open Validator lands on Governance & Safety →
     await waitFor(() =>
       expect(screen.getByTestId('loc').textContent).toBe('/governance?tab=validator'),
     );
-    // the tab is genuinely SELECTED — never merely the default Policy tab
+    // the tab is genuinely SELECTED. (The default used to be Policy, which moved
+    // to Settings on 2026-10-12 — a bare `/governance` now redirects there — so
+    // landing on the Validator is only possible by naming it.)
     expect(screen.getByRole('tab', { name: 'Validator' })).toHaveAttribute(
       'aria-selected',
       'true',
     );
-    expect(screen.getByRole('tab', { name: 'Policy' })).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getByRole('tab', { name: 'Schema Reference' })).toHaveAttribute(
+      'aria-selected',
+      'false',
+    );
     // …and the Validator surface itself is mounted
     expect(screen.getByRole('heading', { name: 'Standalone Validator' })).toBeInTheDocument();
     expect(screen.getByLabelText(/candidate record \(json\)/i)).toBeInTheDocument();
@@ -479,23 +484,28 @@ describe('P36V S-B · Governance & Safety derives its tab from the URL', () => {
     expect(screen.getByRole('heading', { name: 'Standalone Validator' })).toBeInTheDocument();
   });
 
-  it('an unknown, empty, or absent tab value falls back to Policy without throwing', () => {
+  /* INVERTED 2026-10-12: the fallback was Policy, and Policy moved to Settings.
+     Rendered directly, the page now falls back to its FIRST tab, the Validator;
+     through the route, an unknown value redirects to the policy's new home
+     (`governance-tabs.test.tsx`). Either way, nothing throws and nothing is dead. */
+  it('an unknown, empty, or absent tab value falls back to the Validator without throwing', () => {
     for (const entry of ['/governance', '/governance?tab=', '/governance?tab=bogus', '/governance?tab=VALIDATOR']) {
       const { unmount } = renderGovernance(entry);
-      expect(screen.getByRole('tab', { name: 'Policy' }), entry).toHaveAttribute(
+      expect(screen.getByRole('tab', { name: 'Validator' }), entry).toHaveAttribute(
         'aria-selected',
         'true',
       );
-      expect(screen.queryByText('Standalone Validator')).toBeNull();
+      expect(screen.queryByRole('tab', { name: 'Policy' })).toBeNull();
       unmount();
     }
   });
 
   it('an in-page tab click keeps the tablist roving-tabindex focus (never stolen by arrival focus)', () => {
-    renderGovernance('/governance');
-    const policy = screen.getByRole('tab', { name: 'Policy' });
-    policy.focus();
-    fireEvent.keyDown(policy, { key: 'ArrowRight' });
+    stubFetchRoutes({ 'GET /api/schema': { body: { schema_title: 't', schema_version: '1.05', schema: { properties: {} }, vocabularies: {} } } });
+    renderGovernance('/governance?tab=schema');
+    const schema = screen.getByRole('tab', { name: 'Schema Reference' });
+    schema.focus();
+    fireEvent.keyDown(schema, { key: 'ArrowLeft' });
 
     const validator = screen.getByRole('tab', { name: 'Validator' });
     expect(validator).toHaveAttribute('aria-selected', 'true');
@@ -507,7 +517,7 @@ describe('P36V S-B · Governance & Safety derives its tab from the URL', () => {
 
   it('an in-page tab click REPLACES history, so Back leaves Governance instead of stepping tabs', async () => {
     stubFetchRoutes({ 'GET /api/graph/status': { body: graphStatusUnavailable } });
-    renderApp(['/experiments', '/governance'], { index: 1 });
+    renderApp(['/experiments', '/governance?tab=schema'], { index: 1 });
 
     fireEvent.click(await screen.findByRole('tab', { name: 'Validator' }));
     await waitFor(() =>

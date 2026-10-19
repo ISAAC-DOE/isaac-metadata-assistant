@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from 'react';
 import { LoadingPanel, BackendDown } from './FetchStates';
+import { Widget } from './Widget';
 import { LayoutList, Search, ChevronRight } from './icons';
 import { api } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
@@ -58,30 +59,41 @@ import type { ApiSchemaResponse } from '../lib/types';
  * propose/review/approve/edit/role/persistence affordance anywhere in this
  * component, and it computes no verdict of its own.
  */
+/** "<title> — v<version> — vendored official schema (read-only reference)",
+ *  with the version stated once whether or not the title already carries it. */
+export function sourceLineFor(title: string | null | undefined, version: string): string {
+  const name = title ?? 'ISAAC official schema';
+  const versioned = name.includes(`v${version}`) ? name : `${name} — v${version}`;
+  return `${versioned} — vendored official schema (read-only reference)`;
+}
+
 export function SchemaBrowser() {
   const fetchState = useFetch(() => api.getSchema(), []);
 
   return (
-    <section className="schema-browser card" aria-labelledby="schema-browser-heading">
-      <header className="schema-browser-head">
-        <LayoutList size={18} strokeWidth={2} aria-hidden="true" className="schema-browser-icon" />
-        <div>
-          <h2 id="schema-browser-heading">Schema Reference</h2>
-          <p className="schema-browser-sub">
-            A read-only reference for the canonical official ISAAC schema and its controlled
-            vocabulary — every field, type, requirement, allowed value, rule, and term below is read
-            verbatim from the vendored schema and vocabulary files. This is a reference view, not
-            the portal Ontology system: there is nothing to propose, review, approve, or edit here.
-          </p>
-        </div>
-      </header>
-
+    /* A WIDGET SINCE 2026-10-12, like the Validator beside it: the title, ONE
+       line saying what this is, and the rest of the old four-line description
+       behind the info toggle — still in the DOM. The body is unchanged. */
+    <Widget
+      id="schema-browser-heading"
+      className="schema-browser"
+      title="Schema Reference"
+      icon={<LayoutList size={18} strokeWidth={2} />}
+      sub="A read-only reference for the canonical official ISAAC schema."
+      info={
+        <p>
+          Every field, type, requirement, allowed value, rule, and term below is read verbatim from
+          the vendored schema and vocabulary files. This is a reference view, not the portal
+          Ontology system: there is nothing to propose, review, approve, or edit here.
+        </p>
+      }
+    >
       {fetchState.status === 'loading' && <LoadingPanel label="Loading schema…" />}
       {fetchState.status === 'error' && (
         <BackendDown error={fetchState.error} onRetry={fetchState.reload} />
       )}
       {fetchState.status === 'data' && <SchemaBrowserBody data={fetchState.data} />}
-    </section>
+    </Widget>
   );
 }
 
@@ -192,7 +204,11 @@ function SchemaBrowserBody({ data }: { data: ApiSchemaResponse }) {
   const selected =
     findFieldByPath(visibleFields, selectedPath) ?? (visibleFields.length > 0 ? visibleFields[0] : null);
 
-  const sourceLine = `${data.schema_title ?? 'ISAAC official schema'} — v${data.schema_version} — vendored official schema (read-only reference)`;
+  /* THE VERSION ONCE (2026-10-12). The vendored schema's own title already ends
+     in its version ("ISAAC AI-Ready Scientific Record v1.05"), so appending
+     `— v1.05` printed "v1.05 — v1.05". The version is appended only when the
+     title does not already carry it, so a title without one still gets it. */
+  const sourceLine = sourceLineFor(data.schema_title, data.schema_version);
 
   /** Cross-view navigation: show one exact field in the Fields master-detail. */
   function openField(path: string) {

@@ -249,7 +249,9 @@ def test_draft_grouping(client):
     titles = [g["title"] for g in groups]
     assert "Sample" in titles and "System & Instrument" in titles
     total_fields = sum(len(g["fields"]) for g in groups)
-    assert total_fields == 26
+    # 26 -> 28 on 2026-10-12: the reaction and the cell type a person chooses on a run
+    # are rows any record can hold; a seeded record shows them as empty rows.
+    assert total_fields == 28
     statuses = {f["status"] for g in groups for f in g["fields"]}
     assert "verified" in statuses and "inferred" in statuses
     a_field = groups[0]["fields"][0]
@@ -267,11 +269,14 @@ def test_draft_grouping(client):
         "present",
         "capture",
     }
-    # THIS RECORD HOLDS ALL 26, so nothing here is a skeleton row. That is what makes
-    # the `26` above unchanged rather than newly satisfied by rows the record does not
-    # have — the assertion counted 26 before the skeleton existed and counts the same 26
-    # now, and this line is the reason a reader can tell those two apart.
-    assert all(f["present"] is True for g in groups for f in g["fields"])
+    # THIS RECORD HOLDS ALL 26 IT WAS SEEDED WITH, so none of THOSE is a skeleton row —
+    # and the only two that are, are the two paths added on 2026-10-12, which no fixture
+    # sheet carries. That is what keeps the count honest: 26 present rows, exactly as
+    # before the skeleton existed, plus the two named empty rows and nothing else.
+    chosen = {"context.electrochemistry.reaction", "context.electrochemistry.cell_type"}
+    absent = {f["path"] for g in groups for f in g["fields"] if f["present"] is not True}
+    assert absent == chosen
+    assert sum(1 for g in groups for f in g["fields"] if f["present"] is True) == 26
 
 
 # --- 6. pending ---------------------------------------------------------------

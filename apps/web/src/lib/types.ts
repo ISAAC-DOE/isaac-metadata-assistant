@@ -4461,6 +4461,13 @@ export interface ApiImportCandidate {
   disagreement: ApiImportDisagreement[];
   unresolved_reason: string | null;
   not_proposable_reason: string | null;
+  /**
+   * 2026-10-18 (QA `C-05`/`C-06`) — the SHORT, plain sentence a scientist reads beside a
+   * value that cannot be sent, derived by the server (`hist.plain_reason`). The full
+   * `not_proposable_reason` above is the engineering rationale and stays behind "Why, in
+   * detail". `null` for a candidate that can be sent; absent from an older server.
+   */
+  not_proposable_summary?: string | null;
   /** DERIVED by the server and served anyway, so no client recomputes the rule. */
   proposable: boolean;
   /**
@@ -4489,6 +4496,45 @@ export interface ApiImportCandidate {
   variation_total?: number | null;
   /** How many distinct scans (or files, for `per_source`) the variation spans. */
   variation_scans?: number | null;
+  /**
+   * 2026-10-12 — the DOMAIN OWNER's standing rule that resolves this disagreement, when
+   * one reaches it (`bl15.resolution.STANDING_RESOLUTIONS`): which source's reading is
+   * used, why, who confirmed it and how that reached the repository. Every competing
+   * reading stays in `disagreement`. Set together with `resolved_by_rule`.
+   */
+  standing_resolution?: ApiImportStandingResolution | null;
+}
+
+/** `bl15.resolution.StandingResolution.to_state` — a domain-owner rule, applied. */
+export interface ApiImportStandingResolution {
+  rule_id: string;
+  rule_version: number;
+  authority: 'domain_owner_rule';
+  layer: string;
+  chosen_source_role: string;
+  chosen_source_role_meaning: string;
+  over_source_role: string;
+  over_source_role_meaning: string;
+  statement: string;
+  attribution: string;
+  confirmed: string;
+  reading_used: { scan: string | null; item: string | null; value: string; source_ids: string[]; locators: string[] }[];
+  every_reading_kept: true;
+  writes_a_record_field: false;
+  applied: true;
+}
+
+/** `hist.left_for_a_person` — what an import does NOT fill on the runs (2026-10-12). */
+export interface ApiImportLeftForAPerson {
+  rule: string;
+  attribution: string;
+  where: string;
+  reasons: Record<string, string>;
+  runs: number;
+  fields: { path: string; label: string; left: number; offered: number; options: string[] }[];
+  /** Absent from the batch report, present on the session view. */
+  by_measurement?: Record<string, { path: string; label: string; reason: string }[]>;
+  fills_anything: false;
 }
 
 /** `hist.send_plan` — the batch's partition, published before anything is sent. */
@@ -4653,6 +4699,8 @@ export interface ApiImportSession {
    * predicts exactly what it then reports.
    */
   send_plan?: ApiImportSendPlan;
+  /** 2026-10-12 — the environment, reaction and cell type left for a person. */
+  left_for_a_person?: ApiImportLeftForAPerson | null;
   /** The two capability blocks, computed by the same functions `/api/health` uses. */
   capabilities?: {
     historical_file_ingestion: ApiIngestionCapability;
@@ -4951,6 +4999,11 @@ export interface ApiImportUnsentCandidate {
    * it, read off the candidate rather than composed a second time.
    */
   reason: string;
+  /**
+   * 2026-10-18 — the SHORT sentence a scientist reads first (`hist.plain_reason`); the
+   * full `reason` above stays one press away. Absent from a server that predates it.
+   */
+  summary?: string | null;
 }
 
 /**
@@ -5017,6 +5070,8 @@ export interface ApiImportAddedToExperiment {
     writes_field_values: false;
   };
   run_origins_recorded?: number;
+  /** 2026-10-12 — the same report as the session's, without its per-measurement list. */
+  left_for_a_person?: ApiImportLeftForAPerson | null;
   /** The session was re-read under THIS record's rules before anything was minted. */
   reread_for_target?: boolean;
   nominal_offers?: unknown[];

@@ -1,3 +1,4 @@
+import { CAPTURE_COPY } from './transcriptCaptureContent';
 /**
  * Settings → Connect Your Agent — every sentence the tab renders, authored once.
  *
@@ -95,7 +96,19 @@ export const MCP_CONNECT_COPY = {
     "How a scientist's own Claude would call ISAAC's tools — what it will be allowed to do, and what this deployment has to settle first.",
 
   /** The status, stated as a sentence so it never depends on a colour. */
-  statusLabel: 'Requires organization configuration',
+  /* THE WIDGET'S HEADLINE since 2026-10-12, and deliberately UNCHANGED in the move.
+     The redesign brief proposed "Not available — needs organization configuration";
+     `docs/mcp-capability-audit.md` (per capture-brief §33) prescribes THIS phrase for
+     exactly this state, and `connect-your-agent.test.tsx` pins the two together. A
+     committed decision document outranks a layout brief, so the words stay and only
+     their placement changed. It is true in every posture this build can report: with
+     no published address (`MCP_ENDPOINT` is `null`) no remote agent can be pointed at
+     this deployment, whatever `/api/health` says about the mount. What the posture
+     changes is the REASON, which the widget states beneath it. */
+  /* 2026-10-18: the audit's WORDS, in the page's Title Case for a heading (the
+     independent review asked for one casing register across Settings). The pin in
+     `connect-your-agent.test.tsx` compares the words, not the casing. */
+  statusLabel: 'Requires Organization Configuration',
   statusDetail:
     'No agent can connect to this deployment. There is no endpoint address to connect to and no configured way to authenticate a caller, so there is no live connection for this page to report, and nothing for it to revoke.',
 
@@ -128,7 +141,7 @@ export const MCP_CONNECT_COPY = {
   endpointNone:
     'None. This screen will not show a placeholder address, because a scientist who copied one would be pointing their Claude at something that does not answer. Ask whoever runs this deployment whether an address exists yet.',
   endpointVerify:
-    'You can check the claim rather than take it: the Endpoint Explorer tab lists every operation this build exposes, generated from the app’s own contract, and no agent interface is among them.',
+    'You can check the claim rather than take it: the Endpoint Explorer, under Advanced, lists every operation this build exposes, generated from the app’s own contract, and no agent interface is among them.',
   /**
    * THE OTHER MECHANISM, named — because two tabs apart, one word apart, this
    * page and API Access make auth claims that do not reconcile on their own.
@@ -146,7 +159,7 @@ export const MCP_CONNECT_COPY = {
    * worth drawing on the day an address is published.
    */
   restApiPointer:
-    'This page is about the agent interface only. This build does serve an HTTP API, and the API Access tab’s “Connect an Agent” guide covers what a program you write has to get right to call it — a different mechanism, with its own separate answer about authentication.',
+    'This page is about the agent interface only. This build does serve an HTTP API, and the API Access widget’s “Program an Agent” guide covers what a program you write has to get right to call it — a different mechanism, with its own separate answer about authentication.',
 
   /** The endpoint, when a deployment publishes one. Still not a connection. */
   endpointPublishedNote:
@@ -717,3 +730,40 @@ export const MCP_SETUP_STEPS: readonly McpSetupStep[] = [
  * documentation route.
  */
 export const MCP_AUDIT_DOC = 'docs/mcp-capability-audit.md';
+
+// --- the Connect Your Agent WIDGET (2026-10-12) -------------------------------
+
+/** The widget's structural labels. The claims are all in `MCP_CONNECT_COPY`. */
+export const MCP_WIDGET_COPY = {
+  title: 'Connect Your Agent',
+  /** The widget's one-line description. `MCP_CONNECT_COPY.cardSub`, the longer
+   *  version, is in the widget's info. */
+  sub: "How your own Claude would call ISAAC's tools.",
+  viewCanDo: 'Can Do',
+  viewPermissions: 'Permissions',
+  viewSetup: 'Setup',
+  viewClaude: 'Open in Claude',
+  refusedHeading: 'And What It Will Not',
+  detailsSummary: 'Endpoint, Activity and Access',
+} as const;
+
+/**
+ * THE REASON LINE under the unconfigured headline, chosen by the deployment's
+ * own posture (`/api/health` → `mcp.posture`, `mcp/deployment.py::posture`).
+ *
+ * The two posture-specific sentences are the voice-capture view's, imported
+ * rather than re-authored, so Settings and Record → Capture cannot give two
+ * different reasons for the same deployment. Every other value — `unmounted`,
+ * an unread or unrecognised posture, a read still in flight — keeps the
+ * sentence this tab has always shown, which is the build's own fact (no address
+ * is published, and nothing here can authenticate a caller).
+ *
+ * Only called on the UNCONFIGURED branch: with no published address none of
+ * these postures makes an agent reachable, so none of them may change the
+ * headline above it.
+ */
+export function mcpReasonLine(posture: string | null): string {
+  if (posture === 'local-only') return CAPTURE_COPY.claudeLocalOnly;
+  if (posture === 'oauth-mounted' || posture === 'remote-ready') return CAPTURE_COPY.claudeNoAddress;
+  return MCP_CONNECT_COPY.statusDetail;
+}

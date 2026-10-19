@@ -98,6 +98,28 @@ export interface StatCardProps {
    * `quiet` is the neutral not-available treatment, not an error treatment.
    */
   tone?: StatTone;
+  /**
+   * THIS FIGURE IS THE DETERMINISTIC VERDICT — the official validator's result.
+   * Only a verdict card paints `good` in the reserved PASS green; every other
+   * `good` is drawn calm and neutral, because the design system reserves that
+   * green for the verdict alone (`docs/ui-handoff/design-system.md`).
+   */
+  verdict?: boolean;
+  /**
+   * A SHORT visible unit set beside the value ("records", "trials · 0
+   * unexpected") — for the compact stat row. When given, the full `note`
+   * sentence is kept for assistive technology (`sr-only`) and the unit is what a
+   * sighted reader sees; the unit is `aria-hidden` so the two are not read
+   * twice. Without `unit`, `note` renders visibly as it always has.
+   */
+  unit?: string;
+  /**
+   * THE INLINE STAT (2026-10-18): label and value on one line, no box, no
+   * visible sentence. The `note` is kept for assistive technology (`sr-only`),
+   * exactly as with `unit`; the sentence a sighted reader no longer sees under
+   * the number belongs in the widget's info panel. Implied by `unit`.
+   */
+  compact?: boolean;
 }
 
 /**
@@ -106,9 +128,22 @@ export interface StatCardProps {
  * the repo rule that figures must be a labelled `<dl>` and never bare divs of
  * numbers.
  */
-export function StatCard({ label, value, note, icon, tone = 'neutral' }: StatCardProps) {
+export function StatCard({
+  label,
+  value,
+  note,
+  icon,
+  tone = 'neutral',
+  verdict = false,
+  unit,
+  compact = unit !== undefined,
+}: StatCardProps) {
   return (
-    <dl className="stat-card" data-tone={tone}>
+    <dl
+      className={`stat-card${compact ? ' stat-card-compact' : ''}`}
+      data-tone={tone}
+      data-verdict={verdict ? 'true' : undefined}
+    >
       <dt className="stat-card-label">
         {icon ? (
           <span className="stat-card-icon" aria-hidden="true">
@@ -118,7 +153,49 @@ export function StatCard({ label, value, note, icon, tone = 'neutral' }: StatCar
         <span>{label}</span>
       </dt>
       <dd className="stat-card-value mono">{value}</dd>
-      {note ? <dd className="stat-card-note">{note}</dd> : null}
+      {/* Its own <dd>, so the value's text stays exactly the value. */}
+      {unit !== undefined ? (
+        <dd className="stat-card-unit" aria-hidden="true">
+          {unit}
+        </dd>
+      ) : null}
+      {note ? (
+        <dd className={compact ? 'stat-card-note sr-only' : 'stat-card-note'}>{note}</dd>
+      ) : null}
+    </dl>
+  );
+}
+
+/* ---- HeadlineFigure --------------------------------------------------- */
+
+export interface HeadlineFigureProps {
+  /** Title Case label — what the figure counts, in words. */
+  label: string;
+  /** Already-formatted display value — see `StatCardProps.value`. */
+  value: string;
+  /** Decoration only; the label carries the meaning. */
+  tone?: StatTone;
+}
+
+/**
+ * A widget's ONE headline figure (`components/Widget.tsx`'s `headline` slot).
+ *
+ * It is a `StatCard` in structure — the same single-group `<dl>`, the same
+ * `stat-card-label` / `stat-card-value` pair, the same `data-tone` — so every
+ * guard that reads a figure by its own label (`cardValue` in the Statistics
+ * suites) reads this one the same way, and a figure promoted to a headline
+ * cannot drift out of what those guards see. Only the presentation differs:
+ * borderless, larger, in tabular numerals, with the label set above the value.
+ *
+ * Like every primitive here it formats nothing: `value` arrives as a string.
+ */
+export function HeadlineFigure({ label, value, tone = 'neutral' }: HeadlineFigureProps) {
+  return (
+    <dl className="stat-card stat-card-headline" data-tone={tone}>
+      <dt className="stat-card-label">
+        <span>{label}</span>
+      </dt>
+      <dd className="stat-card-value">{value}</dd>
     </dl>
   );
 }

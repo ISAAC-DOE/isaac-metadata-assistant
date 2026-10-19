@@ -312,9 +312,9 @@ describe('A11Y-06 residue · the Endpoint Explorer tab names one region, once', 
       `two landmarks named "Endpoint Explorer" are indistinguishable in a landmark list; ` +
         `found ${named.length}: ${named.map((el) => el.className).join(' | ')}`,
     ).toBe(1);
-    // And it is the shared card, not the inner panel — the card is the one that
-    // carries the tab's title, so it is the one that should keep the name.
-    expect(named[0].className).toContain('settings-card');
+    // And it is the Explorer WIDGET (the card until 2026-10-12), not the inner
+    // panel — the widget carries the title, so it is the one that keeps the name.
+    expect(named[0].className).toContain('settings-explorer');
   });
 
   /*

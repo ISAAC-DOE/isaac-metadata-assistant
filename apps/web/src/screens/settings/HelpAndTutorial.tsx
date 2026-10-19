@@ -1,13 +1,16 @@
 import '../../components/tutorial.css';
 import { useRef } from 'react';
 
+import { Widget } from '../../components/Widget';
+import { Compass } from '../../components/icons';
 import { LABELS } from '../../lib/labels';
+import { SETTINGS_WIDGET_COPY } from '../../lib/settingsContent';
 import { startTutorial, useTutorialState } from '../../lib/tutorialController';
 import { TUTORIAL_ANCHORS, TUTORIAL_STEP_COUNT } from '../../lib/tutorialSteps';
 
 /**
- * Settings & API → Help & Tutorial. The ONE permanent home of the replay
- * control.
+ * Settings → Overview → Guided Walkthrough (was Settings & API → Help &
+ * Tutorial). The ONE permanent home of the replay control.
  *
  * FOUR THINGS IT MUST SAY, AND SAYS:
  *
@@ -58,43 +61,90 @@ import { TUTORIAL_ANCHORS, TUTORIAL_STEP_COUNT } from '../../lib/tutorialSteps';
  * session, which is stated where the reader is while it can still matter to them
  * (the bar's own body copy), not buried in Settings.
  */
+/** The widget heading's id — also the region's accessible name. */
+export const WALKTHROUGH_WIDGET_HEADING_ID = 'settings-help-heading';
+
+/*
+ * ── A WIDGET ON OVERVIEW SINCE 2026-10-12 ───────────────────────────────────
+ *
+ * This was a tab of its own — 319 words for one button. It is now the Guided
+ * Walkthrough widget on Overview, and `?tab=help` (which the walkthrough's own
+ * last step links to) lands on it. Every sentence is kept; what moved is where:
+ *
+ *   · VISIBLE: what it is, in the one-line description; the STATE (finished in
+ *     this browser or not) as the headline, in a live region; the Replay control;
+ *     and — only while one is open — the warning that starting again discards the
+ *     open worked example, because a destructive consequence is never behind a
+ *     disclosure (`DEC-35`).
+ *   · INFO: the longer description, what starting it does, and what is
+ *     remembered where. Provenance and explanation, none of it a state.
+ */
 export function HelpAndTutorialPanel() {
   const state = useTutorialState();
   const replayRef = useRef<HTMLButtonElement>(null);
 
   return (
-    <>
-      <p>
-        The guided walkthrough is a {TUTORIAL_STEP_COUNT}-step tour of this app that points at the
-        real controls on the real screens — what the experiment list holds, how a record shows what
-        it still needs, how evidence and confirmation work, where validation happens, and why export
-        stays closed until a record earns it.
-      </p>
-
-      <div className="tutorial-help-actions">
-        <button
-          ref={replayRef}
-          type="button"
-          className="btn btn-primary"
-          data-tutorial-anchor={TUTORIAL_ANCHORS.tutorialReplay}
-          onClick={() => startTutorial(replayRef.current)}
-        >
-          {LABELS.actionReplayTutorial}
-        </button>
-        <span className="tutorial-help-note" role="status">
-          {state.completed
-            ? 'Finished in this browser.'
-            : 'Not finished in this browser yet.'}
-        </span>
-      </div>
-
-      <p className="tutorial-help-note">
-        Starting it opens a worked example of its own — a temporary workspace holding five example
-        records to walk through, kept apart from your experiments and discarded when the walkthrough
-        ends. Your own work is not touched: no field of yours is answered, no record of yours is
-        exported, and nothing of yours is restored or removed.
-      </p>
-
+    <Widget
+      id={WALKTHROUGH_WIDGET_HEADING_ID}
+      className="settings-widget-walkthrough"
+      title={LABELS.settingsTabHelp}
+      icon={<Compass size={18} strokeWidth={2} />}
+      info={
+        <>
+          <p>
+            The guided walkthrough is a {TUTORIAL_STEP_COUNT}-step tour of this app that points at
+            the real controls on the real screens — what the experiment list holds, how a record
+            shows what it still needs, how evidence and confirmation work, where validation happens,
+            and why export stays closed until a record earns it.
+          </p>
+          <p>
+            Starting it opens a worked example of its own — a temporary workspace holding five
+            example records to walk through, kept apart from your experiments and discarded when the
+            walkthrough ends. Your own work is not touched: no field of yours is answered, no record
+            of yours is exported, and nothing of yours is restored or removed.
+          </p>
+          <p>
+            Whether you have finished the walkthrough is remembered by this browser only — this
+            build has no account to file it under — so another browser, another device, or a cleared
+            browser will be offered it again. While a walkthrough is open, this tab also holds which
+            worked example it is using and which step you reached, so a reload puts you back where
+            you were. Both are forgotten when the walkthrough ends — with one deliberate exception: if
+            the check this tab makes on a walkthrough you had open fails for a reason it cannot
+            identify, that note is kept, because discarding it would throw away your only route back
+            into a walkthrough that may still be open. Nothing else about the walkthrough is stored:
+            neither of those two entries holds record content, a field value, or an identity. What
+            the assistant panel keeps is separate and is described under {LABELS.navSettings} &rarr;
+            Privacy &amp; Governance.
+          </p>
+        </>
+      }
+      infoLabel={`About the ${LABELS.settingsTabHelp}`}
+      headline={
+        <>
+          <span className="widget-state settings-walkthrough-state" role="status">
+            {state.completed
+              ? SETTINGS_WIDGET_COPY.walkthroughFinished
+              : SETTINGS_WIDGET_COPY.walkthroughNotFinished}
+          </span>
+          {/* The replay control sits ON the state line — one row: where you
+              stand, and the one thing you can do about it. */}
+          <span className="tutorial-help-actions settings-walkthrough-action">
+            <button
+              ref={replayRef}
+              type="button"
+              className="btn btn-primary"
+              data-tutorial-anchor={TUTORIAL_ANCHORS.tutorialReplay}
+              onClick={() => startTutorial(replayRef.current)}
+            >
+              {/* Start before this browser has finished it, Replay after — the
+                  same browser-local `completed` flag the state line beside it
+                  reads, so the two can never disagree. */}
+              {state.completed ? LABELS.actionReplayTutorial : LABELS.actionStartTutorial}
+            </button>
+          </span>
+        </>
+      }
+    >
       {/*
         Shown only while a session is actually open, and it is `sessionId` that
         decides — the same condition the worked-example bar uses, because the same
@@ -103,25 +153,12 @@ export function HelpAndTutorialPanel() {
         `running` phase would miss a session resumed after a reload.
       */}
       {state.sessionId !== null && (
-        <p className="tutorial-help-note" role="status">
+        <p className="tutorial-help-note settings-state-line" role="status">
           A worked example is open now. Starting the walkthrough again discards it first — together
           with anything you have confirmed inside it — and opens a fresh one.
         </p>
       )}
 
-      <p className="tutorial-help-note">
-        Whether you have finished the walkthrough is remembered by this browser only — this build has
-        no account to file it under — so another browser, another device, or a cleared browser will
-        be offered it again. While a walkthrough is open, this tab also holds which worked example it
-        is using and which step you reached, so a reload puts you back where you were. Both are
-        forgotten when the walkthrough ends — with one deliberate exception: if the check this tab
-        makes on a walkthrough you had open fails for a reason it cannot identify, that note is
-        kept, because discarding it would throw away your only route back into a walkthrough that
-        may still be open. Nothing else about the walkthrough is stored: neither
-        of those two entries holds record content, a field value, or an identity. What the
-        assistant panel keeps is separate and is described under {LABELS.navSettings} &rarr; Data &amp;
-        Privacy.
-      </p>
-    </>
+    </Widget>
   );
 }

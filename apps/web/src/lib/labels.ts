@@ -171,6 +171,15 @@ export function humanizeActivityToken(token: string): string {
  */
 const SETTINGS_DESTINATION = 'Settings';
 
+/**
+ * WHERE THE GUIDED WALKTHROUGH LIVES, named once (2026-10-12). It was the
+ * `Help & Tutorial` TAB; Settings is now four tabs of widgets and the replay
+ * control is the Guided Walkthrough widget on Overview (`?tab=help` still lands
+ * on it). Every sentence that tells a reader where to find it reads this, so the
+ * wayfinding cannot name a tab that no longer exists.
+ */
+const SETTINGS_WALKTHROUGH = 'Guided Walkthrough';
+
 export const LABELS = {
   // App / brand
   brand: 'ISAAC',
@@ -983,8 +992,8 @@ export const LABELS = {
     'and nothing changed.',
   demoScopeRequiredRemedy:
     'Opening the guided walkthrough opens a worked example, and this control works inside one. ' +
-    `It lives in ${SETTINGS_DESTINATION} → Help & Tutorial.`,
-  actionGoToHelpAndTutorial: 'Go to Help & Tutorial',
+    `It lives in ${SETTINGS_DESTINATION} → ${SETTINGS_WALKTHROUGH}.`,
+  actionGoToHelpAndTutorial: `Go to ${SETTINGS_WALKTHROUGH}`,
   actionGoToExperiments: 'Go to My Experiments',
 
   /*
@@ -1126,7 +1135,7 @@ export const LABELS = {
    * stays hidden for the rest of this session. Only the words moved, to the two
    * the strip's one line has room for.
    */
-  actionStartTutorial: 'Start Guided Walkthrough',
+  actionStartTutorial: `Start ${SETTINGS_WALKTHROUGH}`,
   // The strip's visible verb; its accessible name is `actionStartTutorial`.
   actionStart: 'Start',
   actionSkipForNow: 'Not Now',
@@ -1135,7 +1144,19 @@ export const LABELS = {
   actionTutorialNext: 'Next',
   actionTutorialFinish: 'Finish',
   actionCloseTutorial: 'Close Walkthrough',
-  actionReplayTutorial: 'Replay Guided Walkthrough',
+  /* ~~'Replay Tutorial'~~ — 2026-10-18: the walkthrough is called the Guided
+     Walkthrough everywhere it is offered (`SETTINGS_WALKTHROUGH`), so the control
+     that replays it says so. One label, still: the Settings widget's control, the
+     Help popover's, the empty state's and the completion card's share it. */
+  actionReplayTutorial: `Replay ${SETTINGS_WALKTHROUGH}`,
+  /* ~~`actionStartWalkthrough: \`Start ${SETTINGS_WALKTHROUGH}\``~~ — MERGED INTO
+     `actionStartTutorial` (merge of the Settings and pages slices, 2026-10-19).
+     Both slices arrived at "Start Guided Walkthrough" for a reader who has not
+     finished the walkthrough in this browser — Settings for its widget's control,
+     the pages slice for every entry point — so two keys held one string for one
+     action. One name per thing means one key: Settings now reads
+     `actionStartTutorial` beside `actionReplayTutorial`, chosen from the same
+     browser-local completion flag the Help popover reads. */
 
   /*
    * ~~THE EMPTY STATE'S OWN PRIMARY, and it needed a THIRD name rather than either of
@@ -1665,18 +1686,18 @@ export const LABELS = {
   tutorialSessionCreateFailedTitle: 'The worked example could not be opened',
   tutorialSessionCreateFailedBody:
     'The walkthrough did not start, and nothing in My Experiments was changed. You can try ' +
-    `again from ${SETTINGS_DESTINATION} → Help & Tutorial.`,
+    `again from ${SETTINGS_DESTINATION} → ${SETTINGS_WALKTHROUGH}.`,
   tutorialSessionExpiredTitle: 'The Worked Example Has Expired',
   tutorialSessionExpiredBody:
     'The temporary workspace this walkthrough was using no longer exists, so its five example ' +
     'records are gone and the walkthrough has closed. Nothing in My Experiments was changed. ' +
-    `You can start the walkthrough again from ${SETTINGS_DESTINATION} → Help & Tutorial.`,
+    `You can start the walkthrough again from ${SETTINGS_DESTINATION} → ${SETTINGS_WALKTHROUGH}.`,
   tutorialSessionResumeFailedTitle: 'The worked example could not be resumed',
   tutorialSessionResumeFailedBody:
     'Checking the walkthrough you had open did not succeed, so it has not been resumed. Whether ' +
     'it is still there is not something this screen can tell you. Nothing was written and ' +
     'nothing in My Experiments was changed. Reloading the page tries again, and you can start a ' +
-    `new walkthrough from ${SETTINGS_DESTINATION} → Help & Tutorial.`,
+    `new walkthrough from ${SETTINGS_DESTINATION} → ${SETTINGS_WALKTHROUGH}.`,
   actionDismissTutorialNotice: 'Dismiss',
 
   /*
@@ -1801,9 +1822,9 @@ export const LABELS = {
     'That is the whole workflow. The worked example you were walking through is gone now, and so ' +
     'is anything you answered inside it — it was a temporary copy of the five examples, kept apart ' +
     'from your own work, and no record of yours was changed. You can start it again from ' +
-    `${SETTINGS_DESTINATION} → Help & Tutorial at any time.`,
+    `${SETTINGS_DESTINATION} → ${SETTINGS_WALKTHROUGH} at any time.`,
 
-  settingsTabHelp: 'Help & Tutorial',
+  settingsTabHelp: SETTINGS_WALKTHROUGH,
 
   /*
    * New Proposal — the creation form on the Ingestion Proposals panel.
