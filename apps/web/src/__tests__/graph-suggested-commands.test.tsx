@@ -1,3 +1,4 @@
+import { LABELS } from '../lib/labels';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { act, render, fireEvent, waitFor, within, type RenderResult } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -631,6 +632,14 @@ describe('graph suggested commands — keyboard-operable and honestly named', ()
     const { view } = renderGraph();
     await view.findByText('Graph', { selector: 'h2' });
 
+    // Behind the command bar's Suggestions disclosure since 2026-10-12 (it stays
+    // mounted while closed, so the DOM-reading tests in this file still reach it;
+    // a role query only sees it once it is open, as a reader would). The toggle is
+    // a real `aria-expanded` button, asserted here too.
+    const toggle = view.getByRole('button', { name: LABELS.graphCommandsToggle });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
     const list = view.getByRole('list', { name: 'Suggested Commands' });
     expect(list.querySelectorAll(':scope > li').length).toBe(chips().length);
     for (const chip of chips()) {

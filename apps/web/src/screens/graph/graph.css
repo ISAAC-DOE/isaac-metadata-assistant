@@ -153,6 +153,12 @@
   align-items: center;
   gap: 10px;
 }
+.memory-graph-boundary {
+  margin: 0 0 0 auto;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+}
 .memory-graph-search-wrap {
   display: flex;
   align-items: center;
@@ -886,7 +892,9 @@
 
 /* ---- status line + notices ------------------------------------------- */
 .memory-graph-status {
-  margin-top: 10px;
+  /* `--space-sm`, not 10px: the status line sits closer to the controls it reports
+     on (2026-10-18), part of bringing the canvas onto the first screen. */
+  margin-top: var(--space-sm);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1710,6 +1718,11 @@
 }
 
 /* ---- help drawer (S6) ------------------------------------------------ */
+/* The dialog stays mounted while closed (its statements stay in the DOM), so
+   `hidden` has to win over the `display: flex` below. */
+.graph-help-backdrop[hidden] {
+  display: none;
+}
 .graph-help-backdrop {
   position: fixed;
   inset: 0;
@@ -2006,6 +2019,9 @@
     flex-direction: column;
     align-items: stretch;
   }
+  .memory-graph-boundary {
+    margin-left: 0;
+  }
   /* In a COLUMN container flex-basis is a height: the row layout's
      `flex: 1 1 220px` would otherwise make the search box 220px TALL. */
   .memory-graph-search-wrap {
@@ -2060,4 +2076,74 @@
   .graph-help-panel {
     padding: 16px 14px 20px;
   }
+}
+
+/* ---- the command bar's Suggestions disclosure (2026-10-12) ---------------- */
+.graph-cmd-commands-toggle svg {
+  transition: transform 0.15s ease;
+}
+.graph-cmd-commands-toggle[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+.graph-cmd-more {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+.graph-cmd-more[hidden] {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .graph-cmd-commands-toggle svg {
+    transition: none;
+  }
+}
+
+/* ---- the legend on one band (2026-10-12) -----------------------------------
+   Node types, references and clusters sit side by side and wrap, instead of
+   three stacked groups under a heading row. The heading stays for the outline. */
+.graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-xs) var(--space-xl);
+}
+.graph-legend .graph-legend-heading {
+  margin: 0;
+}
+.graph-legend .graph-legend-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-xs) var(--space-sm);
+  margin: 0;
+}
+.graph-legend .graph-legend-group-title {
+  margin: 0;
+}
+
+/* The header now holds only the truncation note, and only when the projection is
+   capped; with nothing in it, it takes no space. The projection's counts sit in
+   the status row (2026-10-12). */
+.memory-graph-header:empty {
+  display: none;
+}
+.memory-graph-status .memory-graph-counts {
+  margin: 0;
+  flex: 1 1 24rem;
+  min-width: 0;
+}
+
+/* The outer-ring count, visible under the canvas (it is a figure, so it is not
+   in the canvas's info tip). */
+.graph-canvas-isolated {
+  margin: var(--space-xs) 0 0;
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+}
+/* With no title row and no truncation note above it, the controls row is the
+   card's first line and takes no extra top margin. */
+.memory-graph-header:empty + .memory-graph-controls {
+  margin-top: 0;
 }

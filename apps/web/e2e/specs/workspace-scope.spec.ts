@@ -149,8 +149,7 @@ test.describe('@interaction the ordinary workspace', () => {
      *
      * Both retired names must stay absent: one label must address exactly one control.
      */
-    await expect(page.getByRole('button', { name: 'Launch Guided Demo' })).toBeEnabled();
-    await expect(page.getByRole('button', { name: 'Replay Tutorial' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Start Guided Walkthrough' })).toBeEnabled();
     await expect(page.getByRole('button', { name: 'Replay Guided Walkthrough' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Go to Help & Tutorial' })).toHaveCount(0);
     // 2026-10-18: that control's label now reads `Go to Guided Walkthrough` (the tab it
@@ -376,7 +375,7 @@ test.describe('@interaction the example-workspace operations refuse outside a se
      * have written to it — which is exactly the point.
      */
     await app.goto('/load');
-    await expect(page.getByRole('button', { name: 'Launch Guided Demo' })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Start Guided Walkthrough' })).toBeEnabled();
     await expect(page.getByRole('button', { name: 'Run the Worked Example' })).toHaveCount(0);
 
     const after = await request.get(`${API_BASE}/experiments`);

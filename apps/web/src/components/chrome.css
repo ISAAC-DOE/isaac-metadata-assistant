@@ -202,13 +202,6 @@
   align-items: center;
   gap: 12px;
 }
-.breadcrumb {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-tertiary);
-  font-size: 12.5px;
-}
 .record-context {
   display: flex;
   align-items: center;
@@ -306,6 +299,44 @@
   /* The rung, not the literal it happened to equal. */
   font-size: var(--font-size-meta);
   color: var(--text-quaternary);
+}
+/* The id as a control (2026-10-12): the same mono rung and colour as the file
+   crumb it replaces, with a copy glyph and a quiet hover — it is secondary to the
+   record's name beside it, so it never looks like a primary action. */
+.record-file-wrap {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-xs);
+}
+.record-file-full {
+  font-family: var(--font-mono);
+  user-select: all;
+  color: var(--text-secondary);
+}
+.record-file-copy {
+  font: inherit;
+  color: inherit;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-2xs) var(--space-xs);
+  border: 1px solid transparent;
+  border-radius: var(--radius-token);
+  background: transparent;
+  line-height: var(--line-height-snug);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.record-file-copy:hover {
+  border-color: var(--border);
+  background: var(--surface-subtle);
+  color: var(--text-secondary);
+}
+.record-file-copy:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
 }
 .icon-btn {
   width: 30px;
@@ -1100,6 +1131,11 @@
   /* Trim the search trigger to its icon at phone widths. */
   .topbar-search-label,
   .topbar-search-kbd { display: none; }
+  /* The build label leaves the collapsed nav at phone width (2026-10-18): it
+     took a row of its own under the four destinations on every screen. The same
+     version is stated in Settings (App Version) and in Copy Diagnostics, and the
+     label stays in the DOM for every non-phone width. */
+  .nav-footer { display: none; }
   /* PHONE ONLY: the supplementary mono filename is dropped. Between 641 and
      1024px it stays visible — the crumb has its own row there and the filename
      fits on it: at 768 that second row runs 29→485.4, i.e. 456.4px of a 710px

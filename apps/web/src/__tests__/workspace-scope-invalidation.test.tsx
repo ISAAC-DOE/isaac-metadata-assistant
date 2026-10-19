@@ -178,7 +178,7 @@ function bar(): HTMLElement | null {
  * `startTutorial`.
  */
 async function startFromOffer(): Promise<void> {
-  fireEvent.click(await screen.findByRole('button', { name: LABELS.actionLaunchGuidedDemo }));
+  fireEvent.click(await screen.findByRole('button', { name: LABELS.actionStartTutorial }));
   await waitFor(() => expect(getTutorialState().sessionId).toBe(TUTORIAL_SESSION_ID));
 }
 
@@ -482,7 +482,7 @@ describe('D2 · the walkthrough navigates on a step change, not continuously', (
     expect(await screen.findByRole('tab', { name: 'Overview', selected: true })).toBeInTheDocument();
     const walkthrough = await screen.findByRole('region', { name: LABELS.settingsTabHelp });
     // Not yet finished in this browser, so the control reads Start (2026-10-18).
-    const replay = within(walkthrough).getByRole('button', { name: LABELS.actionStartWalkthrough });
+    const replay = within(walkthrough).getByRole('button', { name: LABELS.actionStartTutorial });
     fireEvent.click(replay);
 
     // One session discarded, one opened — never two held at once.

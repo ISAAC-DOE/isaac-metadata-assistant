@@ -3172,3 +3172,125 @@ a.settings-jump-btn {
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
 }
+
+/* ---- Load Materials (2026-10-12) ------------------------------------------
+   Two widgets under the page header. The grid is `.onramps` (runner.css), whose
+   auto-fit tracks are pinned by `responsive-layout-defects.test.ts`; the cards
+   are `components/Widget.tsx`. */
+.load-page {
+  max-width: 1040px;
+}
+.load-page .gov-banner {
+  margin-bottom: var(--space-lg);
+}
+.load-widget-cta {
+  align-self: flex-start;
+}
+.load-widget-caveat {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  margin: 0;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--advisory-text);
+}
+.load-widget-caveat svg {
+  flex: none;
+  margin-top: var(--space-2xs);
+}
+/* In the info panel the refusal statement is ordinary info prose. */
+.widget-info .onramp-warn {
+  display: block;
+  margin-top: 0;
+  font-size: inherit;
+  color: inherit;
+}
+.load-page .onramps {
+  margin-top: 0;
+  align-items: start;
+}
+.helptip-panel .notfound-scope {
+  margin: 0;
+  font-size: inherit;
+  color: inherit;
+}
+
+/* ---- Project Memory Overview as widgets (2026-10-12) ----------------------
+   Three widgets in the shared `.widget-grid` (components/widget.css). Inside a
+   widget the figure grid is one column and starts flush — the widget's own gap
+   spaces it — and the axis rows lose their top margin for the same reason. */
+.placeholder .memory-intro {
+  margin-top: var(--space-xs);
+}
+.memory-overview-grid {
+  margin-top: var(--space-lg);
+}
+.widget .memory-figures {
+  margin: 0;
+  grid-template-columns: 1fr;
+}
+.widget .memory-axes {
+  margin: 0;
+}
+.widget .memory-indexed-note {
+  margin: 0;
+  font-size: var(--font-size-body);
+  color: var(--text-secondary);
+}
+.memory-size-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+.memory-size-view[hidden] {
+  display: none;
+}
+.memory-size-open {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--action);
+  font: inherit;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  text-decoration: underline;
+  text-decoration-color: var(--action-selected-border);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.memory-size-open:hover {
+  color: var(--action-hover);
+  text-decoration-color: currentColor;
+}
+.memory-size-open:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-token);
+}
+.memory-axis-defs {
+  margin: 0;
+}
+.memory-axis-defs dd {
+  margin: var(--space-2xs) 0 var(--space-sm);
+  font-size: inherit;
+  color: inherit;
+}
+/* Each size view leads with its own figure, value first. */
+.memory-figures-lead > .memory-figure:first-child {
+  justify-content: flex-start;
+  gap: var(--space-sm);
+  padding-top: 0;
+}
+.memory-figures-lead > .memory-figure:first-child dd {
+  order: -1;
+  text-align: left;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-heading-lg);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.memory-figures-lead > .memory-figure:first-child dt {
+  font-size: var(--font-size-body);
+  color: var(--text-secondary);
+}

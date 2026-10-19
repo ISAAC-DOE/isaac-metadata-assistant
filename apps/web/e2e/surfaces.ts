@@ -86,7 +86,7 @@ export const SURFACES: readonly Surface[] = [
     // any request without a session header. The refusal itself is a BEHAVIOUR this
     // suite asserts elsewhere rather than a reason to open the surface in a session.
     scope: 'ordinary',
-    ready: { role: 'button', name: 'Launch Guided Demo' },
+    ready: { role: 'button', name: 'Start Guided Walkthrough' },
     // FINDING A11Y-05 is CLOSED (2026-08-26). `LoadMaterials.tsx` renders
     // `<h1 class="sr-only">Load Materials</h1>`, so `expectH1: false` is gone
     // and `specs/structure.spec.ts` now holds this surface to the same

@@ -42,7 +42,7 @@ const MODAL = '[role="dialog"][aria-modal="true"]';
  */
 async function startFromEmptyState(page: import('@playwright/test').Page) {
   await page.goto('/experiments', { waitUntil: 'domcontentloaded' });
-  await page.getByRole('button', { name: 'Launch Guided Demo' }).click();
+  await page.getByRole('button', { name: 'Start Guided Walkthrough' }).click();
   await expect(bar(page)).toBeVisible({ timeout: 20_000 });
   await expect(mark(page)).toBeVisible({ timeout: 20_000 });
 }
@@ -227,7 +227,7 @@ test.describe('worked-example session lifecycle', () => {
     await expect(page.locator('.exp-row')).toHaveCount(5);
 
     // Leave, then replay from the permanent home of the control.
-    await page.getByRole('button', { name: 'Close Tutorial' }).click();
+    await page.getByRole('button', { name: 'Close Walkthrough' }).click();
     await expect(bar(page)).toHaveCount(0);
     await expect
       .poll(async () => (await lifecycle.listInSession(first)).status, { timeout: 20_000 })

@@ -195,10 +195,18 @@ describe('A11Y-05 · Load Materials has exactly one <h1>', () => {
    * both. This pins the difference, because "add an <h1>" is satisfiable in a
    * way that closes the axe rule and helps nobody.
    */
-  it('the heading is visually hidden but NOT hidden from assistive technology', () => {
+  /*
+   * ~~"the heading is visually hidden but NOT hidden from assistive technology"~~ —
+   * INVERTED 2026-10-12, and the property it guarded is now held in a stronger form.
+   * The heading was `sr-only` because the on-ramp's visual design had no title. With
+   * the same chrome and page header as every other screen, it is VISIBLE: reachable by
+   * sight AND by assistive technology. What must still never happen — the heading
+   * being removed from the accessibility tree — is asserted unchanged.
+   */
+  it('the heading is visible AND not hidden from assistive technology', () => {
     const { container } = renderAt('/load');
     const h1 = container.querySelector('h1')!;
-    expect(h1.className).toContain('sr-only');
+    expect(h1.className).not.toContain('sr-only');
     expect(h1.getAttribute('aria-hidden')).toBeNull();
     expect(h1.hasAttribute('hidden')).toBe(false);
   });

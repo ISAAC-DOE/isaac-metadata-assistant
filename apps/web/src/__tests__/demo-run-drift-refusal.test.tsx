@@ -307,7 +307,7 @@ describe('S2 · demo run — 409 tutorial_scope_required is a refusal, not a fai
     await waitFor(() =>
       /* Not finished in this browser → Start; the destination's control reads
          by completion state since 2026-10-18. */
-      expect(view.getByRole('button', { name: LABELS.actionStartWalkthrough })).toBeInTheDocument(),
+      expect(view.getByRole('button', { name: LABELS.actionStartTutorial })).toBeInTheDocument(),
     );
   });
 

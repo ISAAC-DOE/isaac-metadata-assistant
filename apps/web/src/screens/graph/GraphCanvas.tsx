@@ -41,6 +41,8 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { Maximize2, Network, RotateCcw, ZoomIn, ZoomOut } from '../../components/icons';
+import { HelpTip } from '../../components/HelpTip';
+import { LABELS } from '../../lib/labels';
 import { relationDisplayLabel } from '../../lib/displayLabels';
 import type { ApiMemoryGraphEdge, ApiMemoryGraphNode } from '../../lib/types';
 import {
@@ -622,6 +624,48 @@ export function GraphCanvas({
         <span className="memory-graph-modenote graph-lod-indicator">
           {levelSummary(level, plan, focusSuspends, deep)}
         </span>
+        {/* HOW TO MOVE THE CANVAS, AND WHAT THE OUTER RING IS (2026-10-12): the
+            caption under the canvas is now this toolbar's info tip. It is how-to
+            and where-from prose, not a qualifier of any figure, and `HelpTip`
+            keeps it in the DOM while closed — so the ring explanation is still
+            on the surface for every guard that reads it. */}
+        <HelpTip subject={LABELS.graphCanvasInfoLabel} label={LABELS.graphCanvasInfoLabel} kind="info">
+          <span className="graph-canvas-caption">
+            {/* WHAT EACH LEVEL ACTUALLY DRAWS. The previous copy said, for BOTH deep
+                levels, that "only the marks and the arrows come from the graph". At
+                the cluster level neither is a graph object — a mark is a
+                (file, community) GROUP and a line is a FOLD over the real edges
+                between two such groups — so the sentence asserted a provenance the
+                level does not have. Each level now says what it is drawing. */}
+            {plan?.level === 'cluster' ? (
+              <>
+                Drag the background to pan. Each mark here is a GROUP of symbols that share one file and
+                one recorded cluster; each dashed line SUMMARISES the references recorded between two
+                such groups, so one line can stand for several of different kinds — hover or focus a line
+                to read exactly what it summarises. Hover or focus a mark for its detail; Enter pins it.
+                Zoom in for the individual symbols, out for the file projection. Positions inside a file
+                are a deterministic layout, not a claim about the code's structure; the groups and the
+                counts come from the graph.
+              </>
+            ) : plan ? (
+              <>
+                Drag the background to pan. Each mark is ONE symbol recorded in the graph and each solid
+                arrow is ONE recorded reference, in the direction the payload recorded it. Hover or focus
+                a mark for its detail; Enter pins it. Zoom out to return to the file projection.
+                Positions inside a file are a deterministic layout, not a claim about the code's
+                structure — the marks and the arrows themselves come from the graph.
+              </>
+            ) : (
+              <>
+                Drag the background to pan, drag a node to move it. Every visible node is labelled once{' '}
+                {LABEL_LIMIT} or fewer are shown; above that up to {HUB_LABEL_COUNT} of the
+                most-connected nodes stay labelled as landmarks, along with the selected node and its
+                connections. Zoom in past {Math.round(LOD_CLUSTER_SCALE * 100)}% to open the clusters
+                and symbols inside these files.
+              </>
+            )}
+          </span>
+        </HelpTip>
       </div>
 
       <div className="graph-canvas">
@@ -936,49 +980,15 @@ export function GraphCanvas({
         </p>
       )}
 
-      <p className="graph-canvas-caption">
-        {/* WHAT EACH LEVEL ACTUALLY DRAWS. The previous copy said, for BOTH deep
-            levels, that "only the marks and the arrows come from the graph". At
-            the cluster level neither is a graph object — a mark is a
-            (file, community) GROUP and a line is a FOLD over the real edges
-            between two such groups — so the sentence asserted a provenance the
-            level does not have. Each level now says what it is drawing. */}
-        {plan?.level === 'cluster' ? (
-          <>
-            Drag the background to pan. Each mark here is a GROUP of symbols that share one file and
-            one recorded cluster; each dashed line SUMMARISES the references recorded between two
-            such groups, so one line can stand for several of different kinds — hover or focus a line
-            to read exactly what it summarises. Hover or focus a mark for its detail; Enter pins it.
-            Zoom in for the individual symbols, out for the file projection. Positions inside a file
-            are a deterministic layout, not a claim about the code's structure; the groups and the
-            counts come from the graph.
-          </>
-        ) : plan ? (
-          <>
-            Drag the background to pan. Each mark is ONE symbol recorded in the graph and each solid
-            arrow is ONE recorded reference, in the direction the payload recorded it. Hover or focus
-            a mark for its detail; Enter pins it. Zoom out to return to the file projection.
-            Positions inside a file are a deterministic layout, not a claim about the code's
-            structure — the marks and the arrows themselves come from the graph.
-          </>
-        ) : (
-          <>
-            Drag the background to pan, drag a node to move it. Every visible node is labelled once{' '}
-            {LABEL_LIMIT} or fewer are shown; above that up to {HUB_LABEL_COUNT} of the
-            most-connected nodes stay labelled as landmarks, along with the selected node and its
-            connections. Zoom in past {Math.round(LOD_CLUSTER_SCALE * 100)}% to open the clusters
-            and symbols inside these files.
-            {isolatedVisible > 0 && (
-              <>
-                {' '}
-                {isolatedVisible} of the nodes drawn here have no recorded reference at all and sit
-                on the outer rings — the ring is where they are parked, not a relationship between
-                them.
-              </>
-            )}
-          </>
-        )}
-      </p>
+      {/* A FIGURE, SO IT IS VISIBLE (review, 2026-10-18). This sentence carries a
+          count, and an info tip holds prose, never a measurement — so it stays on
+          the surface under the canvas it describes rather than in the caption tip. */}
+      {!plan && isolatedVisible > 0 && (
+        <p className="graph-canvas-isolated">
+          {isolatedVisible} of the nodes drawn here have no recorded reference at all and sit on
+          the outer rings — the ring is where they are parked, not a relationship between them.
+        </p>
+      )}
     </div>
   );
 }

@@ -465,48 +465,57 @@
  * `statistics.css`'s own `[data-tone='attention']` uses for the identical
  * "needs attention" meaning.
  */
-.library-overview {
+/* THE WIDGET'S OWN SPACING — `components/Widget.tsx` draws the card. The list
+   below it is the result of the filter inside it, so a little more room separates
+   the two than separates the widget's rows. */
+.library-overview,
+.library-find {
   margin-bottom: var(--space-lg);
-  padding: var(--space-md) var(--space-lg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  background: var(--surface);
+}
+.widget .library-toolbar {
+  margin-bottom: 0;
 }
 
-.library-overview-heading {
-  margin: 0 0 var(--space-sm);
-  font-size: var(--font-size-meta);
-  font-weight: var(--font-weight-semibold);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
+/* The headline: the figure that answers "what needs me?", then the two sums
+   beside it, quieter. A `<dl>` keeps each figure labelled for a screen reader
+   ("Needs Attention, 3"); `order` puts the value first on screen without
+   reordering the definition list itself. */
 .library-overview-grid {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-xl);
+  align-items: baseline;
+  gap: var(--space-xs) var(--space-xl);
   margin: 0;
 }
 
 .library-overview-item {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2xs);
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-xs);
 }
 
 .library-overview-label {
   margin: 0;
-  font-size: var(--font-size-meta);
+  font-size: var(--font-size-body);
   font-weight: var(--font-weight-medium);
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .library-overview-value {
+  order: -1;
   margin: 0;
-  font-size: var(--font-size-heading-md);
+  font-size: var(--font-size-heading-sm);
   font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+  font-variant-numeric: tabular-nums lining-nums;
   color: var(--text-heading);
+}
+.library-overview-lead .library-overview-value {
+  font-size: var(--font-size-heading-lg);
+}
+.library-overview-lead .library-overview-label {
+  font-size: var(--font-size-heading-sm);
+  color: var(--text-strong);
 }
 
 /* The non-verdict amber family — a workspace fact ("N records need you"), not
@@ -517,9 +526,132 @@
 }
 
 .library-overview-note {
-  margin: var(--space-sm) 0 0;
+  margin: 0;
   max-width: 62ch;
-  font-size: var(--font-size-meta);
+  font-size: var(--font-size-body);
   line-height: var(--line-height-normal);
-  color: var(--text-muted);
+  color: var(--text-secondary);
+}
+/* The short-read caveat is the one note that stays VISIBLE (it qualifies the
+   figures beneath it), so it carries the advisory tone the alert above it uses. */
+.library-overview-note-partial {
+  color: var(--advisory-text);
+}
+
+/* In the widget's info panel the hint is ordinary info prose, not a caption. */
+.widget-info .library-search-hint {
+  font-size: inherit;
+  color: inherit;
+}
+
+/* ~~NARROW: one scrolling row of status chips~~ — WITHDRAWN (review, 2026-10-18).
+   A sideways-scrolling region is exactly what `layout-widths` forbids, and it hid
+   the later chips off the edge of a 375px screen. The chips wrap at every width,
+   as they always did outside a widget. (The `position: relative` this rule needed
+   for the absolutely-positioned `.sr-only` counts went with it: each radio's name
+   is now one `aria-label`, so no positioned span can widen the document.) */
+
+/* The Folders heading with its info tip beside it (2026-10-18). */
+.library-folders-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-xs);
+}
+.library-folders-head .library-folders-heading {
+  margin: 0;
+}
+.helptip-panel .library-folders-note {
+  margin: 0;
+  font-size: inherit;
+  color: inherit;
+}
+
+/* ---- THE STATUS FILTER AS THE WIDGET HEADLINE (2026-10-18) -----------------
+   Each facet is a tile: its count first and large, its name beneath. They are
+   still the radiogroup `LibraryToolbar` documents — same counts over the whole
+   list, same "only rendered when it matches something", same selected state in
+   the action blue (never a verdict hue). */
+.library-overview-headline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  width: 100%;
+  min-width: 0;
+}
+.library-facets-tiles {
+  position: relative;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+.library-facets-tiles .library-facet {
+  flex-direction: column-reverse;
+  align-items: flex-start;
+  gap: var(--space-2xs);
+  min-width: 6.5rem;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-inner);
+  font-size: var(--font-size-body);
+  color: var(--text-secondary);
+}
+.library-facets-tiles .library-facet-count {
+  font-size: var(--font-size-heading-lg);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+  font-variant-numeric: tabular-nums lining-nums;
+  color: var(--text-heading);
+}
+.library-facets-tiles .library-facet.is-selected .library-facet-count {
+  color: var(--action-hover);
+}
+.library-overview-headline .library-overview-grid .library-overview-value {
+  font-size: var(--font-size-body);
+}
+.library-overview-headline .library-overview-label {
+  font-size: var(--font-size-body);
+}
+
+/* NARROW: the tiles WRAP (review, 2026-10-18 — they used to scroll sideways,
+   which `layout-widths` forbids). To keep that from stacking a tall tile per row,
+   each one becomes a compact pill reading count-then-label on one line ("3 Needs
+   Attention"): `row-reverse` puts the count, which follows the label in the DOM,
+   first on screen, and the name order a screen reader hears is unchanged. */
+@media (max-width: 720px) {
+  .library-overview-headline {
+    gap: var(--space-xs);
+  }
+  .library-facets-tiles {
+    gap: var(--space-xs);
+  }
+  .library-facets-tiles .library-facet {
+    flex-direction: row-reverse;
+    align-items: baseline;
+    gap: var(--space-xs);
+    min-width: 0;
+    padding: var(--space-xs) var(--space-sm);
+  }
+  .library-facets-tiles .library-facet-count {
+    font-size: var(--font-size-body);
+  }
+}
+
+/* PHONE: search and sort share one row inside the library widget while the
+   search box can stay at least 8rem wide, and wrap onto two rows below that
+   (about 360px). The visible "Sort by" label leaves the row with `display: none`
+   — not a hand-rolled clip, which `layout-responsive` rightly reports as clipped
+   text — and the select keeps the same name through its own `aria-label`; its
+   value ("Last Updated") already reads as a sort order. `8rem` is a flex basis,
+   a layout dimension, not a spacing-rhythm value. */
+@media (max-width: 480px) {
+  .widget .library-toolbar-row {
+    align-items: center;
+    gap: var(--space-xs);
+  }
+  .widget .library-search {
+    flex: 1 1 8rem;
+    min-width: 8rem;
+  }
+  .widget .library-sort-label {
+    display: none;
+  }
 }

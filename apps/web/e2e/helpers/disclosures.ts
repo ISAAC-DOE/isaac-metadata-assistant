@@ -195,6 +195,20 @@ export const WIDGET_INFO_PANELS: Readonly<Record<string, number>> = Object.freez
   validator: 1,
   'schema-reference': 1,
   imports: 1,
+  /* The pages slice (#291), MEASURED in Chromium on 2026-10-19 on the merged branch
+     (`.widget-info` counted after load, the memory surfaces served a valid snapshot):
+       experiments-example  1 — What Needs Me? (the library widget renders only
+                                with rows, so the EMPTY `experiments` surface
+                                mounts 0 and keeps the default)
+       load                 2 — Try a Worked Example, Can I Load My Own Files?
+       memory               1 — Can I Trust the Snapshot? (How Big Is It? and
+                                Where Did It Come From? carry no info panel)
+     `memory-graph` and `not-found` mount no widget, so they keep the default 0. The
+     `HelpTip` info tips these pages also use are a different control (`.helptip`),
+     not counted here. */
+  'experiments-example': 1,
+  load: 2,
+  memory: 1,
 });
 
 /**

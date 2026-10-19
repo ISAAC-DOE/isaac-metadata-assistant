@@ -246,6 +246,12 @@ export function useTutorialState(): TutorialState {
  *     unmounted before a second click can land on it.
  *   · `screens/settings/HelpAndTutorial.tsx` — replay, unguarded. Reachable only
  *     from Settings, and re-entering from there is the control's purpose.
+ *   · `screens/LoadMaterials.tsx` — disabled while `phase !== 'idle'`, the same
+ *     explicit guard as My Experiments' empty state, for the same reason.
+ *   · `components/HelpPanel.tsx` (2026-10-12) — rendered ONLY while
+ *     `phase === 'idle'` and no session is held, and the click closes the popover
+ *     in the same handler, so the control is unmounted before a second press can
+ *     land; while a walkthrough is opening or open the row states that instead.
  * A future caller must decide which of those it is; it does not inherit safety
  * from here.
  *

@@ -1065,7 +1065,17 @@ describe('semantic zoom — honesty when the layer is missing or stale', () => {
     fireEvent.click(view.getByRole('button', { name: 'Reset View' }));
     await waitFor(() => expect(deepMarks()).toEqual([]));
     expect(document.querySelector('.graph-deep-staleness')).toBeNull();
-    expect(view.container.textContent).not.toContain('point-in-time index');
+    // Scoped to the SURFACE (re-review, 2026-10-18): About This Graph now stays in
+    // the DOM while closed, hidden, and its own boundary note says the structure
+    // "is a point-in-time index" — a standing statement about the whole index, not
+    // the canvas claiming a deep layer it no longer draws. So the dialog's body is
+    // set aside, and asserted to be the only place the phrase is left.
+    const help = view.container.querySelector('.graph-help-backdrop') as HTMLElement;
+    expect(help).toHaveAttribute('hidden');
+    const surface = view.container.cloneNode(true) as HTMLElement;
+    surface.querySelector('.graph-help-backdrop')?.remove();
+    expect(surface.textContent).not.toContain('point-in-time index');
+    expect(help.textContent).toContain('point-in-time index');
   });
 
   it('adds the served-set clause when the payload reports the path set has moved (M2)', async () => {

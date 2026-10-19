@@ -127,13 +127,23 @@ test('@interaction NOT FOUND: an unknown record id says so inside a worked-examp
 test('@interaction REFUSED: Load Materials refuses uploads and explains the boundary', async ({ page, app }) => {
   await app.goto('/load');
 
-  const refusal = page.getByRole('button', { name: /Loading your own files is not enabled/i });
+  // Since 2026-10-12 the answer is a STATE in the "Can I Load My Own Files?"
+  // widget, and the control that asks the server is a plain "Try an Upload"
+  // button whose DESCRIPTION (read on focus) says it opens no picker and sends no
+  // file — it was a full-width drop-target styled button carrying that sentence
+  // as its visible label.
+  await expect(page.getByText('Not in this build — uploads are refused')).toBeVisible();
+  await expect(
+    page.getByText(/operator's responsibility, not a check this software performs/i)
+  ).toBeVisible();
+  const refusal = page.getByRole('button', { name: 'Try an Upload' });
   await expect(refusal).toBeVisible();
+  await expect(refusal).toHaveAccessibleDescription(/opens no file picker, takes no dropped file and sends no file/i);
 
-  // Deliberately ENABLED, not disabled: the control's own label says it opens
-  // no picker and takes no dropped file, and activating it makes the server
-  // state the refusal. Asserting `toBeDisabled()` here would have been a test
-  // asserting a design the app does not have.
+  // Deliberately ENABLED, not disabled: the control opens no picker and takes no
+  // dropped file, and activating it makes the server state the refusal.
+  // Asserting `toBeDisabled()` here would have been a test asserting a design the
+  // app does not have.
   await expect(refusal).toBeEnabled();
 
   // There is genuinely no file input anywhere on the surface.
@@ -149,7 +159,7 @@ test('@interaction REFUSED: Load Materials refuses uploads and explains the boun
 
   // The offered alternative is present and enabled. Outside a worked example it is the
   // guided demo (B-05): the run button is only offered where the server would accept it.
-  await expect(page.getByRole('button', { name: 'Launch Guided Demo' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Start Guided Walkthrough' })).toBeEnabled();
 });
 
 test('@interaction REFUSED: the upload endpoint itself answers 403', async ({ request }) => {

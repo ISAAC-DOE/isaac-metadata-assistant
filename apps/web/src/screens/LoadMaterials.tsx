@@ -4,6 +4,8 @@ import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
+import { LeftNav } from '../components/LeftNav';
+import { Widget } from '../components/Widget';
 import { GovernanceBanner } from '../components/GovernanceBanner';
 import { StagedRunner } from '../components/StagedRunner';
 import { BackendDown } from '../components/FetchStates';
@@ -176,95 +178,137 @@ export function LoadMaterials() {
   return (
     <AppShell
       variant="full"
-      topBar={<TopBar variant="breadcrumb" breadcrumb={LABELS.actionOpenRecord} />}
-      mainPad="centered"
+      /* THE SAME CHROME AS EVERY OTHER SCREEN (2026-10-12 clutter audit). This
+         surface used to mount a breadcrumb-only top bar with no left navigation
+         and no Help, so a reader who reached it had one way out (the brand mark)
+         and no help at all. It now carries the home top bar — search, workspace
+         chip, Help — and the primary navigation, with no item current, because
+         `/load` is not a navigation destination (no global nav item is added
+         without a decision, `ISAAC_PRODUCT_DECISIONS.md` after DEC-51). */
+      topBar={<TopBar variant="home" />}
+      sidebar={<LeftNav />}
+      mainPad="pad"
     >
-      <div className="centered-col">
+      <div className="load-page">
         {/*
-          FINDING A11Y-05 fix. This screen rendered NO heading of any level, so
-          a screen-reader user arriving here had nothing to orient by: the
-          heading list was empty and "jump to the top heading" went nowhere.
-
-          `sr-only` rather than a visible title, following the five screens that
-          already do this (`RecordWorkbench`, `EvidenceExplorer`,
-          `ExportReadiness`, `GuidedCompletion`). The visual design of this
-          on-ramp is deliberate and a new visible title would change it; the
-          document outline is what was missing, and that is what this adds. It
-          also paints no new text, so it moves no `color-contrast` count.
+          FINDING A11Y-05 fix, and since 2026-10-12 the heading is VISIBLE. It was
+          `sr-only` because the on-ramp's visual design had no title and the
+          document outline was what was missing. With the same chrome as every
+          other screen, the page header is part of that design — so the one
+          `<h1>` is now reachable by sight AND by assistive technology, which is a
+          stronger form of what the fix was for.
 
           `LABELS.screenLoad` is the name this surface already carries in
           navigation, so the outline and the nav agree.
         */}
-        <h1 className="sr-only">{LABELS.screenLoad}</h1>
+        <div className="page-header">
+          <div>
+            <h1 className="page-title">{LABELS.screenLoad}</h1>
+          </div>
+        </div>
         <GovernanceBanner onReadPolicy={() => navigate(ROUTES.governance)} />
 
         <div className="onramps">
-          <div className="onramp emphasis">
-            <div className="onramp-head">
-              <span className="onramp-icon" aria-hidden="true">
-                <Play size={16} strokeWidth={2.2} />
-              </span>
-              <div>
-                <div className="onramp-title">Worked Example: CuO Cu K-edge XANES</div>
-                <div className="onramp-tagline">a complete example run · ~10s</div>
-              </div>
-              <span className="onramp-tag">Built-in Example</span>
-            </div>
-            <p className="onramp-body">
-              A fictional year-2099 CuO / Cu K-edge XANES session. Assembles the evidenced draft,
-              holds back the fields it won't guess, and — once you confirm them — validates against
-              ISAAC v1.05.
-            </p>
+          {/*
+            WIDGET 1 — "Try a worked example". The primary action on this screen.
+            Its long description (what the example assembles, why it runs inside the
+            Guided Walkthrough, what starting one does) moved behind the widget's
+            info panel, which `Widget` keeps in the DOM while closed — so the
+            Start control is still DESCRIBED BY the audited disclosure, and
+            `load-worked-example-session.test.tsx` still reads it here.
+          */}
+          <Widget
+            id="load-example-title"
+            className="load-widget load-widget-example"
+            title={LABELS.loadExampleTitle}
+            icon={<Play size={16} strokeWidth={2.2} />}
+            sub={LABELS.loadExampleSub}
+            infoLabel={LABELS.loadExampleInfoLabel}
+            info={
+              <>
+                <p>{LABELS.loadExampleBody}</p>
+                {!inWorkedExample && (
+                  <p id="load-launch-hint">
+                    {LABELS.demoRunsInsideGuidedDemo} {LABELS.launchGuidedDemoBody}
+                  </p>
+                )}
+              </>
+            }
+          >
             {inWorkedExample ? (
               <button
                 type="button"
-                className="btn btn-primary"
+                className="btn btn-primary load-widget-cta"
                 onClick={startDemo}
                 disabled={run.name === 'running'}
               >
                 {run.name === 'running' ? 'Running…' : LABELS.actionRunDemoShort}
               </button>
             ) : (
-              <>
-                <p className="onramp-body" id="load-launch-hint">
-                  {LABELS.demoRunsInsideGuidedDemo} {LABELS.launchGuidedDemoBody}
-                </p>
-                <button
-                  ref={launchRef}
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={launchBusy}
-                  aria-describedby="load-launch-hint"
-                  onClick={() => startTutorial(launchRef.current)}
-                >
-                  {LABELS.actionLaunchGuidedDemo}
-                </button>
-              </>
+              <button
+                ref={launchRef}
+                type="button"
+                className="btn btn-primary load-widget-cta"
+                disabled={launchBusy}
+                aria-describedby="load-launch-hint"
+                onClick={() => startTutorial(launchRef.current)}
+              >
+                {tutorial.completed ? LABELS.actionReplayTutorial : LABELS.actionStartTutorial}
+              </button>
             )}
-          </div>
+          </Widget>
 
-          <div className="onramp">
-            <div className="onramp-head">
-              <span className="onramp-icon neutral" aria-hidden="true">
-                <Upload size={16} strokeWidth={2} />
-              </span>
-              <div>
-                <div className="onramp-title">{LABELS.actionLoadLocal}</div>
-                <div className="onramp-tagline">not enabled in this build</div>
-              </div>
-              <span className="onramp-tag">Approval-Gated</span>
-            </div>
+          {/*
+            WIDGET 2 — "Can I load my own files?" Answered as a STATE, never as a
+            disabled control: the headline says it is not in this build, and the
+            one sentence that must stay visible — that keeping real or private
+            artifacts out is the operator's responsibility and not a check this
+            software performs — sits beside it (`DEC-35`: a security/privacy state
+            is never disclosed away).
+
+            R1b. "no file is read, parsed, or inspected" was an ABSOLUTE and false:
+            `RecordValidator` and `CsvReconcilePanel` both read a file the reader
+            picks. The refusal claim holds for the UPLOAD path and is kept, scoped
+            to it; the two readers are named instead of denied. It is the info
+            panel's `.onramp-warn`, and `__tests__/upload-claim-parity.test.tsx`
+            reads it there — `Widget` keeps it in the DOM while closed. Pinned to
+            the other sites that make this claim by that test.
+          */}
+          <Widget
+            id="load-own-files-title"
+            className="load-widget"
+            title={LABELS.loadOwnFilesTitle}
+            icon={<Upload size={16} strokeWidth={2} />}
+            infoLabel={LABELS.loadOwnFilesInfoLabel}
+            headline={<span className="widget-state">{LABELS.loadOwnFilesState}</span>}
+            info={
+              <>
+                <p className="onramp-warn">
+                  Every file upload is refused outright, whatever it contains — the refused
+                  request is never read, parsed, or inspected. Two review tools elsewhere do
+                  read a file you paste or pick — the standalone Validator, and campaign-sheet
+                  CSV reconciliation — checking the text in memory, discarding it, and
+                  recording only the outcome, never the content.
+                </p>
+                <p id="load-ask-server-hint">{LABELS.loadAskServerHint}</p>
+                {/* Moved here from the page banner (2026-10-12), which is now one
+                    line scoped to the workspace; the requirement is unchanged. */}
+                <p>{LABELS.loadGovernanceApproval}</p>
+              </>
+            }
+          >
+            <p className="load-widget-caveat">
+              <TriangleAlert size={13} strokeWidth={2.2} aria-hidden="true" />
+              {LABELS.loadOperatorResponsibility}
+            </p>
             {upload.name === 'idle' && (
-              /*
-               * The affordance states what activating it does. There is no file
-               * input element here and no drop handler: clicking sends an empty
-               * `POST /api/uploads`, which the server refuses with 403 without
-               * declaring or parsing a form. So no picker opens and no file is
-               * chosen, sent, or read — and the control must not imply otherwise.
-               */
-              <button type="button" className="drop-target" onClick={tryLocalFiles}>
-                Loading your own files is not enabled here. This control opens no file picker and
-                takes no dropped file — select it and the server states its refusal.
+              <button
+                type="button"
+                className="btn btn-secondary load-widget-cta"
+                aria-describedby="load-ask-server-hint"
+                onClick={tryLocalFiles}
+              >
+                {LABELS.actionAskServer}
               </button>
             )}
             {upload.name === 'blocked' && (
@@ -278,23 +322,7 @@ export function LoadMaterials() {
             {upload.name === 'down' && (
               <BackendDown error={upload.error} onRetry={tryLocalFiles} />
             )}
-            {/* R1b. "no file is read, parsed, or inspected" was an ABSOLUTE and
-                false: `RecordValidator` and `CsvReconcilePanel` both read a
-                file the reader picks. The refusal claim holds for the UPLOAD
-                path and is kept, scoped to it; the two readers are named
-                instead of denied. Pinned to the other two sites that make this
-                claim (Governance → Policy, Settings → Data & Privacy) by
-                `__tests__/upload-claim-parity.test.tsx`. */}
-            <p className="onramp-warn">
-              <TriangleAlert size={13} strokeWidth={2.2} aria-hidden="true" />
-              Every file upload is refused outright, whatever it contains — the refused request is
-              never read, parsed, or inspected. Two review tools elsewhere do read a file you paste
-              or pick — the standalone Validator, and campaign-sheet CSV reconciliation — checking
-              the text in memory, discarding it, and recording only the outcome, never the content.
-              Keeping real or private artifacts out is the operator's responsibility, not a check
-              this software performs.
-            </p>
-          </div>
+          </Widget>
         </div>
 
         {run.name === 'running' && (

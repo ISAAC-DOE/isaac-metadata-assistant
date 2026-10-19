@@ -69,6 +69,13 @@ interface GraphHelpProps {
   communityCount: number;
   singletonCount: number;
   expand?: GraphHelpExpand | null;
+  /**
+   * `false` keeps the whole body in the DOM, `hidden` (re-review, 2026-10-18):
+   * the boundary, the counts and the projection scope must not exist only while
+   * the dialog is open. Closed, it is out of the accessibility tree, takes no
+   * keys and moves no focus. Defaults to `true` (mounted means open).
+   */
+  open?: boolean;
   onClose: () => void;
 }
 
@@ -81,6 +88,7 @@ export function GraphHelp({
   communityCount,
   singletonCount,
   expand = null,
+  open = true,
   onClose,
 }: GraphHelpProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -89,6 +97,7 @@ export function GraphHelp({
   // Escape closes; Tab / Shift+Tab cycle inside the panel. Capture phase so the
   // dialog handles the key before anything beneath it (mirrors AssistantDrawer).
   useEffect(() => {
+    if (!open) return undefined;
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         e.stopPropagation();
@@ -117,13 +126,13 @@ export function GraphHelp({
     }
     document.addEventListener('keydown', onKeyDown, true);
     return () => document.removeEventListener('keydown', onKeyDown, true);
-  }, [onClose]);
+  }, [onClose, open]);
 
   // Move focus into the panel on open. Focus RESTORATION is the owner's job
   // (it holds the trigger ref and calls onClose from every close path).
   useEffect(() => {
-    panelRef.current?.focus();
-  }, []);
+    if (open) panelRef.current?.focus();
+  }, [open]);
 
   const u = meta.underlying_graph;
   const underlyingKnown = u.node_count != null && u.edge_count != null && u.community_count != null;
@@ -135,6 +144,7 @@ export function GraphHelp({
   return (
     <div
       className="graph-help-backdrop"
+      hidden={!open}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}

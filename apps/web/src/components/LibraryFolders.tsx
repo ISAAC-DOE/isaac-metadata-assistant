@@ -1,5 +1,6 @@
 import './library.css';
 import { ChevronRight, FolderIcon } from './icons';
+import { HelpTip } from './HelpTip';
 import { LABELS } from '../lib/labels';
 import { folderBreadcrumbs, type FolderNode } from '../lib/folders';
 
@@ -21,9 +22,13 @@ interface FolderBreadcrumbsProps {
  * folder is `aria-current="page"` rather than a link. Making the last crumb a
  * button that navigates to where you already are is a control that does nothing.
  *
- * AND IT RENDERS EVEN AT THE ROOT — one crumb, not zero. A trail that appears
- * only once you are inside something gives a reader no way to learn that folders
- * exist at all, and no stable place to look for where they are.
+ * ~~AND IT RENDERS EVEN AT THE ROOT — one crumb, not zero.~~ — WITHDRAWN
+ * 2026-10-18 (review). At the root that one crumb was an unlinked "All
+ * experiments" caption between the library widget and the list. The reason it
+ * gave — a reader must be able to learn that folders exist — is met by the
+ * Folders list itself, which renders at the root whenever a folder exists, so
+ * `ExperimentsHome` now mounts the trail only inside a folder, where it is the
+ * way back.
  */
 export function FolderBreadcrumbs({ folder, onNavigate }: FolderBreadcrumbsProps) {
   const crumbs = folderBreadcrumbs(folder);
@@ -115,18 +120,26 @@ export function FolderList({ folders, onNavigate, showModelNote }: FolderListPro
   if (folders.length === 0) return null;
   return (
     <section className="library-folders" aria-labelledby="library-folders-heading">
-      <h2 className="library-folders-heading" id="library-folders-heading">
-        {LABELS.libraryFoldersHeading}
-      </h2>
+      <div className="library-folders-head">
+        <h2 className="library-folders-heading" id="library-folders-heading">
+          {LABELS.libraryFoldersHeading}
+        </h2>
+        {/* The folder model, STILL STATED ONCE AT THE ROOT — behind an info tip
+            since 2026-10-18 (review: three lines of visible prose above the
+            folders). It explains what a folder is; it qualifies no figure. Beside
+            the heading, not inside it, so the heading's name stays "Folders". */}
+        {showModelNote && (
+          <HelpTip subject={LABELS.libraryFoldersHeading} kind="info">
+            <span className="library-folders-note">{LABELS.libraryFolderModelNote}</span>
+          </HelpTip>
+        )}
+      </div>
       {/*
         STATED ONCE, AT THE ROOT. Every reader arrives expecting Drive, and four of
         Drive's behaviours are absent here. Saying what a folder IS conveys that
         without listing four capabilities we do not have — which is the difference
         between a truthful screen and a changelog of absences.
       */}
-      {showModelNote && (
-        <p className="library-folders-note">{LABELS.libraryFolderModelNote}</p>
-      )}
       <ul className="library-folder-list">
         {folders.map((node) => (
           <li key={node.path}>

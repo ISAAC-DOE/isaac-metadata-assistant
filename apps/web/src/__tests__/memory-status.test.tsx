@@ -387,8 +387,14 @@ describe('P25.7 · Project Memory grounded assistant — available', () => {
     const send = panel.getByRole('button', { name: /send/i });
     expect(send.className).toMatch(/btn-secondary/);
     expect(send.className).not.toMatch(/btn-primary/);
-    // P34.2: the persistent helper names the grounded scopes the resolver answers over
-    expect(assistant.textContent).toMatch(/Ask about this record/i);
+    // P34.2: the persistent helper names the grounded scopes the resolver answers over.
+    // INVERTED 2026-10-12: this pinned "Ask about this record" — on the ONE mount that
+    // has no record. Project Memory sends a typed question to the record-agnostic
+    // memory resolver, so the helper now names what that resolver answers over, and
+    // the record wording is asserted ABSENT here (it is still pinned on the record
+    // mounts by `assistant-model-claim-parity.test.tsx`).
+    expect(assistant.textContent).toMatch(/Ask what project memory knows/i);
+    expect(assistant.textContent).not.toMatch(/Ask about this record/i);
     // the legacy standalone guided-note ("Guided prompts only …") is never surfaced
     expect(assistant.textContent).not.toMatch(/Guided prompts only — the assistant answers/i);
   });

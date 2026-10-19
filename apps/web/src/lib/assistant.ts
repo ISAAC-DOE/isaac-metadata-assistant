@@ -76,6 +76,17 @@ export const GUIDED_ONLY_NOTE =
 export const ASSISTANT_COMPOSER_HELPER =
   'Ask about this record, its evidence, workflow, export readiness, or project-memory leads.';
 
+/*
+ * THE SAME HELPER ON THE ONE MOUNT THAT HAS NO RECORD (2026-10-12 clutter audit).
+ * Project Memory mounts this panel with `queryScope="memory"`, which sends a typed
+ * question to the record-agnostic memory resolver (`api.askMemory`) — so "Ask about
+ * this record" there named a record that does not exist on the screen and scopes the
+ * resolver never answers over. This names what that resolver does answer over:
+ * project-memory leads (`MEMORY_CAPABILITY_GROUPS`), each a pointer to verify.
+ */
+export const ASSISTANT_COMPOSER_HELPER_MEMORY =
+  "Ask what project memory knows about this project's files and concepts; each answer is a lead to verify.";
+
 // P34.2: shown when the grounded resolver is unreachable or errors. The rest of
 // the workspace (record, workflow, evidence, validation) stays fully usable — the
 // assistant is advisory and never gates anything.

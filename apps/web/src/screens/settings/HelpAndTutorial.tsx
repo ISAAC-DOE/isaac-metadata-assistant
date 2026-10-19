@@ -139,7 +139,7 @@ export function HelpAndTutorialPanel() {
               {/* Start before this browser has finished it, Replay after — the
                   same browser-local `completed` flag the state line beside it
                   reads, so the two can never disagree. */}
-              {state.completed ? LABELS.actionReplayTutorial : LABELS.actionStartWalkthrough}
+              {state.completed ? LABELS.actionReplayTutorial : LABELS.actionStartTutorial}
             </button>
           </span>
         </>

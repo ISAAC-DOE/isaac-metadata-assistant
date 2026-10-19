@@ -161,7 +161,12 @@ const NAV_PARENT: Partial<Record<NavKey, NavKey>> = {
 };
 
 interface LeftNavProps {
-  active: NavKey;
+  /**
+   * The current destination. OPTIONAL since 2026-10-12: `/load` and the not-found
+   * page now carry the same chrome as every other screen, and neither is a
+   * navigation destination, so they mark no item current rather than inventing one.
+   */
+  active?: NavKey;
 }
 
 /**
@@ -170,7 +175,7 @@ interface LeftNavProps {
  * — see `NAV_PARENT` for why that is a weaker claim than `active`.
  */
 export function LeftNav({ active }: LeftNavProps) {
-  const ancestor = NAV_PARENT[active];
+  const ancestor = active === undefined ? undefined : NAV_PARENT[active];
   return (
     <nav className="leftnav" aria-label="Primary">
       {ITEMS.map(({ key, label, icon: Icon, to }) => {

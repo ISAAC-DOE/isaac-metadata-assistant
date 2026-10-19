@@ -518,7 +518,7 @@ describe('R0 · finishing the walkthrough', () => {
   it('the empty state makes the identical disclosure, and quotes the offer verbatim', async () => {
     stubFetchRoutes(readOnlyRoutes([]) as never);
     renderAt();
-    await screen.findByRole('button', { name: LABELS.actionLaunchGuidedDemo });
+    await screen.findByRole('button', { name: LABELS.actionStartTutorial });
 
     // The precondition that makes this the reader's ONLY copy: with no rows, the
     // guarded surface is not on screen at all.
@@ -596,7 +596,7 @@ describe('R0 · replay from Settings & API → Help & Tutorial', () => {
     // The state is the Guided Walkthrough widget's headline since 2026-10-12.
     expect(screen.getByText(SETTINGS_WIDGET_COPY.walkthroughFinished)).toBeInTheDocument();
     // Finished in this browser → the control REPLAYS, and is not also offered as Start.
-    expect(screen.queryByRole('button', { name: LABELS.actionStartWalkthrough })).toBeNull();
+    expect(screen.queryByRole('button', { name: LABELS.actionStartTutorial })).toBeNull();
 
     fireEvent.click(replay);
 
@@ -613,7 +613,7 @@ describe('R0 · replay from Settings & API → Help & Tutorial', () => {
   it('reports honestly when the walkthrough has NOT been finished in this browser', async () => {
     stubFetchRoutes(readOnlyRoutes() as never);
     renderAt('/settings?tab=help');
-    const start = await screen.findByRole('button', { name: LABELS.actionStartWalkthrough });
+    const start = await screen.findByRole('button', { name: LABELS.actionStartTutorial });
     expect(start).toHaveTextContent('Start Guided Walkthrough');
     expect(screen.getByText(SETTINGS_WIDGET_COPY.walkthroughNotFinished)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: LABELS.actionReplayTutorial })).toBeNull();
@@ -622,7 +622,7 @@ describe('R0 · replay from Settings & API → Help & Tutorial', () => {
   it('starts the walkthrough from the Start control exactly as Replay does', async () => {
     stubFetchRoutes(readOnlyRoutes() as never);
     renderAt('/settings?tab=help');
-    fireEvent.click(await screen.findByRole('button', { name: LABELS.actionStartWalkthrough }));
+    fireEvent.click(await screen.findByRole('button', { name: LABELS.actionStartTutorial }));
     const first = await markForStep(0);
     expect(first.textContent).toContain(`Step 1 of ${TOTAL}`);
   }, 30000);
@@ -650,7 +650,7 @@ describe('R0 · replay from Settings & API → Help & Tutorial', () => {
   it('says the completion flag is browser-local, and scopes what replay does not touch', async () => {
     stubFetchRoutes(readOnlyRoutes() as never);
     renderAt('/settings?tab=help');
-    await screen.findByRole('button', { name: LABELS.actionStartWalkthrough });
+    await screen.findByRole('button', { name: LABELS.actionStartTutorial });
     const panel = screen.getByRole('tabpanel');
     // The build has no identity it trusts, so the copy must not imply a profile
     // that follows the reader to another machine.
