@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Disclosure } from './Disclosure';
+import { LazyDisclosure } from './LazyDisclosure';
 import { HelpTip } from './HelpTip';
 import { SemanticStatus } from './SemanticStatus';
 import { ROUTES } from '../lib/routes';
@@ -9,6 +10,7 @@ import {
   REVIEW_BUCKET_STATE,
   candidateBucket,
   candidateLabel,
+  candidateReading,
   candidateValue,
   sourceCount,
   type ReviewBucket,
@@ -62,6 +64,11 @@ export function ImportCandidateRow({
 }) {
   const bucket: ReviewBucket = reviewBucket ?? (already !== undefined ? 'sent' : candidateBucket(candidate));
   const value = candidateValue(candidate);
+  /* WHAT THE SOURCES SAY, when nothing is offered for sending (2026-10-18, QA `C-07`).
+     "No value has been selected" sat beside "Sources Agree" on most rows: true of the
+     PROPOSAL, and read as though the sources had said nothing. A disagreement still says
+     no value was selected; a reading that is simply not sent says what was read. */
+  const reading = value === null && candidate.disagreement.length === 0 ? candidateReading(candidate) : null;
   const label = candidateLabel(candidate);
   const sources = sourceCount(candidate);
   const labels = IMPORT_STAGE_COPY.stateLabels;
@@ -103,7 +110,18 @@ export function ImportCandidateRow({
               <span className="hi-cand-value hi-cand-none">{variesSummary}</span>
             ) : (
               <span className={value === null ? 'hi-cand-value hi-cand-none' : 'hi-cand-value'}>
-                {value ?? IMPORT_STAGE_COPY.conflicts.noValue}
+                {value !== null ? (
+                  value
+                ) : reading !== null ? (
+                  <>
+                    <span className="hi-cand-reading">{reading}</span>{' '}
+                    <span className="hi-cand-read-note">· {IMPORT_STAGE_COPY.readNotSent}</span>
+                  </>
+                ) : candidate.disagreement.length > 0 ? (
+                  IMPORT_STAGE_COPY.conflicts.noValue
+                ) : (
+                  IMPORT_STAGE_COPY.notRead
+                )}
               </span>
             )}
           </span>
@@ -220,10 +238,25 @@ export function ImportCandidateRow({
           ) : candidate.proposable ? (
             children
           ) : (
-            /* WHY IT CANNOT BE SENT, in the server's own words, with no control. */
-            <p className="hi-blocked" role="note">
-              {candidate.not_proposable_reason ?? IMPORT_COPY.notProposableFallback}
-            </p>
+            /* WHY IT CANNOT BE SENT — the server's SHORT sentence first, and its full
+               reason one press away, verbatim (2026-10-18, QA `C-05`/`C-06`). No control. */
+            <div className="hi-blocked-wrap">
+              <p className="hi-blocked" role="note">
+                {candidate.not_proposable_summary ??
+                  candidate.not_proposable_reason ??
+                  IMPORT_COPY.notProposableFallback}
+              </p>
+              {candidate.not_proposable_summary && candidate.not_proposable_reason && (
+                <LazyDisclosure className="hi-cand-rule hi-why" summary={IMPORT_STAGE_COPY.whyInDetail}>
+                  {() => (
+                    <>
+                      <p className="hi-sub">{IMPORT_STAGE_COPY.whyInDetailLead}</p>
+                      <p className="hi-rule">{candidate.not_proposable_reason}</p>
+                    </>
+                  )}
+                </LazyDisclosure>
+              )}
+            </div>
           )}
         </div>
       </Disclosure>

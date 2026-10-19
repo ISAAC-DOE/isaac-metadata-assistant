@@ -172,10 +172,15 @@ function QuickStart({
      * is derived from the contract and it states no security or privacy
      * posture). It is now one of the API Access widget's two views, which a
      * reader opens by choosing it, so a drawer inside the view would be a second
-     * click that buys nothing. THE SECTION AND ITS `aria-labelledby` ARE
-     * UNCHANGED, so this is still a named region.
+     * click that buys nothing. ~~THE SECTION AND ITS `aria-labelledby` ARE
+     * UNCHANGED, so this is still a named region.~~ — CHANGED 2026-10-19: the
+     * shared Widget's button-mode view panel is ITSELF a `region` named by its
+     * button, "Quick Start", so a named section inside it made two landmarks with
+     * one name (axe `landmark-unique`, found once the sweep began revealing widget
+     * views). The panel carries the name now; this section is plain grouping, and
+     * its `<h3>` still heads it.
      */
-    <section className="api-quickstart" aria-labelledby="settings-api-quickstart-heading">
+    <section className="api-quickstart">
       <h3 id="settings-api-quickstart-heading" className="api-section-title">
         Quick Start
       </h3>

@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom';
    "never reads as an established fact" (`signals.css`, the `evCandidate` /
    `evUnknown` chips), which is exactly this tab's condition; a padlock would
    claim a permission denial and a person glyph would imply an identity. */
-import { CircleDashed } from '../../components/icons';
+import { CircleDashed, LayoutList } from '../../components/icons';
 import { ROUTES } from '../../lib/routes';
 import {
   type CurrentUserSource,
@@ -20,8 +20,8 @@ import {
   type MyStatsPendingReason,
   type MyStatsSource,
 } from '../../lib/myStatsContract';
+import { Widget, WidgetGrid } from '../../components/Widget';
 import { ChartAccessPending } from './StatsCharts';
-import { StatsSection } from './StatsPrimitives';
 
 /**
  * My Stats — the personal-statistics tab.
@@ -120,13 +120,47 @@ export function MyStats({ source, currentUser = disabledCurrentUserSource }: MyS
    */
   const headline = resolved.workflowCounts();
 
+  /*
+   * ── TWO WIDGETS SINCE 2026-10-12, AND NOT ONE SENTENCE CHANGED ───────────
+   *
+   * The tab used to render its two explanatory paragraphs and eight planned-
+   * view cards in the open flow — the largest block on a tab that states no
+   * figure. The gate state and the one sentence the adapter reports stay
+   * visible; the two paragraphs that explain WHY are the first widget's info
+   * panel, and the eight planned views are one expansion inside the second.
+   * Every sentence is the one it was (the approved-sentence allowlist in
+   * `my-stats.test.tsx` is exact in both directions), and the only copy added
+   * is the controls' own names, which that allowlist now carries.
+   */
   return (
-    <>
-      <StatsSection
+    <WidgetGrid>
+      <Widget
         id="stats-mine-gate"
         title="Personal Statistics"
         sub="What this tab will show once records are associated with a signed-in account."
         icon={<CircleDashed size={18} strokeWidth={2} aria-hidden="true" />}
+        info={
+          <>
+            <p>
+              Personal statistics will appear here once experiments are associated with your
+              signed-in account. Two things are missing today, and both are properties of this
+              preview rather than of your work: nothing here establishes who you are, and no record
+              in this workspace carries an author, so there is no way to select the records that are
+              yours.
+            </p>
+            <p>
+              Nothing on this tab is hidden from you, and none of the figures below are zero — they
+              are absent. A count of zero would say you have no records; what is true is that this
+              build cannot tell whose records these are.
+            </p>
+          </>
+        }
+        footer={
+          <>
+            <Link to={ROUTES.settingsTab('privacy')}>Open Privacy Settings</Link>
+            <Link to={ROUTES.statisticsTab('general')}>See Workspace Statistics</Link>
+          </>
+        }
       >
         {headline.status === 'access_pending' ? (
           <ChartAccessPending title="Not Available in This Preview">
@@ -144,55 +178,54 @@ export function MyStats({ source, currentUser = disabledCurrentUserSource }: MyS
             {`The personal-statistics source reported "${headline.status}", and this preview has no view built for it, so nothing is shown.`}
           </ChartAccessPending>
         )}
-        <p className="stats-note">
-          Personal statistics will appear here once experiments are associated with your signed-in
-          account. Two things are missing today, and both are properties of this preview rather than
-          of your work: nothing here establishes who you are, and no record in this workspace
-          carries an author, so there is no way to select the records that are yours.
-        </p>
-        <p className="stats-note">
-          Nothing on this tab is hidden from you, and none of the figures below are zero — they are
-          absent. A count of zero would say you have no records; what is true is that this build
-          cannot tell whose records these are.
-        </p>
-        <p className="stats-actions">
-          <Link to={ROUTES.settingsTab('privacy')}>Open Data &amp; Privacy Settings</Link>
-          <Link to={ROUTES.statisticsTab('general')}>See Workspace Statistics</Link>
-        </p>
-      </StatsSection>
+      </Widget>
 
-      <StatsSection
+      <Widget
         id="stats-mine-planned"
         title="Views Prepared for Your Account"
-        sub="Each view below is defined as a typed dataset, so it can be filled in without changing this page's layout. None of them is drawing anything right now."
-      >
-        <ul className="stats-plan-grid">
-          {MY_STATS_VIEWS.map((view) => {
-            const reason: MyStatsPendingReason = MY_STATS_PENDING_REASON[view.id];
-            return (
-              <li className="stats-plan-card" key={view.id}>
-                <h3 className="stats-plan-title">{view.title}</h3>
-                <p className="stats-plan-desc">{view.description}</p>
-                <p className="stats-plan-meta">
-                  {/* Composed in JS, not interpolated into JSX. `Will render as a
-                      {view.form}.` renders as THREE text nodes, so any reader that
-                      joins text nodes — a screen reader, a translation tool, this
-                      repo's own test helpers — sees "a bar chart ." with a space
-                      before the period. */}
-                  <span className="stats-plan-form">{`Will render as a ${view.form}.`}</span>{' '}
-                  <span className="stats-plan-gate">{`${MY_STATS_PENDING_LABEL[reason]}.`}</span>
-                </p>
-              </li>
-            );
-          })}
-        </ul>
-        <p className="stats-note">
-          Each description names the unit it would count — records, fields, or validation issues —
-          because a dashboard that blurs records into fields states a number nobody can act on. That
-          is the same distinction the workspace figures keep, where evidence support is counted in
-          fields beside the number of records those fields came from.
-        </p>
-      </StatsSection>
-    </>
+        icon={<LayoutList size={18} strokeWidth={2} aria-hidden="true" />}
+        sub="None of them is drawing anything right now."
+        info={
+          <>
+          {/* The supporting line's first sentence until 2026-10-18: the line is
+              one short sentence now, and this one is unchanged. */}
+          <p>
+            {/* A string, not JSX text: the approved-sentence allowlist is exact,
+                and this sentence has always carried a straight apostrophe. */}
+            {"Each view below is defined as a typed dataset, so it can be filled in without changing this page's layout."}
+          </p>
+          <p>
+            Each description names the unit it would count — records, fields, or validation issues
+            — because a dashboard that blurs records into fields states a number nobody can act on.
+            That is the same distinction the workspace figures keep, where evidence support is
+            counted in fields beside the number of records those fields came from.
+          </p>
+          </>
+        }
+        details={{
+          summary: 'Show the Prepared Views',
+          content: (
+            <ul className="stats-plan-grid">
+              {MY_STATS_VIEWS.map((view) => {
+                const reason: MyStatsPendingReason = MY_STATS_PENDING_REASON[view.id];
+                return (
+                  <li className="stats-plan-card" key={view.id}>
+                    <h3 className="stats-plan-title">{view.title}</h3>
+                    <p className="stats-plan-desc">{view.description}</p>
+                    <p className="stats-plan-meta">
+                      {/* Composed in JS, not interpolated into JSX: `Will render
+                          as a {view.form}.` renders as THREE text nodes, so a
+                          reader that joins text nodes sees "a bar chart ." */}
+                      <span className="stats-plan-form">{`Will render as a ${view.form}.`}</span>{' '}
+                      <span className="stats-plan-gate">{`${MY_STATS_PENDING_LABEL[reason]}.`}</span>
+                    </p>
+                  </li>
+                );
+              })}
+            </ul>
+          ),
+        }}
+      />
+    </WidgetGrid>
   );
 }

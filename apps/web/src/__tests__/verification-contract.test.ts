@@ -22,6 +22,7 @@ import {
   VERIFICATION_MODE_LABELS,
   SAFEGUARD_LABELS,
   safeguardDetail,
+  safeguardQualifier,
   corpusDisclosure,
   corpusSizeMismatch,
   histogramIsEmpty,
@@ -727,5 +728,51 @@ describe('a withheld occurrence count is carried as withheld, never as a number'
       label: SUPPRESSED_ROW_LABEL,
       value: 5,
     });
+  });
+});
+
+
+/* ── REVIEW FIX 4, 2026-10-18: a qualified "Verified" carries its qualifier ──
+ *
+ * Three verified safeguards are narrower than the word: one is guaranteed by
+ * construction and not measured on this run, one compared a single property,
+ * one compared copies in memory. Their full reasons sit behind "Show Reasons";
+ * the QUALIFIER is what must stay beside the chip. Pinned as literals.
+ */
+describe('safeguardQualifier', () => {
+  it('qualifies exactly the three verified safeguards that are narrower than the word', () => {
+    expect(safeguardQualifier('export_gating_unchanged', 'verified')).toBe(
+      'by construction — not measured on this run',
+    );
+    expect(safeguardQualifier('official_validator_unchanged', 'verified')).toBe(
+      'one property compared — not the schema byte for byte',
+    );
+    expect(safeguardQualifier('source_records_modified', 'verified')).toBe(
+      'in memory — no stored record was re-read',
+    );
+    expect(safeguardQualifier('private_values_exposed', 'verified')).toBeNull();
+  });
+
+  it('qualifies nothing that is not Verified — the state word already says less', () => {
+    for (const key of [
+      'export_gating_unchanged',
+      'official_validator_unchanged',
+      'source_records_modified',
+      'transaction_read_only',
+    ] as const) {
+      expect(safeguardQualifier(key, 'unverified')).toBeNull();
+      expect(safeguardQualifier(key, 'not_applicable')).toBeNull();
+    }
+  });
+
+  it('every qualifier restates its own full reason, never a different claim', () => {
+    // The qualifier is a short form of the sentence behind "Show Reasons"; each
+    // shares that sentence's load-bearing words.
+    expect(safeguardDetail('export_gating_unchanged', 'verified')).toMatch(/construction/);
+    expect(safeguardDetail('export_gating_unchanged', 'verified')).toMatch(/measured on this run/);
+    expect(safeguardDetail('official_validator_unchanged', 'verified')).toMatch(/one property/);
+    expect(safeguardDetail('official_validator_unchanged', 'verified')).toMatch(/byte for byte/);
+    expect(safeguardDetail('source_records_modified', 'verified')).toMatch(/in memory/);
+    expect(safeguardDetail('source_records_modified', 'verified')).toMatch(/no stored record was re-read/);
   });
 });

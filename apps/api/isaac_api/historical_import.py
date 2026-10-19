@@ -963,6 +963,187 @@ def _no_run_for(candidate: "SemanticCandidate") -> "SemanticCandidate":
     return candidate
 
 
+# --- the SHORT reason a scientist reads (2026-10-18, QA `C-05`/`C-06`) -----------------
+#
+# Every `not_proposable_reason` above, and every one `bl15.reconstruct` and the mapping
+# registry set, is the FULL reason: what the build does and why, written for whoever has
+# to maintain it. The import screen showed it verbatim beside every value it could not
+# send — a median of ~350 characters, up to 1,318, with revision history and decision ids
+# in it. The screen now shows ONE short sentence and keeps the full reason one press away.
+#
+# The short sentence is DERIVED here from the same facts the full one was set from, and
+# never stored: a session persisted before this existed gets one on its next read, and a
+# reworded full reason cannot leave a stale short one behind in a session document. It is
+# keyed on the full reason's identity (the constant it is), or for the registry's rows on
+# the concept the candidate carries, and only for the dynamic logbook sentences on what
+# they all end with. Anything unrecognised gets `PLAIN_REASON_FALLBACK`, which is true of
+# every candidate it can reach and which a test forbids on the committed corpora.
+
+#: Said for a candidate whose full reason this table does not recognise. True of every
+#: candidate that is not proposable, and deliberately says nothing more.
+PLAIN_REASON_FALLBACK = "This value cannot be sent as a proposal. Why, in detail, is below."
+
+PLAIN_REASON_DISAGREEMENT = (
+    "The sources disagree, so no value was chosen. Decide which reading is right in "
+    "Conflicts."
+)
+PLAIN_REASON_NOT_A_VALUE = (
+    "This says a measurement or experiment exists; it is not a value. The record and its "
+    "runs are made in Add to Experiment."
+)
+PLAIN_REASON_STRUCTURAL = (
+    "The sources disagree about which measurement this is. It is decided in Conflicts and "
+    "is never sent as a value."
+)
+#: A structural finding whose only other "reading" is the ABSENCE of a source (no macro
+#: declared the measurement) — the Conflicts stage shows it as "Noted — nothing to choose",
+#: so the short reason must not call it a disagreement to decide (review, 2026-10-18).
+PLAIN_REASON_NOTED = (
+    "One source states this and no other source mentions it, so there is nothing to "
+    "choose. The finding is kept; it is not a value."
+)
+PLAIN_REASON_NO_WRITE_PATH = (
+    "This is an official ISAAC field, but this build cannot write it yet. The reading is "
+    "kept here with its source."
+)
+PLAIN_REASON_LOCAL_TIME = (
+    "This time names no time zone, so it cannot go into a UTC field without guessing. It "
+    "is kept as evidence."
+)
+PLAIN_REASON_NOT_A_RUN = (
+    "This belongs to an alignment scan or a standard, which is not offered as a run. The "
+    "reading is kept."
+)
+PLAIN_REASON_BEAMTIME_SCOPE = (
+    "This was stated for the whole beamtime, not one measurement, so it has no run of its "
+    "own. Send it to the run you mean from Review."
+)
+PLAIN_REASON_VARIES = (
+    "This differs from scan to scan, as expected, so there is no single value to send. "
+    "Each scan's reading is kept."
+)
+PLAIN_REASON_SAME_FIELD_OFFERED = (
+    "Another reading of this field states the same value and is the one sent. This one is "
+    "kept as a second witness."
+)
+PLAIN_REASON_SAME_FIELD_CONFLICT = (
+    "Another reading of this field states a different value. Nothing is sent until you "
+    "decide in Conflicts."
+)
+PLAIN_REASON_LEFT_FOR_A_PERSON = (
+    "The files do not settle this clearly enough to fill it in, so it is left for you to "
+    "choose."
+)
+PLAIN_REASON_NO_EX_SITU = (
+    "The schema copy in this build offers no ex situ environment, so nothing is proposed."
+)
+PLAIN_REASON_NO_REGISTRY_ENTRY = (
+    "ISAAC has no mapping for this kind of reading yet, so it is kept as evidence."
+)
+
+
+def _plain_reason_table() -> dict[str, str]:
+    """``full reason -> short reason`` for every CONSTANT reason, built at call time.
+
+    At call time because ``bl15.reconstruct`` imports this module; importing it at the
+    top of this one would be a cycle.
+    """
+    from .bl15 import reconstruct as rc
+
+    return {
+        CANDIDATE_NOT_PROPOSABLE_DISAGREEMENT: PLAIN_REASON_DISAGREEMENT,
+        rc.DISAGREEMENT_NOT_PROPOSABLE: PLAIN_REASON_DISAGREEMENT,
+        CANDIDATE_NOT_PROPOSABLE_NO_EXPERIMENT_CREATION: PLAIN_REASON_NOT_A_VALUE,
+        rc.RUN_CANDIDATE_NOT_PROPOSABLE: PLAIN_REASON_NOT_A_VALUE,
+        CANDIDATE_NOT_PROPOSABLE_NO_WRITE_PATH: PLAIN_REASON_NO_WRITE_PATH,
+        CANDIDATE_NOT_PROPOSABLE_LOCAL_TIME: PLAIN_REASON_LOCAL_TIME,
+        CANDIDATE_NOT_PROPOSABLE_NOT_A_RUN: PLAIN_REASON_NOT_A_RUN,
+        rc.VARIES_NOT_PROPOSABLE: PLAIN_REASON_VARIES,
+    }
+
+
+def _is_noted_finding(disagreement: Sequence[Mapping]) -> bool:
+    """One stated reading against the ABSENCE of a source — nothing to choose between.
+
+    The same test the screen applies (`importStages.conflictDisposition`): a reading whose
+    source is a parenthesised description — ``(the macros in this import)`` — is the
+    absence of a source (`bl15.resolution.role_of`), and with at most one STATED reading
+    beside it there is no choice to make.
+    """
+    absent = 0
+    stated = 0
+    for row in disagreement:
+        ids = [str(i) for i in (row.get("source_ids") or [])]
+        if ids and all(i.startswith("(") for i in ids):
+            absent += 1
+        else:
+            stated += 1
+    return absent > 0 and stated <= 1
+
+
+def plain_reason_of(candidate: "SemanticCandidate") -> str | None:
+    """:func:`plain_reason` for a candidate, reading the facts it carries — ONE place, so the
+    session view, the batch's ``not_sent`` rows and the reconstruction's own wire shape
+    cannot say different things about the same candidate."""
+    return plain_reason(
+        candidate.not_proposable_reason,
+        candidate_id=candidate.candidate_id,
+        kind=candidate.kind,
+        unresolved=candidate.unresolved_reason is not None,
+        noted=candidate.kind != CANDIDATE_KIND_FIELD
+        and candidate.unresolved_reason is not None
+        and _is_noted_finding(candidate.disagreement),
+    )
+
+
+def plain_reason(
+    reason: str | None,
+    *,
+    candidate_id: str = "",
+    kind: str = CANDIDATE_KIND_FIELD,
+    unresolved: bool = False,
+    noted: bool = False,
+) -> str | None:
+    """The short, scientist-facing sentence for a full ``not_proposable_reason``.
+
+    ``None`` exactly when there is no reason to summarise and nothing unresolved. It never
+    returns the full reason itself, and never reads anything but its arguments.
+    """
+    from .bl15 import mapping as bl15_mapping
+    from .bl15 import reconstruct as rc
+
+    if reason is None and not unresolved:
+        return None
+    if kind != CANDIDATE_KIND_FIELD:
+        if unresolved:
+            return PLAIN_REASON_NOTED if noted else PLAIN_REASON_STRUCTURAL
+        return PLAIN_REASON_NOT_A_VALUE
+    if unresolved:
+        return PLAIN_REASON_DISAGREEMENT
+    table = _plain_reason_table()
+    if reason in table:
+        return table[reason]
+    text = reason or ""
+    if text.startswith(rc.SAME_FIELD_ALREADY_OFFERED.split("{other}")[0]):
+        return PLAIN_REASON_SAME_FIELD_OFFERED
+    if text.startswith(rc.SAME_FIELD_IN_CONFLICT.split("{other}")[0]):
+        return PLAIN_REASON_SAME_FIELD_CONFLICT
+    parts = candidate_id.split("::")
+    concept = parts[-2] if len(parts) >= 2 and parts[-1] == "resolved" else parts[-1]
+    entry = bl15_mapping.MAPPINGS.get(concept)
+    if entry is not None and text == entry.reason:
+        return entry.summary
+    if text.startswith("This reading has no entry in the mapping registry"):
+        return PLAIN_REASON_NO_REGISTRY_ENTRY
+    if "does not offer ex_situ" in text:
+        return PLAIN_REASON_NO_EX_SITU
+    if text.rstrip().endswith(
+        ("left blank for a person to choose.", "left blank for a person to choose on each run.")
+    ):
+        return PLAIN_REASON_LEFT_FOR_A_PERSON
+    return PLAIN_REASON_FALLBACK
+
+
 def is_zoned_utc_value(path: str | None, value: Any) -> bool:
     """Whether ``value`` may be proposed at ``path`` as far as TIME ZONES go.
 
@@ -1045,6 +1226,12 @@ class SemanticCandidate:
     variation_total: int | None = None
     #: How many distinct scans (or, for ``per_source``, files) the variation spans.
     variation_scans: int | None = None
+    #: THE DOMAIN OWNER'S STANDING RULE that resolves this disagreement, when one
+    #: reaches it (``bl15.resolution.STANDING_RESOLUTIONS``, 2026-10-12): which source's
+    #: reading is used and why, who confirmed the rule and how that reached this
+    #: repository, and the readings it uses. Set together with :attr:`resolved_by_rule`
+    #: (the rule's id). Every competing reading stays in :attr:`disagreement`.
+    standing_resolution: Mapping[str, Any] | None = None
 
     # --- UI statuses, DERIVED (2026-09-22) ----------------------------------------
 
@@ -1127,6 +1314,9 @@ class SemanticCandidate:
             "disagreement": [dict(d) for d in self.disagreement],
             "unresolved_reason": self.unresolved_reason,
             "not_proposable_reason": self.not_proposable_reason,
+            # 2026-10-18 — DERIVED (`plain_reason`), like `proposable` below: the short
+            # sentence a scientist reads, with the full reason above kept beside it.
+            "not_proposable_summary": plain_reason_of(self),
             "supporting_statement_total": self.supporting_statement_total,
             "distinct_sources": self.distinct_sources,
             "resolved_by_rule": self.resolved_by_rule,
@@ -1134,6 +1324,9 @@ class SemanticCandidate:
             "variation_basis": self.variation_basis,
             "variation_total": self.variation_total,
             "variation_scans": self.variation_scans,
+            "standing_resolution": (
+                dict(self.standing_resolution) if self.standing_resolution else None
+            ),
             # DERIVED, and serialised anyway. A client that recomputed it would be
             # a second expression of the rule, free to drift from this one.
             "proposable": self.proposable,
@@ -1215,6 +1408,9 @@ class SemanticCandidate:
             else None,
             variation_total=_as_count(state.get("variation_total")),
             variation_scans=_as_count(state.get("variation_scans")),
+            standing_resolution=dict(state["standing_resolution"])
+            if isinstance(state.get("standing_resolution"), Mapping)
+            else None,
         )
 
 
@@ -2709,15 +2905,24 @@ def read_archive(
     rules_applied: set[str] = set(semantics["rules_applied"])
     rules_applied.update(b.rule_ref for b in bindings if b.rule_ref)
 
+    source_id_map = {path: source.source_id for path in evidence_by_source}
     for unit_candidates in report.units:
         unit = by_stem.get(unit_candidates.stem)
+        per_unit = semantics["units"].get(unit_candidates.stem, {})
         bounded: list[SemanticCandidate] = []
-        for candidate in unit_candidates.candidates:
+        # THE LOGBOOK'S environment / reaction / cell statements for this measurement
+        # (2026-10-12) join its own candidates, so the same-field reconciliation below
+        # compares them with the filename's dry-sample reading — and neither can win
+        # silently.
+        logbook = rc.logbook_candidates(
+            unit_candidates.stem, per_unit.get("logbook_statements") or {}, source_id_map
+        )
+        for candidate in (*unit_candidates.candidates, *logbook):
             candidate_total += 1
             if len(candidates) + len(bounded) >= MAX_CANDIDATES_PER_SESSION:
                 continue
             candidate, derived = _apply_resolution(candidate, resolutions, evidence_index)
-            if candidate.resolved_by_rule:
+            if candidate.resolved_by_rule and candidate.standing_resolution is None:
                 rules_applied.add(candidate.resolved_by_rule)
             bounded.append(_bound_candidate(candidate, writable))
             if derived is not None and len(candidates) + len(bounded) < MAX_CANDIDATES_PER_SESSION:
@@ -2729,7 +2934,6 @@ def read_archive(
             bounded = [_no_run_for(c) for c in bounded]
         bounded = rc._reconcile_same_field(bounded)
         label_tokens = _label_tokens_for(unit, evidence_by_source)
-        per_unit = semantics["units"].get(unit_candidates.stem, {})
         units.append(
             UnitReading(
                 stem=unit_candidates.stem,
@@ -2768,6 +2972,16 @@ def read_archive(
             bounded_derived = _bound_candidate(derived, writable)
             candidates.append(bounded_derived)
             shared_ids.append(bounded_derived.candidate_id)
+
+    # (review I3) logbook sentences about samples this build cannot map onto measurements
+    # deterministically: ONE beamtime candidate per field, no value, the sentence kept.
+    for unscoped in rc.logbook_unscoped_candidates(semantics["logbook_unscoped"], source_id_map):
+        candidate_total += 1
+        if len(candidates) >= MAX_CANDIDATES_PER_SESSION:
+            continue
+        bounded_unscoped = _bound_candidate(unscoped, writable)
+        candidates.append(bounded_unscoped)
+        shared_ids.append(bounded_unscoped.candidate_id)
 
     column_readings, column_capped, column_thinned = _column_readings(evidence_by_source)
     # `DEC-41` LEVEL 4, PRODUCED HERE BECAUSE HERE IS WHERE THE EVIDENCE OBJECTS
@@ -2970,6 +3184,18 @@ def _archive_semantics(
     unbound_quality: list[dict] = []
     contributors_by_number: dict[int, list[dict]] = {}
     beamtime_contributors: list[dict] = []
+    # THE LOGBOOK'S STATEMENTS ABOUT THE ENVIRONMENT, REACTION AND CELL (2026-10-12),
+    # scoped exactly as contributors are: a sample section's to its file numbers, one
+    # made before any section to the whole beamtime.
+    from .bl15 import conditions as cond
+
+    logbook_by_number: dict[str, dict[int, list]] = {concept: {} for concept in cond.FIELDS}
+    logbook_beamtime: dict[str, list] = {concept: [] for concept in cond.FIELDS}
+    # (review I3) a beamtime sentence NAMING samples applies to those samples only, and
+    # only where the mapping onto the convention's confirmed sample token (`DEC-47`) is
+    # deterministic; one about an unnamed subset applies to none. Both are kept.
+    logbook_named: dict[str, list] = {concept: [] for concept in cond.FIELDS}
+    logbook_unscoped: list = []
     table_row_file: dict[tuple[str, int, int], int] = {}
     procedure_rows: list[tuple[str, tuple[int, int], Any]] = []
 
@@ -3062,6 +3288,18 @@ def _archive_semantics(
                     beamtime_contributors.append(
                         {**person, "basis": "named at beamtime scope; inherited by every measurement"}
                     )
+            elif concept in cond.FIELDS and item.source_type == ev.SOURCE_TYPE_BEAMTIME_NOTES:
+                value = item.normalized_value if isinstance(item.normalized_value, Mapping) else {}
+                if value.get("section") is None and value.get("unscoped"):
+                    logbook_unscoped.append(item)
+                elif value.get("section") is None and value.get("named_samples"):
+                    logbook_named[concept].append(item)
+                elif value.get("section") is None:
+                    logbook_beamtime[concept].append(item)
+                else:
+                    for number in value.get("file_numbers") or []:
+                        if isinstance(number, int) and not isinstance(number, bool):
+                            logbook_by_number[concept].setdefault(number, []).append(item)
     for path, key, item in procedure_rows:
         number = table_row_file.get((path, key[0], key[1]))
         if number is not None:
@@ -3074,6 +3312,42 @@ def _archive_semantics(
     for unit in relationships.units:
         if unit.legacy_number is not None:
             legacy_counts[unit.legacy_number] = legacy_counts.get(unit.legacy_number, 0) + 1
+
+    # -- (review I3) which named-sample sentences map deterministically --------------
+    # The convention's confirmed reading (`DEC-47`): a filename's second numeric token is
+    # the sample/electrode instance number. A sentence naming "samples 3 and 4" maps onto
+    # the measurements whose token is 3 or 4 — and only if, for every sample it names,
+    # the logbook's own "Sample N" section (when it has one) lists exactly those
+    # measurements. Otherwise the document numbers its samples differently from its file
+    # names, which sample the sentence means is a reading this build does not make, and
+    # the sentence applies to none.
+    def _group_number(unit) -> int | None:
+        token = unit.group_token
+        return int(token) if isinstance(token, str) and token.isdigit() else None
+
+    legacy_by_group: dict[int, set[int]] = {}
+    for unit in relationships.units:
+        group = _group_number(unit)
+        if group is not None and unit.legacy_number is not None:
+            legacy_by_group.setdefault(group, set()).add(unit.legacy_number)
+    named_applies: dict[str, list[tuple[Any, frozenset[int]]]] = {c: [] for c in cond.FIELDS}
+    for concept, items in logbook_named.items():
+        for item in items:
+            value = item.normalized_value if isinstance(item.normalized_value, Mapping) else {}
+            named = [n for n in value.get("named_samples") or [] if isinstance(n, int)]
+            files = value.get("named_sample_file_numbers") or {}
+            deterministic = bool(named) and all(
+                n in legacy_by_group
+                and (
+                    files.get(str(n)) is None
+                    or set(files.get(str(n)) or ()) == legacy_by_group[n]
+                )
+                for n in named
+            )
+            if deterministic:
+                named_applies[concept].append((item, frozenset(named)))
+            else:
+                logbook_unscoped.append(item)
 
     rules_applied: set[str] = set()
     resolutions = cr.resolutions_by_target(rules)
@@ -3119,6 +3393,24 @@ def _archive_semantics(
             "signal_selection": selection.to_state(),
             "data_quality_notes": quality,
             "contributors": people,
+            # Per field: this measurement's own sample section's statements, else the
+            # beamtime's — a section's statement overrides the beamtime's for that
+            # section only. SourceEvidence objects, used to build candidates; never
+            # serialised from here.
+            "logbook_statements": {
+                concept: (
+                    list(logbook_by_number[concept].get(unit.legacy_number, ()))
+                    if unit.legacy_number is not None
+                    else []
+                )
+                or list(logbook_beamtime[concept])
+                + [
+                    item
+                    for item, named in named_applies[concept]
+                    if _group_number(unit) in named
+                ]
+                for concept in cond.FIELDS
+            },
         }
 
     # -- conflicts, annotated with their layers ----------------------------------------
@@ -3197,6 +3489,7 @@ def _archive_semantics(
     return {
         "units": per_unit,
         "relationships_state": rel_state,
+        "logbook_unscoped": logbook_unscoped,
         "beamtime_elements": beamtime_elements,
         "temperature_statements": temperature_statements,
         "unbound_data_quality_notes": unbound_quality,
@@ -3423,14 +3716,26 @@ def _label_tokens_for(
     """
     if unit is None:
         return []
+    from .bl15 import evidence as ev
+
     first: dict[str, str] = {}
+    unrecognised: list[str] = []
     for item in evidence_by_source.get(unit.acquisition_path, ()):
+        # EVERY UNRECOGNISED TOKEN, in the order the name states them (2026-10-18, QA
+        # `C-19`). They used to be dropped, so `06_03_ZZ3_alk_fresh_…` and
+        # `08_03_ZZ3_alk_cycled_…` both became "Legacy N · 03 · ZZ3 · f30 · 1000mV" and
+        # two runs differed only by their legacy number. A token no convention reads is
+        # still the scientist's own word for the measurement, so it is kept, verbatim,
+        # after the recognised ones — and never interpreted.
+        if item.concept == ev.CONCEPT_UNKNOWN_TOKEN:
+            unrecognised.append(item.raw_literal)
+            continue
         if item.concept in first:
             continue
         first[item.concept] = item.raw_literal
     return [
         (concept, first[concept]) for concept in _LABEL_CONCEPTS if concept in first
-    ]
+    ] + [(ev.CONCEPT_UNKNOWN_TOKEN, literal) for literal in unrecognised]
 
 
 def _legacy_int(text: object) -> int | None:
@@ -4973,6 +5278,9 @@ def session_view(session: ImportSession) -> dict:
         # (2026-09-23) What the batch will do with each candidate, from the batch's
         # own partition — so the Add stage predicts exactly what it then reports.
         "send_plan": send_plan(session),
+        # (2026-10-12) Which of the environment, reaction and cell type this import
+        # leaves for a person to choose, per measurement, and where to choose them.
+        "left_for_a_person": left_for_a_person(session),
         # --- added 2026-09-22 ----------------------------------------------------
         # The registered naming CONVENTIONS a scientist can bind a subset of Runs to —
         # each with its historical aliases, and none of them a person.
@@ -5373,6 +5681,7 @@ def batch_partition(session: "ImportSession") -> tuple[list[SemanticCandidate], 
                     "error": "candidate_unresolved",
                     "reason": candidate.not_proposable_reason
                     or CANDIDATE_NOT_PROPOSABLE_DISAGREEMENT,
+                    "summary": plain_reason_of(candidate),
                 }
             )
         elif not candidate.proposable:
@@ -5384,6 +5693,12 @@ def batch_partition(session: "ImportSession") -> tuple[list[SemanticCandidate], 
                     "error": "candidate_not_proposable",
                     "reason": candidate.not_proposable_reason
                     or CANDIDATE_NOT_PROPOSABLE_NO_EXPERIMENT_CREATION,
+                    "summary": plain_reason(
+                        candidate.not_proposable_reason
+                        or CANDIDATE_NOT_PROPOSABLE_NO_EXPERIMENT_CREATION,
+                        candidate_id=candidate.candidate_id,
+                        kind=candidate.kind,
+                    ),
                 }
             )
         else:
@@ -5403,6 +5718,114 @@ def has_no_run_when_creating_runs(session: "ImportSession", candidate: SemanticC
         return False
     unit = reading.unit_of_candidate(candidate.candidate_id)
     return unit is None or not unit.run_candidate
+
+
+#: The field names a scientist reads, in the order a run editor shows them.
+_PERSON_CHOICE_LABELS: Mapping[str, str] = {
+    "context.environment": "Environment",
+    "context.electrochemistry.reaction": "Reaction",
+    "context.electrochemistry.cell_type": "Cell type",
+}
+#: Why a field is left, in a sentence. Keys are served; the sentence is the label.
+PERSON_CHOICE_REASONS: Mapping[str, str] = {
+    "not_stated": "No file this import read states it.",
+    "stated_not_settled": (
+        "A file mentions it, but not in a way that names exactly one of the schema's "
+        "options — its words are kept with the import's readings."
+    ),
+    "sources_disagree": "The sources state different values, and nothing was chosen.",
+    # (re-review, 2026-10-12) a logbook sentence that names samples this import could not
+    # match to measurements is applied to NONE — which is not "no file states it".
+    "stated_unmatched": (
+        "The logbook mentions it, but not for measurements this import could match — the "
+        "sentence is kept with the import's readings and, once added, in the record's "
+        "\u201cAlso read from the archive\u201d note."
+    ),
+}
+#: Where a person sets them — the run editor's own words.
+PERSON_CHOICE_WHERE = (
+    "Choose them on each run: open the record's Runs, open the run, and set them under "
+    "Conditions for this run."
+)
+
+
+def left_for_a_person(session: "ImportSession") -> dict | None:
+    """The domain owner's 2026-10-12 rule, made visible: what this import does NOT fill.
+
+    For every measurement offered as a Run, each of the environment, the reaction and
+    the cell type is either OFFERED — a candidate this import can send as a proposal (a
+    dry-sample filename, an explicit logbook statement) — or LEFT FOR A PERSON, with the
+    reason. Nothing here proposes or writes anything; it reports. ``None`` for a session
+    with no archive reading. The counts are over Runs only: an alignment scan or a
+    reference standard is never a Run, so it has no run to set these on.
+    """
+    from .bl15 import mapping as mp  # local: keeps import order flexible
+
+    reading = session.archive_reading
+    if reading is None:
+        return None
+    by_id = {c.candidate_id: c for c in candidates_of(session)}
+    by_measurement: dict[str, list[dict]] = {}
+    tally: dict[str, dict[str, int]] = {
+        path: {"left": 0, "offered": 0} for path in mp.PERSON_CHOICE_PATHS
+    }
+    runs = 0
+    # The fields a logbook sentence spoke to that matched NO measurement (`shared::unscoped`).
+    unmatched = {
+        c.target_field_path
+        for c in by_id.values()
+        if c.candidate_id.startswith("shared::unscoped::")
+    }
+    for unit in reading.units:
+        if not unit.run_candidate:
+            continue
+        runs += 1
+        mine = [by_id[cid] for cid in unit.candidate_ids if cid in by_id]
+        offered = {c.target_field_path for c in mine if c.proposable}
+        disputed = {
+            c.target_field_path
+            for c in mine
+            if c.unresolved_reason is not None and c.resolved_by_rule is None
+        }
+        mentioned = {c.target_field_path for c in mine if c.kind == CANDIDATE_KIND_FIELD}
+        left: list[dict] = []
+        for path in mp.PERSON_CHOICE_PATHS:
+            if path in offered:
+                tally[path]["offered"] += 1
+                continue
+            reason = (
+                "sources_disagree"
+                if path in disputed
+                else "stated_not_settled"
+                if path in mentioned
+                else "stated_unmatched"
+                if path in unmatched
+                else "not_stated"
+            )
+            tally[path]["left"] += 1
+            left.append({"path": path, "label": _PERSON_CHOICE_LABELS[path], "reason": reason})
+        by_measurement[unit.stem] = left
+    return {
+        "rule": mp.LEFT_FOR_A_PERSON_RULE,
+        "attribution": mp.ANGEL_2026_10_12,
+        "where": PERSON_CHOICE_WHERE,
+        "reasons": dict(PERSON_CHOICE_REASONS),
+        "runs": runs,
+        "fields": [
+            {
+                "path": path,
+                "label": _PERSON_CHOICE_LABELS[path],
+                "left": tally[path]["left"],
+                "offered": tally[path]["offered"],
+                # The schema's own options, read at runtime — what a person picks from.
+                "options": list(mp.schema_enum(path)),
+            }
+            for path in mp.PERSON_CHOICE_PATHS
+        ],
+        "by_measurement": by_measurement,
+        # SAID ON THE WIRE: nothing here is a value, and nothing was filled in.
+        "fills_anything": False,
+    }
 
 
 def send_plan(session: "ImportSession") -> dict:
@@ -5619,6 +6042,10 @@ _READING_LABELS: Mapping[str, str] = {
     "beamsize": "Beam size",
     "legacy_run_or_file_number": "Legacy run or file number",
     "contributor_statement": "Named in the notes",
+    "sample_position": "Sample position",
+    "environment_statement": "Environment, as the logbook says it",
+    "reaction_statement": "Reaction, as the logbook says it",
+    "cell_type_statement": "Cell type, as the logbook says it",
 }
 
 #: The order lines are listed in: what the sample WAS first, then how it was measured,
@@ -5634,6 +6061,9 @@ _READING_ORDER: tuple[str, ...] = (
     "potential_reference_basis",
     "filter",
     "acquisition_method",
+    "environment_statement",
+    "reaction_statement",
+    "cell_type_statement",
     "scan_command",
     "energy_grid",
     "counting_time",

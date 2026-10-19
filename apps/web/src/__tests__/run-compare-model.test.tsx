@@ -45,6 +45,7 @@ import {
   type RunComparison,
 } from '../lib/runCompare';
 import type { ApiConflict, ApiRunInherited, ApiRunView } from '../lib/types';
+import { RUN_FIELDS } from '../lib/runFields';
 
 /* ── fixtures ──────────────────────────────────────────────────────────────── */
 
@@ -323,12 +324,14 @@ describe('the tally counts what it can see and nothing else', () => {
     expect(tally.agreeing).toBe(tally.compared);
   });
 
-  it('two empty runs produce the five run-level rows and no difference', () => {
+  it('two empty runs produce the seven run-level rows and no difference', () => {
     const comparison = buildRunComparison(run(), run({ id: 'R2' }));
     // `RUN_FIELDS` is unioned in so "neither run records a temperature" is a row
     // rather than an omission — the fact a reader asking "are these the same apart
-    // from temperature?" needs.
-    expect(comparison.tally.compared).toBe(5);
+    // from temperature?" needs. Five until 2026-10-12, when the reaction and the cell
+    // type a person chooses on a run joined the editor.
+    expect(comparison.tally.compared).toBe(7);
+    expect(comparison.tally.compared).toBe(RUN_FIELDS.length);
     expect(allRows(comparison).every((row) => row.scope === 'run-field')).toBe(true);
     expect(comparison.blocks).toEqual([]);
   });

@@ -767,7 +767,7 @@ async def _answer_questions(ctx: ToolContext, args: Mapping[str, Any]) -> ToolOu
 
     WHY THIS IS SEPARATE FROM :func:`_update_draft`, and the distinction is the
     caller's, not an implementation detail. ``isaac_update_draft`` writes **official
-    field paths** — ``context.temperature_K`` and the four others PATCH accepts, or a
+    field paths** — ``context.temperature_K`` and the six others PATCH accepts, or a
     dotted path on the record. This tool writes **blocking-question keys**, the ones
     ``GET .../pending`` hands out: ``series``, ``qc``, ``descriptor``, an asset URI.
     They are different key spaces reaching different core writers, and a tool whose
@@ -1509,10 +1509,12 @@ def _tools() -> tuple[Tool, ...]:
                 "write is refused.\n\n"
                 "THE TWO BRANCHES TAKE DIFFERENT KEY SPACES, and this sentence "
                 "used to claim they took the same one. WITH a `run_id`, `fields` "
-                "takes official field paths and exactly five are writable — "
+                "takes official field paths and exactly seven are writable — "
                 "`context.environment`, `context.temperature_K`, "
-                "`context.thermodynamics.atmosphere` and the two "
-                "`timestamps.acquired_*`. WITHOUT one, it takes the "
+                "`context.thermodynamics.atmosphere`, the two "
+                "`timestamps.acquired_*`, and `context.electrochemistry.reaction` and "
+                "`context.electrochemistry.cell_type`, which take only a value from the "
+                "official schema's own list for each. WITHOUT one, it takes the "
                 "BLOCKING-QUESTION keys `isaac_answer_questions` takes, because it "
                 "posts to the record's correction route — so an official field path "
                 "there is refused as `unrecognized_field`, WITH TWO NAMED "
@@ -2498,7 +2500,7 @@ def _tools() -> tuple[Tool, ...]:
                     "proposed_value": {
                         # ANY JSON VALUE EXCEPT NULL, spelled as a list of types rather
                         # than as an invented `"any"` or as an omitted `type` — see
-                        # `_declared_types`. The eighteen writable paths hold strings,
+                        # `_declared_types`. The twenty writable paths hold strings,
                         # numbers and structured values, and the route refuses `null`
                         # because a null would CLEAR the field if it were applied.
                         #

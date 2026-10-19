@@ -229,18 +229,22 @@ describe('A11Y — heading levels never skip a level or go backwards', () => {
     await view.findByText('Total Records');
 
     const found = levels(view.container);
+    /* ~~Workspace at a Glance · Workflow Distribution · Open Questions · How
+       These Five Are Counted · Evidence and Validation (h3 Evidence Support, h3
+       Export Gate) · What Each Position Means · Recent Work · Workspace Activity
+       · Historical Imports · No Analytics~~ — the 2026-10-12 widget redesign:
+       one h2 per WIDGET, and no h3 at all on this tab. The two prose
+       disclosures' summary headings are gone because their copy is now in info
+       panels; the two `Evidence and Validation` h3s are gone because each half
+       became a place of its own (the export gate a view of Records); `Workflow
+       Distribution` and `Recent Work` are views, named by their tabs. The
+       outline is flatter and still never skips a level. */
     expect(found).toEqual([
       1,
-      2 /* Workspace at a Glance */,
-      2 /* Workflow Distribution */,
+      2 /* Records */,
       2 /* Open Questions */,
-      2 /* How These Five Are Counted — a closed prose disclosure's summary */,
-      2 /* Evidence and Validation */,
-      3 /* Evidence Support */,
-      3 /* Export Gate */,
-      2 /* What Each Position Means — a closed prose disclosure's summary */,
-      2 /* Recent Work */,
-      2 /* Workspace Activity — `ACT-004`, added 2026-09-18 */,
+      2 /* Evidence Support */,
+      2 /* Workspace Activity */,
       2 /* Historical Imports */,
       2 /* This Application Collects No Analytics */,
     ]);
@@ -258,26 +262,30 @@ describe('A11Y — heading levels never skip a level or go backwards', () => {
     // running order: the official/shadow comparison, mutation verification, the
     // issue distributions, and the run details. It was FIVE until the safeguards
     // became an h2 of their own — the outline is one level deeper nowhere.
+    /* Since 2026-10-12: Record Verification's four h3s are now its four VIEWS'
+       own headings (the panels are mounted while hidden, so they stay in the
+       outline); the four prose disclosures and `Technical Details` are gone as
+       containers, and the four build facts are h2 widgets of their own rather
+       than h3s inside a closed region. Platform Metrics' six planned-view h3s
+       are inside its expansion — still in the outline, one level below it. */
+    /* Since 2026-10-18 the Validators view draws no h3: the comparison is two
+       compact rows, named by the view's own tab, and the h3 restated it. */
     expect(found).toEqual([
       1,
       2 /* Record Verification */,
-      3 /* Official Validation and the Format Shadow, Side by Side */,
       3 /* Mutation Verification */,
       3 /* Where the Stricter Checks Disagreed */,
       3 /* About This Run */,
       2 /* Verification Safeguards */,
+      /* Runtime moved beside Platform Metrics on 2026-10-18 (rows paired by
+         height); the outline is the same set of h2s in that order. */
+      2 /* Project Memory */,
+      2 /* Record Schema */,
+      2 /* API Surface */,
+      2 /* Runtime */,
       2 /* Platform Metrics */,
       3,
       3,
-      3,
-      3,
-      3,
-      3,
-      2 /* How Verification Works */,
-      2 /* How to Interpret Results */,
-      2 /* Mutation Methodology */,
-      2 /* Known Limitations */,
-      2 /* Technical Details */,
       3,
       3,
       3,

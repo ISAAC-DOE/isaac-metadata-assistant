@@ -32,6 +32,11 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { readFileSync } from 'node:fs';
+
+/* THE RECORD SCREEN'S PER-TEST BUDGET (review, 2026-10-18): the focus tests in §15 drive
+   six mounted stages through deferred acts and measured 3.5 s on a shared host — within
+   the 5 s default only by luck. `record-view-input-survival.test.tsx` sets the same. */
+vi.setConfig({ testTimeout: 30_000 });
 import { join } from 'node:path';
 
 /** The comment-stripping the source-scan guards use, extracted so the mutation
@@ -375,6 +380,11 @@ function stub(
          future looser pattern would. */
       if (routes.sources !== undefined && /\/api\/imports\/[^/]+\/sources$/.test(url) && method === 'POST') {
         return json(routes.sources);
+      }
+      /* SINCE 2026-10-18 (QA `C-21`) adding a readable source READS AND RECONSTRUCTS it
+         in the same act, so those two POSTs are expected and answer the session. */
+      if (/\/api\/imports\/[^/]+\/(parse|reconstruct)$/.test(url) && method === 'POST') {
+        return json({ import: routes.detail ?? session() });
       }
       if (/\/api\/imports\/[^/]+\/add-to-experiment$/.test(url)) {
         if (routes.onAdd) return routes.onAdd();
@@ -953,18 +963,29 @@ describe('§4 · one `<h1>`, one name for the destination, and the server’s wo
     expect(ROUTE_PATTERNS.imports).toBe(ROUTES.imports);
   });
 
-  it('the workflow steps and the unbuilt disclosure come from the SERVER', async () => {
+  it('the strip and the tabs share ONE vocabulary — the stage names (QA `C-20`)', async () => {
     /**
-     * MUTATION: hard-coding the six labels in the component makes this RED, which
-     * is the point — a second vocabulary in the browser is free to drift from the
-     * operation that enforces it.
+     * INVERTED 2026-10-18, NOT DELETED. ~~"the workflow steps and the unbuilt disclosure
+     * come from the SERVER" — asserted a server step LABEL ("Parse") rendered in the
+     * landing's strip.~~ That was the defect the audit named: the strip said New Import ·
+     * Sources · Parse · Reconstruct · Review · Add to Experiments while the tabs said
+     * Source Bundle · What ISAAC Read · Runs & Candidates · Conflicts · Review · Add to
+     * Experiment — one sequence, two sets of names. What still comes from the server is
+     * how far a session has REACHED and any step it declares UNBUILT, in its own words
+     * (§3). MUTATION: rendering `step.label` in the strip makes this RED.
      */
     const renamed = WORKFLOW.map((step) =>
       step.id === 'parse' ? { ...step, label: 'A LABEL ONLY THE SERVER KNOWS' } : step,
     );
     stub({ list: listResponse({ workflow: renamed }) });
     renderScreen();
-    expect(await screen.findByText('A LABEL ONLY THE SERVER KNOWS')).toBeTruthy();
+    await screen.findByRole('heading', { name: 'Imports', level: 2 });
+    fireEvent.click(screen.getByRole('button', { name: 'How Historical Import works' }));
+    const strip = document.querySelector('.hi-steps')!;
+    expect(strip.textContent).not.toContain('A LABEL ONLY THE SERVER KNOWS');
+    for (const stage of ['sources', 'read', 'runs', 'conflicts', 'review', 'add'] as const) {
+      expect(strip.textContent).toContain(IMPORT_STAGE_COPY[stage].title);
+    }
   });
 
   it('the durability sentence is the SERVER’s, not the browser’s', async () => {
@@ -1481,7 +1502,12 @@ describe('§10 · adding a whole import to one record', () => {
        reader less than the server said — and the one it left out is the one
        that needs their attention. */
     const counts = screen.getByText(/could not be sent/);
-    expect(counts.textContent).toContain('2 sent');
+    // ~~'2 sent'~~ (QA `C-25`): "2 sent · 0 already there" sat above a list titled "Sent
+    // candidates" that held both. The report now names the whole — "2 proposals on this
+    // record" — and how it splits, so the numbers agree.
+    // …and since review (2026-10-18) "sent now": it counts only THIS send.
+    expect(counts.textContent).toContain('2 sent now');
+    expect(counts.textContent).toContain('2 new');
     expect(counts.textContent).toContain('0 already there');
     expect(counts.textContent).toContain('1 could not be sent');
     expect(counts.textContent).toContain('5 candidates in this import');
@@ -1508,8 +1534,8 @@ describe('§10 · adding a whole import to one record', () => {
 
     expect(screen.getByText(IMPORT_COPY.addWholeNothingNew)).toBeTruthy();
     expect(screen.getAllByText('already there').length).toBe(2);
-    // AND IT DOES NOT CLAIM TO HAVE SENT ANYTHING.
-    expect(screen.getByText(/could not be sent/).textContent).toContain('0 sent');
+    // AND IT DOES NOT CLAIM TO HAVE SENT ANYTHING NEW.
+    expect(screen.getByText(/could not be sent/).textContent).toContain('0 new');
   });
 
   it('never says a value was applied, written or saved to the record', async () => {
@@ -1549,7 +1575,8 @@ describe('§10 · adding a whole import to one record', () => {
     await chooseRecordAndAdd();
     await screen.findByText(IMPORT_COPY.addWholeResultTitle);
 
-    fireEvent.click(screen.getByRole('button', { name: /Sent candidates/ }));
+    // ~~/Sent candidates/~~ — renamed for what it holds (QA `C-25`): this send's proposals.
+    fireEvent.click(screen.getByRole('button', { name: /Sent now/ }));
     const links = within(
       document.querySelector('.hi-addwhole-result .hi-addwhole-sent') as HTMLElement,
     ).getAllByRole('link');
@@ -1740,8 +1767,8 @@ describe('§12 · one stage in focus, reached by real tabs', () => {
 
   it('MUTATION-GUARDED: an act keeps the reader on the stage they are on', async () => {
     /**
-     * MUTATION: deleting the `setStage((current) => current ?? activeRef.current)`
-     * pin in `act` makes this RED. Found in a real browser first: adding the first
+     * MUTATION: deleting the pin in `act` (`onStage(activeRef.current, { replace: true })`
+     * when the URL names no stage) makes this RED. Found in a real browser first: adding the first
      * source re-derived the stage and swept the reader to What ISAAC Read, table and
      * all, while they were still assembling the bundle.
      */
@@ -1769,21 +1796,52 @@ describe('§12 · one stage in focus, reached by real tabs', () => {
     fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
     await sessionOpen();
     expect(screen.getByRole('tab', { selected: true }).textContent).toContain(IMPORT_STAGE_COPY.sources.title);
-    fireEvent.click(screen.getByRole('button', { name: IMPORT_COPY.actionAddFixture }));
+    /* A POINTER, NOT A READABLE SOURCE (2026-10-18): adding a readable one now reads it and
+       moves the reader on by design (QA `C-21`, asserted in §12 below). Recording a
+       reference names no next stage, so it is the act that proves the pin. */
+    fireEvent.click(screen.getByRole('button', { name: 'Add an external reference instead' }));
+    fireEvent.change(screen.getByLabelText('File name'), { target: { value: 'FAKE-scan_0012.mac' } });
+    fireEvent.change(screen.getByLabelText('Where it is'), { target: { value: '/fake/2099/FAKE-scan_0012.mac' } });
+    fireEvent.click(screen.getByRole('button', { name: IMPORT_COPY.actionAddReference }));
     await waitFor(() => expect(added).toBe(true));
     await waitFor(() => expect(document.querySelector('table')).not.toBeNull());
     expect(screen.getByRole('tab', { selected: true }).textContent).toContain(IMPORT_STAGE_COPY.sources.title);
   });
 
-  it('names the next stage at the foot of each one, and lands focus on its tab', async () => {
-    await openSession();
+  it('offers no "Next:" button — adding a readable source reads it and moves the reader on (QA `C-21`)', async () => {
+    /**
+     * INVERTED 2026-10-18, NOT DELETED. ~~"names the next stage at the foot of each one,
+     * and lands focus on its tab"~~ — the audit measured those buttons adding no decision
+     * (each only moved a tab), and Reconstruct adding none either. What replaces them is
+     * the act itself: adding an example source reads and reconstructs it, and — the reader
+     * not having moved — lands them on Runs & Candidates with its heading focused.
+     * MUTATION: dropping the `'runs'` from the add act makes the stage assertion RED.
+     */
+    stub({ list: listResponse(), detail: session(), sources: { source: FIXTURE_SOURCE, import: session() } });
+    renderScreen();
+    fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
+    await sessionOpen();
+    for (const stage of ['sources', 'read', 'runs', 'conflicts', 'review', 'add'] as const) {
+      expect(within(goTo(IMPORT_STAGE_COPY[stage].title)).queryByRole('button', { name: /^Next:/ })).toBeNull();
+    }
     const panel = goTo(IMPORT_STAGE_COPY.sources.title);
-    const next = within(panel).getByRole('button', { name: `Next: ${IMPORT_STAGE_COPY.read.title}` });
-    fireEvent.click(next);
-    expect(screen.getByRole('tab', { selected: true }).textContent).toContain(IMPORT_STAGE_COPY.read.title);
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('tab', { selected: true })));
-    // The last stage offers no "next".
-    expect(within(goTo(IMPORT_STAGE_COPY.add.title)).queryByRole('button', { name: /^Next:/ })).toBeNull();
+    fireEvent.click(within(panel).getByRole('button', { name: IMPORT_COPY.actionAddFixture }));
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { selected: true }).textContent).toContain(IMPORT_STAGE_COPY.runs.title),
+    );
+    /* AND FOCUS GOES WITH THE READER (independent review, 2026-10-18): the stage now lives in
+       the URL, and with `v7_startTransition` the move lands a render later — the first fix
+       focused the Source Bundle heading that was about to hide, and focus fell to <body>.
+       MUTATION: querying the active panel instead of the TARGET stage's panel makes this RED. */
+    const runsPanel = document.querySelector('[role="tabpanel"]:not([hidden])') as HTMLElement;
+    await waitFor(() =>
+      expect(document.activeElement).toBe(runsPanel.querySelector('.hi-stage-title')),
+    );
+    expect(document.activeElement?.textContent).toBe(IMPORT_STAGE_COPY.runs.title);
+    // The read and the reconstruction were both asked for, in that order, in one act.
+    const posts = seen.filter((r) => r.method === 'POST').map((r) => r.url.replace(/.*\/api\/imports\/[^/]+/, ''));
+    expect(posts.indexOf('/parse')).toBeGreaterThan(posts.indexOf('/sources'));
+    expect(posts.indexOf('/reconstruct')).toBeGreaterThan(posts.indexOf('/parse'));
   });
 });
 
@@ -1825,11 +1883,17 @@ describe('§13 · what the batch send reports, and where review happens', () => 
     renderScreen();
     fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
     await sessionOpen();
-    // Not before a send: the note belongs beside the link to review.
-    expect(within(goTo(IMPORT_STAGE_COPY.add.title)).queryByText(IMPORT_STAGE_COPY.acceptanceNote)).toBeNull();
+    /*
+     * INVERTED 2026-10-18 (QA `C-17`), NOT DELETED. ~~"Not before a send: the note belongs
+     * beside the link to review"~~ — that was the defect: a scientist learned acceptance
+     * was unavailable only AFTER sending. The fact is said on the Add stage BEFORE a send,
+     * from the same capability, and the report no longer repeats it.
+     */
+    expect(within(goTo(IMPORT_STAGE_COPY.add.title)).getByText(IMPORT_STAGE_COPY.acceptanceBefore)).toBeTruthy();
     await chooseRecordAndAdd();
     await screen.findByText(IMPORT_COPY.addWholeResultTitle);
-    expect(screen.getByText(IMPORT_STAGE_COPY.acceptanceNote)).toBeTruthy();
+    expect(screen.getAllByText(IMPORT_STAGE_COPY.acceptanceBefore)).toHaveLength(1);
+    expect(screen.queryByText(IMPORT_STAGE_COPY.acceptanceNote)).toBeNull();
   });
 
   it('and says nothing about acceptance when the capability is available', async () => {
@@ -1837,6 +1901,7 @@ describe('§13 · what the batch send reports, and where review happens', () => 
     await chooseRecordAndAdd();
     await screen.findByText(IMPORT_COPY.addWholeResultTitle);
     expect(screen.queryByText(IMPORT_STAGE_COPY.acceptanceNote)).toBeNull();
+    expect(screen.queryByText(IMPORT_STAGE_COPY.acceptanceBefore)).toBeNull();
   });
 
   it('offers "one run per measurement" only for an archive import', async () => {
@@ -1878,7 +1943,8 @@ describe('§14 · per-scan variation is not counted or shown as a conflict', () 
     fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
     await sessionOpen();
     // ONE conflict — the disagreement — in the tab, the summary and the stage.
-    expect(screen.getByRole('tab', { name: new RegExp(IMPORT_STAGE_COPY.conflicts.title) }).textContent).toContain('1 open');
+    // "1 to decide" since 2026-10-18 (QA `C-22`): only what a person can decide is counted.
+    expect(screen.getByRole('tab', { name: new RegExp(IMPORT_STAGE_COPY.conflicts.title) }).textContent).toContain('1 to decide');
     const conflictsCount = document.querySelector('.hi-summary-item[data-id="conflicts"] dd');
     expect(conflictsCount?.textContent).toBe('1');
     const panel = goTo(IMPORT_STAGE_COPY.conflicts.title);

@@ -65,6 +65,7 @@ import {
   proposalCard,
   proposalCardInState,
   test,
+  unrelatedMembers,
   type ServerApi,
 } from './fixtures';
 import { FIXTURE_ACTOR_SUBJECT, FIXTURE_TRUST_BASIS, TRUSTED_API_BASE } from './env';
@@ -123,13 +124,18 @@ async function deriveTarget(api: APIRequestContext, server: ServerApi, id: strin
 
   for (const path of [...runScoped].sort()) {
     const values = nodeAt(path)?.enum;
-    if (Array.isArray(values) && values.length >= 3 && values.every((v) => typeof v === 'string')) {
-      const [runOne, runTwo, proposed] = values as string[];
+    if (!Array.isArray(values) || !values.every((v) => typeof v === 'string')) continue;
+    // Three members none of which contains another (`unrelatedMembers`): the central
+    // assertion below says run ONE's value is absent, and `flow_cell` inside
+    // `microfluidic_flow_cell` would make that false on a correct screen.
+    const picked = unrelatedMembers(values as string[], 3);
+    if (picked !== null) {
+      const [runOne, runTwo, proposed] = picked;
       return { path, runOne, runTwo, proposed };
     }
   }
   throw new Error(
-    `no run-scoped target is a schema enum of three or more string members. ` +
+    `no run-scoped target is a schema enum of three or more mutually unrelated string members. ` +
       `Run-scoped targets served: ${JSON.stringify(runScoped)}`
   );
 }
@@ -249,7 +255,10 @@ test.describe('a run-scoped ingestion proposal, reviewed in a browser', () => {
 
     // THE CENTRAL ASSERTION OF THIS FILE. Three distinct values are in play; the one
     // rendered must be the SECOND run's.
-    await expect(body).toContainText(target.runTwo);
+    // EXACT text first: the body IS run two's value, nothing more or less. The two
+    // containment negatives then stay meaningful because the three values are
+    // mutually unrelated (`deriveTarget`).
+    await expect(body).toHaveText(target.runTwo);
     await expect(body).not.toContainText(target.runOne);
     await expect(body).not.toContainText(target.proposed);
 

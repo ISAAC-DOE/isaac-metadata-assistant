@@ -3,7 +3,6 @@ import {
   useCallback,
   useEffect,
   useId,
-  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -215,25 +214,47 @@ export const CHART_MIN_WIDTH = 120;
  */
 export function useChartWidth(): [(node: HTMLElement | null) => void, number] {
   const [width, setWidth] = useState(CHART_FALLBACK_WIDTH);
-  const observerRef = useRef<ResizeObserver | null>(null);
-
-  useEffect(() => () => observerRef.current?.disconnect(), []);
+  /*
+   * ── THE POST-OPEN FAILURE, IDENTIFIED (2026-10-12) ─────────────────────
+   *
+   * The observer used to be created inside the ref callback and disconnected by
+   * a mount-only effect cleanup (`useEffect(() => () => disconnect(), [])`).
+   * `main.tsx` renders under `<StrictMode>`, which in development runs every
+   * effect's cleanup once and re-runs the effect — but React 18 does NOT re-run
+   * the ref callback. So the simulated unmount disconnected the observer and
+   * nothing ever created another: every chart's observer was dead from its
+   * first commit in a dev build (which is what the e2e suites run against).
+   *
+   * Measured, which is why this is stated as a cause rather than a guess: with
+   * a chart mounted inside a hidden widget view, a SEPARATELY installed observer
+   * on the same `.stats-chart-plot` reported `[0, 849]` when the view was shown
+   * and `830` on a later window resize, while the chart's own SVG stayed at the
+   * 560px fallback through both. Visible-at-mount charts never showed it,
+   * because the synchronous read below sized them before the observer mattered;
+   * a chart mounted while hidden reads 0 there and depended on the observer
+   * alone. That is also the closed-`<details>` symptom recorded above.
+   *
+   * The observer now lives in an effect keyed on the measured NODE, so a
+   * StrictMode re-run creates a fresh one, and its cleanup is its own.
+   */
+  const [node, setNode] = useState<HTMLElement | null>(null);
 
   const apply = useCallback((measured: number | undefined) => {
     if (typeof measured !== 'number' || !Number.isFinite(measured) || measured <= 0) return;
     setWidth(Math.max(CHART_MIN_WIDTH, Math.round(measured)));
   }, []);
 
+  useEffect(() => {
+    if (node === null || typeof ResizeObserver === 'undefined') return; // jsdom: keep the fallback
+    const observer = new ResizeObserver((entries) => apply(entries[0]?.contentRect.width));
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [node, apply]);
+
   const attach = useCallback(
-    (node: HTMLElement | null) => {
-      observerRef.current?.disconnect();
-      observerRef.current = null;
-      if (node === null) return;
-      apply(node.getBoundingClientRect().width);
-      if (typeof ResizeObserver === 'undefined') return; // jsdom: keep the fallback
-      const observer = new ResizeObserver((entries) => apply(entries[0]?.contentRect.width));
-      observer.observe(node);
-      observerRef.current = observer;
+    (next: HTMLElement | null) => {
+      setNode(next);
+      if (next !== null) apply(next.getBoundingClientRect().width);
     },
     [apply],
   );
@@ -254,6 +275,12 @@ export interface ChartTableRow {
 export interface ChartFrameProps {
   /** Sentence-case caption. Rendered as a visible `<figcaption>`. */
   caption: string;
+  /**
+   * Keep the caption for assistive technology only (`sr-only`). For a compact
+   * figure whose surrounding widget view already names it and whose rows
+   * state every figure in words — never for a plot whose marks need it.
+   */
+  captionHidden?: boolean;
   /** The one sentence a screen reader gets in place of the picture. */
   summary: string;
   /** Optional visible clarifier under the caption. */
@@ -282,6 +309,7 @@ export interface ChartFrameProps {
  */
 export function ChartFrame({
   caption,
+  captionHidden = false,
   summary,
   note,
   legend,
@@ -292,7 +320,9 @@ export function ChartFrame({
 }: ChartFrameProps) {
   return (
     <figure className="stats-chart">
-      <figcaption className="stats-chart-caption">{caption}</figcaption>
+      <figcaption className={captionHidden ? 'stats-chart-caption sr-only' : 'stats-chart-caption'}>
+        {caption}
+      </figcaption>
       {note ? <p className="stats-chart-note">{note}</p> : null}
       {/* The authoritative text equivalent. Present in the accessibility tree
           on every render — never inside the collapsed disclosure below. */}
@@ -979,6 +1009,8 @@ export const IN_SEGMENT_LABEL_SLOTS: readonly number[] = Object.freeze([1, 2, 4,
 
 export interface StatsComparisonRowsProps {
   caption: string;
+  /** See `ChartFrameProps.captionHidden`. */
+  captionHidden?: boolean;
   rows: readonly ChartRow[];
   unit: string;
   total: number | null;
@@ -1004,6 +1036,7 @@ export interface StatsComparisonRowsProps {
  */
 export function StatsComparisonRows({
   caption,
+  captionHidden = false,
   rows,
   unit,
   total,
@@ -1017,6 +1050,7 @@ export function StatsComparisonRows({
   return (
     <ChartFrame
       caption={caption}
+      captionHidden={captionHidden}
       summary={chartSummary(caption, rows, unit, total)}
       note={note}
       tableRowHeader={categoryHeader}

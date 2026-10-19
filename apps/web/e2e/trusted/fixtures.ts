@@ -492,6 +492,28 @@ export async function backToAllRuns(page: Page): Promise<void> {
  */
 /** Navigate to the Review Record screen's Proposals view and wait for the
  *  proposals panel. (~~`view = 'capture'`~~ — the panel moved there 2026-09-22.) */
+/**
+ * The first `count` members of a schema enum, in the schema's own order, of which NO
+ * ONE IS A SUBSTRING OF ANOTHER — or `null` when the enum cannot supply that many.
+ *
+ * WHY, measured rather than supposed (2026-10-12): once `context.electrochemistry.cell_type`
+ * became a run-writable target it sorts ahead of `context.environment`, and its first two
+ * members are `flow_cell` and `microfluidic_flow_cell`. A spec asserting "shows run two's
+ * value, not run one's" with `not.toContainText(runOne)` then fails on a CORRECT screen,
+ * because the right value contains the wrong one. Picking unrelated members keeps every
+ * containment assertion meaningful without naming a single literal: the values are still
+ * the server's, only the choice among them is constrained.
+ */
+export function unrelatedMembers(values: readonly string[], count: number): string[] | null {
+  const chosen: string[] = [];
+  for (const value of values) {
+    if (chosen.some((c) => c.includes(value) || value.includes(c))) continue;
+    chosen.push(value);
+    if (chosen.length === count) return chosen;
+  }
+  return null;
+}
+
 export async function openRecord(page: Page, id: string, view = 'proposals'): Promise<void> {
   await page.goto(`/record/${id}?view=${view}`);
   await expect(page.getByRole('heading', { name: 'Ingestion Proposals' })).toBeVisible();

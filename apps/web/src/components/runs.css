@@ -694,6 +694,21 @@
   container-type: inline-size;
   container-name: run-fields;
 }
+
+/* "ELECTROCHEMISTRY · IF IT APPLIES" (2026-10-12) — the reaction and the cell type, set
+   apart from the counted run fields above them. */
+.run-fields-group {
+  margin-top: var(--space-md);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border);
+}
+
+.run-fields-group-title {
+  margin: 0 0 var(--space-xs);
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  color: var(--text-muted);
+}
 @container run-fields (max-width: 480px) {
   .run-field {
     flex-direction: column;

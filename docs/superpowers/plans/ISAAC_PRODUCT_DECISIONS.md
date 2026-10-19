@@ -320,10 +320,45 @@ reproduced locally from `main` at `0a12f7ae`, then confirmed read-only on hosted
 - **The truth plane is untouched.** Official validation, export gating, provenance, actor trust,
   immutable submitted snapshots, no-guessing and no agent final Submit are unchanged.
 - **No new table, no migration, no operator act** (`DEC-49` precedent).
-- **`Q6`, `Q7`, `Q8` remain Angel's** — his reply did not address them — and **`Q21`** (which acquisition quantities are legitimately per-scan) is new.
+- ~~**`Q6`, `Q7`, `Q8` remain Angel's** — his reply did not address them — and **`Q21`** (which acquisition quantities are legitimately per-scan) is new.~~ — **answered 2026-10-12; see `B8` (`DEC-68`…`DEC-75`).** Kept struck rather than deleted: it was true of the 2026-09-22 reply.
 - **No production provider, MCP endpoint, identity boundary or real-byte ingestion is enabled.**
   `EXT-01`, `EXT-02`, `EXT-13` are unchanged; the new `historical_file_ingestion` capability
   defaults to **disabled**.
+
+## B8. Decisions taken from the domain owner's 2026-10-12 answers
+
+**Eight decisions, `DEC-68`…`DEC-75`. One narrows an earlier row — `DEC-67`'s "until Angel
+says otherwise" — by confirming it, and is recorded as a confirmation rather than folded in.**
+
+**Provenance, per row.** `DEC-68`…`DEC-74` are **domain-owner (Angel) answers relayed by the
+project owner**, dated 2026-10-12 — two messages that day, the second a follow-up about the
+logbook — the same evidentiary class as `DEC-47` and `DEC-62`…`DEC-66`: no transcript backs
+them, authorship witnesses nothing, and **only Krish can confirm the relay — and only Angel
+the content.** `DEC-75` is an **engineering decision taken by the implementing slice** inside
+`DEC-68`, on measured evidence. The answers are quoted in
+[`docs/bl15-2-domain-questions-2026-09-16.md`](../../bl15-2-domain-questions-2026-09-16.md)
+§"RECONCILED 2026-10-12".
+
+| ID | Decision | Status | Source | Reasoning and boundary |
+|---|---|---|---|---|
+| **DEC-68** | **A value is taken from the metadata the import reads, or left blank for a person to choose.** For every measurement offered as a Run, the import states which of the environment, reaction and cell type it leaves for a person, why, and where to set them. | CONFIRMED 2026-10-12 | **Angel** (relayed) | Restates T5/`DEC-62` in the domain owner's words. `left_for_a_person` is served on the session view and in the Add report; it fills nothing (`fills_anything: false`). |
+| **DEC-69** | **The environment, reaction and cell type the domain owner gave for ONE beamtime (operando, OER, three_electrode) are never filled in for any archive.** They are facts about that beamtime, not readings a file states. | CONFIRMED 2026-10-12 | **Angel** (relayed) | Recorded in the domain-question registry as answers (`Q6`/`Q7`/`Q8` → `conditionally_resolved`), never as defaults. **Open tension, not resolved here:** *three_electrode* for the whole experiment sits beside the beamtime document's statement that samples 7–8 used a flowing configuration — the domain owner's to say. |
+| **DEC-70** | **A measurement whose own filename says it was dry or had no electrolyte — and says nothing else about the conditions — gets an `ex_situ` environment PROPOSAL** (`bl15.environment.dry_sample_is_ex_situ.v1`, determinism `inferred`). "As-is" alone does not qualify; only identity tokens may stand beside it, and any other token (pH, gas, flow, electrolyte, potential, cycling, unrecognised), or a header declaring another name, leaves it for a person. | CONFIRMED 2026-10-12 | **Angel** (*"ex_situ for the dry or reference standard samples"*) | Never written: a proposal, acceptance behind the unchanged `409 human_actor_required` gate. Reference standards and alignment scans are never Runs (unchanged), so they receive nothing. |
+| **DEC-71** | **The logbook is read for the environment, reaction and cell type** by a bounded, versioned lexicon (`bl15.notes.environment_statement.v1`, `…reaction_statement.v1`, `…cell_type_statement.v1`) that maps ONLY an explicit term naming exactly one of the vendored schema's own options, read at runtime, to a PROPOSAL citing the sentence. Section scope overrides beamtime scope for that section only; a beamtime sentence naming samples applies only to those, and only where the logbook's numbering and the filenames' sample token agree (else to none); two options in one scope are a conflict; a term with no option, several, or in a negating or hedged sentence fills nothing and is kept verbatim; an abbreviation in an all-capitals clause and a term in a path or file name are not statements; a Notes cell is never read; a dry-filename `ex_situ` and a logbook environment that disagree are a conflict. | CONFIRMED 2026-10-12 | **Angel** (follow-up the same day) | **Schema-vocabulary gap, for the domain owner and upstream:** `cell_type` has no member for a two-electrode cell, a battery or a generic electrolyzer. Requesting one is upstream's (`CLAUDE.md` §1). |
+| **DEC-72** | **Where a run file's planned motor move disagrees with the position the raw acquisition file recorded, the RECORDED position is the reading used** — a standing domain-owner rule, `bl15.resolution.recorded_motor_position.v1`, in the confirmed-resolution layer. Both readings are kept verbatim; nothing is written (no official field — Q19). | CONFIRMED 2026-10-12 | **Angel** (relayed) | Applies only to a plan-versus-recording disagreement; two RECORDINGS that disagree stay an open conflict, and a relative move is never compared. Requires `bl15.mapping.cardinality.v3`: `sample_position` is per motor and per scan — under v2 the four stage motors were compared with each other. |
+| **DEC-73** | **`Q21` answered: acquisition settings are one value per measurement.** Emission energy, energy grid, counting time, scan command and filter: a difference within one measurement is a conflict for review; different measurements are never compared. | CONFIRMED 2026-10-12 — **confirms `DEC-67`'s narrowing** | **Angel** (relayed) | The warrant now says so plainly, without a question id or a date. A deliberate change is said by the domain owner to belong in the logbook or run files. |
+| **DEC-74** | **Acquisition-timestamp disagreements are real discrepancies** and stay conflicts. | CONFIRMED 2026-10-12 | **Angel** (*"those should be real discrepancies"*) | Nothing picks one; the warrant says so. |
+| **DEC-75** | **The reaction and the cell type are run-writable closed enums a person chooses in the Run editor** (`routes.RUN_CHOSEN_ENUM_PATH_NAMES`), through `PATCH …/runs/{id}`, with values restricted to the vendored schema's own enum (read at runtime; `422 not_an_allowed_value` off-list, also at proposal acceptance). They are NOT added to the extractor's `FIELD_MAP`. | CONFIRMED 2026-10-12 — engineering decision inside `DEC-68` | measured: before, both paths answered `422 unrecognized_field` and the editor had no control, so a person could not select them | `context.environment`'s pre-existing acceptance of an off-enum value at the run edit route is **unchanged** and named. Run-writable 5 → 7; note-mappable 25 → 27; proposal targets 18 → 20. In the Run editor they sit in their own "Electrochemistry · if it applies" group and are **not counted** toward a run's "All Recorded" (orchestrator decision, 2026-10-12: only an electrochemical measurement has them and the schema requires neither); the fill count stays over the other five, atmosphere included. A run with the required context plus both validates and submits. |
+
+### What `DEC-68`…`DEC-75` do NOT change
+- **The truth plane is untouched.** Official validation, export gating, provenance, actor trust,
+  no-guessing and no agent final Submit are unchanged; no file under `src/isaac_records/` or
+  `schema/` was modified.
+- **No new table, no migration, no dependency, no operator act** (`DEC-49` precedent).
+- **No value is written by an import.** Every value reaches a record only as a proposal whose
+  acceptance keeps its trusted-actor gate.
+- **No production provider, MCP endpoint, identity boundary or real-byte ingestion is enabled.**
+  `EXT-01`, `EXT-02`, `EXT-13` are unchanged.
 
 ## C. Open — external owners
 

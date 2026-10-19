@@ -3325,11 +3325,23 @@ describe('Settings → the API tabs — accessibility', () => {
    * subsection a reader is sent to directly — keeps a name. Every other inner
    * block is a heading in the outline, not a landmark.
    */
-  it('does not inflate landmarks: the widget is one region, with only Quick Start named inside', async () => {
+  /* RE-POINTED 2026-10-19, and the change is the fix for a real defect: the
+     shared Widget's view panels are regions named by their buttons, so the
+     `section.api-quickstart` named "Quick Start" inside the "Quick Start" panel
+     made TWO landmarks with ONE name (axe `landmark-unique`). The inner section
+     is now unnamed; the panel is the one named region per view, and no two
+     landmarks inside the widget share a name. */
+  it('does not inflate landmarks: one named region per view, no two with one name', async () => {
     await openApiAccess();
     const widget = keysRegion();
     const inner = Array.from(widget.querySelectorAll('section[aria-labelledby]'));
-    expect(inner.map((r) => r.className.split(' ')[0])).toEqual(['api-quickstart']);
+    expect(inner, 'no section inside the widget names itself').toEqual([]);
+    const panels = Array.from(widget.querySelectorAll('[role="region"]'));
+    const names = panels.map((p) =>
+      document.getElementById(p.getAttribute('aria-labelledby') ?? '')?.textContent?.trim(),
+    );
+    expect(names).toEqual(['Quick Start', 'Program an Agent']);
+    expect(new Set(names).size).toBe(names.length);
     // The headings survive: a name change, not a structure loss.
     expect(within(widget).getByRole('heading', { level: 3, name: API_ACCESS_COPY.statusHeading })).toBeInTheDocument();
   });

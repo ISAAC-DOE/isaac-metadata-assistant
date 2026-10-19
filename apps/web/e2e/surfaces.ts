@@ -453,7 +453,7 @@ export const SURFACES: readonly Surface[] = [
     name: 'Statistics (ordinary, empty)',
     path: '/statistics',
     scope: 'ordinary',
-    ready: { role: 'heading', name: 'Workspace at a Glance' },
+    ready: { role: 'heading', name: 'Records' },
   },
   {
     // NEW, for the same reason `experiments-example` is, and it was MISSED when that
@@ -470,7 +470,7 @@ export const SURFACES: readonly Surface[] = [
     name: 'Statistics (worked example)',
     path: '/statistics',
     scope: 'example',
-    ready: { role: 'heading', name: 'Workspace at a Glance' },
+    ready: { role: 'heading', name: 'Records' },
   },
   {
     /*

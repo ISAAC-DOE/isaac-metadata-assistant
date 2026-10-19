@@ -180,7 +180,7 @@ catalog should follow is a separate question about a surface with a different re
 and it is open.
 
 ~~The two routes that DO accept these paths are a RUN's~~ — **THREE routes accept them
-now.** ``PATCH /api/experiments/{id}/runs/{run_id}`` for the 5 run-level paths; ``POST
+now.** ``PATCH /api/experiments/{id}/runs/{run_id}`` for the 7 run-level paths (5 until 2026-10-12); ``POST
 /api/experiments/{id}/answers`` (corrected at ``.../edit``) for the 13 record-level
 ones, which is the route a record with no runs at all can use; and ``POST
 /api/experiments/{id}/runs/{run_id}/overrides`` to record ONE run's divergence from a

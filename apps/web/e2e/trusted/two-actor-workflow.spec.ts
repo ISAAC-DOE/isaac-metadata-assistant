@@ -80,6 +80,7 @@ import {
   proposalCard,
   proposalCardInState,
   test,
+  unrelatedMembers,
   type ServerApi,
 } from './fixtures';
 import { FIXTURE_ACTOR_SUBJECT, FIXTURE_TRUST_BASIS, TRUSTED_API_BASE } from './env';
@@ -212,13 +213,17 @@ async function deriveRunTarget(
     .sort();
   for (const path of runScoped) {
     const values = await schemaEnum(api, path).catch(() => null);
-    if (values !== null && values.length >= 4) {
-      const [runOne, runTwo, proposed, moved] = values;
+    // Four members none of which contains another (`unrelatedMembers`): step 12 says
+    // run ONE's value is absent from what the card shows, and `flow_cell` inside
+    // `microfluidic_flow_cell` would make that false on a correct screen.
+    const picked = values === null ? null : unrelatedMembers(values, 4);
+    if (picked !== null) {
+      const [runOne, runTwo, proposed, moved] = picked;
       return { path, runOne, runTwo, proposed, moved };
     }
   }
   throw new Error(
-    `no run-scoped target is a schema enum of four or more members. Served: ${JSON.stringify(
+    `no run-scoped target is a schema enum of four or more mutually unrelated members. Served: ${JSON.stringify(
       runScoped
     )}`
   );
@@ -329,7 +334,16 @@ test.describe('two scientists, one record, end to end', () => {
      * its own accordion in place, and that stopped being true the moment this branch
      * shipped one open editor addressed by `?run=`. `openRun` clicks the first
      * compact row's own "Open Run …" control and returns the editor that replaces the
-     * list, which is where `getByLabel('Environment')` actually lives.
+     * list, which is where every run-field control actually lives.
+     *
+     * ADDRESSED BY THE DERIVED PATH, NOT BY A LABEL. `deriveRunTarget` reads the target
+     * off the wire, so the control must be found from that same path —
+     * `data-run-field-path` is on the primary control only, and it is the handle the
+     * Record Map uses too. This used to read `getByLabel('Environment')`, which was
+     * right only while `context.environment` happened to be the first run-scoped enum;
+     * since the reaction and the cell type became run-writable (2026-10-12) the
+     * derivation picks `context.electrochemistry.cell_type`, and an Environment select
+     * was being asked for a cell type it correctly does not offer.
      *
      * TYPED INTO THE RUN CARD, WHICH AUTOSAVES. There is no per-field Save button:
      * `RunCard` queues the change and `runAutosaveStore` flushes it after a 600 ms
@@ -338,7 +352,9 @@ test.describe('two scientists, one record, end to end', () => {
      * only that typing works.
      */
     const runOneCard = await openRun(page, 0);
-    await runOneCard.getByLabel('Environment').selectOption(runTarget.runOne);
+    await runOneCard
+      .locator(`select[data-run-field-path="${runTarget.path}"]`)
+      .selectOption(runTarget.runOne);
     await expect
       .poll(async () => {
         const body = (await server.runBody(id, runOne.id)) as {

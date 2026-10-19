@@ -360,6 +360,12 @@ function copyUnitsFrom(root: Element, attrs: readonly string[]): string[] {
  */
 const APPROVED_PANEL_SENTENCES: readonly string[] = [
   'Personal Statistics',
+  /* The two info toggles' accessible names and the expansion's label — the only
+     copy the 2026-10-12 widget redesign added to this panel. Each names a
+     control; none states a figure. */
+  'About Personal Statistics',
+  'About Views Prepared for Your Account',
+  'Show the Prepared Views',
   'What this tab will show once records are associated with a signed-in account.',
   'Not Available in This Preview',
   'Records in this preview are not associated with an account, so this view cannot tell which of them are yours.',
@@ -369,7 +375,7 @@ const APPROVED_PANEL_SENTENCES: readonly string[] = [
   'Nothing on this tab is hidden from you, and none of the figures below are zero — they are absent.',
   'A count of zero would say you have no records;',
   'what is true is that this build cannot tell whose records these are.',
-  'Open Data & Privacy Settings',
+  'Open Privacy Settings',
   'See Workspace Statistics',
   'Views Prepared for Your Account',
   'Each view below is defined as a typed dataset, so it can be filled in without changing this page\'s layout.',
@@ -712,7 +718,7 @@ describe('the top-level tabs', () => {
   it('exposes exactly three tabs, in order, with Overview selected by default', async () => {
     stubFetchRoutes(statisticsRoutes());
     renderAt(ROUTES.statistics);
-    await screen.findByRole('heading', { name: 'Workspace at a Glance' });
+    await screen.findByRole('heading', { name: 'Records' });
 
     const tabs = within(tablist()).getAllByRole('tab');
     /* ~~['General ISAAC', 'My Stats']~~ — the first label was renamed with the
@@ -732,7 +738,7 @@ describe('the top-level tabs', () => {
   it('uses a roving tabindex — exactly one tab is in the tab order', async () => {
     stubFetchRoutes(statisticsRoutes());
     renderAt(ROUTES.statistics);
-    await screen.findByRole('heading', { name: 'Workspace at a Glance' });
+    await screen.findByRole('heading', { name: 'Records' });
 
     const tabs = within(tablist()).getAllByRole('tab');
     expect(tabs.map((t) => t.tabIndex)).toEqual([0, -1, -1]);
@@ -741,7 +747,7 @@ describe('the top-level tabs', () => {
   it('wires the selected tab to a rendered tabpanel, and the panel back to it', async () => {
     stubFetchRoutes(statisticsRoutes());
     renderAt(ROUTES.statistics);
-    await screen.findByRole('heading', { name: 'Workspace at a Glance' });
+    await screen.findByRole('heading', { name: 'Records' });
 
     const selected = within(tablist()).getAllByRole('tab')[0];
     const panelId = selected.getAttribute('aria-controls');
@@ -758,7 +764,7 @@ describe('the top-level tabs', () => {
   it('switches on ArrowRight and moves focus with the selection', async () => {
     stubFetchRoutes(statisticsRoutes());
     renderAt(ROUTES.statistics);
-    await screen.findByRole('heading', { name: 'Workspace at a Glance' });
+    await screen.findByRole('heading', { name: 'Records' });
 
     const first = within(tablist()).getAllByRole('tab')[0];
     first.focus();
@@ -787,14 +793,14 @@ describe('the top-level tabs', () => {
   it('an unrecognised ?tab= value falls back to General ISAAC without throwing', async () => {
     stubFetchRoutes(statisticsRoutes());
     renderAt(`${ROUTES.statistics}?tab=not-a-tab`);
-    await screen.findByRole('heading', { name: 'Workspace at a Glance' });
+    await screen.findByRole('heading', { name: 'Records' });
     expect(within(tablist()).getAllByRole('tab')[0]).toHaveAttribute('aria-selected', 'true');
   });
 
   it('activating a tab writes the ?tab= value the route helper builds', async () => {
     stubFetchRoutes(statisticsRoutes());
     renderAt(ROUTES.statistics);
-    await screen.findByRole('heading', { name: 'Workspace at a Glance' });
+    await screen.findByRole('heading', { name: 'Records' });
 
     fireEvent.click(within(tablist()).getAllByRole('tab', { name: 'My Stats' })[0]);
     await screen.findByRole('heading', { name: 'Personal Statistics' });
@@ -818,12 +824,17 @@ describe('the General ISAAC tab keeps the workspace material', () => {
   it('holds the three workspace sections and the privacy claim, and NOT the personal gate', async () => {
     stubFetchRoutes(statisticsRoutes());
     renderAt(ROUTES.statistics);
-    await screen.findByRole('heading', { name: 'Workspace at a Glance' });
+    await screen.findByRole('heading', { name: 'Records' });
 
+    /* ~~'Workspace at a Glance', 'Workflow Distribution', 'Evidence and
+       Validation'~~ — the 2026-10-12 widget redesign merged the first two (and
+       the export-gate half of the third) into the `Records` widget, whose Status,
+       Workflow and Export Gate views carry exactly what they did, and renamed the
+       evidence half `Evidence Support`. The property is unchanged: the workspace
+       material and the privacy claim are here, the personal gate is not. */
     for (const name of [
-      'Workspace at a Glance',
-      'Workflow Distribution',
-      'Evidence and Validation',
+      'Records',
+      'Evidence Support',
       'This Application Collects No Analytics',
     ]) {
       expect(screen.getByRole('region', { name })).toBeInTheDocument();
@@ -840,26 +851,42 @@ describe('the General ISAAC tab keeps the workspace material', () => {
   it('leaves the no-analytics claim outside the collapsed region', async () => {
     stubFetchRoutes(statisticsRoutes());
     const { container } = renderAt(ROUTES.statistics);
-    await screen.findByRole('heading', { name: 'Workspace at a Glance' });
+    await screen.findByRole('heading', { name: 'Records' });
 
     const section = container.querySelector('section[aria-labelledby="stats-no-analytics"]');
     expect(section).not.toBeNull();
     expect(section!.closest('details')).toBeNull();
   });
 
-  it('collapses the build internals — runtime, Project Memory and the API surface — by default', async () => {
-    /* They moved to `?tab=build` in the 2026-09-15 redesign, and they are still
-       COLLAPSED inside it: the tab change did not make them a main-flow
-       destination, which is the property this case exists for. */
+  /*
+   * ── INVERTED 2026-10-12: THE BUILD INTERNALS ARE NO LONGER COLLAPSED ─────
+   *
+   * ~~'collapses the build internals — runtime, Project Memory and the API
+   * surface — by default'~~ — they sat inside one closed `Technical Details`
+   * region on `?tab=build`. The widget redesign made each a small widget that
+   * states its own headline, so the region is gone and they are visible on
+   * arrival. What this case still pins is the half that mattered for a
+   * SCIENTIST: they are on the Build tab and NOT on the one a scientist lands on.
+   */
+  it('shows the build internals — runtime, Project Memory and the API surface — on the Build tab, uncollapsed', async () => {
     stubFetchRoutes(statisticsRoutes());
     const { container } = renderAt(ROUTES.statisticsTab('build'));
     await screen.findByText('Synthetic-Only');
 
-    const details = container.querySelector('details.stats-technical');
-    expect(details).not.toBeNull();
-    expect(details!.hasAttribute('open')).toBe(false);
+    expect(container.querySelector('details.stats-technical')).toBeNull();
     for (const name of ['Runtime', 'Project Memory', 'API Surface']) {
-      expect(screen.getByRole('region', { name }).closest('details')).toBe(details);
+      const region = screen.getByRole('region', { name });
+      expect(region.closest('details')).toBeNull();
+      expect(region.closest('[hidden]')).toBeNull();
+    }
+  });
+
+  it('keeps the build internals off the Overview tab', async () => {
+    stubFetchRoutes(statisticsRoutes());
+    renderAt(ROUTES.statistics);
+    await screen.findByRole('heading', { name: 'Records' });
+    for (const name of ['Runtime', 'Project Memory', 'API Surface', 'Record Schema']) {
+      expect(screen.queryByRole('region', { name })).toBeNull();
     }
   });
 });
@@ -1054,10 +1081,16 @@ describe('My Stats invents no personal figure — the six traps', () => {
     expect(panel.querySelector('svg.stats-chart-columns')).toBeNull();
     expect(panel.querySelector('.stats-chart-track')).toBeNull();
     expect(panel.querySelector('.stats-chart-grid')).toBeNull();
-    // No axis, no ticks, no empty plot of any kind. The only SVGs are the
-    // section's decorative heading glyphs.
+    // No axis, no ticks, no empty plot of any kind. The only SVGs are
+    // DECORATIVE CONTROL AND HEADING GLYPHS — the widget's heading icon, its
+    // info toggle's `i` and the expansion's chevron (2026-10-12) — and every one
+    // of them is hidden from assistive technology.
     for (const svg of panel.querySelectorAll('svg')) {
-      expect(svg.closest('.stats-card-icon')).not.toBeNull();
+      expect(
+        svg.closest('.widget-icon, .widget-info-toggle, .disclosure-trigger'),
+        'an SVG outside a decorative glyph slot',
+      ).not.toBeNull();
+      expect(svg.closest('[aria-hidden="true"]')).not.toBeNull();
     }
   });
 
@@ -1892,7 +1925,7 @@ describe('the gated state', () => {
     const lead = sentencesOf(soleElement(container, '.placeholder > p'));
     expect(lead.length, 'the lead must have at least one sentence').toBeGreaterThan(0);
 
-    const subs = [...container.querySelectorAll('p.stats-card-sub')] as HTMLElement[];
+    const subs = [...container.querySelectorAll('p.widget-sub')] as HTMLElement[];
     expect(subs.length, 'the panel must render section subtitles to compare against').toBe(2);
 
     for (const sub of subs) {
@@ -1910,7 +1943,7 @@ describe('the gated state', () => {
       'href',
       '/statistics?tab=general',
     );
-    expect(screen.getByRole('link', { name: 'Open Data & Privacy Settings' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Open Privacy Settings' })).toHaveAttribute(
       'href',
       ROUTES.settingsTab('privacy'),
     );
@@ -1923,6 +1956,16 @@ describe('the planned views describe a shape without asserting a figure', () => 
   it('lists all eight, each with a title, a description, a form and a gate marker', async () => {
     await renderMineTab();
     expect(MY_STATS_VIEWS).toHaveLength(8);
+
+    /* BEHIND ONE EXPANSION SINCE 2026-10-12, and REACHABLE THROUGH IT — the
+       assertion is made after opening it with the real control, so it pins the
+       route a reader takes and not merely that the markup exists. Closed, the
+       eight headings are not in the accessibility tree at all. */
+    const toggle = screen.getByRole('button', { name: 'Show the Prepared Views' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('heading', { level: 3, name: MY_STATS_VIEWS[0].title })).toBeNull();
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
 
     for (const view of MY_STATS_VIEWS) {
       const heading = screen.getByRole('heading', { level: 3, name: view.title });
@@ -2124,7 +2167,7 @@ describe('switching tabs is free', () => {
   it('issues no additional request when the reader moves between tabs', async () => {
     const calls = stubFetchRoutes(statisticsRoutes());
     renderAt(ROUTES.statistics);
-    await screen.findByRole('heading', { name: 'Workspace at a Glance' });
+    await screen.findByRole('heading', { name: 'Records' });
     const afterLoad = calls.length;
 
     const tablist = screen.getByRole('tablist', { name: 'Statistics sections' });
@@ -2133,7 +2176,7 @@ describe('switching tabs is free', () => {
     fireEvent.click(within(tablist).getByRole('tab', { name: 'Build & Verification' }));
     await screen.findByRole('heading', { name: 'Record Verification' });
     fireEvent.click(within(tablist).getByRole('tab', { name: 'Overview' }));
-    await screen.findByRole('heading', { name: 'Workspace at a Glance' });
+    await screen.findByRole('heading', { name: 'Records' });
 
     await waitFor(() => expect(calls.length).toBe(afterLoad));
   });

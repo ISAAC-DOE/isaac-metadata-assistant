@@ -6,15 +6,23 @@ import { api } from '../lib/api';
 import { conflictKindLabel } from '../lib/bl15ReviewContent';
 import { IMPORT_STAGE_COPY } from '../lib/historicalImportContent';
 import {
+  ABSENCE_ROLE,
   CHOOSABLE_ROLES,
-  isResolved,
+  conflictDisposition,
   readingLabel,
   roleLabel,
+  type ConflictDisposition,
   type ConflictView,
 } from '../lib/importStages';
 import type { ProposalDestinations } from '../lib/importDestinations';
+import { ExperimentPicker, RuleScopeFields, type RuleScope } from './ImportScope';
+import { Breakable } from './Breakable';
 
-type ActFn = (name: string, run: () => Promise<unknown>) => Promise<void>;
+/* Moved to `ImportScope` (2026-10-18) with the scope fields; re-exported so existing
+   importers keep one path. */
+export { ExperimentPicker };
+
+type ActFn = (name: string, run: () => Promise<unknown>) => Promise<unknown>;
 
 const COPY = IMPORT_STAGE_COPY;
 
@@ -141,12 +149,22 @@ function ConflictKind({
      the first sentence of the server's own explanation stays visible, verbatim; the
      remainder is behind the `?`, still in the DOM. */
   const [lead, rest] = splitFirstSentence(meaning ?? '');
-  const extra = list.length - CONFLICTS_SHOWN_PER_KIND;
-  const open = list.filter((c) => !isResolved(c)).length;
+  /* WHAT EACH ROW ASKS (2026-10-18, QA `C-12`/`C-22`): only `open` is work to decide. */
+  const dispositions = list.map(conflictDisposition);
+  const open = dispositions.filter((d) => d === 'open').length;
+  const resolvedCount = dispositions.filter((d) => d === 'resolved').length;
   const forbidden = list.every((c) => c.forbidden);
+  const allNoted = dispositions.every((d) => d === 'noted');
   const groupable = kind !== FIELD_KIND && groupRuleChoices(list) !== null;
-  /* OPEN FIRST, resolved after — so the first five rows are the ones still waiting. */
-  const ordered = [...list.filter((c) => !isResolved(c)), ...list.filter((c) => isResolved(c))];
+  /* NOTHING TO DECIDE, ROWS ONE PRESS AWAY (2026-10-18, QA `C-12`/`C-22`): a kind whose
+     every row is noted, preserved or resolved states its count and meaning in the header,
+     and keeps its rows — still in the DOM — behind `Show N`. */
+  const shownByDefault = open === 0 ? 0 : CONFLICTS_SHOWN_PER_KIND;
+  const extra = list.length - shownByDefault;
+  /* OPEN FIRST, then what was noted or preserved, resolved last — so the first five rows
+     are the ones still waiting for a decision. */
+  const rank: Record<ConflictDisposition, number> = { open: 0, noted: 1, preserved: 1, resolved: 2 };
+  const ordered = [...list].sort((a, b) => rank[conflictDisposition(a)] - rank[conflictDisposition(b)]);
 
   return (
     <section className="hi-conflict-group" aria-labelledby={titleId}>
@@ -154,9 +172,9 @@ function ConflictKind({
         <h4 className="hi-conflict-group-title" id={titleId}>
           {title}
           <span className="hi-count">{list.length}</span>
-          {open !== list.length && (
+          {open > 0 && resolvedCount > 0 && (
             <span className="hi-sub">
-              {open} open · {list.length - open} resolved
+              {open} open · {resolvedCount} resolved
             </span>
           )}
         </h4>
@@ -173,12 +191,16 @@ function ConflictKind({
           </p>
         )}
         {/* WHAT HAS BEEN CHOSEN, said once for the kind rather than on every row. */}
-        {open > 0 && (
-          <p className="hi-conflict-kind-state">
-            {forbidden
-              ? COPY.resolve.forbidden
-              : `${open} open — ${COPY.conflicts.noValue.replace(/\.$/, '')} for ${open === 1 ? 'it' : 'any of them'}.`}
-          </p>
+        {forbidden ? (
+          <p className="hi-conflict-kind-state">{COPY.conflicts.preservedKind}</p>
+        ) : allNoted ? (
+          <p className="hi-conflict-kind-state">{COPY.conflicts.notedKind}</p>
+        ) : (
+          open > 0 && (
+            <p className="hi-conflict-kind-state">
+              {`${open} open — ${COPY.conflicts.noValue.replace(/\.$/, '')} for ${open === 1 ? 'it' : 'any of them'}.`}
+            </p>
+          )
         )}
         {groupable && (
           <Disclosure className="hi-conflict-review hi-group-rule" summary={COPY.resolve.groupTitle}>
@@ -198,7 +220,7 @@ function ConflictKind({
           <ConflictRow
             key={conflict.key}
             conflict={conflict}
-            hidden={!all && index >= CONFLICTS_SHOWN_PER_KIND}
+            hidden={!all && index >= shownByDefault}
             showExplanation={kind !== FIELD_KIND && shared === null}
             importId={importId}
             busy={busy}
@@ -220,11 +242,19 @@ function ConflictKind({
             announce(
               next
                 ? `${extra} more shown — all ${list.length} of this kind.`
-                : `Showing the first ${CONFLICTS_SHOWN_PER_KIND} of ${list.length}.`,
+                : shownByDefault === 0
+                  ? `${list.length} hidden.`
+                  : `Showing the first ${CONFLICTS_SHOWN_PER_KIND} of ${list.length}.`,
             );
           }}
         >
-          {all ? `Show the first ${CONFLICTS_SHOWN_PER_KIND} only` : `Show ${extra} more`}
+          {all
+            ? shownByDefault === 0
+              ? 'Hide them'
+              : `Show the first ${CONFLICTS_SHOWN_PER_KIND} only`
+            : shownByDefault === 0
+              ? `Show ${extra === 1 ? 'it' : `all ${extra}`}`
+              : `Show ${extra} more`}
         </button>
       )}
     </section>
@@ -248,8 +278,14 @@ function ConflictRow({
   onAct: ActFn;
   destinations: ProposalDestinations;
 }) {
-  const resolved = isResolved(conflict);
+  const disposition = conflictDisposition(conflict);
+  const resolved = disposition === 'resolved';
   const chosen = resolved ? String(conflict.resolution?.chosen_value ?? '') : '';
+  /* A DOMAIN OWNER'S STANDING RULE (2026-10-12) is not "a rule you recorded" — it was
+     confirmed by the domain owner and ships with the build — so it says so, with the
+     rule's own sentence. */
+  const standing = resolved && conflict.resolution?.authority === 'domain_owner_rule' ? conflict.resolution : null;
+  const [standingLead] = splitFirstSentence(String(standing?.statement ?? ''));
   return (
     <li className={`hi-conflict${resolved ? ' is-resolved' : ''}`} hidden={hidden}>
       {/* ONE LINE, AS THE BRIEF WROTE IT: the state, each source's reading, and what
@@ -259,6 +295,10 @@ function ConflictRow({
       <div className="hi-conflict-main">
         {resolved ? (
           <SemanticStatus state="complete" label={COPY.stateLabels.resolved} size="sm" />
+        ) : disposition === 'preserved' ? (
+          <SemanticStatus state="notApplicable" label={COPY.stateLabels.preserved} size="sm" />
+        ) : disposition === 'noted' ? (
+          <SemanticStatus state="notApplicable" label={COPY.stateLabels.noted} size="sm" />
         ) : (
           <SemanticStatus state="conflict" label={COPY.stateLabels.conflict} size="sm" />
         )}
@@ -268,18 +308,26 @@ function ConflictRow({
           {conflict.readings.map((reading, index) => (
             <li key={index} className="hi-conflict-reading">
               <span className="hi-conflict-role">{readingLabel(reading)}</span>{' '}
-              <span className="hi-conflict-value">{conflict.distinct?.[index] ?? reading.value}</span>
+              <span className="hi-conflict-value">
+                <Breakable text={conflict.distinct?.[index] ?? reading.value} />
+              </span>
             </li>
           ))}
         </ul>
         {/* The open state is said once, on the kind; a row says so only when it differs. */}
         {resolved && (
           <span className="hi-conflict-state">
-            {`Resolved by a rule you recorded${chosen ? `: ${chosen}` : ''}. Every reading is still kept.`}
+            {standing
+              ? `Resolved by the domain owner's rule: ${standingLead.replace(/\.$/, '')}${chosen ? ` (${chosen})` : ''}. Every reading is still kept.`
+              : `Resolved by a rule you recorded${chosen ? `: ${chosen}` : ''}. Every reading is still kept.`}
           </span>
         )}
         {/* Which acquisition, so a long list of rows can be told apart. */}
-        {conflict.subject && <span className="hi-conflict-subject">{conflict.subject}</span>}
+        {conflict.subject && (
+          <span className="hi-conflict-subject">
+            <Breakable text={conflict.subject} />
+          </span>
+        )}
       </div>
       {showExplanation && conflict.explanation && (
         <p className="hi-conflict-explanation">{conflict.explanation}</p>
@@ -328,13 +376,32 @@ function ConflictRow({
           </li>
           <li className="hi-layer">
             <h5 className="hi-layer-title">{COPY.layers.confirmed}</h5>
-            {resolved ? (
+            {standing ? (
+              <>
+                <p className="hi-sub">{String(standing.statement ?? '')}</p>
+                {/* THE PROVENANCE IS DETAIL, NOT THE SENTENCE (review, 2026-10-12): a
+                    scientist reads who confirmed it; how that reached the repository —
+                    an owner relay, with no transcript — sits behind the `?`. */}
+                <p className="hi-sub">
+                  Confirmed by the domain owner.{' '}
+                  <HelpTip subject="who confirmed this rule">
+                    Rule {String(standing.rule_id ?? '')}, version {String(standing.rule_version ?? '')}.{' '}
+                    {String(standing.attribution ?? '')}
+                  </HelpTip>{' '}
+                  Nothing is written to the record.
+                </p>
+              </>
+            ) : resolved ? (
               <p className="hi-sub">
-                {chosen ? `${chosen} — ` : ''}recorded as a reading rule. {COPY.confirmedBy}{' '}
+                {chosen ? `${chosen} — ` : ''}recorded as a reading rule. {COPY.confirmedBy}:{' '}
                 {COPY.unattributed}.
               </p>
             ) : conflict.forbidden ? (
               <p className="hi-sub">{COPY.resolve.forbidden}</p>
+            ) : disposition === 'noted' ? (
+              /* NOTHING TO CHOOSE (2026-10-18, QA `C-12`): the only other "reading" is the
+                 absence of a source, so no choice is offered — the finding is kept. */
+              <p className="hi-sub">{COPY.conflicts.notedRow}</p>
             ) : !conflict.resolvable || conflict.target === null ? (
               <p className="hi-sub">{COPY.resolve.fixtureOnly}</p>
             ) : (
@@ -379,46 +446,7 @@ function Suggestion({ conflict }: { conflict: ConflictView }) {
   );
 }
 
-type Scope = 'import' | 'experiment' | 'profile';
-
-/** The three scopes, in the owner's words, and the record picker a stored rule needs. */
-function ScopeFields({
-  name,
-  scope,
-  setScope,
-  experimentId,
-  setExperimentId,
-  destinations,
-}: {
-  name: string;
-  scope: Scope;
-  setScope: (scope: Scope) => void;
-  experimentId: string;
-  setExperimentId: (id: string) => void;
-  destinations: ProposalDestinations;
-}) {
-  return (
-    <>
-      <fieldset className="hi-resolve-group">
-        <legend className="hi-field-label">{COPY.resolve.scope}</legend>
-        {(['import', 'experiment', 'profile'] as Scope[]).map((option) => (
-          <label key={option} className="hi-choice">
-            <input
-              type="radio"
-              name={`${name}-scope`}
-              checked={scope === option}
-              onChange={() => setScope(option)}
-            />
-            <span>{COPY.scopeOptions[option]}</span>
-          </label>
-        ))}
-      </fieldset>
-      {scope !== 'import' && (
-        <ExperimentPicker value={experimentId} onChange={setExperimentId} destinations={destinations} />
-      )}
-    </>
-  );
-}
+type Scope = RuleScope;
 
 /** Record a rule: read the record's version first when it is stored on one. */
 async function recordConflictRule(
@@ -474,7 +502,10 @@ function ResolveForm({
     >
       <fieldset className="hi-resolve-group">
         <legend className="hi-field-label">{COPY.resolve.choose}</legend>
-        {conflict.readings.map((reading, index) => (
+        {conflict.readings.map((reading, index) =>
+          /* AN ABSENCE IS NOT AN ANSWER (2026-10-18, QA `C-12`): "nothing was stated" is
+             shown among the readings above and never offered as one to choose. */
+          reading.role === ABSENCE_ROLE ? null : (
           <label key={index} className="hi-choice">
             <input
               type="radio"
@@ -487,10 +518,10 @@ function ResolveForm({
               {reading.value}
             </span>
           </label>
-        ))}
+          ),
+        )}
       </fieldset>
-      <ScopeFields
-        name={name}
+      <RuleScopeFields
         scope={scope}
         setScope={setScope}
         experimentId={experimentId}
@@ -528,7 +559,7 @@ export function groupRuleChoices(
   list: readonly ConflictView[],
 ): { roles: string[]; groups: { token: string; count: number }[] } | null {
   const eligible = list.filter(
-    (c) => c.kind === 'structural' && c.resolvable && !c.forbidden && !isResolved(c) && c.groupToken !== null,
+    (c) => c.kind === 'structural' && c.resolvable && conflictDisposition(c) === 'open' && c.groupToken !== null,
   );
   const counts = new Map<string, number>();
   for (const c of eligible) counts.set(c.groupToken as string, (counts.get(c.groupToken as string) ?? 0) + 1);
@@ -608,8 +639,7 @@ function GroupRuleForm({
           </label>
         ))}
       </fieldset>
-      <ScopeFields
-        name={name}
+      <RuleScopeFields
         scope={scope}
         setScope={setScope}
         experimentId={experimentId}
@@ -624,55 +654,5 @@ function GroupRuleForm({
         {busy === key ? 'Recording…' : COPY.resolve.groupSubmit}
       </button>
     </form>
-  );
-}
-
-/** A record picker for a rule stored on an experiment. The same list every picker uses. */
-export function ExperimentPicker({
-  value,
-  onChange,
-  destinations,
-}: {
-  value: string;
-  onChange: (id: string) => void;
-  destinations: ProposalDestinations;
-}) {
-  return (
-    <label className="hi-field">
-      <span className="hi-field-label">{COPY.whichExperiment}</span>
-      {destinations.failed ? (
-        <>
-          <input
-            className="hi-input"
-            type="text"
-            required
-            value={value}
-            onChange={(event) => onChange(event.target.value)}
-            placeholder="the record's id"
-          />
-          <span className="hi-note">
-            The list of records could not be read, so this asks for the id instead.
-          </span>
-        </>
-      ) : destinations.rows === null ? (
-        <span className="hi-note">Reading your records…</span>
-      ) : destinations.rows.length === 0 ? (
-        <span className="hi-note">This workspace holds no records yet.</span>
-      ) : (
-        <select
-          className="hi-input"
-          required
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-        >
-          <option value="">Choose a record…</option>
-          {destinations.rows.map((row) => (
-            <option key={row.id} value={row.id}>
-              {row.title}
-            </option>
-          ))}
-        </select>
-      )}
-    </label>
   );
 }

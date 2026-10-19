@@ -68,12 +68,17 @@ __all__ = [
     "RECOMMENDATION_NONE",
     "RECOMMENDATION_SUGGESTED",
     "ROLE_MEANINGS",
+    "STANDING_RESOLUTIONS",
+    "STANDING_RULE_RECORDED_POSITION",
+    "StandingResolution",
     "Recommendation",
     "Support",
     "annotate_conflict",
     "conflict_id",
     "recommend",
     "role_of",
+    "role_of_evidence",
+    "standing_resolution_for",
 ]
 
 # --- the four layers ------------------------------------------------------------
@@ -155,6 +160,135 @@ def role_of(reading: Reading) -> str:
     if reading.locator.startswith("#"):
         return ROLE_INSTRUMENT_HEADER
     return ROLE_OTHER
+
+
+#: The parser ids whose evidence is a statement a PERSON wrote into a name, and the
+#: parsers whose evidence is what the acquisition system RECORDED. Read off the readers'
+#: own ``PARSER_ID`` values (asserted by test) rather than imported, so this module keeps
+#: its import graph: it sits below the readers, not beside them.
+_FILENAME_PARSER_IDS = frozenset({"bl15_filename_tokens_v1"})
+_RECORDING_PARSER_IDS = frozenset({"bl15_spec_acquisition_v1", "bl15_scan_export_v1"})
+
+
+def role_of_evidence(item: ev.SourceEvidence) -> str:
+    """The role of ONE piece of read evidence — the same vocabulary as :func:`role_of`.
+
+    Added 2026-10-12 so a FIELD disagreement (a value two sources state differently,
+    built from :class:`~isaac_api.bl15.evidence.SourceEvidence`) can be read in the same
+    terms as a structural one (built from a relationship ``Reading``): a macro is the
+    plan, an acquisition file's header is the recording, a filename is a person's label,
+    the notes are a later account.
+    """
+    if item.source_type in {
+        ev.SOURCE_TYPE_MACRO,
+        ev.SOURCE_TYPE_ACQUISITION_METHOD_MACRO,
+        ev.SOURCE_TYPE_MOTOR_SNAPSHOT_MACRO,
+    }:
+        return ROLE_PLANNED_ACQUISITION
+    if item.source_type == ev.SOURCE_TYPE_BEAMTIME_NOTES:
+        return ROLE_RETROSPECTIVE_NOTE
+    if item.parser_id in _FILENAME_PARSER_IDS:
+        return ROLE_HUMAN_LABEL
+    if item.parser_id in _RECORDING_PARSER_IDS:
+        return ROLE_INSTRUMENT_HEADER
+    return ROLE_OTHER
+
+
+# --- STANDING RULES: resolutions the DOMAIN OWNER confirmed, applied by the build ------
+#
+# A scientist-confirmed resolution (`isaac_api.convention_rules`) is recorded in a session
+# or on an experiment by an act in this application. A STANDING rule is the same layer —
+# `LAYER_CONFIRMED_RESOLUTION`, the only authoritative one — confirmed instead by the
+# domain owner for a whole class of disagreement, and shipped with the build, named and
+# versioned so a later answer supersedes it by a new version rather than an edit. It
+# CHOOSES BY THE MEANING OF A SOURCE, never by a value, exactly as a recurring
+# conflict_resolution rule does; it keeps every reading; and it writes nothing.
+
+#: The domain owner's 2026-10-12 answer, relayed by the project owner: *"Sample positions
+#: or motor positions are always recorded in the raw data files and can be read directly
+#: scan to scan; the manually written run files are written by users and they can make
+#: mistakes in updating the position with a move command e.g., "mv Sx 13.0" but the real
+#: motor position will be recorded no matter what on the original raw SPEC file."*
+STANDING_RULE_RECORDED_POSITION = "bl15.resolution.recorded_motor_position.v1"
+
+#: Who confirmed the standing rules, and how that reached the repository. The same
+#: evidentiary class as `bl15.mapping.ANGEL_2026_10_12` (asserted equal by test).
+STANDING_RULE_ATTRIBUTION = (
+    "Angel (domain owner), relayed by the project owner on 2026-10-12. No transcript is "
+    "committed; only Krish can confirm the relay and only Angel the content."
+)
+
+
+@dataclass(frozen=True)
+class StandingResolution:
+    """ONE domain-owner rule: for these concepts, the reading with this role is used."""
+
+    rule_id: str
+    version: int
+    concepts: frozenset[str]
+    #: The role whose reading is used.
+    chosen_source_role: str
+    #: The role it is chosen OVER. The rule applies only to a disagreement between
+    #: exactly these two roles — any other source in the dispute leaves it open.
+    over_source_role: str
+    #: The sentence a scientist reads beside the resolved disagreement.
+    statement: str
+    #: What each of the two sources IS, for THIS rule. Not :data:`ROLE_MEANINGS`, whose
+    #: header sentence is about the file-name line a macro writes, and would be wrong
+    #: beside a motor position the instrument recorded.
+    chosen_meaning: str = ""
+    over_meaning: str = ""
+    attribution: str = STANDING_RULE_ATTRIBUTION
+    confirmed: str = "2026-10-12"
+
+    def to_state(self, *, reading_used: Sequence[Mapping]) -> dict:
+        return {
+            "rule_id": self.rule_id,
+            "rule_version": self.version,
+            "authority": "domain_owner_rule",
+            "layer": LAYER_CONFIRMED_RESOLUTION,
+            "chosen_source_role": self.chosen_source_role,
+            "chosen_source_role_meaning": self.chosen_meaning
+            or ROLE_MEANINGS[self.chosen_source_role],
+            "over_source_role": self.over_source_role,
+            "over_source_role_meaning": self.over_meaning
+            or ROLE_MEANINGS[self.over_source_role],
+            "statement": self.statement,
+            "attribution": self.attribution,
+            "confirmed": self.confirmed,
+            "reading_used": [dict(row) for row in reading_used],
+            "every_reading_kept": True,
+            "writes_a_record_field": False,
+            "applied": True,
+        }
+
+
+STANDING_RESOLUTIONS: tuple[StandingResolution, ...] = (
+    StandingResolution(
+        rule_id=STANDING_RULE_RECORDED_POSITION,
+        version=1,
+        concepts=frozenset({ev.CONCEPT_SAMPLE_POSITION, ev.CONCEPT_MOTOR_POSITION}),
+        chosen_source_role=ROLE_INSTRUMENT_HEADER,
+        over_source_role=ROLE_PLANNED_ACQUISITION,
+        statement=(
+            "The position the acquisition file recorded is the one used. A move command "
+            "in a run file is written by hand and can be out of date; the raw file "
+            "records where the motor actually was. Both readings are kept."
+        ),
+        chosen_meaning=(
+            "The raw acquisition file: the motor position the instrument recorded, scan "
+            "by scan."
+        ),
+        over_meaning=(
+            "A run file: the move command a person wrote before the measurement."
+        ),
+    ),
+)
+
+
+def standing_resolution_for(concept: str) -> StandingResolution | None:
+    """The standing domain-owner rule for ``concept``, or ``None``."""
+    return next((r for r in STANDING_RESOLUTIONS if concept in r.concepts), None)
 
 
 def conflict_id(conflict: Conflict) -> str:

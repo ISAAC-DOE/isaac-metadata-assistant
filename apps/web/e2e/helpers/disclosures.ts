@@ -141,8 +141,60 @@ export const PROSE_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze
    * The lesson is the map's own: a per-surface count is a property of the
    * SURFACE AND ITS SCOPE, and measuring one scope does not measure the other.
    */
-  'statistics-example': 2,
-  'statistics-build': 4,
+  /*
+   * ~~'statistics-example': 2, 'statistics-build': 4~~ — ZERO since 2026-10-12,
+   * and THIS TIME THE CONTENT DID NOT LEAVE THE SCAN. The widget redesign
+   * retired every `details.stats-disclosure` on Statistics: the prose they held
+   * is now inside each widget's INFO PANEL (`.widget-info`, opened below by
+   * `openWidgetInfoAndViews`), and the figures that sat in the build-internals
+   * region are visible widgets. The declaration therefore goes to absent (`?? 0`)
+   * while a NEW declared map, `WIDGET_INFO_PANELS`, takes over the coverage — the
+   * same move the 2026-09-15 entry above records, made in the same change for the
+   * same reason.
+   */
+});
+
+/**
+ * How many widget INFO PANELS (`components/Widget.tsx`, `.widget-info`) each
+ * surface mounts — declared, not measured-and-accepted, for the reason
+ * `PROSE_DISCLOSURES` is: a panel that is not opened here is not scanned by axe at
+ * any viewport, and its prose would leave the sweep without moving a number.
+ *
+ * Measured in Chromium on 2026-10-12. Overview (both scopes): the page's own
+ * "About These Figures" panel plus Records, Open Questions, Evidence Support,
+ * Workspace Activity, Historical Imports and the no-analytics widget = 7. Build:
+ * page + Record Verification + Verification Safeguards + Record Schema +
+ * Platform Metrics = 5 — and 7 since the 2026-10-18 density round, which gave
+ * Runtime and Project Memory info panels for the sentences that left their
+ * bodies. My Stats: Personal Statistics + Views Prepared = 2 (it
+ * renders no page-level panel, because it has no read meta row). The Overview
+ * counts are scope-INDEPENDENT on purpose: a widget renders its info toggle even
+ * when its data is empty, so the empty ordinary workspace mounts the same seven.
+ */
+export const WIDGET_INFO_PANELS: Readonly<Record<string, number>> = Object.freeze({
+  statistics: 7,
+  'statistics-example': 7,
+  'statistics-mine': 2,
+  'statistics-build': 7,
+  /* Settings and Governance & Safety, MEASURED in Chromium on 2026-10-19 (the merge
+     of #289 into the Settings branch), each read out of this helper's own failure
+     ("mounts N widget info panel(s) … declares 0"):
+       settings (Overview)      3 — Data Safety, This Build, Guided Walkthrough
+       settings-privacy         0 — the four question widgets carry no info panel
+                                    (their definitions are Details; see
+                                    SETTINGS_DEFINITION_DISCLOSURES)
+       settings-api             2 — Connect Your Agent, API Access
+       settings-explorer        1 — Project Memory's launcher
+       validator                1 — the Standalone Validator
+       schema-reference         1 — the Schema Reference
+     `imports` is #290's Historical Import surface, measured in the same run and
+     declared here so the merged branch's sweep is complete. */
+  settings: 3,
+  'settings-api': 2,
+  'settings-explorer': 1,
+  validator: 1,
+  'schema-reference': 1,
+  imports: 1,
 });
 
 /**
@@ -255,19 +307,17 @@ export const SETTINGS_CONCEPT_DISCLOSURES: Readonly<Record<string, number>> = Ob
  * DEFINITIONS each surface mounts — the successor of `SETTINGS_CONCEPT_DISCLOSURES`.
  *
  * The four question widgets each keep their concepts' full definitions (and the
- * governance policy's Workspace Scope paragraph) behind one `Full Definitions`
- * Details, a `button[aria-expanded]` over a `hidden` body. Opened here so the
- * definitions are scanned as they were when they were `<details>` rows. The
- * nested `details.settings-more` drawers stay CLOSED, unchanged — they were closed
- * before too, so the scanned DOM stays comparable.
+ * governance policy's paragraphs) behind one `Full Definitions` Details, a
+ * `button[aria-expanded]` over a `hidden` body. The nested `details.settings-more`
+ * drawers stay CLOSED, unchanged — they were closed before too.
  *
- * Other widget Details, info panels and collapsible views on the Settings tabs
- * (Integrations' reference views, Technical Details, This Build's info) are NOT
- * opened. Their content sat in closed `<details>` before this change too —
- * Connect Your Agent's four drawers, Quick Start's drawer, the Connect an Agent
- * guide, Technical Details — and none was opened by this helper, so leaving them
- * closed keeps the scanned DOM what it was. That is a real, pre-existing coverage
- * gap, named here rather than introduced here.
+ * ~~Opened here … Other widget Details, info panels and collapsible views on the
+ * Settings tabs are NOT opened~~ — SUPERSEDED BY THE MERGE WITH #289 (2026-10-19):
+ * `openWidgetInfoAndViews` now opens every widget info panel, every widget Details
+ * and reveals every widget view on EVERY surface, Settings included, so the
+ * coverage gap the struck sentence named is closed rather than merely named. This
+ * map stays as a COUNT declaration only — the one thing that helper does not
+ * assert for these four Details.
  */
 export const SETTINGS_DEFINITION_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze({
   'settings-privacy': 4,
@@ -421,8 +471,11 @@ export async function openUnreachableDisclosures(page: Page, surfaceId: string):
   }
 
   /* The Privacy & Governance definitions — the four widget Details that replaced
-     the twelve rows above. Same mechanism: declared count, opened by index,
-     asserted open. */
+     the twelve rows above. DECLARED here, OPENED by `openWidgetInfoAndViews` below
+     (which presses every `.widget-details` trigger on every surface), so they are
+     not handled twice: this block only asserts the declared count, which is the
+     part that helper does not check — a definition widget that stopped mounting
+     would otherwise leave the scan without moving a number. */
   const definitions = page.locator('.settings-grid-privacy .widget-details .disclosure-trigger');
   const expectedDefinitions = SETTINGS_DEFINITION_DISCLOSURES[surfaceId] ?? 0;
   const definitionCount = await definitions.count();
@@ -432,15 +485,81 @@ export async function openUnreachableDisclosures(page: Page, surfaceId: string):
       `disclosures; SETTINGS_DEFINITION_DISCLOSURES in e2e/helpers/disclosures.ts declares ` +
       `${expectedDefinitions}. A definition left closed here is exempt from every axe scan.`
   ).toBe(expectedDefinitions);
-  for (let i = 0; i < definitionCount; i++) {
-    const one = definitions.nth(i);
-    if ((await one.getAttribute('aria-expanded')) === 'false') await one.click();
-    await expect(one).toHaveAttribute('aria-expanded', 'true');
-  }
 
+  await openWidgetInfoAndViews(page, surfaceId);
+  for (let i = 0; i < definitionCount; i++) {
+    await expect(definitions.nth(i)).toHaveAttribute('aria-expanded', 'true');
+  }
   await openDraftBlocks(page, surfaceId);
   await openAssetReferences(page, surfaceId);
   await openExtendedContext(page, surfaceId);
+}
+
+/**
+ * Open every widget INFO PANEL and every widget DETAILS expansion, and REVEAL
+ * every inactive widget VIEW, so a widget's whole content is scanned.
+ *
+ * ── WHY THE VIEWS ARE REVEALED RATHER THAN CLICKED THROUGH ──────────────────
+ *
+ * A widget's views are a tablist: exactly one panel is shown at a time, so no
+ * sequence of clicks puts all of them in front of a single axe scan, and a scan
+ * per view would multiply every statistics cell by the number of views. Before
+ * 2026-10-12 every one of these blocks was a stacked, visible part of the page and
+ * WAS scanned; leaving the inactive views hidden would therefore have made the
+ * baselines DROP for a reason that is a coverage loss, which this helper's own
+ * history shows reads as an accessibility win.
+ *
+ * So the `hidden` attribute is removed from the inactive panels FOR THE SCAN ONLY.
+ * That is a DOM state the product never shows — all of a widget's views stacked —
+ * but each panel's own content is exactly what a reader reaches by one press of its
+ * tab, and stacking them changes no colour, no name and no structure inside any
+ * panel. The tabs keep their real `aria-selected` state, so the tablist itself is
+ * scanned as shipped. What this cannot catch, stated rather than left to be found:
+ * a defect that exists only in the real one-panel-at-a-time layout (an overlap, a
+ * width), which is what the layout and visual sweeps measure instead.
+ */
+export async function openWidgetInfoAndViews(page: Page, surfaceId: string): Promise<void> {
+  const toggles = page.locator('.widget-info-toggle[aria-expanded="false"]');
+  const expected = WIDGET_INFO_PANELS[surfaceId] ?? 0;
+  const mounted = await page.locator('.widget-info').count();
+  expect(
+    mounted,
+    `surface "${surfaceId}" mounts ${mounted} widget info panel(s); WIDGET_INFO_PANELS in ` +
+      `e2e/helpers/disclosures.ts declares ${expected}. A panel that is not opened here is ` +
+      'not scanned by axe at any viewport — update the map in the same change that adds or ' +
+      'removes one.'
+  ).toBe(expected);
+  const closed = await toggles.count();
+  for (let i = 0; i < closed; i++) {
+    // `.first()`: each press removes the pressed toggle from the locator's set.
+    await toggles.first().click();
+  }
+  await expect(page.locator('.widget-info[hidden]')).toHaveCount(0);
+
+  const details = page.locator('.widget-details > .disclosure-trigger[aria-expanded="false"]');
+  const detailCount = await details.count();
+  for (let i = 0; i < detailCount; i++) {
+    await details.first().click();
+  }
+  await expect(page.locator('.widget-details .disclosure-body[hidden]')).toHaveCount(0);
+
+  /* IN-WIDGET REVEALS (2026-10-18): a control marked `data-widget-reveal` shows
+     prose a widget keeps one press away inside its own body — Verification
+     Safeguards' per-row reasons. Pressed, so that prose is scanned like an info
+     panel is. */
+  const reveals = page.locator('.widget [data-widget-reveal][aria-expanded="false"]');
+  const revealCount = await reveals.count();
+  for (let i = 0; i < revealCount; i++) {
+    await reveals.first().click();
+  }
+  await expect(page.locator('.widget [data-widget-reveal][aria-expanded="false"]')).toHaveCount(0);
+
+  await page.evaluate(() => {
+    for (const panel of document.querySelectorAll('.widget-view-panel[hidden]')) {
+      panel.removeAttribute('hidden');
+    }
+  });
+  await expect(page.locator('.widget-view-panel[hidden]')).toHaveCount(0);
 }
 
 /**

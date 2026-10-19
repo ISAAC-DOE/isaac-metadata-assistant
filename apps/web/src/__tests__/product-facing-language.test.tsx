@@ -494,7 +494,13 @@ const CREATION_CAPABILITY_SITES: Readonly<Record<string, readonly string[]>> = {
    * where `POST /api/uploads` is still an unconditional 403 and a "New Record"
    * button would still be the exact defect P1 removed.
    */
-  'screens/HistoricalImport.tsx': ['New record from this import'],
+  /*
+   * MOVED 2026-10-18, still ONE STRING, ONE OCCURRENCE: the label is now
+   * `IMPORT_COPY.actionNewRecord`, read by the send forms' `NewDestinationButton` and by
+   * the rule-scope fields (QA `C-13`) — the same act, the same `POST /api/experiments`,
+   * on the same screen. ~~`'screens/HistoricalImport.tsx': ['New record from this import']`~~
+   */
+  'lib/historicalImportContent.ts': ['New record from this import'],
 };
 
 function creationScannedCopy(path: string): string {

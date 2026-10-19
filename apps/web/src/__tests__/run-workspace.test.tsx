@@ -23,7 +23,7 @@ import { resolve } from 'node:path';
 
 import { AppRoutes } from '../App';
 import { AUTOSAVE_DEBOUNCE_MS, AUTOSAVE_RETRY_BASE_MS } from '../lib/useRunAutosave';
-import { RUN_FIELDS } from '../lib/runFields';
+import { COUNTED_RUN_FIELDS, RUN_FIELDS } from '../lib/runFields';
 import { __entryCount, __resetRunAutosaveStore } from '../lib/runAutosaveStore';
 import {
   bundleRoutes,
@@ -815,6 +815,10 @@ describe('the whole writable set is reachable, not three fifths of it', () => {
       'context.thermodynamics.atmosphere',
       'timestamps.acquired_start_utc',
       'timestamps.acquired_end_utc',
+      // 2026-10-12: the reaction and the cell type a person chooses (closed enums), in
+      // their own "Electrochemistry · if it applies" group after the counted fields.
+      'context.electrochemistry.reaction',
+      'context.electrochemistry.cell_type',
     ]);
     expect(paths).toHaveLength(RUN_FIELDS.length);
   });
@@ -899,6 +903,73 @@ describe('the whole writable set is reachable, not three fifths of it', () => {
 // ---------------------------------------------------------------------------
 // 4 — isolation
 // ---------------------------------------------------------------------------
+
+/* ── the electrochemistry pair is offered, and not counted (2026-10-12) ─────── */
+
+describe('a run is "All Recorded" without the reaction and the cell type', () => {
+  /*
+   * ORCHESTRATOR DECISION, 2026-10-12: the reaction and the cell type apply only to an
+   * electrochemical measurement and the schema requires neither, so a run must be able to
+   * read "All Recorded" without them. They are shown in their own "Electrochemistry · if it
+   * applies" group, still selectable, and setting them does not change the count.
+   */
+  const v = (value: unknown) => ({ value, status: 'verified', evidence: [] });
+  const counted = {
+    'context.environment': v('ex_situ'),
+    'context.temperature_K': v(300),
+    'context.thermodynamics.atmosphere': v('air'),
+    'timestamps.acquired_start_utc': v('2099-01-01T00:00:00Z'),
+    'timestamps.acquired_end_utc': v('2099-01-01T01:00:00Z'),
+  };
+
+  it('reads All Recorded with every other run field recorded and the pair unset', async () => {
+    const run = runFixture({ id: 'RUNFUL', label: 'Run 1', ordinal: 1, version: 'rf.0', fields: counted });
+    renderRecord({ [`GET ${BASE}/runs`]: { body: runsBody([run]) } });
+    await screen.findByRole('button', { name: /Add Run/ });
+    const header = headerOf('RUNFUL');
+    expect(header.textContent).toContain('All Recorded');
+    expect(header.textContent).toContain('5 of 5');
+  });
+
+  it('setting the pair changes neither the state nor the count', async () => {
+    const run = runFixture({
+      id: 'RUNFUL',
+      label: 'Run 1',
+      ordinal: 1,
+      version: 'rf.0',
+      fields: {
+        ...counted,
+        'context.electrochemistry.reaction': v('OER'),
+        'context.electrochemistry.cell_type': v('three_electrode'),
+      },
+    });
+    renderRecord({ [`GET ${BASE}/runs`]: { body: runsBody([run]) } });
+    await screen.findByRole('button', { name: /Add Run/ });
+    const header = headerOf('RUNFUL');
+    expect(header.textContent).toContain('All Recorded');
+    expect(header.textContent).toContain('5 of 5');
+    expect(header.textContent).not.toContain('of 7');
+  });
+
+  it('offers the pair in its own group, each showing its value or Not set', async () => {
+    const run = runFixture({
+      id: 'RUNFUL',
+      label: 'Run 1',
+      ordinal: 1,
+      version: 'rf.0',
+      fields: { ...counted, 'context.electrochemistry.reaction': v('OER') },
+    });
+    renderRecord({ [`GET ${BASE}/runs`]: { body: runsBody([run]) } });
+    await screen.findByRole('button', { name: /Add Run/ });
+    await expand('RUNFUL');
+    const group = within(cardFor('RUNFUL')).getByRole('group', { name: 'Electrochemistry · if it applies' });
+    const reaction = within(group).getByLabelText('Reaction', { exact: true }) as HTMLSelectElement;
+    const cell = within(group).getByLabelText('Cell type', { exact: true }) as HTMLSelectElement;
+    expect(reaction.value).toBe('OER');
+    expect(cell.value).toBe('');
+    expect(cell.selectedOptions[0]?.textContent).toBe('Not set');
+  });
+});
 
 describe('two runs on one screen', () => {
   /*
@@ -1714,8 +1785,10 @@ describe('the denominator discloses its scope (review finding: invented denomina
     // screen reader or a reader of the DOM.
     expect(progress.textContent).toMatch(/run fields recorded/);
     expect(progress.textContent).not.toMatch(/^\s*\d+ of \d+ set\s*$/);
-    // The denominator is DERIVED, so it cannot drift from what the screen renders.
-    expect(progress.textContent).toContain(`of ${RUN_FIELDS.length}`);
+    // The denominator is DERIVED, so it cannot drift from what the screen renders — and
+    // since 2026-10-12 it is the COUNTED fields, without the electrochemistry pair.
+    expect(progress.textContent).toContain(`of ${COUNTED_RUN_FIELDS.length}`);
+    expect(COUNTED_RUN_FIELDS.length).toBe(RUN_FIELDS.length - 2);
   });
 });
 

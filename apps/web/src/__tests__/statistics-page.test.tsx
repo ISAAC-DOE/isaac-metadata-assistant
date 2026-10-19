@@ -215,27 +215,49 @@ async function settled(): Promise<void> {
   );
 }
 
-/** One of the six regions, by its own heading text. */
+/** One of the regions — since 2026-10-12, one WIDGET — by its own heading text. */
 const regionOf = (name: string): HTMLElement => screen.getByRole('region', { name });
 
-/** A `StatCard`'s displayed value, resolved by the card's own visible label. */
-function cardValue(region: string, label: string): string {
-  const card = within(regionOf(region)).getByText(label).closest('dl.stat-card');
-  expect(card, `no stat card labelled "${label}" in ${region}`).not.toBeNull();
+/**
+ * ONE VIEW OF A WIDGET, resolved through the widget's own tab — the route a
+ * reader takes — and returned whether or not it is the selected view. A view is
+ * a named alternative presentation inside one widget (see `components/Widget.tsx`),
+ * so a label can legitimately appear in two views of one region (`Exported` is a
+ * status cell AND an export-gate row); a lookup scoped to the view is what keeps
+ * each assertion about exactly one figure.
+ */
+function viewOf(region: string, view: string): HTMLElement {
+  const tab = within(regionOf(region)).getByRole('tab', { name: view });
+  const panel = document.getElementById(tab.getAttribute('aria-controls') ?? '');
+  expect(panel, `the ${view} tab of ${region} controls no panel`).not.toBeNull();
+  expect(panel).toHaveAttribute('role', 'tabpanel');
+  return panel as HTMLElement;
+}
+
+/** A region by name, or an element already resolved (a widget view). */
+const scopeOf = (where: string | HTMLElement): HTMLElement =>
+  typeof where === 'string' ? regionOf(where) : where;
+const nameOf = (where: string | HTMLElement): string =>
+  typeof where === 'string' ? where : (where.id || 'the view');
+
+/** A `StatCard`'s (or a widget headline's) displayed value, by its own visible label. */
+function cardValue(region: string | HTMLElement, label: string): string {
+  const card = within(scopeOf(region)).getByText(label).closest('dl.stat-card');
+  expect(card, `no stat card labelled "${label}" in ${nameOf(region)}`).not.toBeNull();
   return card!.querySelector('.stat-card-value')?.textContent?.trim() ?? '';
 }
 
 /** A `FigureList` row's displayed value, resolved by the row's own visible label. */
-function figureValue(region: string, label: string): string {
-  const row = within(regionOf(region)).getByText(label).closest('.stats-figure');
-  expect(row, `no figure row labelled "${label}" in ${region}`).not.toBeNull();
+function figureValue(region: string | HTMLElement, label: string): string {
+  const row = within(scopeOf(region)).getByText(label).closest('.stats-figure');
+  expect(row, `no figure row labelled "${label}" in ${nameOf(region)}`).not.toBeNull();
   return row!.querySelector('dd')?.textContent?.trim() ?? '';
 }
 
 /** Every figure row in a region, as label → displayed value. */
-function figuresIn(region: string): Record<string, string> {
+function figuresIn(region: string | HTMLElement): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const row of regionOf(region).querySelectorAll('.stats-figure')) {
+  for (const row of scopeOf(region).querySelectorAll('.stats-figure')) {
     out[row.querySelector('dt')?.textContent?.trim() ?? ''] =
       row.querySelector('dd')?.textContent?.trim() ?? '';
   }
@@ -243,11 +265,11 @@ function figuresIn(region: string): Record<string, string> {
 }
 
 /** One chart `<figure>`, resolved by its own visible caption. */
-function chartFigure(region: string, caption: string): HTMLElement {
-  const figure = within(regionOf(region))
+function chartFigure(region: string | HTMLElement, caption: string): HTMLElement {
+  const figure = within(scopeOf(region))
     .getByText(caption, { selector: 'figcaption' })
     .closest('figure');
-  expect(figure, `no chart figure captioned "${caption}" in ${region}`).not.toBeNull();
+  expect(figure, `no chart figure captioned "${caption}" in ${nameOf(region)}`).not.toBeNull();
   return figure as HTMLElement;
 }
 
@@ -260,7 +282,7 @@ function chartFigure(region: string, caption: string): HTMLElement {
  * real HTML text beside the mark, which is what makes those charts readable with
  * every fill removed.
  */
-function chartRows(region: string, caption: string): [string, string][] {
+function chartRows(region: string | HTMLElement, caption: string): [string, string][] {
   const figure = chartFigure(region, caption);
   return [...figure.querySelectorAll('.stats-chart-row, .stats-chart-comparerow')].map((row) => [
     row.querySelector('.stats-chart-row-label')?.textContent?.trim() ?? '',
@@ -277,7 +299,7 @@ function chartRows(region: string, caption: string): [string, string][] {
  * assertion about the table alternative rather than an assertion about the
  * picture, which is the point of the table existing.
  */
-function chartTableRows(region: string, caption: string): [string, string][] {
+function chartTableRows(region: string | HTMLElement, caption: string): [string, string][] {
   const figure = chartFigure(region, caption);
   const table = figure.querySelector('table.stats-chart-table');
   expect(table, `no data table in the chart captioned "${caption}"`).not.toBeNull();
@@ -288,13 +310,13 @@ function chartTableRows(region: string, caption: string): [string, string][] {
 }
 
 /** The screen-reader summary sentence a chart figure carries. */
-function chartSummaryText(region: string, caption: string): string {
+function chartSummaryText(region: string | HTMLElement, caption: string): string {
   return chartFigure(region, caption).querySelector('.sr-only')?.textContent?.trim() ?? '';
 }
 
 /** The chip + count pairs of a `MiniBreakdown`, in DOM order. */
-function chipRows(region: string): [string, string][] {
-  return [...regionOf(region).querySelectorAll('.stats-mini-item')].map((item) => [
+function chipRows(region: string | HTMLElement): [string, string][] {
+  return [...scopeOf(region).querySelectorAll('.stats-mini-item')].map((item) => [
     item.querySelector('.chip span')?.textContent?.trim() ?? '',
     item.querySelector('.stats-mini-n')?.textContent?.trim() ?? '',
   ]);
@@ -748,22 +770,34 @@ describe('Workspace at a Glance', () => {
    * by hand per choice 2 at the head of this file), and `Historical Imports` is
    * `importListFixture.total`.
    */
-  it('the six headline cards state the counts the fixture implies', async () => {
+  /*
+   * ── RE-POINTED 2026-10-12, AND EVERY FIGURE IS STILL ASSERTED AT ITS OWN LABEL ─
+   *
+   * ~~'the six headline cards state the counts the fixture implies'~~ — the six
+   * tiles of `Workspace at a Glance` are now spread across the widgets whose
+   * question each one answers: `Total Records` is the `Records` widget's
+   * headline, the three status cells are its `Status` view, and the two tiles
+   * that were RESTATEMENTS (`Open Questions`, `Historical Imports`) are the
+   * headlines of their own widgets — which is where the tiles always pointed.
+   * The literals are unchanged and each is still read from its own labelled
+   * slot; what the case pins — that no figure lands under another's label — is
+   * the same property over the new layout.
+   */
+  it('the headline figures state the counts the fixture implies, each at its own label', async () => {
     renderStatistics(statisticsRoutes());
     await settled();
 
-    expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
-    expect(cardValue('Workspace at a Glance', 'Needs Attention')).toBe('2');
-    expect(cardValue('Workspace at a Glance', 'Ready to Export')).toBe('1');
-    expect(cardValue('Workspace at a Glance', 'Exported')).toBe('1');
-    expect(cardValue('Workspace at a Glance', 'Open Questions')).toBe('7');
-    expect(cardValue('Workspace at a Glance', 'Historical Imports')).toBe('2');
+    expect(cardValue('Records', 'Total Records')).toBe(String(RECORD_COUNT));
+    const status = viewOf('Records', 'Status');
+    expect(cardValue(status, 'Needs Attention')).toBe('2');
+    expect(cardValue(status, 'Ready to Export')).toBe('1');
+    expect(cardValue(status, 'Exported')).toBe('1');
+    expect(cardValue('Open Questions', 'Total Open Questions')).toBe('7');
+    expect(cardValue('Historical Imports', 'Import Sessions')).toBe('2');
 
     // Every row's status is one of the four, so the surfaced-unknown card must
     // NOT appear — it is emitted only when a record carries an unplaceable status.
-    expect(
-      within(regionOf('Workspace at a Glance')).queryByText('Unrecognized Status'),
-    ).toBeNull();
+    expect(within(regionOf('Records')).queryByText('Unrecognized Status')).toBeNull();
     // …and nothing claims the page saw fewer records than the API reported.
     expect(screen.queryByText(/This page received/)).toBeNull();
   });
@@ -779,8 +813,8 @@ describe('Workspace at a Glance', () => {
   it('Runtime Mode and Persistence render from /api/about, in Title Case', async () => {
     /* The `Runtime` region moved to `?tab=build` with the rest of Technical
        Details; the glance half of the assertion is unaffected, because the two
-       tabs are rendered by one component tree and `regionOf('Workspace at a
-       Glance')` is simply absent here — which is why that half is re-expressed
+       tabs are rendered by one component tree and `regionOf('Records')` (the
+       widget that replaced `Workspace at a Glance`) is simply absent here — which is why that half is re-expressed
        below as a page-text absence rather than a region query. */
     renderStatisticsBuild(statisticsRoutes());
     await settled();
@@ -797,7 +831,7 @@ describe('Workspace at a Glance', () => {
     cleanup();
     renderStatistics(statisticsRoutes());
     await settled();
-    const glance = regionOf('Workspace at a Glance');
+    const glance = regionOf('Records');
     expect(within(glance).queryByText('Runtime Mode')).toBeNull();
     expect(within(glance).queryByText('Persistence')).toBeNull();
   });
@@ -829,7 +863,7 @@ describe('Workspace at a Glance', () => {
       expect(regionOf(region), `${region} must still render`).toBeInTheDocument();
     }
     expect(figureValue('Project Memory', 'Nodes')).toBe(String(graphStatusAvailable.node_count));
-    expect(figureValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
+    expect(cardValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
 
     // Neither malformed fact is stated, and neither is replaced by a plausible
     // default — "Synthetic-Only" would be a guess, and this app must not guess.
@@ -854,34 +888,38 @@ describe('Workspace at a Glance', () => {
       }),
     );
     await settled();
-    for (const region of [
-      'Workspace at a Glance',
-      'Workflow Distribution',
-      'Evidence and Validation',
-      NO_ANALYTICS_HEADING,
-    ]) {
+    for (const region of ['Records', 'Evidence Support', NO_ANALYTICS_HEADING]) {
       expect(regionOf(region), `${region} must still render`).toBeInTheDocument();
     }
-    expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
+    expect(cardValue('Records', 'Total Records')).toBe(String(RECORD_COUNT));
   });
 });
 
 // --- Workflow Distribution ------------------------------------------------
 
-describe('Workflow Distribution', () => {
+/*
+ * THE WORKFLOW DISTRIBUTION IS THE `Records` WIDGET'S `Workflow` VIEW since
+ * 2026-10-12. Every assertion below is the one it was, scoped to that view
+ * rather than to the section it used to be — and the view is reached through its
+ * own tab, so this also pins that the chart is one click away and not gone.
+ */
+describe('Workflow Distribution (the Records widget\'s Workflow view)', () => {
   it('renders every canonical bucket with its count as real text, zeros included, in canonical order', async () => {
-    const { container } = renderStatistics(statisticsRoutes());
+    renderStatistics(statisticsRoutes());
     await settled();
+    fireEvent.click(within(regionOf('Records')).getByRole('tab', { name: 'Workflow' }));
+    const workflow = viewOf('Records', 'Workflow');
+    expect(workflow).not.toHaveAttribute('hidden');
 
     // ONE ordered read of the visible spans. `Record Created` is at zero in this
     // fixture and must still draw its row: a distribution that silently omits
     // an empty bucket reshapes its own axis as records move.
     const caption = `Records by current workflow step, out of ${RECORD_COUNT} counted`;
-    expect(chartRows('Workflow Distribution', caption)).toEqual(WORKFLOW_BARS);
+    expect(chartRows(workflow, caption)).toEqual(WORKFLOW_BARS);
 
     // The counts are VISIBLE, not only spoken: strip every aria-hidden subtree —
     // which is the whole drawn SVG — and the labels and numbers are still there.
-    const visible = pageTextWithout(container, '[aria-hidden="true"]');
+    const visible = pageTextWithout(workflow, '[aria-hidden="true"]');
     for (const [label, count] of WORKFLOW_BARS) {
       expect(visible).toContain(label);
       expect(new RegExp(`${label}\\s*${count}`).test(visible)).toBe(true);
@@ -894,28 +932,35 @@ describe('Workflow Distribution', () => {
      * disclosure — so a screen reader gets the whole distribution without walking
      * a grid. The data table then carries every figure for everyone.
      */
-    const summary = chartSummaryText('Workflow Distribution', caption);
+    const summary = chartSummaryText(workflow, caption);
     for (const [label, count] of WORKFLOW_BARS) {
       expect(summary).toContain(`${label}: ${count}`);
     }
     expect(summary).toContain(`Total ${RECORD_COUNT} records.`);
-    expect(chartTableRows('Workflow Distribution', caption)).toEqual(WORKFLOW_BARS);
+    expect(chartTableRows(workflow, caption)).toEqual(WORKFLOW_BARS);
 
     // The picture itself claims nothing: the SVG is hidden from assistive
     // technology, so it cannot state a figure the text equivalents do not.
-    const svg = chartFigure('Workflow Distribution', caption).querySelector('svg');
+    const svg = chartFigure(workflow, caption).querySelector('svg');
     expect(svg).toHaveAttribute('aria-hidden', 'true');
   });
 });
 
-// --- Evidence and Validation ---------------------------------------------
+// --- Evidence Support, and the Export Gate view --------------------------------
 
-describe('Evidence and Validation', () => {
+/*
+ * `Evidence and Validation` WAS TWO READINGS IN ONE SECTION, and since 2026-10-12
+ * it is two places: the evidence half is the `Evidence Support` widget (chips in
+ * its `Counts` view, the composition in its `Composition` view) and the
+ * export-gate half is the `Records` widget's `Export Gate` view. Every literal
+ * and every property below is the one it was; only the scope moved.
+ */
+describe('Evidence Support and the Export Gate', () => {
   it('renders the six evidence classes in severity precedence, NOT sorted by count', async () => {
     renderStatistics(statisticsRoutes());
     await settled();
 
-    expect(chipRows('Evidence and Validation')).toEqual(EVIDENCE_CHIPS);
+    expect(chipRows(viewOf('Evidence Support', 'Counts'))).toEqual(EVIDENCE_CHIPS);
 
     // The discriminator: this fixture's counts (30,3,2,2,3,0) are NOT in
     // descending order, so a page that re-sorted by count would read
@@ -928,44 +973,55 @@ describe('Evidence and Validation', () => {
   it('labels every evidence count in FIELDS, never in records', async () => {
     renderStatistics(statisticsRoutes());
     await settled();
-    const region = regionOf('Evidence and Validation');
+    const region = regionOf('Evidence Support');
+    const counts = viewOf('Evidence Support', 'Counts');
 
-    expect(within(region).getByText('Fields by Evidence-Support Class')).toBeInTheDocument();
+    expect(within(counts).getByText('Fields by Evidence-Support Class')).toBeInTheDocument();
     // Each chip's count carries its unit for a screen reader, so the badge is
     // never a bare number.
-    const nouns = [...region.querySelectorAll('.stats-mini-item .sr-only')].map((n) =>
+    const nouns = [...counts.querySelectorAll('.stats-mini-item .sr-only')].map((n) =>
       n.textContent?.trim(),
     );
     expect(nouns).toHaveLength(EVIDENCE_CHIPS.length);
     for (const noun of nouns) expect(['field', 'fields']).toContain(noun);
 
-    expect(figureValue('Evidence and Validation', 'Total Fields Counted')).toBe('40');
-    expect(figureValue('Evidence and Validation', 'Records Counted')).toBe(String(RECORD_COUNT));
-    expect(
-      within(region).getByText(/counts FIELDS across the records counted, not records/),
-    ).toBeInTheDocument();
+    // The total is the widget's HEADLINE now; the record count sits beside it.
+    expect(cardValue('Evidence Support', 'Total Fields Counted')).toBe('40');
+    expect(figureValue('Evidence Support', 'Records Counted')).toBe(String(RECORD_COUNT));
+    // …and the fields-not-records line is VISIBLE, beside them, not in the info.
+    const line = within(region).getByText(/counts FIELDS across the records counted, not records/);
+    expect(line.closest('.widget-info')).toBeNull();
   });
 
-  it('renders the export-gate rows', async () => {
+  it('renders the export-gate rows, in the Records widget\'s Export Gate view', async () => {
     renderStatistics(statisticsRoutes());
     await settled();
+    const gate = viewOf('Records', 'Export Gate');
 
-    expect(figureValue('Evidence and Validation', 'Exported')).toBe('1');
-    expect(figureValue('Evidence and Validation', 'Ready Now')).toBe('1');
-    expect(figureValue('Evidence and Validation', 'Blocked by the Export Gate')).toBe('1');
-    expect(figureValue('Evidence and Validation', 'Blocked by Open Questions')).toBe('2');
-    expect(figureValue('Evidence and Validation', 'Stale Artifacts')).toBe('1');
+    expect(figureValue(gate, 'Exported')).toBe('1');
+    expect(figureValue(gate, 'Ready Now')).toBe('1');
+    expect(figureValue(gate, 'Blocked by the Export Gate')).toBe('1');
+    expect(figureValue(gate, 'Blocked by Open Questions')).toBe('2');
+    expect(figureValue(gate, 'Stale Artifacts')).toBe('1');
+    // The SUBSET caveat stays beside the rows it qualifies, visible in the view.
+    expect(
+      within(gate).getByText(/Stale Artifacts is a subset of Exported, not a fifth bucket/),
+    ).toBeInTheDocument();
   });
 
   it('states that evidence support and schema validation are separate signals', async () => {
     renderStatistics(statisticsRoutes());
     await settled();
 
+    /* In the widget's info panel since 2026-10-12, and reached through the info
+       toggle — the sentence is prose, and prose is what an info panel holds. */
+    const region = regionOf('Evidence Support');
+    const toggle = within(region).getByRole('button', { name: 'About Evidence Support' });
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(
-      within(regionOf('Evidence and Validation')).getByText(
-        'Evidence support and schema validation are separate signals.',
-      ),
-    ).toBeInTheDocument();
+      within(region).getByText(/^Evidence support and schema validation are separate signals\./),
+    ).toBeVisible();
   });
 });
 
@@ -1182,16 +1238,17 @@ describe('API Surface', () => {
     renderStatisticsBuild(statisticsRoutes());
     await settled();
 
-    expect(figureValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
+    expect(cardValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
     expect(figureValue('API Surface', 'Groups')).toBe(GROUP_COUNT);
   });
 
   /*
-   * READ FROM THE DATA TABLE, deliberately. This breakdown is a COLUMN chart: its
-   * category names sit under the marks and only the sole maximum is direct-
-   * labelled, because a number on every mark goes unread. So the table is where
-   * every exact figure lives — and asserting it here is an assertion about the
-   * alternative every chart on this surface is required to carry.
+   * READ FROM THE DATA TABLE, deliberately — and, since 2026-10-18, from the
+   * visible rows too. ~~This breakdown is a COLUMN chart: its category names sit
+   * under the marks and only the sole maximum is direct-labelled~~; it is now
+   * compact comparison rows, every value printed on its own row. The table
+   * assertion stays because it is the alternative every chart on this surface
+   * is required to carry.
    */
   it('breaks the operations down by UPPERCASED HTTP method', async () => {
     renderStatisticsBuild(statisticsRoutes());
@@ -1199,12 +1256,10 @@ describe('API Surface', () => {
 
     const caption = 'Documented operations by HTTP method';
     expect(chartTableRows('API Surface', caption)).toEqual(METHOD_BARS);
-    // The method names are also visible text under the columns, not SVG glyphs.
-    expect(
-      [...chartFigure('API Surface', caption).querySelectorAll('.stats-chart-cat')].map((c) =>
-        c.textContent?.trim(),
-      ),
-    ).toEqual(METHOD_BARS.map(([method]) => method));
+    /* The method names are also visible text, not SVG glyphs — since
+       2026-10-18 as compact comparison rows (each row's own label and value)
+       rather than as category labels under columns. */
+    expect(chartRows('API Surface', caption)).toEqual(METHOD_BARS);
   });
 
   it('groups the operations in the contract’s own tag order', async () => {
@@ -1309,76 +1364,54 @@ describe('analytics are not collected', () => {
     expect(text).toMatch(/stores no per-user or per-operation metric/);
 
     // ONE sentence of body copy, which is the reduction the brief asked for.
-    // Counted on the section's own `.stats-note` paragraphs, so the supporting
-    // line and the link line are not mistaken for body prose.
+    // Counted on the widget's own `.stats-note` paragraphs, so the supporting
+    // line and the footer link are not mistaken for body prose.
     expect(regionOf(NO_ANALYTICS_HEADING).querySelectorAll('p.stats-note')).toHaveLength(1);
 
-    // …and the scope is still disclosed AT the claim, in the section's own
-    // supporting line, naming where the full statement is.
+    // …and the scope is still disclosed AT the claim, in the widget's own
+    // visible supporting line.
     expect(text).toMatch(/Server-side logs belong to whoever operates the deployment/);
-    expect(text).toMatch(/Known Limitations/);
+    const sub = regionOf(NO_ANALYTICS_HEADING).querySelector('p.widget-sub');
+    expect(pageText(sub as HTMLElement)).toMatch(
+      /Server-side logs belong to whoever operates the deployment/,
+    );
 
-    /*
-     * ── THE POINTER IS NOW ASSERTED AS A LINK, AND THAT IS A STRENGTHENING ──
-     *
-     * `Known Limitations` moved to `?tab=build`, so the supporting line's old
-     * word "below" became false. The section now names the tab AND offers a
-     * real anchor to it, and this case pins the anchor rather than only the
-     * words — because the words alone are what would drift if the target moved
-     * again. Without this, a reader could be pointed at a disclosure with no
-     * way to reach it, which is worse than the state the original defect was
-     * corrected out of.
-     */
-    expect(text).toMatch(/on the Build & Verification tab/);
-    expect(
-      within(regionOf(NO_ANALYTICS_HEADING)).getByRole('link', { name: 'Read Known Limitations' }),
-    ).toHaveAttribute('href', ROUTES.statisticsTab('build'));
-
-    // The vetted Settings wording is linked rather than re-authored. Asserted
-    // BEFORE the tab switch below, because this link is the Overview section's.
+    // The vetted Settings wording is linked rather than re-authored.
     expect(
       within(regionOf(NO_ANALYTICS_HEADING)).getByRole('link', {
-        name: 'Open Data & Privacy Settings',
+        name: 'Open Privacy Settings',
       }),
     ).toHaveAttribute('href', ROUTES.settingsTab('privacy'));
 
-    // The server-side logging paragraph itself: relocated, not dropped — and it
-    // is now one tab away, so it is read on the tab it lives on. Resolved
-    // through the disclosure's own heading id, so a rename cannot make this
-    // vacuous — `closest('details')` on a missing element would throw.
-    cleanup();
-    const build = renderStatisticsBuild(statisticsRoutes());
-    await settled();
-    const limitations = build.container.querySelector('#stats-limitations')!.closest('details');
-    expect(limitations, 'the Known Limitations disclosure must render').not.toBeNull();
-    const limitationsText = pageText(limitations as HTMLElement);
+    /*
+     * ── THE CORRECTION MOVED BACK BESIDE THE CLAIM, AND THIS IS A STRENGTHENING ─
+     *
+     * ~~`Read Known Limitations` → `?tab=build`, and the paragraph read inside
+     * `#stats-limitations`'s `<details>` on the Build tab~~ — the 2026-10-12
+     * widget redesign retired the free-standing `Known Limitations` disclosure
+     * and put this paragraph in THIS widget's info panel. So the scope of the
+     * Overview's privacy claim no longer lives on a different tab behind a link;
+     * it is one press of the claim's own info toggle away. Asserted through that
+     * control, so a rename of the toggle or the panel cannot make this vacuous.
+     */
+    const toggle = within(regionOf(NO_ANALYTICS_HEADING)).getByRole('button', {
+      name: `About ${NO_ANALYTICS_HEADING}`,
+    });
+    const panel = document.getElementById(toggle.getAttribute('aria-controls') ?? '');
+    expect(panel, 'the info toggle must control a panel').not.toBeNull();
+    expect(panel).toHaveAttribute('hidden');
+    fireEvent.click(toggle);
+    expect(panel).not.toHaveAttribute('hidden');
+    const limitationsText = pageText(panel as HTMLElement);
     expect(limitationsText).toMatch(/outcome line per operation/);
     expect(limitationsText).toMatch(/access line per request/);
     expect(limitationsText).toMatch(/identity gateway/);
     expect(limitationsText).toMatch(/the browser cannot see them/);
-
+    // …and the cross-tab pointer it replaces is gone, not left dangling.
+    expect(within(regionOf(NO_ANALYTICS_HEADING)).queryByRole('link', { name: 'Read Known Limitations' })).toBeNull();
   });
 });
 
-/*
- * ── THE VISUAL-FIRST ORDER, AND THE RULE THAT DECIDES WHAT MAY BE COLLAPSED ──
- *
- * Record Verification was the FIFTH h2 on this tab, roughly 1,700px down. Every
- * item the brief named as above-the-fold material — the corpus that ran, the
- * report's age, the four headline counts, the two validators side by side, the
- * mutation harness, the protected distributions — is inside it, so the fix was
- * to promote the section rather than to compress the page.
- *
- * Supporting PROSE went the other way, into four new closed disclosures beside
- * `Technical Details`. The rule the split was made on is asserted here rather
- * than only written down, because it is the one that can be violated silently:
- * A DISCLOSURE MAY HOLD PROSE AND MUST NOT HOLD A MEASUREMENT. A closed
- * `<details>` is not scanned by axe, is skipped by a reader scanning headings,
- * and reads as optional — so collapsing a finding is hiding it.
- *
- * `Technical Details` is deliberately exempt from that assertion and is checked
- * separately: it holds build-internal FIGURES on purpose and always has.
- */
 describe('the visual-first order', () => {
   /** Every section element, in document order, by its accessible name. */
   function sectionNames(container: HTMLElement): string[] {
@@ -1419,7 +1452,10 @@ describe('the visual-first order', () => {
     // Vacuity guard: an empty or mis-rooted scan would satisfy every comparison
     // below without having read anything.
     expect(names.length, 'the scan found no sections at all').toBeGreaterThan(5);
-    expect(names[0]).toBe('Workspace at a Glance');
+    // `Records` is the widget that replaced `Workspace at a Glance` (2026-10-12)
+    // and carries its headline figure, so the property — the workspace figures
+    // open the tab — is the one this always asserted.
+    expect(names[0]).toBe('Records');
     expect(names).not.toContain('Record Verification');
     expect(names).not.toContain('Verification Safeguards');
     expect(names).not.toContain('Platform Metrics');
@@ -1433,59 +1469,67 @@ describe('the visual-first order', () => {
     expect(names.length, 'the scan found no sections at all').toBeGreaterThan(2);
     expect(names.slice(0, 2)).toEqual(['Record Verification', 'Verification Safeguards']);
     // …and the workspace figures are not duplicated onto this tab.
-    expect(names).not.toContain('Workspace at a Glance');
-  });
-
-  it('renders the four prose disclosures, closed, in the documented order', async () => {
-    const { container } = renderStatisticsBuild(statisticsRoutes());
-    await settled();
-
-    const prose = [...container.querySelectorAll('details.stats-disclosure')];
-    expect(prose.map((d) => d.querySelector('h2')?.textContent)).toEqual([
-      'How Verification Works',
-      'How to Interpret Results',
-      'Mutation Methodology',
-      'Known Limitations',
-    ]);
-    for (const d of prose) {
-      expect(d.hasAttribute('open'), 'a supporting disclosure must arrive closed').toBe(false);
-    }
-    // The build-internals region keeps its own class, and stays the ONLY one
-    // carrying it: three e2e helpers address `details.stats-technical` through
-    // strict-mode locators, one of them asserting exactly one match.
-    expect(container.querySelectorAll('details.stats-technical')).toHaveLength(1);
+    expect(names).not.toContain('Records');
   });
 
   /*
-   * WIDENED, NOT RE-POINTED. The four prose disclosures are on `?tab=build`,
-   * and the Overview tab gained TWO of its own when the distillation moved the
-   * restatements of two caveats behind a `<summary>`. Scanning only one tab
-   * would leave the new pair — the more recently authored, so the likelier to
-   * carry a figure — unguarded. Both tabs are scanned, with the expected count
-   * asserted on each so neither can pass by rendering nothing.
+   * ── INVERTED 2026-10-12: THE PROSE MOVED INTO THE WIDGETS IT EXPLAINS ─────
+   *
+   * ~~'renders the four prose disclosures, closed, in the documented order'~~
+   * and ~~'puts NO measurement inside a prose disclosure — on EITHER tab'~~ —
+   * the four free-standing `details.stats-disclosure` (How Verification Works,
+   * How to Interpret Results, Mutation Methodology, Known Limitations), the two
+   * Overview restatement disclosures and the `Technical Details` region are
+   * gone as containers. Every paragraph is now inside the INFO PANEL of the
+   * widget whose figures it explains (`components/Widget.tsx`).
+   *
+   * THE RULE IS CARRIED OVER, NOT DROPPED, and it is asserted over the new
+   * container on BOTH data tabs: an info panel is closed by default, so a figure
+   * inside it would be a hidden figure. The negative control is unchanged — the
+   * guard's selector really matches the figures this page draws.
    */
-  it('puts NO measurement inside a prose disclosure — on EITHER tab', async () => {
+  it('renders no free-standing disclosure, and every info panel arrives closed', async () => {
+    for (const render of [renderStatisticsBuild, renderStatistics]) {
+      const { container } = render(statisticsRoutes());
+      await settled();
+      expect(container.querySelectorAll('details.stats-disclosure')).toHaveLength(0);
+      expect(container.querySelectorAll('details.stats-technical')).toHaveLength(0);
+      const panels = [...container.querySelectorAll('.widget-info')];
+      expect(panels.length, 'no info panel rendered, so this asserts nothing').toBeGreaterThan(3);
+      for (const panel of panels) {
+        expect(panel.hasAttribute('hidden'), `${panel.id} must arrive closed`).toBe(true);
+        const toggle = container.querySelector(`[aria-controls="${panel.id}"]`);
+        expect(toggle, `${panel.id} must be reachable by a control`).not.toBeNull();
+        expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      }
+      cleanup();
+    }
+  });
+
+  it('puts NO measurement inside an info panel — on EITHER tab', async () => {
     const build = renderStatisticsBuild(statisticsRoutes());
     await settled();
-    assertNoMeasurementInProse(build.container, 4);
+    /* 7 since the 2026-10-18 density round: Runtime and Project Memory gained
+       info panels for the sentences that left their bodies. */
+    assertNoMeasurementInInfo(build.container, 7);
     cleanup();
 
     const overview = renderStatistics(statisticsRoutes());
     await settled();
-    assertNoMeasurementInProse(overview.container, 2);
+    assertNoMeasurementInInfo(overview.container, 7);
   });
 
-  function assertNoMeasurementInProse(container: HTMLElement, expected: number): void {
-    const prose = [...container.querySelectorAll('details.stats-disclosure')];
-    expect(prose.length, 'no prose disclosure rendered, so this asserts nothing').toBe(expected);
-    for (const d of prose) {
-      const figures = d.querySelectorAll(
+  function assertNoMeasurementInInfo(container: HTMLElement, expected: number): void {
+    const panels = [...container.querySelectorAll('.widget-info')];
+    expect(panels.length, 'the info-panel count changed — re-derive it').toBe(expected);
+    for (const panel of panels) {
+      const figures = panel.querySelectorAll(
         '.stat-card, .stats-figure, figure.stats-chart, .stats-verify-safeguard, .stats-mini-item',
       );
       expect(
         [...figures].map((n) => n.className),
-        `${d.querySelector('h2')?.textContent} holds a measurement; a closed disclosure is ` +
-          'not scanned by axe and is skipped by a reader, so a figure inside one is a hidden figure',
+        `${panel.id} holds a measurement; a closed info panel is not scanned by axe and is ` +
+          'skipped by a reader, so a figure inside one is a hidden figure',
       ).toEqual([]);
     }
     // The negative control: the guard's own selector really does match the
@@ -1535,15 +1579,18 @@ describe('the visual-first order', () => {
     // The page clock, still in the meta row above the tab panel body.
     expect(metaLabel(container)).toBe('Last Read From the API');
 
-    // The report clock, now in Record Verification's freshness strip — and
-    // stated exactly once, so the two rows cannot disagree with each other.
+    // The report clock, in Record Verification — and each half stated exactly
+    // once, so two rows cannot disagree with each other. Since 2026-10-18 the
+    // AGE is in the header strip beside the re-read control, and the instant
+    // behind it, `Report Generated`, is About This Run's first row again.
     const verification = container.querySelector(
       'section[aria-labelledby="stats-verification"]',
     ) as HTMLElement;
     const strip = verification.querySelector('.stats-verify-freshness') as HTMLElement;
     expect(strip, 'the freshness strip must render').not.toBeNull();
-    expect(pageText(strip)).toMatch(/Report Generated/);
     expect(pageText(strip)).toMatch(/Report Age/);
+    expect(pageText(strip)).not.toMatch(/Report Generated/);
+    expect(pageText(viewOf('Record Verification', 'About This Run'))).toMatch(/Report Generated/);
     expect(pageText(verification).match(/Report Generated/g)).toHaveLength(1);
     expect(pageText(verification).match(/Report Age/g)).toHaveLength(1);
 
@@ -1605,7 +1652,7 @@ describe('truthfulness — the page states nothing it cannot know', () => {
   it.each(SCANNED)('renders no invented verdict, health or telemetry figure — %s', async (_case, routes) => {
     const overview = renderStatistics(routes);
     await settled();
-    assertNoInventedFigure(overview.container, 'Workspace at a Glance');
+    assertNoInventedFigure(overview.container, 'Total Records');
     cleanup();
 
     const build = renderStatisticsBuild(routes);
@@ -1651,11 +1698,14 @@ describe('loading', () => {
        split with them rather than shortened. Every label is the one it was:
        a section's loading state did not change because the tab did. */
     const onOverview: [string, string][] = [
-      ['Workspace at a Glance', 'Loading the workspace summary…'],
-      ['Workflow Distribution', 'Loading the workflow distribution…'],
+      /* `Workflow Distribution` is a view of `Records` since 2026-10-12 and has
+         no loading state of its own: the widget's one loading state covers it.
+         `Recent Work`'s is in the Activity widget's `Latest Updates` view. */
+      ['Records', 'Loading the workspace summary…'],
       ['Open Questions', 'Loading the open-question counts…'],
-      ['Evidence and Validation', 'Loading evidence and export-gate counts…'],
-      ['Recent Work', 'Loading the most recent updates…'],
+      ['Evidence Support', 'Loading the evidence counts…'],
+      ['Workspace Activity', 'Loading the recorded activity…'],
+      ['Workspace Activity', 'Loading the most recent updates…'],
       ['Historical Imports', 'Loading the import sessions…'],
     ];
     for (const [region, label] of onOverview) {
@@ -1667,7 +1717,7 @@ describe('loading', () => {
     expect(screen.getByText('Reading From the API')).toBeInTheDocument();
 
     await settled();
-    expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
+    expect(cardValue('Records', 'Total Records')).toBe(String(RECORD_COUNT));
     cleanup();
 
     renderStatisticsBuild(statisticsRoutes());
@@ -1697,29 +1747,35 @@ describe('partial failure — one dead source degrades only what reads it', () =
       within(regionOf(NO_ANALYTICS_HEADING)).getByText(/ships no analytics SDK/),
     ).toBeInTheDocument();
     // The import figures read /api/imports, which is still alive.
-    expect(figureValue('Historical Imports', 'Import Sessions')).toBe('2');
+    expect(cardValue('Historical Imports', 'Import Sessions')).toBe('2');
     // No record figure is substituted for the ones that were not received.
     expect(screen.queryByText('Total Records')).toBeNull();
 
-    // Every region that reads the dead source offers the recourse.
-    for (const region of [
-      'Workspace at a Glance',
-      'Workflow Distribution',
-      'Evidence and Validation',
-      'Recent Work',
-    ]) {
+    // Every widget that reads the dead source offers the recourse — the three
+    // whose body reads it, and the Activity widget's `Latest Updates` view, which
+    // is where Recent Work's read lives now (reached through its own tab, so the
+    // Retry is asserted on the view a reader actually opens).
+    for (const region of ['Records', 'Open Questions', 'Evidence Support']) {
       expect(
         within(regionOf(region)).getByRole('button', { name: 'Retry' }),
         `${region} must offer a Retry`,
       ).toBeInTheDocument();
     }
+    fireEvent.click(within(regionOf('Workspace Activity')).getByRole('tab', { name: 'Latest Updates' }));
+    expect(
+      within(viewOf('Workspace Activity', 'Latest Updates')).getByRole('button', { name: 'Retry' }),
+    ).toBeInTheDocument();
+    // …while the activity figures, which read a DIFFERENT source, are unharmed.
+    expect(cardValue('Workspace Activity', 'Changes in the Last 7 Days')).toBe(
+      String(activitySummaryFixture.totals.events_in_window),
+    );
 
     // …and the Build tab, which reads none of `/api/runtime/records`, is whole.
     cleanup();
     renderStatisticsBuild(statisticsRoutes({ records: dead }));
     await settled();
     expect(figureValue('Project Memory', 'Nodes')).toBe(String(graphStatusAvailable.node_count));
-    expect(figureValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
+    expect(cardValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
     // The two runtime cards read /api/about, which is still alive.
     expect(cardValue('Runtime', 'Runtime Mode')).toBe('Synthetic-Only');
   });
@@ -1733,16 +1789,17 @@ describe('partial failure — one dead source degrades only what reads it', () =
     renderStatistics(statisticsRoutes({ imports: dead }));
     await settled();
 
-    expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
-    // NOT `0`, which would claim the workspace holds no import session.
-    expect(cardValue('Workspace at a Glance', 'Historical Imports')).toBe(UNAVAILABLE);
-    const tile = within(regionOf('Workspace at a Glance'))
-      .getByText('Historical Imports')
-      .closest('dl.stat-card');
-    expect(tile?.getAttribute('data-tone')).toBe('quiet');
-
-    // One alarm, at the section that reads it, with the recourse.
+    expect(cardValue('Records', 'Total Records')).toBe(String(RECORD_COUNT));
+    /* ~~the `Historical Imports` TILE in the glance row reads `Not Available`~~
+       — the tile was a restatement of this widget's own headline and left with
+       the 2026-10-12 redesign. The property it carried survives in a stronger
+       form: with the source dead there is NO import headline at all, and in
+       particular no `0`, which would claim the workspace holds no session. */
     const section = regionOf('Historical Imports');
+    expect(section.querySelectorAll('dl.stat-card')).toHaveLength(0);
+    expect(within(section).queryByText('0')).toBeNull();
+
+    // One alarm, at the widget that reads it, with the recourse.
     expect(within(section).getAllByRole('alert')).toHaveLength(1);
     expect(within(section).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
     expect(screen.getAllByRole('alert')).toHaveLength(1);
@@ -1752,8 +1809,8 @@ describe('partial failure — one dead source degrades only what reads it', () =
     renderStatistics(statisticsRoutes({ about: dead }));
     await settled();
 
-    expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
-    expect(cardValue('Workspace at a Glance', 'Needs Attention')).toBe('2');
+    expect(cardValue('Records', 'Total Records')).toBe(String(RECORD_COUNT));
+    expect(cardValue('Records', 'Needs Attention')).toBe('2');
 
     cleanup();
     renderStatisticsBuild(statisticsRoutes({ about: dead }));
@@ -1770,16 +1827,16 @@ describe('partial failure — one dead source degrades only what reads it', () =
     renderStatistics(statisticsRoutes({ graph: dead }));
     await settled();
 
-    expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
-    expect(chartRows('Workflow Distribution', `Records by current workflow step, out of ${RECORD_COUNT} counted`)).toEqual(
+    expect(cardValue('Records', 'Total Records')).toBe(String(RECORD_COUNT));
+    expect(chartRows(viewOf('Records', 'Workflow'), `Records by current workflow step, out of ${RECORD_COUNT} counted`)).toEqual(
       WORKFLOW_BARS,
     );
-    expect(chipRows('Evidence and Validation')).toEqual(EVIDENCE_CHIPS);
+    expect(chipRows('Evidence Support')).toEqual(EVIDENCE_CHIPS);
 
     cleanup();
     renderStatisticsBuild(statisticsRoutes({ graph: dead }));
     await settled();
-    expect(figureValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
+    expect(cardValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
 
     expect(figuresIn('Project Memory')).toEqual({});
     expect(within(regionOf('Project Memory')).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
@@ -1789,11 +1846,11 @@ describe('partial failure — one dead source degrades only what reads it', () =
     renderStatistics(statisticsRoutes({ openapi: dead }));
     await settled();
 
-    expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
-    expect(chartRows('Workflow Distribution', `Records by current workflow step, out of ${RECORD_COUNT} counted`)).toEqual(
+    expect(cardValue('Records', 'Total Records')).toBe(String(RECORD_COUNT));
+    expect(chartRows(viewOf('Records', 'Workflow'), `Records by current workflow step, out of ${RECORD_COUNT} counted`)).toEqual(
       WORKFLOW_BARS,
     );
-    expect(figureValue('Evidence and Validation', 'Total Fields Counted')).toBe('40');
+    expect(cardValue('Evidence Support', 'Total Fields Counted')).toBe('40');
 
     cleanup();
     renderStatisticsBuild(statisticsRoutes({ openapi: dead }));
@@ -1834,29 +1891,29 @@ describe('partial failure — one dead source degrades only what reads it', () =
 
     // The records alarm is at the FIRST section that reads records; every other
     // section reading it gets the compact, neutral note instead.
-    expect(within(regionOf('Workspace at a Glance')).getByRole('alert')).toBeInTheDocument();
-    for (const region of [
-      'Workflow Distribution',
-      'Open Questions',
-      'Evidence and Validation',
-      'Recent Work',
-    ]) {
+    // (`Workflow Distribution` is a view of `Records` since 2026-10-12, so it
+    // shares that widget's one alarm rather than needing a note of its own; and
+    // `Recent Work` is the Activity widget's `Latest Updates` view.)
+    expect(within(regionOf('Records')).getByRole('alert')).toBeInTheDocument();
+    for (const region of ['Open Questions', 'Evidence Support', 'Workspace Activity']) {
       expect(within(regionOf(region)).queryByRole('alert'), `${region} must not re-alarm`).toBeNull();
       expect(regionOf(region).querySelector('.stats-unavailable')).not.toBeNull();
     }
+    expect(
+      viewOf('Workspace Activity', 'Latest Updates').querySelector('.stats-unavailable'),
+    ).not.toBeNull();
 
-    // Every affected section still offers the recourse.
-    for (const region of [
-      'Workspace at a Glance',
-      'Workflow Distribution',
-      'Open Questions',
-      'Evidence and Validation',
-      'Recent Work',
-    ]) {
+    // Every affected widget still offers the recourse.
+    for (const region of ['Records', 'Open Questions', 'Evidence Support']) {
       expect(
         within(regionOf(region)).getAllByRole('button', { name: 'Retry' }).length,
       ).toBeGreaterThan(0);
     }
+    fireEvent.click(within(regionOf('Workspace Activity')).getByRole('tab', { name: 'Latest Updates' }));
+    expect(
+      within(viewOf('Workspace Activity', 'Latest Updates')).getAllByRole('button', { name: 'Retry' })
+        .length,
+    ).toBeGreaterThan(0);
 
     // On Build the other two dead sources each have a single reader, so each
     // alarms there exactly once — two alarms, not one and not three.
@@ -1888,7 +1945,7 @@ describe('partial failure — one dead source degrades only what reads it', () =
     renderStatistics(statisticsRoutes({ about: dead }));
     await settled();
     expect(screen.queryAllByRole('alert')).toHaveLength(0);
-    expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
+    expect(cardValue('Records', 'Total Records')).toBe(String(RECORD_COUNT));
   });
 });
 
@@ -1910,7 +1967,7 @@ describe('total failure', () => {
     expect(screen.getAllByRole('alert')).toHaveLength(1);
     expect(container.querySelectorAll('.fetch-state.error')).toHaveLength(1);
     // Every section is replaced by the one failure, not decorated with it.
-    expect(screen.queryByRole('region', { name: 'Workspace at a Glance' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Records' })).toBeNull();
     expect(screen.queryByRole('region', { name: 'API Surface' })).toBeNull();
     // The recourse is still offered once.
     expect(screen.getAllByRole('button', { name: 'Retry' })).toHaveLength(1);
@@ -1922,36 +1979,40 @@ describe('empty workspace', () => {
     renderStatistics(statisticsRoutes({ records: { body: { records: [], total: 0 } } }));
     await settled();
 
-    expect(within(regionOf('Workspace at a Glance')).getByText('No Records Yet')).toBeInTheDocument();
+    expect(within(regionOf('Records')).getByText('No Records Yet')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Go to My Experiments' })).toHaveAttribute(
       'href',
       ROUTES.experiments,
     );
 
-    // No grid of zeros, no zero-height bars, no five-chip zero row. The glance
-    // section holds NO card at all in this state — including the two tiles added
-    // in 2026-09-15 (`Open Questions`, `Historical Imports`), which are inside
-    // the same grid and so are absent with it. A zero here would be a figure
-    // nobody measured.
-    expect(regionOf('Workspace at a Glance').querySelectorAll('dl.stat-card')).toHaveLength(0);
-    // No chart is drawn, and no empty axis either — not one row, not one tick,
-    // not one table. Scoped to `.stats-chart` rather than to the region, because
-    // the section's own decorative heading glyph is an `<svg>` too and it is not
-    // a plot.
-    expect(regionOf('Workflow Distribution').querySelectorAll('.stats-chart-row')).toHaveLength(0);
-    expect(regionOf('Workflow Distribution').querySelectorAll('figure.stats-chart')).toHaveLength(0);
-    expect(regionOf('Workflow Distribution').querySelectorAll('.stats-chart svg')).toHaveLength(0);
-    expect(regionOf('Workflow Distribution').querySelectorAll('table')).toHaveLength(0);
-    expect(chipRows('Evidence and Validation')).toEqual([]);
-    expect(figuresIn('Evidence and Validation')).toEqual({});
-    expect(within(regionOf('Workflow Distribution')).getByText(/No bar is drawn rather than a row of zeros/)).toBeInTheDocument();
-    expect(within(regionOf('Evidence and Validation')).getByText(/no fields were classified and no count is stated/)).toBeInTheDocument();
-    expect(within(regionOf('Evidence and Validation')).getByText(/no export-gate position to state/)).toBeInTheDocument();
-    // The new sections state the absence too, and neither draws a zero row.
+    // No grid of zeros, no zero-height bars, no five-chip zero row. The Records
+    // widget holds NO figure at all in this state — no headline and no status
+    // cell. A zero here would be a figure nobody measured.
+    expect(regionOf('Records').querySelectorAll('dl.stat-card')).toHaveLength(0);
+    /* ~~the `Workflow Distribution` section states "No bar is drawn rather than a
+       row of zeros" and draws no row, figure, svg or table~~ — since 2026-10-12
+       the distribution is a VIEW of `Records`, and with no record received the
+       widget offers NO VIEW AT ALL: no Workflow tab, no Export Gate tab, and so
+       no chart, axis, table or zero row anywhere inside it. That is the
+       stronger form of the old assertion — nothing to draw is not drawn, and
+       there is no switcher leading to an empty panel. */
+    expect(within(regionOf('Records')).queryByRole('tablist')).toBeNull();
+    expect(regionOf('Records').querySelectorAll('.stats-chart-row')).toHaveLength(0);
+    expect(regionOf('Records').querySelectorAll('figure.stats-chart')).toHaveLength(0);
+    expect(regionOf('Records').querySelectorAll('.stats-chart svg')).toHaveLength(0);
+    expect(regionOf('Records').querySelectorAll('table')).toHaveLength(0);
+    expect(regionOf('Records').querySelectorAll('.stats-figure')).toHaveLength(0);
+    expect(chipRows('Evidence Support')).toEqual([]);
+    expect(figuresIn('Evidence Support')).toEqual({});
     expect(
-      within(regionOf('Recent Work')).getByText(/No records were returned, so there is nothing recent to list\./),
+      within(regionOf('Evidence Support')).getByText(/no fields were classified and no count is stated/),
     ).toBeInTheDocument();
-    expect(regionOf('Recent Work').querySelectorAll('.stats-recent-row')).toHaveLength(0);
+    // The Recent Work list states the absence too, and draws no zero row.
+    const latest = viewOf('Workspace Activity', 'Latest Updates');
+    expect(
+      within(latest).getByText(/No records were returned, so there is nothing recent to list\./),
+    ).toBeInTheDocument();
+    expect(latest.querySelectorAll('.stats-recent-row')).toHaveLength(0);
 
     // …and the two /api/about cards it used to keep are in the `Runtime` region
     // on the Build tab, which still has them: the move is real, not a deletion.
@@ -1971,7 +2032,7 @@ describe('truncated body', () => {
     await settled();
 
     // The server's own denominator is shown as the total…
-    expect(cardValue('Workspace at a Glance', 'Total Records')).toBe('9');
+    expect(cardValue('Records', 'Total Records')).toBe('9');
     // …and the page says which counts are the subset, naming the ONE that is not.
     expect(
       screen.getByText(
@@ -1979,8 +2040,8 @@ describe('truncated body', () => {
       ),
     ).toBeInTheDocument();
     // The breakdowns keep counting what actually arrived — 5, not 9.
-    expect(figureValue('Evidence and Validation', 'Records Counted')).toBe('5');
-    expect(chartRows('Workflow Distribution', 'Records by current workflow step, out of 5 counted')).toEqual(
+    expect(figureValue('Evidence Support', 'Records Counted')).toBe('5');
+    expect(chartRows(viewOf('Records', 'Workflow'), 'Records by current workflow step, out of 5 counted')).toEqual(
       WORKFLOW_BARS,
     );
   });
@@ -2025,7 +2086,7 @@ describe('truncated body', () => {
      * change is a grid in another section; this form pins it against the grid it
      * actually qualifies, resolved from the same region.
      */
-    const grid = regionOf('Workspace at a Glance').querySelector('.stats-cards');
+    const grid = viewOf('Records', 'Status').querySelector('.stats-cards');
     expect(note, 'the truncation caveat must render').not.toBeNull();
     expect(grid, 'the glance grid must render').not.toBeNull();
     // Node.DOCUMENT_POSITION_FOLLOWING === 4: the grid follows the note.
@@ -2151,7 +2212,7 @@ describe('Refresh', () => {
     await settled();
     const live = container.querySelector('p.sr-only[role="status"]');
     expect(live).not.toBeNull();
-    expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
+    expect(cardValue('Records', 'Total Records')).toBe(String(RECORD_COUNT));
 
     fireEvent.click(refreshButton());
     await waitFor(() => expect(live?.textContent).toMatch(/^Refresh finished/));
@@ -2178,7 +2239,7 @@ describe('Refresh', () => {
     expect(new Date(metaTime(container).dateTime).getTime()).toBeLessThanOrEqual(Date.now());
 
     // The stale figure is still the one on screen — kept, disclosed, not blanked.
-    expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
+    expect(cardValue('Records', 'Total Records')).toBe(String(RECORD_COUNT));
 
     /* The SAME live region spoke: the on-screen failure note mounts between the
        meta row and the region, and that must not remount the region — a live
@@ -2245,8 +2306,8 @@ describe('Refresh', () => {
 
     // Every figure is still the one that was actually read, unchanged and
     // un-substituted — the page keeps its data instead of blanking.
-    expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
-    expect(figureValue('Historical Imports', 'Import Sessions')).toBe('2');
+    expect(cardValue('Records', 'Total Records')).toBe(String(RECORD_COUNT));
+    expect(cardValue('Historical Imports', 'Import Sessions')).toBe('2');
 
     // Still the same live region, with the failure note mounted above it.
     expect(container.querySelector('p.sr-only[role="status"]')).toBe(live);
@@ -2273,7 +2334,7 @@ describe('Refresh', () => {
         build.container.querySelector('p.sr-only[role="status"]')?.textContent ?? '',
       ).toMatch(/^Refresh finished, but 7 of 7 reads failed/),
     );
-    expect(figureValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
+    expect(cardValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
     expect(figureValue('Project Memory', 'Nodes')).toBe(String(graphStatusAvailable.node_count));
     expect(figureValue('Record Schema', 'Top-Level Fields')).toBe('6');
     expect(screen.queryAllByRole('alert')).toHaveLength(0);
@@ -2383,18 +2444,22 @@ describe('privacy — nothing identifying reaches the DOM', () => {
       /session[\s_-]*(id|ids|token|tokens|key|keys|cookie|header)/i.test(text),
       'a credential-shaped session reference appeared',
     ).toBe(false);
-    const SESSION_NOUN_HOMES = 'section[aria-labelledby="stats-imports"], .stats-cards-glance';
+    /* ~~TWO homes — the Historical Imports section and the glance row's tile~~ —
+       ONE since 2026-10-12: the tile restated the import widget's own headline
+       and left with the redesign, so the exemption NARROWS to the one widget
+       that renders the noun. A narrower exemption is a stronger guard. */
+    const SESSION_NOUN_HOMES = 'section[aria-labelledby="stats-imports"]';
     expect(
       /\bsession/i.test(pageTextWithout(container, SESSION_NOUN_HOMES)),
-      '"session" appeared outside the two places that render the import-session noun',
+      '"session" appeared outside the one widget that renders the import-session noun',
     ).toBe(false);
     /* The negative control: the exemption is not vacuous — the noun really is
-       rendered in both of the exempted homes, so an empty exclusion would be
-       caught rather than read as a clean pass. */
+       rendered in the exempted home, so an empty exclusion would be caught
+       rather than read as a clean pass. */
     expect(/\bimport sessions?\b/i.test(textOf(regionOf('Historical Imports')))).toBe(true);
-    expect(
-      /\bimport sessions?\b/i.test(textOf(container.querySelector('.stats-cards-glance') as HTMLElement)),
-    ).toBe(true);
+    expect(container.querySelector('.stats-cards-glance .stat-card-label')?.textContent).not.toMatch(
+      /session/i,
+    );
 
     // No record content in the AGGREGATE sections: not a title, not an id, not
     // a per-record value. This is the clause the narrowing scopes, and the
@@ -2449,8 +2514,11 @@ describe('Open Questions', () => {
     renderStatistics(statisticsRoutes());
     await settled();
 
+    /* The question total is the widget's HEADLINE since 2026-10-12, and the
+       four record tallies are the figures beneath it — asserted as the full set,
+       so a fifth row or a moved label still fails. */
+    expect(cardValue('Open Questions', 'Total Open Questions')).toBe('7');
     expect(figuresIn('Open Questions')).toEqual({
-      'Total Open Questions': '7',
       'Records With Open Questions': '2',
       'Most on One Record': '5',
       'Records With a Blocked Step': '1',
@@ -2476,23 +2544,32 @@ describe('Open Questions', () => {
    * is a hidden measurement (the rule `puts NO measurement inside a prose
    * disclosure` enforces). The unit claim survives without the number.
    */
-  it('keeps the non-addability caveat VISIBLE, with the full explanation disclosed', async () => {
+  it('keeps the non-addability caveat VISIBLE, with the full explanation one press away', async () => {
     renderStatistics(statisticsRoutes());
     await settled();
 
     const region = regionOf('Open Questions');
-    const disclosure = region.querySelector('details.stats-disclosure');
-    expect(disclosure, 'the reading-rules disclosure must render').not.toBeNull();
-    expect(disclosure!.hasAttribute('open'), 'it must arrive closed').toBe(false);
+    /* ~~`details.stats-disclosure`~~ — the restatement is the widget's INFO
+       panel since 2026-10-12. Same two halves, same strength. */
+    const toggle = within(region).getByRole('button', { name: 'About Open Questions' });
+    const info = document.getElementById(toggle.getAttribute('aria-controls') ?? '');
+    expect(info, 'the reading-rules panel must render').not.toBeNull();
+    expect(info).toHaveAttribute('hidden');
 
-    // (a) the operative caveat, outside the disclosure — read from a clone with
-    // the disclosure removed, so this cannot pass on the disclosed copy.
-    const visible = pageTextWithout(region, 'details.stats-disclosure');
-    expect(visible).toMatch(/Total Open Questions counts QUESTIONS; the other four count RECORDS/);
-    expect(visible).toMatch(/None of the five may be added together/);
+    // (a) the operative caveat, outside the info panel — read from a clone with
+    // the panel removed, so this cannot pass on the disclosed copy.
+    const visible = pageTextWithout(region, '.widget-info');
+    /* ~~`Total Open Questions counts QUESTIONS; …` / `None of the five may be
+       added together`~~ — the 2026-10-18 density round shortened the visible
+       caveat to one line. BOTH HALVES ARE STILL ASSERTED: which figure counts
+       questions and which count records, and the prohibition on adding them. */
+    expect(visible).toMatch(/The total counts QUESTIONS; the other four count RECORDS/);
+    expect(visible).toMatch(/Never add them/);
 
-    // (b) the full explanation, inside it, unchanged.
-    const disclosed = textOf(disclosure as HTMLElement);
+    // (b) the full explanation, inside it, unchanged — and reachable.
+    fireEvent.click(toggle);
+    expect(info).not.toHaveAttribute('hidden');
+    const disclosed = textOf(info as HTMLElement);
     expect(disclosed).toMatch(/counts QUESTIONS across the records received/);
     /* The three record-counting rows are NAMED rather than referred to by
        position: "the three beneath it" was true and unreadable, because a
@@ -2535,7 +2612,7 @@ describe('Open Questions', () => {
     await settled();
 
     // The 5 that row carried is gone from the total, and the shortfall is stated.
-    expect(figureValue('Open Questions', 'Total Open Questions')).toBe('2');
+    expect(cardValue('Open Questions', 'Total Open Questions')).toBe('2');
     expect(
       within(regionOf('Open Questions')).getByText(
         /1 of the 5 records received carried no usable question count/,
@@ -2549,18 +2626,34 @@ describe('Open Questions', () => {
  * Its counts are derived by hand in `statistics-model.test.ts`, which states the
  * derivation; the literals here are what must reach the labelled slots.
  */
-describe('Record Schema (inside Technical Details)', () => {
+describe('Record Schema (a widget on the Build tab)', () => {
   it('states the schema counts in their labelled slots', async () => {
     renderStatisticsBuild(statisticsRoutes());
     await settled();
 
+    /* `Fields at Every Depth` is the widget's HEADLINE since 2026-10-12; the
+       eight others were its `Summary` view and since 2026-10-18 are split
+       across `Summary` and `Fields & Vocabulary` — asserted per view AND as
+       the full set, so a row cannot fall between the two. */
+    expect(cardValue('Record Schema', 'Fields at Every Depth')).toBe('12');
+    expect(figuresIn(viewOf('Record Schema', 'Summary'))).toEqual({
+      'Schema Title': 'ISAAC AI-Ready Scientific Record v1.05 (fixture)',
+      'Schema Version': '1.05',
+    });
+    expect(figuresIn(viewOf('Record Schema', 'Fields & Vocabulary'))).toEqual({
+      'Top-Level Fields': '6',
+      'Required Top-Level Fields': '3',
+      'Fields With Enumerated Values': '1',
+      'Conditional Rules': '2',
+      'Vocabulary Files': '1',
+      'Vocabulary Terms': '4',
+    });
     expect(figuresIn('Record Schema')).toEqual({
       'Schema Title': 'ISAAC AI-Ready Scientific Record v1.05 (fixture)',
       'Schema Version': '1.05',
       // "Fields", not "Sections": on the real schema 5 of the 6 the root requires
       // are scalar strings, and the model's own field names say `topLevelFields`.
       'Top-Level Fields': '6',
-      'Fields at Every Depth': '12',
       'Required Top-Level Fields': '3',
       'Fields With Enumerated Values': '1',
       'Conditional Rules': '2',
@@ -2647,7 +2740,7 @@ describe('Record Schema (inside Technical Details)', () => {
   it('states the same field total the Schema Reference browser displays', async () => {
     renderStatisticsBuild(statisticsRoutes());
     await settled();
-    const onStatistics = figureValue('Record Schema', 'Fields at Every Depth');
+    const onStatistics = cardValue('Record Schema', 'Fields at Every Depth');
     // …and it really did read a number, or the comparison below could pass on ''.
     expect(onStatistics).toMatch(/^\d+$/);
 
@@ -2704,13 +2797,13 @@ describe('Record Schema (inside Technical Details)', () => {
     expect(textOf(region).replace(alarmText, '')).not.toMatch(/\b\d+\b/);
 
     // Everything else on this tab still renders...
-    expect(figureValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
+    expect(cardValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
     // ...and the Overview tab, which reads none of `/api/schema`, is untouched
     // and alarm-free.
     cleanup();
     renderStatistics(statisticsRoutes({ schema: { status: 500, body: { detail: 'synthetic failure' } } }));
     await settled();
-    expect(cardValue('Workspace at a Glance', 'Total Records')).toBe(String(RECORD_COUNT));
+    expect(cardValue('Records', 'Total Records')).toBe(String(RECORD_COUNT));
     expect(screen.queryAllByRole('alert')).toHaveLength(0);
   });
 });
@@ -2778,5 +2871,89 @@ describe('Platform Metrics — the inactive adapter boundary', () => {
     expect(panel.querySelector('figure.stats-chart')).toBeNull();
     expect(panel.querySelector('.stats-chart-track')).toBeNull();
     expect(panel.querySelector('.stats-chart-grid')).toBeNull();
+  });
+});
+
+/* ── REVIEW FIXES, 2026-10-18 (independent review of the density round) ──────
+ *
+ * Each test below pins a defect the review found and the round's own suite
+ * passed. They were written BEFORE the fixes and failed against them.
+ */
+describe('review fixes — density round', () => {
+  /*
+   * 1 · THE OVERVIEW SCROLLED SIDEWAYS AT 320px, and the base did not. A
+   * headline's companion figure list was a flex item with a 16rem basis whose
+   * grid columns were `minmax(150px, 1fr)` — so at 320px the list could not
+   * shrink below its columns and Workspace Activity's figures reached x=378 in
+   * a 320 viewport. jsdom computes no layout, so this pins the two CSS facts
+   * that make the shrink possible; the browser half is `charts.spec.ts`
+   * ("never scrolls sideways at 320px").
+   */
+  it('lets a headline’s companion figures shrink below their grid minimum', async () => {
+    const css = String((await import('../screens/statistics/statistics.css?raw')).default);
+    const block = (selector: string): string => {
+      const start = css.indexOf(`${selector} {`);
+      expect(start, `${selector} must be declared`).toBeGreaterThan(-1);
+      return css.slice(start, css.indexOf('}', start));
+    };
+    expect(block('.statistics .widget-headline > .stats-figures')).toMatch(/min-width:\s*0/);
+    expect(block('.statistics .stats-figures')).toMatch(
+      /grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(min\(150px,\s*100%\),\s*1fr\)\)/,
+    );
+  });
+
+  /*
+   * 2 · A FALSE COUNT. The Evidence Support info said "The five classes are
+   * mutually exclusive … so they sum to the total" — there are SIX, and the
+   * total is the sum of all six (`EVIDENCE_CLASSES`, Unreadable included). The
+   * sentence now names no count, and names the class a reader would miss.
+   */
+  it('states no false class count, and names the Unreadable class the total includes', async () => {
+    renderStatistics(statisticsRoutes());
+    await settled();
+    const toggle = within(regionOf('Evidence Support')).getByRole('button', {
+      name: 'About Evidence Support',
+    });
+    const info = document.getElementById(toggle.getAttribute('aria-controls') ?? '') as HTMLElement;
+    const text = textOf(info);
+    expect(text).not.toMatch(/\b(two|three|four|five|seven|eight|nine|ten) classes\b/i);
+    expect(text).toMatch(/sum to the total/);
+    expect(text).toContain(LABELS.chipEvUnreadable);
+  });
+
+  /*
+   * 3 · DEC-35 WAS VISIBLE ON THE BASE AND THE ROUND HID IT. "Entries are not
+   * attributed to a person…" moved into Workspace Activity's closed info panel.
+   * A disclosure about who is NOT named is part of what every count in the
+   * widget means, so it is visible again — asserted outside every `[hidden]`
+   * ancestor, which is what "visible" means in jsdom.
+   */
+  it('keeps the unattributed-actor sentence VISIBLE in Workspace Activity', async () => {
+    renderStatistics(statisticsRoutes());
+    await settled();
+    const region = regionOf('Workspace Activity');
+    const holders = [...region.querySelectorAll('*')].filter(
+      (el) =>
+        [...el.childNodes].some(
+          (n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? '').includes(LABELS.activityActorUnattributed),
+        ),
+    );
+    expect(holders.length, 'the sentence must render exactly once').toBe(1);
+    expect(holders[0].closest('[hidden]'), 'it must not sit inside anything hidden').toBeNull();
+    expect(holders[0].closest('.widget-info'), 'it must not sit inside the info panel').toBeNull();
+  });
+
+  /*
+   * 5 · THE SETTINGS LINK NAMES NO TAB. "Open Privacy & Governance Settings"
+   * named a tab label that is being renamed; "Open Privacy Settings" is true
+   * under the current and the coming one. Same target.
+   */
+  it('links to the privacy settings without naming a tab label', async () => {
+    renderStatistics(statisticsRoutes());
+    await settled();
+    expect(
+      within(regionOf(NO_ANALYTICS_HEADING)).getByRole('link', { name: 'Open Privacy Settings' }),
+    ).toHaveAttribute('href', ROUTES.settingsTab('privacy'));
+    expect(screen.queryByRole('link', { name: /Governance Settings|Data & Privacy Settings/ })).toBeNull();
   });
 });

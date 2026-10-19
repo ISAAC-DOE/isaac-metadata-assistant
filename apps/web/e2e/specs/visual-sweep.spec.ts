@@ -677,7 +677,8 @@ const STATES: readonly VisualState[] = [
     async reach({ page, app }) {
       await app.goto('/statistics');
       await settled(page);
-      const heading = page.getByRole('heading', { name: 'Workspace at a Glance' });
+      // `Records` is the widget that replaced `Workspace at a Glance` (2026-10-12).
+      const heading = page.getByRole('heading', { name: 'Records', exact: true });
       await expect(heading).toBeVisible({ timeout: 20_000 });
       return heading;
     },

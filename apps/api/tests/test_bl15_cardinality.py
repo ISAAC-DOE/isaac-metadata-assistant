@@ -48,23 +48,30 @@ MINI = "bl15_synthetic_mini_corpus"
 def test_the_cardinality_rule_is_named_versioned_and_stated_per_concept():
     # v2 (2026-09-23): the meaning changed — scans are established only by a source's
     # own `#S`, and every measurement-level reading is compared with every scan's.
-    assert mp.RULE_CARDINALITY.startswith("bl15.mapping.cardinality.v2:")
+    # v3 (2026-10-12): `sample_position` is per scan item (the domain owner: positions are
+    # recorded "scan to scan"), positions are compared on their number, and a relative
+    # move is kept without being compared.
+    assert mp.RULE_CARDINALITY.startswith("bl15.mapping.cardinality.v3:")
     assert set(mp.CONCEPT_CARDINALITY.values()) <= mp.CARDINALITIES
     for concept in mp.CONCEPT_CARDINALITY:
         assert concept in ev.CONCEPTS, concept
     assert mp.cardinality_for(ev.CONCEPT_ACQUISITION_TARGET) == mp.CARDINALITY_PER_SCAN
     assert mp.cardinality_for(ev.CONCEPT_DETECTOR_COLUMN) == mp.CARDINALITY_PER_SCAN_ITEM
     assert mp.cardinality_for(ev.CONCEPT_MOTOR_POSITION) == mp.CARDINALITY_PER_SCAN_ITEM
+    assert mp.cardinality_for(ev.CONCEPT_SAMPLE_POSITION) == mp.CARDINALITY_PER_SCAN_ITEM
     assert mp.cardinality_for(ev.CONCEPT_UNKNOWN_TOKEN) == mp.CARDINALITY_PER_SOURCE
     # ANYTHING NOT DECLARED IS ONE VALUE PER MEASUREMENT — the conservative default,
     # because comparing everything is what can never hide a disagreement.
     assert mp.cardinality_for(ev.CONCEPT_SAMPLE_NAME) == mp.CARDINALITY_PER_MEASUREMENT
 
 
-def test_four_scan_stated_quantities_were_reverted_to_per_measurement_pending_Q21():
+def test_four_scan_stated_quantities_stay_per_measurement_as_the_domain_owner_confirmed():
     """v1 declared them per scan; a macro's planned value and the header's recorded
-    value for the SAME, only scan then read as variation. Reverted until the domain
-    owner answers which acquisition quantities vary per scan (Q21)."""
+    value for the SAME, only scan then read as variation. ~~Reverted until the domain
+    owner answers which acquisition quantities vary per scan (Q21).~~ CONFIRMED on
+    2026-10-12 (Q21): acquisition settings are kept the same for every scan, so each is
+    one value per measurement. Renamed from ``…_pending_Q21``."""
+    assert mp.DOMAIN_QUESTIONS["Q21"].is_open is False
     for concept in (
         ev.CONCEPT_COUNTING_TIME,
         ev.CONCEPT_SCAN_COMMAND,
