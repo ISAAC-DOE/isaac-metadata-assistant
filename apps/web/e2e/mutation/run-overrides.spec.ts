@@ -648,6 +648,27 @@ test.describe('per-run overrides of inherited record values', () => {
     expect(runs[0].states[MATERIAL]).toBe('inherited');
   });
 
+  test('an ENUM row keeps keyboard focus when the schema’s list replaces its box', async ({ page }) => {
+    /*
+     * REVIEW I-2, measured in this browser: the override form opens with focus in a
+     * text box and, once `GET /api/schema` answers, a select of the schema's own list
+     * replaces it — and focus was left on <body> (INPUT → BODY with an 800 ms schema
+     * delay). The delay is reproduced here so the swap happens AFTER focus landed.
+     */
+    await page.route('**/api/schema', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      await route.continue();
+    });
+    await openRunsSection(page, SEED.fresh);
+    const card = await addAndExpand(page, 1);
+    const target = row(card, 'field:system.technique');
+    await target.getByRole('button', { name: /Override for this run/ }).click();
+    const select = target.getByRole('combobox');
+    await expect(select).toBeVisible();
+    await expect(select).toBeFocused();
+    expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('SELECT');
+  });
+
   test('every control that unmounts itself hands focus on, and none of them drops it on the body', async ({
     page,
   }) => {

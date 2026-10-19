@@ -1123,12 +1123,13 @@ test.describe('two scientists, two real browsers, one record', () => {
         await expect(card, 'step 6: the atmosphere card is open for judgement').toBeVisible();
         await card.getByRole('button', { name: 'More Actions' }).click();
         await card.getByRole('button', { name: 'Correct the Value, Then Accept' }).click();
-        const editor = card.getByLabel('The corrected value, as JSON');
+        // A text value is corrected as plain text (QA A-29) — no longer a JSON box.
+        const editor = card.getByLabel('The corrected value', { exact: true });
         await expect(
           editor,
           'step 6: the editor is PREFILLED with the proposed value, so a correction is an edit',
-        ).toHaveValue(JSON.stringify(TRANSCRIPT_TARGETS.atmosphere.value));
-        await editor.fill(JSON.stringify(CORRECTED_ATMOSPHERE));
+        ).toHaveValue(String(TRANSCRIPT_TARGETS.atmosphere.value));
+        await editor.fill(CORRECTED_ATMOSPHERE);
         await card.getByRole('button', { name: 'Accept the Corrected Value' }).click();
 
         await expect(

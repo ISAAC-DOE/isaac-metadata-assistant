@@ -5,6 +5,7 @@ import { CornerDownRight } from './icons';
 import { HelpTip } from './HelpTip';
 import { fieldLabel, isRunFieldPath, officialPathOf } from '../lib/fieldLabels';
 import { RUN_FIELDS } from '../lib/runFields';
+import { RECORD_FIELDS } from '../lib/recordFields';
 import { RECORD_ADDRESS_PARAM, ROUTES } from '../lib/routes';
 
 /**
@@ -87,6 +88,23 @@ export function goToDestination(
         `field:${trimmed}`,
       )}`,
       label: 'Go to Field',
+    };
+  }
+  /*
+   * A RECORD-LEVEL FIELD, ON A RUN → THAT RUN'S OWN ROW (QA A-14). A finding on a
+   * run's export unit is about the value THE RUN carries — an override it holds, or
+   * the record's value it inherits — and its inherited-values row (`data-address`
+   * `field:<path>`) shows that value and says which of the two it is. The record's
+   * System section shows only the record's value, so an override's bad value was
+   * nowhere on the screen it opened. Only a LEAF the record-level surface names is
+   * routed here; a parent (`system`) is still the record's own requirement.
+   */
+  if (runId && RECORD_FIELDS.some((spec) => spec.path === trimmed)) {
+    return {
+      href: `${ROUTES.recordRun(experimentId, runId)}&${RECORD_ADDRESS_PARAM}=${encodeURIComponent(
+        `field:${trimmed}`,
+      )}`,
+      label: 'Go to Run Value',
     };
   }
   if (runId && RUN_FIELDS.some((spec) => spec.path.startsWith(`${trimmed}.`))) {

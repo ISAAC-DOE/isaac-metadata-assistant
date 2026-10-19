@@ -15,7 +15,7 @@ const SRC_CLASS: Record<SourceType, string> = {
 };
 
 /**
- * A neutral chip + colored source-type icon + mono source_type label.
+ * A neutral chip + colored source-type icon + the source type IN WORDS (QA A-15).
  *
  * Tolerates a source type this build does not know: the glyph falls back (see
  * `sourceIcon`) and the label still prints the stored string verbatim, so an
@@ -23,13 +23,51 @@ const SRC_CLASS: Record<SourceType, string> = {
  * This token is mounted on the record workbench field rows AND in the Evidence
  * sidecar detail, so the crash it used to cause had two blast radii, not one.
  */
+/**
+ * A source type in words (QA A-15): `user_confirmation` → "User Confirmation".
+ *
+ * CASING AND SEPARATORS ONLY — the `enumOptionLabel` contract: every output word is
+ * an input word, so nothing is glossed or invented. The stored token is kept, exactly,
+ * in the chip's `title` and `data-source-type` for a curator who maps by it.
+ */
+export function evidenceSourceLabel(sourceType: string): string {
+  return sourceType
+    .split('_')
+    .filter((word) => word !== '')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+/**
+ * A source type in words when THIS BUILD KNOWS it, verbatim otherwise — the one rule
+ * every surface shows a source type by (review minor: the asset evidence list put an
+ * unrecognised type in words while this token printed it as stored).
+ */
+export function sourceTypeWords(sourceType: string): string {
+  return Object.prototype.hasOwnProperty.call(SRC_CLASS, sourceType)
+    ? evidenceSourceLabel(sourceType)
+    : sourceType;
+}
+
 export function SourceTypeToken({ sourceType }: { sourceType: SourceType }) {
   const Icon = sourceIcon(sourceType);
   const cls = SRC_CLASS[sourceType] ?? 'src-unknown';
+  const stored = typeof sourceType === 'string' && (sourceType as string) !== '';
+  /* Only a type THIS BUILD KNOWS is put in words; an unrecognised one is still printed
+     verbatim, as this token always has (see the note above). */
+  const known = stored && Object.prototype.hasOwnProperty.call(SRC_CLASS, sourceType);
   return (
-    <span className={`src-token ${cls}`}>
+    <span
+      className={`src-token ${cls}`}
+      title={stored ? sourceType : undefined}
+      data-source-type={stored ? sourceType : undefined}
+    >
       <Icon size={12} strokeWidth={2} aria-hidden="true" />
-      {typeof sourceType === 'string' && sourceType ? sourceType : 'source type not recorded'}
+      {!stored
+        ? 'source type not recorded'
+        : known
+          ? evidenceSourceLabel(sourceType)
+          : sourceType}
     </span>
   );
 }

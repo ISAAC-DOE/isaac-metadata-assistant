@@ -17,6 +17,7 @@ import { RenameExperimentPanel } from '../components/RenameExperimentPanel';
 import { MoveExperimentPanel } from '../components/MoveExperimentPanel';
 import { DiscardExperimentPanel } from '../components/DiscardExperimentPanel';
 import { RecordDescriptionPanel } from '../components/RecordDescriptionPanel';
+import { RECORD_DESCRIPTION_ADDRESS } from '../components/FieldCaptureControl';
 import { RunsSection } from '../components/RunsSection';
 import { RunSchemaMirror } from '../components/RunSchemaMirror';
 import type { VoiceState } from '../components/TranscriptCapturePanel';
@@ -1044,20 +1045,44 @@ function LoadedWorkbench({
    * target and changes nothing, like every other `at=` address.
    */
   const blockAddress = activeView === 'fields' ? searchParams.get(RECORD_ADDRESS_PARAM) : null;
+  /* `field:<path>` NAMES ONE FIELD (review minor, "Go to Field" landed on a section
+     header): its section opens exactly as `block:<section>` does, and focus goes to
+     that field's own control (`data-field-capture-path`) when the row renders one —
+     the header otherwise. */
+  const linkedField =
+    blockAddress !== null && blockAddress.startsWith('field:') ? blockAddress.slice(6) : null;
   const linkedBlock =
-    blockAddress !== null && blockAddress.startsWith('block:') ? blockAddress.slice(6) : null;
+    blockAddress !== null && blockAddress.startsWith('block:')
+      ? blockAddress.slice(6)
+      : linkedField !== null
+        ? linkedField.split('.')[0]
+        : null;
   useEffect(() => {
     if (linkedBlock === null || linkedBlock === '') return;
     setToggles((prev) => (prev[linkedBlock] ? prev : { ...prev, [linkedBlock]: true }));
     let marked: Element | null = null;
+    let looked = 0;
     const cancel = focusWhenPresent(
       () => {
+        // A draft block, or one of the record's own sections that a link can name
+        // (`data-record-section` — Record Description, QA A-08).
         const section = document.querySelector(
-          `section[data-draft-block="${CSS.escape(linkedBlock)}"]`,
+          `section[data-draft-block="${CSS.escape(linkedBlock)}"], ` +
+            `section[data-record-section="${CSS.escape(linkedBlock)}"]`,
         );
         if (section === null) return null;
         marked = section;
         section.setAttribute('data-linked-address', 'true');
+        if (linkedField !== null) {
+          const control = section.querySelector<HTMLElement>(
+            `[data-field-capture-path="${CSS.escape(linkedField)}"]`,
+          );
+          if (control !== null) return control;
+          // The body renders on the next frame after it is expanded; a row with no
+          // control of its own falls back to the header rather than nothing.
+          looked += 1;
+          if (looked < 4) return null;
+        }
         return section.querySelector<HTMLElement>('.fg-header');
       },
     );
@@ -1065,7 +1090,7 @@ function LoadedWorkbench({
       cancel();
       marked?.removeAttribute('data-linked-address');
     };
-  }, [linkedBlock]);
+  }, [linkedBlock, linkedField]);
   const recorderLiveElsewhere =
     (voiceState === 'recording' || voiceState === 'paused') &&
     !(activeView === 'capture' && captureView === 'voice');
@@ -1226,7 +1251,9 @@ function LoadedWorkbench({
         activeView={activeView}
         pending={pending}
         pendingTotal={pendingTotal}
+        proposalsOpen={detail.capture_summary?.proposals_open ?? 0}
         onReviewAnswer={() => navigate(ROUTES.complete(id))}
+        onReviewProposals={openProposals}
       />
 
       {/* A LIVE MICROPHONE IS NEVER LEFT OUT OF SIGHT (DEC-35 keeps privacy state
@@ -1467,7 +1494,10 @@ function LoadedWorkbench({
               this screen last believed is how a second save gets routed to the wrong
               operation.
             */}
-            <RecordDescriptionPanel experimentId={id} />
+            <RecordDescriptionPanel
+              experimentId={id}
+              linked={`block:${linkedBlock}` === RECORD_DESCRIPTION_ADDRESS}
+            />
             <RecordInfoPanel detail={detail} groups={bundle.groups} artifacts={bundle.artifacts} />
             <RecordLinksPanel artifacts={bundle.artifacts} />
             {/* THE ONE REMOVAL (B-08). Last in the identity column on purpose: it is the
@@ -1870,16 +1900,48 @@ function NeedsYouBanner({
   activeView,
   pending,
   pendingTotal,
+  proposalsOpen,
   onReviewAnswer,
+  onReviewProposals,
 }: {
   /** Which workspace is open. Decides whether the QUESTIONS are listed — never
    *  whether the banner appears, and never what the count says. */
   activeView: RecordViewId;
   pending: ApiPendingItem[];
   pendingTotal: number;
+  /**
+   * Proposals awaiting a person's judgement — the SERVER's `capture_summary
+   * .proposals_open`, counted over the whole record (QA C-24). The banner used to
+   * say nothing about them, so the one "this needs you" surface on the screen was
+   * silent about a queue of values waiting for review. Never counted here.
+   */
+  proposalsOpen: number;
   onReviewAnswer: () => void;
+  onReviewProposals: () => void;
 }) {
-  if (pendingTotal <= 0) return null;
+  /* Not repeated on the Proposals view, where the queue itself is the content. */
+  const proposalsWaiting = activeView === 'proposals' ? 0 : Math.max(0, proposalsOpen);
+  const proposalsLine =
+    proposalsWaiting > 0 ? (
+      <p className="needsyou-proposals">
+        {proposalsWaiting === 1
+          ? '1 proposal is waiting for your review.'
+          : `${proposalsWaiting} proposals are waiting for your review.`}{' '}
+        <button type="button" className="btn btn-secondary" onClick={onReviewProposals}>
+          Review Proposals
+        </button>
+      </p>
+    ) : null;
+  if (pendingTotal <= 0) {
+    /* No open questions, but proposals wait: the same banner idiom, saying only that. */
+    if (proposalsLine === null) return null;
+    return (
+      <div className="needsyou-banner needsyou-compact" role="note">
+        <CircleAlert className="needsyou-icon" size={18} strokeWidth={2.2} aria-hidden="true" />
+        <div className="needsyou-body">{proposalsLine}</div>
+      </div>
+    );
+  }
 
   /*
    * ── THE LIST IS ON RECORD FIELDS; THE BANNER IS EVERYWHERE. ────────────────
@@ -2026,6 +2088,7 @@ function NeedsYouBanner({
         )}
         </>
         )}
+        {proposalsLine}
       </div>
       <button type="button" className="btn btn-primary needsyou-action" onClick={onReviewAnswer}>
         {LABELS.actionReviewAnswer} →

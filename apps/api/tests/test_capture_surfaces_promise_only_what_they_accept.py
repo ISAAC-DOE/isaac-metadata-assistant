@@ -958,8 +958,25 @@ def test_the_transcript_route_is_a_second_note_producer(client):
     # path and the line's locator prefixed: exactly what the member claims. It is
     # NOT `typed_note` (nobody typed it here) and NOT `domain_guidance_nominal`
     # (there is a source, and a locator in it).
-    assert routes_src.count("exp.capture_note(") == 5, (
-        "a sixth producer needs the prose updated — and the prose is the point: "
+    #
+    # ── 5 -> 6 ON 2026-10-12 ────────────────────────────────────────────────────
+    #
+    # The SIXTH producer is the "Also read from the archive" capture in the same
+    # route: per measurement, ONE run note listing what the import read from that
+    # measurement's files and did not send as a proposal (and, per beamtime source
+    # file, one record note), so the readings outlive the non-durable import session.
+    # It mints NO proposal, and `DEC-41` is why it is a note at all: those concepts
+    # have homes at levels 1-3, so the level-4 companion may not take them.
+    #
+    # ITS `source` IS `historical_source_line`, REUSED, and it is true of EVERY line:
+    # each lists a value a deterministic parser READ out of a historical source file,
+    # verbatim, with that file's path and the place in it — the member's claim. ~~"true
+    # of every line but two kinds … the HERFD primary-signal line and the
+    # channel-assignment lines"~~ — those lines are GONE (review item I1, 2026-10-12):
+    # they were `bl15.signals`' conclusions, and "Propose a Value From This Note" would
+    # have cited a conclusion as a parsed reading, which the member's definition forbids.
+    assert routes_src.count("exp.capture_note(") == 6, (
+        "a seventh producer needs the prose updated — and the prose is the point: "
         "this count exists so a new note producer cannot land without somebody "
         "stating which `NOTE_SOURCES` member it claims and why that member is true "
         "of it"

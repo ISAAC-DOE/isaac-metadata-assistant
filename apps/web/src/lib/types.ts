@@ -4629,6 +4629,13 @@ export interface ApiImportSession {
   /** Archive names the server will walk, from its own allowlist. */
   available_archives: string[];
   /**
+   * 2026-10-12 — the name a scientist sees for each COMMITTED archive, keyed by its id.
+   * A staged archive has none. Optional: a server that predates it omits the key.
+   */
+  archive_display_names?: Record<string, string>;
+  /** 2026-10-12 — the archive a picker opens on (the one the hosted image ships). */
+  default_archive?: string | null;
+  /**
    * 2026-09-22 — the archive reading's per-measurement page. The server sends
    * `null` (not an absent key) for a session with no archive — measured on a
    * two-fixture session, where reading it as "absent" crashed the stage tabs.
@@ -4885,6 +4892,10 @@ export interface ApiImportListResponse {
   available_fixtures: string[];
   /** Archive names the server will walk, from its own allowlist. */
   available_archives: string[];
+  /** 2026-10-12 — see `ApiImportSession.archive_display_names`. */
+  archive_display_names?: Record<string, string>;
+  /** 2026-10-12 — see `ApiImportSession.default_archive`. */
+  default_archive?: string | null;
 }
 
 export interface ApiImportSessionResponse {
@@ -4989,6 +5000,21 @@ export interface ApiImportAddedToExperiment {
     captured_as_run_notes: number;
     already_present: number;
     writes_qc_status: false;
+  };
+  /**
+   * 2026-10-12 — what the import READ and did not send, kept as NOTES: one per
+   * measurement on its run, and the beamtime's own statements on the record, one note per
+   * source file. Outside `counts`, because none of it is a candidate. Never a value.
+   */
+  readings_notes?: {
+    label: string;
+    measurements: number;
+    captured_as_run_notes: number;
+    already_present: number;
+    beamtime_notes_captured: number;
+    beamtime_notes_already_present: number;
+    not_listed: number;
+    writes_field_values: false;
   };
   run_origins_recorded?: number;
   /** The session was re-read under THIS record's rules before anything was minted. */

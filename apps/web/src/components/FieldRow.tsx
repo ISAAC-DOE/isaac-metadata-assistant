@@ -3,9 +3,16 @@ import { useId } from 'react';
 import { HelpTip } from './HelpTip';
 import { StatusChip } from './StatusChip';
 import { EvidenceRow } from './EvidenceRow';
-import { FieldCaptureControl, canEnterOnRecord, captureHint } from './FieldCaptureControl';
+import {
+  FieldCaptureControl,
+  RecordDescriptionLink,
+  canEnterOnRecord,
+  captureHint,
+} from './FieldCaptureControl';
 import { fieldChipKind } from '../lib/status';
+import { isRecorded } from '../lib/adapt';
 import type { DraftField } from '../lib/types';
+
 
 interface FieldRowProps {
   field: DraftField;
@@ -54,7 +61,18 @@ export function FieldRow({ field, capture }: FieldRowProps) {
   /* The PATH is passed because one of the sentences is true of exactly one path — see
      `captureHint`'s own note on the export stamp. Nothing else about the copy varies by
      path; the rest is composed from the served facts. */
-  const hint = captureHint(field.capture, offering, field.path);
+  /*
+   * A RECORD-LEVEL VALUE THAT IS TYPED, NOT CHOSEN (QA A-08): its input is Record
+   * Description, on this same view. Once the row HOLDS a value the sentence about
+   * where to enter one is dropped — it was still there after a value was confirmed,
+   * under a row already showing it.
+   */
+  const typedOnTheRecord =
+    field.capture?.record_writable === true && !canEnterOnRecord(field.capture);
+  const hint =
+    typedOnTheRecord && isRecorded(field)
+      ? null
+      : captureHint(field.capture, offering, field.path);
   const labelId = useId();
 
   return (
@@ -161,7 +179,20 @@ export function FieldRow({ field, capture }: FieldRowProps) {
             onSaved={capture.onSaved}
           />
         ) : (
-          hint !== null && <p className="field-capture-hint">{hint}</p>
+          hint !== null && (
+            <p className="field-capture-hint">
+              {hint}
+              {/* THE INPUT THE SENTENCE NAMES, ONE CLICK AWAY (QA A-08) — only on the
+                  screen that holds it (`capture` is the record screen's), and only
+                  inside a router; the section opens on arrival. */}
+              {typedOnTheRecord && capture !== undefined && (
+                <>
+                  {' '}
+                  <RecordDescriptionLink />
+                </>
+              )}
+            </p>
+          )
         )}
       </div>
     </div>

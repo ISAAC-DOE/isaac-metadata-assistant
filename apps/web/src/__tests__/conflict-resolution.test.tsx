@@ -136,8 +136,13 @@ describe('rendering one conflict', () => {
     expect(within(article).getByText('LiFePO4')).toBeInTheDocument();
     expect(within(article).getByText(/2 evidence entries assert this answer/)).toBeInTheDocument();
     expect(within(article).getByText(/1 evidence entry assert/)).toBeInTheDocument();
-    // The safe projection's own tokens, one per citation (2 + 1).
-    expect(within(article).getAllByText('user_confirmation')).toHaveLength(3);
+    // The safe projection's own tokens, one per citation (2 + 1) — in words now (QA
+    // A-15), each keeping the stored token in `title`.
+    const chips = within(article).getAllByText('User Confirmation');
+    expect(chips).toHaveLength(3);
+    for (const chip of chips) {
+      expect(chip.closest('.src-token')?.getAttribute('title')).toBe('user_confirmation');
+    }
   });
 
   it('renders the server’s own explanation rather than a paraphrase of it', async () => {

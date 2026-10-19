@@ -378,7 +378,7 @@ describe('the record description panel', () => {
       'Formula',
       'Provenance',
       'Sample form',
-      'CuO₂ mass fraction',
+      'CuO2 mass fraction',
       'Sucrose mass fraction',
       'Pellet diameter (mm)',
     ]) {

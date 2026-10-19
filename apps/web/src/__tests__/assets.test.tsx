@@ -565,7 +565,8 @@ describe('the evidence view', () => {
     renderPanel();
     await screen.findByText('reduced_spectrum');
     fireEvent.click(screen.getByRole('button', { name: 'Evidence (1)' }));
-    expect(screen.getByText('user_confirmation')).toBeInTheDocument();
+    // In words (QA A-15), the stored token in `title` — inverted from the raw token.
+    expect(screen.getByText('User Confirmation').getAttribute('title')).toBe('user_confirmation');
     expect(
       screen.getByText(/None of it is a check of the file at the location above/),
     ).toBeInTheDocument();

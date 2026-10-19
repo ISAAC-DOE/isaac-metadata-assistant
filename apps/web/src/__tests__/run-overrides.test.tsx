@@ -250,7 +250,13 @@ describe('recording an override', () => {
     expect(log.seen[0].ifMatch).toBe('"ra.3"');
     expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ rev: 4 }));
     expect(outcome()).toMatch(/Override recorded for sample\.material\.name/);
-    expect(outcome()).toMatch(/2099-04-02T10:00:00Z/);
+    // The server's instant, kept EXACTLY on the <time> element and its `title`; the
+    // text reads as a date (review minor — this asserted the raw ISO as visible text,
+    // which pinned the defect, and is inverted rather than deleted).
+    expect(outcome()).not.toMatch(/2099-04-02T10:00:00Z/);
+    const when = panel().querySelector('.run-inherited-outcome time');
+    expect(when?.getAttribute('dateTime')).toBe('2099-04-02T10:00:00Z');
+    expect(when?.getAttribute('title')).toBe('2099-04-02T10:00:00Z');
     expect(outcome()).toMatch(/record's own value is unchanged/);
   });
 

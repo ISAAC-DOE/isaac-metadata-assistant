@@ -962,7 +962,13 @@ function SourceBundleStage({
   const [reference, setReference] = useState('');
   const [sha256, setSha256] = useState('');
   const [fixture, setFixture] = useState(data.available_fixtures[0] ?? '');
-  const [archive, setArchive] = useState(data.available_archives[0] ?? '');
+  /* THE SERVER'S DEFAULT (2026-10-12): the archive the hosted image ships, so the picker
+     never opens on one a scientist there could not have been offered. */
+  const [archive, setArchive] = useState(
+    data.default_archive && data.available_archives.includes(data.default_archive)
+      ? data.default_archive
+      : (data.available_archives[0] ?? ''),
+  );
 
   return (
     <>
@@ -990,6 +996,7 @@ function SourceBundleStage({
               <SourceRow
                 key={source.source_id}
                 source={source}
+                archiveNames={data.archive_display_names}
                 busy={busy}
                 onRemove={() =>
                   onAct(`remove:${source.source_id}`, () =>
@@ -1034,9 +1041,12 @@ function SourceBundleStage({
             <label className="hi-field">
               <span className="hi-field-label">Which archive</span>
               <select className="hi-input" value={archive} onChange={(event) => setArchive(event.target.value)}>
+                {/* THE SERVER'S NAME for each committed archive (2026-10-12), never its id. */}
                 {data.available_archives.map((name) => (
                   <option key={name} value={name}>
-                    {name.startsWith('staged:') ? `${archiveLabel(name)} (staged on the server)` : archiveLabel(name)}
+                    {name.startsWith('staged:')
+                      ? `${archiveLabel(name, data.archive_display_names)} (staged on the server)`
+                      : archiveLabel(name, data.archive_display_names)}
                   </option>
                 ))}
               </select>
@@ -1183,12 +1193,16 @@ function SourceRow({
   source,
   busy,
   onRemove,
+  archiveNames,
 }: {
   source: ApiImportSource;
   busy: string | null;
   onRemove: () => void;
+  /** The server's names for committed archives (2026-10-12). */
+  archiveNames?: Readonly<Record<string, string>>;
 }) {
   const state = PARSE_STATE_LABELS[source.parse_state] ?? source.parse_state;
+  const named = archiveLabel(source.filename, archiveNames);
   return (
     <tr>
       <td>
@@ -1197,8 +1211,8 @@ function SourceRow({
             printing it beside the name put the raw token straight back (review of #279). */}
         {source.kind === 'archive' ? (
           <span className="hi-filename">
-            {archiveLabel(source.filename)}{' '}
-            <HelpTip subject={`the archive ${archiveLabel(source.filename)}`}>
+            {named}{' '}
+            <HelpTip subject={`the archive ${named}`}>
               Its id: <code>{source.filename}</code>
               {source.reference !== source.filename && (
                 <>
@@ -1229,7 +1243,7 @@ function SourceRow({
           className="btn btn-secondary"
           disabled={busy !== null}
           onClick={onRemove}
-          aria-label={`${IMPORT_COPY.actionRemoveSource} ${source.kind === 'archive' ? archiveLabel(source.filename) : source.filename}`}
+          aria-label={`${IMPORT_COPY.actionRemoveSource} ${source.kind === 'archive' ? named : source.filename}`}
         >
           {IMPORT_COPY.actionRemoveSource}
         </button>
@@ -1285,6 +1299,7 @@ function ReadStage({
           review={data.corpus_review}
           profiles={data.profiles ?? []}
           units={data.archive?.units_page.rows ?? []}
+          archiveNames={data.archive_display_names}
         />
       )}
 
@@ -1949,7 +1964,36 @@ function AddStage({
   const [experimentId, setExperimentId] = useState('');
   const [runId, setRunId] = useState('');
   const archive = Boolean(data.archive);
-  const [createRuns, setCreateRuns] = useState(archive);
+  const [createRunsChoice, setCreateRuns] = useState(archive);
+  /* EVERY STAGE IS MOUNTED WHEN THE SESSION OPENS (hidden until chosen), so `useState`'s
+     initial value was read while the bundle held no archive yet — measured in a real
+     browser 2026-10-12: an archive added in the same session left "Make one run per
+     measurement" UNCHECKED, and the batch then refused `target_requires_a_run`. The
+     default now follows the archive's ARRIVAL; it never re-checks a box the scientist
+     cleared, because `archive` does not change again. */
+  useEffect(() => {
+    if (archive) setCreateRuns(true);
+  }, [archive]);
+  const runUnits = data.archive?.run_candidate_unit_count ?? 0;
+  /* CREATING THE RUNS IS AN ACT BY ITSELF (2026-10-12). With nothing sendable the server
+     used to refuse the batch whole, so a scientist whose every value needs a decision
+     could not get the measurements onto a record at all. Now `create_runs` alone is a
+     batch: the runs, their Data Quality Notes and their "Also read from the archive"
+     notes. So the form is offered whenever the archive has measurements to make runs
+     from — and, with nothing to send, ONLY with runs made, because without them the
+     server would still answer `nothing_to_send`. */
+  const withRuns = planFor(data, true);
+  /* …and only once the import has been RECONSTRUCTED: before that it has measurements and
+     no candidate, and the notes the batch writes are built from the candidates. The
+     server refuses that case too ("reconstruct it first"). */
+  const reconstructed = (data.reconstruction?.candidates.length ?? 0) > 0;
+  const runsOnly =
+    archive &&
+    reconstructed &&
+    runUnits > 0 &&
+    withRuns.willSend.length === 0 &&
+    withRuns.alreadySent.length === 0;
+  const createRuns = runsOnly || createRunsChoice;
   /* ONE PLAN, the batch's own partition (`send_plan`) — so what this stage says will
      happen is what the report then says did (2026-09-23). */
   const plan = planFor(data, archive && createRuns);
@@ -2039,13 +2083,13 @@ function AddStage({
             )}
           </div>
 
-          {sendable.length === 0 ? (
+          {sendable.length === 0 && !runsOnly ? (
             <p className="hi-body hi-empty-inline">
               {plan.alreadySent.length > 0
                 ? 'Everything this import can send has been sent.'
                 : 'Nothing in this import can be sent yet. Resolve its field conflicts, or read and reconstruct its sources first.'}
             </p>
-          ) : sendable.length === 1 ? (
+          ) : sendable.length === 1 && !(archive && runUnits > 0) ? (
             /* ONE CANDIDATE: this panel and that candidate's own form would do the
                same thing by two routes, so the one route is offered. */
             <p className="hi-body">
@@ -2074,6 +2118,7 @@ function AddStage({
               }}
             >
               <h4 className="hi-block-title">{IMPORT_COPY.actionAddWhole}</h4>
+              {runsOnly && <p className="hi-note">{STAGE.runsOnlyLead(runUnits)}</p>}
               <RecordPicker
                 label="Which record?"
                 value={experimentId}
@@ -2093,6 +2138,9 @@ function AddStage({
                   <input
                     type="checkbox"
                     checked={createRuns}
+                    /* With nothing to send, making the runs IS the act — the lead above
+                       says so — so the choice is shown and held on. */
+                    disabled={runsOnly}
                     onChange={(event) => setCreateRuns(event.target.checked)}
                   />
                   <span>{STAGE.createRuns}</span>
@@ -2157,6 +2205,13 @@ function AddResult({
           {IMPORT_COPY.addWholeNothingNew}
         </p>
       )}
+      {/* RUNS WERE MADE AND NOTHING WAS SENT (2026-10-12) — said, so "0 sent" does not read
+          as a batch that did nothing. */}
+      {result.counts.sent === 0 && result.counts.already_sent === 0 && (result.counts.runs_created ?? 0) > 0 && (
+        <p className="hi-sent" role="note">
+          {STAGE.runsOnlyResult}
+        </p>
+      )}
       {result.reread_for_target && <p className="hi-note">{STAGE.reread}</p>}
       {result.data_quality_notes && result.data_quality_notes.available > 0 && (
         <p className="hi-note">
@@ -2164,6 +2219,19 @@ function AddResult({
           {result.data_quality_notes.already_present} already there. Never read as a QC verdict.
         </p>
       )}
+      {/* WHAT WAS READ AND NOT SENT (2026-10-12), every number the server's own. */}
+      {result.readings_notes &&
+        (result.readings_notes.measurements > 0 ||
+          result.readings_notes.beamtime_notes_captured + result.readings_notes.beamtime_notes_already_present > 0) && (
+          <p className="hi-note hi-readings-kept">
+            {STAGE.readingsKept}: {result.readings_notes.captured_as_run_notes} new on runs ·{' '}
+            {result.readings_notes.already_present} already there
+            {result.readings_notes.beamtime_notes_captured + result.readings_notes.beamtime_notes_already_present > 0
+              ? ` · for the whole beamtime, ${result.readings_notes.beamtime_notes_captured} new · ${result.readings_notes.beamtime_notes_already_present} already there`
+              : ''}
+            . {STAGE.readingsNever}
+          </p>
+        )}
       <p>
         <Link className="btn btn-secondary" to={ROUTES.recordView(result.experiment_id, 'proposals')}>
           {STAGE.openProposals}
