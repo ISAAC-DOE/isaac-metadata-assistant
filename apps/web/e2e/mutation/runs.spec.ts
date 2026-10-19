@@ -441,13 +441,26 @@ test.describe('R5 · the Run workspace', () => {
     await expect(progress(card)).toHaveText(/^\s*\d+ of \d+\s+run fields recorded\s*$/);
     await expect(conditions(card)).toContainText('277.15 K');
 
-    // The denominator is the number of controls the card actually renders — asserted
-    // against the DOM rather than against a constant, so it cannot drift from what a
-    // reader sees and cannot be broken by widening the offered set.
+    // The denominator is the number of COUNTED controls the card actually renders —
+    // asserted against the DOM rather than against a constant, so it cannot drift from
+    // what a reader sees and cannot be broken by widening the offered set.
+    //
+    // 2026-10-12: the reaction and the cell type render as run fields in their own
+    // "Electrochemistry · if it applies" group and are deliberately NOT in the count
+    // (they apply only to an electrochemical measurement; the schema requires neither).
+    // So the count is compared with the counted fields, and the optional group is
+    // asserted separately: its two fields are on screen and the denominator excludes them.
     const denominator = Number(
       ((await progress(card).textContent()) ?? '').match(/of (\d+)/)?.[1] ?? '0',
     );
-    await expect(card.locator('.run-field')).toHaveCount(denominator);
+    await expect(card.locator('.run-field[data-run-field-counted="true"]')).toHaveCount(denominator);
+    const optional = card.getByRole('group', { name: 'Electrochemistry · if it applies' });
+    await expect(optional).toBeVisible();
+    await expect(optional).toHaveAttribute('data-run-field-group', 'electrochemistry');
+    await expect(optional.locator('.run-field[data-run-field-counted="false"]')).toHaveCount(2);
+    await expect(fieldControl(card, 'context.electrochemistry.reaction')).toBeVisible();
+    await expect(fieldControl(card, 'context.electrochemistry.cell_type')).toBeVisible();
+    await expect(card.locator('.run-field')).toHaveCount(denominator + 2);
 
     /*
      * DURABILITY, through the real read path rather than through React state.
@@ -467,6 +480,16 @@ test.describe('R5 · the Run workspace', () => {
     await expect(progress(reloaded)).toHaveText(/^\s*\d+ of \d+\s+run fields recorded\s*$/);
     // And the value is in the box, not merely in the summary line.
     await expect(fieldControl(reloaded, 'context.temperature_K')).toHaveValue('277.15');
+
+    // AND CHOOSING AN OPTIONAL FIELD DOES NOT MOVE THE COUNT (2026-10-12): the reaction
+    // is saved like any run field, and the progress reads exactly what it read before.
+    const before = ((await progress(reloaded).textContent()) ?? '').replace(/\s+/g, ' ').trim();
+    await fieldControl(reloaded, 'context.electrochemistry.reaction').selectOption('OER');
+    await expect(saveStatus(reloaded)).toHaveText('Saved', { timeout: 10_000 });
+    await expect(fieldControl(reloaded, 'context.electrochemistry.reaction')).toHaveValue('OER');
+    const after = ((await progress(reloaded).textContent()) ?? '').replace(/\s+/g, ' ').trim();
+    expect(after).toBe(before);
+    expect(after).toContain(`of ${denominator}`);
   });
 
   test('two runs are ISOLATED: editing Run 2 leaves Run 1 untouched on the server', async ({
