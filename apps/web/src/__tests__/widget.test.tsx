@@ -305,6 +305,26 @@ describe('Widget · the range group is a radiogroup', () => {
   });
 });
 
+/*
+ * THE FOOTER IS NOT A <footer>. A widget's footer row (links, coverage lines)
+ * rendered as `<footer>` gave every Statistics tab four extra footer
+ * elements, and `e2e/specs/structure.spec.ts` allows the page exactly one —
+ * CI's a11y job failed on every project ("unexpected extra <footer>
+ * element(s)"). It is a plain `div.widget-foot`: same class, same styling, no
+ * footer or contentinfo semantics.
+ */
+describe('Widget · the footer row', () => {
+  it('renders as a plain div, never a <footer> or a contentinfo landmark', () => {
+    const { container } = render(<ThreeViews />);
+    const foot = container.querySelector('.widget-foot');
+    expect(foot).not.toBeNull();
+    expect(foot!.tagName).toBe('DIV');
+    expect(foot!.textContent).toBe('Open X');
+    expect(container.querySelector('footer')).toBeNull();
+    expect(screen.queryByRole('contentinfo')).toBeNull();
+  });
+});
+
 describe('Widget · the details expansion', () => {
   it('is the shared full-row Disclosure, closed on arrival, with its body mounted', () => {
     render(

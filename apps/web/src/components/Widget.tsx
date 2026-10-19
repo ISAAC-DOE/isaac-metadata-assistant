@@ -428,7 +428,10 @@ export function Widget({
         </Disclosure>
       ) : null}
 
-      {footer ? <footer className="widget-foot">{footer}</footer> : null}
+      {/* A plain `div`, NOT `<footer>`: a widget's footer row is not the page's
+          footer, and `e2e/specs/structure.spec.ts` allows the page exactly one
+          (CI failed on four extra). Same class, same styling. */}
+      {footer ? <div className="widget-foot">{footer}</div> : null}
     </section>
   );
 }
