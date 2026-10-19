@@ -47,6 +47,8 @@ import {
   SIDE_REVISION,
   SUBMITTED_IMMUTABLE_NOTE,
   SUBMITTED_REVISION_HEADING,
+  HISTORY_NOT_KEPT_LINE,
+  readRevisionHistory,
   submittedRevisionText,
   WORKING_CHANGES_HEADING,
   actorBasisNote,
@@ -82,6 +84,9 @@ function asApiError(err: unknown): ApiError {
 type ListState =
   | { status: 'loading' }
   | { status: 'error'; error: ApiError }
+  /* B-25 — the deployment keeps no submission history BY CONFIGURATION, so nothing
+     was asked. Not an error and not an empty history: a third, calm state. */
+  | { status: 'not_kept' }
   | { status: 'data'; history: ApiRevisionHistory };
 
 type SelectionState =
@@ -126,9 +131,14 @@ function RevisionHistoryBrowser({ experimentId }: { experimentId: string }) {
   const load = useCallback(() => {
     setList({ status: 'loading' });
     setSelection({ status: 'idle' });
-    api
-      .getRevisionHistory(experimentId)
-      .then((history) => setList({ status: 'data', history }))
+    // B-25 — `readRevisionHistory` makes NO request when the shared health read says
+    // this deployment has no application database (see `historyStoreNotConfigured`);
+    // every other deployment reads exactly as before, and a real read failure is still
+    // a failure below.
+    readRevisionHistory(experimentId)
+      .then((read) =>
+        setList(read.kept ? { status: 'data', history: read.history } : { status: 'not_kept' }),
+      )
       .catch((err: unknown) => setList({ status: 'error', error: asApiError(err) }));
   }, [experimentId]);
 
@@ -154,6 +164,13 @@ function RevisionHistoryBrowser({ experimentId }: { experimentId: string }) {
   if (list.status === 'error') {
     return <BackendDown error={list.error} onRetry={load} />;
   }
+  if (list.status === 'not_kept') {
+    return (
+      <p className="revhist-status" role="note">
+        <span className="revhist-status-text">{HISTORY_NOT_KEPT_LINE}</span>
+      </p>
+    );
+  }
 
   const { history } = list;
   return (
@@ -170,7 +187,7 @@ function RevisionHistoryBrowser({ experimentId }: { experimentId: string }) {
       */}
       <p className="revhist-status">
         <span className="revhist-chip" data-state={history.lifecycle.state}>
-          {history.lifecycle.label}
+          {lifecycleChipLabel(history.lifecycle)}
         </span>
         <span className="revhist-status-text">{historyStatusText(history)}</span>
       </p>
@@ -189,6 +206,32 @@ function RevisionHistoryBrowser({ experimentId }: { experimentId: string }) {
       </Disclosure>
     </>
   );
+}
+
+/**
+ * THE CHIP'S WORD, AND THE ONE PLACE IT DEPARTS FROM THE SERVER'S LABEL (A-23).
+ *
+ * The QA audit measured "Ready to Submit" beside "Submitting is unavailable in this
+ * deployment" on one line — an action offered and withdrawn in the same breath. Both
+ * halves are server facts and both are true: the lifecycle is derived from the record's
+ * science alone and NEVER lowered by the deployment (point 4 of this file's header),
+ * while the deployment block says this server cannot accept a submission. What is false
+ * is only the composition: "to Submit" names an act the same line says cannot happen.
+ *
+ * So when — and only when — the deployment blocks submission, a `ready_to_submit`
+ * record's chip reads "Ready". The STATE is not lowered (it is still the ready state,
+ * still `data-state="ready_to_submit"`, never "Needs Review" or a greyed chip); the
+ * chip simply stops naming an act the line beside it withdraws. Every other state, and
+ * every deployment that CAN submit, renders the server's label verbatim.
+ */
+export function lifecycleChipLabel(lifecycle: ApiLifecycle): string {
+  if (
+    lifecycle.state === 'ready_to_submit' &&
+    lifecycle.submission_blocked_by_deployment.blocked
+  ) {
+    return 'Ready';
+  }
+  return lifecycle.label;
 }
 
 /**
@@ -289,13 +332,32 @@ function SubmittedVersusWorking({ history }: { history: ApiRevisionHistory }) {
         <div className="revhist-working-row">
           <dt className="revhist-working-label">What a submission covers</dt>
           <dd className="revhist-working-value">
-            <span className="mono revhist-working-scope">{history.signature_scope}</span>
+            {/* IN WORDS WHEN THIS BUILD KNOWS THE SCOPE (QA A-15), the identifier
+                itself kept in `title` for the curator who maps by it. An unknown
+                scope — a server that has moved on — is shown verbatim, never
+                described from a guess, so this cannot drift from what is enforced. */}
+            {SIGNATURE_SCOPE_WORDS[history.signature_scope] !== undefined ? (
+              <span className="revhist-working-scope" title={history.signature_scope}>
+                {SIGNATURE_SCOPE_WORDS[history.signature_scope]}
+              </span>
+            ) : (
+              <span className="mono revhist-working-scope">{history.signature_scope}</span>
+            )}
           </dd>
         </div>
       </dl>
     </section>
   );
 }
+
+/**
+ * The scope identifiers this build can say in words — an exact-match map, so a
+ * scope it does not know falls through to the verbatim identifier.
+ */
+const SIGNATURE_SCOPE_WORDS: Readonly<Record<string, string>> = {
+  export_unit_ids_drafts_and_conflict_decisions:
+    "Each export unit's id and draft, and the record's conflict decisions",
+};
 
 /* ── the lifecycle ─────────────────────────────────────────────────────────── */
 

@@ -917,3 +917,41 @@
 .proposals-lock-why-text + .proposals-lock-why-text {
   margin-top: var(--space-xs);
 }
+
+/*
+ * THE NEXT STEP ON A LOCKED OPEN CARD (QA A-09) — what the scientist can still do
+ * while acceptance is unavailable here. Secondary text, not an advisory box: it is
+ * an option, not a warning. The link takes the same shape as a validation finding's
+ * `Go to …` (`.blocker-go`), so one destination looks like one kind of control.
+ * Tokens only (UX-001); no new custom property.
+ */
+.proposal-manual-path {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+  max-width: 78ch;
+}
+
+.proposal-manual-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-2xs) var(--space-sm);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  color: var(--action);
+  font-weight: var(--font-weight-medium);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.proposal-manual-link:hover {
+  background: var(--action-tint);
+  border-color: var(--action-selected-border);
+}
+
+.proposal-manual-link:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}

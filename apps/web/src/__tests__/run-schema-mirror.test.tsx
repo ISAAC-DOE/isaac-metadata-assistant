@@ -32,6 +32,8 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react';
 
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+
 import { RunSchemaMirror } from '../components/RunSchemaMirror';
 import type { ApiRunCheckResponse, ApiRunView } from '../lib/types';
 
@@ -328,6 +330,79 @@ describe('only a row with a real destination is pressable', () => {
       expect(document.activeElement).toBe(input);
     } finally {
       input.remove();
+    }
+  });
+
+  /*
+   * QA A-11: on the Capture, Proposals and Runs-list views "Edit Environment" did
+   * nothing. The map found the field by attribute — but a compact row renders no
+   * inputs, and the Runs workspace stays mounted-but-`hidden` behind every other
+   * view, so the first match was an input nobody could see and `focus()` on it is a
+   * no-op. Where this screen shows no editable control for the field, the button now
+   * OPENS this run's editor at that field.
+   */
+  function Where() {
+    const location = useLocation();
+    return <output data-testid="where">{`${location.pathname}${location.search}`}</output>;
+  }
+  function renderRouted() {
+    return render(
+      <MemoryRouter
+        initialEntries={['/record/E1?view=capture']}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <Routes>
+          <Route
+            path="*"
+            element={
+              <>
+                <RunSchemaMirror run={runFixture({})} />
+                <Where />
+              </>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it('QA A-11: with no visible editor, Edit opens THIS run’s editor at that field', async () => {
+    stub();
+    const hiddenPanel = document.createElement('div');
+    hiddenPanel.hidden = true;
+    const input = document.createElement('input');
+    input.setAttribute('data-run-field-path', 'context.environment');
+    hiddenPanel.appendChild(input);
+    document.body.appendChild(hiddenPanel);
+    try {
+      renderRouted();
+      await waitFor(() => expect(screen.getByText('measurement')).toBeTruthy());
+      fireEvent.click(screen.getByRole('button', { name: 'Edit Environment' }));
+      expect(document.activeElement).not.toBe(input);
+      expect(decodeURIComponent(screen.getByTestId('where').textContent ?? '')).toBe(
+        '/record/E1?view=runs&run=RUN1&at=field:context.environment',
+      );
+    } finally {
+      hiddenPanel.remove();
+    }
+  });
+
+  it('QA A-11: an input belonging to a DIFFERENT run is not this run’s editor', async () => {
+    stub();
+    const otherCard = document.createElement('article');
+    otherCard.setAttribute('data-run-id', 'RUN2');
+    const input = document.createElement('input');
+    input.setAttribute('data-run-field-path', 'context.environment');
+    otherCard.appendChild(input);
+    document.body.appendChild(otherCard);
+    try {
+      renderRouted();
+      await waitFor(() => expect(screen.getByText('measurement')).toBeTruthy());
+      fireEvent.click(screen.getByRole('button', { name: 'Edit Environment' }));
+      expect(document.activeElement).not.toBe(input);
+      expect(screen.getByTestId('where').textContent).toContain('run=RUN1');
+    } finally {
+      otherCard.remove();
     }
   });
 

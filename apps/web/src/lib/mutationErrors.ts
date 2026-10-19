@@ -78,6 +78,51 @@ export function isUnstorableFieldValue(err: unknown): boolean {
   return (body as { error?: unknown }).error === 'invalid_field_value';
 }
 
+/** One part of a value the official schema refused, as the server reported it. */
+export interface ShapeFinding {
+  key: string;
+  /** The record path the failing part would occupy, dot-joined as export prints it. */
+  path: string;
+  /** The schema validator's message, VERBATIM (DEC-30/DEC-35). */
+  message: string;
+  /** The server ended a very long message early and says so; never paraphrased. */
+  message_truncated?: boolean;
+}
+
+/**
+ * Did the server refuse this write because the value does not have the shape the
+ * OFFICIAL schema gives that field (QA audit A-03, `422 official_shape_mismatch`)?
+ *
+ * Returns the findings to render, or `null`. A separate predicate from
+ * {@link isUnstorableFieldValue} rather than a widening of it, because the two say
+ * different true things: that one may only say "the record cannot store this", this
+ * one carries WHICH parts the schema refused and the schema's own words for each —
+ * and a screen that folded them together would either drop the findings or claim them
+ * for a refusal that has none. Same fail-closed narrowing: anything not shaped like
+ * the documented body is `null`, and the caller falls through to what claims less.
+ */
+export function officialShapeMismatch(
+  err: unknown,
+): { findings: ShapeFinding[]; more: boolean } | null {
+  if (typeof err !== 'object' || err === null) return null;
+  if ((err as { status?: unknown }).status !== 422) return null;
+  const body = (err as { body?: unknown }).body;
+  if (typeof body !== 'object' || body === null) return null;
+  /* `schema_errors_more`, never a total: the server takes the validator's errors LAZILY
+     and stops one past what it reports (review C-1), so "how many" is not something it
+     knows — only that there are more. */
+  const b = body as { error?: unknown; schema_errors?: unknown; schema_errors_more?: unknown };
+  if (b.error !== 'official_shape_mismatch' || !Array.isArray(b.schema_errors)) return null;
+  const findings = b.schema_errors.filter(
+    (f): f is ShapeFinding =>
+      typeof f === 'object' &&
+      f !== null &&
+      typeof (f as ShapeFinding).path === 'string' &&
+      typeof (f as ShapeFinding).message === 'string',
+  );
+  return { findings, more: b.schema_errors_more === true };
+}
+
 /**
  * Did the ANSWER to this write come from an authenticating edge rather than from
  * ISAAC? Duck-typed for the same reason `statusOf` is.

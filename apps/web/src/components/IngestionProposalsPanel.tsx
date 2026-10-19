@@ -138,12 +138,12 @@
  * cannot strand the panel a revision behind for good.
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 
 import { api, ApiError } from '../lib/api';
 import { mutationFailureCopy, staleWriteCurrentVersion, statusOf } from '../lib/mutationErrors';
 import type { RecordChangeSummary } from '../lib/recordChanges';
-import { RECORD_PROPOSAL_PARAM } from '../lib/routes';
+import { RECORD_ADDRESS_PARAM, RECORD_PROPOSAL_PARAM, RECORD_VIEW_PARAM, ROUTES } from '../lib/routes';
 import { allProposalsSelfMinted } from '../lib/selfMintedProposals';
 import { RUNS_PAGE_SIZE } from '../lib/runPaging';
 import type {
@@ -151,15 +151,20 @@ import type {
   ApiProposalOrder,
   ApiProposalReviewAction,
   ApiProposalsResponse,
+  JsonSchemaNode,
 } from '../lib/types';
 import { BackendDown, LoadingPanel } from './FetchStates';
 import { NewProposalForm } from './NewProposalForm';
 import { Disclosure } from './Disclosure';
 import { HelpTip } from './HelpTip';
 import { SemanticStatus, type SemanticState } from './SemanticStatus';
-import { findingFieldLabel } from './BlockerItems';
+import { findingFieldLabel, goToDestination } from './BlockerItems';
 import { ChevronDown, ChevronRight, Lock } from './icons';
 import { noteSourceLabel } from '../lib/noteSource';
+import { RUN_FIELDS, enumOptionLabel } from '../lib/runFields';
+import { overrideRows } from '../lib/runOverrides';
+import { recordFieldFacts } from '../lib/recordFields';
+import { isRunFieldPath } from '../lib/fieldLabels';
 import { formatWhen } from '../lib/labels';
 import { focusWhenPresent } from '../lib/focusHandoff';
 import type { ApiHealthProposalAcceptance } from '../lib/types';
@@ -708,6 +713,150 @@ function jsonText(value: unknown): string {
 }
 
 /**
+ * HOW A CORRECTED VALUE IS TYPED — by what the TARGET holds (QA A-10, A-29).
+ *
+ * The editor used to take JSON for every target, so correcting a text value meant
+ * typing quotes and correcting an enum meant knowing its exact tokens. The kind is
+ * now read, in order, from: a closed list the SERVER named in a refusal; the run
+ * editor's own field set (`RUN_FIELDS`, the same list its controls are built from);
+ * and, for any other target, the type of the proposed value itself. Only a
+ * structured value keeps JSON — there the type genuinely cannot be guessed.
+ *
+ * A `choice` is offered and NEVER preselected unless the proposed value is already
+ * a member: "in situ" is not silently read as `in_situ`, which would be this screen
+ * choosing a scientific value.
+ */
+export type CorrectionInput =
+  | { kind: 'choice'; options: readonly string[] }
+  | { kind: 'text' }
+  | { kind: 'number' }
+  | { kind: 'json' };
+
+export function correctionInputFor(
+  proposal: ApiProposal,
+  serverAllowed?: readonly string[],
+): CorrectionInput {
+  if (serverAllowed !== undefined && serverAllowed.length > 0) {
+    return { kind: 'choice', options: serverAllowed };
+  }
+  const spec = RUN_FIELDS.find((field) => field.path === proposal.target_field_path);
+  if (spec?.kind === 'enum' && spec.options !== undefined && spec.options.length > 0) {
+    return { kind: 'choice', options: spec.options };
+  }
+  if (spec?.kind === 'number') return { kind: 'number' };
+  if (spec !== undefined) return { kind: 'text' };
+  if (typeof proposal.proposed_value === 'string') return { kind: 'text' };
+  if (typeof proposal.proposed_value === 'number') return { kind: 'number' };
+  return { kind: 'json' };
+}
+
+/**
+ * Where a scientist can type this proposal's value by hand, or `null` when this screen
+ * can name NO reachable input (review I-4) — in which case the card says nothing about
+ * entering it, rather than promising a field that is not there.
+ *
+ * - record-scoped: the Record Fields view, at the field itself (its section opens and
+ *   its own control takes focus);
+ * - one of the five run fields: the run editor, which always renders all five;
+ * - a record-level value ON A RUN: the run's inherited-values row — which exists, with
+ *   an Override control, only where the record holds a value and the server says the
+ *   address is overridable (`runOverrides.overrideRows`). Unknown (the runs read has
+ *   not landed, or failed) is treated as unreachable.
+ */
+export function manualEntryHref(
+  experimentId: string,
+  proposal: ApiProposal,
+  overridableByRun: Readonly<Record<string, ReadonlySet<string>>> | null,
+): string | null {
+  const path = proposal.target_field_path;
+  if (proposal.run_id === null) {
+    return `${ROUTES.record(experimentId)}?${RECORD_VIEW_PARAM}=fields&${RECORD_ADDRESS_PARAM}=${encodeURIComponent(
+      `field:${path}`,
+    )}`;
+  }
+  if (!isRunFieldPath(path) && !overridableByRun?.[proposal.run_id]?.has(`field:${path}`)) {
+    return null;
+  }
+  return goToDestination(experimentId, proposal.run_id, path)?.href ?? null;
+}
+
+/** Whether the proposed value lies OUTSIDE a closed list the target declares. */
+export function isOutsideTheList(proposal: ApiProposal, input: CorrectionInput): boolean {
+  return (
+    input.kind === 'choice' &&
+    !(input.options as readonly unknown[]).includes(proposal.proposed_value)
+  );
+}
+
+/** The text a correction editor starts from — the proposed value, in the editor's form. */
+function correctionStartText(proposal: ApiProposal, input: CorrectionInput): string {
+  const value = proposal.proposed_value;
+  if (input.kind === 'choice') return isOutsideTheList(proposal, input) ? '' : String(value);
+  if (input.kind === 'text') return typeof value === 'string' ? value : '';
+  if (input.kind === 'number') return typeof value === 'number' ? String(value) : '';
+  return jsonText(value);
+}
+
+const BLANK_CORRECTION =
+  'Type the corrected value first. A blank would CLEAR the field, which is a different ' +
+  'act with its own questions — nothing was sent.';
+
+/** Editor text → the value to send, or the sentence saying why nothing was sent. */
+export function parseCorrection(
+  input: CorrectionInput,
+  text: string,
+): { ok: true; value: unknown } | { ok: false; error: string } {
+  if (input.kind === 'choice') {
+    if (!input.options.includes(text)) {
+      return {
+        ok: false,
+        error:
+          'Choose one of the values the official schema allows first. Nothing is chosen ' +
+          'for you, and nothing was sent.',
+      };
+    }
+    return { ok: true, value: text };
+  }
+  if (input.kind === 'text') {
+    if (text.trim() === '') return { ok: false, error: BLANK_CORRECTION };
+    // Sent exactly as typed — no trimming, no case change.
+    return { ok: true, value: text };
+  }
+  if (input.kind === 'number') {
+    const trimmed = text.trim();
+    if (trimmed === '') return { ok: false, error: BLANK_CORRECTION };
+    const value = Number(trimmed);
+    if (!Number.isFinite(value)) {
+      return {
+        ok: false,
+        error: 'That is not a number, so it was not sent and nothing was written.',
+      };
+    }
+    return { ok: true, value };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text) as unknown;
+  } catch {
+    return {
+      ok: false,
+      error:
+        'That is not valid JSON, so it was not sent and nothing was written. A text value ' +
+        'inside a structured value needs quotes around it.',
+    };
+  }
+  if (parsed === null) {
+    return {
+      ok: false,
+      error:
+        'A null would CLEAR the field, and clearing a confirmed value is a different act ' +
+        'with its own questions. It was not sent.',
+    };
+  }
+  return { ok: true, value: parsed };
+}
+
+/**
  * How the window's ORDER is disclosed — ONE string, so the wording cannot drift
  * between the control and the sentence a screen reader hears.
  *
@@ -914,6 +1063,27 @@ function ProposalsBrowser({
   const runLabelsFetchedRef = useRef(false);
   const [reloadNonce, setReloadNonce] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
+  /**
+   * The closed list the server named, per proposal, when it refused a value
+   * `not_an_allowed_value` (QA A-10). The card turns its correction into exactly that
+   * choice; nothing here transcribes a list the server did not send.
+   */
+  /** Per run, the `field:` addresses its inherited panel offers an Override at (I-4). */
+  const [overridableByRun, setOverridableByRun] = useState<Readonly<
+    Record<string, ReadonlySet<string>>
+  > | null>(null);
+  /**
+   * RECORD-level closed lists, read from the schema (review minor): the card's
+   * off-enum check used to know only `RUN_FIELDS`, so an off-enum `system.technique`
+   * kept "Accept as Proposed" until a refusal a locked deployment never produces.
+   */
+  const [recordAllowed, setRecordAllowed] = useState<Readonly<Record<string, readonly string[]>>>(
+    {},
+  );
+  const recordAllowedFetchedRef = useRef(false);
+  const [allowedByProposal, setAllowedByProposal] = useState<
+    Readonly<Record<string, readonly string[]>>
+  >({});
   const [refusal, setRefusal] = useState<string | null>(null);
   /*
    * PR #277 REVIEW (pre-existing) — FOCUS AFTER A REVIEW ACT USED TO FALL TO
@@ -1354,11 +1524,18 @@ function ProposalsBrowser({
       .then((res) => {
         const map: Record<string, string> = {};
         const counts: Record<string, number> = {};
+        const overridable: Record<string, ReadonlySet<string>> = {};
         for (const run of res.runs) {
           map[run.id] = run.label;
           counts[run.label] = (counts[run.label] ?? 0) + 1;
+          overridable[run.id] = new Set(
+            overrideRows(run)
+              .filter((row) => row.overridable)
+              .map((row) => row.address),
+          );
         }
         setRunLabels(map);
+        setOverridableByRun(overridable);
         setDuplicateRunLabels(
           new Set(Object.keys(counts).filter((label) => counts[label] > 1)),
         );
@@ -1368,6 +1545,36 @@ function ProposalsBrowser({
         // never wrong — only less readable — so a failed read here is silent.
       });
   }, [list, experimentId]);
+
+  // ONE schema read, at most, per mount — and only for a window holding an OPEN
+  // proposal at a record-scoped target, the one class whose closed list is not in
+  // `RUN_FIELDS`. A failed read leaves the server's refusal as the only check.
+  useEffect(() => {
+    if (list.status !== 'data' || recordAllowedFetchedRef.current) return;
+    const recordScoped = list.loaded.record_scoped_target_field_paths ?? [];
+    const paths = [
+      ...new Set(
+        list.loaded.proposals
+          .filter((p) => p.state === 'open' && recordScoped.includes(p.target_field_path))
+          .map((p) => p.target_field_path),
+      ),
+    ];
+    if (paths.length === 0) return;
+    recordAllowedFetchedRef.current = true;
+    api
+      .getSchema()
+      .then((body) => {
+        const found: Record<string, readonly string[]> = {};
+        for (const path of paths) {
+          const allowed = recordFieldFacts(body.schema as JsonSchemaNode | undefined, path).allowed;
+          if (allowed !== null) found[path] = allowed;
+        }
+        setRecordAllowed(found);
+      })
+      .catch(() => {
+        // Left unknown: the server's own refusal still names the allowed values.
+      });
+  }, [list]);
 
   const reload = useCallback((silent: boolean) => {
     silentRef.current = silent;
@@ -1509,6 +1716,12 @@ function ProposalsBrowser({
       } catch (err: unknown) {
         setRefusal(recoverFromStale(err, action));
         setRefusalKind(refusalCode(err));
+        if (refusalCode(err) === 'not_an_allowed_value') {
+          const allowed = refusalList(err, 'allowed');
+          if (allowed.length > 0) {
+            setAllowedByProposal((prev) => ({ ...prev, [proposal.proposal_id]: allowed }));
+          }
+        }
         setRefusalNonce((n) => n + 1);
         setAnnouncement('');
         /*
@@ -2154,6 +2367,11 @@ function ProposalsBrowser({
                     }
                     busy={busyId === proposal.proposal_id || version === null}
                     acceptLockedBy={acceptLocked ? `${lockNoticeId}-line` : null}
+                    serverAllowed={
+                      allowedByProposal[proposal.proposal_id] ??
+                      recordAllowed[proposal.target_field_path]
+                    }
+                    overridableByRun={overridableByRun}
                     onReview={review}
                   />
                 </li>
@@ -2311,11 +2529,17 @@ function EmptyProposals({
           `summaryUnproposable`). "for each value it can store" is the claim
           this build can keep.
         */}
-        No proposals yet. Capture notes above or ask a colleague&rsquo;s agent to propose
-        a value. A proposal is created three ways: finalizing a transcript capture
-        mints one for each value it can store, proposing a value from an existing
-        note in Unmapped Notes mints one, and an MCP agent may call
-        <code> isaac_propose_field_value</code> with a note it can cite. Nothing is
+        {/*
+          QA A-26 (2026-10-12): this said "Capture notes ABOVE" — on the focused
+          Proposals view nothing is above it — and named the agent tool
+          `isaac_propose_field_value` to a scientist. The tool's name lives where it
+          is explicitly agent documentation (Settings → Connect Your Agent); here the
+          three ways in are said plainly, and the facts are unchanged.
+        */}
+        No proposals yet. A proposal is a value suggested for a field, waiting for your
+        review. One is created three ways: finishing a transcript capture adds one for
+        each value it can store, proposing a value from a note in Unmapped Notes adds
+        one, and a connected AI agent can propose one from a note it cites. Nothing is
         ever inferred from this record&rsquo;s contents on its own{disclosure}.
       </p>
     </div>
@@ -2337,10 +2561,19 @@ function ProposalCard({
   focusNonce = 0,
   busy,
   acceptLockedBy,
+  serverAllowed,
+  overridableByRun,
   onReview,
 }: {
   experimentId: string;
   proposal: ApiProposal;
+  /** Per run, the `field:` addresses its inherited panel offers an Override control at. */
+  overridableByRun: Readonly<Record<string, ReadonlySet<string>>> | null;
+  /**
+   * The closed list the SERVER named when it refused this proposal's value
+   * `not_an_allowed_value`, if it has. Turns the correction into that choice.
+   */
+  serverAllowed?: readonly string[];
   served: { targetFieldPaths?: string[]; recordScopedTargetFieldPaths?: string[] };
   offeredActions: ApiProposalReviewAction[];
   acceptedFromValues: string[];
@@ -2472,13 +2705,37 @@ function ProposalCard({
     isOpen && offeredActions.includes('accept') && unavailable === null;
   const canAccept = acceptPossible && acceptedFromValues.includes('candidate');
   const canEditAccept = acceptPossible && acceptedFromValues.includes('edited');
+  /*
+   * A VALUE OUTSIDE THE TARGET'S CLOSED LIST IS NEVER OFFERED "AS PROPOSED" (QA A-10).
+   * The transcript reader proposes a phrase exactly as written — "in situ" — and
+   * accepting that stored a value the schema's enum does not hold, so the run's
+   * select read "Not set" and Check Run failed. The server refuses it now
+   * (`422 not_an_allowed_value`); this card does not offer the act it would refuse,
+   * and puts the correction — the scientist choosing the member — on the top row.
+   */
+  const correction = correctionInputFor(proposal, serverAllowed);
+  const outsideTheList = isOutsideTheList(proposal, correction);
+  const offerAsProposed = canAccept && !outsideTheList;
+  const correctionPromoted = canEditAccept && outsideTheList;
 
   /** I5: true while an editor that lives INSIDE the More-Actions group (the
    *  correction JSON box, or a Supersede/Withdraw reason box) is open — Reject's
-   *  own editor is in the top-level row and is not one of these. */
+   *  own editor is in the top-level row and is not one of these. A PROMOTED
+   *  correction lives in the top row too, so collapsing cannot orphan it. */
   const editorProtectedFromCollapse =
     editor !== null &&
-    (editor.kind === 'edited' || (editor.kind === 'reason' && editor.action !== 'reject'));
+    ((editor.kind === 'edited' && !correctionPromoted) ||
+      (editor.kind === 'reason' && editor.action !== 'reject'));
+  /*
+   * WHERE THE VALUE CAN BE ENTERED BY HAND (QA A-09) — the same destination a
+   * validation finding at this path opens (`goToDestination`): the run editor's
+   * field, the run's own row for a record-level value on a run, or the record's
+   * section. Shown only on a LOCKED open card, as navigation and nothing more.
+   */
+  const manualDestination =
+    isOpen && locked && (canAccept || canEditAccept)
+      ? manualEntryHref(experimentId, proposal, overridableByRun)
+      : null;
 
   async function run(
     action: ApiProposalReviewAction,
@@ -2618,9 +2875,21 @@ function ProposalCard({
 
       {/* A TARGET THAT MOVED, OR THAT COULD NOT BE CHECKED, IS NEVER DISCLOSED AWAY
           (DEC-35: a conflict and an uncertainty stay visible). Only the reassuring
-          "unchanged" sentence goes behind the disclosure below. */}
-      {proposal.target_stale !== false && (
-        <TargetState proposal={proposal} acceptOffered={(canAccept || canEditAccept) && !locked} />
+          "unchanged" sentence goes behind the disclosure below.
+
+          OPEN CARDS ONLY (QA A-13/C-18). The sentence is about whether ACCEPTING
+          would be refused, which is a question only an open proposal has. After an
+          acceptance the target holds the ACCEPTED value, so `target_stale` is true on
+          every accepted card — and "accepting is refused … nothing would be written"
+          sat directly above "the record still held what this acceptance wrote". A
+          decided card's own record (`AcceptanceRecord`, the closed note) says what
+          happened; it is never contradicted by a sentence about an act it can no
+          longer take. */}
+      {isOpen && proposal.target_stale !== false && (
+        <TargetState
+          proposal={proposal}
+          acceptOffered={(offerAsProposed || canEditAccept) && !locked}
+        />
       )}
 
       {proposal.state === 'accepted' && <AcceptanceRecord proposal={proposal} />}
@@ -2632,15 +2901,72 @@ function ProposalCard({
         </p>
       )}
 
+      {isOpen && unavailable === null && outsideTheList && (
+        <p className="proposal-unavailable" role="note">
+          <span className="proposal-unavailable-label">Not an allowed value: </span>
+          &ldquo;{renderValue(proposal.proposed_value)}&rdquo; is not one of the values the
+          official schema allows for {fieldLabel}, so it cannot be accepted as proposed.
+          Choose the value that was meant, then accept &mdash; nothing is chosen for you.
+        </p>
+      )}
+
+      {manualDestination !== null && (
+        /*
+         * THE NEXT STEP A SCIENTIST CAN TAKE WHILE ACCEPTANCE IS LOCKED (QA A-09).
+         * The panel's notice names an operator fix; this names the reader's.
+         *
+         * NAVIGATION AND NOTHING MORE. The destination is not prefilled, the value is
+         * not copied anywhere, and the proposal is not marked accepted. Acceptance is
+         * the ATTRIBUTABLE act — recording that a named scientist judged this value
+         * right — and enabling it is EXT-01's gate (a trusted authentication
+         * boundary, contract §5 I4). Carrying the proposal's value into the field on
+         * the reader's behalf would be that acceptance in all but name, recorded
+         * against nobody. Typing it yourself is an ordinary manual entry, with its own
+         * confirmation, and the proposal stays open until someone reviews it.
+         */
+        <p className="proposal-manual-path">
+          While acceptance is unavailable here, you can enter it yourself in the field it
+          targets &mdash; that records your own entry, and this proposal stays open until
+          someone reviews it.{' '}
+          <Link className="proposal-manual-link" to={manualDestination}>
+            Go to Field<span className="sr-only"> — {fieldLabel}</span>
+          </Link>
+        </p>
+      )}
+
       {isOpen ? (
         <>
           <div className="proposal-actions">
             {/*
               ACCEPT AS PROPOSED — the primary act, and the only button in this row
               styled `btn-primary`. See the P2 note at the top of this file for why
-              it stands beside Reject rather than a wider peer row.
+              it stands beside Reject rather than a wider peer row. Withheld for a
+              value outside the target's closed list (QA A-10, above), where the
+              correction takes its place in this row.
             */}
-            {canAccept && (
+            {correctionPromoted && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                aria-expanded={editor?.kind === 'edited'}
+                aria-controls={editor?.kind === 'edited' ? `${editorId}-edited` : undefined}
+                disabled={busy || locked}
+                aria-describedby={acceptLockedBy ?? undefined}
+                onClick={() => {
+                  setEditedError(null);
+                  setEditor((open) => {
+                    if (open?.kind === 'edited') return null;
+                    setEditedText((text) =>
+                      text === '' ? correctionStartText(proposal, correction) : text,
+                    );
+                    return { kind: 'edited' };
+                  });
+                }}
+              >
+                Correct the Value, Then Accept
+              </button>
+            )}
+            {offerAsProposed && (
               <button
                 type="button"
                 className="btn btn-primary"
@@ -2716,7 +3042,7 @@ function ProposalCard({
               dangling id when it is not), read together with the label the
               same way a form field's hint text is.
             */}
-            {(canEditAccept ||
+            {((canEditAccept && !correctionPromoted) ||
               offeredActions.includes('supersede') ||
               offeredActions.includes('withdraw')) && (
               <>
@@ -2744,7 +3070,7 @@ function ProposalCard({
 
           {moreOpen && (
             <div className="proposal-more" id={moreId} role="group" aria-label="More actions">
-              {canEditAccept && (
+              {canEditAccept && !correctionPromoted && (
                 <button
                   type="button"
                   className="btn btn-secondary"
@@ -2758,7 +3084,9 @@ function ProposalCard({
                       if (open?.kind === 'edited') return null;
                       // Prefilled ONCE, and only when the box is empty, so re-opening
                       // never overwrites what is already being typed.
-                      setEditedText((text) => (text === '' ? jsonText(proposal.proposed_value) : text));
+                      setEditedText((text) =>
+                        text === '' ? correctionStartText(proposal, correction) : text,
+                      );
                       return { kind: 'edited' };
                     });
                   }}
@@ -2799,27 +3127,93 @@ function ProposalCard({
           {editor?.kind === 'edited' && (
             <div className="proposal-form" id={`${editorId}-edited`}>
               <label className="proposal-form-label" htmlFor={`${editorId}-edited-input`}>
-                The corrected value, as JSON
+                {correction.kind === 'json'
+                  ? 'The corrected value, as JSON'
+                  : 'The corrected value'}
               </label>
-              <textarea
-                id={`${editorId}-edited-input`}
-                className="proposal-form-input mono"
-                rows={5}
-                value={editedText}
-                onChange={(e) => {
-                  setEditedText(e.target.value);
-                  setEditedError(null);
-                }}
-              />
-              <p className="proposal-form-hint">
-                Entered as JSON so the type is never guessed: a text value is quoted, for
-                example <span className="mono">&quot;CuO&quot;</span>. Accepting this way
-                records that the proposed value was WRONG and that this is the corrected
-                one — a different claim from accepting it as it stands, and the record
-                keeps both apart.
+              {/*
+                THE CONTROL FOLLOWS THE TARGET (QA A-10, A-29) — see
+                `correctionInputFor`. Every kind carries `aria-invalid` and names its
+                error, so a refused correction is announced WITH the box it is about.
+              */}
+              {correction.kind === 'choice' ? (
+                <select
+                  id={`${editorId}-edited-input`}
+                  className="proposal-form-input"
+                  value={editedText}
+                  aria-invalid={editedError !== null || undefined}
+                  aria-describedby={
+                    editedError !== null
+                      ? `${editorId}-edited-hint ${editorId}-edited-error`
+                      : `${editorId}-edited-hint`
+                  }
+                  onChange={(e) => {
+                    setEditedText(e.target.value);
+                    setEditedError(null);
+                  }}
+                >
+                  <option value="">Choose a value…</option>
+                  {correction.options.map((option) => (
+                    <option key={option} value={option}>
+                      {enumOptionLabel(option)}
+                    </option>
+                  ))}
+                </select>
+              ) : correction.kind === 'json' ? (
+                <textarea
+                  id={`${editorId}-edited-input`}
+                  className="proposal-form-input mono"
+                  rows={5}
+                  value={editedText}
+                  aria-invalid={editedError !== null || undefined}
+                  aria-describedby={
+                    editedError !== null
+                      ? `${editorId}-edited-hint ${editorId}-edited-error`
+                      : `${editorId}-edited-hint`
+                  }
+                  onChange={(e) => {
+                    setEditedText(e.target.value);
+                    setEditedError(null);
+                  }}
+                />
+              ) : (
+                <input
+                  id={`${editorId}-edited-input`}
+                  className="proposal-form-input"
+                  type="text"
+                  inputMode={correction.kind === 'number' ? 'decimal' : undefined}
+                  autoComplete="off"
+                  value={editedText}
+                  aria-invalid={editedError !== null || undefined}
+                  aria-describedby={
+                    editedError !== null
+                      ? `${editorId}-edited-hint ${editorId}-edited-error`
+                      : `${editorId}-edited-hint`
+                  }
+                  onChange={(e) => {
+                    setEditedText(e.target.value);
+                    setEditedError(null);
+                  }}
+                />
+              )}
+              <p className="proposal-form-hint" id={`${editorId}-edited-hint`}>
+                {correction.kind === 'choice'
+                  ? 'One of the values the official schema allows for this field. '
+                  : correction.kind === 'number'
+                    ? 'A number, sent as a number. '
+                    : correction.kind === 'text'
+                      ? 'Typed exactly as it should be stored — no quotes needed. '
+                      : 'This value has structure, so it is entered as JSON and its type is never guessed: text inside it is quoted, for example "CuO". '}
+                Accepting this way records that the proposed value was WRONG and that this
+                is the corrected one — a different claim from accepting it as it stands,
+                and the record keeps both apart.
               </p>
               {editedError && (
-                <p className="proposal-form-error" role="alert">
+                <p
+                  className="proposal-form-error"
+                  role="alert"
+                  id={`${editorId}-edited-error`}
+                >
                   {editedError}
                 </p>
               )}
@@ -2830,26 +3224,14 @@ function ProposalCard({
                   disabled={busy || locked}
                   aria-describedby={acceptLockedBy ?? undefined}
                   onClick={() => {
-                    let parsed: unknown;
-                    try {
-                      parsed = JSON.parse(editedText) as unknown;
-                    } catch {
-                      setEditedError(
-                        'That is not valid JSON, so it was not sent and nothing was written. ' +
-                          'A text value needs quotes around it.',
-                      );
-                      return;
-                    }
-                    if (parsed === null) {
-                      setEditedError(
-                        'A null would CLEAR the field, and clearing a confirmed value is a ' +
-                          'different act with its own questions. It was not sent.',
-                      );
+                    const parsed = parseCorrection(correction, editedText);
+                    if (!parsed.ok) {
+                      setEditedError(parsed.error);
                       return;
                     }
                     void run(
                       'accept',
-                      { acceptedFrom: 'edited', value: parsed },
+                      { acceptedFrom: 'edited', value: parsed.value },
                       `The corrected value for ${fieldLabel} was accepted ` +
                         'and written to the record.',
                       () => {
@@ -2992,7 +3374,11 @@ function ProposalCard({
             {proposal.history.map((entry, index) => (
               <li key={`${entry.action}-${entry.at}-${index}`}>
                 <span className="proposal-history-act">{entry.action}</span>{' '}
-                <span className="proposal-history-when">{entry.at}</span>
+                {/* A person's date and time; the exact instant in `title` and the
+                    `<time>` value (QA A-15) — the same form as the card's own date. */}
+                <time className="proposal-history-when" dateTime={entry.at} title={entry.at}>
+                  {formatWhen(entry.at) ?? entry.at}
+                </time>
                 {entry.from_state !== null && (
                   <span className="proposal-history-move">
                     {' '}
@@ -3114,9 +3500,19 @@ function AcceptanceRecord({ proposal }: { proposal: ApiProposal }) {
       <p className="proposal-acceptance-line">
         {by === null
           ? 'No accept act is recorded against this proposal.'
-          : by.subject !== null
-            ? `Accepted by ${by.subject} at ${by.at}.`
-            : `Accepted at ${by.at}, recorded without an attributed actor — no name is substituted.`}
+          : (
+            /* A person's date; the exact instant on `<time>` and its `title` (review
+               minor — this printed the raw ISO). */
+            <>
+              {by.subject !== null ? `Accepted by ${by.subject} at ` : 'Accepted at '}
+              <time dateTime={by.at} title={by.at}>
+                {formatWhen(by.at) ?? by.at}
+              </time>
+              {by.subject !== null
+                ? '.'
+                : ', recorded without an attributed actor — no name is substituted.'}
+            </>
+          )}
       </p>
     </div>
   );

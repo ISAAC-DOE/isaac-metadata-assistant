@@ -1515,6 +1515,101 @@ export interface ApiArtifactsResponse {
 }
 
 /**
+ * ONE EXPORTED RUN's written files — `GET /run-artifacts` (QA audit A-02, 2026-10-11).
+ *
+ * A record with runs exports one official record + sidecar PER RUN, and until this
+ * read existed the only place those files were named was the export RESPONSE, so a
+ * reload lost them. Every field mirrors `routes.get_run_artifacts` verbatim; the
+ * filenames are bare basenames, never a server path. `artifact` is judged PER RUN
+ * (`dependencies.unit_artifact_state`), so the screen can say WHICH run changed after
+ * export rather than only that one did (A-06).
+ */
+export interface ApiRunArtifact {
+  run_id: string;
+  run_label: string;
+  record_id: string;
+  record_filename: string | null;
+  sidecar_filename: string | null;
+  /** `null` when the file is missing or unreadable — `artifact.state` is then `stale`. */
+  record: Record<string, unknown> | null;
+  sidecar: Record<string, unknown> | null;
+  extended_context: Record<string, unknown> | null;
+  extended_context_filename: string | null;
+  artifact: ApiArtifactState;
+}
+
+export interface ApiRunArtifactsResponse {
+  experiment_id: string;
+  /** How many runs EXIST, whatever has been exported. */
+  runs_total: number;
+  /** How many runs HAVE been exported, whatever this page returned. */
+  total: number;
+  returned: number;
+  offset: number;
+  limit: number;
+  artifacts: ApiRunArtifact[];
+  /** Set only for a record with no runs, naming where its single pair is read. */
+  reason: string | null;
+}
+
+/** The three answers `GET /structured-answers` reports (QA audit A-01/A-04). */
+export type StructuredAnswerKey = 'series' | 'qc' | 'descriptor';
+
+/**
+ * ONE confirmed structured answer, as the server holds it.
+ *
+ * `confirmed` means a value is STORED and `value` is that value verbatim; `open` is a
+ * question still waiting; `absent` is neither. `editable` is the server's own answer
+ * to "will the correction operation accept this?", so a screen offers Edit exactly
+ * where the write would land — never a control with one possible outcome.
+ */
+export interface ApiStructuredAnswer {
+  state: 'confirmed' | 'open' | 'absent';
+  value: unknown;
+  editable: boolean;
+  /** Descriptor only: the output block's label, carried so a correction keeps it. */
+  label?: string | null;
+  /** Descriptor only: how many descriptors the block holds. */
+  count?: number;
+  /** Why a confirmed answer is NOT editable, in the server's words. */
+  reason?: string;
+  /**
+   * What the stored value's OWN evidence says (re-review, minor): `confirmed` — a person
+   * confirmed every part; `from_evidence` — recorded evidence such as an extraction,
+   * without a person's confirmation for every part; `no_evidence` — none. Absent on an
+   * answer that holds no value.
+   */
+  confirmation?: 'confirmed' | 'from_evidence' | 'no_evidence';
+}
+
+export interface ApiStructuredUnit {
+  /** `null` for a record with no runs, whose answers are the record's own. */
+  run_id: string | null;
+  run_label: string | null;
+  /** The `If-Match` value `edit_at` takes for THIS unit. */
+  version: string;
+  edit_at: string;
+  /**
+   * Whether this unit's official record has been WRITTEN (review I-3). A correction
+   * there changes the working copy only — the exported file is never rewritten — so a
+   * screen says so BEFORE the scientist edits, not only after.
+   */
+  exported: boolean;
+  answers: Record<StructuredAnswerKey, ApiStructuredAnswer>;
+}
+
+export interface ApiStructuredAnswersResponse {
+  experiment_id: string;
+  experiment_version: string;
+  level: 'record' | 'run';
+  units: ApiStructuredUnit[];
+  total: number;
+  returned: number;
+  offset: number;
+  limit: number;
+}
+
+/**
  * ONE ENTRY of a record's `DEC-41` level-4 extended context companion. `CTX-004`.
  *
  * Mirrors `extended_context.ContextEntry.to_state()` verbatim. Every key is present on
@@ -4534,6 +4629,13 @@ export interface ApiImportSession {
   /** Archive names the server will walk, from its own allowlist. */
   available_archives: string[];
   /**
+   * 2026-10-12 — the name a scientist sees for each COMMITTED archive, keyed by its id.
+   * A staged archive has none. Optional: a server that predates it omits the key.
+   */
+  archive_display_names?: Record<string, string>;
+  /** 2026-10-12 — the archive a picker opens on (the one the hosted image ships). */
+  default_archive?: string | null;
+  /**
    * 2026-09-22 — the archive reading's per-measurement page. The server sends
    * `null` (not an absent key) for a session with no archive — measured on a
    * two-fixture session, where reading it as "absent" crashed the stage tabs.
@@ -4790,6 +4892,10 @@ export interface ApiImportListResponse {
   available_fixtures: string[];
   /** Archive names the server will walk, from its own allowlist. */
   available_archives: string[];
+  /** 2026-10-12 — see `ApiImportSession.archive_display_names`. */
+  archive_display_names?: Record<string, string>;
+  /** 2026-10-12 — see `ApiImportSession.default_archive`. */
+  default_archive?: string | null;
 }
 
 export interface ApiImportSessionResponse {
@@ -4894,6 +5000,21 @@ export interface ApiImportAddedToExperiment {
     captured_as_run_notes: number;
     already_present: number;
     writes_qc_status: false;
+  };
+  /**
+   * 2026-10-12 — what the import READ and did not send, kept as NOTES: one per
+   * measurement on its run, and the beamtime's own statements on the record, one note per
+   * source file. Outside `counts`, because none of it is a candidate. Never a value.
+   */
+  readings_notes?: {
+    label: string;
+    measurements: number;
+    captured_as_run_notes: number;
+    already_present: number;
+    beamtime_notes_captured: number;
+    beamtime_notes_already_present: number;
+    not_listed: number;
+    writes_field_values: false;
   };
   run_origins_recorded?: number;
   /** The session was re-read under THIS record's rules before anything was minted. */
