@@ -178,7 +178,7 @@ function bar(): HTMLElement | null {
  * `startTutorial`.
  */
 async function startFromOffer(): Promise<void> {
-  fireEvent.click(await screen.findByRole('button', { name: LABELS.actionLaunchGuidedDemo }));
+  fireEvent.click(await screen.findByRole('button', { name: LABELS.actionStartTutorial }));
   await waitFor(() => expect(getTutorialState().sessionId).toBe(TUTORIAL_SESSION_ID));
 }
 

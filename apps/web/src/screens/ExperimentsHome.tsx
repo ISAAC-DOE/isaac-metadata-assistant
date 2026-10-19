@@ -13,11 +13,12 @@ import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
 import { ExperimentQueue } from '../components/ExperimentQueue';
 import { LibraryList, LibraryNoResults } from '../components/LibraryList';
-import { LibraryToolbar } from '../components/LibraryToolbar';
+import { LibraryFacets, LibraryToolbar } from '../components/LibraryToolbar';
 import { FolderBreadcrumbs, FolderList } from '../components/LibraryFolders';
 import { LibraryOverview } from '../components/LibraryOverview';
 import { TutorialPromotion } from '../components/TutorialPromotion';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
+import { HelpTip } from '../components/HelpTip';
 import { Compass, Inbox, LayoutList, Plus, ShieldCheck } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
@@ -321,7 +322,8 @@ export function ExperimentsHome() {
    * Demo" is not an action that is available. Pinned by
    * `tutorial-session-lifecycle.test.tsx` → "T7e".
    */
-  const tutorialPhase = useTutorialState().phase;
+  const tutorialState = useTutorialState();
+  const tutorialPhase = tutorialState.phase;
   const launchBusy = tutorialPhase !== 'idle';
 
   // P27.6 — the dashboard is NOT tightly polled (no interval). It only refetches
@@ -366,6 +368,9 @@ export function ExperimentsHome() {
   const [query, setQuery] = useState('');
   const [facet, setFacet] = useState<LibraryFacetId>('all');
   const [sort, setSort] = useState<LibrarySortId>(DEFAULT_LIBRARY_SORT);
+  /* The search box's description now lives in the library widget's info panel;
+     one id joins the two. */
+  const searchHintId = useId();
   const [folder, setFolder] = useState('');
 
   let subcount = '';
@@ -471,6 +476,7 @@ export function ExperimentsHome() {
       <EmptyExperiments
         launchRef={launchRef}
         launchBusy={launchBusy}
+        walkthroughCompleted={tutorialState.completed}
         durability={durability}
         onCreated={openCreated}
         onOpenValidator={() => navigate(`${ROUTES.governance}?tab=validator`)}
@@ -479,28 +485,38 @@ export function ExperimentsHome() {
       <>
         {/*
           UX-017's LIBRARY HALF — see `components/LibraryOverview.tsx` and
-          `lib/library.ts::libraryOverviewStats`. Shown only at the root
+          `lib/library.ts::libraryOverviewStats`. ONE WIDGET since 2026-10-12:
+          the figures and the filter/search toolbar answer one question, so they
+          sit in one card. The FIGURES are still shown only at the root
           (`folder === ''`), matching `FolderList`'s own `showModelNote` gate
-          below: these are WORKSPACE-wide totals, and showing a "Workspace
-          Statistics" strip while browsing one folder's contents would read as
-          though it described that folder rather than everything in it.
+          below: they are WORKSPACE-wide totals, and showing them while browsing
+          one folder's contents would read as though they described that folder.
+          The filter and search stay available inside a folder.
         */}
-        {folder === '' && (
-          <LibraryOverview
-            stats={libraryOverviewStats(summaries)}
-            readIncomplete={incompleteRead}
+        <LibraryOverview
+          stats={libraryOverviewStats(summaries)}
+          readIncomplete={incompleteRead}
+          showTotals={folder === ''}
+          searchHintId={searchHintId}
+          facets={<LibraryFacets facet={facet} onFacet={setFacet} counts={counts} variant="tiles" />}
+        >
+          <LibraryToolbar
+            showFacets={false}
+            query={query}
+            onQuery={setQuery}
+            facet={facet}
+            onFacet={setFacet}
+            sort={sort}
+            onSort={setSort}
+            counts={counts}
+            hintId={searchHintId}
           />
-        )}
-        <FolderBreadcrumbs folder={folder} onNavigate={setFolder} />
-        <LibraryToolbar
-          query={query}
-          onQuery={setQuery}
-          facet={facet}
-          onFacet={setFacet}
-          sort={sort}
-          onSort={setSort}
-          counts={counts}
-        />
+        </LibraryOverview>
+        {/* Inside a folder only (review, 2026-10-18): at the root the trail was a
+            single unlinked "All experiments" caption under the widget, saying
+            nothing the list did not; the Folders list is how a reader learns
+            folders exist, and the trail appears the moment there is a way back. */}
+        {folder !== '' && <FolderBreadcrumbs folder={folder} onNavigate={setFolder} />}
         <FolderList
           folders={childFolders}
           onNavigate={setFolder}
@@ -564,7 +580,11 @@ export function ExperimentsHome() {
       <div className="page-header">
         <div>
           <h1 className="page-title">{LABELS.screenExperiments}</h1>
-          {subcount && <p className="page-subcount">{subcount}</p>}
+          {/* ON THE EMPTY STATE ONLY since 2026-10-18 (review: "5" appeared six times
+              above the first row). With rows on screen, the status filter's own
+              tiles state the total and how many are ready; the empty state keeps
+              the line because it states zero rather than omitting it. */}
+          {subcount && queueIsEmpty && <p className="page-subcount">{subcount}</p>}
         </div>
         {/*
          * TWO CONTROLS WERE REMOVED FROM HERE, and neither was a styling choice.
@@ -741,12 +761,15 @@ export function ExperimentsHome() {
 function EmptyExperiments({
   launchRef,
   launchBusy,
+  walkthroughCompleted,
   durability,
   onCreated,
   onOpenValidator,
 }: {
   launchRef: RefObject<HTMLButtonElement>;
   launchBusy: boolean;
+  /** Finished in this browser → the control says Replay; otherwise Start. */
+  walkthroughCompleted: boolean;
   durability: Durability;
   onCreated: (id: string) => void;
   onOpenValidator: () => void;
@@ -796,16 +819,17 @@ function EmptyExperiments({
         </div>
       </div>
 
-      {/* An eyebrow, not a heading: it labels the cards below without adding an
-          outline level, and the cards carry their own h3 titles. */}
-      <p className="queue-empty-eyebrow">What you can do here now</p>
-
-      <ul className="queue-empty-list">
+      {/* ~~An eyebrow, not a heading: it labels the cards below without adding an
+          outline level~~ — REMOVED 2026-10-12 (clutter audit). "What you can do
+          here now" restated what four cards each carrying a verb already say, and
+          an eyebrow over a list is decoration rather than structure; the list is
+          named for assistive technology instead, which is the job it was doing. */}
+      <ul className="queue-empty-list" aria-label={LABELS.emptyExperimentsChoices}>
         <CreateExperimentControl variant="card" onCreated={onCreated} />
 
         {/*
-          LAUNCH GUIDED DEMO — behaviour UNCHANGED, and every part of it is
-          load-bearing.
+          START GUIDED WALKTHROUGH (was "Launch Guided Demo") — behaviour
+          UNCHANGED, and every part of it is load-bearing.
 
           It calls `startTutorial` directly, on exactly the contract
           `TutorialPromotion` uses: the live node from a ref, so
@@ -817,10 +841,14 @@ function EmptyExperiments({
           was to navigate somewhere else to press a different button; that is not
           reintroduced.
 
-          NOT a duplicate of Settings → Help & Tutorial, which keeps `Replay
-          Tutorial` as the walkthrough's permanent home. This is an entry point,
-          not a second home, and it carries a third name so that no label in the
-          app addresses two controls.
+          NOT a duplicate of Settings → Help & Tutorial, which keeps the replay
+          control as the walkthrough's permanent home. This is an entry point,
+          not a second home. ~~It carries a third name so that no label in the
+          app addresses two controls~~ — withdrawn 2026-10-12: it now carries the
+          ONE name every start control carries ("Start Guided Walkthrough"),
+          because every one of them does the same thing; see `labels.ts` above
+          `actionStartTutorial` for why one name per thing replaced one name per
+          control.
 
           WHAT CHANGED IS ONLY THE TREATMENT — `btn-primary` to `btn-action`. See
           the hierarchy note above.
@@ -830,13 +858,21 @@ function EmptyExperiments({
             <Compass size={18} strokeWidth={1.75} />
           </span>
           <div className="queue-empty-action-main">
-            <h3 className="queue-empty-action-title">Guided demo</h3>
-            {/* Associated with the button rather than left as adjacent text: a
-                screen reader announcing the control otherwise reads three words and
-                none of the disclosure. It is a DESCRIPTION, not a label — the
-                accessible name stays "Launch Guided Demo". */}
-            <p className="queue-empty-hint" id="queue-empty-launch-hint">
-              {LABELS.launchGuidedDemoBody}
+            {/* ONE NAME (2026-10-12): the card was "Guided demo" over a button
+                reading "Launch Guided Demo", for the same tour the first-run strip
+                calls "Guided Walkthrough". It is one thing with one name now. */}
+            <h3 className="queue-empty-action-title">{LABELS.tutorialOfferTitle}</h3>
+            <p className="queue-empty-hint">
+              {LABELS.tutorialOfferLine}{' '}
+              {/* The audited disclosure is still RENDERED, verbatim, and the button
+                  is still DESCRIBED BY it — it moved behind an info tip because it is
+                  a reassurance, not one of `DEC-35`'s always-visible classes.
+                  `HelpTip` keeps its panel in the DOM while closed, so
+                  `aria-describedby` still resolves to this text and
+                  `tutorial-flow.test.tsx`'s ratchet still reads it here. */}
+              <HelpTip subject={LABELS.tutorialOfferTitle} kind="info">
+                <span id="queue-empty-launch-hint">{LABELS.launchGuidedDemoBody}</span>
+              </HelpTip>
             </p>
           </div>
           <div className="queue-empty-action-cta">
@@ -848,7 +884,8 @@ function EmptyExperiments({
               aria-describedby="queue-empty-launch-hint"
               onClick={() => startTutorial(launchRef.current)}
             >
-              {LABELS.actionLaunchGuidedDemo}
+              {/* One name, two verbs: Replay for a browser that has finished it. */}
+              {walkthroughCompleted ? LABELS.actionReplayTutorial : LABELS.actionStartTutorial}
             </button>
           </div>
         </li>
@@ -887,7 +924,15 @@ function EmptyExperiments({
           </span>
           <div className="queue-empty-action-main">
             <h3 className="queue-empty-action-title">{LABELS.navImports}</h3>
-            <p className="queue-empty-hint">{LABELS.historicalImportHint}</p>
+            <p className="queue-empty-hint">
+              {LABELS.historicalImportHint}{' '}
+              {/* Named for what it explains, not "About Historical Import": the empty
+                  state offers no control named for importing (it LINKS there), and
+                  `tutorial-session-lifecycle.test.tsx` T7 holds it to that. */}
+              <HelpTip subject={LABELS.navImports} label={LABELS.historicalImportInfoLabel} kind="info">
+                <span>{LABELS.historicalImportHintMore}</span>
+              </HelpTip>
+            </p>
           </div>
           <div className="queue-empty-action-cta">
             <Link className="btn btn-secondary queue-empty-cta" to={ROUTES.imports}>
@@ -901,11 +946,12 @@ function EmptyExperiments({
             <ShieldCheck size={18} strokeWidth={1.75} />
           </span>
           <div className="queue-empty-action-main">
-            <h3 className="queue-empty-action-title">Schema validator</h3>
+            <h3 className="queue-empty-action-title">{LABELS.validatorCardTitle}</h3>
             <p className="queue-empty-hint">
-              Check a record file you already have against the official ISAAC schema —
-              the same deterministic check this app runs on an exported record. It
-              names every failing path, and the file you check is never stored.
+              {LABELS.validatorCardHint}{' '}
+              <HelpTip subject={LABELS.validatorCardTitle} kind="info">
+                <span>{LABELS.validatorCardMore}</span>
+              </HelpTip>
             </p>
           </div>
           <div className="queue-empty-action-cta">
@@ -1292,7 +1338,7 @@ function CreateExperimentControl({
             <Plus size={18} strokeWidth={1.75} />
           </span>
           <div className="queue-empty-action-main">
-            <h3 className="queue-empty-action-title">New experiment</h3>
+            <h3 className="queue-empty-action-title">New Experiment</h3>
             <p className="queue-empty-hint" id={hintId}>
               {LABELS.createExperimentHint}
             </p>

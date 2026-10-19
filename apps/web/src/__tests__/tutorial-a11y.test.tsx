@@ -587,7 +587,7 @@ describe('R0 · a11y — axe over the walkthrough in the real app', () => {
     );
 
     const launch = (await screen.findByRole('button', {
-      name: LABELS.actionLaunchGuidedDemo,
+      name: LABELS.actionStartTutorial,
     })) as HTMLButtonElement;
     expect(await axeRules(container, RULES)).toEqual([]);
 
@@ -602,7 +602,7 @@ describe('R0 · a11y — axe over the walkthrough in the real app', () => {
 
     // Its supporting line is text next to the control, not the control's own name: the
     // accessible name stays short enough to be useful in a screen reader's control list.
-    expect(launch.textContent?.trim()).toBe(LABELS.actionLaunchGuidedDemo);
+    expect(launch.textContent?.trim()).toBe(LABELS.actionStartTutorial);
 
     fireEvent.click(launch);
     const bubble = await waitFor(
@@ -673,7 +673,7 @@ describe('R0 · a11y — axe over the walkthrough in the real app', () => {
       </MemoryRouter>,
     );
 
-    const launch = await screen.findByRole('button', { name: LABELS.actionLaunchGuidedDemo });
+    const launch = await screen.findByRole('button', { name: LABELS.actionStartTutorial });
     fireEvent.click(launch);
     const bubble = await waitFor(
       () => {
@@ -731,7 +731,7 @@ describe('R0 · a11y — axe over the walkthrough in the real app', () => {
      * Both controls call the same `startTutorial`, so the failure this exercises is
      * unchanged.
      */
-    fireEvent.click(await screen.findByRole('button', { name: LABELS.actionLaunchGuidedDemo }));
+    fireEvent.click(await screen.findByRole('button', { name: LABELS.actionStartTutorial }));
 
     const notice = await waitFor(() => {
       const found = document.querySelector<HTMLElement>('[data-tutorial-notice]');

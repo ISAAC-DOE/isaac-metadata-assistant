@@ -10,12 +10,14 @@
  * that the containment code ran and chose that element.
  */
 
-import { describe, expect, it } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { HelpPanel } from '../components/HelpPanel';
 import { LABELS } from '../lib/labels';
-import { ROUTES } from '../lib/routes';
+import { __bootTutorialStore, __resetTutorialStore } from '../lib/tutorialController';
+import { markTutorialCompleted } from '../lib/tutorialPreference';
+import { setTutorialScope } from '../lib/api';
 
 function openHelp() {
   const view = render(
@@ -132,47 +134,61 @@ describe('A11Y-02 · the Help dialog contains focus', () => {
   });
 });
 
-describe('UX-021 · Help points at the guided walkthrough', () => {
-  it('renders a real link to the walkthrough', () => {
-    const { dialog } = openHelp();
-    const link = Array.from(dialog.querySelectorAll('a')).find(
-      (a) => a.textContent === LABELS.actionGoToHelpAndTutorial,
-    );
-    expect(link, 'Help offers no route to the guided walkthrough').toBeDefined();
-    // A real anchor with an href, so it is middle-clickable and bookmarkable rather
-    // than a button that only works on left-click.
-    expect(link!.getAttribute('href')).toBeTruthy();
+describe('UX-021 · Help offers the guided walkthrough — in place, true for every reader', () => {
+  /*
+   * INVERTED 2026-10-12, AND THE CORRECTNESS POINT IS KEPT, NOT DROPPED.
+   *
+   * These tests pinned a LINK to Settings → Help & Tutorial ("Go to Help &
+   * Tutorial"), for one reason: the obvious alternative — pointing at My
+   * Experiments' first-run offer — is FALSE for a reader who has finished the
+   * walkthrough, because that control disappears for good on completion. The point
+   * was that Help must only offer what is true for EVERY reader.
+   *
+   * The clutter audit moved the walkthrough to the END of the popover as a control
+   * of its own ("Replay last"). It meets the same requirement more directly: it is
+   * named by this browser's own completion state — Start when unfinished, Replay
+   * when finished — so it is true for every reader without sending anyone anywhere.
+   * Asserted both ways below, plus the guard against offering a second start while
+   * a walkthrough is already open.
+   */
+  afterEach(() => {
+    __resetTutorialStore();
+    window.localStorage.clear();
   });
 
-  it('MUTATION-GUARDED — the destination is the PERMANENT home of the walkthrough, not My Experiments', () => {
-    /*
-     * THE CORRECTNESS POINT OF THE WHOLE SLICE, and the reason this is a separate
-     * assertion rather than a detail of the one above.
-     *
-     * The obvious destination — My Experiments, where `Launch Guided Demo` lives — is
-     * FALSE for any reader who has already finished the walkthrough: that control is
-     * gated on the queue and, per `ExperimentsHome.tsx`'s own note, "disappears for
-     * good once the walkthrough is finished". `lib/routes.ts` calls the Settings
-     * `help` tab "the one permanent home of the guided walkthrough".
-     *
-     * A Help surface is exactly where a first-time-only claim does the most damage,
-     * so pointing it at `ROUTES.experiments` is the mutation this guards.
-     */
+  it('offers Start to a reader who has not finished it, as the LAST control', () => {
+    __resetTutorialStore();
     const { dialog } = openHelp();
-    const link = Array.from(dialog.querySelectorAll('a')).find(
-      (a) => a.textContent === LABELS.actionGoToHelpAndTutorial,
-    )!;
-    expect(link.getAttribute('href')).toBe(ROUTES.settingsTab('help'));
-    expect(link.getAttribute('href')).not.toBe(ROUTES.experiments);
+    const start = within(dialog).getByRole('button', { name: LABELS.actionStartTutorial });
+    const all = focusables(dialog);
+    expect(all[all.length - 1]).toBe(start);
+    expect(within(dialog).queryByRole('button', { name: LABELS.actionReplayTutorial })).toBeNull();
   });
 
-  it('the pointer promises only what the destination delivers', () => {
-    // It must not claim the walkthrough starts HERE, or that it teaches anything this
-    // build cannot do. `help-claim-parity.test.tsx` owns the banned-claim sweep over
-    // the whole panel; this is the narrower check that the new sentence is a POINTER.
+  it('MUTATION-GUARDED — offers Replay, not Start, to a reader who HAS finished it', () => {
+    markTutorialCompleted();
+    __resetTutorialStore();
+    const { dialog } = openHelp();
+    expect(within(dialog).getByRole('button', { name: LABELS.actionReplayTutorial })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: LABELS.actionStartTutorial })).toBeNull();
+  });
+
+  it('the row promises only what the control delivers', () => {
     const { dialog } = openHelp();
     const text = dialog.textContent ?? '';
-    expect(text).toContain('worked example');
+    // No pointer sentence claims the walkthrough starts somewhere else, or teaches
+    // anything this build cannot do; `help-claim-parity.test.tsx` owns the sweep.
     expect(text).not.toMatch(/launch|start the (guided )?walkthrough now/i);
+    expect(dialog.querySelector('a[href*="tab=help"]')).toBeNull();
+  });
+
+  it('states that a walkthrough is open instead of offering a second start', () => {
+    setTutorialScope('session-open-in-this-tab');
+    __bootTutorialStore();
+    const { dialog } = openHelp();
+    expect(within(dialog).queryByRole('button', { name: LABELS.actionStartTutorial })).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: LABELS.actionReplayTutorial })).toBeNull();
+    expect(dialog.textContent).toContain(LABELS.helpWalkthroughOpen);
+    setTutorialScope(null);
   });
 });

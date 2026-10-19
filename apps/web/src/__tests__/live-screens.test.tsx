@@ -57,7 +57,7 @@ describe('S1 · My Experiments renders live queue groups from injected data', ()
         body: { experiments: [experimentSummary, exportedSummary] },
       },
     });
-    const { findByText, queryByText, getByText, container } = renderAt('/experiments');
+    const { findByText, queryByText, getByText, getByRole, container } = renderAt('/experiments');
 
     /*
      * THE QUERIES ARE NOW SCOPED TO THE QUEUE, and the scoping is a
@@ -102,8 +102,14 @@ describe('S1 · My Experiments renders live queue groups from injected data', ()
     expect(getByText('Synthetic XANES — CuO baseline (exported)')).toBeInTheDocument();
     expect(getByText('Exported')).toBeInTheDocument();
 
-    // subcount comes from the live list
-    expect(getByText('2 experiments · 0 ready to export')).toBeInTheDocument();
+    // ~~subcount comes from the live list~~ — INVERTED 2026-10-18 (review: the total
+    // was printed six times above the first row). With rows on screen the subcount
+    // line is gone and the status filter's tiles state the total, live from the
+    // same list; the empty state keeps the subcount (it states zero).
+    expect(queryByText('2 experiments · 0 ready to export')).toBeNull();
+    expect(
+      getByRole('radio', { name: /All Experiments.*2 of all experiments/ }),
+    ).toBeInTheDocument();
   });
 
   it('backend down → visible "Backend Not Running" with the exact run command, never fake rows', async () => {
@@ -126,7 +132,12 @@ describe('S2 · Load Materials', () => {
     // so no picker can open and no file is ever chosen, sent or read. The copy
     // now says exactly that, and is selected on here so it cannot drift back.
     expect(container.querySelector('input[type="file"]')).toBeNull();
-    fireEvent.click(getByRole('button', { name: /opens no file picker/i }));
+    // Since 2026-10-12 the control is a plain secondary "Try an Upload" button in the
+    // "Can I Load My Own Files?" widget, and "opens no file picker" is its DESCRIPTION
+    // (read on focus) rather than its visible text — asserted, so it cannot drift back.
+    const ask = getByRole('button', { name: 'Try an Upload' });
+    expect(ask).toHaveAccessibleDescription(/opens no file picker, takes no dropped file and sends no file/i);
+    fireEvent.click(ask);
 
     expect(await findByText(/Blocked by governance\./)).toBeInTheDocument();
     expect(getByText(new RegExp(uploadsBlocked.reason))).toBeInTheDocument();
@@ -141,7 +152,7 @@ describe('S2 · Load Materials', () => {
     stubFetchDown();
     const { findByText, getByText, getByRole, queryByText } = renderAt('/load');
 
-    fireEvent.click(getByRole('button', { name: /opens no file picker/i }));
+    fireEvent.click(getByRole('button', { name: 'Try an Upload' }));
 
     expect(await findByText('Backend Not Running')).toBeInTheDocument();
     expect(getByText(RUN_COMMAND)).toBeInTheDocument();

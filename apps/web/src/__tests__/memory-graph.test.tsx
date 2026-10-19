@@ -157,22 +157,71 @@ describe('Graph tab — appears and mounts', () => {
 // --- 2. counts + honest layered disclosure ---------------------------------
 
 describe('Graph tab — counts and disclosure', () => {
-  it('shows the rendered counts, scoped as a projection, on the surface itself', async () => {
+  /*
+   * FOLDED INTO About This Graph (review, 2026-10-18). The counts line sat above
+   * the toolbar and, with the description line, kept the canvas below the first
+   * screen. "What You Are Viewing" already stated the same counts with the same
+   * scope; the card's own line was the second copy. So this asserts the counts —
+   * and their scope — where they now live, and that the surface no longer carries
+   * the duplicate line.
+   */
+  it('states the rendered counts, scoped as a projection, in About This Graph', async () => {
     stubFetchRoutes(graphRoutes);
-    const { findByText, container } = renderScreen();
-    await findByText('Graph', { selector: 'h2' });
+    const view = renderScreen();
+    await view.findByText('Graph', { selector: 'h2' });
+    expect(view.container.querySelector('.memory-graph-counts')).toBeNull();
+    openHelp(view);
 
-    const text = container.textContent ?? '';
+    const text = view.getByRole('dialog').textContent ?? '';
     expect(text).toMatch(/3 files/);
     expect(text).toMatch(/2 concepts/);
     expect(text).toMatch(/1 reference\b/);
-    expect(text).toMatch(/2 communities shown/);
-    // P36V PR2 slice B moved the LONGER disclosures into About This Graph, so
-    // the counts line itself must still carry its own scope: these numbers are
-    // a projection's, not the whole graph's.
-    expect(text).toMatch(/an advisory served-file\s+projection, never the full source graph/);
+    expect(text).toMatch(/2 clusters/);
+    // The counts still carry their own scope: these numbers are a projection's,
+    // not the whole graph's.
+    expect(text).toMatch(/served-file reference projection only, never the full source graph/);
     expect(text).not.toMatch(/knowledge graph/i);
     expect(text).not.toMatch(/ontology/i);
+  });
+
+  /*
+   * THE STATEMENTS STAY IN THE DOM WHILE THE DISCLOSURE IS CLOSED (re-review,
+   * 2026-10-18). Folding them into About This Graph had made the dialog MOUNT on
+   * open, so with it closed the page carried none of them: not the boundary, not
+   * the counts, not the projection scope. The body is now always rendered and
+   * hidden while closed, and one short boundary clause stays visible on the card.
+   */
+  it('keeps the boundary, the counts and the projection scope in the DOM while closed', async () => {
+    stubFetchRoutes(graphRoutes);
+    const view = renderScreen();
+    await view.findByText('Graph', { selector: 'h2' });
+    const card = view.container.querySelector('.memory-graph-card') as HTMLElement;
+
+    // Closed: no dialog is exposed to assistive technology…
+    expect(view.queryByRole('dialog')).toBeNull();
+    // …but every statement is in the document.
+    const text = card.textContent ?? '';
+    expect(text).toMatch(/does not represent scientific truth or causality/);
+    expect(text).toMatch(/3 files/);
+    expect(text).toMatch(/2 concepts/);
+    expect(text).toMatch(/served-file reference projection only, never the full source graph/);
+    expect(text).toMatch(/Not scientific relationships, and not causality/);
+
+    // ONE short clause is VISIBLE on the card, outside the hidden disclosure.
+    const visible = card.querySelector('.memory-graph-boundary') as HTMLElement;
+    expect(visible).not.toBeNull();
+    expect(visible.closest('[hidden]')).toBeNull();
+    expect(visible.textContent).toMatch(/leads? to verify/i);
+    expect(visible.textContent).toMatch(/not .*truth/i);
+
+    // And the hidden body is what opens: same node, now exposed as the dialog.
+    openHelp(view);
+    expect(view.getByRole('dialog', { name: 'About This Graph' }).textContent).toMatch(
+      /never the full source graph/,
+    );
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(view.queryByRole('dialog')).toBeNull();
+    expect(card.textContent ?? '').toMatch(/never the full source graph/);
   });
 
   it('discloses the un-embedded source graph and the four layers in About This Graph', async () => {
@@ -206,7 +255,8 @@ describe('Graph tab — counts and disclosure', () => {
 
   it('never uses verdict language on this advisory surface', async () => {
     stubFetchRoutes(graphRoutes);
-    const { findByText, container } = renderScreen();
+    const view = renderScreen();
+    const { findByText, container } = view;
     await findByText('Graph', { selector: 'h2' });
     // Scoped to the graph card: the surrounding page legitimately says
     // "never a validation verdict", which is the opposite of a verdict claim.
@@ -224,13 +274,19 @@ describe('Graph tab — counts and disclosure', () => {
     ]) {
       expect(text, `verdict language in the graph card: ${claim}`).not.toMatch(claim);
     }
-    // P36V PR2 slice B — ONE visible boundary statement replaced the four
-    // stacked disclosures. The card still refuses verdict language and still
-    // calls itself advisory in plain sight.
-    expect(text).toMatch(
-      /This graph shows project-file relationships and navigation leads\. It does not represent\s+scientific truth or causality\./,
-    );
-    expect(text).toMatch(/advisory/i);
+    // P36V PR2 slice B — ONE visible boundary statement replaced the four stacked
+    // disclosures. ~~"This graph shows project-file relationships and navigation
+    // leads. It does not represent scientific truth or causality."~~ — FOLDED INTO
+    // About This Graph (review, 2026-10-18), whose first screenful already made the
+    // same boundary in its own words: a line means two files reference each other
+    // "— that, and nothing more", and "What It Does Not Show" opens with "Not
+    // scientific relationships, and not causality". Those are asserted, beside the
+    // dialog's own "advisory" boundary note, so the claim is still one click away.
+    openHelp(view);
+    const help = view.getByRole('dialog').textContent ?? '';
+    expect(help).toMatch(/reference each other in the project source — that, and nothing more/);
+    expect(help).toMatch(/Not scientific relationships, and not causality/);
+    expect(help).toMatch(/advisory/i);
   });
 });
 

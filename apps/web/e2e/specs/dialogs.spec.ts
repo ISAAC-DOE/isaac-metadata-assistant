@@ -210,7 +210,7 @@ test.describe('@interaction reset-worked-example confirmation dialog', () => {
      * on this screen; it calls the same `startTutorial`, so the session this test needs
      * is opened by the same code path it always was.
      */
-    await page.getByRole('button', { name: 'Launch Guided Demo' }).click();
+    await page.getByRole('button', { name: 'Start Guided Walkthrough' }).click();
     // The bar is chrome and appears as soon as the session exists — before any
     // coach mark has settled.
     const bar = page.getByRole('complementary', { name: 'Worked example session' });

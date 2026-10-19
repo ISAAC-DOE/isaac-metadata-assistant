@@ -472,8 +472,10 @@ const CREATION_CAPABILITY_SITES: Readonly<Record<string, readonly string[]>> = {
   /*
    * The lead card's own title. The button beside it carries the label; this is the
    * heading over it, and it is the ONE string in this file the patterns catch.
+   * Title Case since 2026-10-12 (it was "New experiment"), matching its three
+   * sibling card titles; the same single exemption, re-spelled.
    */
-  'screens/ExperimentsHome.tsx': ['New experiment'],
+  'screens/ExperimentsHome.tsx': ['New Experiment'],
   /*
    * HISTORICAL IMPORT CAN NOW CREATE THE DESTINATION, added 2026-09-14.
    *
@@ -626,13 +628,13 @@ describe("R0 · the guided walkthrough's copy uses no harness vocabulary", () =>
 
   it('leaves the walkthrough\'s actual copy alone — it must pass its own ratchet', () => {
     for (const shipped of [
-      'Take the Guided Walkthrough',
-      'Start Tutorial',
-      'Skip for Now',
-      'Skip Tutorial',
-      'Replay Tutorial',
-      'Close Tutorial',
-      'Tutorial Complete',
+      'Guided Walkthrough',
+      'Start Guided Walkthrough',
+      'Not Now',
+      'Skip Walkthrough',
+      'Replay Guided Walkthrough',
+      'Close Walkthrough',
+      'Walkthrough Complete',
       'Help & Tutorial',
       'What My Experiments Contains',
       'Opening a Worked Example',

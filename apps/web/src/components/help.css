@@ -12,7 +12,9 @@
   top: calc(100% + 8px);
   right: 0;
   z-index: 30;
-  width: min(340px, 90vw);
+  /* 380, not 340 (2026-10-12): the wider measure is what lets the whole popover
+     fit its own 558px box at desktop without scrolling past its last section. */
+  width: min(380px, 92vw);
   max-height: min(70vh, 560px);
   overflow-y: auto;
   background: var(--surface);
@@ -62,10 +64,13 @@
 }
 
 .help-panel-body {
-  padding: 14px;
+  /* `--space-md` padding and a `--space-sm` gap, down from a hand-authored 14px:
+     the popover must fit its own 558px box with every honesty sentence it shows,
+     and 14 was off the spacing scale anyway. */
+  padding: var(--space-md);
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--space-sm);
 }
 
 /* ONE SELECTOR LIST, NOT TWO MATCHING RULES. The `<summary>` of `.help-more`
@@ -76,6 +81,8 @@
  * literals were new, AND two rules with identical values are exactly how the
  * record sidebar's gutter drifted apart earlier in this branch. */
 .help-section h3,
+.help-onpage h3,
+.help-walkthrough h3,
 .help-more > summary {
   font-size: 11px;
   font-weight: 600;
@@ -84,7 +91,9 @@
   color: var(--text-slate);
   margin-bottom: 6px;
 }
-.help-section p {
+.help-section p,
+.help-onpage p,
+.help-walkthrough p {
   font-size: 12.5px;
   line-height: 1.55;
   color: var(--text-secondary);
@@ -137,7 +146,8 @@
   flex-direction: column;
   gap: 5px;
 }
-.help-steps li {
+.help-steps li,
+.help-step-details li {
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--text-secondary);
@@ -145,4 +155,82 @@
 .help-steps strong {
   color: var(--text-strong);
   font-weight: 600;
+}
+
+/* ON THIS PAGE (2026-10-12) — the screen's own one-liner, first. Set on the
+ * action tint so it reads as "here", distinct from the global sections below it.
+ * Tokens only: the type treatment is the shared selector list above. */
+.help-onpage {
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-inner);
+  background: var(--action-tint);
+}
+.help-onpage p {
+  color: var(--text-strong);
+}
+.help-onpage strong {
+  color: var(--action-hover);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* The Synthetic workspace section's own small disclosure: the mode token and
+ * every bound of the diagnostic, together. */
+.help-inline-more {
+  margin-top: var(--space-xs);
+}
+.help-inline-more > summary {
+  cursor: pointer;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  color: var(--action);
+}
+.help-inline-more > summary:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-token);
+}
+.help-inline-more[open] > p {
+  margin-top: var(--space-sm);
+}
+
+/* The Guided Walkthrough row — last, one control. */
+.help-walkthrough {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-faint);
+}
+.help-walkthrough h3 {
+  margin-bottom: 0;
+}
+
+/* The chain: five labels on two or three lines, separated by a quiet arrow drawn
+ * by CSS so no glyph reaches the accessible name. */
+.help-steps-chain {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: var(--space-2xs) var(--space-xs);
+}
+.help-steps-chain li + li::before {
+  content: "→" / "";
+  margin-right: var(--space-xs);
+  color: var(--text-muted);
+}
+.help-steps-note {
+  margin-top: var(--space-2xs);
+}
+.help-step-details {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+.help-step-details strong {
+  color: var(--text-strong);
+  font-weight: var(--font-weight-semibold);
 }

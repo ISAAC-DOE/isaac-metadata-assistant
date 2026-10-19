@@ -31,6 +31,7 @@ import { AssistantRailToggleSlotContext } from './AssistantDrawer';
 import type { AssistantPrefill } from '../lib/assistantAsk';
 import {
   ASSISTANT_COMPOSER_HELPER,
+  ASSISTANT_COMPOSER_HELPER_MEMORY,
   ASSISTANT_NO_MODEL_CLAIM,
   ASSISTANT_UNAVAILABLE,
   MEMORY_UNAVAILABLE_CAVEAT,
@@ -2452,7 +2453,7 @@ export function AssistantPanel({
             * detector reported on this dock. */}
         <p className="assistant-dock-note">
           <span id={composerHelperId} className="assistant-composer-helper">
-            {ASSISTANT_COMPOSER_HELPER}
+            {queryScope === 'memory' ? ASSISTANT_COMPOSER_HELPER_MEMORY : ASSISTANT_COMPOSER_HELPER}
           </span>{' '}
           <span id={noModelClaimId} className="assistant-no-model">
             {ASSISTANT_NO_MODEL_CLAIM}

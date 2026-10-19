@@ -55,11 +55,21 @@ function topLevelLabels(container: HTMLElement): string[] {
     if (child.tagName === 'DETAILS') {
       return (child.querySelector('summary')?.textContent ?? '').trim();
     }
-    return (child.querySelector('h3')?.textContent ?? '').trim();
+    // The two rows added 2026-10-12 ("On this page" and the walkthrough control)
+    // are named regions without an <h3> of their own; they are listed by name.
+    return (
+      child.querySelector('h3')?.textContent ??
+      child.getAttribute('aria-label') ??
+      ''
+    ).trim();
   });
 }
 
 const BEHIND_THE_DISCLOSURE = [
+  // Added 2026-10-12: the five steps' individual checks moved here when "How it
+  // works" became a one-line chain of their names (the popover did not fit its own
+  // 558px box). The names, in order, are still the visible `ol.help-steps`.
+  'What each step checks',
   'Where values come from',
   'Three separate signals',
   'Three gates on export',
@@ -69,27 +79,38 @@ const BEHIND_THE_DISCLOSURE = [
 const STAYS_OPEN = ['How it works', 'No guessing', 'Synthetic workspace'];
 
 describe('UX-021b · Help is four top-level items', () => {
-  it('shows exactly four, and the fourth is the disclosure', () => {
+  /*
+   * ~~"shows exactly four, and the fourth is the disclosure"~~ — SIX since
+   * 2026-10-12, and the four it pinned are unchanged in order. Two rows were added
+   * around them: "On this page" FIRST (the screen's own one-liner — the popover said
+   * the same thing on every route), and the Guided Walkthrough control LAST (it
+   * replaced a link to Settings inside "How it works"). Neither is a section of
+   * explanation, which is why neither carries a `.help-section` heading.
+   */
+  it('shows the four it always did, between "On This Page" and the walkthrough control', () => {
     const { container } = openHelp();
     const top = topLevelLabels(container);
-    expect(top).toHaveLength(4);
-    expect(top.slice(0, 3)).toEqual(STAYS_OPEN);
+    expect(top).toHaveLength(6);
+    expect(top[0]).toBe('On This Page');
+    expect(top.slice(1, 4)).toEqual(STAYS_OPEN);
     // Named rather than matched loosely: the summary has to say what is behind
     // it, or the reduction hides the claims instead of deferring them.
-    expect(top[3]).toBe('How values, signals and gates work');
+    expect(top[4]).toBe('How values, signals and gates work');
+    expect(top[5]).toBe('Guided Walkthrough');
   });
 
-  it('deleted nothing: all seven sections are still in the DOM', () => {
+  // Eight since 2026-10-12 — "What each step checks" joined the disclosure.
+  it('deleted nothing: all eight sections are still in the DOM', () => {
     const { container } = openHelp();
     // The exact set, so removing a section fails here rather than quietly
     // shrinking a count nobody reads.
     expect(new Set(allHeadings(container))).toEqual(
       new Set([...STAYS_OPEN, ...BEHIND_THE_DISCLOSURE]),
     );
-    expect(allHeadings(container)).toHaveLength(7);
+    expect(allHeadings(container)).toHaveLength(8);
   });
 
-  it('puts exactly the four mechanism sections behind the disclosure', () => {
+  it('puts exactly the mechanism sections behind the disclosure', () => {
     const { container } = openHelp();
     const more = container.querySelector('details.help-more');
     expect(more, 'the disclosure is missing').not.toBeNull();

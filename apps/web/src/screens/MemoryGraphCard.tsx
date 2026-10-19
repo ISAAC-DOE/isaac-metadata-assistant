@@ -16,7 +16,7 @@
  * un-embedded figures), a scientific relationship map, or a validation verdict.
  */
 import './graph/graph.css';
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { CircleHelp, LayoutList, Network, Search } from '../components/icons';
@@ -111,6 +111,11 @@ export function MemoryGraphCard({ onReady }: MemoryGraphCardProps = {}) {
   // suggestion asked for the reference data; the plain trigger asked for
   // neither, so nothing is pre-expanded for it.
   const [helpExpand, setHelpExpand] = useState<GraphHelpExpand | null>(null);
+  // Bumped on every open, as the dialog's `key`: the body now stays mounted while
+  // closed (its statements stay in the DOM), and a fresh instance per open keeps
+  // what a remount on open used to give — focus moves in, and the disclosures
+  // inside start from the state `expand` asks for.
+  const [helpOpenCount, setHelpOpenCount] = useState(0);
   const helpTriggerRef = useRef<HTMLButtonElement | null>(null);
   // The help drawer has FOUR openers: the "About This Graph" trigger, the
   // command bar's "Syntax" button, typing `help`, and the "View Technical
@@ -123,6 +128,7 @@ export function MemoryGraphCard({ onReady }: MemoryGraphCardProps = {}) {
     helpReturnRef.current =
       active instanceof HTMLElement && active !== document.body ? active : null;
     setHelpExpand(expand ?? null);
+    setHelpOpenCount((n) => n + 1);
     setHelpOpen(true);
   }, []);
   const closeHelp = useCallback(() => {
@@ -137,24 +143,14 @@ export function MemoryGraphCard({ onReady }: MemoryGraphCardProps = {}) {
 
   return (
     <div className="card placeholder-card memory-graph-card">
-      <div className="memory-graph-titlerow">
-        <h2 className="memory-graph-heading">Graph</h2>
-        {helpAvailable && (
-          <button
-            ref={helpTriggerRef}
-            type="button"
-            className="memory-graph-help-trigger"
-            aria-haspopup="dialog"
-            aria-expanded={helpOpen}
-            /* An arrow, not the bare callback: React would pass the MouseEvent
-               as the `expand` argument. */
-            onClick={() => openHelp()}
-          >
-            <CircleHelp size={13} strokeWidth={2} aria-hidden="true" />
-            About This Graph
-          </button>
-        )}
-      </div>
+      {/* THE CARD'S HEADING IS FOR THE OUTLINE (2026-10-18). The selected page tab
+          directly above already reads "Graph", so a visible second "Graph" was the
+          same word twice; the h2 stays for the heading outline (screen readers
+          navigate by it), and About This Graph moved into the controls row, where
+          it is one of the controls. Together with folding the description and the
+          counts into About This Graph, that is what brings the canvas onto the
+          first screen. */}
+      <h2 className="memory-graph-heading sr-only">Graph</h2>
       {/* P36V PR2 slice B — ONE visible boundary statement. The longer
           disclosures that used to stack up here (the un-embedded source graph's
           figures, the four-layer projection chain, the snapshot provenance line,
@@ -162,17 +158,48 @@ export function MemoryGraphCard({ onReady }: MemoryGraphCardProps = {}) {
           dropped: Graph Data carries the layer chain and the un-embedded
           figures, Cluster Colors carries the cluster caveat, and Technical
           Details carries the provenance fingerprint. */}
-      <p className="memory-graph-subtitle">
-        This graph shows project-file relationships and navigation leads. It does not represent
-        scientific truth or causality.
-      </p>
+      {/* ONE visible boundary statement — MOVED, not folded away (review and
+          re-review, 2026-10-18). The counts line went into About This Graph ("What
+          You Are Viewing" carries the counts and the "never the full source graph"
+          scope), whose body now stays in the DOM while closed. The boundary
+          sentence itself is on the status line above the canvas, in short form
+          ("Navigation leads to verify — it does not represent scientific truth or
+          causality."), because the status line had the room and this header did
+          not: the canvas stays on the first screen. ~~"its lead carries this
+          sentence"~~ was false — the dialog's lead never did. */}
       {graph.status === 'loading' && <LoadingPanel label="Loading graph…" />}
       {graph.status === 'error' && <MemoryGraphError error={graph.error} onRetry={graph.reload} />}
       {graph.status === 'data' && (
-        <MemoryGraphBody data={graph.data} onReady={onReady} onOpenHelp={openHelp} />
+        <MemoryGraphBody
+          data={graph.data}
+          onReady={onReady}
+          onOpenHelp={openHelp}
+          helpTrigger={
+            helpAvailable ? (
+              <button
+                ref={helpTriggerRef}
+                type="button"
+                className="memory-graph-help-trigger"
+                aria-haspopup="dialog"
+                aria-expanded={helpOpen}
+                /* An arrow, not the bare callback: React would pass the MouseEvent
+                   as the `expand` argument. */
+                onClick={() => openHelp()}
+              >
+                <CircleHelp size={13} strokeWidth={2} aria-hidden="true" />
+                About This Graph
+              </button>
+            ) : null
+          }
+        />
       )}
-      {helpOpen && graph.status === 'data' && graph.data.available && (
+      {/* ALWAYS RENDERED, HIDDEN WHILE CLOSED (re-review, 2026-10-18). Mounting it
+          only on open meant the boundary, the counts and the projection scope
+          existed only while the dialog was up. */}
+      {graph.status === 'data' && graph.data.available && (
         <GraphHelp
+          key={helpOpenCount}
+          open={helpOpen}
           meta={graph.data.meta}
           relationTypes={[...new Set(graph.data.edges.flatMap((e) => e.relations))].sort()}
           paletteSlots={PALETTE_SLOTS}
@@ -194,10 +221,13 @@ function MemoryGraphBody({
   data,
   onReady,
   onOpenHelp,
+  helpTrigger,
 }: {
   data: ApiMemoryGraphResponse;
   onReady?: (ctx: GraphSurfaceContext | null) => void;
   onOpenHelp: (expand?: GraphHelpExpand) => void;
+  /** About This Graph's trigger, owned (and focus-restored) by the card. */
+  helpTrigger?: ReactNode;
 }) {
   if (!data.available) {
     return (
@@ -220,7 +250,14 @@ function MemoryGraphBody({
       </p>
     );
   }
-  return <MemoryGraphAvailable data={data} onReady={onReady} onOpenHelp={onOpenHelp} />;
+  return (
+    <MemoryGraphAvailable
+      data={data}
+      onReady={onReady}
+      onOpenHelp={onOpenHelp}
+      helpTrigger={helpTrigger}
+    />
+  );
 }
 
 // --- available state ---------------------------------------------------------
@@ -229,10 +266,12 @@ function MemoryGraphAvailable({
   data,
   onReady,
   onOpenHelp,
+  helpTrigger,
 }: {
   data: ApiMemoryGraphResponse;
   onReady?: (ctx: GraphSurfaceContext | null) => void;
   onOpenHelp: (expand?: GraphHelpExpand) => void;
+  helpTrigger?: ReactNode;
 }) {
   const navigate = useNavigate();
   const index = useMemo<GraphIndex>(() => buildGraphIndex(data), [data]);
@@ -658,8 +697,6 @@ function MemoryGraphAvailable({
     [navigate],
   );
 
-  const meta = data.meta;
-
   return (
     <div className="memory-graph-available">
       {/* P36V PR2 slice B — the header is now ONE data line. The counts keep
@@ -668,13 +705,6 @@ function MemoryGraphAvailable({
           chain and the provenance fingerprint all moved into About This Graph
           (Graph Data / Technical Details). Nothing was dropped. */}
       <div className="memory-graph-header">
-        <p className="memory-graph-counts">
-          {meta.counts.files} files · {meta.counts.concepts} concepts ·{' '}
-          {meta.counts.reference_edges} reference{meta.counts.reference_edges === 1 ? '' : 's'} ·{' '}
-          {meta.counts.communities_rendered} communit
-          {meta.counts.communities_rendered === 1 ? 'y' : 'ies'} shown — an advisory served-file
-          projection, never the full source graph.
-        </p>
         {data.truncated && (
           <p className="memory-graph-truncated-note">
             Showing a capped subset of the served-file graph — the node or reference count reached
@@ -734,6 +764,7 @@ function MemoryGraphAvailable({
           buttonRef={filtersToggleRef}
         />
         <GraphPathToggle id={pathId} open={pathOpen} onToggle={() => setPathOpen((o) => !o)} />
+        {helpTrigger}
       </div>
 
       {filtersOpen && (
@@ -813,6 +844,14 @@ function MemoryGraphAvailable({
             </button>
           </span>
         )}
+        {/* THE ONE VISIBLE BOUNDARY CLAUSE (re-review, 2026-10-18). The full
+            statements live in About This Graph, which stays in the DOM while
+            closed; this is the short form a reader meets without opening it. It
+            sits on the status line, which has the room, so the canvas does not
+            move down for it. */}
+        <p className="memory-graph-boundary">
+          Navigation leads to verify — it does not represent scientific truth or causality.
+        </p>
       </div>
       {/* Exactly ONE polite live region on this surface. Always mounted (an
           empty container announces reliably; one created on demand does not).

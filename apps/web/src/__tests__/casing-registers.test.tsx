@@ -1050,7 +1050,8 @@ const HARDCODED_LABEL_SLOT_CEILING: Readonly<Record<string, number>> = {
   'screens/GovernancePage.tsx': 1,
   'screens/GuidedCompletion.tsx': 2,
   'screens/HistoricalImport.tsx': 22,
-  'screens/LoadMaterials.tsx': 1,
+  // `screens/LoadMaterials.tsx` dropped 2026-10-12: its last hardcoded label-slot
+  // literal moved into `lib/labels.ts` when the on-ramp became two widgets.
   'screens/MemoryGraphCard.tsx': 3,
   'screens/ProjectMemory.tsx': 4,
   'screens/RecordWorkbench.tsx': 1,

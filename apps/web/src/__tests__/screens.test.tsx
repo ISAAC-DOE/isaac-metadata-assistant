@@ -36,7 +36,9 @@ describe('router-level smoke: each surface renders without error', () => {
 
   it('S2 · Load Materials (/load)', () => {
     const { getByText } = renderAt('/load');
-    expect(getByText('Worked Example: CuO Cu K-edge XANES')).toBeInTheDocument();
+    // Renamed 2026-10-12: the on-ramp is two widgets, each titled by its question.
+    expect(getByText('Try a Worked Example')).toBeInTheDocument();
+    expect(getByText('Can I Load My Own Files?')).toBeInTheDocument();
   });
 
   it('S3 · Review Record (/record/:id) — live bundle', async () => {
@@ -66,7 +68,9 @@ describe('router-level smoke: each surface renders without error', () => {
   it('Project Memory (/memory) is a separate destination', async () => {
     stubFetchRoutes({ 'GET /api/graph/status': { body: graphStatusAvailable } });
     const { getByText, findByText } = renderAt('/memory');
-    expect(getByText('Memory / Query Plane')).toBeInTheDocument();
+    // ~~'Memory / Query Plane'~~ — the eyebrow was removed 2026-10-12 (clutter audit;
+    // an eyebrow over a heading restates it). The destination is named by its h1.
+    expect(getByText('Project Memory', { selector: 'h1' })).toBeInTheDocument();
     // Freshness is live from the endpoint, not a hardcoded claim.
     await findByText('Memory Available');
   });

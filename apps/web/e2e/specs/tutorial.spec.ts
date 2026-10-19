@@ -95,7 +95,10 @@ const chip = (page: import('@playwright/test').Page) => page.locator('span.mode-
  * renders in — see `experimentsWithRows` above.
  */
 async function startFromEmptyState(page: import('@playwright/test').Page) {
-  await page.getByRole('button', { name: 'Launch Guided Demo' }).click();
+  // Start or Replay: since 2026-10-12 the one control is named by this browser's
+  // own completion state, so a test that marked the walkthrough finished finds it
+  // under "Replay".
+  await page.getByRole('button', { name: /^(Start|Replay) Guided Walkthrough$/ }).click();
   await expect(bar(page)).toBeVisible({ timeout: 20_000 });
   await expect(mark(page)).toBeVisible({ timeout: 20_000 });
   await expect(mark(page)).toHaveAttribute('data-tutorial-step', 'experiments-overview');
@@ -110,9 +113,9 @@ test.describe('@interaction the first-run offer', () => {
     await expect(page.locator('.exp-row')).toHaveCount(5);
     await expect(page.locator('.queue-empty-state')).toHaveCount(0);
 
-    const offer = page.getByRole('region', { name: 'Take the Guided Walkthrough' });
+    const offer = page.getByRole('region', { name: 'Guided Walkthrough' });
     await expect(offer.or(page.locator('section.tutorial-offer')).first()).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Take the Guided Walkthrough' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Guided Walkthrough' })).toBeVisible();
     // THIS ASSERTION WAS RE-POINTED, AND IT IS NOW STRICTLY STRONGER. It used to
     // require `/only reads/i`, pinning the sentence "It only reads — it answers
     // nothing and changes nothing" — which is FALSE: pressing the button two lines
@@ -126,16 +129,19 @@ test.describe('@interaction the first-run offer', () => {
     await expect(offerCopy).toContainText(/no record of yours is created, changed, or removed/i);
     await expect(offerCopy).not.toContainText(/only reads/i);
     await expect(offerCopy).not.toContainText(/changes nothing/i);
-    await expect(page.getByRole('button', { name: 'Start Tutorial' })).toBeEnabled();
-    await expect(page.getByRole('button', { name: 'Skip for Now' })).toBeEnabled();
-    // Exactly two, and the empty state's primary is not a third: whichever surface
-    // owns the CTA, one action must not be offered under two names at once.
-    await expect(page.getByRole('button', { name: 'Launch Guided Demo' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Start Guided Walkthrough' })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Not Now' })).toBeEnabled();
+    // Exactly two, and the empty state's primary is not a third. INVERTED 2026-10-12,
+    // and the rule it protects is unchanged: this used to assert the empty state's
+    // "Launch Guided Demo" was ABSENT, because one action must not be offered under
+    // two names at once. There is now ONE name for it everywhere, so the same rule is
+    // stated directly — exactly one control on this screen starts the walkthrough.
+    await expect(page.getByRole('button', { name: 'Start Guided Walkthrough' })).toHaveCount(1);
   });
 
   test('"Skip for Now" hides the offer and creates NO session', async ({ page, app, tutorial }) => {
     await app.open(experimentsWithRows);
-    await page.getByRole('button', { name: 'Skip for Now' }).click();
+    await page.getByRole('button', { name: 'Not Now' }).click();
 
     await expect(page.locator('section.tutorial-offer')).toHaveCount(0);
     // The distinction that matters: declining the OFFER is not the same event as
@@ -155,7 +161,7 @@ test.describe('@interaction the first-run offer', () => {
     // And it is "not now", not "never": a fresh visit offers it again, because
     // dismissal is session-scoped and deliberately unpersisted.
     await app.open(experimentsWithRows);
-    await expect(page.getByRole('heading', { name: 'Take the Guided Walkthrough' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Guided Walkthrough' })).toBeVisible();
   });
 
   test('is not offered to a browser that already finished it', async ({ page, app, tutorial }) => {
@@ -169,8 +175,8 @@ test.describe('@interaction the first-run offer', () => {
     // And nothing takes its place on this screen. "Replay Tutorial" is the exact label
     // of the Settings control that starts the walkthrough; a second control under that
     // name here is the defect this assertion has always guarded against.
-    await expect(page.getByRole('button', { name: 'Replay Tutorial' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Start Tutorial' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Replay Guided Walkthrough' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Start Guided Walkthrough' })).toHaveCount(0);
   });
 });
 
@@ -201,11 +207,14 @@ test.describe("@interaction the empty workspace's own primary", () => {
     await expect(page.getByRole('heading', { name: 'Start Your First Experiment' })).toBeVisible();
     await expect(page.locator('section.tutorial-offer')).toHaveCount(0);
 
-    // The way in — and it is the only one, under exactly one name.
-    const launch = page.getByRole('button', { name: 'Launch Guided Demo' });
+    // The way in — and it is the only one, under exactly one name. This browser has
+    // FINISHED the walkthrough, so since 2026-10-12 that name is "Replay Guided
+    // Walkthrough" (one name per thing, Start or Replay by completion state); the
+    // Start form is therefore absent, and the Replay form appears exactly once.
+    const launch = page.getByRole('button', { name: 'Replay Guided Walkthrough' });
     await expect(launch).toBeEnabled();
-    await expect(page.getByRole('button', { name: 'Start Tutorial' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Replay Tutorial' })).toHaveCount(0);
+    await expect(launch).toHaveCount(1);
+    await expect(page.getByRole('button', { name: 'Start Guided Walkthrough' })).toHaveCount(0);
 
     // It STARTS the walkthrough rather than navigating to somewhere that might. This is
     // the assertion the control it replaced could not have passed: that one's entire
@@ -233,7 +242,7 @@ test.describe("@interaction the empty workspace's own primary", () => {
      * until the session's records arrive — which is why it carries an explicit guard.
      */
     await app.open(experiments);
-    const launch = page.getByRole('button', { name: 'Launch Guided Demo' });
+    const launch = page.getByRole('button', { name: 'Start Guided Walkthrough' });
     // `dblclick` rather than two awaited clicks: the second lands while the create is
     // still in flight, which is the only timing that reproduces the defect.
     await launch.dblclick();
@@ -498,7 +507,7 @@ test.describe('@interaction leaving the walkthrough', () => {
       if (r.method() === 'DELETE') deletes.push(new URL(r.url()).pathname);
     });
 
-    await page.getByRole('button', { name: 'Close Tutorial' }).click();
+    await page.getByRole('button', { name: 'Close Walkthrough' }).click();
 
     // The overlay and the chrome go.
     await expect(mark(page)).toHaveCount(0);
@@ -542,7 +551,7 @@ test.describe('@interaction leaving the walkthrough', () => {
     // …and the reader is left on a usable screen: the way back in is present and
     // operable, not disabled by the walkthrough they just escaped from.
     await expect(page.getByRole('heading', { name: 'Start Your First Experiment' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Launch Guided Demo' })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Start Guided Walkthrough' })).toBeEnabled();
   });
 
   /*
@@ -566,10 +575,10 @@ test.describe('@interaction leaving the walkthrough', () => {
     tutorial,
   }) => {
     await app.open(experimentsWithRows);
-    await expect(page.getByRole('heading', { name: 'Take the Guided Walkthrough' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Guided Walkthrough' })).toBeVisible();
 
     // Started from the CARD, because that is the control this test is about.
-    await page.getByRole('button', { name: 'Start Tutorial' }).click();
+    await page.getByRole('button', { name: 'Start Guided Walkthrough' }).click();
     await expect(bar(page)).toBeVisible({ timeout: 20_000 });
     await expect(mark(page)).toBeVisible({ timeout: 20_000 });
     expect(tutorial.sessionsCreated().length).toBe(1);
@@ -586,7 +595,7 @@ test.describe('@interaction leaving the walkthrough', () => {
     // "never". Completion is the only thing that retires it, and escaping is not
     // completion — asserted directly in the test above.
     await app.open(experimentsWithRows);
-    await expect(page.getByRole('heading', { name: 'Take the Guided Walkthrough' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Guided Walkthrough' })).toBeVisible();
   });
 
   test('"Skip Tutorial" in the mark also discards the session', async ({ page, app, tutorial }) => {
@@ -594,7 +603,7 @@ test.describe('@interaction leaving the walkthrough', () => {
     await startFromEmptyState(page);
     const session = tutorial.sessionsCreated()[0];
 
-    await page.getByRole('button', { name: 'Skip Tutorial' }).click();
+    await page.getByRole('button', { name: 'Skip Walkthrough' }).click();
 
     await expect(mark(page)).toHaveCount(0);
     await expect(bar(page)).toHaveCount(0);
@@ -648,7 +657,7 @@ test.describe('@interaction reloading', () => {
   test('after leaving, a refresh comes back to the ordinary empty workspace', async ({ page, app }) => {
     await app.open(experiments);
     await startFromEmptyState(page);
-    await page.getByRole('button', { name: 'Close Tutorial' }).click();
+    await page.getByRole('button', { name: 'Close Walkthrough' }).click();
     await expect(bar(page)).toHaveCount(0);
 
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -725,7 +734,7 @@ test.describe('@interaction a step whose target is missing', () => {
     );
 
     await page.goto('/settings?tab=help', { waitUntil: 'domcontentloaded' });
-    await page.getByRole('button', { name: 'Replay Tutorial' }).click();
+    await page.getByRole('button', { name: 'Replay Guided Walkthrough' }).click();
 
     await expect(mark(page)).toBeVisible({ timeout: 25_000 });
     expect(tutorial.sessionsCreated().length, 'the session itself is real').toBe(1);
@@ -792,7 +801,7 @@ test.describe('@interaction the walkthrough is quiet', () => {
       `console errors while walking the tutorial:\n${consoleErrors.join('\n')}`
     ).toEqual([]);
 
-    await page.getByRole('button', { name: 'Close Tutorial' }).click();
+    await page.getByRole('button', { name: 'Close Walkthrough' }).click();
     await expect(bar(page)).toHaveCount(0);
 
     expect(tutorial.sessionsCreated().length).toBe(1);
@@ -873,7 +882,7 @@ test.describe('@interaction the walkthrough is quiet', () => {
     await expect(mark(page)).toHaveAttribute('data-tutorial-step', 'record-readiness');
     await expect(page).toHaveURL(/\/record\//);
 
-    await page.getByRole('button', { name: 'Close Tutorial' }).click();
+    await page.getByRole('button', { name: 'Close Walkthrough' }).click();
 
     // The walkthrough chrome goes, and the chip stops claiming the example scope.
     await expect(mark(page)).toHaveCount(0);

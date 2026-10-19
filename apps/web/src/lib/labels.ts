@@ -385,7 +385,20 @@ export const LABELS = {
    * boundary in matching words rather than two independent claims that could
    * drift apart.
    */
-  libraryOverviewHeading: 'Workspace Statistics',
+  /*
+   * ~~'Workspace Statistics'~~ → 'What Needs Me?' (2026-10-12). The card and the
+   * filter toolbar became ONE widget answering the screen's own question — this
+   * file's `ExperimentsHome` docstring has always said the screen answers "what
+   * needs me next?" — so the heading names the question, not the container. It
+   * makes no per-person claim: "me" is the reader at the screen, and the six
+   * phrasings `experiment-library-screen.test.tsx` bans still do not match it.
+   */
+  libraryOverviewHeading: 'What Needs Me?',
+  libraryOverviewInfoLabel: 'About This Summary',
+  // Inside a folder the totals are withheld (they are the workspace's, not the
+  // folder's); the widget keeps the filter and search under this title.
+  libraryFindHeading: 'Find an Experiment',
+  libraryFindInfoLabel: 'About This Search',
   libraryOverviewTotal: 'Experiments',
   libraryOverviewNeedsAttention: 'Needs Attention',
   libraryOverviewRuns: 'Runs Recorded',
@@ -999,6 +1012,13 @@ export const LABELS = {
     'No screen in this application answers to this address. The link may be out of date, or ' +
     'the address may have a typo.',
   notFoundAttemptedLabel: 'You asked for:',
+  // The record top bar's id control (2026-10-12). The accessible name carries the
+  // FULL record id after this prefix; the visible text shows it head…tail, and
+  // the control copies the id alone — never the surrounding filename.
+  actionCopyRecordId: 'Copy Record ID',
+  recordIdCopied: 'Copied to the clipboard.',
+  recordIdCopyFailed: 'Copy did not work in this browser; the full record ID is shown beside the button.',
+  notFoundScopeInfoLabel: 'About This Address',
   notFoundRecordScope:
     'This is about the address, not about your data. Nothing has been deleted, and no record ' +
     'was looked up — an address ISAAC does not recognise never reaches a record at all.',
@@ -1020,6 +1040,33 @@ export const LABELS = {
   actionReadPolicy: 'Read Policy',
   actionBackToComplete: 'Back to Complete',
   actionLoadLocal: 'Load Local Structured Files',
+  /*
+   * LOAD MATERIALS AS TWO WIDGETS (2026-10-12 clutter audit). Each widget answers
+   * one question a reader arrives with. The detail each card used to print in full
+   * moved into its widget's info panel and is unchanged there.
+   */
+  loadExampleTitle: 'Try a Worked Example',
+  loadExampleSub: 'A fictional year-2099 CuO / Cu K-edge XANES session — a complete example run, ~10s.',
+  loadExampleInfoLabel: 'About the Worked Example',
+  loadExampleBody:
+    "It assembles the evidenced draft, holds back the fields it won't guess, and — once you " +
+    'confirm them — validates against ISAAC v1.05.',
+  loadOwnFilesTitle: 'Can I Load My Own Files?',
+  loadOwnFilesInfoLabel: 'About File Uploads',
+  loadOwnFilesState: 'Not in this build — uploads are refused',
+  // VISIBLE, always: a security/privacy state (`DEC-35`). It is the one caveat a
+  // reader must not have to open anything to meet.
+  loadOperatorResponsibility:
+    "Keeping real or private artifacts out is the operator's responsibility, not a check this " +
+    'software performs.',
+  // Says what it does: it TRIES an upload, and the server's refusal comes back.
+  actionAskServer: 'Try an Upload',
+  loadAskServerHint:
+    'It opens no file picker, takes no dropped file and sends no file — it asks the upload route, and ' +
+    'shows the refusal it gives.',
+  loadGovernanceApproval:
+    'Real SLAC/SSRL or private artifacts require written data-governance approval before they can be ' +
+    'read, indexed, or sent to any model.',
   actionDontKnow: "I don't know — leave honestly missing",
 
   // Evidence / preview
@@ -1064,19 +1111,45 @@ export const LABELS = {
    * written, so the offer returns on the next visit, and it stays hidden for the
    * rest of this session so the reader is not asked twice.
    */
-  actionStartTutorial: 'Start Tutorial',
-  actionSkipForNow: 'Skip for Now',
-  actionSkipTutorial: 'Skip Tutorial',
+  /*
+   * ONE NAME PER THING (2026-10-12, owner direction via the site-wide clutter
+   * audit). The tour used to answer to FIVE names — "Take the Guided
+   * Walkthrough", "Start Tutorial", "Launch Guided Demo", "Guided demo" and
+   * "Replay Tutorial" — so a reader met what looked like five features. It is
+   * one thing, the Guided Walkthrough, and its controls carry only the two
+   * verbs that genuinely differ: Start (not finished in this browser) and
+   * Replay (finished). Every entry point that starts it now says the same
+   * thing, because it does the same thing.
+   *
+   * ~~"Skip for Now"~~ → "Not Now": the decline's contract is unchanged — the
+   * completion flag is not written, the offer returns on the next visit, and it
+   * stays hidden for the rest of this session. Only the words moved, to the two
+   * the strip's one line has room for.
+   */
+  actionStartTutorial: 'Start Guided Walkthrough',
+  // The strip's visible verb; its accessible name is `actionStartTutorial`.
+  actionStart: 'Start',
+  actionSkipForNow: 'Not Now',
+  actionSkipTutorial: 'Skip Walkthrough',
   actionTutorialBack: 'Back',
   actionTutorialNext: 'Next',
   actionTutorialFinish: 'Finish',
-  actionCloseTutorial: 'Close Tutorial',
-  actionReplayTutorial: 'Replay Tutorial',
+  actionCloseTutorial: 'Close Walkthrough',
+  actionReplayTutorial: 'Replay Guided Walkthrough',
 
   /*
-   * THE EMPTY STATE'S OWN PRIMARY, and it needed a THIRD name rather than either of
+   * ~~THE EMPTY STATE'S OWN PRIMARY, and it needed a THIRD name rather than either of
    * the two that already exist, because both were already spoken for on surfaces a
-   * reader can reach.
+   * reader can reach.~~ — **WITHDRAWN 2026-10-12, and kept struck because the reasoning
+   * below was sound about a different goal.** It optimised for "no label in the app
+   * addresses two controls"; the measured cost was a reader meeting the same tour under
+   * five names and reading it as five features. The goal now is one name per THING:
+   * every control that starts the walkthrough is `actionStartTutorial` ("Start Guided
+   * Walkthrough"), because every one of them calls the same `startTutorial`. The
+   * collision the paragraph below feared cannot occur on one screen — the first-run
+   * strip requires rows, the empty state requires none, and `/load` renders neither —
+   * so two of them are never on screen together. `actionLaunchGuidedDemo` is removed.
+   * The rest of this note is kept as the record of why it once existed.
    *
    * Not `actionReplayTutorial`: that is the Settings control, and
    * `tutorial-session-lifecycle.test.tsx` pins its ABSENCE from My Experiments so the
@@ -1122,8 +1195,8 @@ export const LABELS = {
    * genuinely happens next: the record opens with its questions already listed.
    */
   actionCreateExperiment: 'Create Experiment',
-  createExperimentHint:
-    'Starts an empty record with the questions ISAAC needs already listed, and opens it.',
+  // One line since 2026-10-12; it still says only what genuinely happens next.
+  createExperimentHint: 'Opens an empty record with its questions already listed.',
 
   /** The form's own heading, distinct from the button that opens it, so a screen
    *  reader announcing the expanded region is not told "Create Experiment" twice. */
@@ -1302,9 +1375,15 @@ export const LABELS = {
    * are, reads what it can, proposes what it finds), and "import your files"
    * would imply the one thing it does not do.
    */
-  emptyExperimentsBody:
-    'Create your first experiment, bring in work you already have, validate an existing ' +
-    'record, or explore ISAAC with the guided demo.',
+  /*
+   * SHORTENED 2026-10-12 (clutter audit). The previous sentence listed the four
+   * cards below it one by one — the screen said each choice twice, once in the lede
+   * and once on its card. The lede now frames the choice and the cards name it.
+   * "bring in work you already have" is kept verbatim: it is the phrase
+   * `historical-import.test.tsx` pins, for the reason given above.
+   */
+  emptyExperimentsBody: 'Start fresh, or bring in work you already have.',
+  emptyExperimentsChoices: 'Ways to begin',
 
   /*
    * `UX-016`'s IMPORT HALF — the first-run discovery of Pillar 2.
@@ -1316,10 +1395,22 @@ export const LABELS = {
    * committed synthetic fixtures, and really does put every candidate through the
    * proposal review a person decides.
    */
+  /*
+   * ONE LINE since 2026-10-12. The reassurance it carried — "review every
+   * candidate before any of it becomes a value" — is kept in substance: nothing
+   * becomes a value until a person reviews it. The mechanism (record where each
+   * file lives, see what ISAAC can read) is the destination's own landing copy.
+   */
   historicalImportHint:
-    'Reconstruct a past experiment from the files it is scattered across. Record where ' +
-    'each file lives, see what ISAAC can read out of it, and review every candidate ' +
-    'before any of it becomes a value.',
+    'Rebuild a past experiment; nothing becomes a value unreviewed.',
+  // The empty state's validator card. "Never stored" stays VISIBLE: it is a
+  // privacy state (`DEC-35`), the route's documented contract for
+  // `POST /api/validate/record` — the body "is never written anywhere".
+  validatorCardTitle: 'Schema Validator',
+  validatorCardHint: 'Check a file against the official schema; it is never stored.',
+  validatorCardMore:
+    'It is the same deterministic check this app runs on an exported record, and it names every ' +
+    'failing path.',
   actionOpenHistoricalImport: 'Open Historical Import',
 
   actionOpenValidator: 'Open Validator',
@@ -1451,12 +1542,11 @@ export const LABELS = {
     'recorded that they were not reaching it. Creating one may fail outright, and nothing on ' +
     'this screen establishes that a record created now is stored durably.',
 
-  actionLaunchGuidedDemo: 'Launch Guided Demo',
   // /load, outside a worked example (B-05). One sentence of cause, ahead of the audited
   // `launchGuidedDemoBody` it is always rendered with — so the screen says WHY the
   // button offers a demo rather than a run, before the press, instead of refusing after.
   demoRunsInsideGuidedDemo:
-    'This worked example runs inside the guided demo, which this browser tab has not opened.',
+    'This worked example runs inside the Guided Walkthrough, which this browser tab has not opened.',
   launchGuidedDemoBody:
     'Starting it opens a worked example of its own — a temporary workspace holding five example ' +
     'records, discarded when the tour ends. No record of yours is created, changed, or removed.',
@@ -1589,6 +1679,69 @@ export const LABELS = {
   actionDismissTutorialNotice: 'Dismiss',
 
   /*
+   * HELP → ON THIS PAGE (2026-10-12). One or two lines per screen, read by
+   * `components/HelpPanel.tsx::onThisPage`. Each says what the screen is for and,
+   * where a reader most needs it, what it will NOT do; none names a capability
+   * this build lacks. They sit inside the popover, so every Help guard reads them.
+   */
+  helpOnPageExperiments: 'Your experiments, grouped by what each still needs. Open a row to continue it.',
+  helpOnPageRecord: 'One record. The rail shows each step and what it still needs; nothing is guessed.',
+  helpOnPageComplete: 'The questions still blocking export. “I don’t know” is always a safe answer.',
+  helpOnPageEvidence: 'The evidence this record holds, and the source each entry cites.',
+  helpOnPageExport: 'A dry run: what would still refuse the export. Nothing is written here.',
+  helpOnPageImports: 'Rebuild a past experiment; nothing becomes a value until you review it.',
+  // Two tabs with two scopes: the workspace's records, and this build's own checks.
+  helpOnPageStatistics: "Workspace record counts and this build's own checks; nothing here gates export.",
+  helpOnPageSettings: "This deployment's privacy boundaries, integrations and developer tools.",
+  helpOnPageGovernance: 'Check a record file against the official schema, or browse it. Nothing is stored.',
+  helpOnPageMemory: "A developer map of this project's own files and docs: leads to verify, never truth.",
+  helpOnPageLoad: 'The worked example, and why your own files cannot be loaded in this build.',
+  helpOnPageUnknown: 'This address matches no screen in ISAAC.',
+  helpWalkthroughOpen: 'The Guided Walkthrough is open in this tab.',
+
+  /*
+   * PROJECT MEMORY (2026-10-12 clutter audit): one sentence of introduction, and
+   * the Overview as three widgets, one question each. Developer surface (`DEC-26`).
+   */
+  // Keeps the claim P24.8 pins — it surfaces related FILES and concepts, never
+  // "related records" (`memory-honesty.test.tsx`).
+  // One line; the paragraph it replaced is `memoryIntroFull`, verbatim, behind the
+  // info tip beside it — including "it never validates, completes, or supplies a value".
+  memoryIntro: 'Related files and concepts from this project — leads to verify, never truth.',
+  memoryTrustTitle: 'Can I Trust the Snapshot?',
+  memoryTrustSub:
+    'Graphify is a memory plane, not a truth plane — every lead points back to a cited file to confirm.',
+  /*
+   * THE FULL INTRODUCTION, behind the page's info tip (2026-10-12). The visible
+   * intro is one sentence (`DEC-35`); this is the paragraph it replaced, verbatim,
+   * plus the orientation line that used to sit under the Overview card — nothing
+   * in it was dropped, an independent review checked.
+   */
+  memoryIntroFull:
+    "Project Memory is the assistant's memory and navigation surface — Graphify plus project docs. It " +
+    'is deliberately separate from the experiment queue and never appears inside it. It surfaces ' +
+    'related files and concepts, prior documents, and "how is this connected?" answers as leads to ' +
+    'verify — it never validates, completes, or supplies a value.',
+  memoryAllTabsRead: 'Sources, Concepts and Graph all read the memory graph summarised above.',
+  memoryIntroInfoLabel: 'About Project Memory',
+  historicalImportInfoLabel: 'How Rebuilding a Past Experiment Works',
+  historicalImportHintMore:
+    'Record where each file lives, see what ISAAC can read out of it, and review every candidate ' +
+    'before any of it becomes a value.',
+  memoryTrustInfoLabel: 'What Each Check Means',
+  memorySizeTitle: 'How Big Is It?',
+  memorySizeViews: 'Counts to Show',
+  memoryOpenSources: 'Browse the sources',
+  memoryOpenGraph: 'Open the graph',
+  memoryOpenConcepts: 'Browse the concepts',
+  memoryOriginTitle: 'Where Did It Come From?',
+  // The graph command bar's disclosure for the hint and the suggested commands.
+  graphCommandsToggle: 'Suggestions',
+  graphCanvasInfoLabel: 'About This View',
+  helpStepsNote: "Each step is re-derived from the record's current state; export needs all three gates.",
+  helpOnPageHeading: 'On This Page',
+
+  /*
    * The first-run offer (`components/TutorialPromotion.tsx`).
    *
    * "It only reads — it answers nothing and changes nothing" WAS FALSE, and it sat
@@ -1613,7 +1766,9 @@ export const LABELS = {
    * and must not grow into claiming: that the ordinary workspace is empty. It says the
    * reader's records are untouched, which is a statement about this button's reach.
    */
-  tutorialOfferTitle: 'Take the Guided Walkthrough',
+  tutorialOfferTitle: 'Guided Walkthrough',
+  tutorialOfferLead: 'New here?',
+  tutorialOfferLine: 'A short tour of the real screens, on its own examples.',
   tutorialOfferBody:
     'A short guided tour of this app, pointing at the real controls on the real screens: what this ' +
     'list holds, how a record shows what it still needs, how evidence and confirmation work, and ' +
@@ -1640,7 +1795,7 @@ export const LABELS = {
    * And "start it again" replaces "reopen this walkthrough", because a replay mints a
    * NEW session at step one; the one just finished cannot be reopened.
    */
-  tutorialCompleteTitle: 'Tutorial Complete',
+  tutorialCompleteTitle: 'Walkthrough Complete',
   tutorialCompleteBody:
     'That is the whole workflow. The worked example you were walking through is gone now, and so ' +
     'is anything you answered inside it — it was a temporary copy of the five examples, kept apart ' +

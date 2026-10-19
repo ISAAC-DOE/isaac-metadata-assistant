@@ -453,7 +453,7 @@ const STATES: readonly VisualState[] = [
     async reach({ page, app }) {
       await app.open(experimentsExampleSurface);
       await expect(page.locator('section.tutorial-offer')).toHaveCount(1);
-      const start = page.getByRole('button', { name: 'Start Tutorial' });
+      const start = page.getByRole('button', { name: 'Start Guided Walkthrough' });
       await expect(start).toBeVisible({ timeout: 20_000 });
       return start;
     },
@@ -516,7 +516,7 @@ const STATES: readonly VisualState[] = [
       await expect(page.getByRole('heading', { name: 'My Experiments' })).toBeVisible();
       // The empty state's own primary. It did not exist when this sweep was
       // written; the heading stood in for it because the screen offered nothing.
-      const launch = page.getByRole('button', { name: 'Launch Guided Demo' }).first();
+      const launch = page.getByRole('button', { name: 'Start Guided Walkthrough' }).first();
       await expect(launch).toBeVisible({ timeout: 20_000 });
       return launch;
     },
@@ -614,7 +614,7 @@ const STATES: readonly VisualState[] = [
     async reach({ page, app }) {
       await app.goto('/settings?tab=help');
       await settled(page);
-      const replay = page.getByRole('button', { name: 'Replay Tutorial' });
+      const replay = page.getByRole('button', { name: 'Replay Guided Walkthrough' });
       await expect(replay).toBeVisible({ timeout: 20_000 });
       return replay;
     },
@@ -1206,7 +1206,7 @@ const STATES: readonly VisualState[] = [
     async reach({ page, app, tutorial }) {
       await app.goto('/settings?tab=help');
       await settled(page);
-      await page.getByRole('button', { name: 'Replay Tutorial' }).click();
+      await page.getByRole('button', { name: 'Replay Guided Walkthrough' }).click();
 
       const mark = page.locator('.tutorial-mark');
       await expect(mark).toBeVisible({ timeout: 25_000 });
@@ -1787,7 +1787,7 @@ test.describe('probe self-check (injected geometry)', () => {
     await app.open(experimentsSurface);
     // A real product control, not an injected one — if the probe has become
     // noise, this is where it shows.
-    expect(await primaryHealth(page.getByRole('button', { name: 'Launch Guided Demo' }))).toBe('ok');
+    expect(await primaryHealth(page.getByRole('button', { name: 'Start Guided Walkthrough' }))).toBe('ok');
     expect(await primaryHealth(page.locator('#no-such-element-anywhere'))).toBe(
       'primary element is not in the DOM'
     );

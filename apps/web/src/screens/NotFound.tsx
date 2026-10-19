@@ -2,6 +2,8 @@ import './screens.css';
 import { Link, useHref, useLocation } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
+import { LeftNav } from '../components/LeftNav';
+import { HelpTip } from '../components/HelpTip';
 import { TriangleAlert } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
@@ -90,10 +92,15 @@ export function NotFound() {
   return (
     <AppShell
       variant="full"
-      topBar={<TopBar variant="breadcrumb" breadcrumb={LABELS.screenNotFound} />}
-      mainPad="centered"
+      /* THE SAME CHROME AS EVERY OTHER SCREEN (2026-10-12 clutter audit): a
+         reader who followed a stale link lands with the primary navigation and
+         Help in reach, not with the brand mark as the only way out. No nav item
+         is current, because no destination matched. */
+      topBar={<TopBar variant="home" />}
+      sidebar={<LeftNav />}
+      mainPad="pad"
     >
-      <div className="centered-col">
+      <div className="notfound-page">
         {/* Exactly one `<h1>`, per `e2e/specs/structure.spec.ts`, and visible
             rather than `sr-only`: unlike the on-ramp screens that use a hidden
             heading to preserve a deliberate visual design, the whole purpose of
@@ -107,9 +114,15 @@ export function NotFound() {
           <p className="notfound-body">{LABELS.notFoundExplanation}</p>
           <p className="notfound-attempted">
             {LABELS.notFoundAttemptedLabel}{' '}
-            <span className="mono notfound-path">{attempted}</span>
+            <span className="mono notfound-path">{attempted}</span>{' '}
+            {/* The small print moved behind an info tip beside the address it is
+                about (2026-10-12): "this is about the address, not your data" is a
+                reassurance, not one of `DEC-35`'s always-visible classes, and it
+                stays in the DOM, so every guard that reads it still does. */}
+            <HelpTip subject={LABELS.screenNotFound} label={LABELS.notFoundScopeInfoLabel} kind="info">
+              <span className="notfound-scope">{LABELS.notFoundRecordScope}</span>
+            </HelpTip>
           </p>
-          <p className="notfound-scope">{LABELS.notFoundRecordScope}</p>
           <Link className="btn btn-primary" to={ROUTES.experiments}>
             {LABELS.actionGoToExperiments}
           </Link>

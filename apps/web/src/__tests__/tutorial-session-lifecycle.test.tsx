@@ -108,10 +108,16 @@ function sentRequests(): { key: string; scope: string | undefined }[] {
  * running overlay's own controls are excluded by construction — neither is called
  * `Start Tutorial` nor `Launch Guided Demo`.
  */
+/*
+ * Every control that starts the walkthrough, by ACCESSIBLE name. Since 2026-10-12
+ * there is one name for it (Start, or Replay once finished in this browser), and
+ * the first-run strip's button reads "Start" on screen with that name as its
+ * `aria-label` — so the count reads the label first, then the text.
+ */
 function ctaCount(container: HTMLElement): number {
-  const names = new Set<string>([LABELS.actionStartTutorial, LABELS.actionLaunchGuidedDemo]);
+  const names = new Set<string>([LABELS.actionStartTutorial, LABELS.actionReplayTutorial]);
   return [...container.querySelectorAll('button')].filter((b) =>
-    names.has((b.textContent ?? '').trim()),
+    names.has((b.getAttribute('aria-label') ?? b.textContent ?? '').trim()),
   ).length;
 }
 
@@ -497,7 +503,7 @@ describe('worked-example session — cleanup failure', () => {
 
     // The empty state's primary, not the offer card's: the list above answers `[]`
     // outside a session, so this screen is the empty state and it owns the CTA.
-    fireEvent.click(await screen.findByRole('button', { name: LABELS.actionLaunchGuidedDemo }));
+    fireEvent.click(await screen.findByRole('button', { name: LABELS.actionStartTutorial }));
     await waitFor(() => expect(getTutorialScope()).toBe(TUTORIAL_SESSION_ID));
     await waitFor(() => expect(scopedListReads).toBeGreaterThan(0));
 
@@ -664,7 +670,7 @@ describe('ordinary workspace — no example record, and no promise of one', () =
     const validator = view.getByRole('button', { name: LABELS.actionOpenValidator });
     expect(validator).toHaveClass('btn-secondary');
     expect(validator).not.toHaveClass('btn-primary');
-    const demo = view.getByRole('button', { name: LABELS.actionLaunchGuidedDemo });
+    const demo = view.getByRole('button', { name: LABELS.actionStartTutorial });
     expect(demo).toHaveClass('btn-action');
     expect(demo).not.toHaveClass('btn-primary');
     // Exactly one solid primary on the empty state, and it is the create control.
@@ -696,10 +702,11 @@ describe('ordinary workspace — no example record, and no promise of one', () =
      */
     expect(view.queryByRole('button', { name: LABELS.actionReplayTutorial })).toBeNull();
     expect(view.queryByRole('button', { name: LABELS.actionGoToHelpAndTutorial })).toBeNull();
-    expect(view.queryByRole('button', { name: LABELS.actionStartTutorial })).toBeNull();
-    expect(
-      view.getByRole('button', { name: LABELS.actionLaunchGuidedDemo }),
-    ).toBeInTheDocument();
+    // ~~`queryByRole(actionStartTutorial)` toBeNull, then `getByRole(actionLaunchGuidedDemo)`~~
+    // — since 2026-10-12 those are ONE name ("Start Guided Walkthrough"), because both
+    // controls start the same walkthrough. The rule this pinned — one label addresses
+    // exactly one control on this screen — is asserted as exactly one match.
+    expect(view.getAllByRole('button', { name: LABELS.actionStartTutorial })).toHaveLength(1);
     // And no unscoped request was made to an example-workspace endpoint.
     const keys = sentRequests().map((r) => r.key);
     expect(keys.filter((k) => k.includes('/demo/'))).toEqual([]);
@@ -745,7 +752,7 @@ describe('ordinary workspace — no example record, and no promise of one', () =
     const view = renderAt();
 
     const launch = await view.findByRole('button', {
-      name: LABELS.actionLaunchGuidedDemo,
+      name: LABELS.actionStartTutorial,
     });
     expect(sentRequests().map((r) => r.key)).not.toContain(SESSION_CREATE);
 
@@ -793,7 +800,7 @@ describe('ordinary workspace — no example record, and no promise of one', () =
     expect(document.querySelectorAll('.tutorial-offer')).toHaveLength(0);
     expect(ctaCount(empty.container)).toBe(1);
     expect(
-      empty.getByRole('button', { name: LABELS.actionLaunchGuidedDemo }),
+      empty.getByRole('button', { name: LABELS.actionStartTutorial }),
     ).toBeInTheDocument();
     empty.unmount();
 
@@ -806,9 +813,10 @@ describe('ordinary workspace — no example record, and no promise of one', () =
     );
     expect(filled.container.querySelector('.queue-empty-state')).toBeNull();
     expect(ctaCount(filled.container)).toBe(1);
-    expect(
-      filled.queryByRole('button', { name: LABELS.actionLaunchGuidedDemo }),
-    ).toBeNull();
+    // ...and that one CTA is the strip's, under the one name — not the empty state's.
+    const only = filled.getAllByRole('button', { name: LABELS.actionStartTutorial });
+    expect(only).toHaveLength(1);
+    expect(only[0].closest('.tutorial-offer')).not.toBeNull();
   }, 30000);
 
   /*
@@ -857,8 +865,9 @@ describe('ordinary workspace — no example record, and no promise of one', () =
     expect(shouldOfferTutorial(getTutorialState())).toBe(false);
     expect(document.querySelectorAll('.tutorial-offer')).toHaveLength(0);
 
-    // ...and the way in is still there, and operable.
-    const launch = view.getByRole('button', { name: LABELS.actionLaunchGuidedDemo });
+    // ...and the way in is still there, and operable — named REPLAY since 2026-10-12,
+    // because this browser finished it (one name, Start or Replay by completion).
+    const launch = view.getByRole('button', { name: LABELS.actionReplayTutorial });
     expect(launch).toBeInTheDocument();
     expect((launch as HTMLButtonElement).disabled).toBe(false);
     // Still exactly one CTA — a completed browser must not get the card back either.
@@ -894,7 +903,7 @@ describe('ordinary workspace — no example record, and no promise of one', () =
     stubFetchRoutes({ ...tutorialSessionRoutes(), ...readOnlyRoutes([]) } as never);
     const view = renderAt();
     const launch = (await view.findByRole('button', {
-      name: LABELS.actionLaunchGuidedDemo,
+      name: LABELS.actionStartTutorial,
     })) as HTMLButtonElement;
 
     // Two clicks with nothing awaited between them — the impatient double-click, and

@@ -195,41 +195,80 @@
 
 /* The first-run offer on My Experiments. A card in the page flow — never a modal
    over the queue, because the queue is the reader's actual work. */
+/*
+ * THE FIRST-RUN OFFER — one line (2026-10-12 clutter audit). It was a four-line
+ * card above the reader's records; it is now a quiet strip carrying the name, one
+ * sentence, an info tip and two controls, and it wraps rather than overflows on a
+ * narrow screen. Tokens only, so it adds no raw literal to any ratchet in
+ * `type-scale-and-spacing.test.ts`.
+ */
 .tutorial-offer {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 14px 16px;
-  margin-bottom: 18px;
+  align-items: center;
+  gap: var(--space-sm) var(--space-md);
+  padding: var(--space-sm) var(--space-sm) var(--space-sm) var(--space-lg);
+  margin-bottom: var(--space-lg);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   background: var(--surface-subtle);
 }
-
+.tutorial-offer-mark {
+  display: inline-flex;
+  flex: none;
+  color: var(--action);
+}
 .tutorial-offer-body {
-  flex: 1 1 260px;
+  display: flex;
+  flex: 1 1 12rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2xs) var(--space-sm);
   min-width: 0;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-snug);
 }
-
-.tutorial-offer h2 {
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--text-heading);
-  margin-bottom: 4px;
-}
-
-.tutorial-offer p {
-  font-size: 12.5px;
-  line-height: 1.55;
+.tutorial-offer-lead {
   color: var(--text-secondary);
 }
-
+.tutorial-offer .tutorial-offer-title {
+  margin: 0;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-snug);
+  color: var(--text-heading);
+}
+.tutorial-offer-line {
+  color: var(--text-secondary);
+}
 .tutorial-offer-actions {
   display: flex;
-  gap: 8px;
-  align-items: center;
   flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-left: auto;
+}
+/* The decline is a quiet text control: it is the strip's second action, and a
+   bordered button beside Start would read as two equal choices. */
+.tutorial-offer-dismiss {
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+.tutorial-offer-dismiss:hover {
+  color: var(--text-strong);
+  background: var(--border-faint);
+}
+.tutorial-offer-dismiss:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
 }
 
 /* Settings & API → Help & Tutorial */
@@ -377,5 +416,81 @@
     bottom: 12px;
     width: auto;
     flex-wrap: wrap;
+  }
+}
+
+/* NARROW: the strip keeps the name, the info tip and both controls; the one-line
+   description is the part that goes (it is restated in full behind the tip), so
+   the offer costs two short rows on a phone instead of five. */
+@media (max-width: 640px) {
+  .tutorial-offer-line {
+    display: none;
+  }
+  /* Name, info tip and both controls on ONE row at phone width (review,
+     2026-10-18: the tip wrapped onto a line of its own). */
+  .tutorial-offer {
+    flex-wrap: nowrap;
+    padding-left: var(--space-md);
+    /* A one-line strip at this width: the desktop card's --space-lg below it
+       reads as a section break (review, 2026-10-18: it is part of what keeps the
+       first experiment row on the first phone screen). */
+    margin-bottom: var(--space-sm);
+  }
+  .tutorial-offer-lead,
+  .tutorial-offer-mark {
+    display: none;
+  }
+  .tutorial-offer-body {
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
+  }
+  .tutorial-offer .tutorial-offer-title {
+    white-space: nowrap;
+  }
+  .tutorial-offer-actions {
+    flex-wrap: nowrap;
+    gap: 0;
+  }
+  .tutorial-offer-dismiss {
+    padding-left: var(--space-sm);
+    padding-right: var(--space-sm);
+  }
+}
+/* NARROWEST (≤380px, review 2026-10-18): one row no longer holds the whole
+   name, so the name WRAPS instead of running under the Start button — at 320px
+   `layout-widths` found the info tip covered by it. The body may shrink below
+   its content for that to happen. */
+@media (max-width: 380px) {
+  .tutorial-offer-body {
+    min-width: 0;
+  }
+  .tutorial-offer .tutorial-offer-title {
+    white-space: normal;
+    min-width: 0;
+  }
+}
+@media (max-width: 640px) {
+  /* The two controls compact enough that name, tip and both fit one row. */
+  .tutorial-offer-actions .btn {
+    padding: var(--space-sm) var(--space-md);
+  }
+}
+
+.tutorial-offer-dismiss {
+  display: inline-flex;
+  align-items: center;
+}
+.tutorial-offer-dismiss-icon {
+  display: none;
+}
+@media (max-width: 640px) {
+  .tutorial-offer-dismiss {
+    padding: var(--space-sm) var(--space-xs);
+  }
+  .tutorial-offer-dismiss-text {
+    display: none;
+  }
+  .tutorial-offer-dismiss-icon {
+    display: inline-block;
   }
 }

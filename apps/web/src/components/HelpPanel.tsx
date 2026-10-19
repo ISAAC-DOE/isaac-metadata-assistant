@@ -1,10 +1,11 @@
 import './help.css';
 import { useEffect, useId, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { CircleHelp, X } from './icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { CANONICAL_STEPS } from '../lib/workflowSteps';
+import { startTutorial, useTutorialState } from '../lib/tutorialController';
 
 /*
  * ONE WORKFLOW VOCABULARY, AND IT IS THE SERVER'S.
@@ -33,106 +34,22 @@ import { CANONICAL_STEPS } from '../lib/workflowSteps';
  * static popover must not appear to report them.
  */
 const STEP_TEXT: Record<string, string> = {
-  // `satisfied['load_record']` is unconditionally `True` (`workflow.py:63`), and
-  // the module's own header states the rest: per-step state is "computed on read
-  // from the current signals only — never persisted".
-  // TRIMMED (I-2 slice). The tail read "— your position in the sequence is never
-  // stored", which restates "re-derived ... each time it is read" in different
-  // words: `workflow.py`'s header states both halves of one fact, and this copy
-  // had imported both. Nine words of the Help budget for no claim a reader did
-  // not already have. Removed deliberately, not accidentally — the Impeccable
-  // critique measured this surface 89% longer than it should be (`UX-021`), and
-  // the room for the three-gate correction below is taken from wording.
+  /*
+   * VERBATIM, and rendered in the "How values, signals and gates work" disclosure
+   * under "What each step checks" since 2026-10-12 (the visible list is now the
+   * chain of step NAMES). A first trim shortened these and dropped three claims —
+   * "is satisfied when none are left", "over every unit of the record", "each time
+   * it is read" — which an independent review caught; moving a claim behind a
+   * disclosure is allowed, rewording it shorter is not, so the originals stand.
+   */
   load_record:
     'opens a record. Every step below is re-derived from that record’s current state each time it is read.',
-  // `satisfied['complete_metadata'] = pending_count == 0` (`workflow.py:65`), and
-  // `workspace.run_questions` is documented as "The open blocking questions ONE
-  // run carries" — so the questions asked ARE the blocking ones.
   complete_metadata:
     'asks only the questions still blocking export, and is satisfied when none are left.',
-  // `satisfied['review_evidence'] = pending_count == 0 and draft_ok`
-  // (`workflow.py:66`); `Experiment.draft_ok` is "Whether EVERY unit's draft
-  // passes the no-guessing checks".
   review_evidence:
     'is satisfied only once every question is answered AND the no-guessing checks pass on every unit of the record.',
-  // `satisfied['review_export_readiness'] = ready`, where `ready` is
-  // `Experiment.export_ready` — "True iff a dry-run export of EVERY unit passes".
-  // The dry run is `export.export_draft`, which returns a result object and
-  // writes no file and no record.
   review_export_readiness:
     'dry-runs the export over every unit of the record and reports what would still refuse. Nothing is written.',
-  // CORRECTED (I-2). "both export gates" was a COUNT CLAIM, and it was wrong by
-  // one. RE-DERIVED HERE rather than taken from the comment it replaces:
-  // `export.export_draft` has THREE refusal returns — the no-guessing draft
-  // report (`export.py:305`), `check_exactness` on the assembled record (`:343`)
-  // and `validate_official` (`:347`) — against exactly one success return at
-  // `:350`.
-  //
-  // The repository already said so in two committed places while this said
-  // "both": `screens/ExportReadiness.tsx:789-791` ("it clears THREE gates, not
-  // two"), and `lib/officialAttribution.ts` calls them
-  // "ISAAC's two gates" at `:164` — ISAAC's OWN — beside the upstream schema.
-  //
-  // THAT CITATION WAS WRONG IN TWO WAYS AND IS CORRECTED HERE, because a comment
-  // citing the wrong line is how this branch has already lost time. It read
-  // ``lib/officialAttribution.ts:11,164`, which counts the FIRST TWO as "ISAAC's
-  // two gates"'. (i) `:11` does NOT make that count: it is item **3** of that
-  // module's own three-item numbering of finding PRODUCERS (`:9` the vendored
-  // official schema, `:10` the no-guessing draft validator, `:11` the
-  // anchored-pattern exactness gate). Only `:164` states the count. (ii) The
-  // pair is the LAST two, not the first two — `:13` is the line that pairs them
-  // ("`export.py` folds (2) and (3) together"), and (1) is the upstream schema,
-  // which is precisely the one that is NOT ISAAC's. The substantive point the
-  // citation was making survives intact and is unchanged: this product shipped
-  // two different counts of its own export gates on two screens. So the
-  // product shipped two different counts of its own export gates on two screens,
-  // and this was the wrong one.
-  //
-  // ~~DO NOT "HARMONISE" THIS WITH `components/ValidateReview.tsx:420`, which
-  // says ISAAC applies ONE gate of its own beyond the official schema. That
-  // surface validates a PASTED record through `POST /api/validate/record`, where
-  // `ok = schema_ok AND exactness_ok` and the no-guessing draft check is not in
-  // the path at all. TWO gates there, THREE here; both are correct about
-  // different operations, and a sweep that averaged them would replace one false
-  // claim with another.~~
-  //
-  // WITHDRAWN 2026-09-12, AND KEPT STRUCK RATHER THAN DELETED, because a
-  // "DO NOT HARMONISE" instruction is exactly the kind of sentence a future
-  // session obeys — this one told three sessions not to fix a real defect.
-  // ATTRIBUTION, stated plainly: the premise came from an ORCHESTRATOR ADDENDUM
-  // that has since been retracted in writing. The implementer who transcribed it
-  // was following its brief; the error is the premise's, not the transcription's.
-  //
-  // Every load-bearing part of it is false. RE-MEASURED HERE rather than taken
-  // on trust, which is how it should have arrived the first time:
-  //
-  //   - `ValidateReview` does NOT call `POST /api/validate/record`. It calls
-  //     `api.validate(experimentId)` (`ValidateReview.tsx:305`), which is
-  //     `POST /api/experiments/{id}/validate` (`lib/api.ts:2081-2083`). The
-  //     retired sentence's own last clause sent the reader AWAY to the Standalone
-  //     Validator, so it was never that route's copy — and the comment nine lines
-  //     above this one already named `export_draft`.
-  //   - So that surface describes THIS path, where the gates number THREE
-  //     (`export.py:305`, `:343`, `:347`, against one success return at `:350`)
-  //     and TWO of them are ISAAC's own. Same operation, same count.
-  //   - "TWO gates there, THREE here; both are correct about different
-  //     operations" is therefore wrong twice over, and the `ValidateReview` copy
-  //     it forbade touching was a genuine defect.
-  //
-  // IT IS ALSO STALE. That copy HAS been corrected; the sentence quoted above no
-  // longer exists there, and `ValidateReview.tsx:423-430` now keeps it struck
-  // with a third falsehood nobody had named — its trailing clause predated the
-  // `official_validator_ran` discriminator (`routes.py:19036`), so a CANDIDATE
-  // record's findings CAN be headed "Official ISAAC schema findings"
-  // (`lib/officialAttribution.ts:188`).
-  //
-  // WHAT IS ACTUALLY FORBIDDEN, and the citation to point at:
-  // `lib/officialAttribution.ts:163-169` — copy attributing a REFUSAL may not
-  // name ONE of ISAAC's two gates as its source, because `export.py:342` folds
-  // the exactness findings into `draft_report` and the response cannot say which
-  // of the two refused. That is a rule about ATTRIBUTING A FINDING, not about
-  // listing which gates run: the rendered copy below names all three, claims no
-  // finding for any of them, and is inside the rule.
   export:
     'writes the official ISAAC record plus an evidence sidecar — and only when all three export gates pass.',
 };
@@ -168,6 +85,8 @@ export function HelpPanel() {
   const panelRef = useRef<HTMLDivElement>(null);
   const headingId = useId();
   const wasOpen = useRef(false);
+  const location = useLocation();
+  const tutorial = useTutorialState();
 
   /*
    * A11Y-02 — Escape, click-outside, AND Tab containment.
@@ -289,50 +208,48 @@ export function HelpPanel() {
           </div>
 
           <div className="help-panel-body">
+            {/*
+              ON THIS PAGE (2026-10-12). The popover used to say the same thing on
+              every screen, so the one question a reader opens Help with — "what is
+              this screen for?" — was answered nowhere in it. One or two lines, by
+              route; it states what the screen does, never a capability it lacks.
+            */}
+            <section className="help-onpage" aria-label={LABELS.helpOnPageHeading}>
+              <p>
+                <strong>{LABELS.helpOnPageHeading}.</strong> {onThisPage(location.pathname)}
+              </p>
+            </section>
+
             <section className="help-section">
               <h3>How it works</h3>
-              <ol className="help-steps">
+              {/*
+                THE FIVE STEPS AS ONE CHAIN, their checks one press away (2026-10-12).
+                The labels stay here, in order, in `ol.help-steps` (pinned by
+                `help-claim-parity.test.tsx` against `CANONICAL_STEPS`); what each
+                step checks moved into the disclosure below as its own section, so
+                the popover fits its 558px box. The two facts a first-time reader
+                needs before opening anything — that every step is re-derived, and
+                that export needs all three gates — are the visible line under it.
+              */}
+              <ol className="help-steps help-steps-chain">
                 {WORKFLOW_STEPS.map((step) => (
                   <li key={step.id}>
-                    <strong>{step.label}</strong> {step.text}
+                    <strong>{step.label}</strong>
                   </li>
                 ))}
               </ol>
+              <p className="help-steps-note">{LABELS.helpStepsNote}</p>
               {/*
-                UX-021 — THE WALKTHROUGH POINTER. The Impeccable critique named
-                "no link to the guided walkthrough one route away" as part of
-                this surface's P1 regression: Help explained the workflow in
-                prose while the product's one interactive teaching path was
-                reachable only by knowing where to look.
-
-                THE DESTINATION IS SETTINGS, NOT MY EXPERIMENTS, AND THAT IS A
-                CORRECTNESS POINT RATHER THAN A PREFERENCE. The obvious pointer
-                — "press Launch Guided Demo on My Experiments" — is FALSE for
-                any reader who has already finished the walkthrough: that
-                control is gated on the queue and, per
-                `ExperimentsHome.tsx`'s own note, "disappears for good once the
-                walkthrough is finished", with the replay control living in
-                Settings & API -> Help & Tutorial. `lib/routes.ts:19` already
-                calls that tab "the one permanent home of the guided
-                walkthrough". So the only pointer that is true for every reader
-                is the permanent one, and a Help surface is exactly where a
-                first-time-only claim would do the most damage.
-
-                ZERO NEW VOCABULARY: `LABELS.actionGoToHelpAndTutorial` and
-                `ROUTES.settingsTab('help')` both already exist and are already
-                used for this destination elsewhere. A real `<Link>` rather than
-                a button, so it is middle-clickable, bookmarkable and reachable
-                by the keyboard walk — and it is now the first focusable item
-                inside the trapped dialog, which is why the trap above had to
-                land in the same change.
+                UX-021 — THE WALKTHROUGH POINTER ~~sat here~~, and since 2026-10-12
+                it is a CONTROL at the end of this popover rather than a link to
+                Settings. The pointer's correctness point is kept, and is now met
+                more directly: it had to be true for EVERY reader, which a link to
+                My Experiments' first-run offer was not (that control disappears
+                for good once the walkthrough is finished). The control at the end
+                is named by this browser's own completion state — Start for a
+                reader who has not finished it, Replay for one who has — so it is
+                true for every reader without sending anyone anywhere.
               */}
-              <p className="help-walkthrough-pointer">
-                Prefer to be shown? The guided walkthrough opens a worked example and
-                steps through this in the product.{' '}
-                <Link to={ROUTES.settingsTab('help')}>
-                  {LABELS.actionGoToHelpAndTutorial}
-                </Link>
-              </p>
             </section>
 
             <section className="help-section">
@@ -369,20 +286,33 @@ export function HelpPanel() {
                   app verified that isolation — the guarantee is an external
                   pg_hba grant, not something this app can check. */}
               <h3>Synthetic workspace</h3>
-              <p>
-                The records shown here are synthetic and uploads are disabled: this deployment is
-                configured for synthetic-only operation, and real mode intentionally refuses to
-                start because the required ingestion and governance guardrails do not exist yet.
-                What the app enforces is that mode, not the contents of what it is handed.
-              </p>
-              <p style={{ marginTop: 8 }}>
-                Separately, this deployment may run a protected, read-only diagnostic against an
-                isolated SLAC test database containing production-derived records: those records are
-                processed transiently in pod memory, only sanitized aggregate results are returned,
-                no record is modified, no per-record content is displayed, and nothing is sent to
-                any model. Database-backed record display remains disabled pending an explicit
-                visibility decision.
-              </p>
+              <p>Records shown here are synthetic; uploads are disabled.</p>
+              {/*
+                COMPACT, AND THE PAIRING IS THE POINT (2026-10-12). The mode token
+                ("configured for synthetic-only operation") and every bound of the
+                diagnostic sit in ONE disclosure, together — never the token visible
+                with its qualifier hidden, which is the unqualified whole-deployment
+                claim `db-recon-truthfulness.test.tsx` exists to stop. What stays
+                visible is scoped to the workspace a reader sees. The wording inside
+                is unchanged, so every guard that reads it reads the same sentences.
+              */}
+              <details className="help-inline-more">
+                <summary>About this deployment</summary>
+                <p>
+                  This deployment is configured for synthetic-only operation, and real mode
+                  intentionally refuses to start because the required ingestion and governance
+                  guardrails do not exist yet. What the app enforces is that mode, not the
+                  contents of what it is handed.
+                </p>
+                <p>
+                  Separately, this deployment may run a protected, read-only diagnostic against an
+                  isolated SLAC test database containing production-derived records: those records
+                  are processed transiently in pod memory, only sanitized aggregate results are
+                  returned, no record is modified, no per-record content is displayed, and nothing
+                  is sent to any model. Database-backed record display remains disabled pending an
+                  explicit visibility decision.
+                </p>
+              </details>
             </section>
 
             {/* ── UX-021b — SEVEN TOP-LEVEL SECTIONS BECOME FOUR, BY DISCLOSURE
@@ -421,6 +351,16 @@ export function HelpPanel() {
                 every sentence behind it is still scanned at every viewport. */}
             <details className="help-more">
               <summary className="help-more-summary">How values, signals and gates work</summary>
+              <section className="help-section">
+                <h3>What each step checks</h3>
+                <ol className="help-step-details">
+                  {WORKFLOW_STEPS.map((step) => (
+                    <li key={step.id}>
+                      <strong>{step.label}</strong> {step.text}
+                    </li>
+                  ))}
+                </ol>
+              </section>
               <section className="help-section">
                 {/* CORRECTED. The first workflow step used to read:
                     "Draft extracts candidate field values FROM YOUR FILES, each tagged
@@ -774,9 +714,55 @@ export function HelpPanel() {
                 </p>
               </section>
             </details>
+
+            {/*
+              THE GUIDED WALKTHROUGH, LAST (2026-10-12). Named by this browser's own
+              completion state, so it is true for every reader: Start when the
+              walkthrough has not been finished here, Replay when it has. While a
+              walkthrough is opening or open, a second start is not an action that is
+              available, so the row states that instead of offering a dead button —
+              an absent capability is shown as a state.
+            */}
+            <section className="help-walkthrough" aria-label={LABELS.tutorialOfferTitle}>
+              {tutorial.phase === 'idle' && tutorial.sessionId === null ? (
+                <button
+                  type="button"
+                  className="btn btn-action help-walkthrough-btn"
+                  onClick={() => {
+                    setOpen(false);
+                    startTutorial(buttonRef.current);
+                  }}
+                >
+                  {tutorial.completed ? LABELS.actionReplayTutorial : LABELS.actionStartTutorial}
+                </button>
+              ) : (
+                <p>{LABELS.helpWalkthroughOpen}</p>
+              )}
+            </section>
           </div>
         </div>
       )}
     </div>
   );
+}
+
+/**
+ * ONE OR TWO LINES ABOUT THE CURRENT SCREEN, by route. Each line says what the
+ * screen is for and, where the reader most needs it, what it will not do. None
+ * names a capability this build lacks. Unknown routes get the not-found line.
+ */
+export function onThisPage(pathname: string): string {
+  const path = pathname.replace(/\/+$/, '') || '/';
+  if (path.startsWith(ROUTES.experiments)) return LABELS.helpOnPageExperiments;
+  if (/^\/record\/[^/]+\/complete$/.test(path)) return LABELS.helpOnPageComplete;
+  if (/^\/record\/[^/]+\/evidence$/.test(path)) return LABELS.helpOnPageEvidence;
+  if (/^\/record\/[^/]+\/export$/.test(path)) return LABELS.helpOnPageExport;
+  if (path.startsWith('/record/')) return LABELS.helpOnPageRecord;
+  if (path.startsWith(ROUTES.imports)) return LABELS.helpOnPageImports;
+  if (path.startsWith(ROUTES.statistics)) return LABELS.helpOnPageStatistics;
+  if (path.startsWith(ROUTES.settings)) return LABELS.helpOnPageSettings;
+  if (path.startsWith(ROUTES.governance)) return LABELS.helpOnPageGovernance;
+  if (path.startsWith(ROUTES.memory)) return LABELS.helpOnPageMemory;
+  if (path.startsWith(ROUTES.load)) return LABELS.helpOnPageLoad;
+  return LABELS.helpOnPageUnknown;
 }

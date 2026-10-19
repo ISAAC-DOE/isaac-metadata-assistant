@@ -1,7 +1,7 @@
 import './chrome.css';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AudioWaveform, Shield, ChevronRight } from './icons';
+import { AudioWaveform, Check, Copy, Shield, ChevronRight } from './icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { StatusChip } from './StatusChip';
@@ -382,6 +382,103 @@ function WorkspaceChip() {
   );
 }
 
+/** A ULID — 26 Crockford base-32 characters, the id every record carries. */
+const ULID_IN_TEXT = /\b[0-9A-HJKMNP-TV-Z]{26}\b/;
+
+/**
+ * The visible form of an id: its first six and last four characters around an
+ * ellipsis, so a reader can still tell two records apart at a glance and nothing
+ * claims to BE the whole id. Exported for the test that pins the rule.
+ */
+export function abbreviateId(id: string): string {
+  return `${id.slice(0, 6)}…${id.slice(-4)}`;
+}
+
+/**
+ * THE RECORD'S ID IN THE TOP BAR — SECONDARY, AND ONE PRESS FROM COPIED.
+ *
+ * WHAT CHANGED (2026-10-12 clutter audit). The bar printed the full 26-character
+ * ULID — or `<ULID>.json` / `<ULID>.evidence.json` / `draft · <ULID>` — in mono
+ * beside the record's name, on every record surface. The NAME tells a scientist
+ * which record this is; the id is what they need when they quote it or look it
+ * up. So the name stays primary and the id becomes a compact control: it shows
+ * the id head…tail (`docs/ui-handoff/design-system.md`: "Truncate mono
+ * identifiers gracefully … with a reveal/copy affordance; never silently drop
+ * characters") and copies the FULL ID on press.
+ *
+ * IT COPIES THE ID AND NOTHING ELSE (corrected in review, 2026-10-18). The first
+ * version copied the whole display string, so on Complete/Export the clipboard
+ * held "draft · 01M5…" and on an exported Evidence screen "<ULID>.evidence.json"
+ * — not the identifier the control is named for. The matched ULID is what is
+ * copied, what the accessible name states, and what the tooltip shows; the
+ * surrounding filename stays available as the tooltip's second line.
+ *
+ * THE OUTCOME IS ANNOUNCED BY A REGION THAT EXISTS BEFORE THE PRESS. A
+ * `role="status"` region inserted together with its text is not reliably
+ * announced, so the region is mounted with the control and only its TEXT changes.
+ * When copying fails, the full id is REVEALED inline as selectable text — a
+ * keyboard or touch reader cannot open a hover tooltip, so the fallback must not
+ * depend on one.
+ *
+ * A filename with no ULID in it (a short id like `demo`, or a data file's own
+ * name) is rendered exactly as before: there is nothing to abbreviate, and a copy
+ * control for a word a reader can already read in full would be clutter.
+ *
+ * It keeps the `record-file` class, so the phone band in `chrome.css` that drops
+ * the file crumb still drops it.
+ */
+function RecordFile({ filename }: { filename: string }) {
+  const [copied, setCopied] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const match = ULID_IN_TEXT.exec(filename);
+  const id = match?.[0] ?? null;
+  useEffect(() => {
+    if (copied !== 'copied') return;
+    const timer = window.setTimeout(() => setCopied('idle'), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+
+  if (id === null) return <span className="record-file">{filename}</span>;
+
+  const copy = () => {
+    const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
+    if (!clipboard?.writeText) {
+      setCopied('failed');
+      return;
+    }
+    clipboard.writeText(id).then(
+      () => setCopied('copied'),
+      () => setCopied('failed'),
+    );
+  };
+
+  return (
+    <span className="record-file record-file-wrap">
+      <button
+        type="button"
+        className="record-file-copy"
+        title={filename === id ? id : `${id}\n${filename}`}
+        aria-label={`${LABELS.actionCopyRecordId} ${id}`}
+        onClick={copy}
+      >
+        <span aria-hidden="true">{abbreviateId(id)}</span>
+        {copied === 'copied' ? (
+          <Check size={12} strokeWidth={2.4} aria-hidden="true" />
+        ) : (
+          <Copy size={12} strokeWidth={2} aria-hidden="true" />
+        )}
+      </button>
+      {copied === 'failed' && <span className="record-file-full">{id}</span>}
+      <span className="sr-only" role="status">
+        {copied === 'copied'
+          ? LABELS.recordIdCopied
+          : copied === 'failed'
+            ? LABELS.recordIdCopyFailed
+            : ''}
+      </span>
+    </span>
+  );
+}
+
 // The identity mark doubles as the home crumb — a real link back to the queue,
 // so no surface is a dead end from the top-left.
 function Brand() {
@@ -396,8 +493,14 @@ function Brand() {
 }
 
 interface TopBarProps {
-  variant: 'home' | 'record' | 'breadcrumb';
-  breadcrumb?: string;
+  /**
+   * ~~`'breadcrumb'`~~ — RETIRED 2026-10-12. It was the chrome of `/load` and the
+   * not-found page: a single leaf crumb, no left navigation and no Help, so a
+   * reader who reached either had the brand mark as the only way out and no help
+   * at all. Both now carry `home` and the primary navigation, which is the same
+   * chrome as every other screen; no caller of this variant remained.
+   */
+  variant: 'home' | 'record';
   title?: string;
   filename?: string;
   stateChip?: ChipKind;
@@ -413,7 +516,7 @@ interface TopBarProps {
  * the ⌘K search command palette. The mode chip is always mounted — it is
  * load-bearing. Search is real (P26): the SearchDialog affordance is mounted on
  * every variant so ⌘K opens the API-backed palette from any surface. */
-export function TopBar({ variant, breadcrumb, title, filename, stateChip, recordId, surface }: TopBarProps) {
+export function TopBar({ variant, title, filename, stateChip, recordId, surface }: TopBarProps) {
   return (
     <header className="topbar">
       <Brand />
@@ -425,20 +528,6 @@ export function TopBar({ variant, breadcrumb, title, filename, stateChip, record
             <SearchDialog />
             <WorkspaceChip />
             <HelpPanel />
-          </div>
-        </>
-      )}
-
-      {variant === 'breadcrumb' && (
-        <>
-          <span className="breadcrumb" aria-current="page">
-            <ChevronRight size={14} strokeWidth={2} aria-hidden="true" />
-            {breadcrumb}
-          </span>
-          <div className="topbar-spacer" />
-          <div className="topbar-right">
-            <SearchDialog />
-            <WorkspaceChip />
           </div>
         </>
       )}
@@ -510,7 +599,7 @@ export function TopBar({ variant, breadcrumb, title, filename, stateChip, record
               </>
             )}
             {stateChip && <StatusChip kind={stateChip} />}
-            {filename && <span className="record-file">{filename}</span>}
+            {filename && <RecordFile filename={filename} />}
           </div>
           <div className="topbar-spacer" />
           <div className="topbar-right">

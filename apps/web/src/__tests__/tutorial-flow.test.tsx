@@ -517,7 +517,7 @@ describe('R0 · finishing the walkthrough', () => {
   it('the empty state makes the identical disclosure, and quotes the offer verbatim', async () => {
     stubFetchRoutes(readOnlyRoutes([]) as never);
     renderAt();
-    await screen.findByRole('button', { name: LABELS.actionLaunchGuidedDemo });
+    await screen.findByRole('button', { name: LABELS.actionStartTutorial });
 
     // The precondition that makes this the reader's ONLY copy: with no rows, the
     // guarded surface is not on screen at all.

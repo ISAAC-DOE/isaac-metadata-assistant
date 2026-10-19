@@ -352,14 +352,24 @@ describe('UX-017 — Workspace Statistics is merged into the Library', () => {
     ]);
     const { container } = renderLibrary();
     await screen.findByRole('heading', { name: LABELS.libraryOverviewHeading });
-    // In DOM order: Experiments, Needs Attention, Runs Recorded, Proposals Waiting.
-    // Experiments: 3. Needs Attention: 1 (facetCounts parity). Runs Recorded:
-    // 3 + 5 + 0 = 8 (a SUM). Proposals Waiting: 2 + 1 + 0 = 3 (a SUM, not the
-    // "2 records have at least one" the `proposals` facet chip would show).
+    // In DOM order: Runs Recorded, Proposals Waiting — the two SUMS no facet states.
+    // Runs Recorded: 3 + 5 + 0 = 8. Proposals Waiting: 2 + 1 + 0 = 3 (a SUM, not
+    // the "2 records have at least one" the `proposals` facet would show).
+    //
+    // ~~`['3', '1', '8', '3']`~~ — the `Experiments` total and the `Needs
+    // Attention` figure LEFT this list (2026-10-12 / 2026-10-18 review: "5" was
+    // printed six times above the first row). Neither is lost: the status filter
+    // IS the widget's headline now, and its tiles state the total (`All
+    // Experiments`) and every status count — asserted here, so neither figure can
+    // silently disappear from the screen.
     const values = Array.from(container.querySelectorAll('.library-overview-value')).map(
       (el) => el.textContent,
     );
-    expect(values).toEqual(['3', '1', '8', '3']);
+    expect(values).toEqual(['8', '3']);
+    const filter = screen.getByRole('radiogroup', { name: 'Filter these experiments' });
+    expect(container.querySelector('.library-overview')!.contains(filter)).toBe(true);
+    expect(within(filter).getByRole('radio', { name: /All Experiments.*3 of all experiments/ })).toBeInTheDocument();
+    expect(within(filter).getByRole('radio', { name: /Needs Attention.*1 of all experiments/ })).toBeInTheDocument();
   });
 
   /*

@@ -16,7 +16,8 @@
  * MemoryGraphCard). Nothing here creates a second one.
  */
 import { useCallback, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { CircleHelp, CornerDownRight, X } from '../../components/icons';
+import { ChevronDown, CircleHelp, CornerDownRight, X } from '../../components/icons';
+import { LABELS } from '../../lib/labels';
 import {
   MAX_COMMAND_LENGTH,
   suggestCommands,
@@ -59,6 +60,15 @@ export function GraphCommandBar({
   const [activeIdx, setActiveIdx] = useState(-1);
   // Ephemeral recall cursor over the commands typed in THIS mounted session.
   const [recall, setRecall] = useState(-1);
+  /* THE COMMANDS DISCLOSURE (2026-10-12 clutter audit). The hint sentence, the
+     Suggested Commands and the sentence explaining them stood between the command
+     bar and the canvas on every visit — about 200px that pushed the canvas below
+     the fold at 1510px. They are one press away now, behind a real
+     `aria-expanded` button beside Run, and they stay MOUNTED while closed (the
+     panel is `hidden`), so the input's `aria-describedby` still resolves to the
+     hint and every guard that reads the suggestions still reads them. */
+  const [commandsOpen, setCommandsOpen] = useState(false);
+  const commandsId = useId();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listId = useId();
   const suggestId = useId();
@@ -213,12 +223,17 @@ export function GraphCommandBar({
           <CircleHelp size={13} strokeWidth={2} aria-hidden="true" />
           Syntax
         </button>
+        <button
+          type="button"
+          className="graph-cmd-help graph-cmd-commands-toggle"
+          aria-expanded={commandsOpen}
+          aria-controls={commandsId}
+          onClick={() => setCommandsOpen((o) => !o)}
+        >
+          <ChevronDown size={13} strokeWidth={2} aria-hidden="true" />
+          {LABELS.graphCommandsToggle}
+        </button>
       </div>
-
-      <p className="graph-cmd-hint" id={`${listId}-help`}>
-        A fixed set of commands over this projection — nothing is executed and no record is changed.
-        Type <span className="mono">help</span> for the full list; ↑ recalls what you typed here.
-      </p>
 
       {open && suggestions.length > 0 && (
         <ul className="graph-cmd-suggestions" role="listbox" id={listId} aria-label="Command completions">
@@ -245,6 +260,11 @@ export function GraphCommandBar({
         </ul>
       )}
 
+      <div className="graph-cmd-more" id={commandsId} hidden={!commandsOpen}>
+      <p className="graph-cmd-hint" id={`${listId}-help`}>
+        A fixed set of commands over this projection — nothing is executed and no record is changed.
+        Type <span className="mono">help</span> for the full list; ↑ recalls what you typed here.
+      </p>
       {/* P36V.1 G — Suggested Commands. Rendered AFTER the completion list in
           document order on purpose: the list is absolutely positioned at its
           static position, so putting this block above it would push the
@@ -289,6 +309,7 @@ export function GraphCommandBar({
           </p>
         </div>
       )}
+      </div>
 
       {shown.length > 0 && (
         <div className="graph-cmd-history">

@@ -56,12 +56,14 @@ describe('B-05 · /load outside a worked-example session', () => {
     const calls = stubFetchRoutes({});
     renderAt('/load');
     expect(
-      await screen.findByRole('button', { name: LABELS.actionLaunchGuidedDemo }),
+      await screen.findByRole('button', { name: LABELS.actionStartTutorial }),
     ).toBeEnabled();
     expect(screen.queryByRole('button', { name: LABELS.actionRunDemoShort })).toBeNull();
     // The cause is stated BEFORE any press, scoped to this tab, and the audited
     // disclosure of what launching does is the same text My Experiments shows.
-    const body = document.querySelector('.onramp.emphasis')?.textContent ?? '';
+    // The worked-example widget (2026-10-12; was the `.onramp.emphasis` card). The
+    // cause and the disclosure are in its info panel, which stays in the DOM.
+    const body = document.querySelector('.load-widget-example')?.textContent ?? '';
     expect(body).toContain(LABELS.demoRunsInsideGuidedDemo);
     expect(body).toContain(LABELS.launchGuidedDemoBody);
     expect(LABELS.demoRunsInsideGuidedDemo).toMatch(/this browser tab/i);
@@ -75,7 +77,7 @@ describe('B-05 · /load outside a worked-example session', () => {
       'POST /api/demo/run': { status: 409, body: { error: 'tutorial_scope_required' } },
     });
     renderAt('/load');
-    const launch = await screen.findByRole('button', { name: LABELS.actionLaunchGuidedDemo });
+    const launch = await screen.findByRole('button', { name: LABELS.actionStartTutorial });
     const hint = document.getElementById(launch.getAttribute('aria-describedby') ?? '');
     expect(hint?.textContent).toContain(LABELS.launchGuidedDemoBody);
 
@@ -97,7 +99,7 @@ describe('B-05 · /load outside a worked-example session', () => {
       },
     } as never);
     renderAt('/load');
-    const launch = await screen.findByRole('button', { name: LABELS.actionLaunchGuidedDemo });
+    const launch = await screen.findByRole('button', { name: LABELS.actionStartTutorial });
     fireEvent.click(launch);
     await waitFor(() => expect(launch).toBeDisabled());
     release();
@@ -109,7 +111,7 @@ describe('B-05 · /load inside a worked-example session', () => {
     enterWorkedExample();
     stubFetchRoutes({ 'POST /api/demo/run': { body: demoRunDraftOnly } });
     renderAt('/load');
-    expect(screen.queryByRole('button', { name: LABELS.actionLaunchGuidedDemo })).toBeNull();
+    expect(screen.queryByRole('button', { name: LABELS.actionStartTutorial })).toBeNull();
     fireEvent.click(await screen.findByRole('button', { name: LABELS.actionRunDemoShort }));
     expect(await screen.findByText('Open the Record →')).toBeInTheDocument();
   });

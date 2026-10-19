@@ -189,7 +189,7 @@ describe('My Experiments · the empty state', () => {
     const section = panel();
     for (const name of [
       LABELS.actionCreateExperiment,
-      LABELS.actionLaunchGuidedDemo,
+      LABELS.actionStartTutorial,
       LABELS.actionOpenValidator,
     ]) {
       expect(within(section).getByRole('button', { name })).toBeInTheDocument();
@@ -242,7 +242,7 @@ describe('My Experiments · the empty state', () => {
      * rather than filled. Asserted in both directions: "is blue" and "is not the
      * solid primary" are different claims.
      */
-    const demo = within(section).getByRole('button', { name: LABELS.actionLaunchGuidedDemo });
+    const demo = within(section).getByRole('button', { name: LABELS.actionStartTutorial });
     expect(demo, 'Launch Guided Demo lost the action treatment').toHaveClass('btn-action');
     expect(demo, 'Launch Guided Demo became a second primary').not.toHaveClass('btn-primary');
 
@@ -281,10 +281,10 @@ describe('My Experiments · the empty state', () => {
   it('keeps Launch Guided Demo wired to the tutorial, with its disclosure and its guard', async () => {
     await openEmptyState(EPHEMERAL);
     const section = panel();
-    const launch = within(section).getByRole('button', { name: LABELS.actionLaunchGuidedDemo });
+    const launch = within(section).getByRole('button', { name: LABELS.actionStartTutorial });
 
     // The disclosure is DESCRIBED-BY, not part of the accessible name.
-    expect(launch).toHaveAccessibleName(LABELS.actionLaunchGuidedDemo);
+    expect(launch).toHaveAccessibleName(LABELS.actionStartTutorial);
     expect(section.textContent).toContain(LABELS.launchGuidedDemoBody);
     expect(launch.getAttribute('aria-describedby')).toBe('queue-empty-launch-hint');
     // The double-submit guard is off while idle — its ON state is covered by

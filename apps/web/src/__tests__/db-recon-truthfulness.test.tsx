@@ -508,14 +508,35 @@ const FORBIDDEN_CLAIMS: [string, RegExp][] = [
   ...FORBIDDEN_CLAIMS_SHARED,
 ];
 
-describe('GovernanceBanner copy — distinguishes the workspace from the diagnostic', () => {
+describe('GovernanceBanner copy — scoped to the workspace, so it owes the diagnostic nothing', () => {
   function bannerText(): string {
     render(<GovernanceBanner />);
     return document.querySelector('.gov-body')!.textContent ?? '';
   }
 
-  it.each(REQUIRED_CLAIMS)('states %s', (_what, pattern) => {
+  /*
+   * INVERTED 2026-10-12, AND THE RULE IT ENFORCES IS UNCHANGED.
+   *
+   * This used to require `REQUIRED_CLAIMS` — the workspace half AND all seven
+   * diagnostic bounds — because the banner NAMED the diagnostic, and a surface
+   * that names it must bound it. The clutter audit made the banner one line
+   * scoped to the workspace a reader sees (the diagnostic was stated on five
+   * surfaces). So the banner now states the WORKSPACE half, and is proven to make
+   * no capability statement at all — which is what makes the missing bounds
+   * correct rather than an under-disclosure. `missingBounds` is asserted vacuous
+   * rather than assumed so, so that re-adding "may run …" here without its bounds
+   * fails loudly. The capability, with every bound, is still stated by the Help
+   * popover and the policy page this banner links to (both asserted in this file).
+   */
+  it.each(WORKSPACE_CLAIMS)('states %s', (_what, pattern) => {
     expect(bannerText()).toMatch(pattern);
+  });
+
+  it('makes no statement about the diagnostic, so it owes none of its bounds', () => {
+    const text = bannerText();
+    expect(CAPABILITY_STATEMENT.test(text)).toBe(false);
+    expect(text).not.toMatch(/diagnostic|test database|production-derived/i);
+    expect(missingBounds(text)).toEqual([]);
   });
 
   it.each(FORBIDDEN_CLAIMS)('never claims %s', (_what, pattern) => {

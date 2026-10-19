@@ -17,7 +17,9 @@ import { AssistantPanel } from '../components/AssistantPanel';
 import { AssistantDrawer } from '../components/AssistantDrawer';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { MemoryGraphCard } from './MemoryGraphCard';
-import { Network, ChevronDown, ChevronRight, Search } from '../components/icons';
+import { Widget } from '../components/Widget';
+import { HelpTip } from '../components/HelpTip';
+import { ChevronDown, ChevronRight, Search } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { conceptDisplayTitle, relationDisplayLabel } from '../lib/displayLabels';
 import { api } from '../lib/api';
@@ -216,36 +218,38 @@ export function ProjectMemory() {
       width={activeTab === 'graph' ? 'full' : 'wide'}
     >
       <div className="placeholder">
-        <span className="eyebrow">Memory / Query Plane</span>
+        {/* ~~`<span className="eyebrow">Memory / Query Plane</span>`~~ and a five-line
+            introduction — REDUCED 2026-10-12 (clutter audit) to the heading and ONE
+            sentence (`DEC-35`). The eyebrow restated what the sentence says; the
+            other four lines restated the Overview's own widgets. The sentence keeps
+            the two claims the paragraph existed to make: it is memory, not truth,
+            and it never validates or supplies a value. */}
         <h1>{LABELS.navMemory}</h1>
-        <p>
-          Project Memory is the assistant's memory and navigation surface — Graphify plus project
-          docs. It is deliberately separate from the experiment queue and never appears inside it. It
-          surfaces related files and concepts, prior documents, and "how is this connected?" answers
-          as leads to verify — it never validates, completes, or supplies a value.
+        <p className="memory-intro">
+          {LABELS.memoryIntro}{' '}
+          <HelpTip subject={LABELS.navMemory} label={LABELS.memoryIntroInfoLabel} kind="info">
+            <span>{LABELS.memoryIntroFull}</span>{' '}
+            <span>{LABELS.memoryAllTabsRead}</span>
+          </HelpTip>
         </p>
 
         <SectionTabs active={activeTab} onSelect={selectTab} />
 
         {activeTab === 'overview' && (
           <div id={panelId('overview')} role="tabpanel" aria-labelledby={tabId('overview')} tabIndex={0}>
-            <div className="card placeholder-card">
-              {graph.status === 'loading' && <LoadingPanel label="Checking memory status…" />}
-              {graph.status === 'error' && <BackendDown error={graph.error} onRetry={graph.reload} />}
-              {graph.status === 'data' && <MemoryStatusDetail data={graph.data} />}
-            </div>
-            {/* P36R S10 — "Browse depth is out of scope for this first build."
-                was a roadmap note left in shipped copy, and it is no longer
-                true: the Graph tab offers 1-hop and 2-hop neighbourhoods and a
-                shortest-path search. Replaced with orientation that IS
-                verifiable — `/api/memory/files`, `/api/memory/concepts` and
-                `/api/memory/graph` all resolve the SAME
-                `memory.get_default_reader()` instance whose status this card
-                reports (`routes.py:1206/1290/1338/1394`). */}
-            <p style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--text-tertiary)' }}>
-              <Network size={15} strokeWidth={2} aria-hidden="true" />
-              Sources, Concepts and Graph all read the memory graph summarised above.
-            </p>
+            {graph.status === 'loading' && (
+              <div className="card placeholder-card">
+                <LoadingPanel label="Checking memory status…" />
+              </div>
+            )}
+            {graph.status === 'error' && (
+              <div className="card placeholder-card">
+                <BackendDown error={graph.error} onRetry={graph.reload} />
+              </div>
+            )}
+            {graph.status === 'data' && (
+              <MemoryStatusDetail data={graph.data} onOpenTab={selectTab} />
+            )}
           </div>
         )}
 
@@ -333,45 +337,140 @@ function SectionTabs({
 
 // --- status detail card --------------------------------------------------
 
-function MemoryStatusDetail({ data }: { data: ApiGraphStatus }) {
-  // P24.10: the primary axis is availability. The finer axes (integrity /
-  // memory policy / indexed sources) are each individually honest and are shown
-  // as separate rows — never collapsed back into a single freshness verdict.
+/**
+ * THE OVERVIEW AS THREE WIDGETS — one question each (2026-10-12 clutter audit).
+ *
+ * It was one card: a chip, a sentence, three axis rows each carrying a caption,
+ * an eight-figure grid and a closing note, then a line under the card. Every fact
+ * survives, regrouped by the question a reader brings: CAN I TRUST THE SNAPSHOT
+ * (the three separated axes, as states), HOW BIG IS IT (the counts, with a
+ * switcher for which counts), and WHERE DID IT COME FROM (provenance). The axis
+ * captions are definitions of each row — where-from prose — so they moved into
+ * the first widget's info panel, which `Widget` keeps in the DOM.
+ *
+ * P24.10's rule is unchanged: availability is the primary axis, and the finer
+ * axes stay separate rows — never collapsed back into one freshness verdict.
+ */
+function MemoryStatusDetail({
+  data,
+  onOpenTab,
+}: {
+  data: ApiGraphStatus;
+  onOpenTab: (tab: MemoryTab) => void;
+}) {
   const available = data.availability === 'available';
 
+  if (!available) {
+    return (
+      <Widget
+        id="memory-trust-title"
+        title={LABELS.memoryTrustTitle}
+        headline={<GraphStatusChip availability={data.availability} note={data.note} />}
+      >
+        {/* When a shipped artifact is malformed/unsupported, surface WHY via the
+            integrity axis; a wholly-absent artifact stays quiet (integrity unknown). */}
+        {data.integrity !== 'unknown' && (
+          <div className="memory-axes">
+            <MemoryAxisRow label="Snapshot Integrity" presentation={INTEGRITY_AXIS[data.integrity]} />
+          </div>
+        )}
+        <MemoryUnavailablePanel integrity={data.integrity} />
+      </Widget>
+    );
+  }
+
   return (
-    <>
-      <GraphStatusChip availability={data.availability} note={data.note} />
-      {available ? (
-        <>
-          <p>
-            Graphify is a memory plane, not a truth plane — every lead points back to a cited file
-            to confirm.
-          </p>
-          <MemoryAxes data={data} />
-          <MemoryFigures data={data} />
-          <p className="memory-indexed-note">
-            Project memory indexes this project's source code, docs, schema, and test fixtures via
-            Graphify — metadata and provenance only, never file contents.
-          </p>
-        </>
-      ) : (
-        <>
-          {/* When a shipped artifact is malformed/unsupported, surface WHY via the
-              integrity axis; a wholly-absent artifact stays quiet (integrity unknown). */}
-          {data.integrity !== 'unknown' && (
-            <div className="memory-axes">
-              <MemoryAxisRow
-                label="Snapshot Integrity"
-                caption={AXIS_CAPTION.integrity}
-                presentation={INTEGRITY_AXIS[data.integrity]}
-              />
+    <div className="widget-grid memory-overview-grid">
+      <Widget
+        id="memory-trust-title"
+        title={LABELS.memoryTrustTitle}
+        sub={LABELS.memoryTrustSub}
+        infoLabel={LABELS.memoryTrustInfoLabel}
+        headline={<GraphStatusChip availability={data.availability} note={data.note} />}
+        info={
+          /* Each row's definition, keyed by a short form of its name so the row's
+             own label stays the one place the full name is printed. */
+          <dl className="memory-axis-defs">
+            <dt className="widget-info-heading">Integrity</dt>
+            <dd className="memory-axis-caption">{AXIS_CAPTION.integrity}</dd>
+            <dt className="widget-info-heading">Policy</dt>
+            <dd className="memory-axis-caption">{AXIS_CAPTION.memoryPolicy}</dd>
+            <dt className="widget-info-heading">Sources</dt>
+            <dd className="memory-axis-caption">{AXIS_CAPTION.indexedSources}</dd>
+          </dl>
+        }
+      >
+        <MemoryAxes data={data} />
+      </Widget>
+      <MemorySizeWidget data={data} onOpenTab={onOpenTab} />
+      <MemoryOriginWidget data={data} />
+    </div>
+  );
+}
+
+type SizeView = 'files' | 'graph' | 'concepts';
+
+/**
+ * "How big is it?" — ONE VIEW PER SCALE, each with its own figures (corrected in
+ * review, 2026-10-18: the first version kept the served-files figure as a widget
+ * headline under every view and left the Files view empty, so the switcher
+ * switched nothing). Each view now leads with its own figure — files served,
+ * graph nodes, concepts — followed by the rest of that scale and a link to the tab
+ * that browses it.
+ *
+ * `viewSwitcher="buttons"`, not tabs: this widget sits inside the page's own
+ * tabpanel, and a second tablist would put a "Graph" and a "Concepts" tab beside
+ * the page tabs of the same names. Every figure stays MOUNTED in a hidden panel,
+ * so each is still a `.memory-figure` row with its exact label
+ * (`statistics-page.test.tsx` compares these labels with Statistics' own).
+ */
+function MemorySizeWidget({
+  data,
+  onOpenTab,
+}: {
+  data: ApiGraphStatus;
+  onOpenTab: (tab: MemoryTab) => void;
+}) {
+  const groups = memoryFigureGroups(data);
+  const views: { id: SizeView; label: string; tab: MemoryTab; open: string }[] = [
+    { id: 'files', label: 'Files', tab: 'sources', open: LABELS.memoryOpenSources },
+    { id: 'graph', label: 'Graph', tab: 'graph', open: LABELS.memoryOpenGraph },
+    { id: 'concepts', label: 'Concepts', tab: 'concepts', open: LABELS.memoryOpenConcepts },
+  ];
+  return (
+    <Widget
+      id="memory-size-title"
+      title={LABELS.memorySizeTitle}
+      viewSwitcher="buttons"
+      views={views
+        .filter((v) => groups[v.id].length > 0)
+        .map((v) => ({
+          id: v.id,
+          label: v.label,
+          content: (
+            <div className="memory-size-view">
+              <MemoryFigures rows={groups[v.id]} lead />
+              <button type="button" className="memory-size-open" onClick={() => onOpenTab(v.tab)}>
+                {v.open}
+              </button>
             </div>
-          )}
-          <MemoryUnavailablePanel integrity={data.integrity} />
-        </>
-      )}
-    </>
+          ),
+        }))}
+    />
+  );
+}
+
+/** "Where did it come from?" — provenance, and the one scope sentence. */
+function MemoryOriginWidget({ data }: { data: ApiGraphStatus }) {
+  const rows = memoryFigureGroups(data).origin;
+  return (
+    <Widget id="memory-origin-title" title={LABELS.memoryOriginTitle}>
+      <MemoryFigures rows={rows} />
+      <p className="memory-indexed-note">
+        Project memory indexes this project's source code, docs, schema, and test fixtures via
+        Graphify — metadata and provenance only, never file contents.
+      </p>
+    </Widget>
   );
 }
 
@@ -414,13 +513,13 @@ const AXIS_CAPTION = {
     'Proven in CI over only the files already in the snapshot — newly added indexable files are not detected until Graphify re-indexes.',
 } as const;
 
+/** One axis as a STATE ROW — label and state. Its definition is in the trust
+ *  widget's info panel (`AXIS_CAPTION`), not repeated under every row. */
 function MemoryAxisRow({
   label,
-  caption,
   presentation,
 }: {
   label: string;
-  caption: string;
   presentation: AxisPresentation;
 }) {
   return (
@@ -431,7 +530,6 @@ function MemoryAxisRow({
           {presentation.label}
         </span>
       </div>
-      <p className="memory-axis-caption">{caption}</p>
     </div>
   );
 }
@@ -440,21 +538,9 @@ function MemoryAxisRow({
 function MemoryAxes({ data }: { data: ApiGraphStatus }) {
   return (
     <div className="memory-axes">
-      <MemoryAxisRow
-        label="Snapshot Integrity"
-        caption={AXIS_CAPTION.integrity}
-        presentation={INTEGRITY_AXIS[data.integrity]}
-      />
-      <MemoryAxisRow
-        label="Memory Policy"
-        caption={AXIS_CAPTION.memoryPolicy}
-        presentation={CONSISTENCY_AXIS[data.memory_policy]}
-      />
-      <MemoryAxisRow
-        label="Indexed Sources"
-        caption={AXIS_CAPTION.indexedSources}
-        presentation={CONSISTENCY_AXIS[data.indexed_sources]}
-      />
+      <MemoryAxisRow label="Snapshot Integrity" presentation={INTEGRITY_AXIS[data.integrity]} />
+      <MemoryAxisRow label="Memory Policy" presentation={CONSISTENCY_AXIS[data.memory_policy]} />
+      <MemoryAxisRow label="Indexed Sources" presentation={CONSISTENCY_AXIS[data.indexed_sources]} />
     </div>
   );
 }
@@ -465,13 +551,19 @@ interface FigureRow {
   mono?: boolean;
 }
 
-/** Only figures the live response actually returned — nothing is ever defaulted. */
-function MemoryFigures({ data }: { data: ApiGraphStatus }) {
-  const rows: FigureRow[] = [];
-  if (data.node_count != null) rows.push({ label: 'Nodes', value: String(data.node_count), mono: true });
-  if (data.edge_count != null) rows.push({ label: 'Edges', value: String(data.edge_count), mono: true });
+/**
+ * Only figures the live response actually returned — nothing is ever defaulted.
+ * GROUPED since 2026-10-12, by the widget that states them: the size widget's
+ * three views and the provenance widget. Every label and value is unchanged, and
+ * each still renders as a `.memory-figure` row (`statistics-page.test.tsx` compares
+ * these labels with Statistics' own).
+ */
+function memoryFigureGroups(data: ApiGraphStatus): Record<SizeView | 'origin', FigureRow[]> {
+  const rows: (FigureRow & { group: SizeView | 'origin' })[] = [];
+  if (data.node_count != null) rows.push({ label: 'Nodes', value: String(data.node_count), mono: true, group: 'graph' });
+  if (data.edge_count != null) rows.push({ label: 'Edges', value: String(data.edge_count), mono: true, group: 'graph' });
   if (data.community_count != null) {
-    rows.push({ label: 'Communities', value: String(data.community_count), mono: true });
+    rows.push({ label: 'Communities', value: String(data.community_count), mono: true, group: 'graph' });
   }
   /* This figure is `file_count` — the served PATH SET from the overview — and
      the label names that scope. It used to read "Indexed files", which is the
@@ -484,13 +576,18 @@ function MemoryFigures({ data }: { data: ApiGraphStatus }) {
      The status-plane `served_file_count` can be null pre-regen; we never render
      a broken/empty "served" figure from it — the count shown here is file_count. */
   if (data.file_count != null) {
-    rows.push({ label: 'Served Files (Path Set)', value: String(data.file_count), mono: true });
+    rows.push({
+      label: 'Served Files (Path Set)',
+      value: String(data.file_count),
+      mono: true,
+      group: 'files',
+    });
   }
   if (data.concept_count != null) {
-    rows.push({ label: 'Concepts', value: String(data.concept_count), mono: true });
+    rows.push({ label: 'Concepts', value: String(data.concept_count), mono: true, group: 'concepts' });
   }
   if (data.provider !== 'unavailable') {
-    rows.push({ label: 'Provider', value: data.provider, mono: true });
+    rows.push({ label: 'Provider', value: data.provider, mono: true, group: 'origin' });
   }
   /* The 7-char short sha, kept as-is (Statistics states the same field in full).
      A deliberate formatting difference, so the label says which form it is
@@ -500,6 +597,7 @@ function MemoryFigures({ data }: { data: ApiGraphStatus }) {
       label: 'Source Graph Commit (Short)',
       value: shortSha(data.source_graph_commit),
       mono: true,
+      group: 'origin',
     });
   }
   /* Same field, same name as Statistics' row. The `v` prefix stays: it reads as
@@ -509,18 +607,31 @@ function MemoryFigures({ data }: { data: ApiGraphStatus }) {
       label: 'Snapshot Schema Version',
       value: `v${data.snapshot_schema_version}`,
       mono: true,
+      group: 'origin',
     });
   }
   // No invented timestamps: the age line is derived from the shipped age
   // signal (`graph_mtime`) only, and is omitted entirely when it is absent.
   if (data.graph_mtime != null) {
-    rows.push({ label: 'Age', value: formatGraphAge(data.graph_mtime) });
+    rows.push({ label: 'Age', value: formatGraphAge(data.graph_mtime), group: 'origin' });
   }
 
+  const groups: Record<SizeView | 'origin', FigureRow[]> = {
+    files: [],
+    graph: [],
+    concepts: [],
+    origin: [],
+  };
+  for (const { group, ...row } of rows) groups[group].push(row);
+  return groups;
+}
+
+/** `lead` sets the first row as the view's own headline figure (value first). */
+function MemoryFigures({ rows, lead = false }: { rows: FigureRow[]; lead?: boolean }) {
   if (rows.length === 0) return null;
 
   return (
-    <dl className="memory-figures">
+    <dl className={`memory-figures${lead ? ' memory-figures-lead' : ''}`}>
       {rows.map((row) => (
         <div className="memory-figure" key={row.label}>
           <dt>{row.label}</dt>

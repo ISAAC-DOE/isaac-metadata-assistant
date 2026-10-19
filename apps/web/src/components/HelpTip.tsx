@@ -1,6 +1,6 @@
 import './help-tip.css';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { CircleHelp } from './icons';
+import { CircleHelp, Info } from './icons';
 
 /**
  * AN ACCESSIBLE `?` — a short definition behind a button, never behind hover.
@@ -65,8 +65,18 @@ export function HelpTip({
   subject,
   label,
   describedBy,
+  kind = 'definition',
   children,
 }: {
+  /**
+   * WHICH GLYPH, AND THEREFORE WHICH JOB. `definition` (the default, and every
+   * caller before 2026-10-12) is the `?` that defines a field or term. `info` is
+   * the circled `i` that `components/Widget.tsx` uses for "where this comes from /
+   * why" — provenance and reassurance prose moved off a visible surface. Same
+   * behaviour, same accessible pattern; only the mark differs, so a reader learns
+   * one meaning per glyph across the app.
+   */
+  kind?: 'definition' | 'info';
   /** What the tip is about — "Temperature". The trigger reads "About Temperature". */
   subject: string;
   /**
@@ -173,7 +183,11 @@ export function HelpTip({
         aria-controls={panelId}
         onClick={() => setOpen((current) => !current)}
       >
-        <CircleHelp size={14} strokeWidth={2} aria-hidden="true" />
+        {kind === 'info' ? (
+          <Info size={14} strokeWidth={2} aria-hidden="true" />
+        ) : (
+          <CircleHelp size={14} strokeWidth={2} aria-hidden="true" />
+        )}
       </button>
       {/* Rendered while closed too (hidden), so `aria-controls` never dangles and
           the definition is reachable by every DOM-reading guard. A `<span>`

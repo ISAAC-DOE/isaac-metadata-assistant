@@ -76,7 +76,14 @@ describe('QA-020 · an unrecognised address reaches the not-found screen', () =>
       screen.getByRole('heading', { level: 1 }).textContent,
       'an unrecognised address still resolves to another screen',
     ).toBe(LABELS.screenNotFound);
-    expect(screen.queryByText(LABELS.screenExperiments)).toBeNull();
+    /*
+     * Scoped to HEADINGS since 2026-10-12. This was `queryByText(...)`, which was
+     * the same check while the not-found page had no navigation. It now carries the
+     * same chrome as every other screen, so the left navigation legitimately names
+     * "My Experiments" as a link the reader can take — that is the way OUT, not the
+     * page having become it. What must stay absent is My Experiments' own heading.
+     */
+    expect(screen.queryByRole('heading', { name: LABELS.screenExperiments })).toBeNull();
   });
 
   it('shows the address that was asked for — the thing `replace` used to destroy', () => {

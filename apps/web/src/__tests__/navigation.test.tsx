@@ -53,12 +53,21 @@ describe('P22B · navigation / no dead ends', () => {
     expect(brand!.getAttribute('href')).toBe('/experiments');
   });
 
-  it('the breadcrumb leaf crumb is non-link text marked aria-current="page"', () => {
-    const { container } = renderAt('/load');
-    const crumb = container.querySelector('.breadcrumb');
-    expect(crumb).not.toBeNull();
-    expect(crumb!.tagName).toBe('SPAN'); // leaf, not a link
-    expect(crumb!.getAttribute('aria-current')).toBe('page');
+  /*
+   * INVERTED 2026-10-12. This asserted /load's one-crumb top bar — a leaf crumb and
+   * no left navigation, which left the brand mark as the page's only way out. /load
+   * (and the not-found page) now carry the SAME chrome as every other screen, so the
+   * no-dead-ends property this describe exists for is asserted directly: the primary
+   * navigation is present, no item claims to be the current page (no nav destination
+   * matches /load), and Help is in reach. The retired `.breadcrumb` crumb is absent.
+   */
+  it('/load carries the shared chrome: primary navigation with no item current, and Help', () => {
+    const { container, getByRole } = renderAt('/load');
+    const nav = getByRole('navigation', { name: 'Primary' });
+    expect(nav.querySelectorAll('a').length).toBeGreaterThanOrEqual(4);
+    expect(nav.querySelector('[aria-current]')).toBeNull();
+    expect(getByRole('button', { name: 'Help' })).toBeInTheDocument();
+    expect(container.querySelector('.breadcrumb')).toBeNull();
   });
 
   it('Evidence Trail deep-link renders an explicit return link to /record/:id + a current leaf crumb', async () => {
