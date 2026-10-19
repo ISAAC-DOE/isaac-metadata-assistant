@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import { AppRoutes } from '../App';
@@ -82,11 +82,19 @@ function figureValue(label: string): string {
   return row!.querySelector('dd')?.textContent?.trim() ?? '';
 }
 
+/** The widget's HEADLINE (a `dl.stat-card`), by its own label — 2026-10-12. */
+function headlineValue(label: string): string {
+  const card = within(section()).getByText(label).closest('dl.stat-card');
+  expect(card, `no headline labelled "${label}"`).not.toBeNull();
+  return card!.querySelector('.stat-card-value')?.textContent?.trim() ?? '';
+}
+
 describe('Workspace Activity summarizes the history and never replaces it', () => {
   it('renders the three headline figures from the server, each at its own label', async () => {
     renderStatistics(statisticsRoutes());
     await settled();
-    expect(figureValue('Changes in the Last 7 Days')).toBe(EVENTS_IN_WINDOW);
+    // The window count is the widget's headline; its two companions sit beside it.
+    expect(headlineValue('Changes in the Last 7 Days')).toBe(EVENTS_IN_WINDOW);
     expect(figureValue('Records Changed')).toBe(RECORDS_CHANGED);
     expect(figureValue('Recorded Acts, All Time')).toBe(EVENTS_ALL_TIME);
   });
@@ -465,9 +473,14 @@ describe('Workspace Activity summarizes the history and never replaces it', () =
     ).toBeTruthy();
     expect(within(section()).getByRole('button', { name: 'Retry' })).toBeTruthy();
     // The rest of the Overview tab is untouched — one dead read degrades one
-    // section, which is the page's partial-failure design.
-    expect(screen.getByRole('region', { name: 'Recent Work' })).toBeTruthy();
-    expect(screen.getByRole('region', { name: 'Workspace at a Glance' })).toBeTruthy();
+    // source, which is the page's partial-failure design. `Recent Work` is this
+    // widget's `Latest Updates` view since 2026-10-12, and it reads the RECORDS
+    // source, so it still lists records with the activity read dead.
+    fireEvent.click(within(section()).getByRole('tab', { name: 'Latest Updates' }));
+    const latestTab = within(section()).getByRole('tab', { name: 'Latest Updates' });
+    const latest = document.getElementById(latestTab.getAttribute('aria-controls') ?? '');
+    expect(latest?.querySelectorAll('.stats-recent-row').length).toBeGreaterThan(0);
+    expect(screen.getByRole('region', { name: 'Records' })).toBeTruthy();
   });
 
   it('lives on the Overview tab and NOT on My Stats', async () => {
@@ -482,5 +495,81 @@ describe('Workspace Activity summarizes the history and never replaces it', () =
     expect(section()).toBeTruthy();
     screen.getByRole('tab', { name: 'My Stats' }).click();
     await waitFor(() => expect(screen.queryByRole('region', { name: SECTION })).toBeNull());
+  });
+});
+
+/*
+ * THE RANGE CONTROL (2026-10-12) — the one genuine time dimension on the page.
+ *
+ * The route has always accepted `window_days`; the widget is its first caller to
+ * send one. Two properties make it honest, and both are asserted: the DEFAULT
+ * read sends no parameter at all (its URL is the one it always was), and every
+ * label is taken from the RESPONSE's `window.days`, never from the chip that was
+ * pressed — so a server answering for a different span cannot be mislabelled.
+ */
+describe('Workspace Activity · the range control', () => {
+  it('reads the default span with NO parameter, and offers 7 · 30 · 365 days as a radiogroup', async () => {
+    const { calls } = renderStatistics(statisticsRoutes());
+    await settled();
+    expect(calls).toContain('GET /api/activity/summary');
+    expect(calls.some((c) => c.includes('window_days'))).toBe(false);
+
+    const group = within(section()).getByRole('radiogroup', { name: 'Time Range' });
+    const radios = within(group).getAllByRole('radio');
+    expect(radios.map((r) => r.textContent)).toEqual(['7 Days', '30 Days', '365 Days']);
+    expect(radios.map((r) => r.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false']);
+    expect(radios.map((r) => r.tabIndex)).toEqual([0, -1, -1]);
+  });
+
+  it('re-reads with window_days and labels every figure from the PAYLOAD', async () => {
+    const thirty = {
+      ...activitySummaryFixture,
+      window: { ...activitySummaryFixture.window, days: 30 },
+      totals: { ...activitySummaryFixture.totals, events_in_window: 11 },
+    };
+    const { calls } = renderStatistics({
+      ...statisticsRoutes(),
+      'GET /api/activity/summary?window_days=30': { body: thirty },
+    });
+    await settled();
+
+    fireEvent.click(within(section()).getByRole('radio', { name: '30 Days' }));
+    await waitFor(() => expect(within(section()).getByText('Changes in the Last 30 Days')).toBeTruthy());
+    expect(calls).toContain('GET /api/activity/summary?window_days=30');
+    expect(headlineValue('Changes in the Last 30 Days')).toBe('11');
+    // The breakdown labels follow the payload too.
+    expect(within(section()).getByText('What Changed in the Last 30 Days')).toBeTruthy();
+    expect(within(section()).queryByText('Changes in the Last 7 Days')).toBeNull();
+  });
+
+  it('labels from the response even when the server answers for a DIFFERENT span', async () => {
+    // A server that answered a 30-day request with a 7-day window must be
+    // labelled "7 days": the label is the payload's, not the chip's.
+    renderStatistics({
+      ...statisticsRoutes(),
+      'GET /api/activity/summary?window_days=30': { body: activitySummaryFixture },
+    });
+    await settled();
+    fireEvent.click(within(section()).getByRole('radio', { name: '30 Days' }));
+    await waitFor(() =>
+      expect(within(section()).getByRole('radio', { name: '30 Days' })).toHaveAttribute(
+        'aria-checked',
+        'true',
+      ),
+    );
+    await settled();
+    expect(headlineValue('Changes in the Last 7 Days')).toBe(EVENTS_IN_WINDOW);
+    expect(within(section()).queryByText('Changes in the Last 30 Days')).toBeNull();
+  });
+
+  it('moves with the arrow keys, roving the tab stop', async () => {
+    renderStatistics(statisticsRoutes());
+    await settled();
+    const seven = within(section()).getByRole('radio', { name: '7 Days' });
+    seven.focus();
+    fireEvent.keyDown(seven, { key: 'ArrowRight' });
+    const thirty = within(section()).getByRole('radio', { name: '30 Days' });
+    expect(thirty).toHaveAttribute('aria-checked', 'true');
+    expect(thirty).toHaveFocus();
   });
 });

@@ -205,8 +205,12 @@ const EXPECTED_STATE_IDS = [
   'source-did-not-answer-intercepted-error',
   'transport-timeout-intercepted-error',
   'program-error-intercepted-error',
-  'technical-details-collapsed-real-public-reference',
-  'technical-details-expanded-real-public-reference',
+  /* ~~'technical-details-collapsed-…', 'technical-details-expanded-…'~~ —
+     the region is gone since the 2026-10-12 widget redesign; these two capture
+     what replaced it: the build facts as visible widgets on arrival, and a
+     widget's info panel opened from the keyboard. */
+  'build-facts-widgets-real-public-reference',
+  'widget-info-open-real-public-reference',
   'my-stats-no-attribution-unavailable-state',
 ] as const;
 
@@ -935,57 +939,49 @@ const STATES: readonly VerificationState[] = [
     },
   },
   {
-    id: 'technical-details-collapsed-real-public-reference',
+    id: 'build-facts-widgets-real-public-reference',
     what:
-      'The Statistics page’s Technical Details region as it arrives: collapsed, its heading ' +
-      'readable inside the summary, its body not rendered. Real backend throughout.',
+      'The build facts as they arrive since the 2026-10-12 widget redesign: four visible ' +
+      'widgets — Runtime, Project Memory, Record Schema, API Surface — each stating its own ' +
+      'headline, and NO collapsed region to open first. Real backend throughout.',
     async reach({ page, request }) {
       const status = await waitForRealReport(request);
       expect(status).toBe('ok');
       await open(page, VERIFICATION_PATH);
-      const details = page.locator('details.stats-technical');
-      await expect(details).toHaveCount(1, { timeout: 20_000 });
-      await expect(details.getByRole('heading', { name: 'Technical Details' })).toBeVisible();
-      expect(await details.evaluate((el) => (el as HTMLDetailsElement).open)).toBe(false);
-      /*
-       * MEASURED, not assumed. A CLOSED `<details>` keeps its children in layout
-       * with `content-visibility: hidden` in Chromium, so a bounding box is not
-       * evidence either way — `checkVisibility` is (see `helpers/layout.ts`).
-       */
-      const bodyRendered = await details.evaluate((el) => {
-        const body = el.querySelector('.stats-technical-body');
-        if (body === null) return null;
-        return (body as Element & { checkVisibility: (o: Record<string, boolean>) => boolean })
-          .checkVisibility({ contentVisibilityAuto: true });
-      });
-      expect(bodyRendered, 'the collapsed region must not paint its body').toBe(false);
-      return details;
+      // The region these replaced is gone, not merely closed.
+      await expect(page.locator('details.stats-technical')).toHaveCount(0);
+      for (const name of ['Runtime', 'Project Memory', 'Record Schema', 'API Surface']) {
+        await expect(page.getByRole('region', { name })).toBeVisible({ timeout: 20_000 });
+      }
+      await expect(
+        page.getByRole('region', { name: 'API Surface' }).locator('dl.stat-card-headline'),
+      ).toBeVisible();
+      return page.getByRole('region', { name: 'Runtime' });
     },
   },
   {
-    id: 'technical-details-expanded-real-public-reference',
+    id: 'widget-info-open-real-public-reference',
     what:
-      'The same region opened from the keyboard — the build’s own runtime, schema, memory ' +
-      'and API facts. Real backend throughout.',
+      'A widget’s info panel opened from the KEYBOARD — Record Verification’s, which holds ' +
+      'the prose that used to be three disclosures at the foot of the page. Closed on ' +
+      'arrival; Enter on its named toggle opens it. Real backend throughout.',
     async reach({ page, request }) {
       const status = await waitForRealReport(request);
       expect(status).toBe('ok');
       await open(page, VERIFICATION_PATH);
-      const details = page.locator('details.stats-technical');
-      await expect(details).toHaveCount(1, { timeout: 20_000 });
-      // `> summary`, not `summary`: every chart's data table is a nested
-      // `<details>` of its own, so the descendant selector matches four.
-      // Through the KEYBOARD, because "keyboard operable" is the claim the
-      // component's own comment makes for choosing a native disclosure.
-      await details.locator('> summary').focus();
+      const widget = page.getByRole('region', { name: 'Record Verification' });
+      const toggle = widget.getByRole('button', { name: 'About Record Verification' });
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false', { timeout: 20_000 });
+      const panelId = await toggle.getAttribute('aria-controls');
+      const panel = page.locator(`[id="${panelId}"]`);
+      await expect(panel).toBeHidden();
+      // Through the KEYBOARD: the toggle is a real button, so Enter activates it.
+      await toggle.focus();
       await page.keyboard.press('Enter');
-      await expect
-        .poll(() => details.evaluate((el) => (el as HTMLDetailsElement).open), { timeout: 10_000 })
-        .toBe(true);
-      const body = details.locator('.stats-technical-body');
-      await expect(body).toBeVisible();
-      await expect(body.getByRole('heading', { name: 'Runtime' })).toBeVisible({ timeout: 20_000 });
-      return details;
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      await expect(panel).toBeVisible();
+      await expect(panel.getByText('How Verification Works')).toBeVisible();
+      return panel;
     },
   },
   {
@@ -1449,6 +1445,19 @@ async function reportAssertions(
   // ── long JSON-pointer schema paths WRAP, measured as real line boxes ──────
   const longPathLines: number[] = [];
   if (state.longPaths === true) {
+    /*
+     * THE PATHS LIVE IN A VIEW SINCE 2026-10-12. The issue distributions are the
+     * Record Verification widget's `Format Issues` view, mounted but `hidden`
+     * until its tab is pressed — and a hidden element has no line box, which is
+     * what this measured ("produced no line box at all") until the tab was
+     * pressed here. Pressed through the real control, so the geometry measured
+     * is the geometry a reader gets.
+     */
+    const issuesTab = s.getByRole('tab', { name: 'Format Issues' });
+    if ((await issuesTab.count()) > 0 && (await issuesTab.getAttribute('aria-selected')) !== 'true') {
+      await issuesTab.click();
+      await expect(issuesTab).toHaveAttribute('aria-selected', 'true');
+    }
     const measured = await s.evaluate((root) => {
       const out: { text: string; lines: number; overflow: number }[] = [];
       for (const el of Array.from(root.querySelectorAll('.stats-chart-row-label'))) {
@@ -1943,7 +1952,11 @@ test.describe('probe self-check (injected DOM)', () => {
       label.setAttribute('style', 'white-space: nowrap !important; overflow: hidden; width: 100px; display: block;');
       label.textContent = path;
       row.appendChild(label);
-      root.querySelector('.stats-chart-plot')!.appendChild(row);
+      /* INTO THE SHOWN VIEW (2026-10-12). The first `.stats-chart-plot` in the
+         section is the validators chart, which sits in a view that is hidden
+         once `reportAssertions` has pressed `Format Issues` — and a label in a
+         hidden panel has no line box, so the probe would measure nothing. */
+      root.querySelector('.widget-view-panel:not([hidden]) .stats-chart-plot')!.appendChild(row);
     }, LONG_SCHEMA_PATHS[0]);
 
     const found: string[] = [];

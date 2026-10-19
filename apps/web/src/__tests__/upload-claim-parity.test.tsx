@@ -143,7 +143,7 @@ import { cleanup, render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import { HelpPanel } from '../components/HelpPanel';
-import { GovernancePage } from '../screens/GovernancePage';
+import { SettingsPage } from '../screens/SettingsPage';
 import { LoadMaterials } from '../screens/LoadMaterials';
 import { ConnectAnAgent, type ConnectAnAgentFacts } from '../screens/settings/ConnectAnAgent';
 import { ConnectYourAgentPanel } from '../screens/settings/ConnectYourAgent';
@@ -226,16 +226,34 @@ function syntheticModeCard(): string {
  * test in the file down with it. Wrapping is the right fix rather than downgrading the
  * `<Link>`: in production this panel is mounted inside `TopBar`, inside the router, so the
  * HARNESS was what did not match reality. */
+/*
+ * THE POLICY MOVED, AND THE SITE MOVED WITH IT (2026-10-12). Governance & Safety
+ * → Policy is now part of Settings → Privacy & Governance (`DEC-28`): its
+ * paragraphs are `GOVERNANCE_POLICY` in `lib/settingsContent.ts`, rendered as
+ * rows of that tab's question widgets, and `/governance?tab=policy` redirects
+ * there. The site is still RENDERED, for the reason above — and it is still the
+ * policy's own paragraphs, not the whole tab, so a neighbouring concept card
+ * cannot supply half the claim and count as parity.
+ */
 function policyTabText(): string {
   render(
     <MemoryRouter
-      initialEntries={['/governance']}
+      initialEntries={['/settings?tab=privacy']}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
-      <GovernancePage />
+      <SettingsPage />
     </MemoryRouter>,
   );
-  return screen.getByRole('tabpanel').textContent ?? '';
+  /* Since 2026-10-18 the tab shows two policy paragraphs as VISIBLE ONE-LINE rows
+     and keeps all three paragraphs, verbatim, in Details. Both layers are this
+     site's claim, so both are read: the three full paragraphs AND the two lines a
+     reader sees first — a one-line form that overstated the claim would be the
+     defect this file exists for, in the most-read place. */
+  const full = Array.from(document.querySelectorAll('.settings-definition.gov-policy-section'));
+  const lines = Array.from(document.querySelectorAll('.settings-point.gov-policy-section'));
+  if (full.length !== 3) throw new Error(`expected the three policy paragraphs, found ${full.length}`);
+  if (lines.length !== 2) throw new Error(`expected the two one-line policy rows, found ${lines.length}`);
+  return [...lines, ...full].map((el) => el.textContent ?? '').join(' ');
 }
 
 function loadMaterialsWarnText(): string {
@@ -322,7 +340,7 @@ function connectAnAgentGuide(): string {
 }
 
 const SITES: [string, () => string][] = [
-  ['Governance → Policy', policyTabText],
+  ['Settings → Privacy & Governance → the governance policy', policyTabText],
   ['the Load Materials on-ramp warning', loadMaterialsWarnText],
   ['Settings → Data & Privacy → no-real-experiment-data', noRealDataDetail],
   ['Settings → Connect Your Agent → the no-upload capability row', mcpNoUploadRow],
@@ -444,9 +462,12 @@ describe('R1b §1 · the file-reading controls exist, so the absolute claim is f
     expect(src).toMatch(/not sent to ISAAC/);
   });
 
-  it('the Governance page mounts one of them one tab away from its own policy copy', () => {
+  it('the Governance page mounts one of them, and the policy that names it links there', () => {
     const src = rawSource('screens/GovernancePage.tsx');
     expect(src).toMatch(/<RecordValidator\s*\/>/);
+    // The policy moved to Settings › Privacy & Governance; its review-tools row
+    // names the Validator and the widget links to it.
+    expect(rawSource('screens/SettingsPage.tsx')).toMatch(/\?tab=validator/);
   });
 
   /*

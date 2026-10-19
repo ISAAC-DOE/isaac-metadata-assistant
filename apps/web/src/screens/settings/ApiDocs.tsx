@@ -5,12 +5,13 @@
  * no CDN, no embedded API-explorer library, and no second description of any
  * operation.
  *
- * Two exported panels, one per Settings tab:
+ * Three exported bodies (re-cut 2026-10-12, when Settings became widgets):
  *
- *   · {@link ApiQuickStartPanel} (API Access) — Quick Start, the handful of
- *     facts a caller needs first, every one derived from that document, plus the
- *     collapsed Connect an Agent guide.
- *   · {@link ApiExplorerPanel} (Endpoint Explorer) — the master-detail browser,
+ *   · {@link ApiQuickStartView} and {@link ApiProgramAgentView} — the two views
+ *     of the API Access widget on the Integrations tab: Quick Start, the handful
+ *     of facts a caller needs first, every one derived from that document, and
+ *     the Program an Agent guide.
+ *   · {@link ApiExplorerPanel} (Advanced → Endpoint Explorer) — the master-detail browser,
  *     grouped by the document's real `tags` (see `lib/apiDocsModel.ts` for why
  *     the old path-segment inference had to go), with Purpose, whether the
  *     contract declares a 401, parameters, request body, responses, error
@@ -18,8 +19,8 @@
  *     `Technical Schema` disclosure. Nothing here reports whether a DEPLOYMENT
  *     enables authentication — the app cannot see that.
  *
- * Because those are now separate tabs, nothing here may call the Explorer
- * "above": the prose names the TAB and offers a control that goes there.
+ * Because those sit on different tabs, nothing here may call the Explorer
+ * "above": the prose names the Explorer and offers a control that goes there.
  *
  * The base URL is always the RELATIVE path the contract itself declares; no
  * origin or host literal is ever displayed or assumed, and the generated samples
@@ -33,7 +34,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import { ChevronRight, Search } from '../../components/icons';
+import { ChevronRight, Info, Search } from '../../components/icons';
 import {
   codeSamples,
   collectExamples,
@@ -52,12 +53,11 @@ import {
 import { API_ACCESS_COPY } from '../../lib/settingsContent';
 import type { ApiOpenApiResponse, OpenApiMediaType } from '../../lib/types';
 import { ConnectAnAgent } from './ConnectAnAgent';
-import { CopyAnnouncer, CopyButton, MethodBadge, RovingTabs } from './apiShared';
+import { CopyAnnouncer, CopyButton, MethodBadge } from './apiShared';
 
 const API_DETAIL_ID = 'settings-api-detail';
 const API_DETAIL_NAME_ID = 'settings-api-detail-name';
 const API_LIST_HEADING_ID = 'settings-api-endpoints-heading';
-const CONNECT_SUMMARY_ID = 'settings-api-connect-summary';
 /** The tab-level Auth legend, referenced by every detail pane's Auth flag. */
 const AUTH_LEGEND_ID = 'settings-api-auth-legend';
 /**
@@ -71,8 +71,42 @@ const slug = (value: string) => value.replace(/[^a-zA-Z0-9]+/g, '-');
 const endpointRowId = (key: string) => `settings-api-row-${slug(key)}`;
 const groupHeadingId = (key: string) => `settings-api-group-${slug(key)}`;
 
-/** The API Access tab's contract-derived half: Quick Start + Connect an Agent. */
-export function ApiQuickStartPanel({
+/**
+ * The API Access widget's Quick Start view. ONE polite region for every copy
+ * affordance in it, so adding a copy button never adds a live region.
+ *
+ * `onOpenProgram` switches the widget to its Program an Agent view — the old
+ * "Connect an Agent" jump, which used to open a drawer below this one.
+ */
+export function ApiQuickStartView({
+  schema,
+  onOpenExplorer,
+  onOpenProgram,
+}: {
+  schema: ApiOpenApiResponse;
+  onOpenExplorer: () => void;
+  onOpenProgram: () => void;
+}) {
+  const rows = useMemo(() => flattenOpenApi(schema), [schema]);
+  const facts = useMemo(() => quickStartFacts(schema, rows), [schema, rows]);
+  const [copyMessage, setCopyMessage] = useState('');
+  const onCopied = useCallback((what: string) => setCopyMessage(`Copied ${what}.`), []);
+  return (
+    <>
+      <CopyAnnouncer message={copyMessage} />
+      <QuickStart
+        facts={facts}
+        onCopied={onCopied}
+        onOpenExplorer={onOpenExplorer}
+        onOpenConnect={onOpenProgram}
+      />
+    </>
+  );
+}
+
+/** The API Access widget's Program an Agent view: the guide, without a drawer of
+ *  its own — the view IS the disclosure a reader chose. */
+export function ApiProgramAgentView({
   schema,
   onOpenExplorer,
 }: {
@@ -81,42 +115,16 @@ export function ApiQuickStartPanel({
 }) {
   const rows = useMemo(() => flattenOpenApi(schema), [schema]);
   const facts = useMemo(() => quickStartFacts(schema, rows), [schema, rows]);
-
-  // ONE polite region for every copy affordance on this panel, so adding a copy
-  // button never adds a live region.
-  const [copyMessage, setCopyMessage] = useState('');
-  const onCopied = useCallback((what: string) => setCopyMessage(`Copied ${what}.`), []);
-
-  const [connectOpen, setConnectOpen] = useState(false);
-  const openConnect = useCallback(() => {
-    setConnectOpen(true);
-    (document.getElementById(CONNECT_SUMMARY_ID) as HTMLElement | null)?.focus();
-  }, []);
-
   return (
-    <>
-      <CopyAnnouncer message={copyMessage} />
-      <QuickStart
-        facts={facts}
-        onCopied={onCopied}
-        onOpenExplorer={onOpenExplorer}
-        onOpenConnect={openConnect}
-      />
-      <ConnectAnAgent
-        open={connectOpen}
-        onOpenChange={setConnectOpen}
-        summaryId={CONNECT_SUMMARY_ID}
-        facts={{
-          requestMediaTypes: facts.requestMediaTypes,
-          errorCodes: facts.errorCodes,
-        }}
-        onOpenExplorer={onOpenExplorer}
-      />
-    </>
+    <ConnectAnAgent
+      bare
+      facts={{ requestMediaTypes: facts.requestMediaTypes, errorCodes: facts.errorCodes }}
+      onOpenExplorer={onOpenExplorer}
+    />
   );
 }
 
-/** The Endpoint Explorer tab: the master-detail browser and nothing else. */
+/** The Endpoint Explorer: the master-detail browser and nothing else. */
 export function ApiExplorerPanel({ schema }: { schema: ApiOpenApiResponse }) {
   const rows = useMemo(() => flattenOpenApi(schema), [schema]);
   const descriptions = useMemo(() => tagDescriptions(schema), [schema]);
@@ -157,47 +165,22 @@ function QuickStart({
   const firstSample = first ? codeSamples(first)[0] : null;
   return (
     /*
-     * ── COLLAPSED BY DEFAULT SINCE 2026-09-15, AND WHY IT IS ELIGIBLE ───────
+     * ── A VIEW, NOT A DRAWER, SINCE 2026-10-12 ──────────────────────────────
      *
-     * The owner's standing direction is that this page carries too much visible
-     * prose, and the brief for API Access is narrower than "shorten it": the
-     * default view should answer only whether API access is available, whether
-     * a credential is available, how the agent interface differs from the REST
-     * API, and where a developer goes next. Those four are the banner, the
-     * disabled Create control with its reason, the two jump links, and the
-     * access rows. A `curl` line, a base path, a media-type list and a
-     * bearer-header discussion are none of them: they are what a developer
-     * reads ONCE, after deciding to call the API.
-     *
-     * NOTHING HERE IS A STATE A READER MUST NOT MISS, which is the test this
-     * surface's disclosures are held to. Every figure in this drawer is derived
-     * from the contract the app generates for itself (`quickStartFacts`), it
-     * states no security or privacy posture, no destructive consequence and no
-     * required action — the ONE claim of that kind on this tab, that no
-     * operation can issue a credential, is in the always-visible banner and
-     * stays there. `ConnectAnAgent` below is already a drawer, so this
-     * introduces no new disclosure vocabulary.
-     *
-     * THE SECTION AND ITS `aria-labelledby` ARE UNCHANGED, so this is still a
-     * named region with the same accessible name, and native `<details>` keeps
-     * every sentence in the DOM and in the accessibility tree — which is what
-     * lets the honesty guards go on reaching it with `querySelectorAll` without
-     * being weakened.
-     *
-     * THE ROOT CLASS IS ITS OWN, AND THAT IS NOT A STYLE DECISION. It wears the
-     * same chrome as the `Connect an Agent` drawer below — `screens.css` shares
-     * the declarations through one selector list — but it must NOT carry
-     * `api-connect`, because `settings-api.test.tsx` addresses that drawer with
-     * `document.querySelector('details.api-connect')`, which takes the FIRST
-     * match. Adding the class here made three of those tests assert about this
-     * drawer instead of the one they name, and they failed loudly rather than
-     * silently only because the open/closed state happened to differ.
+     * This sat in its own collapsed `<details>` on the API Access tab (since
+     * 2026-09-15: nothing in it is a state a reader must not miss — every figure
+     * is derived from the contract and it states no security or privacy
+     * posture). It is now one of the API Access widget's two views, which a
+     * reader opens by choosing it, so a drawer inside the view would be a second
+     * click that buys nothing. ~~THE SECTION AND ITS `aria-labelledby` ARE
+     * UNCHANGED, so this is still a named region.~~ — CHANGED 2026-10-19: the
+     * shared Widget's button-mode view panel is ITSELF a `region` named by its
+     * button, "Quick Start", so a named section inside it made two landmarks with
+     * one name (axe `landmark-unique`, found once the sweep began revealing widget
+     * views). The panel carries the name now; this section is plain grouping, and
+     * its `<h3>` still heads it.
      */
-    <details className="api-quickstart-drawer">
-      <summary className="api-connect-summary">
-        <span className="api-connect-title">Quick Start — Your First Request</span>
-      </summary>
-    <section className="api-quickstart" aria-labelledby="settings-api-quickstart-heading">
+    <section className="api-quickstart">
       <h3 id="settings-api-quickstart-heading" className="api-section-title">
         Quick Start
       </h3>
@@ -209,14 +192,14 @@ function QuickStart({
             <>
               <code className="mono api-quickstart-value">{facts.basePath}</code>
               <span className="api-quickstart-note">
-                Relative to the origin serving this page. Every path on the Endpoint Explorer tab
+                Relative to the origin serving this page. Every path in the Endpoint Explorer
                 already begins with it, so a request needs the origin and nothing else.
               </span>
             </>
           ) : (
             <span className="api-quickstart-note">
               The contract's paths share no single base, so there is no one base URL to
-              report. Use each path exactly as the Endpoint Explorer tab lists it.
+              report. Use each path exactly as the Endpoint Explorer lists it.
             </span>
           )}
         </QuickStartRow>
@@ -247,7 +230,7 @@ function QuickStart({
             One credential belonging to the deployment, sent on every call that needs it — where a
             deployment sets one. Where none is set, no operation refuses a call for want of it.{' '}
             {facts.authRequiredCount} of {facts.operationCount} operations document a 401, and the
-            Endpoint Explorer tab marks which.
+            Endpoint Explorer marks which.
           </span>
         </QuickStartRow>
 
@@ -310,22 +293,18 @@ function QuickStart({
         </div>
       )}
 
-      {/* Where a reader goes next. The old first entry pointed at an "API Keys"
-          sub-tab that no longer exists — that content is now the status banner
-          at the top of THIS tab, so a jump to it would be a link to the page
-          you are on. The Endpoint Explorer is a different tab, and Connect an
-          Agent is the disclosure immediately below. */}
+      {/* Where a reader goes next: the Endpoint Explorer (Advanced tab), and the
+          guide that is this widget's other view. */}
       <nav className="api-quickstart-jump" aria-label="More API detail">
         <button type="button" className="settings-jump-btn" onClick={onOpenExplorer}>
           Browse Every Endpoint
           <ChevronRight size={13} strokeWidth={2.2} aria-hidden="true" />
         </button>
         <button type="button" className="settings-jump-btn" onClick={onOpenConnect}>
-          Connect an Agent
+          Program an Agent
         </button>
       </nav>
     </section>
-    </details>
   );
 }
 
@@ -471,7 +450,13 @@ function ApiBrowser({
         where they meant the input. The landmark gets its own name.
       */}
       <div className="settings-search" role="search" aria-label={API_SEARCH_LANDMARK}>
-        <label className="settings-search-label" htmlFor="api-docs-search">
+        {/* ONE VISIBLE HEADING (2026-10-18, review): "Browse Endpoints" and a
+            visible "Search endpoints" label read as two headings stacked over one
+            input. The label is kept — it is the input's accessible name, and
+            three tests and a screen reader resolve the box by it — but it is
+            visually hidden; the placeholder and the search glyph carry the
+            affordance for a sighted reader. */}
+        <label className="settings-search-label sr-only" htmlFor="api-docs-search">
           Search endpoints
         </label>
         <div className="settings-search-input-wrap">
@@ -500,14 +485,11 @@ function ApiBrowser({
         {filtered.length} of {rows.length} endpoint{rows.length === 1 ? '' : 's'}
       </p>
 
-      {/* The authentication explanation, ONCE for the whole tab. It used to be a
-          two-sentence paragraph re-rendered inside every endpoint's detail pane —
-          the same warning up to seven times per visit — while the per-operation
-          fact is a single flag. The flag is now compact metadata on the detail
-          pane and this legend says what it means, in one place. */}
-      <p className="api-browser-legend" id={AUTH_LEGEND_ID}>
-        {API_ACCESS_COPY.authMarkerLegend}
-      </p>
+      {/* The authentication explanation used to sit here, ONCE for the whole
+          tab, above the list. Since 2026-10-12 it is the info toggle on the
+          detail pane's own Auth column — beside the flag it explains, still
+          stated exactly once (there is one detail pane), still the target of
+          the flag's `aria-describedby`. */}
 
       {filtered.length === 0 && (
         <p className="settings-doc-empty">No endpoints match &ldquo;{query}&rdquo;.</p>
@@ -634,6 +616,10 @@ function ApiEndpointRow({
  * project requires to stay visible. See {@link BOUNDARY_CAVEAT_MARKERS}.
  */
 export const PURPOSE_DISCLOSURE_MIN_CHARS = 400;
+
+/* ~~`PURPOSE_CLAMP_MIN_CHARS`~~ — retired 2026-10-18 with the four-line clamp
+   (CI refused the clip). The Purpose now shows its lead paragraph and puts every
+   later one behind "Full Description"; see `ApiEndpointDetail`. */
 
 /**
  * The project's boundary/honesty vocabulary, lowercased. A remainder containing
@@ -782,6 +768,34 @@ export function splitPurpose(description?: string): {
   return { lead, inline: collapse ? [] : rest, collapsed: collapse ? rest : [] };
 }
 
+/**
+ * THE CONTRACT'S OWN MARKUP, RENDERED RATHER THAN PRINTED (2026-10-12).
+ *
+ * The descriptions are route docstrings, and they mark identifiers the way a
+ * docstring does — `persistence`, `GET /api/health`. Rendered as plain text the
+ * reader saw the backticks themselves, a dozen pairs on some operations. A pair
+ * of backticks now becomes an inline `<code>`, and NOTHING ELSE CHANGES: no
+ * word is added or dropped, the span's text is exactly what sat between the
+ * backticks, and an unpaired backtick is left as it is rather than guessed at.
+ */
+export function InlineCode({ text }: { text: string }) {
+  const parts = text.split(/`([^`\n]+)`/);
+  if (parts.length === 1) return <>{text}</>;
+  return (
+    <>
+      {parts.map((part, i) =>
+        i % 2 === 1 ? (
+          <code className="mono api-inline-code" key={i}>
+            {part}
+          </code>
+        ) : (
+          part
+        ),
+      )}
+    </>
+  );
+}
+
 function ApiEndpointDetail({
   row,
   schema,
@@ -796,6 +810,19 @@ function ApiEndpointDetail({
   const ok = row.responses.filter((r) => !isErrorCode(r.code));
   const errors = row.responses.filter((r) => isErrorCode(r.code));
   const purpose = splitPurpose(row.description);
+  const [legendOpen, setLegendOpen] = useState(false);
+  const restText = [...purpose.inline, ...purpose.collapsed].join(' ');
+  const hasMore = restText.length > 0;
+  const [purposeOpen, setPurposeOpen] = useState(false);
+  /* A Full Description opened on one operation does not stay open on the next.
+     The pane is NOT re-keyed for this: its other state (the Code Examples
+     drawer, the Auth legend) has always carried over between selections. */
+  const [purposeFor, setPurposeFor] = useState(row.key);
+  if (purposeFor !== row.key) {
+    setPurposeFor(row.key);
+    setPurposeOpen(false);
+  }
+  const purposeBodyId = `${API_DETAIL_ID}-purpose`;
   return (
     <>
       <h4 id={API_DETAIL_NAME_ID} className="api-browser-detail-name">
@@ -837,7 +864,22 @@ function ApiEndpointDetail({
           a supplement — the label above is truthful on its own. */}
       <dl className="api-browser-meta">
         <div className="api-browser-meta-item">
-          <dt>Auth</dt>
+          <dt>
+            Auth
+            {/* The meaning of the flag, one click away and never a tooltip: a
+                real button, `aria-expanded`, and the legend stays in the DOM
+                (`hidden`) so the flag's description resolves either way. */}
+            <button
+              type="button"
+              className="api-browser-info"
+              aria-label="About Auth"
+              aria-expanded={legendOpen}
+              aria-controls={AUTH_LEGEND_ID}
+              onClick={() => setLegendOpen((open) => !open)}
+            >
+              <Info size={13} strokeWidth={2} aria-hidden="true" />
+            </button>
+          </dt>
           <dd
             className={row.authRequired ? 'api-browser-meta-flag required' : 'api-browser-meta-flag'}
             aria-describedby={AUTH_LEGEND_ID}
@@ -860,12 +902,31 @@ function ApiEndpointDetail({
           </dd>
         </div>
       </dl>
+      <p className="api-browser-legend" id={AUTH_LEGEND_ID} hidden={!legendOpen}>
+        {API_ACCESS_COPY.authMarkerLegend}
+      </p>
 
       <section className="api-browser-section">
         <h5 className="api-browser-section-heading">Purpose</h5>
         {purpose.lead ? (
           <>
-            <p className="api-docs-description">{purpose.lead}</p>
+            {/* THE LEAD PARAGRAPH, THEN THE REST ON REQUEST (2026-10-18, review):
+                the median Purpose ran ~1,500 characters and the longest ~9,500,
+                so the detail pane opened on a wall.
+
+                ~~Clamped to four lines~~ — the first version clamped the whole
+                block with `-webkit-line-clamp` + `overflow: hidden`, and CI's
+                layout sweep refused it as clipped text (`clipped-y` on every
+                paragraph and inline code span past line four). The split is now
+                by PARAGRAPH: the lead is shown whole, and every later paragraph —
+                verbatim, in the DOM, `splitPurpose`'s rule unchanged inside it —
+                sits in a `hidden` block behind a real toggle. Nothing is clipped,
+                and when the hidden part carries boundary copy the toggle says so,
+                so the lead is never read as the whole statement. */}
+            <p className="api-docs-description">
+              <InlineCode text={purpose.lead} />
+            </p>
+            <div className="api-purpose-body" id={purposeBodyId} hidden={hasMore && !purposeOpen}>
             {/* Short and medium remainders — and ANY remainder carrying a
                 boundary caveat, at any length — render in full, right here. See
                 `splitPurpose`: the disclosure below is reserved for a genuinely
@@ -883,7 +944,7 @@ function ApiEndpointDetail({
                 description are legal and must not collide. */}
             {purpose.inline.map((paragraph, i) => (
               <p className="api-docs-description" key={`purpose-inline-${i}`}>
-                {paragraph}
+                <InlineCode text={paragraph} />
               </p>
             ))}
             {purpose.collapsed.length > 0 && (
@@ -897,10 +958,25 @@ function ApiEndpointDetail({
                 </summary>
                 {purpose.collapsed.map((paragraph, i) => (
                   <p className="api-docs-description" key={`purpose-collapsed-${i}`}>
-                    {paragraph}
+                    <InlineCode text={paragraph} />
                   </p>
                 ))}
               </details>
+            )}
+            </div>
+            {hasMore && (
+              <button
+                type="button"
+                className="api-purpose-toggle"
+                aria-expanded={purposeOpen}
+                aria-controls={purposeBodyId}
+                onClick={() => setPurposeOpen((open) => !open)}
+              >
+                {purposeOpen ? 'Shorter Description' : 'Full Description'}
+                {!purposeOpen && isBoundaryCaveat(restText) && (
+                  <span className="api-purpose-toggle-note"> — includes its stated limits</span>
+                )}
+              </button>
             )}
           </>
         ) : (
@@ -1094,16 +1170,23 @@ const SAMPLE_TABS: { id: SampleId; label: string }[] = [
 /**
  * Three runnable-shaped samples per operation, generated from that operation's
  * own contract (see `codeSamples`). Collapsed by default, and compact: one
- * language at a time behind a roving tablist, never three code walls at once.
- * No SDK and no dependency is referenced, because none exists.
+ * language at a time, never three code walls at once. No SDK and no dependency
+ * is referenced, because none exists.
+ *
+ * ~~behind a roving tablist~~ — a GROUP OF TOGGLE BUTTONS since 2026-10-18
+ * (independent review): Settings refuses a second tablist, and the Advanced tab
+ * had one here, nested inside the page's own. Each button is its own tab stop,
+ * says whether its language is shown (`aria-pressed`) and names the panel it
+ * controls; the look is the shared widget view switch, so every view switch on
+ * the page reads the same.
  */
 function CodeSamples({ row, onCopied }: { row: ApiEndpoint; onCopied: (what: string) => void }) {
   const samples = useMemo(() => codeSamples(row), [row]);
   const [active, setActive] = useState<SampleId>('curl');
   const current = samples.find((s) => s.id === active) ?? samples[0];
   const base = `settings-api-sample-${slug(row.key)}`;
-  const tabId = (id: SampleId) => `${base}-tab-${id}`;
-  const panelId = (id: SampleId) => `${base}-panel-${id}`;
+  const optionId = (id: SampleId) => `${base}-option-${id}`;
+  const panelId = `${base}-panel`;
   return (
     <details className="api-samples">
       <summary className="api-samples-summary">Code Examples</summary>
@@ -1111,21 +1194,22 @@ function CodeSamples({ row, onCopied }: { row: ApiEndpoint; onCopied: (what: str
         Generated from this operation's method, path, required parameters and declared media
         type. Standard library only — no client library exists for this API.
       </p>
-      <RovingTabs
-        className="api-samples-tabs"
-        label="Code example language"
-        tabs={SAMPLE_TABS}
-        active={active}
-        onSelect={setActive}
-        tabId={tabId}
-        panelId={panelId}
-      />
-      <div
-        className="api-samples-panel"
-        id={panelId(current.id)}
-        role="tabpanel"
-        aria-labelledby={tabId(current.id)}
-      >
+      <div className="widget-views api-samples-tabs" role="group" aria-label="Code Example Language">
+        {SAMPLE_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            id={optionId(tab.id)}
+            type="button"
+            className="widget-view-tab"
+            aria-pressed={tab.id === current.id}
+            aria-controls={panelId}
+            onClick={() => setActive(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      <div className="api-samples-panel" id={panelId}>
         <div className="api-samples-head">
           <span className="api-samples-lang">{current.label}</span>
           <CopyButton

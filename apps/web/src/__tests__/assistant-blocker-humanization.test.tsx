@@ -413,7 +413,8 @@ describe('P36V.1 Unit B · activating the free-form Open Validator reaches the V
       'aria-selected',
       'true',
     );
-    expect(screen.getByRole('tab', { name: 'Policy' })).toHaveAttribute('aria-selected', 'false');
+    // Policy moved to Settings › Privacy & Governance (2026-10-12); the other tab here is Schema Reference.
+    expect(screen.getByRole('tab', { name: 'Schema Reference' })).toHaveAttribute('aria-selected', 'false');
     expect(screen.getByRole('heading', { name: 'Standalone Validator' })).toBeInTheDocument();
     expect(screen.getByLabelText(/candidate record \(json\)/i)).toBeInTheDocument();
   });

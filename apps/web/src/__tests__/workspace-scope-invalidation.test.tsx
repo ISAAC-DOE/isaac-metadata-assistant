@@ -31,7 +31,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 
 import { AppRoutes } from '../App';
@@ -475,8 +475,14 @@ describe('D2 · the walkthrough navigates on a step change, not continuously', (
     fireEvent.click(screen.getByRole('link', { name: LABELS.navSettings }));
     await waitFor(() => expect(at()).toBe(ROUTES.settings));
 
-    fireEvent.click(await screen.findByRole('tab', { name: LABELS.settingsTabHelp }));
-    const replay = await screen.findByRole('button', { name: LABELS.actionReplayTutorial });
+    // 2026-10-18, Settings widget redesign (DEC-28): the walkthrough is no longer a tab
+    // of its own. It is the Guided Walkthrough WIDGET on Overview, the tab `/settings`
+    // opens on — so the path to Replay got shorter (no tab click), and what this test
+    // pins is unchanged: the control is reachable mid-walkthrough, inside that widget.
+    expect(await screen.findByRole('tab', { name: 'Overview', selected: true })).toBeInTheDocument();
+    const walkthrough = await screen.findByRole('region', { name: LABELS.settingsTabHelp });
+    // Not yet finished in this browser, so the control reads Start (2026-10-18).
+    const replay = within(walkthrough).getByRole('button', { name: LABELS.actionStartWalkthrough });
     fireEvent.click(replay);
 
     // One session discarded, one opened — never two held at once.

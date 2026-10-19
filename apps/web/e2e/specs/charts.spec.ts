@@ -254,6 +254,12 @@ function copyUnitsFrom(root: Element, attrs: readonly string[]): string[] {
  */
 const APPROVED_PANEL_SENTENCES: readonly string[] = [
   'Personal Statistics',
+  /* The two info toggles' accessible names and the expansion's label — the only
+     copy the 2026-10-12 widget redesign added to this panel. Each names a
+     control; none states a figure. */
+  'About Personal Statistics',
+  'About Views Prepared for Your Account',
+  'Show the Prepared Views',
   'What this tab will show once records are associated with a signed-in account.',
   'Not Available in This Preview',
   'Records in this preview are not associated with an account, so this view cannot tell which of them are yours.',
@@ -263,7 +269,7 @@ const APPROVED_PANEL_SENTENCES: readonly string[] = [
   'Nothing on this tab is hidden from you, and none of the figures below are zero — they are absent.',
   'A count of zero would say you have no records;',
   'what is true is that this build cannot tell whose records these are.',
-  'Open Data & Privacy Settings',
+  'Open Privacy Settings',
   'See Workspace Statistics',
   'Views Prepared for Your Account',
   'Each view below is defined as a typed dataset, so it can be filled in without changing this page\'s layout.',
@@ -644,11 +650,33 @@ function assertsEmptiness(sentence: string): boolean {
  * future re-render (a breakpoint reflow) is tolerated rather than turned into a
  * flake. The value it converges on is fixed at mount.
  */
+/*
+ * ── 2026-10-12: THERE IS NO `Technical Details` REGION TO OPEN ANY MORE ──────
+ *
+ * The widget redesign made each build fact a visible widget and put each widget's
+ * breakdowns behind its own VIEW tabs (`components/Widget.tsx`), so a chart now
+ * sits either in the selected view or in a hidden, still-mounted one. This
+ * function therefore REVEALS every widget view for the per-figure battery below —
+ * the same test-only state `e2e/helpers/disclosures.ts`'s `openWidgetInfoAndViews`
+ * uses for the axe sweep, with the same caveat: all views stacked is a state the
+ * product never shows, but each panel's content is exactly what one press of its
+ * tab reaches. The REAL interaction is pinned separately, by
+ * `a chart in an inactive view is measured when its tab is pressed`, which clicks
+ * a tab and asserts the newly shown chart takes its column's width.
+ *
+ * The poll below is unchanged in meaning: every plot's SVG width equals its
+ * column. It used to rely on the synchronous read alone; since 2026-10-12 the
+ * hook's ResizeObserver also works under StrictMode (see `StatsCharts.tsx`, "THE
+ * POST-OPEN FAILURE, IDENTIFIED"), which is what lets a chart mounted while
+ * hidden reach its width once revealed.
+ */
 async function openTechnicalDetails(page: import('@playwright/test').Page): Promise<void> {
-  const summary = page.locator('details.stats-technical > summary');
-  await expect(summary).toBeVisible();
-  await summary.click();
-  await expect(page.locator('details.stats-technical')).toHaveAttribute('open', '');
+  await page.evaluate(() => {
+    for (const panel of document.querySelectorAll('.widget-view-panel[hidden]')) {
+      panel.removeAttribute('hidden');
+    }
+  });
+  await expect(page.locator('.widget-view-panel[hidden]')).toHaveCount(0);
   await expect
     .poll(
       () =>
@@ -692,11 +720,21 @@ async function openTechnicalDetails(page: import('@playwright/test').Page): Prom
  * would satisfy a request-level wait while the figure was still absent.
  */
 async function settledVerificationSection(page: import('@playwright/test').Page): Promise<void> {
+  /* ~~the `Official Validation and the Format Shadow, Side by Side` heading~~ —
+     that `h3` was retired 2026-10-18 when the comparison became two compact
+     rows under the widget's own `Validators` tab. The section is settled when
+     both validator rows are drawn, which is the same fact the heading stood for. */
   await expect(
-    page.getByRole('heading', { name: 'Official Validation and the Format Shadow, Side by Side' }),
+    page
+      .getByRole('region', { name: 'Record Verification' })
+      .locator('.stats-verify-chartgroup')
+      .first(),
     'Record Verification must have a settled report before its figure is counted — see ' +
       'e2e/global-setup.ts step 5',
   ).toBeVisible({ timeout: 20_000 });
+  await expect(
+    page.getByRole('region', { name: 'Record Verification' }).locator('.stats-verify-chartgroup'),
+  ).toHaveCount(2);
 }
 
 /**
@@ -827,6 +865,26 @@ test.describe('@responsive Statistics charts (worked example)', () => {
       expect(await rows.count(), `${caption}: table rows`).toBeGreaterThan(0);
       await expect(figure.locator('table.stats-chart-table thead th').first()).toBeVisible();
     }
+  });
+
+  test('a chart in an inactive view is measured when its tab is pressed', async ({ page, app }) => {
+    await app.open(STATISTICS_BUILD);
+    const api = page.getByRole('region', { name: 'API Surface' });
+    await api.getByRole('tab', { name: 'By Group' }).click();
+    const panel = api.getByRole('tabpanel', { name: 'By Group' });
+    await expect(panel).toBeVisible();
+    await expect
+      .poll(
+        () =>
+          panel.evaluate((el) => {
+            const plot = el.querySelector('.stats-chart-plot') as HTMLElement | null;
+            const svg = el.querySelector('svg.stats-chart-track') as SVGSVGElement | null;
+            if (!plot || !svg) return Number.NaN;
+            return Math.abs(Number(svg.getAttribute('width')) - plot.getBoundingClientRect().width);
+          }),
+        { message: 'the chart in a newly shown view must take its column\'s width' },
+      )
+      .toBeLessThanOrEqual(1);
   });
 
   test('the drawn SVG claims nothing — the text is authoritative', async ({ page, app }) => {
@@ -1007,14 +1065,21 @@ test.describe('@responsive Statistics charts (empty ordinary workspace)', () => 
      * `toHaveCount(0)` would fail for a reason that has nothing to do with the
      * empty workspace.)
      */
-    for (const region of ['Workflow Distribution', 'Evidence and Validation']) {
+    /* ~~'Workflow Distribution', 'Evidence and Validation'~~ — the widgets that
+       carry those charts since 2026-10-12. */
+    for (const region of ['Records', 'Evidence Support']) {
       const section = page.getByRole('region', { name: region });
       await expect(section.locator('figure.stats-chart'), region).toHaveCount(0);
       await expect(section.locator('.stats-chart-grid'), region).toHaveCount(0);
       await expect(section.locator('table.stats-chart-table'), region).toHaveCount(0);
     }
-    // …and it says so in words, rather than leaving a blank card.
-    await expect(page.getByText(/No bar is drawn rather than a row of zeros/)).toBeVisible();
+    // …and it says so in words, rather than leaving a blank card. Since
+    // 2026-10-12 the distribution is a VIEW of `Records`, and with no record the
+    // widget offers no view at all — so the sentence is the widget's own empty
+    // state, and there is no tab leading to an empty plot.
+    const records = page.getByRole('region', { name: 'Records' });
+    await expect(records.getByText('No Records Yet')).toBeVisible();
+    await expect(records.getByRole('tablist')).toHaveCount(0);
   });
 });
 
@@ -1160,6 +1225,19 @@ test.describe('@responsive Statistics · My Stats', () => {
     await expect(panel.locator('.stats-chart-grid')).toHaveCount(0);
     await expect(panel.locator('[role="status"]')).toHaveCount(0);
 
+    /*
+     * EVERYTHING A READER CAN REACH, NOT ONLY WHAT IS OPEN ON ARRIVAL. Since
+     * 2026-10-12 the tab's two explanatory paragraphs are the Personal Statistics
+     * widget's info panel and the eight planned views are an expansion, so
+     * `innerText` of the closed tab would skip exactly the copy this matcher
+     * exists to police (its own zero-denying sentence among it). Both are opened
+     * through their real controls first.
+     */
+    const toggles = panel.locator('.widget-info-toggle[aria-expanded="false"]');
+    while ((await toggles.count()) > 0) await toggles.first().click();
+    const details = panel.locator('.widget-details > .disclosure-trigger[aria-expanded="false"]');
+    while ((await details.count()) > 0) await details.first().click();
+
     // No figure at all: a personal tab that cannot attribute a record must not
     // display a count, and "0" is a count.
     const text = (await panel.innerText()).replace(/\s+/g, ' ');
@@ -1244,4 +1322,58 @@ test.describe('@responsive Statistics · My Stats', () => {
       page.locator('#statistics-tabpanel-mine .stats-plan-card h3'),
     ).toHaveCount(8);
   });
+});
+
+/*
+ * NO STATISTICS TAB SCROLLS SIDEWAYS AT 320px — review fix, 2026-10-18.
+ *
+ * The density round's headline figure lists (a flex item with a 16rem basis,
+ * whose grid columns would not go below 150px) pushed Workspace Activity and
+ * Historical Imports to x=378 in a 320px viewport — `main` scrollWidth 367
+ * against clientWidth 298 — where the base had not scrolled at all. jsdom
+ * computes no layout, so the CSS half is pinned in `statistics-page.test.tsx`
+ * and this is the browser half: every tab, at 320px, as shipped AND with every
+ * widget view revealed (a view a reader opens must not overflow either).
+ *
+ * `@interaction`, not `@responsive`: the viewport is set here, so running it in
+ * all five projects would measure the same 320px layout five times.
+ */
+test.describe('@interaction Statistics never scrolls sideways at 320px', () => {
+  for (const surface of [STATISTICS_EXAMPLE_OVERVIEW, STATISTICS_ORDINARY, STATISTICS_MINE, STATISTICS_BUILD]) {
+    test(`${surface.name}`, async ({ page, app }) => {
+      await page.setViewportSize({ width: 320, height: 800 });
+      await app.open(surface);
+      const overflow = () =>
+        page.evaluate(() => {
+          const main = document.querySelector('main#main') as HTMLElement;
+          const doc = document.documentElement;
+          const mainRight = main.getBoundingClientRect().right;
+          return {
+            main: main.scrollWidth - main.clientWidth,
+            doc: doc.scrollWidth - doc.clientWidth,
+            escapees: Array.from(main.querySelectorAll('.widget *'))
+              .filter((el) => {
+                if (el.closest('.stats-scroll, .sr-only')) return false;
+                const box = el.getBoundingClientRect();
+                return box.width > 0 && box.right > mainRight + 1;
+              })
+              .slice(0, 5)
+              .map((el) => `${el.tagName.toLowerCase()}.${String((el as HTMLElement).className)}`),
+          };
+        });
+      const shipped = await overflow();
+      expect(shipped.escapees, `${surface.name}: nothing may extend past main at 320px`).toEqual([]);
+      expect(shipped.main, `${surface.name}: main must not scroll sideways`).toBeLessThanOrEqual(0);
+      expect(shipped.doc, `${surface.name}: the page must not scroll sideways`).toBeLessThanOrEqual(0);
+
+      await page.evaluate(() => {
+        for (const panel of document.querySelectorAll('.widget-view-panel[hidden]')) {
+          panel.removeAttribute('hidden');
+        }
+      });
+      const revealed = await overflow();
+      expect(revealed.escapees, `${surface.name}: no revealed view may extend past main`).toEqual([]);
+      expect(revealed.main, `${surface.name}: main must not scroll sideways with every view open`).toBeLessThanOrEqual(0);
+    });
+  }
 });

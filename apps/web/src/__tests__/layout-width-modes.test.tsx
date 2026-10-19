@@ -290,7 +290,8 @@ describe('screens opt into the width system', () => {
   });
 
   it('Governance & Safety renders wide', () => {
-    // The default Policy tab issues no request; Validator / Schema mount lazily.
+    // The default tab — the Validator since Policy moved to Settings — issues no
+    // request until Validate is pressed; Schema mounts lazily.
     stubFetchRoutes({});
     const { container } = routerRender(<GovernancePage />, '/governance');
     expect(mainOf(container).getAttribute('data-width')).toBe('wide');
@@ -337,7 +338,7 @@ describe('screens opt into the width system', () => {
   });
 });
 
-describe('all four Governance regions share one measure', () => {
+describe('every Governance region shares one measure', () => {
   /*
    * The header and the Policy panel are `.placeholder`; the Validator and
    * Schema panels host whole components and are `.governance-panel`. Both
@@ -346,11 +347,13 @@ describe('all four Governance regions share one measure', () => {
    * place of `.placeholder` on purpose: `.placeholder p` (0-1-1) would beat the
    * components' own 0-1-0 paragraph classes and restyle their body text.
    */
-  it('the Validator panel is a measured wrapper, not a bare inline-styled div', () => {
+  /* The `.placeholder` Policy panel this asserted moved to Settings › Privacy &
+     Governance on 2026-10-12, so there is no `#governance-tabpanel-policy` to
+     measure; the two panels that remain are asserted below. */
+  it('the Policy panel is gone from this page', () => {
     stubFetchRoutes({});
     const { container } = routerRender(<GovernancePage />, '/governance');
-    const panel = container.querySelector('#governance-tabpanel-policy');
-    expect(panel?.className).toBe('placeholder');
+    expect(container.querySelector('#governance-tabpanel-policy')).toBeNull();
   });
 
   /** The panel must carry the shared measure as a CLASS, with no inline literal. */
@@ -363,8 +366,7 @@ describe('all four Governance regions share one measure', () => {
 
   it('the Validator tab panel uses .governance-panel', () => {
     stubFetchRoutes({}); // the Validator issues no request until Validate is pressed
-    const { container, getByRole } = routerRender(<GovernancePage />, '/governance');
-    fireEvent.click(getByRole('tab', { name: 'Validator' }));
+    const { container } = routerRender(<GovernancePage />, '/governance?tab=validator');
     expectMeasuredPanel(container, 'validator');
   });
 

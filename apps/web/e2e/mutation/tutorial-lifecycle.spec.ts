@@ -177,7 +177,7 @@ test.describe('worked-example session lifecycle', () => {
     const done = page.locator('[data-tutorial-step="complete"]');
     await expect(done).toBeVisible({ timeout: 20_000 });
     await expect(done.getByRole('button', { name: 'Go to My Experiments' })).toBeVisible();
-    await expect(done.getByRole('button', { name: 'Replay Tutorial' })).toBeVisible();
+    await expect(done.getByRole('button', { name: 'Replay Guided Walkthrough' })).toBeVisible();
     await expect(done.getByRole('button', { name: /Reset/i })).toHaveCount(0);
 
     // COMPLETION IS RECORDED — and it is recorded before disposal is attempted, so
@@ -234,7 +234,9 @@ test.describe('worked-example session lifecycle', () => {
       .toBe(404);
 
     await page.goto('/settings?tab=help', { waitUntil: 'domcontentloaded' });
-    await page.getByRole('button', { name: 'Replay Tutorial' }).click();
+    // Not finished here (the walkthrough was closed, not completed), so the
+    // control reads Start; it is the same control as Replay (2026-10-18).
+    await page.getByRole('button', { name: 'Start Guided Walkthrough' }).click();
     await expect(bar(page)).toBeVisible({ timeout: 20_000 });
 
     const sessions = lifecycle.sessionsCreated();

@@ -612,23 +612,11 @@ const EXEMPT_SITES: readonly ExemptSite[] = [
       'Disabled secondary button (PR #277 review — there was no disabled rule at all, so a ' +
       'disabled secondary looked enabled). Same 1.4.3 inactive-component exemption as the rows above.',
   },
-  {
-    file: 'screens/screens.css',
-    selector: '.api-keys-create-btn',
-    token: '--text-disabled',
-    basis: 'inactive-control',
-    disabledMark: 'api-keys-create-btn',
-    why:
-      'Permanently inactive. The SELECTOR is not `:disabled` — it is a bare class with ' +
-      '`cursor: not-allowed`, a dashed border and no enabled state anywhere in the stylesheet — ' +
-      'and that is why the basis check accepts `cursor: not-allowed` as well as the pseudo-class. ' +
-      'BUT THE EXEMPTION DOES NOT REST ON THE CURSOR. The ELEMENT is genuinely inactive: ' +
-      '`screens/settings/ApiKeys.tsx` renders it with a bare, unconditional `disabled` attribute, ' +
-      'so WCAG 1.4.3\'s inactive-component exception applies to the control itself and not merely ' +
-      'to how it is painted. That is checked mechanically through `disabledMark`, so nobody can ' +
-      'later weaken the basis — by dropping `cursor: not-allowed`, or by making the attribute ' +
-      'conditional — while believing the exemption still holds.',
-  },
+  /* ~~`screens/screens.css` · `.api-keys-create-btn` · `--text-disabled`~~ —
+     RETIRED 2026-10-12 with the control. The permanently disabled "Create API Key"
+     button is gone (an absent capability is shown as a STATE, never as a control
+     that cannot be pressed), and its rule went with it, so the exemption it
+     claimed has nothing left to exempt. */
   {
     file: 'screens/graph/evidence-graph.css',
     selector: '.evgraph-btn:disabled',
@@ -1286,14 +1274,15 @@ const TINTED_PAIRS = [
 ] as const;
 
 /**
- * The ONE tinted pair below 4.5:1, named with its measured ratio rather than
- * skipped. It is cause (c) of FINDING A11Y-01 — a saturated CATEGORY colour, not
- * a neutral ink — and `e2e/a11y-baseline.ts` records it with 265 instances.
- * Deliberately NOT fixed here: A3 is the neutral palette, and re-hueing the
- * "verified" teal is a motif decision with its own blast radius. Recorded so it
- * cannot be quietly forgotten, and bounded so a SECOND failure cannot join it.
+ * ~~The ONE tinted pair below 4.5:1 … `--verified-text`, 4.21~~ — RETIRED
+ * 2026-10-18. It was cause (c) of FINDING A11Y-01, a saturated CATEGORY colour,
+ * and was left out of A3 as "a motif decision with its own blast radius". That
+ * decision was taken (an orchestrator decision after the Settings redesign's
+ * independent review): `--verified-text` is #2b7570, the same hue darkened to
+ * 4.69:1 on `--verified-bg`. The map stays, EMPTY, because the ratchet below it
+ * still says what a future exception would have to carry.
  */
-const TINTED_EXCEPTIONS: ReadonlyMap<string, number> = new Map([['--verified-text', 4.21]]);
+const TINTED_EXCEPTIONS: ReadonlyMap<string, number> = new Map();
 
 describe('A3 · tinted status ink clears AA on its own tint', () => {
   it('every pair passes, except the one recorded exception', () => {
@@ -1327,8 +1316,15 @@ describe('A3 · tinted status ink clears AA on its own tint', () => {
     expect(declaredHex('--missing-text')).toBe(declaredHex('--text-tertiary'));
   });
 
-  it('the recorded exception list is not silently empty or over-wide', () => {
-    expect([...TINTED_EXCEPTIONS.keys()]).toEqual(['--verified-text']);
+  it('the recorded exception list is empty, and the retired one really was a failure', () => {
+    // INVERTED 2026-10-18, not deleted: it pinned the list as ['--verified-text'].
+    // The exception is retired because the value changed, and the vacuity half
+    // proves it: the discarded value FAILED on this tint, the declared one passes.
+    expect([...TINTED_EXCEPTIONS.keys()]).toEqual([]);
+    expect(contrastRatio('#2f7d78', declaredHex('--verified-bg'))).toBeLessThan(4.5);
+    expect(declaredHex('--verified-text')).toBe('#2b7570');
+    expect(contrastRatio(declaredHex('--verified-text'), declaredHex('--verified-bg'))).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(declaredHex('--verified-text'), declaredHex('--surface'))).toBeGreaterThanOrEqual(4.5);
   });
 });
 

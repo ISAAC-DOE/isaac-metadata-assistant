@@ -607,6 +607,28 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
       // else on both arms is untouched — in particular the workspace clauses and
       // the isolated SLAC test database clause, neither of which depends on the
       // outcome of a create.
+      //
+      // A THIRD CORRECTION, 2026-10-18 (independent review of the Settings
+      // redesign): the `durable` detail said the diagnostic's database "is not
+      // where your experiment records go", and the `unavailable` detail that it
+      // "is not the database this state is about". Both were false. The durable
+      // write path (`db_write.py`) and the diagnostic (`db_recon.py`) both gate on
+      // `PGDATABASE` being exactly `metadata_assistant` and pin that name from one
+      // constant, so it is ONE database. What differs is the TABLE: the diagnostic
+      // reads the production-derived `records` table, which the write path refuses
+      // by identifier, and experiment records go into the app's own tables. Struck:
+      //  · durable: ~~"is neither of these — it is not the workspace's storage and
+      //    it is not where your experiment records go"~~
+      //  · unavailable: ~~"is not the workspace's storage and is not the database
+      //    this state is about"~~
+      // AND THE FIRST REPLACEMENT WAS ITSELF FALSE (re-review, same day): it said
+      // the diagnostic "reads only the production-derived records table".
+      // `db_recon.run_recon` also reads `vocabulary_cache` (a row count and up to
+      // 200 grouped values per allowlisted column) and the table catalog
+      // (`information_schema`, `pg_tables`). What it never reads is the CONTENT of
+      // this application's own tables. Struck: ~~"reads only the production-derived
+      // records table beside them"~~ / ~~"reads only its production-derived records
+      // table"~~.
       summary: durable
         ? 'Experiment records are in this deployment’s database and survive a restart; the workspace files around them, including anything you exported, are not in it and go with the temporary storage it sits on — this screen cannot say when that will be.'
         : unavailable
@@ -615,9 +637,9 @@ export function settingsConcepts(facts: SettingsFacts): SettingsConcept[] {
             ? "The workspace is files on the server, not a database — discarded with the deployment's temporary storage."
             : `The backend reports persistence as "${persistence}".`,
       detail: durable
-        ? "Experiment records survive a restart. The backend reports persistence as durable, which means their titles, drafts, the answers you confirm and their runs are written to this deployment's own database. The workspace is not stored in a database: it is a working directory of files on the server, it is not shared between deployments, and it is discarded whenever the temporary storage it sits on goes away — this screen cannot say when that will be. One consequence is worth stating plainly, because it is the part that surprises: the official records and evidence sidecars you export are written to that directory and are not in the database, so a restart can restore an experiment that is still marked as exported while the exported files themselves are gone, and the app reports that artifact as stale rather than serving it. The isolated SLAC test database that the protected, read-only diagnostic may read is neither of these — it is not the workspace's storage and it is not where your experiment records go: nothing from it is written here, no record is modified, and only sanitized aggregate results are returned."
+        ? "Experiment records survive a restart. The backend reports persistence as durable, which means their titles, drafts, the answers you confirm and their runs are written to this deployment's own database. The workspace is not stored in a database: it is a working directory of files on the server, it is not shared between deployments, and it is discarded whenever the temporary storage it sits on goes away — this screen cannot say when that will be. One consequence is worth stating plainly, because it is the part that surprises: the official records and evidence sidecars you export are written to that directory and are not in the database, so a restart can restore an experiment that is still marked as exported while the exported files themselves are gone, and the app reports that artifact as stale rather than serving it. The isolated SLAC test database that the protected, read-only diagnostic may read is this same configured database: your experiment records go into this application's own tables in it, while the diagnostic reads the production-derived records and vocabulary_cache tables, which this application never writes, and the database's table catalog — never the contents of this application's own tables. What it reads is not the workspace's storage: nothing from it is written here, no record in it is modified, and only sanitized aggregate results are returned."
         : unavailable
-          ? "The backend reports persistence as unavailable: a database is configured for this deployment to hold experiment records and the backend has recorded that they were not reaching it. Creating one may fail outright, and nothing this screen has read establishes that a record created now is stored durably. The workspace is not stored in a database. Workspace state is written as files in a working directory on the server, so restarting the backend process does not by itself clear it; it is not durable, is not shared between deployments, and is discarded whenever the temporary storage it sits on goes away — this screen cannot say when that will be. The isolated SLAC test database that the protected, read-only diagnostic may read is not the workspace's storage and is not the database this state is about: nothing from it is written here, no record is modified, and only sanitized aggregate results are returned."
+          ? "The backend reports persistence as unavailable: a database is configured for this deployment to hold experiment records and the backend has recorded that they were not reaching it. Creating one may fail outright, and nothing this screen has read establishes that a record created now is stored durably. The workspace is not stored in a database. Workspace state is written as files in a working directory on the server, so restarting the backend process does not by itself clear it; it is not durable, is not shared between deployments, and is discarded whenever the temporary storage it sits on goes away — this screen cannot say when that will be. The isolated SLAC test database that the protected, read-only diagnostic may read is this same configured database, but the diagnostic reads the production-derived records and vocabulary_cache tables, which this application never writes, and the database's table catalog — never the contents of this application's own tables. What it reads is not the workspace's storage: nothing from it is written here, no record in it is modified, and only sanitized aggregate results are returned."
           : ephemeral
             ? "The workspace is not stored in a database. Workspace state is written as files in a working directory on the server, so restarting the backend process does not by itself clear it. The backend reports that storage as ephemeral: it is not durable, is not shared between deployments, and is discarded whenever the temporary storage it sits on goes away — this screen cannot say when that will be. The isolated SLAC test database that the protected, read-only diagnostic may read is not the workspace's storage: nothing from it is written here, no record is modified, and only sanitized aggregate results are returned."
             : `The backend reports persistence as "${persistence}". This screen states only what the backend reports.`,
@@ -1077,26 +1099,41 @@ export const API_ACCESS_COPY = {
    *  here — it was only labelling the whole build as synthetic, which is the
    *  unqualified whole-application claim this slice removed everywhere else.
    *  "This Build" states the same scope without the claim. */
-  statusHeading: 'API Key Management Is Not Available in This Build',
+  statusHeading: 'No API Keys in This Build',
+  /* ~~"The Endpoint Explorer tab is the proof"~~ — 2026-10-12: the Explorer is no
+     longer a tab of its own; it is the main widget of the Advanced tab. The claim
+     is unchanged; only the wayfinding moved with the surface it names. */
   statusBody:
-    'This API has no operation that creates, lists, revokes, or rotates a credential, so no key can be issued from this screen — and there is never a key here to reveal, copy, or store. The Endpoint Explorer tab is the proof: it lists every operation this build has.',
-  /** The disabled Create control's own reason — short, because the banner owns
-   *  the explanation. Always visible AND `aria-describedby`-associated.
+    'This API has no operation that creates, lists, revokes, or rotates a credential, so no key can be issued from this screen — and there is never a key here to reveal, copy, or store. The Endpoint Explorer, under Advanced, is the proof: it lists every operation this build has.',
+  /**
+   * THE ONE VISIBLE LINE UNDER THE HEADLINE (2026-10-12).
    *
-   *  It NAMES the section it points at rather than its position. "See the status
-   *  above" was true in both current source orders, but a positional reference is
-   *  the construction slice 12 had to remove elsewhere on this very surface (the
-   *  Endpoint Explorer "above" became false the moment it moved to its own tab),
-   *  and it reads as nonsense once the two-column grid stacks. */
-  createDisabledReason:
-    'Disabled: there is no operation for this button to call — see the API Key Management status on this tab.',
+   * The retired surface said "no keys / not available" SIX times — a heading, its
+   * paragraph, a disabled Create button with its own reason, and an empty "Your
+   * API Keys" list with a title and a body — beside a control that could do
+   * nothing. An absent capability is now a STATE (the headline), and this line is
+   * the one fact a developer needs next: what credential DOES exist, and whether
+   * this page sends it. Both halves are already stated canonically below, in
+   * `API_ACCESS_ROWS` ("Current Access Model" says a deployment sets one or none;
+   * "What This Interface Sends" says this page attaches none), so this is their
+   * one-line form — "at most one", never "one", because a deployment may set none.
+   */
+  credentialLine:
+    'At most one credential exists — the deployment’s own, set on its server — and this page sends none.',
+  /* ~~`createDisabledReason`~~ RETIRED 2026-10-12, with the control it explained.
+     A really-`disabled` "Create API Key" button sat beside the status, with this
+     sentence as its reason. The cross-page rule the redesign follows is that an
+     absent capability is shown as a STATE, never as a disabled button: a control
+     that cannot be pressed says "this exists, you just may not use it", which is
+     the opposite of the truth. The claim it carried — no operation exists for the
+     button to call — is the headline and `statusBody`, both still rendered. */
   /** Lead-in to the collapsed Technical Requirements disclosure. */
   requirementsNote:
     'What would have to exist before a key could be issued. Each is a backend and security contract this prototype does not have; none of them is stubbed out behind this screen, and they belong to a later, separately authorized phase.',
-  /** The intentional empty state of Your API Keys. */
-  emptyTitle: 'No keys to show.',
-  emptyBody:
-    'This list is empty by design, not by circumstance — nothing failed to load.',
+  /* ~~`emptyTitle` / `emptyBody`~~ RETIRED 2026-10-12, with the empty "Your API
+     Keys" list they described. A list that can never hold an item, under a
+     heading promising keys, was the fifth and sixth statement of one absence. The
+     absence itself is still stated, once, by the headline. */
   /**
    * The ONE explanation of the Endpoint Explorer's per-operation Auth marker.
    * It replaced a two-sentence authentication paragraph that was repeated on
@@ -1156,7 +1193,7 @@ export const API_ACCESS_COPY = {
    * read side by side in one module diff.
    */
   connectMcpPointer:
-    'This guide is about calling the HTTP API from a program you write. Pointing your own Claude at ISAAC’s machine-callable tool interface is a different mechanism with a different answer about authentication, and the Connect Your Agent tab describes it — including the fact that no agent can reach this deployment yet.',
+    'This guide is about calling the HTTP API from a program you write. Pointing your own Claude at ISAAC’s machine-callable tool interface is a different mechanism with a different answer about authentication, and the Connect Your Agent widget beside this one describes it — including the fact that no agent can reach this deployment yet.',
 } as const;
 
 /**
@@ -1196,7 +1233,7 @@ export const API_ACCESS_ROWS: readonly { term: string; detail: string }[] = [
     // surfaces by `settings-page.test.tsx`.
     term: 'What an API Key Would Enable',
     detail:
-      'On a deployment that answers a program directly, a program running outside this browser — a script, a notebook, or an agent — could call the operations listed on the Endpoint Explorer tab directly, without a person driving the interface. Where a deployment instead answers only browser sessions, as the SLAC-hosted one is documented to, a key would enable none of that: the call does not reach these operations at all, whether or not it carries a credential.',
+      'On a deployment that answers a program directly, a program running outside this browser — a script, a notebook, or an agent — could call the operations listed in the Endpoint Explorer directly, without a person driving the interface. Where a deployment instead answers only browser sessions, as the SLAC-hosted one is documented to, a key would enable none of that: the call does not reach these operations at all, whether or not it carries a credential.',
   },
   {
     term: 'External Agent Access',
@@ -1241,3 +1278,267 @@ export const API_KEY_REQUIREMENTS: readonly string[] = [
   'Scopes, so a key issued for reading cannot be used to write or export.',
   'A record of use, so a key that leaks can be traced and cut off.',
 ];
+
+// --- Settings as question widgets (2026-10-12) --------------------------------
+
+/**
+ * THE FOUR-TAB, WIDGET-SHAPED SETTINGS PAGE — the copy the new structure needs
+ * and nothing more.
+ *
+ * The owner's direction was "less visual clutter, streamlined, intuitive", with
+ * information as WIDGETS: one widget per question, its views switched in place
+ * inside it. A measured audit found this page at 9,168 words across seven tabs,
+ * the same twelve boundaries stated three times (Overview, Data & Privacy and
+ * Governance → Policy) and "no API keys" said six times beside a disabled button.
+ *
+ * WHAT THIS BLOCK DOES NOT DO is author a new claim about the build. Every state
+ * line on the new Overview is a concept `summary` already vetted above; every
+ * row on Privacy & Governance is a concept `summary` with its `detail` in the
+ * widget's Details; the three governance-policy paragraphs below are Governance
+ * → Policy's own text, moved here verbatim except for one wayfinding phrase. What
+ * is new is only structural: widget titles (a question or a noun), one-line
+ * widget descriptions that name a TOPIC rather than assert a fact, and the
+ * labels of the rows that group existing summaries.
+ */
+
+/** One line of a Data Safety row: a concept's vetted `summary`, or a
+ *  governance-policy paragraph's one-line `summary`. */
+export type OverviewSafetyItem = { concept: SettingsConceptId } | { policy: SummarizedPolicyId };
+
+/**
+ * The four question-groups the Overview's Data Safety widget answers, each
+ * carried by one-line summaries that have a canonical home on Privacy &
+ * Governance — never by a sentence that exists only here.
+ *
+ * ~~`What Enters`: `synthetic-data-only` alone; `What Leaves`: `no-telemetry` +
+ * `no-external-model-calls` alone~~ — CORRECTED 2026-10-18 (independent review),
+ * because each row is the answer to its QUESTION and both answers were true but
+ * incomplete in the direction that matters. "What Leaves" named only what does
+ * NOT leave, so it read as "nothing leaves" — while a downloaded export is, by
+ * `export-handling`'s own words, beyond this app, and the read-only diagnostic
+ * returns aggregate output. "What Enters" named only the refused upload, so it
+ * read as "no file is read" — while the Validator and CSV reconciliation DO read
+ * a file the reader chooses (the same false-by-omission shape the upload-claim
+ * parity guard exists for). Pinned in `settings-page.test.tsx`.
+ */
+export const OVERVIEW_SAFETY_ROWS: readonly { label: string; items: readonly OverviewSafetyItem[] }[] = [
+  { label: 'What Enters', items: [{ concept: 'synthetic-data-only' }, { policy: 'reviewTools' }] },
+  { label: 'What Is Kept', items: [{ concept: 'what-resets' }] },
+  {
+    label: 'What Leaves',
+    items: [
+      { concept: 'export-handling' },
+      { concept: 'no-telemetry' },
+      { concept: 'no-external-model-calls' },
+      { policy: 'diagnostic' },
+    ],
+  },
+  { label: 'Who Decides', items: [{ concept: 'record-truth-boundary' }] },
+];
+
+/**
+ * Governance & Safety → Policy, MOVED HERE on 2026-10-12. `DEC-28` names the tab
+ * `Privacy & Governance`, and the policy tab's own banner already said Settings
+ * was the canonical home for data handling — so the two homes for one subject
+ * became one. `/governance?tab=policy` now lands on that tab.
+ *
+ * VERBATIM, apart from two corrections, each recorded at its site: a wayfinding
+ * phrase in `reviewTools` ("the Validator on the next tab", untrue once it is not
+ * on the Governance page), and one false clause in `diagnostic`.
+ *
+ * The `diagnostic` paragraph is the one place on the page that states every
+ * bound of the read-only database diagnostic in one visible block, including the
+ * exact list of what is withheld from display — which is why it is a visible row
+ * and not a definition behind Details. `db-recon-truthfulness.test.tsx` requires
+ * each bound of it; `upload-claim-parity.test.tsx` requires `workspaceScope` and
+ * `reviewTools` together to state the whole upload claim.
+ */
+export const GOVERNANCE_POLICY = {
+  workspaceScope: {
+    heading: 'Workspace Scope',
+    text: 'The visible workspace remains synthetic and uploads remain disabled. Real SLAC/SSRL or private artifacts require written data-governance approval before they can be read, indexed, or sent to any model. Adding a file to this workspace is closed off entirely: every file upload is refused outright, whatever it contains, and the refused request is never read, parsed, or inspected.',
+  },
+  reviewTools: {
+    heading: 'What a Review Tool Reads',
+    /** The one-line form, rendered as the visible row (Privacy & Governance) and
+     *  on Overview's What Enters. The paragraph below is its Details text. */
+    summary:
+      'The Validator and campaign-sheet CSV reconciliation read a file you pick or text you paste — in memory, never added to the workspace, with only the outcome kept.',
+    text: "Two review tools do read a file you paste or pick, and neither adds it to the workspace: the Validator under Governance & Safety, and campaign-sheet CSV reconciliation on a record's evidence trail. Each checks the text in memory and discards it, and records only the outcome — never the content.",
+  },
+  diagnostic: {
+    heading: 'Private Database Diagnostic',
+    /** The one-line form, visible on Privacy & Governance and on Overview's What
+     *  Leaves. It keeps every bound a reader needs at a glance — read-only,
+     *  aggregates only, no record displayed, nothing sent to a model — so the
+     *  state is never behind a disclosure (`DEC-35`); the full paragraph, with
+     *  the exact list of what is withheld, is its Details text. Deliberately NOT
+     *  the "may run a protected, read-only diagnostic" capability sentence, which
+     *  owes every bound in full and is made once, by the paragraph. */
+    summary:
+      'A protected, read-only diagnostic may read an isolated SLAC test database of production-derived records — sanitized aggregates only, no record displayed, nothing sent to a model.',
+    /* ONE CLAUSE CORRECTED IN THE MOVE, AND IT IS A CORRECTION, NOT AN EDIT FOR
+       LENGTH. The Policy tab said "PostgreSQL is used only by that diagnostic
+       path". That stopped being true on 2026-08-07, when durable Create Experiment
+       persistence began writing this application's OWN tables in a configured
+       PostgreSQL database — which the "What Is Stored" row two widgets away states
+       for exactly that deployment ("Experiment records in this deployment's
+       database"). Two rows of one tab contradicting each other is the defect this
+       page was rebuilt to remove, so the false clause is gone; every bound of the
+       diagnostic that `db-recon-truthfulness.test.tsx` requires is unchanged. */
+    text: 'Separately, this deployment may run a protected, read-only diagnostic against an isolated SLAC test database containing production-derived records: those records are processed transiently in pod memory, only sanitized aggregate results are returned, and no record is modified. No record ids, titles, scientific values, evidence, full JSON, or per-record results are displayed, and nothing is sent to any model. Database-backed record display remains disabled pending an explicit visibility decision.',
+  },
+} as const;
+
+export type GovernancePolicyId = keyof typeof GOVERNANCE_POLICY;
+/** The policy paragraphs that have a one-line `summary` (a visible row). */
+export type SummarizedPolicyId = 'reviewTools' | 'diagnostic';
+
+/**
+ * The four questions Privacy & Governance answers, one widget each. `concepts`
+ * are rendered as visible rows (heading + summary — `DEC-35`: a privacy state is
+ * never behind a disclosure) with every `detail` in the widget's Details;
+ * `policyRows` are visible rows carrying a policy paragraph's one-line `summary`,
+ * with the full paragraph in Details; `policyDetails` sit in Details only.
+ *
+ * `merged` names concepts whose two visible rows say one thing twice and are
+ * shown as ONE row (`syntheticWorkspaceRow`); each keeps its own definition, under
+ * its own heading, in Details.
+ *
+ * Every concept appears in exactly one widget, in the order the old Data &
+ * Privacy tab presented them — a test asserts the union is all twelve, once.
+ *
+ * ~~`sub`~~ — RETIRED 2026-10-18 (independent review): each widget's one-line
+ * description listed the row headings directly beneath it ("Where your work is
+ * stored, what resets it, and what removes it." above What Is Stored / What
+ * Resets / Reset and Deletion) — the same words twice in one card.
+ */
+export const PRIVACY_QUESTIONS: readonly {
+  id: 'enter' | 'kept' | 'leaves' | 'truth';
+  title: string;
+  concepts: readonly SettingsConceptId[];
+  merged?: readonly SettingsConceptId[];
+  policyRows: readonly SummarizedPolicyId[];
+  policyDetails: readonly GovernancePolicyId[];
+}[] = [
+  {
+    id: 'enter',
+    title: 'What Can Enter?',
+    concepts: ['synthetic-data-only', 'no-real-experiment-data'],
+    merged: ['synthetic-data-only', 'no-real-experiment-data'],
+    policyRows: ['reviewTools'],
+    policyDetails: ['workspaceScope'],
+  },
+  {
+    id: 'kept',
+    title: 'What Is Kept, and for How Long?',
+    concepts: ['what-is-stored', 'what-resets', 'how-long-it-is-kept', 'reset-and-deletion'],
+    policyRows: [],
+    policyDetails: [],
+  },
+  {
+    id: 'leaves',
+    title: 'What Leaves?',
+    concepts: ['export-handling', 'no-telemetry', 'no-external-model-calls'],
+    policyRows: ['diagnostic'],
+    policyDetails: [],
+  },
+  {
+    id: 'truth',
+    title: 'Who Decides What Is True?',
+    concepts: ['record-truth-boundary', 'project-memory-boundary', 'authentication-boundary'],
+    policyRows: [],
+    policyDetails: [],
+  },
+];
+
+/**
+ * THE ONE VISIBLE ROW for `synthetic-data-only` + `no-real-experiment-data`
+ * (2026-10-18). Their two summaries stated one boundary twice — the upload is
+ * refused, and nothing checks whether data is real — one directly above the
+ * other. Each clause here is a clause one of the two already makes, and the
+ * operator-responsibility clause is `synthetic-data-only`'s own detail ("a
+ * responsibility of whoever operates it, not a check the software performs").
+ * The second summary's last clause — the diagnostic displays no record — is not
+ * dropped: it is the visible Private Database Diagnostic row on What Leaves.
+ *
+ * On a regime this build does not ship with, nothing is merged into a sentence
+ * the backend did not report: both summaries are shown as they are.
+ */
+export function syntheticWorkspaceRow(facts: SettingsFacts): { heading: string; text: string } {
+  const [mode, noReal] = settingsConcepts(facts).filter(
+    (c) => c.id === 'synthetic-data-only' || c.id === 'no-real-experiment-data',
+  );
+  if (facts.dataRegime !== 'synthetic-only') {
+    return { heading: mode.heading, text: `${mode.summary} ${noReal.summary}` };
+  }
+  return {
+    heading: mode.heading,
+    text: 'Synthetic-only mode — the upload route refuses every request outright, and the app cannot tell real data from synthetic, so keeping real data out of the workspace falls to whoever operates it.',
+  };
+}
+
+/**
+ * Widget titles, one-line descriptions and the few structural labels. Titles
+ * are Title Case; descriptions are one sentence and name a TOPIC — none of them
+ * is the canonical statement of a fact, which is what lets a description sit
+ * above the rows that ARE.
+ */
+export const SETTINGS_WIDGET_COPY = {
+  safetyTitle: 'Data Safety',
+  safetySub: 'Is this workspace safe for my data?',
+  safetyHeadline: 'Synthetic Workspace',
+  /** Shown instead when the backend reports a regime this build does not ship
+   *  with — the What Enters row beneath it names the reported value. A statement
+   *  of what was reported, never a guess at what the regime means. */
+  safetyHeadlineOther: 'Not Reported as Synthetic-Only',
+  safetyAll: 'All Boundaries',
+  safetyInfo:
+    'Each line is the one-line form of a boundary defined in full under Privacy & Governance, where every boundary this build states has a row of its own. The two facts the lines depend on — the data regime and where experiments are stored — are read from the running app when this page loads.',
+
+  buildTitle: 'This Build',
+  /** ~~`buildSub`~~ — the same sentence, moved from the widget's sub-line into its
+   *  info panel 2026-10-18 (Overview trims). */
+  buildNoSettings: 'This build has no user-adjustable settings.',
+  buildViewBuild: 'Build',
+  buildViewRuntime: 'Runtime',
+  provenanceLive: 'read per request',
+  provenanceFixed: 'fixed for this build',
+  provenanceLegend:
+    'A value marked with the clock is read per request from the running deployment; an unmarked one is fixed for this build.',
+
+  /* ~~walkthroughSub~~ — dropped 2026-10-18 (Overview trims): the widget's info
+     already opens "The guided walkthrough is a N-step tour of this app". */
+  walkthroughNotFinished: 'Not Finished in This Browser',
+  walkthroughFinished: 'Finished in This Browser',
+
+  fullDefinitions: 'Full Definitions',
+
+  apiTitle: 'API Access',
+  apiSub: 'What a program can do with this build, and what it has to send.',
+  apiViewQuickStart: 'Quick Start',
+  apiViewProgram: 'Program an Agent',
+  apiHowAccessWorks: 'How Access Works Today',
+  apiTechnicalRequirements: 'Technical Requirements',
+
+  advancedNote:
+    'None of these is part of recording an experiment: they describe this build and this project rather than your science.',
+  explorerTitle: 'Endpoint Explorer',
+  explorerSub:
+    'Every operation this build exposes, read from the OpenAPI document the app generates for itself.',
+  memoryTitle: 'Project Memory',
+  memorySub:
+    "A read-only view of a committed, point-in-time snapshot of this project's own source and documentation.",
+  memoryBody:
+    'It surfaces related files and concepts as leads to verify — it never validates a record, completes a field, or supplies a value.',
+  memoryOpen: 'Open Project Memory',
+  validatorTitle: 'Validator',
+  validatorSub: 'Check a JSON record against the official schema without adding it to My Experiments.',
+  validatorOpen: 'Open the Validator',
+  schemaTitle: 'Schema Reference',
+  schemaSub: 'A read-only reference for the canonical official ISAAC schema.',
+  schemaOpen: 'Open Schema Reference',
+  technicalTitle: 'Technical Details',
+  technicalSub: 'The raw values behind this page — the full commit, the response fields, the sources.',
+  technicalShow: 'Raw Values',
+} as const;

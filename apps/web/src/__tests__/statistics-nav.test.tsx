@@ -321,13 +321,15 @@ describe('every demoted destination is still reachable', () => {
    *     capability elsewhere FIRST" the moment the nav slot was withdrawn,
    *     which is why it now has an assertion of its own. ***
    */
-  it('Settings → Overview links to Project Memory, as a real anchor', async () => {
+  /* MOVED, NOT LOST (2026-10-12): the "Advanced & Developer Surfaces" block on
+     Overview became the Advanced TAB, where Project Memory is a launcher widget —
+     `DEC-19`'s own wording, "Project Memory moves under Settings →
+     Advanced/Developer". Still a real anchor, still one activation from Settings. */
+  it('Settings → Advanced links to Project Memory, as a real anchor', async () => {
     stubFetchRoutes(settingsRoutes());
-    renderAt(ROUTES.settings);
+    renderAt(ROUTES.settingsTab('advanced'));
 
-    const group = await screen.findByRole('navigation', {
-      name: 'Advanced and developer surfaces',
-    });
+    const group = await screen.findByRole('region', { name: 'Project Memory' });
     const links = Array.from(group.querySelectorAll<HTMLAnchorElement>('a'));
 
     expect(links.map((a) => a.getAttribute('href'))).toEqual([ROUTES.memory]);
@@ -443,14 +445,14 @@ describe('the Settings destination reads "Settings"', () => {
       clone.querySelectorAll('[aria-hidden="true"]').forEach((n) => n.remove());
       return clone.textContent;
     };
+    /* FOUR TABS SINCE 2026-10-12 (`DEC-28`'s regroup). This guard belongs to the
+       `Settings` rename slice; the rename still has not reached the strip, and the
+       strip is now the four tabs `DEC-28` named. An equality, as before. */
     expect(screen.getAllByRole('tab').map(accessibleText)).toEqual([
       'Overview',
-      'Data & Privacy',
-      'About',
-      'Help & Tutorial',
-      'API Access',
-      'Endpoint Explorer',
-      'Connect Your Agent',
+      'Privacy & Governance',
+      'Integrations',
+      'Advanced',
     ]);
   });
 });
@@ -507,12 +509,15 @@ describe('routing', () => {
     expect(ROUTES.settings).toBe('/settings');
   });
 
-  it('/settings?tab=explorer still deep-links to the Endpoint Explorer tab', async () => {
+  /* The Endpoint Explorer is the Advanced tab's widget since 2026-10-12; the old
+     id is an alias, so the link still lands on it. */
+  it('/settings?tab=explorer still deep-links to the Endpoint Explorer', async () => {
     stubFetchRoutes(settingsRoutes());
     renderAt(ROUTES.settingsTab('explorer'));
 
-    const explorer = await screen.findByRole('tab', { name: 'Endpoint Explorer' });
+    const explorer = await screen.findByRole('tab', { name: 'Advanced' });
     expect(explorer).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByRole('region', { name: 'Endpoint Explorer' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute(
       'aria-selected',
       'false',
@@ -520,9 +525,9 @@ describe('routing', () => {
     // Scoped by accessible name, not `getByRole('tabpanel')`: once the contract
     // has loaded, the Explorer's detail pane carries its OWN code-sample tablist,
     // so the page has more than one panel in the tree.
-    expect(screen.getByRole('tabpanel', { name: 'Endpoint Explorer' })).toHaveAttribute(
+    expect(screen.getByRole('tabpanel', { name: 'Advanced' })).toHaveAttribute(
       'id',
-      'settings-tabpanel-explorer',
+      'settings-tabpanel-advanced',
     );
   });
 
@@ -572,9 +577,12 @@ describe('active destination', () => {
    * to carry. `/governance` is reached from Settings → Data & Privacy, so
    * Settings is its ancestor and nothing on the list is the page you are on.
    */
+  /* `/governance` itself redirects to Settings › Privacy & Governance since the
+     Policy tab moved there (2026-10-12), so the page this guards is reached by
+     naming one of its two remaining tabs. */
   it('on /governance NO link is aria-current — Settings is only the ancestor', async () => {
     stubFetchDown();
-    const { container } = renderAt(ROUTES.governance);
+    const { container } = renderAt(`${ROUTES.governance}?tab=validator`);
 
     const links = navLinks(container);
     expect(links.filter((a) => a.hasAttribute('aria-current'))).toHaveLength(0);

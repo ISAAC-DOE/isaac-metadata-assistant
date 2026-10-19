@@ -152,6 +152,16 @@
  *   it exists to sit below. `palette-contrast.test.ts` re-derives all three
  *   thresholds by search and asserts both orderings.
  *   Cause (c), --verified-text and --src-derivation, is untouched here.
+ *
+ * Exception (A11Y-01 cause (c), HALF CLOSED, 2026-10-18): --verified-text was
+ * darkened from #2f7d78 to #2b7570 — the least-disruptive accessible value, an
+ * orchestrator decision taken after the Settings redesign's independent review.
+ * Same hue, the teal motif unchanged. MEASURED: #2f7d78 was 4.21:1 on
+ * --verified-bg #e6f1f0 (the GET method chip and the evidence chips) and 4.85:1
+ * on white; #2b7570 is 4.69:1 on --verified-bg and 5.41:1 on white.
+ * `palette-contrast.test.ts` recomputes both from the declared hex. The other
+ * cause-(c) colour, --src-derivation #7a6bb0, is NOT changed here. The handoff
+ * doc still has the original and should be reconciled.
  */
 :root {
   /* neutrals — cool */
@@ -294,7 +304,7 @@
   --idle:            #9aa4af;  /* draft / idle / archived */
 
   /* field evidence status chips */
-  --verified-text:   #2f7d78;  --verified-bg:   #e6f1f0;  --verified-border:   #c4e0dd; /* teal */
+  --verified-text:   #2b7570;  --verified-bg:   #e6f1f0;  --verified-border:   #c4e0dd; /* teal */
   --confirmed-text:  #6f5c3f;  --confirmed-bg:  #f5f1ea;  --confirmed-border:  #e6ddcd; /* warm tan = human motif */
   --inferred-text:   #5b6b7d;  --inferred-bg:   #eef1f5;  --inferred-border:   #d5dde5; /* slate */
   --missing-text:    #626c77;  --missing-bg:    #f6f8fa;  --missing-border:    #c3ccd5; /* DASHED border; text darkened in A3 from #78838f, 3.62:1 on its own bg; now 5.02:1 */
