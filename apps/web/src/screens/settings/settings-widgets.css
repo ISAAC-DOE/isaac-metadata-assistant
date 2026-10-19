@@ -388,11 +388,20 @@
 }
 
 /* ---- the page tab row at a narrow width -------------------------------------
-   At 390px the four full labels wrapped onto two rows. "Privacy & Governance"
-   shows its short form there; the tab's name is its `sr-only` full label at every
-   width, so it is the same at every width. The row never wraps:
-   if a narrower screen still cannot fit it, it scrolls sideways, with a fade at
-   the trailing edge saying there is more. */
+   At 390px the four full labels wrapped onto two rows. Below 600px "Privacy &
+   Governance" shows its short form; the tab's name is its `sr-only` full label at
+   every width, so it never changes with the viewport.
+
+   ~~If a narrower screen still cannot fit it, it scrolls sideways, with a fade~~ —
+   RETIRED 2026-10-18: CI's layout sweep forbids any region that scrolls sideways,
+   and on CI's font (a wider DejaVu/Liberation face than this host's) the
+   single-row tabs measured ~317px against a 312px box at 390 and a 297px one at
+   375. So the four tabs now FIT, by construction rather than by margin:
+     · 441–600px: one row, short label, tighter padding — ~317px of CI-font
+       content in a box of at least ~363px;
+     · ≤440px: two rows of two (a 2 x 2 grid), so each tab gets half the box —
+       at 320px ~121px a cell against "Integrations"' ~101px on CI's font.
+   Nothing scrolls, nothing is hidden, and no selected tab can be off-screen. */
 .section-tab-label-short {
   display: none;
 }
@@ -400,20 +409,6 @@
   .settings-section-tabs {
     flex-wrap: nowrap;
     gap: 0;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-  .settings-section-tabs::-webkit-scrollbar {
-    display: none;
-  }
-  /* The fade is drawn only when the row really is wider than its box
-     (`data-overflowing`, measured in `SettingsSectionTabs`), so it never dims the
-     last label of a row that fits. */
-  .settings-section-tabs[data-overflowing='true'] {
-    mask-image: linear-gradient(to right, var(--surface) calc(100% - 1.5rem), transparent);
-  }
-  .settings-section-tabs[data-overflowing='true'] .section-tab:last-child {
-    margin-right: 1.5rem;
   }
   .settings-section-tabs .section-tab {
     flex: none;
@@ -427,23 +422,22 @@
     display: inline;
   }
 }
+@media (max-width: 440px) {
+  .settings-section-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .settings-section-tabs .section-tab {
+    text-align: left;
+  }
+}
 
 /* ---- the Endpoint Explorer's detail pane ---------------------------------- */
 
-/* Purpose, clamped to four lines until the reader asks for the rest. Visual
-   only: every paragraph is still rendered. */
-.api-purpose-body[data-clamped='true'] {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
-  line-clamp: 4;
-  overflow: hidden;
-}
-.api-purpose-body[data-clamped='true'] > * {
-  display: inline;
-}
-.api-purpose-body[data-clamped='true'] > * + *::before {
-  content: ' ';
+/* Purpose: the lead paragraph, then the rest behind "Full Description" — a
+   `hidden` block, never a clip (CI's layout sweep refuses clipped text). */
+.api-purpose-body[hidden] {
+  display: none;
 }
 .api-purpose-toggle {
   margin-top: var(--space-2xs);

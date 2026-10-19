@@ -288,6 +288,12 @@
 .widget-view-panel {
   min-width: 0;
 }
+/* A tab panel is in the tab sequence (APG), so it shows where focus is. */
+.widget-view-panel:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-token);
+}
 .widget-view-panel[hidden] {
   display: none;
 }

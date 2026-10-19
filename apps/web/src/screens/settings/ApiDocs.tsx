@@ -612,14 +612,9 @@ function ApiEndpointRow({
  */
 export const PURPOSE_DISCLOSURE_MIN_CHARS = 400;
 
-/**
- * Above this many characters a Purpose is clamped to four lines with a "Full
- * Description" toggle (2026-10-18). Roughly four lines at the detail pane's
- * measure; decided from the text, not from layout, so the control is the same in
- * every renderer. Independent of `PURPOSE_DISCLOSURE_MIN_CHARS`: the clamp hides
- * nothing from the DOM, the disclosure is a structural split.
- */
-export const PURPOSE_CLAMP_MIN_CHARS = 360;
+/* ~~`PURPOSE_CLAMP_MIN_CHARS`~~ — retired 2026-10-18 with the four-line clamp
+   (CI refused the clip). The Purpose now shows its lead paragraph and puts every
+   later one behind "Full Description"; see `ApiEndpointDetail`. */
 
 /**
  * The project's boundary/honesty vocabulary, lowercased. A remainder containing
@@ -811,8 +806,8 @@ function ApiEndpointDetail({
   const errors = row.responses.filter((r) => isErrorCode(r.code));
   const purpose = splitPurpose(row.description);
   const [legendOpen, setLegendOpen] = useState(false);
-  const purposeText = [purpose.lead, ...purpose.inline, ...purpose.collapsed].join(' ');
-  const clampable = purposeText.length > PURPOSE_CLAMP_MIN_CHARS;
+  const restText = [...purpose.inline, ...purpose.collapsed].join(' ');
+  const hasMore = restText.length > 0;
   const [purposeOpen, setPurposeOpen] = useState(false);
   /* A Full Description opened on one operation does not stay open on the next.
      The pane is NOT re-keyed for this: its other state (the Code Examples
@@ -822,7 +817,6 @@ function ApiEndpointDetail({
     setPurposeFor(row.key);
     setPurposeOpen(false);
   }
-  const clamped = clampable && !purposeOpen;
   const purposeBodyId = `${API_DETAIL_ID}-purpose`;
   return (
     <>
@@ -911,21 +905,23 @@ function ApiEndpointDetail({
         <h5 className="api-browser-section-heading">Purpose</h5>
         {purpose.lead ? (
           <>
-            {/* CLAMPED TO FOUR LINES (2026-10-18, review): the median Purpose ran
-                ~1,500 characters and the longest ~9,500, so the detail pane
-                opened on a wall. The clamp is VISUAL ONLY — every paragraph stays
-                in the DOM and the accessibility tree, verbatim, and the
-                `splitPurpose` rule below is unchanged — and when the hidden part
-                carries boundary copy the toggle says so, so the first four lines
-                are never read as the whole statement. */}
-            <div
-              className="api-purpose-body"
-              id={purposeBodyId}
-              data-clamped={clamped ? 'true' : 'false'}
-            >
+            {/* THE LEAD PARAGRAPH, THEN THE REST ON REQUEST (2026-10-18, review):
+                the median Purpose ran ~1,500 characters and the longest ~9,500,
+                so the detail pane opened on a wall.
+
+                ~~Clamped to four lines~~ — the first version clamped the whole
+                block with `-webkit-line-clamp` + `overflow: hidden`, and CI's
+                layout sweep refused it as clipped text (`clipped-y` on every
+                paragraph and inline code span past line four). The split is now
+                by PARAGRAPH: the lead is shown whole, and every later paragraph —
+                verbatim, in the DOM, `splitPurpose`'s rule unchanged inside it —
+                sits in a `hidden` block behind a real toggle. Nothing is clipped,
+                and when the hidden part carries boundary copy the toggle says so,
+                so the lead is never read as the whole statement. */}
             <p className="api-docs-description">
               <InlineCode text={purpose.lead} />
             </p>
+            <div className="api-purpose-body" id={purposeBodyId} hidden={hasMore && !purposeOpen}>
             {/* Short and medium remainders — and ANY remainder carrying a
                 boundary caveat, at any length — render in full, right here. See
                 `splitPurpose`: the disclosure below is reserved for a genuinely
@@ -963,7 +959,7 @@ function ApiEndpointDetail({
               </details>
             )}
             </div>
-            {clampable && (
+            {hasMore && (
               <button
                 type="button"
                 className="api-purpose-toggle"
@@ -972,7 +968,7 @@ function ApiEndpointDetail({
                 onClick={() => setPurposeOpen((open) => !open)}
               >
                 {purposeOpen ? 'Shorter Description' : 'Full Description'}
-                {!purposeOpen && isBoundaryCaveat(purposeText) && (
+                {!purposeOpen && isBoundaryCaveat(restText) && (
                   <span className="api-purpose-toggle-note"> — includes its stated limits</span>
                 )}
               </button>

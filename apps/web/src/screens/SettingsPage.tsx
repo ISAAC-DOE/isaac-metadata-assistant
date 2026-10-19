@@ -2,10 +2,7 @@ import './screens.css';
 import './settings/settings-widgets.css';
 import {
   useEffect,
-  useLayoutEffect,
   useMemo,
-  useRef,
-  useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
@@ -260,32 +257,10 @@ function SettingsSectionTabs({
   active: SettingsTabId;
   onSelect: (tab: SettingsTabId) => void;
 }) {
-  /* Whether the row is WIDER than its box — the one fact CSS cannot read, and the
-     only thing the trailing fade may claim. At 390px the short labels fit and no
-     fade is drawn; at 320px the row scrolls and the fade says there is more. */
-  const listRef = useRef<HTMLDivElement>(null);
-  const [overflowing, setOverflowing] = useState(false);
-  useLayoutEffect(() => {
-    const el = listRef.current;
-    if (!el) return;
-    const measure = () => setOverflowing(el.scrollWidth > el.clientWidth + 1);
-    measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  /* THE SELECTED TAB IS ALWAYS ON SCREEN (WCAG 2.4.11, re-review 2026-10-18). At
-     320px the row scrolls sideways, and `?tab=advanced` — or End / ArrowLeft from
-     Overview — left it at scrollLeft 0 with the selected, focused tab out of view.
-     `nearest` moves the row only as far as it must and, the tab row being on
-     screen, does not move the page; a no-op whenever the tab is already visible. */
-  useEffect(() => {
-    document
-      .getElementById(tabId(active))
-      ?.scrollIntoView?.({ inline: 'nearest', block: 'nearest' });
-  }, [active]);
+  /* ~~A measured `data-overflowing` fade and a `scrollIntoView` of the selected
+     tab~~ — both RETIRED 2026-10-18 with the sideways-scrolling row they served:
+     the row now always FITS (one row to 441px, two rows of two below — see
+     `settings-widgets.css`), so no tab, selected or not, can be off-screen. */
 
   function onKeyDown(e: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
     let nextIndex: number | null = null;
@@ -307,9 +282,7 @@ function SettingsSectionTabs({
 
   return (
     <div
-      ref={listRef}
       className="section-tabs settings-section-tabs"
-      data-overflowing={overflowing ? 'true' : undefined}
       role="tablist"
       aria-label="Settings sections"
       /* The walkthrough's "where Settings and API access live" anchor: the

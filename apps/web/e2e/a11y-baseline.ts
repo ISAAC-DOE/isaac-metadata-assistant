@@ -515,7 +515,11 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        *
        * MEASURED ON LINUX, ON THIS DEVELOPMENT HOST (WSL2, Playwright's Chromium,
        * a production build served by `vite preview`), read out of the sweep's own
-       * verdicts — NOT YET TRANSCRIBED FROM CI, which may replace any figure here:
+       * verdicts — and CONFIRMED BY CI the next day: the PR #288 a11y job (merge
+       * commit `8e6fd58`) ran every `a11y-axe` / `a11y-narrow` scan against these
+       * exact figures and none failed, i.e. CI's linux counts equal the ones below
+       * (it reported no IMPROVED / FIXED? / GREW line at all), so there was nothing
+       * to transcribe:
        *
        *   memory@*            4 -> 0   all 7   (`FIXED?` on every project)
        *   record-detail@*    25 -> 0   all 7
@@ -4589,6 +4593,8 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // (not yet transcribed from CI): 28 cells reached 0 and are deleted (-129 -28 -175
   // -7), and `evidence@*` fell 68 -> 3 on all seven (-455). 815 - 794 = 21, which is
   // seven cells of 3 — the `--src-derivation` key glyphs. See the note at `counts`.
+  // CONFIRMED by CI on PR #288 (merge `8e6fd58`): every a11y scan passed at these
+  // counts, so 21 is now a CI figure too.
   linux: 21,
   // 2026-08-30, ROUND TWO — CI's linux figures for the merged tree: 2287 -> 2291.
   //

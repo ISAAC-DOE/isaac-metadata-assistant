@@ -292,6 +292,9 @@ export function Widget({
                 type="button"
                 className="widget-info-toggle"
                 aria-label={infoLabel ?? `About ${title}`}
+                /* The same words as a hover tooltip: the control is an icon,
+                   and a sighted pointer user otherwise gets no name for it. */
+                title={infoLabel ?? `About ${title}`}
                 aria-expanded={infoOpen}
                 aria-controls={widgetIds.info(id)}
                 onClick={() => setInfoOpen((open) => !open)}
@@ -405,6 +408,10 @@ export function Widget({
               className="widget-view-panel"
               role="tabpanel"
               aria-labelledby={widgetIds.tab(id, candidate.id)}
+              /* APG: a tab panel is itself in the tab sequence, so a keyboard
+                 user can reach a panel whose content holds no focusable
+                 element (a figure list, a chart) right after the tablist. */
+              tabIndex={0}
               hidden={candidate.id !== activeView}
             >
               {candidate.content}
@@ -421,7 +428,10 @@ export function Widget({
         </Disclosure>
       ) : null}
 
-      {footer ? <footer className="widget-foot">{footer}</footer> : null}
+      {/* A plain `div`, NOT `<footer>`: a widget's footer row is not the page's
+          footer, and `e2e/specs/structure.spec.ts` allows the page exactly one
+          (CI failed on four extra). Same class, same styling. */}
+      {footer ? <div className="widget-foot">{footer}</div> : null}
     </section>
   );
 }

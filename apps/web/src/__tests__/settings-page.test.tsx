@@ -361,45 +361,30 @@ describe('Settings — tabs', () => {
   });
 
   /*
-   * WCAG 2.4.11 at 320px (re-review, 2026-10-18): the narrow tab row scrolls
-   * sideways, and `?tab=advanced` (or End / ArrowLeft from Overview) left the
-   * row at scrollLeft 0 with the SELECTED, focused tab off-screen. The selected
-   * tab is now scrolled into view on load and on every selection change. jsdom
-   * has no layout, so the call itself is what is asserted — its target and its
-   * options — and the browser does the rest.
+   * WCAG 2.4.11 at 320px (re-review, 2026-10-18), SOLVED BY LAYOUT, NOT BY
+   * SCROLLING. The narrow tab row used to scroll sideways, and `?tab=advanced`
+   * left the selected tab off-screen; a `scrollIntoView` fixed that, and then CI's
+   * layout sweep refused the sideways-scrolling region outright (on CI's font the
+   * row measured ~317px against a 312px box at 390). So the row now always FITS:
+   * one row of short labels down to 441px, two rows of two below. jsdom computes
+   * no layout, so the rules that guarantee it are what is pinned — and the
+   * absence of the scroll machinery, so a horizontal scroller cannot creep back.
    */
-  it('scrolls the selected tab into view on load and on every selection change', () => {
-    const calls: { id: string; options: unknown }[] = [];
-    const original = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = function (this: Element, options?: unknown) {
-      calls.push({ id: this.id, options });
-    } as typeof Element.prototype.scrollIntoView;
-    try {
-      stubFetchRoutes(fullRoutes());
-      const view = renderSettings('/settings?tab=advanced');
-      const tabCalls = () => calls.filter((c) => c.id.startsWith('settings-tab-'));
-      const last = () => tabCalls()[tabCalls().length - 1];
-      expect(last()).toEqual({
-        id: 'settings-tab-advanced',
-        options: { inline: 'nearest', block: 'nearest' },
-      });
-      fireEvent.keyDown(tab('Advanced'), { key: 'Home' });
-      expect(last()?.id).toBe('settings-tab-overview');
-      fireEvent.keyDown(tab('Overview'), { key: 'End' });
-      expect(last()?.id).toBe('settings-tab-advanced');
-      fireEvent.keyDown(tab('Advanced'), { key: 'Home' });
-      fireEvent.keyDown(tab('Overview'), { key: 'ArrowLeft' });
-      expect(last()?.id).toBe('settings-tab-advanced');
-      fireEvent.click(tab('Integrations'));
-      expect(last()?.id).toBe('settings-tab-integrations');
-      // A retired alias resolves to its tab, and THAT tab is the one brought into view.
-      view.unmount();
-      stubFetchRoutes(fullRoutes());
-      renderSettings('/settings?tab=explorer');
-      expect(last()?.id).toBe('settings-tab-advanced');
-    } finally {
-      Element.prototype.scrollIntoView = original;
-    }
+  it('keeps the narrow tab row from ever scrolling sideways', () => {
+    const css = readFileSync(resolve(__dirname, '..', 'screens/settings/settings-widgets.css'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '');
+    const rulesFor = (selector: string) =>
+      [...css.matchAll(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'g'))]
+        .map((m) => m[1])
+        .join('\n');
+    const tabRow = rulesFor('.settings-section-tabs');
+    expect(tabRow).not.toMatch(/overflow-x\s*:\s*(auto|scroll)/);
+    expect(tabRow).toMatch(/display\s*:\s*grid/);
+    expect(tabRow).toMatch(/grid-template-columns\s*:\s*repeat\(2,/);
+    expect(css).toMatch(/@media \(max-width: 440px\)/);
+    stubFetchRoutes(fullRoutes());
+    renderSettings('/settings?tab=advanced');
+    expect(pageTablist()).not.toHaveAttribute('data-overflowing');
   });
 
   it('uses a roving tabindex: only the selected tab is in the tab order', () => {
