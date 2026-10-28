@@ -144,6 +144,17 @@ def classify_key(key: str, *, overrides: Mapping[str, str] | None = None) -> str
 
 _UNKNOWN_TOKEN = "unknown_token"
 _TOKEN_SPLIT = re.compile(r"[_\-\s.]+")
+#: A minus that follows a separator (or starts the name) and precedes a digit is a SIGN, not a
+#: separator: `x_-50mV` must not read as `x_50mV`. A hyphen between words (`Pt-C`, `E1-400mV`) still splits.
+_SIGN = re.compile(r"(?:(?<=[_\s.])|^)-(?=\d)")
+
+
+def _stem_tokens(stem: str) -> list[str]:
+    """The name's tokens, keeping a sign on a signed number (:data:`_SIGN`)."""
+    marked = _SIGN.sub("\x00", str(stem))
+    return [t.replace("\x00", "-") for t in _TOKEN_SPLIT.split(marked) if t]
+
+
 _ALIGN_PREFIXES = ("align", "rough")
 _REFERENCE_PREFIXES = ("foil", "calib", "reference", "standard")
 _REFERENCE_EXACT = frozenset({"ref", "std", "stds", "refs"})
@@ -294,11 +305,28 @@ def _is_counter_token(toks: Sequence[str], i: int, positions: set, known: set) -
     return False
 
 
+#: Suffixes after which an ALL-ZERO number is written several ways (casefolded). Only zero is
+#: normalised: zero is zero under every convention, whereas `05V` may mean 0.5 V in some naming
+#: schemes, and a token split off a decimal (`0.05V` → `0`, `05V`) has significant zeros.
+_ZERO_UNITS = frozenset({"mv", "v", "ev", "kev", "ma", "ua", "mbar", "bar", "torr"})
+_NUMBER_WITH_UNIT_TOKEN = re.compile(r"^([-+]?)(\d+)([A-Za-z]+)$")
+
+
+def _unit_token(t: str) -> str:
+    """``000mV`` → ``0mV`` (seen on real data beside ``0mV``); every other token unchanged.
+    Measured hazard this avoids: stripping zeros from any number merged `0.05V` with `0.5V`."""
+    m = _NUMBER_WITH_UNIT_TOKEN.match(t)
+    if m is None or m.group(3).casefold() not in _ZERO_UNITS or m.group(2).strip("0"):
+        return t
+    return f"{m.group(1)}0{m.group(3)}"
+
+
 def name_stem_key(stem: str, *, loose: bool = False, counter_positions: Iterable[int] = (), known_counters: Iterable[int] = ()) -> str:
     """The name with counters (:func:`_is_counter_token`) and repeat markers removed,
-    casefolded — never a material. ``loose=True`` drops EVERY digit token; it is used only to
+    casefolded — never a material. An all-zero number-with-unit token reads as zero
+    (:func:`_unit_token`). ``loose=True`` drops EVERY digit token; it is used only to
     find merge CANDIDATES that differ in a number that is not a counter."""
-    toks = [t for t in _TOKEN_SPLIT.split(str(stem)) if t]
+    toks = _stem_tokens(stem)
     positions = {int(x) for x in counter_positions}
     known = {int(x) for x in known_counters if x is not None}
     out = []
@@ -307,13 +335,13 @@ def name_stem_key(stem: str, *, loose: bool = False, counter_positions: Iterable
             continue
         if t.isdigit() and (loose or _is_counter_token(toks, i, positions, known)):
             continue
-        out.append(t)
+        out.append(_unit_token(t))
     return "_".join(out).casefold()
 
 
 def counter_tokens(stem: str, *, counter_positions: Iterable[int] = (), known_counters: Iterable[int] = ()) -> list[str]:
     """The literal digit tokens of ``stem`` that were treated as counters (for the question)."""
-    toks = [t for t in _TOKEN_SPLIT.split(str(stem)) if t]
+    toks = _stem_tokens(stem)
     positions = {int(x) for x in counter_positions}
     known = {int(x) for x in known_counters if x is not None}
     return [t for i, t in enumerate(toks) if t.isdigit() and _is_counter_token(toks, i, positions, known)]
@@ -1042,7 +1070,7 @@ def counter_positions_decision(bundle: Mapping) -> dict | None:
 def _differing_number_positions(stems: Sequence[str], *, counter_positions: Iterable[int] = ()) -> list[int]:
     """1-based token positions where same-length names differ only in all-digit tokens that are
     NOT already counters (the positions a set_counter_positions answer would have to name)."""
-    toks = [[t for t in _TOKEN_SPLIT.split(str(s)) if t] for s in stems]
+    toks = [_stem_tokens(s) for s in stems]
     if not toks or len({len(t) for t in toks}) != 1:
         return []
     positions = {int(x) for x in counter_positions}

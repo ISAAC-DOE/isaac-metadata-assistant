@@ -439,6 +439,39 @@ def test_scan_index_misread_with_no_sample_groups_on_the_name_stem():
     assert G.condition_violations(b, p) == []
 
 
+def test_a_unit_token_with_leading_zeros_is_the_same_number():
+    # Measured on a real beamtime: `..._0mV` and `..._000mV` names were kept apart as different potentials.
+    assert G.name_stem_key("SYN_E6_x_000mV") == G.name_stem_key("SYN_E6_x_0mV") == "syn_e6_x_0mv"
+    assert G.name_stem_key("SYN_E6_x_-000mV") == "syn_e6_x_-0mv"
+    # ONLY zero: a non-zero padded number is kept literally (`05V` may mean 0.5 V), and a token
+    # split off a decimal has significant zeros (independent review: `0.05V` had merged with `0.5V`)
+    assert G.name_stem_key("SYN_E6_x_0400mV") == "syn_e6_x_0400mv"
+    assert G.name_stem_key("SYN_E6_x_05V") != G.name_stem_key("SYN_E6_x_5V")
+    assert G.name_stem_key("SYN_E6_x_0.05V") != G.name_stem_key("SYN_E6_x_0.5V")
+    assert G.name_stem_key("SYN_E6_x_1.0400V") != G.name_stem_key("SYN_E6_x_1.400V")
+    assert G.name_stem_key("SYN_E6_x_007c") != G.name_stem_key("SYN_E6_x_7c")  # `c` may mean cycles
+    # a sign after a separator is kept: -50 mV and 50 mV are different potentials
+    assert G.name_stem_key("SYN_E6_x_-50mV") != G.name_stem_key("SYN_E6_x_50mV")
+    assert G.name_stem_key("-50mV_SYN_E6") == "-50mv_syn_e6"
+    # a hyphen between words or after a word still separates
+    assert G.name_stem_key("SYN_Pt-C_x") == "syn_pt_c_x" and G.name_stem_key("SYN_E1-400mV") == "syn_e1_400mv"
+    # never a conversion
+    assert G.name_stem_key("SYN_E6_x_500mV") != G.name_stem_key("SYN_E6_x_0.5V")
+    # the sign reaches the counter question's two other tokenisation sites too
+    assert G.counter_tokens("a_b_-01") == [] and G.counter_tokens("a_b_01") == ["01"]
+    assert G._differing_number_positions(["a_-1_400mV", "a_-2_400mV"]) == []
+    assert G._differing_number_positions(["a_1_400mV", "a_2_400mV"]) == [2]
+    nosample = {k: v for k, v in BASE.items() if k != "sample_name"}
+    b = _bundle([{"stem": "SYN_E6_x_000mV", "conds": dict(nosample)}, {"stem": "SYN_E6_x_0mV", "conds": dict(nosample)}])
+    _scan_index_conflict(b)
+    p = G.propose(b)
+    (g,) = p["record_groups"]
+    assert len(g["member_run_keys"]) == 2 and G.condition_violations(b, p) == []
+    b2 = _bundle([{"stem": "SYN_E6_x_0.05V", "conds": dict(nosample)}, {"stem": "SYN_E6_x_0.5V", "conds": dict(nosample)}])
+    _scan_index_conflict(b2)
+    assert [len(g["member_run_keys"]) for g in G.propose(b2)["record_groups"]] == [1, 1]
+
+
 def test_a_middle_number_difference_is_a_merge_candidate_not_a_group():
     nosample = {k: v for k, v in BASE.items() if k != "sample_name"}
     b = _bundle([{"stem": "SYN_E1_12_400mV", "conds": dict(nosample)}, {"stem": "SYN_E1_1_400mV", "conds": dict(nosample)}])
