@@ -360,6 +360,35 @@ the content.** `DEC-75` is an **engineering decision taken by the implementing s
 - **No production provider, MCP endpoint, identity boundary or real-byte ingestion is enabled.**
   `EXT-01`, `EXT-02`, `EXT-13` are unchanged.
 
+## B9. Decisions taken by the 2026-10-28 owner direction — the local-first Claude skill
+
+**Provenance.** `DEC-76`…`DEC-84` come from the project owner (Krish) in the 2026-10-28 session.
+The domain owner (Angel) supplied the content of `DEC-79`…`DEC-81` in Slack, as relayed by Krish.
+The orchestrator was Opus 5.5, under the `DEC-17` disclosed fallback.
+
+| ID | Decision | Status | Source | Reasoning and boundary |
+|---|---|---|---|---|
+| **DEC-76** | **The local skill exports to the schema the official ISAAC portal enforces**, pinned at upstream commit `a1cb1c8`. ISAAC's own deterministic validators run against that pinned schema, alongside the portal's validator run offline. The vendored v1.05 schema (July) stays the website's authority, unchanged. | DECIDED 2026-10-28 | orchestrator, under the owner's goal: export only after ISAAC and offline-portal validation | The vendored schema *forbids* `attribution.produced_by`; the portal *requires* it (`PRODUCED_BY_MISSING`). No record could pass both, so the goal was unsatisfiable as written. The truth plane is not edited. Every report names which schema each verdict used. Refreshing the vendored schema remains **Krish's decision**. |
+| **DEC-77** | **One ISAAC record per sample + technique + condition group, inside one experiment per beamtime folder.** Repeats, extra scans and repeated runs at the same conditions merge into that one record. It is not one record per file, and not one record per experiment. | DECIDED 2026-10-28 | owner and domain owner; the upstream record contract ("one result, one record") | The portal rejects a whole-experiment record (`DUPLICATE_DESCRIPTOR_NAME`). Groups are *proposed* by code and *confirmed* by a scientist. An unknown or differing condition splits a group and is never merged silently. |
+| **DEC-78** | **A record's spectrum is a processed product**: calibration, deglitch, merge, normalize, quality checks. It follows the versioned protocol `isaac.xas.v0` (`docs/xas-processing-protocol-v0.md`), whose status is `draft_unreviewed` until a beamline scientist approves it. | DECIDED 2026-10-28 | domain owner (Angel) | Glitches are flagged, never dropped by default. Every parameter is logged. Processed values are gated on a scientist's approval. Oscar's protocol supersedes `isaac.xas.v0` when it arrives. |
+| **DEC-79** | **The scientists' own processed outputs are preferred** (Athena `.prj`, XDI exports) where they exist. ISAAC's protocol is also run and compared against them. | DECIDED 2026-10-28 | owner | A disagreement is a review item, never an override. |
+| **DEC-80** | **No upload of any kind in this phase.** `isaac bundle upload` is dry-run only: it reports what it *would* send to `POST /portal/api/records` and refuses otherwise. | DECIDED 2026-10-28 | owner ("we're going for function") | The portal API key belongs to the scientist, is read only from the environment, and is never printed or asked for. |
+| **DEC-81** | **Claude Code is the first supported assistant for the local workflow.** Claude Desktop and a simpler scientist installer come later. | DECIDED 2026-10-28 | owner | Claude Code can run the CLI on local folders. |
+| **DEC-82** | **Real SSRL data may be read by Claude in this session**, to polish the skill. The data stays outside the repository and is never committed. | APPROVED 2026-10-28 | owner (project owner approval). Angel gave data-owner consent in Slack. | SLAC's institutional question (H5) remains open. See `docs/local-first-data-flows.md`. |
+| **DEC-83** | **Schema Proposals is a website section** that drafts and tracks vocabulary proposals in the upstream portal's `add_term` / `add_category` format. ISAAC never approves or applies a proposal. | DECIDED 2026-10-28 | owner | Proposals are stored in the temporary workspace on hosted, which is disclosed. Identity is unverified, so `proposed_by` is null. |
+| **DEC-84** | **AI readings are suggestions.** They can never be stronger than `needs_review`. Only a scientist decision yields `scientist_confirmed`, and a local decision's identity is `local_unverified`. ORCID is credit, never authentication. | DECIDED 2026-10-28 | owner direction; identity contract §9.1 | See `docs/local-import-bundle-contract.md` and `docs/orcid-account-linking-design.md`. |
+
+### What `DEC-76`…`DEC-84` do NOT change
+- **The website's truth plane.** `schema/` and the `src/isaac_records` validators and export are unedited. The only change in `src/isaac_records/cli.py` is the additive `import` / `bundle` dispatch.
+- **One hosted read changes, and it is a bug fix.** When an archive has acquisition files with the
+  same name but different bytes in different folders, `historical_import.read_archive_at` now pairs
+  each unit with its own file by position. Before, both units took the second file's path and
+  identity. Found on real BL6-2c data and measured by the final review on a synthetic duplicate
+  corpus: digest `93bf88…` on `main` versus `1d5990…` on this branch. Golden digests for every
+  committed fixture are unchanged. A hosted test pins the new behaviour.
+- No migration, no production MCP, no identity boundary, no real-file ingestion on the hosted site.
+- `EXT-01`, `EXT-02` and `EXT-13` are unchanged.
+
 ## C. Open — external owners
 
 These are not ours to decide. Full detail in

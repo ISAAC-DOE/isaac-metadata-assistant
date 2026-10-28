@@ -8,6 +8,54 @@ the repository — never from remembered chat context.
 ## SESSION HEADER
 
 ```
+*** 2026-10-28, LOCAL-FIRST CLAUDE SKILL — Mac session (Opus 5.5; DEC-17 fallback, Fable 5.1
+    unavailable). Everything below this block is a SUPERSEDED reading, kept unedited. ***
+
+RE-DERIVED AT RUN OPEN: main = origin/main = 69982fb9 (v0.0.271), ahead/behind 0/0, clean,
+  no stashes/worktrees, gh NOT authenticated (no PR possible from this machine yet).
+BRANCH: feat/local-first-import-bundle (from 69982fb9). Committed locally, NOT pushed, no PR —
+  merging to main auto-deploys the hosted site, so push/PR/merge are Krish's acts.
+AGENTS: 5 (cap respected; no nested spawning): Opus implementer (bundle/CLI/records/validation),
+  Sonnet implementer (Schema Proposals, extractor, readers, skill, setup, self-test, docs), Opus
+  implementer (grouping + XAS processing), 2 independent Opus reviewers (LOCAL-1/PROP-1:
+  MERGE-after-fixes; final branch: BLOCK -> fixed -> MERGE on re-verification). Fixes went back
+  to the implementing agent via SendMessage.
+
+WHAT WAS BUILT (see ISAAC_Skill_Plan_2026-10-28.md rev 2 + DEC-76..84):
+  * isaac import <folder|zip> --out <bundle>: standalone (no FastAPI), same reconstruction as
+    hosted; ISAAC Local Import Bundle v1 (docs/local-import-bundle-contract.md): many witnesses
+    per value, states recomputed by the validator, AI <= needs_review, only decide -> confirmed.
+  * generic readers (SSRL XDC BL4-3, XDI, XES tab, MCA, two-column) + document extractor
+    (docx/pptx/xlsx incl. embedded images; PDF/images via Claude Read).
+  * isaac bundle group / isaac process: one record per sample+technique+condition; isaac.xas.v0
+    DRAFT protocol (calibration only on approve_calibration, deglitch flags never drop, merge,
+    normalize, QC); Athena-first with comparison; per-run output dirs (approved files immutable).
+  * questions v2 (asked once at the right scope), decide (local_unverified; QC status required),
+    build-records, validate (draft > export dry run > ISAAC official+exactness against the
+    PORTAL's pinned schema a1cb1c8 > offline portal validator), export (fresh composition only),
+    upload --dry-run only.
+  * .claude/skills/isaac-historical-import (+ reference/), scripts/setup_isaac_local.sh,
+    install_local_cli.sh, install_portal_validator.sh, isaac_selftest.sh (40/0/0).
+  * Schema Proposals website section (/schema-proposals): portal add_term/add_category format,
+    portal vocabulary snapshot a1cb1c8 + schema enums, no approve path, temporary storage disclosed.
+  * Designs only (not implemented): docs/mcp-staged-bundle-import-design.md,
+    docs/orcid-account-linking-design.md, docs/local-first-data-flows.md.
+
+REAL DATA (DEC-82, owner-approved; never in the repo): ~/Documents/ISAAC/real-data/ (6 SSRL
+  beamtimes, 6,399 files). All six import exit 0; coverage 6,106 code / 230 Claude / 63
+  unreadable. Processing vs scientists' Athena: 107 matched groups, 26 agree at defaults; RMS
+  0.076 -> 0.0096 with the scientist's own normalization params. Real-format groups reach portal
+  `publish` ONLY with labelled synthetic self-test decisions (outputs in real-data/_runs/).
+
+HOSTED BEHAVIOUR: unchanged on every committed fixture (golden digests from main pinned), except
+  a bug fix — same-name different-bytes acquisitions in different folders now keep their own
+  files (pinned by a hosted-path test). Truth plane untouched except the additive isaac CLI
+  dispatch (import/bundle/process).
+
+STILL OPEN: memory-snapshot.json regeneration needs Graphify (absent on this Mac) — run before
+  merge; Playwright e2e + a11y (settings-explorer cells move with +7 operations) need Linux CI;
+  scientist-reviewed gold set; Oscar's protocol; H5; D1/D2; vendored-schema refresh decision.
+
 *** 2026-09-22/23, OWNER HOSTED-QA REDESIGN + ANGEL'S BL15 ANSWERS — RE-DERIVED FROM
     COMMANDS. Everything below this block is a SUPERSEDED reading, kept unedited. ***
 
