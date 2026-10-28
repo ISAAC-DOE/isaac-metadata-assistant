@@ -1,0 +1,283 @@
+# ISAAC XAS processing protocol `isaac.xas.v0` (with record grouping)
+
+> **DRAFT — not reviewed by a beamline scientist. Oscar's protocol supersedes on arrival.**
+> Status `draft_unreviewed`, version `0.1.0`. Every result is `state: needs_review`. Nothing
+> here produces an official ISAAC value; results are review material for a scientist.
+
+Code: `apps/api/isaac_api/local_import/grouping.py` (stdlib) and
+`apps/api/isaac_api/local_import/processing/` (numpy + xraylarch, optional extra
+`processing`, imported lazily). Machine-readable parameters: `processing/protocol.py`
+(`DEFAULT_PARAMS`, `PARAM_DOCS`). Entry points: `processing.cli_entry.run_group(bundle_dir)`
+and `run_process(bundle_dir, source_root=..., params=...)`; evaluation:
+`python -m isaac_api.local_import.processing.evaluate <folder>`.
+
+## 0. Why
+
+An official ISAAC record is ONE RESULT: one sample, one technique, one set of conditions
+(upstream wiki *What an ISAAC record is*). Domain owner (Angel, 28 Oct 2026): *"Multiple
+scans, multiple runs, or repeats of the same sample in a specific condition create a single
+record. It requires scientific knowledge/protocol: energy calibration, identification of
+glitches and outliers, merging data, normalization of spectra, checking quality of the
+data."* One ISAAC experiment = one beamtime folder (`experiment_key = experiment:<folder name>`).
+
+## 1. Record grouping (`isaac.grouping.record_groups.v1`)
+
+Each run's candidates are read as *readings* (`value`, `literal`, `conflicting`, absent), and
+every statement key is in exactly ONE class (`grouping.CONDITION_KEYS`, `BOOKKEEPING_KEYS`,
+`UNKNOWN_KEYS`, each entry with its justification in code):
+
+| class | keys | a difference means |
+|---|---|---|
+| **condition** | sample name/number, loading/thickness; acquisition method (technique); environment, cell type, reaction; potential + its reference; electrolyte/medium, pH; gas, flow; cycling and before/after state; dry state; temperature; filter (changes count rate and dose); HERFD emission energy (selects the line) | split (also on a conflict, or stated for one run only — with a question) |
+| **bookkeeping** | legacy run/file number, repeat markers (`again`), timestamps, scan commands/grids/counts, detector columns, motor and stage positions, file declarations, beamtime context … | nothing: runs differing only here form **one proposed group** with question `confirm_repeats_merge` listing the differing bookkeeping literals |
+| **unknown** | `new_spot`, `step_number`, unrecognised acquisition-name tokens, and **every key not listed** | split, plus a **`merge_candidate`** naming the key (`unknown_key_differs`), so a scientist merges with one decision |
+
+A proposed group requires, per member: same role; no conflicting condition; a stated sample
+identity; ≥ 1 scan; no engine-reading issue; equal condition and unknown readings. A merge
+candidate requires same role, equal condition readings, no hard condition conflict, ≥ 1 scan.
+Duplicate legacy numbers stay separate runs (flag `duplicate_legacy_number`). Ids are stable
+sha256 prefixes (`rg-…`, `mc-…`); order follows the bundle.
+
+**Engine misreadings (`isaac.grouping.engine_misreading.v0`)** are identified with their
+evidence, never hard-split, and offered as merge candidates (`blocked_by_engine_reading`).
+The engine is not edited; these are engine fixes for its owner:
+
+1. `scan_index_token_read_as_value` — every scan-file witness of a conflict is that scan
+   file's own trailing index (`_001` → 1); measured as the sample number on 73/92 runs (2019).
+2. `auxiliary_macro_read_as_method` — exactly one disagreeing `acquisition_method` reading
+   names a technique (`*_XAS.mac`), the others are helper macros (e.g. `syn_helper.mac`); 56/92, 67/87.
+3. `same_value_different_unit_spelling` — `9175.4` vs `9175.4 eV`.
+4. `exported_file_read_as_acquisition` — a zero-scan run named like another run plus a
+   data-file extension (`x.dat`); offered to that run.
+5. Beamtime-level `sample_number_inconsistent_with_sample_name` — ≥ 2 sample numbers each read
+   beside ≥ 2 different sample names (and ≥ half of such numbers): the profile is reading a
+   run counter; `sample_or_electrode_number` is treated as **unknown** for that beamtime.
+
+**Roles (`isaac.grouping.run_role.v0`)**: engine classifier first (`alignment`,
+`standard_or_reference`), else stem tokens (`align*`/`rough*` → alignment;
+`foil*`/`calib*`/`reference*`/`standard*`/`ref`/`std` → reference), else sample; never merged
+with samples.
+
+**Acquisitions with no bundle run** (`isaac.grouping.unread_numbered_scans.v0`): text files
+`<stem>.<NNN>` in one directory are one acquisition's scans (binary twins skipped); one group
+each, conditions unknown. `isaac.grouping.unread_name_counters.v0` offers merge candidates
+(never merges) between those whose names are equal after removing a leading run counter and a
+trailing acquisition counter. `groups_from_generic_runs()` adapts a non-engine reader's runs.
+
+**Scientist approves:** the three key lists; the engine-misreading rules; every proposed group
+and merge candidate.
+
+## 2. Inputs and channels
+
+Raw files are read from the source folder (`source_root`, else the bundle's
+`local_root_hint`); each scan's sha256 must equal the bundle's `content_sha256`
+(`source_hash_mismatch` otherwise). Readers (content-sniffed, `processing/readers.py`):
+SPEC columns (last `#L` before data, the `bl15.signals` convention), SSRL XDAC text
+(`Data:` + one name per line), delimited text; CR/CRLF endings normalised, duplicate column
+names kept as `name#2`, short rows skipped and counted, binary content refused.
+
+| Param | Default | Approve |
+|---|---|---|
+| `channels.energy_candidates` | `Achieved Energy, absev, energy, Energy, mono, Requested Energy, …` (measured: scientists' Athena energies equal BL15-2 `absev`, not `energy`) | yes |
+| `channels.use_bl15_signal_selection` | true — use `bl15/signals.py`'s proposed HERFD channel | yes |
+| `channels.fluorescence_candidates` | `vortDT…4, sum:DTC_FF, sum:FF, sum:SCA1_, Lytle, PIPS, If, fluor` (dead elements excluded, flagged) | yes |
+| `channels.i0_candidates` | `I0, i0, IO`; none → `signal_only` + `i0_missing` | yes |
+| `channels.transmission_after_sample` | `I1, It, IT` → mu = ln(I0/I1); reference/alignment groups prefer transmission | yes |
+| `channels.reference_after_reference` | `I2, Iref, IR` → reference mu = ln(I1/I2) | yes |
+| `channels.dead_time_rate_prefix` | `ICR1_` → flag `dead_time_correction_not_applied` (no rule approved) | yes |
+
+Every choice, its basis and alternatives are in `channel_choice`; flags
+`channel_choice_needs_review` / `channel_from_bl15_selector_suggestion`,
+`energy_column_alternatives`, `multiple_signal_alternatives`. Per scan: energy sorted
+(non-monotonic steps counted), exact duplicate energies averaged, non-finite points dropped
+and counted.
+
+## 3. Calibration
+
+E0 = larch `find_e0` (maximum of the first derivative). Reference: a reference group's own
+signal, else an in-scan reference channel (I1/I2) whose edge SNR ≥ `reference_min_edge_snr`
+(10). The shift is tabulated − measured (table `processing/edges.py`, xraydb 4.5.8 /
+Elam-Ravel-Sieber 2002).
+
+**Authority rule.** Only a scientist's processing-approval decision applies a shift:
+`calibration_approvals[group_id] = {element, edge, decided_by, decision_id}`, recorded by the
+scientist (with `--by`) through the bundle's decision commands; an approval without a named
+decider is ignored (`calibration_approval_incomplete_ignored`). Everything else can only
+**propose** the reference element/edge — the shift is then computed and reported but NOT
+applied (`calibration_shift_awaiting_approval`, `reference_approved: false`):
+
+* a params-file value `calibration.proposed_reference` (labelled `params_file_value`; a params
+  file is never a scientist decision; the v0 key `confirmed_reference` is read the same way);
+* for a reference group, file-name/header evidence (`stated_by_evidence`): a `foil` token plus
+  exactly one element-symbol token, and an edge from the bundle's element evidence and/or a
+  header `<El><Edge>_` symbol (XDAC region file), all agreeing.
+
+Without any reference: no shift, `calibration_reference_unconfirmed`. A foil group's shift is
+never propagated to sample groups. `max_plausible_shift_eV` 25; `align_scans_by_reference`
+false. **All calibration params need approval.**
+
+## 4. Deglitch / outliers (flag, never drop by default)
+
+* ≥ `min_scans_for_cross_scan` (3) scans: each scan fitted as `a + b·median`; a point is
+  flagged when |residual − median| > `point_z_threshold` (6) × scale, scale = max(scan's
+  residual 1.4826·MAD, across-scan 1.4826·MAD at that energy) — so the edge under sub-eV
+  jitter is not flagged but a one-scan spike is.
+* fewer scans: residual against the line through the two neighbours, scaled by its MAD.
+* a scan whose residual RMS/span > `scan_rms_ratio_threshold` (3) × the median scan's and >
+  `scan_rms_floor` (0.005) is an outlier scan.
+* `exclude_flagged` **false**: flagged points/scans are listed as `would_exclude`, kept in
+  the merge, marked × in the plot. **Scientist approves k, the thresholds and exclusion.**
+
+## 5. Merge
+
+Grid = energy points of the widest-range scan; every scan contributes only inside its own
+range (linear interpolation, no extrapolation); per point N, mean, std (ddof 1),
+stderr = std/√N (`merged.csv`). Scans covering < 90 % of the grid are flagged
+`scan_range_truncated` (measured: one short scan had cut a group's grid below E0).
+
+## 6. Normalize
+
+larch `pre_edge` on the merged mu: e0 = find_e0, pre1 larch default, **pre2 −30 eV**,
+**norm1 = min(100 eV, 0.4·(Emax−E0))**, norm2 larch default, **nnorm 2** (1 if the post-E0
+range < 100 eV), flatten on. Defaults measured on 107 scientist Athena groups in the archive
+(nor1 median 110 eV, pre2 mode −30, nnorm 2 in 82). Resolved values are recorded.
+Outputs `normalized.csv` (norm, flat). **All need approval.**
+
+## 7. QC (data quality only; provenance flags do not move it)
+
+fail: 0 usable scans, < 20 points, edge step ≤ 0, I0 ≤ 0 on > 5 %, all-zero signal.
+warn: 1 scan, pre-edge noise/step > 0.02, median stderr/step > 0.02, glitches or outlier
+scans flagged, |shift| > 2 eV, reference E0 spread > 0.5 eV, ≥ 3 identical maximum signal
+values (saturation), non-monotonic energy, non-finite points, some I0 ≤ 0. Else pass.
+`qc.json` records metrics, reasons and thresholds. **Thresholds need approval.**
+
+## 8. Athena-first
+
+`.prj` files the bundle inventoried are read with larch (`AthenaProject.read(do_preedge=True)`
+— larch's reproduction of the stored e0/pre1/pre2/nor1/nor2/nnorm/flatten); comparison in
+the scientist's frame (energy + `bkg_eshift`). Matching (`isaac.athena.match_by_name.v0`):
+normalised label/file name equals a member run stem, or stem + `_` + scan selection
+(`5-6`, `001`, `merge…`); exact beats suffix; zero-scan groups take no part; identical data
+count once; one merged group wins; one-group-per-scan in one project is compared as a set
+(mean of the scientist's per-scan normalisations, labelled derived); anything else
+anything else is **several versions**: each is listed in `athena_versions[]` with what its
+own files state (project path and file name, years in the path, label, merge flag, scan
+selection, parameters), compared individually, and **none is selected**
+(`athena_result_of_record: null`, question `which_athena_version_is_result_of_record`).
+Matched: a `scientist_athena` result (their params recorded,
+`preferred_for_record: true`) plus the ISAAC result with `comparison`: E0 delta, RMS of
+flattened/normalised mu on the overlap, edge-step ratio, verdict `agree` (|ΔE0| ≤ 1 eV and
+RMS ≤ 0.05) | `differs` | `not_comparable` (< 20 points or < 30 eV overlap). Diagnostics
+(not in the verdict): `rms_norm_with_athena_params` (ISAAC data, scientist parameters) and
+`rms_norm_same_scans_same_params`. Disagreement is a review item, never an override.
+
+## 9. Outputs and states
+
+Each run writes to its own **content-addressed run directory**
+`processing/<group_id>/<run_id>/` (`run_id` = sha256 over protocol version, group, used input
+digests and every data output; the plot is excluded). Earlier runs are never overwritten or
+deleted: an identical re-run reuses the same directory and ids without rewriting a byte, and
+any changed parameter yields a NEW `run_id` and NEW, undecided `result_id`s
+(`proc-<group>-<run_id>-isaac|athena`), with `prior_run_ids` listed. Each run directory also
+holds `result.json`. Paths are relative to the bundle directory and never contain `..`.
+
+`<bundle_dir>/record_groups.json`; `<bundle_dir>/processing/processing_results.json`
+(`processing_results[]` in the bundle-v1.1 shape, `unread_acquisition_results[]`);
+per group `merged.csv`, `normalized.csv`, `qc.json`, `params.json`, `plot.png`
+(`athena_normalized.csv` when matched) — paths relative to the bundle dir, each with sha256.
+Without numpy/xraylarch: `processing/status.json` with `processing_unavailable`, no results.
+
+## 10. What a scientist must approve before any of this is relied on
+
+Every proposed group; the condition/bookkeeping split; channel and energy-column choices;
+calibration reference and shift; deglitch thresholds and whether to exclude; the merge
+grid rule; normalisation ranges and E0; QC thresholds; Athena tolerances and the matching
+rule. `params.json` lists `needs_scientist_approval` per group.
+
+## 11. Open questions for Oscar / Angel (`protocol_questions`)
+
+Machine-readable in `processing/protocol.py` `PROTOCOL_QUESTIONS`, written into every
+`params.json` and the `processing_results.json` header so the skill can ask them:
+
+```json
+[
+  {
+    "question_id": "pq-001",
+    "topic": "energy_column",
+    "ask": "angel_or_oscar",
+    "text": "At SSRL BL15-2, is `absev` (encoder/absolute energy) the energy axis to use, rather than `energy`? Measured: the scientists' Athena energy arrays equal `absev`, 1.7-3.4 eV from `energy`.",
+    "affects": [
+      "channels.energy_candidates"
+    ],
+    "current_default": "absev before energy",
+    "status": "open"
+  },
+  {
+    "question_id": "pq-002",
+    "topic": "grouping.new_spot",
+    "ask": "angel_or_oscar",
+    "text": "Is a measurement on a NEW SPOT of the same sample, at the same condition, a repeat (one record) or a different result?",
+    "affects": [
+      "grouping.UNKNOWN_KEYS.new_spot"
+    ],
+    "current_default": "unknown: separate groups plus a merge candidate",
+    "status": "open"
+  },
+  {
+    "question_id": "pq-003",
+    "topic": "grouping.step_number",
+    "ask": "angel_or_oscar",
+    "text": "Is a numbered step (`stepNN`) a repeat at the same condition, or a different point in a protocol?",
+    "affects": [
+      "grouping.UNKNOWN_KEYS.step_number"
+    ],
+    "current_default": "unknown: separate groups plus a merge candidate",
+    "status": "open"
+  },
+  {
+    "question_id": "pq-004",
+    "topic": "calibration.foil_shift_to_samples",
+    "ask": "oscar",
+    "text": "Should the energy shift measured on a reference-foil group be applied to the beamtime's sample groups (and under which conditions)?",
+    "affects": [
+      "calibration.proposed_reference",
+      "calibration.apply_shift_when_confirmed"
+    ],
+    "current_default": "never propagated automatically",
+    "status": "open"
+  },
+  {
+    "question_id": "pq-005",
+    "topic": "athena.e0_frame",
+    "ask": "oscar",
+    "text": "Is the E0 stored in an Athena project in the energy-SHIFTED frame (after bkg_eshift) or the stored-energy frame? This build follows larch's read_athena reproduction (stored frame) and compares in the shifted frame.",
+    "affects": [
+      "athena comparison: e0_delta_eV"
+    ],
+    "current_default": "larch read_athena convention",
+    "status": "open"
+  },
+  {
+    "question_id": "pq-006",
+    "topic": "channels.dead_time",
+    "ask": "oscar",
+    "text": "For SSRL XDAC data, should SCA fluorescence channels be dead-time corrected with the ICR columns, and by which rule?",
+    "affects": [
+      "channels.dead_time_rate_prefix"
+    ],
+    "current_default": "no correction; flag dead_time_correction_not_applied",
+    "status": "open"
+  },
+  {
+    "question_id": "pq-007",
+    "topic": "athena.result_of_record",
+    "ask": "scientist_of_the_beamtime",
+    "text": "When several Athena projects hold different versions of one measurement (re-normalised, glitch-removed, smoothed), which is the result of record?",
+    "affects": [
+      "processing_results[].athena_versions"
+    ],
+    "current_default": "none selected; each listed and compared",
+    "status": "open"
+  }
+]
+```

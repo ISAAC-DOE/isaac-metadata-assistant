@@ -100,12 +100,20 @@ def _repo_root() -> Path:
     whole record engine, which is the coupling this package's layering exists to
     avoid. The duplication is noted so it reads as a decision rather than an
     oversight.
+
+    ~~The local copy~~ — 2026-10-28: the walk is now
+    :func:`isaac_api.schema_locator.find_repo_root`, the ONE resolver (stdlib only, so
+    the layering argument above still holds: it is not ``workspace``). The old
+    ``parents[4]`` fallback is kept ONLY for the case where no schema is found above
+    this file, because :data:`GOLD_DIR` is evaluated at import and gold standards are
+    test fixtures, not the schema: an absent gold file is reported as
+    ``unmeasurable`` by the evaluator, never read as a pass. The SCHEMA read itself
+    (``bl15.mapping._schema``) fails closed through the resolver.
     """
-    here = Path(__file__).resolve()
-    for candidate in (here, *here.parents):
-        if (candidate / "schema" / "isaac_record_v1.json").exists():
-            return candidate
-    return here.parents[4]
+    from ..schema_locator import find_repo_root
+
+    root = find_repo_root(Path(__file__))
+    return root if root is not None else Path(__file__).resolve().parents[4]
 
 
 #: Where committed gold standards live. Declarative JSON, human-authored.

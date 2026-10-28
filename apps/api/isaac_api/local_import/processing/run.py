@@ -1,0 +1,829 @@
+"""Run protocol ``isaac.xas.v0`` over a bundle's record groups and write the results.
+
+Outputs, all under ``<bundle_dir>/processing/`` (paths in results are relative to
+``<bundle_dir>``; every file carries its sha256):
+
+* ``processing_results.json`` — ``processing_results[]`` (record groups; one
+  ``isaac_protocol`` entry per group, plus a ``scientist_athena`` entry when an Athena group
+  matches) and ``unread_acquisition_results[]`` for acquisitions the import could not read;
+* ``<group_id>/merged.csv``, ``normalized.csv``, ``qc.json``, ``params.json``, ``plot.png``
+  and, when matched, ``athena_normalized.csv``;
+* ``status.json`` — ``processing_unavailable`` when numpy/xraylarch are missing (no
+  results are fabricated).
+
+Raw data is READ from the source folder (``source_root``, else the bundle's
+``local_root_hint``); each scan's bytes are checked against the bundle's
+``content_sha256`` before use. Nothing is copied out of the source folder.
+"""
+
+from __future__ import annotations
+
+import datetime as _dt
+import hashlib
+import json
+import re
+import shutil
+import tempfile
+import warnings
+from pathlib import Path, PurePosixPath
+from typing import Any, Mapping, Sequence
+
+from .. import grouping as G
+from . import _deps
+from . import athena as A
+from . import core as C
+from . import protocol as P
+from .channels import choose_channels
+from .edges import edge_energy
+from .readers import read_scan_file
+
+PROCESSING_DIR = "processing"
+RESULTS_FILE = "processing_results.json"
+STATUS_FILE = "status.json"
+RESULTS_FORMAT = "isaac.processing-results"
+RESULTS_FORMAT_VERSION = "0.1.0"
+
+ELEMENTS = frozenset(
+    "H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr "
+    "Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm "
+    "Yb Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn Fr Ra Ac Th Pa U Np Pu".split()
+)
+#: The region/method-file shape ``<Element><Edge>_...`` — the same shape
+#: ``bl15.signals.RULE_METHOD_SYMBOL_ELEMENT_EDGE`` reads from a BL15-2 method macro.
+_REGION_SYMBOL = re.compile(r"^([A-Z][a-z]?)(K|L[1-3]|M[1-5])_")
+_TOKEN = re.compile(r"[_\-\s.]+")
+
+
+def _now() -> str:
+    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _json_bytes(obj: Any) -> bytes:
+    return (json.dumps(obj, indent=2, sort_keys=False, ensure_ascii=False, default=_jsonable) + "\n").encode("utf-8")
+
+
+def _jsonable(o: Any):
+    try:
+        import numpy as np
+
+        if isinstance(o, np.generic):
+            return o.item()
+        if isinstance(o, np.ndarray):
+            return o.tolist()
+    except Exception:  # noqa: BLE001
+        pass
+    return str(o)
+
+
+def _write(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_bytes(data)
+    tmp.replace(path)
+
+
+def _resolve_source(root: Path, rel: str) -> Path | None:
+    p = PurePosixPath(rel)
+    if p.is_absolute() or ".." in p.parts:
+        return None
+    full = root.joinpath(*p.parts)
+    try:
+        if full.is_symlink() or not full.resolve().is_relative_to(root.resolve()):
+            return None
+    except OSError:
+        return None
+    return full
+
+
+def stated_reference(name: str, bundle: Mapping, header_lines: Sequence[str]) -> tuple[dict | None, str]:
+    """A reference foil's element + edge, ONLY when evidence states both. (reference, reason).
+
+    Element: the name has a ``foil`` token and exactly one token that is an element symbol
+    (case-sensitive). Edge: the bundle's ``experiment.element_evidence`` for that element,
+    and/or a header line shaped ``<El><Edge>_`` (an XDAC region file, e.g. ``ZzK_SYNTHETIC.rgn``);
+    every stated edge must agree.
+    """
+    toks = [t for t in _TOKEN.split(name) if t]
+    if not any(t.casefold().startswith("foil") for t in toks):
+        return None, "name_has_no_foil_token"
+    els = sorted({t for t in toks if t in ELEMENTS})
+    if len(els) != 1:
+        return None, f"foil_element_not_unique:{els}"
+    el = els[0]
+    basis = [{"kind": "name_token", "name": name, "element": el}]
+    edges = set()
+    for ev in (bundle.get("experiment") or {}).get("element_evidence") or ():
+        if ev.get("element") == el and ev.get("edge"):
+            edges.add(ev["edge"])
+            basis.append({"kind": "bundle_element_evidence", "source_id": ev.get("source_id"), "locator": ev.get("locator"), "edge": ev["edge"]})
+    for i, line in enumerate(header_lines):
+        m = _REGION_SYMBOL.match(line.strip())
+        if m and m.group(1) == el:
+            edges.add(m.group(2))
+            basis.append({"kind": "scan_header_region_symbol", "header_line_index": i, "literal": line.strip()[:80], "edge": m.group(2)})
+    if len(edges) != 1:
+        return None, f"edge_not_stated_uniquely:{sorted(edges)}"
+    return {"element": el, "edge": next(iter(edges)), "basis": "stated_by_evidence", "evidence": basis}, "stated_by_evidence"
+
+
+# --- per group ------------------------------------------------------------------------------
+
+
+class _Ctx:
+    def __init__(self, *, bundle, bundle_dir, root, params, np, xafs, out_dir, sources, runs_by_key):
+        self.bundle = bundle
+        self.bundle_dir = bundle_dir
+        self.root = root
+        self.params = params
+        self.np = np
+        self.xafs = xafs
+        self.out_dir = out_dir
+        self.sources = sources
+        self.runs_by_key = runs_by_key
+
+
+def group_scans(group: Mapping, runs_by_key: Mapping[str, Mapping]) -> tuple[list[dict], list[str], dict | None]:
+    if group.get("group_kind") in ("unread_acquisition", "generic_run"):
+        return [dict(s) for s in group.get("member_scans") or ()], [group.get("stem") or ""], None
+    scans, stems, sel = [], [], None
+    for key in group.get("member_run_keys") or ():
+        run = runs_by_key.get(key)
+        if run is None:
+            continue
+        stems.append(run.get("stem") or "")
+        sel = sel or run.get("signal_selection")
+        for s in run.get("scans") or ():
+            scans.append({"source_id": s.get("source_id"), "relative_path": s.get("relative_path"), "scan_index": s.get("scan_index"), "run_key": key})
+    return scans, stems, sel
+
+
+def _base(group: Mapping, source: str) -> dict:
+    return {
+        "result_id": f"proc-{group['group_id']}-{'isaac' if source == 'isaac_protocol' else 'athena'}",
+        "group_id": group["group_id"],
+        "group_kind": group.get("group_kind", "record_group"),
+        "protocol_id": P.PROTOCOL_ID,
+        "protocol_version": P.PROTOCOL_VERSION,
+        "protocol_status": P.PROTOCOL_STATUS,
+        "source": source,
+        "inputs": [],
+        "steps": [],
+        "outputs": {"files": [], "e0_eV": None, "edge_step": None, "points": None},
+        "qc": {"metrics": {}, "verdict": "fail", "reasons": []},
+        "comparison": None,
+        "state": "needs_review",
+        "review_flags": ["protocol_draft_unreviewed"],
+        "preferred_for_record": False,
+        "failure": None,
+    }
+
+
+_RUN_DIR = re.compile(r"^r-[0-9a-f]{16}$")
+
+
+def run_id_for(group_id: str, input_hashes: Sequence[str], data_hashes: Sequence[tuple[str, str]]) -> str:
+    h = hashlib.sha256(json.dumps([P.PROTOCOL_ID, P.PROTOCOL_VERSION, group_id, list(input_hashes), [list(x) for x in data_hashes]]).encode())
+    return "r-" + h.hexdigest()[:16]
+
+
+def _fail(res: dict, code: str, detail: str = "") -> dict:
+    res["failure"] = {"code": code, "detail": detail}
+    rid = run_id_for(res["group_id"], [], [("failure", hashlib.sha256(f"{code}:{detail}".encode()).hexdigest())])
+    res["run_id"] = rid
+    res["result_id"] = f"proc-{res['group_id']}-{rid}-isaac"
+    res["qc"] = {"metrics": res["qc"].get("metrics") or {}, "verdict": "fail", "reasons": [code]}
+    return res
+
+
+def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], headers: Sequence[str], ctx: _Ctx) -> dict:
+    np, cp = ctx.np, ctx.params["calibration"]
+    role = group.get("role", "sample")
+    flags: list[str] = []
+    # AUTHORITY: a params-file value or file-name evidence may only PROPOSE the reference
+    # element/edge. The shift is APPLIED only under a scientist's processing-approval decision
+    # (``calibration_approvals[group_id]``, recorded with a named decider).
+    proposed = None
+    param_ref = cp.get("proposed_reference")
+    if param_ref:
+        proposed = {"element": param_ref.get("element"), "edge": param_ref.get("edge"), "basis": "params_file_value"}
+    approval = (ctx.calibration_approvals or {}).get(group["group_id"])
+    approved = None
+    if approval and str(approval.get("decided_by") or "").strip() and approval.get("element") and approval.get("edge"):
+        approved = {
+            "element": approval["element"],
+            "edge": approval["edge"],
+            "basis": "scientist_decision",
+            "decided_by": approval["decided_by"],
+            "decision_id": approval.get("decision_id"),
+        }
+    elif approval:
+        flags.append("calibration_approval_incomplete_ignored")
+    per_scan: list[dict | None] = []
+    ref_source = None
+    unconfirmed_reason = None
+    if role == "reference":
+        ref_source = "reference_group_own_signal"
+        per_scan = [C.edge_e0(sa["energy"], sa["mu"], np, ctx.xafs) for sa in scans_data]
+        if not proposed:
+            stated, unconfirmed_reason = stated_reference(stems[0] if stems else "", ctx.bundle, headers)
+            if stated:
+                proposed = stated
+    elif cp.get("use_in_scan_reference_channel") and any(sa.get("mu_ref") is not None for sa in scans_data):
+        ref_source = "in_scan_reference_channel"
+        per_scan = [C.edge_e0(sa["energy"], sa["mu_ref"], np, ctx.xafs) if sa.get("mu_ref") is not None else None for sa in scans_data]
+        unconfirmed_reason = "in_scan_reference_element_not_confirmed"
+    else:
+        flags.append("no_reference_available")
+        unconfirmed_reason = "no_reference"
+    min_snr = float(cp["reference_min_edge_snr"])
+    usable = [r for r in per_scan if r and r.get("e0_eV") is not None and (r.get("snr") or 0) >= min_snr]
+    if per_scan and not usable:
+        flags.append("reference_edge_not_found")
+    measured = spread = None
+    if usable:
+        e0s = [r["e0_eV"] for r in usable]
+        measured = float(np.median(e0s))
+        spread = float(max(e0s) - min(e0s))
+    ref = approved or proposed
+    tab = tab_src = shift = None
+    applied = 0.0
+    if not approved:
+        flags.append("calibration_reference_unconfirmed")
+    if ref and measured is not None:
+        tab, tab_src = edge_energy(ref["element"], ref["edge"])
+        if tab is None:
+            flags.append("edge_energy_unknown")
+        else:
+            shift = tab - measured
+            if abs(shift) > float(cp["max_plausible_shift_eV"]):
+                flags.append("shift_implausible_not_applied")
+            elif not approved:
+                flags.append("calibration_shift_awaiting_approval")
+            elif cp.get("apply_shift_when_confirmed"):
+                applied = shift
+    if approved:
+        unconfirmed_reason = None
+    elif proposed:
+        unconfirmed_reason = "proposed_not_approved"
+    confirmed = approved
+    basis = approved or proposed
+    per_scan_shifts = None
+    if cp.get("align_scans_by_reference") and usable and len(usable) == len(scans_data):
+        per_scan_shifts = [measured - r["e0_eV"] for r in per_scan]  # type: ignore[index]
+    return {
+        "step": "calibration",
+        "params": {
+            k: cp[k] for k in ("use_in_scan_reference_channel", "reference_min_edge_snr", "apply_shift_when_confirmed", "max_plausible_shift_eV", "align_scans_by_reference", "proposed_reference")
+        },
+        "outcome": {
+            "reference_source": ref_source,
+            "reference_e0_per_scan_eV": [r.get("e0_eV") if r else None for r in per_scan],
+            "reference_snr_per_scan": [r.get("snr") if r else None for r in per_scan],
+            "measured_reference_e0_eV": measured,
+            "reference_e0_spread_eV": spread,
+            "reference": basis,
+            "reference_approved": bool(confirmed),
+            "unconfirmed_reason": unconfirmed_reason,
+            "tabulated_edge_eV": tab,
+            "tabulated_edge_source": tab_src,
+            "computed_shift_eV": shift,
+            "applied_shift_eV": applied,
+            "applied": bool(applied),
+            "per_scan_alignment_shifts_eV": per_scan_shifts,
+            "method": "larch find_e0 (maximum of the first derivative)",
+        },
+        "flags": flags,
+    }
+
+
+def _csv(path: Path, header: Sequence[str], cols: Sequence, np) -> None:
+    lines = ["# DRAFT protocol isaac.xas.v0 (draft_unreviewed) - review material, not an official value", ",".join(header)]
+    for row in zip(*cols):
+        lines.append(",".join("" if (v is None or not np.isfinite(v)) else (f"{v:.6f}" if i == 0 else f"{v:.8g}") for i, v in enumerate(row)))
+    _write(path, ("\n".join(lines) + "\n").encode("utf-8"))
+
+
+def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None, athena_versions: Sequence[Mapping] | None = None) -> list[dict]:
+    np, params = ctx.np, ctx.params
+    res = _base(group, "isaac_protocol")
+    scans, stems, sel = group_scans(group, ctx.runs_by_key)
+    if not scans:
+        return [_fail(res, "no_scans_in_group")]
+    tables = []
+    for s in scans:
+        entry = {"source_id": s.get("source_id"), "scan": s.get("scan_index"), "relative_path": s.get("relative_path"), "channel": None, "used": False}
+        res["inputs"].append(entry)
+        path = _resolve_source(ctx.root, s.get("relative_path") or "") if ctx.root else None
+        if path is None or not path.is_file():
+            entry["skip_reason"] = "source_file_not_found"
+            continue
+        expected = (ctx.sources.get(s.get("source_id") or "") or {}).get("content_sha256")
+        if expected and sha256_file(path) != expected:
+            entry["skip_reason"] = "source_hash_mismatch"
+            continue
+        table = ctx.scan_reader(path)
+        entry["format"] = table.format_id
+        entry["reader_notes"] = table.notes
+        if table.error:
+            entry["skip_reason"] = f"unreadable:{table.error}"
+            continue
+        tables.append((entry, table))
+    if not tables:
+        causes = sorted({e.get("skip_reason") or "?" for e in res["inputs"]})
+        return [_fail(res, "no_readable_scan", ";".join(causes))]
+
+    choice = choose_channels(tables[0][1], params=params, role=group.get("role", "sample"), bl15_selection=sel)
+    res["channel_choice"] = choice.to_state()
+    res["review_flags"] += choice.flags
+    if choice.energy is None or choice.mode is None:
+        return [_fail(res, "no_channel", ",".join(choice.flags))]
+    scans_data, used_entries, headers = [], [], []
+    for entry, table in tables:
+        try:
+            sa = C.scan_arrays(table, choice, np)
+        except C.StepError as exc:
+            entry["skip_reason"] = exc.code
+            continue
+        if sa["energy"].size < 5:
+            entry["skip_reason"] = "too_few_points"
+            continue
+        entry.update(used=True, channel=choice.signal_name, diagnostics=sa["diagnostics"])
+        scans_data.append(sa)
+        used_entries.append(entry)
+        headers.extend(table.header_lines)
+    if not scans_data:
+        causes = sorted({e.get("skip_reason") or "?" for e in res["inputs"]})
+        return [_fail(res, "no_usable_scan", ";".join(causes))]
+
+    cal = _calibration(group, stems, scans_data, headers, ctx)
+    res["steps"].append(cal)
+    res["review_flags"] += cal["flags"]
+    shifts = cal["outcome"]["per_scan_alignment_shifts_eV"] or [0.0] * len(scans_data)
+    for sa, d in zip(scans_data, shifts):
+        sa["energy"] = sa["energy"] + cal["outcome"]["applied_shift_eV"] + d
+
+    try:
+        grid, ginfo = C.common_grid(scans_data, np)
+    except C.StepError as exc:
+        return [_fail(res, exc.code, exc.detail)]
+    if grid.size < int(params["merge"]["min_points"]):
+        return [_fail(res, "too_few_common_points", str(grid.size))]
+    M = C.interpolate(scans_data, grid, np)
+    dg = C.deglitch(M, grid, params, np)
+    excl = bool(params["deglitch"]["exclude_flagged"])
+    pos_sid = [e["source_id"] for e in used_entries]
+    res["steps"].append(
+        {
+            "step": "deglitch",
+            "params": {k: params["deglitch"][k] for k in ("point_z_threshold", "robust_scale", "min_scans_for_cross_scan", "scan_rms_ratio_threshold", "scan_rms_floor", "exclude_flagged")},
+            "outcome": {
+                "method": dg["method"],
+                "flagged_points_total": dg["flagged_points_total"],
+                "flagged_points_listed": [{"source_id": pos_sid[p["scan_position"]], "energy_eV": p["energy_eV"]} for p in dg["flagged_points_listed"]],
+                "flagged_points_listed_truncated": dg["flagged_points_total"] > len(dg["flagged_points_listed"]),
+                "scan_rms": dg["scan_rms"],
+                "max_abs_z": dg["max_abs_z"],
+                "outlier_scans": [pos_sid[i] for i, f in enumerate(dg["scan_flags"]) if f],
+                "would_exclude": {"points": dg["flagged_points_total"], "scans": int(sum(dg["scan_flags"]))},
+                "excluded": excl,
+            },
+            "flags": (["glitch_points_flagged"] if dg["flagged_points_total"] else []) + (["outlier_scans_flagged"] if any(dg["scan_flags"]) else []),
+        }
+    )
+    mg = C.merge(M, dg["point_flags"] if excl else None, dg["scan_flags"] if excl else None, np)
+    ok = np.isfinite(mg["mean"])
+    g2, mean = grid[ok], mg["mean"][ok]
+    if g2.size < int(params["merge"]["min_points"]):
+        return [_fail(res, "too_few_common_points", str(g2.size))]
+    res["steps"].append(
+        {
+            "step": "merge",
+            "params": {k: params["merge"][k] for k in ("grid", "interpolation", "min_points")} | {"statistic": "mean, std (ddof=1), stderr = std/sqrt(N)"},
+            "outcome": {
+                "n_scans": len(scans_data),
+                **{k: ginfo[k] for k in ("grid_eV", "all_scans_overlap_eV", "truncated_fraction")},
+                "grid_from_source_id": pos_sid[ginfo["grid_from_scan_position"]],
+                "truncated_scans": [pos_sid[i] for i in ginfo["truncated_scan_positions"]],
+                "points": int(g2.size),
+                "n_min": int(mg["n"][ok].min()) if ok.any() else 0,
+                "n_max": int(mg["n"][ok].max()) if ok.any() else 0,
+            },
+            "flags": ([] if len(scans_data) > 1 else ["single_scan_no_merge"]) + (["scan_range_truncated"] if ginfo["truncated_scan_positions"] else []),
+        }
+    )
+    try:
+        nm = C.normalize(g2, mean, params, np, ctx.xafs)
+    except C.StepError as exc:
+        res["steps"].append({"step": "normalize", "params": dict(params["normalize"]), "outcome": {"error": exc.code, "detail": exc.detail}, "flags": ["normalization_failed"]})
+        return [_fail(res, exc.code, exc.detail)]
+    res["steps"].append(
+        {"step": "normalize", "params": nm["resolved_params"], "outcome": {"e0_eV": nm["e0_eV"], "edge_step": nm["edge_step"], "pre_edge_noise": nm["pre_edge_noise"]}, "flags": []}
+    )
+
+    diags = [sa["diagnostics"] for sa in scans_data]
+    read_pts = sum(d["points_read"] for d in diags) or 1
+    i0np = [d["i0_nonpositive"] for d in diags if d["i0_nonpositive"] is not None]
+    step = nm["edge_step"]
+    se = mg["stderr"][ok]
+    metrics = {
+        "scans_listed": len(scans),
+        "scans_used": len(scans_data),
+        "points": int(g2.size),
+        "e0_eV": nm["e0_eV"],
+        "edge_step": step,
+        "pre_edge_noise": nm["pre_edge_noise"],
+        "scan_spread": float(np.nanmedian(se) / abs(step)) if (len(scans_data) > 1 and step and np.isfinite(se).any()) else None,
+        "glitch_points": dg["flagged_points_total"],
+        "outlier_scans": int(sum(dg["scan_flags"])),
+        "truncated_scans": len(ginfo["truncated_scan_positions"]),
+        "energy_shift_eV": cal["outcome"]["computed_shift_eV"],
+        "reference_e0_spread_eV": cal["outcome"]["reference_e0_spread_eV"],
+        "signal_max_run": max(d["signal_max_run"] for d in diags),
+        "nonmonotonic_steps": sum(d["nonmonotonic_steps"] for d in diags),
+        "nonfinite_dropped": sum(d["nonfinite_dropped"] for d in diags),
+        "duplicate_energies_merged": sum(d["duplicate_energies_merged"] for d in diags),
+        "i0_nonpositive_fraction": (sum(i0np) / read_pts) if i0np else None,
+        "signal_all_zero_scans": sum(1 for d in diags if d["signal_all_zero"]),
+    }
+    verdict, reasons = C.qc_verdict(metrics, params)
+    res["qc"] = {"metrics": metrics, "verdict": verdict, "reasons": reasons}
+    res["steps"].append({"step": "qc", "params": dict(params["qc"]), "outcome": {"verdict": verdict, "reasons": reasons}, "flags": []})
+
+    # outputs
+    group_dir = ctx.out_dir / group["group_id"]
+    group_dir.mkdir(parents=True, exist_ok=True)
+    gdir = Path(tempfile.mkdtemp(prefix=".staging-", dir=group_dir))
+    _csv(gdir / "merged.csv", ["energy_eV", "mu_mean", "mu_std", "mu_stderr", "n_scans"], [g2, mean, mg["std"][ok], se, mg["n"][ok].astype(float)], np)
+    _csv(gdir / "normalized.csv", ["energy_eV", "norm", "flat"], [g2, nm["norm"], nm["flat"]], np)
+    comparison = None
+    athena_res = None
+    if athena_entry is not None:
+        comparison = A.compare({"grid": g2, "norm": nm["norm"], "flat": nm["flat"], "e0_eV": nm["e0_eV"], "edge_step": step}, athena_entry, params, np)
+        _diagnose(comparison, athena_entry, stems, used_entries, grid, M, ctx)
+        res["comparison"] = comparison
+        if comparison["verdict"] == "differs":
+            res["review_flags"].append("athena_disagrees")
+        _csv(gdir / "athena_normalized.csv", ["energy_eV", "norm", "flat"], [athena_entry["energy"], athena_entry["norm"], athena_entry["flat"]], np)
+    version_files = []
+    if athena_versions:
+        # Several distinct Athena versions for this group (e.g. re-normalised, glitch-removed,
+        # smoothed). NONE is selected: each is listed with what its own files state, compared,
+        # and the scientist is asked which one is the result of record.
+        res["athena_versions"] = []
+        for n, v in enumerate(athena_versions, start=1):
+            cmp_ = A.compare({"grid": g2, "norm": nm["norm"], "flat": nm["flat"], "e0_eV": nm["e0_eV"], "edge_step": step}, v, params, np)
+            _diagnose(cmp_, v, stems, used_entries, grid, M, ctx)
+            name = f"athena_version_{n:02d}.csv"
+            _csv(gdir / name, ["energy_eV", "norm", "flat"], [v["energy"], v["norm"], v["flat"]], np)
+            version_files.append((f"athena_version_{n:02d}", name))
+            res["athena_versions"].append({"version_id": f"{group['group_id']}-v{n:02d}", "provenance": A.version_provenance(v, stems), "comparison": cmp_})
+        res["athena_result_of_record"] = None
+        res["review_flags"].append("athena_result_of_record_not_selected")
+        res["questions"] = [
+            {
+                "code": "which_athena_version_is_result_of_record",
+                "text": f"{len(athena_versions)} different Athena versions of this measurement exist. Which one is the result of record? None is selected until you choose.",
+                "version_ids": [v["version_id"] for v in res["athena_versions"]],
+            }
+        ]
+    plotted = False
+    try:
+        from .plot import review_plot
+
+        plotted = review_plot(
+            gdir / "plot.png",
+            title=f"{group['group_id']} ({group.get('role')}) {', '.join(stems)[:90]}",
+            grid=grid,
+            M=M,
+            merged=mg["mean"],
+            point_flags=dg["point_flags"],
+            scan_flags=dg["scan_flags"],
+            norm=nm["norm"],
+            flat=nm["flat"],
+            e0=nm["e0_eV"],
+            athena=athena_entry,
+            np=np,
+        )
+    except Exception:  # noqa: BLE001 - a plot failure is a flag, never a processing failure
+        plotted = False
+    if not plotted:
+        res["review_flags"].append("plot_unavailable")
+    _write(gdir / "qc.json", _json_bytes({"group_id": group["group_id"], **res["qc"], "thresholds": params["qc"], "protocol_status": P.PROTOCOL_STATUS}))
+    _write(
+        gdir / "params.json",
+        _json_bytes(
+            {
+                "protocol_id": P.PROTOCOL_ID,
+                "protocol_version": P.PROTOCOL_VERSION,
+                "protocol_status": P.PROTOCOL_STATUS,
+                "notice": P.PROTOCOL_NOTICE,
+                "params": params,
+                "changed_from_default": P.changed_from_default(params),
+                "needs_scientist_approval": P.needs_approval(),
+                "protocol_questions": P.PROTOCOL_QUESTIONS,
+                "channel_choice": res["channel_choice"],
+                "calibration": cal["outcome"],
+                "normalize_resolved": nm["resolved_params"],
+            }
+        ),
+    )
+    roles = [("merged", "merged.csv"), ("normalized", "normalized.csv"), ("qc", "qc.json"), ("params", "params.json")]
+    if plotted:
+        roles.append(("plot", "plot.png"))
+    if athena_entry is not None:
+        roles.append(("athena_normalized", "athena_normalized.csv"))
+    roles.extend(version_files)
+    # CONTENT-ADDRESSED RUN DIRECTORY. A decided (approved) result's outputs are never
+    # overwritten: each run lives in processing/<group>/<run_id>/, run_id = sha256 over the
+    # protocol version, the group, the used inputs and every data output (the plot is
+    # excluded: PNG bytes are not guaranteed reproducible). Changing any parameter makes a
+    # NEW run_id and so NEW, undecided result ids; prior runs are kept untouched.
+    data_hashes = sorted((name, sha256_file(gdir / name)) for role, name in roles if name != "plot.png")
+    input_hashes = sorted((ctx.sources.get(e.get("source_id") or "") or {}).get("content_sha256") or str(e.get("relative_path")) for e in used_entries)
+    run_id = run_id_for(group["group_id"], input_hashes, data_hashes)
+    final = group_dir / run_id
+    if final.exists():
+        shutil.rmtree(gdir)  # identical content already on disk: keep it, never rewrite it
+    else:
+        gdir.rename(final)
+    gdir = final
+    res["run_id"] = run_id
+    res["result_id"] = f"proc-{group['group_id']}-{run_id}-isaac"
+    res["prior_run_ids"] = sorted(p.name for p in group_dir.iterdir() if p.is_dir() and _RUN_DIR.match(p.name) and p.name != run_id)
+    files = []
+    for role, name in roles:
+        p = gdir / name
+        if p.is_file():
+            files.append({"role": role, "relative_path": PurePosixPath(p.relative_to(ctx.bundle_dir)).as_posix(), "sha256": sha256_file(p)})
+    res["outputs"] = {"files": files, "e0_eV": nm["e0_eV"], "edge_step": step, "points": int(g2.size)}
+
+    out = [res]
+    if athena_entry is not None:
+        athena_res = _athena_result(group, athena_entry, files, params, np, ctx)
+        athena_res["comparison"] = comparison
+        athena_res["preferred_for_record"] = True
+        athena_res["run_id"] = run_id
+        athena_res["result_id"] = f"proc-{group['group_id']}-{run_id}-athena"
+        out.append(athena_res)
+    record = gdir / "result.json"
+    if not record.exists():
+        _write(record, _json_bytes({"results": out}))
+    return out
+
+
+def _diagnose(comparison: dict, entry: Mapping, stems: Sequence[str], used_entries: Sequence[Mapping], grid, M, ctx: _Ctx) -> None:
+    """Separate WHY ISAAC and Athena differ (diagnostics only; the verdict is unchanged):
+
+    * ``rms_norm_with_athena_params`` — ISAAC's merge of ALL its scans, normalised with the
+      scientist's e0/pre/post parameters: what remains is data (scans, channel, energy).
+    * ``rms_norm_same_scans_same_params`` — only the scans the Athena label selects
+      (``_5-6``), same parameters: what remains is channel / energy axis / processing.
+    """
+    np = ctx.np
+    sel = A.scan_selection(entry["label"], stems)
+    comparison["athena_scan_selection"] = sel
+    idx = [e.get("scan") for e in used_entries]
+    if sel and set(sel) != set(i for i in idx if i is not None):
+        comparison["flags"].append("scientist_selected_subset_of_scans")
+    p = entry["params"]
+    if any(p.get(k) is None for k in ("e0", "pre1", "pre2", "nor1", "nor2", "nnorm")):
+        return
+    quantity = comparison["metrics"].get("compared_quantity", "flat")
+    eshift = float(p.get("eshift") or 0.0)
+
+    def _rms(rows) -> float | None:
+        if not rows:
+            return None
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            mean = np.nanmean(M[rows], axis=0)
+        ok = np.isfinite(mean)
+        if ok.sum() < 10:
+            return None
+        from larch import Group
+
+        g = Group()
+        try:
+            ctx.xafs.pre_edge(grid[ok], mean[ok], group=g, e0=float(p["e0"]) + eshift, pre1=float(p["pre1"]), pre2=float(p["pre2"]),
+                              norm1=float(p["nor1"]), norm2=float(p["nor2"]), nnorm=int(float(p["nnorm"])))
+        except Exception:  # noqa: BLE001 - a diagnostic that cannot be computed is omitted
+            return None
+        y = np.asarray(getattr(g, quantity, g.norm), dtype=float)
+        e = grid[ok]
+        ae = entry["energy"]
+        inside = (e >= ae[0]) & (e <= ae[-1])
+        if inside.sum() < 10:
+            return None
+        return float(np.sqrt(np.mean((y[inside] - np.interp(e[inside], ae, entry[quantity])) ** 2)))
+
+    comparison["metrics"]["rms_norm_with_athena_params"] = _rms(list(range(M.shape[0])))
+    if sel:
+        rows = [i for i, s in enumerate(idx) if s in set(sel)]
+        if rows and len(rows) == len(sel):
+            comparison["metrics"]["rms_norm_same_scans_same_params"] = _rms(rows)
+
+
+def _athena_result(group: Mapping, entry: Mapping, files: Sequence[Mapping], params: Mapping, np, ctx: _Ctx) -> dict:
+    res = _base(group, "scientist_athena")
+    res["review_flags"] = ["scientist_processed_data", "isaac_did_not_change_scientist_values"]
+    res["inputs"] = [
+        {
+            "source_id": entry["prj_source_id"],
+            "scan": entry["label"],
+            "channel": entry["channel_expression"],
+            "relative_path": entry["prj_relative_path"],
+            "athena_group": entry["group_name"],
+            "match_kind": entry.get("_match_kind"),
+        }
+    ]
+    e = entry["energy"]
+    sel = (e >= entry["e0_eV"] + (entry["params"].get("pre1") or -1e9)) & (e <= entry["e0_eV"] + (entry["params"].get("pre2") or -1e9))
+    noise = None
+    if np.sum(sel) >= 3 and entry["edge_step"]:
+        # pre-edge residual of the scientist's own normalised curve (norm ~ 0 before the edge)
+        noise = float(np.std(entry["norm"][sel]))
+    res["steps"] = [
+        {
+            "step": "normalize",
+            "params": {**entry["params"], "reproduced_with": "larch AthenaProject.read(do_preedge=True)", "energy_frame": "stored energy + bkg_eshift"},
+            "outcome": {"e0_eV": entry["e0_eV"], "edge_step": entry["edge_step"]},
+            "flags": ["scientist_params_recorded"],
+        }
+    ]
+    steps_ok = np.all(np.diff(e) > 0)
+    metrics = {
+        "scans_used": None,
+        "points": int(e.size),
+        "e0_eV": entry["e0_eV"],
+        "edge_step": entry["edge_step"],
+        "pre_edge_noise": noise,
+        "nonmonotonic_steps": 0 if steps_ok else int(np.sum(np.diff(e) <= 0)),
+    }
+    verdict, reasons = C.qc_verdict(metrics, params)
+    res["qc"] = {"metrics": metrics, "verdict": verdict, "reasons": reasons}
+    res["steps"].append({"step": "qc", "params": dict(params["qc"]), "outcome": {"verdict": verdict, "reasons": reasons}, "flags": []})
+    ath = [f for f in files if f["role"] in ("athena_normalized", "plot")]
+    res["outputs"] = {"files": ath, "e0_eV": entry["e0_eV"], "edge_step": entry["edge_step"], "points": int(e.size)}
+    return res
+
+
+# --- whole bundle ---------------------------------------------------------------------------
+
+
+def _groups_for(bundle: Mapping, bundle_dir: Path) -> tuple[list[dict], list[dict], str]:
+    if bundle.get("record_groups"):
+        rec, origin = list(bundle["record_groups"]), "bundle.json"
+    else:
+        f = bundle_dir / "record_groups.json"
+        if f.is_file():
+            data = json.loads(f.read_text(encoding="utf-8"))
+            return list(data.get("record_groups") or ()), list(data.get("unread_acquisition_groups") or ()), "record_groups.json"
+        rec, origin = G.propose_record_groups(bundle), "proposed_now"
+    return rec, G.propose_unread_acquisition_groups(bundle), origin
+
+
+def process_bundle(
+    bundle_dir: Path,
+    *,
+    source_root: Path | None = None,
+    params: Mapping | None = None,
+    group_ids: Sequence[str] | None = None,
+    include_unread: bool = True,
+    athena: bool = True,
+    bundle: Mapping | None = None,
+    created_utc: str | None = None,
+    generic_runs: Sequence[Any] | None = None,
+    scan_reader: Any = None,
+    calibration_approvals: Mapping[str, Mapping] | None = None,
+) -> dict:
+    """Process every (or the selected) record group of the bundle in ``bundle_dir``.
+
+    ``generic_runs``: runs from a non-engine reader (duck-typed, see
+    :func:`grouping.groups_from_generic_runs`); when given they REPLACE the unread-file
+    fallback groups. ``scan_reader``: ``callable(path) -> readers.ScanTable`` used instead
+    of the built-in content-sniffing reader (adapt a reader's output with
+    :func:`readers.table_from_columns`). ``calibration_approvals``: ``{group_id: {element,
+    edge, decided_by, decision_id}}`` from the scientist's processing-approval decisions —
+    the ONLY thing that applies a calibration shift.
+    """
+    from ..bundle import load_bundle
+
+    bundle_dir = Path(bundle_dir)
+    bundle = bundle if bundle is not None else load_bundle(bundle_dir)
+    out_dir = bundle_dir / PROCESSING_DIR
+    resolved = P.resolve_params(params)
+    header = {
+        "format": RESULTS_FORMAT,
+        "format_version": RESULTS_FORMAT_VERSION,
+        "protocol": {"id": P.PROTOCOL_ID, "version": P.PROTOCOL_VERSION, "status": P.PROTOCOL_STATUS, "notice": P.PROTOCOL_NOTICE, "protocol_questions": P.PROTOCOL_QUESTIONS},
+        "bundle_id": bundle.get("bundle_id"),
+        "experiment_key": G.experiment_key_of(bundle),
+        "created_utc": created_utc or _now(),
+    }
+    try:
+        mods = _deps.require()
+    except _deps.ProcessingUnavailable as exc:
+        status = {**header, "status": "processing_unavailable", "missing": exc.missing, "detail": exc.detail, "processing_results": []}
+        _write(out_dir / STATUS_FILE, _json_bytes(status))
+        return status
+    np = mods["numpy"]
+    import larch.xafs as xafs
+
+    root = Path(source_root) if source_root else None
+    if root is None and (bundle.get("source_root") or {}).get("local_root_hint"):
+        root = Path(bundle["source_root"]["local_root_hint"])
+    rec, unread, origin = _groups_for(bundle, bundle_dir)
+    if generic_runs is not None:
+        by_path = {s.get("relative_path"): s.get("source_id") for s in bundle.get("sources") or ()}
+        unread = G.groups_from_generic_runs(generic_runs, experiment_key=G.experiment_key_of(bundle), sources_by_path=by_path)
+    if not include_unread:
+        unread = []
+    if group_ids:
+        wanted = set(group_ids)
+        rec = [g for g in rec if g["group_id"] in wanted]
+        unread = [g for g in unread if g["group_id"] in wanted]
+    runs_by_key = {r["run_key"]: r for r in bundle.get("runs") or ()}
+    sources = {s["source_id"]: s for s in bundle.get("sources") or () if s.get("source_id")}
+    ctx = _Ctx(bundle=bundle, bundle_dir=bundle_dir, root=root, params=resolved, np=np, xafs=xafs, out_dir=out_dir, sources=sources, runs_by_key=runs_by_key)
+    ctx.scan_reader = scan_reader or read_scan_file
+    ctx.calibration_approvals = dict(calibration_approvals or {})
+
+    # Athena-first: read every project once, match by name.
+    entries, a_notes, projects = [], [], A.find_projects(bundle)
+    read_ok = 0
+    if athena and resolved["athena"]["enabled"] and root is not None:
+        for rel, sid in projects:
+            path = _resolve_source(root, rel)
+            if path is None or not path.is_file():
+                a_notes.append({"code": "athena_project_not_found", "prj_relative_path": rel})
+                continue
+            got, notes = A.load_project(path, rel, sid, np)
+            read_ok += 1 if got or not notes else 0
+            entries.extend(got)
+            a_notes.extend({"code": n.split(":", 1)[0], "detail": n} for n in notes if not n.startswith("athena_group_not_xmu"))
+    all_groups = [dict(g) for g in rec] + [dict(g) for g in unread]
+    for g in all_groups:
+        scans_, stems_, _ = group_scans(g, runs_by_key)
+        g["_stems"], g["_has_scans"] = stems_, bool(scans_)
+    matched, m_notes, versions = A.match_with_versions(all_groups, entries, np)
+
+    results, unread_results = [], []
+    for g in all_groups:
+        try:
+            out = process_group(g, ctx, matched.get(g["group_id"]), athena_versions=versions.get(g["group_id"]))
+        except Exception as exc:  # noqa: BLE001 - one group's crash is that group's failure, never a pass
+            out = [_fail(_base(g, "isaac_protocol"), "processing_error", f"{type(exc).__name__}: {exc}"[:500])]
+        (unread_results if g.get("group_kind") in ("unread_acquisition", "generic_run") else results).extend(out)
+
+    payload = {
+        **header,
+        "status": "processed",
+        "groups_origin": origin,
+        "source_root_label": (bundle.get("source_root") or {}).get("label"),
+        "source_root_available": root is not None,
+        "software": _deps.versions(),
+        "athena": {
+            "projects_found": len(projects),
+            "projects_read": read_ok,
+            "groups_read": len(entries),
+            "record_groups_matched": len(matched),
+            "record_groups_with_unselected_versions": len(versions),
+            "notes": (a_notes + m_notes)[:500],
+            "match_rule": A.MATCH_RULE_ID,
+        },
+        "processing_results": results,
+        "unread_acquisition_results": unread_results,
+        "summary": summarize(results + unread_results),
+    }
+    _write(out_dir / RESULTS_FILE, _json_bytes(payload))
+    return payload
+
+
+def summarize(results: Sequence[Mapping]) -> dict:
+    isaac = [r for r in results if r.get("source") == "isaac_protocol"]
+    verdicts: dict[str, int] = {}
+    failures: dict[str, int] = {}
+    comp: dict[str, int] = {}
+    for r in isaac:
+        verdicts[r["qc"]["verdict"]] = verdicts.get(r["qc"]["verdict"], 0) + 1
+        if r.get("failure"):
+            code = r["failure"]["code"]
+            failures[code] = failures.get(code, 0) + 1
+        if r.get("comparison"):
+            v = r["comparison"]["verdict"]
+            comp[v] = comp.get(v, 0) + 1
+    return {
+        "groups": len(isaac),
+        "qc_verdicts": dict(sorted(verdicts.items())),
+        "failures_by_cause": dict(sorted(failures.items())),
+        "athena_matched": sum(comp.values()),
+        "athena_comparison": dict(sorted(comp.items())),
+    }
