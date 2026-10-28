@@ -48,3 +48,14 @@ measures (`--element Ir`, `--edge L3` style). Record `decide --target <group id>
 approve_calibration --element <symbol> --edge <K|L1-L3|M1-M5> --by "<name>"`, then run
 `process --group <group id>` again. Without that decision the shift is not applied; do not guess the
 element or edge from a file name.
+
+## Groups that need an explanation
+
+- `merged_despite_engine_reading`: more than one run was proposed as one group although the importer read
+  something that differs. Say what differs in words and ask; confirming is the scientist's call.
+- `sample_key_basis: name_stem`: no file states the sample, so runs were grouped by the stem of their file
+  names. Say so, and ask the scientist to confirm or split.
+- `naming_counter_positions` (an experiment-scope question): which positions of the file name are running
+  counters, not sample identity. Ask once. Answer with `decide <bundle> --target experiment --decision
+  set_counter_positions --positions 2,3 --by "<name>"`, then `bundle group <bundle> --regroup` (decided
+  groups are kept).

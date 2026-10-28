@@ -39,19 +39,32 @@ Duplicate legacy numbers stay separate runs (flag `duplicate_legacy_number`). Id
 sha256 prefixes (`rg-…`, `mc-…`); order follows the bundle.
 
 **Engine misreadings (`isaac.grouping.engine_misreading.v0`)** are identified with their
-evidence, never hard-split, and offered as merge candidates (`blocked_by_engine_reading`).
-The engine is not edited; these are engine fixes for its owner:
+evidence (engine fixes for its owner; the engine is not edited). The four MECHANICAL ones do
+not block a proposed group — the group records `merged_despite_engine_reading: [{kind,
+run_key, evidence}]` and its confirm question says so in plain words:
 
 1. `scan_index_token_read_as_value` — every scan-file witness of a conflict is that scan
    file's own trailing index (`_001` → 1); measured as the sample number on 73/92 runs (2019).
-2. `auxiliary_macro_read_as_method` — exactly one disagreeing `acquisition_method` reading
-   names a technique (`*_XAS.mac`), the others are helper macros (e.g. `syn_helper.mac`); 56/92, 67/87.
-3. `same_value_different_unit_spelling` — `9175.4` vs `9175.4 eV`.
+   If this leaves the sample unstated, the sample key is the run's OWN name with counters and
+   repeat markers removed (`sample_name_stem`, `sample_key_basis: "name_stem"`) — never a
+   guessed material; only in this case. A digit token is a counter ONLY in a counter position
+   (the leading token, the trailing scan index, or right after a repeat marker); any other
+   differing number (a middle `_12_` vs `_1_`) keeps the runs apart as a merge candidate
+   (`numeric_name_token_differs`).
+2. `same_value_different_unit_spelling` — `9175.4` vs `9175.4 eV`, only in the field's own unit
+   (`FIELD_UNITS`; no conversions).
+3. `auxiliary_macro_read_as_method` — exactly one disagreeing `acquisition_method` reading names
+   a technique (`*_XAS.mac`), the others are helper macros; 56/92, 67/87 runs.
 4. `exported_file_read_as_acquisition` — a zero-scan run named like another run plus a
-   data-file extension (`x.dat`); offered to that run.
-5. Beamtime-level `sample_number_inconsistent_with_sample_name` — ≥ 2 sample numbers each read
-   beside ≥ 2 different sample names (and ≥ half of such numbers): the profile is reading a
-   run counter; `sample_or_electrode_number` is treated as **unknown** for that beamtime.
+   data-file extension (`x.dat`); it joins that run's group as **context**
+   (`context_run_keys`, no scans merged) when every condition it states agrees; otherwise it
+   stays a merge candidate.
+
+Beamtime-level `sample_number_inconsistent_with_sample_name` (≥ 2 sample numbers each read
+beside ≥ 2 different sample names) makes `sample_or_electrode_number` **unknown** for that
+beamtime (differences → merge candidates). `condition_violations()` independently re-checks
+every proposed group (all condition-class keys of its measurement members agree) and is
+written into `record_groups.json`; it must be empty.
 
 **Roles (`isaac.grouping.run_role.v0`)**: engine classifier first (`alignment`,
 `standard_or_reference`), else stem tokens (`align*`/`rough*` → alignment;
@@ -61,8 +74,12 @@ with samples.
 **Acquisitions with no bundle run** (`isaac.grouping.unread_numbered_scans.v0`): text files
 `<stem>.<NNN>` in one directory are one acquisition's scans (binary twins skipped); one group
 each, conditions unknown. `isaac.grouping.unread_name_counters.v0` offers merge candidates
-(never merges) between those whose names are equal after removing a leading run counter and a
-trailing acquisition counter. `groups_from_generic_runs()` adapts a non-engine reader's runs.
+between those whose names are equal after removing a leading run counter, a trailing
+acquisition counter and repeat markers. `isaac.grouping.unread_header_agreement.v0` turns such a
+candidate into ONE proposed group when every scan's literal header statements agree (format,
+detector and region files, beamline/mono line, gains, beam size, sample description; date,
+point-count and weights/offsets lines are bookkeeping). Disagreement → stays a candidate with
+the differing positions; headers absent/unreadable (name-only evidence) → stays a candidate. `groups_from_generic_runs()` adapts a non-engine reader's runs.
 
 **Scientist approves:** the three key lists; the engine-misreading rules; every proposed group
 and merge candidate.

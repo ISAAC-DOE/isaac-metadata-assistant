@@ -369,6 +369,37 @@ def consolidate(bundle: Mapping) -> dict:
             }
         )
 
+    # THE GROUPING STEP'S OWN EXPERIMENT-SCOPE QUESTIONS (e.g. which filename positions are
+    # run counters). Answered with a set_counter_positions decision, then a regroup.
+    answered_positions = any(d.get("decision") == "set_counter_positions" for d in bundle.get("scientist_decisions") or ())
+    for gq in bundle.get("grouping_questions") or ():
+        if not isinstance(gq, Mapping) or gq.get("kind") != "naming_counter_positions":
+            continue
+        qid = _qid("experiment", "naming_counter_positions", str(gq.get("id") or gq.get("text") or ""))
+        questions.append(
+            {
+                "question_id": qid,
+                "partition": None,
+                "tier": TIER_CONFLICT,
+                "blocking": False,
+                "why": "It decides which runs are repeats of one measurement, and so how many records there are.",
+                "kind": "naming_counter_positions",
+                "scope": "experiment",
+                "target_field_path": None,
+                "text": str(gq.get("text") or "Which filename token positions are run or acquisition counters?"),
+                "applies_to": {"groups": len(groups), "runs": len(bundle["runs"]), "targets": 1},
+                "targets": [{"kind": "experiment", "id": "experiment"}],
+                "per_scope_targets": {"experiment": ["experiment"]},
+                "hints": [{"kind": "grouping", "literal": gq.get("examples") or gq.get("options"), "locator": "the grouping step"}],
+                "allowed_values": None,
+                "answered": answered_positions,
+                "answer_command": (
+                    'isaac bundle decide <bundle_dir> --target experiment --decision set_counter_positions '
+                    '--positions <n[,m]> --by "<your name>"  &&  isaac bundle group <bundle_dir> --regroup'
+                ),
+            }
+        )
+
     def order(q):
         scope = q["scope"]
         if scope == "experiment":

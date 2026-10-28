@@ -13,7 +13,7 @@
 | Record an AI reading | `<isaac> bundle annotate <bundle> --target <id> --value <text> [--json] --excerpt-locator "<where>" [--source-id <src>] --model "<model name>" [--blind] --rationale "<why>"` |
 | Show the parser value, compare | `<isaac> bundle reveal <bundle> <id>` (marks the target as exposed) |
 | Consolidated questions (use these) | `<isaac> bundle questions <bundle> [--scope experiment\|group:<id>\|run:<id>] [--blocking-only] [--limit N] [--offset M]` |
-| Scientist decision | `<isaac> bundle decide <bundle> (--target <id> \| --targets-file <file> \| --question <Q> [--only group:<id>] [--field <path>]) --decision <d> [--value <v>] [--json] --by "<name>" [--orcid 0000-0000-0000-0000] [--note "<text>"] [--split-into '<json>'] [--merge-with <group ids>] [--qc-status <word> [--qc-note "<text>"]] [--element <symbol> --edge <edge>]` (`--qc-status` only with a processing result and `approve`; `--element`/`--edge` only with a record group and `approve_calibration`) |
+| Scientist decision | `<isaac> bundle decide <bundle> (--target <id> \| --targets-file <file> \| --question <Q> [--only group:<id>] [--field <path>]) --decision <d> [--value <v>] [--json] --by "<name>" [--orcid 0000-0000-0000-0000] [--note "<text>"] [--split-into '<json>'] [--merge-with <group ids>] [--qc-status <word> [--qc-note "<text>"]] [--element <symbol> --edge <edge>] [--positions N,N]` (`--qc-status` only with a processing result and `approve`; `--element`/`--edge` only with a record group and `approve_calibration`) |
 | Group runs into records | `<isaac> bundle group <bundle> [--regroup]` (proposes groups inside the bundle) |
 | See the groups | `<isaac> bundle list <bundle> groups [--limit N] [--offset M]` · `<isaac> bundle list <bundle> merge-candidates` · `<isaac> bundle show <bundle> group <id>` |
 | Process spectra (draft protocol) | `<isaac> process <bundle> --source <folder> [--group <id> ...] [--no-athena] [--params-file <json>]` (writes `processing/`) |
@@ -24,7 +24,7 @@
 | Pull text and images out of a document | `python -m isaac_api.local_import.extract <file> --out <dir> [--root <folder>]` or `--from-bundle <bundle>/unread_files.json --root <folder> [--limit N]` |
 
 Decisions by target kind: candidate / missing value / conflict: `confirm` `correct` `reject` `defer`;
-record group: `confirm` `split` `merge` `reject` `defer` `approve_calibration` (needs `--element` and `--edge`); processing result: `approve` (always with `--qc-status`) `reject`
+record group: `confirm` `split` `merge` `reject` `defer` `approve_calibration` (needs `--element` and `--edge`); the experiment (`--target experiment`): `set_counter_positions` (needs `--positions`); processing result: `approve` (always with `--qc-status`) `reject`
 `needs_changes` `defer`. `confirm` and `correct` on a conflict or missing value need `--value`.
 
 Exit codes: 0 ok · 1 not valid / not exportable (validate, export, check) · 2 usage or refused

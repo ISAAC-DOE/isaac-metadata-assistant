@@ -27,10 +27,49 @@ GROUPS_FORMAT = "isaac.record-groups"
 GROUPS_FORMAT_VERSION = "0.1.0"
 
 
-def build_groups_payload(bundle: Mapping) -> dict:
+def _header_reader(root: Path | None):
+    """``relative_path -> header lines | None`` over the source folder (stdlib reader)."""
+    from pathlib import PurePosixPath
+
+    from .readers import read_scan_file
+
+    def read(rel: str):
+        if root is None or not rel:
+            return None
+        p = PurePosixPath(rel)
+        if p.is_absolute() or ".." in p.parts:
+            return None
+        full = root.joinpath(*p.parts)
+        if full.is_symlink() or not full.is_file():
+            return None
+        t = read_scan_file(full)
+        return None if t.error else t.header_lines
+
+    return read
+
+
+def build_groups_payload(bundle: Mapping, *, source_root: Path | None = None) -> dict:
     proposal = G.propose(bundle)
     groups = proposal["record_groups"]
     unread = G.propose_unread_acquisition_groups(bundle)
+    cpos = (proposal.get("counter_positions_decision") or {}).get("positions") or ()
+    unread_candidates = G.propose_unread_merge_candidates(unread, counter_positions=cpos)
+    root = Path(source_root) if source_root else None
+    if root is None and (bundle.get("source_root") or {}).get("local_root_hint"):
+        root = Path(bundle["source_root"]["local_root_hint"])
+    n_unread_before = len(unread)
+    unread, unread_candidates = G.promote_unread_by_headers(unread, unread_candidates, _header_reader(root))
+    # ONE experiment-scope counter question across bundle runs AND unread acquisitions.
+    pos_count: dict[int, int] = {}
+    for q in proposal["experiment_questions"]:
+        for p, n in (q.get("candidates_resolved_by_position") or {}).items():
+            pos_count[int(p)] = pos_count.get(int(p), 0) + int(n)
+    for mc in unread_candidates:
+        if not mc.get("names_agree_on_non_counter_tokens", True):
+            for p in G._differing_number_positions(mc["reasons"][0]["stems"], counter_positions=cpos):
+                pos_count[p] = pos_count.get(p, 0) + 1
+    q = G.counter_question(pos_count, proposal["counter_positions_decision"])
+    experiment_questions = [x for x in proposal["experiment_questions"] if x.get("kind") != "naming_counter_positions"] + ([q] if q else [])
     return {
         "format": GROUPS_FORMAT,
         "format_version": GROUPS_FORMAT_VERSION,
@@ -49,18 +88,32 @@ def build_groups_payload(bundle: Mapping) -> dict:
         "merge_candidates": proposal["merge_candidates"],
         "engine_reading_issues": proposal["engine_reading_issues"],
         "key_classes": proposal["key_classes"],
+        "experiment_questions": experiment_questions,
+        "violations_prevented": len(proposal["violations_prevented"]),
+        "merges_prevented_by_name_tokens": proposal["merges_prevented_by_name_tokens"],
+        "counter_positions_decision": proposal["counter_positions_decision"],
         "unread_acquisition_groups": unread,
-        "unread_merge_candidates": G.propose_unread_merge_candidates(unread),
+        "unread_merge_candidates": unread_candidates,
+        "unread_header_promotion": {
+            "source_root_available": root is not None,
+            "acquisitions": n_unread_before,
+            "groups_after": len(unread),
+            "multi_acquisition_groups": sum(1 for g in unread if len(g.get("acquisition_keys") or ()) > 1),
+        },
+        "condition_violations": proposal["condition_violations"],
     }
 
 
-def run_group(bundle_dir: Path | str, *, write: bool = True, bundle: Mapping | None = None) -> dict:
-    """Propose record groups for the bundle in ``bundle_dir``; write ``record_groups.json``."""
+def run_group(bundle_dir: Path | str, *, write: bool = True, bundle: Mapping | None = None, source_root: Path | str | None = None) -> dict:
+    """Propose record groups for the bundle in ``bundle_dir``; write ``record_groups.json``.
+
+    ``source_root`` (else the bundle's ``local_root_hint``) lets acquisitions with no bundle
+    run be grouped on their literal header statements; without it they stay merge candidates."""
     from ..bundle import load_bundle
 
     bundle_dir = Path(bundle_dir)
     bundle = bundle if bundle is not None else load_bundle(bundle_dir)
-    payload = build_groups_payload(bundle)
+    payload = build_groups_payload(bundle, source_root=Path(source_root) if source_root else None)
     if write:
         path = bundle_dir / GROUPS_FILE
         tmp = path.with_name(path.name + ".tmp")
@@ -95,7 +148,7 @@ def run_process(
 
     bundle_dir = Path(bundle_dir)
     if regroup or not (bundle_dir / GROUPS_FILE).is_file():
-        run_group(bundle_dir, bundle=bundle)
+        run_group(bundle_dir, bundle=bundle, source_root=source_root)
     overrides: dict = {}
     if params_file:
         overrides = json.loads(Path(params_file).read_text(encoding="utf-8"))

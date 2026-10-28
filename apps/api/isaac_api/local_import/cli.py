@@ -803,6 +803,17 @@ def cmd_bundle_questions(args) -> int:
     return _mutation(run)
 
 
+def _positions(raw: str | None):
+    from . import mutations as M
+
+    if raw is None:
+        return None
+    try:
+        return [int(x) for x in raw.split(",") if x.strip()]
+    except ValueError as exc:
+        raise M.MutationRefused("--positions must be whole numbers separated by commas, e.g. 2,3.") from exc
+
+
 def cmd_bundle_decide(args) -> int:
     from . import mutations as M
 
@@ -833,6 +844,7 @@ def cmd_bundle_decide(args) -> int:
             qc_note=args.qc_note,
             element=args.element,
             edge=args.edge,
+            positions=_positions(args.positions),
         )
 
     return _mutation(run)
@@ -1016,6 +1028,7 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--qc-note", help="with --qc-status: what is compromised or failed, and why")
     q.add_argument("--element", help="record group + approve_calibration: the absorbing element (e.g. Ir)")
     q.add_argument("--edge", help="record group + approve_calibration: the edge (K, L1-L3, M1-M5)")
+    q.add_argument("--positions", help="--target experiment + set_counter_positions: filename token positions, e.g. 2 or 2,3")
     q.set_defaults(func=cmd_bundle_decide)
 
     q = bsub.add_parser("questions", help="consolidated questions: asked once, at the right scope, blocking first")

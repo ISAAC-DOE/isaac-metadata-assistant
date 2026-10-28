@@ -234,6 +234,7 @@ DECISIONS_BY_KIND: Mapping[str, frozenset[str]] = {
     "conflict": frozenset({"confirm", "correct", "reject", "defer"}),
     "record_group": frozenset({"confirm", "split", "merge", "reject", "defer", "approve_calibration"}),
     "processing_result": frozenset({"approve", "reject", "needs_changes", "defer"}),
+    "experiment": frozenset({"set_counter_positions"}),
 }
 #: Record-group status from its decision (``None`` = no decision, or ``defer``).
 GROUP_STATUS_BY_DECISION: Mapping[str | None, str] = {
@@ -2029,6 +2030,13 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50) -> list[str]:
                 errors.append(f"reference: {r['run_id']} shares a legacy number with unknown {rid}")
         if bool(r["shares_legacy_number_with"]) != r["legacy_number_shared"]:
             errors.append(f"consistency: {r['run_id']} legacy_number_shared disagrees with shares_legacy_number_with")
+    for d in bundle["scientist_decisions"]:
+        problem = decider_name_problem((d.get("decided_by") or {}).get("name"))
+        if problem:
+            errors.append(f"decision: {d['decision_id']} {problem}")
+    for g in bundle.get("record_groups") or ():
+        if g.get("status") == "proposed" and g.get("condition_violations"):
+            errors.append(f"consistency: proposed record group {g['group_id']} carries condition violations")
     run_keys = {r["run_key"] for r in bundle["runs"]}
     group_ids = _unique(bundle.get("record_groups") or [], "group_id", "group_id")
     targets = {
@@ -2039,6 +2047,7 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50) -> list[str]:
         "run": run_ids,
         "record_group": group_ids,
         "processing_result": {processing_id(r) for r in bundle.get("processing_results") or ()},
+        "experiment": {"experiment"},
     }
     for entry in [
         *bundle["scientist_decisions"],
@@ -2096,6 +2105,22 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50) -> list[str]:
     if bundle["readiness"]["blocking"] != expected["readiness"]["blocking"]:
         errors.append("consistency: readiness.blocking disagrees with the bundle's own sections")
     return errors[:max_errors]
+
+
+MAX_DECIDER_NAME_CHARS = 200
+
+
+def decider_name_problem(name: object) -> str | None:
+    """Why ``name`` cannot stand as the person who decided, or ``None``. The ONE rule both
+    ``decide --by`` and the validator apply: a non-empty string after strip, at most
+    :data:`MAX_DECIDER_NAME_CHARS`, with no control characters."""
+    if not isinstance(name, str) or not name.strip():
+        return "has no decider name (decided_by.name is empty)"
+    if len(name.strip()) > MAX_DECIDER_NAME_CHARS:
+        return f"has a decider name longer than {MAX_DECIDER_NAME_CHARS} characters"
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in name):
+        return "has a control character in its decider name"
+    return None
 
 
 def review_status_from_basis(candidate: Mapping) -> tuple[str, bool]:

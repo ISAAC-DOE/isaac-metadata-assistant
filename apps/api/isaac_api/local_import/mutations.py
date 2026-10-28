@@ -119,7 +119,10 @@ def mutate(bundle_dir: Path, change) -> Any:
 
 
 def resolve_target(bundle: Mapping, target_id: str) -> tuple[str, dict]:
-    """``(kind, object)`` for an id, by the bundle's own id spaces."""
+    """``(kind, object)`` for an id, by the bundle's own id spaces. ``experiment`` names
+    the whole beamtime (e.g. for ``set_counter_positions``)."""
+    if target_id == "experiment":
+        return "experiment", {"id": "experiment"}
     sections = (
         ("candidate", "candidates", "candidate_id"),
         ("missing_value", "missing_values", "value_id"),
@@ -313,6 +316,7 @@ def decide(
     qc_note: str | None = None,
     element: str | None = None,
     edge: str | None = None,
+    positions: Sequence[int] | None = None,
 ) -> dict:
     """Record a scientist decision for each target (ALL-OR-NOTHING), idempotently.
 
@@ -320,8 +324,9 @@ def decide(
     records nothing new. Each target is its own entry even in a bulk call, sharing a
     ``batch_id``.
     """
-    if not by or not by.strip():
-        raise MutationRefused("--by is required: the name of the person deciding.")
+    problem = B.decider_name_problem(by)
+    if problem:
+        raise MutationRefused(f"--by is required: the name of the person deciding (this one {problem.replace('has ', 'has ', 1)}).")
     if orcid is not None and not ORCID_RE.fullmatch(orcid):
         raise MutationRefused("--orcid must look like 0000-0000-0000-0000 (last character may be X).")
     if not target_ids:
@@ -337,6 +342,16 @@ def decide(
             raise MutationRefused("approve_calibration needs --element (e.g. Ir) and --edge (K, L1-L3, M1-M5).")
     elif element or edge:
         raise MutationRefused("--element/--edge go with --decision approve_calibration on a record group.")
+    if decision == "set_counter_positions":
+        if (
+            not positions
+            or len(positions) > 8
+            or any(not isinstance(n, int) or isinstance(n, bool) or n < 1 for n in positions)
+        ):
+            raise MutationRefused("--positions must be 1 to 8 positive whole numbers, e.g. --positions 2 or --positions 2,3.")
+        positions = list(positions)
+    elif positions:
+        raise MutationRefused("--positions goes with --target experiment --decision set_counter_positions.")
     bulk = len(target_ids) > 1
 
     def change(bundle):
@@ -368,7 +383,8 @@ def decide(
         for tid, (kind, obj) in zip(target_ids, planned):
             prior = latest.get((kind, tid))
             signature = (decision, json.dumps(value, sort_keys=True), decided_by["name"], orcid,
-                         json.dumps(split_into or []), json.dumps(merge_with or []), qc_status, qc_note, element, edge)
+                         json.dumps(split_into or []), json.dumps(merge_with or []), qc_status, qc_note, element, edge,
+                         json.dumps(positions or []))
             if prior is not None and (
                 prior.get("decision"),
                 json.dumps(prior.get("value"), sort_keys=True),
@@ -380,6 +396,7 @@ def decide(
                 prior.get("qc_note"),
                 prior.get("element"),
                 prior.get("edge"),
+                json.dumps(prior.get("positions") or []),
             ) == signature:
                 unchanged.append(tid)
                 continue
@@ -401,6 +418,8 @@ def decide(
                 entry["merge_with"] = list(merge_with)
             if decision == "approve_calibration":
                 entry["element"], entry["edge"] = element, edge
+            if decision == "set_counter_positions":
+                entry["positions"] = positions
             if kind == "processing_result" and decision == "approve":
                 # AN APPROVAL BINDS TO EXACTLY THIS RESULT'S FILES (and their hashes).
                 entry["approved_files"] = [
@@ -638,7 +657,12 @@ def group(bundle_dir: Path, *, regroup: bool = False) -> dict:
         fresh = [dict(g) for g in payload["record_groups"] if g["group_id"] not in kept_ids]
         for g in fresh:
             g["status"] = "proposed"  # only a decision moves it
+            g.setdefault("condition_violations", [])  # carried; a proposed group must have none
         bundle["record_groups"] = keep + fresh
+        bundle["grouping_questions"] = [
+            dict(q) for q in (payload.get("experiment_questions") or payload.get("questions") or ())
+            if isinstance(q, Mapping)
+        ]
         ids = {g["group_id"] for g in bundle["record_groups"]}
         bundle["merge_candidates"] = [
             dict(mc) for mc in payload.get("merge_candidates") or () if set(mc.get("group_ids") or ()) <= ids
@@ -766,3 +790,17 @@ def calibration_approvals(bundle: Mapping) -> dict:
                 "decision_id": d["decision_id"],
             }
     return out
+
+
+def counter_positions(bundle: Mapping) -> list[int] | None:
+    """The scientist's LATEST ``set_counter_positions`` answer (every earlier one is kept in
+    ``scientist_decisions``; the last supersedes), or ``None``. For the grouping step."""
+    latest = None
+    for d in bundle.get("scientist_decisions") or ():
+        if (
+            d.get("decision") == "set_counter_positions"
+            and d["target"] == {"kind": "experiment", "id": "experiment"}
+            and B.decider_name_problem((d.get("decided_by") or {}).get("name")) is None
+        ):
+            latest = list(d.get("positions") or [])
+    return latest

@@ -225,7 +225,7 @@ def test_a_scientist_decision_is_the_only_way_to_confirmed(bundle):
             "decision": "confirm",
             "value": None,
             "chosen_reading_index": None,
-            "decided_by": {"name": None, "basis": "self_reported_local_user"},
+            "decided_by": {"name": "Synthetic Scientist", "basis": "self_reported_local_user"},
             "decided_utc": NOW,
             "method": "scientist_answer",
             "note": None,

@@ -113,7 +113,13 @@ stop after Step 7. Read `reference/grouping-and-processing.md`. List the propose
 `<isaac> bundle list <bundle> groups --limit 10` (page it), one group in full with `<isaac> bundle show
 <bundle> group <id>`, and groups the code thinks might belong together with `<isaac> bundle list <bundle>
 merge-candidates`. Never read a groups file by hand. Present each group in plain words: the sample,
-the conditions, how many scans, and why runs were split ("these two differ in potential"). Ask the
+the conditions, how many scans, and why runs were split ("these two differ in potential"). Say plainly when a group needs care:
+`merged_despite_engine_reading` = "the importer read something different in these files, but I grouped
+them because the rest matches; please confirm"; `sample_key_basis: name_stem` = "I grouped these by
+their file names because no file states the sample; please confirm". The experiment question
+`naming_counter_positions` asks which filename positions hold a counter; answer it once:
+`decide <bundle> --target experiment --decision set_counter_positions --positions N --by "<name>"`, then
+`bundle group <bundle> --regroup`. Ask the
 scientist to **confirm, split or merge** each, in batches, with progress. Record with `decide
 --decision confirm|split|merge` (`--split-into` takes a JSON list of lists of run keys, which you
 build; they never type it).

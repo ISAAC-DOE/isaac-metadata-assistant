@@ -59,13 +59,14 @@ CLASS_CONDITION = "condition"
 CLASS_BOOKKEEPING = "bookkeeping"
 CLASS_UNKNOWN = "unknown"
 
-SAMPLE_KEYS: tuple[str, ...] = ("sample_name", "sample_or_electrode_number", "loading_or_thickness")
+SAMPLE_KEYS: tuple[str, ...] = ("sample_name", "sample_or_electrode_number", "loading_or_thickness", "sample_name_stem")
 TECHNIQUE_KEYS: tuple[str, ...] = ("acquisition_method",)
 ENVIRONMENT_KEYS: tuple[str, ...] = ("environment_statement", "cell_type_statement", "reaction_statement")
 
 #: Part of what the result IS. key -> why a difference makes a different record.
 CONDITION_KEYS: Mapping[str, str] = {
     "sample_name": "sample identity: a different material is a different result",
+    "sample_name_stem": "sample identity from the run's own name minus counters/repeat markers — used ONLY when the engine's sample number was a scan-index misreading and no source states the sample",
     "sample_or_electrode_number": "sample identity: a different electrode/specimen is a different result",
     "loading_or_thickness": "material: loading/thickness changes absorption and self-absorption",
     "acquisition_method": "technique: a different acquisition method is a different measurement",
@@ -246,7 +247,86 @@ FIELD_UNITS: Mapping[str, str] = {"emission_energy": "ev"}
 
 #: Misreadings detected mechanically and unambiguously: the run still joins a PROPOSED group
 #: (a scientist confirms every group) and the group records `merged_despite_engine_reading`.
-MERGEABLE_MISREADINGS = frozenset({"scan_index_token_read_as_value", "same_value_different_unit_spelling"})
+MERGEABLE_MISREADINGS = frozenset(
+    {
+        "scan_index_token_read_as_value",
+        "same_value_different_unit_spelling",
+        "auxiliary_macro_read_as_method",
+        "exported_file_read_as_acquisition",
+    }
+)
+
+#: Plain words for the confirm question, per misreading a proposed group was formed despite.
+PLAIN_MISREADING = {
+    "scan_index_token_read_as_value": "the importer read scan-file numbers (_001, _002) as a sample number",
+    "same_value_different_unit_spelling": "the importer saw one value written with and without its unit as a disagreement",
+    "auxiliary_macro_read_as_method": "the importer read a helper macro the run also called as a second acquisition method",
+    "exported_file_read_as_acquisition": "one member is not a measurement but an exported/processed file of it (kept as context; its data are not merged)",
+    "sample_key_from_name_stem": "no source states the sample, so the runs were matched on their own file names with run counters and repeat markers removed",
+}
+
+_REPEAT_TOKEN = re.compile(r"^(again|repeat|rep\d*|redo)$", re.IGNORECASE)
+
+
+def _is_counter_token(toks: Sequence[str], i: int, positions: set, known: set) -> bool:
+    """Is the digit token ``toks[i]`` a COUNTER? Only when:
+
+    * a scientist's ``set_counter_positions`` decision names its 1-based position; or
+    * it follows a repeat marker (``again_2``); or
+    * it is the XDAC acquisition counter ``<digits>_<letter>`` at the end (``_098_A``), a
+      fixed format of that exporter; or
+    * it is at an EDGE (first or last token) AND is zero-padded (``01``, ``002``) or equals
+      the run's own legacy/scan number.
+
+    Anything else — a bare ``_400`` (could be a potential), a leading ``3_`` (could be an
+    electrode) — is NOT a counter."""
+    t = toks[i]
+    if not t.isdigit():
+        return False
+    if (i + 1) in positions:
+        return True
+    if i > 0 and _REPEAT_TOKEN.match(toks[i - 1]):
+        return True
+    if i == len(toks) - 2 and len(toks[-1]) == 1 and toks[-1].isalpha() and len(t) == 3:
+        return True
+    if i in (0, len(toks) - 1):
+        return (len(t) >= 2 and t[0] == "0") or int(t) in known
+    return False
+
+
+def name_stem_key(stem: str, *, loose: bool = False, counter_positions: Iterable[int] = (), known_counters: Iterable[int] = ()) -> str:
+    """The name with counters (:func:`_is_counter_token`) and repeat markers removed,
+    casefolded — never a material. ``loose=True`` drops EVERY digit token; it is used only to
+    find merge CANDIDATES that differ in a number that is not a counter."""
+    toks = [t for t in _TOKEN_SPLIT.split(str(stem)) if t]
+    positions = {int(x) for x in counter_positions}
+    known = {int(x) for x in known_counters if x is not None}
+    out = []
+    for i, t in enumerate(toks):
+        if _REPEAT_TOKEN.match(t):
+            continue
+        if t.isdigit() and (loose or _is_counter_token(toks, i, positions, known)):
+            continue
+        out.append(t)
+    return "_".join(out).casefold()
+
+
+def counter_tokens(stem: str, *, counter_positions: Iterable[int] = (), known_counters: Iterable[int] = ()) -> list[str]:
+    """The literal digit tokens of ``stem`` that were treated as counters (for the question)."""
+    toks = [t for t in _TOKEN_SPLIT.split(str(stem)) if t]
+    positions = {int(x) for x in counter_positions}
+    known = {int(x) for x in known_counters if x is not None}
+    return [t for i, t in enumerate(toks) if t.isdigit() and _is_counter_token(toks, i, positions, known)]
+
+
+def _known_counters(run: Mapping) -> list[int]:
+    out = []
+    try:
+        if run.get("legacy_number") is not None:
+            out.append(int(run["legacy_number"]))
+    except (TypeError, ValueError):
+        pass
+    return out
 
 
 def _unit_spelling_misread(c: Mapping) -> dict | None:
@@ -278,7 +358,10 @@ def _unit_spelling_misread(c: Mapping) -> dict | None:
     }
 
 
-_TECHNIQUE_WORD = re.compile(r"(xas|xanes|exafs|xafs|herfd|xes|rixs)", re.IGNORECASE)
+_TECHNIQUE_WORD = re.compile(
+    r"(xas|xanes|exafs|xafs|herfd|xes|rixs|emission|kbeta|kalpha|vtc|xrf|xrd|saxs|waxs|diffraction|ptychograph|tomograph)",
+    re.IGNORECASE,
+)
 
 
 def _auxiliary_macro_misread(c: Mapping) -> dict | None:
@@ -289,8 +372,20 @@ def _auxiliary_macro_misread(c: Mapping) -> dict | None:
         return None
     lits = sorted({str(x).strip() for x in c.get("observed_literals") or () if str(x).strip()})
     named = [x for x in lits if _TECHNIQUE_WORD.search(x)]
-    if len(lits) < 2 or len(named) != 1:
+    if len(lits) < 2 or not named:
         return None
+    if len(named) > 1:
+        # A second technique-like macro (e.g. an emission scan beside XAS) may be a different
+        # measurement: identified, never merged — a merge candidate at most.
+        return {
+            "code": "several_technique_macros",
+            "rule_id": ENGINE_RULE_ID,
+            "statement_key": "acquisition_method",
+            "candidate_id": c.get("candidate_id"),
+            "detail": "more than one disagreeing reading names a technique; the run may hold more than one kind of measurement",
+            "evidence": [{"literal": x, "names_a_technique": x in named} for x in lits[:10]],
+            "effective_reading": {"kind": "literal", "value": [_norm_literal(x) for x in named]},
+        }
     return {
         "code": "auxiliary_macro_read_as_method",
         "rule_id": ENGINE_RULE_ID,
@@ -497,6 +592,9 @@ def _basis(readings_list: Sequence[Mapping[str, dict]], classes: Mapping[str, st
             entry["readings"] = first.get("readings")
         if first.get("engine_reading_issue"):
             entry["engine_reading_issue"] = first["engine_reading_issue"]
+        if first.get("sample_key_basis"):
+            entry["sample_key_basis"] = first["sample_key_basis"]
+            entry["value"] = first.get("value")
         basis[_category(key, classes[key])][key] = entry
     return basis
 
@@ -524,12 +622,35 @@ def _diff(a: Mapping[str, dict], b: Mapping[str, dict], classes: Mapping[str, st
 
 
 def propose(bundle: Mapping, *, max_split_reasons: int = 20) -> dict:
-    """Groups, merge candidates and engine-reading issues for ``bundle`` (deterministic; no I/O)."""
+    """Groups, merge candidates and engine-reading issues for ``bundle`` (deterministic; no I/O).
+
+    ENFORCED: :func:`condition_violations` is run over the result; any proposed group it
+    flags is dissolved (its runs are proposed alone and offered as a merge candidate,
+    ``condition_check_failed``) and the dissolved groups are reported in
+    ``violations_prevented``. The returned proposal therefore has no violation."""
+    force: frozenset = frozenset()
+    prevented: list[dict] = []
+    for _ in range(4):
+        result = _propose(bundle, max_split_reasons=max_split_reasons, _force_alone=force)
+        viol = condition_violations(bundle, result)
+        if not viol:
+            break
+        prevented.extend(viol)
+        bad = {v["group_id"] for v in viol}
+        force = force | {k for g in result["record_groups"] if g["group_id"] in bad for k in g["member_run_keys"]}
+    result["violations_prevented"] = prevented
+    result["condition_violations"] = condition_violations(bundle, result)
+    return result
+
+
+def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: frozenset = frozenset()) -> dict:
     runs: Sequence[Mapping] = bundle.get("runs") or ()
     cands = {c["candidate_id"]: c for c in bundle.get("candidates") or () if "candidate_id" in c}
     sources = {s["source_id"]: s for s in bundle.get("sources") or () if "source_id" in s}
     exp_key = experiment_key_of(bundle)
     eng = engine_reading_issues(bundle)
+    counter_decision = counter_positions_decision(bundle)
+    cpos = counter_decision["positions"] if counter_decision else ()
 
     raw = [_run_readings(run, cands, eng["per_run"].get(run["run_key"], [])) for run in runs]
     beamtime_issues = []
@@ -550,8 +671,20 @@ def propose(bundle: Mapping, *, max_split_reasons: int = 20) -> dict:
         soft = sorted(k for k, r in readings.items() if r["kind"] == "conflicting" and classes[k] == CLASS_UNKNOWN)
         sample_known = any(k in readings and readings[k]["kind"] != "conflicting" and classes[k] == CLASS_CONDITION for k in SAMPLE_KEYS)
         scans = int(run.get("scan_count") or len(run.get("scans") or ()))
-        issues = eng["per_run"].get(run["run_key"], [])
-        blocking = [i for i in issues if i["code"] not in MERGEABLE_MISREADINGS]
+        issues = list(eng["per_run"].get(run["run_key"], []))
+        if not sample_known and any(i["code"] == "scan_index_token_read_as_value" for i in issues):
+            readings = dict(readings)
+            readings["sample_name_stem"] = {
+                "kind": "literal",
+                "value": name_stem_key(run.get("stem") or "", counter_positions=cpos, known_counters=_known_counters(run)),
+                "candidate_ids": [],
+                "sample_key_basis": "name_stem",
+                "_loose": name_stem_key(run.get("stem") or "", loose=True),
+            }
+            classes["sample_name_stem"] = CLASS_CONDITION
+            sample_known = True
+            issues.append({"code": "sample_key_from_name_stem", "rule_id": ENGINE_RULE_ID, "statement_key": "sample_name_stem", "evidence": [{"stem": run.get("stem"), "sample_key": readings["sample_name_stem"]["value"]}]})
+        blocking = [i for i in issues if i["code"] not in MERGEABLE_MISREADINGS and i["code"] != "sample_key_from_name_stem"]
         blockers = []
         if hard:
             blockers.append("conflicting_condition")
@@ -563,21 +696,35 @@ def propose(bundle: Mapping, *, max_split_reasons: int = 20) -> dict:
             blockers.append("no_scans")
         if blocking:
             blockers.append("blocked_by_engine_reading")
+        if run["run_key"] in _force_alone:
+            blockers.append("condition_check_failed")
+        name_key = name_stem_key(run.get("stem") or "", counter_positions=cpos, known_counters=_known_counters(run))
         cond_sig = _canon({k: _comparable(r) for k, r in sorted(readings.items()) if classes[k] == CLASS_CONDITION})
+        # For merge CANDIDATES only: the name-stem key with every digit token dropped.
+        cond_sig_loose = _canon(
+            {k: (_canon(["loose", r["_loose"]]) if k == "sample_name_stem" else _comparable(r)) for k, r in sorted(readings.items()) if classes[k] == CLASS_CONDITION}
+        )
         unk_sig = _canon({k: _comparable(r) for k, r in sorted(readings.items()) if classes[k] == CLASS_UNKNOWN})
         infos.append(
             {
                 "index": index, "run": run, "readings": readings, "books": books, "classes": classes,
                 "role": role, "role_basis": role_basis, "hard": hard, "soft": soft, "blockers": blockers,
-                "issues": issues, "blocking": blocking, "cond_sig": cond_sig, "unk_sig": unk_sig, "scans": scans,
+                "issues": issues, "blocking": blocking, "cond_sig": cond_sig, "cond_sig_loose": cond_sig_loose, "name_key": name_key, "unk_sig": unk_sig, "scans": scans,
                 "candidate_eligible": not hard and scans > 0,
             }
         )
 
+    # Names must agree on every NON-counter token too: a differing number that is not a counter
+    # keeps runs apart (they meet again as a merge candidate on the loose key).
     buckets: dict[Any, list[dict]] = {}
     for info in infos:
-        key = ("merge", info["role"], info["cond_sig"], info["unk_sig"]) if not info["blockers"] else ("alone", info["index"])
+        key = ("merge", info["role"], info["cond_sig"], info["unk_sig"], info["name_key"]) if not info["blockers"] else ("alone", info["index"])
         buckets.setdefault(key, []).append(info)
+    name_split: dict[tuple, set] = {}
+    for info in infos:
+        if not info["blockers"]:
+            name_split.setdefault((info["role"], info["cond_sig"], info["unk_sig"]), set()).add(info["name_key"])
+    merges_prevented_by_name_tokens = sum(1 for v in name_split.values() if len(v) > 1)
 
     groups = []
     for members in buckets.values():
@@ -599,7 +746,7 @@ def propose(bundle: Mapping, *, max_split_reasons: int = 20) -> dict:
             {"kind": i["code"], "run_key": m["run"]["run_key"], "statement_key": i.get("statement_key"), "evidence": i.get("evidence"), "rule_id": i.get("rule_id")}
             for m in members
             for i in m["issues"]
-            if i["code"] in MERGEABLE_MISREADINGS
+            if i["code"] in MERGEABLE_MISREADINGS or i["code"] == "sample_key_from_name_stem"
         ]
         if despite and len(members) > 1:
             flags.append("merged_despite_engine_reading")
@@ -610,7 +757,7 @@ def propose(bundle: Mapping, *, max_split_reasons: int = 20) -> dict:
             "member_run_ids": [m["run"].get("run_id") for m in members],
             "role": first["role"],
             "role_basis": first["role_basis"],
-            "basis": _basis([m["readings"] for m in members], classes),
+            "basis": _basis([m["readings"] for m in members], classes),  # members here are measurements; context runs join later
             "split_reasons": [],
             "status": "proposed",
             "questions": [],
@@ -618,10 +765,47 @@ def propose(bundle: Mapping, *, max_split_reasons: int = 20) -> dict:
             "merge_candidate_ids": [],
             "engine_reading_issues": [i for m in members for i in m["issues"]],
             "merged_despite_engine_reading": despite if len(members) > 1 else [],
+            "context_run_keys": [],
+            "counter_positions_basis": (counter_decision or {}).get("decision_id") if any("sample_name_stem" in m["readings"] for m in members) and counter_decision else None,
             "rule_id": GROUPING_RULE_ID,
             "_members": members,
         }
         groups.append(g)
+
+    # An exported file read as a zero-scan acquisition joins its run's group as CONTEXT (no
+    # scans merged), when every condition it states agrees with that run's.
+    by_run = {m["run"]["run_key"]: g for g in groups for m in g["_members"]}
+    for info in infos:
+        exp_issue = next((i for i in info["issues"] if i["code"] == "exported_file_read_as_acquisition"), None)
+        if not exp_issue or info["hard"]:
+            continue
+        target, own = by_run.get(exp_issue.get("related_run_key")), by_run.get(info["run"]["run_key"])
+        if target is None or own is None or target is own or len(own["_members"]) != 1:
+            continue
+        ref = target["_members"][0]
+        agree = all(
+            k in ref["readings"] and _comparable(ref["readings"][k]) == _comparable(r)
+            for k, r in info["readings"].items()
+            if info["classes"][k] == CLASS_CONDITION
+        )
+        if not agree:
+            continue
+        groups.remove(own)
+        target["_members"].append(info)
+        target["context_run_keys"].append(info["run"]["run_key"])
+        target["member_run_keys"].append(info["run"]["run_key"])
+        target["member_run_ids"].append(info["run"].get("run_id"))
+        target["merged_despite_engine_reading"].append(
+            {"kind": exp_issue["code"], "run_key": info["run"]["run_key"], "statement_key": None, "evidence": exp_issue.get("evidence"), "rule_id": exp_issue.get("rule_id")}
+        )
+        target["engine_reading_issues"].append(exp_issue)
+        target["group_id"] = group_id_for(exp_key, target["member_run_keys"])
+        for f in ("multi_run_group", "merged_despite_engine_reading", "export_kept_as_context"):
+            if f not in target["flags"]:
+                target["flags"].append(f)
+        for k, v in list(by_run.items()):
+            if v is own:
+                by_run[k] = target
     groups.sort(key=lambda g: g["_members"][0]["index"])
     gid_of_run = {m["run"]["run_key"]: g["group_id"] for g in groups for m in g["_members"]}
     by_gid = {g["group_id"]: g for g in groups}
@@ -637,14 +821,13 @@ def propose(bundle: Mapping, *, max_split_reasons: int = 20) -> dict:
         m0 = g["_members"][0]
         run = m0["run"]
         if len(g["_members"]) > 1:
+            ctoks = [counter_tokens(m["run"].get("stem") or "", counter_positions=cpos, known_counters=_known_counters(m["run"])) for m in g["_members"] if m["run"]["run_key"] not in g["context_run_keys"]]
             note = ""
+            if len({tuple(c) for c in ctoks}) > 1:
+                note += " Their file names differ only in the numbers " + " / ".join("_".join(c) or "(none)" for c in ctoks) + ", read as run counters."
             if g["merged_despite_engine_reading"]:
                 kinds = sorted({d["kind"] for d in g["merged_despite_engine_reading"]})
-                plain = {
-                    "scan_index_token_read_as_value": "the importer read scan-file numbers (_001, _002) as a sample number",
-                    "same_value_different_unit_spelling": "the importer saw one value written with and without its unit as a disagreement",
-                }
-                note = " They were grouped even though " + "; and ".join(plain[k] for k in kinds) + " — check that this is all that differs."
+                note += " They were grouped even though " + "; and ".join(PLAIN_MISREADING[k] for k in kinds) + " — check that this is all that differs."
             g["questions"].append(
                 _question(
                     "confirm_repeats_merge",
@@ -657,6 +840,7 @@ def propose(bundle: Mapping, *, max_split_reasons: int = 20) -> dict:
                             "stem": m["run"].get("stem"),
                             "legacy_run_or_file_number": m["books"].get("legacy_run_or_file_number") or [],
                             "repeat_marker": m["books"].get("repeat_marker") or [],
+                            "counter_tokens": counter_tokens(m["run"].get("stem") or "", counter_positions=cpos, known_counters=_known_counters(m["run"])),
                         }
                         for m in g["_members"]
                     ],
@@ -734,7 +918,7 @@ def propose(bundle: Mapping, *, max_split_reasons: int = 20) -> dict:
     pools: dict[tuple, list[dict]] = {}
     for info in infos:
         if info["candidate_eligible"]:
-            pools.setdefault((info["role"], info["cond_sig"]), []).append(info)
+            pools.setdefault((info["role"], info["cond_sig_loose"]), []).append(info)  # names may differ: the reasons say how
     seen_sets = set()
 
     def _add_candidate(member_infos: list[dict], extra_reasons: list[dict] | None = None):
@@ -744,6 +928,20 @@ def propose(bundle: Mapping, *, max_split_reasons: int = 20) -> dict:
         seen_sets.add(tuple(gids))
         reasons: list[dict] = list(extra_reasons or [])
         unk_keys = sorted({k for m in member_infos for k, c in m["classes"].items() if c == CLASS_UNKNOWN})
+        stems_by_group = {}
+        for m in member_infos:
+            stems_by_group.setdefault(gid_of_run[m["run"]["run_key"]], m["name_key"])
+        if len(set(stems_by_group.values())) > 1:
+            reasons.append(
+                {
+                    "code": "numeric_name_token_differs",
+                    "values_by_group": stems_by_group,
+                    "why_unknown": "the names differ in a number that is not in a counter position (it may be a sample, electrode or potential)",
+                }
+            )
+        for m in member_infos:
+            if "condition_check_failed" in m["blockers"]:
+                reasons.append({"code": "condition_check_failed", "group_id": gid_of_run[m["run"]["run_key"]]})
         for key in unk_keys:
             vals = {}
             for m in member_infos:
@@ -781,6 +979,19 @@ def propose(bundle: Mapping, *, max_split_reasons: int = 20) -> dict:
             if issue["code"] == "exported_file_read_as_acquisition" and issue.get("related_run_key") in run_info:
                 _add_candidate([info, run_info[issue["related_run_key"]]], [{"code": "exported_file_read_as_acquisition", "group_id": gid_of_run[info["run"]["run_key"]]}])
 
+    # ONE experiment-scope question when name numbers in a non-counter position block merges.
+    experiment_questions = []
+    pos_count: dict[int, int] = {}
+    for mc in merge_candidates:
+        for r in mc["reasons"]:
+            if r["code"] == "numeric_name_token_differs":
+                stems = [by_gid[g]["_members"][0]["run"].get("stem") or "" for g in mc["group_ids"]]
+                for pos in _differing_number_positions(stems, counter_positions=cpos):
+                    pos_count[pos] = pos_count.get(pos, 0) + 1
+    q = counter_question(pos_count, counter_decision)
+    if q:
+        experiment_questions.append(q)
+
     for g in groups:
         g.pop("_members", None)
     key_classes = {
@@ -795,7 +1006,111 @@ def propose(bundle: Mapping, *, max_split_reasons: int = 20) -> dict:
         "merge_candidates": merge_candidates,
         "engine_reading_issues": {"per_run": eng["per_run"], "beamtime": beamtime_issues},
         "key_classes": key_classes,
+        "experiment_questions": experiment_questions,
+        "counter_positions_decision": counter_decision,
+        "merges_prevented_by_name_tokens": merges_prevented_by_name_tokens,
     }
+
+
+def counter_positions_decision(bundle: Mapping) -> dict | None:
+    """The scientist's latest experiment-scope ``set_counter_positions`` answer, or None.
+
+    Positions are read ONLY through :func:`local_import.mutations.counter_positions` (the
+    records agent's reader of ``scientist_decisions``); the matching entry supplies just its
+    ``decision_id`` and decider for provenance. Positions are 1-based file-name token
+    positions; anything not a list of positive whole numbers is ignored."""
+    from .mutations import counter_positions
+
+    pos = counter_positions(bundle)
+    if not pos or not all(isinstance(x, int) and not isinstance(x, bool) and x > 0 for x in pos):
+        return None
+    entry: Mapping = {}
+    for d in bundle.get("scientist_decisions") or ():
+        if isinstance(d, Mapping) and d.get("decision") == "set_counter_positions" and list(d.get("positions") or []) == list(pos):
+            entry = d
+    by = entry.get("decided_by")
+    name = by.get("name") if isinstance(by, Mapping) else by
+    if not str(name or "").strip():
+        return None  # a decision without a named decider is ignored
+    return {
+        "positions": sorted(set(pos)),
+        "decided_by": name,
+        "decision_id": entry.get("decision_id"),
+    }
+
+
+def _differing_number_positions(stems: Sequence[str], *, counter_positions: Iterable[int] = ()) -> list[int]:
+    """1-based token positions where same-length names differ only in all-digit tokens that are
+    NOT already counters (the positions a set_counter_positions answer would have to name)."""
+    toks = [[t for t in _TOKEN_SPLIT.split(str(s)) if t] for s in stems]
+    if not toks or len({len(t) for t in toks}) != 1:
+        return []
+    positions = {int(x) for x in counter_positions}
+    out = []
+    for i in range(len(toks[0])):
+        col = [t[i] for t in toks]
+        if len(set(col)) > 1:
+            if not all(c.isdigit() for c in col):
+                return []
+            if not all(_is_counter_token(t, i, positions, set()) for t in toks):
+                out.append(i + 1)
+    return out
+
+
+def counter_question(pos_count: Mapping[int, int], counter_decision: Mapping | None) -> dict | None:
+    """The ONE experiment-scope question about counter positions (None when nothing to ask)."""
+    if not pos_count:
+        return None
+
+    def ordinal(n: int) -> str:
+        return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+    positions = sorted(int(p) for p in pos_count)
+    return {
+        "question_id": "rgq-experiment-counter-positions",
+        "id": "rgq-experiment-counter-positions",
+        "kind": "naming_counter_positions",
+        "code": "set_counter_positions",
+        "examples": ["XX_02_…", "XX_03_…"],
+        "scope": "experiment",
+        "target": "experiment",
+        "text": "In this beamtime, is the " + " / ".join(ordinal(p) for p in positions)
+        + " token of the file names a run counter? (e.g. XX_02_… vs XX_03_…). If yes, runs whose names differ only there are proposed as one group.",
+        "positions": positions,
+        "candidates_resolved_by_position": {str(p): int(pos_count[p]) for p in positions},
+        "answer_shape": {"decision": "set_counter_positions", "target": {"kind": "experiment", "id": "experiment"}, "positions": positions, "decided_by": "<name>"},
+        "already_decided": counter_decision,
+    }
+
+
+def condition_violations(bundle: Mapping, proposal: Mapping) -> list[dict]:
+    """INDEPENDENT re-check: every proposed group whose members disagree on a
+    condition-class key. Re-reads each run from the bundle (engine misreadings applied the
+    same way, synthesised name-stem keys excluded) and compares every condition key any
+    measurement member states. Context runs (exported files) are compared on the keys they
+    state. Empty means no group merges runs with differing conditions."""
+    cands = {c["candidate_id"]: c for c in bundle.get("candidates") or () if "candidate_id" in c}
+    runs = {r["run_key"]: r for r in bundle.get("runs") or ()}
+    per_run = (proposal.get("engine_reading_issues") or {}).get("per_run") or {}
+    overrides = (proposal.get("key_classes") or {}).get("beamtime_overrides") or {}
+    cpos = ((proposal.get("counter_positions_decision") or {}).get("positions")) or ()
+    out = []
+    for g in proposal.get("record_groups") or ():
+        context = set(g.get("context_run_keys") or ())
+        reads = {k: _run_readings(runs[k], cands, per_run.get(k, []))[0] for k in g["member_run_keys"] if k in runs}
+        keys = sorted({k for rk, r in reads.items() if rk not in context for k in r if classify_key(k, overrides=overrides) == CLASS_CONDITION})
+        for key in keys:
+            vals = {rk: _comparable(r.get(key)) for rk, r in reads.items() if rk not in context or key in r}
+            if len(set(vals.values())) > 1:
+                out.append({"group_id": g["group_id"], "key": key, "values": vals})
+        names = {
+            rk: name_stem_key(runs[rk].get("stem") or "", counter_positions=cpos, known_counters=_known_counters(runs[rk]))
+            for rk in g["member_run_keys"]
+            if rk in runs and rk not in context
+        }
+        if len(set(names.values())) > 1:
+            out.append({"group_id": g["group_id"], "key": "name_non_counter_tokens", "values": names})
+    return out
 
 
 def propose_record_groups(bundle: Mapping, *, max_split_reasons: int = 20) -> list[dict]:
@@ -880,36 +1195,39 @@ _LEADING_COUNTER = re.compile(r"^\d+_")
 _TRAILING_COUNTER = re.compile(r"_\d+(_[A-Za-z])?$")
 
 
-def propose_unread_merge_candidates(groups: Sequence[Mapping]) -> list[dict]:
+def propose_unread_merge_candidates(groups: Sequence[Mapping], *, counter_positions: Iterable[int] = ()) -> list[dict]:
     """Merge CANDIDATES (never merges) among acquisitions no reader extracted conditions for.
 
-    ``isaac.grouping.unread_name_counters.v0``: two acquisitions of the same role whose
-    names are equal once a leading run counter (``17_``) and a trailing acquisition counter
-    (``_098``, ``_098_A``) are removed. The name is the only evidence available, so this
-    only ASKS; a scientist decides.
-    """
+    ``isaac.grouping.unread_name_counters.v0``: same role and the same name once EVERY digit
+    token and repeat marker is removed. Each candidate records whether the names also agree
+    on every non-counter token (``names_agree_on_non_counter_tokens``, counters per
+    :func:`_is_counter_token`); only then may header agreement promote it to a group."""
     pools: dict[tuple, list[Mapping]] = {}
     for g in groups:
         stem = str(g.get("stem") or "")
-        core = _TRAILING_COUNTER.sub("", _LEADING_COUNTER.sub("", stem))
-        if core and core != stem:
-            pools.setdefault((g.get("role"), g.get("experiment_key"), core.casefold()), []).append(g)
+        loose = name_stem_key(stem, loose=True)
+        if loose and loose != stem.casefold():
+            pools.setdefault((g.get("role"), g.get("experiment_key"), loose), []).append(g)
     out = []
     for (role, exp_key, _), members in pools.items():
         if len(members) < 2:
             continue
         gids = [m["group_id"] for m in members]
+        strict = {m["group_id"]: name_stem_key(m.get("stem") or "", counter_positions=counter_positions) for m in members}
+        agree = len(set(strict.values())) == 1
         mcid = "mc-" + hashlib.sha256((str(exp_key) + "\n" + "\n".join(sorted(gids))).encode()).hexdigest()[:16]
+        reasons = [{"code": "names_differ_only_in_counters" if agree else "numeric_name_token_differs", "stems": [m.get("stem") for m in members], "values_by_group": strict}]
         out.append(
             {
                 "merge_candidate_id": mcid,
                 "experiment_key": exp_key,
                 "group_ids": gids,
                 "status": "proposed",
-                "reasons": [{"code": "names_differ_only_in_counters", "stems": [m.get("stem") for m in members]}],
+                "names_agree_on_non_counter_tokens": agree,
+                "reasons": reasons,
                 "question": {
                     "code": "merge_candidate",
-                    "text": f"{len(gids)} acquisitions have the same name apart from run/acquisition counters, and no reader extracted their conditions. Are they repeats of one measurement?",
+                    "text": f"{len(gids)} acquisitions have the same name apart from numbers, and no reader extracted their conditions. Are they repeats of one measurement?",
                     "group_ids": gids,
                     "merge_candidate_id": mcid,
                 },
@@ -917,6 +1235,88 @@ def propose_unread_merge_candidates(groups: Sequence[Mapping]) -> list[dict]:
             }
         )
     return out
+
+
+HEADER_RULE_ID = "isaac.grouping.unread_header_agreement.v0"
+_HEADER_DATE = re.compile(r"\b(mon|tue|wed|thu|fri|sat|sun)\w*\s+[a-z]{3}\w*\s+\d{1,2}\s+\d{1,2}:\d{2}(:\d{2})?(\s+\d{4})?\b", re.IGNORECASE)
+
+
+def header_statements(lines: Sequence[str] | None) -> list[str] | None:
+    """The non-bookkeeping literal header statements of one scan export (None = unreadable).
+
+    Kept: format line, detector/region files, beamline/mono line, gains, beam size, sample
+    description. Dropped as bookkeeping: date/time lines, the ``PTS:``/``COLS:`` count line,
+    and everything from ``Weights:`` on (per-scan weights and dark-current offsets)."""
+    if not lines:
+        return None
+    out = []
+    for raw in lines:
+        line = " ".join(str(raw).split())
+        if not line:
+            continue
+        if line.startswith("Weights:") or line.startswith("Offsets:") or line == "Data:":
+            break
+        if line.upper().startswith("PTS:"):
+            continue
+        if _HEADER_DATE.fullmatch(line):
+            continue  # a line that is ONLY a timestamp is bookkeeping
+        out.append(_HEADER_DATE.sub("<timestamp>", line))  # mixed line: compared without its timestamp
+    return out
+
+
+def promote_unread_by_headers(groups: Sequence[Mapping], candidates: Sequence[Mapping], read_header) -> tuple[list[dict], list[dict]]:
+    """Turn a name-counter merge candidate into ONE proposed group when every scan's literal
+    header statements agree (``isaac.grouping.unread_header_agreement.v0``).
+
+    ``read_header(relative_path) -> list[str] | None`` (None when absent/unreadable). Any
+    unreadable header -> the candidate stays (name-only evidence). Any disagreement -> it stays,
+    with the differing statement positions. Returns (groups, remaining candidates)."""
+    by_id = {g["group_id"]: g for g in groups}
+    out_groups = [dict(g) for g in groups]
+    remaining = []
+    for mc in candidates:
+        members = [by_id[g] for g in mc["group_ids"] if g in by_id]
+        if not mc.get("names_agree_on_non_counter_tokens", True):
+            remaining.append(mc)  # a differing non-counter number: headers cannot settle it
+            continue
+        heads = []
+        for g in members:
+            for sc in g.get("member_scans") or ():
+                heads.append((g["group_id"], sc.get("relative_path"), header_statements(read_header(sc.get("relative_path")))))
+        if not heads or any(h is None for _, _, h in heads):
+            remaining.append({**mc, "reasons": mc["reasons"] + [{"code": "headers_unreadable_name_only_evidence"}]})
+            continue
+        ref = heads[0][2]
+        differ = sorted({i for _, _, h in heads for i in range(max(len(h), len(ref))) if (h[i] if i < len(h) else None) != (ref[i] if i < len(ref) else None)})
+        if differ:
+            remaining.append({**mc, "reasons": mc["reasons"] + [{"code": "header_statements_disagree", "statement_positions": differ}]})
+            continue
+        keys = sorted(g["acquisition_key"] for g in members)
+        merged = {
+            **{k: v for k, v in members[0].items() if k not in ("group_id", "acquisition_key", "stem", "member_scans", "questions", "flags")},
+            "group_id": group_id_for(members[0]["experiment_key"], keys),
+            "acquisition_keys": keys,
+            "stem": members[0]["stem"],
+            "stems": [g["stem"] for g in members],
+            "member_scans": [{**sc, "acquisition_key": g["acquisition_key"]} for g in members for sc in g.get("member_scans") or ()],
+            "basis": {**members[0]["basis"], "header_statements": {"value": ref, "kind": "literal", "agreeing_scans": len(heads), "rule_id": HEADER_RULE_ID}},
+            "flags": ["no_bundle_run", "conditions_unknown", "multi_acquisition_group", "merged_on_header_agreement"],
+            "merged_from_candidate": mc["merge_candidate_id"],
+            "questions": [
+                {
+                    "question_id": f"{mc['merge_candidate_id']}-confirm",
+                    "code": "confirm_repeats_merge",
+                    "text": f"These {len(members)} acquisitions have the same name apart from counters and identical header statements "
+                    f"(region, detector, beamline, gains, beam size, sample description). They look like repeats — merge into one record? "
+                    "No reader extracted their conditions, so check that nothing else differs.",
+                    "run_keys": [],
+                }
+            ],
+            "rule_id": HEADER_RULE_ID,
+        }
+        ids = {g["group_id"] for g in members}
+        out_groups = [g for g in out_groups if g["group_id"] not in ids] + [merged]
+    return out_groups, remaining
 
 
 def _attr(obj: Any, *names: str, default: Any = None) -> Any:

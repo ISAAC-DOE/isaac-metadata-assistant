@@ -312,3 +312,54 @@ def test_a_derive_step_naming_another_rule_or_an_unwitnessed_source_launders_not
 def test_a_value_with_no_named_rule_gets_no_step():
     cand = _evidence("Read from 1 source, exactly as written.", "invented", "dry", None, None)
     assert cand["evidence"][0]["normalization"] == [] and json.dumps("invented") not in B.witnessed_values(cand)
+
+
+# --- set_counter_positions -----------------------------------------------------------------------------------
+
+
+def test_set_counter_positions_is_validated_idempotent_and_superseded(bdir, capsys):
+    argv = ["bundle", "decide", str(bdir), "--target", "experiment", "--decision", "set_counter_positions", "--by", "S"]
+    assert cli.main(argv + ["--positions", "2"]) == 0
+    d = M.load(bdir)["scientist_decisions"][-1]
+    assert d["decision"] == "set_counter_positions" and d["target"] == {"kind": "experiment", "id": "experiment"}
+    assert d["positions"] == [2] and d["decided_by"]["identity"] == "local_unverified" and d["decision_id"]
+    assert cli.main(argv + ["--positions", "2"]) == 0  # replay: no new entry
+    assert len(M.load(bdir)["scientist_decisions"]) == 1
+    for bad in ("0", "-1", "a", "1,2,3,4,5,6,7,8,9"):
+        assert cli.main(argv + ["--positions", bad]) == 2
+    assert cli.main(argv + ["--positions", "2,3"]) == 0
+    b = M.load(bdir)
+    assert len(b["scientist_decisions"]) == 2 and M.counter_positions(b) == [2, 3]  # later supersedes, all kept
+    assert B.check_bundle(bdir) == []
+    capsys.readouterr()
+
+
+def test_the_grouping_counter_question_is_surfaced_with_its_command(bdir):
+    b = M.load(bdir)
+    b["grouping_questions"] = [{"kind": "naming_counter_positions", "text": "Which filename positions are counters?"}]
+    M.save_bundle(bdir, b)
+    q = next(q for q in Q.consolidate(M.load(bdir))["questions"] if q["kind"] == "naming_counter_positions")
+    assert q["scope"] == "experiment"
+    assert "--target experiment --decision set_counter_positions --positions" in q["answer_command"]
+    assert "isaac bundle group <bundle_dir> --regroup" in q["answer_command"]
+
+
+def test_every_decision_needs_a_decider_name_and_counter_positions_ignore_one_without(bdir):
+    M.decide(bdir, target_ids=["experiment"], decision="set_counter_positions", value=None, positions=[2], **BY)
+    b = M.load(bdir)
+    forged = dict(b["scientist_decisions"][-1], decision_id="d-99999", positions=[3],
+                  decided_by={"name": "", "basis": "self_reported_local_user", "identity": "local_unverified", "orcid_claimed": None})
+    b["scientist_decisions"].append(forged)
+    assert any("no decider name" in e for e in B.validate_bundle(b))
+    assert M.counter_positions(b) == [2]  # the nameless one is ignored
+    for bad in ("", "   ", "a\x00b", "x" * 201):
+        with pytest.raises(M.MutationRefused):
+            M.decide(bdir, target_ids=["experiment"], decision="set_counter_positions", value=None, positions=[3], by=bad, orcid=None)
+
+
+def test_a_proposed_group_with_condition_violations_is_invalid(bdir):
+    M.group(bdir)
+    b = M.load(bdir)
+    assert all("condition_violations" in g for g in b["record_groups"])
+    b["record_groups"][0]["condition_violations"] = [{"condition": "potential", "values": ["a", "b"]}]
+    assert any("condition violations" in e for e in B.validate_bundle(b))

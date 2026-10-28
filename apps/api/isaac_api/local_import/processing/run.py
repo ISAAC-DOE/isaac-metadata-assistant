@@ -152,11 +152,12 @@ class _Ctx:
 
 def group_scans(group: Mapping, runs_by_key: Mapping[str, Mapping]) -> tuple[list[dict], list[str], dict | None]:
     if group.get("group_kind") in ("unread_acquisition", "generic_run"):
-        return [dict(s) for s in group.get("member_scans") or ()], [group.get("stem") or ""], None
+        return [dict(s) for s in group.get("member_scans") or ()], list(group.get("stems") or [group.get("stem") or ""]), None
     scans, stems, sel = [], [], None
+    context = set(group.get("context_run_keys") or ())
     for key in group.get("member_run_keys") or ():
         run = runs_by_key.get(key)
-        if run is None:
+        if run is None or key in context:  # an exported file kept as context: no scans, no stem
             continue
         stems.append(run.get("stem") or "")
         sel = sel or run.get("signal_selection")
