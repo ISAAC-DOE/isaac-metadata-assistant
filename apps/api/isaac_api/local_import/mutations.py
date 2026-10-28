@@ -651,9 +651,14 @@ def group(bundle_dir: Path, *, regroup: bool = False) -> dict:
         existing = list(bundle.get("record_groups") or ())
         if existing and not regroup:
             raise MutationRefused("This bundle already has record groups; pass --regroup to replace the undecided ones.")
-        payload = cli_entry.build_groups_payload(bundle)
         keep = [g for g in existing if g["group_id"] in decided]
         kept_ids = {g["group_id"] for g in keep}
+        # A kept group's runs are the scientist's; fresh proposals are made over the REST only,
+        # or a run could sit in a decided group and a new proposal at once (measured: a
+        # counter-position answer re-merged a confirmed single-run group's run).
+        kept_runs = {rk for g in keep for rk in g.get("member_run_keys") or ()}
+        view = {**bundle, "runs": [r for r in bundle.get("runs") or () if r.get("run_key") not in kept_runs]} if kept_runs else bundle
+        payload = cli_entry.build_groups_payload(view)
         fresh = [dict(g) for g in payload["record_groups"] if g["group_id"] not in kept_ids]
         for g in fresh:
             g["status"] = "proposed"  # only a decision moves it
