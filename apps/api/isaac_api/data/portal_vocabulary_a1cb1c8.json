@@ -1,0 +1,1454 @@
+{
+  "Record Info": {
+    "record_type": {
+      "description": "Fundamental nature of the record.",
+      "values": [
+        "evidence",
+        "intent",
+        "synthesis"
+      ]
+    },
+    "record_domain": {
+      "description": "Scientific domain of the record content.",
+      "values": [
+        "characterization",
+        "performance",
+        "simulation",
+        "theory",
+        "derived"
+      ]
+    },
+    "source_type": {
+      "description": "Origin of the data acquisition.",
+      "values": [
+        "facility",
+        "laboratory",
+        "computation",
+        "literature",
+        "database",
+        "industrial"
+      ]
+    }
+  },
+  "Sample": {
+    "sample.sample_form": {
+      "description": "Physical realization of the sample. A calculation uses a model form: slab_model, cluster_model, unit_cell (any periodic simulation cell, including a molecular-dynamics box), molecule_model (a molecular complex, as in homogeneous catalysis) or continuum_model (a microkinetic or continuum model with no atomistic structure). A measurement uses a physical form. The two sets never mix (DOMAIN_INCONSISTENT).",
+      "values": [
+        "powder",
+        "pellet",
+        "film",
+        "monolith",
+        "liquid",
+        "gas",
+        "single_crystal",
+        "nanoparticle",
+        "membrane_electrode_assembly",
+        "slab_model",
+        "cluster_model",
+        "unit_cell",
+        "fluids",
+        "molecule_model",
+        "continuum_model"
+      ]
+    },
+    "sample.material.provenance": {
+      "description": "Origin of the material.",
+      "values": [
+        "commercial",
+        "synthesized",
+        "fabricated",
+        "theoretical",
+        "literature",
+        "natural"
+      ]
+    },
+    "sample.material.identifiers.scheme": {
+      "description": "Scheme for external identifiers.",
+      "values": [
+        "doi",
+        "inchi",
+        "cas",
+        "materials_project",
+        "internal",
+        "ase_db"
+      ]
+    },
+    "sample.electrode_type": {
+      "description": "Type of electrode or substrate configuration. Captures the functional form of the electrode assembly, distinct from the sample_form which describes the material form.",
+      "values": [
+        "GDE",
+        "thin_film",
+        "patterned_film",
+        "nanoparticle",
+        "foil",
+        "mesh",
+        "foam",
+        "RDE",
+        "RRDE",
+        "pellet",
+        "single_crystal",
+        "MEA",
+        "flow_field_plate"
+      ]
+    },
+    "sample.geometry": {
+      "description": "Canonical keys for the sample.geometry free-form object. Use these exact key names to ensure cross-record queryability.",
+      "values": [
+        "geometric_area_cm2",
+        "thickness_um",
+        "particle_size_nominal_nm",
+        "loading_mg_cm2"
+      ]
+    },
+    "sample.composition": {
+      "description": "Canonical keys for the sample.composition free-form object. Domain-specific keys are allowed but these standard keys should be used when applicable.",
+      "values": [
+        "Ag_at_fraction",
+        "Au_at_fraction",
+        "Cu_at_fraction",
+        "Pt_at_fraction",
+        "catalyst_loading_mg_cm2",
+        "support"
+      ]
+    }
+  },
+  "Context": {
+    "context.environment": {
+      "description": "The surrounding condition.",
+      "values": [
+        "operando",
+        "in_situ",
+        "ex_situ",
+        "in_silico"
+      ]
+    },
+    "context.temperature_basis": {
+      "description": "Where context.temperature_K comes from. 'stated': the source or the instrument gives the number. 'room_temperature': the source says room temperature without a number (store 298.15 K). 'not_reported': the source does not say (temperature_K is null). A default is never a stated temperature.",
+      "values": [
+        "stated",
+        "room_temperature",
+        "not_reported"
+      ]
+    },
+    "context.reaction.name": {
+      "description": "The transformation a record is about, for any chemistry. The token names what is transformed; context.reaction.drive says what drives it (photocatalytic CO2 reduction is CO2RR with drive photochemical). Electrochemical: CO2RR, CORR (CO reduction), OER, HER, ORR, HOR, N2RR (N2 reduction), NO3RR (nitrate reduction), urea_synthesis (from CO2 + nitrate), AOR (alcohol oxidation), FOR (formic acid oxidation), UOR (urea oxidation), CER (chlorine evolution), H2O2_electrosynthesis, water_splitting (full cell), H_absorption (hydrogen uptake into a host lattice, e.g. PdHx), sulfur_redox (Li-S and related cathodes), surface_oxidation and stripping_voltammetry (surface processes, not catalytic turnover). Thermal and molecular: NH3_synthesis, NH3_decomposition, CO_oxidation, CO_hydrogenation, CO2_hydrogenation, CO2_methanation, methanol_synthesis, methane_dry_reforming, methane_steam_reforming, methane_partial_oxidation, water_gas_shift, Fischer_Tropsch_synthesis, propane_dehydrogenation, ethane_dehydrogenation, acetylene_semihydrogenation, alkene_hydrogenation, hydrodeoxygenation, NH3_SCR (selective catalytic reduction of NOx by NH3), ethylene_epoxidation, hydroformylation, olefin_metathesis, cross_coupling. Request an addition through a vocabulary proposal.",
+      "values": [
+        "CO2RR",
+        "CORR",
+        "OER",
+        "HER",
+        "ORR",
+        "HOR",
+        "N2RR",
+        "NO3RR",
+        "urea_synthesis",
+        "AOR",
+        "FOR",
+        "UOR",
+        "CER",
+        "H2O2_electrosynthesis",
+        "water_splitting",
+        "H_absorption",
+        "sulfur_redox",
+        "surface_oxidation",
+        "stripping_voltammetry",
+        "NH3_synthesis",
+        "NH3_decomposition",
+        "CO_oxidation",
+        "CO_hydrogenation",
+        "CO2_hydrogenation",
+        "CO2_methanation",
+        "methanol_synthesis",
+        "methane_dry_reforming",
+        "methane_steam_reforming",
+        "methane_partial_oxidation",
+        "water_gas_shift",
+        "Fischer_Tropsch_synthesis",
+        "propane_dehydrogenation",
+        "ethane_dehydrogenation",
+        "acetylene_semihydrogenation",
+        "alkene_hydrogenation",
+        "hydrodeoxygenation",
+        "NH3_SCR",
+        "ethylene_epoxidation",
+        "hydroformylation",
+        "olefin_metathesis",
+        "cross_coupling"
+      ]
+    },
+    "context.reaction.drive": {
+      "description": "What drives the reaction. electrochemical = an applied potential or current; thermal = temperature; photochemical = light; photoelectrochemical = light plus an applied bias; plasma; mechanochemical; biochemical.",
+      "values": [
+        "electrochemical",
+        "thermal",
+        "photochemical",
+        "photoelectrochemical",
+        "plasma",
+        "mechanochemical",
+        "biochemical"
+      ]
+    },
+    "context.reaction.catalysis": {
+      "description": "Where the catalyst is relative to the reactants. heterogeneous = a solid catalyst, electrodes included; homogeneous = a dissolved molecular catalyst; enzymatic; uncatalyzed.",
+      "values": [
+        "heterogeneous",
+        "homogeneous",
+        "enzymatic",
+        "uncatalyzed"
+      ]
+    },
+    "context.electrochemistry.reaction": {
+      "description": "DEPRECATED: use context.reaction.name. Kept so stored records validate; when present it must equal context.reaction.name.",
+      "values": [
+        "CO2RR",
+        "CORR",
+        "OER",
+        "HER",
+        "ORR",
+        "NRR",
+        "N2RR",
+        "AOR",
+        "FOR",
+        "water_splitting",
+        "surface_oxidation",
+        "stripping_voltammetry",
+        "None",
+        "NO3RR",
+        "urea_synthesis"
+      ]
+    },
+    "context.electrochemistry.control_mode": {
+      "description": "Method of electrochemical control.",
+      "values": [
+        "potentiostatic",
+        "galvanostatic",
+        "potentiodynamic",
+        "open_circuit",
+        "mixed"
+      ]
+    },
+    "context.electrochemistry.potential_scale": {
+      "description": "Thermodynamic reference scale for voltage.",
+      "values": [
+        "RHE",
+        "SHE",
+        "Ag/AgCl",
+        "SCE",
+        "Hg/HgO",
+        "Hg/HgSO4"
+      ]
+    },
+    "context.electrochemistry.cell_type": {
+      "description": "The specific hardware rig body. 'not_reported' when the source does not state the cell; never a guessed cell.",
+      "values": [
+        "flow_cell",
+        "microfluidic_flow_cell",
+        "h_cell",
+        "beaker_cell",
+        "gde_cell",
+        "mea_cell",
+        "zero_gap_cell",
+        "coin_cell",
+        "three_electrode",
+        "scanning_droplet_cell",
+        "not_reported"
+      ]
+    },
+    "context.electrochemistry.pH_basis": {
+      "description": "Basis for the pH value.",
+      "values": [
+        "measured",
+        "nominal",
+        "buffered_assumed"
+      ]
+    },
+    "context.electrochemistry.ir_compensation.method": {
+      "description": "Method used for iR compensation.",
+      "values": [
+        "none",
+        "automatic",
+        "manual",
+        "post_hoc",
+        "EIS_based"
+      ]
+    },
+    "context.transport.flow_mode": {
+      "description": "Hydrodynamic conditions.",
+      "values": [
+        "stagnant",
+        "flowing_liquid",
+        "bubbling_gas",
+        "gas_diffusion",
+        "rotating_disk"
+      ]
+    },
+    "context.transport.feed.phase": {
+      "description": "Phase of the transport feed.",
+      "values": [
+        "gas",
+        "liquid"
+      ]
+    },
+    "context.simulation_assumptions.solvation_model": {
+      "description": "[In Silico] Solvation handling.",
+      "values": [
+        "none",
+        "implicit",
+        "explicit"
+      ]
+    },
+    "context.electrochemistry.potential_vs_RHE.rhe_basis": {
+      "description": "Trust tier of the derived RHE potential. Filter meta-analyses with rhe_basis IN (measured_direct, derived_calibrated).",
+      "values": [
+        "measured_direct",
+        "derived_calibrated",
+        "reported_as_RHE",
+        "derived_nominal",
+        "in_silico_setpoint",
+        "not_convertible_no_pH",
+        "not_convertible_no_reference_offset",
+        "not_reported",
+        "not_applicable"
+      ]
+    },
+    "context.electrochemistry.reference_electrode.type": {
+      "description": "Physical reference electrode chemistry.",
+      "values": [
+        "Ag/AgCl",
+        "SCE",
+        "Hg/HgO",
+        "Hg/HgSO4",
+        "RHE",
+        "SHE",
+        "pseudo_reference",
+        "other"
+      ]
+    },
+    "context.modulation_driven_variables": {
+      "description": "Control variables that can be DRIVEN PERIODICALLY instead of held constant. The list is deliberately cross-domain: modulating a potential in electrocatalysis, chopping illumination in photocatalysis, cycling temperature in a programmed-desorption experiment and pulsing a reactant in a transient-kinetics reactor are the same structure with a different driven variable. Add one when a new technique needs it; do not add a technique-specific block.",
+      "values": [
+        "potential",
+        "current",
+        "temperature",
+        "pressure",
+        "illumination",
+        "reactant_concentration",
+        "flow_rate",
+        "magnetic_field",
+        "electric_field",
+        "strain",
+        "pH",
+        "composition"
+      ]
+    },
+    "context.modulation_waveforms": {
+      "description": "Shape of the drive. `pulse_train` is a square wave with a duty cycle far from 0.5; `step` and `ramp` describe a single non-repeating change, for which frequency_Hz is left unset.",
+      "values": [
+        "square",
+        "pulse_train",
+        "sine",
+        "triangle",
+        "sawtooth",
+        "step",
+        "ramp",
+        "arbitrary"
+      ]
+    },
+    "context.modulation_descriptor_semantics": {
+      "description": "What a record's descriptors mean relative to the drive. This is the field that decides whether a number is comparable to one from a static experiment: a cycle-averaged quantity and a steady-state quantity of the same name are DIFFERENT QUANTITIES.",
+      "values": [
+        "cycle_averaged",
+        "phase_resolved",
+        "at_a_single_level",
+        "transient",
+        "unspecified"
+      ]
+    }
+  },
+  "System": {
+    "system.domain": {
+      "description": "Physical vs Computational system.",
+      "values": [
+        "experimental",
+        "computational"
+      ]
+    },
+    "system.technique": {
+      "description": "Primary technique or computational method used to produce this record.",
+      "values": [
+        "XAS",
+        "HERFD-XAS",
+        "XES",
+        "RIXS",
+        "XPS",
+        "XRF",
+        "XRD",
+        "SAXS",
+        "WAXS",
+        "PDF",
+        "neutron_reflectometry",
+        "neutron_diffraction",
+        "SANS",
+        "cyclic_voltammetry",
+        "chronoamperometry",
+        "chronopotentiometry",
+        "EIS",
+        "linear_sweep_voltammetry",
+        "galvanostatic_cycling",
+        "TEM",
+        "SEM",
+        "AFM",
+        "STM",
+        "SECM",
+        "atom_probe_tomography",
+        "DFT",
+        "ab_initio_MD",
+        "classical_MD",
+        "kinetic_monte_carlo",
+        "microkinetic_modeling",
+        "machine_learning_potential",
+        "GC",
+        "HPLC",
+        "ICP_MS",
+        "ICP_OES",
+        "NMR",
+        "EPR",
+        "mass_spectrometry",
+        "FTIR",
+        "Raman",
+        "UV_Vis",
+        "TGA",
+        "chemisorption",
+        "physisorption",
+        "catalytic_reactor_test"
+      ]
+    },
+    "system.instrument.instrument_type": {
+      "description": "Kind of measurement hardware. A calculation has no instrument: its code is computation.method.code and its computer system.facility (CODE_OUTSIDE_METHOD).",
+      "values": [
+        "beamline_endstation",
+        "diffractometer",
+        "spectrometer",
+        "microscope",
+        "potentiostat",
+        "chromatograph",
+        "mass_spectrometer",
+        "nmr_spectrometer"
+      ]
+    },
+    "system.configuration": {
+      "description": "Allowed flat keys for system configuration. Values must be string, number, or boolean (no nesting).",
+      "values": [
+        "detector_model",
+        "monochromator_crystal",
+        "spectrometer_geometry",
+        "compute_architecture",
+        "code_version",
+        "container_image",
+        "channel_id",
+        "electrode_configuration",
+        "counter_electrode",
+        "gc_column_type",
+        "gc_model",
+        "cell_geometry",
+        "product_detection_gas",
+        "product_detection_liquid",
+        "scan_rate_mV_s",
+        "beam_attenuator"
+      ]
+    },
+    "system.organizations": {
+      "description": "Canonical research organizations, identified by ROR (Research Organization Registry, ror.org) \u2014 the same registry funders and publishers use. An organization string is only usable for reasoning if two records naming the same institution produce the same key: the discovery engine treats results from one organization as sharing method culture and systematic practice, so 'SLAC' and 'SLAC National Accelerator Laboratory' scoring as two different labs silently inflates how independent the evidence looks. Every ROR id below was resolved against the live registry, not recalled. Add entries by looking the institution up at ror.org; do not invent an id.",
+      "values": {
+        "SLAC National Accelerator Laboratory": "https://ror.org/05gzmn429",
+        "Lawrence Berkeley National Laboratory": "https://ror.org/02jbv0t02",
+        "Argonne National Laboratory": "https://ror.org/05gvnxz63",
+        "National Energy Research Scientific Computing Center": "https://ror.org/05v3mvq14",
+        "University of California, Berkeley": "https://ror.org/01an7q238",
+        "California Institute of Technology": "https://ror.org/05dxps055",
+        "University of Toronto": "https://ror.org/03dbr7087",
+        "Utrecht University": "https://ror.org/04pp8hn57",
+        "Eindhoven University of Technology": "https://ror.org/02c2kyt77",
+        "Xi'an Jiaotong University": "https://ror.org/017zhmm22",
+        "European Synchrotron Radiation Facility": "https://ror.org/02550n020",
+        "Oak Ridge National Laboratory": "https://ror.org/01qz5mb56",
+        "Beijing University of Chemical Technology": "https://ror.org/00df5yc52",
+        "City University of Hong Kong": "https://ror.org/03q8dnn23"
+      }
+    },
+    "system.organization_aliases": {
+      "description": "Deprecated or abbreviated organization spellings mapped to their canonical name in system.organizations. Same accept-and-teach pattern as unit aliases: a record using an alias is ACCEPTED and the validator says which canonical form to prefer. Built from the strings actually present in the repository.",
+      "map": {
+        "SLAC": "SLAC National Accelerator Laboratory",
+        "LBNL": "Lawrence Berkeley National Laboratory",
+        "LBL": "Lawrence Berkeley National Laboratory",
+        "Berkeley Lab": "Lawrence Berkeley National Laboratory",
+        "Lawrence Berkeley National Laboratory / UC Berkeley": "Lawrence Berkeley National Laboratory",
+        "ANL": "Argonne National Laboratory",
+        "Advanced Photon Source, Argonne National Laboratory": "Argonne National Laboratory",
+        "APS": "Argonne National Laboratory",
+        "NERSC": "National Energy Research Scientific Computing Center",
+        "XJTU": "Xi'an Jiaotong University",
+        "ESRF": "European Synchrotron Radiation Facility",
+        "Caltech": "California Institute of Technology",
+        "UC Berkeley": "University of California, Berkeley",
+        "UToronto": "University of Toronto",
+        "TU Eindhoven": "Eindhoven University of Technology",
+        "TU/e": "Eindhoven University of Technology",
+        "ORNL": "Oak Ridge National Laboratory",
+        "Oak Ridge National Lab": "Oak Ridge National Laboratory",
+        "SNS": "Oak Ridge National Laboratory",
+        "Spallation Neutron Source": "Oak Ridge National Laboratory",
+        "HFIR": "Oak Ridge National Laboratory",
+        "ALS": "Lawrence Berkeley National Laboratory",
+        "Advanced Light Source": "Lawrence Berkeley National Laboratory",
+        "BUCT": "Beijing University of Chemical Technology",
+        "CityU": "City University of Hong Kong"
+      }
+    },
+    "system.organization_placeholders": {
+      "description": "Strings that appear in the organization slot but name NO institution. These must never be treated as an organization key: two records both saying 'not_specified_in_source' are not thereby the same lab, and scoring them as one would invent a correlation the records do not assert. The discovery engine treats these as ABSENT provenance, which leaves the evidence independent rather than correlated.",
+      "values": [
+        "not_specified_in_source",
+        "not_specified_in_main_text",
+        "unknown",
+        "none",
+        "TBD",
+        "literature",
+        "N/A",
+        "na",
+        "not_reported"
+      ]
+    },
+    "system.domain_signals": {
+      "description": "Field values that say whether a record is a calculation or a measurement. Every one present in a record must say the same (DOMAIN_INCONSISTENT); a value missing from this table says neither, so a spectroscopy technique can name a measured or a simulated spectrum. A calculation reported in a paper is still a calculation.",
+      "map": {
+        "context.environment=ex_situ": "measurement",
+        "context.environment=in_silico": "calculation",
+        "context.environment=in_situ": "measurement",
+        "context.environment=operando": "measurement",
+        "record_domain=simulation": "calculation",
+        "sample.material.provenance=commercial": "measurement",
+        "sample.material.provenance=fabricated": "measurement",
+        "sample.material.provenance=natural": "measurement",
+        "sample.material.provenance=synthesized": "measurement",
+        "sample.material.provenance=theoretical": "calculation",
+        "sample.sample_form=cluster_model": "calculation",
+        "sample.sample_form=continuum_model": "calculation",
+        "sample.sample_form=film": "measurement",
+        "sample.sample_form=fluids": "measurement",
+        "sample.sample_form=gas": "measurement",
+        "sample.sample_form=liquid": "measurement",
+        "sample.sample_form=membrane_electrode_assembly": "measurement",
+        "sample.sample_form=molecule_model": "calculation",
+        "sample.sample_form=monolith": "measurement",
+        "sample.sample_form=nanoparticle": "measurement",
+        "sample.sample_form=pellet": "measurement",
+        "sample.sample_form=powder": "measurement",
+        "sample.sample_form=single_crystal": "measurement",
+        "sample.sample_form=slab_model": "calculation",
+        "sample.sample_form=unit_cell": "calculation",
+        "source_type=computation": "calculation",
+        "system.domain=computational": "calculation",
+        "system.domain=experimental": "measurement",
+        "system.technique=DFT": "calculation",
+        "system.technique=ab_initio_MD": "calculation",
+        "system.technique=classical_MD": "calculation",
+        "system.technique=kinetic_monte_carlo": "calculation",
+        "system.technique=machine_learning_potential": "calculation",
+        "system.technique=microkinetic_modeling": "calculation"
+      },
+      "map_columns": [
+        "field = value",
+        "says"
+      ]
+    }
+  },
+  "Measurement": {
+    "measurement.series.channels.role": {
+      "description": "Semantic role of a data channel.",
+      "values": [
+        "primary_signal",
+        "measured_response",
+        "simulated_observable",
+        "derived_signal",
+        "auxiliary_signal",
+        "control_readback",
+        "quality_monitor"
+      ]
+    },
+    "measurement.processing.steps": {
+      "description": "Atomic processing steps applied to transform raw data into the reported payload. Use a list of steps instead of compound strings. Extended 2026-06-11 with literature-mining pipeline steps (figure digitization, verification, record splitting).",
+      "values": [
+        "background_correction",
+        "averaging",
+        "normalization",
+        "calibration",
+        "iR_correction",
+        "steady_state_extraction",
+        "gc_analysis",
+        "hplc_analysis",
+        "nmr_analysis",
+        "icpms_quantification",
+        "fe_calculation",
+        "spectrum_merging",
+        "energy_alignment",
+        "broadening",
+        "digitized_from_published_figure",
+        "user_verified",
+        "manual_record_split",
+        "user_verified_digitization_rules",
+        "duplicate_condition_deduplication",
+        "energy_referencing",
+        "thermodynamic_summation",
+        "rietveld_refinement",
+        "exafs_fitting",
+        "linear_combination_fitting",
+        "peak_fitting",
+        "equivalent_circuit_fitting",
+        "article_style_replot_checked",
+        "overlay_comparison_checked"
+      ]
+    },
+    "measurement.qc.status": {
+      "description": "Quality control status of the measurement. pending = intent records awaiting execution.",
+      "values": [
+        "valid",
+        "compromised",
+        "failed",
+        "pending"
+      ]
+    },
+    "measurement.processing.publication_extraction_steps": {
+      "description": "Processing steps that mean the record's numbers were extracted from a publication. A record carrying one is source_type literature (LITERATURE_SOURCE_UNDECLARED).",
+      "values": [
+        "digitized_from_published_figure",
+        "user_verified_digitization_rules"
+      ]
+    }
+  },
+  "Assets": {
+    "assets.content_role": {
+      "description": "Role of the external file.",
+      "values": [
+        "raw_data",
+        "raw_data_pointer",
+        "reduction_product",
+        "input_structure",
+        "workflow_recipe",
+        "processing_script",
+        "calibration_reference",
+        "auxiliary_reference",
+        "documentation",
+        "metadata_snapshot",
+        "supplementary_image",
+        "other"
+      ]
+    },
+    "assets.citation.relation": {
+      "description": "How a cited publication relates to the record. source: the record's numbers were taken from this publication, its figures, tables, supplementary information or data repository (the record is then source_type literature). reports_this_work: the publication reports the same measurement or calculation, and the record's numbers come from the producer's own data. reference: related work, such as a method paper or the experiment a calculation models. Required on every cited publication of a record that is not source_type literature or database (CITATION_RELATION_UNDECLARED).",
+      "values": [
+        "source",
+        "reports_this_work",
+        "reference"
+      ]
+    }
+  },
+  "Links": {
+    "links.rel": {
+      "description": "Semantic relationship type.",
+      "values": [
+        "derived_from",
+        "intended_comparison_target",
+        "calibration_of",
+        "same_sample_as",
+        "replica_of",
+        "follows",
+        "validates",
+        "invalidates"
+      ]
+    },
+    "links.basis": {
+      "description": "Categorical justification for a link relationship.",
+      "values": [
+        "same_absorber_edge",
+        "matched_operating_conditions",
+        "shared_reference_state",
+        "same_workflow_version",
+        "identical_geometry",
+        "analysis_pipeline_output",
+        "replicate_preparation",
+        "same_sample_id",
+        "shared_analysis_method",
+        "shared_material_batch",
+        "matched_computational_method",
+        "unspecified"
+      ]
+    }
+  },
+  "Descriptors": {
+    "descriptors.outputs.descriptors.kind": {
+      "description": "Mathematical nature of the descriptor.",
+      "values": [
+        "absolute",
+        "differential",
+        "categorical",
+        "similarity",
+        "model",
+        "theoretical_metric"
+      ]
+    },
+    "descriptors.outputs.descriptors.source": {
+      "description": "Origin of the descriptor value.",
+      "values": [
+        "auto",
+        "manual",
+        "imported"
+      ]
+    },
+    "descriptors.faradaic_efficiency_products": {
+      "description": "Canonical product keys for {faradaic_efficiency|partial_current_density|production_rate}.{KEY} descriptors (Decision B, 2026-06-11: formula-style tokens). Single species use molecular formulas (CH3COO not acetate). Class tokens: C1 (all single-carbon), C1plus (all carbon products), C2plus, C3plus, C2plus_alcohols. Pragmatic-exception trivial names (no practical formula): urea, lactate. Aliases in descriptors.product_aliases are REJECTED by the validator on new submissions.",
+      "values": [
+        "H2",
+        "CO",
+        "CH4",
+        "HCOO",
+        "C2H4",
+        "C2H6",
+        "CH3COO",
+        "C2H5OH",
+        "C3H7OH",
+        "CH3OH",
+        "C3H6",
+        "n_C3H7OH",
+        "i_C3H7OH",
+        "CH3CHO",
+        "C3H5OH",
+        "lactate",
+        "urea",
+        "NH3",
+        "CH3NH2",
+        "C1",
+        "C1plus",
+        "C2plus",
+        "C3plus",
+        "C2plus_alcohols"
+      ]
+    },
+    "descriptors.electrochemical_performance": {
+      "description": "Canonical descriptor names for electrochemical performance metrics. Descriptor names SHOULD use these keys for cross-record queryability.",
+      "values": [
+        "steady_state_current_density",
+        "onset_potential",
+        "half_wave_potential",
+        "limiting_current_density",
+        "tafel_slope",
+        "exchange_current_density",
+        "mass_activity",
+        "specific_activity",
+        "ecsa",
+        "roughness_factor",
+        "electron_transfer_number",
+        "overpotential",
+        "cell_voltage",
+        "energy_efficiency",
+        "turnover_frequency",
+        "stability_retention_percent",
+        "total_faradaic_efficiency",
+        "partial_current_density",
+        "steady_state_potential",
+        "production_rate",
+        "work_function",
+        "degradation_rate",
+        "operating_duration"
+      ]
+    },
+    "descriptors.theoretical_metric": {
+      "description": "[In Silico] Key theoretical outcomes. Use dot-notation for specificity (e.g., adsorption_energy.CO, activation_barrier.OCCO_coupling, d_band_center.Cu_surface).",
+      "values": [
+        "adsorption_energy",
+        "pourbaix_stability",
+        "activation_barrier",
+        "projected_density_of_states",
+        "band_gap",
+        "surface_energy",
+        "d_band_center",
+        "total_energy",
+        "bond_length",
+        "reaction_energy"
+      ]
+    },
+    "descriptors.product_aliases": {
+      "description": "DEPRECATED product tokens and their canonical replacements (Decision B). All existing records migrated 2026-06-11.",
+      "map": {
+        "HCOOH": "HCOO",
+        "acetate": "CH3COO",
+        "CH3COOH": "CH3COO",
+        "n_propanol": "n_C3H7OH",
+        "1_propanol": "n_C3H7OH",
+        "C3H7OH": "n_C3H7OH",
+        "allyl_alcohol": "C3H5OH",
+        "acetaldehyde": "CH3CHO",
+        "lactic_acid": "lactate",
+        "total_C1": "C1",
+        "total_C2plus": "C2plus",
+        "C2plus_alcohol": "C2plus_alcohols"
+      }
+    },
+    "descriptors.spectroscopy": {
+      "description": "Canonical descriptor names for spectroscopy-derived knowledge claims (added 2026-06-12). XAS: edge_position, white_line_energy, white_line_intensity, inflection_point_energy, edge_shift (kind=differential with relative_to), oxidation_state.{element}. XPS: binding_energy.{level}, spin_orbit_splitting.{level}. XRD: phase_fraction.{phase}, lattice_parameter.{phase}, peak_position.{reflection}, peak_intensity.{reflection}. Spectra themselves live in measurement.series; descriptors carry what was LEARNED from them.",
+      "values": [
+        "edge_position",
+        "white_line_energy",
+        "white_line_intensity",
+        "inflection_point_energy",
+        "edge_shift",
+        "oxidation_state",
+        "binding_energy",
+        "spin_orbit_splitting",
+        "phase_fraction",
+        "lattice_parameter",
+        "peak_position",
+        "peak_intensity"
+      ]
+    },
+    "descriptors.theoretical": {
+      "description": "",
+      "values": [
+        "adsorption_energy",
+        "activation_barrier",
+        "reaction_energy",
+        "total_energy",
+        "formation_energy",
+        "surface_energy",
+        "band_gap",
+        "pourbaix_stability",
+        "work_function",
+        "vibrational_frequency",
+        "d_band_center"
+      ]
+    },
+    "descriptors.component_families": {
+      "description": "Descriptor name PREFIXES whose dotted members are SHARES OF A WHOLE, so that the members present in one output block can be summed and compared against a known total. This is what lets the validator check closure arithmetically without knowing any chemistry: it sums what the record declares and compares it to the total the record declares. Add a prefix here when a family has that shares-of-a-whole property in your domain; the default whole is 1.0 and a block may override it via descriptors.outputs[].completeness.expected_total.",
+      "values": [
+        "faradaic_efficiency",
+        "mole_fraction",
+        "mass_fraction",
+        "atomic_fraction",
+        "phase_fraction",
+        "selectivity",
+        "branching_ratio",
+        "isotope_abundance"
+      ]
+    },
+    "descriptors.aggregate_descriptors": {
+      "description": "Descriptors that AGGREGATE other descriptors in the same output block, mapped to the members they aggregate. Two uses, both arithmetic: an aggregate is excluded from a closure sum so it is not double-counted alongside its own members, and where both the aggregate and its members are present their values must agree. Domain-specific content lives HERE, as data, not in validator code - other domains extend this map without touching Python. A record may also declare aggregation inline via the descriptor's own `aggregates` field, which takes precedence over this table.",
+      "map": {
+        "faradaic_efficiency.C1": [
+          "faradaic_efficiency.CH4",
+          "faradaic_efficiency.CO",
+          "faradaic_efficiency.HCOO",
+          "faradaic_efficiency.CH3OH"
+        ],
+        "faradaic_efficiency.C2plus": [
+          "faradaic_efficiency.C2H4",
+          "faradaic_efficiency.C2H5OH",
+          "faradaic_efficiency.CH3COO",
+          "faradaic_efficiency.CH3CHO",
+          "faradaic_efficiency.C2H6",
+          "faradaic_efficiency.n_C3H7OH",
+          "faradaic_efficiency.i_C3H7OH",
+          "faradaic_efficiency.C3H6"
+        ],
+        "faradaic_efficiency.C2_products_sum": [
+          "faradaic_efficiency.C2H4",
+          "faradaic_efficiency.C2H5OH",
+          "faradaic_efficiency.CH3COO",
+          "faradaic_efficiency.CH3CHO",
+          "faradaic_efficiency.C2H6"
+        ],
+        "faradaic_efficiency.C2": [
+          "faradaic_efficiency.C2H4",
+          "faradaic_efficiency.C2H5OH",
+          "faradaic_efficiency.CH3COO",
+          "faradaic_efficiency.CH3CHO",
+          "faradaic_efficiency.C2H6"
+        ],
+        "faradaic_efficiency.C3plus": [
+          "faradaic_efficiency.n_C3H7OH",
+          "faradaic_efficiency.i_C3H7OH",
+          "faradaic_efficiency.C3H6",
+          "faradaic_efficiency.C3H5OH"
+        ],
+        "faradaic_efficiency.total": [],
+        "faradaic_efficiency.liquid": [],
+        "faradaic_efficiency.gas": []
+      },
+      "map_columns": [
+        "aggregate descriptor",
+        "members it sums"
+      ]
+    },
+    "descriptors.uncertainty_basis": {
+      "description": "How the uncertainty on a descriptor value was arrived at. Generic across every domain and every descriptor class. `not_reported` is the honest entry when the source gives no uncertainty, and it is what a value should carry INSTEAD of sigma: 0 - a zero sigma tells a machine the value is exact.",
+      "values": [
+        "reported",
+        "digitization_estimate",
+        "assumed",
+        "propagated",
+        "method",
+        "exact",
+        "not_reported"
+      ]
+    },
+    "descriptors.structure": {
+      "description": "Canonical descriptor names for structural claims from scattering, reflectometry, microscopy and sorption. Layer, phase or element labels go after the dot (layer_thickness.CuOx, coordination_number.Cu_O).",
+      "values": [
+        "layer_thickness",
+        "scattering_length_density",
+        "interface_roughness",
+        "coordination_number",
+        "crystallite_size",
+        "particle_size",
+        "specific_surface_area"
+      ]
+    },
+    "descriptors.class_units": {
+      "description": "The canonical unit of each canonical descriptor class (the part of the name before the first dot). A numeric value of a listed class must carry one of these units, or the validator rejects it with CLASS_UNIT_MISMATCH: convert the value, never relabel the unit. One class, one unit, so values from different records compare without conversion. mass_activity lists two because the normalizing mass is part of the unit (all catalyst vs Pt only).",
+      "map_columns": [
+        "descriptor class",
+        "canonical unit"
+      ],
+      "map": {
+        "steady_state_current_density": [
+          "mA/cm2"
+        ],
+        "partial_current_density": [
+          "mA/cm2"
+        ],
+        "limiting_current_density": [
+          "mA/cm2"
+        ],
+        "exchange_current_density": [
+          "mA/cm2"
+        ],
+        "specific_activity": [
+          "mA/cm2"
+        ],
+        "mass_activity": [
+          "A/mg",
+          "A/mg_Pt"
+        ],
+        "onset_potential": [
+          "V_RHE"
+        ],
+        "half_wave_potential": [
+          "V_RHE"
+        ],
+        "steady_state_potential": [
+          "V_RHE",
+          "V_SHE",
+          "V_ref"
+        ],
+        "overpotential": [
+          "V"
+        ],
+        "cell_voltage": [
+          "V_cell"
+        ],
+        "tafel_slope": [
+          "mV/dec"
+        ],
+        "ecsa": [
+          "cm2"
+        ],
+        "roughness_factor": [
+          "dimensionless"
+        ],
+        "electron_transfer_number": [
+          "dimensionless"
+        ],
+        "energy_efficiency": [
+          "fraction"
+        ],
+        "turnover_frequency": [
+          "1/s"
+        ],
+        "stability_retention_percent": [
+          "percent"
+        ],
+        "total_faradaic_efficiency": [
+          "fraction"
+        ],
+        "faradaic_efficiency": [
+          "fraction"
+        ],
+        "production_rate": [
+          "umol/cm2/h"
+        ],
+        "degradation_rate": [
+          "mV/h",
+          "uV/h"
+        ],
+        "operating_duration": [
+          "h"
+        ],
+        "edge_position": [
+          "eV"
+        ],
+        "white_line_energy": [
+          "eV"
+        ],
+        "inflection_point_energy": [
+          "eV"
+        ],
+        "edge_shift": [
+          "eV"
+        ],
+        "binding_energy": [
+          "eV"
+        ],
+        "spin_orbit_splitting": [
+          "eV"
+        ],
+        "oxidation_state": [
+          "dimensionless"
+        ],
+        "phase_fraction": [
+          "fraction"
+        ],
+        "lattice_parameter": [
+          "angstrom"
+        ],
+        "layer_thickness": [
+          "angstrom"
+        ],
+        "scattering_length_density": [
+          "1e-6 angstrom^-2"
+        ],
+        "interface_roughness": [
+          "angstrom"
+        ],
+        "coordination_number": [
+          "dimensionless"
+        ],
+        "crystallite_size": [
+          "nm"
+        ],
+        "particle_size": [
+          "nm"
+        ],
+        "specific_surface_area": [
+          "m2/g"
+        ],
+        "adsorption_energy": [
+          "eV"
+        ],
+        "activation_barrier": [
+          "eV"
+        ],
+        "reaction_energy": [
+          "eV"
+        ],
+        "total_energy": [
+          "eV"
+        ],
+        "formation_energy": [
+          "eV"
+        ],
+        "band_gap": [
+          "eV"
+        ],
+        "d_band_center": [
+          "eV"
+        ],
+        "work_function": [
+          "eV"
+        ],
+        "surface_energy": [
+          "J/m^2"
+        ],
+        "vibrational_frequency": [
+          "cm-1"
+        ],
+        "bond_length": [
+          "angstrom"
+        ],
+        "conversion": [
+          "fraction"
+        ],
+        "selectivity": [
+          "fraction"
+        ],
+        "yield": [
+          "fraction"
+        ],
+        "mass_specific_rate": [
+          "umol/g/h"
+        ],
+        "apparent_activation_energy": [
+          "kJ/mol"
+        ],
+        "reaction_order": [
+          "dimensionless"
+        ],
+        "light_off_temperature": [
+          "K"
+        ]
+      }
+    },
+    "descriptors.magnitude_classes": {
+      "description": "Descriptor classes stored as a non-negative magnitude. Some are positive by definition (an area, a turnover rate, an exchange current density). For the others the literature uses both signs, and ISAAC stores the magnitude: the direction is carried by the reaction and by the sign of the current density at which the value is read (ADR-001). An HER overpotential of 38 mV at -10 mA/cm2 is overpotential = 0.038 V with at.current_density_mA_cm2 = -10; a cathodic Tafel slope of -120 mV/dec is tafel_slope = 120 mV/dec. A negative value draws NEGATIVE_MAGNITUDE.",
+      "values": [
+        "overpotential",
+        "tafel_slope",
+        "ecsa",
+        "roughness_factor",
+        "turnover_frequency",
+        "exchange_current_density"
+      ]
+    },
+    "descriptors.name_prefix_tokens": {
+      "description": "Reaction, technique and method tokens that must not begin a descriptor name (PREFIX_IN_DESCRIPTOR_NAME). The reaction is stated in context, the technique in system.technique and experimental vs computational in system.domain, so the name carries only the quantity: half_wave_potential, not orr_half_wave_potential; edge_position, not xanes.edge_position; adsorption_energy.O2, not dft_o2_adsorption_energy. Organization namespaces (lbnl.xps.elements_detected) are not affected.",
+      "values": [
+        "co2rr",
+        "corr",
+        "oer",
+        "her",
+        "orr",
+        "nrr",
+        "n2rr",
+        "aor",
+        "no3rr",
+        "hor",
+        "uor",
+        "mor",
+        "eor",
+        "xas",
+        "xanes",
+        "exafs",
+        "herfd",
+        "herfd_xas",
+        "herfd_xanes",
+        "xes",
+        "rixs",
+        "xps",
+        "ups",
+        "xrf",
+        "xrd",
+        "saxs",
+        "waxs",
+        "pdf",
+        "sans",
+        "cv",
+        "lsv",
+        "eis",
+        "tem",
+        "sem",
+        "afm",
+        "stm",
+        "dft",
+        "aimd",
+        "kmc",
+        "mkm",
+        "mlip",
+        "gc",
+        "hplc",
+        "icp",
+        "icp_ms",
+        "icp_oes",
+        "nmr",
+        "ftir",
+        "raman",
+        "uv_vis",
+        "uvvis",
+        "epr",
+        "tga",
+        "bet",
+        "tpd",
+        "tpr",
+        "sers",
+        "dems",
+        "secm"
+      ]
+    },
+    "descriptors.class_aliases": {
+      "description": "Deprecated descriptor spellings and their canonical replacements. The validator rejects a descriptor whose full name or class is listed here (DESCRIPTOR_CLASS_ALIAS) and names the replacement.",
+      "map": {
+        "activation_energy": "activation_barrier",
+        "dft.total_energy": "total_energy",
+        "dE_ads": "adsorption_energy",
+        "Eads": "adsorption_energy",
+        "e_ads": "adsorption_energy",
+        "d_band_centre": "d_band_center",
+        "tof": "turnover_frequency",
+        "exchange_current": "exchange_current_density"
+      }
+    },
+    "descriptors.catalytic_performance": {
+      "description": "Canonical descriptor names for catalytic performance under any drive (thermal, photo-, electro-, homogeneous). selectivity.{product} and the product qualifiers use formula-style tokens (selectivity.C3H6, selectivity.CH3OH). Conditions (temperature, pressure, time on stream) go in `at` or context, never in the name.",
+      "values": [
+        "conversion",
+        "selectivity",
+        "yield",
+        "mass_specific_rate",
+        "apparent_activation_energy",
+        "reaction_order",
+        "light_off_temperature"
+      ]
+    }
+  },
+  "Computation": {
+    "computation.method.family": {
+      "description": "Method family for computational records.",
+      "values": [
+        "DFT",
+        "DFT_U",
+        "hybrid_DFT",
+        "AIMD",
+        "classical_MD",
+        "CHE",
+        "microkinetic",
+        "machine_learning",
+        "semi_empirical"
+      ]
+    },
+    "computation.method.functional_class": {
+      "description": "Density functional class.",
+      "values": [
+        "LDA",
+        "GGA",
+        "meta_GGA",
+        "hybrid",
+        "double_hybrid",
+        "RPA"
+      ]
+    },
+    "computation.method.basis_type": {
+      "description": "Basis set type.",
+      "values": [
+        "planewave",
+        "LCAO",
+        "real_space",
+        "mixed"
+      ]
+    },
+    "computation.method.spin_treatment": {
+      "description": "Spin polarization treatment.",
+      "values": [
+        "none",
+        "collinear",
+        "noncollinear",
+        "SOC"
+      ]
+    },
+    "computation.method.dispersion": {
+      "description": "Van der Waals dispersion correction.",
+      "values": [
+        "none",
+        "D2",
+        "D3",
+        "D3BJ",
+        "TS",
+        "MBD",
+        "dDsC",
+        "vdW_DF",
+        "vdW_DF2",
+        "rVV10"
+      ]
+    },
+    "computation.potential_method.type": {
+      "description": "Electrochemical potential treatment in the simulation. Critical for valid comparison between records.",
+      "values": [
+        "vacuum",
+        "CHE",
+        "implicit_solvent_PZC",
+        "fixed_NELECT",
+        "grand_canonical",
+        "constant_potential",
+        "joint_DFT"
+      ]
+    },
+    "computation.output_quantity.quantity": {
+      "description": "The thermodynamic quantity reported in descriptors. Records with different output quantities MUST NOT be compared without correction.",
+      "values": [
+        "E_DFT",
+        "E_DFT_plus_ZPE",
+        "delta_E",
+        "delta_G_CHE",
+        "delta_G_grand_canonical",
+        "activation_energy_raw",
+        "activation_energy_ZPE",
+        "activation_free_energy"
+      ]
+    },
+    "computation.transition_state.method": {
+      "description": "Transition state search method.",
+      "values": [
+        "NEB",
+        "CI-NEB",
+        "dimer",
+        "string",
+        "IRC",
+        "growing_string"
+      ]
+    },
+    "computation.method.code": {
+      "description": "Free text, not a closed list: any code is accepted. Use the code's usual name (for example VASP, Quantum ESPRESSO, GPAW, CP2K, ORCA, LAMMPS, COMSOL Multiphysics); a workflow that chains codes joins them in order with ' + '; 'not_reported' when the source does not state it. This is the only place a record states its code (CODE_OUTSIDE_METHOD)."
+    },
+    "computation.method_requirements": {
+      "description": "Fields of computation.method that every calculation declares, whatever its method family (COMPUTATION_METHOD_MISSING, COMPUTATION_METHOD_INCOMPLETE). Write 'not_reported' for a value the source does not state; the family is always known.",
+      "values": [
+        "family",
+        "code"
+      ]
+    },
+    "computation.method_requirements_by_family": {
+      "description": "Further fields of computation.method that a calculation of the given family declares (COMPUTATION_METHOD_INCOMPLETE); 'not_reported' is accepted. A family missing from this table has only the requirements above. Extend it through a vocabulary proposal.",
+      "map": {
+        "DFT": [
+          "functional_name"
+        ],
+        "DFT_U": [
+          "functional_name"
+        ],
+        "hybrid_DFT": [
+          "functional_name"
+        ],
+        "AIMD": [
+          "functional_name"
+        ],
+        "CHE": [
+          "functional_name"
+        ]
+      },
+      "map_columns": [
+        "family",
+        "also required"
+      ]
+    }
+  },
+  "Units": {
+    "units.electrochemistry": {
+      "description": "Canonical unit strings for electrochemistry. Use these exact strings in measurement.series and descriptors to ensure cross-record consistency.",
+      "values": [
+        "mA/cm2",
+        "A/cm2",
+        "A/mg",
+        "A/mg_Pt",
+        "mA/mg",
+        "V",
+        "V_RHE",
+        "V_SHE",
+        "mV/dec",
+        "mV",
+        "fraction",
+        "percent",
+        "Hz",
+        "ohm",
+        "ohm_cm2",
+        "mF/cm2",
+        "cm2",
+        "rpm",
+        "s",
+        "min",
+        "h",
+        "mol/s",
+        "mol/s/cm2",
+        "1/s",
+        "sccm",
+        "mL/min",
+        "umol/cm2/h",
+        "mmol/s/cm2",
+        "mol/L",
+        "uM",
+        "mM",
+        "bar",
+        "ppm",
+        "V_ref",
+        "V_cell",
+        "mV/h",
+        "uV/h"
+      ]
+    },
+    "units.spectroscopy": {
+      "description": "Canonical unit strings for spectroscopy measurements.",
+      "values": [
+        "eV",
+        "keV",
+        "nm",
+        "cm-1",
+        "angstrom",
+        "arb",
+        "mu_normalized",
+        "counts",
+        "counts/s",
+        "1e-6 angstrom^-2",
+        "degree"
+      ]
+    },
+    "units.general": {
+      "description": "Canonical general-purpose unit strings.",
+      "values": [
+        "dimensionless",
+        "count",
+        "counts",
+        "ratio",
+        "arb",
+        "angstrom^-1",
+        "angstrom^2",
+        "angstrom^3",
+        "g/mol",
+        "ML",
+        "mu_B",
+        "eV/angstrom",
+        "J/m^2",
+        "m2/g",
+        "umol/g/h",
+        "kJ/mol",
+        "K"
+      ]
+    },
+    "units.aliases": {
+      "description": "DEPRECATED unit spellings and their canonical replacements (Decision A, 2026-06-11: slash-form grammar). The validator REJECTS these aliases on new submissions with a message pointing to the canonical form. All 1,580 existing records were migrated 2026-06-11.",
+      "map": {
+        "mA_cm-2": "mA/cm2",
+        "mA_cm2": "mA/cm2",
+        "mA cm-2": "mA/cm2",
+        "V_vs_RHE": "V_RHE",
+        "V_vs_SHE": "V_SHE",
+        "umol_cm-2_h-1": "umol/cm2/h",
+        "umol_h-1_cm-2": "umol/cm2/h",
+        "mmol_s-1_cm-2": "mmol/s/cm2",
+        "mol_L-1": "mol/L",
+        "%": "percent",
+        "\u00c5\u207b\u00b9": "angstrom^-1",
+        "unitless": "dimensionless",
+        "none": "dimensionless",
+        "arbitrary_units": "arb",
+        "mV_per_dec": "mV/dec",
+        "mV dec-1": "mV/dec",
+        "mV/decade": "mV/dec",
+        "per_s": "1/s",
+        "per_site_per_s": "1/s",
+        "s-1": "1/s",
+        "mA_per_cm2": "mA/cm2",
+        "\u00c5": "angstrom",
+        "1e-6 \u00c5\u207b\u00b2": "1e-6 angstrom^-2",
+        "angstrom^-1\u207b\u00b9": "angstrom^-1",
+        "1e-6 angstrom^-1\u207b\u00b2": "1e-6 angstrom^-2"
+      }
+    }
+  },
+  "Attribution": {
+    "attribution.contributors.role": {
+      "description": "Contributor roles. data_owner = the PI/lab whose data this is; the same person may hold multiple roles (separate entries).",
+      "values": [
+        "data_owner",
+        "performed_measurement",
+        "performed_analysis",
+        "curated_record"
+      ]
+    }
+  }
+}

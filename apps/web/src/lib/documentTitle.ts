@@ -172,6 +172,9 @@ export function routeDocumentTitle(pathname: string, search: string): string | n
       // A title authored here would be a second name for a destination that
       // already has one — the defect this module's header records.
       return composeDocumentTitle([LABELS.navImports]);
+    case '/schema-proposals':
+      // `navSchemaProposals`, the SAME string the nav item and the page `<h1>` read.
+      return composeDocumentTitle([LABELS.navSchemaProposals]);
     case '/memory':
       return composeDocumentTitle([LABELS.navMemory]);
     case '/governance':

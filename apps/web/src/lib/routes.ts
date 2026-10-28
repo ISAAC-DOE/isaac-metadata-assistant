@@ -497,6 +497,8 @@ export const ROUTES = {
   memory: '/memory',
   governance: '/governance',
   statistics: '/statistics',
+  /** SCHEMA PROPOSALS — drafting proposals to change the official vocabulary. `?tab=browse|propose|proposals`. */
+  schemaProposals: '/schema-proposals',
   settings: '/settings',
   /**
    * A deep link to one Settings tab, e.g. `/settings?tab=advanced`. A retired
@@ -602,6 +604,7 @@ export const ROUTE_PATTERNS = {
   memory: '/memory',
   governance: '/governance',
   statistics: '/statistics',
+  schemaProposals: '/schema-proposals',
   settings: '/settings',
   record: '/record/:id',
   complete: '/record/:id/complete',

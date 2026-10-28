@@ -1,6 +1,6 @@
 import './chrome.css';
 import { Link } from 'react-router-dom';
-import { BarChart3, Inbox, LayoutList, Settings } from './icons';
+import { BarChart3, FilePenLine, Inbox, LayoutList, Settings } from './icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import type { LucideIcon } from './icons';
@@ -11,6 +11,7 @@ export type NavKey =
   | 'memory'
   | 'governance'
   | 'statistics'
+  | 'schemaProposals'
   | 'settings';
 
 /**
@@ -125,6 +126,18 @@ const ITEMS: { key: NavKey; label: string; icon: LucideIcon; to: string }[] = [
    * label, which is this file's standing rule.
    */
   { key: 'statistics', label: LABELS.navStatistics, icon: BarChart3, to: ROUTES.statistics },
+  /*
+   * SCHEMA PROPOSALS (2026-10-28), between Statistics and Settings (Settings stays last).
+   * A destination of its own because proposing a vocabulary change is a scientist's act
+   * and not a setting; it states on its own screen that ISAAC drafts and the standard's
+   * owners decide, so the label promises no outcome.
+   */
+  {
+    key: 'schemaProposals',
+    label: LABELS.navSchemaProposals,
+    icon: FilePenLine,
+    to: ROUTES.schemaProposals,
+  },
   { key: 'settings', label: LABELS.navSettings, icon: Settings, to: ROUTES.settings },
 ];
 

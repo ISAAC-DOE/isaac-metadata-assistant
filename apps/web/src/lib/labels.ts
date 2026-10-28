@@ -224,6 +224,13 @@ export const LABELS = {
    * making a claim the surface then has to walk back.
    */
   navImports: 'Historical Import',
+  /*
+   * SCHEMA PROPOSALS — one authored string: the nav label, the page `<h1>` and the
+   * `document.title` segment all read it. It names what the destination is FOR
+   * (proposing a change to the official vocabulary) and promises nothing about an
+   * outcome: ISAAC drafts these, the standard's owners decide them elsewhere.
+   */
+  navSchemaProposals: 'Schema Proposals',
 
   // Screen titles
   screenExperiments: 'My Experiments',

@@ -1036,7 +1036,7 @@ describe('the Full Description rule over the REAL generated contract', () => {
    * rule recognises, NOT by widening the list. This is the THIRD recorded
    * instance of that miss, and the second the test caught rather than a human.
    */
-  it('describes the contract it claims to: 95 operations, MEASURED on the merged tree', () => {
+  it('describes the contract it claims to: 101 operations, MEASURED on the merged tree', () => {
     // FOUR slices have now raised this from 52 for real, different additions — the
     // asset slice, the transcript slice, run removal, and the two CONFLICT
     // RESOLUTION operations. Both sides of this merge conflict carried a number
@@ -1770,7 +1770,10 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // record and sidecar) and `GET /api/experiments/{experiment_id}/structured-answers`
     // (A-01/A-04, the confirmed spectrum, QC verdict and descriptor). The TITLE above is
     // edited in the same change.
-    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(95);
+    // 95 -> 101, 2026-10-28: SIX Schema Proposals operations (`GET`/`POST /api/schema-proposals`,
+    // `.../vocabulary`, `.../{proposal_id}`, `.../withdraw`, `.../portal-payload`). The TITLE above is
+    // edited in the same change.
+    expect(REAL_CONTRACT_DESCRIPTIONS).toHaveLength(101);
     // 84,501 -> 84,584 (+83): the assistant seam's own description was corrected, in
     // ONE operation and with the paragraph count unchanged. It read "so every request
     // is answered `501`" while the paragraph two below it documented the `422` — a
@@ -2515,7 +2518,13 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // The hosted-import change and the export change met in one merge on 2026-10-12 (each
     // re-transcribed DISJOINT operations); the combined total below was READ from this
     // assertion's own failure output after the merge, not derived by adding the deltas.
-    expect(total).toBe(181258);
+    // 181,258 -> 184,670 (+3,412), 2026-10-28: SIX Schema Proposals operations added, NO
+    // existing description changed (`test_contract_description_parity.py` proves the
+    // captured copy matches the served document in both directions). Re-measured over the
+    // transcribed array, which that parity test pins to `create_app().openapi()`.
+    // 184,670 -> 185,409 (+739), same day: the Schema Proposals descriptions were rewritten after review (two
+    // vocabulary sources, no 'official vocabulary' claim, a 413 and the shared limit stated). Re-measured.
+    expect(total).toBe(185409);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never
@@ -2845,7 +2854,10 @@ describe('the Full Description rule over the REAL generated contract', () => {
       //
       // 347 -> 348 (+1), after the slice's review: `GET .../structured-answers` gained
       // the `exported` paragraph. Measured (`expected 348 to be 347`), with the characters.
-      348,
+      // 348 -> 356 (+8), 2026-10-28: the six Schema Proposals operations carry 8 post-lead
+      // paragraphs between them; no existing operation changed. Measured by the assertion.
+      // 356 -> 357 (+1) after the review rewrite: one Schema Proposals description gained a paragraph. Measured.
+      357,
     );
     // 211 -> 235 (+24): the four new operations carry a lead plus 24 post-lead
     // paragraphs between them. It is asserted separately from the character total

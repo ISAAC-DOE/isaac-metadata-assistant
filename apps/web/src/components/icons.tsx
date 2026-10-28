@@ -5,6 +5,9 @@
  */
 import {
   BookMarked,
+  // SCHEMA PROPOSALS destination glyph: a document with a pen, i.e. drafting a change
+  // to a document. Paired with its text label at the one call site (`LeftNav`).
+  FilePenLine,
   // THE WIDGET GLYPHS (`components/Widget.tsx`). `Info` is the widget's
   // "about these figures" affordance — a plain circled i, never a question mark
   // (that is `HelpTip`'s field-definition `?`, a different job). The other four
@@ -275,6 +278,7 @@ export {
    * alone.
    */
   Inbox,
+  FilePenLine,
   History,
   CornerRightUp,
   Hourglass,

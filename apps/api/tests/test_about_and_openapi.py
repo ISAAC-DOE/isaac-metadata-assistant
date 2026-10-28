@@ -27,6 +27,7 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from isaac_api.routes import OPENAPI_TAGS, _build_commit
+from isaac_api.schema_proposals import SCHEMA_PROPOSALS_TAG
 from isaac_records.official import EXPECTED_VERSION
 
 
@@ -850,7 +851,17 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     #
     # AT THIS HEAD: 85 PATHS AND 95 METHOD-OPERATIONS; `checked` is the second —
     # re-derived over `create_app().openapi()`, not incremented.
-    assert checked == 95, f"expected 95 documented operations, found {checked}"
+    #
+    # ── 95 -> 101, 2026-10-28: SCHEMA PROPOSALS, six operations ──────────────────
+    # `apps/api/isaac_api/schema_proposals.py` (its own router, not routes.py): the
+    # vocabulary read, create, list, read-one, withdraw, and the portal payload.
+    # None approves, applies or sends anything; the status vocabulary is `pending` and
+    # `withdrawn` only. Storage is workspace files, so no table and no migration.
+    #
+    # AT THIS HEAD: 90 PATHS AND 101 METHOD-OPERATIONS (paths 85 -> 90: `/schema-
+    # proposals` carries GET and POST, so five new paths carry six operations);
+    # `checked` is the second — re-derived over `create_app().openapi()`.
+    assert checked == 101, f"expected 101 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -990,10 +1001,14 @@ def test_every_operation_is_tagged_with_a_registered_tag(client):
 
 def test_registered_tags_match_the_module_level_definitions(client):
     schema = client.get("/api/openapi").json()
-    assert schema["tags"] == OPENAPI_TAGS
-    names = [tag["name"] for tag in OPENAPI_TAGS]
+    # `Schema Proposals` is registered by `create_app` beside `OPENAPI_TAGS` rather than
+    # inside it (that list lives in the route module another slice was editing); the
+    # published list is the two together.
+    published = [*OPENAPI_TAGS, SCHEMA_PROPOSALS_TAG]
+    assert schema["tags"] == published
+    names = [tag["name"] for tag in published]
     assert len(names) == len(set(names)), f"duplicate tag name in {names}"
-    assert all(tag.get("description", "").strip() for tag in OPENAPI_TAGS)
+    assert all(tag.get("description", "").strip() for tag in published)
 
 
 # --- 5. the CONTRACT is pinned: status codes and component schemas --------------
@@ -1366,6 +1381,15 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
         "/api/imports/{import_id}/sources/{source_id}",
         "delete",
     ): ["200", "401", "404", "422"],
+    # SCHEMA PROPOSALS. `409` is the term/category/duplicate conflict, `429` the
+    # pending/stored caps, `503` an unwritable working folder; `422` on the writes is
+    # the typed per-field refusal (and FastAPI's own for a malformed query/path).
+    ("/api/schema-proposals", "get"): ["200", "401", "422"],
+    ("/api/schema-proposals", "post"): ["201", "401", "409", "413", "422", "429", "503"],
+    ("/api/schema-proposals/vocabulary", "get"): ["200", "401"],
+    ("/api/schema-proposals/{proposal_id}", "get"): ["200", "401", "404", "422"],
+    ("/api/schema-proposals/{proposal_id}/portal-payload", "get"): ["200", "401", "404", "422"],
+    ("/api/schema-proposals/{proposal_id}/withdraw", "post"): ["200", "401", "404", "409", "422", "503"],
     ("/api/search", "get"): ["200", "401", "404", "422"],
     ("/api/tutorial/sessions", "post"): ["201", "401"],
     ("/api/tutorial/sessions/{session_id}", "delete"): ["204", "401", "422"],

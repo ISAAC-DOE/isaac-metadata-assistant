@@ -113,6 +113,14 @@ import type {
   RecordBundle,
 } from './types';
 import { readTutorialSession } from './tutorialSession';
+import type {
+  ApiSchemaPortalPayload,
+  ApiSchemaProposalList,
+  ApiSchemaProposalResponse,
+  ApiSchemaVocabulary,
+  SchemaProposalInput,
+  SchemaProposalStatus,
+} from './schemaProposals';
 
 /**
  * The base a build with no `VITE_API_BASE` falls back to — the local FastAPI
@@ -3076,6 +3084,41 @@ export const api = {
    * `createProposal` does — the same trap `updateRun`'s comment names, in the
    * other direction.
    * ====================================================================== */
+
+  /* ======================================================================
+   * SCHEMA PROPOSALS — drafting and tracking proposals to change the official
+   * vocabulary. NONE of these approves, applies or sends anything: the owners of
+   * the standard review a proposal in the ISAAC portal. A proposal serves no
+   * `ETag` and no operation here takes `If-Match`: the store has no revision
+   * contract, and a write is serialised on the server.
+   * ==================================================================== */
+
+  getSchemaVocabulary(): Promise<ApiSchemaVocabulary> {
+    return getJson<ApiSchemaVocabulary>('/schema-proposals/vocabulary');
+  },
+
+  listSchemaProposals(
+    opts: { limit?: number; offset?: number; status?: SchemaProposalStatus } = {},
+  ): Promise<ApiSchemaProposalList> {
+    const query = new URLSearchParams();
+    if (opts.limit !== undefined) query.set('limit', String(opts.limit));
+    if (opts.offset !== undefined) query.set('offset', String(opts.offset));
+    if (opts.status !== undefined) query.set('status', opts.status);
+    const qs = query.toString();
+    return getJson<ApiSchemaProposalList>(`/schema-proposals${qs ? `?${qs}` : ''}`);
+  },
+
+  createSchemaProposal(input: SchemaProposalInput): Promise<ApiSchemaProposalResponse> {
+    return postJson<ApiSchemaProposalResponse>('/schema-proposals', input);
+  },
+
+  withdrawSchemaProposal(proposalId: string): Promise<ApiSchemaProposalResponse> {
+    return postJson<ApiSchemaProposalResponse>(`/schema-proposals/${enc(proposalId)}/withdraw`);
+  },
+
+  getSchemaProposalPortalPayload(proposalId: string): Promise<ApiSchemaPortalPayload> {
+    return getJson<ApiSchemaPortalPayload>(`/schema-proposals/${enc(proposalId)}/portal-payload`);
+  },
 
   listImports(): Promise<ApiImportListResponse> {
     return getJson<ApiImportListResponse>('/imports');
