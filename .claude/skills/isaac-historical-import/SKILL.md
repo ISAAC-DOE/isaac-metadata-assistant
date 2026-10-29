@@ -132,7 +132,15 @@ scientist's own Athena projects). Results are in `<bundle>/processing/processing
 with a `plot.png` and `qc.json` per group in `<bundle>/processing/<group id>/`. For each group show:
 the quality verdict in words, glitch flags, whether it agrees with the scientist's own Athena
 output when one exists, and the plot: open the PNG with Read and describe it. Ask approve / reject /
-needs changes per group. **When approving, also ask for the QC status**: it is the scientist's
+needs changes per group. **A result with `applicability.status: not_applicable` is not a curve and
+has no verdict** — never call it a fail and never ask to approve it (`decide` refuses): say "no
+ISAAC processing protocol covers this data yet" (`no_xas_channel`, naming the reader and layout it
+states, e.g. `xes_tab_v1`) or "this group has no scans, so there is nothing to process"
+(`no_scans`); such a group stays incomplete. `isaac process` prints these counts apart. **When a
+result says scans were skipped** (QC reason `scans_skipped_lacking_chosen_columns`, often with the
+flag `channel_from_a_later_scan`), say it in plain words from its metrics, e.g. "14 of 165 scans were
+used; 150 had different columns (they may be motor or alignment scans); please confirm these belong
+in one record" — never present the curve as the whole group. **When approving, also ask for the QC status**: it is the scientist's
 call and `warn` is never turned into a status for them. Show the allowed words (the pinned
 vocabulary lists them; `isaac bundle decide --help` names the option) and what the QC flags were:
 `decide --target <result_id> --decision approve --qc-status <word> [--qc-note "<what is compromised or

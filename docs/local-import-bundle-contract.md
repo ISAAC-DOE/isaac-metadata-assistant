@@ -527,3 +527,57 @@ Exit codes for the LOCAL-2 commands: `validate` and `export` exit 1 when any dra
   structured logbook reading; a stored rule such as dry sample → ex_situ) carries a `derive`
   normalisation step naming that rule; the validator accepts it only when the rule id is the
   candidate's own and `from` is a witnessed reading.
+
+## 18. Processing that does not apply is not a QC fail
+
+Measured on six real beamtimes: every group the draft XAS protocol could not apply to was
+reported QC `fail` — tab-separated `xes<N>` files, MCA arrays, headerless two-column files
+(no absorption channel could be formed) and groups listing no scan. A `fail` tells a
+scientist their spectrum is bad; the truth was "this protocol does not apply" or "there is
+nothing to process".
+
+- **Contract (additive, no format bump).** `processing_result.applicability` is OPTIONAL
+  (absent = the protocol applied, so every older bundle is unchanged):
+  `{status: "not_applicable", reason_code: "no_scans" | "no_xas_channel", detail, statement,
+  what_the_data_states}`. The schema forbids `qc.verdict` and any `outputs.files` beside it.
+  `processing_result` already allowed additional properties and `qc.verdict` was never
+  required, so no `format_version` change is needed; `save_bundle`'s version rule is unchanged.
+  `processing/processing_results.json` is format 0.2.0 (adds the field and
+  `summary.not_applicable` / `summary.lines`).
+- **The boundary is what the code detects, never a reader name.** `no_scans`: the group lists
+  no scan at all. `no_xas_channel`: in NONE of the group's readable scans does
+  `channels.choose_channels` form a channel (an energy axis and a signal), and no scan has a
+  signal-side candidate column (I0, transmission, fluorescence name or `sum:` family member)
+  that is present but not live. Such a dead candidate is a real QC failure,
+  `fail signal_channel_dead`. When some scans form a channel and others do not, the first
+  scan that forms one supplies the group's choice and the scans without those columns are
+  skipped, each with `skip_reason: scan_lacks_chosen_columns` (flag `channel_from_a_later_scan`);
+  any such skip makes QC at least `warn` (`scans_skipped_lacking_chosen_columns`, with the
+  `scans_readable` and `scans_skipped_lacking_chosen_columns` metrics), never `pass`.
+  A column whose label names time (whole-token `epoch`, `time`, `sec`, `seconds`, `timestamp`,
+  `clock`, …) is never taken as the energy axis by value shape. Everything else — unreadable or
+  missing files, too few points, a failed normalisation, a crash — is still judged and can still
+  `fail`. A scan with a recognised energy column but no signal column under a recognised name is
+  `no_xas_channel`: no column was judged, so no verdict is given.
+- **What the data states, as literals.** `what_the_data_states` holds the runs' `source_type`,
+  reader id and profile, that reader's stated file LAYOUT (`processing.run.READER_LAYOUT`, taken
+  from each reader's own docstring — e.g. "two numbers per line, no header"), the scan format and
+  its column labels. No technique is named: the `xes_tab_v1` reader itself does not say what
+  technique produced the file, so neither does this.
+- **Nothing to decide.** `decide` refuses every decision (approve, reject, needs_changes, defer)
+  on a not-applicable result, and `validate_bundle` refuses a decision on one, a QC verdict on
+  one, an output file on one, `preferred_for_record` on one, a `no_scans` reason that disagrees
+  with the listed inputs, and a `no_xas_channel` reason whose own `channel_choice` formed a
+  channel (or is absent), that read no scan, or that marks a scan used — checked against the
+  result's own record.
+- **Latest result decides.** A group is processing-blocked when its LATEST `isaac_protocol`
+  result (last in `processing_results[]`) is not applicable; older kept results (e.g. a rejected
+  `fail` from before this rule) are never deleted and do not make it approvable. A group that
+  holds an APPROVED curve is never blocked: the record uses that curve.
+- **Downstream.** `bundle questions`' `minimum_for_one_group` never offers "approve its
+  processing result" for such a group, prefers a group processing can complete, and states
+  `blocked: "no ISAAC processing protocol covers this data yet (...)"` when only such groups are
+  left. `build-records` lists `blocked` on the draft and the composition says why; `validate`
+  reports `processing_blocked` and the verdict `incomplete` (never a pass); export refuses it.
+  `summary.md` and `isaac process` print the not-applicable groups apart from the QC verdicts
+  (by reason, and the no-channel groups by reader profile).

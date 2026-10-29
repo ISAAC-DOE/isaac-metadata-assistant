@@ -26,6 +26,15 @@ verdict (pass / warn / fail), glitch flags, and compares with the scientist's ow
 it finds one. Show per group, in words:
 
 - the verdict and the reasons (counts, noise, glitches, energy range);
+- **when scans were skipped** (reason `scans_skipped_lacking_chosen_columns`; flag
+  `channel_from_a_later_scan` when the first scan was one of them): the used / readable / skipped
+  counts in plain words — "14 of 165 scans were used; 150 had different columns (they may be motor
+  or alignment scans); please confirm these belong in one record";
+- **or, when the result has `applicability.status: not_applicable`, no verdict at all**: say "no
+  ISAAC processing protocol covers this data yet" (`no_xas_channel`: no absorption channel could be
+  formed; name the reader and the layout it states, never a technique) or "no scans, nothing to
+  process" (`no_scans`). Do not call it a fail, show no plot, and ask nothing — `decide` refuses
+  every decision on it, and the group cannot become a complete record until a protocol covers it;
 - whether it agrees with Athena, and by how much, or "no Athena output found";
 - the plot PNG (`<bundle>/processing/<group id>/plot.png`): open it with Read, describe the curve (edge, pre/post-edge, obvious artefacts); the numbers are in `qc.json` beside it and in `processing/processing_results.json`.
 

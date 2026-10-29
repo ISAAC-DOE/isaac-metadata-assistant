@@ -460,10 +460,22 @@ def targets_for(payload: Mapping, question_id: str, only: str | None = None, fie
     return ids
 
 
+def processing_blocked_groups(bundle: Mapping) -> dict[str, str]:
+    """``{group_id: reason_code}`` for groups whose latest processing result says the
+    protocol does not apply (:func:`bundle.processing_blocked_groups`): there is no curve to
+    approve, so none is asked about."""
+    return {gid: r["applicability"]["reason_code"] for gid, r in B.processing_blocked_groups(bundle).items()}
+
+
 def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping) -> dict | None:
     """The fewest BLOCKING questions that stand between one record group and export —
     experiment-scope blocking questions plus that group's own — plus the two decisions
-    every group needs (confirm the group, approve its processing)."""
+    every group needs (confirm the group, approve its processing).
+
+    A group the processing protocol does not apply to is never offered as "the nearest"
+    while another exists: no approval can make it complete. When only such groups are left,
+    the decision named is the blocking reason, never "approve its processing result"."""
+    blocked = processing_blocked_groups(bundle)
     best = None
     for g in bundle.get("record_groups") or ():
         key = f"group:{g['group_id']}"
@@ -471,8 +483,15 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping) -> dict | N
             1 for q in payload["questions"]
             if q["blocking"] and (q["scope"] == key or (q["scope"] == "experiment" and (key in q["per_scope_targets"] or "experiment" in q["per_scope_targets"])))
         )
-        if best is None or need < best[1]:
-            best = (g["group_id"], need)
+        rank = (g["group_id"] in blocked, need)
+        if best is None or rank < best[2]:
+            best = (g["group_id"], need, rank)
     if best is None:
         return None
-    return {"group_id": best[0], "blocking_questions": best[1], "plus_decisions": ["confirm the group", "approve its processing result"]}
+    out = {"group_id": best[0], "blocking_questions": best[1], "plus_decisions": ["confirm the group", "approve its processing result"]}
+    if best[0] in blocked:
+        out["plus_decisions"] = ["confirm the group"]
+        out["blocked"] = f"{B.NO_PROTOCOL_COVERS} ({blocked[best[0]]}); this group cannot become a complete record until one does"
+    if blocked:
+        out["groups_without_an_applicable_processing_protocol"] = len(blocked)
+    return out

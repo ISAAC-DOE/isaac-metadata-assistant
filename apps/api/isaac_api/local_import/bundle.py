@@ -564,6 +564,38 @@ GROUP_STATUS_BY_DECISION: Mapping[str | None, str] = {
 GROUP_STATUS_DECISIONS = frozenset({"confirm", "split", "merge", "reject", "defer"})
 #: What a processing result may say about itself without a scientist's decision.
 PROCESSING_UNDECIDED_STATES = frozenset({STATE_CANDIDATE_EXTRACTED, STATE_NEEDS_REVIEW})
+#: ``processing_result.applicability.status``: the protocol could not be applied to the group.
+#: Such a result is an explicit outcome, NOT a curve: it carries no QC verdict and no output
+#: file, and no decision (approve, reject, needs_changes, defer) is accepted on it.
+NOT_APPLICABLE = "not_applicable"
+#: The group lists no scan: nothing to process.
+NA_NO_SCANS = "no_scans"
+#: No energy axis or no absorption signal could be formed from the scan's columns.
+NA_NO_XAS_CHANNEL = "no_xas_channel"
+#: Why a group without an approvable processing result cannot become a record.
+NO_PROTOCOL_COVERS = "no ISAAC processing protocol covers this data yet"
+
+
+def processing_not_applicable(result: Mapping) -> bool:
+    """True when the processing protocol could not be applied (``applicability.status``)."""
+    return isinstance(result, Mapping) and (result.get("applicability") or {}).get("status") == NOT_APPLICABLE
+
+
+def processing_blocked_groups(bundle: Mapping) -> dict[str, Mapping]:
+    """``{group_id: latest result}`` for groups whose LATEST ``isaac_protocol`` result says
+    the protocol does not apply. Latest = last in ``processing_results`` (``isaac process``
+    stores the kept, decided results first and the fresh run after them). Older results
+    (e.g. a rejected ``fail`` from before this rule) are kept and never deleted, but they do
+    not make the group approvable. A group with an APPROVED (non-not-applicable) result is
+    never blocked: the record composer uses that approved curve."""
+    latest: dict[str, Mapping] = {}
+    approved: set = set()
+    for r in bundle.get("processing_results") or ():
+        if r.get("source") == "isaac_protocol":
+            latest[r.get("group_id")] = r
+        if r.get("state") == STATE_SCIENTIST_CONFIRMED and not processing_not_applicable(r):
+            approved.add(r.get("group_id"))  # an approved curve exists: the record uses it
+    return {gid: r for gid, r in latest.items() if processing_not_applicable(r) and gid not in approved}
 
 
 def processing_id(result: Mapping) -> str:
@@ -2432,12 +2464,42 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50) -> list[str]:
     held_ids = {g.get("group_id") for g in bundle.get("record_groups") or ()} | {
         g.get("group_id") for g in bundle.get("superseded_record_groups") or ()
     }
+    not_applicable_ids = set()
     for r in bundle.get("processing_results") or ():
         if r.get("group_id") not in held_ids:
             errors.append(f"reference: processing result {processing_id(r)} names group {r.get('group_id')}, in neither record_groups nor superseded_record_groups")
+        if processing_not_applicable(r):
+            # RECOMPUTED, not trusted: a not-applicable result is no curve and carries no verdict
+            pid = processing_id(r)
+            not_applicable_ids.add(pid)
+            if (r.get("qc") or {}).get("verdict") is not None:
+                errors.append(f"consistency: processing result {pid} is not_applicable but carries a QC verdict")
+            if (r.get("outputs") or {}).get("files"):
+                errors.append(f"consistency: processing result {pid} is not_applicable but lists output files")
+            if r.get("preferred_for_record"):
+                errors.append(f"consistency: processing result {pid} is not_applicable but is preferred_for_record")
+            code = r["applicability"].get("reason_code")
+            if (code == NA_NO_SCANS) != (not r.get("inputs")):
+                errors.append(f"consistency: processing result {pid} reason {code} disagrees with its {len(r.get('inputs') or ())} listed inputs")
+            if code == NA_NO_XAS_CHANNEL:
+                # the result's OWN record must show no channel formed from a scan that was read
+                cc = r.get("channel_choice")
+                read = [i for i in r.get("inputs") or () if not i.get("skip_reason")]
+                if not isinstance(cc, Mapping) or (cc.get("energy") is not None and cc.get("mode") is not None):
+                    errors.append(f"consistency: processing result {pid} says no_xas_channel but its channel_choice formed one (or is absent)")
+                if not read:
+                    errors.append(f"consistency: processing result {pid} says no_xas_channel but no scan was read")
+                if any(i.get("used") for i in r.get("inputs") or ()):
+                    errors.append(f"consistency: processing result {pid} says no_xas_channel but marks a scan used")
         for f in (r.get("outputs") or {}).get("files") or ():
             if _safe_relative(f.get("relative_path")) is None:
                 errors.append(f"paths: processing result {processing_id(r)} names an output outside the bundle")
+    for d in bundle["scientist_decisions"]:
+        if d["target"]["kind"] == "processing_result" and d["target"]["id"] in not_applicable_ids:
+            errors.append(
+                f"decision: {d['decision_id']} decides processing result {d['target']['id']}, which is not_applicable "
+                f"({NO_PROTOCOL_COVERS}); there is nothing to {d.get('decision')}"
+            )
     for c in bundle["candidates"]:
         if c["run_id"] is not None and c["run_id"] not in run_ids:
             errors.append(f"reference: {c['candidate_id']} names unknown run {c['run_id']}")

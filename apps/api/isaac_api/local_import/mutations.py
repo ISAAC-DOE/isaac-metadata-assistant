@@ -295,6 +295,12 @@ def _check_decision(bundle: Mapping, kind: str, obj: Mapping, decision: str, val
         raise MutationRefused(f"A {kind} cannot be decided.")
     if decision not in allowed:
         raise MutationRefused(f"`{decision}` is not a decision for a {kind}; allowed: {', '.join(sorted(allowed))}.")
+    if kind == "processing_result" and B.processing_not_applicable(obj):
+        app = obj.get("applicability") or {}
+        raise MutationRefused(
+            f"{B.processing_id(obj)} is not a curve: the processing protocol does not apply to this group "
+            f"({app.get('reason_code')}: {B.NO_PROTOCOL_COVERS}). There is nothing to {decision}, and no QC verdict was given."
+        )
     if decision == "correct" and value is None:
         raise MutationRefused("`correct` needs --value.")
     if kind == "candidate" and decision == "confirm":

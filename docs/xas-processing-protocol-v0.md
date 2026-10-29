@@ -164,9 +164,26 @@ Outputs `normalized.csv` (norm, flat). **All need approval.**
 
 fail: 0 usable scans, < 20 points, edge step ≤ 0, I0 ≤ 0 on > 5 %, all-zero signal.
 warn: 1 scan, pre-edge noise/step > 0.02, median stderr/step > 0.02, glitches or outlier
-scans flagged, |shift| > 2 eV, reference E0 spread > 0.5 eV, ≥ 3 identical maximum signal
+scans flagged, readable scans skipped for lacking the chosen columns
+(`scans_skipped_lacking_chosen_columns`, with `scans_readable` / `scans_skipped_lacking_chosen_columns`
+metrics), |shift| > 2 eV, reference E0 spread > 0.5 eV, ≥ 3 identical maximum signal
 values (saturation), non-monotonic energy, non-finite points, some I0 ≤ 0. Else pass.
 `qc.json` records metrics, reasons and thresholds. **Thresholds need approval.**
+
+**Not applicable is not a verdict.** A group listing no scan (`no_scans`), or none of whose readable
+scans yields an energy axis plus a signal under §3's channel rules (`no_xas_channel` — measured:
+tab-separated `xes<N>` files, MCA arrays, headerless two-column files), gets
+`applicability: {status: not_applicable, reason_code, what_the_data_states}` and NO QC verdict, no
+output file and nothing to approve: "no ISAAC processing protocol covers this data yet". What the
+data states is literal (source type, reader and profile, the reader's stated layout, column
+labels); no technique is inferred. Everything else that goes wrong is still judged (`fail`).
+Three rules keep that boundary honest: (1) every readable scan is asked, and when some form a
+channel the first that does supplies the group's choice — the others are skipped with
+`scan_lacks_chosen_columns` (flag `channel_from_a_later_scan`), never mixed in; (2) a signal-side
+candidate column (I0, transmission, fluorescence, `sum:` member) that is present but not live is
+a data-quality failure, `fail signal_channel_dead`, never "not applicable"; (3) a column whose
+label names time (whole token `epoch`/`time`/`sec`/`seconds`/`timestamp`/`clock`) is never the
+energy axis by value shape.
 
 ## 8. Athena-first
 

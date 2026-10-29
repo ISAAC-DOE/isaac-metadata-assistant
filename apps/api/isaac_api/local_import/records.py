@@ -232,10 +232,13 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[di
     }
 
     # processing (series, qc, E0 descriptor) — ONLY an approved result
-    approved = [
-        r for r in bundle.get("processing_results") or ()
-        if r["group_id"] == group["group_id"] and r["state"] == B.STATE_SCIENTIST_CONFIRMED
-    ]
+    mine = [r for r in bundle.get("processing_results") or () if r["group_id"] == group["group_id"]]
+    approved = [r for r in mine if r["state"] == B.STATE_SCIENTIST_CONFIRMED and not B.processing_not_applicable(r)]
+    # A group whose LATEST result says the protocol does not apply cannot get an approved
+    # curve from it: that is a blocking reason in its own words, never a fake approval.
+    latest_na = B.processing_blocked_groups(bundle).get(group["group_id"])
+    not_applicable = [latest_na] if latest_na else []
+    blocked_by_protocol = latest_na is not None
     if len(approved) > 1:
         report["processing"] = {"used": None, "reason": "more than one approved processing result; a person chooses one"}
     elif approved:
@@ -333,6 +336,14 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[di
                 }
             ]
         report["processing"] = used
+    elif blocked_by_protocol:
+        app = not_applicable[-1]["applicability"]
+        report["processing"] = {
+            "used": None,
+            "reason": f"{B.NO_PROTOCOL_COVERS} ({app.get('reason_code')}): {app.get('statement')}",
+            "not_applicable": {"result_id": B.processing_id(not_applicable[-1]), "reason_code": app.get("reason_code"),
+                               "what_the_data_states": app.get("what_the_data_states")},
+        }
     else:
         report["processing"] = {"used": None, "reason": "no scientist-approved processing result for this group"}
 
@@ -375,7 +386,10 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[di
                 "descriptors.outputs": bool(draft.get("descriptors_outputs")),
             }[req]
             if not present:
-                report["missing_required"].append({"path": req, "from": "an approved processing result"})
+                report["missing_required"].append(
+                    {"path": req, "from": "an approved processing result"}
+                    | ({"blocked": B.NO_PROTOCOL_COVERS} if blocked_by_protocol and not approved else {})
+                )
             continue
         field = REQUIRED_AS_FIELD.get(req, req)
         if not any(p == field or p.startswith(field + ".") for p in fields):
@@ -486,6 +500,7 @@ def build_records(bundle_dir: Path, *, test_marker: bool = False) -> dict:
                 "disagreements": len(report["disagreements"]),
                 "complete": not report["missing_required"] and not report["disagreements"],
             }
+            | ({"blocked": report["processing"]["reason"]} if (report.get("processing") or {}).get("not_applicable") else {})
         )
     skipped = [
         {"group_id": g["group_id"], "status": g["status"], "reason": "only a scientist-confirmed record group becomes a draft"}
@@ -667,7 +682,9 @@ def validate_draft_file(draft: Mapping, *, run_portal, composition: Mapping | No
     portal_check = run_portal(record)
     drift = schema_drift(record, P.upstream_schema(where), portal_check)
     pv = portal_check.get("verdict") or P.verdict_of(portal_check)
-    if missing or not dr.ok:
+    proc = (composition or {}).get("processing") or {}
+    blocked = proc.get("reason") if proc.get("not_applicable") else None
+    if missing or not dr.ok or blocked:
         verdict = "incomplete"
     elif target_official is None:
         verdict = P.VERDICT_UNAVAILABLE
@@ -683,6 +700,7 @@ def validate_draft_file(draft: Mapping, *, run_portal, composition: Mapping | No
     summary = [
         f"Draft checks: {'pass' if dr.ok else 'FAIL'} ({len(dr.errors)} error(s), {len(dr.warnings)} warning(s)).",
         f"Missing required values: {', '.join(missing) if missing else 'none'}.",
+        *([f"Processing: {blocked}. The record's series, QC status and E0 cannot be supplied, so it stays incomplete."] if blocked else []),
         (
             f"Portal-target schema (upstream {commit[:12]}): {'pass' if target_official.ok else 'FAIL'} "
             f"({len(target_official.errors)} error(s)); exactness: {'pass' if target_exact.ok else 'FAIL'}."
@@ -704,6 +722,7 @@ def validate_draft_file(draft: Mapping, *, run_portal, composition: Mapping | No
         "schemas_used": used,
         "draft_validation": {"ok": dr.ok, "errors": [list(e) for e in dr.errors], "warnings": [list(w) for w in dr.warnings]},
         "missing_required": missing,
+        "processing_blocked": blocked,
         "composition": {
             "reused": ["isaac_records.export.transform", "isaac_records.export.set_path", "isaac_records.export.build_sidecar"],
             "not_used": "isaac_records.export.export_draft (its transform drops null fields, so it cannot write temperature_K: null)",

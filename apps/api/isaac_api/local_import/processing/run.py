@@ -11,6 +11,18 @@ Outputs, all under ``<bundle_dir>/processing/`` (paths in results are relative t
 * ``status.json`` — ``processing_unavailable`` when numpy/xraylarch are missing (no
   results are fabricated).
 
+A group the protocol CANNOT APPLY to gets no QC verdict: its result carries
+``applicability = {status: "not_applicable", reason_code, ...}`` instead
+(:func:`_not_applicable`). The boundary is what the code detects, never a reader name:
+``no_scans`` when the group lists no scan at all (nothing to process), ``no_xas_channel``
+when :func:`channels.choose_channels` forms no channel (energy axis + signal) in ANY of the
+group's readable scans and no scan with an energy axis has a signal-side candidate column
+that is present but dead (that is ``fail signal_channel_dead``). When only some scans form a
+channel, the first that does supplies the choice, the others are skipped and counted, and
+QC warns ``scans_skipped_lacking_chosen_columns``. What the data states about itself (run source type, the reader
+and profile that claimed it, that reader's stated LAYOUT, the scan format and column labels)
+is reported as literals beside it; no technique is inferred.
+
 Raw data is READ from the source folder (``source_root``, else the bundle's
 ``local_root_hint``); each scan's bytes are checked against the bundle's
 ``content_sha256`` before use. Nothing is copied out of the source folder.
@@ -28,12 +40,13 @@ import warnings
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
+from .. import bundle as B
 from .. import grouping as G
 from . import _deps
 from . import athena as A
 from . import core as C
 from . import protocol as P
-from .channels import choose_channels
+from .channels import choose_channels, dead_candidates
 from .edges import edge_energy
 from .readers import read_scan_file
 
@@ -41,7 +54,8 @@ PROCESSING_DIR = "processing"
 RESULTS_FILE = "processing_results.json"
 STATUS_FILE = "status.json"
 RESULTS_FORMAT = "isaac.processing-results"
-RESULTS_FORMAT_VERSION = "0.1.0"
+#: 0.2.0 (additive): ``applicability`` on a not-applicable result; ``summary.not_applicable``.
+RESULTS_FORMAT_VERSION = "0.2.0"
 
 ELEMENTS = frozenset(
     "H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr "
@@ -166,6 +180,10 @@ def group_scans(group: Mapping, runs_by_key: Mapping[str, Mapping]) -> tuple[lis
     return scans, stems, sel
 
 
+def _formed(choice) -> bool:
+    return choice.energy is not None and choice.mode is not None
+
+
 def _base(group: Mapping, source: str) -> dict:
     return {
         "result_id": f"proc-{group['group_id']}-{'isaac' if source == 'isaac_protocol' else 'athena'}",
@@ -201,6 +219,79 @@ def _fail(res: dict, code: str, detail: str = "") -> dict:
     res["run_id"] = rid
     res["result_id"] = f"proc-{res['group_id']}-{rid}-isaac"
     res["qc"] = {"metrics": res["qc"].get("metrics") or {}, "verdict": "fail", "reasons": [code]}
+    return res
+
+
+#: What each generic reader states about a file's LAYOUT — its own docstring's "layout from
+#: the real files", literal structure only. Never a technique: ``xes_tab_v1`` itself "does
+#: not say ... what technique produced the file", and neither does this table.
+READER_LAYOUT = {
+    "xes_tab_v1": "tab-separated columns whose header names are xes<N>",
+    "mca_v1": "one MCA array of counts (#@MCA header, @A array)",
+    "two_column_v1": "two numbers per line, no header",
+    "ssrl_xdc_v1": "SSRL EXAFS Data Collector 4.0 text scan",
+    "xdi_v1": "XDI text file",
+}
+NA_STATEMENTS = {
+    B.NA_NO_SCANS: (
+        "Nothing to process: this group lists no scan. This says nothing about data quality, "
+        "so no QC verdict is given."
+    ),
+    B.NA_NO_XAS_CHANNEL: (
+        f"No ISAAC processing protocol covers this data yet: {P.PROTOCOL_ID} could not form an "
+        "absorption spectrum (an energy axis and an absorption signal) from these columns. This "
+        "says nothing about data quality, so no QC verdict is given."
+    ),
+}
+_MAX_LABELS_STATED = 16
+
+
+def data_states(group: Mapping, runs_by_key: Mapping[str, Mapping], entries: Sequence[Mapping] = (), table: Any = None) -> dict:
+    """What the group's data states about itself — literals only, no inferred technique."""
+    readers, seen = [], set()
+    for key in group.get("member_run_keys") or ():
+        run = runs_by_key.get(key)
+        if not run:
+            continue
+        rd = run.get("reader") or {}
+        item = {"source_type": run.get("source_type"), "reader_id": rd.get("reader_id"), "profile": rd.get("profile")}
+        k = tuple(item.values())
+        if k not in seen:
+            seen.add(k)
+            readers.append(item)
+    labels = list(table.labels) if table is not None else []
+    return {
+        "basis": "the runs' recorded source type and reader, that reader's stated file layout, and the scan's own column labels; no technique is inferred",
+        "readers": readers,
+        "reader_layout": sorted({READER_LAYOUT[r["profile"]] for r in readers if r.get("profile") in READER_LAYOUT}),
+        "scan_formats": sorted({str(e["format"]) for e in entries if e.get("format")}),
+        "column_labels": labels[:_MAX_LABELS_STATED],
+        "column_labels_total": len(labels),
+    }
+
+
+def reader_label(result: Mapping) -> str:
+    """The reader a not-applicable result's data came through: profile, else source type."""
+    rs = ((result.get("applicability") or {}).get("what_the_data_states") or {}).get("readers") or []
+    names = sorted({str(r.get("profile") or r.get("source_type") or "unknown") for r in rs})
+    return "+".join(names) or "unknown"
+
+
+def _not_applicable(res: dict, code: str, detail: str, states: Mapping) -> dict:
+    """The protocol does not apply: an explicit outcome, never a QC verdict."""
+    res["applicability"] = {
+        "status": B.NOT_APPLICABLE,
+        "reason_code": code,
+        "detail": detail,
+        "statement": NA_STATEMENTS[code],
+        "what_the_data_states": dict(states),
+    }
+    rid = run_id_for(res["group_id"], [], [("not_applicable", hashlib.sha256(f"{code}:{detail}".encode()).hexdigest())])
+    res["run_id"] = rid
+    res["result_id"] = f"proc-{res['group_id']}-{rid}-isaac"
+    res["qc"] = {"metrics": {}, "reasons": []}  # NO verdict: there is no curve to judge
+    res["failure"] = None
+    res["review_flags"] = ["no_isaac_protocol_applies"]
     return res
 
 
@@ -317,7 +408,7 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     res = _base(group, "isaac_protocol")
     scans, stems, sel = group_scans(group, ctx.runs_by_key)
     if not scans:
-        return [_fail(res, "no_scans_in_group")]
+        return [_not_applicable(res, B.NA_NO_SCANS, "the group lists no scan", data_states(group, ctx.runs_by_key))]
     tables = []
     for s in scans:
         entry = {"source_id": s.get("source_id"), "scan": s.get("scan_index"), "relative_path": s.get("relative_path"), "channel": None, "used": False}
@@ -341,11 +432,34 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         causes = sorted({e.get("skip_reason") or "?" for e in res["inputs"]})
         return [_fail(res, "no_readable_scan", ";".join(causes))]
 
-    choice = choose_channels(tables[0][1], params=params, role=group.get("role", "sample"), bl15_selection=sel)
+    role = group.get("role", "sample")
+    choice = choose_channels(tables[0][1], params=params, role=role, bl15_selection=sel)
+    if not _formed(choice):
+        # THE FIRST SCAN DOES NOT DECIDE ALONE. Every readable scan is asked; the first one
+        # that forms a channel supplies the group's choice (scans without those columns are
+        # then skipped, each with its reason, by the merge below). Only when NO scan forms one:
+        # a scan whose signal-side candidate columns are PRESENT but not live is a real QC
+        # failure (``signal_channel_dead``); otherwise the protocol does not apply.
+        first = choice
+        choices = [first] + [choose_channels(t, params=params, role=role, bl15_selection=sel) for _, t in tables[1:]]
+        found = next(((k, c) for k, c in enumerate(choices) if _formed(c)), None)
+        if found is None:
+            res["channel_choice"] = first.to_state()
+            dead = {}
+            for (entry, table), c in zip(tables, choices):
+                cols = dead_candidates(table, params=params) if c.energy is not None else []
+                if cols:
+                    dead[entry.get("relative_path")] = cols
+            if dead:
+                res["review_flags"] += first.flags
+                cols = sorted({c for d in dead.values() for c in d})
+                return [_fail(res, "signal_channel_dead", f"{len(dead)} of {len(tables)} readable scans have candidate columns that are present but not live: {','.join(cols)}")]
+            return [_not_applicable(res, B.NA_NO_XAS_CHANNEL, ",".join(first.flags), data_states(group, ctx.runs_by_key, res["inputs"], tables[0][1]))]
+        k, choice = found
+        choice.basis["chosen_from_scan_position"] = k
+        choice.flags.append("channel_from_a_later_scan")
     res["channel_choice"] = choice.to_state()
     res["review_flags"] += choice.flags
-    if choice.energy is None or choice.mode is None:
-        return [_fail(res, "no_channel", ",".join(choice.flags))]
     scans_data, used_entries, headers = [], [], []
     for entry, table in tables:
         try:
@@ -434,9 +548,12 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     i0np = [d["i0_nonpositive"] for d in diags if d["i0_nonpositive"] is not None]
     step = nm["edge_step"]
     se = mg["stderr"][ok]
+    lacking = sum(1 for e, _ in tables if e.get("skip_reason") == "scan_lacks_chosen_columns")
     metrics = {
         "scans_listed": len(scans),
         "scans_used": len(scans_data),
+        # only when scans WERE skipped (absent otherwise, so an unaffected result is unchanged)
+        **({"scans_readable": len(tables), "scans_skipped_lacking_chosen_columns": lacking} if lacking else {}),
         "points": int(g2.size),
         "e0_eV": nm["e0_eV"],
         "edge_step": step,
@@ -809,11 +926,22 @@ def process_bundle(
 
 
 def summarize(results: Sequence[Mapping]) -> dict:
+    """Counts. A not-applicable group is counted APART from the QC verdicts, never as a fail."""
     isaac = [r for r in results if r.get("source") == "isaac_protocol"]
+    na = [r for r in isaac if B.processing_not_applicable(r)]
+    applied = [r for r in isaac if not B.processing_not_applicable(r)]
     verdicts: dict[str, int] = {}
     failures: dict[str, int] = {}
     comp: dict[str, int] = {}
-    for r in isaac:
+    by_reason: dict[str, int] = {}
+    by_reader: dict[str, int] = {}
+    for r in na:
+        code = r["applicability"]["reason_code"]
+        by_reason[code] = by_reason.get(code, 0) + 1
+        if code == B.NA_NO_XAS_CHANNEL:
+            name = reader_label(r)
+            by_reader[name] = by_reader.get(name, 0) + 1
+    for r in applied:
         verdicts[r["qc"]["verdict"]] = verdicts.get(r["qc"]["verdict"], 0) + 1
         if r.get("failure"):
             code = r["failure"]["code"]
@@ -823,8 +951,29 @@ def summarize(results: Sequence[Mapping]) -> dict:
             comp[v] = comp.get(v, 0) + 1
     return {
         "groups": len(isaac),
+        "groups_processed": len(applied),
         "qc_verdicts": dict(sorted(verdicts.items())),
         "failures_by_cause": dict(sorted(failures.items())),
+        "not_applicable": {
+            "groups": len(na),
+            "by_reason": dict(sorted(by_reason.items())),
+            "no_xas_channel_by_reader": dict(sorted(by_reader.items())),
+        },
         "athena_matched": sum(comp.values()),
         "athena_comparison": dict(sorted(comp.items())),
+        "lines": summary_lines(len(applied), verdicts, by_reason, by_reader),
     }
+
+
+def summary_lines(processed: int, verdicts: Mapping[str, int], by_reason: Mapping[str, int], by_reader: Mapping[str, int]) -> list[str]:
+    """The plain sentences ``isaac process`` and ``summary.md`` print."""
+    qc = ", ".join(f"{k} {verdicts[k]}" for k in ("pass", "warn", "fail") if verdicts.get(k)) or "none"
+    lines = [f"{processed} groups processed by draft protocol {P.PROTOCOL_ID}: QC {qc} (a person states the QC status)."]
+    n = by_reason.get(B.NA_NO_XAS_CHANNEL, 0)
+    if n:
+        readers = ", ".join(f"{k} {v}" for k, v in sorted(by_reader.items()))
+        lines.append(f"{n} groups: no ISAAC processing protocol applies (no absorption channel could be formed; by reader: {readers}). No QC verdict.")
+    m = by_reason.get(B.NA_NO_SCANS, 0)
+    if m:
+        lines.append(f"{m} groups: no scans, nothing to process. No QC verdict.")
+    return lines

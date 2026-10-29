@@ -339,6 +339,10 @@ def qc_verdict(metrics: Mapping, params: Mapping) -> tuple[str, list[str]]:
         fail.append("signal_all_zero")
     if metrics.get("scans_used") is not None and metrics["scans_used"] < int(q["warn_min_scans"]):
         warn.append("single_scan")
+    if metrics.get("scans_skipped_lacking_chosen_columns"):
+        # readable scans of the group that lack the chosen columns were left out: a person
+        # confirms they belong elsewhere (e.g. motor/alignment scans), so never a pass
+        warn.append("scans_skipped_lacking_chosen_columns")
     if (metrics.get("pre_edge_noise") or 0) > float(q["warn_pre_edge_noise"]):
         warn.append("pre_edge_noise")
     if (metrics.get("scan_spread") or 0) > float(q["warn_scan_spread"]):

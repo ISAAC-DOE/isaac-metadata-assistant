@@ -2741,6 +2741,59 @@
         },
         "state": {
           "$ref": "#/$defs/value_state"
+        },
+        "applicability": {
+          "description": "Optional (absent = the protocol applied). not_applicable: the protocol could not be applied to the group, which is an explicit outcome and NOT a QC verdict. reason_code no_scans = the group lists no scan; no_xas_channel = no energy axis or absorption signal could be formed from the scan's columns. what_the_data_states holds literals (source type, reader, the reader's stated layout, scan format, column labels), never an inferred technique. Such a result carries no qc.verdict and no output file, and no decision is accepted on it.",
+          "type": "object",
+          "required": [
+            "status",
+            "reason_code"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "not_applicable"
+              ]
+            },
+            "reason_code": {
+              "enum": [
+                "no_scans",
+                "no_xas_channel"
+              ]
+            },
+            "detail": {
+              "type": "string"
+            },
+            "statement": {
+              "type": "string"
+            },
+            "what_the_data_states": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "if": {
+        "required": [
+          "applicability"
+        ]
+      },
+      "then": {
+        "properties": {
+          "qc": {
+            "not": {
+              "required": [
+                "verdict"
+              ]
+            }
+          },
+          "outputs": {
+            "properties": {
+              "files": {
+                "maxItems": 0
+              }
+            }
+          }
         }
       }
     },

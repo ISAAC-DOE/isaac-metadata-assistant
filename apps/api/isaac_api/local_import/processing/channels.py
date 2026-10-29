@@ -61,8 +61,22 @@ def _family(table: ScanTable, prefix: str) -> list[str]:
     return [c for c in table.labels if pat.match(c)]
 
 
+#: Whole-token words that name TIME. A column so named is never taken as the energy axis by
+#: value shape: measured on a real BL15-2 motor (alignment) scan, ``Epoch`` is monotonic and
+#: lies inside the energy value range, so the shape rule alone would have called it energy.
+TIME_WORDS = frozenset({"epoch", "time", "sec", "secs", "second", "seconds", "timestamp", "clock"})
+_LABEL_TOKEN = re.compile(r"[^0-9a-z]+")
+
+
+def names_time(label: str) -> bool:
+    """True when a whole token of ``label`` (case-insensitive) is a time word."""
+    return any(t in TIME_WORDS for t in _LABEL_TOKEN.split(label.casefold()) if t)
+
+
 def _energy_by_shape(table: ScanTable, lo: float, hi: float) -> str | None:
     for name in table.labels:
+        if names_time(name):
+            continue
         vals = table.columns[name]
         if len(vals) < 5:
             continue
@@ -89,6 +103,21 @@ def _fluorescence_options(table: ScanTable, candidates: Sequence[str]) -> list[d
         elif table.has(cand) and _live(table.columns[cand]):
             out.append({"candidate": cand, "columns": [cand], "dead_columns": [], "total": _total(table.columns[cand])})
     return out
+
+
+def dead_candidates(table: ScanTable, *, params: Mapping) -> list[str]:
+    """Signal-side candidate columns (I0, transmission, fluorescence names and ``sum:``
+    family members) that the scan HAS but that are not live — present and rejected. When no
+    channel forms, these make it a data-quality failure, not "the protocol does not apply"."""
+    cp = params["channels"]
+    names: list[str] = []
+    for cand in [*cp["i0_candidates"], *cp["transmission_after_sample"], *cp["fluorescence_candidates"]]:
+        names.extend(_family(table, cand[4:]) if cand.startswith("sum:") else [cand])
+    seen: list[str] = []
+    for c in names:
+        if table.has(c) and not _live(table.columns[c]) and c not in seen:
+            seen.append(c)
+    return seen
 
 
 def choose_channels(

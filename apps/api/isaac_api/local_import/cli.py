@@ -271,6 +271,13 @@ def render_summary(bundle: Mapping) -> str:
             f"- Record groups: {len(groups)} ({sum(1 for g in groups if g['status'] == 'scientist_confirmed')} "
             f"confirmed) · processing results: {len(bundle.get('processing_results') or [])}"
         )
+    if bundle.get("processing_results"):
+        # Counts only. A group the protocol does not apply to is reported apart from the QC
+        # verdicts: it was not judged, so it is never counted as a fail.
+        from .processing.run import summarize
+
+        for line in summarize(bundle["processing_results"])["lines"]:
+            add(f"- Processing: {line}")
     add(
         "- This summary shows no parser value except in conflicts, so a blind cross-check "
         "(`isaac bundle crosscheck-plan`) is still possible after reading it."
