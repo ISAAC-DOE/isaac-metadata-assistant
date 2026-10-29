@@ -359,7 +359,8 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[di
     elif approved:
         r = approved[0]
         pid = B.processing_id(r)
-        d = decisions[("processing_result", pid)]
+        # the APPROVAL (latest state decision): a later select_athena_version never stands in for it
+        d = B.processing_state_decisions(bundle)[("processing_result", pid)]
         conf = _confirmation({**d, "value": f"approved {pid}"}, f"Approve processing result {pid}")
         used: dict[str, Any] = {"result": pid}
         files = (r.get("outputs") or {}).get("files") or []

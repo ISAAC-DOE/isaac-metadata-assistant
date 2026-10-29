@@ -1,6 +1,6 @@
 # ISAAC Local Import Bundle — contract v1
 
-Status: **v1.4.0** (the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
+Status: **v1.6.0** (capture decisions — keep apart, the Athena result of record, "no counter" — a merge decision applied as one combined group, and question ids that survive answers, 2026-10-29, §9 "What 1.6.0 added"; v1.5.0 control mode answerable the same day; v1.4.0 the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
 [`apps/api/isaac_api/local_import/bundle-v1.schema.json`](../apps/api/isaac_api/local_import/bundle-v1.schema.json)
 (JSON Schema draft 2020-12) plus the checks in
 [`bundle.py`](../apps/api/isaac_api/local_import/bundle.py) `validate_bundle` that JSON
@@ -309,12 +309,15 @@ processed files, double-counting measurements (94 of 274 runs in one beamtime, 2
   each existing group's STATUS:
   - `scientist_confirmed` is BINDING: kept, and its runs are never re-proposed.
   - `rejected`, `split` and `merged` are HISTORY: kept as the record of that decision, and they
-    do not hold their runs. `merged` is history, not binding: nothing applies a decision's
-    `merge_with` and only a confirmed group becomes a record, so a merged group's runs must
-    stay proposable. A fresh proposal identical to a rejected or split group is not
-    re-proposed; one identical to a merged group is re-proposed under a distinct id
-    (`reproposed_after_group_id`), and a merge candidate (`scientist_decided_merge`, with the
-    decision id) joins the groups now holding the merge's runs, for the scientist to confirm.
+    do not hold their runs. `merged` is history, not binding: only a confirmed group becomes a
+    record, so a merged group's runs must stay proposable. A fresh proposal identical to a
+    rejected or split group is not re-proposed; one identical to a merged group is re-proposed
+    under a distinct id (`reproposed_after_group_id`). **Since 1.6.0 the regroup APPLIES the merge
+    (§9 "What 1.6.0 added"):** the groups now holding the merge's runs are replaced by ONE combined
+    proposed group (`merged_by_decision`), for the scientist to confirm. Where it cannot be combined,
+    a merge candidate (`scientist_decided_merge`, with the decision id) joins those groups and its
+    detail says why. (Before 1.6.0 only that candidate was carried, which no decision could turn
+    into one group — a defect, not a design.)
   - `proposed` (undecided, deferred, calibration-only) is replaced. A replaced group that a
     decision, a processing result or an AI interpretation (1.3.0: an absorber reading is
     recorded on a group) still names moves to `superseded_record_groups[]`
@@ -541,6 +544,110 @@ label alone (plus `processed_outputs` required at 1.5.0, as at 1.2.0–1.4.0).
 - See §20 ("Newly answerable fields") for what the field allows and how it interacts with the
   set-point.
 
+### What 1.6.0 added (capture decisions, the merge applied, stable question ids — DEC-91)
+
+A minor version by the rules above: widened enums (three decisions and the target kind
+`merge_candidate`, which a 1.5.0 validator refuses — that is why the label moves) and optional
+fields and one optional section. **Nothing becomes newly writable**, so `WRITABLE_ADDED_IN` is
+unchanged and no eligibility is STALE because of 1.6.0; a 1.5.0 bundle checks VALID, and its first
+write relabels it 1.6.0 with no `format_upgrades` entry (exactly as 1.4.0 relabelled a 1.3.0 bundle
+with nothing to re-import). A 1.6.0 bundle requires `processed_outputs`, like 1.2.0–1.5.0. Each
+decision CAPTURES a statement; none takes a scientific decision, and none is defaulted.
+
+- **`keep_apart`** (`decide --target <mc-id> --decision keep_apart --by NAME`): the groups a merge
+  candidate names are distinct. The candidate's `status` is DERIVED `kept_apart` (with
+  `kept_apart_by_decision_id`) on every save, so it is no longer an open merge question
+  (`bundle list merge-candidates` shows the status). **Nothing else changes:** no group's
+  membership, status or questions move, and none is confirmed — keeping apart is what the proposal
+  already does; each group is still confirmed (or not) on its own. A regroup that proposes the same
+  candidate (same id) keeps it kept apart. One a regroup no longer proposes, while a decision names
+  it, moves to the optional `superseded_merge_candidates[]` (`merge_candidate_id`, `group_ids`,
+  `run_keys`, `superseded_utc`, `reason`) so the decision keeps its target, as
+  `superseded_record_groups[]` does for groups. `keep_apart` is refused on any other target, and a
+  merge candidate accepts no other decision (merging is the record-group decision below).
+- **`merge` is applied (a fixed defect).** The required sequence:
+  (1) `decide --target <group> --decision merge --merge-with <group ...> --by NAME` — the group's
+  status becomes `merged` (history); (2) `isaac bundle group <dir> --regroup` — the fresh groups now
+  holding the runs of the merged group and of every group in `merge_with` are replaced by ONE
+  proposed group, id `rg-` + sha256(experiment key, its runs, `merged-by:<decision id>`), flag
+  `merged_by_scientist_decision`, and `merged_by_decision` {`decision_id`, `merged_group_id`,
+  `merge_with`, `decided_by`, `from_groups`, `basis_keys_dropped`, `name_number_positions`,
+  `statement`}; its basis keeps every reading the groups agree on — compared on what it says
+  (value, kind), never on its per-run evidence ids, which are united — and drops (and names) the
+  rest; (3) `decide --target <combined group> --decision confirm` — only this makes it a record.
+  The regroup output lists `combined_by_merge_decision` and `merge_decisions_not_combined`.
+  **The check FAILS CLOSED** (`mutations._merge_blockers`): the groups are combined only when
+  NOTHING the import read or a scientist confirmed tells them apart — none of their runs is in a
+  confirmed group; they share one role; every basis reading agrees (the name stem standing in for
+  an unstated sample aside — it is the file name the merge rules on); the independent condition
+  check (`grouping.condition_violations`) finds only the names; the runs' file names have the same
+  tokens except **counter-shaped numbers** at the same positions (`name_number_positions`, and the
+  differing values in `name_numbers` [{`position`, `values`}], e.g. `02` vs `03`, shown when
+  confirming): digits only — no unit, sign, decimal point or letter; **zero-padded and of one width**
+  (`02`/`03`, never `1`/`10`, `25`/`80` or `400`/`500`, which may be values); **at no position a
+  `set_not_counter_positions` answer names** (the scientist said it is not a counter); and **not next
+  to a unit or keyword token** (`025_C`, `E_01`, `pH_02`, `02_min`). The unit/keyword list is DERIVED
+  from what the import's readers already recognise (the BL15 filename reader's mV / V / p-volt,
+  filter / f, nm / wtpc / wpc, step, pH, before/after … cycling / cv and its flow units; the grouping
+  step's `_ZERO_UNITS` and `FIELD_UNITS`), plus a short supplement for quantities no reader parses
+  yet: C, K, degC, h, hr, min, s, sec, cycle(s), cyc, mA, uA, A, E (`mutations._unit_words`). And no
+  confirmed, eligible run-level answer (an answered missing value or a confirmed reading, e.g. the
+  control mode) differs. Any other difference keeps the `scientist_decided_merge` candidate, its
+  detail naming each blocker and the differing tokens: `0.05V`/`0.5V` (the decimal point splits the
+  token, so no potential is read), `1MKOH`/`0p1MKOH`, `10ug`/`50ug`, `SYNcat`/`SYNdog`, `E1`/`E2`,
+  `step01`/`step02`, `before`/`after`, an extra `newspot` token — all measured, all kept apart.
+  Merge candidates that named a combined group name it instead. **A combined group that was itself
+  decided** (rejected, split, or merged again) is that ruling on exactly that group: the regroup does
+  not propose it again and asks no candidate about it (`merge_decisions_not_combined` says "already
+  decided"); a merge of the combined group with another group is a new decision, combined in turn.
+  **A not-counter answer AFTER a merge** at a position the combined group was combined across is
+  never silent: `decide` says so (`contradicts_combined_groups`, also on stderr), the group carries
+  the derived `merged_by_decision.contradicted_by_not_counter` {`positions`, `decision_ids`, `note`},
+  `confirm` of it is refused, and the next regroup reopens a proposed one as a
+  `scientist_decided_merge` candidate naming the answer. A group already confirmed stays (binding)
+  and stays flagged. A later `set_counter_positions` naming the position withdraws the contradiction.
+- **`select_athena_version`** (`decide --target <processing result> --decision select_athena_version
+  --value <version id> --by NAME`): which of the result's listed `athena_versions[].version_id` is the
+  scientist's result of record. ANY other value is refused (nothing recorded), as is a result that
+  lists no versions; the validator refuses a stored selection that is not listed. DERIVED on every
+  save from the latest such decision: `athena_result_of_record` (the version id, else `null`) and
+  `athena_result_of_record_basis` {`decision_id`, `decided_by`, `statement`}; the flag
+  `athena_result_of_record_not_selected` and the result's own question
+  `which_athena_version_is_result_of_record` are present exactly while nothing is selected (the
+  question drops out once answered). A selection made or changed AFTER the result was approved is
+  noted on it (`athena_result_of_record_basis.changed_after_approval` {`approval_decision_id`,
+  `selected_at_approval`, `note`}); it is not wired into export. **It is not a state decision**
+  (`bundle.PROCESSING_STATE_DECISIONS`): the result's `state`, QC, outputs and processed values are
+  never touched, a selection never supersedes the approval a record cites
+  (`bundle.processing_state_decisions`), and `--qc-status` is refused with it. The composed record
+  is unchanged by it (it uses the approved ISAAC curve, as before). **The selection is bound to the
+  version's own identity, not its number:** version ids are positional (`<group>-vNN`, numbered over
+  the projects sorted by path and group name), so adding or removing a project file renumbers them.
+  The decision records `athena_version_provenance` {`prj_relative_path`, `athena_group`,
+  `data_sha256_prefix`} (refused when two listed versions share it), and `athena_result_of_record` is
+  the version with that identity (`bundle.athena_resolve`). A selection alone does not freeze the
+  result against `isaac process`: a fresh result of the same id replaces it when it holds a version
+  with that identity — re-pointed to its new id if it moved, said in
+  `athena_result_of_record_basis.repointed` {`decision_value`, `now`, `note`} — and otherwise the OLD
+  result is kept, so a selection never points at nothing or at another curve. Only the latest
+  selection counts, and the validator refuses one that resolves to no listed version.
+- **`set_not_counter_positions`** (`decide --question <counter question> --decision
+  set_not_counter_positions --by NAME`, which names the question's open positions; or `--target
+  experiment --positions n[,m]`): those 1-based filename token positions are NOT run/acquisition
+  counters — the numbers name distinct samples, electrodes or conditions, or are a plain sequence
+  that does not mark repeats. Stored as `not_counter_positions` on the decision. **Grouping is
+  unchanged by it:** runs whose names differ there were already proposed as separate groups and
+  stay so, and each merge candidate between them stays open (merge it, or keep it apart); the
+  decision says so. Refused for a position the latest `set_counter_positions` names (record
+  `set_counter_positions` without it instead); a later `set_counter_positions` naming a position
+  takes over (latest statement per position, `bundle.not_counter_positions`).
+- **An answered counter question drops out.** The consolidated `naming_counter_positions` question
+  asks only about its positions that no answer covers (a counter by the latest
+  `set_counter_positions`, or not one by `set_not_counter_positions`), lists them in `positions`,
+  says which are already answered, and is left out when none is open — under the same id
+  throughout. It drops out after `set_counter_positions` even before the regroup applies it; the
+  grouping step's own `grouping_questions[]` entry is kept as it wrote it.
+
 ## 10. Exit codes (`isaac import` / `isaac bundle`)
 
 0 ok · 1 `check` found the bundle invalid, or STALE (stored by an older build, §9 "What 1.3.0
@@ -675,6 +782,18 @@ Exit codes for the LOCAL-2 commands: `validate` and `export` exit 1 when any dra
   about a required field is blocking), then conflicts that affect a record, then optional.
   `decide --question Q [--only group:<id>] [--field <path>]` records one decision per target.
   Allowed values come from the target schema's enum, else the pinned vocabulary.
+  **Question ids survive answers (1.6.0, DEC-91).** A question's scope and partition — and so its
+  id — are read only from what the IMPORT recorded (candidates) and from the record groups, never
+  from scientist answers. Answering a question, or one group of it (`--only`), takes exactly those
+  targets out; the question for the rest keeps its id, and when answers given so far differ its
+  text says so ("answer per group") and the question carries `answers_differ: true` (its
+  `answer_command` says to answer per group), so an agent following the command is warned; the note
+  needs at least one answer — differing file readings alone are the scope rule above. (Before 1.6.0 an answered value counted as "recorded", so one
+  answered group re-asked a `sample=unrecorded` or shared-field question group by group under new
+  ids — measured +99 and +111 new ids on two real beamtimes.) An answer can still ADD a question
+  that was withheld until it existed, never rename one: a stated clock zone unlocks the start-time
+  confirmations it gives (§9 "What 1.4.0 added"), a stated control mode makes its set-point
+  required (§9 "What 1.5.0 added"), and a zone change re-asks the confirmations it undid.
 - `decide --target <processing result> --decision approve --qc-status <pinned
   measurement.qc.status> [--qc-note ...]`: the scientist states the QC status; the protocol's
   own verdict and metrics are kept beside it (`qc_evidence`). `pass` maps to `valid` only

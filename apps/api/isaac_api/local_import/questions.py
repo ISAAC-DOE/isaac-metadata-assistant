@@ -21,7 +21,14 @@ This module CONSOLIDATES it for a person:
   enum, and the exact ``isaac bundle decide --question`` command that answers it.
 
 Question ids are content-derived (``Q-<sha1(scope|kind|subject)[:10]>``), so they are stable
-across rebuilds; an answered target simply drops out.
+across rebuilds; an answered target simply drops out. **That holds across answers too
+(DEC-91):** a question's scope and partition are read only from what the import recorded and
+from the record groups, never from answers, so answering one question (or some of its
+targets) leaves every other open question's id unchanged. What an answer can still do is ADD a
+question that was withheld until it existed — the documented unlocks: a stated clock zone
+unlocks the start-time confirmations it gives; a stated control mode makes its set-point
+required (that missing value moves from the optional question to a blocking one); a later zone
+change re-asks the confirmations it undid. None of these renames an existing question.
 """
 
 from __future__ import annotations
@@ -63,7 +70,7 @@ ALLOWED_DECISIONS: Mapping[str, tuple[str, ...]] = {
     "optional_values": ("confirm", "correct", "reject", "defer"),
     "confirm_value": ("confirm", "correct", "reject", "defer"),
     "resolve_conflict": ("confirm", "correct", "reject", "defer"),
-    "naming_counter_positions": ("set_counter_positions",),
+    "naming_counter_positions": ("set_counter_positions", B.NOT_COUNTER_DECISION),
     "clock_time_zone": (B.CLOCK_ZONE_DECISION,),
     "confirm_absorber": ("set_absorber", "defer"),
 }
@@ -189,18 +196,21 @@ def consolidate(bundle: Mapping) -> dict:
             canon = {k: (v.get("value") if isinstance(v, Mapping) else v) for k, v in sorted(sample.items())}
             sample_key_of_group[g["group_id"]] = json.dumps(canon, sort_keys=True)
 
-    # what the bundle already RECORDS for each field (a differing recorded condition blocks
-    # experiment-wide propagation)
+    # what the FILES record for each field (a differing recorded condition blocks experiment-wide
+    # propagation). ID STABILITY (DEC-91): the scope and partition of a question — and so its id —
+    # are read ONLY from what the import recorded, never from the answers given since. An answer
+    # given for some targets therefore takes exactly those targets out and leaves the question for
+    # the rest under the SAME id; answers that already differ are stated in its text instead.
     recorded: dict[str, set[str]] = {}
     for c in bundle["candidates"]:
         if c["target_field_path"] and c["value"] is not None:
             recorded.setdefault(c["target_field_path"], set()).add(json.dumps(c["value"], sort_keys=True))
+    answered: dict[str, set[str]] = {}
     decisions = B._decisions_by_target(bundle.get("scientist_decisions") or ())
+    path_of_value = {m["value_id"]: m["target_field_path"] for m in bundle["missing_values"]}
     for (kind, tid), d in decisions.items():
-        if kind == "missing_value" and d.get("value") is not None:
-            m = next((x for x in bundle["missing_values"] if x["value_id"] == tid), None)
-            if m:
-                recorded.setdefault(m["target_field_path"], set()).add(json.dumps(d["value"], sort_keys=True))
+        if kind == "missing_value" and d.get("value") is not None and tid in path_of_value:
+            answered.setdefault(path_of_value[tid], set()).add(json.dumps(d["value"], sort_keys=True))
 
     def scope_of_run(run_id: str | None) -> str:
         if run_id is None:
@@ -351,10 +361,18 @@ def consolidate(bundle: Mapping) -> dict:
                              " otherwise answer per group (--only group:<id>).")
                 else:
                     text += (" with the same sample reading" if partition else "") + " — answer once, or per group."
+            given = answered.get(path) or set()
+            answers_differ = bool(given) and len(given | recorded.get(path, set())) > 1
+            if answers_differ:
+                # the question keeps its id (DEC-91); what the answers so far say is stated instead
+                text += (f" Answers already given for this field elsewhere differ ({len(given)} distinct value(s) answered"
+                         + (", besides what the files record" if recorded.get(path) else "")
+                         + "): answer per group (--only group:<id>) unless they truly are all the same.")
             decision = "correct"
         else:
             text = f"Is the extracted {_label(path)} ({path}) right? Confirm it, or correct it."
             decision = "confirm"
+            answers_differ = False
         hints = []
         if path.startswith("attribution.produced_by."):
             hints.append({"kind": "folder_name", "literal": bundle["source_root"]["label"], "locator": "the imported folder's name",
@@ -393,11 +411,15 @@ def consolidate(bundle: Mapping) -> dict:
                 "per_scope_targets": q["per_scope_targets"],
                 "hints": hints,
                 "allowed_values": enum,
+                # L2: the answers already given for this field differ — an agent following
+                # answer_command should answer per group (--only), not once for all
+                "answers_differ": answers_differ,
                 "answer_command": (
                     f'isaac bundle decide <bundle_dir> --question {qid} --decision {decision}'
                     + (f" --value {value_arg}" if kind == "missing_value" else "")
                     + ' --by "<your name>"'
-                    + ("   # per group: add --only group:<group_id>" if len(q["per_scope_targets"]) > 1 else "")
+                    + ("   # answers given so far DIFFER: answer per group with --only group:<group_id>" if answers_differ
+                       else "   # per group: add --only group:<group_id>" if len(q["per_scope_targets"]) > 1 else "")
                 ),
             }
         )
@@ -433,11 +455,30 @@ def consolidate(bundle: Mapping) -> dict:
 
     # THE GROUPING STEP'S OWN EXPERIMENT-SCOPE QUESTIONS (e.g. which filename positions are
     # run counters). Answered with a set_counter_positions decision, then a regroup.
-    answered_positions = any(d.get("decision") == "set_counter_positions" for d in bundle.get("scientist_decisions") or ())
+    # DEC-91: a position is ANSWERED once a scientist stated it is a counter (the latest
+    # set_counter_positions) or is not one (set_not_counter_positions); the question asks only about
+    # the positions still open and drops out when none is — under the SAME id throughout.
+    from .mutations import counter_positions
+
+    answered_positions = any(d.get("decision") in ("set_counter_positions", B.NOT_COUNTER_DECISION)
+                             for d in bundle.get("scientist_decisions") or ())
+    said_counter = set(counter_positions(bundle) or ())
+    said_not = B.not_counter_positions(bundle)
     for gq in bundle.get("grouping_questions") or ():
         if not isinstance(gq, Mapping) or gq.get("kind") != "naming_counter_positions":
             continue
+        asked_positions = [int(p) for p in gq.get("positions") or () if isinstance(p, int)]
+        open_positions = [p for p in asked_positions if p not in said_counter and p not in said_not]
+        if asked_positions and not open_positions:
+            continue  # every position it asks about is answered: it drops out
         qid = _qid("experiment", "naming_counter_positions", str(gq.get("id") or gq.get("text") or ""))
+        text = str(gq.get("text") or "Which filename token positions are run or acquisition counters?")
+        if len(open_positions) < len(asked_positions):
+            text += (" Already answered: position(s) " + ", ".join(str(p) for p in asked_positions if p not in open_positions)
+                     + f"; still open: {', '.join(map(str, open_positions))}.")
+        text += (" If none of the open positions is a counter (the numbers name distinct samples, electrodes or "
+                 "conditions, or are a plain sequence that does not mark repeats), say so with "
+                 f"{B.NOT_COUNTER_DECISION}: grouping is unchanged by that answer and each merge candidate stays open.")
         questions.append(
             {
                 "question_id": qid,
@@ -448,7 +489,8 @@ def consolidate(bundle: Mapping) -> dict:
                 "kind": "naming_counter_positions",
                 "scope": "experiment",
                 "target_field_path": None,
-                "text": str(gq.get("text") or "Which filename token positions are run or acquisition counters?"),
+                "text": text,
+                "positions": open_positions,
                 "applies_to": {"groups": len(groups), "runs": len(bundle["runs"]), "targets": 1},
                 "targets": [{"kind": "experiment", "id": "experiment"}],
                 "per_scope_targets": {"experiment": ["experiment"]},
@@ -458,6 +500,7 @@ def consolidate(bundle: Mapping) -> dict:
                 "answer_command": (
                     'isaac bundle decide <bundle_dir> --target experiment --decision set_counter_positions '
                     '--positions <n[,m]> --by "<your name>"  &&  isaac bundle group <bundle_dir> --regroup'
+                    f'   # none is a counter: isaac bundle decide <bundle_dir> --question {qid} --decision {B.NOT_COUNTER_DECISION} --by "<your name>"'
                 ),
             }
         )

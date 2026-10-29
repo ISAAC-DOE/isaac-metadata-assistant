@@ -42,7 +42,13 @@ FORMAT_ID = "isaac.local-import-bundle"
 #: 1.5.0 (additive): a larger writable set — ``context.electrochemistry.control_mode``
 #: (:data:`WRITABLE_ADDED_IN`, :data:`LOCAL_ANSWER_FIELDS`), so eligibility stored by an older
 #: build can be STALE, exactly as at 1.3.0. No section, field or enum of the bundle changes.
-FORMAT_VERSION = "1.5.0"
+#: 1.6.0 (additive, DEC-91): three capture decisions a 1.5.0 validator would refuse —
+#: ``keep_apart`` on the new target kind ``merge_candidate``, ``select_athena_version`` on a
+#: processing result (with the derived ``athena_result_of_record``), and
+#: ``set_not_counter_positions`` on the experiment (decision field ``not_counter_positions``) —
+#: plus the optional ``superseded_merge_candidates`` section and a merge decision's combined
+#: group (``merged_by_decision``). Nothing becomes newly writable, so no eligibility is STALE.
+FORMAT_VERSION = "1.6.0"
 #: The electrochemical control mode. Its allowed values are the official schema's enum (read at
 #: runtime by :func:`value_problem`); the schema's conditional rules key the set-point a record
 #: requires on it (:func:`required_record_paths`). Never defaulted, never derived.
@@ -63,7 +69,7 @@ VALUE_IDS_APPEND_FROM = "1.5.0"
 IMPORT_RULES_ADDED_IN: Mapping[str, tuple] = {
     "1.4.0": (("generic:ssrl_xdc_v1", "ssrl_xdc_scan_start_v1"),),
 }
-_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0")
+_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0")
 #: A field composed into a draft only beside another of the SAME run (interim decision for the
 #: set-point, pending domain-owner review; ``records.compose_group`` applies it).
 COMPOSES_ONLY_WITH: Mapping[str, str] = {
@@ -586,9 +592,22 @@ DECISIONS_BY_KIND: Mapping[str, frozenset[str]] = {
     "missing_value": frozenset({"confirm", "correct", "reject", "defer"}),
     "conflict": frozenset({"confirm", "correct", "reject", "defer"}),
     "record_group": frozenset({"confirm", "split", "merge", "reject", "defer", "approve_calibration", "set_absorber"}),
-    "processing_result": frozenset({"approve", "reject", "needs_changes", "defer"}),
-    "experiment": frozenset({"set_counter_positions", "set_clock_time_zone"}),
+    "processing_result": frozenset({"approve", "reject", "needs_changes", "defer", "select_athena_version"}),
+    "experiment": frozenset({"set_counter_positions", "set_clock_time_zone", "set_not_counter_positions"}),
+    # 1.6.0: a merge candidate is decided only to say its groups are DISTINCT; merging stays a
+    # record-group decision (``merge --merge-with``)
+    "merge_candidate": frozenset({"keep_apart"}),
 }
+#: The processing-result decisions that set its STATE (approve / reject / needs_changes / defer).
+#: ``select_athena_version`` (1.6.0) records which listed Athena version is the scientist's result
+#: of record; it never moves the state, the QC status or any processed value.
+PROCESSING_STATE_DECISIONS = frozenset({"approve", "reject", "needs_changes", "defer"})
+ATHENA_SELECT_DECISION = "select_athena_version"
+KEEP_APART_DECISION = "keep_apart"
+NOT_COUNTER_DECISION = "set_not_counter_positions"
+#: The flag and the processing result's own question while no Athena version is selected.
+ATHENA_UNSELECTED_FLAG = "athena_result_of_record_not_selected"
+ATHENA_QUESTION_CODE = "which_athena_version_is_result_of_record"
 #: Record-group status from its decision (``None`` = no decision, or ``defer``).
 GROUP_STATUS_BY_DECISION: Mapping[str | None, str] = {
     None: "proposed",
@@ -652,6 +671,204 @@ def _decisions_by_target(decisions: Sequence[Mapping]) -> dict[tuple[str, str], 
         target = d.get("target") if isinstance(d, Mapping) else None
         if isinstance(target, Mapping):
             out[(str(target.get("kind")), str(target.get("id")))] = d
+    return out
+
+
+def processing_state_decisions(bundle: Mapping) -> dict[tuple[str, str], Mapping]:
+    """The LAST state-setting decision per processing result (:data:`PROCESSING_STATE_DECISIONS`).
+    A ``select_athena_version`` answer (1.6.0) is not one: choosing the result of record never
+    approves, rejects or reopens a result, and never supersedes the approval a record cites."""
+    return _decisions_by_target([
+        d for d in bundle.get("scientist_decisions") or ()
+        if isinstance(d, Mapping) and (d.get("target") or {}).get("kind") == "processing_result"
+        and d.get("decision") in PROCESSING_STATE_DECISIONS
+    ])
+
+
+# --- 1.6.0 capture decisions (DEC-91): result of record, keep apart, not a counter -------------
+
+
+def athena_version_ids(result: Mapping) -> list[str]:
+    """The Athena version ids a processing result lists (``athena_versions[].version_id``)."""
+    return [str(v.get("version_id")) for v in result.get("athena_versions") or () if isinstance(v, Mapping) and v.get("version_id")]
+
+
+#: What identifies an Athena version across re-processing. Its ``version_id`` is POSITIONAL
+#: (``<group>-vNN``, numbered over the projects sorted by path and group name,
+#: processing/athena.py), so adding or removing a project file renumbers it; these three facts
+#: from its own provenance do not move.
+ATHENA_IDENTITY_KEYS = ("prj_relative_path", "athena_group", "data_sha256_prefix")
+
+
+def athena_version_identity(version: Mapping) -> dict:
+    prov = version.get("provenance") if isinstance(version, Mapping) else None
+    prov = prov if isinstance(prov, Mapping) else {}
+    return {k: prov.get(k) for k in ATHENA_IDENTITY_KEYS}
+
+
+def latest_athena_selection(bundle: Mapping, result: Mapping) -> Mapping | None:
+    """The LATEST ``select_athena_version`` decision on this result, whatever it names."""
+    pid, out = processing_id(result), None
+    for d in bundle.get("scientist_decisions") or ():
+        if d.get("decision") == ATHENA_SELECT_DECISION and d.get("target") == {"kind": "processing_result", "id": pid}:
+            out = d
+    return out
+
+
+def athena_resolve(result: Mapping, decision: Mapping) -> str | None:
+    """The version id ``decision`` selects in ``result`` NOW: the version with the provenance the
+    decision recorded (``athena_version_provenance``), wherever re-processing numbered it; for a
+    decision without one, its value when listed. ``None`` when the result holds no such version."""
+    prov = decision.get("athena_version_provenance")
+    if isinstance(prov, Mapping):
+        want = {k: prov.get(k) for k in ATHENA_IDENTITY_KEYS}
+        hits = [str(v.get("version_id")) for v in result.get("athena_versions") or ()
+                if isinstance(v, Mapping) and athena_version_identity(v) == want]
+        return hits[0] if len(hits) == 1 else None
+    return decision.get("value") if decision.get("value") in athena_version_ids(result) else None
+
+
+def athena_selection(bundle: Mapping, result: Mapping) -> Mapping | None:
+    """The LATEST ``select_athena_version`` decision on this result when it resolves to one of the
+    result's versions (:func:`athena_resolve`), else ``None``. Only the latest counts: an earlier
+    selection never stands in for a later one that no longer resolves (the validator refuses that,
+    and ``isaac process`` keeps the old result rather than let it happen)."""
+    d = latest_athena_selection(bundle, result)
+    return d if d is not None and athena_resolve(result, d) is not None else None
+
+
+def athena_question(result: Mapping) -> dict:
+    """The processing result's own question while no version is selected (as ``isaac process`` writes it)."""
+    ids = athena_version_ids(result)
+    return {
+        "code": ATHENA_QUESTION_CODE,
+        "text": f"{len(ids)} different Athena versions of this measurement exist. Which one is the result of record? None is selected until you choose.",
+        "version_ids": ids,
+    }
+
+
+def _derive_athena_selection(bundle: Mapping) -> None:
+    """DERIVED on every save from the decisions (latest wins): ``athena_result_of_record`` (a listed
+    version id, else ``None``) and its ``athena_result_of_record_basis``; the unselected flag and the
+    result's own question are present exactly while nothing is selected. A result that lists no
+    Athena versions is untouched. Nothing else on the result — state, QC, outputs — is read or set."""
+    for r in bundle.get("processing_results") or ():
+        if not athena_version_ids(r):
+            continue
+        d = athena_selection(bundle, r)
+        flags = [f for f in r.get("review_flags") or () if f != ATHENA_UNSELECTED_FLAG]
+        questions = [q for q in r.get("questions") or () if not (isinstance(q, Mapping) and q.get("code") == ATHENA_QUESTION_CODE)]
+        if d is None:
+            r["athena_result_of_record"] = None
+            r.pop("athena_result_of_record_basis", None)
+            had_flag = ATHENA_UNSELECTED_FLAG in (r.get("review_flags") or ())
+            # kept IN PLACE when already there, so a bundle with no selection is re-derived byte-identical
+            r["review_flags"] = list(r.get("review_flags") or []) if had_flag else flags + [ATHENA_UNSELECTED_FLAG]
+            if not any(isinstance(q, Mapping) and q.get("code") == ATHENA_QUESTION_CODE for q in r.get("questions") or ()):
+                r["questions"] = questions + [athena_question(r)]
+        else:
+            now = athena_resolve(r, d)
+            r["athena_result_of_record"] = now
+            r["athena_result_of_record_basis"] = {
+                "decision_id": d.get("decision_id"),
+                "decided_by": (d.get("decided_by") or {}).get("name"),
+                "statement": "the scientist's statement of which listed Athena version is the result of record; "
+                             "it changes no QC status and no processed value",
+            }
+            if now != d.get("value"):
+                # RE-POINTED, and said so: re-processing renumbered the versions; the SAME version (same
+                # project file, Athena group and data hash) now has another id
+                r["athena_result_of_record_basis"]["repointed"] = {
+                    "decision_value": d.get("value"), "now": now,
+                    "note": "re-processing renumbered the Athena versions; the version this decision selected "
+                            "(same project file, Athena group and data hash) is now " + str(now),
+                }
+            # A CHANGE AFTER THE APPROVAL IS SAID, never silent (it is not wired into export): the
+            # approval was given while another version (or none) was the result of record.
+            decisions = list(bundle.get("scientist_decisions") or ())
+            pid, listed = processing_id(r), set(athena_version_ids(r))
+            approve_at = next((i for i in range(len(decisions) - 1, -1, -1)
+                               if decisions[i].get("target") == {"kind": "processing_result", "id": pid}
+                               and decisions[i].get("decision") == "approve"), None)
+            if approve_at is not None:
+                at_approval = next((x.get("value") for x in reversed(decisions[:approve_at])
+                                    if x.get("decision") == ATHENA_SELECT_DECISION
+                                    and x.get("target") == {"kind": "processing_result", "id": pid} and x.get("value") in listed), None)
+                if at_approval != d["value"]:
+                    r["athena_result_of_record_basis"]["changed_after_approval"] = {
+                        "approval_decision_id": decisions[approve_at].get("decision_id"),
+                        "selected_at_approval": at_approval,
+                        "note": "the result of record was selected or changed after this result was approved; "
+                                "the approval and the record's processed values are unchanged by it",
+                    }
+            r["review_flags"] = flags
+            r["questions"] = questions
+
+
+def kept_apart(bundle: Mapping) -> dict[str, Mapping]:
+    """``{merge_candidate_id: its latest keep_apart decision}``."""
+    return {tid: d for (kind, tid), d in _decisions_by_target(bundle.get("scientist_decisions") or ()).items()
+            if kind == "merge_candidate" and d.get("decision") == KEEP_APART_DECISION}
+
+
+def _derive_merge_candidate_status(bundle: Mapping) -> None:
+    """A merge candidate's ``status`` is ``kept_apart`` (with ``kept_apart_by_decision_id``) exactly
+    while a keep_apart decision names it; otherwise it stays as the grouping step wrote it. The
+    groups it names are not touched: keeping apart is what the proposal already does."""
+    ka = kept_apart(bundle)
+    for mc in bundle.get("merge_candidates") or ():
+        d = ka.get(mc.get("merge_candidate_id"))
+        if d is not None:
+            mc["status"] = "kept_apart"
+            mc["kept_apart_by_decision_id"] = d.get("decision_id")
+        elif mc.get("status") == "kept_apart":
+            mc["status"] = "proposed"
+            mc.pop("kept_apart_by_decision_id", None)
+
+
+def merge_contradictions(bundle: Mapping, group: Mapping) -> dict | None:
+    """For a group a merge decision combined (``merged_by_decision``): the positions where its run
+    names differ that a ``set_not_counter_positions`` answer states are NOT counters, with those
+    decisions — the scientist's two statements disagree. ``None`` otherwise."""
+    mbd = group.get("merged_by_decision")
+    if not isinstance(mbd, Mapping):
+        return None
+    said = not_counter_positions(bundle)
+    hit = sorted(p for p in mbd.get("name_number_positions") or () if p in said)
+    if not hit:
+        return None
+    return {"positions": hit, "decision_ids": sorted({said[p].get("decision_id") for p in hit}),
+            "note": "a later answer states these name positions are NOT run counters, but this group was combined "
+                    "across them by a merge decision: it cannot be confirmed as it stands; `isaac bundle group --regroup` "
+                    "reopens the merge as a candidate (a confirmed one stays, flagged here)"}
+
+
+def _derive_merge_contradictions(bundle: Mapping) -> None:
+    for g in bundle.get("record_groups") or ():
+        mbd = g.get("merged_by_decision")
+        if not isinstance(mbd, dict):
+            continue
+        c = merge_contradictions(bundle, g)
+        if c is None:
+            mbd.pop("contradicted_by_not_counter", None)
+        else:
+            mbd["contradicted_by_not_counter"] = c
+
+
+def not_counter_positions(bundle: Mapping) -> dict[int, Mapping]:
+    """``{position: decision}`` for each 1-based filename token position a scientist stated is NOT a
+    run/acquisition counter (``set_not_counter_positions``), unless a LATER ``set_counter_positions``
+    names it as one (latest statement per position wins)."""
+    out: dict[int, Mapping] = {}
+    for d in bundle.get("scientist_decisions") or ():
+        if d.get("target") != {"kind": "experiment", "id": "experiment"} or decider_name_problem((d.get("decided_by") or {}).get("name")):
+            continue
+        if d.get("decision") == NOT_COUNTER_DECISION:
+            for p in d.get("not_counter_positions") or ():
+                out[int(p)] = d
+        elif d.get("decision") == "set_counter_positions":
+            for p in d.get("positions") or ():
+                out.pop(int(p), None)
     return out
 
 
@@ -1342,8 +1559,9 @@ def apply_derivations(bundle: dict) -> dict:
         d = status_of.get(("record_group", g["group_id"]))
         kind = d.get("decision") if d is not None else None
         g["status"] = GROUP_STATUS_BY_DECISION.get(None if kind == "defer" else kind, "proposed")
+    state_of = processing_state_decisions(bundle)
     for r in bundle.get("processing_results") or ():
-        d = decision_of.get(("processing_result", processing_id(r)))
+        d = state_of.get(("processing_result", processing_id(r)))
         kind = d.get("decision") if d is not None else None
         if kind is None or kind in NEUTRAL_DECISIONS:
             if r.get("state") not in PROCESSING_UNDECIDED_STATES:
@@ -1356,6 +1574,9 @@ def apply_derivations(bundle: dict) -> dict:
             r["state"] = STATE_NEEDS_REVIEW
     _derive_processed_links(bundle)
     _derive_merge_candidate_ids(bundle)
+    _derive_merge_candidate_status(bundle)
+    _derive_merge_contradictions(bundle)
+    _derive_athena_selection(bundle)
     bundle["readiness"]["eligible_value_count"] = eligible
     states = [c["value_state"] for c in bundle["candidates"]]
     counts = bundle.get("counts") or {}
@@ -3514,6 +3735,22 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50) -> list[str]:
             problem = clock_zone_problem(d.get("value"))
             if problem is not None:
                 errors.append(f"decision: {d['decision_id']} {problem}")
+        # 1.6.0 (DEC-91): each capture decision only on its own target kind, with its own field
+        allowed = DECISIONS_BY_KIND.get(d["target"]["kind"])
+        if d.get("decision") in (ATHENA_SELECT_DECISION, KEEP_APART_DECISION, NOT_COUNTER_DECISION) and (
+                allowed is None or d["decision"] not in allowed):
+            errors.append(f"decision: {d['decision_id']} {d['decision']} is not a decision for a {d['target']['kind']}")
+        if d.get("decision") == NOT_COUNTER_DECISION:
+            pos = d.get("not_counter_positions")
+            if not isinstance(pos, list) or not pos or any(not isinstance(p, int) or isinstance(p, bool) or p < 1 for p in pos):
+                errors.append(f"decision: {d['decision_id']} {NOT_COUNTER_DECISION} needs not_counter_positions (1-based positions)")
+        elif "not_counter_positions" in d:
+            errors.append(f"decision: {d['decision_id']} carries not_counter_positions, which only {NOT_COUNTER_DECISION} does")
+        if d.get("decision") == ATHENA_SELECT_DECISION and d["target"]["kind"] == "processing_result":
+            r = next((x for x in bundle.get("processing_results") or () if processing_id(x) == d["target"]["id"]), None)
+            if r is not None and latest_athena_selection(bundle, r) is d and athena_resolve(r, d) is None:
+                errors.append(f"decision: {d['decision_id']} selects {d.get('value')!r}, which is not one of the Athena versions "
+                              f"{d['target']['id']} lists ({', '.join(athena_version_ids(r)) or 'none'}), by id or by its recorded provenance")
     for c in bundle["candidates"]:
         if is_local_clock_start(c):
             # THE WITNESSES ARE RE-READ FROM THEIR LITERALS (ssrl_xdc_scan_start_v1), never trusted
@@ -3563,6 +3800,10 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50) -> list[str]:
         "record_group": group_ids | {g["group_id"] for g in bundle.get("superseded_record_groups") or ()},
         "processing_result": {processing_id(r) for r in bundle.get("processing_results") or ()},
         "experiment": {"experiment"},
+        # 1.6.0: a merge candidate a regroup replaced is kept in superseded_merge_candidates while a
+        # decision names it, exactly as a record group is
+        "merge_candidate": {mc.get("merge_candidate_id") for mc in bundle.get("merge_candidates") or ()}
+        | {mc.get("merge_candidate_id") for mc in bundle.get("superseded_merge_candidates") or ()},
     }
     for entry in [
         *bundle["scientist_decisions"],
@@ -3684,6 +3925,16 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50) -> list[str]:
     for r, e in zip(bundle.get("processing_results") or (), expected.get("processing_results") or ()):
         if r["state"] != e["state"]:
             errors.append(f"state: processing result for {r['group_id']} is {r['state']} but only {e['state']} is supported")
+        for part in ("athena_result_of_record", "athena_result_of_record_basis", "review_flags", "questions"):
+            if json.dumps(r.get(part), sort_keys=True) != json.dumps(e.get(part), sort_keys=True):
+                errors.append(f"state: processing result {processing_id(r)} {part} is not what its select_athena_version decisions give")
+    for g, e in zip(bundle.get("record_groups") or (), expected.get("record_groups") or ()):
+        if json.dumps((g.get("merged_by_decision") or {}).get("contradicted_by_not_counter"), sort_keys=True) != json.dumps(
+                (e.get("merged_by_decision") or {}).get("contradicted_by_not_counter"), sort_keys=True):
+            errors.append(f"state: record group {g['group_id']} contradicted_by_not_counter is not what its decisions give")
+    for mc, e in zip(bundle.get("merge_candidates") or (), expected.get("merge_candidates") or ()):
+        if (mc.get("status"), mc.get("kept_apart_by_decision_id")) != (e.get("status"), e.get("kept_apart_by_decision_id")):
+            errors.append(f"state: merge candidate {mc.get('merge_candidate_id')} is {mc.get('status')} but its decisions give {e.get('status')}")
     if bundle["readiness"]["eligible_value_count"] != expected["readiness"]["eligible_value_count"]:
         errors.append("consistency: readiness.eligible_value_count disagrees with the candidates")
     for key, want in expected["counts"].items():

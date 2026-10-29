@@ -596,6 +596,7 @@ def _row(kind: str, obj: Mapping) -> dict:
     if kind == "merge-candidates":
         return {
             "merge_candidate_id": obj.get("merge_candidate_id") or obj.get("id"),
+            "status": obj.get("status"),
             "group_ids": list(obj.get("group_ids") or [])[:50],
             "reason_code": obj.get("reason_code") or obj.get("code") or obj.get("basis"),
         }
@@ -928,6 +929,7 @@ def cmd_bundle_decide(args) -> int:
         except ValueError as exc:
             raise M.MutationRefused(f"--split-into is not valid JSON: {exc}") from exc
         targets = _targets_from(args)
+        positions = _positions(args.positions)
         if args.question:
             from . import questions as Q
 
@@ -942,6 +944,8 @@ def cmd_bundle_decide(args) -> int:
             if not found:
                 raise M.MutationRefused(f"No open question {args.question!r}" + (f" for {args.only}" if args.only else "") + ".", code=6)
             targets.extend(found)
+            if asked is not None and asked["kind"] == "naming_counter_positions" and args.decision == "set_not_counter_positions" and positions is None:
+                positions = list(asked.get("positions") or [])  # the positions the question asks about now
         return M.decide(
             Path(args.bundle_dir),
             target_ids=targets,
@@ -956,7 +960,7 @@ def cmd_bundle_decide(args) -> int:
             qc_note=args.qc_note,
             element=args.element,
             edge=args.edge,
-            positions=_positions(args.positions),
+            positions=positions,
         )
 
     return _mutation(run)
@@ -1166,8 +1170,20 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--field", help="with --question on an optional-values question: the one field being answered")
     q.add_argument("--decision", required=True,
                    help="candidate / missing value / conflict: confirm correct reject defer; record group: confirm split merge "
-                        "reject defer approve_calibration set_absorber; processing result: approve reject needs_changes defer; "
-                        "--target experiment: set_counter_positions (with --positions) or set_clock_time_zone (with --value)")
+                        "reject defer approve_calibration set_absorber; processing result: approve reject needs_changes defer, "
+                        "or select_athena_version --value <one of its athena_versions[].version_id> (the result of record, "
+                        "bound to that version's project file, group and data hash, so a renumbering re-processing keeps it; "
+                        "changes no QC status and no processed value); merge candidate (mc-...): keep_apart (the groups are "
+                        "distinct; no group changes); --target experiment: set_counter_positions (with --positions), "
+                        "set_not_counter_positions (with --positions, or --question on the counter question: those positions "
+                        "are not counters; grouping is unchanged) or set_clock_time_zone (with --value). "
+                        "MERGING two groups takes three steps: (1) --target <group> --decision merge --merge-with <group...>; "
+                        "(2) isaac bundle group <dir> --regroup, which proposes ONE combined group (flag "
+                        "merged_by_scientist_decision) only when nothing recorded tells them apart: no confirmed run, one role, "
+                        "every recorded reading and confirmed run answer equal, and file names differing only in zero-padded "
+                        "fixed-width numbers (02/03: no unit, sign, decimal or letter, not beside a unit or keyword, not at "
+                        "a position stated not a counter); otherwise it keeps a scientist_decided_merge candidate "
+                        "naming why; (3) --target <combined group> --decision confirm")
     q.add_argument("--value", help="the value; for set_clock_time_zone the IANA name (Area/Location, or UTC) of the time zone "
                                    "the INSTRUMENT CLOCK that wrote the scan headers was set to (no offset, no abbreviation)")
     q.add_argument("--json", action="store_true", help="parse --value as JSON")
@@ -1180,7 +1196,8 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--qc-note", help="with --qc-status: what is compromised or failed, and why")
     q.add_argument("--element", help="record group + approve_calibration (the calibration reference) or set_absorber (the absorber): an element, e.g. Ir")
     q.add_argument("--edge", help="with --element: the edge (K, L1-L3, M1-M5)")
-    q.add_argument("--positions", help="--target experiment + set_counter_positions: filename token positions, e.g. 2 or 2,3")
+    q.add_argument("--positions", help="--target experiment + set_counter_positions or set_not_counter_positions: "
+                                       "1-based filename token positions, e.g. 2 or 2,3")
     q.set_defaults(func=cmd_bundle_decide)
 
     q = bsub.add_parser("questions", help="consolidated questions: asked once, at the right scope, blocking first")

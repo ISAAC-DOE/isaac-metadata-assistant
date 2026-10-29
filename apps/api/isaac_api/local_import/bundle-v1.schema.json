@@ -47,9 +47,10 @@
         "1.2.0",
         "1.3.0",
         "1.4.0",
-        "1.5.0"
+        "1.5.0",
+        "1.6.0"
       ],
-      "description": "1.1.0 adds record_groups, processing_results and exposures (all optional, so a 1.0.0 bundle still validates) and widens the decision, target and question enums. 1.2.0 adds processed_outputs (optional; absent means none were recorded) and extended_context_entry.processed_output_id. A 1.2.0 bundle REQUIRES processed_outputs (possibly empty); a bundle without it keeps its older version. 1.3.0 adds ai_interpretation.field_path and .run_ids and the optional eligibility_rederived and format_upgrades logs (all optional), and eligibility is derived under a larger writable set (context.electrochemistry.potential_setpoint_V). A 1.3.0 bundle also REQUIRES processed_outputs. 1.4.0 adds the set_clock_time_zone experiment decision (and its decision field clock_zone_binding on a confirm), the confirm_clock_time_zone question kind, the optional candidates[].local_clock block and the optional zone / zone_decision_id on a normalization step (all additive); nothing becomes newly writable. A 1.4.0 bundle also REQUIRES processed_outputs. 1.5.0 adds nothing to the bundle's shape; eligibility is derived under a larger writable set (context.electrochemistry.control_mode), as at 1.3.0. A 1.5.0 bundle also REQUIRES processed_outputs."
+      "description": "1.1.0 adds record_groups, processing_results and exposures (all optional, so a 1.0.0 bundle still validates) and widens the decision, target and question enums. 1.2.0 adds processed_outputs (optional; absent means none were recorded) and extended_context_entry.processed_output_id. A 1.2.0 bundle REQUIRES processed_outputs (possibly empty); a bundle without it keeps its older version. 1.3.0 adds ai_interpretation.field_path and .run_ids and the optional eligibility_rederived and format_upgrades logs (all optional), and eligibility is derived under a larger writable set (context.electrochemistry.potential_setpoint_V). A 1.3.0 bundle also REQUIRES processed_outputs. 1.4.0 adds the set_clock_time_zone experiment decision (and its decision field clock_zone_binding on a confirm), the confirm_clock_time_zone question kind, the optional candidates[].local_clock block and the optional zone / zone_decision_id on a normalization step (all additive); nothing becomes newly writable. A 1.4.0 bundle also REQUIRES processed_outputs. 1.5.0 adds nothing to the bundle's shape; eligibility is derived under a larger writable set (context.electrochemistry.control_mode), as at 1.3.0. A 1.5.0 bundle also REQUIRES processed_outputs. 1.6.0 (DEC-91) adds three capture decisions — keep_apart on the new target kind merge_candidate, select_athena_version on a processing result (its value one of that result's athena_versions[].version_id; the derived athena_result_of_record / athena_result_of_record_basis), and set_not_counter_positions on the experiment (decision field not_counter_positions) — the optional superseded_merge_candidates section, the derived merge-candidate status kept_apart, and a merge decision's combined group (record_group.merged_by_decision); nothing becomes newly writable. A 1.6.0 bundle also REQUIRES processed_outputs."
     },
     "is_official_record": {
       "const": false
@@ -566,7 +567,7 @@
       "items": {
         "type": "object"
       },
-      "description": "LOCAL-P's proposals of record groups a scientist may merge with one decision. Suggestions only. A candidate may name one group plus run_keys (a zero-scan export offered to a confirmed group as context)."
+      "description": "LOCAL-P's proposals of record groups a scientist may merge with one decision. Suggestions only. A candidate may name one group plus run_keys (a zero-scan export offered to a confirmed group as context). 1.6.0: status is DERIVED kept_apart (with kept_apart_by_decision_id) while a keep_apart decision names the candidate; a kept-apart candidate is not an open merge question, and no group it names is changed."
     },
     "self_test": {
       "type": "object",
@@ -642,6 +643,45 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      }
+    },
+    "superseded_merge_candidates": {
+      "type": "array",
+      "maxItems": 5000,
+      "description": "1.6.0: merge candidates a `bundle group --regroup` no longer proposes while a decision (keep_apart) still names them. Kept so those decisions keep a target; never an open question.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "merge_candidate_id",
+          "group_ids",
+          "superseded_utc",
+          "reason"
+        ],
+        "properties": {
+          "merge_candidate_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "group_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "run_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "superseded_utc": {
+            "$ref": "#/$defs/utc"
+          },
+          "reason": {
+            "type": "string"
           }
         }
       }
@@ -854,7 +894,8 @@
             "processing_result",
             "source",
             "run",
-            "experiment"
+            "experiment",
+            "merge_candidate"
           ]
         },
         "id": {
@@ -2608,7 +2649,10 @@
             "approve_calibration",
             "set_absorber",
             "set_counter_positions",
-            "set_clock_time_zone"
+            "set_clock_time_zone",
+            "keep_apart",
+            "select_athena_version",
+            "set_not_counter_positions"
           ]
         },
         "value": {},
@@ -2782,6 +2826,46 @@
             }
           },
           "description": "1.4.0, confirm of a local-clock start-time candidate only: the instrument clock's time zone (and its set_clock_time_zone decision) the confirmation was made under, and the UTC value that zone gave. A candidate whose current zone or value differs is not eligible until confirmed again."
+        },
+        "not_counter_positions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "description": "1.6.0, set_not_counter_positions only: the 1-based filename token positions a scientist stated are NOT run/acquisition counters. Grouping is unchanged by it; the counter question stops asking about them."
+        },
+        "athena_version_provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "prj_relative_path",
+            "athena_group",
+            "data_sha256_prefix"
+          ],
+          "properties": {
+            "prj_relative_path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "athena_group": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "data_sha256_prefix": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "description": "1.6.0, select_athena_version only: the selected version's own identity (project file, Athena group, data hash prefix). Version ids are positional and move when a project file is added or removed; the selection follows this identity, never the number."
         }
       }
     },
@@ -2890,6 +2974,10 @@
           "type": "array",
           "items": {},
           "description": "Recorded conditions the group's members disagree on. A proposed group must have none."
+        },
+        "merged_by_decision": {
+          "type": "object",
+          "description": "1.6.0: present on the ONE group `bundle group --regroup` proposes for a scientist's merge decision (decision_id, merged_group_id, merge_with, decided_by, from_groups, basis_keys_dropped, name_number_positions, statement). Proposed only; a confirm decision makes it a record."
         }
       }
     },
@@ -3081,6 +3169,17 @@
               "type": "object"
             }
           }
+        },
+        "athena_result_of_record": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Null until a select_athena_version decision names one of athena_versions[].version_id; DERIVED from the latest such decision on every save. Never changes state, QC or outputs."
+        },
+        "athena_result_of_record_basis": {
+          "type": "object",
+          "description": "1.6.0, derived: the select_athena_version decision (decision_id, decided_by, statement) behind athena_result_of_record."
         }
       },
       "if": {
@@ -3668,6 +3767,23 @@
         "properties": {
           "format_version": {
             "const": "1.5.0"
+          }
+        },
+        "required": [
+          "format_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "processed_outputs"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "format_version": {
+            "const": "1.6.0"
           }
         },
         "required": [

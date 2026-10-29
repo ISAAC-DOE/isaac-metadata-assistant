@@ -39,14 +39,37 @@ def test_a_shared_value_is_asked_once_at_experiment_scope(grouped):
     assert "never an answer" in hint["note"]
 
 
-def test_a_differing_recorded_value_stops_experiment_wide_propagation(grouped):
+def test_differing_answers_keep_the_question_id_and_say_they_differ(grouped):
+    """DEC-91 (replaces "a differing answered value splits the question per group"): a question's
+    scope is read from what the FILES record, never from answers, so two differing answers leave the
+    question for the remaining groups under the SAME id — and its text says the answers differ."""
     b = M.load(grouped)
+    before = _by_path(Q.consolidate(b), "context.environment")
     env = [m for m in b["missing_values"] if m["target_field_path"] == "context.environment"]
     M.decide(grouped, target_ids=[env[0]["value_id"]], decision="correct", value="ex_situ", by="S", orcid=None)
     M.decide(grouped, target_ids=[env[1]["value_id"]], decision="correct", value="in_situ", by="S", orcid=None)
     p = Q.consolidate(M.load(grouped))
     asked = _by_path(p, "context.environment")
-    assert asked and all(q["scope"].startswith("group:") for q in asked)
+    assert [q["question_id"] for q in asked] == [before[0]["question_id"]] and asked[0]["scope"] == "experiment"
+    assert {t["id"] for t in asked[0]["targets"]} == {t["id"] for t in before[0]["targets"]} - {env[0]["value_id"], env[1]["value_id"]}
+    assert "Answers already given for this field elsewhere differ (2 distinct value(s) answered" in asked[0]["text"]
+    assert asked[0]["answers_differ"] is True and "answers given so far DIFFER" in asked[0]["answer_command"]
+    assert before[0]["answers_differ"] is False and "Answers already given" not in before[0]["text"]
+
+
+def test_differing_file_readings_with_no_answer_say_nothing_about_answers(grouped):
+    """L1: the note needs at least one answer; differing FILE readings alone never produce it."""
+    import copy
+
+    b = M.load(grouped)
+    q = _by_path(Q.consolidate(b), "context.environment")[0]
+    for value in ("ex_situ", "in_situ"):  # two differing recorded readings, in memory only
+        c = copy.deepcopy(b["candidates"][0])
+        c.update(candidate_id=f"cand-x{value}", target_field_path="context.environment", value=value, value_state="unmapped")
+        b["candidates"].append(c)
+    for x in Q.consolidate(b)["questions"]:
+        assert "Answers already given" not in x["text"] and x.get("answers_differ") in (False, None), x["question_id"]
+    assert q["question_id"]
 
 
 def test_questions_are_deduplicated_ordered_and_fewer_than_v1(grouped):

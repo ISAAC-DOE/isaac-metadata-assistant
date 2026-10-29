@@ -71,6 +71,7 @@ def evaluate_results(payloads: Iterable[Mapping]) -> dict:
                         "edge_step_ratio": m.get("edge_step_ratio"),
                         "rms_norm_with_athena_params": m.get("rms_norm_with_athena_params"),
                         "athena_versions": len(r.get("athena_versions") or ()),
+                        "athena_result_of_record": r.get("athena_result_of_record"),
                     }
                 )
     return {"rows": rows, "overall": _summary(rows), "by_bundle": {b: _summary([r for r in rows if r["bundle"] == b]) for b in sorted({r["bundle"] or "?" for r in rows})}}
@@ -98,7 +99,8 @@ def _summary(rows: Sequence[Mapping]) -> dict:
         "failures_by_cause": _count(rows, "failure"),
         "not_applicable": _count(rows, "not_applicable"),
         "athena_matched": len(matched),
-        "athena_versions_unselected": sum(1 for r in rows if r.get("athena_versions")),
+        # unselected = no select_athena_version answer yet (bundle 1.6.0 derives athena_result_of_record)
+        "athena_versions_unselected": sum(1 for r in rows if r.get("athena_versions") and not r.get("athena_result_of_record")),
         "comparison_verdicts": _count(matched, "comparison_verdict"),
         "comparison_flags": dict(sorted(flags.items())),
         "abs_e0_delta_eV": _dist([abs(r["e0_delta_eV"]) for r in comparable if r["e0_delta_eV"] is not None], _BINS["abs_e0_delta_eV"]),

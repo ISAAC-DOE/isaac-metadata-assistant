@@ -20,6 +20,7 @@ local user typed — and is never used to decide anything.
 
 from __future__ import annotations
 
+import copy
 import fcntl
 import hashlib
 import json
@@ -188,6 +189,9 @@ def resolve_target(bundle: Mapping, target_id: str) -> tuple[str, dict]:
     for result in bundle.get("processing_results") or ():
         if B.processing_id(result) == target_id:
             return "processing_result", result
+    for mc in bundle.get("merge_candidates") or ():
+        if mc.get("merge_candidate_id") == target_id:
+            return "merge_candidate", mc
     raise MutationRefused(f"No target with id {target_id!r} in this bundle.", code=6)
 
 
@@ -423,6 +427,22 @@ def _check_decision(bundle: Mapping, kind: str, obj: Mapping, decision: str, val
         )
     if decision == "correct" and value is None:
         raise MutationRefused("`correct` needs --value.")
+    if decision == B.ATHENA_SELECT_DECISION:
+        listed = B.athena_version_ids(obj)
+        if not listed:
+            raise MutationRefused(f"{B.processing_id(obj)} lists no Athena versions; there is no result of record to select.")
+        if value not in listed:
+            raise MutationRefused(
+                f"{value!r} is not one of the Athena versions {B.processing_id(obj)} lists ({', '.join(listed)}). "
+                "Name one of them with --value; nothing was recorded."
+            )
+        ident = [B.athena_version_identity(v) for v in obj.get("athena_versions") or ()]
+        mine = B.athena_version_identity(next(v for v in obj["athena_versions"] if v.get("version_id") == value))
+        if ident.count(mine) != 1 or not any(mine.values()):
+            raise MutationRefused(
+                f"{value!r} cannot be told apart from another listed version by its own provenance (project file, "
+                "Athena group, data hash), so a later re-processing could not keep this selection on it. Nothing was recorded."
+            )
     if kind == "candidate" and decision == "confirm" and B.is_local_clock_start(obj):
         # a local clock time is confirmed only as the UTC value a CONFIRMED zone gives it; a value
         # the scientist supplies is a correction, and is never credited to the zone rule
@@ -507,21 +527,47 @@ def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, ed
             raise MutationRefused(f"{decision} needs --element (e.g. Ir) and --edge (K, L1-L3, M1-M5).")
     elif element or edge:
         raise MutationRefused("--element/--edge go with --decision approve_calibration or set_absorber on a record group.")
-    if decision == "set_counter_positions":
+    if decision in ("set_counter_positions", B.NOT_COUNTER_DECISION):
         if (
             not positions
             or len(positions) > 8
             or any(not isinstance(n, int) or isinstance(n, bool) or n < 1 for n in positions)
         ):
-            raise MutationRefused("--positions must be 1 to 8 positive whole numbers, e.g. --positions 2 or --positions 2,3.")
-        positions = list(positions)
+            raise MutationRefused(
+                "--positions must be 1 to 8 positive whole numbers, e.g. --positions 2 or --positions 2,3"
+                + (" (answering the counter question with --question names its open positions for you)."
+                   if decision == B.NOT_COUNTER_DECISION else ".")
+            )
+        positions = sorted(set(positions)) if decision == B.NOT_COUNTER_DECISION else list(positions)
     elif positions:
-        raise MutationRefused("--positions goes with --target experiment --decision set_counter_positions.")
+        raise MutationRefused("--positions goes with --target experiment --decision set_counter_positions or set_not_counter_positions.")
+    if decision == B.ATHENA_SELECT_DECISION and (value is None or not isinstance(value, str)):
+        raise MutationRefused("select_athena_version needs --value <version id>, one of the processing result's athena_versions.")
     if decision == B.CLOCK_ZONE_DECISION:
         problem = B.clock_zone_problem(value)
         if problem is not None:
             raise MutationRefused(f"{problem}. Nothing was recorded.")
     return positions
+
+
+#: What a 1.6.0 capture decision records — and what it does NOT do (DEC-91). Returned by ``decide``.
+CAPTURE_STATEMENTS: Mapping[str, str] = {
+    B.KEEP_APART_DECISION: (
+        "Recorded: the groups this merge candidate names are distinct and stay apart. The candidate is no "
+        "longer an open merge question (status kept_apart). No group was changed, confirmed or rejected: "
+        "confirm (or otherwise decide) each group on its own."
+    ),
+    B.ATHENA_SELECT_DECISION: (
+        "Recorded: {value} is the scientist's result of record among this result's Athena versions "
+        "(athena_result_of_record). The processing result's state, QC status and processed values are unchanged."
+    ),
+    B.NOT_COUNTER_DECISION: (
+        "Recorded: filename token position(s) {positions} are NOT run/acquisition counters. Grouping is unchanged "
+        "by this answer: runs whose names differ there were proposed as separate groups and stay so, and each merge "
+        "candidate between them stays open (merge it, or keep it apart). The counter question no longer asks about "
+        "these positions."
+    ),
+}
 
 
 def record_decision(
@@ -564,6 +610,14 @@ def record_decision(
                     "Approving a processing result needs --qc-status (one of "
                     + ", ".join(qc_status_vocabulary()) + "): the QC status is a person's statement."
                 )
+            if kind == "record_group" and decision == "confirm" and B.merge_contradictions(bundle, obj):
+                c = B.merge_contradictions(bundle, obj)
+                raise MutationRefused(
+                    f"{tid} was combined by a merge decision across name position(s) {', '.join(map(str, c['positions']))}, "
+                    f"which decision(s) {', '.join(c['decision_ids'])} state are NOT run counters. Run "
+                    "`isaac bundle group <dir> --regroup` (the merge is reopened as a candidate), or record "
+                    "set_counter_positions if they are counters. Nothing was recorded."
+                )
             if kind == "record_group" and decision == "confirm":
                 # R-4: a group whose runs now sit in ANOTHER live group cannot be confirmed
                 # (e.g. a rejected group after a regroup re-proposed its runs)
@@ -573,6 +627,15 @@ def record_decision(
                         raise MutationRefused(
                             f"This group's run is now in proposal {other['group_id']}; confirm or reject that proposal instead."
                         )
+            if decision == B.NOT_COUNTER_DECISION:
+                counters = set(counter_positions(bundle) or ())
+                clash = sorted(set(positions or ()) & counters)
+                if clash:
+                    raise MutationRefused(
+                        f"Position(s) {', '.join(map(str, clash))} are recorded as run counters by the latest "
+                        "set_counter_positions answer. To say otherwise, record set_counter_positions without them; "
+                        "nothing was recorded."
+                    )
             planned.append((kind, obj))
         decided_by = {
             "name": by.strip(),
@@ -596,6 +659,13 @@ def record_decision(
                 # with the latest of ITS kind (a zone restated after a counter answer is unchanged)
                 prior = next((d for d in reversed(bundle.get("scientist_decisions") or ())
                               if d.get("target") == {"kind": "experiment", "id": tid} and d.get("decision") == decision), None)
+            elif kind == "processing_result":
+                # an Athena-version selection (1.6.0) and the state decisions share the target: each is
+                # compared with the latest of its own class
+                selecting = decision == B.ATHENA_SELECT_DECISION
+                prior = next((d for d in reversed(bundle.get("scientist_decisions") or ())
+                              if d.get("target") == {"kind": kind, "id": tid}
+                              and (d.get("decision") == B.ATHENA_SELECT_DECISION) == selecting), None)
             # THE BINDING (1.4.0): a confirmation of a local-clock start time records the zone and the
             # converted value it was made under; a later zone decision cannot reuse it silently.
             binding = (B.local_clock_binding(obj, zone_d)
@@ -615,7 +685,7 @@ def record_decision(
                 prior.get("qc_note"),
                 prior.get("element"),
                 prior.get("edge"),
-                json.dumps(prior.get("positions") or []),
+                json.dumps(prior.get("positions") or prior.get("not_counter_positions") or []),
                 json.dumps(prior.get("clock_zone_binding"), sort_keys=True),
             ) == signature:
                 unchanged.append(tid)
@@ -640,6 +710,13 @@ def record_decision(
                 entry["element"], entry["edge"] = element, edge
             if decision == "set_counter_positions":
                 entry["positions"] = positions
+            if decision == B.NOT_COUNTER_DECISION:
+                entry["not_counter_positions"] = positions
+            if decision == B.ATHENA_SELECT_DECISION:
+                # the version's own identity, so a re-processing that renumbers the versions cannot make
+                # this selection point at another curve (B.athena_resolve)
+                entry["athena_version_provenance"] = B.athena_version_identity(
+                    next(v for v in obj.get("athena_versions") or () if v.get("version_id") == value))
             if binding is not None:
                 entry["clock_zone_binding"] = binding
             if kind == "processing_result" and decision == "approve":
@@ -657,6 +734,18 @@ def record_decision(
             decisions.append(entry)
             recorded.append(tid)
         result = {"recorded": recorded, "unchanged": unchanged, "batch_id": batch_id}
+        statement = CAPTURE_STATEMENTS.get(decision)
+        if statement:
+            result["statement"] = statement.format(value=value, positions=", ".join(map(str, positions or ())))
+        if decision == B.NOT_COUNTER_DECISION:
+            hit = [g["group_id"] for g in bundle.get("record_groups") or () if B.merge_contradictions(bundle, g)]
+            if hit:
+                # NEVER SILENT: a group a merge combined across these positions now contradicts this answer
+                result["contradicts_combined_groups"] = hit
+                result["statement"] += (f" It CONTRADICTS {len(hit)} group(s) a merge decision combined across these positions "
+                                        f"({', '.join(hit[:5])}): each is flagged (contradicted_by_not_counter) and cannot be "
+                                        "confirmed; a regroup reopens a proposed one as a merge candidate.")
+                print(f"isaac: {result['statement']}", file=sys.stderr)
         if decision == B.CLOCK_ZONE_DECISION:
             after = B.apply_derivations(json.loads(json.dumps(bundle)))
             stale = B.local_clock_reconfirm(after)
@@ -980,22 +1069,112 @@ def group(bundle_dir: Path, *, regroup: bool = False) -> dict:
         merge_candidates += G.binding_merge_candidates(
             full["record_groups"], fresh, bind_of, exports_of_binding, experiment_key=exp_key
         )
-        # a MERGE decision is carried as a candidate between the groups now holding its runs
-        by_id_all = {g["group_id"]: g for g in existing}
+        # A MERGE DECISION IS APPLIED (DEC-91; before 1.6.0 it was only carried as a candidate, which no
+        # decision could turn into one group — a dead end). The runs of the merged group and of every
+        # group it names in merge_with are proposed as ONE combined group, for the scientist to confirm,
+        # only when nothing the import or a scientist recorded tells them apart (FAIL CLOSED,
+        # :func:`_merge_blockers`): none is in a confirmed group, they share a role, every basis reading
+        # agrees, the independent condition check finds nothing but the names, the names differ only in
+        # BARE WHOLE NUMBERS at the same token positions (what the counter question asks about), and no
+        # confirmed run-level answer differs. Anything else keeps the candidate below, naming why.
+        by_id_all = {g["group_id"]: g for g in [*(bundle.get("superseded_record_groups") or ()), *existing]}
+        # the combined group a previous regroup made for a decision still holds the runs of its
+        # merge_with groups after those were replaced, so a later regroup reproduces it
+        combined_runs_of: dict[str, list[str]] = {}
+        for g in existing:
+            mbd = g.get("merged_by_decision")
+            if isinstance(mbd, Mapping) and mbd.get("decision_id"):
+                combined_runs_of.setdefault(mbd["decision_id"], []).extend(g.get("member_run_keys") or ())
+        combined_by: list[dict] = []
+        not_combined: list[dict] = []
         for gid, d in sorted(merge_decision.items()):
+            if (by_id_all.get(gid) or {}).get("status") != "merged":
+                continue  # a later status decision superseded the merge
             runs_named = [k for x in [gid, *(d.get("merge_with") or [])] for k in (by_id_all.get(x) or {}).get("member_run_keys") or ()]
+            runs_named += [k for k in combined_runs_of.get(d["decision_id"], ()) if k not in runs_named]
             gids = sorted({fresh_of[k] if k in fresh_of else bind_of[k] for k in runs_named if k in fresh_of or k in bind_of})
-            if len(gids) > 1:
-                mcid = "mc-" + hashlib.sha256((exp_key + "\n" + "\n".join(gids)).encode()).hexdigest()[:16]
-                merge_candidates.append({
-                    "merge_candidate_id": mcid, "experiment_key": exp_key, "group_ids": gids, "run_keys": [],
-                    "status": "proposed", "rule_id": G.BINDING_RULE_ID,
-                    "reasons": [{"code": "scientist_decided_merge", "decision_id": d["decision_id"], "group_id": gid,
-                                 "detail": "a scientist decided to merge these runs' former groups; confirm the merge as one group"}],
-                })
+            if len(gids) < 2:
+                continue
+            why = None
+            holders = [g for g in fresh if g["group_id"] in gids]
+            if any(k in bind_of for k in runs_named):
+                why = "a run of it is in a confirmed group, whose runs are never re-proposed"
+            elif len(holders) != len(gids) or len({h.get("role") for h in holders}) != 1:
+                why = "the groups holding its runs do not share one role"
+            if why is None:
+                order = {g["group_id"]: i for i, g in enumerate(fresh)}
+                holders.sort(key=lambda h: order[h["group_id"]])
+                combined = _combine_for_merge(holders, d, gid, exp_key)
+                prior = kept_by_id.get(combined["group_id"])
+                if prior is not None:
+                    # H1: the combined group was itself decided (rejected, split or merged): that is the
+                    # scientist's ruling on exactly this group, so it is not proposed again — and no
+                    # candidate re-asks it
+                    not_combined.append({"decision_id": d["decision_id"],
+                                         "reason": f"the combined group {combined['group_id']} was already decided ({prior.get('status')})"})
+                    continue
+                blockers = _merge_blockers(bundle, payload, holders, combined)
+                if blockers:
+                    why = "; ".join(blockers)
+                else:
+                    numbers = merge_name_numbers(bundle, combined)
+                    combined["merged_by_decision"]["name_number_positions"] = [n["position"] for n in numbers]
+                    # the differing VALUES, so the scientist sees "02 vs 03" when confirming
+                    combined["merged_by_decision"]["name_numbers"] = numbers
+                    first = order[holders[0]["group_id"]]
+                    fresh = [g for g in fresh if g["group_id"] not in gids]
+                    fresh.insert(min(first, len(fresh)), combined)
+                    for h in holders:
+                        renamed[h["group_id"]] = combined["group_id"]
+                        for k in h.get("member_run_keys") or ():
+                            fresh_of[k] = combined["group_id"]
+                    combined_by.append({"decision_id": d["decision_id"], "group_id": combined["group_id"], "from_groups": gids})
+                    continue
+            not_combined.append({"decision_id": d["decision_id"], "reason": why})
+            mcid = "mc-" + hashlib.sha256((exp_key + "\n" + "\n".join(gids)).encode()).hexdigest()[:16]
+            merge_candidates.append({
+                "merge_candidate_id": mcid, "experiment_key": exp_key, "group_ids": gids, "run_keys": [],
+                "status": "proposed", "rule_id": G.BINDING_RULE_ID,
+                "reasons": [{"code": "scientist_decided_merge", "decision_id": d["decision_id"], "group_id": gid,
+                             "detail": f"a scientist decided to merge these runs' former groups, but they were not combined: {why}. "
+                                       "Confirm or reject each group, or record a new decision."}],
+            })
+        if combined_by:
+            # a candidate that named a group now combined names the combined group instead; one left
+            # naming a single group (and no run) has nothing left to merge
+            remapped, seen_mc = [], set()
+            for mc in merge_candidates:
+                gids2 = sorted({renamed.get(x, x) for x in mc.get("group_ids") or ()})
+                if gids2 != sorted(mc.get("group_ids") or ()):
+                    if len(gids2) < 2 and not mc.get("run_keys"):
+                        continue
+                    mc = {**mc, "group_ids": gids2,
+                          "merge_candidate_id": "mc-" + hashlib.sha256((exp_key + "\n" + "\n".join(gids2 + list(mc.get("run_keys") or []))).encode()).hexdigest()[:16]}
+                if mc["merge_candidate_id"] in seen_mc:
+                    continue
+                seen_mc.add(mc["merge_candidate_id"])
+                remapped.append(mc)
+            merge_candidates = remapped
         bundle["record_groups"] = keep + fresh
         ids = {g["group_id"] for g in bundle["record_groups"]}
+        before_mc = list(bundle.get("merge_candidates") or ())
         bundle["merge_candidates"] = [dict(mc) for mc in merge_candidates if mc.get("group_ids") and set(mc["group_ids"]) <= ids]
+        # 1.6.0: a merge candidate a decision names (keep_apart) that this regroup no longer proposes is
+        # kept in superseded_merge_candidates, so the decision keeps its target; one proposed again
+        # leaves it (its decision applies to it again by id)
+        mc_now = {mc["merge_candidate_id"] for mc in bundle["merge_candidates"]}
+        mc_named = {d["target"]["id"] for d in decisions if d["target"]["kind"] == "merge_candidate"}
+        sup_mc = [x for x in bundle.get("superseded_merge_candidates") or () if x["merge_candidate_id"] not in mc_now]
+        known_mc = {x["merge_candidate_id"] for x in sup_mc}
+        for mc in before_mc:
+            mcid = mc.get("merge_candidate_id")
+            if mcid in mc_named and mcid not in mc_now and mcid not in known_mc:
+                sup_mc.append({"merge_candidate_id": mcid, "group_ids": list(mc.get("group_ids") or []),
+                               "run_keys": list(mc.get("run_keys") or []), "superseded_utc": now_utc(),
+                               "reason": "no longer proposed by `isaac bundle group --regroup`; a decision names it, so it "
+                                         "is kept here as that decision's target. It is not an open question."})
+        if sup_mc or "superseded_merge_candidates" in bundle:
+            bundle["superseded_merge_candidates"] = sup_mc
         mc_ids_of: dict[str, list[str]] = {}
         for mc in bundle["merge_candidates"]:
             for x in mc["group_ids"]:
@@ -1058,6 +1237,8 @@ def group(bundle_dir: Path, *, regroup: bool = False) -> dict:
             "superseded": len(superseded),
             "proposed": len(fresh),
             "merge_candidates": len(bundle["merge_candidates"]),
+            "combined_by_merge_decision": combined_by,
+            "merge_decisions_not_combined": not_combined,
             "rule_id": payload.get("rule_id"),
             "statement": "Proposed groups only. A scientist confirms, splits, merges or rejects each one.",
             "read_them_with": [
@@ -1085,6 +1266,209 @@ def group(bundle_dir: Path, *, regroup: bool = False) -> dict:
         }),
     )
     return result
+
+
+def _reading_core(v: Any) -> str:
+    """A basis reading compared on what it SAYS (value, kind ...), never on the per-run evidence ids."""
+    if isinstance(v, Mapping):
+        v = {k: x for k, x in v.items() if k != "candidate_ids"}
+    return json.dumps(v, sort_keys=True)
+
+
+#: The one basis key a merge decision may override: the name stem standing in for an unstated
+#: sample (``grouping.CONDITION_KEYS['sample_name_stem']``) — it is the file name, which is what the
+#: scientist's merge rules on. Every other differing basis reading blocks the combination.
+_MERGE_NAME_ONLY_BASIS = frozenset({("sample", "sample_name_stem")})
+_MERGE_NAME_ONLY_VIOLATIONS = frozenset({"name_non_counter_tokens", "sample_name_stem"})
+
+
+def _merge_blockers(bundle: Mapping, payload: Mapping, holders: Sequence[Mapping], combined: Mapping) -> list[str]:
+    """Why ``holders`` must NOT be combined for a merge decision — empty only when nothing the import
+    read or a scientist confirmed tells them apart (FAIL CLOSED, DEC-91):
+
+    * every basis reading agrees (value and kind; the name stem aside);
+    * the independent condition check (:func:`grouping.condition_violations`) finds only the names;
+    * the runs' file names have the same tokens except BARE WHOLE NUMBERS (digits only: no unit,
+      sign, decimal point or letter) at the same positions — the tokens the counter question asks
+      about. ``0.05V``/``0.5V``, ``1MKOH``/``0p1MKOH``, ``10ug``/``50ug``, ``SYNcat``/``SYNdog``,
+      ``E1``/``E2``, ``step01``/``step02``, ``before``/``after`` or an extra token all block;
+    * no confirmed, eligible run-level answer (a scientist's or a confirmed reading) differs."""
+    from . import grouping as G
+
+    out: list[str] = []
+    differing = []
+    for part in sorted({p for h in holders for p in (h.get("basis") or {})}):
+        vals = [(h.get("basis") or {}).get(part) for h in holders]
+        if not all(isinstance(v, Mapping) or v is None for v in vals):
+            if len({_reading_core(v) for v in vals}) > 1:
+                differing.append(part)
+            continue
+        for key in sorted({k for v in vals for k in (v or {})}):
+            if (part, key) in _MERGE_NAME_ONLY_BASIS:
+                continue
+            if len({_reading_core((v or {}).get(key)) for v in vals}) > 1:
+                differing.append(f"{part}.{key}")
+    if differing:
+        out.append(f"their recorded readings differ ({', '.join(differing)})")
+    viol = G.condition_violations(bundle, {**payload, "record_groups": [combined]})
+    other = sorted({v["key"] for v in viol if v["key"] not in _MERGE_NAME_ONLY_VIOLATIONS})
+    if other:
+        out.append(f"their runs differ in condition(s) {', '.join(other)}")
+    stems = _merge_stems(bundle, holders)
+    toks = [[G._unit_token(t) for t in G._stem_tokens(x)] for x in stems]
+    not_counter = B.not_counter_positions(bundle)
+    if toks and len({len(t) for t in toks}) > 1:
+        out.append("their file names have different tokens (" + " / ".join(sorted({"_".join(t) for t in toks})) + ")")
+    elif toks:
+        for i in range(len(toks[0])):
+            col = sorted({t[i] for t in toks})
+            if len(col) < 2:
+                continue
+            shown = " / ".join(col)
+            if not all(c.isdigit() for c in col):
+                out.append(f"their file names differ at token {i + 1} ({shown}), which is not a bare number")
+            elif i + 1 in not_counter:
+                out.append(f"their file names differ at token {i + 1} ({shown}), which decision "
+                           f"{not_counter[i + 1].get('decision_id')} states is NOT a run counter")
+            elif len({len(c) for c in col}) > 1 or not all(c.startswith("0") for c in col):
+                out.append(f"their file names differ at token {i + 1} ({shown}), which is not a zero-padded "
+                           "fixed-width number (the shape of a run counter)")
+            else:
+                near = [t[j] for t in toks for j in (i - 1, i + 1) if 0 <= j < len(t) and _unit_like(t[j])]
+                if near:
+                    out.append(f"their file names differ at token {i + 1} ({shown}), next to the unit or keyword "
+                               f"{sorted(set(near))[0]!r}, so the number may be a value")
+    answers = _confirmed_run_answers(bundle, {r for h in holders for r in h.get("member_run_ids") or ()})
+    diff_answers = sorted(path for path, vals in answers.items() if len(vals) > 1)
+    if diff_answers:
+        out.append(f"confirmed answers for their runs differ ({', '.join(diff_answers)})")
+    return out
+
+
+def _merge_stems(bundle: Mapping, groups: Sequence[Mapping]) -> list[str]:
+    runs = {r["run_key"]: r for r in bundle.get("runs") or ()}
+    context = {k for g in groups for k in g.get("context_run_keys") or ()}
+    return [runs[k].get("stem") or "" for g in groups for k in g.get("member_run_keys") or () if k in runs and k not in context]
+
+
+def merge_name_numbers(bundle: Mapping, group: Mapping) -> list[dict]:
+    """``[{position, values}]``: each 1-based token position where a combined group's run names differ
+    (bare zero-padded numbers, by :func:`_merge_blockers`), with the DIFFERING VALUES — what the
+    scientist sees when confirming ("02 vs 03")."""
+    from . import grouping as G
+
+    toks = [[G._unit_token(t) for t in G._stem_tokens(x)] for x in _merge_stems(bundle, [group])]
+    if not toks or len({len(t) for t in toks}) > 1:
+        return []
+    return [{"position": i + 1, "values": sorted({t[i] for t in toks})} for i in range(len(toks[0])) if len({t[i] for t in toks}) > 1]
+
+
+def _unit_words() -> frozenset[str]:
+    """Tokens that make a neighbouring bare number a VALUE, not a counter. DERIVED from what the
+    import's own readers already recognise as units or condition keywords — the BL15 filename reader
+    (bl15.filenames: mV / V / p-volt, filter / f, nm / wtpc / wpc loading, step, pH, before/after
+    ... cycling / cv, and its flow units) and the grouping step's unit sets (grouping._ZERO_UNITS,
+    FIELD_UNITS) — plus a SHORT documented supplement for quantities no reader parses yet but that a
+    file name writes beside a bare number: temperature (C, K, degC), time (h, hr, min, s, sec),
+    cycles (cycle, cycles, cyc), current (mA, uA, A) and the electrode letter E."""
+    from . import grouping as G
+    from ..bl15 import filenames as F
+
+    derived = {"mv", "v", "filter", "ffilter", "f", "nm", "wtpc", "wpc", "step", "ph", "before", "after", "cycling", "cv"}
+    derived |= {k.casefold() for k in getattr(F, "_FLOW_UNITS", {})}
+    derived |= {u.casefold() for u in G._ZERO_UNITS} | {u.casefold() for u in G.FIELD_UNITS.values()}
+    supplement = {"c", "k", "degc", "h", "hr", "min", "s", "sec", "cycle", "cycles", "cyc", "ma", "ua", "a", "e"}
+    return frozenset(derived | supplement)
+
+
+def _unit_like(token: str) -> bool:
+    """A token that IS a unit/keyword, or starts with one before a number (``pH2``, ``E1``)."""
+    import re as _re
+
+    low = token.casefold()
+    return low in _unit_words() or _re.sub(r"[-+]?\d.*$", "", low) in _unit_words() - {""}
+
+
+def _confirmed_run_answers(bundle: Mapping, run_ids: set) -> dict[str, set[str]]:
+    """``path -> distinct values`` of every scientist-confirmed, ELIGIBLE run-level value of these runs
+    (an answer to a missing value, or a confirmed or corrected reading)."""
+    decision_of = B._decisions_by_target(bundle.get("scientist_decisions") or ())
+    out: dict[str, set[str]] = {}
+    for m in bundle.get("missing_values") or ():
+        if m.get("run_id") in run_ids and m.get("value_state") == B.STATE_SCIENTIST_CONFIRMED \
+                and (m.get("eligibility_for_official_record") or {}).get("eligible"):
+            v = B.final_value(None, decision_of.get(("missing_value", m["value_id"])))
+            out.setdefault(m["target_field_path"], set()).add(json.dumps(v, sort_keys=True))
+    for c in bundle.get("candidates") or ():
+        if c.get("run_id") in run_ids and c.get("target_field_path") and c.get("value_state") == B.STATE_SCIENTIST_CONFIRMED \
+                and (c.get("eligibility_for_official_record") or {}).get("eligible"):
+            v = B.final_value(c.get("value"), B.candidate_decision(bundle, c, decision_of), c.get("readings"))
+            out.setdefault(c["target_field_path"], set()).add(json.dumps(v, sort_keys=True))
+    return out
+
+
+def _combine_for_merge(holders: Sequence[Mapping], decision: Mapping, merged_group_id: str, exp_key: str) -> dict:
+    """ONE proposed group holding every run of ``holders`` (the fresh groups now holding a merge
+    decision's runs), in their order. Its id is new (the runs plus the decision id), so it is never
+    mistaken for a group the rule proposed. What the holders agree on is kept in its basis; a key they
+    differ on is left out of it and named in ``merged_by_decision.basis_keys_dropped``."""
+    from . import grouping as G
+
+    members = [k for h in holders for k in h.get("member_run_keys") or ()]
+    combined = {k: v for k, v in holders[0].items() if k not in ("reproposed_after_group_id",)}
+    basis: dict = {}
+    dropped: list[str] = []
+    for part, first in (holders[0].get("basis") or {}).items():
+        if not isinstance(first, Mapping):
+            same = all((h.get("basis") or {}).get(part) == first for h in holders)
+            basis[part] = first if same else None
+            if not same:
+                dropped.append(part)
+            continue
+        if not all(isinstance((h.get("basis") or {}).get(part), Mapping) for h in holders):
+            basis[part] = first if all(_reading_core((h.get("basis") or {}).get(part)) == _reading_core(first) for h in holders) else {}
+            if basis[part] != first:
+                dropped.append(part)
+            continue
+        keys = set().union(*[set(((h.get("basis") or {}).get(part) or {})) for h in holders])
+        basis[part] = {}
+        for k in sorted(keys):
+            vals = [((h.get("basis") or {}).get(part) or {}).get(k) for h in holders]
+            # M2: compared on what the reading SAYS; the evidence ids (per run) are united, never compared
+            if all(_reading_core(v) == _reading_core(vals[0]) for v in vals):
+                kept = copy.deepcopy(vals[0])
+                if isinstance(kept, dict) and any(isinstance(v, Mapping) and "candidate_ids" in v for v in vals):
+                    kept["candidate_ids"] = list(dict.fromkeys(c for v in vals for c in (v or {}).get("candidate_ids") or ()))
+                basis[part][k] = kept
+            else:
+                dropped.append(f"{part}.{k}")
+    combined.update({
+        "group_id": G.group_id_for(exp_key, members + [f"merged-by:{decision['decision_id']}"]),
+        "member_run_keys": members,
+        "member_run_ids": [r for h in holders for r in h.get("member_run_ids") or ()],
+        "context_run_keys": [r for h in holders for r in h.get("context_run_keys") or ()],
+        "engine_reading_issues": [i for h in holders for i in h.get("engine_reading_issues") or ()],
+        "merged_despite_engine_reading": [i for h in holders for i in h.get("merged_despite_engine_reading") or ()],
+        "basis": basis,
+        "split_reasons": [],
+        "questions": [],
+        "merge_candidate_ids": [],
+        "flags": sorted({f for h in holders for f in h.get("flags") or () if f != "reproposed_after_merge_decision"})
+        + ["merged_by_scientist_decision"],
+        "status": "proposed",
+        "condition_violations": [],
+        "merged_by_decision": {
+            "decision_id": decision["decision_id"],
+            "merged_group_id": merged_group_id,
+            "merge_with": list(decision.get("merge_with") or []),
+            "decided_by": (decision.get("decided_by") or {}).get("name"),
+            "from_groups": [h["group_id"] for h in holders],
+            "basis_keys_dropped": dropped,
+            "statement": "proposed as one group because a scientist decided to merge these runs' groups; "
+                         "only a confirm decision makes it a record",
+        },
+    })
+    return combined
 
 
 def process(
@@ -1125,7 +1509,20 @@ def process(
 
     def change(bundle):
         known = {g["group_id"] for g in bundle.get("record_groups") or ()}
-        decided = {d["target"]["id"] for d in bundle.get("scientist_decisions") or () if d["target"]["kind"] == "processing_result"}
+        # only a decision that sets a result's STATE freezes it against re-processing (L3): a
+        # select_athena_version answer keys on the result id and its listed version ids, so it applies
+        # to the fresh result of the same id as it did to the old one
+        decided = {d["target"]["id"] for d in bundle.get("scientist_decisions") or ()
+                   if d["target"]["kind"] == "processing_result" and d.get("decision") in B.PROCESSING_STATE_DECISIONS}
+        # ... unless the fresh result (same id) holds no version with the provenance the latest selection
+        # recorded (project file, Athena group, data hash): then the old result is kept, so the selection
+        # never points at nothing — or, after a renumbering, at a different curve
+        fresh_by_id = {B.processing_id(r): r for r in produced}
+        for r in bundle.get("processing_results") or ():
+            d = B.latest_athena_selection(bundle, r)
+            pid = B.processing_id(r)
+            if d is not None and (pid not in fresh_by_id or B.athena_resolve(fresh_by_id[pid], d) is None):
+                decided.add(pid)
         superseded = {g["group_id"] for g in bundle.get("superseded_record_groups") or ()}
         # decided results are kept, and so is every result of a SUPERSEDED group (never deleted)
         keep = [r for r in bundle.get("processing_results") or () if B.processing_id(r) in decided or r.get("group_id") in superseded]

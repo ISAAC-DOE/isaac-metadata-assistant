@@ -84,7 +84,7 @@ def _compose(b, run_id):
 def test_control_mode_is_a_run_scope_local_answer_field_new_in_1_5_0():
     assert B.LOCAL_ANSWER_FIELDS[CM] == B.LOCAL_ANSWER_FIELDS[SCALE] == "run"
     assert CM in B._writable_paths() and CM in B.WRITABLE_ADDED_IN["1.5.0"]
-    assert B.FORMAT_VERSION == "1.5.0" and B._added_since("1.4.0") == frozenset({CM})
+    assert B.FORMAT_VERSION == "1.6.0" and B._added_since("1.4.0") == frozenset({CM}) and B._added_since("1.5.0") == frozenset()
     assert not Q._is_shared(CM) and not Q._is_shared(SCALE)  # never asked once for the whole beamtime
 
 
@@ -293,7 +293,7 @@ def test_a_1_4_0_bundle_with_a_confirmed_mode_is_stale_not_invalid_then_rederive
     result = R.build_records(grouped)
     assert [x["id"] for x in result["eligibility_rederived_now"]] == [vid]
     after = _json(grouped)
-    assert after["format_version"] == "1.5.0" and B.validate_bundle(after) == []
+    assert after["format_version"] == B.FORMAT_VERSION and B.validate_bundle(after) == []
     [u] = after["format_upgrades"]
     assert (u["from_format_version"], u["newly_writable_paths"], u["statement"]) == ("1.4.0", [CM], UPGRADE_14)
 
@@ -312,7 +312,7 @@ def test_a_1_4_0_bundle_as_that_build_made_it_is_valid_and_upgraded_once_with_no
     M.decide(grouped, target_ids=[other["value_id"]], decision="correct", value="in_situ", by=BY, orcid=None)
     assert capsys.readouterr().err.count(UPGRADE_14) == 1
     after = _json(grouped)
-    assert after["format_version"] == "1.5.0" and [u["newly_writable_paths"] for u in after["format_upgrades"]] == [[CM]]
+    assert after["format_version"] == B.FORMAT_VERSION and [u["newly_writable_paths"] for u in after["format_upgrades"]] == [[CM]]
     assert not [m for m in after["missing_values"] if m["target_field_path"] == CM]  # a save adds no answer slot
 
 
