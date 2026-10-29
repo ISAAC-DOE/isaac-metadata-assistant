@@ -84,8 +84,8 @@ BUNDLE_FILES = (
     "reading.full.json",
 )
 
-LIST_KINDS = ("runs", "conflicts", "candidates", "questions", "unread", "groups", "merge-candidates")
-SHOW_KINDS = ("run", "conflict", "candidate", "source", "question", "group")
+LIST_KINDS = ("runs", "conflicts", "candidates", "questions", "unread", "groups", "merge-candidates", "processed-outputs")
+SHOW_KINDS = ("run", "conflict", "candidate", "source", "question", "group", "processed-output")
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 200
 #: The target size of summary.md (bytes). Sections are windowed to stay near it.
@@ -242,6 +242,19 @@ def render_summary(bundle: Mapping) -> str:
         f"- Runs: {counts['runs']} ({counts['runs_sharing_a_legacy_number']} share a legacy "
         f"number with another run; all are kept)"
     )
+    pos = bundle.get("processed_outputs") or []
+    if pos:
+        n_files = sum(len(p["files"]) for p in pos)
+        linked = sum(1 for p in pos if p["proposed_links"])
+        assumed = sum(1 for p in pos for link in p["proposed_links"] if link.get("assumption"))
+        add(
+            f"- {n_files} processed files from the scientists (Athena/Demeter), kept as reference "
+            f"results, not records ({len(pos)} output(s) by name; {linked} with a proposed link to a run "
+            f"by the name rule (same name, or same name plus a selection of that run's own scans), "
+            f"{len(pos) - linked} unlinked"
+            + (f"; {assumed} of them assume scans are numbered 1..N because the run states no scan index" if assumed else "")
+            + "). Not counted as runs; no question is asked about them."
+        )
     add(
         f"- Values: {counts['candidates']} — {counts['candidate_extracted']} extracted, "
         f"{counts['needs_review']} need review, {counts['conflicting_candidates']} conflicting, "
@@ -477,6 +490,11 @@ def cmd_import(args) -> int:
         f"({c['conflicts']} conflicts, {c['needs_review']} need review, "
         f"{c['missing_values']} missing, {c['unread_files']} unread files)"
     )
+    if c.get("processed_output_files"):
+        print(
+            f"  {c['processed_output_files']} processed files from the scientists (Athena/Demeter), "
+            "kept as reference results, not records"
+        )
     print("  This is NOT a validated official ISAAC record. Start with summary.md.")
     return EXIT_OK
 
@@ -555,6 +573,16 @@ def _row(kind: str, obj: Mapping) -> dict:
             "group_ids": list(obj.get("group_ids") or [])[:50],
             "reason_code": obj.get("reason_code") or obj.get("code") or obj.get("basis"),
         }
+    if kind == "processed-outputs":
+        # what the files state about themselves, and the proposed link; no parser value
+        return {
+            "processed_output_id": obj["processed_output_id"],
+            "label": obj["label"],
+            "files": len(obj["files"]),
+            "processed_by": sorted({s["literal"] for s in obj["states"]["processed_by"] if s["literal"]})[:10],
+            "proposed_link": (obj["proposed_links"] or [None])[0],
+            "link_note": (obj["link_note"] or {}).get("code"),
+        }
     if kind == "questions":
         return {
             "question_id": obj["question_id"],
@@ -579,6 +607,7 @@ _LIST_SECTION = {
     "candidates": "candidates",
     "questions": "questions",
     "unread": "unread_files",
+    "processed-outputs": "processed_outputs",
 }
 _SHOW_SECTION = {
     "group": ("record_groups", "group_id"),
@@ -587,6 +616,7 @@ _SHOW_SECTION = {
     "candidate": ("candidates", "candidate_id"),
     "source": ("sources", "source_id"),
     "question": ("questions", "question_id"),
+    "processed-output": ("processed_outputs", "processed_output_id"),
 }
 
 
@@ -600,6 +630,12 @@ def _exposed_by_show(kind: str, obj: Mapping) -> list[tuple[str, str]]:
         return [("run", obj["run_id"])]
     if kind == "question" and obj["target"]["kind"] in ("candidate", "conflict") and obj.get("options"):
         return [(obj["target"]["kind"], obj["target"]["id"])]
+    if kind == "processed-output":
+        # it prints the files' own header literals (element, edge ...): an exposure of the
+        # sources that state them and of the run it proposes to link to
+        ids = [("source", f["source_id"]) for f in obj.get("files") or () if f.get("source_id")]
+        ids += [("run", link["run_id"]) for link in obj.get("proposed_links") or ()]
+        return ids
     if kind == "group":
         # a group's basis prints the readings it was grouped by: each is an exposure
         ids: list[tuple[str, str]] = []

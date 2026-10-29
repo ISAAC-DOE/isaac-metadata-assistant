@@ -456,7 +456,9 @@ def build_records(bundle_dir: Path, *, test_marker: bool = False) -> dict:
     from . import mutations as M
 
     bundle_dir = Path(bundle_dir)
-    load_validated(bundle_dir)
+    refusal = B.legacy_refusal(load_validated(bundle_dir))
+    if refusal:  # a pre-1.2.0 bundle whose runs include the scientists' processed outputs
+        raise RecordsRefused(refusal, code=2)
 
     def mark(b):  # the self-test state lives IN bundle.json, re-validated on write
         b["self_test"] = {"test_marker": bool(test_marker), "set_by": "isaac bundle build-records"}

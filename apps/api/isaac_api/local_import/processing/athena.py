@@ -25,6 +25,18 @@ The Athena normalisation is reproduced the way larch's own ``read_athena(do_pree
 does: ``pre_edge`` on the stored energy with the project's ``e0``, ``pre1``, ``pre2``,
 ``nor1``, ``nor2``, ``nnorm`` and ``flatten``. Comparisons are made in the scientist's
 energy frame: stored energy + ``bkg_eshift``, E0 + ``bkg_eshift``.
+
+TODO (bundle 1.2.0 ``processed_outputs[]``, NOT BUILT): the bundle now also carries the
+scientists' exported Athena/Demeter XDI files (``.nor``, ``.xmu`` ...) as reference results,
+each with at most one PROPOSED link to a run (``bundle.LINK_RULE_ID``) and, through it, a
+record group. They are not fed into this comparison. Doing so honestly needs more than a
+name match: (1) only a scientist-CONFIRMED link should count (a decision kind for
+processed-output links does not exist yet; a proposed link is a suggestion); (2) an XDI
+export carries the processed spectrum, not the project's ``pre1``/``nor1``/``nnorm``
+parameters (those are present only when the file states ``Athena.*`` fields), so
+:func:`compare` cannot re-run the scientist's normalisation from it; and (3) which column is
+the normalised spectrum must come from the file's own ``Column.N``/column-header statement,
+never from its extension. Until then the ``.prj`` path below is the only Athena comparison.
 """
 
 from __future__ import annotations

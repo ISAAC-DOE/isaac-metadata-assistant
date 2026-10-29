@@ -21,6 +21,7 @@ whose stored state disagrees, so a hand-edited ``"value_state":
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from functools import lru_cache
@@ -28,7 +29,9 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Mapping, Sequence
 
 FORMAT_ID = "isaac.local-import-bundle"
-FORMAT_VERSION = "1.1.0"
+#: 1.2.0 (additive): ``processed_outputs[]`` — the scientists' own Athena/Demeter outputs,
+#: kept OUT of ``runs[]`` (see :func:`_processing_origin`).
+FORMAT_VERSION = "1.2.0"
 SCHEMA_FILE = Path(__file__).with_name("bundle-v1.schema.json")
 BUNDLE_FILE = "bundle.json"
 
@@ -74,6 +77,49 @@ MAX_OBSERVED_LITERALS = 8
 MAX_GENERIC_STATEMENTS_PER_RUN = 200
 
 _TRUNCATION_MARKER = " …[truncated by bundle bounds: {n} characters in the original]"
+
+# --- processed outputs (1.2.0) ---------------------------------------------------
+#
+# A PROCESSED OUTPUT IS A REFERENCE RESULT, NEVER AN ACQUISITION. The XDI reader reads the
+# scientists' own Athena/Demeter outputs (``.nor``, ``.xmu``, ``.peak`` ...). Each one is
+# the scientist's processing of scans that are already in the bundle as runs, so making it
+# a run as well made the grouping step propose record groups (future ISAAC records) out of
+# processed files, double-counting measurements. They are kept in ``processed_outputs[]``
+# instead: evidence, and the thing ISAAC's own processing is checked against.
+#
+# THE RULE (``isaac.processed_output.origin.v0``, :func:`classify_processing_origin`) is the
+# file's OWN statement, not its extension and not the format. Line 1 decides: an exact
+# application token in :data:`PROCESSING_APPLICATIONS` makes it a processed output; only
+# OTHER applications named keeps it a run whatever its fields say (a disagreement is
+# recorded); no application named falls back to a non-empty ``Demeter.output_filetype`` or
+# ``Athena.*`` fields. XDI is also a raw-data format at some beamlines.
+
+PROCESSED_OUTPUT_KIND = "processed_output_of_the_scientist"
+PROCESSED_ORIGIN_RULE_ID = "isaac.processed_output.origin.v0"
+#: Casefolded application names, as written on an XDI file's first line. Measured on the
+#: real corpus (28 Oct 2026): every XDI file names one of these two.
+PROCESSING_APPLICATIONS = frozenset({"athena", "demeter"})
+#: Header statements of a processed output recorded as what the file states about itself.
+_PROCESSED_STATED_KEYS = {
+    "Element.symbol": "element_symbol",
+    "Element.edge": "element_edge",
+    "Demeter.output_filetype": "demeter_output_filetype",
+}
+
+# THE LINK RULE (``isaac.processed_output.link_by_run_stem.v0``, :func:`propose_processed_links`)
+# — PROPOSES, never merges. A processed output's name stem (its file name minus the processed
+# extension, as the reader groups it) against run ``stem``s, case-sensitively, nothing else
+# normalised:
+#   1. ``exact``                 — a run has exactly this name (ANY such run, even zero-scan,
+#      also blocks rule 2); only a run candidate with at least one scan is linked;
+#   2. ``scan_selection_suffix`` — stem == run stem + "_" + N or N-M, and every number is a
+#      scan the run HAS (its stated scan indices, else 1..scan_count). Another number may be
+#      another sample or condition, so it links nothing.
+# Exactly ONE fitting run -> one proposed link (its record group derived from live
+# ``record_groups[]`` membership). Several -> no link, noted as ambiguous. None -> unlinked,
+# the honest outcome when the scientist renamed the file. The validator re-runs it.
+LINK_RULE_ID = "isaac.processed_output.link_by_run_stem.v0"
+_SCAN_SELECTION_SUFFIX = re.compile(r"^(?P<base>.+)_(?P<sel>\d+(?:-\d+)?)$")
 
 # --- value states --------------------------------------------------------------
 
@@ -184,6 +230,276 @@ def _rule_id(rule_text: object) -> str | None:
 def _reader_version(reader_id: str) -> str | None:
     match = re.search(r"_v(\d+)$", reader_id)
     return match.group(1) if match else None
+
+
+_XDI_LINE1 = re.compile(r"^#[ \t]+XDI/\d+\.\d+(?:[ \t]+(?P<apps>\S.*?))?[ \t]*$")
+
+
+def xdi_line1_applications(literal: object) -> list[tuple[str, str | None]]:
+    """``[(name, version)]`` for each whitespace-separated ``Name/version`` token an XDI
+    first line lists after ``XDI/x.y`` (XDI lets several applications sign a file)."""
+    m = _XDI_LINE1.match(literal.strip()) if isinstance(literal, str) else None
+    if not m or not m.group("apps"):
+        return []
+    out = []
+    for tok in m.group("apps").split():
+        name, _, version = tok.partition("/")
+        if name:
+            out.append((name, version or None))
+    return out
+
+
+def classify_processing_origin(
+    applications: Sequence[tuple[str, str | None]], *, demeter_output_filetype: object, has_athena_fields: bool
+) -> tuple[dict | None, dict | None]:
+    """``(origin, disagreement)`` by ``isaac.processed_output.origin.v0`` — the ONE rule, used
+    for a fresh import and for recognising a pre-1.2.0 bundle that still holds them as runs.
+
+    * line 1 names, as an exact token (case ignored), an application in
+      :data:`PROCESSING_APPLICATIONS` -> processed output (basis ``line_1``);
+    * line 1 names only OTHER applications -> NOT a processed output, whatever the fields
+      say; if ``Demeter.output_filetype`` / ``Athena.*`` fields are present the file
+      disagrees with itself, and the disagreement is returned to be recorded, not resolved;
+    * line 1 names nothing -> processed output only when it carries a non-empty
+      ``Demeter.output_filetype`` or ``Athena.*`` fields (basis ``fields``).
+    """
+    filetype = demeter_output_filetype.strip() if isinstance(demeter_output_filetype, str) else ""
+    named = [(n, v) for n, v in applications if n.casefold() in PROCESSING_APPLICATIONS]
+    foreign = [n for n, _ in applications if n.casefold() not in PROCESSING_APPLICATIONS]
+    if named:
+        basis = "line_1"
+    elif foreign:
+        if filetype or has_athena_fields:
+            return None, {
+                "kind": "processing_statement_disagrees",
+                "locator": "line:1",
+                "detail": (
+                    f"line 1 names {', '.join(foreign)}, not Athena or Demeter, but the header also "
+                    "carries " + " and ".join(x for x, on in (("Demeter.output_filetype", bool(filetype)), ("Athena.* fields", has_athena_fields)) if on)
+                    + "; kept as an acquisition, nothing decided"
+                ),
+                "severity": "note",
+            }
+        return None, None
+    elif filetype or has_athena_fields:
+        basis = "fields"
+    else:
+        return None, None
+    return {
+        "rule_id": PROCESSED_ORIGIN_RULE_ID,
+        "basis": basis,
+        "processed_by": named[0][0] if named else None,
+        "application_version": named[0][1] if named else None,
+        "line_1_applications": [f"{n}/{v}" if v else n for n, v in applications][:10],
+        "names_a_processing_application": bool(named),
+        "has_demeter_output_filetype": bool(filetype),
+        "has_athena_fields": bool(has_athena_fields),
+    }, None
+
+
+def _processing_origin(scan: Mapping, line1: object) -> tuple[dict | None, dict | None]:
+    """:func:`classify_processing_origin` for one file the XDI reader read (``line1`` is its
+    literal first line)."""
+    hints = scan.get("role_hints") if isinstance(scan.get("role_hints"), Mapping) else {}
+    return classify_processing_origin(
+        xdi_line1_applications(line1),
+        demeter_output_filetype=hints.get("demeter_output_filetype"),
+        has_athena_fields=bool(hints.get("has_athena_fields")),
+    )
+
+
+def legacy_processed_runs(bundle: Mapping) -> list[str]:
+    """Run ids of a PRE-1.2.0 bundle (no ``processed_outputs`` section) that are XDI files
+    whose own header, by :func:`classify_processing_origin`, makes them the scientists'
+    processed outputs — read back from the run's recorded statements. Empty for 1.2.0+."""
+    if "processed_outputs" in bundle:
+        return []
+    xdi_runs = {r["run_id"] for r in bundle.get("runs") or () if r.get("source_type") == "generic:xdi_v1"}
+    if not xdi_runs:
+        return []
+    per_file: dict[tuple[str, Any], dict] = {}
+    for e in bundle.get("extended_context") or ():
+        if e.get("run_id") not in xdi_runs:
+            continue
+        f = per_file.setdefault((e["run_id"], e.get("relative_path")), {"line1": None, "filetype": None, "athena": False})
+        concept = str(e.get("concept") or "")
+        if concept == "xdi_version":
+            f["line1"] = e.get("raw_literal")
+        elif concept == "Demeter.output_filetype":
+            f["filetype"] = e.get("raw_literal")
+        elif concept.startswith("Athena."):
+            f["athena"] = True
+    hits = []
+    for (run_id, _), f in per_file.items():
+        origin, _ = classify_processing_origin(
+            xdi_line1_applications(f["line1"]), demeter_output_filetype=f["filetype"], has_athena_fields=f["athena"]
+        )
+        if origin and run_id not in hits:
+            hits.append(run_id)
+    return hits
+
+
+def legacy_refusal(bundle: Mapping) -> str | None:
+    """Why grouping or composing records must refuse this bundle, or ``None``."""
+    hits = legacy_processed_runs(bundle)
+    if not hits:
+        return None
+    return (
+        f"This bundle (format {bundle.get('format_version')}) holds {len(hits)} of the scientists' own "
+        "processed outputs (Athena/Demeter XDI) as runs, so grouping would make record groups of "
+        "processed files. Re-import the folder with this build (`isaac import <folder> --out <new dir>`) "
+        "to separate the scientists' processed outputs; nothing was written."
+    )
+
+
+def _scan_numbers(run: Mapping) -> tuple[set[int], str]:
+    """The scan numbers a run HAS: its scans' own ``scan_index`` values when any is stated,
+    else ``1..scan_count`` (basis named, so a reader sees which)."""
+    stated = {s["scan_index"] for s in run.get("scans") or () if isinstance(s.get("scan_index"), int) and not isinstance(s.get("scan_index"), bool)}
+    if stated:
+        return stated, "scan_indices"
+    return set(range(1, int(run.get("scan_count") or 0) + 1)), "scan_count"
+
+
+def _selection_numbers(sel: str) -> set[int] | None:
+    """``"7"`` -> {7}; ``"1-5"`` -> {1..5}; a reversed or oversized range -> ``None``."""
+    a, _, b = sel.partition("-")
+    lo, hi = int(a), int(b) if b else int(a)
+    if hi < lo or hi - lo > 10_000:
+        return None
+    return set(range(lo, hi + 1))
+
+
+def propose_processed_links(processed_outputs: Sequence[dict], runs: Sequence[Mapping]) -> None:
+    """Fill each processed output's ``proposed_links`` / ``link_note`` in place by
+    :data:`LINK_RULE_ID`. Deterministic; proposes only; never touches a run or a group.
+    The validator re-runs this over the stored runs and refuses a bundle that disagrees."""
+    named: dict[str, list[Mapping]] = {}
+    for r in runs:
+        if isinstance(r.get("stem"), str):
+            named.setdefault(r["stem"], []).append(r)
+
+    def with_scans(rs):
+        return [r for r in rs if r.get("run_candidate") and int(r.get("scan_count") or 0) > 0]
+
+    for po in processed_outputs:
+        stem = po["label"]
+        po["proposed_links"] = []
+        po["link_note"] = None
+        match, suffix, basis, hits = None, None, None, []
+        if stem in named:
+            # ANY run carrying this exact name (zero-scan included) blocks the suffix rule
+            match, hits = "exact", with_scans(named[stem])
+            if not hits:
+                po["link_note"] = {
+                    "code": "exact_name_run_has_no_scans",
+                    "match": "exact",
+                    "run_keys": sorted(r["run_key"] for r in named[stem])[:20],
+                    "detail": "A run has exactly this name but no scan, so nothing is linked.",
+                }
+                continue
+        else:
+            m = _SCAN_SELECTION_SUFFIX.match(stem)
+            base_runs = with_scans(named.get(m.group("base"), [])) if m else []
+            wanted = _selection_numbers(m.group("sel")) if m else None
+            if base_runs and wanted:
+                fitting = []
+                for r in base_runs:
+                    have, why = _scan_numbers(r)
+                    if wanted <= have:
+                        fitting.append((r, why))
+                if fitting:
+                    match, suffix, hits = "scan_selection_suffix", m.group("sel"), [r for r, _ in fitting]
+                    basis = fitting[0][1] if len(fitting) == 1 else None
+        if len(hits) == 1:
+            run = hits[0]
+            po["proposed_links"].append(
+                {
+                    "rule_id": LINK_RULE_ID,
+                    "status": "proposed",
+                    "match": match,
+                    "scan_selection_literal": suffix,
+                    "scan_selection_basis": basis,
+                    # stated, never hidden: a run that states no scan index is taken to
+                    # number its scans 1..scan_count
+                    "assumption": (
+                        f"the run states no scan index; its {int(run.get('scan_count') or 0)} scans are taken to be numbered 1..{int(run.get('scan_count') or 0)}"
+                        if basis == "scan_count" else None
+                    ),
+                    "run_id": run["run_id"],
+                    "run_key": run["run_key"],
+                    "run_stem": run["stem"],
+                    "group_id": None,  # derived from record_groups[] by apply_derivations
+                }
+            )
+        elif len(hits) > 1:
+            po["link_note"] = {
+                "code": "ambiguous",
+                "match": match,
+                "run_keys": sorted(r["run_key"] for r in hits)[:20],
+                "detail": f"{len(hits)} runs fit the name this output points to; none is chosen.",
+            }
+        else:
+            po["link_note"] = {
+                "code": "no_run_named_like_it",
+                "match": None,
+                "run_keys": [],
+                "detail": (
+                    "No run's name equals this output's name, or equals it minus a trailing "
+                    "scan selection whose every number is a scan that run has; it stays unlinked."
+                ),
+            }
+
+
+def processed_output_counts(processed_outputs: Sequence[Mapping]) -> dict[str, int]:
+    """The ``counts`` keys for ``processed_outputs[]`` (present only when the section is)."""
+    return {
+        "processed_outputs": len(processed_outputs),
+        "processed_output_files": sum(len(p.get("files") or ()) for p in processed_outputs),
+        "processed_outputs_linked": sum(1 for p in processed_outputs if p.get("proposed_links")),
+        "processed_outputs_unlinked": sum(1 for p in processed_outputs if not p.get("proposed_links")),
+    }
+
+
+#: Record-group statuses that hold their runs: a run belongs to at most ONE such group.
+#: ``merged`` is NOT one (review R-1): nothing applies a decision's ``merge_with`` and only a
+#: confirmed group becomes a record, so a merged group is history, like rejected and split.
+LIVE_GROUP_STATUSES = frozenset({"proposed", "scientist_confirmed"})
+#: Statuses that BIND a scientist's choice: their runs are never re-proposed.
+BINDING_GROUP_STATUSES = frozenset({"scientist_confirmed"})
+#: Decided statuses kept as the record of that decision; they do not hold their runs.
+HISTORY_GROUP_STATUSES = frozenset({"rejected", "split", "merged"})
+
+
+def _derive_processed_links(bundle: Mapping) -> None:
+    """A proposed link's ``group_id`` is DERIVED: the live record group (status in
+    :data:`LIVE_GROUP_STATUSES`) whose ``member_run_keys`` holds the linked run, else
+    ``None``. A rejected or split group is history and is never named."""
+    pos = bundle.get("processed_outputs")
+    if not pos:
+        return
+    group_of: dict[str, str] = {}
+    for g in bundle.get("record_groups") or ():
+        if g.get("status") in LIVE_GROUP_STATUSES:
+            for key in g.get("member_run_keys") or ():
+                group_of.setdefault(key, g["group_id"])
+    for po in pos:
+        for link in po.get("proposed_links") or ():
+            link["group_id"] = group_of.get(link["run_key"])
+
+
+def _derive_merge_candidate_ids(bundle: Mapping) -> None:
+    """A record group's ``merge_candidate_ids`` is a DERIVED pointer (review N-1): the stored
+    merge candidates naming that group, in their order. Not part of any decision."""
+    if not bundle.get("record_groups"):
+        return
+    of: dict[str, list[str]] = {}
+    for mc in bundle.get("merge_candidates") or ():
+        for gid in mc.get("group_ids") or ():
+            of.setdefault(gid, []).append(mc.get("merge_candidate_id"))
+    for g in bundle["record_groups"]:
+        if "merge_candidate_ids" in g or g["group_id"] in of:
+            g["merge_candidate_ids"] = of.get(g["group_id"], [])
 
 
 def _clamp_strings(obj: Any, counter: list[int]) -> Any:
@@ -513,6 +829,8 @@ def apply_derivations(bundle: dict) -> dict:
             r["state"] = STATE_REJECTED
         else:
             r["state"] = STATE_NEEDS_REVIEW
+    _derive_processed_links(bundle)
+    _derive_merge_candidate_ids(bundle)
     bundle["readiness"]["eligible_value_count"] = eligible
     states = [c["value_state"] for c in bundle["candidates"]]
     counts = bundle.get("counts") or {}
@@ -539,6 +857,8 @@ def apply_derivations(bundle: dict) -> dict:
             "rejected": states.count(STATE_REJECTED),
         }
     )
+    if "processed_outputs" in bundle:  # absent in a 1.0/1.1 bundle: no counts are expected
+        counts.update(processed_output_counts(bundle["processed_outputs"]))
     bundle["counts"] = counts
     bundle["readiness"]["blocking"] = {
         "conflicts": sum(1 for c in bundle["conflicts"] if c["value_state"] in (STATE_CONFLICTING, STATE_NEEDS_REVIEW)),
@@ -1015,10 +1335,132 @@ def build_bundle(
     # -- runs the GENERIC readers found (LOCAL-3), in files the engine did not read ------
     generic_statements: list[dict] = []
     generic_claimed: set[str] = set()
+    processed_outputs: list[dict] = []
+
+    def _statement_entry(g, k: int, st: Mapping, *, run_id: str | None, po_id: str | None) -> dict:
+        path = st.get("source_relative_path")
+        entry = {
+            # "#p" for a processed output's statements: a stem group split file by file
+            # (one stated, one unstated XDI file) must not mint one entry id twice.
+            "entry_id": f"{g.run_key}#{'p' if po_id else 's'}{k}",
+            "concept": str(st.get("key") or ""),
+            "raw_literal": st.get("literal") if isinstance(st.get("literal"), str) else json.dumps(st.get("literal")),
+            "source_id": sid_of.get(path),
+            "relative_path": _safe_relative(path) if path in sid_of else None,
+            "locator": st.get("locator"),
+            "normalized_value": None,
+            "unit": None,
+            "normalization_rule_id": None,
+            "parser_id": g.reader_id or g.profile,
+            "scope": "processed_output" if po_id else "run",
+            "official_path": None,
+            "value_state": STATE_SOURCE_RECORDED,
+            "is_official_field_value": False,
+            "run_id": run_id,
+        }
+        if po_id:
+            entry["processed_output_id"] = po_id
+        return entry
+
+    def _reader_block(g, n_statements: int) -> dict:
+        return {
+            "reader_id": g.reader_id or g.profile,
+            "profile": g.profile,
+            "profile_version": _reader_version(g.profile) or _reader_version(g.reader_id or ""),
+            "statements_total": n_statements,
+            "statements_kept": min(n_statements, MAX_GENERIC_STATEMENTS_PER_RUN),
+        }
+
     if generic is not None:
         for claim in getattr(generic, "claims", None) or ():
             generic_claimed.add(claim["relative_path"])
         for g in getattr(generic, "runs", None) or ():
+            all_scans = [sc for sc in g.scans if _safe_relative(sc.get("relative_path"))]
+            line1 = {st.get("source_relative_path"): st.get("literal") for st in g.statements if st.get("key") == "xdi_version"}
+            judged = {
+                sc["relative_path"]: _processing_origin(sc, line1.get(sc["relative_path"]))
+                for sc in all_scans
+                if (g.role_hints or {}).get("kind") == PROCESSED_OUTPUT_KIND
+            }
+            origin = {p: o for p, (o, _) in judged.items()}
+            # a file whose line 1 names another application but whose fields mention
+            # Athena/Demeter stays an acquisition; the disagreement is recorded on it
+            disagreements = [
+                {**d, "source_relative_path": p, "scan_index": None} for p, (o, d) in judged.items() if d is not None
+            ]
+            processed_paths = {p for p, o in origin.items() if o is not None}
+            # -- the scientist's processed output: evidence and a reference result ---------
+            if processed_paths:
+                po_id = "po-" + hashlib.sha256(f"processed:{g.run_key}".encode("utf-8")).hexdigest()[:16]
+                po_statements = [st for st in g.statements if st.get("source_relative_path") in processed_paths]
+                kept = po_statements[:MAX_GENERIC_STATEMENTS_PER_RUN]
+                stated: dict[str, list[dict]] = {name: [] for name in ("processed_by", *_PROCESSED_STATED_KEYS.values())}
+                for st in kept:
+                    name = _PROCESSED_STATED_KEYS.get(str(st.get("key") or ""))
+                    if name:
+                        stated[name].append(
+                            {
+                                "literal": st.get("literal"),
+                                "source_id": sid_of.get(st.get("source_relative_path")),
+                                "locator": st.get("locator"),
+                            }
+                        )
+                files = []
+                for sc in all_scans:
+                    rel = sc["relative_path"]
+                    if rel not in processed_paths:
+                        continue
+                    o = origin[rel]
+                    if o["processed_by"]:
+                        stated["processed_by"].append(
+                            {
+                                "literal": o["processed_by"] + (f"/{o['application_version']}" if o["application_version"] else ""),
+                                "source_id": sid_of.get(rel),
+                                "locator": "line:1",
+                            }
+                        )
+                    files.append(
+                        {
+                            "source_id": sid_of.get(rel),
+                            "relative_path": rel,
+                            "sha256": sc.get("sha256"),
+                            "size_bytes": sc.get("size_bytes"),
+                            "extension": sc.get("extension"),
+                            "columns": list(sc.get("columns") or [])[:50],
+                            "points": sc.get("points"),
+                            "processing_origin": o,
+                        }
+                    )
+                entries = [_statement_entry(g, k, st, run_id=None, po_id=po_id) for k, st in enumerate(kept)]
+                generic_statements.extend(entries)
+                processed_outputs.append(
+                    {
+                        "processed_output_id": po_id,
+                        "output_key": g.run_key,
+                        "label": g.label,
+                        "directory": g.directory,
+                        "role": "reference_result",
+                        "is_acquisition": False,
+                        "becomes_a_record": False,
+                        "statement": (
+                            "The scientists' own processed output, as its header states. A "
+                            "reference result and evidence: never a run, never a record group."
+                        ),
+                        "reader": _reader_block(g, len(po_statements)),
+                        "files": files,
+                        "states": stated,
+                        "anomalies": [a for a in g.anomalies if a.get("source_relative_path") in processed_paths][:50],
+                        "extended_context_entry_ids": [e["entry_id"] for e in entries],
+                        "proposed_links": [],
+                        "link_note": None,
+                        "value_state": STATE_SOURCE_RECORDED,
+                    }
+                )
+            # -- an acquisition (everything else the generic readers found) -----------------
+            run_scans = [sc for sc in all_scans if sc["relative_path"] not in processed_paths]
+            if processed_paths and not run_scans:
+                continue
+            run_statements = [st for st in g.statements if st.get("source_relative_path") not in processed_paths]
             run_id = f"run-{len(runs) + 1:03d}"
             scans = [
                 {
@@ -1026,8 +1468,7 @@ def build_bundle(
                     "relative_path": sc.get("relative_path"),
                     "scan_index": sc.get("scan_index"),
                 }
-                for sc in g.scans
-                if _safe_relative(sc.get("relative_path"))
+                for sc in run_scans
             ]
             first = scans[0]["source_id"] if scans else None
             runs.append(
@@ -1051,7 +1492,7 @@ def build_bundle(
                     "note_rows": [],
                     "other_relationships": {
                         "companions": [c.get("relative_path") for c in g.companions if _safe_relative(c.get("relative_path"))],
-                        "anomalies": list(g.anomalies)[:50],
+                        "anomalies": (disagreements + [a for a in g.anomalies if a.get("source_relative_path") not in processed_paths])[:50],
                         "header_differences": list(g.header_differences)[:50],
                     },
                     "candidate_ids": [],
@@ -1060,40 +1501,16 @@ def build_bundle(
                     "data_quality_note_ids": [],
                     "naming_profile": {},
                     "signal_selection": None,
-                    "reader": {
-                        "reader_id": g.reader_id or g.profile,
-                        "profile": g.profile,
-                        "profile_version": _reader_version(g.profile) or _reader_version(g.reader_id or ""),
-                        "statements_total": len(g.statements),
-                        "statements_kept": min(len(g.statements), MAX_GENERIC_STATEMENTS_PER_RUN),
-                    },
+                    "reader": _reader_block(g, len(run_statements)),
                 }
             )
             # STATEMENTS ARE SOURCE EVIDENCE, NEVER FIELD VALUES: no statement maps to an
             # official field unless an explicit, tested rule says so, and there is none.
-            for k, st in enumerate(g.statements[:MAX_GENERIC_STATEMENTS_PER_RUN]):
-                path = st.get("source_relative_path")
-                generic_statements.append(
-                    {
-                        "entry_id": f"{g.run_key}#s{k}",
-                        "concept": str(st.get("key") or ""),
-                        "raw_literal": st.get("literal") if isinstance(st.get("literal"), str) else json.dumps(st.get("literal")),
-                        "source_id": sid_of.get(path),
-                        "relative_path": _safe_relative(path) if path in sid_of else None,
-                        "locator": st.get("locator"),
-                        "normalized_value": None,
-                        "unit": None,
-                        "normalization_rule_id": None,
-                        "parser_id": g.reader_id or g.profile,
-                        "scope": "run",
-                        "official_path": None,
-                        "value_state": STATE_SOURCE_RECORDED,
-                        "is_official_field_value": False,
-                        "run_id": run_id,
-                    }
-                )
+            for k, st in enumerate(run_statements[:MAX_GENERIC_STATEMENTS_PER_RUN]):
+                generic_statements.append(_statement_entry(g, k, st, run_id=run_id, po_id=None))
         if generic_claimed:
             unread = [u for u in unread if u["relative_path"] not in generic_claimed]
+    propose_processed_links(processed_outputs, runs)
     runs_by_id = {r["run_id"]: r for r in runs}
 
     # -- candidates -------------------------------------------------------------------
@@ -1413,6 +1830,7 @@ def build_bundle(
         "extended_context": len(extended),
         "data_quality_notes": len(dq_notes),
         "questions": len(questions),
+        **processed_output_counts(processed_outputs),
     }
     eligible = sum(1 for c in out_candidates if c["eligibility_for_official_record"]["eligible"])
     readiness = {
@@ -1516,6 +1934,8 @@ def build_bundle(
         "record_groups": [],
         "processing_results": [],
         "exposures": [],
+        # 1.2.0: the scientists' own processed outputs — reference results, never runs.
+        "processed_outputs": processed_outputs,
         "validation": {
             "bundle_schema": {
                 "status": "valid",
@@ -2009,7 +2429,12 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50) -> list[str]:
     for u in bundle["unread_files"]:
         if u["relative_path"] is not None and _safe_relative(u["relative_path"]) is None:
             errors.append("paths: an unread_files entry has an absolute or escaping path")
+    held_ids = {g.get("group_id") for g in bundle.get("record_groups") or ()} | {
+        g.get("group_id") for g in bundle.get("superseded_record_groups") or ()
+    }
     for r in bundle.get("processing_results") or ():
+        if r.get("group_id") not in held_ids:
+            errors.append(f"reference: processing result {processing_id(r)} names group {r.get('group_id')}, in neither record_groups nor superseded_record_groups")
         for f in (r.get("outputs") or {}).get("files") or ():
             if _safe_relative(f.get("relative_path")) is None:
                 errors.append(f"paths: processing result {processing_id(r)} names an output outside the bundle")
@@ -2045,7 +2470,7 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50) -> list[str]:
         "missing_value": missing_ids,
         "source": source_ids,
         "run": run_ids,
-        "record_group": group_ids,
+        "record_group": group_ids | {g["group_id"] for g in bundle.get("superseded_record_groups") or ()},
         "processing_result": {processing_id(r) for r in bundle.get("processing_results") or ()},
         "experiment": {"experiment"},
     }
@@ -2058,6 +2483,58 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50) -> list[str]:
         t = entry["target"]
         if t["id"] not in targets.get(t["kind"], set()):
             errors.append(f"reference: a {t['kind']} target {t['id']} does not exist")
+
+    # PROCESSED OUTPUTS (1.2.0): references, and the one invariant that matters — a file
+    # that is a processed output is never also a run's scan (so never a record group's).
+    po_ids = _unique(bundle.get("processed_outputs") or [], "processed_output_id", "processed_output_id")
+    run_scan_paths = {s.get("relative_path") for r in bundle["runs"] for s in r.get("scans") or ()}
+    runs_by_id_v = {r["run_id"]: r for r in bundle["runs"]}
+    for po in bundle.get("processed_outputs") or ():
+        pid = po["processed_output_id"]
+        for f in po["files"]:
+            if f["source_id"] is not None and f["source_id"] not in source_ids:
+                errors.append(f"reference: processed output {pid} names unknown source {f['source_id']}")
+            if _safe_relative(f["relative_path"]) is None:
+                errors.append(f"paths: processed output {pid} has an absolute or escaping path")
+            if f["relative_path"] in run_scan_paths:
+                errors.append(f"consistency: processed output {pid} file {f['relative_path']} is also a run's scan")
+        for link in po["proposed_links"]:
+            if link["run_id"] not in run_ids or link["run_key"] not in run_keys:
+                errors.append(f"reference: processed output {pid} links to unknown run {link['run_id']}")
+        if len(po["proposed_links"]) > 1:
+            errors.append(f"consistency: processed output {pid} proposes more than one link")
+        for link in po["proposed_links"]:
+            run = runs_by_id_v.get(link["run_id"])
+            if run is not None and (run["run_key"] != link["run_key"] or run.get("stem") != link["run_stem"]):
+                errors.append(f"consistency: processed output {pid} link names run {link['run_id']} by another run's key or stem")
+    # THE LINK RULE IS RE-RUN, NEVER TRUSTED: a stored link (or its absence) must be exactly
+    # what `propose_processed_links` gives over the stored runs (the derived group_id aside).
+    if bundle.get("processed_outputs"):
+        again = json.loads(json.dumps(bundle["processed_outputs"]))
+        propose_processed_links(again, bundle["runs"])
+
+        def _bare(links):
+            return [{k: v for k, v in link.items() if k != "group_id"} for link in links]
+
+        for po, e in zip(bundle["processed_outputs"], again):
+            if _bare(po["proposed_links"]) != _bare(e["proposed_links"]) or po["link_note"] != e["link_note"]:
+                errors.append(f"consistency: processed output {po['processed_output_id']} link is not what {LINK_RULE_ID} gives over the stored runs")
+    # A RUN IS IN AT MOST ONE LIVE GROUP (proposed / confirmed / merged); rejected and split
+    # groups are history and do not hold their runs.
+    live_of: dict[str, list[str]] = {}
+    for g in bundle.get("record_groups") or ():
+        if g.get("status") in LIVE_GROUP_STATUSES:
+            for key in g["member_run_keys"]:
+                live_of.setdefault(key, []).append(g["group_id"])
+    for key, gids in live_of.items():
+        if len(gids) > 1:
+            errors.append(f"consistency: run {key} is in more than one live record group ({', '.join(gids[:5])})")
+    for e in bundle["extended_context"]:
+        if e.get("processed_output_id") is not None:
+            if e["processed_output_id"] not in po_ids:
+                errors.append(f"reference: extended_context {e['entry_id']} names unknown processed output {e['processed_output_id']}")
+            if e.get("run_id") is not None:
+                errors.append(f"consistency: extended_context {e['entry_id']} is attributed to a processed output AND a run")
 
     # THE STATE RULE — recomputed, never trusted. ONE derivation (`apply_derivations`)
     # is used both to write a bundle and to check one.
@@ -2074,6 +2551,17 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50) -> list[str]:
         for key in g["member_run_keys"]:
             if key not in run_keys:
                 errors.append(f"reference: record group {g['group_id']} names unknown run_key {key}")
+    # MERGE CANDIDATES (review N-2): name stored groups and runs; groups point only at them
+    mc_ids = [mc.get("merge_candidate_id") for mc in bundle.get("merge_candidates") or ()]
+    for mc in bundle.get("merge_candidates") or ():
+        if not set(mc.get("group_ids") or ()) <= group_ids:
+            errors.append(f"reference: merge candidate {mc.get('merge_candidate_id')} names a group not in record_groups")
+        if not set(mc.get("run_keys") or ()) <= run_keys:
+            errors.append(f"reference: merge candidate {mc.get('merge_candidate_id')} names a run not in runs")
+    for g in bundle.get("record_groups") or ():
+        stale = [x for x in g.get("merge_candidate_ids") or () if x not in mc_ids]
+        if stale:
+            errors.append(f"reference: record group {g['group_id']} lists merge candidate(s) {', '.join(stale[:3])} that do not exist")
     expected = apply_derivations(json.loads(json.dumps(bundle)))
     for c, e in zip(bundle["candidates"], expected["candidates"]):
         if c["value_state"] != e["value_state"]:
@@ -2094,6 +2582,9 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50) -> list[str]:
     for g, e in zip(bundle.get("record_groups") or (), expected.get("record_groups") or ()):
         if g["status"] != e["status"]:
             errors.append(f"state: record group {g['group_id']} is {g['status']} but only {e['status']} is supported")
+    for po, e in zip(bundle.get("processed_outputs") or (), expected.get("processed_outputs") or ()):
+        if [l["group_id"] for l in po["proposed_links"]] != [l["group_id"] for l in e["proposed_links"]]:
+            errors.append(f"consistency: processed output {po['processed_output_id']} link group disagrees with record_groups")
     for r, e in zip(bundle.get("processing_results") or (), expected.get("processing_results") or ()):
         if r["state"] != e["state"]:
             errors.append(f"state: processing result for {r['group_id']} is {r['state']} but only {e['state']} is supported")

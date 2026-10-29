@@ -48,8 +48,8 @@ def _header_reader(root: Path | None):
     return read
 
 
-def build_groups_payload(bundle: Mapping, *, source_root: Path | None = None) -> dict:
-    proposal = G.propose(bundle)
+def build_groups_payload(bundle: Mapping, *, source_root: Path | None = None, context: Mapping | None = None) -> dict:
+    proposal = G.propose(bundle, context=context)
     groups = proposal["record_groups"]
     unread = G.propose_unread_acquisition_groups(bundle)
     cpos = (proposal.get("counter_positions_decision") or {}).get("positions") or ()

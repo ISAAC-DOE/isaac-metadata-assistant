@@ -36,6 +36,13 @@ A proposed group needs, for every member: same role; no conflicting condition; a
 sample identity; at least one scan; no engine-reading issue; equal condition AND unknown
 readings. A merge candidate needs: same role, equal condition readings, no hard condition
 conflict, scans. Ids are stable sha256 prefixes; order follows the bundle.
+
+PROCESSED OUTPUTS ARE NOT GROUPED. Since bundle 1.2.0 the scientists' own Athena/Demeter
+exports are kept in ``processed_outputs[]``, never in ``runs[]`` (``bundle.PROCESSED_ORIGIN_RULE_ID``),
+so nothing here can put one in a record group. Their proposed links to runs are made by
+``bundle.propose_processed_links`` and a link's record group is DERIVED from these groups'
+membership (``bundle.apply_derivations``). :func:`_exported_file_misreads` is a different
+case and unchanged: a zero-scan ENGINE run named like another run plus a data-file extension.
 """
 
 from __future__ import annotations
@@ -474,18 +481,29 @@ def engine_reading_issues(bundle: Mapping) -> dict:
 
 def _exported_file_misreads(bundle: Mapping) -> list[tuple[str, dict]]:
     out = []
-    stems = {r.get("stem"): r["run_key"] for r in bundle.get("runs") or () if int(r.get("scan_count") or 0) > 0}
+    # stem -> EVERY run with scans carrying it: a name shared by several runs (different
+    # folders) names no one of them, so the export is flagged and joined to none.
+    stems: dict[str, list[str]] = {}
+    for r in bundle.get("runs") or ():
+        if int(r.get("scan_count") or 0) > 0:
+            stems.setdefault(r.get("stem"), []).append(r["run_key"])
     for run in bundle.get("runs") or ():
         m = _EXPORT_EXT.match(str(run.get("stem") or ""))
         if int(run.get("scan_count") or 0) == 0 and m and m.group("base") in stems:
+            keys = stems[m.group("base")]
+            one = keys[0] if len(keys) == 1 else None
             out.append((run["run_key"],
                 {
                     "code": "exported_file_read_as_acquisition",
                     "rule_id": ENGINE_RULE_ID,
                     "statement_key": None,
-                    "detail": "a zero-scan run named like another run plus a data-file extension: likely the scientist's exported/processed file of that run",
-                    "evidence": [{"stem": run.get("stem"), "source_id": run.get("acquisition_source_id"), "same_as_run_key": stems[m.group("base")]}],
-                    "related_run_key": stems[m.group("base")],
+                    "detail": (
+                        "a zero-scan run named like another run plus a data-file extension: likely the scientist's exported/processed file of that run"
+                        if one else
+                        f"a zero-scan run named like {len(keys)} runs plus a data-file extension: likely an exported/processed file, but of which run is ambiguous, so it is joined to none"
+                    ),
+                    "evidence": [{"stem": run.get("stem"), "source_id": run.get("acquisition_source_id"), "same_as_run_key": one, "ambiguous_run_keys": keys if one is None else []}],
+                    "related_run_key": one,
                 }
             ))
     return out
@@ -649,8 +667,12 @@ def _diff(a: Mapping[str, dict], b: Mapping[str, dict], classes: Mapping[str, st
     return out
 
 
-def propose(bundle: Mapping, *, max_split_reasons: int = 20) -> dict:
+def propose(bundle: Mapping, *, max_split_reasons: int = 20, context: Mapping | None = None) -> dict:
     """Groups, merge candidates and engine-reading issues for ``bundle`` (deterministic; no I/O).
+
+    ``context`` (a regroup passes the FULL bundle while ``bundle`` holds only the runs still
+    to be proposed): the beamtime-level sample-number consistency check is computed over
+    ``context``'s runs, so leaving runs out cannot change how a key is classified.
 
     ENFORCED: :func:`condition_violations` is run over the result; any proposed group it
     flags is dissolved (its runs are proposed alone and offered as a merge candidate,
@@ -659,7 +681,7 @@ def propose(bundle: Mapping, *, max_split_reasons: int = 20) -> dict:
     force: frozenset = frozenset()
     prevented: list[dict] = []
     for _ in range(4):
-        result = _propose(bundle, max_split_reasons=max_split_reasons, _force_alone=force)
+        result = _propose(bundle, max_split_reasons=max_split_reasons, _force_alone=force, _context=context)
         viol = condition_violations(bundle, result)
         if not viol:
             break
@@ -671,7 +693,7 @@ def propose(bundle: Mapping, *, max_split_reasons: int = 20) -> dict:
     return result
 
 
-def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: frozenset = frozenset()) -> dict:
+def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: frozenset = frozenset(), _context: Mapping | None = None) -> dict:
     runs: Sequence[Mapping] = bundle.get("runs") or ()
     cands = {c["candidate_id"]: c for c in bundle.get("candidates") or () if "candidate_id" in c}
     sources = {s["source_id"]: s for s in bundle.get("sources") or () if "source_id" in s}
@@ -683,7 +705,13 @@ def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: froz
     raw = [_run_readings(run, cands, eng["per_run"].get(run["run_key"], [])) for run in runs]
     beamtime_issues = []
     overrides: dict[str, str] = {}
-    sn = _sample_number_consistency([r for r, _ in raw])
+    if _context is not None:
+        c_cands = {c["candidate_id"]: c for c in _context.get("candidates") or () if "candidate_id" in c}
+        c_eng = engine_reading_issues(_context)
+        c_raw = [_run_readings(run, c_cands, c_eng["per_run"].get(run["run_key"], [])) for run in _context.get("runs") or ()]
+        sn = _sample_number_consistency([r for r, _ in c_raw])
+    else:
+        sn = _sample_number_consistency([r for r, _ in raw])
     if sn:
         beamtime_issues.append(sn)
         overrides["sample_or_electrode_number"] = CLASS_UNKNOWN
@@ -1420,3 +1448,49 @@ def summarize_groups(groups: Sequence[Mapping]) -> dict:
         "by_role": dict(sorted(roles.items())),
         "with_questions": sum(1 for g in groups if g.get("questions")),
     }
+
+
+BINDING_RULE_ID = "isaac.grouping.binding_groups.v0"
+
+
+def binding_merge_candidates(
+    full_groups: Sequence[Mapping],
+    fresh_groups: Sequence[Mapping],
+    bind_of: Mapping[str, str],
+    exports_of_binding: Mapping[str, str],
+    *,
+    experiment_key: str,
+) -> list[dict]:
+    """Merge CANDIDATES (never merges) that say where the proposal over the WHOLE bundle
+    would have joined runs to a BINDING (scientist-confirmed) group —
+    ``isaac.grouping.binding_groups.v0``. Pure; no I/O.
+
+    ``full_groups``: the proposal over every run. ``fresh_groups``: the proposal over the
+    runs not bound (and not an export of a bound run). ``bind_of``: bound run key -> its
+    binding group. ``exports_of_binding``: a zero-scan export run key -> the binding group
+    of the run it is an export of; offered to that group as a candidate with its
+    ``run_keys``, never as context of another group.
+    """
+    fresh_of = {k: g["group_id"] for g in fresh_groups for k in g.get("member_run_keys") or ()}
+    out: list[dict] = []
+    seen: set[tuple] = set()
+
+    def add(group_ids: list[str], run_keys: list[str], reason: dict) -> None:
+        key = (tuple(group_ids), tuple(run_keys))
+        if key in seen:
+            return
+        seen.add(key)
+        mcid = "mc-" + hashlib.sha256((experiment_key + "\n" + "\n".join(group_ids + run_keys)).encode()).hexdigest()[:16]
+        out.append({"merge_candidate_id": mcid, "experiment_key": experiment_key, "group_ids": group_ids,
+                    "run_keys": run_keys, "status": "proposed", "reasons": [reason], "rule_id": BINDING_RULE_ID})
+
+    for f in full_groups:
+        members = list(f.get("member_run_keys") or ())
+        for b in sorted({bind_of[k] for k in members if k in bind_of}):
+            for fg in sorted({fresh_of[k] for k in members if k in fresh_of}):
+                add([fg, b], [], {"code": "matches_binding_group", "group_id": b,
+                                  "detail": f"over the whole bundle the grouping rule puts these runs with the runs of confirmed group {b}; they are proposed without it"})
+    for rk, b in sorted(exports_of_binding.items()):
+        add([b], [rk], {"code": "matches_binding_group", "group_id": b, "run_key": rk,
+                        "detail": f"a zero-scan export of a run of confirmed group {b}; offered to that group as context, never merged into another"})
+    return out

@@ -43,9 +43,10 @@
     "format_version": {
       "enum": [
         "1.0.0",
-        "1.1.0"
+        "1.1.0",
+        "1.2.0"
       ],
-      "description": "1.1.0 adds record_groups, processing_results and exposures (all optional, so a 1.0.0 bundle still validates) and widens the decision, target and question enums."
+      "description": "1.1.0 adds record_groups, processing_results and exposures (all optional, so a 1.0.0 bundle still validates) and widens the decision, target and question enums. 1.2.0 adds processed_outputs (optional; absent means none were recorded) and extended_context_entry.processed_output_id. A 1.2.0 bundle REQUIRES processed_outputs (possibly empty); a bundle without it keeps its older version."
     },
     "is_official_record": {
       "const": false
@@ -562,7 +563,7 @@
       "items": {
         "type": "object"
       },
-      "description": "LOCAL-P's proposals of record groups a scientist may merge with one decision. Suggestions only."
+      "description": "LOCAL-P's proposals of record groups a scientist may merge with one decision. Suggestions only. A candidate may name one group plus run_keys (a zero-scan export offered to a confirmed group as context)."
     },
     "self_test": {
       "type": "object",
@@ -587,6 +588,60 @@
         "type": "object"
       },
       "description": "Experiment-scope questions the grouping step asks (e.g. naming_counter_positions)."
+    },
+    "processed_outputs": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": {
+        "$ref": "#/$defs/processed_output"
+      },
+      "description": "1.2.0: the scientists' own processed outputs, kept OUT of runs[] (rule isaac.processed_output.origin.v0). Optional: a 1.0/1.1 bundle has none recorded."
+    },
+    "superseded_record_groups": {
+      "type": "array",
+      "maxItems": 5000,
+      "description": "Groups a `bundle group --regroup` replaced while a decision still named them (e.g. defer, approve_calibration on a proposal). Kept so those decisions keep a target; never a record, never counted as holding its runs.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "group_id",
+          "member_run_keys",
+          "status",
+          "superseded_utc",
+          "reason"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "member_run_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "enum": [
+              "proposed"
+            ]
+          },
+          "superseded_utc": {
+            "$ref": "#/$defs/utc"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "processing_result_ids": {
+            "type": "array",
+            "maxItems": 1000,
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {
@@ -2029,6 +2084,17 @@
               "type": "null"
             }
           ]
+        },
+        "processed_output_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/processed_output_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set when the statement was read from a processed output; such an entry never carries a run_id."
         }
       }
     },
@@ -2677,6 +2743,528 @@
           "$ref": "#/$defs/value_state"
         }
       }
+    },
+    "processed_output_id": {
+      "type": "string",
+      "pattern": "^po-[0-9a-f]{16}$"
+    },
+    "processed_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One of the scientists' own processed outputs (Athena/Demeter XDI), grouped by name stem as the reader groups it. A reference result and evidence: never a run, never a record group.",
+      "required": [
+        "processed_output_id",
+        "output_key",
+        "label",
+        "directory",
+        "role",
+        "is_acquisition",
+        "becomes_a_record",
+        "statement",
+        "reader",
+        "files",
+        "states",
+        "anomalies",
+        "extended_context_entry_ids",
+        "proposed_links",
+        "link_note",
+        "value_state"
+      ],
+      "properties": {
+        "processed_output_id": {
+          "$ref": "#/$defs/processed_output_id"
+        },
+        "output_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string"
+        },
+        "directory": {
+          "type": "string"
+        },
+        "role": {
+          "const": "reference_result"
+        },
+        "is_acquisition": {
+          "const": false
+        },
+        "becomes_a_record": {
+          "const": false
+        },
+        "statement": {
+          "type": "string"
+        },
+        "reader": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "reader_id",
+            "profile",
+            "profile_version",
+            "statements_total",
+            "statements_kept"
+          ],
+          "properties": {
+            "reader_id": {
+              "type": "string"
+            },
+            "profile": {
+              "type": "string"
+            },
+            "profile_version": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "statements_total": {
+              "$ref": "#/$defs/count"
+            },
+            "statements_kept": {
+              "$ref": "#/$defs/count"
+            }
+          }
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source_id",
+              "relative_path",
+              "sha256",
+              "size_bytes",
+              "extension",
+              "columns",
+              "points",
+              "processing_origin"
+            ],
+            "properties": {
+              "source_id": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/source_id"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "relative_path": {
+                "$ref": "#/$defs/relative_path"
+              },
+              "sha256": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "size_bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "extension": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "columns": {
+                "type": "array",
+                "maxItems": 50,
+                "items": {
+                  "type": "string"
+                }
+              },
+              "points": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "processing_origin": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "rule_id",
+                  "basis",
+                  "processed_by",
+                  "application_version",
+                  "line_1_applications",
+                  "names_a_processing_application",
+                  "has_demeter_output_filetype",
+                  "has_athena_fields"
+                ],
+                "properties": {
+                  "rule_id": {
+                    "const": "isaac.processed_output.origin.v0"
+                  },
+                  "processed_by": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "application_version": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "names_a_processing_application": {
+                    "type": "boolean"
+                  },
+                  "has_demeter_output_filetype": {
+                    "type": "boolean"
+                  },
+                  "has_athena_fields": {
+                    "type": "boolean"
+                  },
+                  "basis": {
+                    "enum": [
+                      "line_1",
+                      "fields"
+                    ]
+                  },
+                  "line_1_applications": {
+                    "type": "array",
+                    "maxItems": 10,
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "states": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "What the files' own headers state about themselves, literally, each with its locator. Never a run value.",
+          "required": [
+            "processed_by",
+            "element_symbol",
+            "element_edge",
+            "demeter_output_filetype"
+          ],
+          "properties": {
+            "processed_by": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "literal",
+                  "source_id",
+                  "locator"
+                ],
+                "properties": {
+                  "literal": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "source_id": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/source_id"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "locator": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            },
+            "element_symbol": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "literal",
+                  "source_id",
+                  "locator"
+                ],
+                "properties": {
+                  "literal": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "source_id": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/source_id"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "locator": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            },
+            "element_edge": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "literal",
+                  "source_id",
+                  "locator"
+                ],
+                "properties": {
+                  "literal": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "source_id": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/source_id"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "locator": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            },
+            "demeter_output_filetype": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "literal",
+                  "source_id",
+                  "locator"
+                ],
+                "properties": {
+                  "literal": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "source_id": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/source_id"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "locator": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "anomalies": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object"
+          }
+        },
+        "extended_context_entry_ids": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "string"
+          }
+        },
+        "proposed_links": {
+          "type": "array",
+          "maxItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "rule_id",
+              "status",
+              "match",
+              "scan_selection_literal",
+              "scan_selection_basis",
+              "run_id",
+              "run_key",
+              "run_stem",
+              "group_id",
+              "assumption"
+            ],
+            "properties": {
+              "rule_id": {
+                "const": "isaac.processed_output.link_by_run_stem.v0"
+              },
+              "status": {
+                "const": "proposed"
+              },
+              "match": {
+                "enum": [
+                  "exact",
+                  "scan_selection_suffix"
+                ]
+              },
+              "scan_selection_literal": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "run_id": {
+                "$ref": "#/$defs/run_id"
+              },
+              "run_key": {
+                "type": "string"
+              },
+              "run_stem": {
+                "type": "string"
+              },
+              "group_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "scan_selection_basis": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "scan_indices",
+                  "scan_count",
+                  null
+                ]
+              },
+              "assumption": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "link_note": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "code",
+                "match",
+                "run_keys",
+                "detail"
+              ],
+              "properties": {
+                "code": {
+                  "enum": [
+                    "ambiguous",
+                    "no_run_named_like_it",
+                    "exact_name_run_has_no_scans"
+                  ]
+                },
+                "match": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "exact",
+                    "scan_selection_suffix",
+                    null
+                  ]
+                },
+                "run_keys": {
+                  "type": "array",
+                  "maxItems": 20,
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "detail": {
+                  "type": "string"
+                }
+              }
+            }
+          ]
+        },
+        "value_state": {
+          "const": "source_recorded"
+        }
+      }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "format_version": {
+            "const": "1.2.0"
+          }
+        },
+        "required": [
+          "format_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "processed_outputs"
+        ]
+      }
+    }
+  ]
 }

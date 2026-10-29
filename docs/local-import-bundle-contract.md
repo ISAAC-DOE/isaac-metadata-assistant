@@ -1,6 +1,6 @@
 # ISAAC Local Import Bundle — contract v1
 
-Status: **v1.1.0** (LOCAL-2, 2026-10-28; v1.0.0 introduced by LOCAL-1 the same day). Machine contract:
+Status: **v1.2.0** (processed outputs, 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
 [`apps/api/isaac_api/local_import/bundle-v1.schema.json`](../apps/api/isaac_api/local_import/bundle-v1.schema.json)
 (JSON Schema draft 2020-12) plus the checks in
 [`bundle.py`](../apps/api/isaac_api/local_import/bundle.py) `validate_bundle` that JSON
@@ -57,7 +57,8 @@ being read is refused (the next import would read the bundle as a source).
 | `conflicts[]` | every disagreement: run-level, field-level and corpus-level (duplicate legacy numbers, macros declaring never-acquired targets), each reading with all its witnesses and the engine's non-authoritative recommendation | evidence + extraction |
 | `missing_values[]` | each writable target path no source states (per run, or per record for record-scope paths). `value: null`, always | — |
 | `unmapped_statements[]` | references to candidates with no official field (kept as evidence) | extraction |
-| `extended_context[]` | ISAAC Extended Context (Level 4) entries, verbatim | source evidence |
+| `extended_context[]` | ISAAC Extended Context (Level 4) entries, verbatim. A statement read from a processed output carries `processed_output_id` and never a `run_id` | source evidence |
+| `processed_outputs[]` | **1.2.0.** The scientists' own Athena/Demeter outputs: reference results and evidence, **never runs and never record groups** (§9, "What 1.2.0 added") | source evidence (+ a proposed link) |
 | `data_quality_notes[]` | the files' own notes remarks, verbatim; `writes_qc_status: false` | source evidence |
 | `questions[]` | what a scientist is asked: one per conflict, one per needs-review value that has a field | — |
 | `ai_interpretations[]` | **empty in v1 output**; schema defined now for a later slice | extraction-interpretation |
@@ -178,7 +179,9 @@ Enforced by the builder (refuse, or clamp visibly and count) and by the validato
 - `format` is fixed: `isaac.local-import-bundle`. `format_version` is semver.
 - **Every object in the schema is `additionalProperties: false`**, so a validator only
   accepts fields its own schema declares. Consequently:
-  - the **1.1.0 schema accepts 1.0.0 bundles** (every 1.1.0 addition is optional);
+  - the **1.1.0 schema accepts 1.0.0 bundles** (every 1.1.0 addition is optional), and the
+    **1.2.0 schema accepts 1.0.0 and 1.1.0 bundles** (`processed_outputs` is optional; absent
+    means none was recorded, and no `processed_output*` count is expected);
   - a **1.0.0 validator does NOT accept a 1.1.0 bundle** — it rejects the new fields. A
     reader must check `format_version` and validate with a schema at least that new.
     (The 1.0.0 text said "a v1.0 reader must still validate it after ignoring unknown
@@ -226,6 +229,125 @@ Enforced by the builder (refuse, or clamp visibly and count) and by the validato
   facts, refuses a decision-free value no witness states and no recorded normalisation
   produced, requires a `conflicts[]` entry for every disagreement, and recomputes `counts`
   and `readiness.blocking`.
+
+### What 1.2.0 added (processed outputs)
+
+**The defect it closes (measured on the real SSRL corpus at 05e11c2e):** the XDI reader reads
+the scientists' own processed outputs, yet every XDI stem-group became an ordinary `runs[]`
+entry, so `isaac bundle group` proposed record groups — future ISAAC records — made of
+processed files, double-counting measurements (94 of 274 runs in one beamtime, 253 of 340 and
+347 of 570 in two others).
+
+- **`processed_outputs[]`** — one entry per XDI stem-group the reader already forms:
+  `processed_output_id` (`po-` + 16 hex of sha256 over `processed:<output_key>`, stable),
+  `output_key` (`xdi_v1:<dir>/<stem>`), `label`, `directory`, `role: reference_result`,
+  `is_acquisition: false`, `becomes_a_record: false`, `reader`, `files[]` (source id, relative
+  path, sha256, size, extension, column names, points, `processing_origin`), `states`
+  (`processed_by`, `element_symbol`, `element_edge`, `demeter_output_filetype` — each the
+  file's LITERAL header statement with its source and locator), `anomalies`,
+  `extended_context_entry_ids`, `proposed_links` (at most one), `link_note`,
+  `value_state: source_recorded`.
+- **Which files (`isaac.processed_output.origin.v0`, `bundle.classify_processing_origin`).**
+  Decided by the file's own header, never its extension or columns. Line 1 (`# XDI/1.0
+  Name/version [Name/version ...]`) is read as tokens:
+  - a token whose name is `Athena` or `Demeter` (`bundle.PROCESSING_APPLICATIONS`; the
+    WHOLE name, case ignored — `SYN_Athenaish` is not one) → processed output, basis
+    `line_1`;
+  - only OTHER applications named → an acquisition run, as before, whatever the fields say.
+    If it also carries `Demeter.output_filetype` or `Athena.*` fields, the file disagrees
+    with itself and a `processing_statement_disagrees` anomaly (severity `note`) is recorded
+    on the run; nothing is decided;
+  - no application named → processed output only with a non-empty `Demeter.output_filetype`
+    or `Athena.*` fields (basis `fields`).
+
+  `files[].processing_origin` records the basis and every line-1 token. A stem-group whose
+  files differ is split file by file. Measured: every XDI file in the real corpus names one
+  of the two applications.
+- **Evidence kept, attributed correctly.** Its header statements stay `extended_context[]`
+  entries (`source_recorded`, `is_official_field_value: false`, `scope: processed_output`,
+  `processed_output_id`, `run_id: null`, entry ids `<output_key>#p<k>`). Nothing becomes a
+  run value, a candidate, a missing value or a question.
+- **The link rule (`isaac.processed_output.link_by_run_stem.v0`) — proposes, never merges.**
+  The output's name stem is compared with run `stem`s, case-sensitively, no other
+  normalisation:
+  1. `exact` — a run has exactly this name. ANY such run (zero-scan included) also blocks
+     rule 2. Only runs that are run candidates with at least one scan can be linked; if the
+     only exact-name runs have no scan, `link_note.code: exact_name_run_has_no_scans`;
+  2. `scan_selection_suffix` — name = run stem + `_` + `N` or `N-M`, and EVERY number in it
+     is a scan that run has: its scans' own `scan_index` values when any is stated
+     (`scan_selection_basis: scan_indices`), else `1..scan_count` (`scan_count`). A number
+     the run has no scan for (`SYN_cell_500`) may be another sample or condition: no link.
+
+  Exactly one run → one `proposed` link; several → none, `link_note.code: ambiguous` with the
+  run keys; none → `no_run_named_like_it`. A link's `group_id` is DERIVED by
+  `apply_derivations` from LIVE `record_groups[]` membership (status `proposed`,
+  `scientist_confirmed` or `merged`; null before grouping). Unlinked is the expected outcome
+  when a scientist renamed the export (e.g. raw `SYN_run_07_condA` vs processed
+  `SYN_condA_07_3.nor`); nothing guesses past the rule.
+- **No question per processed file.** None is asked; `summary.md` states the count.
+- **Counts** (only when the section is present): `processed_outputs`,
+  `processed_output_files`, `processed_outputs_linked`, `processed_outputs_unlinked`.
+  `summary.md` (only when there are any): "N processed files from the scientists
+  (Athena/Demeter), kept as reference results, not records (… linked by the name rule …)".
+  `isaac bundle list <dir> processed-outputs` (prints no header literal) and `show <dir>
+  processed-output <id>` (prints them, so it records exposures of the output's sources and
+  of its linked run first, §11).
+- **Validator:** unique ids; known sources; relative paths; a processed-output file is never
+  also a run's scan; a link names a known run by its own key and stem, and at most one;
+  **the link rule is re-run over the stored runs and a stored link or `link_note` that
+  differs is refused**; each link's `group_id` is recomputed; an `extended_context` entry with
+  `processed_output_id` names a known one and no run.
+- **Versions.** A `1.2.0` bundle REQUIRES `processed_outputs` (schema `if/then`). The writer
+  never relabels an older bundle: a mutation keeps a bundle without the section at `1.1.0`
+  (a `1.0.0` one is raised to `1.1.0`, as before). `isaac bundle group` and `isaac bundle
+  build-records` REFUSE (exit 2, nothing written) a pre-1.2.0 bundle in which a
+  `generic:xdi_v1` run's recorded header statements make it a processed output by the rule
+  above (`bundle.legacy_processed_runs`): re-import the folder to separate them.
+- **Regrouping (`isaac bundle group --regroup`, `isaac.grouping.binding_groups.v0`).** By
+  each existing group's STATUS:
+  - `scientist_confirmed` is BINDING: kept, and its runs are never re-proposed.
+  - `rejected`, `split` and `merged` are HISTORY: kept as the record of that decision, and they
+    do not hold their runs. `merged` is history, not binding: nothing applies a decision's
+    `merge_with` and only a confirmed group becomes a record, so a merged group's runs must
+    stay proposable. A fresh proposal identical to a rejected or split group is not
+    re-proposed; one identical to a merged group is re-proposed under a distinct id
+    (`reproposed_after_group_id`), and a merge candidate (`scientist_decided_merge`, with the
+    decision id) joins the groups now holding the merge's runs, for the scientist to confirm.
+  - `proposed` (undecided, deferred, calibration-only) is replaced. A replaced group that a
+    decision or a processing result still names moves to `superseded_record_groups[]`
+    (`group_id`, `member_run_keys`, `status: proposed`, `superseded_utc`, `reason`,
+    `processing_result_ids`); it is never a record and is not decidable.
+
+  STRUCTURAL: the fresh proposal is computed over the runs that are neither bound nor a
+  zero-scan export of a bound run (`related_run_key` pointing at one), so every group, flag,
+  engine-reading issue and question is computed from its real members. The sample-number
+  consistency check and the counter question are computed over the FULL bundle. From the
+  full-bundle proposal: where it would have joined fresh runs to a confirmed group, a merge
+  candidate `matches_binding_group` names both; a bound run's export is offered to ITS group
+  as a merge candidate (`group_ids: [<that group>]`, `run_keys: [<the export>]`), never as
+  context of another group.
+
+  A group's `merge_candidate_ids` is DERIVED (`apply_derivations`) from the stored merge
+  candidates, on kept groups too. When a confirmed group exists, the counter question stays
+  the beamtime's but says that its answer does not merge a confirmed group's runs
+  (`candidates_resolved_by_position_excluding_confirmed`). The validator refuses a merge
+  candidate naming a group or run that is not stored, a group listing a merge candidate that
+  does not exist, a run in more than one live group (`proposed` or `scientist_confirmed`), and a processing result whose `group_id` is in neither
+  `record_groups[]` nor `superseded_record_groups[]`. `isaac process` keeps every result of a
+  superseded group (never deletes it). `decide --decision confirm` on a group whose run now
+  sits in another live group is refused: "This group's run is now in proposal <id>; confirm
+  or reject that proposal instead."
+- **Scan-numbering assumption, stated.** A suffix link whose basis is `scan_count` carries
+  `assumption` ("the run states no scan index; its N scans are taken to be numbered 1..N"),
+  printed by `bundle show processed-output`, and `summary.md` says how many links rest on it.
+- **Old bundles in `isaac process`.** It refuses the same pre-1.2.0 bundles as `bundle group`
+  and `build-records`.
+- **Exported-file misreads** (`grouping._exported_file_misreads`): a zero-scan run named like
+  a run plus a data-file extension is joined to that run only when exactly ONE run with scans
+  carries the name; when several do, it is flagged with `ambiguous_run_keys` and joined to
+  none.
+- **Not built:** feeding processed outputs into the Athena comparison (see the TODO in
+  `processing/athena.py`), and any decision that confirms a link.
 
 ## 10. Exit codes (`isaac import` / `isaac bundle`)
 
@@ -327,6 +449,8 @@ Exit codes for the LOCAL-2 commands: `validate` and `export` exit 1 when any dra
   statements_kept}`; its statements are `extended_context` entries (`source_recorded`,
   `run_id`, at most 200 per run, the total stated). No statement maps to a field: there is no
   rule for it. Claimed files leave `unread_files`. A ZIP is not walked by the generic readers.
+  **Since 1.2.0 an XDI file whose header states Athena/Demeter is a `processed_outputs[]`
+  entry instead of a run** (§9, "What 1.2.0 added").
 - `isaac bundle group <dir> [--regroup]` stores LOCAL-P's proposed `record_groups[]`
   (status `proposed`); `--regroup` keeps every group a scientist decided.
 - `isaac process <dir> [--source] [--group ID] [--no-athena] [--params-file]` runs LOCAL-P's
