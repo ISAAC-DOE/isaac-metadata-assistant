@@ -190,6 +190,8 @@ def _motor_scan(seed):
 
 @pytest.mark.parametrize("case", ["dead_I1", "dead_I0", "beam_lost_60pct"])
 def test_a_present_but_dead_detector_is_a_qc_fail_never_not_applicable(tmp_path, case):
+    pytest.importorskip("numpy", reason="needs the optional `processing` extra")
+    pytest.importorskip("larch", reason="needs the optional `processing` extra")
     import numpy as np
 
     from test_local_import_processing import fluo_scan, spec_file
@@ -247,6 +249,8 @@ def test_a_group_with_no_skipped_scan_carries_no_skip_metrics(tmp_path):
 def test_a_dead_i0_on_a_scan_with_no_energy_axis_is_not_an_xas_scan_so_not_a_fail(tmp_path):
     """Deadness is judged only where a spectrum could exist: without an energy axis the scan is
     not an XAS scan, so a dead I0 on it does not make a QC fail."""
+    pytest.importorskip("numpy", reason="needs the optional `processing` extra")
+    pytest.importorskip("larch", reason="needs the optional `processing` extra")
     import numpy as np
 
     from test_local_import_processing import spec_file
