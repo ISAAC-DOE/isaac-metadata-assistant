@@ -31,7 +31,21 @@ from typing import Any, Iterable, Mapping, Sequence
 FORMAT_ID = "isaac.local-import-bundle"
 #: 1.2.0 (additive): ``processed_outputs[]`` — the scientists' own Athena/Demeter outputs,
 #: kept OUT of ``runs[]`` (see :func:`_processing_origin`).
-FORMAT_VERSION = "1.2.0"
+#: 1.3.0 (additive): ``ai_interpretation.field_path`` / ``.run_ids`` (absorber readings on
+#: record groups), the ``eligibility_rederived`` log, and a larger writable set
+#: (:data:`WRITABLE_ADDED_IN`), so eligibility stored by an older build can be STALE.
+FORMAT_VERSION = "1.3.0"
+#: Paths this build can write that the build of an older format version could not. A value at
+#: one of them whose stored eligibility differs from this build's is STALE, not tampered.
+WRITABLE_ADDED_IN: Mapping[str, frozenset] = {
+    "1.3.0": frozenset({"context.electrochemistry.potential_setpoint_V"}),
+}
+_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0")
+#: A field composed into a draft only beside another of the SAME run (interim decision for the
+#: set-point, pending domain-owner review; ``records.compose_group`` applies it).
+COMPOSES_ONLY_WITH: Mapping[str, str] = {
+    "context.electrochemistry.potential_setpoint_V": "context.electrochemistry.potential_scale",
+}
 SCHEMA_FILE = Path(__file__).with_name("bundle-v1.schema.json")
 BUNDLE_FILE = "bundle.json"
 
@@ -994,7 +1008,31 @@ LOCAL_ANSWER_FIELDS: Mapping[str, str] = {
     "context.electrochemistry.electrolyte.concentration_M": "run",
     "context.electrochemistry.pH": "run",
     "context.electrochemistry.potential_scale": "run",
+    # The as-commanded potential (``number``, volts, on ``potential_scale``). Parsers already
+    # propose it from file names (e.g. ``100mV``); a run whose files state none had no
+    # missing value, so a cited reading of the scientist's notes had nowhere to land.
+    "context.electrochemistry.potential_setpoint_V": "run",
 }
+#: THE ONE SHAPE CHECK for an absorber (``set_absorber`` / ``approve_calibration`` decisions,
+#: and a reading pass's ``system.element`` / ``system.edge`` findings): an element SYMBOL's
+#: shape (one capital, optional lower-case letter; not a periodic-table lookup) and an edge
+#: from K, L1-L3, M1-M5, exactly as written.
+ABSORBER_ELEMENT_PATTERN = re.compile(r"[A-Z][a-z]?")
+ABSORBER_EDGE_PATTERN = re.compile(r"K|L[1-3]|M[1-5]")
+
+
+def is_absorber_element(value: Any) -> bool:
+    return isinstance(value, str) and ABSORBER_ELEMENT_PATTERN.fullmatch(value) is not None
+
+
+def is_absorber_edge(value: Any) -> bool:
+    return isinstance(value, str) and ABSORBER_EDGE_PATTERN.fullmatch(value) is not None
+
+
+#: A reading pass's absorber findings (no record field: recorded on record GROUPS), path -> half.
+ABSORBER_READING_FIELDS: Mapping[str, str] = {"system.element": "element", "system.edge": "edge"}
+
+
 #: The portal requires a producer (``PRODUCED_BY_MISSING``); asked as a required value.
 PORTAL_REQUIRED_PATHS = ("attribution.produced_by.group", "attribution.produced_by.organization")
 #: When a run states a reaction, the upstream ``context.reaction`` object requires these.
@@ -1721,7 +1759,7 @@ def build_bundle(
                     "proposable": c.proposable,
                     "unresolved_reason": c.unresolved_reason,
                     "not_proposable_reason": c.not_proposable_reason,
-                    "not_proposable_summary": _plain_reason(c),
+                    "not_proposable_summary": _local_plain_reason(c),
                     "resolved_by_rule": c.resolved_by_rule,
                 },
                 "rule": c.rule,
@@ -2291,6 +2329,25 @@ def _plain_reason(candidate) -> str | None:
     return hist.plain_reason_of(candidate)
 
 
+#: The engine's "this build cannot write it" is about the WEBSITE's write routes. For a field
+#: only the local path answers (UPSTREAM_TARGET_FIELDS, LOCAL_ANSWER_FIELDS) it is not true here.
+LOCAL_WRITE_PATH_REASON = (
+    "The website cannot write this field yet, but this local import can: confirm or correct it, "
+    "and a confirmed value goes toward the record."
+)
+
+
+def _local_plain_reason(candidate) -> str | None:
+    from .. import historical_import as hist
+
+    reason = _plain_reason(candidate)
+    if reason == hist.PLAIN_REASON_NO_WRITE_PATH and (
+        candidate.target_field_path in UPSTREAM_TARGET_FIELDS or candidate.target_field_path in LOCAL_ANSWER_FIELDS
+    ):
+        return LOCAL_WRITE_PATH_REASON
+    return reason
+
+
 def _missing(n, run_id, path, scope, reason, beamtime_targets, writable) -> dict:
     return {
         "value_id": f"miss-{n + 1:04d}",
@@ -2532,6 +2589,151 @@ def load_bundle(location: Path) -> dict:
     return data
 
 
+def _added_since(version: str | None) -> frozenset:
+    """Writable paths added after ``version`` (all of them for an unknown version)."""
+    at = _VERSION_ORDER.index(version) if version in _VERSION_ORDER else -1
+    out: set = set()
+    for v, paths in WRITABLE_ADDED_IN.items():
+        if _VERSION_ORDER.index(v) > at:
+            out |= paths
+    return frozenset(out)
+
+
+def stale_eligibility(bundle: Mapping) -> list[dict]:
+    """Values whose STORED eligibility differs from this build's derivation ONLY because this
+    build can write a field the storing build could not (:data:`WRITABLE_ADDED_IN`). Each with
+    its id, path, state, before/now and why. Empty for a bundle of this format version."""
+    added = _added_since(bundle.get("format_version"))
+    if not added:
+        return []
+    expected = apply_derivations(json.loads(json.dumps(bundle)))
+    decision_of = _decisions_by_target(bundle.get("scientist_decisions") or ())
+    out = []
+    for kind, section, key in (("candidate", "candidates", "candidate_id"), ("missing_value", "missing_values", "value_id")):
+        for obj, e in zip(bundle[section], expected[section]):
+            path = obj.get("target_field_path")
+            before = bool((obj.get("eligibility_for_official_record") or {}).get("eligible"))
+            now = bool(e["eligibility_for_official_record"]["eligible"])
+            if path in added and before != now:
+                d = candidate_decision(bundle, obj, decision_of) if kind == "candidate" else decision_of.get((kind, obj[key]))
+                reason = f"this build can now write {path}"
+                if e["value_state"] == STATE_SCIENTIST_CONFIRMED:
+                    reason += ("; a scientist confirmed it while the storing build could not write the field: "
+                               + ("eligible now" if now else "not eligible now"))
+                    if now and path in COMPOSES_ONLY_WITH:
+                        reason += f"; composes only beside a confirmed {COMPOSES_ONLY_WITH[path].rsplit('.', 1)[-1]}"
+                out.append({"kind": kind, "id": obj[key], "target_field_path": path, "run_id": obj.get("run_id"),
+                            "value_state": e["value_state"], "eligible_before": before, "eligible_now": now,
+                            "decision_id": (d or {}).get("decision_id"), "reason": reason[:600]})
+    return out
+
+
+def upgrade_statement(from_version: str | None, newly_writable: Iterable[str]) -> str:
+    """THE ONE SENTENCE every surface prints about an upgrade of an older bundle."""
+    if list(newly_writable):
+        return (f"upgraded from {from_version}; fields this build can newly write have no answer slots on runs that "
+                "lacked a parsed value — re-import to get them")
+    return f"upgraded from {from_version}"
+
+
+def record_format_upgrade(bundle: dict, *, from_version: str | None, to_version: str, decisions_before: int) -> dict:
+    """Append ONE ``format_upgrades`` entry: an older bundle first written (re-derived) by this
+    build. ``decisions_before`` is how many scientist decisions it held then, so a composition can
+    tell an answer given under the old build's wording from one given after."""
+    from datetime import datetime, timezone
+
+    newly = sorted(_added_since(from_version))
+    entry = {
+        "from_format_version": str(from_version),
+        "to_format_version": to_version,
+        "derived_by_format_version": FORMAT_VERSION,
+        "upgraded_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "decisions_before": int(decisions_before),
+        "newly_writable_paths": newly,
+        "statement": upgrade_statement(from_version, newly),
+    }
+    bundle.setdefault("format_upgrades", []).append(entry)
+    return entry
+
+
+def needs_format_upgrade(bundle: Mapping) -> bool:
+    """True when this build has not yet re-derived an older bundle (and logged it)."""
+    if not _added_since(bundle.get("format_version")):
+        return False
+    return not any(u.get("derived_by_format_version") == FORMAT_VERSION for u in bundle.get("format_upgrades") or ())
+
+
+def refresh_local_write_summaries(bundle: dict) -> int:
+    """A candidate whose short reason is the engine's "this build cannot write it yet" while this
+    local build DOES write its path gets :data:`LOCAL_WRITE_PATH_REASON` (the engine's full text
+    stays in ``not_proposable_reason``). The import does this; an older bundle gets it on save."""
+    from .. import historical_import as hist
+
+    local = set(UPSTREAM_TARGET_FIELDS) | set(LOCAL_ANSWER_FIELDS)
+    n = 0
+    for c in bundle.get("candidates") or ():
+        sb = c.get("state_basis") or {}
+        if c.get("target_field_path") in local and sb.get("not_proposable_summary") == hist.PLAIN_REASON_NO_WRITE_PATH:
+            sb["not_proposable_summary"] = LOCAL_WRITE_PATH_REASON
+            n += 1
+    return n
+
+
+def upgraded_before(bundle: Mapping, path: str | None, decision: Mapping | None) -> Mapping | None:
+    """The ``format_upgrades`` entry under which ``decision`` (governing a value at ``path``) was
+    made BEFORE this build re-derived the bundle, when ``path`` is one the old build could not
+    write; else ``None``. Decision ids are sequential (``d-<n>``)."""
+    if not path or not decision:
+        return None
+    try:
+        n = int(str(decision.get("decision_id")).rsplit("-", 1)[-1])
+    except ValueError:
+        return None
+    for u in bundle.get("format_upgrades") or ():
+        if path in (u.get("newly_writable_paths") or ()) and n <= int(u.get("decisions_before") or 0):
+            return u
+    return None
+
+
+def validate_allowing_stale(bundle: Any, *, max_errors: int = 50) -> tuple[list[str], list[dict]]:
+    """``(errors, stale)``: :func:`validate_bundle` with every STALE eligibility (and the count
+    it moves) taken as this build re-derives it. ``errors`` empty and ``stale`` non-empty means
+    the bundle is valid except that an older build stored it: any mutation re-derives it."""
+    errors = validate_bundle(bundle, max_errors=max_errors)
+    if not errors or not isinstance(bundle, dict):
+        return errors, []
+    try:
+        stale = stale_eligibility(bundle)
+    except (KeyError, TypeError, ValueError):
+        return errors, []
+    if not stale:
+        return errors, []
+    fixed = json.loads(json.dumps(bundle))
+    expected = apply_derivations(json.loads(json.dumps(bundle)))
+    ids = {(s["kind"], s["id"]) for s in stale}
+    for kind, section, key in (("candidate", "candidates", "candidate_id"), ("missing_value", "missing_values", "value_id")):
+        for obj, e in zip(fixed[section], expected[section]):
+            if (kind, obj[key]) in ids:
+                obj["eligibility_for_official_record"] = e["eligibility_for_official_record"]
+    fixed["readiness"]["eligible_value_count"] = expected["readiness"]["eligible_value_count"]
+    return validate_bundle(fixed, max_errors=max_errors), stale
+
+
+def record_rederivation(bundle: dict, stale: Sequence[Mapping], *, to_version: str) -> None:
+    """Append ``stale`` to ``bundle['eligibility_rederived']`` (the log a composition reads)."""
+    if not stale:
+        return
+    from datetime import datetime, timezone
+
+    at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    log = bundle.setdefault("eligibility_rederived", [])
+    for s in stale:
+        log.append({"kind": s["kind"], "id": s["id"], "target_field_path": s["target_field_path"],
+                    "from_format_version": str(bundle.get("format_version")), "to_format_version": to_version,
+                    "rederived_utc": at, "value_state": s["value_state"], "eligible_before": s["eligible_before"],
+                    "eligible_now": s["eligible_now"], "decision_id": s.get("decision_id"), "reason": s["reason"]})
+
+
 def validate_bundle(bundle: Any, *, max_errors: int = 50) -> list[str]:
     """Every way ``bundle`` breaks the v1 contract. Empty means valid."""
     from jsonschema import Draft202012Validator
@@ -2643,10 +2845,40 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50) -> list[str]:
         if problem:
             errors.append(f"decision: {d['decision_id']} {problem}")
         if d.get("decision") in ("approve_calibration", "set_absorber") and not (
-            isinstance(d.get("element"), str) and re.fullmatch(r"[A-Z][a-z]?", d["element"])
-            and isinstance(d.get("edge"), str) and re.fullmatch(r"K|L[1-3]|M[1-5]", d["edge"])
+            is_absorber_element(d.get("element")) and is_absorber_edge(d.get("edge"))
         ):
             errors.append(f"decision: {d['decision_id']} {d['decision']} needs an element and an edge (K, L1-L3, M1-M5)")
+    for i in bundle["ai_interpretations"]:
+        half = ABSORBER_READING_FIELDS.get(i.get("field_path"))
+        if half is None:
+            continue
+        if i["target"]["kind"] != "record_group":
+            errors.append(f"interpretation: {i['interpretation_id']} reads {i['field_path']} but targets a {i['target']['kind']}, not a record group")
+        if not (is_absorber_element if half == "element" else is_absorber_edge)(i.get("proposed_value")):
+            errors.append(f"interpretation: {i['interpretation_id']} {i['field_path']} {i.get('proposed_value')!r} is not an absorber {half}")
+    groups_by_id = {g["group_id"]: g for g in [*(bundle.get("record_groups") or ()), *(bundle.get("superseded_record_groups") or ())]}
+    key_of_run = {r["run_id"]: r["run_key"] for r in bundle["runs"]}
+    for i in bundle["ai_interpretations"]:
+        if i.get("run_ids") is None:
+            continue
+        if i["target"]["kind"] != "record_group" or i.get("field_path") not in ABSORBER_READING_FIELDS:
+            errors.append(f"interpretation: {i['interpretation_id']} names run_ids, which only a record-group absorber reading carries")
+            continue
+        members = set((groups_by_id.get(i["target"]["id"]) or {}).get("member_run_keys") or ())
+        outside = [x for x in i["run_ids"] if key_of_run.get(x) not in members]
+        if outside:
+            errors.append(f"interpretation: {i['interpretation_id']} names run(s) {outside[:3]} that are not in group {i['target']['id']}")
+    ids_of = {"candidate": {c["candidate_id"] for c in bundle["candidates"]},
+              "missing_value": {m["value_id"] for m in bundle["missing_values"]}}
+    decision_ids = {d["decision_id"] for d in bundle["scientist_decisions"]}
+    for r in bundle.get("eligibility_rederived") or ():
+        if r["id"] not in ids_of[r["kind"]]:
+            errors.append(f"reference: eligibility_rederived names unknown {r['kind']} {r['id']}")
+        if r.get("decision_id") is not None and r["decision_id"] not in decision_ids:
+            errors.append(f"reference: eligibility_rederived names unknown decision {r['decision_id']}")
+    for u in bundle.get("format_upgrades") or ():
+        if u["decisions_before"] > len(bundle["scientist_decisions"]):
+            errors.append("consistency: a format_upgrades entry counts more decisions than the bundle holds")
     for g in bundle.get("record_groups") or ():
         if g.get("status") == "proposed" and g.get("condition_violations"):
             errors.append(f"consistency: proposed record group {g['group_id']} carries condition violations")

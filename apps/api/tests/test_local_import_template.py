@@ -471,6 +471,53 @@ def test_m4_potential_scale_maps_to_its_real_missing_value(grouped, tmp_path, ca
     assert rep["invalid_cells"][0]["cell"] == f"'File List'!{_col('Potential Scale')}{r2}"
 
 
+POT = "context.electrochemistry.potential_setpoint_V"
+
+
+def test_potential_v_fills_a_run_with_no_parsed_potential_and_refuses_text(tmp_path, capsys):
+    """Potential (V) used to be "recorded nowhere" for a run whose files state no potential:
+    the set-point had no missing value. It is answerable now (bundle.LOCAL_ANSWER_FIELDS)."""
+    from test_local_import_reader_ssrl_xdc import make_scan
+    from test_local_import_reader_two_column import make_two
+
+    src = tmp_path / "src" / "SYN_beamtime"
+    make_scan(src / "SYN_run_A.001")
+    make_two(src / "SYN_cell.txt")
+    bdir = tmp_path / "b"
+    assert cli.main(["import", str(src), "--out", str(bdir)]) == 0
+    M.group(bdir)
+    b = M.load(bdir)
+    runs = {r["label"]: r["run_id"] for r in b["runs"]}
+    assert not [c for c in b["candidates"] if c["target_field_path"] == POT]
+    xlsx = _export(bdir, tmp_path)
+    wb = openpyxl.load_workbook(xlsx)
+    status = {v[2]: v[4] for v in wb["_isaac"].iter_rows(values_only=True) if v[0] == "File List" and isinstance(v[1], str)}
+    assert status["Potential (V)"] == "mapped"
+    r_cell, r_run = _row_of(xlsx, runs["SYN_cell"]), _row_of(xlsx, runs["SYN_run"])
+    filled = _fill(xlsx, tmp_path / "pot.xlsx", {("File List", f"{_col('Potential (V)')}{r_cell}"): -0.8,
+                                                 ("File List", f"{_col('Potential (V)')}{r_run}"): "-0.8 V"})
+    code, rep, _ = _import(bdir, filled, capsys, "--apply")
+    assert code == 0 and rep["recorded"] == 1
+    assert [c["cell"] for c in rep["invalid_cells"]] == [f"'File List'!{_col('Potential (V)')}{r_run}"]  # text, not a number
+    assert not [u for u in rep["recorded_nowhere"] if u["header"] == "Potential (V)"]
+    b = M.load(bdir)
+    m = _miss(b, POT, runs["SYN_cell"])
+    assert m["value_state"] == B.STATE_SCIENTIST_CONFIRMED and m["eligibility_for_official_record"]["eligible"]
+    assert B._decisions_by_target(b["scientist_decisions"])[("missing_value", m["value_id"])]["value"] == -0.8
+    assert _miss(b, POT, runs["SYN_run"])["value_state"] == B.STATE_MISSING
+
+
+def test_a_run_with_a_parsed_potential_has_its_candidate_and_no_missing_value(grouped):
+    b = M.load(grouped)
+    with_candidate = {c["run_id"] for c in b["candidates"] if c["target_field_path"] == POT}
+    assert with_candidate == {r["run_id"] for r in b["runs"] if r["run_candidate"]}
+    assert not [m for m in b["missing_values"] if m["target_field_path"] == POT]
+    assert all(c["target_write_scope"] == "run" for c in b["candidates"] if c["target_field_path"] == POT)
+    # the engine's "this build cannot write it" is about the website; this local path writes it
+    assert {c["state_basis"]["not_proposable_summary"] for c in b["candidates"] if c["target_field_path"] == POT} == {
+        B.LOCAL_WRITE_PATH_REASON}
+
+
 def test_l10_a_campaign_answer_reaches_only_the_file_list_runs(grouped, tmp_path, capsys):
     b = M.load(grouped)
     g = b["record_groups"][0]

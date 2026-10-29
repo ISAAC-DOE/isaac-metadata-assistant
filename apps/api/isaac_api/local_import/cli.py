@@ -231,6 +231,9 @@ def render_summary(bundle: Mapping) -> str:
         f"Bundle `{bundle['bundle_id']}` · {bundle['created_utc']} · "
         f"{bundle['format']} {bundle['format_version']} · {root['kind']}"
     )
+    for u in bundle.get("format_upgrades") or ():
+        add("")
+        add(f"> **Bundle {u['statement']}** (by a {u['derived_by_format_version']} build, {u['upgraded_utc']}).")
     add("")
     add("## Counts")
     add("")
@@ -735,10 +738,32 @@ def cmd_bundle_check(args) -> int:
         _err(f"No bundle.json at {args.bundle_dir}.")
         return EXIT_NOT_FOUND
     errors = B.check_bundle(path)
+    stale: list = []
+    if errors:
+        try:
+            errors, stale = B.validate_allowing_stale(B.load_bundle(path))
+        except B.BundleInvalid:
+            pass
     if errors:
         print(f"INVALID: the bundle does not meet {B.FORMAT_ID} {B.FORMAT_VERSION} ({len(errors)} error(s) shown):")
         for e in errors:
             print(f"  - {e}")
+        return EXIT_INVALID
+    if stale:
+        # STALE is not INVALID: an older build stored it, and this build can write more fields.
+        # There is no exit code of its own (§10), so it is non-zero (EXIT_INVALID) and says so.
+        bundle = B.load_bundle(path)
+        print(f"STALE: this bundle (format {bundle.get('format_version')}) was stored by an older build; it is otherwise "
+              f"valid against {B.FORMAT_ID} {B.FORMAT_VERSION}, but {len(stale)} value(s) are eligible differently under this build:")
+        for x in stale[:50]:
+            print(f"  - {x['kind']} {x['id']} ({x['target_field_path']}, {x['value_state']}): "
+                  f"eligible {str(x['eligible_before']).lower()} -> {str(x['eligible_now']).lower()}: {x['reason']}")
+        if len(stale) > 50:
+            print(f"  ... and {len(stale) - 50} more")
+        print("  Remedy: any change re-derives it under this build and logs each value in `eligibility_rederived`; "
+              "`isaac bundle build-records` does that under the bundle lock before composing.")
+        print(f"  On that write: {B.upgrade_statement(bundle.get('format_version'), B._added_since(bundle.get('format_version')))}.")
+        print("  Exit code 1 (EXIT_INVALID): the CLI has no exit code of its own for STALE.")
         return EXIT_INVALID
     bundle = B.load_bundle(path)
     states: dict[str, int] = {}
@@ -753,6 +778,8 @@ def cmd_bundle_check(args) -> int:
         f"{b['evidence_windows_truncated']} evidence windows truncated, "
         f"{b['strings_truncated']} strings clamped"
     )
+    for u in bundle.get("format_upgrades") or ():
+        print(f"  {u['statement']} (by a {u['derived_by_format_version']} build, {u['upgraded_utc']}).")
     print("  This bundle is not an official ISAAC record; official validation does not apply to it.")
     return EXIT_OK
 

@@ -24,6 +24,7 @@ import fcntl
 import hashlib
 import json
 import re
+import sys
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -89,14 +90,47 @@ def save_bundle(bundle_dir: Path, bundle: dict) -> None:
     """Re-derive, re-validate, then atomically replace. Refuses an invalid result."""
     from . import cli
 
-    # THE STORED VERSION IS NOT RELABELLED: only a bundle that HAS processed_outputs (an
-    # import by a 1.2.0 build) is 1.2.0. An older bundle is raised to at most 1.1.0, the
-    # version whose sections this writer adds below; calling it 1.2.0 would claim that its
-    # processed outputs had been separated from its runs, which only a re-import does.
-    if "processed_outputs" in bundle:
-        bundle["format_version"] = B.FORMAT_VERSION
-    elif bundle.get("format_version") in ("1.0.0", "1.1.0"):
-        bundle["format_version"] = "1.1.0"
+    # AN OLDER BUNDLE IS UPGRADED ONCE, AND NEVER SILENTLY. The first save by this build of a
+    # bundle an older build stored (a smaller writable set, bundle.WRITABLE_ADDED_IN):
+    #   * logs ONE `format_upgrades` entry (from/to version, time, how many decisions it held),
+    #     printed once to stderr and shown by `check` and summary.md;
+    #   * appends each value whose eligibility moves only for that reason to
+    #     `eligibility_rederived`, read from the bundle AS STORED (on disk, under the caller's
+    #     lock), so a change made now is not mistaken for one an older build made.
+    # Every save also corrects the engine's "this build cannot write it yet" summary on paths this
+    # local build writes (bundle.refresh_local_write_summaries); the engine's own text is kept.
+    stored_version = bundle.get("format_version")
+    # THE STORED VERSION IS NOT RELABELLED past what it holds: only a bundle that HAS
+    # processed_outputs (an import by a 1.2.0+ build) is raised to this build's version (1.3.0:
+    # its eligibility is re-derived below under this build's writable set). An older bundle is
+    # raised to at most 1.1.0, the version whose sections this writer adds below; calling it
+    # 1.2.0+ would claim that its processed outputs had been separated from its runs, which only
+    # a re-import does.
+    to_version = (B.FORMAT_VERSION if "processed_outputs" in bundle
+                  else "1.1.0" if stored_version in ("1.0.0", "1.1.0") else stored_version)
+    if B.needs_format_upgrade(bundle):
+        stored = None
+        if B.bundle_path(Path(bundle_dir)).is_file():
+            try:
+                stored = B.load_bundle(Path(bundle_dir))
+            except B.BundleInvalid:
+                stored = None
+        stale: list = []
+        if stored is not None:
+            try:
+                stale = B.stale_eligibility(stored)
+            except (KeyError, TypeError, ValueError):
+                stale = []
+        live_ids = {("candidate", c["candidate_id"]) for c in bundle.get("candidates") or ()} | {
+            ("missing_value", m["value_id"]) for m in bundle.get("missing_values") or ()}
+        B.record_rederivation(bundle, [x for x in stale if (x["kind"], x["id"]) in live_ids], to_version=to_version)
+        entry = B.record_format_upgrade(
+            bundle, from_version=stored_version, to_version=to_version,
+            decisions_before=len((stored if stored is not None else bundle).get("scientist_decisions") or ()))
+        print(f"isaac: {entry['statement']} (bundle format {stored_version} -> {to_version}; "
+              "logged in bundle.json format_upgrades)", file=sys.stderr)
+    B.refresh_local_write_summaries(bundle)
+    bundle["format_version"] = to_version
     for key in ("record_groups", "processing_results", "exposures"):
         bundle.setdefault(key, [])
     B.refresh_questions(bundle)
@@ -311,14 +345,17 @@ def annotate_from_readings(bundle_dir: Path, findings: Mapping, *, model_id: str
             out = S.readings_to_interpretations(bundle, findings, model_id=model_id)
         except S.ReadingsRefused as exc:
             raise MutationRefused(str(exc)) from exc
+        # ``field_path`` is part of the identity: one group can be read as element ``K``
+        # (potassium) and edge ``K`` from one line, and those are two readings.
         seen = {
             (i["target"]["kind"], i["target"]["id"], json.dumps(i.get("proposed_value"), sort_keys=True),
-             i.get("source_path"), i.get("excerpt_locator"))
+             i.get("source_path"), i.get("excerpt_locator"), i.get("field_path"), json.dumps(i.get("run_ids")))
             for i in bundle.get("ai_interpretations") or ()
         }
         fresh, repeated = [], 0
         for t, f in out["planned"]:
-            key = (t["kind"], t["id"], json.dumps(f["proposed_value"], sort_keys=True), f["source_path"], f["excerpt_locator"])
+            key = (t["kind"], t["id"], json.dumps(f["proposed_value"], sort_keys=True), f["source_path"], f["excerpt_locator"],
+                   f["field_path"], json.dumps(f["run_ids"]))
             if key in seen:
                 repeated += 1
                 continue
@@ -350,7 +387,7 @@ def annotate_from_readings(bundle_dir: Path, findings: Mapping, *, model_id: str
                 bundle, kind, obj, t["id"], value=f["proposed_value"], rationale=f["rationale"],
                 source_refs=f["source_refs"], excerpt_locator=f["excerpt_locator"], model_id=model_id,
                 is_blind=False, basis="A reading pass over the files; not requested as blind.",
-                extra={k: f[k] for k in ("source_path", "quote", "strength", "finding_id")},
+                extra={k: f[k] for k in ("source_path", "quote", "strength", "finding_id", "field_path", "run_ids")},
             )
         return summary(out, fresh, repeated, True)
 
@@ -438,7 +475,7 @@ def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, ed
         if decision != "approve":
             raise MutationRefused("--qc-status goes with --decision approve on a processing result.")
     if decision in ("approve_calibration", "set_absorber"):
-        if not (element and re.fullmatch(r"[A-Z][a-z]?", element)) or not (edge and re.fullmatch(r"K|L[1-3]|M[1-5]", edge)):
+        if not B.is_absorber_element(element) or not B.is_absorber_edge(edge):
             raise MutationRefused(f"{decision} needs --element (e.g. Ir) and --edge (K, L1-L3, M1-M5).")
     elif element or edge:
         raise MutationRefused("--element/--edge go with --decision approve_calibration or set_absorber on a record group.")
@@ -882,7 +919,12 @@ def group(bundle_dir: Path, *, regroup: bool = False) -> dict:
                 mc_ids_of.setdefault(x, []).append(mc["merge_candidate_id"])
         for g in fresh:
             g["merge_candidate_ids"] = mc_ids_of.get(g["group_id"], [])
+        # A replaced group that a decision, a processing result OR an AI reading (an absorber
+        # finding is recorded on a group) names is kept as superseded, so every reference stays
+        # resolvable. Its readings stay on it; they do not move to the new groups (apply the
+        # findings file again for those).
         named = {d["target"]["id"] for d in decisions if d["target"]["kind"] == "record_group"}
+        named |= {i["target"]["id"] for i in bundle.get("ai_interpretations") or () if i["target"]["kind"] == "record_group"}
         results_of: dict[str, list[str]] = {}
         for r in bundle.get("processing_results") or ():
             results_of.setdefault(r.get("group_id"), []).append(B.processing_id(r))
@@ -899,7 +941,7 @@ def group(bundle_dir: Path, *, regroup: bool = False) -> dict:
                     "status": "proposed",
                     "superseded_utc": now_utc(),
                     "reason": (
-                        "replaced by `isaac bundle group --regroup`; a decision or processing result names it, "
+                        "replaced by `isaac bundle group --regroup`; a decision, processing result or AI reading names it, "
                         "so it is kept here as their target. It is not a record."
                     ),
                     "processing_result_ids": results_of.get(gid, []),

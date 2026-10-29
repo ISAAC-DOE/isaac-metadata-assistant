@@ -7,7 +7,12 @@
   question it lifts is STILL ASKED, with the reading as a hint (before this, an AI reading
   on a missing value made its question disappear).
 * Facility hints are text, never values.
-* Electrolyte, pH and potential scale are answerable (both schemas declare them).
+* Electrolyte, pH, potential scale and potential set-point are answerable (both schemas
+  declare them); a set-point that is not a number never reaches the record.
+* Element / edge readings land on record GROUPS and feed the absorber question as AI
+  suggestions beside the file evidence, never as it; only ``set_absorber`` gives the absorber.
+* The acquisition-system facility hint is shown only when the scan headers carry that
+  system's detector columns (the bundle's ``acquisition_system`` is a build default).
 
 SYNTHETIC ``SYN_`` files only.
 """
@@ -40,11 +45,12 @@ def _run(argv, capsys):
     return code, out
 
 
-def _beamtime(root: Path, *, second_symbol: str | None = None) -> Path:
+def _beamtime(root: Path, *, second_symbol: str | None = None, processed: bool = True) -> Path:
     bt = root / "SYN_beamtime"
     make_scan(bt / "SYN_run_A.001")
     make_two(bt / "SYN_cell.txt")
-    make_xdi(bt / "proc" / "SYN_cell.nor", fields=("Element.edge: K", "Element.symbol: Zz", *XDI_FIELDS))
+    if processed:
+        make_xdi(bt / "proc" / "SYN_cell.nor", fields=("Element.edge: K", "Element.symbol: Zz", *XDI_FIELDS))
     if second_symbol:
         make_xdi(bt / "proc" / "SYN_cell.xmu", first_line="# XDI/1.0 Demeter/0.9.26",
                  fields=("Element.edge: K", f"Element.symbol: {second_symbol}", "Demeter.output_filetype: xmu", *XDI_FIELDS))
@@ -328,3 +334,422 @@ def test_run_labels_must_be_a_list_and_runs_outside_live_groups_are_not_reached(
     M.decide(out, target_ids=[gid], decision="reject", value=None, by=BY, orcid=None)
     done = M.annotate_from_readings(out, _findings(), model_id="m", apply=False)
     assert done["interpretations"] == 0 and "no live record group" in done["skipped"][0]["reason"]
+
+
+# --- Gap A: the potential set-point has an answer slot -------------------------------------------
+
+POT = "context.electrochemistry.potential_setpoint_V"
+SCALE = "context.electrochemistry.potential_scale"
+
+
+def test_a_potential_reading_lands_on_a_run_with_no_parsed_potential(grouped):
+    out = grouped()
+    b = _load(out)
+    assert not [c for c in b["candidates"] if c["target_field_path"] == POT]  # no file states one
+    assert {m["run_id"] for m in b["missing_values"] if m["target_field_path"] == POT} == {
+        r["run_id"] for r in b["runs"] if r["run_candidate"]}
+    done = M.annotate_from_readings(out, _findings(field_path=POT, value=-0.8), model_id="synthetic-model", apply=True)
+    assert done["interpretations"] == 1 and done["skipped"] == []
+    b = _load(out)
+    m = _missing(b, "SYN_cell", POT)
+    [i] = b["ai_interpretations"]
+    assert i["target"] == {"kind": "missing_value", "id": m["value_id"]} and i["proposed_value"] == -0.8
+    assert "field_path" not in i  # a value target says its own field
+    assert m["value_state"] == B.STATE_NEEDS_REVIEW and not m["eligibility_for_official_record"]["eligible"]
+    [q] = [q for q in Q.consolidate(b)["questions"] if m["value_id"] in q.get("fields", {}).get(POT, ())]
+    assert [h["literal"] for h in q["field_hints"][POT] if h["kind"] == "ai_suggestion"] == [-0.8]
+    assert POT in q["answer_command"] and "--json" in q["answer_command"]  # a number needs --json
+    assert B.validate_bundle(b) == []
+
+
+def test_a_potential_answer_that_is_not_a_number_is_kept_out_of_the_record_and_said(grouped):
+    out = grouped()
+    m = _missing(_load(out), "SYN_cell", POT)
+    M.decide(out, target_ids=[m["value_id"]], decision="correct", value="-0.8 V", by=BY, orcid=None)
+    b = _load(out)
+    m = _missing(b, "SYN_cell", POT)
+    assert m["value_state"] == B.STATE_SCIENTIST_CONFIRMED
+    assert m["eligibility_for_official_record"]["eligible"] is False
+    assert "must be number" in m["eligibility_for_official_record"]["reason"]
+    draft, report = R.compose_group(b, _group_of(b, "SYN_cell"), out)
+    assert POT not in draft["fields"]
+    [nc] = [n for n in report["not_composed"] if n.get("value_id") == m["value_id"]]
+    assert nc["path"] == POT and "must be number" in nc["reason"]
+    # a number, beside its confirmed scale, is composed
+    M.decide(out, target_ids=[m["value_id"]], decision="correct", value=-0.8, by=BY, orcid=None)
+    scale = _missing(_load(out), "SYN_cell", SCALE)
+    M.decide(out, target_ids=[scale["value_id"]], decision="correct", value="RHE", by=BY, orcid=None)
+    b = _load(out)
+    draft, report = R.compose_group(b, _group_of(b, "SYN_cell"), out)
+    assert draft["fields"][POT]["value"] == -0.8 and draft["fields"][SCALE]["value"] == "RHE"
+    assert not [n for n in report["not_composed"] if n.get("value_id") == m["value_id"]]
+
+
+def test_a_potential_setpoint_without_its_scale_is_not_composed_and_says_why(grouped):
+    out = grouped()
+    m = _missing(_load(out), "SYN_cell", POT)
+    M.decide(out, target_ids=[m["value_id"]], decision="correct", value=-0.8, by=BY, orcid=None)
+    b = _load(out)
+    assert _missing(b, "SYN_cell", POT)["eligibility_for_official_record"]["eligible"] is True  # the number itself is fine
+    draft, report = R.compose_group(b, _group_of(b, "SYN_cell"), out)
+    assert POT not in draft["fields"] and SCALE not in draft["fields"]
+    [nc] = [n for n in report["not_composed"] if n.get("value_id") == m["value_id"]]
+    assert nc["path"] == POT and nc["reason"] == R.SETPOINT_NEEDS_SCALE
+    assert not [f for f in report["filled"] if f["path"] == POT]
+    # a scale confirmed for ANOTHER run of the bundle does not stand in for this run's
+    other = _missing(b, "SYN_run", SCALE)
+    M.decide(out, target_ids=[other["value_id"]], decision="correct", value="RHE", by=BY, orcid=None)
+    b = _load(out)
+    draft, report = R.compose_group(b, _group_of(b, "SYN_cell"), out)
+    assert POT not in draft["fields"]
+    assert [n["reason"] for n in report["not_composed"] if n.get("value_id") == m["value_id"]] == [R.SETPOINT_NEEDS_SCALE]
+
+
+# --- Gap B: element / edge readings feed the absorber question ------------------------------------
+
+
+def _absorber_findings(*pairs, scope=None, locator="line 3") -> dict:
+    scope = scope or {"scope": "experiment"}
+    return {"format": S.READINGS_FORMAT, "findings": [
+        {"field_path": path, "value": value, "applies_to": scope,
+         "source": {"path": "SYN_cell.txt", "locator": locator}, "quote": f"synthetic quote {value}",
+         "strength": "stated", "reasoning": "synthetic reasoning"}
+        for path, value in pairs]}
+
+
+def test_element_and_edge_readings_without_processed_output_reach_the_groups_and_the_question(grouped, capsys):
+    out = grouped(processed=False)
+    b = _load(out)
+    assert not b.get("processed_outputs") and not b["experiment"]["element_evidence"]
+    live = [g for g in b["record_groups"] if g["status"] in B.LIVE_GROUP_STATUSES]
+    assert len(live) == 2
+    assert not [q for q in Q.consolidate(b)["questions"] if q["kind"] == "confirm_absorber"]  # nothing to ask yet
+
+    f = _absorber_findings(("system.absorbing_element", "Zz"), ("system.edge", "K"))  # an alias is accepted
+    done = M.annotate_from_readings(out, f, model_id="synthetic-model", apply=True)
+    assert done["interpretations"] == 4 and done["skipped"] == []
+    b = _load(out)
+    assert {(i["target"]["kind"], i["field_path"]) for i in b["ai_interpretations"]} == {
+        ("record_group", "system.element"), ("record_group", "system.edge")}
+    assert {i["target"]["id"] for i in b["ai_interpretations"]} == {g["group_id"] for g in live}
+    assert B.validate_bundle(b) == []
+
+    group = _group_of(b, "SYN_run")
+    sug = S.absorber_for_group(b, group)
+    # AI is not file evidence: the files' status and values are unchanged
+    assert (sug["status"], sug["element"], sug["edge"], sug["witnesses"]) == ("none", None, None, [])
+    assert sorted((r["field"], r["value"]) for r in sug["ai_readings"]) == [("system.edge", "K"), ("system.element", "Zz")]
+    r = next(r for r in sug["ai_readings"] if r["field"] == "system.element")
+    assert r["source_path"] == "SYN_cell.txt" and r["locator"] == "line 3" and r["quote"] == "synthetic quote Zz"
+    assert r["strength"] == "stated" and r["finding_id"] == "finding-001" and len(r["interpretation_ids"]) == 1
+    assert sug["ai_vs_files"] == {"element": "no_file_evidence", "edge": "no_file_evidence"}
+    assert sug["ai_disagrees_with_files"] is False
+
+    [q] = [q for q in Q.consolidate(b)["questions"] if q["kind"] == "confirm_absorber"]
+    assert q["scope"] == "experiment" and {t["id"] for t in q["targets"]} == {g["group_id"] for g in live}
+    assert q["allowed_decisions"] == ["set_absorber", "defer"]
+    assert "only an AI reading" in q["text"] and "not file evidence" in q["text"]
+    assert "--element <El>" in q["answer_command"]  # an AI reading is never pre-filled as the answer
+    ai = [h for h in q["hints"] if h["kind"] == "ai_suggestion"]
+    assert {(h["field"], h["literal"]) for h in ai} == {("system.element", "Zz"), ("system.edge", "K")}
+    assert all(h["source_path"] == "SYN_cell.txt" and h["quote"] and h["model_id"] == "synthetic-model"
+               and "AI reading" in h["note"] and h["groups"] == 2 for h in ai)
+
+    # an AI reading alone writes nothing to implicit[]
+    draft, report = R.compose_group(b, group, out)
+    assert not [i for i in draft["implicit"] if i["about"] in ("absorbing_element", "edge")]
+    assert "absorber" not in report
+    code, _ = _run(["bundle", "decide", str(out), "--question", q["question_id"], "--decision", "set_absorber",
+                    "--element", "Zz", "--edge", "K", "--by", BY], capsys)
+    assert code == 0
+    b = _load(out)
+    draft, report = R.compose_group(b, _group_of(b, "SYN_run"), out)
+    assert {i["about"]: i["value"] for i in draft["implicit"]} == {"absorbing_element": "Zz", "edge": "K"}
+    assert not [q for q in Q.consolidate(b)["questions"] if q["kind"] == "confirm_absorber"]
+    assert B.validate_bundle(b) == []
+
+
+def test_an_ai_reading_that_disagrees_with_the_files_is_shown_and_not_resolved(grouped):
+    out = grouped()
+    f = _absorber_findings(("system.element", "Yy"), scope={"scope": "runs", "run_labels": ["SYN_cell"]})
+    assert M.annotate_from_readings(out, f, model_id="synthetic-model", apply=True)["interpretations"] == 1
+    b = _load(out)
+    group = _group_of(b, "SYN_cell")
+    sug = S.absorber_for_group(b, group)
+    assert (sug["status"], sug["element"], sug["edge"]) == ("agrees", "Zz", "K")  # the files' answer, unmoved
+    assert sug["readings"]["element"] == {"Zz": 1}  # the AI value is not counted as a witness
+    assert sug["ai_vs_files"]["element"] == "differs" and sug["ai_disagrees_with_files"] is True
+    qs = [q for q in Q.consolidate(b)["questions"] if q["kind"] == "confirm_absorber"]
+    [q] = [q for q in qs if {"kind": "record_group", "id": group["group_id"]} in q["targets"]]
+    assert q["scope"] == f"group:{group['group_id']}"  # asked on its own, not folded into the files' answer
+    assert "differs" in q["text"] and "Nothing has chosen" in q["text"] and "--element <El>" in q["answer_command"]
+    kinds = [h["kind"] for h in q["hints"]]
+    assert kinds[0] == "processed_output_header" and kinds[-1] == "ai_suggestion"  # file evidence first
+    ai = q["hints"][-1]
+    assert ai["literal"] == "Yy" and ai["differs_from_files"] is True and "DIFFERS" in ai["note"]
+    draft, _ = R.compose_group(b, group, out)
+    assert {i["about"]: i["value"] for i in draft["implicit"]} == {"absorbing_element": None, "edge": None}
+    assert B.validate_bundle(b) == []
+
+
+@pytest.mark.parametrize("path,value", [
+    ("system.element", "zz"), ("system.element", "Fe2"), ("system.element", "iron"), ("system.element", 26),
+    ("system.edge", "k"), ("system.edge", "L4"), ("system.edge", "K-edge"), ("system.edge", " K"),
+])
+def test_an_absorber_reading_of_the_wrong_shape_is_skipped_never_normalised(grouped, path, value):
+    out = grouped(processed=False)
+    done = M.annotate_from_readings(out, _absorber_findings((path, value)), model_id="m", apply=True)
+    assert done["interpretations"] == 0
+    [s] = done["skipped"]
+    assert "is not an absorber" in s["reason"] and "nothing is normalised" in s["reason"]
+    assert _load(out)["ai_interpretations"] == []
+
+
+def test_a_runs_scope_absorber_reading_reaches_only_the_groups_holding_those_runs(grouped):
+    out = grouped(processed=False)
+    run_group = _group_of(_load(out), "SYN_run")
+    done = M.annotate_from_readings(out, _absorber_findings(("system.element", "Zz"), scope={"scope": "runs", "run_labels": ["SYN_run"]}),
+                                    model_id="m", apply=True)
+    assert done["interpretations"] == 1
+    b = _load(out)
+    [i] = b["ai_interpretations"]
+    assert i["target"] == {"kind": "record_group", "id": run_group["group_id"]}
+    assert S.absorber_for_group(b, _group_of(b, "SYN_cell"))["ai_readings"] == []
+    # a one-half reading is asked per group, never consolidated
+    [q] = [q for q in Q.consolidate(b)["questions"] if q["kind"] == "confirm_absorber"]
+    assert q["scope"] == f"group:{run_group['group_id']}" and "name only one half" in q["text"]
+    # the same refusals as a value reading
+    done = M.annotate_from_readings(out, _absorber_findings(("system.edge", "K"), scope={"scope": "runs", "run_labels": ["NOT_A_RUN"]}),
+                                    model_id="m", apply=False)
+    assert "run labels not in this bundle" in done["skipped"][0]["reason"]
+    M.decide(out, target_ids=[run_group["group_id"]], decision="reject", value=None, by=BY, orcid=None)
+    done = M.annotate_from_readings(out, _absorber_findings(("system.edge", "K"), scope={"scope": "runs", "run_labels": ["SYN_run"]}),
+                                    model_id="m", apply=False)
+    assert done["interpretations"] == 0 and "no live record group" in done["skipped"][0]["reason"]
+
+
+def test_an_absorber_reading_before_grouping_is_skipped_with_the_reason(tmp_path, capsys):
+    out = tmp_path / "out"
+    assert _run(["import", str(_beamtime(tmp_path / "src", processed=False)), "--out", str(out)], capsys)[0] == 0
+    done = M.annotate_from_readings(out, _absorber_findings(("system.element", "Zz")), model_id="m", apply=True)
+    assert done["interpretations"] == 0 and "no live record group yet" in done["skipped"][0]["reason"]
+
+
+def test_absorber_readings_apply_once_and_element_k_and_edge_k_are_two_readings(grouped):
+    out = grouped(processed=False)
+    f = _absorber_findings(("system.element", "K"), ("system.edge", "K"))  # potassium, K edge: same value, same line
+    first = M.annotate_from_readings(out, f, model_id="m", apply=True)
+    assert first["interpretations"] == 4
+    again = M.annotate_from_readings(out, f, model_id="m", apply=True)
+    assert again["interpretations"] == 0 and again["already_recorded"] == 4
+    b = _load(out)
+    assert len(b["ai_interpretations"]) == 4
+    assert {r["field"] for r in S.absorber_for_group(b, _group_of(b, "SYN_run"))["ai_readings"]} == {"system.element", "system.edge"}
+
+
+def test_the_validator_refuses_a_tampered_absorber_reading(grouped):
+    out = grouped(processed=False)
+    M.annotate_from_readings(out, _absorber_findings(("system.element", "Zz")), model_id="m", apply=True)
+    b = _load(out)
+    b["ai_interpretations"][0]["proposed_value"] = "zz"
+    assert any("is not an absorber element" in e for e in B.validate_bundle(b))
+    b = _load(out)
+    m = b["missing_values"][0]
+    b["ai_interpretations"][0]["target"] = {"kind": "missing_value", "id": m["value_id"]}
+    assert any("not a record group" in e for e in B.validate_bundle(b))
+
+
+# --- Gap C: the acquisition-system hint is shown only when the files carry its columns -------------
+
+
+def test_no_acquisition_system_hint_when_no_run_carries_its_detector_columns(grouped):
+    b = _load(grouped())
+    assert b["experiment"]["acquisition_system"]["candidate_channels"]  # the build default is still recorded
+    hints = S.facility_hints(b)
+    assert [h["kind"] for h in hints] == ["folder_name"]
+
+
+def test_the_acquisition_system_hint_names_the_columns_the_scan_headers_carry(tmp_path, capsys):
+    from tests_support_records import SEMANTICS
+
+    out = tmp_path / "bl15"
+    assert _run(["import", str(SEMANTICS), "--out", str(out)], capsys)[0] == 0
+    b = _load(out)
+    [acq] = [h for h in S.facility_hints(b) if h["kind"] == "acquisition_system"]
+    # THE EXPECTED COUNT IS READ FROM THE FIXTURE FILES THEMSELVES, not from the bundle's own
+    # channel summary: a run counts when one of its scan files' `#L` column line names vortDT*.
+    def has_vortex_columns(rel: str) -> bool:
+        lines = (SEMANTICS / rel).read_text(errors="replace").splitlines()
+        return any(line.startswith("#L") and any(tok.startswith("vortDT") for tok in line.split()) for line in lines)
+
+    expected = sum(1 for r in b["runs"] if any(has_vortex_columns(s["relative_path"]) for s in r["scans"]))
+    assert expected >= 1
+    assert acq["locator"].startswith(f"{expected} run(s)' scan headers have columns named vortDT")
+    assert "(the column naming of: SSRL BL15-2 SPEC scan exports" in acq["locator"]
+    assert "matched" not in acq["locator"] and "not proof of the beamline" in acq["note"] and "never an answer" in acq["note"]
+    assert any(h["kind"] == "folder_name" for h in S.facility_hints(b))
+
+
+# --- review fixes: regroup after an absorber reading; readings that name some of a group's runs -----
+
+
+def test_a_regroup_after_an_absorber_reading_supersedes_the_old_groups_and_a_reapply_reaches_the_new(tmp_path, capsys):
+    from test_local_import_grouping_cli import _folder
+
+    src, out = _folder(tmp_path), tmp_path / "bundle"
+    assert _run(["import", str(src), "--out", str(out)], capsys)[0] == 0
+    assert _run(["bundle", "group", str(out)], capsys)[0] == 0
+    old = [g["group_id"] for g in _load(out)["record_groups"]]
+    assert len(old) == 2
+    f = {"format": S.READINGS_FORMAT, "findings": [
+        {"field_path": "system.element", "value": "Fe", "applies_to": {"scope": "experiment"},
+         "source": {"path": "Zz_XAS.mac", "locator": "line 1"}, "quote": "synthetic quote", "strength": "stated", "reasoning": "r"}]}
+    assert M.annotate_from_readings(out, f, model_id="m", apply=True)["interpretations"] == 2
+    assert _run(["bundle", "decide", str(out), "--target", "experiment", "--decision", "set_counter_positions",
+                 "--positions", "2", "--by", BY], capsys)[0] == 0
+    # this used to be refused for good: "a record_group target ... does not exist"
+    assert _run(["bundle", "group", str(out), "--regroup"], capsys)[0] == 0
+    b = _load(out)
+    assert B.validate_bundle(b) == []
+    [new] = [g for g in b["record_groups"] if g["status"] in B.LIVE_GROUP_STATUSES]
+    assert new["group_id"] not in old and len(new["member_run_keys"]) == 2
+    sup = {s["group_id"]: s for s in b["superseded_record_groups"]}
+    assert set(sup) == set(old) and all("AI reading" in s["reason"] for s in sup.values())
+    assert {i["target"]["id"] for i in b["ai_interpretations"]} == set(old)  # the readings stay where they were made
+    # the absorber question looks only at the LIVE group: the old readings are not its hints
+    assert S.absorber_for_group(b, new)["ai_readings"] == []
+    qs = [q for q in Q.consolidate(b)["questions"] if q["kind"] == "confirm_absorber"]
+    assert not [h for q in qs for h in q["hints"] if h["kind"] == "ai_suggestion"]
+    # re-applying the same findings file (the skill's step after --regroup) lands it on the new group
+    again = M.annotate_from_readings(out, f, model_id="m", apply=True)
+    assert again["interpretations"] == 1 and again["already_recorded"] == 0
+    b = _load(out)
+    assert [r["value"] for r in S.absorber_for_group(b, new)["ai_readings"]] == ["Fe"]
+    [q] = [q for q in Q.consolidate(b)["questions"] if q["kind"] == "confirm_absorber"]
+    assert {"kind": "record_group", "id": new["group_id"]} in q["targets"]
+    assert [h["literal"] for h in q["hints"] if h["kind"] == "ai_suggestion"] == ["Fe"]
+    assert B.validate_bundle(b) == []
+    # and a second regroup still succeeds (the superseded groups keep their readings)
+    assert _run(["bundle", "group", str(out), "--regroup"], capsys)[0] == 0
+    assert B.validate_bundle(_load(out)) == []
+
+
+def _one_group_of_both_runs(out: Path) -> dict:
+    """SYNTHETIC: fold the two proposed groups into one (as a scientist's merge would), so a
+    reading can name fewer than all of a group's runs."""
+    data = _load(out)
+    a, b2 = data["record_groups"][:2]
+    a["member_run_keys"] = a["member_run_keys"] + b2["member_run_keys"]
+    data["record_groups"] = [a]
+    data["merge_candidates"] = []
+    a["merge_candidate_ids"] = []
+    (out / "bundle.json").write_text(json.dumps(data))
+    M.mutate(out, lambda bundle: None)  # re-derived and re-validated on save
+    return a
+
+
+def test_a_runs_scope_reading_on_a_bigger_group_says_which_runs_it_was_read_for(grouped):
+    out = grouped(processed=False)
+    group = _one_group_of_both_runs(out)
+    f = _absorber_findings(("system.element", "Zz"), ("system.edge", "K"), scope={"scope": "runs", "run_labels": ["SYN_run"]})
+    assert M.annotate_from_readings(out, f, model_id="m", apply=True)["interpretations"] == 2
+    b = _load(out)
+    rid = next(r["run_id"] for r in b["runs"] if r["label"] == "SYN_run")
+    assert {json.dumps(i["run_ids"]) for i in b["ai_interpretations"]} == {json.dumps([rid])}
+    assert all(i["target"] == {"kind": "record_group", "id": group["group_id"]} for i in b["ai_interpretations"])
+    sug = S.absorber_for_group(b, group)
+    assert all(r["run_ids"] == [rid] and r["read_for"] == f"read for 1 of 2 runs in this group: SYN_run ({rid})" for r in sug["ai_readings"])
+    [q] = [q for q in Q.consolidate(b)["questions"] if q["kind"] == "confirm_absorber"]
+    assert q["scope"] == "experiment" and "2 AI reading(s) name only some of a group's runs (see the hints)" in q["text"]
+    hints = [h for h in q["hints"] if h["kind"] == "ai_suggestion"]
+    assert hints and all("read for 1 of 2 runs in this group: SYN_run" in h["note"] for h in hints)
+    assert all(h["read_for"] == [{"group_id": group["group_id"], "run_ids": [rid], "text": f"read for 1 of 2 runs in this group: SYN_run ({rid})"}] for h in hints)
+    # an experiment-scope reading is about the whole group: no run_ids, no "read for"
+    M.annotate_from_readings(out, _absorber_findings(("system.edge", "K"), locator="line 9"), model_id="m", apply=True)
+    b = _load(out)
+    whole = [r for r in S.absorber_for_group(b, group)["ai_readings"] if r["locator"] == "line 9"]
+    assert [(r["run_ids"], r["read_for"]) for r in whole] == [(None, None)]
+    assert B.validate_bundle(b) == []
+
+
+def test_the_validator_refuses_run_ids_outside_the_group_or_on_a_value_reading(grouped):
+    out = grouped(processed=False)
+    f = _absorber_findings(("system.element", "Zz"), scope={"scope": "runs", "run_labels": ["SYN_run"]})
+    M.annotate_from_readings(out, f, model_id="m", apply=True)
+    b = _load(out)
+    other = next(r["run_id"] for r in b["runs"] if r["label"] == "SYN_cell")
+    b["ai_interpretations"][0]["run_ids"] = [other]
+    assert any("not in group" in e for e in B.validate_bundle(b))
+    b = _load(out)
+    M.annotate_from_readings(out, _findings(), model_id="m", apply=True)
+    b = _load(out)
+    value_reading = next(i for i in b["ai_interpretations"] if i["target"]["kind"] == "missing_value")
+    value_reading["run_ids"] = [other]
+    assert any("only a record-group absorber reading carries" in e for e in B.validate_bundle(b))
+
+
+def test_a_parsed_setpoint_is_composed_only_beside_its_runs_confirmed_scale(tmp_path, capsys):
+    from test_local_import_grouping_cli import _folder
+
+    src, out = _folder(tmp_path), tmp_path / "bundle"
+    assert _run(["import", str(src), "--out", str(out)], capsys)[0] == 0
+    assert _run(["bundle", "group", str(out)], capsys)[0] == 0
+    b = _load(out)
+    pot = next(c for c in b["candidates"] if c["target_field_path"] == POT and c["run_id"] == "run-001")
+    M.decide(out, target_ids=[pot["candidate_id"]], decision="confirm", value=None, by=BY, orcid=None)
+    b = _load(out)
+    key = next(r["run_key"] for r in b["runs"] if r["run_id"] == "run-001")
+    group = next(g for g in b["record_groups"] if key in g["member_run_keys"])
+    draft, report = R.compose_group(b, group, out)
+    assert POT not in draft["fields"]
+    assert [n["reason"] for n in report["not_composed"] if n.get("candidate_id") == pot["candidate_id"]] == [R.SETPOINT_NEEDS_SCALE]
+    scale = next(m for m in b["missing_values"] if m["target_field_path"] == SCALE and m["run_id"] == "run-001")
+    M.decide(out, target_ids=[scale["value_id"]], decision="correct", value="RHE", by=BY, orcid=None)
+    b = _load(out)
+    draft, report = R.compose_group(b, group, out)
+    assert draft["fields"][POT]["value"] == pot["value"] and draft["fields"][SCALE]["value"] == "RHE"
+    assert not [n for n in report["not_composed"] if n.get("candidate_id") == pot["candidate_id"]]
+
+
+def _two_runs_one_group(tmp_path, capsys):
+    from test_local_import_grouping_cli import _folder
+
+    src, out = _folder(tmp_path), tmp_path / "bundle"
+    assert _run(["import", str(src), "--out", str(out)], capsys)[0] == 0
+    assert _run(["bundle", "group", str(out)], capsys)[0] == 0
+    assert _run(["bundle", "decide", str(out), "--target", "experiment", "--decision", "set_counter_positions",
+                 "--positions", "2", "--by", BY], capsys)[0] == 0
+    assert _run(["bundle", "group", str(out), "--regroup"], capsys)[0] == 0
+    b = _load(out)
+    [g] = [g for g in b["record_groups"] if g["status"] == "proposed"]
+    pots = sorted((c for c in b["candidates"] if c["target_field_path"] == POT), key=lambda c: c["run_id"])
+    scales = {m["run_id"]: m for m in b["missing_values"] if m["target_field_path"] == SCALE}
+    assert len(g["member_run_keys"]) == 2 and [c["run_id"] for c in pots] == ["run-001", "run-002"]
+    return out, g, pots, scales
+
+
+def test_differing_setpoints_in_one_group_are_a_disagreement_even_when_only_one_has_a_scale(tmp_path, capsys):
+    out, g, (a, b2), scales = _two_runs_one_group(tmp_path, capsys)
+    M.decide(out, target_ids=[a["candidate_id"]], decision="confirm", value=None, by=BY, orcid=None)  # 0.4
+    M.decide(out, target_ids=[b2["candidate_id"]], decision="correct", value=0.6, by=BY, orcid=None)
+    M.decide(out, target_ids=[scales["run-001"]["value_id"]], decision="correct", value="RHE", by=BY, orcid=None)
+    draft, report = R.compose_group(_load(out), g, out)
+    assert POT not in draft["fields"]  # 0.4 used to be filled, with 0.6 hidden behind the scale gate
+    [dis] = [d for d in report["disagreements"] if d["path"] == POT]
+    assert sorted(dis["values"]) == [0.4, 0.6] and set(dis["from"]) == {a["candidate_id"], b2["candidate_id"]}
+    assert not [n for n in report["not_composed"] if n.get("path") == POT]
+
+
+def test_an_agreed_setpoint_is_filled_only_when_every_run_has_its_scale(tmp_path, capsys):
+    out, g, (a, b2), scales = _two_runs_one_group(tmp_path, capsys)
+    assert a["value"] == b2["value"]
+    M.decide(out, target_ids=[a["candidate_id"], b2["candidate_id"]], decision="confirm", value=None, by=BY, orcid=None)
+    M.decide(out, target_ids=[scales["run-001"]["value_id"]], decision="correct", value="RHE", by=BY, orcid=None)
+    draft, report = R.compose_group(_load(out), g, out)
+    assert POT not in draft["fields"] and draft["fields"][SCALE]["value"] == "RHE"
+    reasons = {n["candidate_id"]: n["reason"] for n in report["not_composed"] if n.get("path") == POT}
+    assert reasons == {b2["candidate_id"]: R.SETPOINT_NEEDS_SCALE, a["candidate_id"]: R.SETPOINT_GROUP_NEEDS_SCALE}
+    M.decide(out, target_ids=[scales["run-002"]["value_id"]], decision="correct", value="RHE", by=BY, orcid=None)
+    draft, report = R.compose_group(_load(out), g, out)
+    assert draft["fields"][POT]["value"] == a["value"]
+    assert not [n for n in report["not_composed"] if n.get("path") == POT]

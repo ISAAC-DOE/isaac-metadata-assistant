@@ -45,6 +45,18 @@ VALIDATION_DIR = "validation"
 RUN_ONLY_PATHS = frozenset(
     {"context.environment", "context.electrochemistry.reaction", "context.electrochemistry.cell_type"}
 )
+SETPOINT_PATH = "context.electrochemistry.potential_setpoint_V"
+SCALE_PATH = "context.electrochemistry.potential_scale"
+SETPOINT_NEEDS_SCALE = ("a potential setpoint needs its confirmed potential_scale; the number alone does not say what it "
+                        "is relative to")
+SETPOINT_GROUP_NEEDS_SCALE = ("another run of this record group has this potential setpoint without its confirmed "
+                              "potential_scale, so the group's setpoint is not filled")
+
+
+def _id_key(target_id: str) -> str:
+    return "value_id" if str(target_id).startswith("miss-") else "candidate_id"
+
+
 #: How a required schema object is asked for as a scalar field.
 REQUIRED_AS_FIELD = {"sample.material": "sample.material.name"}
 #: Required paths that come from an approved processing result, not from fields.
@@ -205,8 +217,16 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[di
     }
     proposals: dict[str, list[tuple[Any, list, str]]] = {}
 
+    def _confirmed_but_unfit(obj: Mapping, id_key: str) -> None:
+        # A scientist's answer the official field cannot hold (e.g. "-0.8 V" for a number) is
+        # never composed; it is SAID, so it cannot vanish from the record unseen.
+        if obj["value_state"] == B.STATE_SCIENTIST_CONFIRMED and (obj["run_id"] in member_ids or obj["run_id"] is None):
+            report["not_composed"].append({id_key: obj[id_key], "path": obj["target_field_path"],
+                                           "reason": obj["eligibility_for_official_record"]["reason"]})
+
     for c in bundle["candidates"]:
         if not c["eligibility_for_official_record"]["eligible"]:
+            _confirmed_but_unfit(c, "candidate_id")
             continue
         in_group = c["run_id"] in member_ids
         beamtime = c["run_id"] is None
@@ -228,6 +248,7 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[di
 
     for m in bundle["missing_values"]:
         if not m["eligibility_for_official_record"]["eligible"]:
+            _confirmed_but_unfit(m, "value_id")
             continue
         if not (m["run_id"] in member_ids or m["run_id"] is None):
             continue
@@ -236,6 +257,9 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[di
         proposals.setdefault(FIELD_REMAP.get(m["target_field_path"], m["target_field_path"]), []).append(
             (value, [_confirmation(d, f"What is {m['target_field_path']}?")], m["value_id"])
         )
+
+    run_of = {c["candidate_id"]: c["run_id"] for c in bundle["candidates"]}
+    run_of.update({m["value_id"]: m["run_id"] for m in bundle["missing_values"]})
 
     fields: dict[str, dict] = {}
     for path, options in sorted(proposals.items()):
@@ -250,6 +274,45 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[di
         evidence = [e for _, ev, _ in options for e in ev]
         fields[path] = {"value": value, "status": "verified", "evidence": evidence}
         report["filled"].append({"path": path, "from": [i for _, _, i in options]})
+    # A SET-POINT NEEDS ITS SCALE (interim decision, pending domain-owner review): the number alone
+    # does not say what it is relative to. AFTER the disagreement check above (so differing
+    # set-points are a disagreement, never hidden by this gate), an agreed set-point is filled only
+    # when EVERY run it comes from has an eligible scale filled in this draft (or the scale is
+    # beamtime-wide). If any run lacks one, NONE is filled: each of its own values says why.
+    for path, companion in B.COMPOSES_ONLY_WITH.items():
+        if path not in fields:
+            continue
+        from_ids = next(f for f in report["filled"] if f["path"] == path)["from"]
+        covered = {run_of.get(i) for _, _, i in proposals.get(companion, ())} if companion in fields else set()
+        lacking = [i for i in from_ids if not (run_of.get(i) in covered or None in covered)]
+        if lacking:
+            del fields[path]
+            report["filled"] = [f for f in report["filled"] if f["path"] != path]
+            for i in from_ids:
+                report["not_composed"].append({_id_key(i): i, "path": path,
+                                               "reason": SETPOINT_NEEDS_SCALE if i in lacking else SETPOINT_GROUP_NEEDS_SCALE})
+    # NEVER SILENT: a composed value on a path the build that first stored this bundle could not
+    # write, whose GOVERNING decision was made before this build upgraded the bundle (under the old
+    # wording, "this build cannot write it yet"). A decision made after the upgrade, under the
+    # corrected wording, is not listed: the scientist answered knowing the field is written.
+    obj_of = {c["candidate_id"]: ("candidate", c) for c in bundle["candidates"]}
+    obj_of.update({m["value_id"]: ("missing_value", m) for m in bundle["missing_values"]})
+    report["composed_only_by_this_build"] = []
+    for f in report["filled"]:
+        for i in f["from"]:
+            kind, obj = obj_of.get(i, (None, None))
+            if obj is None:
+                continue
+            d = B.candidate_decision(bundle, obj) if kind == "candidate" else decisions.get(("missing_value", i))
+            u = B.upgraded_before(bundle, obj.get("target_field_path"), d)
+            if u is not None:
+                report["composed_only_by_this_build"].append({
+                    _id_key(i): i, "path": f["path"], "decision_id": d.get("decision_id"),
+                    "from_format_version": u["from_format_version"],
+                    "reason": (f"confirmed ({d.get('decision_id')}) before this build upgraded the bundle from "
+                               f"{u['from_format_version']}, when the build said it could not write {obj.get('target_field_path')}; "
+                               "the confirmation was about the value, so it composes now"),
+                })
 
     draft: dict[str, Any] = {
         "meta": dict(META),
@@ -468,15 +531,22 @@ def contained_file(base: Path, relative: str) -> Path | None:
     return target if target.is_file() else None
 
 
-def load_validated(bundle_dir: Path) -> dict:
+def load_validated(bundle_dir: Path, *, allow_stale: bool = False) -> dict:
     """Load AND validate the bundle (review I1). A bundle that fails v1 is refused with the
-    validator's own findings; nothing downstream reads an unvalidated bundle."""
+    validator's own findings; nothing downstream reads an unvalidated bundle. A STALE bundle
+    (eligibility an older build stored, ``bundle.stale_eligibility``) is refused with the
+    remedy, unless ``allow_stale`` (``build-records``, which re-derives it under the lock)."""
     from . import mutations as M
 
     bundle = M.load(bundle_dir)
-    errors = B.validate_bundle(bundle)
+    errors, stale = B.validate_allowing_stale(bundle)
     if errors:
         raise RecordsRefused("The bundle does not meet v1, so nothing was composed:\n  - " + "\n  - ".join(errors[:20]), code=1)
+    if stale and not allow_stale:
+        raise RecordsRefused(
+            f"The bundle is STALE: an older build stored {len(stale)} value(s) whose eligibility this build derives "
+            f"differently (e.g. {stale[0]['id']}: {stale[0]['reason']}). Run `isaac bundle build-records` first: it "
+            "re-derives them under the bundle lock and lists each one. Nothing was composed.", code=1)
     return bundle
 
 
@@ -509,14 +579,16 @@ def build_records(bundle_dir: Path, *, test_marker: bool = False) -> dict:
     from . import mutations as M
 
     bundle_dir = Path(bundle_dir)
-    refusal = B.legacy_refusal(load_validated(bundle_dir))
+    refusal = B.legacy_refusal(load_validated(bundle_dir, allow_stale=True))
     if refusal:  # a pre-1.2.0 bundle whose runs include the scientists' processed outputs
         raise RecordsRefused(refusal, code=2)
 
     def mark(b):  # the self-test state lives IN bundle.json, re-validated on write
         b["self_test"] = {"test_marker": bool(test_marker), "set_by": "isaac bundle build-records"}
+        # the save re-derives any STALE eligibility under this lock and logs it (mutations.save_bundle)
+        return B.stale_eligibility(b)
 
-    M.mutate(bundle_dir, mark)
+    rederived_now = M.mutate(bundle_dir, mark)
     bundle = load_validated(bundle_dir)
     groups = [g for g in bundle.get("record_groups") or () if g["status"] == "scientist_confirmed"]
     out_dir = bundle_dir / DRAFTS_DIR
@@ -548,6 +620,8 @@ def build_records(bundle_dir: Path, *, test_marker: bool = False) -> dict:
     ]
     result = {"drafts": index, "skipped_groups": skipped, "test_marker": bool(test_marker),
               "statement": "Drafts, not records. A draft with missing required values is incomplete and is never exported."}
+    if rederived_now:
+        result["eligibility_rederived_now"] = rederived_now
     _atomic_write(out_dir / "index.json", _json_bytes(result))
     return result
 

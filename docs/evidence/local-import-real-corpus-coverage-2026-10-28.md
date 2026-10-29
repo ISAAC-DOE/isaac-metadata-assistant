@@ -306,8 +306,9 @@ and questions step exited 0. Runs and groups are unchanged from the previous bui
 | BL15-2 2021-11 | 913 | 48.3% | **13.5%** | 34.7% | 19 of 19 (563 targets) |
 | BL15-2 2025-04 | 1,408 | 40.1% | **10.5%** | 29.3% | 40 of 40 (1,556 targets) |
 
-The 2021-11 reading pass produced 19 findings, 6 stated and 13 inferred. The 2025-04 pass
-produced 40. Both bundles still check VALID (1.2.0).
+The 2021-11 reading pass produced 19 findings, ~~6 stated and 13 inferred~~ **8 stated and 11
+inferred** (corrected 2026-10-29: recounted from the findings file's `strength` fields; the earlier
+split was misreported). The 2025-04 pass produced 40. Both bundles still check VALID (1.2.0).
 
 **What is still missing, and why:**
 - The 2021-11 potential reference: no file states it. The spreadsheets give bare volts.
@@ -329,3 +330,98 @@ to no bundle: a finding is never assigned to a beamtime by guess.
 - A parser cell-type candidate in 2025-04 comes from a sentence about where TEM grids are kept.
 
 Both are left for the scientist.
+
+## Reading pass on all six beamtimes, 2026-10-29
+
+Counts only, as above. The real files and findings stay outside the repository.
+
+**Method.** One Claude reading pass per beamtime, run by Opus agents under the same written spec as
+the pilot. Each pass read the beamtime's documents, macros, scripts and spreadsheets, and the
+header and comment lines of every scan file (by script, not one by one). The shared top-level
+documents were not re-read and were assigned to no beamtime. Every finding cites a file, a locator
+and a quote of at most 25 words.
+
+**Quote check.** Before anything was applied, a script checked each finding's quote against its
+cited file:
+- whitespace-normalized;
+- spreadsheet cells, Word runs and gzip'd Athena text extracted;
+- names checked against the folder's paths.
+
+Results over all six beamtimes:
+- 232 of 239 quotes were found mechanically.
+- The other 7 quote table cells joined with "/" or "|". All 7 were checked by hand and are real.
+- 3 findings cited the wrong file and were corrected in the findings files, with the original
+  path recorded:
+  - 2 cited a wildcard description ("all 125 scan files") instead of one real file;
+  - 1 cited the macro that defines a command instead of the run macro that the quote comes from.
+- The loader still does not check quotes. The bundle contract continues to call a quote "claimed,
+  not checked".
+
+**Loader changes this rollout needed** (see contract §20):
+- Element and edge readings were dropped, because those fields have no record path. They now feed
+  the absorber question, as AI suggestions beside any file evidence. The file-based status never
+  changes because of them.
+- A potential setpoint had no answer slot on a run with no parsed potential. It is now locally
+  answerable. It reaches a record only beside a confirmed `potential_scale`; that rule is interim,
+  pending domain-owner review.
+- The facility hint presented the build-default acquisition system (always BL15-2 Vortex) as "the
+  readers matched", including for Beamline 4-3 and 6-2c data. It now appears only when scan
+  headers name that system's detector columns. On the real corpus it appears for the two BL15-2
+  beamtimes whose scans carry them (2021-11, 2025-04). It is absent for 2019-05, whose own files
+  point to Beamline 6-2, and for both 4-3 beamtimes and 6-2c.
+- The bundle format moved to 1.3.0. A bundle written by the earlier build reports `STALE`, not
+  `INVALID`, and is upgraded on its next write with the upgrade disclosed.
+
+**Result** (corpus rebuilt into `_runs_v7` with the final code; every import, group, process,
+questions and check step exited 0; every bundle VALID 1.3.0):
+
+| Beamtime | Cells | Missing before | Missing after | AI suggestions | From files | Findings placed |
+|---|---:|---:|---:|---:|---:|---:|
+| BL15-2 2019-05 | 1,980 | 74.5% | **16.1%** | 58.4% | 25.5% | 46 of 46 (2,846 targets) |
+| BL15-2 2021-11 | 913 | 48.3% | **13.5%** | 34.7% | 51.7% | 19 of 19 (563) |
+| BL15-2 2025-04 | 1,408 | 40.1% | **10.5%** | 29.3% | 59.9% | 40 of 40 (1,556) |
+| BL4-3 2025-07 | 583 | 100% | **51.3%** | 48.7% | 0% | 46 of 49 (397) |
+| BL4-3 2025-11 | 671 | 100% | **48.9%** | 51.1% | 0% | 36 of 38 (373) |
+| BL6-2c 2018-07 | 2,134 | 77.2% | **22.9%** | 52.2% | 24.9% | 47 of 47 (1,806) |
+| **All six** | **7,689** | **70.0%** | **22.2%** | | | 234 of 239 |
+
+The 5 findings not placed are refined, run-level statements of a field this bundle asks once for
+the whole beamtime (technique, 4), or of a field with no slot (sample id, 1). Each beamtime's
+whole-beamtime finding for that field was placed.
+
+**What remains, and why:**
+- **Beamline 4-3 acquisition time.** Every scan header states a local start time with no time zone.
+  No deterministic reader for this header format exists yet, and turning a local time into
+  `acquired_start_utc` needs the facility's time zone confirmed, not assumed. This is a follow-up.
+- **Beamline 4-3 alignment and calibration scans.** These have no sample, condition or potential to
+  state: 26 of 61 groups in 2025-11 are alignment scans.
+- **Sample numbers.** The leading number in Beamline 4-3 labels is a measurement sequence, not a
+  sample number, and no file gives one.
+- **Potentials and electrolytes** for reference, blank and standard runs, which have none.
+
+**Contradictions surfaced, not resolved** (each is in its beamtime's findings notes, with both sides
+emitted):
+- 2019-05:
+  - beamline (the template sheet and the SPEC account say 6-2, the folder says 15-2);
+  - start date (the sheet vs the scan dates);
+  - the sign of negative potentials (names and the Athena label vs the sheet, where a helper script
+    dropped the minus sign);
+  - a pH typo;
+  - a reference compound's oxidation state;
+  - reaction and cell-type terms outside the vocabulary.
+- 2025-07: four runs whose comments repeat the previous run's potential, contradicting their names.
+- 2025-11:
+  - one run's comment potential disagrees with its name;
+  - a pH stated two ways.
+- 2018-07:
+  - five sample series imported as one sample;
+  - vs-RHE offsets that change between series steps;
+  - a "pristine, pH 13" name vs "dry/air" in processing.
+- 2019-05 and 2018-07 Athena projects include reference spectra taken in other beamtimes; they were
+  assigned to no run.
+
+**Parser defaults the readings exposed** (not yet fixed):
+- Beamline 4-3 and 6-2c bundles carry the BL15-2 acquisition-system label (now no longer shown as
+  evidence).
+- Reused template file names are tokenized as if they named samples (`AgL3`, `MoS2` on Ti and S
+  data).

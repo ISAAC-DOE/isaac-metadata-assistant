@@ -8,14 +8,17 @@ Three things a scientist is shown so they can answer in one step instead of look
   name, a shared readme). Proposed only when every witness agrees; a scientist confirms it
   with a ``set_absorber`` decision. The official schema has no field for it, so a confirmed
   absorber lives in the draft's ``implicit[]`` (sidecar only), like the hosted path's edge.
+  AI readings of the absorber are listed beside the file witnesses (``ai_readings``), never
+  counted as one.
 * :func:`facility_hints` - what the import knows about WHERE the data was taken: the
-  acquisition-system signature the readers matched and the imported folder's name. Text
-  hints on the facility questions, never a value: a file layout or a folder name is not a
-  statement of a facility.
+  imported folder's name and, only when the runs' scan headers have that system's detector
+  column names, the acquisition system those names belong to (the bundle's
+  ``acquisition_system`` is a build default, not a match). Text hints on the facility
+  questions, never a value: a column name or a folder name is not a statement of a facility.
 * :func:`readings_to_interpretations` - a Claude reading pass's findings file
-  (``isaac.reading_findings``) turned into AI interpretations on the bundle's targets. Each
-  one cites its file, locator and quote, and can lift a value to ``needs_review`` and never
-  higher (``bundle.derive_value_state``).
+  (``isaac.reading_findings``) turned into AI interpretations on the bundle's targets (record
+  groups, for an absorber finding). Each one cites its file, locator and quote, and can lift a
+  value to ``needs_review`` and never higher (``bundle.derive_value_state``).
 """
 
 from __future__ import annotations
@@ -101,6 +104,20 @@ def absorber_for_group(bundle: Mapping, group: Mapping) -> dict:
         status = "partial"
     else:
         status = "none"
+    # AI READINGS ARE SHOWN BESIDE THE FILE EVIDENCE, NEVER COUNTED AS IT: ``status``,
+    # ``element``, ``edge`` and ``readings`` above are the files' alone. A reading that differs
+    # from the files is SAID (``ai_vs_files``), never resolved.
+    ai = ai_absorber_readings(bundle, gid)
+    files_name = {"element": set(elements), "edge": set(edges)}
+    ai_vs_files = {}
+    for half in ("element", "edge"):
+        said = {r["value"] for r in ai if r["half"] == half}
+        if not said:
+            ai_vs_files[half] = "no_ai_reading"
+        elif not files_name[half]:
+            ai_vs_files[half] = "no_file_evidence"
+        else:
+            ai_vs_files[half] = "agrees" if said <= files_name[half] else "differs"
     return {
         "element": element,
         "edge": edge,
@@ -111,10 +128,59 @@ def absorber_for_group(bundle: Mapping, group: Mapping) -> dict:
         "beamtime_wide_statements": beamtime_wide[0],
         "witnesses": witnesses,
         "witness_total": sum(elements.values()) + sum(edges.values()),
+        "ai_readings": ai,
+        "ai_vs_files": ai_vs_files,
+        "ai_disagrees_with_files": "differs" in ai_vs_files.values(),
         "rule_id": ABSORBER_RULE_ID,
         "statement": "A suggestion from the files, for a scientist to confirm (set_absorber). "
-                     "The official schema has no absorber field: a confirmed one is carried in the evidence sidecar.",
+                     "The official schema has no absorber field: a confirmed one is carried in the evidence sidecar. "
+                     "AI readings (ai_readings) are suggestions beside the file evidence, never part of it.",
     }
+
+
+def ai_absorber_readings(bundle: Mapping, group_id: str) -> list[dict]:
+    """The distinct AI readings of a group's absorbing element / edge (``system.element`` /
+    ``system.edge`` findings recorded on the group), each with its citation and the ids of
+    the interpretations that carry it. Suggestions: they never set ``status`` or a value."""
+    out: dict[tuple, dict] = {}
+    for i in bundle.get("ai_interpretations") or ():
+        if i.get("target") != {"kind": "record_group", "id": group_id} or i.get("field_path") not in ABSORBER_FIELDS:
+            continue
+        key = (i["field_path"], repr(i.get("proposed_value")), i.get("source_path"), i.get("excerpt_locator"))
+        r = out.get(key)
+        if r is None:
+            ref = (i.get("source_refs") or [{}])[0]
+            r = out[key] = {
+                "field": i["field_path"],
+                "half": ABSORBER_FIELDS[i["field_path"]],
+                "value": i.get("proposed_value"),
+                "source_path": i.get("source_path"),
+                "source_id": ref.get("source_id"),
+                "locator": i.get("excerpt_locator") or ref.get("locator"),
+                "quote": i.get("quote"),
+                "strength": i.get("strength"),
+                "model_id": (i.get("model") or {}).get("model_id"),
+                "finding_id": i.get("finding_id"),
+                "interpretation_ids": [],
+                # None: read for the whole group (experiment scope); else the named runs only
+                "run_ids": None,
+            }
+        r["interpretation_ids"].append(i["interpretation_id"])
+        r.setdefault("_named", []).append(i.get("run_ids"))
+    if not out:
+        return []
+    group = next((g for g in [*(bundle.get("record_groups") or ()), *(bundle.get("superseded_record_groups") or ())]
+                  if g["group_id"] == group_id), {})
+    members = list(group.get("member_run_keys") or ())
+    label_of = {r["run_id"]: r["label"] for r in bundle["runs"]}
+    for r in out.values():
+        named = r.pop("_named")
+        r["run_ids"] = None if any(n is None for n in named) else sorted({x for n in named for x in n})
+        # SAID when the reading names fewer than all of the group's runs: it is about those runs
+        r["read_for"] = (None if r["run_ids"] is None or len(r["run_ids"]) >= len(members) else
+                         f"read for {len(r['run_ids'])} of {len(members)} runs in this group: "
+                         + ", ".join(f"{label_of.get(x, x)} ({x})" for x in r["run_ids"]))
+    return list(out.values())
 
 
 def absorber_decisions(bundle: Mapping) -> dict[str, Mapping]:
@@ -127,16 +193,47 @@ def absorber_decisions(bundle: Mapping) -> dict[str, Mapping]:
     return out
 
 
+def _acquisition_system_observed(bundle: Mapping, system: Mapping) -> tuple[int, list[str]]:
+    """``(runs, column names)``: how many runs' scan headers name one of ``system``'s detector
+    columns, read from each run's channel summary (``signal_selection.channels[].scans_present``,
+    the ``#L`` header of its scans) and its ``detector_column`` statements' literals."""
+    wanted = set(system.get("candidate_channels") or ())
+    if not wanted:
+        return 0, []
+    detector_literals: dict[str | None, set[str]] = {}
+    for c in bundle.get("candidates") or ():
+        if c.get("statement_key") == "detector_column":
+            seen = {str(v) for v in (c.get("observed_literals") or ())} | ({str(c["value"])} if c.get("value") is not None else set())
+            detector_literals.setdefault(c.get("run_id"), set()).update(seen & wanted)
+    runs, names = 0, set()
+    for r in bundle.get("runs") or ():
+        found = set(detector_literals.get(r["run_id"], ()))
+        sel = r.get("signal_selection") or {}
+        if sel.get("system_id") == system.get("system_id"):
+            found |= {ch.get("channel") for ch in sel.get("channels") or () if ch.get("scans_present") and ch.get("channel") in wanted}
+        if found:
+            runs += 1
+            names |= found
+    return runs, sorted(names)
+
+
 def facility_hints(bundle: Mapping) -> list[dict]:
-    """Text hints for the ``system.facility.*`` questions."""
+    """Text hints for the ``system.facility.*`` questions.
+
+    ``experiment.acquisition_system`` is the engine's BUILD DEFAULT (set on every import,
+    whatever the files are), so it is shown ONLY when the runs' scan headers have that system's
+    detector column names, and the locator says literally what was seen."""
     hints = []
     system = (bundle.get("experiment") or {}).get("acquisition_system") or {}
-    if system.get("display_name"):
+    runs, names = _acquisition_system_observed(bundle, system) if system.get("display_name") else (0, [])
+    if runs:
         hints.append({
             "kind": "acquisition_system",
             "literal": system["display_name"],
-            "locator": f"the readers matched acquisition system `{system.get('system_id')}`",
-            "note": "The files have this instrument's export layout. A HINT about where they were taken, never an answer.",
+            "locator": (f"{runs} run(s)' scan headers have columns named {', '.join(names)} "
+                        f"(the column naming of: {system['display_name']})"),
+            "note": ("Column names in the scan headers, nothing more: they match this acquisition system's naming, which is "
+                     "not proof of the beamline. A HINT about where the data were taken, never an answer."),
         })
     hints.append({
         "kind": "folder_name",
@@ -150,7 +247,14 @@ def facility_hints(bundle: Mapping) -> list[dict]:
 # --- a Claude reading pass's findings -> AI interpretations ------------------------------------
 
 #: A finding's field may name a path the bundle spells differently. Only exact renames.
-FIELD_ALIASES = {"context.reaction.name": "context.electrochemistry.reaction"}
+FIELD_ALIASES = {
+    "context.reaction.name": "context.electrochemistry.reaction",
+    "system.absorbing_element": "system.element",
+    "system.absorption_edge": "system.edge",
+}
+#: Findings about the ABSORBER have no record field (the official schema has none): they are
+#: recorded on record GROUPS, where the absorber question asks them, ``path -> half``.
+ABSORBER_FIELDS = B.ABSORBER_READING_FIELDS
 #: A finding about a whole OBJECT the schema splits into members: the reading is offered on
 #: each member, unsplit, with a note. Splitting "0.1 M KOH" into a name and a number is the
 #: scientist's step, never this module's.
@@ -187,14 +291,18 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
 
     ``{"planned": [(target, entry_fields)], "skipped": [{finding, reason}]}``. A finding
     targets every live run's missing value (or extracted candidate) of its field: all of
-    them for ``scope: experiment``, the named runs for ``scope: runs``. A finding whose field
+    them for ``scope: experiment``, the named runs for ``scope: runs``. A finding about the
+    absorber (:data:`ABSORBER_FIELDS`) targets record GROUPS instead: every live group for
+    ``experiment``, every live group holding a named run for ``runs``. A finding whose field
     has no target in this bundle is reported, never forced onto another field."""
     if not isinstance(findings, Mapping) or not isinstance(findings.get("findings"), list):
         raise ReadingsRefused("The findings file must be a JSON object with a `findings` list.")
     runs_by_label: dict[str, list[str]] = {}
     for r in bundle["runs"]:
         runs_by_label.setdefault(r["label"], []).append(r["run_id"])
+    key_of = {r["run_id"]: r["run_key"] for r in bundle["runs"]}
     live = _live_run_ids(bundle)
+    live_groups = [g for g in bundle.get("record_groups") or () if g.get("status") in B.LIVE_GROUP_STATUSES]
     src_by_path = {s["relative_path"]: s["source_id"] for s in bundle["sources"]}
     missing: dict[tuple[str | None, str], list[str]] = {}
     for m in bundle["missing_values"]:
@@ -218,18 +326,36 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
         if not path or f.get("value") in (None, "") or not source.get("path") or not source.get("locator") or not quote:
             skipped.append({"finding": fid, "field_path": path, "reason": "a finding needs field_path, value, source.path, source.locator and quote"})
             continue
-        members = [p for p in FIELD_EXPANSIONS.get(path, (path,)) if p in paths]
-        if path in FIELD_EXPANSIONS and members:
-            path_note = f"The file states the {path.rsplit('.', 1)[-1]} as a whole; split it into {', '.join(m.rsplit('.', 1)[-1] for m in members)} when you confirm. "
+        absorber = path in ABSORBER_FIELDS
+        path_note = ""
+        if absorber:
+            half = ABSORBER_FIELDS[path]
+            ok = B.is_absorber_element if half == "element" else B.is_absorber_edge
+            if not ok(f["value"]):
+                skipped.append({"finding": fid, "field_path": path, "reason": (
+                    f"{f['value']!r} is not an absorber {half} as set_absorber takes it "
+                    + ("(an element symbol, e.g. Fe)" if half == "element" else "(exactly one of K, L1, L2, L3, M1-M5)")
+                    + "; nothing is normalised")})
+                continue
+            if not live_groups:
+                skipped.append({"finding": fid, "field_path": path,
+                                "reason": "an absorber reading is recorded on record groups, and this bundle has no live record group yet (run `isaac bundle group`)"})
+                continue
+            members = [path]
         else:
-            members, path_note = [path], ""
-        if path not in paths and members == [path]:
-            skipped.append({"finding": fid, "field_path": path,
-                            "reason": "this bundle has no missing value or candidate for this field; kept in the findings file only"})
-            continue
+            members = [p for p in FIELD_EXPANSIONS.get(path, (path,)) if p in paths]
+            if path in FIELD_EXPANSIONS and members:
+                path_note = f"The file states the {path.rsplit('.', 1)[-1]} as a whole; split it into {', '.join(m.rsplit('.', 1)[-1] for m in members)} when you confirm. "
+            else:
+                members = [path]
+            if path not in paths and members == [path]:
+                skipped.append({"finding": fid, "field_path": path,
+                                "reason": "this bundle has no missing value or candidate for this field; kept in the findings file only"})
+                continue
         scope = (f.get("applies_to") or {}).get("scope") if isinstance(f.get("applies_to"), Mapping) else None
         if scope == "experiment":
             run_ids = sorted(live) + [None]
+            groups = live_groups
         elif scope == "runs":
             labels = (f.get("applies_to") or {}).get("run_labels")
             if not isinstance(labels, list) or not labels or not all(isinstance(l, str) for l in labels):
@@ -241,17 +367,28 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
                 continue
             named = {rid for l in labels for rid in runs_by_label[l]}
             run_ids = sorted(named & live)
-            if not run_ids:
+            named_keys = {key_of[rid] for rid in named}
+            groups = [g for g in live_groups if named_keys & set(g.get("member_run_keys") or ())]
+            if not (groups if absorber else run_ids):
                 skipped.append({"finding": fid, "field_path": path, "reason": "the runs it names are in no live record group"})
                 continue
         else:
             skipped.append({"finding": fid, "field_path": path, "reason": "applies_to.scope must be `experiment` or `runs`"})
             continue
         targets = []
-        for rid in run_ids:
-            for member in members:
-                targets += [{"kind": "missing_value", "id": v} for v in missing.get((rid, member), ())]
-                targets += [{"kind": "candidate", "id": c} for c in cands.get((rid, member), ())]
+        group_runs: dict[str, list[str]] = {}
+        if absorber:
+            targets = [{"kind": "record_group", "id": g["group_id"]} for g in groups]
+            if scope == "runs":
+                # the reading is about the NAMED runs: record which of each group's runs those are
+                id_of = {r["run_key"]: r["run_id"] for r in bundle["runs"]}
+                for g in groups:
+                    group_runs[g["group_id"]] = sorted(id_of[k] for k in g.get("member_run_keys") or () if k in named_keys and k in id_of)
+        else:
+            for rid in run_ids:
+                for member in members:
+                    targets += [{"kind": "missing_value", "id": v} for v in missing.get((rid, member), ())]
+                    targets += [{"kind": "candidate", "id": c} for c in cands.get((rid, member), ())]
         if not targets:
             skipped.append({"finding": fid, "field_path": path, "reason": "no target for this field on the runs it names"})
             continue
@@ -271,10 +408,12 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
             "quote": str(quote)[:300],
             "strength": strength,
             "finding_id": fid,
+            # A group target does not say which field it reads; a value target does.
+            "field_path": path if absorber else None,
             "model": {"model_id": model_id},
         }
         for t in targets:
-            planned.append((t, fields))
+            planned.append((t, {**fields, "run_ids": group_runs.get(t["id"]) if absorber else None}))
     return {"planned": planned, "skipped": skipped}
 
 

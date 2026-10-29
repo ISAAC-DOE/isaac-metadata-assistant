@@ -1,6 +1,6 @@
 # ISAAC Local Import Bundle — contract v1
 
-Status: **v1.2.0** (processed outputs, 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
+Status: **v1.3.0** (absorber readings on record groups, a larger writable set and STALE bundles, 2026-10-29, §9 "What 1.3.0 added"; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
 [`apps/api/isaac_api/local_import/bundle-v1.schema.json`](../apps/api/isaac_api/local_import/bundle-v1.schema.json)
 (JSON Schema draft 2020-12) plus the checks in
 [`bundle.py`](../apps/api/isaac_api/local_import/bundle.py) `validate_bundle` that JSON
@@ -316,7 +316,8 @@ processed files, double-counting measurements (94 of 274 runs in one beamtime, 2
     (`reproposed_after_group_id`), and a merge candidate (`scientist_decided_merge`, with the
     decision id) joins the groups now holding the merge's runs, for the scientist to confirm.
   - `proposed` (undecided, deferred, calibration-only) is replaced. A replaced group that a
-    decision or a processing result still names moves to `superseded_record_groups[]`
+    decision, a processing result or an AI interpretation (1.3.0: an absorber reading is
+    recorded on a group) still names moves to `superseded_record_groups[]`
     (`group_id`, `member_run_keys`, `status: proposed`, `superseded_utc`, `reason`,
     `processing_result_ids`); it is never a record and is not decidable.
 
@@ -351,9 +352,71 @@ processed files, double-counting measurements (94 of 274 runs in one beamtime, 2
 - **Not built:** feeding processed outputs into the Athena comparison (see the TODO in
   `processing/athena.py`), and any decision that confirms a link.
 
+### What 1.3.0 added (absorber readings, a larger writable set, STALE bundles)
+
+A minor version by the rules above: optional fields, and a writable set that only grows.
+
+- `ai_interpretation.field_path` and `ai_interpretation.run_ids` (§20): an absorber reading
+  recorded on a record group says which half it reads and, when its finding named runs, which of
+  the group's runs (the validator refuses `run_ids` outside the target group, or on anything but
+  a record-group absorber reading).
+- **The writable set grew** (`bundle.WRITABLE_ADDED_IN["1.3.0"]`:
+  `context.electrochemistry.potential_setpoint_V`). Eligibility is derived, so a bundle an older
+  build stored can disagree with this build's derivation without anyone having edited it: a
+  set-point a scientist confirmed under 1.2.0 was stored "no write path", and is eligible now.
+- **STALE, not INVALID** (`bundle.stale_eligibility`, `validate_allowing_stale`). A
+  disagreement is STALE only when the bundle's `format_version` is older AND the value's path is
+  one that version could not write; any other disagreement stays INVALID (so a 1.3.0 bundle with
+  the same disagreement is a tamper). `isaac bundle check` prints `STALE:`, each value (id, path,
+  state, eligible before -> now, why, e.g. "this build can now write
+  context.electrochemistry.potential_setpoint_V; a scientist confirmed it while the storing build
+  could not write the field: eligible now; composes only beside a confirmed potential_scale"),
+  the remedy, and the upgrade sentence below. §10 has no exit code for it, so it exits **1** like
+  INVALID and says so. `bundle validate` / `export` refuse a STALE bundle with the same remedy
+  instead of composing from the stored eligibility.
+- **STALE vs INVALID is read from the stated `format_version`**, so hand-editing the label can
+  turn a tampered eligibility into a STALE one. That cannot reach a draft: a STALE bundle is
+  refused by `validate` / `export`, and `build-records` (like every write) re-derives eligibility
+  under this build before composing, so a draft is composed only from this build's own derivation,
+  never from a stored eligibility.
+- **The upgrade is logged once and said everywhere** (`format_upgrades[]`, optional:
+  `from_format_version`, `to_format_version`, `derived_by_format_version`, `upgraded_utc`,
+  `decisions_before`, `newly_writable_paths`, `statement`). The first write of an older bundle by
+  this build appends one entry and prints its statement once to stderr; `check` (VALID or STALE)
+  and `summary.md` print it too: "upgraded from 1.2.0; fields this build can newly write have no
+  answer slots on runs that lacked a parsed value — re-import to get them". A 1.2.0 bundle so
+  written becomes 1.3.0 (its eligibility is now this build's); a bundle without
+  `processed_outputs` keeps its older label, as before, and is logged the same way.
+- **Re-derived on that write, and each moved value logged** (`eligibility_rederived[]`, optional:
+  `kind`, `id`, `target_field_path`, `from_format_version`, `to_format_version`, `rederived_utc`,
+  `value_state`, `eligible_before`, `eligible_now`, `decision_id`, `reason`). The values whose
+  eligibility moved only for the reason above are read from the bundle AS STORED (on disk, under
+  the lock, so a decision made in the same write is not mistaken for an old one).
+- **The old wording is corrected on every write.** A candidate whose short reason is the engine's
+  "this build cannot write it yet" on a path this local build writes gets
+  `bundle.LOCAL_WRITE_PATH_REASON` in `state_basis.not_proposable_summary`; the engine's own text
+  stays in `not_proposable_reason`. (An import has done this since 1.3.0.)
+- **`build-records` re-derives first, under the bundle lock**, and returns
+  `eligibility_rederived_now`. **The disclosure rule:** a composition report lists in
+  `composed_only_by_this_build` (with `decision_id`, the old version and the reason) every
+  composed value on a path the bundle's original build could not write
+  (`format_upgrades[].newly_writable_paths`) whose GOVERNING decision was made before the upgrade
+  (`decision_id` number ≤ `decisions_before`). That is the case the disclosure is for: a
+  confirmation given while the build said the field could not be written, which still composes
+  because the confirmation was about the value. It is listed on every build until a decision made
+  after the upgrade governs the value; a decision made after the upgrade, under the corrected
+  wording, is not listed, because the scientist answered knowing the field is written.
+- **Not done by a re-derivation:** a missing value (an answer slot) for a newly writable field.
+  Missing values are made by the import; a run of an old bundle with no parsed set-point gets one
+  only from a re-import of the folder (the upgrade sentence says so).
+- **The schema accepts the 1.3.0 optional fields under any version label**, as it accepted
+  1.2.0's: there is one schema file, and only `processed_outputs` is tied to a label.
+- A 1.3.0 bundle requires `processed_outputs`, like 1.2.0.
+
 ## 10. Exit codes (`isaac import` / `isaac bundle`)
 
-0 ok · 1 `check` found the bundle invalid · 2 usage (bad arguments, unknown profile, the
+0 ok · 1 `check` found the bundle invalid, or STALE (stored by an older build, §9 "What 1.3.0
+added": there is no code of its own; the output's first word says which) · 2 usage (bad arguments, unknown profile, the
 local import package not installed) · 3 input refused (not found, not a folder or ZIP,
 symlinked root, unreadable) · 4 output refused (`--out` non-empty without `--force`, a
 file, or inside the source folder) · 5 bounds exceeded or self-validation failed — nothing
@@ -657,13 +720,34 @@ anything `scientist_confirmed`.
     `edge`). Without a decision the value is `null` and the witnesses are kept as evidence, the
     same way the hosted path carries an unconfirmed edge. It reaches the evidence sidecar only,
     never an official field.
+  - **AI readings beside the file evidence, never part of it.** A reading pass's `system.element`
+    / `system.edge` findings (below) are recorded on the group and listed in `ai_readings`
+    (value, field, source path, locator, quote, strength, model, finding and interpretation ids).
+    They never move `status`, `element`, `edge` or `readings`, which stay the files' alone.
+    `ai_vs_files` says, per half, `agrees`, `differs`, `no_file_evidence` or `no_ai_reading`, and
+    `ai_disagrees_with_files` is true when any half differs. Nothing chooses between them.
+  - The absorber question is also asked for a group whose only evidence is AI readings: once at
+    experiment scope per distinct (element, edge) pair the readings agree on (merged with the
+    file-agreed groups of the same pair, the text saying how many rest only on an AI reading),
+    per group when the readings disagree or name one half, and per group when an AI reading
+    differs from file evidence that agrees. Hints list file evidence first, then each AI reading
+    (`kind: ai_suggestion`, with `field`, the citation, `groups` and `differs_from_files`). The
+    answer command pre-fills `--element`/`--edge` only when every group's files state them.
+  - Without a `set_absorber` decision an AI reading writes nothing to `implicit[]`: a group
+    whose only evidence is AI readings gets no absorber entry at all.
 - **Every consolidated question says which decisions answer it** (`allowed_decisions`), and
   `decide --question` refuses any other. The absorber question targets record GROUPS, so without
   this rule `--decision confirm` on it would have bulk-confirmed every group it names.
 - **Facility hints** (`suggestions.facility_hints`) appear on every `system.facility.*` question
-  (in `field_hints` when the field is optional). They are the acquisition-system signature the
-  readers matched and the imported folder's name. They are text and never an answer: a file
-  layout or a folder name is not a statement of where data was taken.
+  (in `field_hints` when the field is optional). They are the imported folder's name and, only
+  when the runs' scan headers have that system's detector column names, the acquisition system
+  (`experiment.acquisition_system`), with a locator saying literally what was seen ("N run(s)'
+  scan headers have columns named vortDT, … (the column naming of: <system>)") and a note that a
+  column name is not proof of the beamline. `experiment.acquisition_system` itself is the engine's build default, set on every
+  import whatever the files are (kept for older readers), so it is never shown as a match on
+  its own: a beamtime from another beamline used to be told its files were BL15-2 exports.
+  Hints are text and never an answer: a file layout or a folder name is not a statement of where
+  data was taken.
 - **A Claude reading pass**: `bundle annotate <bundle> --from-readings <findings.json> --model <id>`.
   - The file has format `isaac.reading_findings`. Each finding gives `field_path`, `value`,
     `applies_to` (`experiment`, or `runs` with exact run labels), `source.path`,
@@ -671,7 +755,8 @@ anything `scientist_confirmed`.
     the file), `strength` (`stated` or `inferred`) and `reasoning`. `source.path` must be relative
     to the imported folder, or carry one leading `../` for a document beside it.
   - Each finding becomes one AI interpretation per target it reaches: the missing value or
-    extracted candidate of that field on every live run it names.
+    extracted candidate of that field on every live run it names (the record group, for an
+    absorber finding; below).
   - The interpretation carries the new optional fields `source_path`, `quote`, `strength` and
     `finding_id`. `source_refs` carries the `source_id` when the cited file is a bundle source.
   - The default is a preview that writes nothing. `--apply` records everything in one locked
@@ -680,17 +765,67 @@ anything `scientist_confirmed`.
     field. Reasons include an unknown field, an unknown run label or a missing quote.
   - A finding about `context.electrochemistry.electrolyte` is offered, unsplit, on both
     `electrolyte.name` and `electrolyte.concentration_M`. Splitting it is the scientist's step.
+  - A finding about `system.element` or `system.edge` (aliases `system.absorbing_element`,
+    `system.absorption_edge`) has no record field. It is recorded on record GROUPS: every live
+    group for `experiment`, every live group holding a named run for `runs` (the same unknown-label
+    and no-live-group refusals). Its value must pass the same shape check as `set_absorber`
+    (`bundle.is_absorber_element` / `is_absorber_edge`: a symbol's shape, an edge from K, L1-L3,
+    M1-M5, exactly as written); another value is skipped with that reason, never normalised. A
+    bundle with no live group skips it ("run `isaac bundle group`"). The interpretation carries
+    the optional `field_path`, because a group target does not say which half it reads, and
+    `field_path` is part of the identity that keeps a re-apply from recording it twice (element
+    `K` and edge `K` from one line are two readings). The validator refuses such an
+    interpretation on anything but a record group, or with a value of the wrong shape.
+  - A `runs`-scope absorber finding is still recorded on the whole group, with `run_ids` naming
+    which of the group's runs the finding named (also part of the identity). When that is fewer
+    than all of them, the reading's `read_for` and its hint say so ("read for 1 of 4 runs in this
+    group: <label> (<run id>)"), and so does the question text. An `experiment` finding carries
+    no `run_ids`: it is about the whole group.
+  - **After `bundle group --regroup`** the replaced groups that readings name are kept as
+    superseded (§9), and the readings stay on them: they are never moved to the new groups by
+    guess. The absorber question and `absorber_for_group` read only a live group's own readings,
+    so apply the same findings file again; it lands on the new groups and adds only what is new.
+  - **Versioning of these fields.** `source_path`, `quote`, `strength` and `finding_id` joined
+    `ai_interpretation` at `1.2.0`; `field_path` and `run_ids` are `1.3.0` (§9 "What 1.3.0
+    added"). The branch carrying 1.2.0 has been pushed, so a 1.2.0 bundle may exist outside this
+    checkout; that is why this change is a version and not an edit of 1.2.0.
 - **The fix this needed in the questions.** A missing value an AI reading lifted to
   `needs_review` used to drop out of `questions.json`: its question disappeared exactly when a
   suggestion arrived. It is now still asked. The reading is the first hint (`kind: ai_suggestion`,
   with the file, locator, quote and model), and the question text names it as a suggestion that
   needs confirmation.
 - **Newly answerable fields** (`bundle.LOCAL_ANSWER_FIELDS`):
-  `context.electrochemistry.electrolyte.name`, `.electrolyte.concentration_M`, `.pH` and
-  `.potential_scale`. Both the vendored v1.05 schema and the pinned portal schema declare them,
-  the website has no write route for them, and beamtime notes often state them. They are
-  `missing_values` like any other writable field. A record whose electrolyte has a name but no
-  concentration fails the schema at export, which is the gate working.
+  `context.electrochemistry.electrolyte.name`, `.electrolyte.concentration_M`, `.pH`,
+  `.potential_scale` and `.potential_setpoint_V`. Both the vendored v1.05 schema and the pinned
+  portal schema declare them, the website has no write route for them, and beamtime notes often
+  state them. They are `missing_values` like any other writable field (a run with a parsed
+  potential has its candidate instead, and no missing value). Such a candidate's
+  `not_proposable_summary` says this local import writes the field
+  (`bundle.LOCAL_WRITE_PATH_REASON`, also for `UPSTREAM_TARGET_FIELDS`); the engine's "this build
+  cannot write it yet" is about the website and stays in `not_proposable_reason`. A record whose
+  electrolyte has a name but no concentration fails the schema at export, which is the gate working.
+  - **The type gate is eligibility, not `decide`.** `decide` stores the answer it is given:
+    `--value -0.8` without `--json` is the TEXT `"-0.8"`, and `"-0.8 V"` is text either way.
+    `bundle.value_problem` then checks it against the vendored schema's `type` (`number` for
+    pH, concentration and set-point), so the value is `scientist_confirmed` but not eligible
+    ("must be number; got str"). `build-records` composes only eligible values, so the text
+    never reaches the draft or the export; the group's report lists it under `not_composed` with
+    that reason, so it cannot vanish unseen. The questions say which fields need `--json`. The
+    metadata template refuses a non-number in a numeric column before anything is recorded.
+  - **A set-point needs its scale (interim decision, pending review by the domain owners,
+    Oscar and Angel; `bundle.COMPOSES_ONLY_WITH`).** The group's confirmed set-points are checked
+    for disagreement FIRST, over all of them: differing values are a `disagreements` entry and
+    nothing is filled. Only an agreed set-point meets the scale gate: it is filled only when EVERY
+    run it comes from has an eligible `context.electrochemistry.potential_scale` filled in the
+    draft (or the scale is beamtime-wide). If any run lacks one, none is filled: that run's value
+    is listed under `not_composed` with "a potential setpoint needs its confirmed potential_scale;
+    the number alone does not say what it is relative to", and the others with "another run of
+    this record group has this potential setpoint without its confirmed potential_scale, so the
+    group's setpoint is not filled". This holds for parsed candidates and answered missing values
+    alike. The values stay confirmed in the bundle; nothing is guessed about the scale.
+  - **Follow-up, not built:** `context.electrochemistry.control_mode`. The hosted mapping writes
+    it beside the set-point, the schema's conditional rules key the set-point requirement on it,
+    and it is not locally writable. It is not added here.
 
 ## 21. Nested ZIPs and analysis files (`.larix`, `.pxp`) — no format bump
 

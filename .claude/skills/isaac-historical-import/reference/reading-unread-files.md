@@ -27,7 +27,8 @@ The files code DID read still hold statements no parser maps: readmes, macro com
 run labels and folder names, and documents beside the folder (proposals, slides). Read those too.
 Look hardest for what the files most often leave unstated: facility and beamline, environment
 (operando / in situ / ex situ), cell type, reaction, electrolyte (name and concentration), pH,
-potential scale (RHE, Ag/AgCl, ...), sample form and formula, and who produced the data.
+potential scale (RHE, Ag/AgCl, ...), the potential set-point (volts), sample form and formula,
+the absorbing element and edge, and who produced the data.
 
 ## Recording what you found: one findings file
 
@@ -53,6 +54,22 @@ Write every finding to ONE JSON file (`isaac.reading_findings`), then load it in
 - Vocabulary fields take one allowed value (see `bundle questions` → `allowed_values`).
 - For `context.electrochemistry.electrolyte` give the whole statement ("0.1 M KOH"); it is
   offered on both the name and the concentration for the scientist to split.
+- `context.electrochemistry.potential_setpoint_V` is a NUMBER in volts on the run's potential
+  scale (`-0.8`, not `"-0.8 V"`; "100 mV" is `0.1`, one written step, so `inferred`). It lands on
+  every named run whose files state no potential, and beside the parsed one where they do.
+  Look for the scale too (`context.electrochemistry.potential_scale`): a set-point reaches the
+  record only beside the confirmed scale of every run it comes from, so a bare number is listed
+  as not composed.
+- The absorber has no record field: write `system.element` (a symbol, e.g. `Fe`) and
+  `system.edge` (exactly `K`, `L1`-`L3` or `M1`-`M5`) as two findings. They are recorded on the
+  record GROUPS holding the named runs (every live group for `"experiment"`). Before Step 5 the
+  preview skips them ("no live record group yet"): apply the same file again after grouping
+  (re-applying adds only what is new). They feed the absorber question in Step 7 as AI
+  suggestions beside any file evidence. After a `--regroup`, apply it again for the new groups
+  (the earlier readings stay on the replaced groups and are not moved). A `"runs"` finding on a
+  group with other runs says which runs it was read for; tell the scientist.
+  A value of another shape is skipped, never normalised. A reading that differs from the files
+  is shown as differing; only the scientist's `set_absorber` answer gives the absorber.
 
 Then:
 

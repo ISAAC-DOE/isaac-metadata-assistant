@@ -121,6 +121,10 @@ def _node(schema: Mapping | None, path: str) -> Mapping | None:
     return node if isinstance(node, Mapping) else None
 
 
+def _is_numeric(node: Mapping | None) -> bool:
+    return isinstance(node, Mapping) and node.get("type") in ("number", "integer", ["number", "null"])
+
+
 def _label(path: str) -> str:
     return path.rsplit(".", 1)[-1].replace("_", " ")
 
@@ -276,6 +280,9 @@ def consolidate(bundle: Mapping) -> dict:
     for (scope, kind, path, partition), q in buckets.items():
         if kind == "optional_values":
             qid = _qid(scope, kind, partition or "")
+            # A number given without --json is stored as text, which the schema's type check
+            # then keeps out of the record (bundle.value_problem): say which fields need it.
+            numeric_fields = sorted(f for f in q["fields"] if _is_numeric(_node(schema, f)))
             questions.append(
                 {
                     "question_id": qid,
@@ -295,7 +302,8 @@ def consolidate(bundle: Mapping) -> dict:
                     "hints": [],
                     "field_hints": _optional_field_hints(bundle, q["fields"]),
                     "allowed_values": None,
-                    "answer_command": f'isaac bundle decide <bundle_dir> --question {qid} --field <field path> --decision correct --value <value> --by "<your name>"',
+                    "answer_command": (f'isaac bundle decide <bundle_dir> --question {qid} --field <field path> --decision correct --value <value> --by "<your name>"'
+                                       + (f"   # a number ({', '.join(numeric_fields)}): add --json, e.g. --value -0.8 --json" if numeric_fields else "")),
                 }
             )
             continue
@@ -304,7 +312,7 @@ def consolidate(bundle: Mapping) -> dict:
         if enum is None and path in vocabulary:
             # D4: a vocabulary-controlled field (no schema enum, but the portal checks it).
             enum = vocabulary[path]
-        numeric = isinstance(node, Mapping) and node.get("type") in ("number", "integer", ["number", "null"])
+        numeric = _is_numeric(node)
         n_groups = len({group_of[r] for r in q["runs"] if r in group_of})
         if kind == "missing_value":
             text = f"What is the {_label(path)} ({path})? No source in this import states it."
@@ -470,7 +478,10 @@ def _optional_field_hints(bundle: Mapping, fields: Mapping[str, Sequence[str]]) 
 
 
 def _absorber_hints(items: Sequence[tuple[Mapping, dict]]) -> list[dict]:
-    """A processed-output summary first, then each distinct beamtime-wide statement."""
+    """FILE EVIDENCE FIRST — a processed-output summary, then each distinct beamtime-wide
+    statement — then each distinct AI reading, labelled as an AI suggestion with its citation.
+    Each list is capped on its own, so file evidence never crowds out an AI reading's
+    disclosure (or the reverse)."""
     hints: list[dict] = []
     po = [w for _, s in items for w in s["witnesses"] if w["kind"] == "processed_output_header"]
     if po:
@@ -488,13 +499,52 @@ def _absorber_hints(items: Sequence[tuple[Mapping, dict]]) -> list[dict]:
                 seen.add(key)
                 hints.append({"kind": w["kind"], "literal": f"{w.get('element') or '?'} {w.get('edge') or '?'}", "locator": w.get("locator"),
                               "source_id": w.get("source_id"), "relative_path": w.get("relative_path"), "note": "stated for the whole beamtime"})
-    return hints[:_HINTS_PER_QUESTION]
+    ai: dict[tuple, dict] = {}
+    for g, s in items:
+        for r in s.get("ai_readings") or ():
+            key = (r["field"], repr(r["value"]), r.get("source_path"), r.get("locator"))
+            h = ai.get(key)
+            if h is None:
+                h = ai[key] = {
+                    "kind": "ai_suggestion",
+                    "field": r["field"],
+                    "literal": r["value"],
+                    "locator": r.get("locator"),
+                    "source_id": r.get("source_id"),
+                    "source_path": r.get("source_path"),
+                    "quote": r.get("quote"),
+                    "strength": r.get("strength"),
+                    "model_id": r.get("model_id"),
+                    "groups": 0,
+                    "differs_from_files": False,
+                    "note": (f"The {r['half']}, suggested by an AI reading of the files; the quote is as the reader gave it. "
+                             "Not file evidence: confirm it with set_absorber, or answer otherwise; it is never used on its own."),
+                }
+            h["groups"] += 1
+            if r.get("read_for"):
+                h.setdefault("read_for", []).append({"group_id": g["group_id"], "run_ids": r["run_ids"], "text": r["read_for"]})
+            if s.get("ai_vs_files", {}).get(r["half"]) == "differs" and r["value"] not in s["readings"][r["half"]]:
+                h["differs_from_files"] = True
+    for h in ai.values():
+        if h["differs_from_files"]:
+            h["note"] += " It DIFFERS from what the files state; nothing has chosen between them."
+        for part in h.get("read_for") or ():
+            h["note"] += f" Group {part['group_id']}: {part['text']}."
+    return hints[:_HINTS_PER_QUESTION] + list(ai.values())[:_HINTS_PER_QUESTION]
+
+
+def _ai_pair(sug: Mapping) -> tuple[str, str] | None:
+    """The one element and one edge the AI readings of a group name, or ``None``."""
+    els = {r["value"] for r in sug.get("ai_readings") or () if r["half"] == "element"}
+    eds = {r["value"] for r in sug.get("ai_readings") or () if r["half"] == "edge"}
+    return (next(iter(els)), next(iter(eds))) if len(els) == 1 and len(eds) == 1 else None
 
 
 def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping]) -> list[dict]:
     """The absorbing element and edge, asked ONCE per distinct suggestion over the groups
-    the files agree on, and per group where they disagree. Optional: the official schema
-    has no absorber field (a confirmed one is carried in the evidence sidecar)."""
+    the files agree on (or, where no file states it, the AI readings agree on), and per group
+    where they disagree, are partial, or an AI reading differs from the files. Optional: the
+    official schema has no absorber field (a confirmed one is carried in the evidence sidecar)."""
     decided = S.absorber_decisions(bundle)
     by_pair: dict[tuple, list] = {}
     split: list[tuple[Mapping, dict]] = []
@@ -502,13 +552,32 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping]) -> list[dict
         if g["group_id"] in decided:
             continue
         sug = S.absorber_for_group(bundle, g)
-        if sug["status"] == "agrees":
+        if sug["status"] == "agrees" and not sug["ai_disagrees_with_files"]:
             by_pair.setdefault((sug["element"], sug["edge"]), []).append((g, sug))
-        elif sug["status"] in ("disagrees", "partial"):
+        elif sug["status"] == "none" and sug["ai_readings"] and _ai_pair(sug):
+            by_pair.setdefault(_ai_pair(sug), []).append((g, sug))
+        elif sug["status"] in ("disagrees", "partial", "agrees") or sug["ai_readings"]:
             split.append((g, sug))
     out = []
     for (element, edge), items in sorted(by_pair.items()):
         qid = _qid("experiment", "confirm_absorber", f"{element}|{edge}")
+        from_files = [(g, s) for g, s in items if s["status"] == "agrees"]
+        ai_only = len(items) - len(from_files)
+        if not ai_only:
+            text = (f"The files state element {element}, edge {edge} for {len(items)} group(s), and no file disagrees: "
+                    f"{sum(1 for _, s in items if s['group_specific_statements'])} of them from processed outputs linked to their runs, "
+                    f"the rest only from beamtime-wide statements ({items[0][1]['beamtime_wide_statements']}, e.g. an acquisition macro's name). "
+                    "Is that the absorber? Answer once, or per group (a reference foil or blank cell may differ).")
+            element_arg, edge_arg = element, edge
+        else:
+            partial = sum(1 for _, s in items for r in s["ai_readings"] if r.get("read_for"))
+            text = (f"Element {element}, edge {edge} is suggested for {len(items)} group(s): "
+                    + (f"the files state it for {len(from_files)}; " if from_files else "")
+                    + f"for {ai_only}, no file the import parsed states the absorber and only an AI reading of the files suggests it "
+                      "(needs your confirmation: an AI reading is not file evidence). "
+                      "Is that the absorber? Answer once, or per group (a reference foil or blank cell may differ)."
+                    + (f" {partial} AI reading(s) name only some of a group's runs (see the hints)." if partial else ""))
+            element_arg, edge_arg = "<El>", "<K|L1-L3|M1-M5>"
         out.append({
             "question_id": qid,
             "partition": None,
@@ -518,20 +587,32 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping]) -> list[dict
             "kind": "confirm_absorber",
             "scope": "experiment",
             "target_field_path": None,
-            "text": (f"The files state element {element}, edge {edge} for {len(items)} group(s), and no file disagrees: "
-                     f"{sum(1 for _, s in items if s['group_specific_statements'])} of them from processed outputs linked to their runs, "
-                     f"the rest only from beamtime-wide statements ({items[0][1]['beamtime_wide_statements']}, e.g. an acquisition macro's name). "
-                     "Is that the absorber? Answer once, or per group (a reference foil or blank cell may differ)."),
+            "text": text,
             "applies_to": {"groups": len(items), "runs": sum(len(g.get("member_run_keys") or ()) for g, _ in items), "targets": len(items)},
             "targets": [{"kind": "record_group", "id": g["group_id"]} for g, _ in items],
             "per_scope_targets": {f"group:{g['group_id']}": [g["group_id"]] for g, _ in items},
             "hints": _absorber_hints(items),
             "allowed_values": None,
             "answer_command": (f'isaac bundle decide <bundle_dir> --question {qid} --decision set_absorber '
-                               f'--element {element} --edge {edge} --by "<your name>"   # per group: add --only group:<group_id>'),
+                               f'--element {element_arg} --edge {edge_arg} --by "<your name>"   # per group: add --only group:<group_id>'),
         })
     for g, sug in split:
         qid = _qid(f"group:{g['group_id']}", "confirm_absorber", "")
+        if sug["status"] == "none":
+            said = ", ".join(f"{r['half']} {r['value']}" for r in sug["ai_readings"])
+            text = ("No file the import parsed states this group's absorber, and the AI readings of the files disagree "
+                    f"or name only one half (AI readings: {said}). Nothing has chosen between them. Which is it?")
+        elif sug["status"] == "agrees":
+            text = (f"The files state element {sug['element']}, edge {sug['edge']} for this group, but an AI reading of the files "
+                    f"differs ({', '.join(h for h, v in sug['ai_vs_files'].items() if v == 'differs')}). Nothing has chosen between them. Which is it?")
+        else:
+            text = (f"The files {'disagree about' if sug['status'] == 'disagrees' else 'only partly state'} this group's absorber "
+                    f"(element readings {sug['readings']['element']}, edge readings {sug['readings']['edge']}). Which is it?")
+            if sug["ai_disagrees_with_files"]:
+                text += " An AI reading of the files also differs from them."
+        for r in sug["ai_readings"]:
+            if r.get("read_for"):
+                text += f" The AI reading {r['half']} {r['value']} was {r['read_for']}."
         out.append({
             "question_id": qid,
             "partition": None,
@@ -541,8 +622,7 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping]) -> list[dict
             "kind": "confirm_absorber",
             "scope": f"group:{g['group_id']}",
             "target_field_path": None,
-            "text": (f"The files {'disagree about' if sug['status'] == 'disagrees' else 'only partly state'} this group's absorber "
-                     f"(element readings {sug['readings']['element']}, edge readings {sug['readings']['edge']}). Which is it?"),
+            "text": text,
             "applies_to": {"groups": 1, "runs": len(g.get("member_run_keys") or ()), "targets": 1},
             "targets": [{"kind": "record_group", "id": g["group_id"]}],
             "per_scope_targets": {f"group:{g['group_id']}": [g["group_id"]]},
