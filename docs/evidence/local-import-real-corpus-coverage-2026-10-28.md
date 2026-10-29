@@ -390,9 +390,13 @@ the whole beamtime (technique, 4), or of a field with no slot (sample id, 1). Ea
 whole-beamtime finding for that field was placed.
 
 **What remains, and why:**
-- **Beamline 4-3 acquisition time.** Every scan header states a local start time with no time zone.
+- ~~**Beamline 4-3 acquisition time.** Every scan header states a local start time with no time zone.
   No deterministic reader for this header format exists yet, and turning a local time into
-  `acquired_start_utc` needs the facility's time zone confirmed, not assumed. This is a follow-up.
+  `acquired_start_utc` needs the facility's time zone confirmed, not assumed. This is a follow-up.~~
+  **Built later on 2026-10-29; see "Beamline 4-3 scan start times" below.** Two corrections to the
+  struck text: a reader for the header already existed (`readers/ssrl_xdc.py`) — what was missing
+  was a tested rule mapping its time to the field; and the zone to confirm is the *instrument
+  clock's*, which is not necessarily "the facility's".
 - **Beamline 4-3 alignment and calibration scans.** These have no sample, condition or potential to
   state: 26 of 61 groups in 2025-11 are alignment scans.
 - **Sample numbers.** The leading number in Beamline 4-3 labels is a measurement sequence, not a
@@ -425,3 +429,62 @@ emitted):
   evidence).
 - Reused template file names are tokenized as if they named samples (`AgL3`, `MoS2` on Ti and S
   data).
+
+## Beamline 4-3 scan start times, 2026-10-29
+
+**The gap, measured.** Both Beamline 4-3 beamtimes produced **0 candidates**. The XDC 4.0 reader
+parsed each scan's line-2 time, but every generic-reader statement was kept only as
+`extended_context`, and no rule mapped it to a field. So acquisition time was missing for all 53
+and all 61 runs. The header states a local clock time (weekday, month, day, time, year), with no
+zone and no epoch.
+
+**What was built:**
+- **One rule, `ssrl_xdc_scan_start_v1`.** Each XDC run gets one `timestamps.acquired_start_utc`
+  candidate. Its evidence is the line-2 literal of every usable scan. The run's start is the
+  earliest scan time.
+  - Unparseable or weekday-mismatched times are excluded, and the exclusion is said.
+  - The value stays empty: the header names no zone, and none is assumed.
+- **One decision, `set_clock_time_zone`.** A scientist records the IANA zone that the instrument
+  clock writing those headers was set to.
+  - The beamtime's question says how many runs it unblocks and cites one example literal. It says
+    plainly that no file states the zone, and it offers **no suggestion**. Guessing a zone from
+    where the facility is would be exactly the guess `CLAUDE.md` §5 forbids.
+- **One named conversion, `local_clock_to_utc_via_confirmed_zone_v1`.** It is daylight-saving
+  aware and re-derived on every save.
+  - A time in the fall-back hour (two instants) or the spring-forward gap (none) gets no value,
+    and the question says which.
+  - Each converted value still needs the scientist's own confirmation.
+  - That confirmation is bound to the zone and the value it was made under. A later zone change
+    stops it counting and the question is asked again.
+- **Bundle format 1.4.0.** Additive. A 1.3.0 bundle holding XDC runs is told, once, that a
+  re-import is needed to get the start times.
+
+**Result** (corpus rebuilt into `_runs_v9` with the final code; every step exited 0; every bundle VALID 1.4.0):
+
+| Beamtime | Missing before (v7) | Missing after (v9) | Start time from files |
+|---|---:|---:|---:|
+| BL4-3 2025-07 | 51.3% | **42.2%** | 53 of 53 runs |
+| BL4-3 2025-11 | 48.9% | **39.8%** | 61 of 61 runs |
+| The other four | unchanged | unchanged | candidates and questions byte-identical to v7 |
+| **All six (7,689 cells)** | **22.2%** | **20.7%** | |
+
+**What "from files" means here.** The start time is read from the scan header, but it is not a UTC
+value until a scientist names the clock's zone and then confirms each converted time.
+
+**Probe on throwaway copies (no scientist decision was recorded in any real bundle).** With
+`America/Los_Angeles` as a test zone, all 114 start times converted:
+- the July 2025 scans at UTC−7 (daylight time);
+- the November 2025 scans at UTC−8 (standard time), including evening scans that move to the next
+  UTC day.
+
+No real header time is quoted here (`CLAUDE.md` §6).
+
+No scan time falls in a daylight-saving fold or gap. Which zone is right is the scientists' answer
+to give.
+
+**Not done:**
+- **Multi-run record groups.** A group made of several runs gets one start time per run. Composing
+  them disagrees and fills nothing, as it already does for BL15-2. Whether a merged record's start
+  is its earliest run's start is a protocol decision, not taken here.
+- **BL15-2 `#D` local times** in runs without an epoch keep their existing handling.
+- **BL6-2c XES/MCA files** still have no start-time rule (67 of 194 groups missing).

@@ -101,11 +101,15 @@ def save_bundle(bundle_dir: Path, bundle: dict) -> None:
     # local build writes (bundle.refresh_local_write_summaries); the engine's own text is kept.
     stored_version = bundle.get("format_version")
     # THE STORED VERSION IS NOT RELABELLED past what it holds: only a bundle that HAS
-    # processed_outputs (an import by a 1.2.0+ build) is raised to this build's version (1.3.0:
-    # its eligibility is re-derived below under this build's writable set). An older bundle is
-    # raised to at most 1.1.0, the version whose sections this writer adds below; calling it
-    # 1.2.0+ would claim that its processed outputs had been separated from its runs, which only
-    # a re-import does.
+    # processed_outputs (an import by a 1.2.0+ build) is raised to this build's version (1.4.0:
+    # its eligibility is re-derived below under this build's writable set, and it may now hold a
+    # set_clock_time_zone decision, which a 1.3.0 validator refuses). An older bundle is raised to
+    # at most 1.1.0, the version whose sections this writer adds below; calling it 1.2.0+ would
+    # claim that its processed outputs had been separated from its runs, which only a re-import
+    # does. 1.4.0 adds no section an import must have filled, and nothing newly writable; the one
+    # import rule it adds (ssrl_xdc_scan_start_v1) is NOT applied by a save, so a 1.3.0 bundle with
+    # ssrl_xdc_v1 runs is raised to 1.4.0 WITH a format_upgrades entry saying those runs have none
+    # of its candidates until re-imported (bundle.import_rules_missing) — never silently.
     to_version = (B.FORMAT_VERSION if "processed_outputs" in bundle
                   else "1.1.0" if stored_version in ("1.0.0", "1.1.0") else stored_version)
     if B.needs_format_upgrade(bundle):
@@ -415,6 +419,26 @@ def _check_decision(bundle: Mapping, kind: str, obj: Mapping, decision: str, val
         )
     if decision == "correct" and value is None:
         raise MutationRefused("`correct` needs --value.")
+    if kind == "candidate" and decision == "confirm" and B.is_local_clock_start(obj):
+        # a local clock time is confirmed only as the UTC value a CONFIRMED zone gives it; a value
+        # the scientist supplies is a correction, and is never credited to the zone rule
+        if value is not None:
+            raise MutationRefused(
+                f"{obj['candidate_id']} is a local clock time: `confirm` accepts only the UTC value the instrument "
+                "clock's confirmed time zone gives it, so it takes no --value. To give the UTC start yourself, use "
+                f"`isaac bundle decide <bundle_dir> --target {obj['candidate_id']} --decision correct --value "
+                'YYYY-MM-DDTHH:MM:SSZ --by "<your name>"`.'
+            )
+        zone_d = B.clock_zone_decision(bundle)
+        if zone_d is None:
+            raise MutationRefused(
+                f"{obj['candidate_id']} is a local clock time with no time zone; there is no UTC value to confirm "
+                "until a scientist states the time zone the instrument clock was set to: "
+                f"{B.CLOCK_ZONE_COMMAND}  (or give the UTC start yourself with `correct --value YYYY-MM-DDTHH:MM:SSZ`)."
+            )
+        got = B.local_clock_start(obj, zone_d)
+        if got["value"] is None:
+            raise MutationRefused(f"{obj['candidate_id']} carries no value to confirm: {got['reason']}")
     if kind == "candidate" and decision == "confirm":
         if value is None and obj["value"] is None:
             raise MutationRefused(
@@ -459,7 +483,7 @@ def decide(
     return mutate(bundle_dir, lambda bundle: record_decision(bundle, **params))
 
 
-def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, edge, positions, **_rest):
+def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, edge, positions, value=None, **_rest):
     """The checks of :func:`decide` that need no bundle. Returns ``positions`` normalised."""
     problem = B.decider_name_problem(by)
     if problem:
@@ -489,6 +513,10 @@ def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, ed
         positions = list(positions)
     elif positions:
         raise MutationRefused("--positions goes with --target experiment --decision set_counter_positions.")
+    if decision == B.CLOCK_ZONE_DECISION:
+        problem = B.clock_zone_problem(value)
+        if problem is not None:
+            raise MutationRefused(f"{problem}. Nothing was recorded.")
     return positions
 
 
@@ -514,7 +542,7 @@ def record_decision(
     is checked before any entry is appended, so a refusal leaves ``bundle`` unchanged."""
     positions = _decide_arguments(
         target_ids=target_ids, decision=decision, by=by, orcid=orcid, qc_status=qc_status,
-        element=element, edge=edge, positions=positions,
+        element=element, edge=edge, positions=positions, value=value,
     )
     bulk = len(target_ids) > 1
 
@@ -552,12 +580,26 @@ def record_decision(
         }
         decisions = bundle.setdefault("scientist_decisions", [])
         batch_id = f"batch-{len(decisions) + 1:04d}" if bulk else None
+        if decision == B.CLOCK_ZONE_DECISION:
+            # what the zone answer is about to undo is SAID, never left for a later check to find
+            counting_before = {x["candidate_id"] for x in B.local_clock_reconfirm(B.apply_derivations(json.loads(json.dumps(bundle))))}
         recorded, unchanged = [], []
+        zone_d = B.clock_zone_decision(bundle)
         for tid, (kind, obj) in zip(target_ids, planned):
             prior = latest.get((kind, tid))
+            if kind == "experiment":
+                # several decision kinds share the one experiment target: replaying one is compared
+                # with the latest of ITS kind (a zone restated after a counter answer is unchanged)
+                prior = next((d for d in reversed(bundle.get("scientist_decisions") or ())
+                              if d.get("target") == {"kind": "experiment", "id": tid} and d.get("decision") == decision), None)
+            # THE BINDING (1.4.0): a confirmation of a local-clock start time records the zone and the
+            # converted value it was made under; a later zone decision cannot reuse it silently.
+            binding = (B.local_clock_binding(obj, zone_d)
+                       if kind == "candidate" and decision == "confirm" and B.is_local_clock_start(obj) and zone_d is not None
+                       else None)
             signature = (decision, json.dumps(value, sort_keys=True), decided_by["name"], orcid,
                          json.dumps(split_into or []), json.dumps(merge_with or []), qc_status, qc_note, element, edge,
-                         json.dumps(positions or []))
+                         json.dumps(positions or []), json.dumps(binding, sort_keys=True))
             if prior is not None and (
                 prior.get("decision"),
                 json.dumps(prior.get("value"), sort_keys=True),
@@ -570,6 +612,7 @@ def record_decision(
                 prior.get("element"),
                 prior.get("edge"),
                 json.dumps(prior.get("positions") or []),
+                json.dumps(prior.get("clock_zone_binding"), sort_keys=True),
             ) == signature:
                 unchanged.append(tid)
                 continue
@@ -593,6 +636,8 @@ def record_decision(
                 entry["element"], entry["edge"] = element, edge
             if decision == "set_counter_positions":
                 entry["positions"] = positions
+            if binding is not None:
+                entry["clock_zone_binding"] = binding
             if kind == "processing_result" and decision == "approve":
                 # AN APPROVAL BINDS TO EXACTLY THIS RESULT'S FILES (and their hashes).
                 entry["approved_files"] = [
@@ -607,7 +652,41 @@ def record_decision(
                 entry["qc_evidence"] = {"verdict": qc.get("verdict"), "metrics": qc.get("metrics") or {}}
             decisions.append(entry)
             recorded.append(tid)
-        return {"recorded": recorded, "unchanged": unchanged, "batch_id": batch_id}
+        result = {"recorded": recorded, "unchanged": unchanged, "batch_id": batch_id}
+        if decision == B.CLOCK_ZONE_DECISION:
+            after = B.apply_derivations(json.loads(json.dumps(bundle)))
+            stale = B.local_clock_reconfirm(after)
+            # ONLY what THIS decision undid: a confirmation already stale before it is not counted again
+            newly = [x for x in stale if x["candidate_id"] not in counting_before]
+            value_of = {c["candidate_id"]: c["value"] for c in after["candidates"]}
+            to_confirm = [x["candidate_id"] for x in newly if value_of.get(x["candidate_id"]) is not None]
+            to_correct = [x["candidate_id"] for x in newly if value_of.get(x["candidate_id"]) is None]
+
+            def _ids(ids):
+                return ", ".join(ids[:20]) + ("…" if len(ids) > 20 else "")
+
+            parts = []
+            if to_confirm:
+                parts.append(f"{len(to_confirm)} to confirm again (this zone gives a UTC value): {_ids(to_confirm)}")
+            if to_correct:
+                parts.append(f"{len(to_correct)} to correct with a UTC value (in this zone the local time is ambiguous or "
+                             f"does not exist, so there is nothing to confirm): {_ids(to_correct)}")
+            result["clock_zone"] = {
+                **B.clock_zone_status(after),
+                "confirmations_invalidated_now": len(newly),
+                "to_confirm_again": to_confirm,
+                "to_correct": to_correct,
+                "statement": (
+                    f"The instrument clock's time zone is now {value}. "
+                    + (f"{len(newly)} start-time confirmation(s) made under another zone no longer count: the clock "
+                       "time zone changed after they were confirmed, so the UTC value they confirmed is not the one "
+                       "this zone gives (isaac bundle questions lists them). " + "; ".join(parts) + "."
+                       if newly else "No start-time confirmation was undone by it.")
+                ),
+            }
+            if newly:
+                print(f"isaac: {result['clock_zone']['statement']}", file=sys.stderr)
+        return result
 
     return change(bundle)
 

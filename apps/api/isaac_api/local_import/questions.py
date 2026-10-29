@@ -64,6 +64,7 @@ ALLOWED_DECISIONS: Mapping[str, tuple[str, ...]] = {
     "confirm_value": ("confirm", "correct", "reject", "defer"),
     "resolve_conflict": ("confirm", "correct", "reject", "defer"),
     "naming_counter_positions": ("set_counter_positions",),
+    "clock_time_zone": (B.CLOCK_ZONE_DECISION,),
     "confirm_absorber": ("set_absorber", "defer"),
 }
 
@@ -250,10 +251,13 @@ def consolidate(bundle: Mapping) -> dict:
             add((scope, "optional_values", None, partition), kind="optional_values", path=None, partition=partition,
                 target={"kind": "missing_value", "id": m["value_id"]}, run_id=rid, scope=scope, blocking=None, field=path)
 
+    zone_decided = B.clock_zone_decision(bundle) is not None
     for c in bundle["candidates"]:
         path = c["target_field_path"]
         if not path or c["value_state"] not in (B.STATE_NEEDS_REVIEW, B.STATE_CANDIDATE_EXTRACTED):
             continue
+        if not zone_decided and B.is_local_clock_start(c):
+            continue  # nothing to confirm until the clock's zone is stated: the zone question asks that
         blocking = required_for(path, c["run_id"])
         if c["value_state"] == B.STATE_CANDIDATE_EXTRACTED and not blocking:
             continue  # an extracted optional value is not asked about
@@ -431,6 +435,102 @@ def consolidate(bundle: Mapping) -> dict:
                     'isaac bundle decide <bundle_dir> --target experiment --decision set_counter_positions '
                     '--positions <n[,m]> --by "<your name>"  &&  isaac bundle group <bundle_dir> --regroup'
                 ),
+            }
+        )
+
+    # THE INSTRUMENT CLOCK'S TIME ZONE (1.4.0): asked once for the beamtime while local-clock start
+    # times wait on it. No value is suggested: no file states one (CLAUDE.md §5).
+    zq = B.clock_zone_question(bundle)
+    if zq is not None:
+        qid = _qid("experiment", "clock_time_zone", "instrument_clock")
+        questions.append(
+            {
+                "question_id": qid,
+                "partition": None,
+                "tier": TIER_OPTIONAL,
+                "blocking": False,
+                "why": ("Optional: the record can be exported without a start time, but these runs' start times "
+                        "stay out of it until the clock's time zone is stated."),
+                "kind": "clock_time_zone",
+                "scope": "experiment",
+                "target_field_path": B.XDC_START_PATH,
+                "text": zq["text"],
+                "applies_to": {"groups": len({group_of[r] for r in zq["run_ids"] if r in group_of}), "runs": len(zq["run_ids"]),
+                               "targets": 1},
+                "targets": [{"kind": "experiment", "id": "experiment"}],
+                "per_scope_targets": {"experiment": ["experiment"]},
+                "hints": [{"kind": "local_clock_literal", **zq["example"],
+                           "note": "The header's own words: a local clock time with no zone. A hint about WHAT is asked, never an answer."}],
+                "allowed_values": None,
+                "suggested_value": None,
+                "answer_command": (f'isaac bundle decide <bundle_dir> --question {qid} --decision {B.CLOCK_ZONE_DECISION} '
+                                   '--value <IANA time-zone name> --by "<your name>"'),
+            }
+        )
+
+    # A START TIME CONFIRMED UNDER ANOTHER CLOCK ZONE is asked again: its confirmation no longer
+    # counts (bundle.local_clock_binding_problem), and it must not vanish from the list.
+    again: dict[str, list[dict]] = {}
+    for x in B.local_clock_reconfirm(bundle):
+        again.setdefault(scope_of_run(x["run_id"]), []).append(x)
+    value_of = {c["candidate_id"]: c["value"] for c in bundle["candidates"]}
+    for scope, every in again.items():
+        # where the zone now gives NO single instant (ambiguous / nonexistent) there is nothing to
+        # confirm: each such start is asked on its own, answered with `correct --value`
+        for x in [x for x in every if value_of.get(x["candidate_id"]) is None]:
+            cid = x["candidate_id"]
+            qid = _qid(scope, "confirm_value", B.XDC_START_PATH, "clock_zone_changed_no_instant", cid)
+            questions.append(
+                {
+                    "question_id": qid,
+                    "partition": None,
+                    "tier": TIER_OPTIONAL,
+                    "blocking": False,
+                    "why": "Optional, but a confirmed start time no longer counts: the instrument clock's time zone changed after it was confirmed.",
+                    "kind": "confirm_value",
+                    "reason": "clock_zone_changed_after_confirmation",
+                    "scope": scope,
+                    "target_field_path": B.XDC_START_PATH,
+                    "text": (f"The instrument clock's time zone changed after start time {cid} was confirmed, so that "
+                             "confirmation no longer counts, and under the zone now recorded its local time is not a single "
+                             "instant (ambiguous or nonexistent): there is nothing to confirm. Correct it with the UTC start."),
+                    "applies_to": {"groups": 1 if x["run_id"] in group_of else 0, "runs": 1, "targets": 1},
+                    "targets": [{"kind": "candidate", "id": cid}],
+                    "per_scope_targets": {scope: [cid]},
+                    "hints": [{"kind": "why_asked_again", "literal": x["reason"], "candidate_id": cid}],
+                    "allowed_values": None,
+                    "allowed_decisions_note": "correct (with a UTC value), reject or defer; confirm is refused: there is no value to confirm",
+                    "answer_command": (f'isaac bundle decide <bundle_dir> --question {qid} --decision correct '
+                                       '--value YYYY-MM-DDTHH:MM:SSZ --by "<your name>"'),
+                }
+            )
+        items = [x for x in every if value_of.get(x["candidate_id"]) is not None]
+        if not items:
+            continue
+        qid = _qid(scope, "confirm_value", B.XDC_START_PATH, "clock_zone_changed")
+        values = {x["candidate_id"]: value_of[x["candidate_id"]] for x in items}
+        questions.append(
+            {
+                "question_id": qid,
+                "partition": None,
+                "tier": TIER_OPTIONAL,
+                "blocking": False,
+                "why": "Optional, but a confirmed start time no longer counts: the instrument clock's time zone changed after it was confirmed.",
+                "kind": "confirm_value",
+                "reason": "clock_zone_changed_after_confirmation",
+                "scope": scope,
+                "target_field_path": B.XDC_START_PATH,
+                "text": (f"The instrument clock's time zone changed after {len(items)} start time(s) here were confirmed, so "
+                         "those confirmations no longer count. Under the zone now recorded the start is "
+                         + ", ".join(f"{v} ({cid})" for cid, v in values.items())
+                         + ". Confirm it again, or correct it."),
+                "applies_to": {"groups": len({group_of[x["run_id"]] for x in items if x["run_id"] in group_of}),
+                               "runs": len({x["run_id"] for x in items}), "targets": len(items)},
+                "targets": [{"kind": "candidate", "id": x["candidate_id"]} for x in items],
+                "per_scope_targets": {scope: [x["candidate_id"] for x in items]},
+                "hints": [{"kind": "why_asked_again", "literal": x["reason"], "candidate_id": x["candidate_id"]} for x in items[:_HINTS_PER_QUESTION]],
+                "allowed_values": None,
+                "answer_command": f'isaac bundle decide <bundle_dir> --question {qid} --decision confirm --by "<your name>"',
             }
         )
 

@@ -34,13 +34,24 @@ FORMAT_ID = "isaac.local-import-bundle"
 #: 1.3.0 (additive): ``ai_interpretation.field_path`` / ``.run_ids`` (absorber readings on
 #: record groups), the ``eligibility_rederived`` log, and a larger writable set
 #: (:data:`WRITABLE_ADDED_IN`), so eligibility stored by an older build can be STALE.
-FORMAT_VERSION = "1.3.0"
+#: 1.4.0 (additive): the ``set_clock_time_zone`` experiment decision (a 1.3.0 validator would
+#: refuse a bundle that uses it), the ``confirm_clock_time_zone`` question kind, the optional
+#: ``candidates[].local_clock`` block and ``scientist_decisions[].clock_zone_binding``, and the
+#: import rule :data:`XDC_START_RULE_ID`. Nothing becomes newly writable
+#: (``timestamps.acquired_start_utc`` already was), so :data:`WRITABLE_ADDED_IN` is unchanged.
+FORMAT_VERSION = "1.4.0"
 #: Paths this build can write that the build of an older format version could not. A value at
 #: one of them whose stored eligibility differs from this build's is STALE, not tampered.
 WRITABLE_ADDED_IN: Mapping[str, frozenset] = {
     "1.3.0": frozenset({"context.electrochemistry.potential_setpoint_V"}),
 }
-_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0")
+#: Import-time rules a format version added: ``version -> ((run source_type, rule id), ...)``. A
+#: bundle an older build imported has none of that rule's candidates on such runs, and nothing but
+#: a re-import adds them; the first save by this build says so in its ``format_upgrades`` entry.
+IMPORT_RULES_ADDED_IN: Mapping[str, tuple] = {
+    "1.4.0": (("generic:ssrl_xdc_v1", "ssrl_xdc_scan_start_v1"),),
+}
+_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0")
 #: A field composed into a draft only beside another of the SAME run (interim decision for the
 #: set-point, pending domain-owner review; ``records.compose_group`` applies it).
 COMPOSES_ONLY_WITH: Mapping[str, str] = {
@@ -564,7 +575,7 @@ DECISIONS_BY_KIND: Mapping[str, frozenset[str]] = {
     "conflict": frozenset({"confirm", "correct", "reject", "defer"}),
     "record_group": frozenset({"confirm", "split", "merge", "reject", "defer", "approve_calibration", "set_absorber"}),
     "processing_result": frozenset({"approve", "reject", "needs_changes", "defer"}),
-    "experiment": frozenset({"set_counter_positions"}),
+    "experiment": frozenset({"set_counter_positions", "set_clock_time_zone"}),
 }
 #: Record-group status from its decision (``None`` = no decision, or ``defer``).
 GROUP_STATUS_BY_DECISION: Mapping[str | None, str] = {
@@ -816,6 +827,450 @@ def candidate_decision(bundle: Mapping, candidate: Mapping, decision_of=None) ->
     return max(options, key=lambda d: decisions.index(d) if d in decisions else -1)
 
 
+# --- the SSRL XDC scan start time, and the instrument clock's time zone (1.4.0) ---------------
+#
+# THE RULE (``ssrl_xdc_scan_start_v1``, applied at import by :func:`_xdc_start_candidate`): one
+# ``timestamps.acquired_start_utc`` candidate per run the ``ssrl_xdc_v1`` reader found. Each scan's
+# line 2 is a LOCAL clock time ("Tue Jul 14 10:23:45 2099") and names no zone; there is no epoch
+# line. The run's start is the EARLIEST parsed scan time. A scan whose time did not parse, or whose
+# weekday does not fall on its date, is not used (the reader already flagged it).
+#
+# THE ZONE is a scientist's statement: ``set_clock_time_zone`` on the experiment, the IANA name of
+# the time zone the INSTRUMENT CLOCK that wrote the headers was set to. No file states it, and
+# nothing here assumes it from where the facility is. Until it is stated the candidate carries no
+# value. Once stated, :func:`apply_derivations` converts the local time on every save
+# (``local_clock_to_utc_via_confirmed_zone_v1``, zoneinfo, DST-aware); a time the zone makes
+# ambiguous (the fall-back hour) or nonexistent (the spring-forward gap) gets NO value.
+#
+# THE BINDING: ``confirm`` without ``--value`` stores no value, and the composed value is the
+# candidate's LIVE value — which a later zone decision changes. So a confirmation records the zone
+# and the converted value it was made under (``clock_zone_binding``), and a candidate whose current
+# zone or value differs from its binding is NOT eligible until it is confirmed again.
+
+XDC_PROFILE_ID = "ssrl_xdc_v1"
+XDC_RUN_SOURCE_TYPE = f"generic:{XDC_PROFILE_ID}"
+XDC_START_RULE_ID = "ssrl_xdc_scan_start_v1"
+XDC_START_RULE = (
+    f"{XDC_START_RULE_ID}: the run's acquisition start is the EARLIEST timestamp written on line 2 of "
+    "its SSRL EXAFS Data Collector 4.0 scan files, read as the instrument clock's local time. A scan "
+    "whose line-2 time does not parse, or names a weekday its date does not fall on, is not used. The "
+    "header names no time zone and states no epoch, so the time becomes a UTC value only under a "
+    "time zone a scientist confirms for that clock."
+)
+XDC_START_STATEMENT_KEY = "acquisition_timestamp"
+XDC_START_PATH = "timestamps.acquired_start_utc"
+CLOCK_ZONE_DECISION = "set_clock_time_zone"
+CLOCK_ZONE_RULE_ID = "local_clock_to_utc_via_confirmed_zone_v1"
+#: Normalisation steps on the supporting witness: the literal read as a naive local time, then
+#: (with a zone) that local time converted to UTC.
+LOCAL_CLOCK_READ_STEP = "read_local_clock"
+LOCAL_CLOCK_CONVERT_STEP = "local_clock_to_utc"
+CLOCK_ZONE_COMMAND = (
+    'isaac bundle decide <bundle_dir> --target experiment --decision set_clock_time_zone '
+    '--value <IANA time-zone name> --by "<your name>"'
+)
+CLOCK_ZONE_QUESTION = "What time zone was the instrument clock that wrote these scan headers set to?"
+_XDC_TIME_FORMAT = "%a %b %d %H:%M:%S %Y"
+_XDC_UNUSABLE_TIME = {"timestamp_unparsed": "its line-2 time does not parse",
+                      "timestamp_weekday_mismatch": "the weekday it names does not fall on its date"}
+LOCAL_CLOCK_AWAITING = "awaiting_clock_time_zone"
+LOCAL_CLOCK_CONVERTED = "converted"
+LOCAL_CLOCK_AMBIGUOUS = "ambiguous_in_zone"
+LOCAL_CLOCK_NONEXISTENT = "nonexistent_in_zone"
+
+
+def _awaiting_zone_reason() -> str:
+    return (
+        "The scan header writes a local clock time, names no time zone and states no epoch, so it is "
+        "not a UTC value and no zone is assumed. It becomes a UTC value only after a scientist "
+        "confirms the time zone the instrument clock that wrote these headers was set to: "
+        f"{CLOCK_ZONE_COMMAND}"
+    )
+
+
+_OFFSET_SHAPE = re.compile(r"[+-]\s*\d|^\d|^(?:UTC|GMT|UT)\s*[+-]", re.IGNORECASE)
+
+
+def clock_zone_problem(value: Any) -> str | None:
+    """Why ``value`` cannot be the instrument clock's time zone, or ``None``. THE ONE RULE both
+    ``decide`` and the validator apply. ACCEPTED: ``UTC``, and any Area/Location name ``zoneinfo``
+    knows — canonical names and the IANA links that keep that form (``US/Pacific``,
+    ``Asia/Calcutta``) alike. REFUSED, never mapped: a non-string or empty value; a fixed offset
+    (``-08:00``, ``UTC-8``, ``Etc/GMT+8``: it cannot say whether daylight saving applied on a scan's
+    date); a name with no Area/Location form (an abbreviation such as ``PST`` or ``EST``, or a
+    one-word name such as ``Japan``); another fixed ``Etc/`` zone; and a name ``zoneinfo`` does not know."""
+    from zoneinfo import available_timezones
+
+    if not isinstance(value, str) or not value.strip():
+        return "set_clock_time_zone needs --value: the IANA time-zone name the instrument clock was set to, as text"
+    if value == "UTC":
+        return None
+    if _OFFSET_SHAPE.search(value):
+        return (f"{value!r} is a fixed UTC offset, not a time zone: an offset cannot say whether daylight "
+                "saving time applied on each scan's date. Give the IANA name (Area/Location) of the zone "
+                "the instrument clock was set to")
+    if "/" not in value:
+        return (f"{value!r} has no Area/Location form: an abbreviation (PST, EST, ...) or a one-word name is "
+                "refused, because it does not reliably say which region's daylight-saving rules applied. Give the "
+                "Area/Location name the instrument clock was set to (an IANA link such as US/Pacific is accepted), "
+                "or UTC")
+    if value.startswith("Etc/"):
+        return f"{value!r} is a fixed zone under Etc/; give UTC or the Area/Location name the instrument clock was set to"
+    if value not in available_timezones():
+        return f"{value!r} is not a time-zone name this build's time-zone database (zoneinfo) knows"
+    return None
+
+
+def clock_zone_decision(bundle: Mapping) -> Mapping | None:
+    """The LATEST ``set_clock_time_zone`` decision (earlier ones are kept and superseded), or ``None``."""
+    found = None
+    for d in bundle.get("scientist_decisions") or ():
+        if isinstance(d, Mapping) and d.get("decision") == CLOCK_ZONE_DECISION:
+            found = d
+    return found
+
+
+def is_local_clock_start(candidate: Mapping) -> bool:
+    """A start-time candidate of :data:`XDC_START_RULE_ID` (its value waits on the clock's zone)."""
+    return _rule_id(candidate.get("rule")) == XDC_START_RULE_ID and candidate.get("target_field_path") == XDC_START_PATH
+
+
+def local_clock_to_utc(local_iso: str, zone: str) -> tuple[str, str | None]:
+    """``(status, utc)`` for a naive local time in ``zone`` (rule :data:`CLOCK_ZONE_RULE_ID`).
+    ``status`` is :data:`LOCAL_CLOCK_CONVERTED` with ``YYYY-MM-DDTHH:MM:SSZ``, or
+    :data:`LOCAL_CLOCK_AMBIGUOUS` (both offsets valid: the fall-back fold) /
+    :data:`LOCAL_CLOCK_NONEXISTENT` (the spring-forward gap) with ``None``. Never fold=0 silently."""
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo(zone)
+    naive = datetime.fromisoformat(local_iso)
+    first, second = naive.replace(tzinfo=tz, fold=0), naive.replace(tzinfo=tz, fold=1)
+    if first.utcoffset() != second.utcoffset():
+        back = first.astimezone(timezone.utc).astimezone(tz).replace(tzinfo=None)
+        return (LOCAL_CLOCK_AMBIGUOUS if back == naive else LOCAL_CLOCK_NONEXISTENT), None
+    return LOCAL_CLOCK_CONVERTED, first.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _local_clock_witness(candidate: Mapping) -> Mapping | None:
+    return next((e for e in candidate.get("evidence") or () if e.get("relation") == "supports"
+                 and e.get("method") == "deterministic_parser"), None)
+
+
+def read_xdc_literal(literal: Any) -> str | None:
+    """The naive local time an XDC line-2 literal states, as ISO, by the READER'S OWN rule (format
+    ``Www Mmm dd hh:mm:ss yyyy`` and the weekday must fall on the date), or ``None``."""
+    from datetime import datetime
+
+    if not isinstance(literal, str):
+        return None
+    try:
+        parsed = datetime.strptime(literal, _XDC_TIME_FORMAT)
+    except ValueError:
+        return None
+    return parsed.isoformat() if parsed.strftime("%a") == literal[:3] else None
+
+
+def local_clock_witness_problems(candidate: Mapping) -> list[str]:
+    """What is wrong with a start-time candidate's witnesses, re-read from their LITERALS (never
+    from a stored local time): each parser witness's literal must read under the reader's rule and
+    its ``read_local_clock`` step must say exactly that; exactly one witness ``supports``, and it is
+    the EARLIEST (ties: the lower scan index, i.e. the earlier witness — they are in scan order)."""
+    cid = candidate.get("candidate_id")
+    problems: list[str] = []
+    parsed: list[tuple[str, int, Mapping]] = []
+    witnesses = [e for e in candidate.get("evidence") or () if e.get("method") == "deterministic_parser"]
+    for i, e in enumerate(witnesses):
+        iso = read_xdc_literal(e.get("literal_value"))
+        read = [n for n in e.get("normalization") or () if n.get("step") == LOCAL_CLOCK_READ_STEP]
+        if iso is None:
+            problems.append(f"{cid} witness {e.get('evidence_id')} literal {e.get('literal_value')!r} is not a usable line-2 time")
+            continue
+        if len(read) != 1 or read[0].get("from") != e.get("literal_value") or read[0].get("to") != iso or read[0].get("rule_id") != XDC_START_RULE_ID:
+            problems.append(f"{cid} witness {e.get('evidence_id')} {LOCAL_CLOCK_READ_STEP} step does not say what its literal reads ({iso})")
+        if e.get("relation") not in ("supports", "context"):
+            problems.append(f"{cid} witness {e.get('evidence_id')} relation {e.get('relation')!r} is neither supports nor context")
+        parsed.append((iso, i, e))
+    supports = [e for e in witnesses if e.get("relation") == "supports"]
+    if len(supports) != 1:
+        problems.append(f"{cid} has {len(supports)} supporting witnesses; exactly one (the earliest scan) supports the start")
+    elif parsed and min(parsed, key=lambda t: (t[0], t[1]))[2] is not supports[0]:
+        problems.append(f"{cid} supporting witness {supports[0].get('evidence_id')} is not the earliest scan time")
+    return problems
+
+
+#: Why a start-time candidate is not proposable to the WEBSITE once converted: true of every status.
+NOT_PROPOSABLE_TO_WEBSITE = (
+    "Not proposable to the website: its UTC value rests on a scientist's statement of the instrument "
+    "clock's time zone (set_clock_time_zone), and the website's proposal route has no clock-zone "
+    "decision to carry, so the value would travel without the evidence it rests on. It is decided "
+    "in this local import instead."
+)
+
+
+def local_clock_start(candidate: Mapping, zone_decision: Mapping | None) -> dict:
+    """What a start-time candidate derives to under ``zone_decision``: ``status``, ``value``, the
+    zone and its decision id, the witness's literal and local time (RE-READ from the literal, never
+    taken from a stored step), why it is not proposable (``reason`` / ``summary``) and what the
+    conversion did (``explanation``). Pure: reads the candidate's own witness, writes nothing."""
+    witness = _local_clock_witness(candidate)
+    literal = (witness or {}).get("literal_value")
+    local_iso = read_xdc_literal(literal)
+    zone = zone_decision.get("value") if zone_decision is not None else None
+    out = {"status": LOCAL_CLOCK_AWAITING, "value": None, "zone": None, "zone_decision_id": None,
+           "literal": literal, "local_time": local_iso,
+           "reason": _awaiting_zone_reason(),
+           "summary": ("This time names no time zone, so it is not a UTC value. It becomes one only after "
+                       "you confirm the instrument clock's time zone (set_clock_time_zone)."),
+           "explanation": ("Waiting on the instrument clock's time zone: no file states it, and none is "
+                           "assumed.")}
+    if zone_decision is None or local_iso is None or clock_zone_problem(zone) is not None:
+        return out
+    out["zone"], out["zone_decision_id"] = zone, zone_decision.get("decision_id")
+    status, utc = local_clock_to_utc(local_iso, zone)
+    out["status"], out["value"] = status, utc
+    who = f"{zone} ({zone_decision.get('decision_id')})"
+    if status == LOCAL_CLOCK_CONVERTED:
+        out["reason"] = NOT_PROPOSABLE_TO_WEBSITE
+        out["summary"] = ("Not sent to the website: this UTC value rests on the clock time zone a scientist "
+                          "stated here, which the website cannot carry.")
+        out["explanation"] = (f"The scan header writes the local clock time {literal!r} and names no zone. It was "
+                              f"converted to {utc} under the instrument clock's time zone a scientist confirmed, "
+                              f"{who}, by rule {CLOCK_ZONE_RULE_ID}. Confirm it, or correct it.")
+    elif status == LOCAL_CLOCK_AMBIGUOUS:
+        out["reason"] = (f"AMBIGUOUS: the scan header's local clock time {literal!r} happens twice in {who} "
+                         "(the daylight-saving fall-back hour), so it is two different UTC instants and none "
+                         "is chosen; there is no value to propose. Give the UTC start with correct --value "
+                         "YYYY-MM-DDTHH:MM:SSZ.")
+        out["summary"] = ("This local time happens twice in the confirmed zone (the fall-back hour); no UTC "
+                          "value is chosen. Give it with correct.")
+        out["explanation"] = out["reason"]
+    else:
+        out["reason"] = (f"NONEXISTENT: the scan header's local clock time {literal!r} does not exist in {who} "
+                         "(it falls in the daylight-saving spring-forward gap), so no UTC value is given and "
+                         "there is none to propose. Check the zone, or give the UTC start with correct --value "
+                         "YYYY-MM-DDTHH:MM:SSZ.")
+        out["summary"] = ("This local time does not exist in the confirmed zone (the spring-forward gap); no "
+                          "UTC value is given. Check the zone, or give it with correct.")
+        out["explanation"] = out["reason"]
+    return out
+
+
+def _derive_local_clock_starts(bundle: dict) -> None:
+    """Re-derive every start-time candidate's value, conversion step, reasons and ``local_clock``
+    block from its witness and the LATEST zone decision. Idempotent; part of :func:`apply_derivations`."""
+    zone_d = clock_zone_decision(bundle)
+    for c in bundle.get("candidates") or ():
+        if not is_local_clock_start(c):
+            continue
+        got = local_clock_start(c, zone_d)
+        c["value"] = got["value"]
+        witness = _local_clock_witness(c)
+        if witness is not None:
+            steps = [n for n in witness["normalization"] if n.get("step") != LOCAL_CLOCK_CONVERT_STEP]
+            if got["status"] == LOCAL_CLOCK_CONVERTED:
+                steps.append({"step": LOCAL_CLOCK_CONVERT_STEP, "rule_id": CLOCK_ZONE_RULE_ID, "from": got["local_time"],
+                              "to": got["value"], "unit": None, "zone": got["zone"],
+                              "zone_decision_id": got["zone_decision_id"]})
+            witness["normalization"] = steps
+        sb = c["state_basis"]
+        sb["not_proposable_reason"], sb["not_proposable_summary"] = got["reason"], got["summary"]
+        block = dict(c.get("local_clock") or {})
+        block.update({"status": got["status"], "zone": got["zone"], "zone_decision_id": got["zone_decision_id"],
+                      "local_time": got["local_time"], "literal": got["literal"], "explanation": got["explanation"]})
+        c["local_clock"] = block
+
+
+def local_clock_binding_problem(candidate: Mapping, decision: Mapping | None, zone_decision: Mapping | None) -> str | None:
+    """Why a CONFIRMED start-time candidate may not carry its value, or ``None``. A ``correct``
+    states its own UTC value and needs no binding; a ``confirm`` carries the candidate's live value,
+    so it must have been made under the zone and the converted value that hold now."""
+    if decision is None or decision.get("decision") != "confirm":
+        return None
+    binding = decision.get("clock_zone_binding")
+    cid = candidate.get("candidate_id")
+    again = f'isaac bundle decide <bundle_dir> --target {cid} --decision confirm --by "<your name>"'
+    if not isinstance(binding, Mapping):
+        return ("Confirmed, but not under a confirmed instrument-clock time zone, so the confirmation is not "
+                f"bound to a converted value. Confirm it again once the zone is set: {again}")
+    if decision.get("value") is not None and decision.get("value") != binding.get("value"):
+        return ("Confirmed with a value of its own, which is not the value the instrument clock's time zone gives; "
+                "a value a scientist supplies is a correction: isaac bundle decide <bundle_dir> --target "
+                f"{cid} --decision correct --value YYYY-MM-DDTHH:MM:SSZ --by \"<your name>\"")
+    zone_now = zone_decision.get("value") if zone_decision is not None else None
+    if binding.get("zone") != zone_now or binding.get("value") != candidate.get("value"):
+        return (f"Confirmed under the instrument clock's time zone {binding.get('zone')} "
+                f"({binding.get('zone_decision_id')}) as {binding.get('value')}, but the clock time zone changed "
+                f"after it was confirmed: it is now {zone_now} ({(zone_decision or {}).get('decision_id')}), "
+                + (f"giving {candidate.get('value')}. Confirm it again: {again}" if candidate.get("value") is not None else
+                   "under which its local time is not a single instant (ambiguous or nonexistent), so there is nothing "
+                   "to confirm. Correct it with the UTC start: isaac bundle decide <bundle_dir> --target "
+                   f"{cid} --decision correct --value YYYY-MM-DDTHH:MM:SSZ --by \"<your name>\""))
+    return None
+
+
+def clock_zone_question(bundle: Mapping) -> dict | None:
+    """THE ONE beamtime-scope question about the instrument clock's zone, or ``None`` when no
+    start-time candidate waits on it or a ``set_clock_time_zone`` decision exists. It states how
+    many runs the answer unblocks, ONE example literal with its file, that no file states a zone,
+    and the exact command. It suggests NO zone: guessing one from where the facility is would be
+    exactly the guess CLAUDE.md §5 forbids."""
+    if clock_zone_decision(bundle) is not None:
+        return None
+    waiting = [c for c in bundle.get("candidates") or () if is_local_clock_start(c)]
+    if not waiting:
+        return None
+    runs = sorted({c["run_id"] for c in waiting if c.get("run_id")})
+    example = _local_clock_witness(waiting[0]) or {}
+    where = example.get("relative_path") or "(unlocated)"
+    text = (
+        f"{len(runs)} run(s) state their start only in the instrument clock's local time, e.g. "
+        f"{example.get('literal_value')!r} in {where} ({example.get('locator')}). No file in this import "
+        "states the clock's time zone, and none is assumed, so these start times stay out of the record. "
+        f"{CLOCK_ZONE_QUESTION} Give its IANA name (Area/Location, or UTC; not an offset or an "
+        "abbreviation). Answering converts these start times to UTC (where the zone gives exactly one instant) "
+        f"for you to confirm: "
+        f"{CLOCK_ZONE_COMMAND}"
+    )
+    return {"text": text, "run_ids": runs, "candidate_ids": [c["candidate_id"] for c in waiting],
+            "example": {"literal": example.get("literal_value"), "relative_path": example.get("relative_path"),
+                        "source_id": example.get("source_id"), "locator": example.get("locator")}}
+
+
+def local_clock_reconfirm(bundle: Mapping) -> list[dict]:
+    """Start-time candidates a scientist CONFIRMED whose confirmation no longer counts (the binding
+    check of :func:`local_clock_binding_problem`, e.g. the clock zone changed after it was given):
+    ``[{candidate_id, run_id, reason}]``. Read from ``bundle`` as derived; writes nothing."""
+    zone_d = clock_zone_decision(bundle)
+    decision_of = _decisions_by_target(bundle.get("scientist_decisions") or ())
+    out = []
+    for c in bundle.get("candidates") or ():
+        if not is_local_clock_start(c) or c.get("value_state") != STATE_SCIENTIST_CONFIRMED:
+            continue
+        problem = local_clock_binding_problem(c, candidate_decision(bundle, c, decision_of), zone_d)
+        if problem is not None:
+            out.append({"candidate_id": c["candidate_id"], "run_id": c.get("run_id"), "reason": problem})
+    return out
+
+
+def clock_zone_status(bundle: Mapping) -> dict | None:
+    """The recorded instrument-clock zone and what hangs on it, for ``summary.md`` and ``decide``:
+    ``None`` when the bundle has no start-time candidate and no zone decision."""
+    zone_d = clock_zone_decision(bundle)
+    starts = [c for c in bundle.get("candidates") or () if is_local_clock_start(c)]
+    if zone_d is None and not starts:
+        return None
+    stale = local_clock_reconfirm(bundle)
+    return {
+        "zone": zone_d.get("value") if zone_d else None,
+        "zone_decision_id": zone_d.get("decision_id") if zone_d else None,
+        "start_time_candidates": len(starts),
+        "confirmations_no_longer_counting": len(stale),
+        "candidate_ids_to_confirm_again": [x["candidate_id"] for x in stale],
+    }
+
+
+def local_clock_binding(candidate: Mapping, zone_decision: Mapping) -> dict:
+    """The ``clock_zone_binding`` a confirmation of a start-time candidate records."""
+    got = local_clock_start(candidate, zone_decision)
+    return {"zone": got["zone"], "zone_decision_id": got["zone_decision_id"], "value": got["value"],
+            "rule_id": CLOCK_ZONE_RULE_ID}
+
+
+def _xdc_start_candidate(g, run_scans: Sequence[Mapping], run_id: str, bundle_cid: str, sid_of: Mapping, writable) -> tuple[dict, dict | None] | None:
+    """``(candidate, order_anomaly or None)`` for ONE ``ssrl_xdc_v1`` run, or ``None`` when no scan
+    has a usable line-2 time. Built through the engine's own candidate type and
+    :func:`_candidate_record`, so its shape is every other candidate's."""
+    from .. import historical_import as hist
+
+    unusable: dict[str, str] = {}
+    for a in g.anomalies:
+        if a.get("kind") in _XDC_UNUSABLE_TIME and a.get("locator") == "line:2":
+            unusable.setdefault(a.get("source_relative_path"), _XDC_UNUSABLE_TIME[a["kind"]])
+    used, excluded = [], []
+    for sc in run_scans:
+        rel = sc.get("relative_path")
+        literal, naive = sc.get("timestamp_literal"), sc.get("timestamp_naive")
+        reason = unusable.get(rel) or (None if naive else "it has no line-2 time")
+        if reason is None and read_xdc_literal(literal) != naive:
+            # the reader's own parse, re-checked: a stored naive time is never trusted blind
+            reason = "its line-2 literal does not read as the stored local time (format or weekday)"
+        if reason is not None:
+            excluded.append({"relative_path": rel, "source_id": sid_of.get(rel), "scan_index": sc.get("scan_index"),
+                             "literal": literal, "reason": f"not used: {reason}"})
+            continue
+        used.append((sc.get("scan_index"), rel, literal, naive))
+    if not used:
+        return None
+    earliest = min(used, key=lambda u: (u[3], u[0] if u[0] is not None else -1))
+    index_order = [u[1] for u in sorted(used, key=lambda u: (u[0] is None, u[0] or 0))]
+    time_order = [u[1] for u in sorted(used, key=lambda u: (u[3], u[0] if u[0] is not None else -1))]
+    order_note = None
+    anomaly = None
+    if index_order != time_order:
+        order_note = ("The scans' line-2 times are not in scan-index order. Every scan is kept as evidence in "
+                      "scan-index order; nothing was reordered. The start is the earliest time, from "
+                      f"{earliest[1]} (scan {earliest[0]}).")
+        anomaly = {"kind": "scan_time_order_differs_from_index_order", "locator": "run", "detail": order_note,
+                   "severity": "note", "source_relative_path": None, "scan_index": None}
+    # THE WINDOW (bundle bound MAX_EVIDENCE_PER_CANDIDATE): scan-index order, and the earliest
+    # scan's witness is ALWAYS in it (it is the start); what is left out is counted, never silent.
+    in_order = sorted(used, key=lambda u: (u[0] is None, u[0] or 0))
+    window = in_order[:MAX_EVIDENCE_PER_CANDIDATE]
+    if earliest not in window:
+        window = [u for u in in_order if u in window[: MAX_EVIDENCE_PER_CANDIDATE - 1] or u is earliest]
+    evidence = []
+    for index, rel, literal, naive in window:
+        evidence.append({
+            "evidence_id": f"{bundle_cid}.e{len(evidence) + 1:03d}",
+            "source_id": sid_of.get(rel),
+            "relative_path": _safe_relative(rel) if rel in sid_of else None,
+            "locator_kind": "source_file" if rel in sid_of else "described",
+            "locator": "line:2",
+            "statement_key": XDC_START_STATEMENT_KEY,
+            "literal_value": literal,
+            "method": "deterministic_parser",
+            "method_id": XDC_START_RULE_ID,
+            # the earliest scan's time IS the start; the others are context for it, never contradictions
+            "relation": "supports" if rel == earliest[1] else "context",
+            "reading_index": None,
+            "normalization": [{"step": LOCAL_CLOCK_READ_STEP, "rule_id": XDC_START_RULE_ID, "from": literal, "to": naive, "unit": None}],
+        })
+    rows = tuple({"scan": index, "item": None, "source": rel, "value": naive, "source_ids": [sid_of.get(rel)], "locators": ["line:2"]}
+                 for index, rel, _, naive in window) if len(used) > 1 else ()
+    engine = hist.SemanticCandidate(
+        candidate_id=f"{g.run_key}::{XDC_START_RULE_ID}",
+        kind=hist.CANDIDATE_KIND_FIELD,
+        determinism=hist.DETERMINISM_DETERMINISTIC,
+        rule=XDC_START_RULE,
+        supporting_source_ids=tuple(rel for _, rel, _, _ in used),
+        target_field_path=XDC_START_PATH,
+        proposed_value=None,
+        not_proposable_reason=_awaiting_zone_reason(),
+        supporting_statement_total=len(used),
+        distinct_sources=len({rel for _, rel, _, _ in used}),
+        variation=rows,
+        variation_basis="per_scan" if rows else None,
+        variation_total=len(used) if rows else None,
+        variation_scans=len(used) if rows else None,
+    )
+    cand = _candidate_record(engine, bundle_cid=bundle_cid, run_id=run_id, key=XDC_START_STATEMENT_KEY,
+                             evidence=evidence, total=len(used), writable=writable)
+    cand["local_clock"] = {
+        "rule_id": XDC_START_RULE_ID,
+        "conversion_rule_id": CLOCK_ZONE_RULE_ID,
+        "timezone_stated": "not_stated",
+        "start_rule": "earliest",
+        "start_source_id": sid_of.get(earliest[1]),
+        "start_relative_path": _safe_relative(earliest[1]),
+        "scans_used": len(used),
+        "excluded_scans": excluded[:MAX_EVIDENCE_PER_CANDIDATE],
+        "excluded_scans_total": len(excluded),
+        "order_note": order_note,
+    }
+    return cand, anomaly
+
+
 def apply_derivations(bundle: dict) -> dict:
     """Recompute every DERIVED state in place and return ``bundle``.
 
@@ -826,6 +1281,9 @@ def apply_derivations(bundle: dict) -> dict:
     decision_of = _decisions_by_target(bundle.get("scientist_decisions") or ())
     interpreted = _interpreted_targets(bundle.get("ai_interpretations") or ())
     writable = _writable_paths()
+    # the start-time candidates' values follow the clock's zone decision (latest wins), every save
+    _derive_local_clock_starts(bundle)
+    zone_d = clock_zone_decision(bundle)
     eligible = 0
     for c in bundle["candidates"]:
         key = ("candidate", c["candidate_id"])
@@ -838,6 +1296,11 @@ def apply_derivations(bundle: dict) -> dict:
             value=final_value(c["value"], d, c.get("readings")),
             writable_paths=writable,
         )
+        if state == STATE_SCIENTIST_CONFIRMED and is_local_clock_start(c):
+            # THE BINDING: a confirmation made under one zone never carries a value converted under another
+            problem = local_clock_binding_problem(c, d, zone_d)
+            if problem is not None:
+                c["eligibility_for_official_record"] = {"eligible": False, "reason": problem}
         eligible += c["eligibility_for_official_record"]["eligible"]
     for m in bundle["missing_values"]:
         key = ("missing_value", m["value_id"])
@@ -1172,6 +1635,70 @@ def _split_locator(locator: str, archive_paths: Sequence[str]):
     from ..bl15 import reconstruct as rc  # local: bl15 imports historical_import
 
     return rc.split_statement_locator(locator, archive_paths)
+
+
+def _candidate_record(c, *, bundle_cid: str, run_id: str | None, key: str, evidence: list[dict], total: int, writable) -> dict:
+    """ONE bundle candidate from ONE engine :class:`SemanticCandidate` and its evidence window —
+    the single shape every candidate has, whichever rule produced it."""
+    extracted = _extracted_state_of(c)
+    state = derive_value_state(extracted, decision=None, interpreted=False)
+    distinct: list = []
+    for e in evidence:
+        if e["literal_value"] not in distinct:
+            distinct.append(e["literal_value"])
+    literals = distinct[:MAX_OBSERVED_LITERALS]
+    return {
+        "candidate_id": bundle_cid,
+        "engine_candidate_id": c.candidate_id,
+        "kind": c.kind,
+        "run_id": run_id,
+        "scope": "run" if run_id else "beamtime",
+        "statement_key": key,
+        "target_field_path": c.target_field_path,
+        "target_write_scope": _target_scope(c.target_field_path) or UPSTREAM_TARGET_FIELDS.get(c.target_field_path) or LOCAL_ANSWER_FIELDS.get(c.target_field_path),
+        "value": c.proposed_value,
+        "observed_literals": literals,
+        # THE CAP IS STATED, never silent (review L3).
+        "observed_literals_total": len(distinct),
+        "observed_literals_truncated": len(distinct) > len(literals),
+        # THE ONE INDEX SPACE for choosing a reading: the engine's RAW
+        # disagreement readings, in order, duplicates kept (review L3).
+        "readings": [r.get("value") for r in c.disagreement],
+        "standing_resolution": dict(c.standing_resolution) if c.standing_resolution else None,
+        "extracted_state": extracted,
+        "value_state": state,
+        "state_basis": {
+            "review_status": c.review_status,
+            "agreement": c.agreement,
+            "determinism": c.determinism,
+            "proposable": c.proposable,
+            "unresolved_reason": c.unresolved_reason,
+            "not_proposable_reason": c.not_proposable_reason,
+            "not_proposable_summary": _local_plain_reason(c),
+            "resolved_by_rule": c.resolved_by_rule,
+        },
+        "rule": c.rule,
+        "evidence": evidence,
+        "evidence_total": total,
+        "evidence_truncated": total > len(evidence),
+        "distinct_sources": c.distinct_sources,
+        "variation": (
+            {
+                "basis": c.variation_basis,
+                "rows_total": c.variation_total if c.variation_total is not None else len(c.variation),
+                "scans": c.variation_scans,
+                "rows": [dict(v) for v in c.variation],
+            }
+            if c.variation
+            else None
+        ),
+        "eligibility_for_official_record": eligibility_for_official_record(
+            state,
+            target_field_path=c.target_field_path,
+            value=c.proposed_value,
+            writable_paths=writable,
+        ),
+    }
 
 
 def build_bundle(
@@ -1522,6 +2049,7 @@ def build_bundle(
     generic_statements: list[dict] = []
     generic_claimed: set[str] = set()
     processed_outputs: list[dict] = []
+    xdc_runs: list[tuple] = []  # (run_id, generic run, its scans): ssrl_xdc_scan_start_v1 applies
 
     def _statement_entry(g, k: int, st: Mapping, *, run_id: str | None, po_id: str | None) -> dict:
         path = st.get("source_relative_path")
@@ -1691,9 +2219,14 @@ def build_bundle(
                 }
             )
             # STATEMENTS ARE SOURCE EVIDENCE, NEVER FIELD VALUES: no statement maps to an
-            # official field unless an explicit, tested rule says so, and there is none.
+            # official field unless an explicit, tested rule says so. There is exactly ONE such
+            # rule, ssrl_xdc_scan_start_v1 (an ssrl_xdc_v1 run's line-2 scan times ->
+            # timestamps.acquired_start_utc, valueless until the clock's zone is confirmed; built
+            # below as a candidate). The statements themselves stay extended context either way.
             for k, st in enumerate(run_statements[:MAX_GENERIC_STATEMENTS_PER_RUN]):
                 generic_statements.append(_statement_entry(g, k, st, run_id=run_id, po_id=None))
+            if g.profile == XDC_PROFILE_ID and run_scans:
+                xdc_runs.append((run_id, g, run_scans))
         # ANALYSIS FILES (.larix, .pxp): evidence in extended_context, never a run.
         generic_statements.extend(
             _analysis_file_context(generic, sources, unread, readers_seen, classifiers_seen)
@@ -1721,69 +2254,11 @@ def build_bundle(
         evidence, total = _evidence_for(
             c, bundle_cid, key, archive_paths, sid_of, ev_index
         )
-        truncated = total > len(evidence)
-        if truncated:
+        if total > len(evidence):
             evidence_windows_truncated += 1
         extracted = _extracted_state_of(c)
-        state = derive_value_state(extracted, decision=None, interpreted=False)
-        distinct: list = []
-        for e in evidence:
-            if e["literal_value"] not in distinct:
-                distinct.append(e["literal_value"])
-        literals = distinct[:MAX_OBSERVED_LITERALS]
         out_candidates.append(
-            {
-                "candidate_id": bundle_cid,
-                "engine_candidate_id": c.candidate_id,
-                "kind": c.kind,
-                "run_id": run_id,
-                "scope": "run" if run_id else "beamtime",
-                "statement_key": key,
-                "target_field_path": c.target_field_path,
-                "target_write_scope": _target_scope(c.target_field_path) or UPSTREAM_TARGET_FIELDS.get(c.target_field_path) or LOCAL_ANSWER_FIELDS.get(c.target_field_path),
-                "value": c.proposed_value,
-                "observed_literals": literals,
-                # THE CAP IS STATED, never silent (review L3).
-                "observed_literals_total": len(distinct),
-                "observed_literals_truncated": len(distinct) > len(literals),
-                # THE ONE INDEX SPACE for choosing a reading: the engine's RAW
-                # disagreement readings, in order, duplicates kept (review L3).
-                "readings": [r.get("value") for r in c.disagreement],
-                "standing_resolution": dict(c.standing_resolution) if c.standing_resolution else None,
-                "extracted_state": extracted,
-                "value_state": state,
-                "state_basis": {
-                    "review_status": c.review_status,
-                    "agreement": c.agreement,
-                    "determinism": c.determinism,
-                    "proposable": c.proposable,
-                    "unresolved_reason": c.unresolved_reason,
-                    "not_proposable_reason": c.not_proposable_reason,
-                    "not_proposable_summary": _local_plain_reason(c),
-                    "resolved_by_rule": c.resolved_by_rule,
-                },
-                "rule": c.rule,
-                "evidence": evidence,
-                "evidence_total": total,
-                "evidence_truncated": truncated,
-                "distinct_sources": c.distinct_sources,
-                "variation": (
-                    {
-                        "basis": c.variation_basis,
-                        "rows_total": c.variation_total if c.variation_total is not None else len(c.variation),
-                        "scans": c.variation_scans,
-                        "rows": [dict(v) for v in c.variation],
-                    }
-                    if c.variation
-                    else None
-                ),
-                "eligibility_for_official_record": eligibility_for_official_record(
-                    state,
-                    target_field_path=c.target_field_path,
-                    value=c.proposed_value,
-                    writable_paths=writable,
-                ),
-            }
+            _candidate_record(c, bundle_cid=bundle_cid, run_id=run_id, key=key, evidence=evidence, total=total, writable=writable)
         )
         if c.disagreement and (extracted == STATE_CONFLICTING or c.resolved_by_rule):
             # A disagreement a STORED rule resolved is still a conflict entry (review
@@ -1801,6 +2276,19 @@ def build_bundle(
                     archive_paths, sid_of,
                 )
             )
+
+    # ssrl_xdc_scan_start_v1: one start-time candidate per XDC run, continuing the cand sequence
+    for run_id, g, run_scans in xdc_runs:
+        built = _xdc_start_candidate(g, run_scans, run_id, f"cand-{len(out_candidates) + 1:04d}", sid_of, writable)
+        if built is None:
+            continue  # no scan states a usable time: the run's start stays a missing value
+        cand, order_anomaly = built
+        out_candidates.append(cand)
+        runs_by_id[run_id]["candidate_ids"].append(cand["candidate_id"])
+        if order_anomaly is not None:
+            runs_by_id[run_id]["other_relationships"]["anomalies"].append(order_anomaly)
+    if len(out_candidates) > MAX_CANDIDATES:
+        raise BundleBoundsExceeded(f"{len(out_candidates)} candidates exceeds the bound of {MAX_CANDIDATES}.")
 
     # corpus-level conflicts (no candidate carries them)
     for cc in rel_state.get("corpus_conflicts") or ():
@@ -2200,7 +2688,10 @@ def refresh_questions(bundle: dict) -> dict:
     since 1.1.0 — ``missing_value`` questions ONLY for values the official record
     REQUIRES (:func:`required_record_paths`), ordered by record (record groups when
     present, else runs), record-scope first. Answered targets keep their question; a
-    question is about a value, not about whether it has been answered."""
+    question is about a value, not about whether it has been answered. The ONE exception is the
+    beamtime-scope ``confirm_clock_time_zone`` question (1.4.0), which is about a fact no file
+    states and is asked only while no ``set_clock_time_zone`` decision exists."""
+    _derive_local_clock_starts(bundle)  # so a prompt below quotes what the zone decision gives now
     questions: list[dict] = []
     for conflict in bundle["conflicts"]:
         questions.append(
@@ -2217,7 +2708,30 @@ def refresh_questions(bundle: dict) -> dict:
                 "options": [r["value"] for r in conflict["readings"]],
             }
         )
+    reconfirm = {x["candidate_id"]: x["reason"] for x in local_clock_reconfirm(bundle)}
     for cand in bundle["candidates"]:
+        if cand["extracted_state"] == STATE_NEEDS_REVIEW and cand["target_field_path"] and is_local_clock_start(cand):
+            # A LOCAL clock literal is never offered as an answer for a *_utc field: before a zone the
+            # question has no option and says it waits on the zone; after, its one option is the UTC value.
+            clock = cand.get("local_clock") or {}
+            if cand["candidate_id"] in reconfirm:
+                prompt = f"{cand['target_field_path']}: {reconfirm[cand['candidate_id']]}"
+            elif clock.get("status") == LOCAL_CLOCK_AWAITING:
+                prompt = (f"{cand['target_field_path']}: waits on the instrument clock's time zone (no file states it); "
+                          "nothing can be confirmed until it is stated (see the confirm_clock_time_zone question).")
+            else:
+                prompt = f"{cand['target_field_path']}: {clock.get('explanation') or cand['state_basis']['not_proposable_summary']}"
+            questions.append(
+                {
+                    "question_id": "",
+                    "kind": "confirm_value",
+                    "target": {"kind": "candidate", "id": cand["candidate_id"]},
+                    "run_id": cand["run_id"],
+                    "prompt": prompt,
+                    "options": [cand["value"]] if cand["value"] is not None else [],
+                }
+            )
+            continue
         if cand["extracted_state"] == STATE_NEEDS_REVIEW and cand["target_field_path"]:
             questions.append(
                 {
@@ -2232,6 +2746,18 @@ def refresh_questions(bundle: dict) -> dict:
                     "options": list(cand["observed_literals"]),
                 }
             )
+    zone_question = clock_zone_question(bundle)
+    if zone_question is not None:
+        questions.append(
+            {
+                "question_id": "",
+                "kind": "confirm_clock_time_zone",
+                "target": {"kind": "experiment", "id": "experiment"},
+                "run_id": None,
+                "prompt": zone_question["text"],
+                "options": [],  # NO suggested value: no file states the zone
+            }
+        )
     control_mode: dict[str | None, str] = {}
     for cand in bundle["candidates"]:
         if cand["target_field_path"] == "context.electrochemistry.control_mode" and isinstance(cand["value"], str):
@@ -2628,12 +3154,33 @@ def stale_eligibility(bundle: Mapping) -> list[dict]:
     return out
 
 
-def upgrade_statement(from_version: str | None, newly_writable: Iterable[str]) -> str:
+def import_rules_missing(bundle: Mapping) -> list[tuple[str, str]]:
+    """``[(run source_type, rule id)]`` for import rules a LATER format added
+    (:data:`IMPORT_RULES_ADDED_IN`) that this bundle has runs for and no candidate of: an older
+    build imported it, and only a re-import applies the rule. Empty for a bundle of this version."""
+    version = bundle.get("format_version")
+    at = _VERSION_ORDER.index(version) if version in _VERSION_ORDER else -1
+    have = {_rule_id(c.get("rule")) for c in bundle.get("candidates") or ()}
+    kinds = {r.get("source_type") for r in bundle.get("runs") or ()}
+    out = []
+    for v, rules in IMPORT_RULES_ADDED_IN.items():
+        if _VERSION_ORDER.index(v) > at:
+            out += [(st, rid) for st, rid in rules if st in kinds and rid not in have]
+    return out
+
+
+def upgrade_statement(from_version: str | None, newly_writable: Iterable[str],
+                      rules_missing: Iterable[tuple[str, str]] = ()) -> str:
     """THE ONE SENTENCE every surface prints about an upgrade of an older bundle."""
     if list(newly_writable):
-        return (f"upgraded from {from_version}; fields this build can newly write have no answer slots on runs that "
+        text = (f"upgraded from {from_version}; fields this build can newly write have no answer slots on runs that "
                 "lacked a parsed value — re-import to get them")
-    return f"upgraded from {from_version}"
+    else:
+        text = f"upgraded from {from_version}"
+    for source_type, rule_id in rules_missing:
+        text += (f"; its {source_type.split(':', 1)[-1]} runs were imported before rule {rule_id} existed and carry "
+                 "none of its candidates — re-import to get them")
+    return text
 
 
 def record_format_upgrade(bundle: dict, *, from_version: str | None, to_version: str, decisions_before: int) -> dict:
@@ -2650,7 +3197,7 @@ def record_format_upgrade(bundle: dict, *, from_version: str | None, to_version:
         "upgraded_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "decisions_before": int(decisions_before),
         "newly_writable_paths": newly,
-        "statement": upgrade_statement(from_version, newly),
+        "statement": upgrade_statement(from_version, newly, import_rules_missing(bundle)),
     }
     bundle.setdefault("format_upgrades", []).append(entry)
     return entry
@@ -2658,7 +3205,7 @@ def record_format_upgrade(bundle: dict, *, from_version: str | None, to_version:
 
 def needs_format_upgrade(bundle: Mapping) -> bool:
     """True when this build has not yet re-derived an older bundle (and logged it)."""
-    if not _added_since(bundle.get("format_version")):
+    if not _added_since(bundle.get("format_version")) and not import_rules_missing(bundle):
         return False
     return not any(u.get("derived_by_format_version") == FORMAT_VERSION for u in bundle.get("format_upgrades") or ())
 
@@ -2848,6 +3395,14 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50) -> list[str]:
             is_absorber_element(d.get("element")) and is_absorber_edge(d.get("edge"))
         ):
             errors.append(f"decision: {d['decision_id']} {d['decision']} needs an element and an edge (K, L1-L3, M1-M5)")
+        if d.get("decision") == CLOCK_ZONE_DECISION:
+            problem = clock_zone_problem(d.get("value"))
+            if problem is not None:
+                errors.append(f"decision: {d['decision_id']} {problem}")
+    for c in bundle["candidates"]:
+        if is_local_clock_start(c):
+            # THE WITNESSES ARE RE-READ FROM THEIR LITERALS (ssrl_xdc_scan_start_v1), never trusted
+            errors.extend(f"provenance: {p}" for p in local_clock_witness_problems(c))
     for i in bundle["ai_interpretations"]:
         half = ABSORBER_READING_FIELDS.get(i.get("field_path"))
         if half is None:
@@ -2991,6 +3546,12 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50) -> list[str]:
             )
         if c["eligibility_for_official_record"]["eligible"] != e["eligibility_for_official_record"]["eligible"]:
             errors.append(f"eligibility: {c['candidate_id']} eligibility disagrees with its state")
+        if is_local_clock_start(c):
+            # THE CONVERSION IS RE-RUN, NEVER TRUSTED: value, steps, reasons and block are what the
+            # witness and the latest zone decision give.
+            for part in ("value", "evidence", "state_basis", "local_clock"):
+                if json.dumps(c.get(part), sort_keys=True) != json.dumps(e.get(part), sort_keys=True):
+                    errors.append(f"consistency: {c['candidate_id']} {part} is not what {XDC_START_RULE_ID} and the clock's zone decision give")
     for m, e in zip(bundle["missing_values"], expected["missing_values"]):
         if m["value_state"] != e["value_state"]:
             errors.append(f"state: {m['value_id']} is {m['value_state']} but only {e['value_state']} is supported")

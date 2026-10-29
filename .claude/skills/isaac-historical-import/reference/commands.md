@@ -25,7 +25,7 @@
 | Pull text and images out of a document | `python -m isaac_api.local_import.extract <file> --out <dir> [--root <folder>]` or `--from-bundle <bundle>/unread_files.json --root <folder> [--limit N]` |
 
 Decisions by target kind: candidate / missing value / conflict: `confirm` `correct` `reject` `defer`;
-record group: `confirm` `split` `merge` `reject` `defer` `approve_calibration` (needs `--element` and `--edge`), `set_absorber` (needs `--element` and `--edge`; changes nothing else about the group); the experiment (`--target experiment`): `set_counter_positions` (needs `--positions`); processing result: `approve` (always with `--qc-status`) `reject`
+record group: `confirm` `split` `merge` `reject` `defer` `approve_calibration` (needs `--element` and `--edge`), `set_absorber` (needs `--element` and `--edge`; changes nothing else about the group); the experiment (`--target experiment`): `set_counter_positions` (needs `--positions`), `set_clock_time_zone` (needs `--value` with the IANA name, Area/Location or `UTC`, of the time zone the INSTRUMENT CLOCK that wrote the scan headers was set to; offsets and abbreviations are refused); processing result: `approve` (always with `--qc-status`) `reject`
 `needs_changes` `defer`. `confirm` and `correct` on a conflict or missing value need `--value`.
 
 Exit codes: 0 ok · 1 not valid / not exportable (validate, export, check) · 2 usage or refused

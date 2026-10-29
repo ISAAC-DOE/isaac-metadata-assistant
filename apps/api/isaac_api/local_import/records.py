@@ -242,6 +242,19 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[di
         d = B.candidate_decision(bundle, c)
         value = B.final_value(c["value"], d, c.get("readings"))
         evidence = _witnesses(c) + [_confirmation({**d, "value": value}, f"Confirm {path}")]
+        if B.is_local_clock_start(c) and d.get("decision") == "confirm":
+            # The value is the file's local clock time converted under the zone a scientist stated
+            # for the INSTRUMENT CLOCK: that statement is part of the value's evidence. (A `correct`
+            # gives its own UTC value, so no zone stands behind it.) DEFENCE IN DEPTH: the zone is
+            # credited ONLY when the composed value IS what the rule produced under that zone and
+            # the confirmation is bound to it — never for a value the rule did not give.
+            zone_d = B.clock_zone_decision(bundle)
+            binding = d.get("clock_zone_binding") or {}
+            produced = B.local_clock_start(c, zone_d)["value"] if zone_d is not None else None
+            if (zone_d is not None and produced is not None and value == produced
+                    and binding.get("value") == produced and binding.get("zone") == zone_d.get("value")):
+                evidence.append(_confirmation(zone_d, B.CLOCK_ZONE_QUESTION)
+                                | {"rule_id": B.CLOCK_ZONE_RULE_ID, "local_time": (c.get("local_clock") or {}).get("local_time")})
         # DEC-76: the reaction's home in the portal's schema is context.reaction.name;
         # context.electrochemistry.reaction is deprecated there.
         proposals.setdefault(FIELD_REMAP.get(path, path), []).append((value, evidence, c["candidate_id"]))

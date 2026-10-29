@@ -121,7 +121,9 @@ them because the rest matches; please confirm"; `sample_key_basis: name_stem` = 
 their file names because no file states the sample; please confirm". The experiment question
 `naming_counter_positions` asks which filename positions hold a counter; answer it once:
 `decide <bundle> --target experiment --decision set_counter_positions --positions N --by "<name>"`, then
-`bundle group <bundle> --regroup`. Ask the
+`bundle group <bundle> --regroup`. (The other experiment question, `clock_time_zone`, asks the instrument clock's
+time zone for SSRL XDC scan start times: `--decision set_clock_time_zone --value <IANA name>`; never suggest one —
+see `reference/questions-and-decisions.md`.) Ask the
 scientist to **confirm, split or merge** each, in batches, with progress. Record with `decide
 --decision confirm|split|merge` (`--split-into` takes a JSON list of lists of run keys, which you
 build; they never type it).

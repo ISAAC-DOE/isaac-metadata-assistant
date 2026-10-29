@@ -215,6 +215,8 @@ def _clip(text: Any, n: int = 80) -> str:
 
 def render_summary(bundle: Mapping) -> str:
     """The compact, scientist-readable summary. Windowed sections, every window counted."""
+    from . import bundle as B
+
     counts = bundle["counts"]
     root = bundle["source_root"]
     readiness = bundle["readiness"]
@@ -234,6 +236,20 @@ def render_summary(bundle: Mapping) -> str:
     for u in bundle.get("format_upgrades") or ():
         add("")
         add(f"> **Bundle {u['statement']}** (by a {u['derived_by_format_version']} build, {u['upgraded_utc']}).")
+    clock = B.clock_zone_status(bundle)
+    if clock is not None:
+        add("")
+        if clock["zone"] is None:
+            add(f"Instrument clock time zone: **not stated** — {clock['start_time_candidates']} scan start time(s) are "
+                "local clock times with no zone and stay out of the record until a scientist states the zone "
+                "(`--target experiment --decision set_clock_time_zone`). None is assumed.")
+        else:
+            add(f"Instrument clock time zone: **{clock['zone']}** (decision {clock['zone_decision_id']}), applied to "
+                f"{clock['start_time_candidates']} scan start time(s).")
+        if clock["confirmations_no_longer_counting"]:
+            add(f"> **{clock['confirmations_no_longer_counting']} start-time confirmation(s) no longer count**: the clock "
+                "time zone changed after they were confirmed. Confirm again: "
+                + ", ".join(clock["candidate_ids_to_confirm_again"][:20]) + ".")
     add("")
     add("## Counts")
     add("")
@@ -762,7 +778,7 @@ def cmd_bundle_check(args) -> int:
             print(f"  ... and {len(stale) - 50} more")
         print("  Remedy: any change re-derives it under this build and logs each value in `eligibility_rederived`; "
               "`isaac bundle build-records` does that under the bundle lock before composing.")
-        print(f"  On that write: {B.upgrade_statement(bundle.get('format_version'), B._added_since(bundle.get('format_version')))}.")
+        print(f"  On that write: {B.upgrade_statement(bundle.get('format_version'), B._added_since(bundle.get('format_version')), B.import_rules_missing(bundle))}.")
         print("  Exit code 1 (EXIT_INVALID): the CLI has no exit code of its own for STALE.")
         return EXIT_INVALID
     bundle = B.load_bundle(path)
@@ -1148,8 +1164,12 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--question", help="answer a consolidated question: one decision per target, each listed")
     q.add_argument("--only", help="with --question: only this scope (group:<id> or run:<id>) — a per-group override")
     q.add_argument("--field", help="with --question on an optional-values question: the one field being answered")
-    q.add_argument("--decision", required=True)
-    q.add_argument("--value")
+    q.add_argument("--decision", required=True,
+                   help="candidate / missing value / conflict: confirm correct reject defer; record group: confirm split merge "
+                        "reject defer approve_calibration set_absorber; processing result: approve reject needs_changes defer; "
+                        "--target experiment: set_counter_positions (with --positions) or set_clock_time_zone (with --value)")
+    q.add_argument("--value", help="the value; for set_clock_time_zone the IANA name (Area/Location, or UTC) of the time zone "
+                                   "the INSTRUMENT CLOCK that wrote the scan headers was set to (no offset, no abbreviation)")
     q.add_argument("--json", action="store_true", help="parse --value as JSON")
     q.add_argument("--by", required=True)
     q.add_argument("--orcid")

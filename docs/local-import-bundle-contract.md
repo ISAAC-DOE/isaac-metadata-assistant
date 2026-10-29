@@ -1,6 +1,6 @@
 # ISAAC Local Import Bundle — contract v1
 
-Status: **v1.3.0** (absorber readings on record groups, a larger writable set and STALE bundles, 2026-10-29, §9 "What 1.3.0 added"; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
+Status: **v1.4.0** (the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
 [`apps/api/isaac_api/local_import/bundle-v1.schema.json`](../apps/api/isaac_api/local_import/bundle-v1.schema.json)
 (JSON Schema draft 2020-12) plus the checks in
 [`bundle.py`](../apps/api/isaac_api/local_import/bundle.py) `validate_bundle` that JSON
@@ -413,6 +413,110 @@ A minor version by the rules above: optional fields, and a writable set that onl
   1.2.0's: there is one schema file, and only `processed_outputs` is tied to a label.
 - A 1.3.0 bundle requires `processed_outputs`, like 1.2.0.
 
+### What 1.4.0 added (the SSRL XDC scan start time and the instrument clock's time zone)
+
+A minor version by the rules above: a widened decision enum (a 1.3.0 validator refuses a bundle
+holding `set_clock_time_zone`, which is why the label moves), a widened question-kind enum, and
+optional fields. **Nothing becomes newly writable** — `timestamps.acquired_start_utc` already was —
+so `WRITABLE_ADDED_IN` is unchanged and no eligibility is STALE because of 1.4.0.
+
+- **The rule `ssrl_xdc_scan_start_v1` (import time, profile `ssrl_xdc_v1` only).** One candidate
+  per XDC run: `statement_key: acquisition_timestamp`, `target_field_path:
+  timestamps.acquired_start_utc`, scope and write scope `run`, ids continuing the `cand-NNNN`
+  sequence, listed in `runs[].candidate_ids`. Each scan's line 2 (`Tue Jul 14 10:23:45 2099`) is a
+  LOCAL clock time with no zone, and there is no epoch line (unlike BL15-2 SPEC files, whose `#D`
+  local time stays not-proposable evidence beside the epoch; those candidates are unchanged). One
+  evidence entry per scan with a usable time (`locator: line:2`, `method: deterministic_parser`,
+  `method_id: ssrl_xdc_scan_start_v1`, the literal verbatim, a `read_local_clock` normalisation to
+  the naive local time). **The start is the EARLIEST parsed time**; that witness `supports`, the
+  others are `context` (never `contradicts`). Evidence stays in scan-index order; when time order
+  differs, `local_clock.order_note` and a run anomaly `scan_time_order_differs_from_index_order`
+  say so — nothing is reordered. A scan whose time did not parse or names a weekday its date does
+  not fall on (the reader already flags both) is NOT used and is listed in
+  `local_clock.excluded_scans` (a window of at most 256, with `excluded_scans_total`); a run with no
+  usable time gets no candidate (its start stays a missing value). **Bounded:** the evidence is a
+  window of at most 256 witnesses (`MAX_EVIDENCE_PER_CANDIDATE`) in scan-index order that ALWAYS
+  includes the earliest scan's witness, with `evidence_total` (every usable scan) and
+  `evidence_truncated` stated; the variation rows are the same window with `rows_total`. The
+  timestamp statements stay in `extended_context` as before.
+- **No zone, no value.** Until a zone is stated the candidate's `value` is `null`, it is
+  `needs_review`, not proposable, and its `not_proposable_reason` says the header writes a local
+  clock time, names no time zone and states no epoch, and becomes a UTC value only after a
+  scientist confirms the instrument clock's zone, with the command. `confirm` is refused (naming
+  the command); `correct --value <UTC instant>` is always available. **`confirm --value` is
+  refused at every stage** for these candidates (pointing to `correct --value`): a confirm stands
+  only for the value the rule produced, and a value the scientist supplies is a correction.
+- **The decision `set_clock_time_zone`** (`--target experiment --value <IANA name> --by NAME`): the
+  time zone the INSTRUMENT CLOCK that wrote the headers was set to — not "the facility's time
+  zone". ACCEPTED: `UTC`, and any Area/Location name `zoneinfo` knows, including the IANA links that
+  keep that form (`US/Pacific`, `Asia/Calcutta`). REFUSED with a plain message, never mapped: a
+  non-string or empty value; a fixed offset (`-08:00`, `UTC-8`, `Etc/GMT+8`); a name with no
+  Area/Location form (abbreviations such as `PST`, `PDT`, `EST`, and one-word names such as `Japan`);
+  another fixed `Etc/` zone; and an unknown name (`bundle.clock_zone_problem`, the one rule `decide`
+  and the validator share). Idempotent; a later one supersedes the earlier (the
+  latest wins; every one is kept).
+- **The question.** While start-time candidates wait and no zone decision exists, ONE
+  beamtime-scope question asks for it: v1 `questions[]` kind `confirm_clock_time_zone` (target
+  `experiment`, `options: []`) and consolidated kind `clock_time_zone` (optional tier,
+  `allowed_decisions: [set_clock_time_zone]`, `suggested_value: null`). It states how many runs it
+  unblocks, one example literal with its file and locator, that no file states a zone, and the
+  exact command. **It suggests no zone**: no file states one, and guessing from where the facility
+  is is exactly what CLAUDE.md §5 forbids. Before a zone exists the consolidated list asks no per-run
+  confirm question for these candidates; the fine-grained v1 `questions[]` list keeps its per-candidate
+  `confirm_value` entry (v1 lists every needs-review value) but with `options: []` and a prompt saying
+  it waits on the clock's zone — a local literal is never offered as an answer for a `*_utc` field.
+  After a zone, its one option is the converted UTC value.
+- **The conversion, re-derived on every save** (`apply_derivations`, rule
+  `local_clock_to_utc_via_confirmed_zone_v1`, zoneinfo, DST-aware): the value becomes
+  `YYYY-MM-DDTHH:MM:SSZ`, recorded as a `local_clock_to_utc` normalisation step on the supporting
+  witness carrying `zone` and `zone_decision_id` (both new optional step fields), and in the
+  candidate's optional `local_clock` block (`status`, `zone`, `zone_decision_id`, `local_time`,
+  `literal`, `explanation`, the rule ids). **`not_proposable_reason` keeps meaning what its name
+  says**: once converted it says why the value is not proposable to the website (its UTC value rests
+  on a clock-zone statement the website's proposal route cannot carry), and what the conversion did
+  is in `local_clock.explanation` and the question text. A local time that is **ambiguous** in the zone (the fall-back fold:
+  both offsets valid) or **nonexistent** (the spring-forward gap) gets NO value; the reason names
+  which and quotes the literal. Fold 0 is never picked silently. **Nothing stored is trusted:** the
+  derivation converts the supporting witness's LITERAL, re-read with the reader's exact format and
+  weekday check, never the stored `read_local_clock.to`; the validator refuses a witness whose literal
+  does not read, whose `read_local_clock` step does not say exactly what its literal reads, or a
+  `supports` witness that is not the earliest scan (ties: the lower scan index), and it re-runs the
+  conversion and refuses a stored value, step, reason or block it does not reproduce.
+- **The binding.** `confirm` without `--value` stores `value: null`, and the composed value is the
+  candidate's LIVE value — which a later zone decision changes. So a confirmation of a start-time
+  candidate records `clock_zone_binding {zone, zone_decision_id, value, rule_id}`: the zone and the
+  converted value it was made under. A confirmed candidate whose current zone or value differs from
+  its binding (or a confirm with no binding) is **not eligible**, and its reason says the clock
+  time zone changed after it was confirmed and to confirm it again; re-confirming records a new
+  binding. **DELIBERATE DEPARTURE from "any zone decision change invalidates":** the binding
+  compares the zone AND the value, not the decision id, so restating the same zone (by anyone), or
+  returning to the zone a confirmation was made under with the same value, keeps that confirmation;
+  a different zone invalidates it even when it gives the identical value (e.g. `UTC` and
+  `Europe/London` in January), and a different value invalidates it under the same zone. **A zone
+  change is never silent:** `decide` returns `clock_zone` (the zone, its decision id,
+  `confirmations_invalidated_now`, `candidate_ids_to_confirm_again` and a statement, also printed to
+  stderr when anything was undone); `summary.md` states the recorded clock zone with its decision id
+  and how many confirmations no longer count; and each such candidate is asked again in the
+  consolidated list (`confirm_value`, `reason: clock_zone_changed_after_confirmation`) and its v1
+  prompt says why. `decide` counts only what THAT decision undid (`to_confirm_again` /
+  `to_correct`), never a confirmation already stale. Where the new zone gives no single instant
+  (ambiguous or nonexistent) there is nothing to confirm: the statement, the eligibility reason and
+  the re-ask (one per candidate) say "correct it" and give a `correct --value` command. A `correct` states its own UTC value and needs no binding.
+  Bulk confirm is allowed (the candidate has source evidence). Older bundles stay valid: the field
+  is optional and no older bundle holds such a candidate.
+- **Composition** (`records.compose_group`): the composed `timestamps.acquired_start_utc` carries
+  the file literal witness(es), the candidate's confirmation, and — only when the composed value is
+  exactly what the rule produced under the current zone and the confirmation is bound to it — a
+  `user_confirmation` for the zone decision (question: "What time zone was the instrument clock that wrote these scan headers set
+  to?", with the conversion rule and the local time). A `correct`ed value carries no zone entry.
+  Group disagreement is unchanged: two runs of one group with different starts fill nothing.
+- **An older bundle** (1.3.0 or earlier) with `ssrl_xdc_v1` runs has none of these candidates; a
+  save does not apply an import rule. Its first write by this build relabels it 1.4.0 (when it has
+  `processed_outputs`, as before) and logs a `format_upgrades` entry whose statement adds "its
+  ssrl_xdc_v1 runs were imported before rule ssrl_xdc_scan_start_v1 existed and carry none of its
+  candidates — re-import to get them" (`bundle.IMPORT_RULES_ADDED_IN`, `import_rules_missing`).
+- A 1.4.0 bundle requires `processed_outputs`, like 1.2.0 and 1.3.0.
+
 ## 10. Exit codes (`isaac import` / `isaac bundle`)
 
 0 ok · 1 `check` found the bundle invalid, or STALE (stored by an older build, §9 "What 1.3.0
@@ -512,8 +616,9 @@ Exit codes for the LOCAL-2 commands: `validate` and `export` exit 1 when any dra
   read>)` after the engine. Each generic run is a `runs[]` entry with `source_type:
   generic:<profile>` and `reader {reader_id, profile, profile_version, statements_total,
   statements_kept}`; its statements are `extended_context` entries (`source_recorded`,
-  `run_id`, at most 200 per run, the total stated). No statement maps to a field: there is no
-  rule for it. Claimed files leave `unread_files`. A ZIP given AS THE ROOT is not walked by the
+  `run_id`, at most 200 per run, the total stated). No statement maps to a field unless an
+  explicit, tested rule says so; there is exactly one, `ssrl_xdc_scan_start_v1` (§9 "What 1.4.0
+  added"), and the statements stay extended context even then. Claimed files leave `unread_files`. A ZIP given AS THE ROOT is not walked by the
   generic readers; a ZIP found INSIDE a folder is (§21).
   **Since 1.2.0 an XDI file whose header states Athena/Demeter is a `processed_outputs[]`
   entry instead of a run** (§9, "What 1.2.0 added").

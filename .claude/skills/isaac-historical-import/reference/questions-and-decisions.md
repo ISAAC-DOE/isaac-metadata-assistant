@@ -24,6 +24,18 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
 
 - **An answer to a consolidated question:** `decide <bundle> --question <Q> --decision correct|confirm --value <v> --by "<name>" [--note "..."]`. It records one decision per target, each listed in the reply; read the list back. `--only group:<id>` answers for one group only (a per-group override of an experiment-wide answer); `--field <path>` picks the one field when a question covers several optional fields.
 - **Experiment-scope question:** say "This applies to N groups. One answer for all, or do some differ?" Only split when the scientist says so.
+- **The instrument clock's time zone** (`clock_time_zone`, experiment scope, optional): SSRL XDC
+  (beamline 4-3 style) scan headers write the start as a local clock time with no zone, so those
+  start times have no value until the scientist states the zone the instrument clock was set to.
+  Ask it in their words; **suggest no zone** — no file states one, and the facility's location is
+  not evidence about the clock. Record: `decide <bundle> --question <Q> --decision set_clock_time_zone
+  --value <the IANA name they give: Area/Location, or UTC> --by "<name>"` (an offset like
+  `-08:00` or an abbreviation like `PST` is refused; ask again for the zone name). Then each start
+  time is shown converted to UTC and needs its own `confirm` (bulk allowed). A time that falls in
+  the daylight-saving fall-back hour or spring-forward gap gets no value: ask for the UTC start and
+  record it with `correct --value YYYY-MM-DDTHH:MM:SSZ` (`confirm` takes no `--value` here). If the
+  zone is changed later to a different zone, every start confirmed under the old one stops counting
+  until confirmed again: `decide` reports how many, and `bundle questions` asks them again; say so.
 - **QC status** is asked when approving processing, not here (Step 6).
 - **Never** pass `--test-marker` to `build-records` with a real scientist; it is for the self-test.
 

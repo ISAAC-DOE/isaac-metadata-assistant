@@ -45,9 +45,10 @@
         "1.0.0",
         "1.1.0",
         "1.2.0",
-        "1.3.0"
+        "1.3.0",
+        "1.4.0"
       ],
-      "description": "1.1.0 adds record_groups, processing_results and exposures (all optional, so a 1.0.0 bundle still validates) and widens the decision, target and question enums. 1.2.0 adds processed_outputs (optional; absent means none were recorded) and extended_context_entry.processed_output_id. A 1.2.0 bundle REQUIRES processed_outputs (possibly empty); a bundle without it keeps its older version. 1.3.0 adds ai_interpretation.field_path and .run_ids and the optional eligibility_rederived and format_upgrades logs (all optional), and eligibility is derived under a larger writable set (context.electrochemistry.potential_setpoint_V). A 1.3.0 bundle also REQUIRES processed_outputs."
+      "description": "1.1.0 adds record_groups, processing_results and exposures (all optional, so a 1.0.0 bundle still validates) and widens the decision, target and question enums. 1.2.0 adds processed_outputs (optional; absent means none were recorded) and extended_context_entry.processed_output_id. A 1.2.0 bundle REQUIRES processed_outputs (possibly empty); a bundle without it keeps its older version. 1.3.0 adds ai_interpretation.field_path and .run_ids and the optional eligibility_rederived and format_upgrades logs (all optional), and eligibility is derived under a larger writable set (context.electrochemistry.potential_setpoint_V). A 1.3.0 bundle also REQUIRES processed_outputs. 1.4.0 adds the set_clock_time_zone experiment decision (and its decision field clock_zone_binding on a confirm), the confirm_clock_time_zone question kind, the optional candidates[].local_clock block and the optional zone / zone_decision_id on a normalization step (all additive); nothing becomes newly writable. A 1.4.0 bundle also REQUIRES processed_outputs."
     },
     "is_official_record": {
       "const": false
@@ -1574,6 +1575,20 @@
             "string",
             "null"
           ]
+        },
+        "zone": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "1.4.0 local_clock_to_utc step: the IANA zone a scientist confirmed for the instrument clock."
+        },
+        "zone_decision_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "1.4.0 local_clock_to_utc step: the set_clock_time_zone decision that stated the zone."
         }
       }
     },
@@ -1850,6 +1865,112 @@
             "object",
             "null"
           ]
+        },
+        "local_clock": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "rule_id",
+            "conversion_rule_id",
+            "timezone_stated",
+            "start_rule",
+            "status",
+            "zone",
+            "zone_decision_id",
+            "local_time",
+            "literal",
+            "excluded_scans",
+            "order_note",
+            "explanation"
+          ],
+          "properties": {
+            "rule_id": {
+              "const": "ssrl_xdc_scan_start_v1"
+            },
+            "conversion_rule_id": {
+              "const": "local_clock_to_utc_via_confirmed_zone_v1"
+            },
+            "timezone_stated": {
+              "const": "not_stated"
+            },
+            "start_rule": {
+              "const": "earliest"
+            },
+            "start_source_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "start_relative_path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "scans_used": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "status": {
+              "enum": [
+                "awaiting_clock_time_zone",
+                "converted",
+                "ambiguous_in_zone",
+                "nonexistent_in_zone"
+              ]
+            },
+            "zone": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "zone_decision_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "local_time": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "literal": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "excluded_scans": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "object"
+              }
+            },
+            "order_note": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "explanation": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "What the conversion did (or why there is no value), in words. The not_proposable_reason says only why the value is not proposable to the website."
+            },
+            "excluded_scans_total": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "How many scans were not used, when excluded_scans is a window."
+            }
+          },
+          "description": "1.4.0, a timestamps.acquired_start_utc candidate of rule ssrl_xdc_scan_start_v1: the earliest line-2 local clock time of the run's scans, which names no zone. status is re-derived on every save from the latest set_clock_time_zone decision (rule local_clock_to_utc_via_confirmed_zone_v1); an ambiguous or nonexistent local time in that zone gets no value."
         }
       }
     },
@@ -2292,7 +2413,8 @@
           "enum": [
             "resolve_conflict",
             "confirm_value",
-            "missing_value"
+            "missing_value",
+            "confirm_clock_time_zone"
           ]
         },
         "target": {
@@ -2484,7 +2606,8 @@
             "needs_changes",
             "approve_calibration",
             "set_absorber",
-            "set_counter_positions"
+            "set_counter_positions",
+            "set_clock_time_zone"
           ]
         },
         "value": {},
@@ -2627,6 +2750,37 @@
             "minimum": 1
           },
           "description": "set_counter_positions: the 1-based filename token positions that are run/acquisition counters."
+        },
+        "clock_zone_binding": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "zone",
+            "zone_decision_id",
+            "value",
+            "rule_id"
+          ],
+          "properties": {
+            "zone": {
+              "type": "string"
+            },
+            "zone_decision_id": {
+              "type": "string"
+            },
+            "value": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rule_id": {
+              "const": "local_clock_to_utc_via_confirmed_zone_v1"
+            }
+          },
+          "description": "1.4.0, confirm of a local-clock start-time candidate only: the instrument clock's time zone (and its set_clock_time_zone decision) the confirmation was made under, and the UTC value that zone gave. A candidate whose current zone or value differs is not eligible until confirmed again."
         }
       }
     },
@@ -3479,6 +3633,23 @@
         "properties": {
           "format_version": {
             "const": "1.3.0"
+          }
+        },
+        "required": [
+          "format_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "processed_outputs"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "format_version": {
+            "const": "1.4.0"
           }
         },
         "required": [
