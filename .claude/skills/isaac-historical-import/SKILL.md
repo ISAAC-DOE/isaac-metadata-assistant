@@ -102,8 +102,10 @@ verification. Skip this step if the scientist says it is not wanted; say that it
 Prioritise logbooks, beamtime notes and proposals. For `.docx/.pptx/.xlsx` run
 `<python> -m isaac_api.local_import.extract <file> --root <folder> --out <bundle>/extracted`, read
 the text it returns, and open embedded images and PDFs with the Read tool. Plain-text files of
-other kinds: Read them directly. Every finding goes in with `annotate` (file, locator, the quote);
-tell the scientist what each file turned out to hold. Unreadable binaries: say so and move on.
+other kinds: Read them directly. Then read what code DID read for statements no parser maps
+(readmes, macro comments, run labels, documents beside the folder). Write every finding to ONE
+findings file and load it with `annotate --from-readings` (preview, then `--apply`); the format is in
+the reference. Tell the scientist what each file turned out to hold. Unreadable binaries: say so.
 
 ## Step 5 · Groups
 
@@ -169,6 +171,16 @@ Then conflicts that affect a record, then the optional rest only if the scientis
 Use the scientist's own words as the value; always pass `--by "<their name>"`. Missing values they
 cannot answer stay missing (`defer`). Never pick a side of a conflict. For several evidence-backed
 confirmations the scientist accepts together, `--targets-file` (list each item back first).
+
+**Then offer the template** for everything the files never state (facility, beamline,
+environment, cell type, reaction, sample form and formula): "I can give you one spreadsheet to
+fill in one sitting." `<isaac> bundle template export <bundle> --out <file.xlsx>`; the answer
+cells are empty and the `ISAAC Suggestions` sheet shows what the files say, with where. When they
+return it: `<isaac> bundle template import <bundle> <file.xlsx> --by "<name>"` (a preview, nothing
+written), read the preview back (decisions, invalid cells, clashes, columns recorded nowhere), and
+only on their yes add `--apply`. Never fill the sheet for them, and never import ISAAC's blank
+template: it holds example values, and import refuses it. Electrolyte is the name only; its
+concentration and the pH have their own columns. Details: `reference/questions-and-decisions.md`.
 
 ## Step 8 · Build and validate
 

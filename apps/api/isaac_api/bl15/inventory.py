@@ -85,6 +85,16 @@ REFUSAL_UNDECODABLE = "undecodable"
 #: because a resource fork beside every file would otherwise become a second, garbled
 #: copy of the corpus. See ``bl15.archive.is_os_metadata``.
 REFUSAL_OS_METADATA = "operating_system_metadata"
+#: A ZIP found INSIDE a ZIP that was itself found inside a folder (2026-10-28). A local
+#: import walks a ZIP it finds in a folder ONE level deep (``Electrode2.zip!/<member>``);
+#: an archive within that one is listed and not opened, so the bound on nesting is a number
+#: (1) and not a hope. See ``bl15.archive.expand_nested_zips``.
+REFUSAL_NESTED_ARCHIVE = "nested_archive_too_deep"
+#: Two entries with ONE archive path once their names are normalised (a member written twice,
+#: ``./b.txt`` beside ``b.txt``, or a nested member whose path a real folder file already
+#: holds). Which one is meant cannot be told, and reading either would cite the other's
+#: bytes, so none of the colliding ZIP members is read. Opt-in (local import only).
+REFUSAL_DUPLICATE_PATH = "duplicate_path"
 
 REFUSAL_REASONS: frozenset[str] = frozenset(
     {
@@ -100,6 +110,8 @@ REFUSAL_REASONS: frozenset[str] = frozenset(
         REFUSAL_UNREADABLE,
         REFUSAL_UNDECODABLE,
         REFUSAL_OS_METADATA,
+        REFUSAL_NESTED_ARCHIVE,
+        REFUSAL_DUPLICATE_PATH,
     }
 )
 

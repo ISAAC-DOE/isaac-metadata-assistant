@@ -105,6 +105,60 @@ class GenericCollection:
 FileEntry = tuple[str, Path, int]  # (relative posix path, absolute path, size)
 
 
+# --- analysis files -----------------------------------------------------------------------
+#
+# A scientist's ANALYSIS file (a Larch session, an Igor Pro experiment) is neither a run, nor a
+# record group, nor a processed output. A reader of one returns an :class:`AnalysisFile`: a
+# bounded list of statements the file makes, as VERBATIM literals with locators, plus the
+# counts that say what was kept and what was not. The bundle holds them as ``extended_context[]``
+# entries (``scope: "analysis_file"``, no ``run_id``, no ``processed_output_id``) and nothing
+# else: no value is mapped onto an official field and no group or run is made from them.
+
+#: Most extended-context entries ALL analysis files together may add to one bundle.
+MAX_ANALYSIS_ENTRIES_TOTAL = 30_000
+#: Characters kept of one stored literal unless a reader sets a tighter cap. A clipped literal
+#: ENDS with :func:`clip_literal`'s marker, which names how many characters the source held.
+MAX_ANALYSIS_LITERAL_CHARS = 500
+
+
+@dataclass
+class AnalysisFile:
+    """What a reader of an analysis file found. Pure data; writes nothing.
+
+    ``entries`` are ``{"concept", "literal", "locator"}`` dicts in file order. ``counts`` holds
+    every total, kept count and cap (all integers or plain strings), so that a reader of the
+    bundle can tell a complete reading from a bounded one. ``refused_reason`` is set, and
+    ``entries`` is empty, when the file could not be read at all.
+    """
+
+    relative_path: str
+    reader_id: str
+    #: ``larch_session`` or ``igor_experiment`` (the file kind, from its own structure).
+    kind: str
+    entries: list[dict] = field(default_factory=list)
+    counts: dict[str, Any] = field(default_factory=dict)
+    refused_reason: str | None = None
+    #: Things the reader could not parse and skipped (counted, never fatal).
+    skipped_total: int = 0
+    #: Statements it found and did not store because of a cap.
+    suppressed_total: int = 0
+
+    @property
+    def partial(self) -> bool:
+        return self.suppressed_total > 0
+
+
+def clip_literal(text: str, limit: int = MAX_ANALYSIS_LITERAL_CHARS) -> tuple[str, bool]:
+    """``(text or its first ``limit`` characters + a marker, whether it was clipped)``.
+
+    The marker is part of the stored literal on purpose: a literal that was cut must say so
+    where a reader looks at it, not only in a counter elsewhere.
+    """
+    if len(text) <= limit:
+        return text, False
+    return f"{text[:limit]} [clipped: first {limit} of {len(text)} characters]", True
+
+
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as fh:

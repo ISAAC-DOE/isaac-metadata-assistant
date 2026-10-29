@@ -108,6 +108,36 @@ def _confirmation(decision: Mapping, question: str) -> dict:
     return entry
 
 
+def _absorber_implicit(bundle: Mapping, group: Mapping) -> list[dict]:
+    """``implicit[]`` entries ``absorbing_element`` and ``edge`` for one group, or ``[]``."""
+    from . import suggestions as S
+
+    sug = S.absorber_for_group(bundle, group)
+    decision = S.absorber_decisions(bundle).get(group["group_id"])
+    witnesses = [
+        {"source_type": "document", "source_file": w.get("relative_path") or "(unlocated)", "locator": w.get("locator"),
+         "quote": w.get("literal") or f"{w.get('element') or ''} {w.get('edge') or ''}".strip(),
+         "quote_basis": "the file's own statement" if w.get("literal") else f"as the {w.get('role') or 'reader'} rule recorded it, not a literal",
+         "method": "stored_rule", "method_id": S.ABSORBER_RULE_ID}
+        for w in sug["witnesses"]
+    ]
+    if decision is None and not witnesses:
+        return []
+    out = []
+    for about, key in (("absorbing_element", "element"), ("edge", "edge")):
+        evidence = list(witnesses) or [{"source_type": "derivation", "rule": f"{S.ABSORBER_RULE_ID}: no file states it"}]
+        value = None
+        if decision is not None:
+            value = decision.get(key)
+            evidence.append(_confirmation({**decision, "value": value}, f"What is the {about.replace('_', ' ')}?"))
+        else:
+            evidence.append({"source_type": "derivation",
+                             "rule": f"{S.ABSORBER_RULE_ID}: the files suggest {sug[key] or 'nothing single'} ({sug['status']}); "
+                                     "needs a scientist's confirmation (set_absorber)"})
+        out.append({"about": about, "value": value, "evidence": evidence})
+    return out
+
+
 #: The processing output contract (LOCAL-P ``processing/run.py``, ``normalized.csv``):
 #: a ``#`` banner, then the header ``energy_eV,norm,flat``. Columns are selected BY NAME.
 SERIES_ENERGY_COLUMN = "energy_eV"
@@ -230,6 +260,15 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[di
         "implicit": [],
         "block_evidence": {},
     }
+
+    # THE ABSORBER (sidecar only: the official schema has no field for it). A scientist's
+    # set_absorber decision gives the value; otherwise the files' suggestion is carried with
+    # value null, exactly as the hosted path carries an unconfirmed edge.
+    absorber = _absorber_implicit(bundle, group)
+    if absorber:
+        draft["implicit"] += absorber
+        report["absorber"] = {"element": absorber[0]["value"], "edge": absorber[1]["value"],
+                              "confirmed": absorber[0]["value"] is not None}
 
     # processing (series, qc, E0 descriptor) — ONLY an approved result
     mine = [r for r in bundle.get("processing_results") or () if r["group_id"] == group["group_id"]]

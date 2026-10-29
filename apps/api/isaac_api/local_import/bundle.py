@@ -548,7 +548,7 @@ DECISIONS_BY_KIND: Mapping[str, frozenset[str]] = {
     "candidate": frozenset({"confirm", "correct", "reject", "defer"}),
     "missing_value": frozenset({"confirm", "correct", "reject", "defer"}),
     "conflict": frozenset({"confirm", "correct", "reject", "defer"}),
-    "record_group": frozenset({"confirm", "split", "merge", "reject", "defer", "approve_calibration"}),
+    "record_group": frozenset({"confirm", "split", "merge", "reject", "defer", "approve_calibration", "set_absorber"}),
     "processing_result": frozenset({"approve", "reject", "needs_changes", "defer"}),
     "experiment": frozenset({"set_counter_positions"}),
 }
@@ -970,6 +970,7 @@ def _writable_paths() -> frozenset[str]:
         frozenset(field_paths.PROPOSAL_TARGET_PATHS)
         | frozenset(field_paths._record_enum_fields())
         | frozenset(UPSTREAM_TARGET_FIELDS)
+        | frozenset(LOCAL_ANSWER_FIELDS)
     )
 
 
@@ -982,6 +983,17 @@ UPSTREAM_TARGET_FIELDS: Mapping[str, str] = {
     "attribution.produced_by.organization": "record",
     "context.reaction.drive": "run",
     "context.reaction.catalysis": "run",
+}
+#: Fields BOTH schemas declare (vendored v1.05 and the pinned portal schema) that the website
+#: has no write route for, and that a beamtime's documents often state: answerable locally so
+#: a scientist's answer (or a cited AI reading of their notes) has a target. ``path -> scope``.
+#: ``electrolyte`` is an object requiring ``name`` AND ``concentration_M``: a record with one
+#: and not the other fails the schema at export, which is the gate working.
+LOCAL_ANSWER_FIELDS: Mapping[str, str] = {
+    "context.electrochemistry.electrolyte.name": "run",
+    "context.electrochemistry.electrolyte.concentration_M": "run",
+    "context.electrochemistry.pH": "run",
+    "context.electrochemistry.potential_scale": "run",
 }
 #: The portal requires a producer (``PRODUCED_BY_MISSING``); asked as a required value.
 PORTAL_REQUIRED_PATHS = ("attribution.produced_by.group", "attribution.produced_by.organization")
@@ -1012,6 +1024,110 @@ def _extracted_state_of(candidate) -> str:
 
 class BundleBoundsExceeded(ValueError):
     """The reading cannot be expressed inside the bundle's bounds. Nothing is written."""
+
+
+#: The classifier id stamped on a source the analysis-file readers recognised (``.larix``,
+#: ``.pxp``): decided by the file's own extension AND whether its structure could be read.
+ANALYSIS_CLASSIFIER_ID = "local_import_analysis_file_classifier_v1"
+#: ``scope`` of an ``extended_context`` entry read from an analysis file. Such an entry has no
+#: ``run_id`` and no ``processed_output_id``: an analysis file is never a run, never a record
+#: group and never a processed output.
+ANALYSIS_SCOPE = "analysis_file"
+
+
+def _staging_failure_rows(generic: Any, unread: list[dict]) -> None:
+    """A nested ZIP member the generic readers were never given (it could not be staged, or its
+    staged bytes did not match the walk's digest) stays in ``unread_files`` with that reason
+    rather than the generic "no reader for this type"."""
+    by_path = {u["relative_path"]: u for u in unread}
+    for failure in getattr(generic, "staging_failures", None) or ():
+        row = by_path.get(failure.get("relative_path"))
+        if row is not None:
+            row["reason_code"] = "member_not_staged"
+            row["reason"] = str(failure.get("reason") or "the member was not offered to the readers")
+
+
+def _analysis_file_context(
+    generic: Any,
+    sources: list[dict],
+    unread: list[dict],
+    readers_seen: set[str],
+    classifiers_seen: set[str],
+) -> list[dict]:
+    """Record what the analysis-file readers (Larch session, Igor experiment) found.
+
+    Mutates ``sources`` (each file's classification and reader block) and ``unread`` (a file the
+    reader could not open stays listed, now with ``reader_refused`` and the reader's own
+    reason), and returns the ``extended_context`` entries. EVIDENCE ONLY: every entry is
+    ``source_recorded`` with a verbatim literal and a locator, none maps to an official field,
+    and none carries a run or a processed output.
+    """
+    by_path = {s["relative_path"]: s for s in sources}
+    unread_by_path = {u["relative_path"]: u for u in unread}
+    entries: list[dict] = []
+    for af in getattr(generic, "analysis_files", None) or ():
+        src = by_path.get(af.relative_path)
+        if src is None:
+            continue
+        sid = src["source_id"]
+        classifiers_seen.add(ANALYSIS_CLASSIFIER_ID)
+        src["classification"] = {
+            "source_type": f"analysis_file:{af.kind}",
+            "reason": (
+                "a scientist's analysis file, by its extension. It is evidence about their "
+                "processing, never a run, a record group or a processed output."
+            ),
+            "confidence": "content" if af.refused_reason is None else "path",
+            "overridable": True,
+            "classifier_id": ANALYSIS_CLASSIFIER_ID,
+        }
+        if af.refused_reason is not None:
+            src["reader"] = {
+                "reader_id": af.reader_id,
+                "content_read": False,
+                "statements_read": 0,
+                "statements_suppressed": 0,
+                "partial": False,
+                "skipped_total": 0,
+                "refused_reason": af.refused_reason,
+            }
+            row = unread_by_path.get(af.relative_path)
+            if row is not None:
+                row["source_type"] = src["classification"]["source_type"]
+                row["reason_code"] = "reader_refused"
+                row["reason"] = af.refused_reason
+            continue
+        readers_seen.add(af.reader_id)
+        src["reader"] = {
+            "reader_id": af.reader_id,
+            "content_read": True,
+            "statements_read": len(af.entries),
+            "statements_suppressed": af.suppressed_total,
+            "partial": af.partial,
+            "skipped_total": af.skipped_total,
+            "refused_reason": None,
+        }
+        for n, e in enumerate(af.entries, 1):
+            entries.append(
+                {
+                    "entry_id": f"{af.reader_id}:{sid}#{n}",
+                    "concept": str(e["concept"]),
+                    "raw_literal": e["literal"],
+                    "source_id": sid,
+                    "relative_path": _safe_relative(af.relative_path),
+                    "locator": e["locator"],
+                    "normalized_value": None,
+                    "unit": None,
+                    "normalization_rule_id": None,
+                    "parser_id": af.reader_id,
+                    "scope": ANALYSIS_SCOPE,
+                    "official_path": None,
+                    "value_state": STATE_SOURCE_RECORDED,
+                    "is_official_field_value": False,
+                    "run_id": None,
+                }
+            )
+    return entries
 
 
 def _split_locator(locator: str, archive_paths: Sequence[str]):
@@ -1540,6 +1656,11 @@ def build_bundle(
             # official field unless an explicit, tested rule says so, and there is none.
             for k, st in enumerate(run_statements[:MAX_GENERIC_STATEMENTS_PER_RUN]):
                 generic_statements.append(_statement_entry(g, k, st, run_id=run_id, po_id=None))
+        # ANALYSIS FILES (.larix, .pxp): evidence in extended_context, never a run.
+        generic_statements.extend(
+            _analysis_file_context(generic, sources, unread, readers_seen, classifiers_seen)
+        )
+        _staging_failure_rows(generic, unread)
         if generic_claimed:
             unread = [u for u in unread if u["relative_path"] not in generic_claimed]
     propose_processed_links(processed_outputs, runs)
@@ -1581,7 +1702,7 @@ def build_bundle(
                 "scope": "run" if run_id else "beamtime",
                 "statement_key": key,
                 "target_field_path": c.target_field_path,
-                "target_write_scope": _target_scope(c.target_field_path) or UPSTREAM_TARGET_FIELDS.get(c.target_field_path),
+                "target_write_scope": _target_scope(c.target_field_path) or UPSTREAM_TARGET_FIELDS.get(c.target_field_path) or LOCAL_ANSWER_FIELDS.get(c.target_field_path),
                 "value": c.proposed_value,
                 "observed_literals": literals,
                 # THE CAP IS STATED, never silent (review L3).
@@ -1773,7 +1894,7 @@ def build_bundle(
         "run (DEC-69)."
     )
     for path in sorted(writable):
-        scope = _target_scope(path) or UPSTREAM_TARGET_FIELDS.get(path)
+        scope = _target_scope(path) or UPSTREAM_TARGET_FIELDS.get(path) or LOCAL_ANSWER_FIELDS.get(path)
         if scope == "record":
             # ONE record-scope question, asked whenever ANY run that becomes a record lacks
             # a reading for it (real-data finding D3): "some run states it" used to suppress
@@ -2521,6 +2642,11 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50) -> list[str]:
         problem = decider_name_problem((d.get("decided_by") or {}).get("name"))
         if problem:
             errors.append(f"decision: {d['decision_id']} {problem}")
+        if d.get("decision") in ("approve_calibration", "set_absorber") and not (
+            isinstance(d.get("element"), str) and re.fullmatch(r"[A-Z][a-z]?", d["element"])
+            and isinstance(d.get("edge"), str) and re.fullmatch(r"K|L[1-3]|M[1-5]", d["edge"])
+        ):
+            errors.append(f"decision: {d['decision_id']} {d['decision']} needs an element and an edge (K, L1-L3, M1-M5)")
     for g in bundle.get("record_groups") or ():
         if g.get("status") == "proposed" and g.get("condition_violations"):
             errors.append(f"consistency: proposed record group {g['group_id']} carries condition violations")

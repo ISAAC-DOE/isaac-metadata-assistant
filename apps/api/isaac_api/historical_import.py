@@ -2587,18 +2587,40 @@ def _readers():
     }
 
 
-def _inventory_of(root: Path, *, root_label: str):
+def _inventory_of(root: Path, *, root_label: str, nested_archives: bool = False):
     """Walk a folder or a ZIP. The suffix decides which, and neither raises.
 
     ``bl15.archive`` returns an inventory carrying one refusal rather than
     raising for a root that is missing, is a symlink, or is an unopenable ZIP —
     so a scientist who chose the wrong thing gets a readable answer about it.
+
+    ``nested_archives`` (the LOCAL import only; the hosted path leaves it off) also
+    walks each ``.zip`` found in a FOLDER, one level deep, through the same guarded ZIP
+    walk (``archive.expand_nested_zips``). Use :func:`_inventory_and_containers_of` to
+    get the per-ZIP rows too.
     """
+    return _inventory_and_containers_of(
+        root, root_label=root_label, nested_archives=nested_archives
+    )[0]
+
+
+def _inventory_and_containers_of(
+    root: Path, *, root_label: str, nested_archives: bool = False
+):
+    """``(inventory, {zip archive path: NestedZip})``; the dict is empty unless asked for."""
     from .bl15 import archive
 
     if root.is_dir():
-        return archive.inventory_folder(root, root_label=root_label)
-    return archive.inventory_zip(root, root_label=root_label)
+        inventory = archive.inventory_folder(root, root_label=root_label)
+        if nested_archives:
+            return archive.expand_nested_zips(inventory, root)
+        return inventory, {}
+    # The duplicate-path refusal is local-only (it rides the same switch as nested ZIPs): the
+    # hosted path keeps every copy, as before.
+    return (
+        archive.inventory_zip(root, root_label=root_label, refuse_duplicates=nested_archives),
+        {},
+    )
 
 
 def _suppressed_in(skipped: Sequence[Mapping]) -> int:
@@ -2682,6 +2704,7 @@ def read_archive_at(
     archive_name: str,
     rules: Sequence[Any] = (),
     evidence_sink: dict | None = None,
+    nested_archives: bool = False,
 ) -> tuple[ArchiveReading, tuple[SemanticCandidate, ...]]:
     """:func:`read_archive`'s whole chain, over an ALREADY-RESOLVED ``root``.
 
@@ -2698,6 +2721,12 @@ def read_archive_at(
     builds and otherwise discards), so a local bundle can name each witness's
     reader and normalisation rule instead of inferring them from prose. ``None``
     (the server's call) changes nothing.
+
+    ``nested_archives`` — the local import turns it on (the server does not): a ``.zip``
+    found in a FOLDER is walked one level deep, its members becoming sources named
+    ``<zip>!/<member>`` that are classified and read exactly as loose files are. The ZIP
+    itself keeps its row, read by ``nested_zip_walk_v1`` (members walked, none of its
+    bytes interpreted).
     """
     from . import convention_rules as cr
     from .bl15 import applicability as appl
@@ -2709,7 +2738,9 @@ def read_archive_at(
     from .bl15 import signals as sig
 
     name = archive_name
-    inventory = _inventory_of(root, root_label=source.filename or name)
+    inventory, nested_containers = _inventory_and_containers_of(
+        root, root_label=source.filename or name, nested_archives=nested_archives
+    )
 
     bindings = cr.bindings_from(rules)
     readers = _readers()
@@ -2784,7 +2815,26 @@ def read_archive_at(
             "skipped_total": 0,
             "refused_reason": None,
         }
-        if reader is None:
+        container = nested_containers.get(entry.archive_path)
+        if container is not None:
+            # A ZIP found in the folder. Its "reading" is the walk of its members: no bytes
+            # of it are interpreted as statements, and each member has its own row.
+            if container.walked:
+                row.update(
+                    {
+                        "parser_id": archive.NESTED_ZIP_READER_ID,
+                        "refused_reason": None,
+                    }
+                )
+            else:
+                row.update(
+                    {
+                        "parser_id": archive.NESTED_ZIP_READER_ID,
+                        "refused_reason": "This ZIP could not be opened, so its "
+                        f"members were not walked: {container.detail}",
+                    }
+                )
+        elif reader is None:
             row["refused_reason"] = (
                 "This build has no reader for this kind of source, so nothing "
                 "was read out of it. It is listed with its classification "
@@ -3150,13 +3200,21 @@ def read_local_archive(
         provenance={},
         fixture_name=None,
     )
-    return read_archive_at(
-        root,
-        source=source,
-        archive_name=f"{LOCAL_ARCHIVE_PREFIX}{label}",
-        rules=rules,
-        evidence_sink=evidence_sink,
-    )
+    from .bl15 import archive as _archive
+
+    try:
+        return read_archive_at(
+            root,
+            source=source,
+            archive_name=f"{LOCAL_ARCHIVE_PREFIX}{label}",
+            rules=rules,
+            evidence_sink=evidence_sink,
+            # LOCAL ONLY: a ZIP inside a folder is walked one level deep (see `read_archive_at`).
+            nested_archives=True,
+        )
+    finally:
+        # the reads of this one import kept their nested ZIPs open; release them
+        _archive.close_nested_cache()
 
 
 def _unit_key(unit) -> str:

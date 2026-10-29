@@ -280,3 +280,52 @@ results. At that build it was 37 groups, 3 agree, the same medians.
 **2019 grouping:** 0 multi-run groups. 11 merge candidates wait on one scientist answer (is
 file-name position 2 a counter?); in that naming scheme position 2 may be a sequence, in which
 case the runs are correctly separate.
+
+## Maximum-inference pilot, 2026-10-28: what a scientist is shown per key field
+
+This section records counts only. The real files and the findings stay outside the repository.
+The owner approved Claude reading the real archive (DEC-86).
+
+**Measure.** For every live record group, 11 key fields were checked: sample name, sample
+number, potential, potential reference, electrolyte/reaction, environment, acquisition time,
+technique, element/edge, producer and facility. Each (group, field) cell is put in one class:
+- `answered`: a scientist decision covers it;
+- `from files`: a parser or stored rule read it;
+- `AI suggestion`: a cited Claude reading suggests it;
+- `hint only`: a text hint such as the folder name;
+- `missing`: nothing.
+
+Nothing in the AI-suggestion class is a value: each one is `needs_review`, cited to a file,
+locator and verbatim quote, and waits for a scientist's decision.
+
+**Corpus build.** Six beamtimes were rebuilt with the pilot code. Every import, group, process
+and questions step exited 0. Runs and groups are unchanged from the previous build.
+
+| Beamtime | Cells | Missing before | Missing after | AI suggestions | Findings placed |
+|---|---:|---:|---:|---:|---:|
+| BL15-2 2021-11 | 913 | 48.3% | **13.5%** | 34.7% | 19 of 19 (563 targets) |
+| BL15-2 2025-04 | 1,408 | 40.1% | **10.5%** | 29.3% | 40 of 40 (1,556 targets) |
+
+The 2021-11 reading pass produced 19 findings, 6 stated and 13 inferred. The 2025-04 pass
+produced 40. Both bundles still check VALID (1.2.0).
+
+**What is still missing, and why:**
+- The 2021-11 potential reference: no file states it. The spreadsheets give bare volts.
+- Sample numbers and potentials for reference-compound and blank runs: they have none.
+- Facility endstation and site: not stated anywhere.
+
+**Shared documents.** The top-level proposal, slides and narrative gave 9 findings, all
+marked `beamtime: unclear`. None names a beamtime's date, sample or beamline. They were applied
+to no bundle: a finding is never assigned to a beamtime by guess.
+
+**Readability.**
+- Unread files fell from 293 to 288 of 6,461. The nested ZIP, Larch and Igor readers read the
+  last five files that had no reader: 2 nested ZIPs (62 members), 2 `.larix` and 1 `.pxp`.
+- Every remaining unread file is a kind Claude reads directly: `.xlsx` 224, Athena `.prj` 58
+  (read by processing), `.csv` 2, `.png` 2, `.docx` 1, `.pdf` 1.
+
+**Contradictions surfaced, not resolved:**
+- The 2025-04 notes state one electrolyte for every experiment, while two of their own procedures name others.
+- A parser cell-type candidate in 2025-04 comes from a sentence about where TEM grids are kept.
+
+Both are left for the scientist.

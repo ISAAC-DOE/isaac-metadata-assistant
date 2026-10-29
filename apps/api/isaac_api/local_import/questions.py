@@ -31,6 +31,7 @@ import json
 from typing import Any, Mapping, Sequence
 
 from . import bundle as B
+from . import suggestions as S
 
 FORMAT_ID = "isaac.questions"
 FORMAT_VERSION = "2.0.0"
@@ -50,8 +51,21 @@ SHARED_PATHS = (
 TIER_BLOCKING, TIER_CONFLICT, TIER_OPTIONAL = 1, 2, 3
 #: A required schema OBJECT with no required members is asked for by its primary field.
 REQUIRED_AS_FIELD = {"sample.material": "sample.material.name"}
-_UNANSWERED = (B.STATE_MISSING,)
+#: A missing value an AI reading lifted to needs_review is still unanswered: it is asked,
+#: with the reading as a hint. Only a scientist decision takes it out of the list.
+_UNANSWERED = (B.STATE_MISSING, B.STATE_NEEDS_REVIEW)
 _HINTS_PER_QUESTION = 5
+#: The decisions that answer each kind of question. ``decide --question`` refuses any other,
+#: so answering e.g. an absorber question with ``confirm`` can never bulk-confirm the record
+#: GROUPS it targets (the absorber question's targets are groups).
+ALLOWED_DECISIONS: Mapping[str, tuple[str, ...]] = {
+    "missing_value": ("confirm", "correct", "reject", "defer"),
+    "optional_values": ("confirm", "correct", "reject", "defer"),
+    "confirm_value": ("confirm", "correct", "reject", "defer"),
+    "resolve_conflict": ("confirm", "correct", "reject", "defer"),
+    "naming_counter_positions": ("set_counter_positions",),
+    "confirm_absorber": ("set_absorber", "defer"),
+}
 
 
 def _is_shared(path: str) -> bool:
@@ -272,12 +286,14 @@ def consolidate(bundle: Mapping) -> dict:
                     "scope": scope,
                     "partition": partition,
                     "target_field_path": None,
-                    "text": f"{len(q['fields'])} optional field(s) no source states: {', '.join(sorted(q['fields']))}. Answer any you know.",
+                    "text": (f"{len(q['fields'])} optional field(s) no parser read a value for: {', '.join(sorted(q['fields']))}. Answer any you know."
+                             + (f" {len(fh)} of them have a suggestion or hint (field_hints)." if (fh := _optional_field_hints(bundle, q["fields"])) else "")),
                     "applies_to": {"groups": len({group_of[r] for r in q["runs"] if r in group_of}), "runs": len(q["runs"]), "targets": len(q["targets"])},
                     "targets": q["targets"],
                     "per_scope_targets": q["per_scope_targets"],
                     "fields": {f: ids for f, ids in sorted(q["fields"].items())},
                     "hints": [],
+                    "field_hints": _optional_field_hints(bundle, q["fields"]),
                     "allowed_values": None,
                     "answer_command": f'isaac bundle decide <bundle_dir> --question {qid} --field <field path> --decision correct --value <value> --by "<your name>"',
                 }
@@ -307,6 +323,16 @@ def consolidate(bundle: Mapping) -> dict:
         if path.startswith("attribution.produced_by."):
             hints.append({"kind": "folder_name", "literal": bundle["source_root"]["label"], "locator": "the imported folder's name",
                           "note": "A PI or group name in a folder name is a HINT to ask about, never an answer."})
+        if path.startswith("system.facility."):
+            hints += S.facility_hints(bundle)
+        ai = S.ai_hints(bundle, [t["id"] for t in q["targets"]])
+        hints = ai + hints
+        if ai:
+            top = ai[0]
+            cite = top.get("source_path") or top.get("source_id") or "a file"
+            text += (f" Suggested from the files (needs your confirmation): {top['literal']!r}, from {cite}"
+                     f"{' @ ' + str(top['locator']) if top.get('locator') else ''}"
+                     + (f"; {len(ai) - 1} other suggestion(s) differ" if len(ai) > 1 else "") + ".")
         for c in related.get(path, [])[:_HINTS_PER_QUESTION]:
             if c["observed_literals"]:
                 ev = next((e for e in c["evidence"] if e["method"] != "ai_interpretation"), None)
@@ -400,6 +426,8 @@ def consolidate(bundle: Mapping) -> dict:
             }
         )
 
+    questions += _absorber_questions(bundle, groups)
+
     def order(q):
         scope = q["scope"]
         if scope == "experiment":
@@ -411,6 +439,8 @@ def consolidate(bundle: Mapping) -> dict:
         return (q["tier"], s, q["target_field_path"] or "", q["question_id"])
 
     questions.sort(key=order)
+    for q in questions:
+        q["allowed_decisions"] = list(ALLOWED_DECISIONS.get(q["kind"], ()))
     return {
         "format": FORMAT_ID,
         "format_version": FORMAT_VERSION,
@@ -425,6 +455,102 @@ def consolidate(bundle: Mapping) -> dict:
         },
         "questions": questions,
     }
+
+
+def _optional_field_hints(bundle: Mapping, fields: Mapping[str, Sequence[str]]) -> dict[str, list[dict]]:
+    """Per optional field: the AI readings of its targets, and the facility hints."""
+    out: dict[str, list[dict]] = {}
+    for path, ids in sorted(fields.items()):
+        hints = S.ai_hints(bundle, ids)
+        if path.startswith("system.facility."):
+            hints += S.facility_hints(bundle)
+        if hints:
+            out[path] = hints
+    return out
+
+
+def _absorber_hints(items: Sequence[tuple[Mapping, dict]]) -> list[dict]:
+    """A processed-output summary first, then each distinct beamtime-wide statement."""
+    hints: list[dict] = []
+    po = [w for _, s in items for w in s["witnesses"] if w["kind"] == "processed_output_header"]
+    if po:
+        n = len({w.get("processed_output_id") for w in po})
+        el = next((w["element"] for w in po if w.get("element")), None)
+        ed = next((w["edge"] for w in po if w.get("edge")), None)
+        hints.append({"kind": "processed_output_header", "literal": f"{el or '?'} {ed or '?'}",
+                      "locator": po[0].get("locator"), "relative_path": po[0].get("relative_path"), "source_id": po[0].get("source_id"),
+                      "note": f"from {n} linked processed output(s) (e.g. this one; an output can be linked to runs of several groups); links are proposed by name, not confirmed"})
+    seen = set()
+    for _, s in items:
+        for w in s["witnesses"]:
+            key = (w.get("source_id"), w.get("locator"))
+            if w["kind"] == "beamtime_element_evidence" and key not in seen:
+                seen.add(key)
+                hints.append({"kind": w["kind"], "literal": f"{w.get('element') or '?'} {w.get('edge') or '?'}", "locator": w.get("locator"),
+                              "source_id": w.get("source_id"), "relative_path": w.get("relative_path"), "note": "stated for the whole beamtime"})
+    return hints[:_HINTS_PER_QUESTION]
+
+
+def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping]) -> list[dict]:
+    """The absorbing element and edge, asked ONCE per distinct suggestion over the groups
+    the files agree on, and per group where they disagree. Optional: the official schema
+    has no absorber field (a confirmed one is carried in the evidence sidecar)."""
+    decided = S.absorber_decisions(bundle)
+    by_pair: dict[tuple, list] = {}
+    split: list[tuple[Mapping, dict]] = []
+    for g in groups:
+        if g["group_id"] in decided:
+            continue
+        sug = S.absorber_for_group(bundle, g)
+        if sug["status"] == "agrees":
+            by_pair.setdefault((sug["element"], sug["edge"]), []).append((g, sug))
+        elif sug["status"] in ("disagrees", "partial"):
+            split.append((g, sug))
+    out = []
+    for (element, edge), items in sorted(by_pair.items()):
+        qid = _qid("experiment", "confirm_absorber", f"{element}|{edge}")
+        out.append({
+            "question_id": qid,
+            "partition": None,
+            "tier": TIER_OPTIONAL,
+            "blocking": False,
+            "why": "Optional: the official schema has no absorber field. A confirmed absorber is kept in the evidence sidecar.",
+            "kind": "confirm_absorber",
+            "scope": "experiment",
+            "target_field_path": None,
+            "text": (f"The files state element {element}, edge {edge} for {len(items)} group(s), and no file disagrees: "
+                     f"{sum(1 for _, s in items if s['group_specific_statements'])} of them from processed outputs linked to their runs, "
+                     f"the rest only from beamtime-wide statements ({items[0][1]['beamtime_wide_statements']}, e.g. an acquisition macro's name). "
+                     "Is that the absorber? Answer once, or per group (a reference foil or blank cell may differ)."),
+            "applies_to": {"groups": len(items), "runs": sum(len(g.get("member_run_keys") or ()) for g, _ in items), "targets": len(items)},
+            "targets": [{"kind": "record_group", "id": g["group_id"]} for g, _ in items],
+            "per_scope_targets": {f"group:{g['group_id']}": [g["group_id"]] for g, _ in items},
+            "hints": _absorber_hints(items),
+            "allowed_values": None,
+            "answer_command": (f'isaac bundle decide <bundle_dir> --question {qid} --decision set_absorber '
+                               f'--element {element} --edge {edge} --by "<your name>"   # per group: add --only group:<group_id>'),
+        })
+    for g, sug in split:
+        qid = _qid(f"group:{g['group_id']}", "confirm_absorber", "")
+        out.append({
+            "question_id": qid,
+            "partition": None,
+            "tier": TIER_OPTIONAL,
+            "blocking": False,
+            "why": "Optional: the official schema has no absorber field. A confirmed absorber is kept in the evidence sidecar.",
+            "kind": "confirm_absorber",
+            "scope": f"group:{g['group_id']}",
+            "target_field_path": None,
+            "text": (f"The files {'disagree about' if sug['status'] == 'disagrees' else 'only partly state'} this group's absorber "
+                     f"(element readings {sug['readings']['element']}, edge readings {sug['readings']['edge']}). Which is it?"),
+            "applies_to": {"groups": 1, "runs": len(g.get("member_run_keys") or ()), "targets": 1},
+            "targets": [{"kind": "record_group", "id": g["group_id"]}],
+            "per_scope_targets": {f"group:{g['group_id']}": [g["group_id"]]},
+            "hints": _absorber_hints([(g, sug)]),
+            "allowed_values": None,
+            "answer_command": f'isaac bundle decide <bundle_dir> --question {qid} --decision set_absorber --element <El> --edge <K|L1-L3|M1-M5> --by "<your name>"',
+        })
+    return out
 
 
 def filter_questions(payload: Mapping, *, scope: str | None = None, blocking_only: bool = False) -> list[dict]:
@@ -445,8 +571,12 @@ def filter_questions(payload: Mapping, *, scope: str | None = None, blocking_onl
     return qs
 
 
+def question(payload: Mapping, question_id: str) -> Mapping | None:
+    return next((q for q in payload["questions"] if q["question_id"] == question_id), None)
+
+
 def targets_for(payload: Mapping, question_id: str, only: str | None = None, field: str | None = None) -> list[str]:
-    q = next((q for q in payload["questions"] if q["question_id"] == question_id), None)
+    q = question(payload, question_id)
     if q is None:
         return []
     ids = [t["id"] for t in q["targets"]]

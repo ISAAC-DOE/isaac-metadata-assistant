@@ -42,8 +42,8 @@ def _resolve(words: list[str]) -> tuple[argparse.ArgumentParser, list[str]]:
     assert command in top, f"`isaac {command}` does not exist in this build"
     node = top[command]
     rest = words[1:]
-    inner = _subparsers(node)
-    if inner:
+    # follow nested subcommands (`bundle template export`) as deep as the parser goes
+    while inner := _subparsers(node):
         assert rest and rest[0] in inner, f"`isaac {command} {rest[:1]}` is not a subcommand ({sorted(inner)})"
         node, rest = inner[rest[0]], rest[1:]
     return node, rest
@@ -68,8 +68,8 @@ def test_the_skill_has_the_expected_shape():
 
 @pytest.mark.parametrize(("name", "span", "words"), list(_commands()), ids=lambda v: v if isinstance(v, str) and len(v) < 60 else None)
 def test_every_command_in_the_skill_exists_with_its_flags(name, span, words):
-    command = [w for w in words if not w.startswith(("-", "<", "[", "(", "'", '"', "\\"))][:2]
-    node, _ = _resolve(command[:1] if command[0] != "bundle" else command[:2])
+    command = [w for w in words if not w.startswith(("-", "<", "[", "(", "'", '"', "\\"))]
+    node, _ = _resolve(command)
     written = set(re.findall(r"--[a-z][a-z-]*", span))
     unknown = written - _flags(node) - {"--help"}
     assert not unknown, f"{name}: `{span}` uses {sorted(unknown)} which this command does not take"
@@ -105,7 +105,8 @@ def _help_text(argv: list[str]) -> str:
 @pytest.mark.parametrize(("name", "span", "words"), list(_commands()), ids=lambda v: v if isinstance(v, str) and len(v) < 60 else None)
 def test_every_flag_the_skill_writes_is_in_the_live_help(name, span, words):
     command = [w for w in words if not w.startswith(("-", "<", "[", "(", "'", '"', "\\"))]
-    argv = command[:2] if command[0] == "bundle" else command[:1]
+    _, rest = _resolve(command)
+    argv = command[: len(command) - len(rest)]
     help_text = _help_text(argv)
     for flag in set(re.findall(r"--[a-z][a-z-]*", span)):
         assert flag in help_text or flag == "--help", f"{name}: `{span}` writes {flag}, which `isaac {' '.join(argv)} --help` does not show"

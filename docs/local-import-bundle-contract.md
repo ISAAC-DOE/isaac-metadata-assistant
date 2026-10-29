@@ -170,7 +170,9 @@ Enforced by the builder (refuse, or clamp visibly and count) and by the validato
 - `local_only: true` on every source and unread file: these refer to files on the
   scientist's machine. **A remote server cannot open a local path** — a bundle sent anywhere
   carries descriptions, digests and literals, never access to the files.
-- Nothing is extracted from a ZIP to disk; symlinks are never followed; no source is ever
+- Nothing is extracted from a ZIP to disk by the engine walk (§21: the generic readers stage a
+  NESTED ZIP's accepted members in a private temporary directory that is deleted before the
+  import returns); symlinks are never followed; no source is ever
   executed (macros are read as text; a test proves a macro containing shell text runs
   nothing).
 
@@ -448,7 +450,8 @@ Exit codes for the LOCAL-2 commands: `validate` and `export` exit 1 when any dra
   generic:<profile>` and `reader {reader_id, profile, profile_version, statements_total,
   statements_kept}`; its statements are `extended_context` entries (`source_recorded`,
   `run_id`, at most 200 per run, the total stated). No statement maps to a field: there is no
-  rule for it. Claimed files leave `unread_files`. A ZIP is not walked by the generic readers.
+  rule for it. Claimed files leave `unread_files`. A ZIP given AS THE ROOT is not walked by the
+  generic readers; a ZIP found INSIDE a folder is (§21).
   **Since 1.2.0 an XDI file whose header states Athena/Demeter is a `processed_outputs[]`
   entry instead of a run** (§9, "What 1.2.0 added").
 - `isaac bundle group <dir> [--regroup]` stores LOCAL-P's proposed `record_groups[]`
@@ -581,3 +584,195 @@ nothing to process".
   reports `processing_blocked` and the verdict `incomplete` (never a pass); export refuses it.
   `summary.md` and `isaac process` print the not-applicable groups apart from the QC verdicts
   (by reason, and the no-channel groups by reader profile).
+
+## 19. The metadata template round trip
+
+Many key fields are stated in no file (facility, beamline, environment, cell type, reaction,
+sample form and formula). The template lets a scientist answer them in one sitting.
+
+- `isaac bundle template export <dir> --out <file.xlsx> [--force] [--no-suggestions]` writes
+  ISAAC's metadata template: sheets Campaign Info, Configurations, File List and Vocabulary,
+  with ISAAC's header text and column order. **Every answer cell is empty**; no example value
+  is written. File List has one row per run in a live record group (proposed or confirmed),
+  named by its acquisition file's path in the import (`SampleA/scan_001` and `SampleB/scan_001`
+  stay apart; where two runs share one file, the run label is added). If names would still
+  repeat, the export is refused. After the template's own columns ISAAC adds two, labelled as
+  its own: **Electrolyte Concentration (M)** and **pH** (both numeric). The template's
+  **Electrolyte** column is the electrolyte name only; "0.1 M KOH" is two answers (name KOH,
+  concentration 0.1), and both electrolyte columns show the whole AI reading in the
+  suggestions so it can be split. Vocabulary and the dropdowns come from the export-target
+  schema's enums, else the pinned vocabulary (as for questions), plus a Technique list for
+  Configurations. Two sheets are added: **ISAAC Suggestions** (visible; the File List layout,
+  each cell showing what the bundle already holds — an extracted value or literal, a question
+  hint, or an AI reading — with its file and locator), and **`_isaac`** (hidden; format
+  `isaac.metadata_template` 1.1.0, `bundle_id`, export time, row → `run_id`/`run_key`/`group_id`,
+  column → official path). Suggestions print parser values, so the export records an exposure
+  first; `--no-suggestions` shows none and records none. Refused for a bundle with no live
+  record group.
+- `isaac bundle template import <dir> <file.xlsx> --by "<name>" [--orcid ...] [--apply]
+  [--supersede] [--json]` is a **preview by default** (nothing written); `--apply` records.
+  It refuses (exit 3) a workbook with no `_isaac` sheet, or one naming another bundle, so an
+  example value in a raw template can never become an answer. It reads only non-empty answer
+  cells. Each is validated first: an enum column must hold an allowed value exactly (no case
+  folding); a numeric column must hold a number; a formula, a date in a text column, or a
+  number Excel stored in a text column is refused. An invalid cell is reported by address and
+  records nothing.
+- Each valid cell becomes decisions through the same code as `decide` (identity
+  `self_reported_local_user`, unverified). A Campaign Info cell fills the missing values of
+  its path for the File List's runs (those still in a live record group) and any record-scope
+  value, in one batch; missing values of other runs are listed as not filled, and extracted
+  values are not touched (they are listed). A File List cell
+  fills that run's missing value for the column's path (`correct`), or decides that run's
+  extracted value: `confirm` when the cell equals it, `correct` otherwise. A Configurations
+  Technique reaches a run through the row's Config ID. Every note cites the cell, e.g.
+  `template beam.xlsx 'File List'!F12`.
+- A cell that would change an earlier scientist decision is a **clash** and is skipped; with
+  `--supersede` the new decision is recorded and wins by the last-wins rule (the earlier one is
+  kept). The same value already decided is not recorded again. Two cells giving one target
+  different values: neither is recorded.
+- Nothing is dropped silently. Columns with no official field (Start Date, Proposal ID, Mode,
+  channels, detectors, calibration, setup, notes, Gas Feed) and columns whose official field
+  has no target in this bundle (for example Flow Mode) are reported with their cells as
+  "recorded nowhere". A row's File Name must match the export exactly (no trimming); a row
+  whose name was edited or moved is refused, never re-matched by guess, and a mapping that
+  names one file or run on two rows is refused outright.
+
+## 20. Suggestions: the absorber, facility hints, and a Claude reading pass
+
+Three ways the import shows a scientist what the files already say, so they can answer in one
+step. None of them is a value: each is a suggestion or hint, and only a scientist decision makes
+anything `scientist_confirmed`.
+
+- **The absorber** (`isaac.suggest.absorber.v0`, `suggestions.absorber_for_group`). It is
+  read from every `Element.symbol` and `Element.edge` header statement of the processed outputs
+  linked to a group. Those links are proposed by name and not confirmed. The beamtime's
+  `experiment.element_evidence` (an acquisition macro's name, a shared readme) also counts.
+  - A value is proposed only when every witness agrees. Two witnesses that differ propose
+    nothing for that half (`status: disagrees`), and the group is asked on its own.
+  - Groups that agree are asked once at experiment scope (`confirm_absorber`). The question is
+    optional, because the official schema has no absorber field.
+  - The answer is `decide --decision set_absorber --element <El> --edge <K|L1-L3|M1-M5>` on a
+    record group. It never changes the group's status.
+  - `build-records` writes the absorber to the draft's `implicit[]` (`absorbing_element`,
+    `edge`). Without a decision the value is `null` and the witnesses are kept as evidence, the
+    same way the hosted path carries an unconfirmed edge. It reaches the evidence sidecar only,
+    never an official field.
+- **Every consolidated question says which decisions answer it** (`allowed_decisions`), and
+  `decide --question` refuses any other. The absorber question targets record GROUPS, so without
+  this rule `--decision confirm` on it would have bulk-confirmed every group it names.
+- **Facility hints** (`suggestions.facility_hints`) appear on every `system.facility.*` question
+  (in `field_hints` when the field is optional). They are the acquisition-system signature the
+  readers matched and the imported folder's name. They are text and never an answer: a file
+  layout or a folder name is not a statement of where data was taken.
+- **A Claude reading pass**: `bundle annotate <bundle> --from-readings <findings.json> --model <id>`.
+  - The file has format `isaac.reading_findings`. Each finding gives `field_path`, `value`,
+    `applies_to` (`experiment`, or `runs` with exact run labels), `source.path`,
+    `source.locator`, a `quote` (as the reader gives it: this build does not check it against
+    the file), `strength` (`stated` or `inferred`) and `reasoning`. `source.path` must be relative
+    to the imported folder, or carry one leading `../` for a document beside it.
+  - Each finding becomes one AI interpretation per target it reaches: the missing value or
+    extracted candidate of that field on every live run it names.
+  - The interpretation carries the new optional fields `source_path`, `quote`, `strength` and
+    `finding_id`. `source_refs` carries the `source_id` when the cited file is a bundle source.
+  - The default is a preview that writes nothing. `--apply` records everything in one locked
+    write. An identical reading of a target is never recorded twice.
+  - A finding that cannot be placed is reported with its reason and never forced onto another
+    field. Reasons include an unknown field, an unknown run label or a missing quote.
+  - A finding about `context.electrochemistry.electrolyte` is offered, unsplit, on both
+    `electrolyte.name` and `electrolyte.concentration_M`. Splitting it is the scientist's step.
+- **The fix this needed in the questions.** A missing value an AI reading lifted to
+  `needs_review` used to drop out of `questions.json`: its question disappeared exactly when a
+  suggestion arrived. It is now still asked. The reading is the first hint (`kind: ai_suggestion`,
+  with the file, locator, quote and model), and the question text names it as a suggestion that
+  needs confirmation.
+- **Newly answerable fields** (`bundle.LOCAL_ANSWER_FIELDS`):
+  `context.electrochemistry.electrolyte.name`, `.electrolyte.concentration_M`, `.pH` and
+  `.potential_scale`. Both the vendored v1.05 schema and the pinned portal schema declare them,
+  the website has no write route for them, and beamtime notes often state them. They are
+  `missing_values` like any other writable field. A record whose electrolyte has a name but no
+  concentration fails the schema at export, which is the gate working.
+
+## 21. Nested ZIPs and analysis files (`.larix`, `.pxp`) — no format bump
+
+Additive and optional: no schema change, no `format_version` change. A 1.2.0 bundle that holds
+none of this validates as before.
+
+### Nested ZIPs
+
+- **A `.zip` found inside a folder import is walked one level deep**, by the same guarded walk a
+  ZIP import gets (`bl15.archive.inventory_zip`: `..`/absolute refusal, symlink refusal, per-entry
+  size, declared AND measured compression ratio, entry-count and total-byte ceilings, CRC checks).
+  The hosted path does not do this; only the local import does.
+- **Member names.** A member's `relative_path` is `<archive path>!/<member path>`, e.g.
+  `Normalized/2_Pt/Electrode2.zip!/Pt_10_m900mV.nor`. The separator is `!/` and only counts
+  after a `.zip`, so a directory called `Hello!` is not one. The string is relative and carries
+  no `..` segment, so it satisfies the schema's `relative_path` unchanged. Members get a source
+  row, a classification and readers exactly as loose files do; `parent_dir` is `<archive path>!`
+  (plus any member sub-folder) and `depth` counts the archive as one level.
+- **The container** keeps its own source row (it is a file the scientist has, with a digest). Its
+  reader is `nested_zip_walk_v1`: `content_read: true` when the members were walked, with no
+  statements of its own. A ZIP that will not open stays in `unread_files` with
+  `reason_code: reader_refused` and the walk's reason.
+- **Budget.** The folder's `ArchiveLimits` are shared: members count against the same entry and
+  total-byte ceilings, so a folder of ZIPs cannot buy one ceiling each.
+- **Depth is 1.** A ZIP among a nested ZIP's members is listed in `unread_files` with
+  `reason_code: nested_archive_too_deep` and is never opened. A hostile member name (absolute, or
+  with `..`) is listed with its name withheld (§8), as for a top-level ZIP.
+- **Duplicates.** Two members whose paths are equal once normalised (a member written twice,
+  `./b.txt` beside `b.txt`) are ALL refused with `reason_code: duplicate_path`, as is a member whose
+  nested path a real file in the folder already holds (the real file wins). This refusal is
+  local-only: it also applies to a ZIP given as the root, and the hosted `inventory_zip` default
+  still keeps every copy, unchanged.
+- **Staging.** The generic readers read from disk, so a nested ZIP's ACCEPTED members are written
+  into a private temporary directory for the duration of `collect_all_generic` and deleted before it
+  returns. Each is staged at a collision-free name (`z<zip>/m<member number><suffix>`, never derived
+  from the member's name, so case-insensitive volumes, Unicode forms, a member `x` beside `x/y` and
+  over-long names cannot collide or fail) and its bytes are hashed against the walk's
+  `content_sha256` before a reader sees them. A member that cannot be staged, or whose staged bytes
+  differ, is not offered to the readers and, if no engine reader read it, is listed in
+  `unread_files` with `reason_code: member_not_staged` and the reason; the import continues. The
+  staging budget is the engine's (the folder's own accepted bytes and entries first). Nothing is
+  written beside the source.
+- **Not covered:** a ZIP given as the root does not expand ZIPs among its members (they are listed
+  as ordinary unread files), and `isaac bundle show ... excerpt` re-walks without nested expansion,
+  so it cannot show text from a nested member.
+
+### Analysis files
+
+A scientist's ANALYSIS file is **never a run, never a record group, never a processed output.**
+Its source gets `classification.source_type: analysis_file:<kind>` (classifier id
+`local_import_analysis_file_classifier_v1`) and `reader {reader_id, content_read: true,
+statements_read, statements_suppressed, partial, skipped_total}`. Its statements are
+`extended_context[]` entries: `source_recorded`, `scope: "analysis_file"`, `run_id: null`, no
+`processed_output_id`, `official_path: null`, a verbatim `raw_literal` and a `locator`. They are
+evidence a scientist may read; nothing maps one onto an official field.
+A file that cannot be read stays in `unread_files` with `reason_code: reader_refused` and the
+reader's reason; its source carries `content_read: false`.
+
+Every file's first entry is `<kind>.reader_summary` (locator `file`): the reader's own counts,
+caps and skips as JSON. A clipped literal ends with `[clipped: first N of M characters]`.
+
+| Reader id | File | Read with | Concepts (locator) |
+|---|---|---|---|
+| `larch_session_v1` | `.larix` | gzip (or plain text beginning `##LARIX:`), standard library | `larch.header.*`, `larch.config.*` (`line N`); `larch.group.<attr>`, `larch.group.callargs.<fn>.<kw>`, `larch.xasgroup.filename/groupname` (`symbol <name>`); `larch.data_file`, `larch.param.<fn>.<kw>`, `larch.param.set.<attr>` (`command N`); `larch.command` (`command N (lines A-B)`) |
+| `igor_pxp_v1` | `.pxp` | packed-file record headers, standard library | `igor.history_line` (`history line N`); `igor.procedure_text`, `igor.recreation_macros`, `igor.packed_file_text/name/type` (`record N (<kind>)`); `igor.data_folder` (`record N (data folder start)`); `igor.wave` (`record N (wave, data folder root:...)`); `igor.wave_note` (`record N (wave note)`) |
+
+Bounds (also stated per file in its summary):
+
+- **`.larix`**: decompressed text <= 64 MiB and <= 200x the compressed size; <= 200,000 history
+  statements scanned; commands <= 6,000, data files <= 2,000, parameters <= 3,000, symbol-derived
+  entries <= 6,000; a literal <= 500 characters (header, config, parameter and symbol values 300; names placed
+  in a concept or in the summary 64, at most 40 listed there). `command N`
+  numbers ALL history statements; display-only calls (`plot*`) are counted by name and not stored.
+  Parameter entries are thinned on `(concept, literal)` (first locator kept, repeats counted).
+  **Withheld, and counted:** the machine name, the machine id and the saving user's profile paths.
+  The session is read as text; no statement is executed or evaluated.
+- **`.pxp`**: <= 100,000 records; data folders nest <= 64 deep (starts past that are counted) and a folder
+  path in a locator is clipped at 200 characters; a record with a negative length or one running past the end of
+  the file ends the walk (`malformed_length`, what was read before it is kept); <= 1 MiB read of a
+  text record and 16 MiB in all; history lines <= 5,000 (500 characters each), text records <= 8,000
+  characters, waves <= 5,000, wave notes <= 1,000; a file over 256 MiB, or whose first header is
+  plausible in neither byte order, is refused. Record types and waves it cannot parse are skipped and
+  counted by type. The packed-file layout (type 8) is the one observed in a real Igor 6 experiment
+  and anything else is skipped as `packed_file_unrecognised`. A wave's data is never read.
+- Across all analysis files in one bundle: <= 30,000 entries.

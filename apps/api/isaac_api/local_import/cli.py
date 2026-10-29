@@ -781,6 +781,25 @@ def _mutation(fn) -> int:
 def cmd_bundle_annotate(args) -> int:
     from . import mutations as M
 
+    def refuse(message: str):
+        raise M.MutationRefused(message)
+
+    if args.from_readings:
+        if args.target or args.value is not None or args.blind:
+            return _mutation(lambda: refuse("--from-readings takes its targets and values from the file, and a reading pass is not blind; drop --target/--value/--blind."))
+
+        def run():
+            try:
+                findings = json.loads(Path(args.from_readings).read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise M.MutationRefused(f"--from-readings cannot be read as JSON: {type(exc).__name__}", code=6) from exc
+            return M.annotate_from_readings(Path(args.bundle_dir), findings, model_id=args.model, apply=args.apply)
+
+        return _mutation(run)
+    if args.apply:
+        return _mutation(lambda: refuse("--apply goes with --from-readings; a single --target reading is recorded at once."))
+    if not args.target:
+        return _mutation(lambda: refuse("annotate needs --target, or --from-readings <findings.json>."))
     return _mutation(
         lambda: M.annotate(
             Path(args.bundle_dir),
@@ -869,7 +888,14 @@ def cmd_bundle_decide(args) -> int:
         if args.question:
             from . import questions as Q
 
-            found = Q.targets_for(Q.consolidate(M.load(Path(args.bundle_dir))), args.question, args.only, args.field)
+            payload = Q.consolidate(M.load(Path(args.bundle_dir)))
+            asked = Q.question(payload, args.question)
+            if asked is not None and args.decision not in asked.get("allowed_decisions", ()):
+                raise M.MutationRefused(
+                    f"`{args.decision}` does not answer question {args.question} ({asked['kind']}); "
+                    f"use one of: {', '.join(asked.get('allowed_decisions') or ()) or '(none)'}."
+                )
+            found = Q.targets_for(payload, args.question, args.only, args.field)
             if not found:
                 raise M.MutationRefused(f"No open question {args.question!r}" + (f" for {args.only}" if args.only else "") + ".", code=6)
             targets.extend(found)
@@ -994,6 +1020,40 @@ def cmd_process(args) -> int:
     )
 
 
+def cmd_bundle_template_export(args) -> int:
+    """``isaac bundle template export``: the metadata template, answer cells empty."""
+    from . import template as T
+
+    try:
+        result = T.export_template(Path(args.bundle_dir), Path(args.out), suggestions=not args.no_suggestions, force=args.force)
+    except T.TemplateRefused as exc:
+        _err(str(exc))
+        return exc.code
+    _print(result)
+    return EXIT_OK
+
+
+def cmd_bundle_template_import(args) -> int:
+    """``isaac bundle template import``: preview by default; ``--apply`` records decisions."""
+    from . import mutations as M
+    from . import template as T
+
+    try:
+        report = T.import_template(Path(args.bundle_dir), Path(args.xlsx), by=args.by, orcid=args.orcid,
+                                   apply=args.apply, supersede=args.supersede)
+    except T.TemplateRefused as exc:
+        _err(str(exc))
+        return exc.code
+    except M.MutationRefused as exc:
+        _err(str(exc))
+        return exc.code
+    if args.json:
+        _print(report)
+    else:
+        print(T.render_report(report))
+    return EXIT_OK
+
+
 # --- argparse ---------------------------------------------------------------------------
 
 
@@ -1042,7 +1102,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
 
     q = bsub.add_parser("annotate", help="record an AI interpretation (never above needs_review)")
     q.add_argument("bundle_dir")
-    q.add_argument("--target", required=True)
+    q.add_argument("--target", help="one target id (or use --from-readings)")
+    q.add_argument("--from-readings", help="a Claude reading pass's findings file (isaac.reading_findings): one interpretation per target it names")
+    q.add_argument("--apply", action="store_true", help="with --from-readings: record them (default: show what would be recorded)")
     q.add_argument("--value")
     q.add_argument("--json", action="store_true", help="parse --value as JSON")
     q.add_argument("--excerpt-locator")
@@ -1069,8 +1131,8 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--merge-with", nargs="*", help="record groups: group ids to merge with")
     q.add_argument("--qc-status", help="processing result + approve: measurement.qc.status, from the pinned vocabulary")
     q.add_argument("--qc-note", help="with --qc-status: what is compromised or failed, and why")
-    q.add_argument("--element", help="record group + approve_calibration: the absorbing element (e.g. Ir)")
-    q.add_argument("--edge", help="record group + approve_calibration: the edge (K, L1-L3, M1-M5)")
+    q.add_argument("--element", help="record group + approve_calibration (the calibration reference) or set_absorber (the absorber): an element, e.g. Ir")
+    q.add_argument("--edge", help="with --element: the edge (K, L1-L3, M1-M5)")
     q.add_argument("--positions", help="--target experiment + set_counter_positions: filename token positions, e.g. 2 or 2,3")
     q.set_defaults(func=cmd_bundle_decide)
 
@@ -1123,6 +1185,24 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--dry-run", action="store_true")
     q.add_argument("--portal-url")
     q.set_defaults(func=cmd_bundle_upload)
+
+    q = bsub.add_parser("template", help="the ISAAC metadata template: export it, fill it once, import the answers")
+    tsub = q.add_subparsers(dest="template_command", required=True)
+    t = tsub.add_parser("export", help="write the template (answer cells empty; suggestions on their own sheet)")
+    t.add_argument("bundle_dir")
+    t.add_argument("--out", required=True, help="the .xlsx file to write")
+    t.add_argument("--force", action="store_true", help="replace an existing --out file")
+    t.add_argument("--no-suggestions", action="store_true", help="leave the ISAAC Suggestions sheet empty (records no exposure)")
+    t.set_defaults(func=cmd_bundle_template_export)
+    t = tsub.add_parser("import", help="read a filled template: preview by default, --apply to record decisions")
+    t.add_argument("bundle_dir")
+    t.add_argument("xlsx")
+    t.add_argument("--by", required=True, help="the name of the person whose answers these are")
+    t.add_argument("--orcid")
+    t.add_argument("--apply", action="store_true", help="record the decisions (default: preview, nothing written)")
+    t.add_argument("--supersede", action="store_true", help="record a cell even where an earlier decision gives a different value")
+    t.add_argument("--json", action="store_true", help="print the full report as JSON")
+    t.set_defaults(func=cmd_bundle_template_import)
     return parser
 
 

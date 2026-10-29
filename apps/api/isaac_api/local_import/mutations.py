@@ -206,6 +206,60 @@ def parse_value(raw: str | None, as_json: bool) -> Any:
         raise MutationRefused(f"--value is not valid JSON: {exc}") from exc
 
 
+def _add_interpretation(bundle: dict, kind: str, obj: Mapping, target_id: str, *, value: Any, rationale: str,
+                        source_refs: list, excerpt_locator: str | None, model_id: str, is_blind: bool, basis: str,
+                        extra: Mapping | None = None) -> dict:
+    """Append ONE AI interpretation (and, on a candidate, its context witness)."""
+    interps = bundle.setdefault("ai_interpretations", [])
+    entry = {
+        "interpretation_id": f"ai-{len(interps) + 1:04d}",
+        "target": {"kind": kind, "id": target_id},
+        "proposed_value": value,
+        "rationale": rationale or "",
+        "source_refs": source_refs,
+        "method": "ai_interpretation",
+        "model": {"model_id": model_id},
+        "created_utc": now_utc(),
+        "max_state": "needs_review",
+        "blind": is_blind,
+        "blind_basis": basis,
+        "excerpt_locator": excerpt_locator,
+    }
+    for k, v in (extra or {}).items():
+        if v is not None:
+            entry[k] = v
+    interps.append(entry)
+    if kind == "candidate":
+        source_id = (source_refs[0] if source_refs else {}).get("source_id")
+        if len(obj["evidence"]) >= B.MAX_EVIDENCE_PER_CANDIDATE:
+            obj["evidence_truncated"] = True
+        else:
+            path = None
+            if source_id:
+                path = next(s["relative_path"] for s in bundle["sources"] if s["source_id"] == source_id)
+            obj["evidence"].append(
+                {
+                    "evidence_id": f"{obj['candidate_id']}.ai{len(interps):04d}",
+                    "source_id": source_id,
+                    "relative_path": path,
+                    "locator": excerpt_locator or "(no locator given)",
+                    "statement_key": obj["statement_key"],
+                    "literal_value": value,
+                    "method": "ai_interpretation",
+                    "method_id": model_id,
+                    "relation": "context",
+                    "reading_index": None,
+                    "normalization": [],
+                }
+            )
+        obj["evidence_total"] = max(obj["evidence_total"] + 1, len(obj["evidence"]))
+        obj["evidence_truncated"] = obj["evidence_total"] > len(obj["evidence"])
+    return entry
+
+
+_INTERPRETABLE = ("candidate", "missing_value", "record_group", "source", "run", "processing_result")
+
+
 def annotate(
     bundle_dir: Path,
     *,
@@ -222,7 +276,7 @@ def annotate(
 
     def change(bundle):
         kind, obj = resolve_target(bundle, target_id)
-        if kind not in ("candidate", "missing_value", "record_group", "source", "run", "processing_result"):
+        if kind not in _INTERPRETABLE:
             raise MutationRefused(f"An AI interpretation cannot target a {kind}.")
         if source_id is not None and source_id not in {s["source_id"] for s in bundle["sources"]}:
             raise MutationRefused(f"Unknown source {source_id!r}.", code=6)
@@ -237,47 +291,68 @@ def annotate(
             )
         else:
             is_blind, basis = False, "Not requested as blind."
-        interps = bundle.setdefault("ai_interpretations", [])
-        entry = {
-            "interpretation_id": f"ai-{len(interps) + 1:04d}",
-            "target": {"kind": kind, "id": target_id},
-            "proposed_value": value,
-            "rationale": rationale or "",
-            "source_refs": [{"source_id": source_id, "locator": excerpt_locator}] if (source_id or excerpt_locator) else [],
-            "method": "ai_interpretation",
-            "model": {"model_id": model_id},
-            "created_utc": now_utc(),
-            "max_state": "needs_review",
-            "blind": is_blind,
-            "blind_basis": basis,
-            "excerpt_locator": excerpt_locator,
+        return _add_interpretation(
+            bundle, kind, obj, target_id, value=value, rationale=rationale,
+            source_refs=[{"source_id": source_id, "locator": excerpt_locator}] if (source_id or excerpt_locator) else [],
+            excerpt_locator=excerpt_locator, model_id=model_id, is_blind=is_blind, basis=basis,
+        )
+
+    return mutate(bundle_dir, change)
+
+
+def annotate_from_readings(bundle_dir: Path, findings: Mapping, *, model_id: str, apply: bool) -> dict:
+    """A Claude reading pass's findings file (``isaac.reading_findings``) as AI
+    interpretations, one per target, in ONE write. Without ``apply`` nothing is written.
+    Re-applying the same findings adds nothing (an identical reading of a target is kept once)."""
+    from . import suggestions as S
+
+    def plan(bundle):
+        try:
+            out = S.readings_to_interpretations(bundle, findings, model_id=model_id)
+        except S.ReadingsRefused as exc:
+            raise MutationRefused(str(exc)) from exc
+        seen = {
+            (i["target"]["kind"], i["target"]["id"], json.dumps(i.get("proposed_value"), sort_keys=True),
+             i.get("source_path"), i.get("excerpt_locator"))
+            for i in bundle.get("ai_interpretations") or ()
         }
-        interps.append(entry)
-        if kind == "candidate":
-            if len(obj["evidence"]) >= B.MAX_EVIDENCE_PER_CANDIDATE:
-                obj["evidence_truncated"] = True
-            else:
-                path = None
-                if source_id:
-                    path = next(s["relative_path"] for s in bundle["sources"] if s["source_id"] == source_id)
-                obj["evidence"].append(
-                    {
-                        "evidence_id": f"{obj['candidate_id']}.ai{len(interps):04d}",
-                        "source_id": source_id,
-                        "relative_path": path,
-                        "locator": excerpt_locator or "(no locator given)",
-                        "statement_key": obj["statement_key"],
-                        "literal_value": value,
-                        "method": "ai_interpretation",
-                        "method_id": model_id,
-                        "relation": "context",
-                        "reading_index": None,
-                        "normalization": [],
-                    }
-                )
-            obj["evidence_total"] = max(obj["evidence_total"] + 1, len(obj["evidence"]))
-            obj["evidence_truncated"] = obj["evidence_total"] > len(obj["evidence"])
-        return entry
+        fresh, repeated = [], 0
+        for t, f in out["planned"]:
+            key = (t["kind"], t["id"], json.dumps(f["proposed_value"], sort_keys=True), f["source_path"], f["excerpt_locator"])
+            if key in seen:
+                repeated += 1
+                continue
+            seen.add(key)
+            fresh.append((t, f))
+        return out, fresh, repeated
+
+    def summary(out, fresh, repeated, recorded):
+        by_field: dict = {}
+        for t, f in fresh:
+            by_field.setdefault(f["finding_id"], 0)
+            by_field[f["finding_id"]] += 1
+        return {"applied": recorded, "interpretations": len(fresh), "already_recorded": repeated,
+                "targets_per_finding": by_field, "skipped": out["skipped"]}
+
+    if not apply:
+        with locked(Path(bundle_dir)):
+            bundle = load(bundle_dir)
+        out, fresh, repeated = plan(bundle)
+        return summary(out, fresh, repeated, False)
+
+    def change(bundle):
+        out, fresh, repeated = plan(bundle)
+        for t, f in fresh:
+            kind, obj = resolve_target(bundle, t["id"])
+            if kind not in _INTERPRETABLE:
+                raise MutationRefused(f"An AI interpretation cannot target a {kind}.")
+            _add_interpretation(
+                bundle, kind, obj, t["id"], value=f["proposed_value"], rationale=f["rationale"],
+                source_refs=f["source_refs"], excerpt_locator=f["excerpt_locator"], model_id=model_id,
+                is_blind=False, basis="A reading pass over the files; not requested as blind.",
+                extra={k: f[k] for k in ("source_path", "quote", "strength", "finding_id")},
+            )
+        return summary(out, fresh, repeated, True)
 
     return mutate(bundle_dir, change)
 
@@ -338,6 +413,17 @@ def decide(
     records nothing new. Each target is its own entry even in a bulk call, sharing a
     ``batch_id``.
     """
+    params = dict(
+        target_ids=target_ids, decision=decision, value=value, by=by, orcid=orcid, note=note,
+        split_into=split_into, merge_with=merge_with, qc_status=qc_status, qc_note=qc_note,
+        element=element, edge=edge, positions=positions,
+    )
+    _decide_arguments(**params)  # refused before the lock is taken, as always
+    return mutate(bundle_dir, lambda bundle: record_decision(bundle, **params))
+
+
+def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, edge, positions, **_rest):
+    """The checks of :func:`decide` that need no bundle. Returns ``positions`` normalised."""
     problem = B.decider_name_problem(by)
     if problem:
         raise MutationRefused(f"--by is required: the name of the person deciding (this one {problem.replace('has ', 'has ', 1)}).")
@@ -351,11 +437,11 @@ def decide(
             raise MutationRefused(f"--qc-status must be one of {', '.join(allowed)} (measurement.qc.status).")
         if decision != "approve":
             raise MutationRefused("--qc-status goes with --decision approve on a processing result.")
-    if decision == "approve_calibration":
+    if decision in ("approve_calibration", "set_absorber"):
         if not (element and re.fullmatch(r"[A-Z][a-z]?", element)) or not (edge and re.fullmatch(r"K|L[1-3]|M[1-5]", edge)):
-            raise MutationRefused("approve_calibration needs --element (e.g. Ir) and --edge (K, L1-L3, M1-M5).")
+            raise MutationRefused(f"{decision} needs --element (e.g. Ir) and --edge (K, L1-L3, M1-M5).")
     elif element or edge:
-        raise MutationRefused("--element/--edge go with --decision approve_calibration on a record group.")
+        raise MutationRefused("--element/--edge go with --decision approve_calibration or set_absorber on a record group.")
     if decision == "set_counter_positions":
         if (
             not positions
@@ -366,6 +452,33 @@ def decide(
         positions = list(positions)
     elif positions:
         raise MutationRefused("--positions goes with --target experiment --decision set_counter_positions.")
+    return positions
+
+
+def record_decision(
+    bundle: dict,
+    *,
+    target_ids: Sequence[str],
+    decision: str,
+    value: Any,
+    by: str,
+    orcid: str | None,
+    note: str | None = None,
+    split_into: Sequence[Sequence[str]] | None = None,
+    merge_with: Sequence[str] | None = None,
+    qc_status: str | None = None,
+    qc_note: str | None = None,
+    element: str | None = None,
+    edge: str | None = None,
+    positions: Sequence[int] | None = None,
+) -> dict:
+    """:func:`decide` applied to an ALREADY-LOADED bundle, under the caller's lock. Saves
+    nothing: the caller saves through :func:`save_bundle` (or :func:`mutate`). Every target
+    is checked before any entry is appended, so a refusal leaves ``bundle`` unchanged."""
+    positions = _decide_arguments(
+        target_ids=target_ids, decision=decision, by=by, orcid=orcid, qc_status=qc_status,
+        element=element, edge=edge, positions=positions,
+    )
     bulk = len(target_ids) > 1
 
     def change(bundle):
@@ -439,7 +552,7 @@ def decide(
                 entry["split_into"] = [list(g) for g in split_into]
             if merge_with:
                 entry["merge_with"] = list(merge_with)
-            if decision == "approve_calibration":
+            if decision in ("approve_calibration", "set_absorber"):
                 entry["element"], entry["edge"] = element, edge
             if decision == "set_counter_positions":
                 entry["positions"] = positions
@@ -459,7 +572,7 @@ def decide(
             recorded.append(tid)
         return {"recorded": recorded, "unchanged": unchanged, "batch_id": batch_id}
 
-    return mutate(bundle_dir, change)
+    return change(bundle)
 
 
 # --- crosscheck plan / excerpt / reveal ---------------------------------------------------------
@@ -580,6 +693,10 @@ def excerpt(bundle: Mapping, target_id: str, *, source: str | None) -> dict:
         if src is None:
             continue
         path = src["relative_path"]
+        if ".zip!/" in path.lower():
+            out.append({"source_id": src["source_id"], "relative_path": path,
+                        "refused": "a member of a ZIP inside the folder: excerpt does not open nested archive members yet; read it with the Read tool after unzipping"})
+            continue
         entry = current.get(path)
         if entry is None:
             out.append({"source_id": src["source_id"], "relative_path": path, "refused": "the file is no longer in the source"})

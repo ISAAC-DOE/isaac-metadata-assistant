@@ -2291,6 +2291,32 @@
             "string",
             "null"
           ]
+        },
+        "source_path": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "The file the reading cites, relative to the imported folder (or ../<name> for a document beside it). Set when the reading came from a findings file; source_refs carries the source_id when the file is one of the bundle's sources."
+        },
+        "quote": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "The words the reading rests on, as the reader quoted them from the cited file. Not checked against the file by this build."
+        },
+        "strength": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "stated",
+            "inferred",
+            null
+          ],
+          "description": "stated: the file says it; inferred: one written step from what the file says."
+        },
+        "finding_id": {
+          "type": "string",
+          "maxLength": 40
         }
       }
     },
@@ -2329,6 +2355,7 @@
             "approve",
             "needs_changes",
             "approve_calibration",
+            "set_absorber",
             "set_counter_positions"
           ]
         },

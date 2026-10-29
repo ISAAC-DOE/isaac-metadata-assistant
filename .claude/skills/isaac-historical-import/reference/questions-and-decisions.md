@@ -37,6 +37,22 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
 - Use `--json` with `--value` for numbers/objects. ORCID only if the scientist gives one (`--orcid`).
 - Repeating a decision is harmless (recorded once). A later decision replaces an earlier one.
 
+## The template (answer everything the files never state, in one sitting)
+
+- Export: `<isaac> bundle template export <bundle> --out <file.xlsx>`. One row per run in a live
+  record group, named by its file's path; Campaign Info answers apply to every File List run.
+  Electrolyte is the name only: "0.1 M KOH" goes in as Electrolyte `KOH` and Electrolyte
+  Concentration (M) `0.1` (ISAAC's added columns, with pH, after Gas Feed). Take the split from the
+  scientist; do not split it for them. Answer cells are empty;
+  `ISAAC Suggestions` shows extracted values, hints and AI readings with file and locator.
+- Import: `<isaac> bundle template import <bundle> <file.xlsx> --by "<name>"` previews; add
+  `--apply` only after the scientist has seen the preview. Each cell becomes decisions; each note
+  cites its cell. Invalid cells (not an allowed value exactly, not a number) record nothing.
+- A cell that disagrees with an earlier decision is a clash and is skipped. Use `--supersede` only
+  when the scientist says the sheet is the newer answer.
+- Columns recorded nowhere (no official field, or no target in this bundle) are listed with their
+  cells. Tell the scientist; do not move their values into another field.
+
 ## Never
 
 Pick a side of a conflict, fill a required value with a plausible number, copy a beamtime fact
