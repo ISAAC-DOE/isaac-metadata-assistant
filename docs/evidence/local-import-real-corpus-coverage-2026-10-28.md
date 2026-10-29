@@ -231,3 +231,39 @@ Before the generic readers, 2584 of 6399 files were not read by ISAAC. 2291 of t
 Flags are factual disagreements inside the files, left as found: in the Athena/Demeter exports the declared `Column.N` entries disagree with the column-header line or the row width. No reader found a non-numeric cell, a points mismatch or a non-monotonic grid in this corpus.
 
 `ssrl_xdc` claims include each run's companion files (region, detector, experiment, other context and the binary originals), which are attached as context and not parsed.
+
+
+## Correction, 2026-10-28 (later the same day): the scientists' processed files are not runs
+
+The run counts above (274 / 340 / 128 / 54 / 61 / 570) are **too high**. They counted every
+Athena/Demeter XDI file (`.nor`, `.xmu`, `.peak`, `.recon`, `.pca`, `.nder`) as an
+acquisition run, so grouping proposed record groups made of the scientists' own processed
+files. Fixed in `e8c21ad1` (bundle format 1.2.0): a file whose line 1 names Athena or
+Demeter is a **processed output** (a reference result, never a record), stored in
+`processed_outputs[]`. The tables above are kept as they were measured, because "the XDI
+reader claimed 743 files" is still true; what was wrong is treating those files as runs.
+
+Re-measured at `e8c21ad1` (all six: import, group, process and `bundle check` exit 0, VALID
+at 1.2.0). Counts only.
+
+| beamtime | runs | processed outputs | record groups | multi-run groups | merge candidates |
+|---|---:|---:|---:|---:|---:|
+| `BL15-2 2019-05` | 180 | 94 | 180 | 0 | 13 |
+| `BL15-2 2021-11` | 87 | 253 | 59 | 25 | 1 |
+| `BL15-2 2025-04` | 128 | 0 | 127 | 1 | 1 |
+| `BL4-3 2025-07` | 53 | 1 | 53 | 0 | 3 |
+| `BL4-3 2025-11` | 61 | 0 | 61 | 0 | 3 |
+| `BL6-2c 2018-07` | 223 | 347 | 194 | 28 | 6 |
+
+**Processing against the scientists' own Athena projects, re-measured:** 74 groups compared
+(not 107); 6 agree at ISAAC's default normalization (not 26); median RMS of normalized mu
+0.117 at defaults, **0.0195** when ISAAC's merge is normalized with the scientist's own Athena
+parameters (not 0.076 -> 0.0096); median |dE0| 0.66 eV. Flags: normalized shape differs 68,
+E0 differs 24, edge-step scale differs 24, scientist used a subset of the scans 10. The
+conclusion is unchanged: the data, channel and merge agree; ISAAC's default normalization
+and E0 choices differ from the scientists', which is a protocol-review item for Oscar and
+Angel, not something ISAAC overrides.
+
+**2019 grouping:** 0 multi-run groups. 13 merge candidates wait on one scientist answer (which
+file-name position is a counter); position 2 in that naming scheme may be a sequence, in
+which case the runs are correctly separate.

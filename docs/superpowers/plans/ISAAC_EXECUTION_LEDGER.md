@@ -43,8 +43,14 @@ WHAT WAS BUILT (see ISAAC_Skill_Plan_2026-10-28.md rev 2 + DEC-76..84):
 
 REAL DATA (DEC-82, owner-approved; never in the repo): ~/Documents/ISAAC/real-data/ (6 SSRL
   beamtimes, 6,399 files). All six import exit 0; coverage 6,106 code / 230 Claude / 63
-  unreadable. Processing vs scientists' Athena: 107 matched groups, 26 agree at defaults; RMS
-  0.076 -> 0.0096 with the scientist's own normalization params. Real-format groups reach portal
+  unreadable. ~~Processing vs scientists' Athena: 107 matched groups, 26 agree at defaults; RMS
+  0.076 -> 0.0096 with the scientist's own normalization params.~~ CORRECTED same day: those
+  figures came from bundles in which the scientists' own Athena/Demeter files were counted as
+  runs (fixed in e8c21ad1). Re-measured at e8c21ad1 (real-data/_runs_v3): 74 groups compared,
+  6 agree at defaults, median RMS(normalized mu) 0.117 -> 0.0195 with the scientist's own
+  Athena parameters, median |dE0| 0.66 eV; 10 groups use a scientist-selected subset of scans.
+  The conclusion stands (data, channel and merge agree; normalization and E0 choices differ),
+  the numbers did not. Real-format groups reach portal
   `publish` ONLY with labelled synthetic self-test decisions (outputs in real-data/_runs/).
 
 HOSTED BEHAVIOUR: unchanged on every committed fixture (golden digests from main pinned), except
