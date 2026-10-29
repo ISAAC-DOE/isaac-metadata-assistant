@@ -1108,7 +1108,9 @@ def _differing_number_positions(stems: Sequence[str], *, counter_positions: Iter
     what follows it are bookkeeping, and the positions before it are the same in every name.
     Measured on a real beamtime: `<n>_<m>_…` beside `<n+1>_<m>_…_again` got a merge candidate
     but no question, because the marker made the names different lengths."""
-    toks = [_stem_tokens(s) for s in stems]
+    # compared as the grouping key compares them (`000mV` = `0mV`, :func:`_unit_token`): measured
+    # on a real beamtime, one set differing only in that spelling was left out of the question
+    toks = [[_unit_token(x) for x in _stem_tokens(s)] for s in stems]
     heads = [t[: next((j for j, x in enumerate(t) if _REPEAT_TOKEN.match(x)), len(t))] for t in toks]
     if not toks or len({len(h) for h in heads}) != 1:
         return []

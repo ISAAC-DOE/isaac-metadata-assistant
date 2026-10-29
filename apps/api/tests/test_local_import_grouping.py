@@ -810,3 +810,10 @@ def test_the_counter_question_is_asked_when_one_name_carries_a_repeat_marker():
     b["scientist_decisions"] = [{**DECISION, "positions": [1]}]
     (g,) = G.propose(b)["record_groups"]
     assert len(g["member_run_keys"]) == 2
+
+
+def test_the_counter_question_compares_unit_tokens_as_the_grouping_key_does():
+    # measured on a real beamtime: `_0mV` beside `_000mV` formed a merge candidate the counter
+    # question did not count, so the question under-reported what one answer would settle
+    assert G._differing_number_positions(["SYN_E6_06_cat_0mV", "SYN_E6_13_cat_000mV"]) == [3]
+    assert G._differing_number_positions(["SYN_E6_06_cat_0mV", "SYN_E6_13_cat_400mV"]) == []

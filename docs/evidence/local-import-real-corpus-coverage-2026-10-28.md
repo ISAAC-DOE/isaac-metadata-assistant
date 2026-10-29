@@ -258,7 +258,7 @@ exit 0, VALID at 1.2.0. Counts only.
 | `BL4-3 2025-11` | 61 | 0 | 61 | 0 | 3 | 0 | 0 | 5 / 49 / 7 |
 | `BL6-2c 2018-07` | 223 | 347 | 194 | 28 | 6 | 0 | 121 | 28 / 44 / 1 |
 
-Counter questions (one answer each settles them): 2019-05 position 2 (10 merge candidates);
+Counter questions (one answer each settles them): 2019-05 position 2 (11 merge candidates);
 2021-11 positions 1 and 2 (25 and 1); 2025-04 position 1 (1); BL6-2c positions 4 and 5.
 
 **Processing against the scientists' own Athena projects**, counted ONCE per group (from
@@ -277,6 +277,6 @@ and Angel, not something ISAAC overrides.
 of this section at `e8c21ad1`): **double-counted**, because each comparison is stored on both
 results. At that build it was 37 groups, 3 agree, the same medians.
 
-**2019 grouping:** 0 multi-run groups. 10 merge candidates wait on one scientist answer (is
+**2019 grouping:** 0 multi-run groups. 11 merge candidates wait on one scientist answer (is
 file-name position 2 a counter?); in that naming scheme position 2 may be a sequence, in which
 case the runs are correctly separate.
