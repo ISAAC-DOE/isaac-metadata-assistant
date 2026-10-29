@@ -79,7 +79,7 @@ def _groups(specs):
 
 
 def test_repeats_at_the_same_condition_merge_and_ids_are_stable():
-    specs = [{"stem": "01_SYN_a", "conds": dict(BASE)}, {"stem": "02_SYN_a", "conds": dict(BASE)}]
+    specs = [{"stem": "SYN_a_01", "conds": dict(BASE)}, {"stem": "SYN_a_02", "conds": dict(BASE)}]
     groups = _groups(specs)
     assert len(groups) == 1
     g = groups[0]
@@ -180,7 +180,7 @@ def test_an_unseen_statement_key_is_a_condition_fail_closed():
 def test_unknown_tokens_count_only_from_the_acquisition_file_name():
     scan_only = dict(BASE, unknown_token=("tokens", [("scanfile-1", "001")]))
     scan_only_b = dict(BASE, unknown_token=("tokens", [("scanfile-2", "002")]))
-    assert len(_groups([{"stem": "01_SYN", "conds": scan_only}, {"stem": "02_SYN", "conds": scan_only_b}])) == 1
+    assert len(_groups([{"stem": "SYN_01", "conds": scan_only}, {"stem": "SYN_02", "conds": scan_only_b}])) == 1
     acq_a = dict(BASE, unknown_token=("tokens", [("ACQ", "asIs")]))
     acq_b = dict(BASE, unknown_token=("tokens", [("ACQ", "newGrid")]))
     assert len(_groups([{"stem": "a", "conds": acq_a}, {"stem": "b", "conds": acq_b}])) == 2
@@ -275,7 +275,7 @@ def test_every_key_has_exactly_one_class_and_unseen_keys_are_unknown():
 def test_bookkeeping_only_differences_make_one_group_and_ask_to_confirm_repeats():
     a = dict(BASE, legacy_run_or_file_number=("lit", "04"))
     b = dict(BASE, legacy_run_or_file_number=("lit", "05"), repeat_marker=("lit", "again"))
-    p = _propose([{"stem": "04_01_SYN", "conds": a}, {"stem": "05_01_SYN_again", "conds": b}])
+    p = _propose([{"stem": "SYN_01_04", "conds": a}, {"stem": "SYN_01_again_05", "conds": b}])
     (g,) = p["record_groups"]
     assert g["status"] == "proposed" and len(g["member_run_keys"]) == 2
     q = next(q for q in g["questions"] if q["code"] == "confirm_repeats_merge")
@@ -285,7 +285,7 @@ def test_bookkeeping_only_differences_make_one_group_and_ask_to_confirm_repeats(
 
 
 def test_an_unknown_key_difference_splits_and_offers_one_merge_candidate():
-    p = _propose([{"stem": "01_SYN", "conds": dict(BASE)}, {"stem": "02_SYN", "conds": dict(BASE, new_spot=("lit", "newSpot"))}])
+    p = _propose([{"stem": "SYN_01", "conds": dict(BASE)}, {"stem": "SYN_02", "conds": dict(BASE, new_spot=("lit", "newSpot"))}])
     g1, g2 = p["record_groups"]
     (mc,) = p["merge_candidates"]
     assert mc["group_ids"] == [g1["group_id"], g2["group_id"]] and mc["status"] == "proposed"
@@ -296,7 +296,7 @@ def test_an_unknown_key_difference_splits_and_offers_one_merge_candidate():
     assert g1["merge_candidate_ids"] == [mc["merge_candidate_id"]] == g2["merge_candidate_ids"]
     assert mc["question"]["code"] == "merge_candidate" and mc["question"] in g1["questions"]
     assert g2["basis"]["unclassified"]["new_spot"]["key_class"] == "unknown"
-    assert mc["merge_candidate_id"] == _propose([{"stem": "01_SYN", "conds": dict(BASE)}, {"stem": "02_SYN", "conds": dict(BASE, new_spot=("lit", "newSpot"))}])["merge_candidates"][0]["merge_candidate_id"]
+    assert mc["merge_candidate_id"] == _propose([{"stem": "SYN_01", "conds": dict(BASE)}, {"stem": "SYN_02", "conds": dict(BASE, new_spot=("lit", "newSpot"))}])["merge_candidates"][0]["merge_candidate_id"]
 
 
 def test_a_condition_difference_is_never_a_merge_candidate():
@@ -320,7 +320,7 @@ def _scan_index_conflict(bundle):
 
 
 def test_scan_index_tokens_read_as_sample_number_still_form_a_proposed_group():
-    p = _propose([{"stem": "01_SYN", "conds": dict(BASE)}, {"stem": "02_SYN", "conds": dict(BASE)}], mutate=_scan_index_conflict)
+    p = _propose([{"stem": "SYN_01", "conds": dict(BASE)}, {"stem": "SYN_02", "conds": dict(BASE)}], mutate=_scan_index_conflict)
     (g,) = p["record_groups"]
     assert g["status"] == "proposed" and len(g["member_run_keys"]) == 2
     assert "merged_despite_engine_reading" in g["flags"] and "blocked_by_engine_reading" not in g["flags"]
@@ -342,7 +342,7 @@ def _emission_conflict(lits):
 
 
 def test_unit_spelling_in_the_fields_own_unit_forms_a_proposed_group():
-    p = _propose([{"stem": "01_SYN", "conds": dict(BASE)}, {"stem": "02_SYN", "conds": dict(BASE)}], mutate=_emission_conflict(["9175.4", "9175.4 eV"]))
+    p = _propose([{"stem": "SYN_01", "conds": dict(BASE)}, {"stem": "SYN_02", "conds": dict(BASE)}], mutate=_emission_conflict(["9175.4", "9175.4 eV"]))
     (g,) = p["record_groups"]
     assert g["merged_despite_engine_reading"][0]["kind"] == "same_value_different_unit_spelling"
     assert g["basis"]["conditions"]["emission_energy"]["value"] == 9175.4
@@ -372,7 +372,7 @@ def test_unit_spelling_and_auxiliary_macro_conflicts_are_engine_readings():
                 b["candidates"].append(_cand(cid, run["run_id"], key, None, lits, state="conflicting"))
                 run["candidate_ids"].append(cid)
     base = {k: v for k, v in BASE.items() if k != "acquisition_method"}
-    p = _propose([{"stem": "01_SYN", "conds": base}, {"stem": "02_SYN", "conds": base}], mutate=mutate)
+    p = _propose([{"stem": "SYN_01", "conds": base}, {"stem": "SYN_02", "conds": base}], mutate=mutate)
     (g,) = p["record_groups"]  # both misreadings are mechanical: ONE proposed group
     assert sorted({d["kind"] for d in g["merged_despite_engine_reading"]}) == ["auxiliary_macro_read_as_method", "same_value_different_unit_spelling"]
     assert g["basis"]["conditions"]["emission_energy"]["value"] == 9175.4
@@ -418,9 +418,9 @@ def test_an_exported_file_stating_a_different_condition_stays_a_candidate():
 def test_scan_index_misread_with_no_sample_groups_on_the_name_stem():
     nosample = {k: v for k, v in BASE.items() if k != "sample_name"}
     specs = [
-        {"stem": "01_SYN_E1_x_400mV", "conds": dict(nosample)},
-        {"stem": "07_SYN_E1_x_400mV_again", "conds": dict(nosample)},
-        {"stem": "02_SYN_E2_x_400mV", "conds": dict(nosample)},
+        {"stem": "SYN_E1_x_400mV_01", "conds": dict(nosample)},
+        {"stem": "SYN_E1_x_400mV_again_2", "conds": dict(nosample)},
+        {"stem": "SYN_E2_x_400mV_02", "conds": dict(nosample)},
     ]
     b = _bundle(specs)
     _scan_index_conflict(b)
@@ -431,7 +431,13 @@ def test_scan_index_misread_with_no_sample_groups_on_the_name_stem():
     assert key["value"] == "syn_e1_x_400mv" and key["sample_key_basis"] == "name_stem"
     assert "file names with run counters and repeat markers removed" in next(q for q in multi[0]["questions"] if q["code"] == "confirm_repeats_merge")["text"]
     assert len(p["record_groups"]) == 2  # E2 is its own group
-    assert G.name_stem_key("012_SYN_A_rep2_7") == "syn_a"  # zero-padded edge + number after a repeat marker
+    assert G.name_stem_key("SYN_A_rep2_7_01") == "syn_a"  # trailing zero-padded edge + number after a repeat marker
+    # a zero-padded LEADING number is NOT a counter (it is the electrode in the scientists' folder names) ...
+    assert G.name_stem_key("012_SYN_A_rep2_7") == "012_syn_a"
+    assert G.name_stem_key("02_01_SYN_cat") == "02_01_syn_cat"
+    # ... unless a scientist's decision names that position, or it is the run's own legacy number
+    assert G.name_stem_key("012_SYN_A_rep2_7", counter_positions=[1]) == "syn_a"
+    assert G.name_stem_key("007_SYN_A", known_counters=[7]) == "007_syn_a" == G.name_stem_key("007_SYN_A", known_counters=[8])
     assert G.name_stem_key("12_SYN_A_rep2_7") == "12_syn_a"  # a bare leading 12 may be an electrode: kept
     assert G.name_stem_key("SYN_x_12_400mV") == "syn_x_12_400mv"  # a middle number is kept
     assert G.name_stem_key("SYN_x_again_2_400mV") == "syn_x_400mv"  # the number after a repeat marker is a counter
@@ -481,11 +487,26 @@ def test_a_middle_number_difference_is_a_merge_candidate_not_a_group():
     (mc,) = p["merge_candidates"]
     (r,) = [x for x in mc["reasons"] if x["code"] == "numeric_name_token_differs"]
     assert sorted(r["values_by_group"].values()) == ["syn_e1_12_400mv", "syn_e1_1_400mv"]
-    # counter positions still merge: leading index, trailing scan index, after a repeat marker
-    b2 = _bundle([{"stem": "07_SYN_E1_400mV_001", "conds": dict(nosample)}, {"stem": "09_SYN_E1_400mV_again_2", "conds": dict(nosample)}])
+    # counter positions that still merge on their own: trailing zero-padded scan index, number after a repeat marker
+    b2 = _bundle([{"stem": "SYN_E1_400mV_001", "conds": dict(nosample)}, {"stem": "SYN_E1_400mV_again_2", "conds": dict(nosample)}])
     _scan_index_conflict(b2)
     p2 = G.propose(b2)
     assert len(p2["record_groups"]) == 1 and p2["merge_candidates"] == []
+    # a zero-padded LEADING number is NOT a counter by itself (it is the electrode): the runs stay apart,
+    # a merge candidate links them, and the experiment question asks about position 1 ...
+    b3 = _bundle([{"stem": "07_SYN_E1_400mV_001", "conds": dict(nosample)}, {"stem": "09_SYN_E1_400mV_002", "conds": dict(nosample)}])
+    _scan_index_conflict(b3)
+    p3 = G.propose(b3)
+    assert len(p3["record_groups"]) == 2 and all(len(g["member_run_keys"]) == 1 for g in p3["record_groups"])
+    (mc3,) = p3["merge_candidates"]
+    assert [r["code"] for r in mc3["reasons"]] == ["numeric_name_token_differs"]
+    assert sorted(mc3["reasons"][0]["values_by_group"].values()) == ["07_syn_e1_400mv", "09_syn_e1_400mv"]
+    (q3,) = p3["experiment_questions"]
+    assert q3["code"] == "set_counter_positions" and q3["positions"] == [1] and q3["candidates_resolved_by_position"] == {"1": 1}
+    # ... and a scientist's "position 1 is a counter" decision merges them
+    b3["scientist_decisions"] = [{**DECISION, "positions": [1]}]
+    p3b = G.propose(b3)
+    assert len(p3b["record_groups"]) == 1 and p3b["merge_candidates"] == [] and p3b["experiment_questions"] == []
 
 
 def test_name_stem_key_is_only_used_after_a_scan_index_misread():
@@ -495,7 +516,7 @@ def test_name_stem_key_is_only_used_after_a_scan_index_misread():
 
 
 def test_condition_violations_catches_a_tampered_group():
-    b = _bundle([{"stem": "01_SYN", "conds": dict(BASE)}, {"stem": "02_SYN", "conds": dict(BASE, potential_magnitude=0.9)}])
+    b = _bundle([{"stem": "SYN_01", "conds": dict(BASE)}, {"stem": "SYN_02", "conds": dict(BASE, potential_magnitude=0.9)}])
     p = G.propose(b)
     assert G.condition_violations(b, p) == []
     g1, g2 = p["record_groups"]
@@ -526,26 +547,26 @@ HEAD = ["SSRL SYNTHETIC Data Collector", "Fri Jan 01 00:00:00 2099", "PTS: 10 CO
 
 
 def test_unread_counter_names_with_agreeing_headers_become_one_proposed_group():
-    b = _unread_bundle(["07_SYN_m111mV_801_A.001", "07_SYN_m111mV_801_A.002", "08_SYN_m111mV_802_A.001", "09_SYN_m222mV_803_A.001"])
+    b = _unread_bundle(["SYN_m111mV_801_A.001", "SYN_m111mV_801_A.002", "SYN_m111mV_802_A.001", "SYN_m222mV_803_A.001"])
     groups = G.propose_unread_acquisition_groups(b)
     cands = G.propose_unread_merge_candidates(groups)
     heads = {rel: list(HEAD) for rel in (s["relative_path"] for s in b["sources"])}
-    heads["08_SYN_m111mV_802_A.001"][1] = "Sat Jan 02 11:11:11 2099"  # a date differs: bookkeeping
-    heads["08_SYN_m111mV_802_A.001"][-1] = "9.9 9.9"  # offsets differ: bookkeeping
+    heads["SYN_m111mV_802_A.001"][1] = "Sat Jan 02 11:11:11 2099"  # a date differs: bookkeeping
+    heads["SYN_m111mV_802_A.001"][-1] = "9.9 9.9"  # offsets differ: bookkeeping
     out, remaining = G.promote_unread_by_headers(groups, cands, heads.get)
     multi = [g for g in out if len(g.get("acquisition_keys") or ()) > 1]
     assert len(multi) == 1 and remaining == []
     m = multi[0]
-    assert m["stems"] == ["07_SYN_m111mV_801_A", "08_SYN_m111mV_802_A"] and len(m["member_scans"]) == 3
+    assert m["stems"] == ["SYN_m111mV_801_A", "SYN_m111mV_802_A"] and len(m["member_scans"]) == 3
     assert m["basis"]["header_statements"]["value"][2] == "SynK_SYNTHETIC.rgn" and m["questions"][0]["code"] == "confirm_repeats_merge"
     assert len(out) == 2
 
 
 def test_unread_header_disagreement_or_absence_keeps_a_candidate():
-    b = _unread_bundle(["07_SYN_m111mV_801_A.001", "08_SYN_m111mV_802_A.001"])
+    b = _unread_bundle(["SYN_m111mV_801_A.001", "SYN_m111mV_802_A.001"])
     groups = G.propose_unread_acquisition_groups(b)
     cands = G.propose_unread_merge_candidates(groups)
-    heads = {"07_SYN_m111mV_801_A.001": list(HEAD), "08_SYN_m111mV_802_A.001": [*HEAD[:6], "i0 5e8 i1 1e8", *HEAD[7:]]}
+    heads = {"SYN_m111mV_801_A.001": list(HEAD), "SYN_m111mV_802_A.001": [*HEAD[:6], "i0 5e8 i1 1e8", *HEAD[7:]]}
     out, (mc,) = G.promote_unread_by_headers(groups, cands, heads.get)
     assert len(out) == 2 and mc["reasons"][-1] == {"code": "header_statements_disagree", "statement_positions": [4]}
     out2, (mc2,) = G.promote_unread_by_headers(groups, cands, lambda rel: None)
@@ -631,15 +652,61 @@ def test_bare_edge_numbers_are_not_counters():
     assert G.name_stem_key("SYN_cat_400") == "syn_cat_400" and G.name_stem_key("3_SYN_cat") == "3_syn_cat"
 
 
-def test_zero_padded_or_legacy_numbered_edges_are_counters_and_are_named_in_the_question():
-    p = G.propose(_nosample_scanidx(["03_SYN_cat_400mV", "05_SYN_cat_400mV"]))
-    (g,) = p["record_groups"]
+def test_leading_numbers_need_a_decision_and_trailing_padded_edges_are_counters():
+    # a zero-padded LEADING number is the electrode, not a run counter: two runs stay apart, a merge
+    # candidate links them, and the experiment question asks about position 1
+    stems = ["03_SYN_cat_400mV", "05_SYN_cat_400mV"]
+    p = G.propose(_nosample_scanidx(stems))
+    assert [len(g["member_run_keys"]) for g in p["record_groups"]] == [1, 1]
+    (mc,) = p["merge_candidates"]
+    assert [r["code"] for r in mc["reasons"]] == ["numeric_name_token_differs"]
+    assert sorted(mc["reasons"][0]["values_by_group"].values()) == ["03_syn_cat_400mv", "05_syn_cat_400mv"]
+    (eq,) = p["experiment_questions"]
+    assert eq["code"] == "set_counter_positions" and eq["positions"] == [1] and eq["candidates_resolved_by_position"] == {"1": 1} and "1st" in eq["text"]
+    # "position 1 is a counter" merges them, and the confirm question names the counter tokens
+    b = _nosample_scanidx(stems)
+    b["scientist_decisions"] = [{**DECISION, "positions": [1]}]
+    p1 = G.propose(b)
+    (g,) = p1["record_groups"]
     q = next(q for q in g["questions"] if q["code"] == "confirm_repeats_merge")
     assert "03 / 05" in q["text"] and [d["counter_tokens"] for d in q["differing_bookkeeping"]] == [["03"], ["05"]]
-    p2 = G.propose(_nosample_scanidx(["3_SYN_cat_400mV", "5_SYN_cat_400mV"], legacy=[3, 5]))
-    assert len(p2["record_groups"]) == 1  # equals the run's own legacy number: a counter
+    assert p1["merge_candidates"] == [] and p1["experiment_questions"] == [] and g["counter_positions_basis"] == "dec-syn-cp-1"
+    # the legacy number is NOT evidence that a leading number is a counter: the importer reads
+    # it from that very token (independent review: with legacy == leading token, every
+    # electrode re-merged on real data while every synthetic test passed)
+    for st in (stems, ["3_SYN_cat_400mV", "5_SYN_cat_400mV"]):
+        p2 = G.propose(_nosample_scanidx(st, legacy=[3, 5]))
+        assert [len(g["member_run_keys"]) for g in p2["record_groups"]] == [1, 1], st
+        (mc2,) = p2["merge_candidates"]
+        assert [r["code"] for r in mc2["reasons"]] == ["numeric_name_token_differs"], st
     p3 = G.propose(_nosample_scanidx(["SYN_cat_400mV_001", "SYN_cat_400mV_002"]))
     assert len(p3["record_groups"]) == 1  # trailing zero-padded scan index
+    # the leading-vs-trailing asymmetry, at the token level
+    assert G.counter_tokens("03_SYN_cat_001") == ["001"] and G.counter_tokens("03_SYN_cat_001", counter_positions=[1]) == ["03", "001"]
+    assert G.counter_tokens("03_SYN_cat", known_counters=[3]) == []
+    assert G.counter_tokens("SYN_cat_3", known_counters=[3]) == []  # a bare trailing number equal to it neither
+
+
+def test_electrodes_numbered_at_the_start_of_the_name_stay_separate_records():
+    """Real defect (measured, synthetic names here): `02_01_<catalyst>_<cond>` and `05_01_<catalyst>_<cond>`
+    were merged, but the leading number is the ELECTRODE, so two electrodes became one record."""
+    stems = ["02_01_SYN_cat_before_060mV", "05_01_SYN_cat_before_060mV"]
+    # legacy=[2, 5]: the shape the real importer writes (legacy number read from the leading token)
+    for legacy in (None, [2, 5]):
+        p = G.propose(_nosample_scanidx(stems, legacy=legacy))
+        assert [len(g["member_run_keys"]) for g in p["record_groups"]] == [1, 1], legacy
+        (mc,) = p["merge_candidates"]
+        assert [r["code"] for r in mc["reasons"]] == ["numeric_name_token_differs"]
+        assert sorted(mc["reasons"][0]["values_by_group"].values()) == ["02_01_syn_cat_before_060mv", "05_01_syn_cat_before_060mv"]
+    (eq,) = p["experiment_questions"]
+    assert eq["code"] == "set_counter_positions" and eq["positions"] == [1] and eq["candidates_resolved_by_position"] == {"1": 1}
+    b = _nosample_scanidx(stems)
+    b["scientist_decisions"] = [{**DECISION, "positions": [1]}]
+    p1 = G.propose(b)
+    (g,) = p1["record_groups"]
+    assert len(g["member_run_keys"]) == 2 and p1["merge_candidates"] == [] and G.condition_violations(b, p1) == []
+    # the middle `01` is never a counter either way
+    assert G.name_stem_key(stems[0]) == "02_01_syn_cat_before_060mv" and G.name_stem_key(stems[0], counter_positions=[1]) == "01_syn_cat_before_060mv"
 
 
 def test_condition_violations_also_checks_non_counter_name_tokens():
@@ -651,7 +718,7 @@ def test_condition_violations_also_checks_non_counter_name_tokens():
 
 
 def test_violations_are_enforced_by_dissolving_the_group(monkeypatch):
-    b = _bundle([{"stem": "01_SYN", "conds": dict(BASE)}, {"stem": "02_SYN", "conds": dict(BASE)}])
+    b = _bundle([{"stem": "SYN_01", "conds": dict(BASE)}, {"stem": "SYN_02", "conds": dict(BASE)}])
     real = G.condition_violations
     calls = {"n": 0}
 
@@ -673,7 +740,7 @@ def test_violations_are_enforced_by_dissolving_the_group(monkeypatch):
 def test_run_group_reports_enforcement_counts():
     from isaac_api.local_import.processing.cli_entry import build_groups_payload
 
-    payload = build_groups_payload(_bundle([{"stem": "01_SYN", "conds": dict(BASE)}, {"stem": "02_SYN", "conds": dict(BASE)}]))
+    payload = build_groups_payload(_bundle([{"stem": "SYN_01", "conds": dict(BASE)}, {"stem": "SYN_02", "conds": dict(BASE)}]))
     assert payload["condition_violations"] == [] and payload["violations_prevented"] == 0
     assert "merges_prevented_by_name_tokens" in payload
 
@@ -697,6 +764,14 @@ def test_unread_non_padded_leading_numbers_need_a_decision():
     (mc2,) = G.propose_unread_merge_candidates(groups, counter_positions=[1])
     out2, rem2 = G.promote_unread_by_headers(groups, [mc2], lambda rel: list(HEAD))
     assert rem2 == [] and len(out2) == 1
+    # a zero-padded leading number is no more a counter than a bare one (it is the electrode)
+    bp = _unread_bundle(["07_SYN_m111mV_801_A.001", "08_SYN_m111mV_802_A.001"])
+    gp = G.propose_unread_acquisition_groups(bp)
+    (mcp,) = G.propose_unread_merge_candidates(gp)
+    assert not mcp["names_agree_on_non_counter_tokens"] and mcp["reasons"][0]["code"] == "numeric_name_token_differs"
+    (mcp2,) = G.propose_unread_merge_candidates(gp, counter_positions=[1])
+    outp, remp = G.promote_unread_by_headers(gp, [mcp2], lambda rel: list(HEAD))
+    assert remp == [] and len(outp) == 1
 
 
 def test_counter_decision_without_a_named_decider_is_ignored():

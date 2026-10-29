@@ -210,8 +210,8 @@ def test_channels_prefer_achieved_energy_and_flag_missing_i0_and_icr():
 
 def test_end_to_end_repeats_merge_outputs_hashed_and_relative(tmp_path):
     runs = [
-        ("01_SYN_ZZ1_acid", [spec_file(fluo_scan(1)), spec_file(fluo_scan(2, spike=120))], {"sample_name": "ZZ1", "electrolyte_or_medium": "acid"}),
-        ("02_SYN_ZZ1_acid", [spec_file(fluo_scan(3)), spec_file(fluo_scan(4))], {"sample_name": "ZZ1", "electrolyte_or_medium": "acid"}),
+        ("SYN_ZZ1_acid_01", [spec_file(fluo_scan(1)), spec_file(fluo_scan(2, spike=120))], {"sample_name": "ZZ1", "electrolyte_or_medium": "acid"}),
+        ("SYN_ZZ1_acid_02", [spec_file(fluo_scan(3)), spec_file(fluo_scan(4))], {"sample_name": "ZZ1", "electrolyte_or_medium": "acid"}),
     ]
     bdir, root, _ = make_case(tmp_path, runs)
     groups = run_group(bdir)

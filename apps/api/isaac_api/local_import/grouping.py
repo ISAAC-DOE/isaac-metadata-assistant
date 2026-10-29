@@ -293,11 +293,16 @@ def _is_counter_token(toks: Sequence[str], i: int, positions: set, known: set) -
     * it follows a repeat marker (``again_2``); or
     * it is the XDAC acquisition counter ``<digits>_<letter>`` at the end (``_098_A``), a
       fixed format of that exporter; or
-    * it is at an EDGE (first or last token) AND is zero-padded (``01``, ``002``) or equals
-      the run's own legacy/scan number.
+    * it is the LAST token AND is zero-padded (``_001``, a scan index).
 
-    Anything else — a bare ``_400`` (could be a potential), a leading ``3_`` (could be an
-    electrode) — is NOT a counter."""
+    Anything else — a bare ``_400`` (could be a potential), a leading ``3_`` or ``02_`` (could
+    be an electrode) — is NOT a counter. A zero-padded LEADING number used to count as one,
+    and so did any edge number equal to the run's ``legacy_number``: measured on a real
+    beamtime, that merged two electrodes (``02_01_<cat>_…`` with ``05_01_<cat>_…``) into one
+    record. The legacy number is not independent evidence: the importer reads it FROM the
+    leading token (``bl15/relate.py`` ``_LEGACY``), so "equals the legacy number" was always
+    true there. ``known`` is therefore not used to decide; a leading number is a question
+    (``naming_counter_positions``) that one scientist answer settles."""
     t = toks[i]
     if not t.isdigit():
         return False
@@ -307,8 +312,8 @@ def _is_counter_token(toks: Sequence[str], i: int, positions: set, known: set) -
         return True
     if i == len(toks) - 2 and len(toks[-1]) == 1 and toks[-1].isalpha() and len(t) == 3:
         return True
-    if i in (0, len(toks) - 1):
-        return (len(t) >= 2 and t[0] == "0") or int(t) in known
+    if i == len(toks) - 1:
+        return len(t) >= 2 and t[0] == "0"
     return False
 
 

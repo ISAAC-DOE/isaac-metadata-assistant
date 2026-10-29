@@ -73,3 +73,21 @@ def test_counter_question_decide_and_regroup_through_the_cli(tmp_path, capsys):
     assert g["counter_positions_basis"] == after["scientist_decisions"][-1]["decision_id"]
     assert after["merge_candidates"] == [] and after["grouping_questions"] == []
     assert _run(["bundle", "check", str(b)], capsys)[0] == 0
+
+
+def test_electrodes_numbered_first_stay_apart_through_the_real_importer(tmp_path, capsys, monkeypatch):
+    """Independent review of the leading-number fix: the importer sets `legacy_number` FROM the
+    leading token, so a rule trusting it re-merged every electrode on real data while every
+    synthetic test (legacy unset) passed. This goes through `isaac import` itself."""
+    if not FIXTURE.is_dir():
+        pytest.skip("synthetic fixture corpus not present")
+    monkeypatch.setattr(__import__(__name__), "STEMS", ["02_01_SYNcat_pH2_400mV", "05_01_SYNcat_pH2_400mV"])
+    src, b = _folder(tmp_path), tmp_path / "bundle"
+    assert _run(["import", str(src), "--out", str(b)], capsys)[0] == 0
+    assert _run(["bundle", "group", str(b)], capsys)[0] == 0
+    bundle = _bundle(b)
+    assert sorted(r.get("legacy_number") for r in bundle["runs"] if r.get("scan_count")) == [2, 5]  # the real shape
+    assert [len(g["member_run_keys"]) for g in bundle["record_groups"]] == [1, 1]
+    assert len(bundle["merge_candidates"]) == 1
+    (gq,) = bundle["grouping_questions"]
+    assert gq["kind"] == "naming_counter_positions" and 1 in gq["positions"]
