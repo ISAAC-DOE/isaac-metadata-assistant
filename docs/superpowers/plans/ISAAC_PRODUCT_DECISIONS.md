@@ -362,7 +362,7 @@ the content.** `DEC-75` is an **engineering decision taken by the implementing s
 
 ## B9. Decisions taken by the 2026-10-28 owner direction — the local-first Claude skill
 
-**Provenance.** `DEC-76`…`DEC-84` come from the project owner (Krish) in the 2026-10-28 session.
+**Provenance.** `DEC-76`…`DEC-86` come from the project owner (Krish) in the 2026-10-28 session.
 The domain owner (Angel) supplied the content of `DEC-79`…`DEC-81` in Slack, as relayed by Krish.
 The orchestrator was Opus 5.5, under the `DEC-17` disclosed fallback.
 
@@ -377,6 +377,8 @@ The orchestrator was Opus 5.5, under the `DEC-17` disclosed fallback.
 | **DEC-82** | **Real SSRL data may be read by Claude in this session**, to polish the skill. The data stays outside the repository and is never committed. | APPROVED 2026-10-28 | owner (project owner approval). Angel gave data-owner consent in Slack. | SLAC's institutional question (H5) remains open. See `docs/local-first-data-flows.md`. |
 | **DEC-83** | **Schema Proposals is a website section** that drafts and tracks vocabulary proposals in the upstream portal's `add_term` / `add_category` format. ISAAC never approves or applies a proposal. | DECIDED 2026-10-28 | owner | Proposals are stored in the temporary workspace on hosted, which is disclosed. Identity is unverified, so `proposed_by` is null. |
 | **DEC-84** | **AI readings are suggestions.** They can never be stronger than `needs_review`. Only a scientist decision yields `scientist_confirmed`, and a local decision's identity is `local_unverified`. ORCID is credit, never authentication. | DECIDED 2026-10-28 | owner direction; identity contract §9.1 | See `docs/local-import-bundle-contract.md` and `docs/orcid-account-linking-design.md`. |
+| **DEC-85** | **The six-step design of `isaac.xas.v0` is the working protocol**: read channels → calibrate only with a scientist's approval → flag glitches (never drop) → merge → normalize → QC, with the scientists' own Athena results preferred and compared. | APPROVED 2026-10-28 | project owner (Krish), after the protocol TL;DR | This approves the **approach**, not the scientific values. `protocol_status` stays `draft_unreviewed` and the seven `protocol_questions` (energy column, new spot, step numbers, foil shift, Athena E0 frame, dead time, Athena version of record) remain for Angel/Oscar. Every per-group scientist approval in §10 of the protocol still applies. |
+| **DEC-86** | **Maximum-quality output comes first.** Claude may read more of a scientist's data where that improves the result. Permission is granted at a higher level, by the ISAAC usage agreement scientists sign, not by per-file friction. | DECIDED 2026-10-28 | project owner | The agreement does not exist yet. Until it does, the skill's one data-flow question (Step 1) stays. Nothing here permits sending data anywhere other than the Claude model service, committing real data, or uploading. |
 
 ### What `DEC-76`…`DEC-84` do NOT change
 - **The website's truth plane.** `schema/` and the `src/isaac_records` validators and export are unedited. The only change in `src/isaac_records/cli.py` is the additive `import` / `bundle` dispatch.
