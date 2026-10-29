@@ -243,27 +243,40 @@ Demeter is a **processed output** (a reference result, never a record), stored i
 `processed_outputs[]`. The tables above are kept as they were measured, because "the XDI
 reader claimed 743 files" is still true; what was wrong is treating those files as runs.
 
-Re-measured at `e8c21ad1` (all six: import, group, process and `bundle check` exit 0, VALID
-at 1.2.0). Counts only.
+Re-measured at `fa8a82f5`, after two further fixes the same day: a leading file-name number
+is no longer assumed to be a run counter (it had merged pairs of ELECTRODES into one record,
+24 of 25 multi-run groups on one beamtime), and groups no XAS protocol covers are reported
+as "not applicable", not as QC failures. All six import, group, process and `bundle check`
+exit 0, VALID at 1.2.0. Counts only.
 
-| beamtime | runs | processed outputs | record groups | multi-run groups | merge candidates |
-|---|---:|---:|---:|---:|---:|
-| `BL15-2 2019-05` | 180 | 94 | 180 | 0 | 13 |
-| `BL15-2 2021-11` | 87 | 253 | 59 | 25 | 1 |
-| `BL15-2 2025-04` | 128 | 0 | 127 | 1 | 1 |
-| `BL4-3 2025-07` | 53 | 1 | 53 | 0 | 3 |
-| `BL4-3 2025-11` | 61 | 0 | 61 | 0 | 3 |
-| `BL6-2c 2018-07` | 223 | 347 | 194 | 28 | 6 |
+| beamtime | runs | processed outputs | record groups | multi-run groups | merge candidates | multi-run groups mixing leading numbers | processing: not applicable | QC pass / warn / fail |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| `BL15-2 2019-05` | 180 | 94 | 180 | 0 | 13 | 0 | 102 | 20 / 57 / 1 |
+| `BL15-2 2021-11` | 87 | 253 | 83 | 4 | 25 | 0 | 1 | 15 / 65 / 2 |
+| `BL15-2 2025-04` | 128 | 0 | 128 | 0 | 2 | 0 | 36 | 9 / 81 / 2 |
+| `BL4-3 2025-07` | 53 | 1 | 53 | 0 | 3 | 0 | 0 | 2 / 48 / 3 |
+| `BL4-3 2025-11` | 61 | 0 | 61 | 0 | 3 | 0 | 0 | 5 / 49 / 7 |
+| `BL6-2c 2018-07` | 223 | 347 | 194 | 28 | 6 | 0 | 121 | 28 / 44 / 1 |
 
-**Processing against the scientists' own Athena projects, re-measured:** 74 groups compared
-(not 107); 6 agree at ISAAC's default normalization (not 26); median RMS of normalized mu
-0.117 at defaults, **0.0195** when ISAAC's merge is normalized with the scientist's own Athena
-parameters (not 0.076 -> 0.0096); median |dE0| 0.66 eV. Flags: normalized shape differs 68,
-E0 differs 24, edge-step scale differs 24, scientist used a subset of the scans 10. The
-conclusion is unchanged: the data, channel and merge agree; ISAAC's default normalization
-and E0 choices differ from the scientists', which is a protocol-review item for Oscar and
-Angel, not something ISAAC overrides.
+Counter questions (one answer each settles them): 2019-05 position 2 (10 merge candidates);
+2021-11 positions 1 and 2 (25 and 1); 2025-04 position 1 (1); BL6-2c positions 4 and 5.
 
-**2019 grouping:** 0 multi-run groups. 13 merge candidates wait on one scientist answer (which
-file-name position is a counter); position 2 in that naming scheme may be a sequence, in
-which case the runs are correctly separate.
+**Processing against the scientists' own Athena projects**, counted ONCE per group (from
+ISAAC's result; the same comparison is also stored on the scientist's Athena result):
+**81 groups compared, 19 agree** at ISAAC's default normalization; median RMS of normalized
+mu **0.078** at defaults and **0.0106** when ISAAC's merge is normalized with the scientist's
+own Athena parameters; median |dE0| **0.62 eV**. Flags: normalized shape differs 59, E0
+differs 18, edge-step scale differs 14, scientist used a subset of the scans 9. Separating
+the electrodes raised the compared groups on 2021-11 from 26 to 70: each electrode now
+matches the scientists' own per-electrode Athena group, which independently supports that
+fix. The conclusion is unchanged: data, channel and merge agree; ISAAC's default
+normalization and E0 choices differ from the scientists', a protocol-review item for Oscar
+and Angel, not something ISAAC overrides.
+
+~~74 groups compared, 6 agree, RMS 0.117 -> 0.0195~~ (stated above in an earlier revision
+of this section at `e8c21ad1`): **double-counted**, because each comparison is stored on both
+results. At that build it was 37 groups, 3 agree, the same medians.
+
+**2019 grouping:** 0 multi-run groups. 10 merge candidates wait on one scientist answer (is
+file-name position 2 a counter?); in that naming scheme position 2 may be a sequence, in which
+case the runs are correctly separate.

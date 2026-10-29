@@ -46,9 +46,11 @@ REAL DATA (DEC-82, owner-approved; never in the repo): ~/Documents/ISAAC/real-da
   unreadable. ~~Processing vs scientists' Athena: 107 matched groups, 26 agree at defaults; RMS
   0.076 -> 0.0096 with the scientist's own normalization params.~~ CORRECTED same day: those
   figures came from bundles in which the scientists' own Athena/Demeter files were counted as
-  runs (fixed in e8c21ad1). Re-measured at e8c21ad1 (real-data/_runs_v3): 74 groups compared,
-  6 agree at defaults, median RMS(normalized mu) 0.117 -> 0.0195 with the scientist's own
-  Athena parameters, median |dE0| 0.66 eV; 10 groups use a scientist-selected subset of scans.
+  runs (fixed in e8c21ad1). ~~Re-measured at e8c21ad1: 74 groups compared, 6 agree~~ (double-
+  counted: each comparison is stored on both results; it was 37 / 3). Final, at fa8a82f5
+  (real-data/_runs_v4, after the electrode-merge and not-applicable fixes): 81 groups
+  compared, 19 agree at defaults, median RMS(normalized mu) 0.078 -> 0.0106 with the
+  scientist's own Athena parameters, median |dE0| 0.62 eV.
   The conclusion stands (data, channel and merge agree; normalization and E0 choices differ),
   the numbers did not. Real-format groups reach portal
   `publish` ONLY with labelled synthetic self-test decisions (outputs in real-data/_runs/).
