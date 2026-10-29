@@ -791,3 +791,22 @@ def test_a_second_technique_macro_is_never_merged():
     assert all(len(g["member_run_keys"]) == 1 for g in p["record_groups"])
     (mc,) = p["merge_candidates"]
     assert any(r["code"] == "blocked_by_engine_reading" and r["issue"]["code"] == "several_technique_macros" for r in mc["reasons"])
+
+
+def test_the_counter_question_is_asked_when_one_name_carries_a_repeat_marker():
+    """Independent review, measured on a real beamtime: `03_08_…` beside `04_08_…_again` got a
+    merge candidate but no counter question, because the marker made the names different
+    lengths. Names are compared up to the first repeat marker."""
+    assert G._differing_number_positions(["03_08_SYN_cat_400mV", "04_08_SYN_cat_400mV_again"]) == [1]
+    assert G._differing_number_positions(["03_08_SYN_cat_400mV_again_2", "04_08_SYN_cat_400mV_rep3"]) == [1]
+    # different words before the marker still ask nothing
+    assert G._differing_number_positions(["03_08_SYN_cat_400mV", "04_08_SYN_dog_400mV_again"]) == []
+    stems = ["03_08_SYN_cat_400mV", "04_08_SYN_cat_400mV_again"]
+    p = G.propose(_nosample_scanidx(stems, legacy=[3, 4]))
+    assert [len(g["member_run_keys"]) for g in p["record_groups"]] == [1, 1]
+    (eq,) = p["experiment_questions"]
+    assert eq["code"] == "set_counter_positions" and eq["positions"] == [1]
+    b = _nosample_scanidx(stems, legacy=[3, 4])
+    b["scientist_decisions"] = [{**DECISION, "positions": [1]}]
+    (g,) = G.propose(b)["record_groups"]
+    assert len(g["member_run_keys"]) == 2

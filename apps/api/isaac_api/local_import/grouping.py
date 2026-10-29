@@ -1102,13 +1102,19 @@ def counter_positions_decision(bundle: Mapping) -> dict | None:
 
 def _differing_number_positions(stems: Sequence[str], *, counter_positions: Iterable[int] = ()) -> list[int]:
     """1-based token positions where same-length names differ only in all-digit tokens that are
-    NOT already counters (the positions a set_counter_positions answer would have to name)."""
+    NOT already counters (the positions a set_counter_positions answer would have to name).
+
+    Names are compared up to their first repeat marker (``again``, ``rep2`` …): a marker and
+    what follows it are bookkeeping, and the positions before it are the same in every name.
+    Measured on a real beamtime: `<n>_<m>_…` beside `<n+1>_<m>_…_again` got a merge candidate
+    but no question, because the marker made the names different lengths."""
     toks = [_stem_tokens(s) for s in stems]
-    if not toks or len({len(t) for t in toks}) != 1:
+    heads = [t[: next((j for j, x in enumerate(t) if _REPEAT_TOKEN.match(x)), len(t))] for t in toks]
+    if not toks or len({len(h) for h in heads}) != 1:
         return []
     positions = {int(x) for x in counter_positions}
     out = []
-    for i in range(len(toks[0])):
+    for i in range(len(heads[0])):
         col = [t[i] for t in toks]
         if len(set(col)) > 1:
             if not all(c.isdigit() for c in col):
