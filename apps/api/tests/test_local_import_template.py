@@ -20,7 +20,7 @@ from tests_support_records import BY, pristine_bundle  # noqa: F401
 TEMPLATE_FILE_LIST_HEADERS = ["File Name", "Config ID", "Sample Name", "Sample Formula", "Sample Form", "Environment",
                               "Reaction", "Cell Type", "Flow Mode", "Electrolyte", "Potential (V)", "Potential Scale", "Gas Feed"]
 # ISAAC's two additions come AFTER the template's own columns
-FILE_LIST_HEADERS = [*TEMPLATE_FILE_LIST_HEADERS, "Electrolyte Concentration (M)", "pH"]
+FILE_LIST_HEADERS = [*TEMPLATE_FILE_LIST_HEADERS, "Electrolyte Concentration (M)", "pH", "Control Mode"]
 CONFIG_HEADERS = ["Config ID", "Technique", "Mode", "Primary Signal Channel", "Normalization Channel", "Detectors",
                   "Energy Calibration", "Beamline Setup", "Notes"]
 CAMPAIGN_LABELS = ["Facility Name", "Organization", "Beamline/Instrument", "Start Date", "Proposal ID"]
@@ -106,7 +106,7 @@ def test_export_has_the_template_sheets_headers_and_one_row_per_live_group_run(g
 
     # the hidden marker: format, version, bundle, time, row -> run, column -> path
     meta = {v[0]: v[1] for v in wb["_isaac"].iter_rows(values_only=True) if v[0] and v[1] is not None}
-    assert meta["format"] == "isaac.metadata_template" and meta["format_version"] == "1.1.0"
+    assert meta["format"] == "isaac.metadata_template" and meta["format_version"] == "1.2.0"  # 1.2.0 adds Control Mode
     assert meta["bundle_id"] == b["bundle_id"] and meta["exported_utc"].endswith("Z")
     mapped_rows = [v for v in wb["_isaac"].iter_rows(values_only=True) if v[0] == "File List" and isinstance(v[1], int)]
     assert [(v[1], v[2], v[3], v[4]) for v in mapped_rows] == [(i, r["run_id"], r["run_key"], r["group_id"]) for i, r in enumerate(rows, 2)]

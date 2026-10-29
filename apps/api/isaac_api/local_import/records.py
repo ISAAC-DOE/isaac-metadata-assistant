@@ -462,8 +462,12 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[di
     else:
         report["processing"] = {"used": None, "reason": "no scientist-approved processing result for this group"}
 
-    # what the record requires and nobody supplied: stays missing, listed
-    control = fields.get("context.electrochemistry.control_mode", {}).get("value")
+    # what the record requires and nobody supplied: stays missing, listed. The control mode is the
+    # one this DRAFT carries — a confirmed, schema-fitting answer that composed (1.5.0: locally
+    # answerable). A potentiostatic draft without a composed set-point (none answered, or held back
+    # by the scale gate above) is therefore incomplete, never exported. No mode is derived from a
+    # set-point, nor a set-point from a mode: an unanswered mode requires nothing.
+    control = fields.get(B.CONTROL_MODE_PATH, {}).get("value")
     required = list(B.required_record_paths(control_mode=control if isinstance(control, str) else None))
     required += list(B.PORTAL_REQUIRED_PATHS)
     if "context.reaction.name" in fields:

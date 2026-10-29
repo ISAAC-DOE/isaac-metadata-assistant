@@ -58,7 +58,7 @@ def test_a_built_bundle_meets_v1_and_round_trips(bundle, tmp_path):
     assert loaded == bundle
     assert B.check_bundle(tmp_path) == []
     assert loaded["format"] == "isaac.local-import-bundle"
-    assert loaded["format_version"] == "1.4.0"  # 1.2.0 added processed_outputs; 1.3.0 absorber readings + a larger writable set; 1.4.0 the clock-zone decision (all additive)
+    assert loaded["format_version"] == "1.5.0"  # 1.2.0 added processed_outputs; 1.3.0 absorber readings + a larger writable set; 1.4.0 the clock-zone decision; 1.5.0 control_mode writable (all additive)
     assert loaded["is_official_record"] is False
     assert "NOT an official ISAAC record" in loaded["official_record_notice"]
     assert loaded["ai_interpretations"] == [] and loaded["scientist_decisions"] == []

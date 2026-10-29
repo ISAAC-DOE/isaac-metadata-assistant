@@ -517,6 +517,30 @@ so `WRITABLE_ADDED_IN` is unchanged and no eligibility is STALE because of 1.4.0
   candidates — re-import to get them" (`bundle.IMPORT_RULES_ADDED_IN`, `import_rules_missing`).
 - A 1.4.0 bundle requires `processed_outputs`, like 1.2.0 and 1.3.0.
 
+### What 1.5.0 added (`context.electrochemistry.control_mode` becomes answerable)
+
+A minor version by the rules above, of the same kind as 1.3.0: **the writable set grew**
+(`bundle.WRITABLE_ADDED_IN["1.5.0"]`: `context.electrochemistry.control_mode`). Nothing in the
+bundle's shape changes: no section, field or enum is added, and the schema change is the version
+label alone (plus `processed_outputs` required at 1.5.0, as at 1.2.0–1.4.0).
+
+- **STALE, not INVALID, exactly as at 1.3.0.** A 1.4.0 bundle whose stored eligibility for a value
+  at this path differs from this build's derivation reports `STALE:` (`bundle check`, exit 1),
+  naming each value and the remedy; any write re-derives it, logs it in `eligibility_rederived[]`
+  and appends one `format_upgrades` entry ("upgraded from 1.4.0; fields this build can newly write
+  have no answer slots on runs that lacked a parsed value — re-import to get them"). A bundle the
+  1.4.0 build actually made holds no value at this path (no parser states one and the field had no
+  answer slot), so it checks **VALID**; its first write still logs the upgrade, naming the path in
+  `newly_writable_paths`. A write never adds the missing values: re-import to get them.
+- **Value ids of older fields do not move** (`bundle.VALUE_IDS_APPEND_FROM`). Missing values are
+  numbered in path order, except that a path made writable at or after 1.5.0 is numbered after
+  every older path. Re-importing the same files with this build therefore gives every older missing
+  value the id a 1.4.0 import gave it; the control-mode values are `miss-` ids after the last of
+  them. (At 1.3.0 the set-point was numbered in path order, which shifted later ids; that is not
+  changed retroactively.)
+- See §20 ("Newly answerable fields") for what the field allows and how it interacts with the
+  set-point.
+
 ## 10. Exit codes (`isaac import` / `isaac bundle`)
 
 0 ok · 1 `check` found the bundle invalid, or STALE (stored by an older build, §9 "What 1.3.0
@@ -764,8 +788,10 @@ sample form and formula). The template lets a scientist answer them in one sitti
   is written. File List has one row per run in a live record group (proposed or confirmed),
   named by its acquisition file's path in the import (`SampleA/scan_001` and `SampleB/scan_001`
   stay apart; where two runs share one file, the run label is added). If names would still
-  repeat, the export is refused. After the template's own columns ISAAC adds two, labelled as
-  its own: **Electrolyte Concentration (M)** and **pH** (both numeric). The template's
+  repeat, the export is refused. After the template's own columns ISAAC adds ~~two~~ three
+  (changed in template 1.2.0), labelled as its own: **Electrolyte Concentration (M)** and **pH**
+  (both numeric) and **Control Mode** (`context.electrochemistry.control_mode`, a dropdown of the
+  schema's enum, on the Vocabulary sheet after ISAAC's own lists). The template's
   **Electrolyte** column is the electrolyte name only; "0.1 M KOH" is two answers (name KOH,
   concentration 0.1), and both electrolyte columns show the whole AI reading in the
   suggestions so it can be split. Vocabulary and the dropdowns come from the export-target
@@ -773,7 +799,7 @@ sample form and formula). The template lets a scientist answer them in one sitti
   Configurations. Two sheets are added: **ISAAC Suggestions** (visible; the File List layout,
   each cell showing what the bundle already holds — an extracted value or literal, a question
   hint, or an AI reading — with its file and locator), and **`_isaac`** (hidden; format
-  `isaac.metadata_template` 1.1.0, `bundle_id`, export time, row → `run_id`/`run_key`/`group_id`,
+  `isaac.metadata_template` ~~1.1.0~~ 1.2.0 (changed: adds Control Mode), `bundle_id`, export time, row → `run_id`/`run_key`/`group_id`,
   column → official path). Suggestions print parser values, so the export records an exposure
   first; `--no-suggestions` shows none and records none. Refused for a bundle with no live
   record group.
@@ -784,7 +810,12 @@ sample form and formula). The template lets a scientist answer them in one sitti
   cells. Each is validated first: an enum column must hold an allowed value exactly (no case
   folding); a numeric column must hold a number; a formula, a date in a text column, or a
   number Excel stored in a text column is refused. An invalid cell is reported by address and
-  records nothing.
+  records nothing. A 1.1.0 workbook (exported before Control Mode existed) is still read:
+  `template.file_columns_of` gives the columns that version wrote, and nothing past pH is read
+  from it; a value typed there is listed under `recorded_nowhere` ("this workbook is template
+  '1.1.0', which has no column P … re-export the template to answer it"), in the preview and on
+  `--apply`, never dropped silently. A workbook labelled 1.2.0 without the column is refused like
+  any moved column.
 - Each valid cell becomes decisions through the same code as `decide` (identity
   `self_reported_local_user`, unverified). A Campaign Info cell fills the missing values of
   its path for the File List's runs (those still in a live record group) and any record-scope
@@ -928,9 +959,56 @@ anything `scientist_confirmed`.
     this record group has this potential setpoint without its confirmed potential_scale, so the
     group's setpoint is not filled". This holds for parsed candidates and answered missing values
     alike. The values stay confirmed in the bundle; nothing is guessed about the scale.
-  - **Follow-up, not built:** `context.electrochemistry.control_mode`. The hosted mapping writes
+  - ~~**Follow-up, not built:** `context.electrochemistry.control_mode`. The hosted mapping writes
     it beside the set-point, the schema's conditional rules key the set-point requirement on it,
-    and it is not locally writable. It is not added here.
+    and it is not locally writable. It is not added here.~~ **Changed in 1.5.0 (DEC-90): built.**
+  - **`context.electrochemistry.control_mode` is answerable** (`bundle.LOCAL_ANSWER_FIELDS`,
+    `bundle.CONTROL_MODE_PATH`; format 1.5.0, §9 "What 1.5.0 added"). No parser states it, so every
+    run that becomes a record has a missing value for it. Nothing is defaulted.
+    - **Allowed values are the official schema's own `enum`**, read at runtime by
+      `bundle.value_problem` (the vendored schema; the pinned portal schema declares the same enum
+      and the questions read the export-target schema). No list is written in this repository, so a
+      schema refresh changes what is accepted. `decide` stores what it is given: an answer outside
+      the enum (e.g. `Potentiostatic`, `OCV`) is `scientist_confirmed` but not eligible ("is not one
+      of the schema's allowed values"), never composed, and listed under `not_composed`. If the
+      vendored schema cannot be read, `value_problem` refuses every value (fail closed): nothing is
+      eligible against a schema nobody checked.
+    - **Run scope, like `potential_scale`**, and not in the questions' `SHARED_PATHS`: one beamtime
+      can hold an open-circuit reference, potential holds and dry samples with no cell, so it is
+      asked per record group, never once for the beamtime. An optional question now lists, in
+      `field_allowed_values`, the VENDORED schema's enum for each field it closes — the one list
+      eligibility checks, so an answer outside a listed set is never eligible (this applies to
+      `potential_scale` too). A field closed only by the export-target schema or the pinned
+      vocabulary (e.g. `context.reaction.drive`) is not listed there, because eligibility does not
+      refuse an answer outside those lists.
+    - **Never derived, either way.** A mode is never inferred from a set-point being present, and
+      no set-point from a mode. A confirmed set-point leaves the mode missing; a confirmed mode
+      fills no set-point.
+    - **The set-point it requires.** `bundle.required_record_paths(control_mode=...)` reads every
+      `allOf` rule keyed on `context.electrochemistry.control_mode` (its `const`) from the schema,
+      so the modes are not listed in code (in the official schema: potentiostatic requires
+      `potential_setpoint_V`, galvanostatic requires `current_setpoint_mA_cm2`). Only one rule shape
+      is understood: a single `control_mode` `const` as the whole condition, and a `then` requiring
+      electrochemistry members. Any other rule whose condition names `control_mode` (an `enum`, an
+      extra condition, an `else`, a `then` with other constraints) raises
+      `bundle.SchemaRuleNotUnderstood` rather than being skipped, so a refreshed schema cannot
+      silently drop a requirement. The composer
+      passes the mode the DRAFT carries (a confirmed, eligible, agreed answer), so a draft whose
+      mode is `potentiostatic` and whose set-point did not compose — unanswered, or held back by
+      the scale gate above — lists `potential_setpoint_V` under `missing_required` and is
+      incomplete. Differing confirmed modes in one group are a `disagreements` entry, as for any
+      field, and nothing is filled. The questions (`bundle.control_mode_by_run`) use the composer's
+      rule too: a mode counts only once a scientist confirmed it and it fits the schema — a parser's
+      candidate (none exists today) under its governing decision (rejected or unconfirmed: nothing;
+      corrected: the correction), or an answer to that run's missing value. Such a run's set-point
+      question becomes blocking, with the same question id. An off-enum answer requires nothing.
+    - **For domain-owner review (Oscar/Angel):** in a record group of several runs, one run answered
+      `potentiostatic` and another left unanswered composes `potentiostatic` for the whole group's
+      record (and so requires its set-point), as every run-scope field does today. Whether an
+      unanswered run should instead hold the group's mode back is not decided here.
+    - **Known gap:** a confirmed `galvanostatic` mode makes `current_setpoint_mA_cm2` required, and
+      that field has no local write route, so such a record is blocked until it gets one. The gate
+      is correct; the answer slot is a follow-up.
 
 ## 21. Nested ZIPs and analysis files (`.larix`, `.pxp`) — no format bump
 

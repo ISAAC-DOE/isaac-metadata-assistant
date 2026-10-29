@@ -122,6 +122,14 @@ def _node(schema: Mapping | None, path: str) -> Mapping | None:
     return node if isinstance(node, Mapping) else None
 
 
+def _eligible_values(path: str) -> list | None:
+    """The vendored schema's ``enum`` at ``path`` — exactly what ``bundle.value_problem`` refuses
+    outside of — or ``None`` when that schema does not close the field."""
+    node = B._schema_node(path)
+    enum = node.get("enum") if isinstance(node, Mapping) else None
+    return list(enum) if isinstance(enum, list) else None
+
+
 def _is_numeric(node: Mapping | None) -> bool:
     return isinstance(node, Mapping) and node.get("type") in ("number", "integer", ["number", "null"])
 
@@ -138,11 +146,22 @@ def consolidate(bundle: Mapping) -> dict:
     """``questions.json`` v2 for ``bundle``. Pure: reads the bundle, writes nothing."""
     schema, basis = _target_schema()
     vocabulary = _vocabulary()
-    required_base = list(B.required_record_paths(schema)) + list(B.PORTAL_REQUIRED_PATHS)
-    if basis["schema"] == "local_export_target":
-        # DEC-76: the pinned schema accepts an unknown temperature as null + not_reported,
-        # which the composer writes; asking for it is optional there, never blocking.
-        required_base = [p for p in required_base if p != "context.temperature_K"]
+    # THE SET-POINT A CONTROL MODE NEEDS (1.5.0): the target schema's conditional rules make the
+    # set-point required for some modes, so a run whose mode a file states or a scientist confirmed
+    # (bundle.control_mode_by_run) has its set-point asked as BLOCKING. A run with no mode adds
+    # nothing, and no mode is ever derived from a set-point (or the reverse).
+    control_mode = B.control_mode_by_run(bundle)
+    required_by_mode: dict[str | None, list[str]] = {}
+
+    def required_base(mode: str | None) -> list[str]:
+        if mode not in required_by_mode:
+            base = list(B.required_record_paths(schema, control_mode=mode)) + list(B.PORTAL_REQUIRED_PATHS)
+            if basis["schema"] == "local_export_target":
+                # DEC-76: the pinned schema accepts an unknown temperature as null + not_reported,
+                # which the composer writes; asking for it is optional there, never blocking.
+                base = [p for p in base if p != "context.temperature_K"]
+            required_by_mode[mode] = base
+        return required_by_mode[mode]
     groups = [g for g in bundle.get("record_groups") or () if g.get("status") not in ("rejected", "split", "merged")]
     run_by_key = {r["run_key"]: r["run_id"] for r in bundle["runs"]}
     group_of: dict[str, str] = {}
@@ -156,7 +175,7 @@ def consolidate(bundle: Mapping) -> dict:
     reaction_runs = {c["run_id"] for c in bundle["candidates"] if c["target_field_path"] in ("context.electrochemistry.reaction", "context.reaction.name")}
 
     def required_for(path: str, run_id: str | None) -> str | None:
-        req = [REQUIRED_AS_FIELD.get(r, r) for r in required_base]
+        req = [REQUIRED_AS_FIELD.get(r, r) for r in required_base(control_mode.get(run_id))]
         if run_id in reaction_runs:
             req += list(B.REACTION_REQUIRED_PATHS)
         return B._required_for(path, req)
@@ -303,6 +322,11 @@ def consolidate(bundle: Mapping) -> dict:
                     "targets": q["targets"],
                     "per_scope_targets": q["per_scope_targets"],
                     "fields": {f: ids for f, ids in sorted(q["fields"].items())},
+                    # the values the VENDORED schema's enum allows — the one source eligibility checks
+                    # (bundle.value_problem) — so an answer outside a list given here is stored but never
+                    # eligible. A field closed only by the export-target schema or the pinned vocabulary is
+                    # not listed: eligibility does not refuse an answer outside those lists.
+                    "field_allowed_values": {f: a for f in sorted(q["fields"]) if (a := _eligible_values(f))},
                     "hints": [],
                     "field_hints": _optional_field_hints(bundle, q["fields"]),
                     "allowed_values": None,

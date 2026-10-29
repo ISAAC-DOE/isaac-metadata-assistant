@@ -39,19 +39,31 @@ FORMAT_ID = "isaac.local-import-bundle"
 #: ``candidates[].local_clock`` block and ``scientist_decisions[].clock_zone_binding``, and the
 #: import rule :data:`XDC_START_RULE_ID`. Nothing becomes newly writable
 #: (``timestamps.acquired_start_utc`` already was), so :data:`WRITABLE_ADDED_IN` is unchanged.
-FORMAT_VERSION = "1.4.0"
+#: 1.5.0 (additive): a larger writable set — ``context.electrochemistry.control_mode``
+#: (:data:`WRITABLE_ADDED_IN`, :data:`LOCAL_ANSWER_FIELDS`), so eligibility stored by an older
+#: build can be STALE, exactly as at 1.3.0. No section, field or enum of the bundle changes.
+FORMAT_VERSION = "1.5.0"
+#: The electrochemical control mode. Its allowed values are the official schema's enum (read at
+#: runtime by :func:`value_problem`); the schema's conditional rules key the set-point a record
+#: requires on it (:func:`required_record_paths`). Never defaulted, never derived.
+CONTROL_MODE_PATH = "context.electrochemistry.control_mode"
 #: Paths this build can write that the build of an older format version could not. A value at
 #: one of them whose stored eligibility differs from this build's is STALE, not tampered.
 WRITABLE_ADDED_IN: Mapping[str, frozenset] = {
     "1.3.0": frozenset({"context.electrochemistry.potential_setpoint_V"}),
+    "1.5.0": frozenset({CONTROL_MODE_PATH}),
 }
+#: Missing values of a path made writable AT or AFTER this version are numbered after every other
+#: path's (:func:`_value_id_order`), so a re-import by a newer build keeps every value id an
+#: import by the 1.4.0 build gave the same files (answers keyed by value id still reach their field).
+VALUE_IDS_APPEND_FROM = "1.5.0"
 #: Import-time rules a format version added: ``version -> ((run source_type, rule id), ...)``. A
 #: bundle an older build imported has none of that rule's candidates on such runs, and nothing but
 #: a re-import adds them; the first save by this build says so in its ``format_upgrades`` entry.
 IMPORT_RULES_ADDED_IN: Mapping[str, tuple] = {
     "1.4.0": (("generic:ssrl_xdc_v1", "ssrl_xdc_scan_start_v1"),),
 }
-_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0")
+_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0")
 #: A field composed into a draft only beside another of the SAME run (interim decision for the
 #: set-point, pending domain-owner review; ``records.compose_group`` applies it).
 COMPOSES_ONLY_WITH: Mapping[str, str] = {
@@ -773,12 +785,16 @@ def value_problem(path: str, value: Any) -> str | None:
     The ``*_utc`` rule (a zoned ISO instant — a local time with no zone is refused,
     the engine's own ``is_zoned_utc_value``), then the vendored schema's own ``enum``
     and ``type`` at that path, read at runtime. An open namespace the schema does not
-    declare gets no check, and none is invented.
+    declare gets no check, and none is invented. FAILS CLOSED: when the vendored schema cannot be
+    read, every value has a problem — nothing is eligible against a schema nobody checked.
     """
     from .. import historical_import as hist
 
     if not hist.is_zoned_utc_value(path, value):
         return f"{path} needs a UTC instant with a zone; {value!r} is not one"
+    if not isinstance(_vendored_schema(), Mapping):
+        return (f"the vendored official schema could not be read, so {value!r} cannot be checked against "
+                f"{path}; nothing is eligible until it can")
     node = _schema_node(path)
     if node is None:
         return None
@@ -1398,8 +1414,12 @@ def required_record_paths(schema: Mapping | None = None, *, record_type: str = "
     The root's ``required``, the ``required`` of every section in
     :data:`RECORD_SECTIONS`, recursed through required object children, plus the
     schema's own conditional rules that apply: ``record_type == evidence`` requires
-    ``descriptors``; ``control_mode`` potentiostatic / galvanostatic requires the
-    matching set-point. Nothing is transcribed except which sections a record carries.
+    ``descriptors``; a rule keyed on ``context.electrochemistry.control_mode`` (``const``)
+    requires what its ``then`` names when ``control_mode`` is that value (in the official
+    schema: potentiostatic -> the potential set-point, galvanostatic -> the current set-point).
+    The modes are read from the rules, not listed here, so they follow a schema refresh.
+    ``control_mode`` is the value a record CARRIES (a confirmed, eligible answer); ``None`` —
+    nothing confirmed — adds nothing. Nothing is transcribed except which sections a record carries.
     """
     if schema is None:
         from ..schema_locator import resolve_schema_path
@@ -1426,14 +1446,95 @@ def required_record_paths(schema: Mapping | None = None, *, record_type: str = "
         if '"record_type": {"const": "evidence"}' in cond and record_type == "evidence":
             for key in then.get("required") or ():
                 walk(schema, "", [key])
-        for mode in ("potentiostatic", "galvanostatic"):
-            if f'"const": "{mode}"' in cond and control_mode == mode:
-                ec = then["properties"]["context"]["properties"]["electrochemistry"]
-                for key in ec.get("required") or ():
-                    path = f"context.electrochemistry.{key}"
-                    if path not in out:
-                        out.append(path)
+        keyed = _control_mode_rule(rule)
+        if keyed is not None and control_mode == keyed[0]:
+            for key in keyed[1]:
+                path = f"context.electrochemistry.{key}"
+                if path not in out:
+                    out.append(path)
     return tuple(p for p in out if p not in COMPOSER_SET_PATHS)
+
+
+class SchemaRuleNotUnderstood(ValueError):
+    """A schema ``allOf`` rule keyed on the control mode has a shape this build cannot interpret.
+    Raised rather than skipped: a requirement that is silently not applied lets a record export
+    without a value the schema requires (fail closed)."""
+
+
+def _control_mode_if(mode: Any) -> dict:
+    """The ONE ``if`` shape understood: ``context.electrochemistry.control_mode`` ``const``, and nothing else."""
+    return {"properties": {"context": {"properties": {"electrochemistry": {
+        "properties": {"control_mode": {"const": mode}}, "required": ["control_mode"]}},
+        "required": ["electrochemistry"]}}, "required": ["context"]}
+
+
+def _control_mode_rule(rule: Any) -> tuple[str, tuple[str, ...]] | None:
+    """``(mode, required electrochemistry keys)`` for an ``allOf`` rule whose ``if`` names
+    ``control_mode``; ``None`` for a rule whose ``if`` does not. Raises
+    :class:`SchemaRuleNotUnderstood` for any other shape: an ``enum`` instead of a ``const``, extra
+    conditions, an ``else``, or a ``then`` that requires anything but electrochemistry members."""
+    cond = rule.get("if") if isinstance(rule, Mapping) else None
+    if '"control_mode"' not in json.dumps(cond, sort_keys=True):
+        return None
+    node: Any = cond
+    for key in ("context", "electrochemistry", "control_mode"):
+        node = (node.get("properties") or {}).get(key) if isinstance(node, Mapping) else None
+    mode = node.get("const") if isinstance(node, Mapping) else None
+    if not isinstance(mode, str) or cond != _control_mode_if(mode):
+        raise SchemaRuleNotUnderstood(
+            "a schema rule keyed on context.electrochemistry.control_mode has a condition this build cannot "
+            f"interpret (only one control_mode const and nothing else is understood): {json.dumps(cond, sort_keys=True)[:300]}")
+    then = rule.get("then")
+    required = None
+    if isinstance(then, Mapping) and set(then) == {"properties"} and set(then["properties"] or {}) == {"context"}:
+        ctx = then["properties"]["context"]
+        if isinstance(ctx, Mapping) and set(ctx) == {"properties"} and set(ctx["properties"] or {}) == {"electrochemistry"}:
+            ec = ctx["properties"]["electrochemistry"]
+            if isinstance(ec, Mapping) and set(ec) == {"required"}:
+                required = ec["required"]
+    if (set(rule) - {"if", "then"} or not isinstance(required, list)
+            or not all(isinstance(k, str) and k for k in required)):
+        raise SchemaRuleNotUnderstood(
+            f"the schema rule for control_mode {mode!r} requires something this build cannot interpret (only "
+            f"context.electrochemistry members are understood): {json.dumps({k: v for k, v in rule.items() if k != 'if'}, sort_keys=True)[:300]}")
+    return mode, tuple(required)
+
+
+def control_mode_by_run(bundle: Mapping) -> dict[str | None, str]:
+    """``run_id -> control mode`` for the set-point requirement the QUESTIONS state.
+
+    Two sources, and nothing else, each counted only when a scientist CONFIRMED it and it fits
+    the schema (the composer's own eligibility rule): a parser's candidate for
+    :data:`CONTROL_MODE_PATH` under its governing decision (a rejected, unconfirmed or off-enum
+    one counts for nothing; a correction counts as corrected), and a scientist's answer to that
+    run's missing value. A mode is NEVER derived from a set-point being present, or the reverse; a run
+    with neither has no entry, and nothing is defaulted. The composer does not use this: it
+    reads the mode the composed draft carries (``records.compose_group``)."""
+    out: dict[str | None, str] = {}
+    decision_of = _decisions_by_target(bundle.get("scientist_decisions") or ())
+
+    def eligible_value(extracted_state: str, base: Any, d: Mapping | None, readings: Any = None) -> str | None:
+        # derived HERE from the decision (not read from the stored eligibility, which a save
+        # re-derives only after the questions are rebuilt)
+        state = derive_value_state(extracted_state, decision=d, interpreted=False)
+        value = final_value(base, d, readings)
+        fit = eligibility_for_official_record(state, target_field_path=CONTROL_MODE_PATH, value=value,
+                                              writable_paths=frozenset({CONTROL_MODE_PATH}))
+        return value if fit["eligible"] and isinstance(value, str) else None
+
+    for cand in bundle.get("candidates") or ():
+        if cand.get("target_field_path") == CONTROL_MODE_PATH:
+            d = candidate_decision(bundle, cand, decision_of)
+            value = eligible_value(cand.get("extracted_state") or STATE_NEEDS_REVIEW, cand.get("value"), d, cand.get("readings"))
+            if value is not None:
+                out[cand["run_id"]] = value
+    for m in bundle.get("missing_values") or ():
+        if m.get("target_field_path") != CONTROL_MODE_PATH or m.get("run_id") in out:
+            continue
+        value = eligible_value(STATE_MISSING, None, decision_of.get(("missing_value", m["value_id"])))
+        if value is not None:
+            out[m["run_id"]] = value
+    return out
 
 
 def _writable_paths() -> frozenset[str]:
@@ -1475,6 +1576,11 @@ LOCAL_ANSWER_FIELDS: Mapping[str, str] = {
     # propose it from file names (e.g. ``100mV``); a run whose files state none had no
     # missing value, so a cited reading of the scientist's notes had nowhere to land.
     "context.electrochemistry.potential_setpoint_V": "run",
+    # 1.5.0. How the cell was driven (the schema's enum, e.g. potentiostatic / open_circuit). RUN
+    # scope, like potential_scale: one beamtime can hold an open-circuit reference, potential
+    # holds and dry samples with no cell at all, so it is never asked once for the whole
+    # beamtime. The schema keys the set-point requirement on it (``required_record_paths``).
+    CONTROL_MODE_PATH: "run",
 }
 #: THE ONE SHAPE CHECK for an absorber (``set_absorber`` / ``approve_calibration`` decisions,
 #: and a reading pass's ``system.element`` / ``system.edge`` findings): an element SYMBOL's
@@ -2419,7 +2525,7 @@ def build_bundle(
         "nothing is defaulted, and a beamtime-level statement is never copied onto a "
         "run (DEC-69)."
     )
-    for path in sorted(writable):
+    for path in sorted(writable, key=_value_id_order):
         scope = _target_scope(path) or UPSTREAM_TARGET_FIELDS.get(path) or LOCAL_ANSWER_FIELDS.get(path)
         if scope == "record":
             # ONE record-scope question, asked whenever ANY run that becomes a record lacks
@@ -2758,10 +2864,7 @@ def refresh_questions(bundle: dict) -> dict:
                 "options": [],  # NO suggested value: no file states the zone
             }
         )
-    control_mode: dict[str | None, str] = {}
-    for cand in bundle["candidates"]:
-        if cand["target_field_path"] == "context.electrochemistry.control_mode" and isinstance(cand["value"], str):
-            control_mode[cand["run_id"]] = cand["value"]
+    control_mode = control_mode_by_run(bundle)
     reaction_runs = {
         cand["run_id"] for cand in bundle["candidates"]
         if cand["target_field_path"] in ("context.electrochemistry.reaction", "context.reaction.name")
@@ -2872,6 +2975,18 @@ def _local_plain_reason(candidate) -> str | None:
     ):
         return LOCAL_WRITE_PATH_REASON
     return reason
+
+
+def _value_id_order(path: str) -> tuple[int, str]:
+    """Missing values are numbered in path order, except that a path made writable at or after
+    :data:`VALUE_IDS_APPEND_FROM` comes after every older path (in the order its version was
+    added): adding a writable field never renumbers the value ids an older build gave."""
+    start = _VERSION_ORDER.index(VALUE_IDS_APPEND_FROM)
+    for version, paths in WRITABLE_ADDED_IN.items():
+        at = _VERSION_ORDER.index(version)
+        if path in paths and at >= start:
+            return (at - start + 1, path)
+    return (0, path)
 
 
 def _missing(n, run_id, path, scope, reason, beamtime_targets, writable) -> dict:

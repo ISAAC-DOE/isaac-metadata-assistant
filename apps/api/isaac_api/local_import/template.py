@@ -39,7 +39,10 @@ from typing import Any, Mapping, Sequence
 from . import bundle as B
 
 FORMAT_ID = "isaac.metadata_template"
-FORMAT_VERSION = "1.1.0"
+#: 1.2.0: File List gains the ISAAC-added column "Control Mode" (``context.electrochemistry.control_mode``,
+#: locally answerable since bundle 1.5.0), after pH. A 1.1.0 workbook is still read: its columns
+#: are the ones 1.1.0 wrote (:data:`COLUMNS_ADDED_IN`), and nothing past pH is read from it.
+FORMAT_VERSION = "1.2.0"
 
 SHEET_CAMPAIGN = "Campaign Info"
 SHEET_CONFIG = "Configurations"
@@ -121,7 +124,29 @@ FILE_COLUMNS: tuple[Column, ...] = (
            note="Added by ISAAC (not in ISAAC's base template). A number in mol/L, e.g. 0.1 for 0.1 M KOH."),
     Column("pH", "context.electrochemistry.pH", isaac_added=True,
            note="Added by ISAAC (not in ISAAC's base template). A number."),
+    Column("Control Mode", B.CONTROL_MODE_PATH, isaac_added=True,
+           note=("Added by ISAAC (not in ISAAC's base template). How the cell was driven for this run, written "
+                 "exactly as one of the listed values. Leave it blank if no cell was driven or nobody knows.")),
 )
+#: File List columns a later template version added: ``header -> version``. A workbook of an older
+#: version does not have them; its import reads only the columns that version wrote. Such a
+#: column is only ever APPENDED: cells are read by position, so one inserted mid-sheet would shift them.
+COLUMNS_ADDED_IN: Mapping[str, str] = {"Control Mode": "1.2.0"}
+
+
+def _version_key(version: Any) -> tuple[int, ...] | None:
+    try:
+        return tuple(int(x) for x in str(version).split("."))
+    except ValueError:
+        return None
+
+
+def file_columns_of(version: Any) -> tuple[Column, ...]:
+    """The File List columns a workbook of template ``version`` has, in order. An unreadable
+    version gets none of the later columns: a cell is read only where its column is known."""
+    have = _version_key(version)
+    return tuple(c for c in FILE_COLUMNS
+                 if c.header not in COLUMNS_ADDED_IN or (have is not None and have >= _version_key(COLUMNS_ADDED_IN[c.header])))
 #: The electrolyte is one reading in the files ("0.1 M KOH") but two fields here: each column's
 #: suggestions also show the AI readings of the other, whole, so the scientist can split it.
 _SIBLING_PATHS = {
@@ -138,6 +163,7 @@ VOCAB_COLUMNS: tuple[tuple[str, str], ...] = (
     ("Potential Scale", "context.electrochemistry.potential_scale"),
     ("Reaction", "context.electrochemistry.reaction"),
     ("Technique", "system.technique"),
+    ("Control Mode", B.CONTROL_MODE_PATH),  # ISAAC-added (1.2.0), after ISAAC's own lists
 )
 _ID_COLUMNS = ("File Name", "Config ID")
 
@@ -501,7 +527,7 @@ def export_template(bundle_dir: Path, out: Path, *, suggestions: bool = True, fo
         "3. File List: one row per run ISAAC found, named by its file's path. Do not edit File Name or reorder rows.",
         "4. Choose each row's Config ID, then fill what you know. Leave a cell blank if you do not know.",
         "5. Electrolyte is the NAME only (e.g. KOH). Put 0.1 M in 'Electrolyte Concentration (M)' as 0.1, and the pH in 'pH'.",
-        "   Those two columns, after Gas Feed, are added by ISAAC; they are not in ISAAC's base template.",
+        "   Those two columns and 'Control Mode', after Gas Feed, are added by ISAAC; they are not in ISAAC's base template.",
         "6. 'ISAAC Suggestions' shows what the files already say, with where. It is evidence, not an answer.",
         "7. Then: isaac bundle template import <bundle_dir> <this file> --by \"<your name>\" (preview), add --apply to record.",
     )
@@ -866,7 +892,9 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
 
     # File List
     wfl = wb[SHEET_FILES]
-    for j, col in enumerate(FILE_COLUMNS, start=1):
+    workbook_version = (marker.get("meta") or {}).get("format_version")
+    file_columns = file_columns_of(workbook_version)
+    for j, col in enumerate(file_columns, start=1):
         check_header(SHEET_FILES, wfl, _letter(j), col)
     runs = {r["run_id"]: r for r in bundle["runs"]}
     rows = marker["rows"]
@@ -887,9 +915,20 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
     for r in range(2, max_row + 1):
         entry = rows.get(r)
         values = []
-        for j, col in enumerate(FILE_COLUMNS, start=1):
+        for j, col in enumerate(file_columns, start=1):
             raw, why = _raw(wfl.cell(row=r, column=j))
             values.append((col, f"{_letter(j)}{r}", raw, why))
+        # A cell typed where a LATER template version has a column this workbook's version does not
+        # (e.g. past pH in a 1.1.0 workbook) is not read, and is SAID, never dropped silently.
+        for j, col in enumerate(FILE_COLUMNS[len(file_columns):], start=len(file_columns) + 1):
+            raw = wfl.cell(row=r, column=j).value
+            if raw is not None and not (isinstance(raw, str) and not raw.strip()):
+                out["nowhere"].append({
+                    "cell": _cell_ref(SHEET_FILES, f"{_letter(j)}{r}"), "header": col.header, "value": raw,
+                    "reason": (f"this workbook is template {workbook_version!r}, which has no column {_letter(j)} "
+                               f"({col.header} was added in {COLUMNS_ADDED_IN.get(col.header)}), so the cell is not "
+                               "read; re-export the template to answer it"),
+                })
         answered = [v for v in values[1:] if v[2] is not None or v[3]]
         if entry is None:
             if answered:

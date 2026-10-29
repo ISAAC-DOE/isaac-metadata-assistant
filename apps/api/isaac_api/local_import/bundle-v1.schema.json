@@ -46,9 +46,10 @@
         "1.1.0",
         "1.2.0",
         "1.3.0",
-        "1.4.0"
+        "1.4.0",
+        "1.5.0"
       ],
-      "description": "1.1.0 adds record_groups, processing_results and exposures (all optional, so a 1.0.0 bundle still validates) and widens the decision, target and question enums. 1.2.0 adds processed_outputs (optional; absent means none were recorded) and extended_context_entry.processed_output_id. A 1.2.0 bundle REQUIRES processed_outputs (possibly empty); a bundle without it keeps its older version. 1.3.0 adds ai_interpretation.field_path and .run_ids and the optional eligibility_rederived and format_upgrades logs (all optional), and eligibility is derived under a larger writable set (context.electrochemistry.potential_setpoint_V). A 1.3.0 bundle also REQUIRES processed_outputs. 1.4.0 adds the set_clock_time_zone experiment decision (and its decision field clock_zone_binding on a confirm), the confirm_clock_time_zone question kind, the optional candidates[].local_clock block and the optional zone / zone_decision_id on a normalization step (all additive); nothing becomes newly writable. A 1.4.0 bundle also REQUIRES processed_outputs."
+      "description": "1.1.0 adds record_groups, processing_results and exposures (all optional, so a 1.0.0 bundle still validates) and widens the decision, target and question enums. 1.2.0 adds processed_outputs (optional; absent means none were recorded) and extended_context_entry.processed_output_id. A 1.2.0 bundle REQUIRES processed_outputs (possibly empty); a bundle without it keeps its older version. 1.3.0 adds ai_interpretation.field_path and .run_ids and the optional eligibility_rederived and format_upgrades logs (all optional), and eligibility is derived under a larger writable set (context.electrochemistry.potential_setpoint_V). A 1.3.0 bundle also REQUIRES processed_outputs. 1.4.0 adds the set_clock_time_zone experiment decision (and its decision field clock_zone_binding on a confirm), the confirm_clock_time_zone question kind, the optional candidates[].local_clock block and the optional zone / zone_decision_id on a normalization step (all additive); nothing becomes newly writable. A 1.4.0 bundle also REQUIRES processed_outputs. 1.5.0 adds nothing to the bundle's shape; eligibility is derived under a larger writable set (context.electrochemistry.control_mode), as at 1.3.0. A 1.5.0 bundle also REQUIRES processed_outputs."
     },
     "is_official_record": {
       "const": false
@@ -3650,6 +3651,23 @@
         "properties": {
           "format_version": {
             "const": "1.4.0"
+          }
+        },
+        "required": [
+          "format_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "processed_outputs"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "format_version": {
+            "const": "1.5.0"
           }
         },
         "required": [

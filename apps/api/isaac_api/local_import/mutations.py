@@ -110,6 +110,10 @@ def save_bundle(bundle_dir: Path, bundle: dict) -> None:
     # import rule it adds (ssrl_xdc_scan_start_v1) is NOT applied by a save, so a 1.3.0 bundle with
     # ssrl_xdc_v1 runs is raised to 1.4.0 WITH a format_upgrades entry saying those runs have none
     # of its candidates until re-imported (bundle.import_rules_missing) — never silently.
+    # 1.5.0 makes context.electrochemistry.control_mode writable (bundle.WRITABLE_ADDED_IN), as 1.3.0
+    # did the set-point: a 1.4.0 bundle is raised to 1.5.0 with a format_upgrades entry naming it
+    # newly writable, and any stored control-mode eligibility that moves is logged as re-derived. A
+    # save adds no missing value: a 1.4.0 import has no control-mode answer slots until re-imported.
     to_version = (B.FORMAT_VERSION if "processed_outputs" in bundle
                   else "1.1.0" if stored_version in ("1.0.0", "1.1.0") else stored_version)
     if B.needs_format_upgrade(bundle):
