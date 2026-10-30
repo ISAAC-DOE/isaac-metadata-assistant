@@ -22,7 +22,13 @@ decisions through :func:`mutations.record_decision` — the same code as ``isaac
 decide``. Each decision's note cites its cell. Without ``apply`` nothing is written. A cell
 that would change an earlier scientist decision is a clash and is skipped unless
 ``supersede``. A column with no official field, or no target in this bundle, is reported
-with its cells: nothing is dropped silently, and no mapping is guessed.
+with its cells: nothing is dropped silently, and no mapping is guessed. A cell that REPLACES an
+extracted value or contradicts the run's own file-name token (``m800mV``) is named on its own line.
+
+ADOPT (``isaac bundle template adopt``) reads the scientist's OWN filled copy of ISAAC's template
+(no ``_isaac`` sheet) and writes this bundle's template from it: their value goes into an answer
+cell only where no file reading contradicts it; every other one is a row of the ``Disagreements``
+sheet with an empty "Your ruling" cell, which IMPORT reads for exactly the runs that row names.
 """
 
 from __future__ import annotations
@@ -33,6 +39,7 @@ import re
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -60,6 +67,12 @@ SHEET_FILES = "File List"
 SHEET_VOCAB = "Vocabulary"
 SHEET_SUGGEST = "ISAAC Suggestions"
 SHEET_MARKER = "_isaac"
+#: ``template adopt`` only: every value of the scientist's own sheet that a file reading contradicts, or
+#: that the field does not take, with an empty "Your ruling" column (:data:`DISAGREE_RULING_COLUMN`).
+SHEET_DISAGREE = "Disagreements"
+DISAGREE_HEADERS = ("ID", "What", "Field", "Their value", "Their cell(s)", "File reading(s)", "Run(s)", "Your ruling",
+                    "Where your ruling goes")
+DISAGREE_RULING_COLUMN = "H"
 
 EXIT_USAGE = 2
 EXIT_INPUT_REFUSED = 3
@@ -323,6 +336,86 @@ def _parse(raw: Any, rule: Mapping | None) -> tuple[Any, str | None]:
     return value, None
 
 
+ELECTROLYTE_NAME_PATH = "context.electrochemistry.electrolyte.name"
+POTENTIAL_PATH = "context.electrochemistry.potential_setpoint_V"
+PH_PATH = "context.electrochemistry.pH"
+#: A concentration written into the electrolyte NAME ("0.01 M HClO4", "1M KOH", "KOH 100 mM").
+_CONCENTRATION_IN_NAME = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?|\.\d+)\s*(mM|M|mol\s*/\s*L)(?![A-Za-z])")
+
+
+def electrolyte_name_problem(value: Any) -> str | None:
+    """Why an Electrolyte (name) cell holding a concentration is refused, or ``None``. The split is the
+    scientist's: the number is named back to them, never moved into the concentration column."""
+    if not isinstance(value, str):
+        return None
+    m = _CONCENTRATION_IN_NAME.search(value)
+    if not m:
+        return None
+    if m.group(2) == "mM":
+        return (f"name only: {value!r} also states a concentration ({m.group(1)} mM); put it in "
+                "'Electrolyte Concentration (M)' in mol/L, and only the name here")
+    return f"name only: put {m.group(1)} in 'Electrolyte Concentration (M)', and only the name here"
+
+
+# --- file-name tokens: a READING to compare against, never a value ---------------------------------
+#
+# ``m800mV`` is -0.8 V in these beamtimes' naming, but the parser reads no value from it, so a typed
+# 0.8 used to clash with nothing. These readings exist ONLY so ``template adopt`` and the import
+# preview can say that a typed value contradicts the run's own file name. They are never offered,
+# stored or recorded as a value.
+_POTENTIAL_TOKEN = re.compile(r"(m?)(\d+)(?:p(\d+))?(mV|V)")
+_PH_TOKEN = re.compile(r"pH(\d+)(?:p(\d+))?")
+NAME_TOKEN_PATHS = (POTENTIAL_PATH, PH_PATH)
+
+
+def _token_number(whole: str, frac: str | None) -> Decimal:
+    return Decimal(f"{whole}.{frac}") if frac else Decimal(whole)
+
+
+def name_token_readings(names: Sequence[str], path: str) -> list[dict]:
+    """``[{value, token, name}]``: what the whole ``_``-separated tokens of ``names`` (a run's file
+    and folder names) read as for ``path`` (potential: ``m?\d+(p\d+)?mV|V``, ``m`` = minus; pH:
+    ``pH\d+``). One entry per distinct value; nothing for any other path."""
+    if path not in NAME_TOKEN_PATHS:
+        return []
+    out: dict[str, dict] = {}
+    for name in names:
+        for token in re.split(r"[_\s]+", name or ""):
+            if path == POTENTIAL_PATH and (m := _POTENTIAL_TOKEN.fullmatch(token)):
+                volts = _token_number(m.group(2), m.group(3)) / (1000 if m.group(4) == "mV" else 1)
+                value = float(-volts if m.group(1) else volts)
+            elif path == PH_PATH and (m := _PH_TOKEN.fullmatch(token)):
+                value = float(_token_number(m.group(1), m.group(2)))
+            else:
+                continue
+            value = int(value) if path == PH_PATH and value.is_integer() else value
+            out.setdefault(repr(float(value)), {"value": value, "token": token, "name": name})
+    return list(out.values())
+
+
+def run_names(bundle: Mapping, run: Mapping) -> list[str]:
+    """The names a run's file is known by: its stem, and each part of its file's path (extension dropped)."""
+    sources = {s["source_id"]: s for s in bundle["sources"]}
+    rel = (sources.get(run.get("acquisition_source_id")) or {}).get("relative_path") or ""
+    parts = [p for p in rel.split("/") if p]
+    if parts:
+        parts[-1] = parts[-1].rsplit(".", 1)[0] if "." in parts[-1] else parts[-1]
+    return list(dict.fromkeys([str(run.get("stem") or ""), *parts]))
+
+
+def _agrees(a: Any, b: Any) -> bool:
+    """The same value: numbers by number (within rounding), text after trimming. A number never
+    equals text."""
+    def num(v):
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+    if num(a) and num(b):
+        return math.isclose(float(a), float(b), rel_tol=1e-9, abs_tol=1e-12)
+    if isinstance(a, str) and isinstance(b, str):
+        return a.strip() == b.strip()
+    return False
+
+
 # --- what the bundle holds ----------------------------------------------------------------------
 
 
@@ -568,8 +661,13 @@ def _write_atomic(path: Path, workbook) -> None:
         raise
 
 
-def export_template(bundle_dir: Path, out: Path, *, suggestions: bool = True, force: bool = False) -> dict:
-    """Write the template for ``bundle_dir`` to ``out``. Answer cells are left EMPTY."""
+def export_template(bundle_dir: Path, out: Path, *, suggestions: bool = True, force: bool = False,
+                    _fill=None, _command: str = "bundle template export") -> dict:
+    """Write the template for ``bundle_dir`` to ``out``. Answer cells are left EMPTY.
+
+    ``_fill`` (``template adopt`` only): called with the built workbook before anything is written;
+    it may fill answer cells and add sheets, and returns a dict whose ``_exposed`` targets are recorded
+    with the suggestions' before the file exists."""
     from . import mutations as M
 
     openpyxl = _openpyxl()
@@ -785,14 +883,20 @@ def export_template(bundle_dir: Path, out: Path, *, suggestions: bool = True, fo
         column_row(SHEET_FILES, _letter(j), col)
     wm.sheet_state = "hidden"
 
+    filled = _fill(wb=wb, bundle=bundle, rows=rows, index=index, rules=rules, marker=wm) if _fill else None
+    exposed = list(suggester.exposed) if suggester is not None else []
+    for target in (filled or {}).pop("_exposed", ()):
+        if target not in exposed:
+            exposed.append(target)
     # THE SUGGESTIONS PRINT PARSER VALUES: that is an exposure, recorded before the file exists.
-    if suggester is not None and suggester.exposed:
+    if exposed:
         try:
-            M.expose_and_load(Path(bundle_dir), suggester.exposed, "bundle template export")
+            M.expose_and_load(Path(bundle_dir), exposed, _command)
         except M.MutationRefused as exc:
             raise TemplateRefused(f"Nothing written: {exc}", code=exc.code) from exc
     _write_atomic(out, wb)
     return {
+        **({"adopted": filled} if filled is not None else {}),
         "written": str(out),
         "format": FORMAT_ID,
         "format_version": FORMAT_VERSION,
@@ -848,11 +952,13 @@ def _marker(wb) -> dict:
     meta: dict[str, Any] = {}
     rows: dict[int, dict] = {}
     columns: list[dict] = []
+    #: ``template adopt`` only: the Disagreements rows (``[disagreements]``) and where each adopted cell came from (``[adopted]``)
+    extra: dict[str, list[dict]] = {"[disagreements]": [], "[adopted]": []}
     section = None
     header: list[str] = []
     for values in ws.iter_rows(values_only=True):
         first = values[0] if values else None
-        if first in ("[meta]", "[rows]", "[columns]"):
+        if first in ("[meta]", "[rows]", "[columns]", *extra):
             section, header = first, []
             continue
         if first is None:
@@ -872,7 +978,13 @@ def _marker(wb) -> dict:
                                           code=EXIT_INPUT_REFUSED) from exc
             else:
                 columns.append(entry)
-    return {"meta": meta, "rows": rows, "columns": columns}
+        elif section in extra:
+            if not header:
+                header = [str(v) for v in values if v is not None]
+                continue
+            extra[section].append(dict(zip(header, values)))
+    return {"meta": meta, "rows": rows, "columns": columns, "disagreements": extra["[disagreements]"],
+            "adopted": {str(e.get("cell")): e for e in extra["[adopted]"] if e.get("cell")}}
 
 
 def _cell_ref(sheet: str, ref: str) -> str:
@@ -913,7 +1025,8 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
     rules = field_rules()
     by_header = {(c.get("sheet"), c.get("header")): c for c in marker["columns"]}
     known = {c.header: c for c in (*CAMPAIGN_FIELDS, *CONFIG_COLUMNS, *FILE_COLUMNS)}
-    out: dict[str, list] = {"cells": [], "invalid": [], "unmapped": {}, "nowhere": [], "rows_refused": []}
+    out: dict[str, list] = {"cells": [], "invalid": [], "unmapped": {}, "nowhere": [], "rows_refused": [], "awaiting_ruling": []}
+    adopted = marker.get("adopted") or {}
     for name in (SHEET_CAMPAIGN, SHEET_CONFIG, SHEET_FILES):
         if name not in wb.sheetnames:
             raise TemplateRefused(f"The workbook has no {name!r} sheet. Re-export the template.", code=EXIT_INPUT_REFUSED)
@@ -946,9 +1059,12 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
                 "the columns were moved or renamed, so no cell can be mapped safely. Re-export the template.",
                 code=EXIT_INPUT_REFUSED)
 
-    def take(sheet, ref, col: Column, raw: Any, *, run: Mapping | None, scope: str, via: str | None = None):
+    def take(sheet, ref, col: Column, raw: Any, *, run: Mapping | None, scope: str, via: str | None = None,
+             because: str | None = None):
         rule = rules.get(col.path or "")
         value, why = _parse(raw, rule)
+        if not why and col.path == ELECTROLYTE_NAME_PATH:
+            why = electrolyte_name_problem(value)
         if why:
             if not any(i["cell"] == _cell_ref(sheet, ref) for i in out["invalid"]):  # a Technique cell many rows reach
                 out["invalid"].append({"cell": _cell_ref(sheet, ref), "header": col.header, "value": raw, "reason": why})
@@ -959,7 +1075,10 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
         if status != "mapped":
             unmapped(sheet, col, ref, value)
             return
-        note = cite(sheet, ref) + (f" (via {via})" if via else "")
+        note = cite(sheet, ref) + (f" (via {via})" if via else "") + (f" ({because})" if because else "")
+        origin = adopted.get(_cell_ref(sheet, ref))
+        if origin and not because:
+            note += f" (adopted from {origin.get('their_file')} {origin.get('their_cell')})"
         out["cells"].append({"cell": _cell_ref(sheet, ref) + (f" via {via}" if via else ""), "sheet": sheet,
                              "header": col.header, "path": col.path, "value": value, "scope": scope,
                              "run_id": run["run_id"] if run else None, "note": note})
@@ -1109,7 +1228,64 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
         if tech is not None and cid not in used and cid not in duplicate:
             out["nowhere"].append({"cell": _cell_ref(SHEET_CONFIG, tech[0]), "header": "Technique", "value": tech[1],
                                    "reason": f"no File List row chose Config ID {cid!r}, so it reaches no run"})
+    _read_rulings(wb, marker, runs, known, take, out)
     return out
+
+
+def _read_rulings(wb, marker: Mapping, runs: Mapping, known: Mapping[str, Column], take, out: dict) -> None:
+    """A workbook ``template adopt`` wrote: each Disagreements row's "Your ruling" cell, typed by the
+    scientist, is read like an answer cell for exactly the targets ``_isaac`` names for that row. An
+    empty ruling records nothing and is listed (``awaiting_ruling``); nothing ISAAC chose is ever
+    read from that sheet."""
+    entries = marker.get("disagreements") or ()
+    if not entries:
+        return
+    if SHEET_DISAGREE not in wb.sheetnames:
+        raise TemplateRefused(f"The `_isaac` sheet lists disagreements but the workbook has no {SHEET_DISAGREE!r} sheet. "
+                              "Run `template adopt` again. Nothing was recorded.", code=EXIT_INPUT_REFUSED)
+    ws = wb[SHEET_DISAGREE]
+    for e in entries:
+        try:
+            row = int(e.get("row"))
+        except (TypeError, ValueError):
+            raise TemplateRefused(f"The `_isaac` sheet's disagreement mapping is damaged ({e!r}). Run `template adopt` "
+                                  "again. Nothing was recorded.", code=EXIT_INPUT_REFUSED) from None
+        did = str(e.get("id"))
+        ref = f"{DISAGREE_RULING_COLUMN}{row}"
+        shown = ws[f"A{row}"].value
+        if shown != did:
+            out["rows_refused"].append({"row": row, "cells": [_cell_ref(SHEET_DISAGREE, ref)],
+                                        "reason": f"{_cell_ref(SHEET_DISAGREE, f'A{row}')} should read {did!r} but reads "
+                                                  f"{shown!r}: the Disagreements rows were moved, so no ruling on it is read"})
+            continue
+        raw, why = _raw(ws[ref])
+        col = known.get(str(e.get("header")))
+        if col is None or col.path != e.get("target_field_path"):
+            raise TemplateRefused(f"The `_isaac` sheet maps disagreement {did} to a column this build does not know "
+                                  f"({e.get('header')!r}). Run `template adopt` again. Nothing was recorded.",
+                                  code=EXIT_INPUT_REFUSED)
+        if why:
+            out["invalid"].append({"cell": _cell_ref(SHEET_DISAGREE, ref), "header": col.header, "value": ws[ref].value, "reason": why})
+            continue
+        if raw is None:
+            reading = ws[f"F{row}"].value
+            out["awaiting_ruling"].append({"id": did, "cell": _cell_ref(SHEET_DISAGREE, ref), "header": col.header,
+                                           "target_field_path": col.path, "their_value": ws[f"D{row}"].value,
+                                           "why": ("file reading " + "; ".join(str(reading).splitlines())) if reading else ws[f"B{row}"].value})
+            continue
+        out["read"] = out.get("read", 0) + 1
+        because = f"your ruling on disagreement {did}" + (f": {e.get('their_file')} {e.get('their_cells')}" if e.get("their_cells") else "")
+        targets = str(e.get("targets") or "")
+        if e.get("scope") == "experiment":
+            take(SHEET_DISAGREE, ref, col, raw, run=None, scope="experiment", because=because)
+            continue
+        for run_id in [t for t in targets.split(";") if t]:
+            run = runs.get(run_id)
+            if run is None:
+                out["nowhere"].append({"cell": _cell_ref(SHEET_DISAGREE, ref), "header": col.header, "value": raw,
+                                       "reason": f"the run {run_id!r} is not in this bundle"})
+                continue
+            take(SHEET_DISAGREE, ref, col, raw, run=run, scope="run", because=because)
 
 
 def _same_value(a: Any, b: Any) -> bool:
@@ -1137,7 +1313,29 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
     index = _Index(bundle)
     latest = B._decisions_by_target(bundle.get("scientist_decisions") or ())
     report: dict[str, list] = {"decisions": [], "clashes": [], "already": [], "refused": [], "nowhere": list(cells["nowhere"]),
-                               "left_alone": [], "campaign_not_filled": []}
+                               "left_alone": [], "campaign_not_filled": [], "contradictions": []}
+    runs_by_id = {r["run_id"]: r for r in bundle["runs"]}
+    contradicted: set[tuple[str, str]] = set()
+
+    def contradiction(cell: Mapping, kind: str, obj: Mapping) -> None:
+        """A cell that REPLACES an extracted value, or contradicts the run's own file-name token, is
+        named on its own line: a count of ``correct`` decisions never shows it. A literal from which no
+        value was derived (a macro's file name, a sample token) is not a reading of a value: answering
+        it replaces nothing."""
+        readings = []
+        if kind == "candidate" and obj.get("value") is not None:
+            ev = next((e for e in obj["evidence"] if e["method"] != "ai_interpretation"), None)
+            readings.append(f"replaces extracted {_shown(obj['value'])} — {_ev_where(index, ev)}")
+        run = runs_by_id.get(obj.get("run_id") or "")
+        if run is not None:
+            for t in name_token_readings(run_names(bundle, run), cell["path"]):
+                if not _agrees(t["value"], cell["value"]):
+                    readings.append(f"contradicts the file name token {t['token']} ({t['value']!r}) in {t['name']}")
+        key = (cell["cell"], obj.get("run_id") or "")
+        if readings and key not in contradicted:
+            contradicted.add(key)
+            report["contradictions"].append({"cell": cell["cell"], "run_id": obj.get("run_id"), "target_field_path": cell["path"],
+                                             "value": cell["value"], "readings": readings})
     reached = cells.get("file_list_run_ids") or set()
     planned: list[tuple[dict, str, str, Mapping, str]] = []  # (cell, decision, kind, obj, target_id)
     for cell in cells["cells"]:
@@ -1212,6 +1410,8 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
         report["decisions"].append({"cell": cell["cell"], "sheet": cell["sheet"], "header": cell["header"],
                                     "target": {"kind": kind, "id": tid}, "target_field_path": cell["path"],
                                     "run_id": obj.get("run_id"), "decision": decision, "value": cell["value"]})
+        if decision == "correct":
+            contradiction(cell, kind, obj)
 
     recorded: list[str] = []
     unchanged: list[str] = []
@@ -1228,6 +1428,8 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
         recorded += res["recorded"]
         unchanged += res["unchanged"]
     report["decisions"] = [d for d in report["decisions"] if d["target"]["id"] not in refused_targets]
+    kept = {(d["cell"], d.get("run_id") or "") for d in report["decisions"]}
+    report["contradictions"] = [c for c in report["contradictions"] if (c["cell"], c.get("run_id") or "") in kept]
     report["recorded_target_ids"] = recorded
     report["unchanged_target_ids"] = unchanged
     return report
@@ -1283,6 +1485,8 @@ def import_template(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None 
         "exported_utc": meta.get("exported_utc"),
         "cells_read": cells.get("read", 0),
         "decisions": report["decisions"],
+        "replaces_or_contradicts_a_file_reading": report["contradictions"],
+        "awaiting_ruling": cells["awaiting_ruling"],
         "recorded": len(report["recorded_target_ids"]) if apply else 0,
         "would_record": len(report["recorded_target_ids"]),
         "unchanged": len(report["unchanged_target_ids"]),
@@ -1342,6 +1546,27 @@ def _grouped_cells(items: Sequence[Mapping], *, key: str = "header") -> list[str
     return out
 
 
+def _invalid_lines(items: Sequence[Mapping]) -> list[str]:
+    """Compact: per column, its allowed values ONCE, then each distinct value with a few of its cells.
+    The allowed list is not repeated per cell (``--full`` and ``--json`` keep each cell's whole reason)."""
+    by_header: dict[str, dict] = {}
+    for x in items:
+        reason = str(x.get("reason") or "")
+        short, sep, allowed = reason.partition("; allowed: ")
+        h = by_header.setdefault(str(x.get("header")), {"allowed": None, "values": {}})
+        if sep and h["allowed"] is None:
+            h["allowed"] = allowed
+        h["values"].setdefault((repr(x.get("value")), short if sep else reason), []).append(str(x.get("cell")))
+    out = []
+    for header, h in by_header.items():
+        out.append(f"  {header}" + (f" (allowed: {h['allowed']}):" if h["allowed"] else ":"))
+        for (value, reason), cells in h["values"].items():
+            more = f" and {len(cells) - _CELLS_SHOWN} more" if len(cells) > _CELLS_SHOWN else ""
+            reason = reason.replace(f"{value} is not an allowed value", "not an allowed value")
+            out.append(f"    {value} in {len(cells)} cell(s) ({', '.join(cells[:_CELLS_SHOWN])}{more}): {reason}")
+    return out
+
+
 def render_report(rep: Mapping, *, full: bool = False) -> str:
     """Plain text for the terminal. COMPACT by default: one line per cell or column with its number
     of decisions, then every invalid cell, clash, refusal and refused row in full, and the totals.
@@ -1361,10 +1586,25 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
         lines += _decision_lines(rep)
     if not rep["decisions"]:
         add("  (none)")
-    in_full = [("Invalid cells (recorded as nothing)", "invalid_cells"), ("Clashes (skipped)", "clashes"),
-               ("Refused", "refused"), ("Rows refused", "rows_refused")]
+    if rep.get("replaces_or_contradicts_a_file_reading"):
+        add("")
+        add("Replaces or contradicts a file reading (one line each; read each back before --apply):")
+        for x in rep["replaces_or_contradicts_a_file_reading"]:
+            run = f" {x['run_id']}" if x.get("run_id") else ""
+            add(f"  {x['cell']}{run} {x['target_field_path']} = {x['value']!r}: {'; '.join(x['readings'])}")
+    if rep.get("awaiting_ruling"):
+        add("")
+        add("Disagreements awaiting your ruling (nothing recorded for them):")
+        for x in rep["awaiting_ruling"]:
+            add(f"  {x['id']} {x['cell']} {x['header']}: theirs {x['their_value']!r}; {x['why']}")
+    in_full = [("Clashes (skipped)", "clashes"), ("Refused", "refused"), ("Rows refused", "rows_refused")]
     if full:
+        in_full.insert(0, ("Invalid cells (recorded as nothing)", "invalid_cells"))
         in_full.insert(3, ("Recorded nowhere (no target for that run/field)", "recorded_nowhere"))
+    elif rep["invalid_cells"]:
+        add("")
+        add("Invalid cells (recorded as nothing):")
+        lines += _invalid_lines(rep["invalid_cells"])
     for title, key in in_full:
         if rep[key]:
             add("")
@@ -1404,9 +1644,531 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
         f"{verb}; {rep['unchanged']} unchanged; {len(rep['already_decided_same_value'])} already decided with the same value; "
         f"{len(rep['invalid_cells'])} invalid; {len(rep['clashes'])} clash(es); {len(rep['refused'])} refused; "
         f"{sum(len(u['cells']) for u in rep['unmapped_columns'])} cell(s) in {len(rep['unmapped_columns'])} unmapped column(s); "
-        f"{len(rep['recorded_nowhere'])} recorded nowhere; {len(rep['rows_refused'])} row(s) refused."
+        f"{len(rep['recorded_nowhere'])} recorded nowhere; {len(rep['rows_refused'])} row(s) refused"
+        + (f"; {len(rep['replaces_or_contradicts_a_file_reading'])} replace or contradict a file reading"
+           if rep.get("replaces_or_contradicts_a_file_reading") else "")
+        + (f"; {len(rep['awaiting_ruling'])} disagreement(s) awaiting a ruling" if rep.get("awaiting_ruling") else "")
+        + "."
     )
     add(rep["statement"])
     if not full:
         add("(--full lists every decision and cell; --json prints the whole report.)")
+    return "\n".join(lines)
+
+
+# --- adopt: the scientist's own filled copy of ISAAC's template ------------------------------------
+#
+# ``isaac bundle template adopt <bundle> <their.xlsx> --out <file.xlsx>``. A scientist who already filled
+# ISAAC's metadata template (no ``_isaac`` sheet, File List keyed by their own folder names) should not
+# retype it. Adopt writes the bundle's own template (:func:`export_template`) and copies THEIR value into
+# an answer cell only when no file reading contradicts it; every value a reading contradicts, or that the
+# field does not take, goes to the Disagreements sheet with an empty "Your ruling" column instead, so
+# nothing that contradicts a file is imported until the scientist rules. ``template import`` then reads
+# the answer cells and the rulings, and nothing else.
+
+#: Their header (whitespace-collapsed, case-folded) -> this template's File List column, beyond an exact
+#: header. ISAAC's template keys File List by "File Name"; filled copies key it by their folders.
+THEIR_FILE_HEADER_ALIASES: Mapping[str, str] = {"folder name": "File Name", "sample": "Sample Name"}
+_TAKEN_NAME_SUFFIX = "_dir"
+
+
+def _norm_header(value: Any) -> str:
+    return " ".join(str(value or "").split()).casefold()
+
+
+def _refuse_unofficial(name: str, why: str) -> TemplateRefused:
+    return TemplateRefused(
+        f"{name} is not a filled copy of ISAAC's metadata template: {why}. `template adopt` reads only that template "
+        f"(sheets {SHEET_CAMPAIGN!r}, {SHEET_CONFIG!r} and {SHEET_FILES!r}; {CAMPAIGN_TITLE!r} in {SHEET_CAMPAIGN} A1; "
+        "a File List keyed by 'File Name' or 'Folder Name'). Nothing was written.", code=EXIT_INPUT_REFUSED)
+
+
+def _their_sheet(wb, name: str) -> dict:
+    """The parts of a filled official template adopt reads, or a plain refusal."""
+    if SHEET_MARKER in wb.sheetnames:
+        raise TemplateRefused(
+            f"{name} has an `_isaac` sheet: it is a template ISAAC exported for a bundle, not the scientist's own "
+            f"copy. Read it with `isaac bundle template import <bundle> {name} --by \"<name>\"`. Nothing was written.",
+            code=EXIT_INPUT_REFUSED)
+    missing = [s for s in (SHEET_CAMPAIGN, SHEET_CONFIG, SHEET_FILES) if s not in wb.sheetnames]
+    if missing:
+        raise _refuse_unofficial(name, f"it has no {', '.join(repr(m) for m in missing)} sheet")
+    if str(wb[SHEET_CAMPAIGN]["A1"].value or "").strip() != CAMPAIGN_TITLE:
+        raise _refuse_unofficial(name, f"{SHEET_CAMPAIGN} A1 reads {wb[SHEET_CAMPAIGN]['A1'].value!r}")
+    wf = wb[SHEET_FILES]
+    header = [c.value for c in wf[1]]
+    if not header or _norm_header(header[0]) not in ("file name", "folder name"):
+        raise _refuse_unofficial(name, f"File List A1 reads {header[0] if header else None!r}")
+    names = [(r, wf.cell(row=r, column=1).value) for r in range(2, wf.max_row + 1)]
+    names = [(r, str(v).strip()) for r, v in names if v is not None and str(v).strip()]
+    if not names:
+        raise TemplateRefused(
+            f"{name} is ISAAC's blank metadata template (its File List names no file or folder): its other cells are "
+            "the template's example values, not anyone's answers. Nothing was written.", code=EXIT_INPUT_REFUSED)
+    return {"files": wf, "header": header, "names": names}
+
+
+def _match_runs(bundle: Mapping, their_name: str) -> list[str]:
+    """The run ids a File List row names: a run whose file sits in a folder of that name, or whose file
+    or stem IS that name (``<name>_dir`` also names the run ``<name>``: SPEC keeps the scan file beside
+    its ``_dir`` folder). Exact names only: nothing is case-folded or guessed."""
+    want = {their_name}
+    if their_name.endswith(_TAKEN_NAME_SUFFIX) and len(their_name) > len(_TAKEN_NAME_SUFFIX):
+        want.add(their_name[: -len(_TAKEN_NAME_SUFFIX)])
+    sources = {s["source_id"]: s for s in bundle["sources"]}
+    out = []
+    for run in bundle["runs"]:
+        rel = (sources.get(run.get("acquisition_source_id")) or {}).get("relative_path") or ""
+        parts = [p for p in rel.split("/") if p]
+        last = parts[-1] if parts else ""
+        if (their_name in parts[:-1] or rel in want or last in want or str(run.get("stem") or "") in want
+                or (last.rsplit(".", 1)[0] in want if "." in last else False)):
+            out.append(run["run_id"])
+    return out
+
+
+class _Adopter:
+    """Reads their sheet against one bundle. Every reading compared is a file's (a parser value, a
+    file-name token, an AI reading of a file); an AI reading OF THEIR SHEET is their sheet, so it is
+    never compared."""
+
+    def __init__(self, bundle: Mapping, index: _Index, rules: Mapping, their_file: str):
+        self.bundle, self.index, self.rules, self.their_file = bundle, index, rules, their_file
+        self.runs = {r["run_id"]: r for r in bundle["runs"]}
+        self.ai_of: dict[tuple[str, str], list[dict]] = {}
+        for i in bundle.get("ai_interpretations") or ():
+            t = i.get("target") or {}
+            self.ai_of.setdefault((str(t.get("kind")), str(t.get("id"))), []).append(i)
+        self.exposed: list[tuple[str, str]] = []
+        self.sheet_readings_skipped = 0
+
+    def _is_their_sheet(self, i: Mapping) -> bool:
+        paths = [i.get("source_path")] + [(self.index.sources.get(r.get("source_id") or "") or {}).get("relative_path")
+                                          for r in i.get("source_refs") or ()]
+        return any(p and Path(str(p)).name == self.their_file for p in paths)
+
+    def _comparable(self, value: Any, path: str) -> Any:
+        rule = self.rules.get(path) or {}
+        if rule.get("numeric"):
+            if isinstance(value, str) and _NUMBER_RE.match(value.strip()):
+                return float(value.strip())
+            return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+        return value.strip() if isinstance(value, str) and value.strip() else None
+
+    def readings(self, run_id: str | None, path: str) -> list[dict]:
+        """``[{value, kind, source, target}]``: what the files say for one run (or, ``run_id=None``, for
+        the whole beamtime), one entry per distinct value and source."""
+        if run_id is None:
+            cands = self.index.cands_by_path.get(path, [])
+            missing = self.index.missing_by_path.get(path, [])
+        else:
+            cands = self.index.cands_by_run.get((run_id, path), []) + (
+                self.index.cands_by_run.get((None, path), []) if path == "system.technique" else [])
+            missing = self.index.missing_by_run.get((run_id, path), [])
+        out: dict[tuple, dict] = {}
+        for c in cands:
+            if c["value"] is None:
+                continue
+            ev = next((e for e in c["evidence"] if e["method"] != "ai_interpretation"), None)
+            out.setdefault((repr(c["value"]), "extracted"), {
+                "value": c["value"], "kind": "extracted", "source": f"extracted from {_ev_where(self.index, ev)}",
+                "target": ("candidate", c["candidate_id"])})
+        if run_id is not None:
+            for t in name_token_readings(run_names(self.bundle, self.runs[run_id]), path):
+                out.setdefault((repr(float(t["value"])), "token"), {
+                    "value": t["value"], "kind": "file_name_token", "source": f"file name token {t['token']} in {t['name']}"})
+        targets = [("candidate", c["candidate_id"]) for c in cands] + [("missing_value", m["value_id"]) for m in missing]
+        for kind, tid in targets:
+            for i in self.ai_of.get((kind, tid), []):
+                if self._is_their_sheet(i):
+                    self.sheet_readings_skipped += 1
+                    continue
+                value = self._comparable(i.get("proposed_value"), path)
+                if value is None:
+                    continue
+                where = i.get("source_path") or (self.index.sources.get(((i.get("source_refs") or [{}])[0]).get("source_id") or "") or {}).get("relative_path")
+                source = f"AI reading ({(i.get('model') or {}).get('model_id')}) of {where or '(source)'} @ {i.get('excerpt_locator') or '(no locator)'}"
+                out.setdefault((repr(value), source), {"value": value, "kind": "ai_reading", "source": source})
+        return list(out.values())
+
+    def against(self, value: Any, run_id: str | None, path: str) -> list[dict]:
+        """The readings that CONTRADICT ``value``. A candidate shown here is an exposure."""
+        bad = [r for r in self.readings(run_id, path)
+               if (v := self._comparable(r["value"], path)) is not None and not _agrees(v, value)]
+        for r in bad:
+            if r.get("target") and r["target"] not in self.exposed:
+                self.exposed.append(r["target"])
+        return bad
+
+
+def _shown_reading(r: Mapping) -> str:
+    return f"{_shown(r['value'])} ({r['source']})"
+
+
+def _refs_shown(refs: Sequence[str], n: int = _CELLS_SHOWN) -> str:
+    more = f" and {len(refs) - n} more ({len(refs)} cells)" if len(refs) > n else ""
+    return ", ".join(refs[:n]) + more
+
+
+def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool = False, suggestions: bool = True) -> dict:
+    """Write ``out``: the bundle's template with the scientist's own values where no file contradicts
+    them, and a Disagreements sheet for every one a file contradicts or the field does not take."""
+    their_xlsx = Path(their_xlsx).expanduser()
+    wb_theirs = _read_workbook(their_xlsx)
+    theirs = _their_sheet(wb_theirs, their_xlsx.name)
+    their_file = their_xlsx.name
+
+    def fill(*, wb, bundle, rows, index, rules, marker) -> dict:
+        from openpyxl.comments import Comment
+        from openpyxl.styles import PatternFill
+
+        flag = PatternFill("solid", fgColor="FFE699")
+        ad = _Adopter(bundle, index, rules, their_file)
+        our_row = {r["run_id"]: i for i, r in enumerate(rows, start=2)}
+        file_col = {c.header: j for j, c in enumerate(FILE_COLUMNS, start=1)}
+        result: dict[str, Any] = {"their_file": their_file, "cells_adopted": 0, "disagreements": [], "not_adopted": [],
+                                  "unmatched_rows": [], "unmatched_runs": [], "rows_matched": 0, "runs_matched": 0,
+                                  "runs_on_several_rows": [], "runs_outside_live_groups": [], "their_columns_not_read": [],
+                                  "their_columns_mapped": []}
+        adopted_cells: list[tuple[str, str]] = []  # (our cell, their cell)
+        groups: dict[tuple, dict] = {}  # disagreement key -> entry
+
+        def disagree(key, **entry):
+            g = groups.get(key)
+            if g is None:
+                g = groups[key] = {**entry, "their_cells": [], "runs": [], "answer_cells": [], "readings": []}
+            for k in ("their_cells", "runs", "answer_cells", "readings"):
+                for v in entry.get("_" + k, ()):
+                    if v not in g[k]:
+                        g[k].append(v)
+            return g
+
+        def judge(sheet, our_ref, col: Column, raw: Any, their_ref: str, run_id: str | None):
+            """Adopt one of their cells into ``our_ref``, or record why not. ``run_id=None``: Campaign Info."""
+            path = col.path
+            rule = rules.get(path or "")
+            if isinstance(raw, str) and raw.startswith("="):
+                value, why = None, "a formula, not a value"
+            else:
+                value, why = _parse(raw, rule)
+            kind = None
+            if not why and path == ELECTROLYTE_NAME_PATH:
+                why = electrolyte_name_problem(value)
+                kind = "name_only" if why else None
+            runs = [run_id] if run_id else []
+            target_cell = _cell_ref(sheet, our_ref)
+            if why:
+                allowed = rule.get("allowed") if rule else None
+                not_allowed = bool(allowed) and isinstance(raw, str) and raw.strip() not in allowed
+                kind = kind or ("not_allowed" if not_allowed else "invalid")
+                shown_reason = "not an allowed value" if not_allowed else why.partition("; allowed: ")[0]
+                disagree((kind, sheet, col.header, repr(raw)), kind=kind, sheet=sheet, header=col.header, path=path,
+                         their_value=raw, reason=shown_reason, allowed=allowed if not_allowed else None,
+                         scope="experiment" if run_id is None else "run",
+                         _their_cells=[their_ref], _runs=runs, _answer_cells=[target_cell])
+                return
+            bad = ad.against(value, run_id, path)
+            if bad:
+                # one row per cell of theirs and the VALUES the files read (a scan file and its calibration
+                # file under one folder name are one disagreement); every source is kept
+                key = ("file_reading", sheet, col.header, their_ref, tuple(sorted({repr(ad._comparable(r["value"], path)) for r in bad})))
+                disagree(key, kind="file_reading", sheet=sheet, header=col.header, path=path, their_value=value,
+                         reason="a file reading says otherwise", scope="experiment" if run_id is None else "run",
+                         _readings=[_shown_reading(r) for r in bad], _their_cells=[their_ref], _runs=runs,
+                         _answer_cells=[target_cell])
+                return
+            ws = wb[sheet]
+            ws[our_ref] = value
+            ws[our_ref].comment = Comment(f"From your sheet: {their_file} {their_ref}", "ISAAC")
+            adopted_cells.append((target_cell, their_ref))
+            result["cells_adopted"] += 1
+
+        # Campaign Info: by label, whatever row it is on
+        wc = wb_theirs[SHEET_CAMPAIGN]
+        campaign_by_label = {}
+        for col in CAMPAIGN_FIELDS:
+            for label in (col.header, *col.aliases):
+                campaign_by_label[_norm_header(label)] = col
+        for r in range(1, wc.max_row + 1):
+            label, raw = wc.cell(row=r, column=1).value, wc.cell(row=r, column=2).value
+            col = campaign_by_label.get(_norm_header(label)) if label else None
+            if raw is None or (isinstance(raw, str) and not raw.strip()):
+                continue
+            their_ref = _cell_ref(SHEET_CAMPAIGN, f"B{r}")
+            if col is None or col.path is None:
+                result["not_adopted"].append({"cell": their_ref, "header": str(label), "value": raw,
+                                              "reason": (f"no official field ({col.why_none})" if col else
+                                                         "no row of this name in ISAAC's template")})
+                continue
+            if index.status(col)[0] != "mapped":
+                result["not_adopted"].append({"cell": their_ref, "header": col.header, "value": raw,
+                                              "reason": index.status(col)[1]})
+                continue
+            our_ref = f"B{CAMPAIGN_FIRST_ROW + list(CAMPAIGN_FIELDS).index(col)}"
+            judge(SHEET_CAMPAIGN, our_ref, col, raw, their_ref, None)
+
+        # Configurations: Config ID and Technique
+        wcf = wb_theirs[SHEET_CONFIG]
+        cfg_header = {_norm_header(c.value): j for j, c in enumerate(wcf[1], start=1) if c.value}
+        configs: dict[str, dict] = {}
+        if "config id" in cfg_header:
+            for r in range(2, wcf.max_row + 1):
+                cid = wcf.cell(row=r, column=cfg_header["config id"]).value
+                if cid is None or not str(cid).strip():
+                    continue
+                tech = wcf.cell(row=r, column=cfg_header["technique"]).value if "technique" in cfg_header else None
+                configs[str(cid).strip()] = {"technique": tech,
+                                             "ref": _cell_ref(SHEET_CONFIG, f"{_letter(cfg_header.get('technique', 2))}{r}")}
+        tech_col = next(c for c in CONFIG_COLUMNS if c.header == "Technique")
+        wcfg = wb[SHEET_CONFIG]
+        for i, (cid, cfg) in enumerate(configs.items(), start=2):
+            wcfg.cell(row=i, column=1, value=cid)
+            cfg["our_row"] = i
+
+        # File List: their columns -> ours
+        mapped: dict[int, Column] = {}
+        seen_cols: dict[str, int] = {}
+        for j, h in enumerate(theirs["header"], start=1):
+            if j == 1 or h is None or not str(h).strip():
+                continue
+            nh = _norm_header(h)
+            target = next((c for c in FILE_COLUMNS if _norm_header(c.header) == nh), None)
+            via_alias = False
+            if target is None and nh in THEIR_FILE_HEADER_ALIASES:
+                target = next(c for c in FILE_COLUMNS if c.header == THEIR_FILE_HEADER_ALIASES[nh])
+                via_alias = True
+            if target is None or target.header == "File Name":
+                result["their_columns_not_read"].append({"column": _letter(j), "header": str(h).strip(),
+                                                         "reason": "no column of this name in ISAAC's template"})
+                continue
+            if target.header in seen_cols:
+                result["their_columns_not_read"].append({"column": _letter(j), "header": str(h).strip(),
+                                                         "reason": f"column {_letter(seen_cols[target.header])} already maps to {target.header!r}"})
+                continue
+            if target.path is None and target.header != "Config ID":
+                result["their_columns_not_read"].append({"column": _letter(j), "header": str(h).strip(),
+                                                         "reason": f"no official field ({target.why_none})"})
+                continue
+            seen_cols[target.header] = j
+            mapped[j] = target
+            result["their_columns_mapped"].append({"column": _letter(j), "header": str(h).strip(), "to": target.header,
+                                                   **({"by_alias": True} if via_alias else {})})
+
+        # rows -> runs
+        live = set(our_row)
+        rows_of_run: dict[str, list[int]] = {}
+        runs_of_row: dict[int, list[str]] = {}
+        for r, name in theirs["names"]:
+            ids = _match_runs(bundle, name)
+            runs_of_row[r] = ids
+            for rid in ids:
+                rows_of_run.setdefault(rid, []).append(r)
+        several = {rid for rid, rs in rows_of_run.items() if len(rs) > 1}
+        result["runs_on_several_rows"] = [{"run_id": rid, "rows": [_cell_ref(SHEET_FILES, f"A{r}") for r in rows_of_run[rid]],
+                                           "reason": "more than one of your File List rows names this run, so neither is adopted for it"}
+                                          for rid in sorted(several)]
+        wf_theirs = theirs["files"]
+        for r, name in theirs["names"]:
+            ids = runs_of_row[r]
+            here = [rid for rid in ids if rid in live and rid not in several]
+            outside = [rid for rid in ids if rid not in live]
+            if outside:
+                result["runs_outside_live_groups"].append({"row": _cell_ref(SHEET_FILES, f"A{r}"), "name": name, "run_ids": outside})
+            if not ids:
+                result["unmatched_rows"].append({"row": _cell_ref(SHEET_FILES, f"A{r}"), "name": name})
+                continue
+            if here:
+                result["rows_matched"] += 1
+            for rid in here:
+                orow = our_row[rid]
+                for j, col in mapped.items():
+                    raw = wf_theirs.cell(row=r, column=j).value
+                    if raw is None or (isinstance(raw, str) and not raw.strip()):
+                        continue
+                    their_ref = _cell_ref(SHEET_FILES, f"{_letter(j)}{r}")
+                    if col.header == "Config ID":
+                        cid = str(raw).strip()
+                        cfg = configs.get(cid)
+                        our_ref = f"{_letter(file_col['Config ID'])}{orow}"
+                        if cfg is None:
+                            disagree(("invalid", SHEET_FILES, "Config ID", repr(raw)), kind="invalid", sheet=SHEET_FILES,
+                                     header="Technique", path=tech_col.path, their_value=raw, allowed=None, scope="run",
+                                     reason=f"your Configurations sheet has no Config ID {cid!r}",
+                                     _their_cells=[their_ref], _runs=[rid], _answer_cells=[_cell_ref(SHEET_FILES, our_ref)])
+                            continue
+                        tech = cfg["technique"]
+                        if tech is not None and str(tech).strip():
+                            value, why = _parse(tech, rules.get(tech_col.path))
+                            bad = [] if why else ad.against(value, rid, tech_col.path)
+                            if why or bad:
+                                kind = "file_reading" if bad else ("not_allowed" if (rules.get(tech_col.path) or {}).get("allowed") else "invalid")
+                                key = (kind, SHEET_CONFIG, "Technique", cfg["ref"], tuple(sorted({repr(b["value"]) for b in bad})))
+                                disagree(key, kind=kind, sheet=SHEET_CONFIG, header="Technique", path=tech_col.path, their_value=tech,
+                                         reason=("a file reading says otherwise" if bad else "not an allowed value" if kind == "not_allowed"
+                                                 else why.partition("; allowed: ")[0]),
+                                         _readings=[_shown_reading(b) for b in bad], scope="run",
+                                         allowed=(rules.get(tech_col.path) or {}).get("allowed") if kind == "not_allowed" else None,
+                                         _their_cells=[cfg["ref"], their_ref], _runs=[rid], _answer_cells=[_cell_ref(SHEET_FILES, our_ref)])
+                                continue
+                            ours = _cell_ref(SHEET_CONFIG, f"B{cfg['our_row']}")
+                            if wcfg[f"B{cfg['our_row']}"].value is None:
+                                wcfg[f"B{cfg['our_row']}"] = value
+                                wcfg[f"B{cfg['our_row']}"].comment = Comment(f"From your sheet: {their_file} {cfg['ref']}", "ISAAC")
+                                adopted_cells.append((ours, cfg["ref"]))
+                        wb[SHEET_FILES][our_ref] = cid
+                        wb[SHEET_FILES][our_ref].comment = Comment(f"From your sheet: {their_file} {their_ref}", "ISAAC")
+                        adopted_cells.append((_cell_ref(SHEET_FILES, our_ref), their_ref))
+                        result["cells_adopted"] += 1
+                        continue
+                    if index.status(col)[0] != "mapped":
+                        result["not_adopted"].append({"cell": their_ref, "header": col.header, "value": raw, "run_id": rid,
+                                                      "reason": index.status(col)[1]})
+                        continue
+                    judge(SHEET_FILES, f"{_letter(file_col[col.header])}{orow}", col, raw, their_ref, rid)
+        matched_runs = {rid for rids in runs_of_row.values() for rid in rids if rid in live and rid not in several}
+        result["runs_matched"] = len(matched_runs)
+        result["unmatched_runs"] = [{"run_id": r["run_id"], "file_name": r["file_name"]} for r in rows if r["run_id"] not in matched_runs]
+
+        # Disagreements: one row per disagreement; the answer cell stays EMPTY and says why
+        order = {"file_reading": 0, "name_only": 1, "not_allowed": 2, "invalid": 3}
+        entries = sorted(groups.values(), key=lambda g: order[g["kind"]])
+        wd = wb.create_sheet(SHEET_DISAGREE, index=wb.sheetnames.index(SHEET_SUGGEST))
+        from openpyxl.styles import Alignment, Font
+
+        for j, h in enumerate(DISAGREE_HEADERS, start=1):
+            wd.cell(row=1, column=j, value=h).font = Font(bold=True)
+            wd.column_dimensions[_letter(j)].width = 28 if h != "File reading(s)" else 60
+        wd[f"{DISAGREE_RULING_COLUMN}1"].comment = Comment(
+            "Type the value to record for this row, exactly as the field takes it (a number for a number field; one of "
+            "the allowed values for a list). Leave it blank and nothing is recorded for it. ISAAC never picks a side.", "ISAAC")
+        what = {"file_reading": "your value contradicts a file reading", "name_only": "",
+                "not_allowed": "", "invalid": "cannot be adopted as written: "}
+        allowed_once: dict[str, list] = {}
+        for i, g in enumerate(entries, start=1):
+            g["id"] = f"D{i}"
+            row = 1 + i
+            g["row"] = row
+            values = (g["id"], what[g["kind"]] if g["kind"] == "file_reading" else what[g["kind"]] + g["reason"]
+                      + (" (each field's allowed values are listed once, below)" if g["kind"] == "not_allowed" else ""),
+                      g["header"], g["their_value"], _refs_shown(g["their_cells"]), "\n".join(g["readings"]) or None,
+                      _refs_shown(g["runs"]) if g["runs"] else "every File List run", None, _refs_shown(g["answer_cells"]))
+            for j, v in enumerate(values, start=1):
+                c = wd.cell(row=row, column=j, value=v if not isinstance(v, str) or not v.startswith("=") else "'" + v)
+                c.alignment = Alignment(wrap_text=True, vertical="top")
+            wd[f"{DISAGREE_RULING_COLUMN}{row}"].number_format = "@" if not (rules.get(g["path"] or "") or {}).get("numeric") else "General"
+            if g.get("allowed"):
+                allowed_once.setdefault(g["header"], list(g["allowed"]))
+            for ref in g["answer_cells"]:
+                sheet, _, cell = ref.partition("!")
+                ws = wb[sheet.strip("'")]
+                ws[cell].fill = flag
+                ws[cell].comment = Comment(
+                    f"Not adopted ({g['id']} on the {SHEET_DISAGREE} sheet): your {their_file} {_refs_shown(g['their_cells'], 2)} "
+                    f"has {_shown(g['their_value'])}; " + ("; ".join(g["readings"]) if g["readings"] else g["reason"])
+                    + ". Rule on it there; this cell stays empty.", "ISAAC")
+        if allowed_once:
+            r = len(entries) + 3
+            wd.cell(row=r, column=1, value="Allowed values (each field's list, once)").font = Font(bold=True)
+            for k, (header, allowed) in enumerate(allowed_once.items(), start=1):
+                wd.cell(row=r + k, column=1, value=header)
+                wd.cell(row=r + k, column=2, value=", ".join(map(str, allowed)))
+        if not entries:
+            wd.cell(row=2, column=1, value="(no disagreements: every value of your sheet that ISAAC read agrees with the files or the files state nothing)")
+        wd.freeze_panes = "A2"
+
+        # _isaac: where each adopted cell came from, and what each Disagreements row's ruling reaches
+        r = marker.max_row + 2
+        marker.cell(row=r, column=1, value="[adopted]")
+        r += 1
+        for j, h in enumerate(("cell", "their_file", "their_cell"), start=1):
+            marker.cell(row=r, column=j, value=h)
+        for ours, their_ref in adopted_cells:
+            r += 1
+            for j, v in enumerate((ours, their_file, their_ref), start=1):
+                marker.cell(row=r, column=j, value=v)
+        r += 2
+        marker.cell(row=r, column=1, value="[disagreements]")
+        r += 1
+        heads = ("id", "row", "kind", "header", "target_field_path", "scope", "targets", "their_file", "their_cells")
+        for j, h in enumerate(heads, start=1):
+            marker.cell(row=r, column=j, value=h)
+        for g in entries:
+            r += 1
+            targets = ";".join(g["runs"]) if g["scope"] == "run" else "experiment"
+            for j, v in enumerate((g["id"], g["row"], g["kind"], g["header"], g["path"], g["scope"], targets, their_file,
+                                   ", ".join(g["their_cells"])), start=1):
+                marker.cell(row=r, column=j, value=v)
+        r += 2
+        marker.cell(row=r, column=1, value="[meta]")  # read into the same meta as the first block
+        marker.cell(row=r + 1, column=1, value="adopted_from")
+        marker.cell(row=r + 1, column=2, value=their_file)
+
+        result["disagreements"] = [{k: g[k] for k in ("id", "kind", "header", "path", "their_value", "their_cells", "readings",
+                                                      "runs", "answer_cells", "reason", "scope")} | {"ruling_cell": _cell_ref(SHEET_DISAGREE, f"{DISAGREE_RULING_COLUMN}{g['row']}")}
+                                   for g in entries]
+        result["allowed_values"] = allowed_once
+        result["ai_readings_of_their_sheet_not_compared"] = ad.sheet_readings_skipped
+        result["_exposed"] = ad.exposed
+        return result
+
+    exported = export_template(bundle_dir, out, suggestions=suggestions, force=force, _fill=fill,
+                               _command="bundle template adopt")
+    exported["statement"] = (f"Answer cells hold your sheet's value only where no file reading contradicts it; each cites "
+                             f"its cell in {their_file}. Nothing that contradicts a file is in an answer cell: rule on each "
+                             f"row of the {SHEET_DISAGREE} sheet (Your ruling), then `template import`.")
+    return exported
+
+
+def render_adopt_summary(result: Mapping) -> str:
+    """Compact: rows matched, cells adopted, EVERY disagreement named (run, field, their value, the
+    file's reading), not-allowed values with each field's allowed list once, unmatched rows."""
+    a = result["adopted"]
+    lines = [f"Wrote {result['written']} from {a['their_file']} (bundle {result['bundle_id']}).",
+             f"Rows: {a['rows_matched']} of your File List rows matched {a['runs_matched']} run(s); "
+             f"{len(a['unmatched_rows'])} row(s) matched no run; {len(a['unmatched_runs'])} run(s) are on none of your rows.",
+             f"Cells adopted: {a['cells_adopted']} (each cites your cell)."]
+    mapped = [f"{m['header']} -> {m['to']}" for m in a["their_columns_mapped"] if m.get("by_alias")]
+    if mapped:
+        lines.append("Columns read under ISAAC's name: " + "; ".join(mapped) + ".")
+    if a["their_columns_not_read"]:
+        lines.append(f"Your columns not read ({len(a['their_columns_not_read'])}): "
+                     + ", ".join(f"{c['column']} {c['header']!r}" for c in a["their_columns_not_read"]) + ".")
+    file_ds = [d for d in a["disagreements"] if d["kind"] == "file_reading"]
+    other = [d for d in a["disagreements"] if d["kind"] != "file_reading"]
+    lines.append("")
+    lines.append(f"Disagreements with a file reading ({len(file_ds)}; not adopted, each awaits your ruling):")
+    for d in file_ds:
+        runs = _refs_shown(d["runs"]) if d["runs"] else "every run"
+        lines.append(f"  {d['id']} {runs} {d['header']}: yours {_shown(d['their_value'])} ({_refs_shown(d['their_cells'], 2)}); "
+                     f"files: {'; '.join(d['readings'])}")
+    if not file_ds:
+        lines.append("  (none)")
+    if other:
+        lines.append("")
+        lines.append(f"Not adopted as written ({len(other)}; each awaits your ruling):")
+        for d in other:
+            lines.append(f"  {d['id']} {d['header']} {_shown(d['their_value'])} in {len(d['answer_cells'])} cell(s) "
+                         f"({_refs_shown(d['their_cells'], 2)}): {d['reason']}")
+        for header, allowed in a.get("allowed_values", {}).items():
+            lines.append(f"  allowed for {header}: {', '.join(map(str, allowed))}")
+    for title, key, shown in (("Your rows that match no run", "unmatched_rows", lambda x: f"{x['row']} {x['name']}"),
+                              ("Runs on none of your rows", "unmatched_runs", lambda x: x["file_name"]),
+                              ("Runs on several of your rows (not adopted)", "runs_on_several_rows", lambda x: f"{x['run_id']} ({', '.join(x['rows'])})")):
+        items = a[key]
+        if items:
+            more = f" and {len(items) - 10} more (--json lists all)" if len(items) > 10 else ""
+            lines.append("")
+            lines.append(f"{title} ({len(items)}): " + "; ".join(shown(x) for x in items[:10]) + more)
+    if a["not_adopted"]:
+        by_header: dict[str, list] = {}
+        for x in a["not_adopted"]:
+            by_header.setdefault(x["header"], []).append(x)
+        lines.append(f"Cells with nowhere to go ({len(a['not_adopted'])}; not copied): " + "; ".join(
+            f"{h} {len(xs)} cell(s) ({xs[0]['reason']})" for h, xs in by_header.items()) + ".")
+    if a.get("ai_readings_of_their_sheet_not_compared"):
+        lines.append(f"{a['ai_readings_of_their_sheet_not_compared']} AI reading(s) of your sheet itself were not compared: they are your sheet, not the files.")
+    lines.append("")
+    lines.append(result["statement"])
+    lines.append(f"Then: isaac bundle template import {result.get('bundle_dir') or '<bundle_dir>'} {result['written']} --by \"<your name>\" "
+                 "(a preview; add --apply to record).")
     return "\n".join(lines)

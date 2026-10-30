@@ -1721,6 +1721,25 @@ def cmd_bundle_template_export(args) -> int:
     return EXIT_OK
 
 
+def cmd_bundle_template_adopt(args) -> int:
+    """``isaac bundle template adopt``: the scientist's own filled ISAAC template, as this bundle's template.
+    Their values go into answer cells only where no file reading contradicts them; every other one is on
+    the Disagreements sheet, awaiting their ruling."""
+    from . import template as T
+
+    try:
+        result = T.adopt_template(Path(args.bundle_dir), Path(args.xlsx), Path(args.out), force=args.force,
+                                  suggestions=not args.no_suggestions)
+    except T.TemplateRefused as exc:
+        _err(str(exc))
+        return exc.code
+    if args.json:
+        _print(result)
+    else:
+        print(T.render_adopt_summary(result))
+    return EXIT_OK
+
+
 def cmd_bundle_template_import(args) -> int:
     """``isaac bundle template import``: preview by default; ``--apply`` records decisions."""
     from . import mutations as M
@@ -1926,6 +1945,15 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     t.add_argument("--no-suggestions", action="store_true", help="leave the ISAAC Suggestions sheet empty (records no exposure)")
     t.add_argument("--json", action="store_true", help="print the full result as JSON, with every column's mapping")
     t.set_defaults(func=cmd_bundle_template_export)
+    t = tsub.add_parser("adopt", help="the scientist's OWN filled copy of ISAAC's metadata template, as this bundle's "
+                                      "template: their values where no file contradicts them, the rest on a Disagreements sheet")
+    t.add_argument("bundle_dir")
+    t.add_argument("xlsx", help="their filled copy of ISAAC's metadata template (no _isaac sheet)")
+    t.add_argument("--out", required=True, help="the .xlsx file to write (a template `template import` reads)")
+    t.add_argument("--force", action="store_true", help="replace an existing --out file")
+    t.add_argument("--no-suggestions", action="store_true", help="leave the ISAAC Suggestions sheet empty")
+    t.add_argument("--json", action="store_true", help="print the full result as JSON (every disagreement, row and run)")
+    t.set_defaults(func=cmd_bundle_template_adopt)
     t = tsub.add_parser("import", help="read a filled template: preview by default, --apply to record decisions")
     t.add_argument("bundle_dir")
     t.add_argument("xlsx")

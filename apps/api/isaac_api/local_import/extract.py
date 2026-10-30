@@ -28,7 +28,8 @@ a counter saying how much*. ``status`` is one of:
 
 Formats: ``.docx`` / ``.pptx`` (text in reading order, tables as rows, every embedded image
 with sha256, position and alt text/caption), ``.xlsx`` (sheets, dimensions, a bounded cell
-preview, formulas as formulas, merged ranges), ``.pdf`` (page count and metadata only),
+preview, formulas as formulas, merged ranges; a sheet cut at the preview bound says in its ``read_rest``
+exactly how to page the rest with ``--sheet``/``--rows-offset``/``--rows-limit``), ``.pdf`` (page count and metadata only),
 images (dimensions where cheap), everything else unreadable.
 
 WHAT IT WILL NOT DO
@@ -106,6 +107,7 @@ class Limits:
     max_slides: int = 500
     max_sheets: int = 25
     max_preview_rows: int = 50
+    max_page_rows: int = 500  # the most rows one page of a sheet returns (``--rows-limit``)
     max_preview_cols: int = 30
     max_preview_cell_chars: int = 500
     max_merged_ranges: int = 200
@@ -829,7 +831,17 @@ def _write_text(out_dir: Path, manifest: dict, blocks: list[dict], kind: str) ->
 # --- .xlsx ----------------------------------------------------------------------------------
 
 
-def _extract_xlsx(path: Path, manifest: dict, out_dir: Path, limits: Limits) -> None:
+@dataclass(frozen=True)
+class SheetPage:
+    """Which rows of which sheet to return: ``rows_offset`` rows are skipped, then up to ``rows_limit``
+    (default ``max_preview_rows``, at most ``max_page_rows``) are returned. ``sheet=None``: every sheet."""
+
+    sheet: str | None = None
+    rows_offset: int = 0
+    rows_limit: int | None = None
+
+
+def _extract_xlsx(path: Path, manifest: dict, out_dir: Path, limits: Limits, page: SheetPage | None = None) -> None:
     try:
         from openpyxl import load_workbook
     except ImportError:  # pragma: no cover - openpyxl is a declared dependency
@@ -878,11 +890,20 @@ def _extract_xlsx(path: Path, manifest: dict, out_dir: Path, limits: Limits) -> 
         manifest["reason"] = f"openpyxl could not open the workbook ({type(exc).__name__})"
         return
     sheets: list[dict] = []
+    page = page or SheetPage()
+    offset = max(0, page.rows_offset)
+    window = min(page.rows_limit or limits.max_preview_rows, limits.max_page_rows)
     try:
         names = list(wb.sheetnames)
-        if len(names) > limits.max_sheets:
+        if page.sheet is not None and page.sheet not in names:
+            manifest["status"] = STATUS_REFUSED
+            manifest["reason"] = f"the workbook has no sheet named {page.sheet!r}; its sheets: {', '.join(names)}"
+            _refuse(manifest, "no_such_sheet", manifest["reason"])
+            return
+        chosen = [page.sheet] if page.sheet is not None else names[: limits.max_sheets]
+        if page.sheet is None and len(names) > limits.max_sheets:
             trunc["sheets_not_read"] = len(names) - limits.max_sheets
-        for name in names[: limits.max_sheets]:
+        for name in chosen:
             ws = wb[name]
             dims = None
             try:
@@ -893,7 +914,7 @@ def _extract_xlsx(path: Path, manifest: dict, out_dir: Path, limits: Limits) -> 
             cell_trunc = 0
             col_cut = 0
             nonempty_rows = 0
-            for r_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=limits.max_preview_rows, values_only=True), 1):
+            for r_idx, row in enumerate(ws.iter_rows(min_row=offset + 1, max_row=offset + window, values_only=True), offset + 1):
                 if len(row) > limits.max_preview_cols:
                     col_cut += len(row) - limits.max_preview_cols
                 cells: list[Any] = []
@@ -905,19 +926,25 @@ def _extract_xlsx(path: Path, manifest: dict, out_dir: Path, limits: Limits) -> 
                     nonempty_rows += 1
                     rows.append({"row": r_idx, "cells": cells})
             rows_in_sheet = _rows_in(dims)
-            rows_cut = max(0, rows_in_sheet - limits.max_preview_rows) if rows_in_sheet is not None else None
+            rows_cut = max(0, rows_in_sheet - (offset + window)) if rows_in_sheet is not None else None
             if rows_cut:
                 trunc["preview_rows_not_returned"] = trunc.get("preview_rows_not_returned", 0) + rows_cut
+            last = min(offset + window, rows_in_sheet) if rows_in_sheet is not None else offset + window
             sheets.append(
                 {
                     "name": name,
                     "rows_in_sheet": rows_in_sheet,
+                    "rows_returned": f"{offset + 1}..{last}" if last > offset else "none",
+                    **({"rows_before_this_page": offset} if offset else {}),
                     "preview_rows_not_returned": rows_cut,
+                    # A CUT SHEET IS NOT READ: its next page, exactly (``main`` adds the whole command).
+                    **({"read_rest": {"sheet": name, "rows_offset": offset + window, "rows_limit": window,
+                                      "rows_remaining": rows_cut}} if rows_cut else {}),
                     "state": hidden.get(name, "visible"),
                     "dimensions": dims,
                     "preview_bounds": {"rows": limits.max_preview_rows, "columns": limits.max_preview_cols, "cell_chars": limits.max_preview_cell_chars},
-                    "header_rows": rows[:3],
-                    "header_rows_note": "the first non-empty rows by position; not a claim that they are headers",
+                    **({"header_rows": rows[:3],
+                        "header_rows_note": "the first non-empty rows by position; not a claim that they are headers"} if not offset else {}),
                     "preview_rows": rows,
                     "preview_nonempty_rows": nonempty_rows,
                     "preview_columns_not_returned": col_cut,
@@ -935,8 +962,13 @@ def _extract_xlsx(path: Path, manifest: dict, out_dir: Path, limits: Limits) -> 
     manifest["counts"] = {"sheets": len(names), "sheets_returned": len(sheets), "images": len(manifest.get("images") or [])}
     if refusals_before:
         manifest["notes"].append("some package members were refused while reading; see refusals")
+    cut = [s for s in sheets if s.get("read_rest")]
     manifest["notes"].append(
-        f"Each sheet's preview is the first {limits.max_preview_rows} rows by {limits.max_preview_cols} columns; the rest of a sheet is not read."
+        (f"Each sheet's preview is the first {window} rows by {limits.max_preview_cols} columns. " if not offset else
+         f"Each sheet returned holds rows {offset + 1}..{offset + window} by {limits.max_preview_cols} columns. ")
+        + (f"{len(cut)} sheet(s) are cut, and the rows past the cut are NOT read: page each with --sheet <name> "
+           "--rows-offset <read_rest.rows_offset> --rows-limit <read_rest.rows_limit> (each sheet's read_rest says exactly)."
+           if cut else "No sheet was cut.")
     )
 
 
@@ -1167,6 +1199,7 @@ def extract_source(
     *,
     source_relative_path: str | None = None,
     limits: Limits = DEFAULT_LIMITS,
+    page: SheetPage | None = None,
 ) -> dict:
     """Read one file into a manifest (and, for documents, text and images under ``out_dir``).
 
@@ -1199,7 +1232,7 @@ def extract_source(
         elif kind == "pptx":
             _extract_pptx(src, manifest, out, limits)
         elif kind == "xlsx":
-            _extract_xlsx(src, manifest, out, limits)
+            _extract_xlsx(src, manifest, out, limits, page)
         elif kind == "pdf":
             _extract_pdf(src, manifest, limits)
         elif kind == "image":
@@ -1398,12 +1431,54 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--root", help="the source folder; the manifest's source_relative_path is the file's path under it")
     p.add_argument("--from-bundle", metavar="UNREAD_JSON", help="extract every entry of an unread_files.json (needs --root)")
     p.add_argument("--limit", type=int, help="with --from-bundle: process at most this many entries")
+    p.add_argument("--sheet", help="a spreadsheet: return only this sheet (page it with --rows-offset/--rows-limit)")
+    p.add_argument("--rows-offset", type=int, default=0, help="with --sheet: skip this many rows (a cut sheet's read_rest says how many)")
+    p.add_argument("--rows-limit", type=int, help=f"with --sheet: return at most this many rows (default {DEFAULT_LIMITS.max_preview_rows}, "
+                                                  f"at most {DEFAULT_LIMITS.max_page_rows})")
+    p.add_argument("--show-limits", action="store_true", help="include every bound applied (the Limits block) in each manifest")
     return p
+
+
+def _with_commands(manifest: dict, args) -> None:
+    """Each cut sheet's ``read_rest`` gets the exact command that reads its next page."""
+    import shlex
+
+    base = ["python", "-m", "isaac_api.local_import.extract", args.file, "--out", args.out]
+    if args.root:
+        base += ["--root", args.root]
+    for sheet in manifest.get("sheets") or ():
+        rest = sheet.get("read_rest")
+        if rest:
+            rest["command"] = shlex.join([*base, "--sheet", rest["sheet"], "--rows-offset", str(rest["rows_offset"]),
+                                          "--rows-limit", str(rest["rows_limit"])])
+
+
+def _trim_limits(doc: dict, show: bool) -> None:
+    """The fixed ``limits`` block (every bound, ~1.5 KB) is the same in every manifest: printed only on
+    ``--show-limits``. What was cut is still in ``truncation`` and each sheet's ``read_rest``."""
+    if show:
+        return
+    for m in [doc, *(doc.get("extractions") or ())]:
+        if isinstance(m, dict) and m.pop("limits", None) is not None:
+            m["limits_shown"] = "no (--show-limits prints every bound); every cut is counted in truncation"
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     out = Path(args.out)
+    paging = args.sheet is not None or args.rows_offset or args.rows_limit is not None
+    if paging and (args.from_bundle or not args.file):
+        print("--sheet, --rows-offset and --rows-limit page one spreadsheet: give the file, not --from-bundle", file=sys.stderr)
+        return 2
+    if paging and Path(args.file).suffix.lower() != ".xlsx":
+        print("--sheet, --rows-offset and --rows-limit page a .xlsx spreadsheet only", file=sys.stderr)
+        return 2
+    if (args.rows_offset or args.rows_limit is not None) and args.sheet is None:
+        print("--rows-offset and --rows-limit need --sheet <name> (a cut sheet's read_rest names it)", file=sys.stderr)
+        return 2
+    if args.rows_offset < 0 or (args.rows_limit is not None and not 1 <= args.rows_limit <= DEFAULT_LIMITS.max_page_rows):
+        print(f"--rows-offset must be >= 0 and --rows-limit 1..{DEFAULT_LIMITS.max_page_rows}", file=sys.stderr)
+        return 2
     try:
         if args.from_bundle:
             if not args.root:
@@ -1423,13 +1498,16 @@ def main(argv: list[str] | None = None) -> int:
                 except ValueError:
                     print("the file is not inside --root", file=sys.stderr)
                     return 3
-            result = extract_source(args.file, out, source_relative_path=rel)
+            page = SheetPage(args.sheet, args.rows_offset, args.rows_limit) if paging else None
+            result = extract_source(args.file, out, source_relative_path=rel, page=page)
+            _with_commands(result, args)
         else:
             print("give a file, or --from-bundle with --root", file=sys.stderr)
             return 2
     except (ValueError, OSError) as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 3
+    _trim_limits(result, args.show_limits)
     json.dump(result, sys.stdout, indent=2, ensure_ascii=False)
     sys.stdout.write("\n")
     return 0

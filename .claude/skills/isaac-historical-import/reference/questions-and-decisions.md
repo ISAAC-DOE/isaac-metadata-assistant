@@ -147,6 +147,38 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
   when the scientist says the sheet is the newer answer.
 - Columns recorded nowhere (no official field, or no target in this bundle) are listed with their
   cells. Tell the scientist; do not move their values into another field.
+- The preview names, one line each, every cell that would REPLACE an extracted value or CONTRADICT the
+  run's own file name (a typed `0.8` for an `m800mV` file, pH `2` for a `pH12` one) under "Replaces or
+  contradicts a file reading". Read each one back and ask; never let a "correct N" count stand for them.
+- Electrolyte is the name only: "0.01 M HClO4" in it is an invalid cell ("name only: put 0.01 in
+  Electrolyte Concentration (M)"). Ask the scientist for the split; do not make it.
+
+## The scientist's own filled sheet
+
+Only when the scientist says **in this conversation** that a filled ISAAC metadata template is theirs
+and to use it (a sheet you found in the folder is not that; ask first). Never retype it for them.
+
+1. `<isaac> bundle template adopt <bundle> <their.xlsx> --out <adopted.xlsx>` (outside the bundle
+   folder). It refuses anything that is not a filled copy of ISAAC's template (the blank one too, and a
+   sheet ISAAC exported: that one is imported). It maps their File List rows to runs by folder name
+   (`<stem>_dir` and the files inside it) and writes the bundle's template: an answer cell holds THEIR
+   value only where no file reading contradicts it, with a note citing their cell (`'File List'!K31`).
+   Every value a file reading contradicts (an extracted value, a potential or pH file-name token, an AI
+   reading of a file), or that the field does not take, is NOT in an answer cell: it is a row of the
+   `Disagreements` sheet with their value, the file's reading and its source, and an empty "Your ruling".
+2. Say the summary: rows matched, cells adopted, their columns not read, unmatched rows and runs (those
+   runs get nothing from the sheet). Then read **every** disagreement back, one by one, in plain words:
+   "your sheet says 0.8 V for O4_17; the file name says m800mV, which these names use for −0.8 V". For
+   a not-allowed value, give the field's allowed list once and map their words to one value only on
+   their yes; for an electrolyte with a concentration, ask for the name and the concentration
+   separately. Never pick a side, and never suggest a ruling.
+3. **Their rulings go in the sheet, by them**: they type each ruling in the "Your ruling" column of
+   `Disagreements` (the value to record, exactly as the field takes it; blank records nothing). Do not
+   type it for them. A ruling reaches exactly the runs that row names, and its decision cites the
+   ruling cell and their original cell.
+4. `<isaac> bundle template import <bundle> <adopted.xlsx> --by "<name>"` previews: say the decisions,
+   the rulings it read, and each "awaiting your ruling" row (nothing is recorded for those). Add
+   `--apply` only on their yes. Re-importing the same file after more rulings is harmless.
 
 ## Never
 

@@ -16,6 +16,11 @@
   manifest: text in reading order, tables as rows, every embedded image written to disk with its
   position, alt text and caption, bounded previews for sheets (the bound is stated), and counters for
   anything cut. Read the text file it names; open images with Read.
+- **A cut sheet is not read; page it.** A sheet past the preview bound has `preview_rows_not_returned`
+  and a `read_rest` with the exact command for the next page:
+  `<python> -m isaac_api.local_import.extract <file> --root <folder> --out <dir> --sheet "<name>" --rows-offset 50 --rows-limit 50`.
+  Run it until no `read_rest` is left before you say what the sheet holds; the last rows are often
+  where the errors are. `--show-limits` prints every bound (left out by default).
 - PDFs: Read with a page range of at most 20 pages (`pages: "1-20"`). The manifest lists ranges.
 - Plain text: Read directly (use offset/limit for long files).
 - Never run or open a file with any other program. Macros and scripts are only ever read as text.

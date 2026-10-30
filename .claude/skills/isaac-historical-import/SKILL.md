@@ -202,6 +202,7 @@ environment, cell type, reaction with its drive and catalysis, sample form and f
 return, `<isaac> bundle template import <bundle> <file.xlsx> --by "<name>"` previews; read it back
 (decisions per cell or column, every invalid cell and clash) and add `--apply` only on their yes.
 Never fill the sheet for them; never import ISAAC's blank template. Details in the reference.
+**They already filled ISAAC's template and say to use it:** `<isaac> bundle template adopt` — see "The scientist's own filled sheet" in the reference.
 
 ## Step 8 · Build and validate
 
