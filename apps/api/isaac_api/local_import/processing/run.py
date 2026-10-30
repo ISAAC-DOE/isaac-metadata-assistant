@@ -852,8 +852,13 @@ def process_bundle(
     generic_runs: Sequence[Any] | None = None,
     scan_reader: Any = None,
     calibration_approvals: Mapping[str, Mapping] | None = None,
+    skip_group_ids: Sequence[str] = (),
 ) -> dict:
     """Process every (or the selected) record group of the bundle in ``bundle_dir``.
+
+    ``skip_group_ids``: record groups NOT processed (``isaac process`` passes the groups that are no
+    longer live: rejected, merged, split). They still take part in the Athena name match, exactly as
+    before, so no live group's match — and so no live group's result id — moves because of them.
 
     ``generic_runs``: runs from a non-engine reader (duck-typed, see
     :func:`grouping.groups_from_generic_runs`); when given they REPLACE the unread-file
@@ -925,7 +930,10 @@ def process_bundle(
     matched, m_notes, versions = A.match_with_versions(all_groups, entries, np)
 
     results, unread_results = [], []
+    skipped = set(skip_group_ids or ())
     for g in all_groups:
+        if g["group_id"] in skipped and g.get("group_kind") not in ("unread_acquisition", "generic_run"):
+            continue
         try:
             out = process_group(g, ctx, matched.get(g["group_id"]), athena_versions=versions.get(g["group_id"]))
         except Exception as exc:  # noqa: BLE001 - one group's crash is that group's failure, never a pass
@@ -949,13 +957,49 @@ def process_bundle(
             "record_groups_with_unselected_versions": len(versions),
             "notes": (a_notes + m_notes)[:500],
             "match_rule": A.MATCH_RULE_ID,
+            "statement": athena_match_statement(all_groups, entries, matched=matched, notes=m_notes),
         },
         "processing_results": results,
         "unread_acquisition_results": unread_results,
         "summary": summarize(results + unread_results),
     }
+    if payload["athena"]["statement"]:
+        payload["summary"]["lines"].append(payload["athena"]["statement"])
     _write(out_dir / RESULTS_FILE, _json_bytes(payload))
     return payload
+
+
+_STATED_SUFFIXES = 3
+
+
+def athena_match_statement(groups: Sequence[Mapping], entries: Sequence[Mapping], *, matched: Mapping, notes: Sequence[Mapping]) -> str | None:
+    """ONE LINE saying why the Athena groups that were read matched NO record group, or ``None`` when
+    there were none to match or some matched. Names how many Athena names BEGIN with a group's scan
+    name but end in a suffix the match rule does not accept (measured on a real BL4-3 beamtime: 161
+    Athena groups named ``<scan>_a_001``, none matched), and how many matched several groups."""
+    if not entries or matched:
+        return None
+    stems = {A.normalise_name(s) for g in groups if g.get("_has_scans", True) for s in g.get("_stems") or ()}
+    stems.discard("")
+    near, suffixes = 0, []
+    for e in entries:
+        tails = [n[len(st):] for n in e.get("names") or () for st in stems if n and n.startswith(st + "_")]
+        if tails:
+            near += 1
+            tail = min(tails, key=len)
+            if tail not in suffixes:
+                suffixes.append(tail)
+    ambiguous = sum(1 for n in notes if n.get("code") == "athena_group_matches_several_record_groups")
+    line = (f"Athena: {len(entries)} Athena group(s) were read and matched no record group under rule {A.MATCH_RULE_ID} "
+            "(an Athena name equal to a group's scan name, or that name plus a scan or merge suffix such as _001 or _merged)")
+    if near:
+        shown = ", ".join(f"'{t}'" for t in suffixes[:_STATED_SUFFIXES]) + (" …" if len(suffixes) > _STATED_SUFFIXES else "")
+        line += f"; {near} of them begin with a group's scan name but end in a suffix the rule does not accept ({shown})"
+    if ambiguous:
+        line += f"; {ambiguous} matched several record groups, so none was used"
+    if not near and not ambiguous:
+        line += "; their names are not the scan names"
+    return line + ". No ISAAC result was compared with the scientist's Athena processing."
 
 
 def _null_non_finite(result: dict) -> None:

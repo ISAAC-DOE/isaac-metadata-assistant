@@ -459,8 +459,12 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[di
         # the APPROVAL (latest state decision): a later select_athena_version never stands in for it
         d = B.processing_state_decisions(bundle)[("processing_result", pid)]
         conf = _confirmation({**d, "value": f"approved {pid}"}, f"Approve processing result {pid}")
-        used: dict[str, Any] = {"result": pid}
+        used: dict[str, Any] = {"result": pid, "group_id": group["group_id"]}
         files = (r.get("outputs") or {}).get("files") or []
+        if not files:
+            # approved before `decide` refused it: a result with NO CURVE. Re-processing with the same
+            # parameters gives the same result, so the remedy must not say "re-run and approve"
+            used["no_curve"] = no_curve_cause(r)
         bound = d.get("approved_files")
         current = [{"role": f.get("role"), "relative_path": f.get("relative_path"), "sha256": f.get("sha256")} for f in files]
         if bound is not None and json.dumps(bound, sort_keys=True) != json.dumps(current, sort_keys=True):
@@ -559,9 +563,19 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[di
         }
     else:
         report["processing"] = {"used": None, "reason": "no scientist-approved processing result for this group",
+                                "group_id": group["group_id"],
                                 "awaiting_approval": [B.processing_id(r) for r in mine
                                                       if r.get("state") in B.PROCESSING_UNDECIDED_STATES
-                                                      and not B.processing_not_applicable(r)]}
+                                                      and not B.processing_not_applicable(r)
+                                                      and (r.get("outputs") or {}).get("files")],
+                                # undecided but with NO CURVE: `decide` refuses to approve them, so they are
+                                # never offered for approval
+                                "no_curve_results": {B.processing_id(r): no_curve_cause(r) for r in mine
+                                                     if r.get("state") in B.PROCESSING_UNDECIDED_STATES
+                                                     and not B.processing_not_applicable(r)
+                                                     and not (r.get("outputs") or {}).get("files")},
+                                # a result a scientist REJECTED exists: "none exists" would send them to re-run
+                                "rejected": [B.processing_id(r) for r in mine if r.get("state") == B.STATE_REJECTED]}
 
     # what the record requires and nobody supplied: stays missing, listed. The control mode is the
     # one this DRAFT carries — a confirmed, schema-fitting answer that composed (1.5.0: locally
@@ -970,6 +984,7 @@ def validate_draft_file(draft: Mapping, *, run_portal, composition: Mapping | No
         "missing_required": missing,
         "missing_from_processing": from_processing,
         "processing_fix": processing_fix,
+        "processing_blocker": processing_blocker(proc) if (blocked or from_processing) else None,
         "processing_blocked": blocked,
         "composition": {
             "reused": ["isaac_records.export.transform", "isaac_records.export.set_path", "isaac_records.export.build_sidecar"],
@@ -996,9 +1011,45 @@ def validate_draft_file(draft: Mapping, *, run_portal, composition: Mapping | No
     }
 
 
+def no_curve_cause(result: Mapping) -> str:
+    """:func:`mutations.no_curve_cause` (imported here lazily, as this module imports mutations)."""
+    from .mutations import no_curve_cause as cause
+
+    return cause(result)
+
+
+def processing_blocker(processing: Mapping) -> str:
+    """One word for why a group's processing-derived values are missing (the export's counts)."""
+    if processing.get("not_applicable"):
+        return "processing_not_applicable"
+    if processing.get("result"):
+        return "approved_result_has_no_curve" if processing.get("no_curve") else "approved_result_not_usable"
+    if processing.get("awaiting_approval"):
+        return "processing_awaiting_approval"
+    if processing.get("no_curve_results"):
+        return "processing_result_has_no_curve"
+    if processing.get("rejected"):
+        return "processing_result_rejected"
+    return "no_processing_result"
+
+
 def processing_remedy(processing: Mapping) -> str:
     """The sentence saying how a group's processing-derived values get into its record."""
+    from .mutations import reprocess_command
+
     waiting = list(processing.get("awaiting_approval") or ())
+    rejected = list(processing.get("rejected") or ())
+    gid = processing.get("group_id") or "<group id>"
+    leave_out = f'leave the group out of the records (`isaac bundle decide <bundle_dir> --target {gid} --decision reject --by "<your name>"`)'
+    no_curve = dict(processing.get("no_curve_results") or {})
+    if processing.get("result") and processing.get("no_curve"):
+        # NEVER "re-run and approve the new result": the same parameters give the same no-curve result
+        pid = processing["result"]
+        return (f"the approved result {pid} has no curve ({processing['no_curve']}): it was approved without an output "
+                "file, and re-running `isaac process` with the same parameters gives the same result. Withdraw the "
+                f'approval (`isaac bundle decide <bundle_dir> --target {pid} --decision reject --by "<your name>"`), then '
+                f"either re-process the group with other parameters ({reprocess_command(gid)}) and approve the new result "
+                f"if it has a curve, or {leave_out}.")
     if processing.get("result"):
         said = "; ".join(f"{k}: {processing[k]}" for k in ("series", "qc", "approval") if processing.get(k))
         return (f"the approved result {processing['result']} did not supply them" + (f" ({said})" if said else "")
@@ -1010,6 +1061,19 @@ def processing_remedy(processing: Mapping) -> str:
                 + (f" (and {len(waiting) - 3} more)" if len(waiting) > 3 else "")
                 + '; a QC status of compromised or failed also needs --qc-note "<what and why>"'
                 + ". Correcting a value does not supply them.")
+    if no_curve:
+        ids = list(no_curve)
+        said = "; ".join(f"{pid} ({cause})" for pid, cause in list(no_curve.items())[:3]) + (" …" if len(ids) > 3 else "")
+        return (f"its processing result has no curve, so there is nothing to approve: {said}. Re-running `isaac process` "
+                "with the same parameters gives the same result. Reject it "
+                f'(`isaac bundle decide <bundle_dir> --target {ids[0]} --decision reject --by "<your name>"`), then either '
+                f"re-process the group with other parameters ({reprocess_command(gid)}) and approve the new result if it "
+                f"has a curve, or {leave_out}.")
+    if rejected:
+        return (f"its processing result was rejected ({', '.join(rejected[:3])}{' …' if len(rejected) > 3 else ''}), and "
+                "no other result is waiting for approval. Re-running `isaac process` with the same parameters keeps the "
+                f"rejected result as it is. Either re-process the group with other parameters ({reprocess_command(gid)}) "
+                f"and approve the new result, stating its QC status, or {leave_out}.")
     return ("no processing result exists for this group: run `isaac process <bundle_dir> --source <the beamtime folder you imported>`, then approve the result "
             '(`isaac bundle decide <bundle_dir> --target <result id> --decision approve --qc-status <value> --by "<your name>"`).')
 
@@ -1187,7 +1251,8 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     for group_id, draft, composition in fresh:
         report = validate_draft_file(draft, run_portal=run_portal, composition=composition)
         if report["verdict"] != "exportable":
-            row = {"group_id": group_id, "verdict": report["verdict"], "summary": report["plain_summary"]}
+            row = {"group_id": group_id, "verdict": report["verdict"], "summary": report["plain_summary"],
+                   "missing_required": report["missing_required"], "processing_blocker": report["processing_blocker"]}
             earlier = prior_of.get((bundle_id, group_id))
             if earlier is not None and earlier.get("record_id"):
                 # WITHDRAWN, never left in place: the record an earlier export wrote for this group is moved
@@ -1274,7 +1339,11 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         "on_disk_drafts_ignored_with_no_confirmed_group": orphans,
     }
     if not exported:
-        result["statement"] = "Nothing was exported."
+        # SAID PLAINLY: with nothing written there is nothing for `upload --dry-run` to show
+        result["statement"] = (
+            (f"Nothing was exported, so there is nothing to dry-run: {out} was not created." if not out.is_dir() else
+             f"Nothing was exported by this run; `upload --dry-run` on {out} lists only records an earlier export left there.")
+            + " `isaac bundle validate <bundle_dir>` says what each group still needs.")
     return result
 
 

@@ -17,9 +17,11 @@ COMMANDS
     files and deletes nothing). Refuses an ``--out`` inside the folder being read.
     The local path is never written into the bundle unless ``--record-local-root``.
 
-``isaac bundle list <dir> runs|conflicts|candidates|questions|unread [--limit N] [--offset M] [--state S]``
+``isaac bundle list <dir> runs|conflicts|candidates|questions|unread|groups|merge-candidates|processed-outputs|processing-results [--limit N] [--offset M] [--state S]``
     A bounded page as JSON, with ``total`` and how many were omitted before and after.
-    Never truncates silently.
+    Never truncates silently. ``processing-results``: one compact row per result (id, group, verdict,
+    applicability, key QC flags and metrics, plot path, Athena agreement, state); ``--state`` filters it
+    by state as it filters ``candidates`` by value_state.
 
 ``isaac bundle show <dir> run|conflict|candidate|source|question <id>``
     One object as JSON.
@@ -90,7 +92,8 @@ BUNDLE_FILES = (
     "reading.full.json",
 )
 
-LIST_KINDS = ("runs", "conflicts", "candidates", "questions", "unread", "groups", "merge-candidates", "processed-outputs")
+LIST_KINDS = ("runs", "conflicts", "candidates", "questions", "unread", "groups", "merge-candidates", "processed-outputs",
+              "processing-results")
 SHOW_KINDS = ("run", "conflict", "candidate", "source", "question", "group", "merge-candidate", "processed-output")
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 200
@@ -567,7 +570,7 @@ def _short(value: Any, n: int = 200) -> Any:
     return value
 
 
-def _row(kind: str, obj: Mapping) -> dict:
+def _row(kind: str, obj: Mapping, group_status: Mapping | None = None) -> dict:
     if kind == "runs":
         return {
             "run_id": obj["run_id"],
@@ -628,6 +631,35 @@ def _row(kind: str, obj: Mapping) -> dict:
             "proposed_link": (obj["proposed_links"] or [None])[0],
             "link_note": (obj["link_note"] or {}).get("code"),
         }
+    if kind == "processing-results":
+        # COMPACT: what a reviewer needs to pick and decide a result; the full result (inputs, steps,
+        # every metric) stays in processing/processing_results.json and `bundle.json`
+        from . import bundle as B
+
+        app = obj.get("applicability") or {}
+        qc = obj.get("qc") or {}
+        failure = obj.get("failure") or {}
+        files = (obj.get("outputs") or {}).get("files") or ()
+        comparison = obj.get("comparison") or {}
+        channel = obj.get("channel_choice") if isinstance(obj.get("channel_choice"), Mapping) else {}
+        return {
+            "result_id": B.processing_id(obj),
+            "group_id": obj.get("group_id"),
+            "group_status": (group_status or {}).get(obj.get("group_id")),
+            "source": obj.get("source"),
+            "state": obj.get("state"),
+            "verdict": qc.get("verdict"),
+            "qc_reasons": list(qc.get("reasons") or [])[:10],
+            "applicability": f"not_applicable:{app.get('reason_code')}" if B.processing_not_applicable(obj) else "applies",
+            "failure": (f"{failure.get('code')}: {_short(failure.get('detail'), 120)}" if failure.get("detail") else failure.get("code")) or None,
+            "channel": _short(channel.get("signal_name") or channel.get("mode"), 120) if channel else None,
+            "flags": [f for f in obj.get("review_flags") or () if f not in _EVERY_RESULT_FLAGS][:20],
+            "metrics": {k: (qc.get("metrics") or {}).get(k) for k in _RESULT_METRICS if k in (qc.get("metrics") or {})},
+            "output_files": len(files),
+            "plot": next((f.get("relative_path") for f in files if f.get("role") == "plot"), None),
+            "athena_agreement": comparison.get("verdict"),
+            "athena_versions": len(obj.get("athena_versions") or ()),
+        }
     if kind == "questions":
         return {
             "question_id": obj["question_id"],
@@ -636,12 +668,17 @@ def _row(kind: str, obj: Mapping) -> dict:
             "run_id": obj["run_id"],
             "prompt": _short(obj["prompt"], 240),
         }
-    return {
+    row = {
         "relative_path": obj["relative_path"],
         "source_id": obj["source_id"],
         "source_type": obj["source_type"],
         "reason_code": obj["reason_code"],
     }
+    later = next((how for suffix, how in READ_LATER_BY_SUFFIX.items()
+                  if str(obj.get("relative_path") or "").lower().endswith(suffix)), None)
+    if later:
+        row["read_by"] = later
+    return row
 
 
 def _mc_reason_code(obj: Mapping) -> str | None:
@@ -686,7 +723,19 @@ _LIST_SECTION = {
     "questions": "questions",
     "unread": "unread_files",
     "processed-outputs": "processed_outputs",
+    "processing-results": "processing_results",
 }
+#: ``bundle list <dir> unread``: files the IMPORT has no reader for but a later command reads (by suffix),
+#: said on the row so an Athena project is never taken for a file nobody reads.
+READ_LATER_BY_SUFFIX = {
+    ".prj": ("isaac process (Athena project: its groups are read and matched by name to record groups, as the "
+             "scientist's own processing to compare with; the import itself has no reader for it)"),
+}
+#: Metrics a ``processing-results`` row carries (the rest are in ``processing/processing_results.json``).
+_RESULT_METRICS = ("scans_listed", "scans_used", "points", "e0_eV", "edge_step", "pre_edge_noise", "scan_spread",
+                   "glitch_points", "outlier_scans", "nonfinite_dropped")
+#: Review flags every draft-protocol result carries: left off the compact row (they say nothing per result).
+_EVERY_RESULT_FLAGS = frozenset({"protocol_draft_unreviewed"})
 _SHOW_SECTION = {
     "group": ("record_groups", "group_id"),
     "run": ("runs", "run_id"),
@@ -751,13 +800,15 @@ def cmd_bundle_list(args) -> int:
         _err("--all applies only to `groups`.")
         return EXIT_USAGE
     if args.state:
-        if args.kind != "candidates":
-            _err("--state applies only to `candidates`.")
+        if args.kind not in ("candidates", "processing-results"):
+            _err("--state applies only to `candidates` and `processing-results`.")
             return EXIT_USAGE
-        rows = [r for r in rows if r.get("value_state") == args.state]
+        key = "value_state" if args.kind == "candidates" else "state"
+        rows = [r for r in rows if r.get(key) == args.state]
     total = len(rows)
     page = rows[args.offset : args.offset + args.limit]
-    items = [_row(args.kind, r) for r in page]
+    status = {g["group_id"]: g.get("status") for g in bundle.get("record_groups") or ()}
+    items = [_row(args.kind, r, status) for r in page]
     if args.kind == "merge-candidates":
         from . import grouping as G
 
@@ -1120,6 +1171,37 @@ def cmd_bundle_validate(args) -> int:
     return code
 
 
+#: How many refused groups ``bundle export`` prints in full by default (``--full`` prints all).
+EXPORT_REFUSED_SHOWN = 3
+
+
+def compact_export(result: Mapping) -> dict:
+    """``bundle export``'s reply without every refused group's full summary: counts by reason, the
+    first :data:`EXPORT_REFUSED_SHOWN` refusals in full, and where the rest are. Measured on a real
+    BL4-3 bundle with nothing exportable: 35 refusals printed 40 KB."""
+    refused = list(result.get("refused") or ())
+    if len(refused) <= EXPORT_REFUSED_SHOWN:
+        return dict(result)
+    by_reason: dict[str, int] = {}
+    by_field: dict[str, int] = {}
+    for row in refused:
+        for key in filter(None, (row.get("verdict"), row.get("processing_blocker"))):
+            by_reason[key] = by_reason.get(key, 0) + 1
+        for path in row.get("missing_required") or ():
+            by_field[path] = by_field.get(path, 0) + 1
+    out = {k: v for k, v in result.items() if k != "refused"}
+    out.update(
+        refused_total=len(refused),
+        refused_by_reason=dict(sorted(by_reason.items(), key=lambda kv: (-kv[1], kv[0]))),
+        missing_required_by_field=dict(sorted(by_field.items(), key=lambda kv: (-kv[1], kv[0]))),
+        refused=refused[:EXPORT_REFUSED_SHOWN],
+        refused_omitted=len(refused) - EXPORT_REFUSED_SHOWN,
+        refused_full_list=("Pass --full to print every refused group's summary, or run `isaac bundle validate "
+                           "<bundle_dir>`: it writes each group's full report to <bundle_dir>/validation/<group_id>.json."),
+    )
+    return out
+
+
 def cmd_bundle_export(args) -> int:
     """Exit 0 only when nothing was refused; 1 when any draft was not exported."""
     from . import records as R
@@ -1128,7 +1210,7 @@ def cmd_bundle_export(args) -> int:
 
     def run():
         holder["r"] = R.export_records(Path(args.bundle_dir), Path(args.out))
-        return holder["r"]
+        return holder["r"] if args.full else compact_export(holder["r"])
 
     code = _mutation(run)
     if code == EXIT_OK and holder["r"]["refused"]:
@@ -1290,7 +1372,7 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("kind", choices=LIST_KINDS)
     q.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     q.add_argument("--offset", type=int, default=0)
-    q.add_argument("--state", help="candidates only: filter by value_state")
+    q.add_argument("--state", help="candidates: filter by value_state; processing-results: filter by state")
     q.add_argument("--no-values", action="store_true", help="candidates only: omit parser values (records no exposure)")
     q.add_argument("--all", action="store_true", help="groups only: also list merged, rejected and split groups (decision history)")
     q.set_defaults(func=cmd_bundle_list)
@@ -1410,6 +1492,7 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q = bsub.add_parser("export", help="write official records that pass every gate")
     q.add_argument("bundle_dir")
     q.add_argument("--out", required=True)
+    q.add_argument("--full", action="store_true", help="print every refused group's full summary (default: counts and the first few)")
     q.set_defaults(func=cmd_bundle_export)
 
     q = bsub.add_parser("upload", help="DRY RUN ONLY: what would be sent to the portal")

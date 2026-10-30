@@ -445,6 +445,14 @@ def test_a_group_with_an_approved_curve_is_never_blocked_by_a_later_not_applicab
     ok = _na_result("g1", b["runs"][0])
     ok.pop("applicability")
     ok.update(result_id="p-ok", qc={"metrics": {}, "verdict": "pass", "reasons": []})
+    # a curve has an output file (`decide` refuses to approve a result without one)
+    (bdir / "processing").mkdir(exist_ok=True)
+    spec = bdir / "processing" / "SYN_ok_norm.txt"
+    spec.write_text("# SYNTHETIC\n7000 0.0\n7010 1.0\n")
+    import hashlib
+
+    ok["outputs"] = {**ok.get("outputs", {}), "files": [{"role": "normalized_spectrum", "relative_path": "processing/SYN_ok_norm.txt",
+                                                      "sha256": hashlib.sha256(spec.read_bytes()).hexdigest()}]}
     b["processing_results"].append(ok)
     M.save_bundle(bdir, b)
     M.decide(bdir, target_ids=["p-ok"], decision="approve", value=None, qc_status="valid", **BY)

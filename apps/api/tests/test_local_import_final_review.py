@@ -217,7 +217,7 @@ def test_export_reports_ignored_drafts_and_says_when_nothing_was_exported(bdir, 
     (drafts / "hand.draft.json").write_text(json.dumps({"meta": {}, "fields": {}}))
     code = cli.main(["bundle", "export", str(bdir), "--out", str(tmp_path / "out")])
     out = json.loads(capsys.readouterr().out)
-    assert code == 0 and out["exported"] == [] and out["statement"] == "Nothing was exported."
+    assert code == 0 and out["exported"] == [] and out["statement"].startswith("Nothing was exported, so there is nothing to dry-run")
     assert out["on_disk_drafts_ignored_with_no_confirmed_group"] == ["hand"]
     _with_group(bdir)
     decide_everything(bdir, add_group=False)

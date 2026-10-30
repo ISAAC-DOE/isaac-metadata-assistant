@@ -230,8 +230,11 @@ def run_process(
     regroup: bool = False,
     bundle: Mapping | None = None,
     calibration_approvals: Mapping[str, Mapping] | None = None,
+    skip_group_ids: Sequence[str] = (),
 ) -> dict:
     """Run protocol ``isaac.xas.v0`` over the bundle's groups (grouping first when absent).
+
+    ``skip_group_ids``: record groups not processed (:func:`run.process_bundle`).
 
     ``source_root``: the folder the bundle was imported from (the bundle stores only
     relative paths unless imported with ``--record-local-root``). ``params`` /
@@ -263,5 +266,6 @@ def run_process(
         athena=athena,
         bundle=bundle,
         calibration_approvals=calibration_approvals,
+        skip_group_ids=skip_group_ids,
     )
     return payload

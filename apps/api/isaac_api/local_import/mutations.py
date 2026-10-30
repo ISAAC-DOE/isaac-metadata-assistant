@@ -51,6 +51,18 @@ CROSSCHECK_CATEGORIES: Sequence[tuple[str, tuple[str, ...], tuple[str, ...]]] = 
     ("cell_type", ("context.electrochemistry.cell_type",), ()),
     ("acquisition_time", ("timestamps.acquired_start_utc",), ()),
 )
+#: The order ``crosscheck-plan`` lists its items in: the high-value categories first, then values the
+#: record requires, then the run-level checks. Within the order every item that can be EXCERPTED comes
+#: before every one that cannot (a missing value has no source text to read).
+CROSSCHECK_ORDER: Sequence[str] = (
+    *(name for name, _, _ in CROSSCHECK_CATEGORIES), "required_by_record", "run_association", "herfd_signal_choice",
+)
+#: Locators ``crosscheck-plan`` prints per item (``locators_total`` says how many there are); ``excerpt``
+#: reads at most :data:`MAX_EXCERPTS` of them anyway. Measured: a BL15-2 run lists one per scan, and
+#: ``--limit 30`` printed 115 KB.
+MAX_PLAN_LOCATORS = 5
+NOT_EXCERPTABLE_MISSING = ("nothing in the source states it (a missing value): there is no source text to excerpt or "
+                           "cross-check; the scientist answers it (`isaac bundle questions`)")
 
 
 class MutationRefused(ValueError):
@@ -543,6 +555,8 @@ def _check_decision(bundle: Mapping, kind: str, obj: Mapping, decision: str, val
             f"{B.processing_id(obj)} is not a curve: the processing protocol does not apply to this group "
             f"({app.get('reason_code')}: {B.NO_PROTOCOL_COVERS}). There is nothing to {decision}, and no QC verdict was given."
         )
+    if kind == "processing_result" and decision == "approve" and not (obj.get("outputs") or {}).get("files"):
+        raise MutationRefused(no_curve_refusal(obj))
     if decision == "correct" and value is None:
         raise MutationRefused("`correct` needs --value.")
     if decision == B.ATHENA_SELECT_DECISION:
@@ -594,6 +608,37 @@ def _check_decision(bundle: Mapping, kind: str, obj: Mapping, decision: str, val
     problem = _decided_value_problem(bundle, kind, obj, decision, value)
     if problem is not None:
         raise MutationRefused(problem)
+
+
+def no_curve_cause(result: Mapping) -> str:
+    """``code: detail`` of why a processing result made no curve (its ``failure``), plainly."""
+    failure = result.get("failure") or {}
+    code = failure.get("code") or ", ".join((result.get("qc") or {}).get("reasons") or ()) or "no output file"
+    detail = failure.get("detail")
+    return f"{code}: {detail}" if detail else str(code)
+
+
+def reprocess_command(group_id: str) -> str:
+    """Re-processing ONE group with other parameters: the only way to a different result."""
+    return (f"`isaac process <bundle_dir> --source <the beamtime folder you imported> --group {group_id} "
+            "--params-file <params.json>`")
+
+
+def no_curve_refusal(result: Mapping) -> str:
+    """Why approving a processing result that has NO CURVE (no output file) is refused, and the
+    real options. An approval would put a QC status into the record with no spectrum beside it."""
+    pid, gid = B.processing_id(result), result.get("group_id")
+    verdict = (result.get("qc") or {}).get("verdict")
+    return (
+        f"{pid} has no curve to approve: the protocol made no output file (QC verdict {verdict!r}, "
+        f"{no_curve_cause(result)}), so an approval would state a QC status for a spectrum that does not exist. "
+        "Re-running `isaac process` with the same parameters gives the same result. The options: "
+        f'reject it (`isaac bundle decide <bundle_dir> --target {pid} --decision reject --by "<your name>"`); '
+        f"or mark it needs_changes (`--target {pid} --decision needs_changes`) and re-process the group with "
+        f"other parameters ({reprocess_command(gid)}), which adds a new result to review; "
+        "or leave the group out of the records "
+        f'(`isaac bundle decide <bundle_dir> --target {gid} --decision reject --by "<your name>"`). Nothing was recorded.'
+    )
 
 
 def merge_with_problem(bundle: Mapping, group_id: str, merge_with: Sequence[str] | None) -> str | None:
@@ -1056,6 +1101,18 @@ def record_decision(
         statement = CAPTURE_STATEMENTS.get(decision)
         if statement:
             result["statement"] = statement.format(value=value, positions=", ".join(map(str, positions or ())))
+        if decision == "needs_changes":
+            # WHAT needs_changes DOES, said: it moves nothing but the result's review, and it freezes the
+            # result against a plain re-run (bundle.apply_derivations, process: a state decision keeps it)
+            gids = sorted({obj.get("group_id") for _, obj in planned if obj.get("group_id")})
+            result["statement"] = (
+                f"Recorded: {', '.join(target_ids)} needs changes. Its state stays needs_review: not approved and not "
+                "rejected, so its group still has no approved curve and cannot become a complete record. A plain "
+                "`isaac process` re-run keeps it as it is (a decided result is never replaced). A changed result comes "
+                "only from re-processing with other parameters: "
+                + "; ".join(reprocess_command(g) for g in gids[:3]) + (" …" if len(gids) > 3 else "")
+                + ", which adds a new result beside this one to review and approve."
+            )
         if decision == B.CLOCK_ZONE_DECISION:
             after = B.apply_derivations(json.loads(json.dumps(bundle)))
             stale = B.local_clock_reconfirm(after)
@@ -1115,20 +1172,25 @@ def crosscheck_plan(bundle: Mapping) -> dict:
         checked.setdefault((i["target"]["kind"], i["target"]["id"]), []).append(i)
     items: list[dict] = []
 
-    def add(kind, tid, category, run_id, locators):
+    def add(kind, tid, category, run_id, locators, field_path=None, not_excerptable=None):
         key = (kind, tid)
         readings = checked.get(key, [])
-        items.append(
-            {
-                "target": {"kind": kind, "id": tid},
-                "category": category,
-                "run_id": run_id,
-                "locators": locators,
-                "checked": bool(readings),
-                "blind_checks": sum(1 for r in readings if r.get("blind")),
-                "parser_value_exposed": bool(exposures_for(bundle, kind, tid)),
-            }
-        )
+        excerptable = not_excerptable is None and bool(locators)
+        item = {
+            "target": {"kind": kind, "id": tid},
+            "category": category,
+            "run_id": run_id,
+            "field_path": field_path,
+            "excerptable": excerptable,
+            "locators": locators[:MAX_PLAN_LOCATORS],
+            "locators_total": len(locators),
+            "checked": bool(readings),
+            "blind_checks": sum(1 for r in readings if r.get("blind")),
+            "parser_value_exposed": bool(exposures_for(bundle, kind, tid)),
+        }
+        if not excerptable:
+            item["not_excerptable_because"] = not_excerptable or "no source locator was recorded for it"
+        items.append(item)
 
     sources = {s["source_id"]: s for s in bundle["sources"]}
     for run in bundle["runs"]:
@@ -1149,15 +1211,32 @@ def crosscheck_plan(bundle: Mapping) -> dict:
         if category is None and path and B._required_for(path, required):
             category = "required_by_record"
         if category:
-            add("candidate", c["candidate_id"], category, c["run_id"], _locators(c))
+            add("candidate", c["candidate_id"], category, c["run_id"], _locators(c), field_path=c["target_field_path"])
     for m in bundle["missing_values"]:
         if B._required_for(m["target_field_path"], required):
-            add("missing_value", m["value_id"], "required_by_record", m["run_id"], [])
+            add("missing_value", m["value_id"], "required_by_record", m["run_id"], [],
+                field_path=m["target_field_path"], not_excerptable=NOT_EXCERPTABLE_MISSING)
+    # HIGH-VALUE FIRST, and every item that can be excerpted before every one that cannot (stable)
+    rank = {name: n for n, name in enumerate(CROSSCHECK_ORDER)}
+    items.sort(key=lambda i: (not i["excerptable"], rank.get(i["category"], len(rank))))
     total = len(items)
+    excerptable_n = sum(1 for i in items if i["excerptable"])
+    by_category: dict[str, int] = {}
+    for i in items:
+        by_category[i["category"]] = by_category.get(i["category"], 0) + 1
     checked_n = sum(1 for i in items if i["checked"])
     blind_n = sum(1 for i in items if i["blind_checks"])
     return {
         "total": total,
+        "excerptable": excerptable_n,
+        "not_excerptable": total - excerptable_n,
+        "by_category": {name: by_category[name] for name in CROSSCHECK_ORDER if name in by_category},
+        "statement_excerptable": (
+            f"{excerptable_n} of {total} item(s) can be cross-checked against the source (`excerpt` reads their "
+            f"locators; each item lists at most {MAX_PLAN_LOCATORS}, `locators_total` says how many it has). The "
+            f"other {total - excerptable_n} (excerptable: false) have no source text — a missing value is answered "
+            "by the scientist, never cross-checked. High-value categories come first."
+        ),
         "coverage": {
             "checked": checked_n,
             "blind_checked": blind_n,
@@ -1200,6 +1279,9 @@ def excerpt(bundle: Mapping, target_id: str, *, source: str | None) -> dict:
         locs = [{"source_id": obj["source_id"], "relative_path": obj["relative_path"], "locator": "line 1"}]
     elif kind == "run":
         locs = [{"source_id": obj["acquisition_source_id"], "relative_path": None, "locator": "line 1"}]
+    elif kind == "missing_value":
+        raise MutationRefused(f"{target_id} is not excerptable: {NOT_EXCERPTABLE_MISSING}. `crosscheck-plan` marks "
+                              "such items excerptable: false.")
     else:
         raise MutationRefused(f"A {kind} has no source locators to excerpt.")
     root = _source_root(bundle, source)
@@ -1972,7 +2054,13 @@ def process(
 ) -> dict:
     """Run the processing protocol (LOCAL-P's ``processing.cli_entry.run_process``) and
     store its ``processing_results[]``. A result a scientist already decided is KEPT;
-    nothing here approves anything — every new result is undecided."""
+    nothing here approves anything — every new result is undecided.
+
+    ONLY LIVE GROUPS (proposed or confirmed) are processed unless ``group_ids`` names others: a
+    rejected, merged or split group cannot become a record, so processing it only added results
+    and QC verdicts nobody can use (a real BL4-3 bundle: 26 rejected alignment groups among 62
+    results). Their earlier results, and every decision on them, are kept as they were, and the
+    reply counts them apart (``not_live_groups``)."""
     try:
         from .processing import cli_entry
     except ImportError as exc:
@@ -1984,6 +2072,13 @@ def process(
         raise MutationRefused(refusal, code=2)
     if not current.get("record_groups"):
         raise MutationRefused("No record groups yet: run `isaac bundle group` first.", code=2)
+    not_live = [] if group_ids else [g for g in current["record_groups"] if g.get("status") not in B.LIVE_GROUP_STATUSES]
+    if not_live and len(not_live) == len(current["record_groups"]):
+        raise MutationRefused(
+            f"No live record group to process: all {len(not_live)} groups are rejected, merged or split, so none can "
+            "become a record. Nothing was processed. Name one with `--group <id>` to process it anyway, or regroup "
+            "(`isaac bundle group <bundle_dir> --regroup`).", code=2)
+    skip = [g["group_id"] for g in not_live]
     payload = cli_entry.run_process(
         bundle_dir,
         source_root=source,
@@ -1992,6 +2087,7 @@ def process(
         params_file=params_file,
         bundle=current,
         calibration_approvals=calibration_approvals(current),
+        skip_group_ids=skip,
     )
     if payload.get("status") == "processing_unavailable":
         missing = ", ".join(payload.get("missing") or []) or "its dependencies"
@@ -2020,6 +2116,8 @@ def process(
         # `--group` processes ONLY those groups: every other group's results (decided or not) are kept as they are
         untouched = set() if not group_ids else {g for g in {r.get("group_id") for r in bundle.get("processing_results") or ()}
                                                      if g not in set(group_ids)}
+        # a group that is no longer live was not processed: its results stay exactly as they were
+        untouched |= set(skip)
         # decided results are kept, and so is every result of a SUPERSEDED group (never deleted)
         keep = [r for r in bundle.get("processing_results") or ()
                 if B.processing_id(r) in decided or r.get("group_id") in superseded or r.get("group_id") in untouched]
@@ -2043,6 +2141,18 @@ def process(
         if group_ids:
             # the groups NOT named keep their results as stored (`new` counts only the named groups')
             out["kept_other_groups"] = len(keep) - kept_decided
+        if not_live:
+            by_status: dict[str, int] = {}
+            for g in not_live:
+                by_status[g.get("status")] = by_status.get(g.get("status"), 0) + 1
+            held = sum(1 for r in keep if r.get("group_id") in set(skip))
+            said = ", ".join(f"{n} {k}" for k, n in sorted(by_status.items()))
+            line = (f"{len(not_live)} record group(s) not processed because they are no longer live ({said}): their "
+                    f"{held} earlier result(s) and any decision on them are kept as they were. `--group <id>` processes one anyway.")
+            out["not_live_groups"] = {"groups": len(not_live), "by_status": dict(sorted(by_status.items())),
+                                      "results_kept": held, "statement": line}
+            if isinstance(out.get("summary"), Mapping):
+                out["summary"] = {**out["summary"], "lines": [*(out["summary"].get("lines") or ()), line]}
         return out
 
     return mutate(bundle_dir, change)
