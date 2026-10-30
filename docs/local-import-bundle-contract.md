@@ -1,6 +1,6 @@
 # ISAAC Local Import Bundle — contract v1
 
-Status: **v1.7.0** (`context.electrochemistry.current_setpoint_mA_cm2` answerable, so a confirmed galvanostatic record can complete, 2026-10-29, §9 "What 1.7.0 added", DEC-92; v1.6.0 capture decisions — keep apart, the Athena result of record, "no counter" — a merge decision applied as one combined group, and question ids that survive answers, 2026-10-29, §9 "What 1.6.0 added"; v1.5.0 control mode answerable the same day; v1.4.0 the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
+Status: **v1.8.0** (the bounds on `scientist_decisions` and `ai_interpretations` raised to 200,000, so an append-only log can no longer lock a bundle; decide refuses a value its field refuses, 2026-10-29, §9 "What 1.8.0 added", §25; v1.7.0 `context.electrochemistry.current_setpoint_mA_cm2` answerable, so a confirmed galvanostatic record can complete, 2026-10-29, §9 "What 1.7.0 added", DEC-92; v1.6.0 capture decisions — keep apart, the Athena result of record, "no counter" — a merge decision applied as one combined group, and question ids that survive answers, 2026-10-29, §9 "What 1.6.0 added"; v1.5.0 control mode answerable the same day; v1.4.0 the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
 [`apps/api/isaac_api/local_import/bundle-v1.schema.json`](../apps/api/isaac_api/local_import/bundle-v1.schema.json)
 (JSON Schema draft 2020-12) plus the checks in
 [`bundle.py`](../apps/api/isaac_api/local_import/bundle.py) `validate_bundle` that JSON
@@ -155,6 +155,8 @@ Enforced by the builder (refuse, or clamp visibly and count) and by the validato
 | `MAX_CANDIDATES` | 4,000 | the engine's own `MAX_CANDIDATES_PER_SESSION`; ~1,000 measured on the real corpus. Engine truncation is reported in `bounds.candidates_truncated_by_engine` |
 | `MAX_EVIDENCE_PER_CANDIDATE` | 256 | the engine keeps 5 supporting statements plus every disagreement reading; past 256 the list is a window with `evidence_truncated: true` |
 | `MAX_STRING_CHARS` | 20,000 | above the engine's longest stored prose (12,000); a longer string is clamped with a visible marker and counted in `bounds.strings_truncated` |
+| `MAX_SCIENTIST_DECISIONS` | 200,000 | (1.8.0; 20,000 before) `scientist_decisions` is append-only, so its bound must sit with the other per-entry bounds (`missing_values` and `exposures`: 200,000), not below them. A `decide` that would pass it is refused up front with the reason (`mutations.log_full_message`), before anything is appended; in practice `MAX_BUNDLE_BYTES` binds first, and a write past it is refused by the validator the same way |
+| `MAX_AI_INTERPRETATIONS` | 200,000 | (1.8.0; 20,000 before) `ai_interpretations` is append-only too; an `annotate` past it is refused up front the same way |
 | `MAX_BUNDLE_BYTES` | 64 MiB | 1,168,848 bytes on the 9-run fixture; a laptop-safe JSON load. `load_bundle` refuses an oversize file before parsing it |
 
 `isaac bundle list` pages (`--limit` 1–200, `--offset`) and always reports `total`,
@@ -667,6 +669,23 @@ as at 1.2.0–1.6.0).
   nothing is recorded for it.
 - See §20 ("Newly answerable fields") for what the field allows and why it has no companion gate.
 
+### What 1.8.0 added (the bounds of the append-only logs)
+
+A minor version: the schema **accepts more** (it refuses nothing 1.7.0 accepted). `scientist_decisions`
+and `ai_interpretations` may hold up to 200,000 entries (`bundle.MAX_SCIENTIST_DECISIONS`,
+`bundle.MAX_AI_INTERPRETATIONS`; the schema's `maxItems` is the same number, pinned by a test). At the
+1.7.0 bound of 20,000 the next decision failed validation, and since the log is append-only every later
+write did too, with no recovery. Nothing in the bundle's shape changes, nothing becomes newly writable,
+and `processed_outputs` is required at 1.8.0 as at 1.2.0–1.7.0.
+
+- **A 1.8.0 validator accepts 1.0.0–1.7.0 bundles;** a 1.7.0 validator refuses a 1.8.0 one (the label),
+  and one past 20,000 entries.
+- **The upgrade is disclosed, never silent.** The first write by this build of an older bundle appends
+  one `format_upgrades` entry whose statement includes `bundle.CHANGES_ADDED_IN["1.8.0"]` (printed once
+  to stderr, shown by `check` and summary.md). No eligibility moves for it.
+- **A write past either bound is refused up front** (exit 2) with a sentence naming the log, how many it
+  holds and the bound; nothing is appended (§7, §25).
+
 ## 10. Exit codes (`isaac import` / `isaac bundle`)
 
 0 ok · 1 `check` found the bundle invalid, or STALE (stored by an older build, §9 "What 1.3.0
@@ -717,7 +736,8 @@ that discipline.
   `portal_reject`, `exportable`.
 - `isaac bundle export <dir> --out <records_dir>` re-runs every gate and writes
   `<ULID>.json` + `<ULID>.evidence.json` (+ approved processing artifacts) ONLY for
-  `exportable`. Everything else is listed with its verdict.
+  `exportable`. Everything else is listed with its verdict. Re-export is idempotent (§25):
+  `<records_dir>/isaac-export-index.json` keeps each group's record id.
 - `isaac bundle upload <records_dir> --dry-run [--portal-url URL]` prints the exact requests
   (`POST /portal/api/validate`, then `POST /portal/api/records`), headers with
   `Authorization: Bearer <from $ISAAC_PORTAL_TOKEN, not read>`, body size and sha256. No
@@ -1452,3 +1472,43 @@ readings of a potential scale that neither list has. The other 14 are phrases or
 website refuses as a term, in `system.technique` and in `sample.material.provenance`, a field
 the portal closes with a six-word list. They are listed, not drafted. No exposure was written,
 because no parser value was printed.
+
+## 25. Decide, evidence, validate and export hardening (2026-10-29 audit) — format 1.8.0 for the bounds only
+
+- **`decide` refuses a value its field refuses** (`mutations._decided_value_problem`, shared by the CLI and
+  the local questions screen). A `confirm`/`correct` on a candidate, missing value or conflict whose value
+  eligibility would reject (`bundle.value_problem`: the vendored schema's `enum` and `type`, the `*_utc`
+  rule, non-finite numbers) on a path this build writes is refused, exit 2, naming the allowed values (or
+  the `--json` hint for a number); nothing is written, and a bulk answer is all-or-nothing. Before, such a
+  value was stored `scientist_confirmed`, was never eligible, and its question closed: the record stayed
+  blocked with nothing left to ask. A bundle an older build stored with one still loads and writes;
+  `bundle.value_unfit_reason` identifies it, and a later `correct` with an allowed value is recorded.
+  (Asking such values again is `questions.py`'s: a value whose `value_unfit_reason` is set is open.)
+- **A replay is "unchanged" only when it is the decision that governs now.** A candidate's value is
+  governed by the later of its own decision and its conflict's (`bundle.candidate_decision`). After
+  `correct` cand → A, `confirm` conflict → B, a second `correct` cand → A is recorded (it changes the
+  value back to A); before, it was dropped as a replay. The same in the other order.
+- **A corrected value's evidence says so.** In a draft and its exported sidecar, each file quote keeps
+  its `relation` (`supports` / `contradicts` / `context`). When the composed value is not the parser's
+  (a `correct`, or a reading chosen on a conflict), the recorded relation is kept as
+  `relation_to_parser_value` and `relation` says whether the quote states the value of record; a quote
+  of the old value is `contradicts`, never support. The confirmation entry carries `provenance`
+  (`scientist_correction` or `scientist_confirmation`) and, when the value changed, `previous_value`.
+- **A merge must name something to merge.** `merge` on a record group is refused without
+  `--merge-with`, with an unknown id, with the group itself, or with a group that is not live
+  (rejected, merged, split). A merge decision an older build stored that combines nothing is listed in
+  `group --regroup`'s `merge_decisions_not_combined` with its reason, never skipped.
+- **`validate` names the processing approval.** `measurement.series`, `measurement.qc.status` and
+  `descriptors.outputs` come only from an approved processing result; until one is approved they are in
+  `missing_required` (and `missing_from_processing`), the verdict is `incomplete`, and `processing_fix`
+  / the summary give the command (`isaac bundle decide <dir> --target <result id> --decision approve
+  --qc-status <value> --by "<name>"`, or `isaac process <dir>` first when there is no result). Before,
+  the verdict was `invalid_official` with "Missing required values: none".
+- **Re-export reuses the record id.** `isaac bundle export` keeps `<out>/isaac-export-index.json`
+  (`isaac.local-export-index`: per bundle id and group id, the record id, the `content_sha256` of the
+  draft and composer overrides it was composed from, and the export time). An unchanged group is
+  rewritten under the same id and time, byte for byte (`export: unchanged`). A changed group gets a new
+  id; the record it replaces is moved to `<out>/superseded/` (kept, never in an upload plan) and the row
+  says so (`export: replaced`, `replaces_record_id`). A group exported before that is now refused lists
+  `previously_exported_record_id`. `upload --dry-run` never lists the index. Records exported before the
+  index existed are not recognised (no group id is in a record), so export to a fresh `--out` once.

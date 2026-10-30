@@ -117,8 +117,9 @@ def save_bundle(bundle_dir: Path, bundle: dict) -> None:
     # save adds no missing value: a 1.4.0 import has no control-mode answer slots until re-imported.
     # 1.7.0 (DEC-92) does the same for context.electrochemistry.current_setpoint_mA_cm2: a 1.4.0-1.6.0
     # bundle is raised with a format_upgrades entry naming it, and gets no current set-point slots
-    # until re-imported.
-    to_version = (B.FORMAT_VERSION if "processed_outputs" in bundle
+    # until re-imported. 1.8.0 raises the bounds of the append-only logs (bundle.CHANGES_ADDED_IN): a
+    # 1.7.0-or-older bundle is raised with a format_upgrades entry saying so; no eligibility moves.
+    to_version =(B.FORMAT_VERSION if "processed_outputs" in bundle
                   else "1.1.0" if stored_version in ("1.0.0", "1.1.0") else stored_version)
     if B.needs_format_upgrade(bundle):
         stored = None
@@ -322,6 +323,8 @@ def _add_interpretation(bundle: dict, kind: str, obj: Mapping, target_id: str, *
                         extra: Mapping | None = None) -> dict:
     """Append ONE AI interpretation (and, on a candidate, its context witness)."""
     interps = bundle.setdefault("ai_interpretations", [])
+    if len(interps) >= B.MAX_AI_INTERPRETATIONS:
+        raise MutationRefused(log_full_message("ai_interpretations", len(interps), 1, B.MAX_AI_INTERPRETATIONS))
     entry = {
         "interpretation_id": f"ai-{len(interps) + 1:04d}",
         "target": {"kind": kind, "id": target_id},
@@ -366,6 +369,14 @@ def _add_interpretation(bundle: dict, kind: str, obj: Mapping, target_id: str, *
         obj["evidence_total"] = max(obj["evidence_total"] + 1, len(obj["evidence"]))
         obj["evidence_truncated"] = obj["evidence_total"] > len(obj["evidence"])
     return entry
+
+
+def log_full_message(section: str, held: int, adding: int, bound: int) -> str:
+    """The sentence for a write refused because an append-only log is at its bound (contract §7)."""
+    what = "scientist decisions" if section == "scientist_decisions" else "AI interpretations"
+    return (f"This bundle already holds {held:,} {what}; recording {adding:,} more would pass the bound of {bound:,} "
+            f"({section}, contract §7), so nothing was written. The log is append-only and nothing in it is dropped: "
+            "start a new import of the remaining files, or split this beamtime's files into smaller imports.")
 
 
 _INTERPRETABLE = ("candidate", "missing_value", "record_group", "source", "run", "processing_result")
@@ -478,12 +489,17 @@ def _has_source_evidence(candidate: Mapping) -> bool:
     return any(e["method"] in ("deterministic_parser", "stored_rule") for e in candidate["evidence"])
 
 
-def _check_decision(bundle: Mapping, kind: str, obj: Mapping, decision: str, value: Any, *, bulk: bool) -> None:
+def _check_decision(bundle: Mapping, kind: str, obj: Mapping, decision: str, value: Any, *, bulk: bool,
+                    merge_with: Sequence[str] | None = None) -> None:
     allowed = B.DECISIONS_BY_KIND.get(kind)
     if allowed is None:
         raise MutationRefused(f"A {kind} cannot be decided.")
     if decision not in allowed:
         raise MutationRefused(f"`{decision}` is not a decision for a {kind}; allowed: {', '.join(sorted(allowed))}.")
+    if kind == "record_group" and decision == "merge":
+        problem = merge_with_problem(bundle, obj["group_id"], merge_with)
+        if problem is not None:
+            raise MutationRefused(f"{problem} Nothing was recorded.")
     if kind == "processing_result" and B.processing_not_applicable(obj):
         app = obj.get("applicability") or {}
         raise MutationRefused(
@@ -538,6 +554,77 @@ def _check_decision(bundle: Mapping, kind: str, obj: Mapping, decision: str, val
             raise MutationRefused(f"{obj['candidate_id']} has no source evidence; a bulk confirmation needs it.")
     if kind in ("missing_value", "conflict") and decision in ("confirm", "correct") and value is None:
         raise MutationRefused(f"Deciding a {kind} needs --value: there is no single extracted value to confirm.")
+    problem = _decided_value_problem(bundle, kind, obj, decision, value)
+    if problem is not None:
+        raise MutationRefused(problem)
+
+
+def merge_with_problem(bundle: Mapping, group_id: str, merge_with: Sequence[str] | None) -> str | None:
+    """Why a ``merge`` of ``group_id`` with ``merge_with`` names nothing to merge, or ``None``.
+
+    A merge needs at least one OTHER group this bundle holds, each LIVE (proposed or confirmed). A
+    merge with no ``merge_with``, an unknown id, the group itself, or a rejected / merged / split
+    group combined nothing: it only moved the group to ``merged`` — a silent reject."""
+    named = list(dict.fromkeys(merge_with or ()))
+    how = ("isaac bundle decide <bundle_dir> --target " + group_id
+           + " --decision merge --merge-with <other group id> --by \"<your name>\"")
+    if not named:
+        return f"A merge of {group_id} needs --merge-with naming the group(s) to merge it with: `{how}`."
+    if group_id in named:
+        return f"--merge-with names {group_id} itself; a group is merged with ANOTHER group: `{how}`."
+    groups = {g["group_id"]: g for g in bundle.get("record_groups") or ()}
+    unknown = [x for x in named if x not in groups]
+    if unknown:
+        superseded = {g["group_id"] for g in bundle.get("superseded_record_groups") or ()}
+        said = ", ".join(x + (" (superseded by a regroup; not a record group now)" if x in superseded else "") for x in unknown)
+        return f"--merge-with names no record group of this bundle: {said}. `isaac bundle list <bundle_dir> groups` lists them."
+    dead = [f"{x} ({groups[x].get('status')})" for x in named if groups[x].get("status") not in B.LIVE_GROUP_STATUSES]
+    if dead:
+        return (f"--merge-with names a group that is no longer live: {', '.join(dead)}. Only a proposed or confirmed group "
+                "can be merged with; its runs are now in another proposal (`isaac bundle list <bundle_dir> groups`).")
+    return None
+
+
+def _decided_value_problem(bundle: Mapping, kind: str, obj: Mapping, decision: str, value: Any) -> str | None:
+    """Why a ``confirm``/``correct`` would store a value its official field refuses, or ``None``.
+
+    The SAME check eligibility makes (:func:`bundle.eligibility_for_official_record`: a path this
+    build writes, then :func:`bundle.value_problem` — the ``*_utc`` rule, the vendored schema's
+    ``enum`` and ``type``), made BEFORE anything is recorded. Without it an off-list answer was
+    stored as ``scientist_confirmed`` but never eligible, and its question closed: the record stayed
+    blocked with nothing left to ask. A value on a path this build does not write stays evidence and
+    is not checked (eligibility does not check it either); when the vendored schema cannot be read,
+    nothing is refused here — eligibility still fails closed."""
+    if decision not in ("confirm", "correct"):
+        return None
+    if kind == "candidate":
+        path = obj.get("target_field_path")
+        effective = B.final_value(obj.get("value"), {"decision": decision, "value": value}, obj.get("readings"))
+        label = obj["candidate_id"]
+    elif kind == "missing_value":
+        path, effective, label = obj.get("target_field_path"), value, obj["value_id"]
+    elif kind == "conflict":
+        cand = next((c for c in bundle.get("candidates") or () if c["candidate_id"] == obj.get("candidate_id")), None)
+        path, effective, label = (cand or {}).get("target_field_path"), value, obj["conflict_id"]
+    else:
+        return None
+    if not path or effective is None or path not in B._writable_paths():
+        return None
+    if not isinstance(B._vendored_schema(), Mapping):
+        return None
+    problem = B.value_problem(path, effective)
+    if problem is None:
+        return None
+    node = B._schema_node(path) or {}
+    allowed = node.get("enum") if isinstance(node.get("enum"), list) else None
+    hint = ""
+    if allowed:
+        hint = f" Allowed values for {path}: {', '.join(json.dumps(a) if not isinstance(a, str) else a for a in allowed)}."
+    elif isinstance(effective, str) and {"number", "integer"} & set(
+            node.get("type") if isinstance(node.get("type"), list) else [node.get("type")]):
+        hint = " Give the number itself with --json (e.g. --value 0.5 --json)."
+    return (f"{label}: {problem}, so it could never go into the record.{hint} Nothing was recorded "
+            f"(`{decision}` refused).")
 
 
 def decide(
@@ -762,7 +849,7 @@ def record_decision(
         planned: list[tuple[str, dict]] = []
         for tid in target_ids:
             kind, obj = resolve_target(bundle, tid)
-            _check_decision(bundle, kind, obj, decision, value, bulk=bulk)
+            _check_decision(bundle, kind, obj, decision, value, bulk=bulk, merge_with=merge_with)
             if qc_status is not None and kind != "processing_result":
                 raise MutationRefused("--qc-status applies to a processing result only.")
             if kind == "processing_result" and decision == "approve" and qc_status is None:
@@ -804,6 +891,7 @@ def record_decision(
             # what the zone answer is about to undo is SAID, never left for a later check to find
             counting_before = {x["candidate_id"] for x in B.local_clock_reconfirm(B.apply_derivations(json.loads(json.dumps(bundle))))}
         recorded, unchanged = [], []
+        held_before = len(decisions)
         zone_d = B.clock_zone_decision(bundle)
         for tid, (kind, obj) in zip(target_ids, planned):
             prior = latest.get((kind, tid))
@@ -819,6 +907,15 @@ def record_decision(
                 prior = next((d for d in reversed(bundle.get("scientist_decisions") or ())
                               if d.get("target") == {"kind": kind, "id": tid}
                               and (d.get("decision") == B.ATHENA_SELECT_DECISION) == selecting), None)
+            elif kind in ("candidate", "conflict") and prior is not None:
+                # A CANDIDATE'S VALUE IS GOVERNED BY THE LATER of its own decision and its conflict's
+                # (bundle.candidate_decision). A replay is "unchanged" only when this target's latest
+                # decision is the one that governs NOW: after `correct` cand -> A, `confirm` conflict -> B,
+                # a second `correct` cand -> A changes the composed value back to A and is recorded.
+                cand = obj if kind == "candidate" else next(
+                    (c for c in bundle.get("candidates") or () if c["candidate_id"] == obj.get("candidate_id")), None)
+                if cand is not None and B.candidate_decision(bundle, cand, latest) is not prior:
+                    prior = None
             # THE BINDING (1.4.0): a confirmation of a local-clock start time records the zone and the
             # converted value it was made under; a later zone decision cannot reuse it silently.
             binding = (B.local_clock_binding(obj, zone_d)
@@ -890,6 +987,10 @@ def record_decision(
                 entry["qc_evidence"] = {"verdict": qc.get("verdict"), "metrics": qc.get("metrics") or {}}
             decisions.append(entry)
             recorded.append(tid)
+        if len(decisions) > B.MAX_SCIENTIST_DECISIONS:
+            added = len(decisions) - held_before
+            del decisions[held_before:]  # the refusal leaves the bundle as it was
+            raise MutationRefused(log_full_message("scientist_decisions", held_before, added, B.MAX_SCIENTIST_DECISIONS))
         result = {"recorded": recorded, "unchanged": unchanged, "batch_id": batch_id}
         statement = CAPTURE_STATEMENTS.get(decision)
         if statement:
@@ -1242,6 +1343,14 @@ def group(bundle_dir: Path, *, regroup: bool = False) -> dict:
             runs_named += [k for k in combined_runs_of.get(d["decision_id"], ()) if k not in runs_named]
             gids = sorted({fresh_of[k] if k in fresh_of else bind_of[k] for k in runs_named if k in fresh_of or k in bind_of})
             if len(gids) < 2:
+                if d["decision_id"] not in combined_runs_of:
+                    # NEVER SILENT: a merge decision that names nothing to merge (no merge_with, an unknown
+                    # id, the group itself, a group that is no longer live — `decide` refuses these now, but
+                    # an older bundle may hold one), or whose runs are all in one group already, combined
+                    # nothing. (One a previous regroup DID combine, now confirmed or re-proposed whole, is
+                    # not listed: it was applied.)
+                    not_combined.append({"decision_id": d["decision_id"],
+                                         "reason": _merge_not_applicable(d, gid, by_id_all, gids)})
                 continue
             why = None
             holders = [g for g in fresh if g["group_id"] in gids]
@@ -1410,6 +1519,24 @@ def group(bundle_dir: Path, *, regroup: bool = False) -> dict:
         }),
     )
     return result
+
+
+def _merge_not_applicable(d: Mapping, gid: str, by_id_all: Mapping, gids: Sequence[str]) -> str:
+    """The reason a stored merge decision combined nothing (``merge_decisions_not_combined``)."""
+    named = [x for x in d.get("merge_with") or () if x != gid]
+    unknown = [x for x in named if x not in by_id_all]
+    if not d.get("merge_with"):
+        why = "the merge decision names no group to merge with (no merge_with)"
+    elif not named:
+        why = "the merge decision names only the group itself in merge_with"
+    elif unknown and len(unknown) == len(named):
+        why = f"merge_with names no group this bundle holds ({', '.join(unknown)})"
+    elif gids:
+        why = f"its runs are all in one group now ({gids[0]}), so there is nothing to combine"
+    else:
+        why = "none of the runs it names is in a live group now"
+    return (why + "; it merged nothing, and its group stays `merged` (not a record). Decide that group again "
+            "(confirm, reject, or merge with --merge-with <group id>).")
 
 
 def _reading_core(v: Any) -> str:

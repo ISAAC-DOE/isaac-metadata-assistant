@@ -69,8 +69,24 @@ def test_decide_refuses_to_store_a_non_finite_number(grouped, token, capsys):
 def test_a_non_finite_value_given_through_the_python_api_is_refused_at_save(grouped, value):
     vid = _miss(M.load(grouped), NUMERIC[0], "run-001")["value_id"]
     before = (grouped / "bundle.json").read_bytes()
-    with pytest.raises(M.MutationRefused, match="would add a non-finite number.*scientist_decisions/0/value"):
+    # refused at decide time, as any value its field refuses (contract §25); the save's own guard stays behind it
+    with pytest.raises(M.MutationRefused, match="is not a finite number.*Nothing was recorded"):
         M.decide(grouped, target_ids=[vid], decision="correct", value=value, by=BY, orcid=None)
+    assert (grouped / "bundle.json").read_bytes() == before
+
+
+def test_the_save_still_refuses_to_add_a_non_finite_number_whatever_wrote_it(grouped):
+    """Behind the decide-time check: a save never ADDS one (mutations.save_bundle)."""
+    held = M.load(grouped)
+    vid = _miss(held, NUMERIC[0], "run-001")["value_id"]
+    held["scientist_decisions"].append({
+        "decision_id": "d-00001", "target": {"kind": "missing_value", "id": vid}, "decision": "correct", "value": math.nan,
+        "chosen_reading_index": None, "decided_by": {"name": BY, "basis": "self_reported_local_user",
+                                                     "identity": "local_unverified", "orcid_claimed": None},
+        "decided_utc": "2026-10-28T00:00:00Z", "method": "scientist_answer", "note": None, "batch_id": None})
+    before = (grouped / "bundle.json").read_bytes()
+    with pytest.raises(M.MutationRefused, match="would add a non-finite number.*scientist_decisions/0/value"):
+        M.save_bundle(grouped, held)
     assert (grouped / "bundle.json").read_bytes() == before
 
 
@@ -121,7 +137,7 @@ def test_a_bundle_already_holding_a_non_finite_answer_is_named_never_bricked_and
     out = capsys.readouterr().out
     assert out.startswith("VALID:") and "NON-FINITE: bundle.json holds 1" in out and "replaced by the later decision" in out
     # ...and a write still cannot ADD one
-    with pytest.raises(M.MutationRefused, match="non-finite"):
+    with pytest.raises(M.MutationRefused, match="not a finite number"):
         M.decide(grouped, target_ids=[other], decision="correct", value=math.nan, by=BY, orcid=None)
 
 

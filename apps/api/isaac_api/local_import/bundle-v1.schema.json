@@ -49,9 +49,10 @@
         "1.4.0",
         "1.5.0",
         "1.6.0",
-        "1.7.0"
+        "1.7.0",
+        "1.8.0"
       ],
-      "description": "1.1.0 adds record_groups, processing_results and exposures (all optional, so a 1.0.0 bundle still validates) and widens the decision, target and question enums. 1.2.0 adds processed_outputs (optional; absent means none were recorded) and extended_context_entry.processed_output_id. A 1.2.0 bundle REQUIRES processed_outputs (possibly empty); a bundle without it keeps its older version. 1.3.0 adds ai_interpretation.field_path and .run_ids and the optional eligibility_rederived and format_upgrades logs (all optional), and eligibility is derived under a larger writable set (context.electrochemistry.potential_setpoint_V). A 1.3.0 bundle also REQUIRES processed_outputs. 1.4.0 adds the set_clock_time_zone experiment decision (and its decision field clock_zone_binding on a confirm), the confirm_clock_time_zone question kind, the optional candidates[].local_clock block and the optional zone / zone_decision_id on a normalization step (all additive); nothing becomes newly writable. A 1.4.0 bundle also REQUIRES processed_outputs. 1.5.0 adds nothing to the bundle's shape; eligibility is derived under a larger writable set (context.electrochemistry.control_mode), as at 1.3.0. A 1.5.0 bundle also REQUIRES processed_outputs. 1.6.0 (DEC-91) adds three capture decisions — keep_apart on the new target kind merge_candidate, select_athena_version on a processing result (its value one of that result's athena_versions[].version_id; the derived athena_result_of_record / athena_result_of_record_basis), and set_not_counter_positions on the experiment (decision field not_counter_positions) — the optional superseded_merge_candidates section, the derived merge-candidate status kept_apart, and a merge decision's combined group (record_group.merged_by_decision); nothing becomes newly writable. A 1.6.0 bundle also REQUIRES processed_outputs. 1.7.0 (DEC-92) adds nothing to the bundle's shape; eligibility is derived under a larger writable set (context.electrochemistry.current_setpoint_mA_cm2), as at 1.3.0 and 1.5.0. A 1.7.0 bundle also REQUIRES processed_outputs."
+      "description": "1.1.0 adds record_groups, processing_results and exposures (all optional, so a 1.0.0 bundle still validates) and widens the decision, target and question enums. 1.2.0 adds processed_outputs (optional; absent means none were recorded) and extended_context_entry.processed_output_id. A 1.2.0 bundle REQUIRES processed_outputs (possibly empty); a bundle without it keeps its older version. 1.3.0 adds ai_interpretation.field_path and .run_ids and the optional eligibility_rederived and format_upgrades logs (all optional), and eligibility is derived under a larger writable set (context.electrochemistry.potential_setpoint_V). A 1.3.0 bundle also REQUIRES processed_outputs. 1.4.0 adds the set_clock_time_zone experiment decision (and its decision field clock_zone_binding on a confirm), the confirm_clock_time_zone question kind, the optional candidates[].local_clock block and the optional zone / zone_decision_id on a normalization step (all additive); nothing becomes newly writable. A 1.4.0 bundle also REQUIRES processed_outputs. 1.5.0 adds nothing to the bundle's shape; eligibility is derived under a larger writable set (context.electrochemistry.control_mode), as at 1.3.0. A 1.5.0 bundle also REQUIRES processed_outputs. 1.6.0 (DEC-91) adds three capture decisions — keep_apart on the new target kind merge_candidate, select_athena_version on a processing result (its value one of that result's athena_versions[].version_id; the derived athena_result_of_record / athena_result_of_record_basis), and set_not_counter_positions on the experiment (decision field not_counter_positions) — the optional superseded_merge_candidates section, the derived merge-candidate status kept_apart, and a merge decision's combined group (record_group.merged_by_decision); nothing becomes newly writable. A 1.6.0 bundle also REQUIRES processed_outputs. 1.7.0 (DEC-92) adds nothing to the bundle's shape; eligibility is derived under a larger writable set (context.electrochemistry.current_setpoint_mA_cm2), as at 1.3.0 and 1.5.0. A 1.7.0 bundle also REQUIRES processed_outputs. 1.8.0 adds nothing to the bundle's shape: the bounds on scientist_decisions and ai_interpretations are raised from 20000 to 200000 entries (both are append-only; at the old bound no further answer could be written). Nothing becomes newly writable. A 1.8.0 bundle also REQUIRES processed_outputs."
     },
     "is_official_record": {
       "const": false
@@ -348,14 +349,14 @@
     },
     "ai_interpretations": {
       "type": "array",
-      "maxItems": 20000,
+      "maxItems": 200000,
       "items": {
         "$ref": "#/$defs/ai_interpretation"
       }
     },
     "scientist_decisions": {
       "type": "array",
-      "maxItems": 20000,
+      "maxItems": 200000,
       "items": {
         "$ref": "#/$defs/scientist_decision"
       }
@@ -3802,6 +3803,23 @@
         "properties": {
           "format_version": {
             "const": "1.7.0"
+          }
+        },
+        "required": [
+          "format_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "processed_outputs"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "format_version": {
+            "const": "1.8.0"
           }
         },
         "required": [

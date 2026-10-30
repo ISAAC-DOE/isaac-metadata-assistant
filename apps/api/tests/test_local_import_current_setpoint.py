@@ -53,8 +53,14 @@ def grouped(tmp_path):
     return b
 
 
-def _set_current(b, run_id, value):
-    M.decide(b, target_ids=[_miss(M.load(b), CURRENT, run_id)["value_id"]], decision="correct", value=value, by=BY, orcid=None)
+def _set_current(b, run_id, value, *, older_build=False):
+    vid = _miss(M.load(b), CURRENT, run_id)["value_id"]
+    if older_build:  # not a number: `decide` refuses it now (contract §25); an older build stored it
+        from tests_support_records import refused_then_stored
+
+        assert "must be number" in refused_then_stored(b, "missing_value", vid, value)
+        return
+    M.decide(b, target_ids=[vid], decision="correct", value=value, by=BY, orcid=None)
 
 
 # --- writable, run scope, new in 1.7.0, no companion -------------------------------------------------
@@ -64,7 +70,7 @@ def test_the_current_setpoint_is_a_run_scope_local_answer_field_new_in_1_7_0():
     assert CURRENT == "context.electrochemistry.current_setpoint_mA_cm2"
     assert B.LOCAL_ANSWER_FIELDS[CURRENT] == B.LOCAL_ANSWER_FIELDS[POT] == "run"
     assert CURRENT in B._writable_paths() and B.WRITABLE_ADDED_IN["1.7.0"] == frozenset({CURRENT})
-    assert B.FORMAT_VERSION == "1.7.0" and B._VERSION_ORDER[-1] == "1.7.0"
+    assert B._VERSION_ORDER.index("1.7.0") == B._VERSION_ORDER.index(B.FORMAT_VERSION) - 1  # 1.8.0 adds bounds only
     assert B._added_since("1.6.0") == frozenset({CURRENT}) and B._added_since("1.7.0") == frozenset()
     assert not Q._is_shared(CURRENT)  # never asked once for the whole beamtime
     # DEC-92: no companion gate — the schema declares no reference for a current density
@@ -74,7 +80,9 @@ def test_the_current_setpoint_is_a_run_scope_local_answer_field_new_in_1_7_0():
 
 def test_the_bundle_schema_accepts_1_7_0_and_requires_processed_outputs_there(grouped):
     data = _json(grouped)
-    assert data["format_version"] == "1.7.0" and B.validate_bundle(data) == []
+    assert data["format_version"] == B.FORMAT_VERSION and B.validate_bundle(data) == []
+    data["format_version"] = "1.7.0"
+    assert B.validate_bundle(data) == []  # a 1.7.0 bundle still validates under the 1.8.0 schema
     del data["processed_outputs"]
     assert B.validate_bundle(data)  # 1.7.0, like 1.2.0-1.6.0, requires processed_outputs
 
@@ -130,8 +138,8 @@ def test_a_galvanostatic_run_without_its_current_setpoint_is_incomplete(grouped)
 
 def test_an_off_type_current_setpoint_is_confirmed_but_not_eligible_and_the_record_stays_incomplete(grouped):
     _set_mode(grouped, "run-001", "galvanostatic")
-    _set_current(grouped, "run-001", "5 mA")
-    _set_current(grouped, "run-002", "-5")  # a number given WITHOUT --json is text: also not eligible
+    _set_current(grouped, "run-001", "5 mA", older_build=True)
+    _set_current(grouped, "run-002", "-5", older_build=True)  # a number given WITHOUT --json is text: also not eligible
     bd = M.load(grouped)
     for run_id, value in (("run-001", "5 mA"), ("run-002", "-5")):
         m = _miss(bd, CURRENT, run_id)
@@ -214,11 +222,14 @@ def test_the_cli_stores_a_number_with_json_and_text_without(grouped, capsys):
     qid = next(q["question_id"] for q in Q.consolidate(bd)["questions"]
                if q["target_field_path"] == CURRENT and q["scope"] == f"group:{_group_of(bd, 'run-001')}")
     base = ["bundle", "decide", str(grouped), "--decision", "correct", "--by", BY]
-    assert cli.main([*base, "--question", qid, "--value", "-5"]) == 0  # without --json: the text "-5"
+    capsys.readouterr()
+    # without --json the answer is the text "-5", which the field refuses: refused, nothing recorded,
+    # and the refusal says to give the number with --json (contract §25)
+    assert cli.main([*base, "--question", qid, "--value", "-5"]) == 2
+    assert "must be number" in (err := capsys.readouterr().err) and "--json" in err
     m = _miss(M.load(grouped), CURRENT, "run-001")
-    assert m["eligibility_for_official_record"]["eligible"] is False
-    # answered (if unfit), the question is closed; the scientist corrects the value itself
-    assert cli.main([*base, "--target", m["value_id"], "--value", "-5", "--json"]) == 0
+    assert m["value_state"] == B.STATE_MISSING
+    assert cli.main([*base, "--question", qid, "--value", "-5", "--json"]) == 0
     m = _miss(M.load(grouped), CURRENT, "run-001")
     assert m["eligibility_for_official_record"]["eligible"] is True
     _, _, entry = _compose(grouped, "run-001")
@@ -229,7 +240,7 @@ def test_the_cli_stores_a_number_with_json_and_text_without(grouped, capsys):
 
 
 UPGRADE_16 = ("upgraded from 1.6.0; fields this build can newly write have no answer slots on runs that lacked a parsed "
-              "value — re-import to get them")
+              "value — re-import to get them; " + B.CHANGES_ADDED_IN["1.8.0"])  # 1.8.0: the log bounds, disclosed
 
 
 def test_a_1_6_0_bundle_with_a_confirmed_current_setpoint_is_stale_not_invalid_then_rederived(grouped, capsys):

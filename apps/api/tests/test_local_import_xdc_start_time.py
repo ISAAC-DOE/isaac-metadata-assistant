@@ -340,9 +340,11 @@ def test_a_correct_with_a_utc_value_needs_no_zone(tmp_path):
     M.decide(out, target_ids=[cid], decision="correct", value="2099-07-14T17:23:45Z", by=BY, orcid=None)
     c = _start_of(_valid(out), "SYN_alpha")
     assert c["value_state"] == B.STATE_SCIENTIST_CONFIRMED and c["eligibility_for_official_record"]["eligible"] is True
-    # a zoneless local time is still refused as a correction (the *_utc rule)
-    M.decide(out, target_ids=[cid], decision="correct", value="2099-07-14T10:23:45", by=BY, orcid=None)
-    assert _start_of(_valid(out), "SYN_alpha")["eligibility_for_official_record"]["eligible"] is False
+    # a zoneless local time is still refused as a correction (the *_utc rule) — at decide time now
+    # (contract §25), so nothing is recorded and the earlier UTC correction stands
+    with pytest.raises(M.MutationRefused, match="needs a UTC instant with a zone"):
+        M.decide(out, target_ids=[cid], decision="correct", value="2099-07-14T10:23:45", by=BY, orcid=None)
+    assert _start_of(_valid(out), "SYN_alpha")["eligibility_for_official_record"]["eligible"] is True
 
 
 def test_bulk_confirmation_is_allowed_once_the_zone_is_set(tmp_path):

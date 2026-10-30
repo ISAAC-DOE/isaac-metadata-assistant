@@ -86,22 +86,66 @@ def _repo_root() -> Path:
 # --- composition ----------------------------------------------------------------------------
 
 
-def _witnesses(candidate: Mapping) -> list[dict]:
+def _vouched_by(candidate: Mapping, e: Mapping) -> set[str]:
+    """The values ONE witness vouches for (JSON-canonical): :func:`bundle.witnessed_values` applied
+    to that witness alone (its literal, its reader normalisations, and a ``derive`` step naming the
+    candidate's own rule from a literal it states)."""
+    return B.witnessed_values({"rule": candidate.get("rule"), "evidence": [e]})
+
+
+#: ``provenance`` on the confirmation entry of a composed candidate value.
+PROVENANCE_CONFIRMED = "scientist_confirmation"
+PROVENANCE_CORRECTED = "scientist_correction"
+
+
+def _witnesses(candidate: Mapping, value: Any = None, decision: Mapping | None = None) -> list[dict]:
+    """The file's own statements for a composed candidate value, each with its ``relation``.
+
+    ``relation`` is ALWAYS carried (``supports`` / ``contradicts`` / ``context``), never dropped. When
+    the composed value is the parser's own value it is the relation the import recorded. When a
+    scientist's decision gave ANOTHER value (``correct``, or a reading chosen on its conflict), the
+    recorded relation was about the parser's value, not this one: it is kept as
+    ``relation_to_parser_value`` and ``relation`` says whether the quote states the value of record
+    (``supports``) or another value (``contradicts``) — a quote of the old value is never presented
+    as support for the new one."""
     out = []
+    mine = json.dumps(value, sort_keys=True)
+    replaced = decision is not None and mine != json.dumps(candidate.get("value"), sort_keys=True)
     for e in candidate["evidence"]:
         if e["method"] == "ai_interpretation":
             continue  # an interpretation is not observed evidence
-        out.append(
-            {
-                "source_type": "document",
-                "source_file": e["relative_path"] or "(unlocated)",
-                "locator": e["locator"],
-                "quote": e["literal_value"] if isinstance(e["literal_value"], str) else json.dumps(e["literal_value"]),
-                "method": e["method"],
-                "method_id": e["method_id"],
-            }
-        )
+        entry = {
+            "source_type": "document",
+            "source_file": e["relative_path"] or "(unlocated)",
+            "locator": e["locator"],
+            "quote": e["literal_value"] if isinstance(e["literal_value"], str) else json.dumps(e["literal_value"]),
+            "method": e["method"],
+            "method_id": e["method_id"],
+            "relation": e.get("relation"),
+        }
+        if replaced:
+            entry["relation_to_parser_value"] = e.get("relation")
+            entry["relation"] = "supports" if mine in _vouched_by(candidate, e) else "contradicts"
+            if entry["relation"] == "contradicts":
+                entry["note"] = ("the file states another value; the value of record is the scientist's decision, "
+                                 "not this quote")
+        out.append(entry)
     return out
+
+
+def _candidate_confirmation(candidate: Mapping, decision: Mapping, value: Any, path: str, witnesses: Sequence[Mapping]) -> dict:
+    """The scientist's confirmation of a composed candidate value, with its PROVENANCE: a
+    ``scientist_correction`` (``correct``, or a value no file witness states) names the value it
+    replaced (``previous_value``, the parser's); a ``scientist_confirmation`` is of a value the files state."""
+    entry = _confirmation({**decision, "value": value}, f"Confirm {path}")
+    stated = any(w.get("relation") == "supports" for w in witnesses)
+    corrected = decision.get("decision") == "correct" or not stated
+    entry["provenance"] = PROVENANCE_CORRECTED if corrected else PROVENANCE_CONFIRMED
+    if json.dumps(value, sort_keys=True) != json.dumps(candidate.get("value"), sort_keys=True):
+        entry["previous_value"] = candidate.get("value")
+        entry["previous_value_basis"] = ("the parser's value for this candidate" if candidate.get("value") is not None
+                                         else "the parser gave no single value (the sources disagree or state none)")
+    return entry
 
 
 def _confirmation(decision: Mapping, question: str) -> dict:
@@ -241,7 +285,8 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[di
             continue
         d = B.candidate_decision(bundle, c)
         value = B.final_value(c["value"], d, c.get("readings"))
-        evidence = _witnesses(c) + [_confirmation({**d, "value": value}, f"Confirm {path}")]
+        witnesses = _witnesses(c, value, d)
+        evidence = witnesses + [_candidate_confirmation(c, d, value, path, witnesses)]
         if B.is_local_clock_start(c) and d.get("decision") == "confirm":
             # The value is the file's local clock time converted under the zone a scientist stated
             # for the INSTRUMENT CLOCK: that statement is part of the value's evidence. (A `correct`
@@ -461,7 +506,10 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[di
                                "what_the_data_states": app.get("what_the_data_states")},
         }
     else:
-        report["processing"] = {"used": None, "reason": "no scientist-approved processing result for this group"}
+        report["processing"] = {"used": None, "reason": "no scientist-approved processing result for this group",
+                                "awaiting_approval": [B.processing_id(r) for r in mine
+                                                      if r.get("state") in B.PROCESSING_UNDECIDED_STATES
+                                                      and not B.processing_not_applicable(r)]}
 
     # what the record requires and nobody supplied: stays missing, listed. The control mode is the
     # one this DRAFT carries — a confirmed, schema-fitting answer that composed (1.5.0: locally
@@ -818,6 +866,14 @@ def validate_draft_file(draft: Mapping, *, run_portal, composition: Mapping | No
     pv = portal_check.get("verdict") or P.verdict_of(portal_check)
     proc = (composition or {}).get("processing") or {}
     blocked = proc.get("reason") if proc.get("not_applicable") else None
+    # THE PROCESSING-DERIVED REQUIRED VALUES (measurement.series, measurement.qc.status,
+    # descriptors.outputs) are not draft fields, so a draft without them has no `status: missing`
+    # envelope for them; the composition lists them. They are missing here too, and the fix is the
+    # processing result's approval — never "correct the value".
+    from_processing = [m["path"] for m in (composition or {}).get("missing_required") or ()
+                       if m.get("from") == "an approved processing result"]
+    missing = sorted(set(missing) | set(from_processing))
+    processing_fix = None if blocked or not from_processing else processing_remedy(proc)
     if missing or not dr.ok or blocked:
         verdict = "incomplete"
     elif target_official is None:
@@ -835,6 +891,8 @@ def validate_draft_file(draft: Mapping, *, run_portal, composition: Mapping | No
         f"Draft checks: {'pass' if dr.ok else 'FAIL'} ({len(dr.errors)} error(s), {len(dr.warnings)} warning(s)).",
         f"Missing required values: {', '.join(missing) if missing else 'none'}.",
         *([f"Processing: {blocked}. The record's series, QC status and E0 cannot be supplied, so it stays incomplete."] if blocked else []),
+        *([f"Processing: {', '.join(from_processing)} come from the group's processing result, and {processing_fix}"]
+          if processing_fix else []),
         (
             f"Portal-target schema (upstream {commit[:12]}): {'pass' if target_official.ok else 'FAIL'} "
             f"({len(target_official.errors)} error(s)); exactness: {'pass' if target_exact.ok else 'FAIL'}."
@@ -856,6 +914,8 @@ def validate_draft_file(draft: Mapping, *, run_portal, composition: Mapping | No
         "schemas_used": used,
         "draft_validation": {"ok": dr.ok, "errors": [list(e) for e in dr.errors], "warnings": [list(w) for w in dr.warnings]},
         "missing_required": missing,
+        "missing_from_processing": from_processing,
+        "processing_fix": processing_fix,
         "processing_blocked": blocked,
         "composition": {
             "reused": ["isaac_records.export.transform", "isaac_records.export.set_path", "isaac_records.export.build_sidecar"],
@@ -880,6 +940,23 @@ def validate_draft_file(draft: Mapping, *, run_portal, composition: Mapping | No
         "portal_check": portal_check,
         "schema_drift": drift,
     }
+
+
+def processing_remedy(processing: Mapping) -> str:
+    """The sentence saying how a group's processing-derived values get into its record."""
+    waiting = list(processing.get("awaiting_approval") or ())
+    if processing.get("result"):
+        said = "; ".join(f"{k}: {processing[k]}" for k in ("series", "qc", "approval") if processing.get(k))
+        return (f"the approved result {processing['result']} did not supply them" + (f" ({said})" if said else "")
+                + ". Re-run `isaac process <bundle_dir>` and approve the new result, stating its QC status.")
+    if waiting:
+        return ("no processing result is approved yet: review the draft processing and approve it, stating its QC status: "
+                + " / ".join(f'`isaac bundle decide <bundle_dir> --target {pid} --decision approve --qc-status <value> --by "<your name>"`'
+                             for pid in waiting[:3])
+                + (f" (and {len(waiting) - 3} more)" if len(waiting) > 3 else "")
+                + ". Correcting a value does not supply them.")
+    return ("no processing result exists for this group: run `isaac process <bundle_dir>`, then approve the result "
+            '(`isaac bundle decide <bundle_dir> --target <result id> --decision approve --qc-status <value> --by "<your name>"`).')
 
 
 def validate_records(bundle_dir: Path, *, run_portal=None) -> dict:
@@ -915,11 +992,63 @@ def _was_marked(bundle: Mapping) -> bool:
 # --- export ----------------------------------------------------------------------------------------
 
 
+#: In ``--out``: which record id each exported group's record got, keyed by bundle and group, with the
+#: hash of what it was composed from. Not a record: ``upload_plan`` never reads it.
+EXPORT_INDEX = "isaac-export-index.json"
+EXPORT_INDEX_FORMAT = "isaac.local-export-index"
+#: In ``--out``: where a record a re-export REPLACED is moved (never deleted; never in an upload plan).
+SUPERSEDED_DIR = "superseded"
+
+
+def content_sha256(draft: Mapping, composition: Mapping | None) -> str:
+    """What a record is composed FROM — the draft and the composer's own overrides — hashed. The
+    record id and the export time are not part of it, so an unchanged group hashes the same."""
+    basis = {"draft": draft, "record_overrides": dict((composition or {}).get("record_overrides") or {})}
+    return "sha256:" + hashlib.sha256(json.dumps(basis, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def _read_export_index(out: Path) -> dict:
+    path = out / EXPORT_INDEX
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {"format": EXPORT_INDEX_FORMAT, "records": []}
+    except (OSError, ValueError) as exc:
+        raise RecordsRefused(f"{path} cannot be read ({type(exc).__name__}); nothing was exported. It records which record "
+                             "id each group was given, so a re-export reuses it: restore it, or export to a new --out.", code=1)
+    if not isinstance(data, dict) or data.get("format") != EXPORT_INDEX_FORMAT or not isinstance(data.get("records"), list):
+        raise RecordsRefused(f"{path} is not an ISAAC export index; nothing was exported. Export to a new --out.", code=1)
+    return data
+
+
+def _move_superseded(out: Path, record_id: str) -> list[str]:
+    """Move a replaced record's files out of ``--out``'s top level (so no upload plan lists them)."""
+    from isaac_records.ids import is_record_id
+
+    if not is_record_id(record_id):
+        return []
+    moved = []
+    dest = out / SUPERSEDED_DIR
+    for name in (f"{record_id}.json", f"{record_id}.evidence.json", f"{record_id}.artifacts"):
+        src = out / name
+        if src.exists() and not src.is_symlink():
+            dest.mkdir(exist_ok=True)
+            shutil.move(str(src), str(dest / name))
+            moved.append(f"{SUPERSEDED_DIR}/{name}")
+    return moved
+
+
 def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     """Write ONLY records that pass the portal-target official validation AND whose portal
     outcome is ``publish`` (DEC-76). Every gate is re-run here; a stale validation file is
     never trusted. The record is composed with ``export.transform`` and its sidecar with
-    ``export.build_sidecar`` — the truth plane's own functions, unedited."""
+    ``export.build_sidecar`` — the truth plane's own functions, unedited.
+
+    RE-EXPORT IS IDEMPOTENT: ``--out``'s :data:`EXPORT_INDEX` keeps, per bundle and group, the record
+    id its record got and the :func:`content_sha256` it was composed from. Exporting an UNCHANGED group
+    again reuses that id and export time, so the files are rewritten byte for byte and no second record
+    appears. A CHANGED group gets a new id; the record it replaces is moved to ``superseded/`` (kept,
+    never in an upload plan) and the result says so (``replaced``)."""
     from isaac_records.export import build_sidecar
     from isaac_records.ids import new_record_id
     from isaac_records.official import validate_official
@@ -931,6 +1060,9 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     bundle_dir, out = Path(bundle_dir), Path(out)
     bundle = load_validated(bundle_dir)
     exported, refused = [], []
+    index = _read_export_index(out) if out.is_dir() else {"format": EXPORT_INDEX_FORMAT, "records": []}
+    bundle_id = bundle.get("bundle_id")
+    prior_of = {(r.get("bundle_id"), r.get("group_id")): r for r in index["records"] if isinstance(r, Mapping)}
     fresh = fresh_compositions(bundle_dir, bundle, test_marker=_was_marked(bundle))
     confirmed = {gid for gid, _, _ in fresh}
     stale = [gid for gid, d, c in fresh if _on_disk_differs(bundle_dir, gid, d, c)]
@@ -941,19 +1073,34 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     for group_id, draft, composition in fresh:
         report = validate_draft_file(draft, run_portal=run_portal, composition=composition)
         if report["verdict"] != "exportable":
-            refused.append({"group_id": group_id, "verdict": report["verdict"], "summary": report["plain_summary"]})
+            row = {"group_id": group_id, "verdict": report["verdict"], "summary": report["plain_summary"]}
+            earlier = prior_of.get((bundle_id, group_id))
+            if earlier is not None and earlier.get("record_id"):
+                # SAID, never silent: --out still holds the record an earlier export wrote for this group
+                row["previously_exported_record_id"] = earlier["record_id"]
+                row["previously_exported_statement"] = (
+                    f"{earlier['record_id']}.json in --out is this group's record from an earlier export ({earlier.get('exported_utc')}); "
+                    "it is no longer what the bundle composes, and was left where it is. Do not upload it.")
+            refused.append(row)
             continue
         where = P.locate()
-        rid = new_record_id()
         from .mutations import now_utc
 
-        record = compose_record(draft, composition, record_id=rid, now=now_utc())
+        digest = content_sha256(draft, composition)
+        prior = prior_of.get((bundle_id, group_id))
+        if prior is not None and prior.get("content_sha256") == digest and prior.get("record_id"):
+            rid, at, status = prior["record_id"], prior.get("exported_utc") or now_utc(), "unchanged"
+        else:
+            rid, at, status = new_record_id(), now_utc(), ("replaced" if prior is not None else "new")
+        record = compose_record(draft, composition, record_id=rid, now=at)
         if not validate_official(record, Path(where["dir"])).ok:  # the minted record, re-checked
             refused.append({"group_id": group_id, "verdict": "invalid_official", "summary": ["the minted record failed re-validation"]})
             continue
         sidecar = build_sidecar(dict(draft), record)
         sidecar["schemas_used"] = report["schemas_used"]
+        sidecar["generated_utc"] = at  # the record's own export time, so an unchanged re-export is byte for byte
         out.mkdir(parents=True, exist_ok=True)
+        moved = _move_superseded(out, prior["record_id"]) if status == "replaced" and prior.get("record_id") else []
         record_path, sidecar_path = out / f"{rid}.json", out / f"{rid}.evidence.json"
         _atomic_write(record_path, (json.dumps(record, indent=2) + "\n").encode("utf-8"))
         _atomic_write(sidecar_path, (json.dumps(sidecar, indent=2) + "\n").encode("utf-8"))
@@ -976,9 +1123,27 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(src, dest)
                     artifacts.append(f["relative_path"])
-        exported.append({"group_id": group_id, "record_id": rid, "record": record_path.name, "sidecar": sidecar_path.name,
-                         "artifacts": artifacts, "schemas_used": report["schemas_used"],
-                         "statement": "Valid for the portal's pinned schema; NOT claimed valid for the website."})
+        row = {"group_id": group_id, "record_id": rid, "record": record_path.name, "sidecar": sidecar_path.name,
+               "artifacts": artifacts, "schemas_used": report["schemas_used"], "export": status,
+               "statement": "Valid for the portal's pinned schema; NOT claimed valid for the website."}
+        if status == "unchanged":
+            row["export_statement"] = (f"Unchanged since its export at {at}: the same record id, rewritten byte for byte. "
+                                       "No second record was made.")
+        elif status == "replaced":
+            row["replaces_record_id"] = prior.get("record_id")
+            row["superseded_files"] = moved
+            row["export_statement"] = (f"The group changed since record {prior.get('record_id')} was exported, so this is a "
+                                       f"new record; the old one was moved to {SUPERSEDED_DIR}/ (kept, never in an upload "
+                                       "plan). If the old record was already uploaded, the portal still holds it.")
+        exported.append(row)
+        entry = {"bundle_id": bundle_id, "group_id": group_id, "record_id": rid, "content_sha256": digest, "exported_utc": at,
+                 "replaced_record_ids": ([*(prior.get("replaced_record_ids") or []), prior.get("record_id")]
+                                         if status == "replaced" else list((prior or {}).get("replaced_record_ids") or []))}
+        index["records"] = [r for r in index["records"]
+                            if not (isinstance(r, Mapping) and (r.get("bundle_id"), r.get("group_id")) == (bundle_id, group_id))]
+        index["records"].append(entry)
+        prior_of[(bundle_id, group_id)] = entry
+        _atomic_write(out / EXPORT_INDEX, (json.dumps(index, indent=2, sort_keys=True) + "\n").encode("utf-8"))
     result = {
         "exported": exported,
         "refused": refused,
@@ -999,8 +1164,8 @@ def upload_plan(records_dir: Path, portal_url: str | None) -> list[dict]:
     base = (portal_url or "<portal-url>").rstrip("/")
     plan = []
     for path in sorted(Path(records_dir).glob("*.json")):
-        if path.name.endswith(".evidence.json"):
-            continue
+        if path.name.endswith(".evidence.json") or path.name == EXPORT_INDEX:
+            continue  # a sidecar, or the export index: neither is a record
         body = path.read_bytes()
         headers = {
             "Content-Type": "application/json",

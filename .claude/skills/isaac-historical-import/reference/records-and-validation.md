@@ -12,7 +12,7 @@ When a scientist asks "what should this record hold?", answer from the upstream 
 
 | Verdict | Tell the scientist | Fix |
 |---|---|---|
-| `incomplete` | "These required facts are still missing: …" (list them from the draft) | answer the blocking questions (Step 7: `bundle questions --blocking-only`), or approve the processing result and state its QC status (Step 6) |
+| `incomplete` | "These required facts are still missing: …" (list them from `missing_required`) | answer the blocking questions (Step 7: `bundle questions --blocking-only`); `measurement.series`, `measurement.qc.status` and `descriptors.outputs` come only from an approved processing result: run the command `processing_fix` names (approve it and state its QC status, Step 6) — correcting a value never supplies them |
 | `invalid_official` | "A value is in the wrong form: …" (quote the validator's message) | correct that value with `decide --decision correct` |
 | `portal_check_unavailable` | "The offline portal check is not installed, so this cannot count as ready." | `scripts/install_portal_validator.sh`, then `validate` again |
 | `portal_check_degraded` | "The portal check ran only partly, so this cannot count as ready." | re-install the validator; if it persists, report it |
@@ -28,7 +28,7 @@ After fixing, run `build-records` then `validate` again. Never hand-edit a draft
 ## Export and upload
 
 `export --out <records>` writes `<ULID>.json` and `<ULID>.evidence.json` for exportable drafts only
-and lists the rest with their verdicts. Then `upload <records> --dry-run`: summarise records, target
+and lists the rest with their verdicts. Exporting again into the same `--out` reuses each unchanged record's id (`export: unchanged`); a changed record gets a new id and the old one is moved to `superseded/` (`export: replaced`) — say which. Then `upload <records> --dry-run`: summarise records, target
 endpoints and body sizes. State plainly: nothing was sent, this build cannot send, the key was not
 read. Never ask for or print a portal key. Tell the scientist the records are in `<records>` and
 the portal upload is theirs to do.

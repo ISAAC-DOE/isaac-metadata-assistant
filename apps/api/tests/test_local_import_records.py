@@ -583,3 +583,93 @@ def test_a_missing_portal_validator_is_reported_as_unavailable(monkeypatch, tmp_
 def test_a_degraded_portal_result_is_never_a_publish():
     check = {"status": "ran", "outcome": "publish", "result": {"degraded": [{"layer": "vocabulary"}]}}
     assert P.verdict_of(check) == P.VERDICT_DEGRADED
+
+
+# --- audit: corrected values' evidence (3), processing-derived missing values (5), re-export (7) ------
+
+
+def test_a_corrected_value_does_not_cite_the_old_values_quotes_as_support(bdir):
+    _decide_everything(bdir)  # corrects sample.material.name; confirms the start time as the file states it
+    R.build_records(bdir)
+    draft = json.loads((bdir / "drafts" / "g1.draft.json").read_text())
+    corrected = draft["fields"]["sample.material.name"]
+    assert corrected["value"] == "ZZ1 synthetic"
+    quotes = [e for e in corrected["evidence"] if e["source_type"] == "document"]
+    assert quotes, "the file's own statements are kept"
+    for e in quotes:
+        assert e["relation"] in ("supports", "contradicts") and "relation_to_parser_value" in e
+        assert e["quote"] == "ZZ1 synthetic" or e["relation"] == "contradicts"
+    [conf] = [e for e in corrected["evidence"] if e["source_type"] == "user_confirmation"]
+    assert conf["provenance"] == R.PROVENANCE_CORRECTED and "previous_value" in conf
+    confirmed = draft["fields"]["timestamps.acquired_start_utc"]
+    assert all(e["relation"] == "supports" and "relation_to_parser_value" not in e
+               for e in confirmed["evidence"] if e["source_type"] == "document")
+    [conf2] = [e for e in confirmed["evidence"] if e["source_type"] == "user_confirmation"]
+    assert conf2["provenance"] == R.PROVENANCE_CONFIRMED and "previous_value" not in conf2
+
+
+def test_the_relation_label_reaches_the_exported_sidecar(bdir, tmp_path):
+    _decide_everything(bdir)
+    R.build_records(bdir)
+    out = tmp_path / "records"
+    result = R.export_records(bdir, out, run_portal=_portal("publish"))
+    rid = result["exported"][0]["record_id"]
+    sidecar = json.loads((out / f"{rid}.evidence.json").read_text())
+    entries = sidecar["evidence"]["sample.material.name"]
+    assert any(e.get("provenance") == R.PROVENANCE_CORRECTED for e in entries)
+    assert all("relation" in e for e in entries if e.get("source_type") == "document")
+
+
+def test_validate_says_an_unapproved_processing_result_is_what_is_missing(bdir):
+    """Before the fix: verdict invalid_official, "Missing required values: none" — pointing at "correct the value"."""
+    _decide_everything(bdir)
+    M.decide(bdir, target_ids=["p1"], decision="defer", value=None, **BY)  # the approval is withdrawn
+    R.build_records(bdir)
+    R.validate_records(bdir, run_portal=_portal("publish"))
+    report = json.loads((bdir / "validation" / "g1.json").read_text())
+    assert report["verdict"] == "incomplete"
+    assert {"measurement.series", "measurement.qc.status", "descriptors.outputs"} <= set(report["missing_required"])
+    assert report["missing_from_processing"] and "--target p1 --decision approve --qc-status" in report["processing_fix"]
+    summary = "\n".join(report["plain_summary"])
+    assert "Missing required values: none" not in summary and "measurement.series" in summary
+    assert "isaac bundle decide <bundle_dir> --target p1 --decision approve" in summary
+
+
+def test_re_exporting_an_unchanged_record_reuses_its_id_and_bytes(bdir, tmp_path, monkeypatch):
+    import isaac_records.export as X
+
+    _decide_everything(bdir)
+    R.build_records(bdir)
+    out = tmp_path / "records"
+    first = R.export_records(bdir, out, run_portal=_portal("publish"))
+    [row] = first["exported"]
+    assert row["export"] == "new"
+    rid = row["record_id"]
+    files = {p.name: p.read_bytes() for p in out.glob("*.json")}
+    # a later export: every clock says another time
+    monkeypatch.setattr(M, "now_utc", lambda: "2099-01-01T00:00:00Z")
+    monkeypatch.setattr(X, "_now_iso", lambda: "2099-01-01T00:00:00Z")
+    second = R.export_records(bdir, out, run_portal=_portal("publish"))
+    [row2] = second["exported"]
+    assert row2["record_id"] == rid and row2["export"] == "unchanged"
+    assert {p.name: p.read_bytes() for p in out.glob("*.json")} == files  # byte for byte; no second record
+    assert [p["record"] for p in R.upload_plan(out, None)] == [f"{rid}.json"]  # the index is not a record
+
+
+def test_re_exporting_a_changed_record_supersedes_the_old_one_and_says_so(bdir, tmp_path):
+    _decide_everything(bdir)
+    R.build_records(bdir)
+    out = tmp_path / "records"
+    old = R.export_records(bdir, out, run_portal=_portal("publish"))["exported"][0]["record_id"]
+    b = M.load(bdir)
+    M.decide(bdir, target_ids=[_cand(b, "sample.material.name", "run-001")["candidate_id"]], decision="correct",
+             value="ZZ1 synthetic, revised", **BY)
+    R.build_records(bdir)
+    [row] = R.export_records(bdir, out, run_portal=_portal("publish"))["exported"]
+    assert row["export"] == "replaced" and row["replaces_record_id"] == old and row["record_id"] != old
+    assert "new record" in row["export_statement"]
+    assert not (out / f"{old}.json").exists() and (out / R.SUPERSEDED_DIR / f"{old}.json").is_file()
+    assert [p["record"] for p in R.upload_plan(out, None)] == [f"{row['record_id']}.json"]
+    index = json.loads((out / R.EXPORT_INDEX).read_text())
+    [entry] = index["records"]
+    assert entry["record_id"] == row["record_id"] and entry["replaced_record_ids"] == [old]

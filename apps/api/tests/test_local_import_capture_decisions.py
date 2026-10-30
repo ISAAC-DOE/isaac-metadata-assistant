@@ -62,7 +62,15 @@ def _answer(bundle: dict, payload: dict, q: dict, *, partial: bool) -> tuple[str
         raise AssertionError(f"unhandled question kind {q['kind']}")
     targets = Q.targets_for(payload, q["question_id"], only, field)
     assert targets, q["question_id"]
-    M.record_decision(bundle, target_ids=targets, decision=decision, value=value, by=BY, orcid=None, **kw)
+    # `decide` refuses a value its field refuses (contract §25): a free-text answer where the field is a
+    # zoned UTC instant or a number is tried in that shape instead (a refusal records nothing)
+    for attempt in ([value] if decision != "correct" or allowed else [value, "2099-01-01T00:00:00Z", 1.0]):
+        try:
+            M.record_decision(bundle, target_ids=targets, decision=decision, value=attempt, by=BY, orcid=None, **kw)
+            break
+        except M.MutationRefused:
+            if attempt == 1.0:
+                raise
     B.refresh_questions(bundle)
     B.apply_derivations(bundle)
     return field, only is not None

@@ -325,12 +325,11 @@ def test_a_value_off_the_list_is_refused_where_the_cli_would_store_it_ineligible
                     json={"decision": "correct", "value": "outdoors", "by": BY, "expected_version": _version(client)})
     assert r.status_code == 422 and r.json()["error"] == "value_refused" and "not an allowed value" in r.json()["message"]
     assert (root / "alpha" / "bundle.json").read_bytes() == before
-    # the CLI stores it, and it is never eligible: the route takes no path the CLI could not
+    # the CLI refuses it too (contract §25: decide refuses a value its field refuses), writing nothing
+    beta_before = (root / "beta" / "bundle.json").read_bytes()
     assert cli.main(["bundle", "decide", str(root / "beta"), "--question", q["question_id"], "--decision", "correct",
-                     "--value", "outdoors", "--by", BY]) == 0
-    beta = M.load(root / "beta")
-    ids = {t["id"] for t in q["targets"]}
-    assert all(not m["eligibility_for_official_record"]["eligible"] for m in beta["missing_values"] if m["value_id"] in ids)
+                     "--value", "outdoors", "--by", BY]) == 2
+    assert (root / "beta" / "bundle.json").read_bytes() == beta_before
     # a near miss in case is refused with the template's own hint
     r = client.post(f"/api/local-bundles/alpha/questions/{q['question_id']}/answer",
                     json={"decision": "correct", "value": "EX_SITU", "by": BY, "expected_version": _version(client)})

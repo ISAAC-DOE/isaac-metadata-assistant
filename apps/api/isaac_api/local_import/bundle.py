@@ -53,7 +53,12 @@ FORMAT_ID = "isaac.local-import-bundle"
 #: (:data:`CURRENT_SETPOINT_PATH`), the set-point the schema requires of a confirmed galvanostatic
 #: run, so eligibility stored by an older build can be STALE, exactly as at 1.3.0 and 1.5.0. No
 #: section, field or enum of the bundle changes.
-FORMAT_VERSION = "1.7.0"
+#: 1.8.0 (bounds only): ``scientist_decisions`` and ``ai_interpretations`` may hold up to 200,000
+#: entries (:data:`MAX_SCIENTIST_DECISIONS`, :data:`MAX_AI_INTERPRETATIONS`; 20,000 before, while
+#: ``missing_values`` and ``exposures`` allowed 200,000). Both are append-only, so at the old bound
+#: no further answer could ever be written. A 1.7.0 validator refuses a bundle past 20,000, hence
+#: the version. Nothing becomes newly writable; the upgrade is disclosed (:data:`CHANGES_ADDED_IN`).
+FORMAT_VERSION = "1.8.0"
 #: The electrochemical control mode. Its allowed values are the official schema's enum (read at
 #: runtime by :func:`value_problem`); the schema's conditional rules key the set-point a record
 #: requires on it (:func:`required_record_paths`). Never defaulted, never derived.
@@ -79,7 +84,13 @@ VALUE_IDS_APPEND_FROM = "1.5.0"
 IMPORT_RULES_ADDED_IN: Mapping[str, tuple] = {
     "1.4.0": (("generic:ssrl_xdc_v1", "ssrl_xdc_scan_start_v1"),),
 }
-_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0")
+_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0")
+#: A change a format version made that moves no eligibility and adds no import rule, but that the
+#: first save by a newer build still DISCLOSES in its ``format_upgrades`` entry (never silently).
+CHANGES_ADDED_IN: Mapping[str, str] = {
+    "1.8.0": ("1.8.0 raises the bounds on scientist_decisions and ai_interpretations from 20,000 to 200,000 "
+              "entries (append-only logs; at 20,000 no further answer could be written)"),
+}
 #: A field composed into a draft only beside another of the SAME run (interim decision for the
 #: set-point, pending domain-owner review; ``records.compose_group`` applies it). The CURRENT
 #: set-point has no entry (DEC-92): its unit, mA per cm², is fixed by its name and no schema field
@@ -124,6 +135,11 @@ MAX_EVIDENCE_PER_CANDIDATE = 256
 #: one-line note) is clamped with a visible marker and counted in
 #: ``bounds.strings_truncated``.
 MAX_STRING_CHARS = 20_000
+#: The bounds on the two append-only logs (1.8.0; 20,000 before). The schema's ``maxItems`` is the
+#: same number (a test pins it); a write that would pass it is refused up front, with the reason
+#: (``mutations.check_log_room``), before anything is appended.
+MAX_SCIENTIST_DECISIONS = 200_000
+MAX_AI_INTERPRETATIONS = 200_000
 #: bundle.json ceiling. The 9-run fixture is ~1 MB; the real 1,192-file corpus is
 #: estimated at well under 16 MB. 64 MiB is a laptop-safe JSON load.
 MAX_BUNDLE_BYTES = 64 * 1024 * 1024
@@ -943,7 +959,7 @@ def eligibility_for_official_record(
         }
     problem = value_problem(target_field_path, value)
     if problem is not None:
-        return {"eligible": False, "reason": f"Confirmed, but the value does not fit the official field: {problem}"}
+        return {"eligible": False, "reason": f"{UNFIT_REASON_PREFIX}{problem}"}
     return {
         "eligible": True,
         "reason": (
@@ -951,6 +967,22 @@ def eligibility_for_official_record(
             "still becomes official only through a reviewed draft and `isaac export`."
         ),
     }
+
+
+#: How :func:`eligibility_for_official_record` begins the reason of a confirmed value its field refuses.
+UNFIT_REASON_PREFIX = "Confirmed, but the value does not fit the official field: "
+
+
+def value_unfit_reason(obj: Mapping) -> str | None:
+    """For a candidate or missing value: why its SCIENTIST-CONFIRMED value can never go into the record
+    because the official field refuses it (off the schema's enum, the wrong type, not a zoned UTC
+    instant, non-finite), else ``None``. ``decide`` refuses such a value now; an older build stored
+    some. Such a value is answered but not usable: it needs a new answer (``correct``), so a question
+    about it is still open."""
+    if obj.get("value_state") != STATE_SCIENTIST_CONFIRMED:
+        return None
+    reason = str((obj.get("eligibility_for_official_record") or {}).get("reason") or "")
+    return reason[len(UNFIT_REASON_PREFIX):] if reason.startswith(UNFIT_REASON_PREFIX) else None
 
 
 @lru_cache(maxsize=1)
@@ -3693,6 +3725,12 @@ def stale_eligibility(bundle: Mapping) -> list[dict]:
     return out
 
 
+def changes_since(version: str | None) -> list[str]:
+    """:data:`CHANGES_ADDED_IN` statements of the versions after ``version`` (all of them for an unknown one)."""
+    at = _VERSION_ORDER.index(version) if version in _VERSION_ORDER else -1
+    return [text for v, text in CHANGES_ADDED_IN.items() if _VERSION_ORDER.index(v) > at]
+
+
 def import_rules_missing(bundle: Mapping) -> list[tuple[str, str]]:
     """``[(run source_type, rule id)]`` for import rules a LATER format added
     (:data:`IMPORT_RULES_ADDED_IN`) that this bundle has runs for and no candidate of: an older
@@ -3719,6 +3757,8 @@ def upgrade_statement(from_version: str | None, newly_writable: Iterable[str],
     for source_type, rule_id in rules_missing:
         text += (f"; its {source_type.split(':', 1)[-1]} runs were imported before rule {rule_id} existed and carry "
                  "none of its candidates — re-import to get them")
+    for change in changes_since(from_version):
+        text += f"; {change}"
     return text
 
 
@@ -3744,7 +3784,8 @@ def record_format_upgrade(bundle: dict, *, from_version: str | None, to_version:
 
 def needs_format_upgrade(bundle: Mapping) -> bool:
     """True when this build has not yet re-derived an older bundle (and logged it)."""
-    if not _added_since(bundle.get("format_version")) and not import_rules_missing(bundle):
+    if (not _added_since(bundle.get("format_version")) and not import_rules_missing(bundle)
+            and not changes_since(bundle.get("format_version"))):
         return False
     return not any(u.get("derived_by_format_version") == FORMAT_VERSION for u in bundle.get("format_upgrades") or ())
 

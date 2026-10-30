@@ -73,3 +73,26 @@ def decide_everything(bdir: Path, *, add_group: bool = True) -> None:
         M.decide(bdir, target_ids=[miss(path, None)], decision="correct", value=value, **BY)
     for path, value in [("sample.sample_form", "powder"), ("context.environment", "ex_situ")]:
         M.decide(bdir, target_ids=[miss(path, "run-001")], decision="correct", value=value, **BY)
+
+
+def stored_by_an_older_build(bdir: Path, kind: str, target_id: str, value, *, decision: str = "correct") -> None:
+    """Append ONE decision as a build before the 2026-10-29 audit stored it — one `decide` now refuses
+    (a value its official field refuses: contract §25) — and save. The bundle stays valid: such a value
+    is confirmed and never eligible, which is what composition and `check` must still handle."""
+    held = M.load(bdir)
+    decisions = held.setdefault("scientist_decisions", [])
+    decisions.append({
+        "decision_id": f"d-{len(decisions) + 1:05d}", "target": {"kind": kind, "id": target_id}, "decision": decision,
+        "value": value, "chosen_reading_index": None,
+        "decided_by": {"name": BY["by"], "basis": "self_reported_local_user", "identity": "local_unverified",
+                       "orcid_claimed": None},
+        "decided_utc": "2026-10-28T00:00:00Z", "method": "scientist_answer", "note": None, "batch_id": None})
+    M.save_bundle(bdir, held)
+
+
+def refused_then_stored(bdir: Path, kind: str, target_id: str, value, *, decision: str = "correct") -> str:
+    """`decide` refuses ``value`` (returns its message); then it is stored as an older build stored it."""
+    with pytest.raises(M.MutationRefused) as exc:
+        M.decide(bdir, target_ids=[target_id], decision=decision, value=value, **BY)
+    stored_by_an_older_build(bdir, kind, target_id, value, decision=decision)
+    return str(exc.value)

@@ -365,7 +365,10 @@ def test_a_potential_reading_lands_on_a_run_with_no_parsed_potential(grouped):
 def test_a_potential_answer_that_is_not_a_number_is_kept_out_of_the_record_and_said(grouped):
     out = grouped()
     m = _missing(_load(out), "SYN_cell", POT)
-    M.decide(out, target_ids=[m["value_id"]], decision="correct", value="-0.8 V", by=BY, orcid=None)
+    # `decide` refuses it now (contract §25); a bundle an older build stored it in is still composed safely
+    from tests_support_records import refused_then_stored
+
+    assert "must be number" in refused_then_stored(out, "missing_value", m["value_id"], "-0.8 V")
     b = _load(out)
     m = _missing(b, "SYN_cell", POT)
     assert m["value_state"] == B.STATE_SCIENTIST_CONFIRMED

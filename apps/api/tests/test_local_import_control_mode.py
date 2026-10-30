@@ -62,8 +62,14 @@ def _group_of(bd, run_id):
     return next(g["group_id"] for g in bd["record_groups"] if key in g["member_run_keys"])
 
 
-def _set_mode(b, run_id, value):
-    M.decide(b, target_ids=[_miss(M.load(b), CM, run_id)["value_id"]], decision="correct", value=value, by=BY, orcid=None)
+def _set_mode(b, run_id, value, *, older_build=False):
+    vid = _miss(M.load(b), CM, run_id)["value_id"]
+    if older_build:  # off the enum: `decide` refuses it now (contract §25); an older build stored it
+        from tests_support_records import refused_then_stored
+
+        assert "not one of the schema's allowed values" in refused_then_stored(b, "missing_value", vid, value)
+        return
+    M.decide(b, target_ids=[vid], decision="correct", value=value, by=BY, orcid=None)
 
 
 def _compose(b, run_id):
@@ -122,7 +128,7 @@ def test_allowed_values_follow_a_schema_refresh(monkeypatch):
 
 def test_an_enum_value_is_eligible_and_an_off_enum_value_is_confirmed_but_not_eligible(grouped):
     _set_mode(grouped, "run-001", "potentiostatic")
-    _set_mode(grouped, "run-002", "Potentiostatic")  # not written exactly as the schema spells it
+    _set_mode(grouped, "run-002", "Potentiostatic", older_build=True)  # not written exactly as the schema spells it
     bd = M.load(grouped)
     ok, off = _miss(bd, CM, "run-001"), _miss(bd, CM, "run-002")
     assert ok["value_state"] == off["value_state"] == B.STATE_SCIENTIST_CONFIRMED
@@ -226,7 +232,7 @@ def test_a_confirmed_potentiostatic_mode_makes_that_groups_setpoint_question_blo
     before1, before2 = setpoint_q(bd, "run-001"), setpoint_q(bd, "run-002")
     assert not before1["blocking"] and not before2["blocking"]
     _set_mode(grouped, "run-001", "potentiostatic")
-    _set_mode(grouped, "run-002", "Potentiostatic")  # off-enum: requires nothing
+    _set_mode(grouped, "run-002", "Potentiostatic", older_build=True)  # off-enum: requires nothing
     bd = M.load(grouped)
     after1, after2 = setpoint_q(bd, "run-001"), setpoint_q(bd, "run-002")
     assert after1["blocking"] and POT in after1["why"] and after1["question_id"] == before1["question_id"]
@@ -270,7 +276,7 @@ def test_control_mode_value_ids_come_after_every_older_fields_ids(grouped):
 
 
 UPGRADE_14 = ("upgraded from 1.4.0; fields this build can newly write have no answer slots on runs that lacked a parsed "
-              "value — re-import to get them")
+              "value — re-import to get them; " + B.CHANGES_ADDED_IN["1.8.0"])  # 1.8.0: the log bounds, disclosed
 
 
 def test_a_1_4_0_bundle_with_a_confirmed_mode_is_stale_not_invalid_then_rederived(grouped, capsys):

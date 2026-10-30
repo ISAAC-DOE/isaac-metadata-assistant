@@ -171,13 +171,25 @@ def test_a_phrase_is_listed_but_never_drafted_or_rewritten(bundle_dir, capsys):
 
 
 def test_a_confirmed_value_off_the_schema_enum_is_listed_and_a_near_duplicate_is_not_drafted(bundle_dir, capsys):
+    """`decide` now REFUSES an answer off the schema's enum (contract §25), so a confirmed off-list
+    value exists only in a bundle an older build stored: it is put there as that build wrote it."""
+    from isaac_api.local_import import mutations as M
+
     field = "context.environment"
     target = _missing_id(bundle_dir, field)
     code = cli.main(
         ["bundle", "decide", str(bundle_dir), "--target", target, "--decision", "correct",
          "--value", "insitu", "--by", "Synthetic Tester"]
     )
-    assert code == cli.EXIT_OK
+    assert code == 2 and "not one of the schema's allowed values" in capsys.readouterr().err
+    held = M.load(bundle_dir)
+    held.setdefault("scientist_decisions", []).append({
+        "decision_id": f"d-{len(held['scientist_decisions']) + 1:05d}", "target": {"kind": "missing_value", "id": target},
+        "decision": "correct", "value": "insitu", "chosen_reading_index": None,
+        "decided_by": {"name": "Synthetic Tester", "basis": "self_reported_local_user", "identity": "local_unverified",
+                       "orcid_claimed": None},
+        "decided_utc": "2026-10-28T00:00:00Z", "method": "scientist_answer", "note": None, "batch_id": None})
+    M.save_bundle(bundle_dir, held)
     stored = next(m for m in _bundle(bundle_dir)["missing_values"] if m["value_id"] == target)
     assert stored["value_state"] == B.STATE_SCIENTIST_CONFIRMED
     # The bundle's own eligibility rule refuses it as off the schema's enum: the same miss.
