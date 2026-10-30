@@ -169,10 +169,8 @@ function CommandBlock({ command, label }: { command: string; label: string }) {
     }
   }
   return (
-    <div className="li-command-block">
-      <pre className="li-command" aria-label={label}>
-        {command}
-      </pre>
+    <div className="li-command-block" role="group" aria-label={label}>
+      <pre className="li-command">{command}</pre>
       <p className="li-actions">
         <button type="button" className="btn btn-secondary" onClick={copy}>
           <Copy size={14} strokeWidth={2} aria-hidden="true" /> {COPY.copyCommand}
@@ -829,7 +827,7 @@ function RunReadings({ scope }: { scope: LocalScope | undefined }) {
           <span className="li-run-names">Run {r.name ?? 'without a name'}</span>
           {r.own.length === 0 ? (
             <span className="li-meta">
-              <span className="li-chip">No reading</span> {COPY.previewNoReading}
+              <span className="li-chip">{COPY.noReadingChip}</span> {COPY.previewNoReading}
             </span>
           ) : (
             <span className="li-meta">

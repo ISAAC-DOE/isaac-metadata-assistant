@@ -556,6 +556,7 @@ export const LOCAL_IMPORTS_COPY = {
   sameForAll: 'Same for all groups in this beamtime',
   thisGroupOnly: 'This group only',
   previewTitle: 'This will write one answer to each of these',
+  noReadingChip: 'No Reading',
   previewNoReading: 'no reading in its files — this answer will be recorded for it too',
   previewHasReading: 'its files suggest',
   previewCancelled: 'Nothing was written.',
