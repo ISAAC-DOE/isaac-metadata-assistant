@@ -337,6 +337,49 @@ def normalize(energy, mu, params: Mapping, np, larch_xafs, *, e0: float | None =
 
 # --- QC ---------------------------------------------------------------------------------------
 
+#: THE EDGE-STEP SANITY BOUND (``isaac.xas.edge_step_plausible.v0``). An edge step is the jump of the
+#: spectrum at E0, so it cannot be much larger than the spectrum's whole range (max - min of the signal
+#: that was normalised). One larger than this many times that range means the post-edge fit did not
+#: describe the data. Measured on a real BL6-2c beamtime: Athena projects stating a post-edge range of
+#: zero width (``nor1 == nor2``), which larch widens to 2 eV and fits with a cubic, gave edge steps of
+#: 4683 to 190115 for spectra spanning 2.5, and their QC said ``pass``. Not a protocol parameter: it
+#: is a sanity bound, and adding it changed no result that it does not flag.
+EDGE_STEP_MAX_RANGE_RATIO = 2.0
+EDGE_STEP_RULE_ID = "isaac.xas.edge_step_plausible.v0"
+
+
+def edge_step_implausible(step, signal, np, *, post_edge: str | None = None) -> dict | None:
+    """``None`` when ``step`` is plausible for ``signal`` (or there is no positive step to judge: that
+    fails on its own as ``edge_step_not_positive``); else what was found, with a plain sentence.
+    ``post_edge`` names the post-edge range that was fitted, for the sentence."""
+    step = _f(step)
+    if step is None or step <= 0:
+        return None
+    y = np.asarray(signal, dtype=float)
+    y = y[np.isfinite(y)]
+    if y.size < 2:
+        return None
+    span = float(y.max() - y.min())
+    ratio = (step / span) if span > 0 else None
+    if ratio is not None and ratio <= EDGE_STEP_MAX_RANGE_RATIO:
+        return None
+    where = f" (post-edge range {post_edge})" if post_edge else ""
+    return {
+        "rule_id": EDGE_STEP_RULE_ID,
+        "edge_step": step,
+        "signal_range": span,
+        "ratio": ratio,
+        "max_ratio": EDGE_STEP_MAX_RANGE_RATIO,
+        "statement": (
+            f"The edge step {step:.6g} is {ratio:.4g} times the spectrum's whole range ({span:.6g}, max - min)"
+            if ratio is not None else f"The edge step {step:.6g} is not zero but the spectrum is flat"
+        ) + (
+            f"; an edge step is at most about that range, so the post-edge fit{where} did not describe the "
+            "data and the normalised curve made with it is not usable. A person checks the post-edge range."
+        ),
+    }
+
+
 
 def qc_verdict(metrics: Mapping, params: Mapping) -> tuple[str, list[str]]:
     """pass | warn | fail with the reasons, from DATA-QUALITY metrics only.
@@ -353,6 +396,10 @@ def qc_verdict(metrics: Mapping, params: Mapping) -> tuple[str, list[str]]:
     step = metrics.get("edge_step")
     if step is None or not (step > 0):
         fail.append("edge_step_not_positive")
+    if "edge_step_implausible" in metrics:
+        # present only when the step failed the sanity bound (edge_step_implausible; its value, the
+        # step / range ratio, is null for a flat spectrum): never a pass
+        fail.append("edge_step_implausible")
     if (metrics.get("i0_nonpositive_fraction") or 0) > float(q["fail_i0_nonpositive_fraction"]):
         fail.append("i0_nonpositive")
     if metrics.get("signal_all_zero_scans"):
@@ -363,6 +410,10 @@ def qc_verdict(metrics: Mapping, params: Mapping) -> tuple[str, list[str]]:
         # readable scans of the group that lack the chosen columns were left out: a person
         # confirms they belong elsewhere (e.g. motor/alignment scans), so never a pass
         warn.append("scans_skipped_lacking_chosen_columns")
+    if metrics.get("truncated_scans"):
+        # a scan that ends early is kept where it has data, so part of the merged curve averages fewer
+        # scans than are listed as used: a person checks it (the plain sentence is in qc.statements)
+        warn.append("scans_truncated")
     if metrics.get("channel_fallback"):
         # the role's first channel was abandoned (``channel_fallback_<why>``): a person confirms
         # the channel that was used, so never a pass

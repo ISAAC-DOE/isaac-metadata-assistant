@@ -26,6 +26,20 @@ does: ``pre_edge`` on the stored energy with the project's ``e0``, ``pre1``, ``p
 ``nor1``, ``nor2``, ``nnorm`` and ``flatten``. Comparisons are made in the scientist's
 energy frame: stored energy + ``bkg_eshift``, E0 + ``bkg_eshift``.
 
+ALREADY-NORMALISED DATA (``isaac.athena.already_normalized.v0``). A group Athena flags ``is_nor``
+was imported as normalised data (e.g. a Demeter ``.nor`` export read back in): its stored spectrum
+IS the scientist's normalised curve, pre-edge 0 and post-edge 1, so its edge step is 1 by
+definition. It is used AS STORED (``norm`` = ``flat`` = stored mu), never normalised again: larch
+does re-run the pre-edge fit on it, and on a real BL6-2c beamtime that fit (a post-edge range of
+zero width, ``nor1 == nor2``, which larch widens to 2 eV, with a cubic) gave edge steps of 4683 to
+190115 and a flattened curve sloping to -1.3, which ISAAC then compared and plotted. The project's
+``pre1``/``nor1``... are recorded but were not applied to it by Athena, so no comparison re-runs them.
+
+IMPLAUSIBLE EDGE STEP (:func:`core.edge_step_implausible`). Any other group whose reproduced edge
+step is more than :data:`core.EDGE_STEP_MAX_RANGE_RATIO` times its own stored range is NOT
+COMPARED (verdict ``not_comparable``, flag :data:`EDGE_STEP_IMPLAUSIBLE_FLAG`, a plain ``reason``),
+not overlaid on the plot, not preferred, and its QC fails ``edge_step_implausible``.
+
 TODO (bundle 1.2.0 ``processed_outputs[]``, NOT BUILT): the bundle now also carries the
 scientists' exported Athena/Demeter XDI files (``.nor``, ``.xmu`` ...) as reference results,
 each with at most one PROPOSED link to a run (``bundle.LINK_RULE_ID``) and, through it, a
@@ -37,6 +51,11 @@ parameters (those are present only when the file states ``Athena.*`` fields), so
 :func:`compare` cannot re-run the scientist's normalisation from it; and (3) which column is
 the normalised spectrum must come from the file's own ``Column.N``/column-header statement,
 never from its extension. Until then the ``.prj`` path below is the only Athena comparison.
+Measured on a real BL6-2c beamtime, that statement can be wrong: Demeter 0.9.24 ``.nor`` exports
+declare ``Column.1: k``, ``Column.2: energy``, ``Column.4: merge`` over rows of TWO columns
+(energy, normalised mu); the reader's ``declared_columns_differ`` anomaly must then refuse the
+column mapping, never compare a misread column. (Those same curves reach this comparison through
+their project, as ``is_nor`` groups; see ALREADY-NORMALISED DATA.)
 """
 
 from __future__ import annotations
@@ -48,6 +67,8 @@ import os
 import re
 from pathlib import Path, PurePosixPath
 from typing import Iterable, Mapping, Sequence
+
+from . import core as C
 
 MATCH_RULE_ID = "isaac.athena.match_by_name.v0"
 COMPARE_RULE_ID = "isaac.athena.compare.v0"
@@ -133,6 +154,16 @@ def load_project(path: Path, rel_path: str, source_id: str | None, np) -> tuple[
         e = np.asarray(energy, dtype=float)
         m = np.asarray(mu, dtype=float)
         e0_raw, step_raw = _finite(getattr(g, "e0", None)), _finite(getattr(g, "edge_step", None))
+        already_normalized = _flag(ap, "is_nor")
+        norm = np.asarray(g.norm, dtype=float)
+        flat = np.asarray(getattr(g, "flat", g.norm), dtype=float)
+        implausible = None
+        if already_normalized:
+            # the stored spectrum is the scientist's normalised curve: used as stored, step 1 by definition
+            # (larch's re-fit of it is not the scientist's processing and is discarded)
+            norm, flat, step_raw = m.copy(), m.copy(), 1.0
+        else:
+            implausible = C.edge_step_implausible(step_raw, m, np, post_edge=_post_edge(params))
         if e0_raw is None:
             non_finite.append("e0_eV")
         if step_raw is None:
@@ -153,8 +184,8 @@ def load_project(path: Path, rel_path: str, source_id: str | None, np) -> tuple[
                 "is_merge": is_merge,
                 "energy": e + float(eshift),
                 "mu": m,
-                "norm": np.asarray(g.norm, dtype=float),
-                "flat": np.asarray(getattr(g, "flat", g.norm), dtype=float),
+                "norm": norm,
+                "flat": flat,
                 "energy_frame_known": frame_known,
                 "e0_eV": (e0_raw + float(eshift)) if (e0_raw is not None and frame_known) else None,
                 "edge_step": step_raw,
@@ -162,9 +193,42 @@ def load_project(path: Path, rel_path: str, source_id: str | None, np) -> tuple[
                 "non_finite_values": non_finite,
                 "channel_expression": {k: (str(v) if v is not None else None) for k, v in channel_expr.items()},
                 "data_hash": hashlib.sha256(e.tobytes() + m.tobytes()).hexdigest(),
+                # present only when true / found, so an entry without them is exactly as before
+                **({"already_normalized": True} if already_normalized else {}),
+                **({"edge_step_implausible": implausible} if implausible else {}),
             }
         )
     return out, notes
+
+
+#: The rule that uses an ``is_nor`` group's stored spectrum as its normalised curve (module docstring).
+ALREADY_NORMALIZED_RULE_ID = "isaac.athena.already_normalized.v0"
+#: Comparison flag: the Athena curve's edge step failed the sanity bound, so it was not compared.
+EDGE_STEP_IMPLAUSIBLE_FLAG = "athena_edge_step_implausible"
+
+
+def _flag(ap, name: str) -> bool:
+    """An Athena ``is_*`` flag ("1", "1.0", 1) as a bool; anything unreadable is False."""
+    try:
+        return bool(int(float(getattr(ap, name, 0) or 0)))
+    except (TypeError, ValueError):
+        return False
+
+
+def _post_edge(params: Mapping) -> str | None:
+    lo, hi = params.get("nor1"), params.get("nor2")
+    if lo is None or hi is None:
+        return None
+    return f"nor1 {lo:g} to nor2 {hi:g} eV above E0, nnorm {params.get('nnorm')}"
+
+
+def already_normalized(entry: Mapping) -> bool:
+    return entry.get("already_normalized") is True
+
+
+def plausible(entry: Mapping) -> bool:
+    """False when the entry's edge step failed :func:`core.edge_step_implausible`."""
+    return not entry.get("edge_step_implausible")
 
 
 #: A version whose ``bkg_eshift`` is not a finite number: listed, never placed on an energy axis.
@@ -247,6 +311,14 @@ def _per_scan_set(pool: Sequence[Mapping], stems: Sequence[str], np) -> dict | N
             },
         }
     )
+    # the set is already normalised only when every member is; it is implausible when any member is
+    out.pop("already_normalized", None)
+    out.pop("edge_step_implausible", None)
+    if all(already_normalized(pool[i]) for i in order):
+        out["already_normalized"] = True
+    bad = next((pool[i]["edge_step_implausible"] for i in order if not plausible(pool[i])), None)
+    if bad is not None:
+        out["edge_step_implausible"] = bad
     return out
 
 
@@ -269,6 +341,8 @@ def version_provenance(entry: Mapping, stems: Sequence[str]) -> dict:
         "scan_selection": scan_selection(entry["label"], stems),
         "params": entry.get("params"),
         "data_sha256_prefix": str(entry.get("data_hash") or "")[:16],
+        **({"already_normalized": True, "already_normalized_rule": ALREADY_NORMALIZED_RULE_ID} if already_normalized(entry) else {}),
+        **({"edge_step_implausible": entry["edge_step_implausible"]} if not plausible(entry) else {}),
     }
 
 
@@ -384,11 +458,19 @@ def compare(isaac: Mapping, entry: Mapping, params: Mapping, np) -> dict:
         "athena_label": entry["label"],
         "match_rule": MATCH_RULE_ID,
         "match_kind": entry.get("_match_kind"),
+        **({"athena_data": "already_normalized", "athena_data_rule": ALREADY_NORMALIZED_RULE_ID} if already_normalized(entry) else {}),
     }
     out = {"athena_ref": ref, "rule_id": COMPARE_RULE_ID, "metrics": {}, "verdict": "not_comparable", "flags": [], "tolerances": dict(tol)}
     if not frame_known(entry):
         out["flags"].append(ENERGY_FRAME_UNKNOWN_FLAG)
         out["non_finite_values"] = list(entry.get("non_finite_values") or ())
+        return out
+    if not plausible(entry):
+        # NEVER COMPARE A BROKEN CURVE: the reproduced normalisation is not the scientist's spectrum
+        bad = entry["edge_step_implausible"]
+        out["flags"].append(EDGE_STEP_IMPLAUSIBLE_FLAG)
+        out["metrics"] = {"e0_athena_eV": entry["e0_eV"], "edge_step_athena": entry["edge_step"], "edge_step_to_range": bad["ratio"]}
+        out["reason"] = f"The scientist's Athena normalisation was not compared: {bad['statement']}"
         return out
     grid = isaac.get("grid")
     y = isaac.get(quantity)
@@ -410,7 +492,8 @@ def compare(isaac: Mapping, entry: Mapping, params: Mapping, np) -> dict:
             "e0_delta_eV": (isaac["e0_eV"] - entry["e0_eV"]) if isaac.get("e0_eV") is not None and entry["e0_eV"] is not None else None,
             "edge_step_isaac": isaac.get("edge_step"),
             "edge_step_athena": entry["edge_step"],
-            "edge_step_ratio": (isaac["edge_step"] / entry["edge_step"]) if isaac.get("edge_step") and entry["edge_step"] else None,
+            # an already-normalised curve has step 1 by definition: a ratio would only restate ISAAC's step
+            "edge_step_ratio": (isaac["edge_step"] / entry["edge_step"]) if isaac.get("edge_step") and entry["edge_step"] and not already_normalized(entry) else None,
         }
     )
     if npts < int(tol["min_overlap_points"]) or (hi - lo) < float(tol["min_overlap_eV"]):
@@ -423,7 +506,7 @@ def compare(isaac: Mapping, entry: Mapping, params: Mapping, np) -> dict:
         out["flags"].append("metric_not_finite")
         return out
     lo_r, hi_r = tol["edge_step_ratio_range"]
-    if m["edge_step_ratio"] is None or not (lo_r <= m["edge_step_ratio"] <= hi_r):
+    if not already_normalized(entry) and (m["edge_step_ratio"] is None or not (lo_r <= m["edge_step_ratio"] <= hi_r)):
         out["flags"].append("edge_step_scale_differs")
     agree = abs(m["e0_delta_eV"]) <= float(tol["agree_e0_delta_eV"]) and rms <= float(tol["agree_rms_norm"])
     out["verdict"] = "agree" if agree else "differs"

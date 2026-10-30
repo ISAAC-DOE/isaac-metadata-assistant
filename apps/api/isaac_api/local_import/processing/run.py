@@ -470,6 +470,36 @@ def _fallback_from_transmission(attempts, choice, tables, role: str, sel, params
     return alt
 
 
+#: Review flag (and the merge step's flag): a scan used in the merge ends early.
+TRUNCATED_FLAG = "scan_range_truncated"
+
+
+def _truncation_statement(ginfo: Mapping, scans_data: Sequence[Mapping], pos_sid: Sequence[str]) -> str | None:
+    """One plain sentence when the merge kept a scan that spans less than ``truncated_fraction`` of the
+    grid (``None`` otherwise). Measured on a real BL6-2c beamtime: the last scan of a run, aborted after
+    98 of 225 points, was merged with the other 11 and QC said nothing (``scans_used`` 12 of 12)."""
+    pos = list(ginfo.get("truncated_scan_positions") or ())
+    if not pos:
+        return None
+    g0, g1 = ginfo["grid_eV"]
+    each = ", ".join(
+        f"{pos_sid[i]} covers {float(scans_data[i]['energy'][0]):.3f}-{float(scans_data[i]['energy'][-1]):.3f} eV" for i in pos[:10]
+    ) + (f" and {len(pos) - 10} more" if len(pos) > 10 else "")
+    overlap = ginfo.get("all_scans_overlap_eV")
+    common = f"all {len(scans_data)} overlap only {overlap[0]:.3f}-{overlap[1]:.3f} eV" if overlap else "no energy is covered by every scan"
+    n, k = len(scans_data), len(pos)
+    return (
+        f"{k} of {n} scans used {'ends' if k == 1 else 'end'} early (under {ginfo['truncated_fraction']:.0%} of the merge grid "
+        f"{g0:.3f}-{g1:.3f} eV): {each}. Each scan is merged only where it has data, so outside its range the merged "
+        f"curve averages fewer than {n} scans ({common}). A person checks whether {'it belongs' if k == 1 else 'they belong'} in the merge."
+    )
+
+
+def _post_edge_range(resolved: Mapping) -> str | None:
+    lo, hi = resolved.get("norm1"), resolved.get("norm2")
+    return f"norm1 {lo:g} to norm2 {hi:g} eV above E0" if lo is not None and hi is not None else None
+
+
 def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None, athena_versions: Sequence[Mapping] | None = None) -> list[dict]:
     np, params = ctx.np, ctx.params
     res = _base(group, "isaac_protocol")
@@ -616,6 +646,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         {"step": "normalize", "params": nm["resolved_params"], "outcome": {"e0_eV": nm["e0_eV"], "edge_step": nm["edge_step"], "pre_edge_noise": nm["pre_edge_noise"]}, "flags": []}
     )
 
+    implausible = C.edge_step_implausible(nm["edge_step"], mean, np, post_edge=_post_edge_range(nm["resolved_params"]))
+    truncated = _truncation_statement(ginfo, scans_data, pos_sid)
     diags = [sa["diagnostics"] for sa in scans_data]
     read_pts = sum(d["points_read"] for d in diags) or 1
     i0np = [d["i0_nonpositive"] for d in diags if d["i0_nonpositive"] is not None]
@@ -632,6 +664,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         "points": int(g2.size),
         "e0_eV": nm["e0_eV"],
         "edge_step": step,
+        # only when the step failed the sanity bound (absent otherwise, so an unaffected result is unchanged)
+        **({"edge_step_implausible": implausible["ratio"]} if implausible else {}),
         "pre_edge_noise": nm["pre_edge_noise"],
         "scan_spread": float(np.nanmedian(se) / abs(step)) if (len(scans_data) > 1 and step and np.isfinite(se).any()) else None,
         "glitch_points": dg["flagged_points_total"],
@@ -648,8 +682,17 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     }
     verdict, reasons = C.qc_verdict(metrics, params)
     res["qc"] = {"metrics": metrics, "verdict": verdict, "reasons": reasons}
+    statements = {}
     if fallback is not None:
-        res["qc"]["statements"] = {FALLBACK_FLAG: choice.basis["fallback_from"]["statement"]}
+        statements[FALLBACK_FLAG] = choice.basis["fallback_from"]["statement"]
+    if truncated:
+        statements["scans_truncated"] = truncated
+        res["review_flags"].append(TRUNCATED_FLAG)
+    if implausible:
+        statements["edge_step_implausible"] = implausible["statement"]
+        res["review_flags"].append("edge_step_implausible")
+    if statements:  # absent when there is nothing to say, so an unaffected result is unchanged
+        res["qc"]["statements"] = statements
     res["steps"].append({"step": "qc", "params": dict(params["qc"]), "outcome": {"verdict": verdict, "reasons": reasons}, "flags": []})
 
     # outputs
@@ -680,6 +723,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
             cmp_ = A.compare({"grid": g2, "norm": nm["norm"], "flat": nm["flat"], "e0_eV": nm["e0_eV"], "edge_step": step}, v, params, np)
             _diagnose(cmp_, v, stems, used_entries, grid, M, ctx)
             listed = {"version_id": f"{group['group_id']}-v{n:02d}", "provenance": A.version_provenance(v, stems), "comparison": cmp_}
+            if not A.plausible(v):
+                listed["flags"] = [A.EDGE_STEP_IMPLAUSIBLE_FLAG]
             if A.frame_known(v):
                 name = f"athena_version_{n:02d}.csv"
                 _csv(gdir / name, ["energy_eV", "norm", "flat"], [v["energy"], v["norm"], v["flat"]], np)
@@ -715,7 +760,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
             norm=nm["norm"],
             flat=nm["flat"],
             e0=nm["e0_eV"],
-            athena=athena_entry if athena_entry is not None and A.frame_known(athena_entry) else None,
+            # never overlay a curve in an unknown energy frame, or one whose normalisation is implausible
+            athena=athena_entry if athena_entry is not None and A.frame_known(athena_entry) and A.plausible(athena_entry) else None,
             np=np,
         )
     except Exception:  # noqa: BLE001 - a plot failure is a flag, never a processing failure
@@ -777,7 +823,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         athena_res["comparison"] = comparison
         # a curve whose energy frame is unknown (non-finite bkg_eshift) is never preferred by default;
         # its result carries athena_energy_frame_unknown, and a scientist can still approve it
-        athena_res["preferred_for_record"] = A.frame_known(athena_entry)
+        # nor is a curve whose edge step failed the sanity bound (its QC fails edge_step_implausible)
+        athena_res["preferred_for_record"] = A.frame_known(athena_entry) and A.plausible(athena_entry)
         athena_res["run_id"] = run_id
         athena_res["result_id"] = f"proc-{group['group_id']}-{run_id}-athena"
         out.append(athena_res)
@@ -803,6 +850,10 @@ def _diagnose(comparison: dict, entry: Mapping, stems: Sequence[str], used_entri
         comparison["flags"].append("scientist_selected_subset_of_scans")
     p = entry["params"]
     if not A.frame_known(entry) or any(p.get(k) is None for k in ("e0", "pre1", "pre2", "nor1", "nor2", "nnorm")):
+        return
+    if A.already_normalized(entry) or not A.plausible(entry):
+        # the project's parameters were not what made this curve (already normalised), or what they make
+        # is not a usable curve (implausible edge step): re-running them on ISAAC's merge says nothing
         return
     quantity = comparison["metrics"].get("compared_quantity", "flat")
     eshift = float(p.get("eshift") or 0.0)
@@ -875,12 +926,17 @@ def _athena_result(group: Mapping, entry: Mapping, files: Sequence[Mapping], par
             "reason": ("the scientist's Athena project gives these as non-finite numbers (NaN or infinity), which "
                        "are not JSON numbers; each is recorded as null, never as a number ISAAC made up"),
         }
+    if A.already_normalized(entry):
+        reproduced = (f"none: the group is already normalised (Athena is_nor), so its stored spectrum is used as stored, "
+                      f"edge step 1 by definition ({A.ALREADY_NORMALIZED_RULE_ID})")
+    else:
+        reproduced = "larch AthenaProject.read(do_preedge=True)"
     res["steps"] = [
         {
             "step": "normalize",
-            "params": {**entry["params"], "reproduced_with": "larch AthenaProject.read(do_preedge=True)", "energy_frame": "stored energy + bkg_eshift"},
+            "params": {**entry["params"], "reproduced_with": reproduced, "energy_frame": "stored energy + bkg_eshift"},
             "outcome": {"e0_eV": entry["e0_eV"], "edge_step": entry["edge_step"]},
-            "flags": ["scientist_params_recorded"],
+            "flags": ["scientist_params_recorded"] + (["athena_already_normalized"] if A.already_normalized(entry) else []),
         }
     ]
     steps_ok = np.all(np.diff(e) > 0)
@@ -892,8 +948,14 @@ def _athena_result(group: Mapping, entry: Mapping, files: Sequence[Mapping], par
         "pre_edge_noise": noise,
         "nonmonotonic_steps": 0 if steps_ok else int(np.sum(np.diff(e) <= 0)),
     }
+    bad = entry.get("edge_step_implausible")
+    if bad:
+        metrics["edge_step_implausible"] = bad["ratio"]
     verdict, reasons = C.qc_verdict(metrics, params)
     res["qc"] = {"metrics": metrics, "verdict": verdict, "reasons": reasons}
+    if bad:
+        res["qc"]["statements"] = {"edge_step_implausible": bad["statement"]}
+        res["review_flags"].append("edge_step_implausible")
     res["steps"].append({"step": "qc", "params": dict(params["qc"]), "outcome": {"verdict": verdict, "reasons": reasons}, "flags": []})
     ath = [f for f in files if f["role"] in ("athena_normalized", "plot")]
     res["outputs"] = {"files": ath, "e0_eV": entry["e0_eV"], "edge_step": entry["edge_step"], "points": int(e.size)}

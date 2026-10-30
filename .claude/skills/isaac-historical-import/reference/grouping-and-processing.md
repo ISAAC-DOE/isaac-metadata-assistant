@@ -56,15 +56,31 @@ it finds one. Show per group, in words:
   every scan, so fluorescence was used): say the sentence in `qc.json` → `statements` and ask the
   scientist to confirm the channel. A scan skipped `signal_not_finite` has its points but a signal
   that is never finite (I0 or I1 ≤ 0); never call that "too few points";
+- **when a scan ends early** (reason `scans_truncated`, flag `scan_range_truncated`; `scans_used` still
+  counts it): say the sentence in `qc.json` → `statements` (how many scans end early, which, the
+  energies each covers, and that part of the merged curve averages fewer scans) and ask whether the
+  short scan belongs in the merge;
+- **an implausible edge step** (reason `edge_step_implausible`, always a `fail`: the step is more than
+  twice the spectrum's whole range, so the post-edge fit did not describe the data): say the sentence
+  in `statements`; never offer to approve that curve. On a scientist's Athena curve the comparison is
+  `not_comparable` with flag `athena_edge_step_implausible` and a `reason`; it is not overlaid on the
+  plot and not preferred;
 - **or, when the result has `applicability.status: not_applicable`, no verdict at all**: say "no
   ISAAC processing protocol covers this data yet" (`no_xas_channel`: no absorption channel could be
   formed; name the reader and the layout it states, never a technique) or "no scans, nothing to
   process" (`no_scans`). Do not call it a fail, show no plot, and ask nothing — `decide` refuses
   every decision on it, and the group cannot become a complete record until a protocol covers it;
-- whether it agrees with Athena, and by how much, or "no Athena output found";
+- whether it agrees with Athena, and by how much, or "no Athena output found". A group Athena marks
+  as already normalised (`athena_ref.athena_data: already_normalized`, e.g. a `.nor` export read back
+  into a project) is the scientist's normalised curve exactly as stored (edge step 1 by definition);
+  it is never normalised again, so no edge-step ratio is given for it;
 - the plot PNG (`<bundle>/processing/<group id>/<run id>/plot.png`; the result's `outputs.files` gives the path): open it with Read, describe the curve (edge, pre/post-edge, obvious artefacts); the numbers are in `qc.json` beside it. Never read `processing/processing_results.json` (it can be
   over a MB): `<isaac> bundle list <bundle> processing-results --limit 20` pages each result's
-  `result_id`, verdict, applicability, failure, flags, key metrics, `plot` path and Athena agreement.
+  `result_id`, verdict, applicability, failure, flags, key metrics, `plot` path, Athena agreement and,
+  when there are several Athena versions, `athena_version_choices` (each `version_id` with its project
+  file, Athena group and label). `<isaac> bundle show <bundle> processing-result <result_id>` prints one
+  result compactly (QC with its `statements`, each step's outcome, the Athena comparison and every
+  version's comparison; long lists are counted, not printed); its `result_file` is the full result.
 - when `process` says why none of the scientist's Athena groups matched (`athena.statement`), say it
   in those words.
 
@@ -86,6 +102,10 @@ Ask: approve, reject, or needs changes (with a note):
   (`athena_versions[]`), ask which one is their result of record and record `decide --target
   <result_id> --decision select_athena_version --value <version_id> --by "<name>"`. It changes no QC
   status and no processed value, and it is not an approval.
+- **The record lists only what was applied.** `measurement.processing.steps` comes from the approved
+  result's steps, without a calibration whose shift was not applied (`outcome.applied: false`) and
+  without a "merge" of a single scan. Never tell the scientist a record was calibrated unless its
+  result says `applied: true`.
 
 ## Calibration shift (only when processing proposes one)
 

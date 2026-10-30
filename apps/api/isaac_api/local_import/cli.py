@@ -24,7 +24,8 @@ COMMANDS
     by state as it filters ``candidates`` by value_state.
 
 ``isaac bundle show <dir> run|conflict|candidate|source|question <id>``
-    One object as JSON.
+    One object as JSON. ``processing-result <result_id>``: one processing result, compact (QC, flags,
+    steps' outcomes, Athena comparison and every Athena version with its id; lists are counted, not printed).
 
 ``isaac bundle check <dir>``
     Re-validate the bundle against v1: schema, bounds, references, and the state rule.
@@ -94,7 +95,8 @@ BUNDLE_FILES = (
 
 LIST_KINDS = ("runs", "conflicts", "candidates", "questions", "unread", "groups", "merge-candidates", "processed-outputs",
               "processing-results")
-SHOW_KINDS = ("run", "conflict", "candidate", "source", "question", "group", "merge-candidate", "processed-output")
+SHOW_KINDS = ("run", "conflict", "candidate", "source", "question", "group", "merge-candidate", "processed-output",
+              "processing-result")
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 200
 #: The target size of summary.md (bytes). Sections are windowed to stay near it.
@@ -668,6 +670,8 @@ def _row(kind: str, obj: Mapping, group_status: Mapping | None = None) -> dict:
             "plot": next((f.get("relative_path") for f in files if f.get("role") == "plot"), None),
             "athena_agreement": comparison.get("verdict"),
             "athena_versions": len(obj.get("athena_versions") or ()),
+            # the ids `decide --decision select_athena_version --value <version_id>` takes, with what names them
+            **({"athena_version_choices": [_athena_version_brief(v) for v in obj["athena_versions"]]} if obj.get("athena_versions") else {}),
         }
     if kind == "questions":
         return {
@@ -868,10 +872,122 @@ def cmd_bundle_list(args) -> int:
     return EXIT_OK
 
 
+def _athena_version_brief(v: Mapping) -> dict:
+    from pathlib import PurePosixPath
+
+    prov = v.get("provenance") or {}
+    path = prov.get("prj_relative_path")
+    return {
+        "version_id": v.get("version_id"),
+        "project": prov.get("prj_file_name") or (PurePosixPath(str(path)).name if path else None),
+        "group": prov.get("athena_group"),
+        "label": _short(prov.get("athena_label"), 80),
+    }
+
+
+#: ``bundle show processing-result``: NO RAW ARRAYS. A list of numbers longer than this (per-scan values,
+#: flagged points) is replaced by its length; a range such as ``grid_eV`` [lo, hi] stays.
+_SHOW_MAX_NUMBERS = 4
+#: ... and any other list (source ids, flags) longer than this.
+_SHOW_MAX_LIST = 20
+
+
+def _compact(value: Any) -> Any:
+    """``value`` with every long list replaced by ``"<n> values (not shown)"``."""
+    if isinstance(value, Mapping):
+        return {k: _compact(v) for k, v in value.items()}
+    if isinstance(value, list):
+        numbers = all(isinstance(v, (int, float)) and not isinstance(v, bool) or v is None for v in value)
+        if len(value) > (_SHOW_MAX_NUMBERS if numbers else _SHOW_MAX_LIST):
+            return f"{len(value)} values (not shown)"
+        return [_compact(v) for v in value]
+    return value
+
+
+def _scan_ranges(scans: Sequence[int]) -> str:
+    """[1, 3, 4, 5, 8] -> "1,3-5,8" (a scan selection, short enough to print whole)."""
+    out: list[str] = []
+    nums = sorted({int(n) for n in scans})
+    i = 0
+    while i < len(nums):
+        j = i
+        while j + 1 < len(nums) and nums[j + 1] == nums[j] + 1:
+            j += 1
+        out.append(str(nums[i]) if i == j else f"{nums[i]}-{nums[j]}")
+        i = j + 1
+    return ",".join(out)
+
+
+def _processing_result_view(bundle: Mapping, r: Mapping) -> dict:
+    """One processing result, compact: what a reviewer needs to decide it and to pick an Athena version.
+    Arrays (per-scan lists, flagged points) are counted, not printed; the full result is in ``result_file``."""
+    from pathlib import PurePosixPath
+
+    from . import bundle as B
+
+    inputs = list(r.get("inputs") or ())
+    skipped: dict[str, list] = {}
+    for i in inputs:
+        if i.get("skip_reason"):
+            skipped.setdefault(str(i["skip_reason"]), []).append(i.get("source_id"))
+    files = (r.get("outputs") or {}).get("files") or ()
+    run_dir = next((PurePosixPath(f["relative_path"]).parent.as_posix() for f in files if f.get("relative_path")), None)
+    status = {g["group_id"]: g.get("status") for g in bundle.get("record_groups") or ()}
+    channel = r.get("channel_choice") if isinstance(r.get("channel_choice"), Mapping) else {}
+    versions = []
+    for v in r.get("athena_versions") or ():
+        prov = v.get("provenance") or {}
+        cmp_ = v.get("comparison") or {}
+        versions.append({
+            **_athena_version_brief(v),
+            "project": prov.get("prj_relative_path") or prov.get("prj_file_name"),
+            **{k: prov.get(k) for k in ("is_merge", "already_normalized") if prov.get(k) is not None},
+            **({"scan_selection": _scan_ranges(prov["scan_selection"])} if prov.get("scan_selection") else {}),
+            "flags": list(v.get("flags") or ()),
+            "comparison": {"verdict": cmp_.get("verdict"), "flags": list(cmp_.get("flags") or ()),
+                           **({"reason": cmp_["reason"]} if cmp_.get("reason") else {}),
+                           "metrics": _compact({k: x for k, x in (cmp_.get("metrics") or {}).items() if not isinstance(x, (list, dict))})},
+        })
+    cmp_ = r.get("comparison") or None
+    return _compact({
+        "result_id": B.processing_id(r),
+        "group_id": r.get("group_id"),
+        "group_status": status.get(r.get("group_id")),
+        "source": r.get("source"),
+        "state": r.get("state"),
+        "preferred_for_record": r.get("preferred_for_record"),
+        "applicability": r.get("applicability"),
+        "failure": r.get("failure"),
+        "qc": r.get("qc"),
+        "review_flags": list(r.get("review_flags") or ()),
+        "channel": {k: channel.get(k) for k in ("mode", "signal_name", "energy", "i0") if channel.get(k) is not None} or None,
+        "inputs": {"listed": len(inputs), "used": sum(1 for i in inputs if i.get("used")), "skipped": skipped},
+        "steps": [{"step": s.get("step"), "flags": list(s.get("flags") or ()), "outcome": s.get("outcome")} for s in r.get("steps") or ()],
+        "outputs": {"e0_eV": (r.get("outputs") or {}).get("e0_eV"), "edge_step": (r.get("outputs") or {}).get("edge_step"),
+                    "points": (r.get("outputs") or {}).get("points"),
+                    "files": [{"role": f.get("role"), "relative_path": f.get("relative_path")} for f in files]},
+        "comparison": ({"verdict": cmp_.get("verdict"), "flags": cmp_.get("flags"), "athena_ref": cmp_.get("athena_ref"),
+                        **({"reason": cmp_["reason"]} if cmp_.get("reason") else {}), "metrics": cmp_.get("metrics")} if cmp_ else None),
+        "athena_versions": versions,
+        "athena_result_of_record": r.get("athena_result_of_record"),
+        "questions": r.get("questions") or [],
+        "result_file": f"{run_dir}/result.json" if run_dir else None,
+    })
+
+
 def cmd_bundle_show(args) -> int:
     bundle, code = _load(args.bundle_dir)
     if bundle is None:
         return code
+    if args.kind == "processing-result":
+        from . import bundle as B
+
+        r = next((x for x in bundle.get("processing_results") or () if B.processing_id(x) == args.id), None)
+        if r is None:
+            _err(f"No processing-result with id {args.id!r} in this bundle (`bundle list <dir> processing-results` lists them).")
+            return EXIT_NOT_FOUND
+        print(json.dumps(_processing_result_view(bundle, r), indent=1, ensure_ascii=False))
+        return EXIT_OK
     section, key = _SHOW_SECTION[args.kind]
     for obj in bundle.get(section) or ():
         if obj.get(key) == args.id:

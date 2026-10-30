@@ -68,6 +68,20 @@ FIELD_REMAP = {"context.electrochemistry.reaction": "context.reaction.name"}
 #: Approved processing step -> the upstream vocabulary token (measurement.processing.steps),
 #: exactly as `data/vocabulary.json` @ a1cb1c8 spells it. `deglitch` and `qc` have none.
 PROCESSING_STEP_VOCABULARY = {"calibration": "calibration", "merge": "spectrum_merging", "normalize": "normalization"}
+
+
+def step_was_applied(step: Mapping) -> bool:
+    """A processing step a record may list: one that CHANGED the data. A calibration whose shift was not
+    applied (``outcome.applied`` false: no approved reference) and a "merge" of one scan are not; a
+    step whose outcome states neither is listed as before."""
+    outcome = step.get("outcome") if isinstance(step.get("outcome"), Mapping) else {}
+    if step.get("step") == "calibration" and "applied" in outcome:
+        return outcome["applied"] is True
+    if step.get("step") == "merge" and isinstance(outcome.get("n_scans"), int):
+        return outcome["n_scans"] > 1
+    return True
+
+
 PORTAL_VALIDATE = "/portal/api/validate"
 PORTAL_RECORDS = "/portal/api/records"
 
@@ -544,7 +558,7 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
         steps = []
         for step in r.get("steps") or ():
             token = PROCESSING_STEP_VOCABULARY.get(step.get("step"))
-            if token and token not in steps:
+            if token and token not in steps and step_was_applied(step):
                 steps.append(token)
         if steps:
             fields["measurement.processing.steps"] = {"value": steps, "status": "verified", "evidence": [conf]}
