@@ -1752,6 +1752,10 @@ _GLUED_QUANTITY = re.compile(r"^[a-z]{1,2}[-+]?\d+(?:p\d+)?$", re.IGNORECASE)
 #: ``Rep1`` / ``rep2`` glued: on the merge path a REPLICATE label (another sample), never a repeat marker
 #: (review: ``Rep1_ZnO`` / ``Rep2_ZnO``). The default grouping still reads it as a marker (unchanged).
 _REPLICATE_TOKEN = re.compile(r"^rep\d+$", re.IGNORECASE)
+#: Any token mixing letters and digits (``T300K``, ``E0p4V``, ``Pt0p5wt``, ``cyc10``, ``t1h``, ``spot2``) may state
+#: a quantity in a shape the patterns above do not know (verification review): FAIL CLOSED, so names that
+#: differ in one are never combined. A bare number is left to the counter and unit-word rules.
+_LETTERS_AND_DIGITS = re.compile(r"(?=.*\d)(?=.*[a-z])", re.IGNORECASE)
 _DECIMAL_POINT = re.compile(r"(?<=\d)\.(?=\d)")
 #: A whole number written beside its unit or label as a separate token (``05_mM``, ``25_C``, ``E_1``,
 #: ``pH_7``) states a quantity too. These lists only ever BLOCK a combination (fail closed): a word
@@ -1824,7 +1828,13 @@ def _merge_blocker_details(bundle: Mapping, payload: Mapping, holders: Sequence[
     kept = [_merge_name_tokens(x, declared, exempt) for x in stems]
     sample, sample_conflict = _confirmed_sample(bundle, holders)
     names_reason = unknown_reason = None
-    if len({tuple(t for _, t, _ in k) for k in kept}) > 1:
+    ordered = {tuple(t for _, t, _ in k) for k in kept}
+    if len(ordered) > 1 and not _differing_tokens(kept):
+        # the same words in another order or another number of times (``pristine_cycled`` / ``cycled_pristine``,
+        # ``ox`` / ``ox_ox``): no word to acknowledge, and nothing recorded says which reading is right (review)
+        never.append("their file names hold the same words in a different order or a different number of times, so "
+                     "nothing recorded can say they are one measurement")
+    elif len(ordered) > 1:
         stated = _stated_quantities(stems)
         said = {str(t).casefold() for t in (decision or {}).get("same_conditions_tokens") or ()}
         if stated:
@@ -1878,7 +1888,8 @@ def _stated_quantities(stems: Sequence[str]) -> list[str]:
         for j, t in enumerate(toks):
             if t not in differ:
                 continue
-            if (_CONDITION_LIKE_TOKEN.match(t) or _GLUED_QUANTITY.match(t)) and not _REPLICATE_TOKEN.match(t):
+            if (_CONDITION_LIKE_TOKEN.match(t) or _GLUED_QUANTITY.match(t) or _LETTERS_AND_DIGITS.match(t)) \
+                    and not _REPLICATE_TOKEN.match(t):
                 out.add(t)
             elif t.isdigit():
                 nxt = toks[j + 1] if j + 1 < len(toks) else ""

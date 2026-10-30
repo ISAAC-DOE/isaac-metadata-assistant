@@ -25,7 +25,7 @@ Get the groups with `bundle list <bundle> groups` and one in full with `bundle s
   same sample is not the same conditions: before `--same-conditions`, ask "same sample AND same
   conditions? the names differ in: pristine / cycled" — `pristine`/`cycled`, `before`/`after`,
   `soaked`, `OCV` are usually conditions, and then the answer is separate records. Runs whose
-  conditions differ, or whose names differ in a quantity (`400mV`, `0p5wt`, `T300`, `E1`), are never
+  conditions differ, or whose names differ in a quantity or any letters-and-digits token (`400mV`, `0p5wt`, `T300K`, `spot2`), are never
   combined. Tell the scientist which happened. When it could not combine them it lists the merge in
   `merge_decisions_not_combined`, with a reason and `next_commands` (the counter answer, or one sample
   confirmation per run and the merge again with `--same-conditions`): say the reason in words and

@@ -126,7 +126,15 @@ def test_same_conditions_is_refused_where_it_cannot_apply(tmp_path, capsys):
     (["Cu_T300", "Cu_T500"], ["T300", "T500"]),
     (["SYN_E1_film", "SYN_E2_film"], ["E1", "E2"]),
     (["SYN_P2_x", "SYN_P3_x"], ["P2", "P3"]),
-    (["SYN_spot2_x", "SYN_spot3_x"], []),  # a word with a number: a label the scientist may acknowledge
+    # verification review: shapes the patterns did not know now fail closed — any letters+digits token
+    (["SYN_spot2_x", "SYN_spot3_x"], ["spot2", "spot3"]),
+    (["Q4_T300K_x", "Q4_T500K_x"], ["T300K", "T500K"]),
+    (["Q4_E0p4V_x", "Q4_E0p6V_x"], ["E0p4V", "E0p6V"]),
+    (["Q4_Pt0p5wt_x", "Q4_Pt1wt_x"], ["Pt0p5wt", "Pt1wt"]),
+    (["Q4_Temp300_x", "Q4_Temp500_x"], ["Temp300", "Temp500"]),
+    (["Q4_cyc10_x", "Q4_cyc50_x"], ["cyc10", "cyc50"]),
+    (["Q4_t1h_x", "Q4_t5h_x"], ["t1h", "t5h"]),
+    (["SYN_x_015", "SYN_x_016"], []),  # a bare counter is left to the counter rules
 ])
 def test_glued_letter_and_number_tokens_are_possible_quantities(stems, stated):
     assert M._stated_quantities(stems) == stated
@@ -217,3 +225,19 @@ def test_the_counter_answer_reply_counts_what_it_would_join(tmp_path, capsys):
     assert reply["regroup_preview"]["groups_joined"] == 2 and reply["regroup_preview"]["into"] == 1
     assert "isaac bundle group <bundle_dir> --regroup" in reply["regroup_preview"]["statement"]
     assert len(M.load(b)["record_groups"]) == 2  # a preview: nothing regrouped
+
+
+@pytest.mark.parametrize("stems", [
+    ["Q4_SYNcat_pristine_cycled", "Q4_SYNcat_cycled_pristine"],
+    ["Q4_SYNcat_pH2_ox", "Q4_SYNcat_pH2_ox_ox"],
+])
+def test_names_with_the_same_words_reordered_or_repeated_are_never_combined(tmp_path, capsys, stems):
+    """Verification review: an order-only or repeat-only difference left no word to acknowledge, so a
+    sample confirmation alone combined them. Nothing recorded can say which reading is right: never."""
+    b = _grouped_stems(tmp_path, stems)
+    g1, g2 = M.load(b)["record_groups"]
+    _confirm_samples(b)
+    nc = _not_combined(_merge(b, g1["group_id"], [g2["group_id"]]))
+    assert "same words in a different order or a different number of times" in nc["reason"]
+    assert not any("--same-conditions" in c for c in nc["next_commands"])
+    assert _combined(b) == []

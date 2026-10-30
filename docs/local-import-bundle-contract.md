@@ -1659,8 +1659,10 @@ on the synthetic fixtures).
   when they differ in a quantity. The refusal asks "same sample AND same conditions? the names differ
   in: cycled / pristine" and its `next_commands` are the sample confirmations and the merge recorded
   again with `--same-conditions` on its own target (replacing the refused decision).
-- **Glued quantities.** One or two letters glued to a number (`T300`, `E1`, `P2`, `s1`) state a possible
-  quantity: names differing in one are never combined. A longer word with a number (`spot2`) is a label.
+- **Quantities fail closed.** Any token mixing letters and digits (`T300`, `E1`, `s1`, `T300K`, `E0p4V`,
+  `cyc10`, `spot2`) states a possible quantity: names differing in one are never combined. A bare number
+  is left to the counter and unit-word rules. Names holding the same words in another order, or a word
+  another number of times, are never combined either: there is no word to acknowledge.
 - **`RepN` is a replicate on the merge path.** A glued `Rep1`/`rep2` is compared as a token (another
   sample), so `Rep1_ZnO` / `Rep2_ZnO` need the same answers as any word. The default grouping still
   reads it as a repeat marker (unchanged). `again`, `repeat`, `redo` (and a number after one) remain
