@@ -2,7 +2,7 @@
    navigation only, so it reads as a link (underlined, the action colour), never as a button
    that could be mistaken for one that saves or sends. */
 .propose-term-link {
-  font-size: 12px;
+  font-size: var(--font-size-body);
   font-weight: 500;
   color: var(--action);
   text-decoration: underline;
@@ -16,7 +16,7 @@
 }
 .rec-val-propose {
   margin-top: var(--space-sm);
-  font-size: 12px;
+  font-size: var(--font-size-body);
   color: var(--text-muted);
 }
 .rec-val-propose-list {
