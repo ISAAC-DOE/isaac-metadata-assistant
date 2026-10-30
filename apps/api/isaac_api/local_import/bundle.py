@@ -2028,6 +2028,130 @@ def _candidate_record(c, *, bundle_cid: str, run_id: str | None, key: str, evide
     }
 
 
+# --- what the build applies vs what the files show (2026-10-29) ----------------------------------
+#
+# The engine reads every import with ONE acquisition system and ONE naming convention, both
+# BL15-2's (`bl15.signals.BL152_VORTEX`, `bl15.profiles`), whatever the files are. Their ids
+# name CODE and stay. Their display names named a beamline, so a Beamline 4-3 or 6-2c bundle
+# read as if its data were BL15-2 exports. A name is now shown only where the facility hint
+# would show it (`suggestions.facility_hints`, DEC-88): when some run's scan headers carry
+# the system's detector column names. Column names are still not proof of the beamline, and
+# the statement says so. The hosted engine and its state are untouched.
+
+ACQUISITION_SYSTEM_APPLIED_AS = "build_default"
+#: A filename-token statement's locator prefix (`bl15.filenames`).
+_FILENAME_TOKEN_LOCATOR = "filename token "
+
+
+def acquisition_system_observed(bundle: Mapping, system: Mapping) -> tuple[int, list[str]]:
+    """``(runs, column names)``: how many runs' scan headers name one of ``system``'s detector
+    columns, read from each run's channel summary (``signal_selection.channels[].scans_present``,
+    the ``#L`` header of its scans) and its ``detector_column`` statements' literals."""
+    wanted = set(system.get("candidate_channels") or ())
+    if not wanted:
+        return 0, []
+    detector_literals: dict[str | None, set[str]] = {}
+    for c in bundle.get("candidates") or ():
+        if c.get("statement_key") == "detector_column":
+            seen = {str(v) for v in (c.get("observed_literals") or ())} | ({str(c["value"])} if c.get("value") is not None else set())
+            detector_literals.setdefault(c.get("run_id"), set()).update(seen & wanted)
+    runs, names = 0, set()
+    for r in bundle.get("runs") or ():
+        found = set(detector_literals.get(r["run_id"], ()))
+        sel = r.get("signal_selection") or {}
+        if sel.get("system_id") == system.get("system_id"):
+            found |= {ch.get("channel") for ch in sel.get("channels") or () if ch.get("scans_present") and ch.get("channel") in wanted}
+        if found:
+            runs += 1
+            names |= found
+    return runs, sorted(names)
+
+
+def _acquisition_system_section(engine_system: Mapping, runs_seen: int, columns: list[str]) -> dict:
+    """``experiment.acquisition_system``: the system this build applies to every import, its
+    name only when some run's scan headers carry its column names, and what was seen."""
+    system = {k: v for k, v in dict(engine_system).items() if k in {"system_id", "display_name", "candidate_channels"}}
+    channels = ", ".join(str(c) for c in system.get("candidate_channels") or ()) or "none listed"
+    if runs_seen:
+        statement = (
+            "The acquisition system this build reads every import with; system_id names that code. "
+            f"{runs_seen} run(s)' scan headers have its detector column names ({', '.join(columns)}): "
+            "column naming only, not proof of the beamline."
+        )
+    else:
+        system.pop("display_name", None)
+        statement = (
+            "The acquisition system this build reads every import with; system_id names that code, "
+            f"not these files. No run's scan headers have its detector column names ({channels}), so "
+            "its name is not shown."
+        )
+    system.update({
+        "applied_as": ACQUISITION_SYSTEM_APPLIED_AS,
+        "runs_with_its_columns": runs_seen,
+        "columns_seen": list(columns),
+        "statement": statement,
+    })
+    return system
+
+
+def _naming_profile_shown(entry: dict, acquisition_system_seen: bool) -> dict:
+    """A build-default binding scoped to the acquisition system shows its convention's name
+    only when the acquisition system is shown (:func:`_acquisition_system_section`), and its
+    selector says, either way, that the convention was applied by default, not detected:
+    detector column names say nothing about how files were named."""
+    if entry.get("basis") != "build_default" or entry.get("scope") != "acquisition_system":
+        return entry
+    selector = entry.get("selector_description") or "every source"
+    if acquisition_system_seen:
+        return {
+            **entry,
+            "selector_description": (
+                f"{selector} (this build's default naming convention, applied whatever the files are; "
+                "not detected from these files, and column naming is not proof of beamline or convention)"
+            ),
+        }
+    return {
+        **entry,
+        "display_name": None,
+        "selector_description": (
+            f"{selector} (this build's default naming convention, applied whatever the files are and "
+            "bound to its default acquisition system, which no run's scan headers show; not detected "
+            "from these files, so its name is not shown)"
+        ),
+    }
+
+
+def _mark_reused_file_name_tokens(extended: list[dict], sources: Sequence[Mapping], runs: Sequence[Mapping]) -> None:
+    """A filename-token statement from a file whose NAME recurs in several folders and that is
+    no run's acquisition or scan file gets that fact added to its locator, in place.
+
+    Such a name is reused (a macro or setup file copied from run folder to run folder, sometimes
+    from another experiment: `AgL3_xas_exp1.exp` beside Ti data), so its tokens describe no one
+    run and need not describe this beamtime. A COUNT, not a classifier: nothing here decides
+    what the name means, and the statement, its literal and its id are unchanged."""
+    run_files = {r.get("acquisition_source_id") for r in runs} | {
+        s.get("source_id") for r in runs for s in r.get("scans") or ()
+    }
+    folders_of: dict[str, set[str]] = {}
+    for s in sources:
+        rel = s.get("relative_path")
+        if isinstance(rel, str) and rel:
+            p = PurePosixPath(rel)
+            folders_of.setdefault(p.name, set()).add(str(p.parent))
+    for e in extended:
+        rel, loc = e.get("relative_path"), e.get("locator")
+        if not (isinstance(rel, str) and isinstance(loc, str) and loc.startswith(_FILENAME_TOKEN_LOCATOR)):
+            continue
+        if e.get("source_id") in run_files:
+            continue
+        n = len(folders_of.get(PurePosixPath(rel).name, ()))
+        if n >= 2:
+            e["locator"] = (
+                f"{loc}; this file name recurs in {n} folders of this import and the file is no run's "
+                "scan, so the name is reused and its tokens need not describe this run or beamtime"
+            )
+
+
 def build_bundle(
     reading,
     candidates: Sequence,
@@ -2796,7 +2920,15 @@ def build_bundle(
             }
         )
 
+    _mark_reused_file_name_tokens(extended, sources, runs)
+
     questions: list[dict] = []  # built by refresh_questions() once the bundle exists
+
+    # -- the acquisition system the build applies, and what the files show of it -------------
+    acq_runs, acq_columns = acquisition_system_observed(
+        {"candidates": out_candidates, "runs": runs}, dict(reading.acquisition_system)
+    )
+    acquisition_system = _acquisition_system_section(reading.acquisition_system, acq_runs, acq_columns)
 
     # -- naming profiles ---------------------------------------------------------------
     naming = [
@@ -2815,6 +2947,7 @@ def build_bundle(
         for b in reading.bindings
         if isinstance(b, Mapping)
     ]
+    naming = [_naming_profile_shown(n, bool(acq_runs)) for n in naming]
 
     # -- counts / readiness ---------------------------------------------------------------
     states = [c["value_state"] for c in out_candidates]
@@ -2910,11 +3043,7 @@ def build_bundle(
                 {**dict(t), "source_id": sid_of.get(t.get("source_path"))}
                 for t in reading.temperature_statements
             ],
-            "acquisition_system": {
-                k: v
-                for k, v in dict(reading.acquisition_system).items()
-                if k in {"system_id", "display_name", "candidate_channels"}
-            },
+            "acquisition_system": acquisition_system,
             "beamtime_contributor_ids": [
                 p["contributor_id"] for p in contributors.values() if p["scope"] == "beamtime"
             ],

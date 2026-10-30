@@ -193,28 +193,9 @@ def absorber_decisions(bundle: Mapping) -> dict[str, Mapping]:
     return out
 
 
-def _acquisition_system_observed(bundle: Mapping, system: Mapping) -> tuple[int, list[str]]:
-    """``(runs, column names)``: how many runs' scan headers name one of ``system``'s detector
-    columns, read from each run's channel summary (``signal_selection.channels[].scans_present``,
-    the ``#L`` header of its scans) and its ``detector_column`` statements' literals."""
-    wanted = set(system.get("candidate_channels") or ())
-    if not wanted:
-        return 0, []
-    detector_literals: dict[str | None, set[str]] = {}
-    for c in bundle.get("candidates") or ():
-        if c.get("statement_key") == "detector_column":
-            seen = {str(v) for v in (c.get("observed_literals") or ())} | ({str(c["value"])} if c.get("value") is not None else set())
-            detector_literals.setdefault(c.get("run_id"), set()).update(seen & wanted)
-    runs, names = 0, set()
-    for r in bundle.get("runs") or ():
-        found = set(detector_literals.get(r["run_id"], ()))
-        sel = r.get("signal_selection") or {}
-        if sel.get("system_id") == system.get("system_id"):
-            found |= {ch.get("channel") for ch in sel.get("channels") or () if ch.get("scans_present") and ch.get("channel") in wanted}
-        if found:
-            runs += 1
-            names |= found
-    return runs, sorted(names)
+#: Moved to :mod:`bundle` (2026-10-29), which also uses it to decide whether the bundle shows the
+#: acquisition system's name at all; the hint and the bundle apply one test.
+_acquisition_system_observed = B.acquisition_system_observed
 
 
 def facility_hints(bundle: Mapping) -> list[dict]:

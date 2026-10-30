@@ -590,6 +590,96 @@ def test_the_acquisition_system_hint_names_the_columns_the_scan_headers_carry(tm
     assert any(h["kind"] == "folder_name" for h in S.facility_hints(b))
 
 
+# --- 2026-10-29: the bundle names BL15-2 only where the facility hint would ------------------------
+
+BL152_SYSTEM_NAME = "SSRL BL15-2 SPEC scan exports — Vortex fluorescence channels"
+
+
+def test_a_bundle_whose_scan_headers_lack_the_system_columns_does_not_name_bl15_2(grouped):
+    b = _load(grouped())
+    acq = b["experiment"]["acquisition_system"]
+    # the reader profile applied is still recorded, by id (ids name code) ...
+    assert acq["system_id"] == "ssrl_bl152_spec_vortex_channels" and acq["candidate_channels"]
+    assert acq["applied_as"] == "build_default" and acq["runs_with_its_columns"] == 0 and acq["columns_seen"] == []
+    # ... but nothing in these files shows it, so no beamline name is shown, and the statement says why
+    assert "display_name" not in acq
+    assert "its name is not shown" in acq["statement"] and "nothing in these files says" not in acq["statement"]
+    default = [n for n in b["naming_profiles"] if n["basis"] == "build_default"]
+    assert default and all(n["display_name"] is None for n in default)
+    assert all(n["profile_id"] == "ssrl_bl152_herfd_echem_naming" for n in default)
+    assert all("not detected from these files" in n["selector_description"] for n in default)
+    assert "BL15-2" not in json.dumps([acq, b["naming_profiles"]])
+    assert [h["kind"] for h in S.facility_hints(b)] == ["folder_name"]
+    assert B.validate_bundle(b) == []
+
+
+def test_a_bl15_2_fixture_whose_scan_headers_carry_the_columns_keeps_its_label(tmp_path, capsys):
+    """The negative control: the semantics corpus's scan headers name vortDT*, so the system's
+    name stays, with a statement that column naming is not proof of the beamline."""
+    from tests_support_records import SEMANTICS
+
+    out = tmp_path / "bl15"
+    assert _run(["import", str(SEMANTICS), "--out", str(out)], capsys)[0] == 0
+    b = _load(out)
+    acq = b["experiment"]["acquisition_system"]
+    assert acq["display_name"] == BL152_SYSTEM_NAME
+    assert acq["runs_with_its_columns"] >= 1 and acq["columns_seen"] and all(c.startswith("vortDT") for c in acq["columns_seen"])
+    assert "not proof of the beamline" in acq["statement"]
+    [hint] = [h for h in S.facility_hints(b) if h["kind"] == "acquisition_system"]
+    assert hint["locator"].startswith(f"{acq['runs_with_its_columns']} run(s)'")
+    default = [n for n in b["naming_profiles"] if n["basis"] == "build_default"]
+    assert default and all(n["display_name"].startswith("SSRL BL15-2 HERFD electrochemistry filename convention v1") for n in default)
+    assert all(n["selector_description"].startswith("every source (this build's default naming convention")
+               and "not detected from these files" in n["selector_description"] for n in default)
+    assert B.validate_bundle(b) == []
+
+
+def test_a_file_name_reused_across_run_folders_is_marked_reused_and_its_tokens_are_kept(tmp_path, capsys):
+    """`AgL3_xas_exp1.exp` beside Ti data, in every run folder: its tokens stay `unknown_token`
+    statements, and their locator now says the name recurs and the file is no run's scan."""
+    bt = tmp_path / "src" / "SYN_reuse"
+    for i, folder in enumerate(("SYN_01_alpha", "SYN_02_beta", "SYN_03_gamma"), 1):
+        make_scan(bt / folder / f"{folder}_A.001")
+        (bt / folder / "SYN_QqL3_tmpl.exp").write_text(f"SYNTHETIC macro copied to folder {i}\n")
+    (bt / "SYN_01_alpha" / "SYN_once_only.exp").write_text("SYNTHETIC macro in one folder\n")
+    out = tmp_path / "out"
+    assert _run(["import", str(bt), "--out", str(out)], capsys)[0] == 0
+    b = _load(out)
+    tokens = [e for e in b["extended_context"] if (e["locator"] or "").startswith("filename token ")]
+    reused = [e for e in tokens if e["relative_path"].endswith("/SYN_QqL3_tmpl.exp")]
+    assert len({e["relative_path"] for e in reused}) == 3
+    assert any(e["raw_literal"] == "QqL3" and e["concept"] == "unknown_token" for e in reused)
+    for e in reused:
+        assert e["locator"].endswith(
+            "; this file name recurs in 3 folders of this import and the file is no run's scan, so the name "
+            "is reused and its tokens need not describe this run or beamtime")
+        assert e["entry_id"].startswith("filename:") and e["value_state"] == "source_recorded"
+    # a name in one folder, and a run's own scan files, are not marked
+    others = [e for e in tokens if e not in reused]
+    assert any(e["relative_path"].endswith("SYN_once_only.exp") for e in others)
+    assert all("recurs in" not in e["locator"] for e in others)
+    # the reused name's tokens are nobody's sample and no group's basis
+    assert "QqL3" not in json.dumps([b["samples"], b["record_groups"], b["questions"], b["candidates"]])
+    assert B.validate_bundle(b) == []
+
+
+def test_a_scan_file_name_repeated_in_every_run_folder_is_a_run_file_and_is_not_marked_reused(tmp_path, capsys):
+    """Each folder's own scan shares one name (`SYN_QqL3_A.001`): the name recurs, but each
+    copy is a run's scan, so its tokens describe that run and are not marked as a reused name."""
+    bt = tmp_path / "src" / "SYN_same_scan_name"
+    for folder in ("SYN_01_alpha", "SYN_02_beta", "SYN_03_gamma"):
+        make_scan(bt / folder / "SYN_QqL3_A.001")
+    out = tmp_path / "out"
+    assert _run(["import", str(bt), "--out", str(out)], capsys)[0] == 0
+    b = _load(out)
+    scan_tokens = [e for e in b["extended_context"]
+                   if (e["locator"] or "").startswith("filename token ") and e["relative_path"].endswith("/SYN_QqL3_A.001")]
+    assert len({e["relative_path"] for e in scan_tokens}) == 3
+    assert len(b["runs"]) == 3  # each copy IS a run's scan: the premise of the exclusion
+    assert all("recurs in" not in e["locator"] for e in scan_tokens)
+    assert B.validate_bundle(b) == []
+
+
 # --- review fixes: regroup after an absorber reading; readings that name some of a group's runs -----
 
 

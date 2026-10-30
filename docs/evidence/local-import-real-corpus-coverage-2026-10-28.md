@@ -424,11 +424,38 @@ emitted):
 - 2019-05 and 2018-07 Athena projects include reference spectra taken in other beamtimes; they were
   assigned to no run.
 
-**Parser defaults the readings exposed** (not yet fixed):
-- Beamline 4-3 and 6-2c bundles carry the BL15-2 acquisition-system label (now no longer shown as
-  evidence).
-- Reused template file names are tokenized as if they named samples (`AgL3`, `MoS2` on Ti and S
-  data).
+**Parser defaults the readings exposed** (~~not yet fixed~~ corrected 2026-10-29; contract §22,
+no format bump):
+- ~~Beamline 4-3 and 6-2c bundles carry the BL15-2 acquisition-system label (now no longer shown as
+  evidence).~~ **Corrected 2026-10-29.** The ids (`ssrl_bl152_spec_vortex_channels`,
+  `ssrl_bl152_herfd_echem_naming`) still name the code applied to every import. The BL15-2
+  display names are shown only where the facility hint's column test passes (`DEC-88`). Rebuilt
+  into `_runs_v12`:
+  - **No BL15-2 name, with a statement saying why:** BL4-3 2025-07 and 2025-11, and BL6-2c
+    2018-07. In each, 0 runs' scan headers have the vortDT columns.
+  - **Also no name: BL15-2 2019-05.** Its headers carry no vortDT columns either, and its beamline
+    is already contradicted (the sheet and the SPEC account say 6-2).
+  - **Name kept: BL15-2 2021-11 and 2025-04.** 85 and 92 runs carry the columns, and the
+    statement says column naming is not proof of the beamline.
+- ~~Reused template file names are tokenized as if they named samples (`AgL3`, `MoS2` on Ti and S
+  data).~~ **Corrected 2026-10-29; the claim itself was too strong.** Traced in `_runs_v11`:
+  - The tokens of `AgL3_xas_exp1.exp` (34 run folders) and `01_MoS2_s1.exp` (37) reached only
+    `unknown_token` statements in `extended_context`.
+  - They reached no sample, candidate, record-group basis or question hint, and no reading-pass
+    finding. A question cites such a file only as the path of a header literal it quotes.
+  - The one `MoS2` formula hint is a real MoS2 standard's header comment.
+  - Tokenization is unchanged. A filename-token statement from a file that is no run's scan, and
+    whose name recurs in two or more folders, now says so in its locator. In `_runs_v12` that is
+    40, 41, 28, 233, 223 and 76 statements (2019-05, 2021-11, 2025-04, 2025-07, 2025-11,
+    2018-07).
+  - This is a count, not a template detector.
+- **The `_runs_v12` result:**
+  - All six bundles are VALID 1.6.0, and every step exited 0.
+  - Against `_runs_v11`, every question (whole object), missing-value, candidate, record-group
+    and extended-context id is identical, and the coverage metric is unchanged.
+  - Still open: the processing protocol's question "At SSRL BL15-2, is `absev` … the energy
+    axis" is asked of the BL4-3 groups too. It is a protocol question that needs scientist
+    review, and it is unchanged here.
 
 ## Beamline 4-3 scan start times, 2026-10-29
 

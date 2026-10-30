@@ -1001,6 +1001,8 @@ anything `scientist_confirmed`.
   column name is not proof of the beamline. `experiment.acquisition_system` itself is the engine's build default, set on every
   import whatever the files are (kept for older readers), so it is never shown as a match on
   its own: a beamtime from another beamline used to be told its files were BL15-2 exports.
+  Since 2026-10-29 the bundle applies the same test to the system's own name: `display_name`
+  is present only when some run's headers carry its columns (§22).
   Hints are text and never an answer: a file layout or a folder name is not a statement of where
   data was taken.
 - **A Claude reading pass**: `bundle annotate <bundle> --from-readings <findings.json> --model <id>`.
@@ -1213,3 +1215,38 @@ Bounds (also stated per file in its summary):
   counted by type. The packed-file layout (type 8) is the one observed in a real Igor 6 experiment
   and anything else is skipped as `packed_file_unrecognised`. A wave's data is never read.
 - Across all analysis files in one bundle: <= 30,000 entries.
+
+## 22. What the build applies vs what the files show (2026-10-29) — no format bump
+
+The engine reads every import with one acquisition system and one filename convention, both
+Beamline 15-2's, whatever the files are. Their ids name code and stay everywhere
+(`experiment.acquisition_system.system_id`, `generator.naming_profiles[]`, each source's
+`naming_profile.profile_ids`). Their **display names** named a beamline, so a Beamline 4-3 or
+6-2c bundle read as if its data were BL15-2 exports. The bundle now applies the facility hint's
+own test (`DEC-88`, §20): does any run's scan headers carry the system's detector column names?
+
+- **`experiment.acquisition_system`** keeps `system_id` and `candidate_channels` and gains
+  `applied_as: "build_default"`, `runs_with_its_columns`, `columns_seen` and a `statement`.
+  `display_name` is present **only when `runs_with_its_columns` > 0**; the statement then says
+  column naming is not proof of the beamline. When it is 0 the statement says the name is not
+  shown because nothing in the files says they were taken with that system.
+- **`naming_profiles[]`**: a `build_default` binding scoped to the `acquisition_system` has
+  `display_name: null` when the acquisition system is not shown, and its `selector_description`
+  says the convention is applied whatever the files are and was not detected from them. A
+  binding the user chose (`--profile`) or a stored rule made is unchanged.
+- **`extended_context[]`**: a `filename token …` statement from a file whose name recurs in two
+  or more folders of the import, and which is no run's acquisition or scan file, has a clause
+  added to its `locator`: the name recurs in N folders, so it is reused and its tokens need not
+  describe this run or beamtime. This is a count, not a template detector: `entry_id`,
+  `concept`, `raw_literal` and the tokenization are unchanged. Measured on the real corpus,
+  such tokens (`AgL3`, `MoS2` from reused `.exp` macro names) reached no sample, sample-name
+  reading, candidate, question hint or record-group basis. They were only `unknown_token`
+  context. A question cites such a file only as the path its own literal came from.
+
+**Why no format bump.** `experiment.acquisition_system` is an untyped object in bundle-v1, and
+`naming_profile.display_name` and `selector_description` were already `string | null`. The
+1.6.0 schema accepts and refuses the same bundles. No question, missing-value, candidate,
+group or extended-context id moves. A bundle written before this change still carries the old
+display names; `suggestions.facility_hints` ignores them unless the column test passes, as
+before. `reading.full.json` (the raw engine state, not the contract) is unchanged and still
+holds the engine's names.
