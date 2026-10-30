@@ -1,6 +1,7 @@
 import './propose-term-link.css';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { ExternalLink } from './icons';
 import { api } from '../lib/api';
 import { ROUTES } from '../lib/routes';
 import {
@@ -24,6 +25,11 @@ import {
  *
  * It is navigation and nothing more: nothing is saved, nothing is sent, and the value is not
  * changed on the way (the form shows it as it was, and the server checks it).
+ *
+ * IT OPENS IN A NEW TAB. The screens it sits on hold work in progress — a record pasted into the
+ * Validator, a half-typed run override — that a same-tab navigation discarded. The house pattern
+ * for a link that leaves the page (`settings/AssistantCompanion.tsx`): `target="_blank"` with
+ * `rel="noopener noreferrer"`, an icon, and the accessible name saying it opens a new tab.
  */
 export function ProposeTermLink({
   fieldPath,
@@ -50,10 +56,15 @@ export function ProposeTermLink({
     <Link
       className={className ?? 'propose-term-link'}
       to={proposeTermHref(ROUTES.schemaProposals, { category, term, from })}
-      /* The accessible name STARTS with the visible text (WCAG 2.5.3), then says which. */
-      aria-label={`Propose this term: ${term}, for ${category}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      /* The accessible name STARTS with the visible text (WCAG 2.5.3), then says which, and that it
+         opens a new tab (the icon says so visually). */
+      aria-label={`Propose this term: ${term}, for ${category} (opens in a new tab)`}
+      title="Opens in a new tab"
     >
       Propose this term
+      <ExternalLink size={12} strokeWidth={2.2} aria-hidden="true" className="propose-term-link-icon" />
     </Link>
   );
 }

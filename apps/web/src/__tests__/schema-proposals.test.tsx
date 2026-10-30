@@ -1,9 +1,11 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { AppRoutes } from '../App';
-import { LABELS } from '../lib/labels';
+import { LABELS, formatWhen } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { composeDocumentTitle } from '../lib/documentTitle';
 import { stubFetchRoutes, type RouteEntry } from '../test/apiFixtures';
@@ -730,5 +732,75 @@ describe('the boundary is stated once', () => {
     expect(count()).toBe(1);
     // The server's own review note is never rendered a second time.
     expect(document.body.textContent).not.toContain(REVIEW_TEXT);
+  });
+});
+
+describe('audit fixes', () => {
+  it('Keep It returns focus to Withdraw and says the proposal is still pending', async () => {
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([proposal()]),
+    });
+    renderAt(`${ROUTE}?tab=proposals`);
+    fireEvent.click(await screen.findByRole('button', { name: 'Withdraw' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Keep It' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Withdraw' })).toHaveFocus());
+    expect(screen.getByTestId('sp-row-status')).toHaveAttribute('role', 'status');
+    expect(screen.getByTestId('sp-row-status')).toHaveTextContent('Kept. The proposal is still pending.');
+  });
+
+  it('a successful withdraw moves focus to the proposal and announces it', async () => {
+    const withdrawn = proposal({ status: 'withdrawn', withdrawn_at: '2026-10-28T18:00:00Z' });
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([proposal()]),
+      'POST /api/schema-proposals/01M61TASK3DFS5VX1C7X1RZJS5/withdraw': { body: { ...envelope, proposal: withdrawn } },
+    });
+    renderAt(`${ROUTE}?tab=proposals`);
+    fireEvent.click(await screen.findByRole('button', { name: 'Withdraw' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Withdraw' }));
+    const row = (await screen.findByText('Withdrawn', { selector: '.sp-status' })).closest('li') as HTMLElement;
+    await waitFor(() => expect(within(row).getByRole('heading', { level: 2 })).toHaveFocus());
+    expect(within(row).getByTestId('sp-row-status')).toHaveTextContent('Withdrawn. The proposal is no longer pending.');
+  });
+
+  it('proposal dates are a person’s date, with the exact instant kept on a <time>', async () => {
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([proposal({ status: 'withdrawn', withdrawn_at: '2026-10-28T18:00:00Z' })]),
+    });
+    renderAt(`${ROUTE}?tab=proposals`);
+    const row = (await screen.findByText('Withdrawn', { selector: '.sp-status' })).closest('li') as HTMLElement;
+    expect(row).not.toHaveTextContent('2026-10-28T17:53:37Z');
+    const times = row.querySelectorAll('time');
+    expect([...times].map((t) => t.getAttribute('dateTime'))).toEqual(['2026-10-28T17:53:37Z', '2026-10-28T18:00:00Z']);
+    expect(times[0].textContent).toBe(formatWhen('2026-10-28T17:53:37Z'));
+  });
+
+  it('a category error is added to the category’s hint, not put in its place', async () => {
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([]),
+      'POST /api/schema-proposals': {
+        status: 422,
+        body: { error: 'invalid', message: 'SERVER: check the fields.', errors: [{ field: 'category', code: 'required', message: 'SERVER: choose a list.' }] },
+      },
+    });
+    renderAt(`${ROUTE}?tab=propose`);
+    await screen.findByLabelText('Category');
+    fireEvent.change(sectionSelect(), { target: { value: 'System' } });
+    fillPropose();
+    fireEvent.click(screen.getByRole('button', { name: 'Save Proposal' }));
+    await screen.findByText('SERVER: choose a list.');
+    const ids = (screen.getByLabelText('Category').getAttribute('aria-describedby') ?? '').split(' ');
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).toMatch(/-hint$/);
+    expect(ids[1]).toMatch(/-err$/);
+    for (const id of ids) expect(document.getElementById(id)).not.toBeNull();
+  });
+
+  it('section-named buttons wrap instead of pushing the page sideways', () => {
+    const css = readFileSync(join(process.cwd(), 'src', 'screens', 'schema-proposals.css'), 'utf8');
+    expect(css).toMatch(/\.sp-actions \.btn\s*\{[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;/);
   });
 });

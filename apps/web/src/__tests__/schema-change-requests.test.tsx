@@ -488,7 +488,7 @@ describe('the Validator', () => {
       target: { value: JSON.stringify({ system: { technique: 'telepathy' }, context: { environment: 'in situ' } }) },
     });
     fireEvent.click(screen.getByRole('button', { name: /Validate/ }));
-    const link = await screen.findByRole('link', { name: 'Propose this term: telepathy, for system.technique' });
+    const link = await screen.findByRole('link', { name: 'Propose this term: telepathy, for system.technique (opens in a new tab)' });
     const href = new URL(link.getAttribute('href') ?? '', 'http://x');
     expect(href.pathname).toBe(ROUTES.schemaProposals);
     expect(Object.fromEntries(href.searchParams)).toEqual({
@@ -598,7 +598,7 @@ describe('a proposed value from a file, outside the field\'s list', () => {
     });
     renderPanel();
     await screen.findByText(/is not one of the values the official schema allows/);
-    const link = await screen.findByRole('link', { name: 'Propose this term: cryogenic, for context.environment' });
+    const link = await screen.findByRole('link', { name: 'Propose this term: cryogenic, for context.environment (opens in a new tab)' });
     expect(link.getAttribute('href')).toContain('from=ingestion_proposal');
   });
 
@@ -627,9 +627,17 @@ describe('ProposeTermLink', () => {
     );
   }
 
+  it('opens in a new tab, so the screen it sits on keeps its pasted record or half-typed override', () => {
+    renderLink('system.technique', 'XMCD');
+    const link = screen.getByRole('link', { name: /opens in a new tab/ });
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link.getAttribute('rel')).toContain('noopener');
+    expect(link).toHaveAccessibleName('Propose this term: XMCD, for system.technique (opens in a new tab)');
+  });
+
   it('renders for a portal list value it lacks, and nothing for any other field or value', () => {
     const shown = renderLink('system.technique', 'XMCD');
-    expect(screen.getByRole('link', { name: 'Propose this term: XMCD, for system.technique' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Propose this term: XMCD, for system.technique (opens in a new tab)' })).toBeInTheDocument();
     shown.unmount();
     for (const [path, term] of [
       ['system.technique', 'XAS'],
@@ -700,7 +708,7 @@ describe('a run override holding a value outside the list', () => {
   it('links to propose it when the portal list lacks it', async () => {
     await open('XMCD');
     const link = await within(rowFor(TECHNIQUE)).findByRole('link', {
-      name: 'Propose this term: XMCD, for system.technique',
+      name: 'Propose this term: XMCD, for system.technique (opens in a new tab)',
     });
     expect(link.getAttribute('href')).toContain('from=run_override');
   });

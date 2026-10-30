@@ -139,7 +139,12 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-sm);
+  min-width: 0;
 }
+/* A label that names a section ("Propose a New Field in Record Info (root fields)") wraps at a
+   narrow width instead of pushing the page sideways (.btn is nowrap by default). */
+.sp-actions .btn { white-space: normal; overflow-wrap: anywhere; text-align: left; max-width: 100%; }
+.sp-item-title:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
 
 /* --- messages -------------------------------------------------------------- */
 

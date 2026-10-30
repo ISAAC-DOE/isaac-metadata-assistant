@@ -16,7 +16,7 @@ import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
 import { BackendDown, LoadingPanel } from '../components/FetchStates';
 import { Copy, Download } from '../components/icons';
-import { LABELS } from '../lib/labels';
+import { LABELS, formatWhen } from '../lib/labels';
 import { api } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
 import { serverMessageOf } from '../lib/mutationErrors';
@@ -791,7 +791,7 @@ function ProposePanel({
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
                 aria-invalid={errorFor('category') ? true : undefined}
-                aria-describedby={errorFor('category') ? `${ids.category}-err` : `${ids.category}-hint`}
+                aria-describedby={`${ids.category}-hint${errorFor('category') ? ` ${ids.category}-err` : ''}`}
               >
                 <option value="">Choose a list…</option>
                 {listsInSection.map((key) => (
@@ -1216,21 +1216,35 @@ function ProposalRow({
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  // what just happened to this proposal, said in a live region and kept on the row
+  const [said, setSaid] = useState('');
   const confirmRef = useRef<HTMLButtonElement>(null);
   const withdrawRef = useRef<HTMLButtonElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     if (confirming) confirmRef.current?.focus();
   }, [confirming]);
 
+  function keep() {
+    setConfirming(false);
+    setSaid('Kept. The proposal is still pending.');
+    // the Withdraw button is rendered again once the confirmation closes
+    requestAnimationFrame(() => withdrawRef.current?.focus());
+  }
+
   async function withdraw() {
     if (busy) return;
     setBusy(true);
     setFailure(null);
+    setSaid('');
     try {
       const response = await api.withdrawSchemaProposal(proposal.id);
       setConfirming(false);
       onChanged(response.proposal);
+      setSaid('Withdrawn. The proposal is no longer pending.');
+      // the Withdraw control is gone: focus the proposal itself, whose status now reads Withdrawn
+      requestAnimationFrame(() => titleRef.current?.focus());
     } catch (err) {
       setConfirming(false);
       setFailure(serverMessageOf(err) ?? 'The proposal could not be withdrawn. Nothing was changed.');
@@ -1245,14 +1259,30 @@ function ProposalRow({
   return (
     <li className="sp-item">
       <div className="sp-item-head">
-        <h2 className="sp-item-title">{proposalHeadline(proposal)}</h2>
+        <h2 className="sp-item-title" tabIndex={-1} ref={titleRef}>
+          {proposalHeadline(proposal)}
+        </h2>
         <span className={`sp-status sp-status-${proposal.status}`}>{STATUS_LABEL[proposal.status]}</span>
       </div>
       <p className="sp-item-meta">
         {proposal.section}
         {` · ${PROPOSAL_KIND_LABEL[proposal.proposal_type] ?? proposal.proposal_type}`}
-        {proposal.proposed_at ? ` · drafted ${proposal.proposed_at}` : ''}
-        {proposal.withdrawn_at ? ` · withdrawn ${proposal.withdrawn_at}` : ''}
+        {proposal.proposed_at && (
+          <>
+            {' · drafted '}
+            <time dateTime={proposal.proposed_at} title={proposal.proposed_at}>
+              {formatWhen(proposal.proposed_at) ?? proposal.proposed_at}
+            </time>
+          </>
+        )}
+        {proposal.withdrawn_at && (
+          <>
+            {' · withdrawn '}
+            <time dateTime={proposal.withdrawn_at} title={proposal.withdrawn_at}>
+              {formatWhen(proposal.withdrawn_at) ?? proposal.withdrawn_at}
+            </time>
+          </>
+        )}
       </p>
       <p className="sp-item-text">{proposal.description}</p>
       {proposal.proposal_type === 'schema_change' && proposal.change && <ChangeSummary change={proposal.change} />}
@@ -1312,7 +1342,7 @@ function ProposalRow({
             <button type="button" className="btn btn-danger" ref={confirmRef} onClick={withdraw} disabled={busy}>
               {busy ? 'Withdrawing…' : 'Confirm Withdraw'}
             </button>
-            <button type="button" className="btn btn-secondary" onClick={() => setConfirming(false)} disabled={busy}>
+            <button type="button" className="btn btn-secondary" onClick={keep} disabled={busy}>
               Keep It
             </button>
           </span>
@@ -1323,6 +1353,9 @@ function ProposalRow({
           {failure}
         </p>
       )}
+      <p className="sp-item-meta" role="status" data-testid="sp-row-status">
+        {said}
+      </p>
     </li>
   );
 }
