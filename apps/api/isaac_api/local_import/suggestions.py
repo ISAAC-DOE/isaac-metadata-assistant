@@ -420,7 +420,8 @@ def ai_hints(bundle: Mapping, target_ids: Iterable[str], *, limit: int = 5) -> l
                 "strength": i.get("strength"),
                 "model_id": (i.get("model") or {}).get("model_id"),
                 "targets": 0,
-                "note": "Suggested by an AI reading of the files; the quote is as the reader gave it. Confirm it, or correct it; it is never used on its own.",
+                "note": ("Suggested by an AI reading of the files. Not file evidence: no parser read this value, and the quote "
+                         "is as the reader gave it. Confirm it, or correct it; it is never used on its own."),
             }
         h["targets"] += 1
     return sorted(by_value.values(), key=lambda h: -h["targets"])[:limit]

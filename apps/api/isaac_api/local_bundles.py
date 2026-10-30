@@ -1023,7 +1023,7 @@ def progress(bundle_dir: Path, bundle: Mapping, check: Mapping) -> dict:
         try:
             payload = Q.consolidate(bundle)
             questions_counts = payload["counts"]
-            minimum = Q.minimum_answers_for_one_group(payload, bundle)
+            minimum = Q.minimum_answers_for_one_group(payload, bundle, bundle_dir=bundle_dir)
         except Exception as exc:  # a bundle this build cannot consolidate: said, never hidden
             questions_counts = {"unavailable": f"{type(exc).__name__}"}
     out["questions"] = questions_counts
@@ -1338,7 +1338,7 @@ def get_local_bundle_questions(
             display, more = describe_question(data, q, folder=bundle, idx=idx)
             shown += more
             out_questions.append({**q, "display": display})
-        minimum = Q.minimum_answers_for_one_group(payload, data, scope=scope)
+        minimum = Q.minimum_answers_for_one_group(payload, data, scope=scope, bundle_dir=bdir)
         capture = capture_items(data)
         before = len(data.get("exposures") or ())
         for k, tid in shown:

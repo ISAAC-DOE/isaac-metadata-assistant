@@ -313,23 +313,45 @@ def test_the_nearest_group_keeps_to_the_scope_asked_for(grouped):
     assert Q.minimum_answers_for_one_group(payload, bundle, scope="group:rg-none") is None
 
 
-def test_the_nearest_group_is_never_one_with_nothing_left(grouped):
-    bundle = M.load(grouped)
-    payload = Q.consolidate(bundle)
-    first = Q.minimum_answers_for_one_group(payload, bundle)
-    done = first["group_id"]
-    g = next(x for x in bundle["record_groups"] if x["group_id"] == done)
-    g["status"] = B.STATE_SCIENTIST_CONFIRMED
-    _approved(bundle, done)
-    payload = {**payload, "questions": [q for q in payload["questions"]
-                                        if not (q["blocking"] and (q["scope"] == f"group:{done}" or q["scope"] == "experiment"))]}
-    got = Q.minimum_answers_for_one_group(payload, bundle)
-    assert got["group_id"] != done and got["groups_with_nothing_left"] == 1
+def _answer_the_minimum(bdir, nearest) -> None:
+    """Answer exactly the nearest group's questions (at their --only scope) with synthetic values, on disk."""
+    payload = Q.consolidate(M.load(bdir))
+    for x in nearest["questions"]:
+        q = Q.question(payload, x["question_id"])
+        field = x["fields"][0] if q["kind"] == "optional_values" else None
+        allowed = (q.get("field_allowed_values") or {}).get(field) if field else q.get("allowed_values")
+        M.decide_question(bdir, question_id=q["question_id"], only=x["only"], field=field, decision="correct",
+                          value=allowed[0] if allowed else "synthetic answer", by="S", orcid=None)
+
+
+def _confirmed_and_approved(bdir, gids) -> dict:
+    bundle = M.load(bdir)
     for x in bundle["record_groups"]:
-        x["status"] = B.STATE_SCIENTIST_CONFIRMED
-        _approved(bundle, x["group_id"])
-    none_left = Q.minimum_answers_for_one_group({**payload, "questions": []}, bundle)
-    assert none_left["group_id"] is None and none_left["plus_decisions"] == [] and "export" in none_left["statement"]
+        if x["group_id"] in gids:
+            x["status"] = B.STATE_SCIENTIST_CONFIRMED
+            _approved(bundle, x["group_id"])
+    return bundle
+
+
+def test_the_nearest_group_is_never_one_with_nothing_left(grouped, tmp_path):
+    """"Nothing left" is the record composer's word (every required field filled), never a question list's."""
+    grouped = shutil.copytree(grouped, tmp_path / "b")  # answered on disk: never the shared module bundle
+    first = Q.minimum_answers_for_one_group(Q.consolidate(M.load(grouped)), M.load(grouped))
+    done = first["group_id"]
+    _answer_the_minimum(grouped, first)
+    bundle = _confirmed_and_approved(grouped, {done})
+    got = Q.minimum_answers_for_one_group(Q.consolidate(bundle), bundle)
+    assert got["group_id"] != done and got["groups_with_nothing_left"] == 1
+    every = {g["group_id"] for g in M.load(grouped)["record_groups"]}
+    for _ in range(len(every)):
+        bundle = _confirmed_and_approved(grouped, every)
+        nearest = Q.minimum_answers_for_one_group(Q.consolidate(bundle), bundle)
+        if nearest["group_id"] is None:
+            break
+        assert nearest["questions"] and not nearest["unasked_required"]
+        _answer_the_minimum(grouped, nearest)
+    assert nearest["group_id"] is None and nearest["plus_decisions"] == [] and "export" in nearest["statement"]
+    assert nearest["groups_with_nothing_left"] == len(every)
 
 
 # --- wording ---------------------------------------------------------------------------------------------

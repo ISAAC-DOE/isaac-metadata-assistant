@@ -13,6 +13,7 @@ Every file here is SYNTHETIC (``SYN_*``, invented numbers). No real data.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from pathlib import Path
 
@@ -388,6 +389,13 @@ def test_the_nearest_group_offered_is_one_processing_can_complete(na_bundle):
     ok = copy.deepcopy(_na_result("g2", b["runs"][1]))
     ok.pop("applicability")
     ok.update(result_id="p-ok", review_flags=[], qc={"metrics": {}, "verdict": "warn", "reasons": []})
+    # an approvable result has a curve: one with no output file is refused by `decide --decision approve`
+    spec = na_bundle / "processing" / "g2" / "normalized.csv"
+    spec.parent.mkdir(parents=True, exist_ok=True)
+    spec.write_text("# synthetic\nenergy_eV,norm\n" + "\n".join(f"{1000 + 5 * i},{i / 20:.3f}" for i in range(21)) + "\n")
+    ok["outputs"] = {"files": [{"role": "normalized", "relative_path": "processing/g2/normalized.csv",
+                                "sha256": hashlib.sha256(spec.read_bytes()).hexdigest()}],
+                     "e0_eV": 1050.0, "edge_step": 1.0, "points": 21}
     b["processing_results"].append(ok)
     M.save_bundle(na_bundle, b)
     b = M.load(na_bundle)

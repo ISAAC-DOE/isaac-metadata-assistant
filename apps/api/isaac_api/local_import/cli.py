@@ -1035,7 +1035,8 @@ def cmd_bundle_questions(args) -> int:
         bundle = M.load(Path(args.bundle_dir))
         payload = Q.consolidate(bundle)
         rows = Q.filter_questions(payload, scope=args.scope, blocking_only=args.blocking_only)
-        page = rows[args.offset : args.offset + args.limit]
+        kept = [q for q in rows if not (args.skip_deferred and q.get("deferred"))]
+        page = kept[args.offset : args.offset + args.limit]
         # HINTS SHOW PARSER LITERALS: that is an exposure, recorded before printing.
         shown = [("candidate", h["candidate_id"]) for q in page for h in q["hints"] if h.get("candidate_id")]
         shown += [("conflict", q["targets"][0]["id"]) for q in page if q["kind"] == "resolve_conflict"]
@@ -1043,15 +1044,94 @@ def cmd_bundle_questions(args) -> int:
             M.expose_and_load(Path(args.bundle_dir), shown, "bundle questions")
         return {
             "format": payload["format"], "format_version": payload["format_version"],
-            "blocking_basis": payload["blocking_basis"], "counts": payload["counts"],
-            "total": len(rows), "offset": args.offset, "limit": args.limit, "returned": len(page),
-            "omitted_before": min(args.offset, len(rows)),
-            "omitted_after": max(0, len(rows) - args.offset - len(page)),
-            "minimum_for_one_group": Q.minimum_answers_for_one_group(payload, bundle, scope=args.scope),
-            "questions": page,
+            "blocking_basis": payload["blocking_basis"],
+            # THE SCOPE'S counts (every question --scope selects, before --blocking-only / --skip-deferred), and the
+            # whole bundle's under their own name
+            "counts": Q.scope_counts(payload, args.scope),
+            **({"counts_whole_bundle": payload["counts"]} if args.scope else {}),
+            "total": len(kept), "offset": args.offset, "limit": args.limit, "returned": len(page),
+            "omitted_before": min(args.offset, len(kept)),
+            "omitted_after": max(0, len(kept) - args.offset - len(page)),
+            **({"skipped_deferred": len(rows) - len(kept)} if args.skip_deferred else {}),
+            "minimum_for_one_group": Q.minimum_answers_for_one_group(payload, bundle, scope=args.scope,
+                                                                     bundle_dir=Path(args.bundle_dir)),
+            **({"questions": page} if args.with_targets else _compact_page(page)),
         }
 
     return _mutation(run)
+
+
+#: How many of a long id list a compact question keeps (the count says how many there are).
+_COMPACT_KEEP = 5
+#: Keys a compact question leaves out when they hold nothing (null, false, empty).
+_COMPACT_DROP_EMPTY = frozenset({"partition", "hints", "field_hints", "answers_differ", "allowed_values", "asked_again",
+                                 "targets_without_a_value", "targets_with_an_unfit_value"})
+
+
+def _compact_page(page: Sequence[Mapping]) -> dict:
+    """THE DEFAULT PAGE: each question compact (:func:`_compact_question`), and what repeats from question to
+    question said ONCE — the allowed values per field (``allowed_values_by_field``: a question's ``allowed_values``
+    / ``field_allowed_values`` are there, under its field) and each kind's allowed decisions
+    (``allowed_decisions_by_kind``: a question lists ``allowed_decisions`` only where it differs) — and each hint
+    kind's standing note (``hint_notes``: a hint carries ``note`` only where it says something else)."""
+    from . import questions as Q
+
+    notes: dict[str, str] = {}
+
+    def lean(hints):
+        out = []
+        for h in hints or ():
+            kind, note = h.get("kind"), h.get("note")
+            if isinstance(kind, str) and isinstance(note, str) and notes.setdefault(kind, note) == note:
+                h = {k: v for k, v in h.items() if k != "note"}
+            out.append(h)
+        return out
+
+    by_field: dict[str, list] = {}
+    by_kind = {q["kind"]: list(Q.ALLOWED_DECISIONS.get(q["kind"], ())) for q in page}
+    out = []
+    for q in page:
+        c = _compact_question(q)
+        if c.get("allowed_values") and c.get("target_field_path"):
+            by_field[c["target_field_path"]] = c.pop("allowed_values")
+        for f, values in (c.pop("field_allowed_values", None) or {}).items():
+            by_field[f] = values
+        if c.get("allowed_decisions") == by_kind.get(c["kind"]):
+            del c["allowed_decisions"]
+        if c.get("hints"):
+            c["hints"] = lean(c["hints"])
+        if c.get("field_hints"):
+            c["field_hints"] = {f: lean(hs) for f, hs in c["field_hints"].items()}
+        out.append(c)
+    return {"targets": ("counted: each question's targets_count, scopes_count and groups_count (--with-targets lists "
+                        "them; `decide --question` resolves them itself); allowed values are listed once per field "
+                        "in allowed_values_by_field, allowed decisions once per kind in allowed_decisions_by_kind, and "
+                        "each hint kind's note once in hint_notes"),
+            "allowed_values_by_field": dict(sorted(by_field.items())), "allowed_decisions_by_kind": by_kind,
+            "hint_notes": notes, "questions": out}
+
+
+def _compact_question(q: Mapping) -> dict:
+    """A question as `bundle questions` prints it by default: its target id lists (``targets``,
+    ``per_scope_targets``, an optional-values question's per-field ids, the groups it blocks) are COUNTED, not
+    listed — `decide --question` resolves them itself, and they were most of the page. ``--with-targets`` prints
+    them in full."""
+    out = {k: v for k, v in q.items() if k not in ("targets", "per_scope_targets", "blocks_group_ids")
+           # nothing said by an empty value: left out (the full question, --with-targets, keeps every key)
+           and not (k in _COMPACT_DROP_EMPTY and not v)}
+    if isinstance(out.get("applies_to"), Mapping) and not out["applies_to"].get("runs_outside_live_groups"):
+        out["applies_to"] = {k: v for k, v in out["applies_to"].items() if k != "runs_outside_live_groups"}
+    pst = q.get("per_scope_targets") or {}
+    out["targets_count"] = len(q.get("targets") or ())
+    out["scopes_count"] = len(pst)
+    out["groups_count"] = sum(1 for s in pst if s.startswith("group:"))
+    if q.get("kind") == "optional_values" and isinstance(q.get("fields"), Mapping):
+        out["fields"] = {f: len(ids) for f, ids in q["fields"].items()}
+    scopes = q.get("confirmable_scopes")
+    if isinstance(scopes, list) and len(scopes) > _COMPACT_KEEP:
+        out["confirmable_scopes"] = scopes[:_COMPACT_KEEP]
+        out["confirmable_scopes_count"] = len(scopes)
+    return out
 
 
 def _positions(raw: str | None):
@@ -1447,7 +1527,12 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q = bsub.add_parser("questions", help="consolidated questions: asked once, at the right scope, blocking first")
     q.add_argument("bundle_dir")
     q.add_argument("--scope", help="experiment | group:<id> | run:<id>")
-    q.add_argument("--blocking-only", action="store_true")
+    q.add_argument("--blocking-only", action="store_true",
+                   help="only what blocks export (with --scope group:<id>: what blocks THAT group's record)")
+    q.add_argument("--skip-deferred", action="store_true",
+                   help="leave out questions whose every target was deferred (still counted: counts.deferred)")
+    q.add_argument("--with-targets", action="store_true",
+                   help="list each question's target ids (targets, per_scope_targets); by default they are counted")
     q.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     q.add_argument("--offset", type=int, default=0)
     q.set_defaults(func=cmd_bundle_questions)
