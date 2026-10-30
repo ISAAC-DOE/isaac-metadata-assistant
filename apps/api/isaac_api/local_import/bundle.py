@@ -61,8 +61,10 @@ FORMAT_ID = "isaac.local-import-bundle"
 #: 1.9.0 (additive): a ``set_counter_positions`` decision may name ``-1`` among its ``positions`` —
 #: the LAST filename token, whatever the name's length (``grouping.LAST_POSITION``, ``decide
 #: --positions last``). Measured on a real beamtime: the counter was always the last token, at positions
-#: 3..10, and no fixed list could say so. A 1.8.0 validator refuses a bundle holding one, hence the
-#: version. Nothing becomes newly writable; the upgrade is disclosed (:data:`CHANGES_ADDED_IN`).
+#: 3..10, and no fixed list could say so. A merge decision may carry ``same_conditions_tokens`` (``decide
+#: --same-conditions``): the file-name words the scientist said are labels, not conditions. A 1.8.0
+#: validator refuses a bundle holding either, hence the version. Nothing becomes newly writable; the
+#: upgrade is disclosed (:data:`CHANGES_ADDED_IN`).
 FORMAT_VERSION = "1.9.0"
 #: The electrochemical control mode. Its allowed values are the official schema's enum (read at
 #: runtime by :func:`value_problem`); the schema's conditional rules key the set-point a record
@@ -95,8 +97,8 @@ _VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0",
 CHANGES_ADDED_IN: Mapping[str, str] = {
     "1.8.0": ("1.8.0 raises the bounds on scientist_decisions and ai_interpretations from 20,000 to 200,000 "
               "entries (append-only logs; at 20,000 no further answer could be written)"),
-    "1.9.0": ("1.9.0 lets a set_counter_positions answer name the LAST file-name token as the counter (--positions last, "
-              "stored as -1), whatever the name's length"),
+    "1.9.0": ("1.9.0 lets a counter answer name the LAST token (--positions last) and a merge say its names differ only "
+              "in labels (--same-conditions)"),
 }
 #: A field composed into a draft only beside another of the SAME run (interim decision for the
 #: set-point, pending domain-owner review; ``records.compose_group`` applies it). The CURRENT

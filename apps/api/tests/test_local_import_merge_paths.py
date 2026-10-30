@@ -109,7 +109,7 @@ def test_a_counter_answer_given_before_the_merge_is_honoured(tmp_path):
     assert out["merge_decisions_not_combined"] == [] and len(_combined(b)) == 1
 
 
-@pytest.mark.parametrize("marker", ["again", "repeat", "rep2", "again_2", "redo"])
+@pytest.mark.parametrize("marker", ["again", "repeat", "again_2", "redo"])  # a glued rep2 is a replicate (merge_conditions)
 def test_names_differing_only_in_a_repeat_marker_are_combined(tmp_path, marker):
     b = _grouped_stems(tmp_path, ["Q4_SYNcat_pH2_400mV", f"Q4_SYNcat_pH2_400mV_{marker}"])
     g1, g2 = M.load(b)["record_groups"]
@@ -121,13 +121,16 @@ def test_names_differing_only_in_a_repeat_marker_are_combined(tmp_path, marker):
 def test_a_repeat_beside_a_not_counter_number_is_honoured_once_the_sample_is_confirmed(tmp_path, capsys):
     """BL15-2 shape: `03_…` beside `04_…_again`, the scientist having said the leading number is NOT a
     counter. The refusal does not send them to the counter answer they contradicted; it names the
-    sample confirmation, and following it combines the runs."""
+    sample confirmation and the statement that 02 / 03 are labels, not conditions, and following them
+    combines the runs."""
     b = _grouped_stems(tmp_path, ["Q4_02_SYNcat_pH2_400mV", "Q4_03_SYNcat_pH2_400mV_again"])
     M.decide(b, target_ids=["experiment"], decision=B.NOT_COUNTER_DECISION, value=None, by=BY, orcid=None, positions=[2])
     g1, g2 = M.load(b)["record_groups"]
     nc = _not_combined(_merge(b, g1["group_id"], [g2["group_id"]]))
     assert "token 2 (02 / 03)" in nc["reason"] and "set_counter_positions" not in nc["reason"]
-    assert len(nc["next_commands"]) == 2 and all("--decision correct --value" in c for c in nc["next_commands"])
+    *samples, ack = nc["next_commands"]
+    assert len(samples) == 2 and all("--decision correct --value" in c for c in samples)
+    assert "--decision merge" in ack and "--same-conditions" in ack and "the names differ in: 02 / 03" in nc["reason"]
     _follow(b, nc["next_commands"], capsys)
     out = M.group(b, regroup=True)
     assert out["merge_decisions_not_combined"] == [] and len(_combined(b)) == 1
@@ -194,10 +197,12 @@ def test_a_confirmed_sample_does_not_combine_names_stating_different_conditions(
     bundle = M.load(b)
     h1, h2 = bundle["record_groups"]
     combined = M._combine_for_merge([h1, h2], {"decision_id": "d-99999", "decided_by": {"name": BY}}, h1["group_id"], "exp")
-    assert M._merge_blockers(bundle, {}, [h1, h2], combined) == []  # the same sample: the counter does not block
+    assert M._merge_blockers(bundle, {}, [h1, h2], combined)  # the same sample alone: the names still differ (015 / 016)
+    said = {"decision_id": "d-99999", "decided_by": {"name": BY}, "same_conditions_tokens": ["015", "016"]}
+    assert M._merge_blockers(bundle, {}, [h1, h2], combined, said) == []  # the same sample AND the same conditions
     for run, stem in zip(bundle["runs"], ("SYN_MOFdry_0p5wt", "SYN_MOFdry_5wt")):  # as if the names stated a loading
         run["stem"] = stem
-    reasons = M._merge_blockers(bundle, {}, [h1, h2], combined)
+    reasons = M._merge_blockers(bundle, {}, [h1, h2], combined, said)
     assert any("state different conditions (0p5wt / 5wt)" in r for r in reasons), reasons
 
 

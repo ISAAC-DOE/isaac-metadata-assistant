@@ -50,7 +50,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Container, Iterable, Mapping, Sequence
 
 GROUPING_RULE_ID = "isaac.grouping.record_groups.v1"
 ROLE_RULE_ID = "isaac.grouping.run_role.v0"
@@ -288,6 +288,34 @@ _REPEAT_TOKEN = re.compile(r"^(again|repeat|rep\d*|redo)$", re.IGNORECASE)
 #: ``decide --positions last``). Measured on a real beamtime: the counter was always the last token,
 #: at positions 3..10, and a fixed position list also named a non-counter token of the longer names.
 LAST_POSITION = -1
+
+
+def last_counter_exempt(stems: Iterable[str]) -> frozenset[str]:
+    """The names (casefolded) whose last token a ``last`` answer (:data:`LAST_POSITION`) does NOT make a
+    counter: where names sharing a prefix (the name up to its trailing run of whole-number tokens) end
+    in trailing runs of different lengths, only the LONGEST is read as ending in a counter. Measured in
+    review: with ``…_pH2_3``, ``…_pH2_4`` and ``…_pH2_3_001`` beside each other, ``last`` joined the
+    sample numbers 3 and 4 (the counter is the token after them, where there is one). Where every name
+    of a prefix ends the same way — the beamtime ``last`` was built for: every name ends in a counter,
+    the names of different lengths — nothing is exempt. Fail closed: an exempt token is no counter."""
+    family: dict[tuple, set[int]] = {}
+    shape: dict[str, tuple[tuple, int]] = {}
+    for stem in stems:
+        toks = [t.casefold() for t in _stem_tokens(stem or "")]
+        j = len(toks)
+        while j and toks[j - 1].isdigit():
+            j -= 1
+        shape[str(stem or "").casefold()] = (tuple(toks[:j]), len(toks) - j)
+        family.setdefault(tuple(toks[:j]), set()).add(len(toks) - j)
+    return frozenset(s for s, (head, n) in shape.items() if n and n < max(family[head]))
+
+
+def stem_counter_positions(stem: str, positions: Iterable[int], exempt: Container[str] = ()) -> list[int]:
+    """``positions`` for this name: :data:`LAST_POSITION` left out where :func:`last_counter_exempt` exempts it."""
+    pos = list(positions)
+    if LAST_POSITION in pos and str(stem or "").casefold() in exempt:
+        return [p for p in pos if p != LAST_POSITION]
+    return pos
 
 
 def _is_counter_token(toks: Sequence[str], i: int, positions: set, known: set) -> bool:
@@ -711,6 +739,12 @@ def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: froz
     eng = engine_reading_issues(bundle)
     counter_decision = counter_positions_decision(bundle)
     cpos = counter_decision["positions"] if counter_decision else ()
+    # `last` is read against every name of the beamtime (the context's runs on a regroup), never this view's
+    last_exempt = (last_counter_exempt(r.get("stem") or "" for r in (_context or bundle).get("runs") or ())
+                   if LAST_POSITION in cpos else frozenset())
+
+    def cpos_of(run: Mapping) -> list[int]:
+        return stem_counter_positions(run.get("stem") or "", cpos, last_exempt)
 
     raw = [_run_readings(run, cands, eng["per_run"].get(run["run_key"], [])) for run in runs]
     beamtime_issues = []
@@ -742,7 +776,7 @@ def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: froz
             readings = dict(readings)
             readings["sample_name_stem"] = {
                 "kind": "literal",
-                "value": name_stem_key(run.get("stem") or "", counter_positions=cpos, known_counters=_known_counters(run)),
+                "value": name_stem_key(run.get("stem") or "", counter_positions=cpos_of(run), known_counters=_known_counters(run)),
                 "candidate_ids": [],
                 "sample_key_basis": "name_stem",
                 "_loose": name_stem_key(run.get("stem") or "", loose=True),
@@ -764,7 +798,7 @@ def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: froz
             blockers.append("blocked_by_engine_reading")
         if run["run_key"] in _force_alone:
             blockers.append("condition_check_failed")
-        name_key = name_stem_key(run.get("stem") or "", counter_positions=cpos, known_counters=_known_counters(run))
+        name_key = name_stem_key(run.get("stem") or "", counter_positions=cpos_of(run), known_counters=_known_counters(run))
         cond_sig = _canon({k: _comparable(r) for k, r in sorted(readings.items()) if classes[k] == CLASS_CONDITION})
         # For merge CANDIDATES only: the name-stem key with every digit token dropped.
         cond_sig_loose = _canon(
@@ -887,7 +921,7 @@ def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: froz
         m0 = g["_members"][0]
         run = m0["run"]
         if len(g["_members"]) > 1:
-            ctoks = [counter_tokens(m["run"].get("stem") or "", counter_positions=cpos, known_counters=_known_counters(m["run"])) for m in g["_members"] if m["run"]["run_key"] not in g["context_run_keys"]]
+            ctoks = [counter_tokens(m["run"].get("stem") or "", counter_positions=cpos_of(m["run"]), known_counters=_known_counters(m["run"])) for m in g["_members"] if m["run"]["run_key"] not in g["context_run_keys"]]
             note = ""
             if len({tuple(c) for c in ctoks}) > 1:
                 note += " Their file names differ only in the numbers " + " / ".join("_".join(c) or "(none)" for c in ctoks) + ", read as run counters."
@@ -906,7 +940,7 @@ def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: froz
                             "stem": m["run"].get("stem"),
                             "legacy_run_or_file_number": m["books"].get("legacy_run_or_file_number") or [],
                             "repeat_marker": m["books"].get("repeat_marker") or [],
-                            "counter_tokens": counter_tokens(m["run"].get("stem") or "", counter_positions=cpos, known_counters=_known_counters(m["run"])),
+                            "counter_tokens": counter_tokens(m["run"].get("stem") or "", counter_positions=cpos_of(m["run"]), known_counters=_known_counters(m["run"])),
                         }
                         for m in g["_members"]
                     ],
@@ -1057,7 +1091,7 @@ def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: froz
         for r in mc["reasons"]:
             if r["code"] == "numeric_name_token_differs":
                 stems = [by_gid[g]["_members"][0]["run"].get("stem") or "" for g in mc["group_ids"]]
-                for pos in _differing_number_positions(stems, counter_positions=cpos):
+                for pos in _differing_number_positions(stems, counter_positions=cpos, last_exempt=last_exempt):
                     pos_count[pos] = pos_count.get(pos, 0) + 1
     q = counter_question(pos_count, counter_decision)
     if q:
@@ -1080,6 +1114,8 @@ def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: froz
         "experiment_questions": experiment_questions,
         "counter_positions_decision": counter_decision,
         "merges_prevented_by_name_tokens": merges_prevented_by_name_tokens,
+        # only under a `last` answer (an undecided proposal is unchanged): the names it does not apply to
+        **({"last_counter_exempt": sorted(last_exempt)} if LAST_POSITION in cpos else {}),
     }
 
 
@@ -1110,7 +1146,8 @@ def counter_positions_decision(bundle: Mapping) -> dict | None:
     }
 
 
-def _differing_number_positions(stems: Sequence[str], *, counter_positions: Iterable[int] = ()) -> list[int]:
+def _differing_number_positions(stems: Sequence[str], *, counter_positions: Iterable[int] = (),
+                                last_exempt: Container[str] = ()) -> list[int]:
     """1-based token positions where same-length names differ only in all-digit tokens that are
     NOT already counters (the positions a set_counter_positions answer would have to name).
 
@@ -1131,7 +1168,7 @@ def _differing_number_positions(stems: Sequence[str], *, counter_positions: Iter
         if len(set(col)) > 1:
             if not all(c.isdigit() for c in col):
                 return []
-            if not all(_is_counter_token(t, i, positions, set()) for t in toks):
+            if not all(_is_counter_token(t, i, set(stem_counter_positions(st, positions, last_exempt)), set()) for st, t in zip(stems, toks)):
                 out.append(i + 1)
     return out
 
@@ -1174,6 +1211,10 @@ def condition_violations(bundle: Mapping, proposal: Mapping) -> list[dict]:
     per_run = (proposal.get("engine_reading_issues") or {}).get("per_run") or {}
     overrides = (proposal.get("key_classes") or {}).get("beamtime_overrides") or {}
     cpos = ((proposal.get("counter_positions_decision") or {}).get("positions")) or ()
+    last_exempt: Container[str] = ()
+    if LAST_POSITION in cpos:
+        last_exempt = (frozenset(proposal["last_counter_exempt"]) if "last_counter_exempt" in proposal
+                       else last_counter_exempt(r.get("stem") or "" for r in runs.values()))
     out = []
     for g in proposal.get("record_groups") or ():
         context = set(g.get("context_run_keys") or ())
@@ -1184,7 +1225,8 @@ def condition_violations(bundle: Mapping, proposal: Mapping) -> list[dict]:
             if len(set(vals.values())) > 1:
                 out.append({"group_id": g["group_id"], "key": key, "values": vals})
         names = {
-            rk: name_stem_key(runs[rk].get("stem") or "", counter_positions=cpos, known_counters=_known_counters(runs[rk]))
+            rk: name_stem_key(runs[rk].get("stem") or "", counter_positions=stem_counter_positions(runs[rk].get("stem") or "", cpos, last_exempt),
+                              known_counters=_known_counters(runs[rk]))
             for rk in g["member_run_keys"]
             if rk in runs and rk not in context
         }
@@ -1288,12 +1330,15 @@ def propose_unread_merge_candidates(groups: Sequence[Mapping], *, counter_positi
         loose = name_stem_key(stem, loose=True)
         if loose and loose != stem.casefold():
             pools.setdefault((g.get("role"), g.get("experiment_key"), loose), []).append(g)
+    counter_positions = list(counter_positions)
+    last_exempt = last_counter_exempt(str(g.get("stem") or "") for g in groups) if LAST_POSITION in counter_positions else frozenset()
     out = []
     for (role, exp_key, _), members in pools.items():
         if len(members) < 2:
             continue
         gids = [m["group_id"] for m in members]
-        strict = {m["group_id"]: name_stem_key(m.get("stem") or "", counter_positions=counter_positions) for m in members}
+        strict = {m["group_id"]: name_stem_key(m.get("stem") or "", counter_positions=stem_counter_positions(m.get("stem") or "", counter_positions, last_exempt))
+                  for m in members}
         agree = len(set(strict.values())) == 1
         mcid = "mc-" + hashlib.sha256((str(exp_key) + "\n" + "\n".join(sorted(gids))).encode()).hexdigest()[:16]
         reasons = [{"code": "names_differ_only_in_counters" if agree else "numeric_name_token_differs", "stems": [m.get("stem") for m in members], "values_by_group": strict}]

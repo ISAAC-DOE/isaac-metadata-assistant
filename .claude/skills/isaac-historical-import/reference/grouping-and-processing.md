@@ -19,12 +19,17 @@ Get the groups with `bundle list <bundle> groups` and one in full with `bundle s
   (refused unless `--merge-with` names another live record group of this bundle), then
   `bundle group <bundle> --regroup`, then confirm the ONE combined group it proposes. The regroup
   combines them when the names differ only at positions the scientist declared counters, or only in a
-  repeat marker (`again`, `repeat`, `rep2`, `redo`), or when the scientist confirmed the same sample for
-  every run; runs whose conditions differ, or whose names differ in a quantity (`400mV`, `0p5wt`), are
-  never combined. Tell the scientist which happened. When it could not combine them it lists the
-  merge in `merge_decisions_not_combined`, with a reason and `next_commands` (the counter answer, or
-  one sample confirmation per run): say the reason in words and offer exactly those steps, asking the
-  scientist for any value they need; then regroup again.
+  repeat marker (`again`, `repeat`, `redo`; a glued `Rep1`/`rep2` is a replicate, another sample), or
+  when the names differ in words the scientist says are labels: the same sample confirmed for every
+  run AND the merge recorded with `--same-conditions` (stored with the words it was said for). The
+  same sample is not the same conditions: before `--same-conditions`, ask "same sample AND same
+  conditions? the names differ in: pristine / cycled" — `pristine`/`cycled`, `before`/`after`,
+  `soaked`, `OCV` are usually conditions, and then the answer is separate records. Runs whose
+  conditions differ, or whose names differ in a quantity (`400mV`, `0p5wt`, `T300`, `E1`), are never
+  combined. Tell the scientist which happened. When it could not combine them it lists the merge in
+  `merge_decisions_not_combined`, with a reason and `next_commands` (the counter answer, or one sample
+  confirmation per run and the merge again with `--same-conditions`): say the reason in words and
+  offer exactly those steps, asking the scientist for any value they need; then regroup again.
 - a merge candidate with `caution` (its file names state different samples or conditions, or the build
   classified no condition at all): say the caution sentence first; merging such groups would usually
   make one wrong record. `bundle show <bundle> merge-candidate <id>` shows its run labels (no values).
@@ -95,7 +100,10 @@ element or edge from a file name.
 - `naming_counter_positions` (an experiment-scope question): which positions of the file name are running
   counters, not sample identity. Ask once. Answer with `decide <bundle> --target experiment --decision
   set_counter_positions --positions 2,3 --by "<name>"` (`--positions last` when the counter is
-  always the last token, whatever the name's length), then `bundle group <bundle> --regroup` (decided
-  groups are kept). When they say a position is NOT a counter: `decide <bundle> --target experiment
+  always the last token, whatever the name's length; where some names sharing a prefix end in a
+  shorter run of numbers, `…_3` beside `…_3_001`, only the longest is read as ending in a counter),
+  then `bundle group <bundle> --regroup` (decided groups are kept). The reply's
+  `regroup_preview.statement` says how many groups the answer would join: tell the scientist before
+  regrouping. When they say a position is NOT a counter: `decide <bundle> --target experiment
   --decision set_not_counter_positions --positions 2 --by "<name>"` (grouping is unchanged; the
   question drops out).

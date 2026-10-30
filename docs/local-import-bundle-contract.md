@@ -1620,9 +1620,9 @@ question ids (measured on the synthetic fixtures and both beamtimes).
 
 - **A merge decision is combined** (`mutations._merge_blocker_details`) when, besides everything §9's
   merge check already requires, the file names agree once repeat markers (`again`, `repeat`, `rep2`,
-  `redo`, and a number right after one) and the digit tokens at positions declared run counters
+  `redo`, and a number right after one; `rep2` no longer, §27.1) and the digit tokens at positions declared run counters
   (`set_counter_positions`, `last` included) are left out — or, where they still differ, a scientist
-  confirmed the same `sample.material.name` for every run. A token's shape alone still never makes it a
+  confirmed the same `sample.material.name` for every run (§27.1: and `--same-conditions`). A token's shape alone still never makes it a
   counter. An unclassified reading read off the names (`unknown_token`, `new_spot`) follows the names;
   one from elsewhere needs the same confirmed sample.
 - **Never combined:** runs whose classified readings or conditions differ, and names that differ in a
@@ -1643,3 +1643,33 @@ question ids (measured on the synthetic fixtures and both beamtimes).
   `bundle show <dir> merge-candidate <id>` shows one (no reading's value, so no exposure).
 - **Live groups by default.** `bundle list groups` lists proposed and confirmed groups and counts the
   rest under `not_listed`; `--all` lists history too. `bundle group` adds `live_record_groups`.
+
+### 27.1 Review fixes (2026-10-30): the same sample is not the same conditions — still format 1.9.0
+
+Found in review (`tests/test_local_import_merge_conditions.py`, synthetic); nothing had shipped, so the
+additions stay in 1.9.0. Undecided bundles are unchanged (the same group, merge-candidate and question ids
+on the synthetic fixtures).
+
+- **A sample confirmation alone no longer combines names that differ.** `Q4_…_pristine` and `Q4_…_cycled`
+  were combined once one sample was confirmed for both — true of one material measured in two
+  conditions. Now the merge decision must also carry `same_conditions_tokens` (`decide … --decision merge
+  --same-conditions`): the words the names differ in, which the scientist states are labels, not
+  conditions. It covers only those words (a group added later, differing in another word, is not
+  combined). `--same-conditions` is refused on anything but a merge, when the names do not differ, and
+  when they differ in a quantity. The refusal asks "same sample AND same conditions? the names differ
+  in: cycled / pristine" and its `next_commands` are the sample confirmations and the merge recorded
+  again with `--same-conditions` on its own target (replacing the refused decision).
+- **Glued quantities.** One or two letters glued to a number (`T300`, `E1`, `P2`, `s1`) state a possible
+  quantity: names differing in one are never combined. A longer word with a number (`spot2`) is a label.
+- **`RepN` is a replicate on the merge path.** A glued `Rep1`/`rep2` is compared as a token (another
+  sample), so `Rep1_ZnO` / `Rep2_ZnO` need the same answers as any word. The default grouping still
+  reads it as a repeat marker (unchanged). `again`, `repeat`, `redo` (and a number after one) remain
+  markers, and the repeat path combines only when the marker is the ONLY difference.
+- **`last` is a counter only where it is one** (`grouping.last_counter_exempt`). Among names sharing a
+  prefix (the name up to its trailing whole numbers) whose trailing numbers differ in count, only the
+  longest is read as ending in a counter: `…_pH2_3` / `…_pH2_4` beside `…_pH2_3_001` are no longer
+  joined. Where every name of a prefix ends the same way (every name ending in a counter, names of
+  different length) nothing changes.
+- **`decide … set_counter_positions` says what it would do:** `regroup_preview` (`groups_joined`, `into`,
+  `groups_split`, `statement`) counts the current proposed groups the next regroup would join, computed
+  as the regroup computes it; nothing is regrouped.

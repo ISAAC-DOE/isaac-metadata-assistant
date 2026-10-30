@@ -129,13 +129,15 @@ sample, the conditions, how many scans, and why runs were split ("these two diff
 Say plainly when a group needs care (`merged_despite_engine_reading`, `sample_key_basis: name_stem`:
 see the reference), and say a merge candidate's `caution` before asking about it.
 The experiment question `naming_counter_positions` asks which filename positions hold a counter;
-answer it once (`set_counter_positions --positions N`, or `last`), then regroup. The other,
+answer it once (`set_counter_positions --positions N`, or `last`); say its `regroup_preview.statement`
+(what it would join), then regroup. The other,
 `clock_time_zone`, needs the instrument clock's IANA zone; never suggest one.
 Ask the scientist to **confirm, split or merge** each, in batches, with progress. A group that is not
 a result (alignment, a reference foil, a test scan) can be **left out** with `reject`; say it is never
 exported. Several groups accepted as shown: list each back, then one `--targets-file` confirm.
 After a regroup, say any `merge_decisions_not_combined` in words and offer its `next_commands` (never
-run one without the scientist's answer).
+run one without the scientist's answer). A `--same-conditions` merge needs a yes to "same sample AND
+same conditions? the names differ in: …" with those words; `pristine`/`cycled` are conditions, not labels.
 
 ## Step 6 · Processing (a DRAFT protocol)
 

@@ -1179,6 +1179,7 @@ def cmd_bundle_decide(args) -> int:
                 element=args.element,
                 edge=args.edge,
                 positions=positions,
+                same_conditions=args.same_conditions,
             )
         return M.decide(
             Path(args.bundle_dir),
@@ -1195,6 +1196,7 @@ def cmd_bundle_decide(args) -> int:
             element=args.element,
             edge=args.edge,
             positions=positions,
+            same_conditions=args.same_conditions,
         )
 
     return _mutation(run)
@@ -1502,9 +1504,11 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
                         "(2) isaac bundle group <dir> --regroup, which proposes ONE combined group (flag "
                         "merged_by_scientist_decision) only when nothing recorded tells them apart: no confirmed run, one role, "
                         "every recorded reading and confirmed run answer equal (runs measured under different conditions are "
-                        "never combined), and file names that agree once repeat markers (again, rep2 ...) and the positions "
+                        "never combined), and file names that agree once repeat markers (again, repeat, redo ...) and the positions "
                         "declared run counters (set_counter_positions) are left out — or, where they still differ, the same "
-                        "sample.material.name confirmed for every run and no differing token stating a quantity (400mV, 0p5wt); "
+                        "sample.material.name confirmed for every run AND the merge recorded with --same-conditions (the words "
+                        "the names differ in are labels, not conditions), no differing token stating a quantity (400mV, "
+                        "0p5wt, T300); "
                         "otherwise its merge_decisions_not_combined entry gives the reason and next_commands that move it on; "
                         "(3) --target <combined group> --decision confirm")
     q.add_argument("--value", help="the value; for set_clock_time_zone the IANA name (Area/Location, or UTC) of the time zone "
@@ -1515,6 +1519,10 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--note")
     q.add_argument("--split-into", help="record groups: JSON list of lists of run keys")
     q.add_argument("--merge-with", nargs="*", help="record groups: group ids to merge with")
+    q.add_argument("--same-conditions", action="store_true",
+                   help="with --decision merge: the scientist states the runs measured the same sample under the SAME "
+                        "conditions — the words their file names differ in (stored on the decision) are labels, not "
+                        "conditions. Refused when the names state different quantities")
     q.add_argument("--qc-status", help="processing result + approve: measurement.qc.status, from the pinned vocabulary")
     q.add_argument("--qc-note", help="with --qc-status: what is compromised or failed, and why")
     q.add_argument("--element", help="record group + approve_calibration (the calibration reference) or set_absorber (the absorber): an element, e.g. Ir")
