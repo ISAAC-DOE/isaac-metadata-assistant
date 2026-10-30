@@ -11,10 +11,12 @@ every uncertain value. **Nothing you produce is an official record until `isaac 
 passes every check, and you never upload anything.**
 
 Talk like a colleague. No jargon, no JSON, no ids unless the scientist asks. Never ask them to
-edit a file; you run the commands. Batch your questions (at most 5 per message) and always show
+edit a bundle or any other file except the two sheets they fill (the template, and the rulings
+column of their own sheet's adoption); you run the commands. Batch your questions (at most 5 per message) and always show
 progress, for example "3 of 12 groups confirmed".
 
-Details live in `reference/`; open a file only when its step needs it.
+Details live in `reference/`; open a file only when its step needs it. Every command and flag is
+listed in `reference/commands.md`.
 
 ## Rules (read first, apply always)
 
@@ -22,7 +24,8 @@ Details live in `reference/`; open a file only when its step needs it.
    composition or validation files, or anything else inside a bundle folder. Every change goes through
    a command (`decide`, `annotate`, `group`, `process`, `build-records`). If a command cannot do what
    is needed, tell the scientist; do not work around it. The only files you write yourself are
-   working notes the commands take as input (the findings file, a list of ids for `--targets-file`),
+   working notes the commands take as input (the findings file, a list of ids for `--targets-file`,
+   a `--params-file` the scientist asked for),
    and those go in a working folder BESIDE the bundle (e.g. `<bundle>-notes/`), never inside it.
 0b. **Run `decide` only with an answer the scientist gave in THIS conversation.** Never infer one from
    a file, a hint, an earlier session or what seems likely. No answer, no decision (`defer`). Never use
@@ -58,7 +61,7 @@ Find the command: read `checkout-path.txt` beside this file (if present) and use
 `<that path>/.venv/bin/isaac` (call it `<isaac>`; the `python` in the same folder is `<python>`);
 otherwise use `isaac` from PATH. Run `<isaac> import --help`.
 If `checkout-path.txt` exists, check this installed copy of the skill is current:
-`diff -rq -x checkout-path.txt <that path>/.claude/skills/isaac-historical-import <this skill's folder>`.
+`diff -rq -x checkout-path.txt -x .DS_Store <that path>/.claude/skills/isaac-historical-import <this skill's folder>`.
 Any difference means this copy is out of date: give the ONE fix, `scripts/setup_isaac_local.sh
 --install-skill` (from the ISAAC folder), then restart Claude Code. Do not continue on an old copy.
 If it says the import package is missing, or the command is not found, stop and give the ONE fix:
@@ -82,7 +85,8 @@ Record their answer in your next message.
 
 - **Yes** → continue.
 - **No / not sure** → deterministic mode: run `isaac import` only (it prints counts, no content),
-  never open source files, `summary.md`, `show`, `excerpt` or `reveal`, and give the scientist the
+  never open source files or any bundle file, never run a command whose output shows content (see the
+  reference), and give the scientist the
   commands to run themselves. Stop there unless they change their answer.
 
 ## Step 2 · Import
@@ -134,12 +138,13 @@ Say plainly when a group needs care (`merged_despite_engine_reading`, `sample_ke
 see the reference), and say a merge candidate's `caution` before asking about it.
 The experiment question `naming_counter_positions` asks which filename positions hold a counter;
 answer it once (`set_counter_positions --positions N`, or `last`); say its `regroup_preview.statement`
-(what it would join or let merge), then regroup. "I don't know" is `--decision defer`: grouping is unchanged. The other,
+(what it would join or let merge), then regroup. "I don't know" is `--target experiment --decision defer`: grouping is unchanged. The other,
 `clock_time_zone`, needs the instrument clock's IANA zone; never suggest one.
 Ask the scientist to **confirm, split or merge** each, in batches, with progress. A group that is not
 a result (alignment, a reference foil, a test scan) can be **left out** with `reject`; say it is never
-exported. Several groups accepted as shown: list each back, then one `--targets-file` confirm; leave
-out every group with a `cannot_export_reason` and say why (no curve can ever be made for it).
+exported. Several groups accepted as shown: list each back, then one `--targets-file` confirm; never
+include a group with a `cannot_export_reason`: say why (no curve can ever be made for it) and offer
+`reject` or leaving it unconfirmed.
 After a regroup, say any `merge_decisions_not_combined` in words and offer its `next_commands` (never
 run one without the scientist's answer). A `--same-conditions` merge needs a yes to "same sample AND
 same conditions? the names differ in: …" with those words; `pristine`/`cycled` are conditions, not labels.
@@ -217,7 +222,7 @@ Never edit a draft file and never relax a check.
 
 ## Step 9 · Export and dry run
 
-`<isaac> bundle export <bundle> --out <records>` writes only `exportable` records. Its reply opens with
+Read `reference/records-and-validation.md`. `<isaac> bundle export <bundle> --out <records>` writes only `exportable` records. Its reply opens with
 `outcome` ("Wrote N record(s), refused M group(s)"): exit 1 means *some* group was refused, not that
 nothing was written. Then counts (`refused_total`, `refused_by_reason`, `missing_required_by_field`)
 and the first 3 refusals; `--full` lists all. **If

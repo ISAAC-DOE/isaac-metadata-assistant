@@ -4,8 +4,8 @@ Source of truth: `docs/local-first-data-flows.md`. Three flows exist and are app
 
 | Flow | What happens | What leaves the computer |
 |---|---|---|
-| A. ISAAC's own code (`isaac import`, `group`, `process`, `validate`, `export`) | reads files here, writes a bundle folder here | nothing |
-| B. Claude reads | anything you open with Read, any `summary.md`, `show`, `list candidates`, `excerpt`, `reveal`, `extract` output you see | that text goes to the Claude model service |
+| A. ISAAC's own code (`isaac import`, `group`, `process`, `validate`, `export`) | reads files here, writes a bundle folder here | nothing, by itself; but whatever it prints that you see is flow B |
+| B. Claude reads | anything you open with Read, and EVERY command output you see: `summary.md`, `bundle questions`, `list`, `show`, `excerpt`, `reveal`, `extract`, `build-records`, `validate`, `export`, `template` previews (they print names and values) | that text goes to the Claude model service |
 | C. Upload to ISAAC | not available in this build | nothing (dry run only) |
 
 ## What to say (adapt, keep it short)
@@ -22,8 +22,8 @@ folder as a yes about another.
 ## If the answer is "no" or "not sure"
 
 Run `isaac import` and report only its short stdout (three lines, four when it found the scientists' processed files). Do not open `summary.md`, any file in the
-source folder or any bundle file, and do not run `show`, `list candidates`, `excerpt`, `reveal` or
-`extract`. Give the scientist the commands to run in their own terminal and tell them what each
+source folder or any bundle file, and do not run any command whose output names or values would reach you (`bundle questions`,
+`list`, `show`, `excerpt`, `reveal`, `extract`, `build-records`, `validate`, `export`, template previews). Give the scientist the commands to run in their own terminal and tell them what each
 produces. Offer to continue once they have permission.
 
 ## Never

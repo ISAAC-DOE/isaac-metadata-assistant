@@ -1,7 +1,7 @@
 # Reading what code could not (Step 4)
 
-`<isaac> bundle list <bundle> unread --limit 50 --offset 0` — each entry has a path, a reason code and
-`source_type`. Work through them in this order, and tell the scientist which you are on.
+`<isaac> bundle list <bundle> unread --limit 50 --offset 0` — each entry has `relative_path`, `source_id`,
+`source_type`, `reason_code` and, for an Athena project, `read_by`. Work through them in this order, and tell the scientist which you are on.
 
 1. **Logbooks, beamtime notes, proposals, spreadsheets that look like a sample list** (docx, xlsx,
    pdf, txt with prose). These hold sample names, conditions and who did what.

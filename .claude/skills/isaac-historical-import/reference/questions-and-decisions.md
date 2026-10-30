@@ -111,7 +111,7 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
 - Missing value they know: `--decision confirm|correct --value <v>`; they do not know: `--decision defer`.
 - Extracted value they accept: `--decision confirm`; reject: `--decision reject`.
 - Several evidence-backed values the scientist accepts together: write their ids to a temporary file
-  OUTSIDE the bundle folder (`f=$(mktemp)`, one id per line; delete it afterwards), list each item to
+  in the notes folder beside the bundle (`<bundle>-notes/`, one id per line), never inside the bundle, list each item to
   them first, then `decide --targets-file "$f" --decision confirm --by "<name>"`. Bulk confirm is refused for any
   value with no source evidence; do not work around that.
 - **"The bundle changed since it was read"** (exit 2, nothing written): something else wrote the bundle

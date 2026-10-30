@@ -28,8 +28,9 @@ Get the groups with `bundle list <bundle> groups` and one in full with `bundle s
   conditions differ, or whose names differ in a quantity or any letters-and-digits token (`400mV`, `0p5wt`, `T300K`, `spot2`), are never
   combined. Tell the scientist which happened. When it could not combine them, nothing changes: the
   groups keep their ids and stay proposed, the merge stays pending (each regroup tries it again), and
-  it is listed in `merge_decisions_not_combined`, with a reason and `next_commands` (the counter answer, or one sample
-  confirmation per run and the merge again with `--same-conditions`): say the reason in words and
+  it is listed in `merge_decisions_not_combined`, with a reason and `next_commands` (the counter answer; or one sample
+  confirmation per run and the merge again with `--same-conditions`; or, when the names differ in a
+  quantity, plain `confirm` of each group to keep them as separate records): say the reason in words and
   offer exactly those steps, asking the scientist for any value they need; then regroup again.
 - a merge candidate with `caution` (its file names state different samples or conditions, or the build
   classified no condition at all): say the caution sentence first; merging such groups would usually
@@ -76,7 +77,8 @@ it finds one. Show per group, in words:
 - **a reference foil whose channel was switched** (flag `channel_fallback_reference_channel`, or
   `reference_channel_tried_not_usable` when every alternative failed too): say which signal was tried
   and why, and ask the scientist which detector the foil was really on — never assume it;
-- **or, when the result has `applicability.status: not_applicable`, no verdict at all**: say "no
+- **or, when the result has `applicability.status: not_applicable` (a `list processing-results` row shows
+  `applicability: not_applicable:<code>`), no verdict at all**: say "no
   ISAAC processing protocol covers this data yet" (`no_xas_channel`: no absorption channel could be
   formed; name the reader and the layout it states, never a technique) or "no scans, nothing to
   process" (`no_scans`). Do not call it a fail, show no plot, and ask nothing — `decide` refuses
@@ -149,7 +151,7 @@ element or edge from a file name.
   decisions it would let the regroup combine (`merge_decisions_unblocked`): tell the scientist before
   regrouping. When they say a position is NOT a counter: `decide <bundle> --target experiment
   --decision set_not_counter_positions --positions 2 --by "<name>"` (grouping is unchanged; the
-  question drops out). When they do not know: `decide <bundle> --question <Q> --decision defer --by
+  question drops out). When they do not know: `decide <bundle> --target experiment --decision defer --by
   "<name>"` records it; grouping is unchanged, the question stays, marked `deferred`, and a later
   answer supersedes it. Never guess a position for them.
 

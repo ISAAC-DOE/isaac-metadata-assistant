@@ -209,7 +209,8 @@ def test_the_skill_never_tells_claude_to_write_inside_the_bundle_folder():
         for bad in re.findall(r"(?:write|save|put|create)[^.`]{0,60}(?:in|into|to|inside) the bundle folder", text, flags=re.I):
             raise AssertionError(f"{path.name}: tells Claude to write in the bundle folder: {bad!r}")
     questions = (SKILL / "reference" / "questions-and-decisions.md").read_text(encoding="utf-8")
-    assert "mktemp" in questions and "OUTSIDE the bundle folder" in questions
+    # the targets list goes in the notes folder BESIDE the bundle (Rule 0), never inside it
+    assert "notes folder beside the bundle" in questions and "never inside the bundle" in questions
 
 
 def test_the_calibration_decision_is_in_the_skill_with_real_flags():
