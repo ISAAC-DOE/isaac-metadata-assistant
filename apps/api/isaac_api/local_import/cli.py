@@ -27,6 +27,12 @@ COMMANDS
 ``isaac bundle check <dir>``
     Re-validate the bundle against v1: schema, bounds, references, and the state rule.
 
+``isaac bundle propose-terms <dir> [--out FILE] [--force]``
+    Values outside a fixed list (the vendored schema's enum or the portal vocabulary
+    snapshot's list), grouped by field with counts and file/locator citations, and one
+    draft per term in the website's portal-payload format. Sent nowhere; each draft needs
+    a description written by a person. Records an exposure for every parser value shown.
+
 LOCAL-2 (``docs/local-import-bundle-contract.md`` §9-§12): ``annotate`` (AI reading,
 never above needs_review; ``--blind`` honoured only before exposure), ``decide``
 (identity ``local_unverified``; ``--orcid`` is a claimed credit value), ``crosscheck-plan``,
@@ -1066,6 +1072,57 @@ def cmd_bundle_upload(args) -> int:
     return EXIT_OK
 
 
+def cmd_bundle_propose_terms(args) -> int:
+    """Off-vocabulary values in the bundle, as draft term proposals (``propose_terms``)."""
+    from .. import schema_locator
+    from .. import schema_proposal_rules as SR
+    from . import mutations as M
+    from . import propose_terms as P
+
+    bundle, code = _load(args.bundle_dir)
+    if bundle is None:
+        return code
+    out_path = Path(args.out).expanduser() if args.out else None
+    if out_path is not None:
+        if out_path.is_dir():
+            _err(f"--out {args.out} is a directory; name a file.")
+            return EXIT_OUTPUT_REFUSED
+        if out_path.exists() and not args.force:
+            _err(f"--out {args.out} already exists; pass --force to replace it. Nothing was written.")
+            return EXIT_OUTPUT_REFUSED
+        if not out_path.parent.is_dir():
+            _err(f"The folder for --out {args.out} does not exist. Nothing was written.")
+            return EXIT_OUTPUT_REFUSED
+    try:
+        sources = SR.load_sources_at(schema_locator.resolve_schema_path())
+    except (OSError, ValueError) as exc:
+        _err(f"The vocabulary could not be read ({exc}); nothing was compared and nothing was written.")
+        return EXIT_INVALID
+    report = P.propose_terms(bundle, sources)
+    if report["exposed_candidates"]:
+        # THE OUTPUT CARRIES PARSER VALUES: recorded as an exposure BEFORE anything is printed
+        # or written, as `bundle list candidates` does (contract §11).
+        try:
+            M.expose_and_load(
+                Path(args.bundle_dir), [("candidate", cid) for cid in report["exposed_candidates"]], P.COMMAND
+            )
+        except M.MutationRefused as exc:
+            _err(f"Nothing printed or written: {exc}")
+            return exc.code
+    text = json.dumps(report, indent=1, ensure_ascii=False) + "\n"
+    if out_path is None:
+        sys.stdout.write(text)
+        return EXIT_OK
+    _atomic_write(out_path, text.encode("utf-8"))
+    totals = report["totals"]
+    print(
+        f"Wrote {out_path}: {totals['terms']} term(s) outside the vocabulary in {totals['fields']} field(s), "
+        f"{totals['occurrences']} occurrence(s), {totals['drafts']} draft proposal(s). Nothing was sent; "
+        "each draft needs a description in your words before it can go to the ISAAC portal."
+    )
+    return EXIT_OK
+
+
 def cmd_bundle_group(args) -> int:
     from . import mutations as M
 
@@ -1244,6 +1301,15 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("bundle_dir")
     q.add_argument("id")
     q.set_defaults(func=cmd_bundle_reveal)
+
+    q = bsub.add_parser(
+        "propose-terms",
+        help="values outside the vocabulary, as draft term proposals for the ISAAC portal (local; nothing is sent)",
+    )
+    q.add_argument("bundle_dir")
+    q.add_argument("--out", help="write the drafts to this JSON file instead of printing them")
+    q.add_argument("--force", action="store_true", help="replace --out if it exists")
+    q.set_defaults(func=cmd_bundle_propose_terms)
 
     q = bsub.add_parser("group", help="propose record groups (one record = one sample, technique, set of conditions)")
     q.add_argument("bundle_dir")

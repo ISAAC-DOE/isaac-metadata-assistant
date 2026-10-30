@@ -63,7 +63,8 @@
 .sp-form { display: flex; flex-direction: column; gap: var(--space-lg); }
 .sp-field { display: flex; flex-direction: column; gap: var(--space-xs); }
 .sp-field > label,
-.sp-fieldset > legend {
+.sp-fieldset > legend,
+.sp-fieldset > .sp-legend {
   font-size: var(--font-size-body);
   font-weight: var(--font-weight-semibold);
   color: var(--text-strong);

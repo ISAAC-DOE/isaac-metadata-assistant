@@ -179,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
 
     for name, text in (
         ("import", "read a folder or ZIP into an ISAAC Local Import Bundle (not an official record)"),
-        ("bundle", "list, show or check an ISAAC Local Import Bundle"),
+        ("bundle", "list, show or check an ISAAC Local Import Bundle, or draft term proposals from it (propose-terms)"),
         ("process", "run the draft XAS processing protocol over a bundle's record groups"),
     ):
         p = sub.add_parser(name, help=text, add_help=False)

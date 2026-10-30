@@ -114,6 +114,7 @@ import type {
 } from './types';
 import { readTutorialSession } from './tutorialSession';
 import type {
+  ApiSchemaChangeRequest,
   ApiSchemaPortalPayload,
   ApiSchemaProposalList,
   ApiSchemaProposalResponse,
@@ -3118,6 +3119,11 @@ export const api = {
 
   getSchemaProposalPortalPayload(proposalId: string): Promise<ApiSchemaPortalPayload> {
     return getJson<ApiSchemaPortalPayload>(`/schema-proposals/${enc(proposalId)}/portal-payload`);
+  },
+
+  /** A schema change request's export: a document for the standard's owners, never a portal payload. */
+  getSchemaProposalChangeRequest(proposalId: string): Promise<ApiSchemaChangeRequest> {
+    return getJson<ApiSchemaChangeRequest>(`/schema-proposals/${enc(proposalId)}/change-request`);
   },
 
   listImports(): Promise<ApiImportListResponse> {

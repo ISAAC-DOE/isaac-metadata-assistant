@@ -338,6 +338,8 @@ def test_no_route_can_approve_apply_or_review(client):
             (f"{BASE}/{{proposal_id}}", "GET"),
             (f"{BASE}/{{proposal_id}}/withdraw", "POST"),
             (f"{BASE}/{{proposal_id}}/portal-payload", "GET"),
+            # 2026-10-29: the schema change request's export (a document, never a send).
+            (f"{BASE}/{{proposal_id}}/change-request", "GET"),
         ]
     )
     for path, _ in paths:
@@ -361,9 +363,14 @@ def _walk(node):
 
 
 def test_the_module_cannot_call_the_portal():
-    source = Path(sp.__file__).read_text(encoding="utf-8")
-    for needle in ("import requests", "import httpx", "urllib.request", "http.client", "aiohttp", "socket"):
-        assert needle not in source, needle
+    # Both halves: the routes, and (since 2026-10-29) the framework-free rules module they
+    # re-export, which the local CLI also imports.
+    from isaac_api import schema_proposal_rules as rules
+
+    for module in (sp, rules):
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        for needle in ("import requests", "import httpx", "urllib.request", "http.client", "aiohttp", "socket"):
+            assert needle not in source, (module.__name__, needle)
 
 
 def test_the_status_vocabulary_has_no_review_decisions():
@@ -496,6 +503,8 @@ def test_every_response_says_proposals_are_temporary(client):
         assert response["persistence"]["class"] == "workspace_files"
         assert response["persistence"]["survives_restart"] == "not_guaranteed"
         assert "portal" in response["persistence"]["message"].lower()
+        # The same sentence names both routes: a portal payload, or a change-request document.
+        assert "change-request document" in response["persistence"]["message"]
 
 
 def test_proposals_live_under_the_workspace_and_touch_no_experiment_listing(client):

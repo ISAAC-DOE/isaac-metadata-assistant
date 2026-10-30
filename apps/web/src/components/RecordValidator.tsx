@@ -8,6 +8,8 @@ import { api, ApiError } from '../lib/api';
 import { mutationFailureCopy } from '../lib/mutationErrors';
 import type { ApiValidateRecordResult, ValidationResult } from '../lib/types';
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
+import { ProposeTermLink, useSchemaVocabulary } from './ProposeTermLink';
+import { canProposeTerm, categoryKeyOf } from '../lib/schemaProposals';
 
 /**
  * P36.3 — the standalone Governance & Safety validator.
@@ -97,6 +99,8 @@ export function RecordValidator() {
   const [rejectedFile, setRejectedFile] = useState<string | null>(null);
   /** What the CURRENT verdict checked: a file's name, or `null` for pasted/typed text. */
   const [checkedFile, setCheckedFile] = useState<string | null>(null);
+  /** The parsed record the CURRENT verdict is about, so an error's own value can be read back. */
+  const [checkedRecord, setCheckedRecord] = useState<unknown>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function resetOutcome() {
@@ -171,6 +175,7 @@ export function RecordValidator() {
       const result = await api.validateRecord(parsed);
       setOutcome(result);
       setCheckedFile(sentFrom);
+      setCheckedRecord(parsed);
       setPhase('result');
     } catch (e) {
       const err = e instanceof ApiError ? e : new ApiError('The record could not be validated.');
@@ -342,6 +347,7 @@ export function RecordValidator() {
         {phase === 'result' && outcome && (
           <div className="rec-val-outcome">
             <VerdictCard result={toValidationResult(outcome)} />
+            <OffListTerms record={checkedRecord} errors={outcome.errors} />
             {/* What the verdict is ABOUT. A verdict that does not say which input it
                 describes invites the reader to attach it to whatever they last picked
                 (B-07). The file name is shown as TEXT, never as a link or a path. */}
@@ -400,5 +406,66 @@ export function RecordValidator() {
         {phase === 'idle' && <p className="rec-val-idle-hint">Paste or upload JSON, then Validate.</p>}
       </div>
       </Widget>
+  );
+}
+
+/** The value at a validator error's dotted path (`a.b.0.c`), or `undefined`. */
+function valueAt(record: unknown, path: string): unknown {
+  let node: unknown = record;
+  for (const seg of path.split('.')) {
+    if (node === null || typeof node !== 'object') return undefined;
+    if (Array.isArray(node)) {
+      if (!/^\d+$/.test(seg)) return undefined;
+      node = node[Number(seg)];
+    } else {
+      node = (node as Record<string, unknown>)[seg];
+    }
+  }
+  return node;
+}
+
+/**
+ * VALUES THIS RECORD HOLDS OUTSIDE A PORTAL TERM LIST, each with a link to propose it.
+ *
+ * Read from the RECORD, not from the error message: for each schema error, the value at its
+ * own path is looked up in the record that was checked, and a link is offered only when that
+ * value is a string the portal vocabulary's list for the field does not hold. An error message
+ * is never parsed (its wording is the validator's, and a value inside it could be anything).
+ * Renders nothing when there is no such value or the vocabulary cannot be read.
+ */
+function OffListTerms({ record, errors }: { record: unknown; errors: { path: string; message: string }[] }) {
+  const candidates: { path: string; category: string; term: string }[] = [];
+  const seen = new Set<string>();
+  for (const e of errors) {
+    const value = valueAt(record, e.path);
+    if (typeof value !== 'string' || value.trim() === '') continue;
+    const category = categoryKeyOf(e.path);
+    const key = `${category}\u0000${value}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    candidates.push({ path: e.path, category, term: value });
+  }
+  const vocabulary = useSchemaVocabulary(candidates.length > 0);
+  if (vocabulary === null) return null;
+  const offered = candidates.filter((c) => canProposeTerm(vocabulary, c.category, c.term));
+  if (offered.length === 0) return null;
+  return (
+    <div className="rec-val-propose" role="note">
+      <p className="rec-val-propose-lead">
+        {offered.length === 1 ? 'This value is' : 'These values are'} not in the list for{' '}
+        {offered.length === 1 ? 'its field' : 'their fields'} in the ISAAC portal vocabulary snapshot
+        {vocabulary.sources.portal.snapshot_commit ? ` ${vocabulary.sources.portal.snapshot_commit}` : ''} (a copy
+        taken at one point in time, not the live portal). If the list is missing a term you need, you can draft a
+        proposal; nothing is sent.
+      </p>
+      <ul className="rec-val-propose-list">
+        {offered.map((c) => (
+          <li key={`${c.category}:${c.term}`}>
+            <span className="mono">{c.path}</span>: <span className="mono">{c.term}</span>{' '}
+            <ProposeTermLink fieldPath={c.path} term={c.term} from="validator" vocabulary={vocabulary} />
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

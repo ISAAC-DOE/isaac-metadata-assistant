@@ -22,15 +22,28 @@ import { useFetch } from '../lib/useFetch';
 import { serverMessageOf } from '../lib/mutationErrors';
 import {
   SCHEMA_PROPOSALS_COPY as COPY,
+  PROPOSAL_KIND_LABEL,
+  PROPOSE_SOURCES,
   STATUS_LABEL,
+  VALUE_TYPE_LABEL,
+  changeRequestJsonFilename,
+  changeRequestJsonText,
+  changeRequestMarkdownFilename,
+  isProposeSource,
   portalBodyFilename,
   portalBodyText,
+  portalSectionFor,
   proposalHeadline,
   schemaFieldErrors,
   type ApiSchemaCategory,
+  type ApiSchemaChange,
   type ApiSchemaProposal,
   type ApiSchemaProposalGate0,
   type ApiSchemaProposalResponse,
+  type ProposeSource,
+  type SchemaChangeInput,
+  type SchemaChangeScope,
+  type SchemaChangeValueType,
   type SchemaSourceId,
   type ApiSchemaSection,
   type ApiSchemaVocabulary,
@@ -76,7 +89,19 @@ interface Prefill {
   type: SchemaProposalType;
   section: string;
   category: string;
+  /** A term carried from the screen where the gap was found (`?term=`). */
+  term?: string;
+  /** Which screen that was (`?from=`); only the names in `PROPOSE_SOURCES` are shown. */
+  from?: ProposeSource;
   nonce: number;
+}
+
+/** What a `?category=&term=&from=` link asked for, read once per distinct link. */
+interface LinkRequest {
+  key: string;
+  category: string;
+  term: string;
+  from: ProposeSource | null;
 }
 
 export function SchemaProposals() {
@@ -105,6 +130,47 @@ export function SchemaProposals() {
     },
     [selectTab],
   );
+
+  /*
+   * PROPOSE FROM WHERE THE GAP WAS FOUND. A link from another screen
+   * (`?tab=propose&category=…&term=…&from=…`) opens the form on that list with that term.
+   * The section is looked up in the server's own `proposal_sections`, never taken from the
+   * link, and a list the portal has no term list for fills in NOTHING: the form says why.
+   */
+  const linkCategory = params.get('category');
+  const linkTerm = params.get('term');
+  const linkFrom = params.get('from');
+  const link: LinkRequest | null =
+    linkCategory !== null && linkTerm !== null
+      ? {
+          key: `${linkCategory}\u0000${linkTerm}\u0000${linkFrom ?? ''}`,
+          category: linkCategory,
+          term: linkTerm,
+          from: isProposeSource(linkFrom) ? linkFrom : null,
+        }
+      : null;
+  const appliedLink = useRef<string | null>(null);
+  const [linkRefused, setLinkRefused] = useState<string | null>(null);
+  const vocabularyData = vocabulary.status === 'data' ? vocabulary.data : null;
+  useEffect(() => {
+    if (link === null || vocabularyData === null || appliedLink.current === link.key) return;
+    appliedLink.current = link.key;
+    const section = portalSectionFor(vocabularyData, link.category);
+    if (section === null) {
+      setLinkRefused(link.category);
+      return;
+    }
+    setLinkRefused(null);
+    setPrefill((previous) => ({
+      type: 'add_term',
+      section,
+      category: link.category,
+      term: link.term,
+      from: link.from ?? undefined,
+      nonce: (previous?.nonce ?? 0) + 1,
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the link, applied once per link
+  }, [link?.key, vocabularyData]);
 
   function onTabKeyDown(e: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
     let nextIndex: number | null = null;
@@ -183,6 +249,7 @@ export function SchemaProposals() {
             <ProposePanel
               vocabulary={vocabulary.data}
               prefill={prefill}
+              linkRefused={linkRefused}
               onSaved={() => setListVersion((v) => v + 1)}
               onViewProposals={() => selectTab('proposals')}
             />
@@ -362,6 +429,15 @@ function BrowsePanel({
           >
             Propose a New List in {section.label}
           </button>
+          {vocabulary.schema_change && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => onPropose('schema_change', section.id, '')}
+            >
+              Propose a New Field in {section.label}
+            </button>
+          )}
         </div>
       )}
     </section>
@@ -400,11 +476,14 @@ const GATE0_FIELDS: { key: keyof ApiSchemaProposalGate0; label: string; rows: nu
 function ProposePanel({
   vocabulary,
   prefill,
+  linkRefused,
   onSaved,
   onViewProposals,
 }: {
   vocabulary: ApiSchemaVocabulary;
   prefill: Prefill | null;
+  /** A link named a list the portal has no term list for, so nothing was filled in. */
+  linkRefused: string | null;
   onSaved: () => void;
   onViewProposals: () => void;
 }) {
@@ -414,9 +493,19 @@ function ProposePanel({
     category: useId(),
     term: useId(),
     description: useId(),
+    parent: useId(),
+    fieldName: useId(),
+    valueType: useId(),
+    unit: useId(),
+    required: useId(),
+    example: useId(),
+    scope: useId(),
+    migration: useId(),
   };
   const limits = vocabulary.limits;
   const sections = vocabulary.proposal_sections;
+  /** The server describes the third type; a server that does not is offered only the portal's two. */
+  const schemaChange = vocabulary.schema_change ?? null;
 
   const [type, setType] = useState<SchemaProposalType>('add_term');
   const [sectionId, setSectionId] = useState(sections.find((s) => s.term_lists.length > 0)?.id ?? sections[0]?.id ?? '');
@@ -424,6 +513,16 @@ function ProposePanel({
   const [term, setTerm] = useState('');
   const [description, setDescription] = useState('');
   const [gate0, setGate0] = useState<Record<string, string>>({});
+  const [from, setFrom] = useState<ProposeSource | null>(null);
+  // A new field (schema change request).
+  const [parentPath, setParentPath] = useState<string | null>(null);
+  const [fieldName, setFieldName] = useState('');
+  const [valueType, setValueType] = useState<SchemaChangeValueType | ''>('');
+  const [unit, setUnit] = useState('');
+  const [required, setRequired] = useState<'' | 'yes' | 'no'>('');
+  const [example, setExample] = useState('');
+  const [scope, setScope] = useState<SchemaChangeScope | ''>('');
+  const [migration, setMigration] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<SchemaFieldError[]>([]);
@@ -434,17 +533,35 @@ function ProposePanel({
 
   const section = sections.find((s) => s.id === sectionId);
   const listsInSection = useMemo(() => section?.term_lists ?? [], [section]);
+  /** The blocks of the schema in this section a new field could go in, as the server derived them. */
+  const parentsInSection = useMemo(
+    () => (schemaChange?.object_paths ?? []).filter((o) => o.section === sectionId),
+    [schemaChange, sectionId],
+  );
+  const parent = parentsInSection.find((o) => o.path === parentPath) ?? null;
+  const isField = type === 'schema_change';
+  const unitAllowed = valueType === 'number' || valueType === 'integer' || valueType === 'array';
 
-  // An "open the form on this list" request from Browse.
+  // An "open the form on this list" request from Browse, or a link from another screen.
   useEffect(() => {
     if (!prefill) return;
-    setType(prefill.type);
+    setType(prefill.type === 'schema_change' && !schemaChange ? 'add_category' : prefill.type);
     setSectionId(prefill.section);
     setCategory(prefill.category);
+    setParentPath(null);
+    if (prefill.term !== undefined) setTerm(prefill.term);
+    setFrom(prefill.from ?? null);
+    if (prefill.from && prefill.term !== undefined) {
+      // THE SOURCE SURFACE IS NOTED where reviewers read it, in words the reader can change.
+      setGate0((prev) => ({
+        ...prev,
+        examples: `Found in ${PROPOSE_SOURCES[prefill.from as ProposeSource]} on the ISAAC Metadata Assistant, as "${prefill.term}".`,
+      }));
+    }
     setErrors([]);
     setTopMessage(null);
     setSaved(null);
-  }, [prefill]);
+  }, [prefill, schemaChange]);
 
   // The category for "add a term" must be one of the section's lists. Keep it valid when the
   // section changes; an explicit empty choice is kept so the reader sees it is not chosen yet.
@@ -452,6 +569,11 @@ function ProposePanel({
     if (type !== 'add_term') return;
     if (category !== '' && !listsInSection.includes(category)) setCategory('');
   }, [type, listsInSection, category]);
+
+  // The parent block must be in the chosen section; changing section clears a choice that is not.
+  useEffect(() => {
+    if (parentPath !== null && !parentsInSection.some((o) => o.path === parentPath)) setParentPath(null);
+  }, [parentsInSection, parentPath]);
 
   useEffect(() => {
     if (errors.length > 0 || topMessage) summaryRef.current?.focus();
@@ -462,7 +584,16 @@ function ProposePanel({
   }, [saved]);
 
   const errorFor = (field: string) => errors.find((e) => e.field === field)?.message;
-  const shown = new Set(['proposal_type', 'section', 'category', 'term', 'description', ...GATE0_FIELDS.map((g) => `gate0.${g.key}`)]);
+  const changeFields = ['change', ...['kind', 'parent_path', 'field_name', 'value_type', 'unit', 'required', 'example', 'scope', 'migration'].map((k) => `change.${k}`)];
+  const shown = new Set([
+    'proposal_type',
+    'section',
+    'category',
+    'term',
+    'description',
+    ...GATE0_FIELDS.map((g) => `gate0.${g.key}`),
+    ...(isField ? changeFields.filter((f) => f !== 'change' && f !== 'change.kind') : []),
+  ]);
   const elsewhere = errors.filter((e) => e.field === null || !shown.has(e.field));
 
   async function onSubmit(e: FormEvent) {
@@ -477,20 +608,46 @@ function ProposePanel({
       const text = (gate0[g.key] ?? '').trim();
       if (text) note[g.key] = text;
     }
-    const input: SchemaProposalInput = {
-      proposal_type: type,
-      section: sectionId,
-      category: category.trim(),
-      description: description.trim(),
-      ...(type === 'add_term' ? { term: term.trim() } : {}),
-      ...(Object.keys(note).length > 0 ? { gate0: note } : {}),
-    };
+    let input: SchemaProposalInput;
+    if (isField) {
+      // EVERY CHOICE IS THE READER'S. An unchosen type or "required?" is sent as missing, so the
+      // server's own sentence asks for it; nothing is defaulted here.
+      const change: Partial<SchemaChangeInput> & { kind: 'add_field' } = { kind: 'add_field' };
+      if (parentPath !== null) change.parent_path = parentPath;
+      if (fieldName.trim()) change.field_name = fieldName.trim();
+      if (valueType) change.value_type = valueType;
+      if (required) change.required = required === 'yes';
+      if (unit.trim() && unitAllowed) change.unit = unit.trim();
+      if (example.trim()) change.example = example.trim();
+      if (scope) change.scope = scope;
+      if (migration.trim()) change.migration = migration.trim();
+      input = {
+        proposal_type: 'schema_change',
+        section: sectionId,
+        description: description.trim(),
+        change: change as SchemaChangeInput,
+        ...(Object.keys(note).length > 0 ? { gate0: note } : {}),
+      };
+    } else {
+      input = {
+        proposal_type: type,
+        section: sectionId,
+        category: category.trim(),
+        description: description.trim(),
+        ...(type === 'add_term' ? { term: term.trim() } : {}),
+        ...(Object.keys(note).length > 0 ? { gate0: note } : {}),
+      };
+    }
     try {
       const response = await api.createSchemaProposal(input);
       setSaved(response);
       setTerm('');
       setDescription('');
       setGate0({});
+      setFrom(null);
+      setFieldName('');
+      setExample('');
+      setMigration('');
       onSaved();
     } catch (err) {
       const fieldErrors = schemaFieldErrors(err);
@@ -505,14 +662,22 @@ function ProposePanel({
   }
 
   const descriptionCount = description.trim().length;
+  const savedIsField = saved?.proposal.proposal_type === 'schema_change';
 
   return (
     <section className="sp-panel" aria-label={COPY.tabPropose}>
       <p className="sp-note">{COPY.proposeLead}</p>
 
+      {linkRefused !== null && (
+        <p className="sp-note" role="status">
+          The link that opened this form named {linkRefused}, which is not a term list in the portal vocabulary
+          snapshot, so nothing was filled in. The portal would refuse a new term for it.
+        </p>
+      )}
+
       {saved && (
         <div className="sp-saved" role="status" tabIndex={-1} ref={savedRef}>
-          <p className="sp-saved-title">{COPY.savedNotice}</p>
+          <p className="sp-saved-title">{savedIsField ? COPY.schemaChangeSaved : COPY.savedNotice}</p>
           {saved.withdrawn_removed ? (
             <p>
               To stay within the server&apos;s limit, {saved.withdrawn_removed} of the oldest withdrawn proposals{' '}
@@ -523,7 +688,11 @@ function ProposePanel({
             <p>Ignored, because the server sets them: {saved.ignored_fields.join(', ')}.</p>
           )}
           <div className="sp-actions">
-            <PortalActions proposalId={saved.proposal.id} />
+            {savedIsField ? (
+              <ChangeRequestActions proposalId={saved.proposal.id} />
+            ) : (
+              <PortalActions proposalId={saved.proposal.id} />
+            )}
             <button type="button" className="btn btn-secondary" onClick={onViewProposals}>
               View Proposals
             </button>
@@ -542,6 +711,13 @@ function ProposePanel({
             </ul>
           )}
         </div>
+      )}
+
+      {from !== null && !isField && (
+        <p className="sp-note" role="note">
+          Opened from {PROPOSE_SOURCES[from]}, with the list and the value as they appeared there. Check the term
+          before saving: the portal takes one word, and nothing here has changed what you saw.
+        </p>
       )}
 
       <form className="sp-form" onSubmit={onSubmit} noValidate>
@@ -565,8 +741,26 @@ function ProposePanel({
             />
             <span>Add a new list of allowed terms</span>
           </label>
+          {schemaChange && (
+            <label className="sp-radio">
+              <input
+                type="radio"
+                name="schema-proposal-type"
+                checked={type === 'schema_change'}
+                onChange={() => setType('schema_change')}
+              />
+              <span>Add a new field to the ISAAC schema (a schema change request)</span>
+            </label>
+          )}
           <FieldError id={`${ids.type}-err`} message={errorFor('proposal_type')} />
         </fieldset>
+
+        {isField && schemaChange && (
+          <div className="sp-notice" role="note">
+            <p>{schemaChange.not_a_portal_proposal}</p>
+            <p>{COPY.schemaChangeLead}</p>
+          </div>
+        )}
 
         <div className="sp-field">
           <label htmlFor={ids.section}>Section</label>
@@ -587,7 +781,7 @@ function ProposePanel({
           <FieldError id={`${ids.section}-err`} message={errorFor('section')} />
         </div>
 
-        {type === 'add_term' ? (
+        {type === 'add_term' && (
           <>
             <div className="sp-field">
               <label htmlFor={ids.category}>Category</label>
@@ -639,7 +833,9 @@ function ProposePanel({
               <FieldError id={`${ids.term}-err`} message={errorFor('term')} />
             </div>
           </>
-        ) : (
+        )}
+
+        {type === 'add_category' && (
           <div className="sp-field">
             <label htmlFor={ids.category}>New list key</label>
             <input
@@ -662,16 +858,184 @@ function ProposePanel({
           </div>
         )}
 
+        {isField && schemaChange && (
+          <>
+            <div className="sp-field">
+              <label htmlFor={ids.parent}>Where in the schema</label>
+              <select
+                id={ids.parent}
+                className="input sp-select"
+                /* `@` + the path, so the record root (path '') is a choice distinct from "none chosen". */
+                value={parentPath === null ? '' : `@${parentPath}`}
+                onChange={(e) => setParentPath(e.target.value === '' ? null : e.target.value.slice(1))}
+                aria-required="true"
+                aria-invalid={errorFor('change.parent_path') ? true : undefined}
+                aria-describedby={`${ids.parent}-hint${errorFor('change.parent_path') ? ` ${ids.parent}-err` : ''}`}
+              >
+                <option value="">Choose a block…</option>
+                {parentsInSection.map((o) => (
+                  <option key={o.path} value={`@${o.path}`}>
+                    {o.path === '' ? 'The record root' : o.path}
+                  </option>
+                ))}
+              </select>
+              <p className="sp-hint" id={`${ids.parent}-hint`}>
+                {parentsInSection.length === 0
+                  ? 'The ISAAC schema has no block in this section. Choose another section.'
+                  : parent === null
+                    ? 'The blocks the ISAAC schema declares in this section.'
+                    : `${parent.path === '' ? 'The record root' : parent.path} has ${parent.fields.length} field${
+                        parent.fields.length === 1 ? '' : 's'
+                      } today: ${parent.fields.join(', ')}. ${
+                        parent.open
+                          ? 'It accepts keys the schema does not declare.'
+                          : 'It refuses any key the schema does not declare, so a record cannot carry the new field until the schema changes.'
+                      }`}
+              </p>
+              <FieldError id={`${ids.parent}-err`} message={errorFor('change.parent_path')} />
+            </div>
+
+            <div className="sp-field">
+              <label htmlFor={ids.fieldName}>New field name</label>
+              <input
+                id={ids.fieldName}
+                className="input input-mono"
+                value={fieldName}
+                maxLength={limits.field_name_max ?? 80}
+                placeholder="for example c_rate"
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(e) => setFieldName(e.target.value)}
+                aria-required="true"
+                aria-invalid={errorFor('change.field_name') ? true : undefined}
+                aria-describedby={`${ids.fieldName}-hint${errorFor('change.field_name') ? ` ${ids.fieldName}-err` : ''}`}
+              />
+              <p className="sp-hint" id={`${ids.fieldName}-hint`}>
+                One word: a letter, then letters, digits or underscores.
+                {parent !== null && fieldName.trim() !== ''
+                  ? ` The full path would be ${parent.path ? `${parent.path}.` : ''}${fieldName.trim()}.`
+                  : ''}
+              </p>
+              <FieldError id={`${ids.fieldName}-err`} message={errorFor('change.field_name')} />
+            </div>
+
+            <div className="sp-field">
+              <label htmlFor={ids.valueType}>Kind of value</label>
+              <select
+                id={ids.valueType}
+                className="input sp-select"
+                value={valueType}
+                onChange={(e) => setValueType(e.target.value as SchemaChangeValueType | '')}
+                aria-required="true"
+                aria-invalid={errorFor('change.value_type') ? true : undefined}
+                aria-describedby={errorFor('change.value_type') ? `${ids.valueType}-err` : undefined}
+              >
+                <option value="">Choose…</option>
+                {schemaChange.value_types.map((t) => (
+                  <option key={t} value={t}>
+                    {VALUE_TYPE_LABEL[t] ?? t}
+                  </option>
+                ))}
+              </select>
+              <FieldError id={`${ids.valueType}-err`} message={errorFor('change.value_type')} />
+            </div>
+
+            {unitAllowed && (
+              <div className="sp-field">
+                <label htmlFor={ids.unit}>Unit (optional)</label>
+                <input
+                  id={ids.unit}
+                  className="input input-mono"
+                  value={unit}
+                  maxLength={limits.unit_max ?? 40}
+                  placeholder="for example mA/g"
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(e) => setUnit(e.target.value)}
+                  aria-invalid={errorFor('change.unit') ? true : undefined}
+                  aria-describedby={errorFor('change.unit') ? `${ids.unit}-err` : undefined}
+                />
+                <FieldError id={`${ids.unit}-err`} message={errorFor('change.unit')} />
+              </div>
+            )}
+
+            {/* A real radio group, so `aria-required` / `aria-invalid` are valid on it (they are not on a fieldset). */}
+            <div
+              className="sp-fieldset"
+              role="radiogroup"
+              aria-labelledby={ids.required}
+              aria-required="true"
+              aria-invalid={errorFor('change.required') ? true : undefined}
+              aria-describedby={errorFor('change.required') ? `${ids.required}-err` : undefined}
+            >
+              <p className="sp-legend" id={ids.required}>Must every record in this block carry it?</p>
+              <label className="sp-radio">
+                <input type="radio" name="schema-change-required" checked={required === 'yes'} onChange={() => setRequired('yes')} />
+                <span>Yes, required</span>
+              </label>
+              <label className="sp-radio">
+                <input type="radio" name="schema-change-required" checked={required === 'no'} onChange={() => setRequired('no')} />
+                <span>No, optional</span>
+              </label>
+              <FieldError id={`${ids.required}-err`} message={errorFor('change.required')} />
+            </div>
+
+            <div className="sp-field">
+              <label htmlFor={ids.example}>Example value (optional)</label>
+              <input
+                id={ids.example}
+                className="input input-mono"
+                value={example}
+                maxLength={limits.example_max ?? 500}
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(e) => setExample(e.target.value)}
+                aria-invalid={errorFor('change.example') ? true : undefined}
+                aria-describedby={errorFor('change.example') ? `${ids.example}-err` : undefined}
+              />
+              <FieldError id={`${ids.example}-err`} message={errorFor('change.example')} />
+            </div>
+
+            <div className="sp-field">
+              <label htmlFor={ids.scope}>Who needs it (optional)</label>
+              <select
+                id={ids.scope}
+                className="input sp-select"
+                value={scope}
+                onChange={(e) => setScope(e.target.value as SchemaChangeScope | '')}
+                aria-invalid={errorFor('change.scope') ? true : undefined}
+                aria-describedby={`${ids.scope}-hint${errorFor('change.scope') ? ` ${ids.scope}-err` : ''}`}
+              >
+                <option value="">Not stated</option>
+                {schemaChange.scopes.map((sc) => (
+                  <option key={sc} value={sc}>
+                    {sc === 'core' ? 'Every science (the core)' : 'One science (a domain profile)'}
+                  </option>
+                ))}
+              </select>
+              <p className="sp-hint" id={`${ids.scope}-hint`}>
+                The standard&apos;s process puts a field only one science needs in that science&apos;s profile.
+              </p>
+              <FieldError id={`${ids.scope}-err`} message={errorFor('change.scope')} />
+            </div>
+          </>
+        )}
+
         <div className="sp-field">
-          <label htmlFor={ids.description}>Description (required)</label>
+          <label htmlFor={ids.description}>{isField ? 'Definition (required)' : 'Description (required)'}</label>
           <textarea
             id={ids.description}
             className="input sp-textarea"
             rows={4}
             value={description}
             maxLength={limits.description_max}
-            placeholder="Say what this means and where it is used. A reviewer writes the definition from it."
+            placeholder={
+              isField
+                ? 'What the field holds, in which unit, and when a record carries it.'
+                : 'Say what this means and where it is used. A reviewer writes the definition from it.'
+            }
             onChange={(e) => setDescription(e.target.value)}
+            aria-required="true"
             aria-invalid={errorFor('description') ? true : undefined}
             aria-describedby={`${ids.description}-hint${errorFor('description') ? ` ${ids.description}-err` : ''}`}
           />
@@ -682,18 +1046,21 @@ function ProposePanel({
           <FieldError id={`${ids.description}-err`} message={errorFor('description')} />
         </div>
 
-        <details className="sp-why">
-          <summary>Why (for reviewers), optional</summary>
+        <details className="sp-why" open={isField || from !== null ? true : undefined}>
+          <summary>{isField ? 'Why (for reviewers): the problem is required for a new field' : 'Why (for reviewers), optional'}</summary>
           <p className="sp-hint">
             Reviewers of changes to the standard look for the problem, who it affects and what would change.
-            These answers travel with your description.
+            These answers travel with your {isField ? 'change request' : 'description'}.
           </p>
           {GATE0_FIELDS.map((g) => {
             const fieldId = `${ids.description}-gate0-${g.key}`;
             const err = errorFor(`gate0.${g.key}`);
             return (
               <div className="sp-field" key={g.key}>
-                <label htmlFor={fieldId}>{g.label}</label>
+                <label htmlFor={fieldId}>
+                  {g.label}
+                  {isField && g.key === 'problem' ? ' (required)' : ''}
+                </label>
                 <textarea
                   id={fieldId}
                   className="input sp-textarea"
@@ -710,6 +1077,26 @@ function ProposePanel({
               </div>
             );
           })}
+          {isField && (
+            <div className="sp-field">
+              <label htmlFor={ids.migration}>Migration, version and rollback (optional)</label>
+              <textarea
+                id={ids.migration}
+                className="input sp-textarea"
+                rows={3}
+                value={migration}
+                maxLength={limits.migration_max ?? 2000}
+                onChange={(e) => setMigration(e.target.value)}
+                aria-invalid={errorFor('change.migration') ? true : undefined}
+                aria-describedby={`${ids.migration}-hint${errorFor('change.migration') ? ` ${ids.migration}-err` : ''}`}
+              />
+              <p className="sp-hint" id={`${ids.migration}-hint`}>
+                The standard&apos;s process asks a schema change for these. Leave it empty if you do not know; the
+                document will say it was not written.
+              </p>
+              <FieldError id={`${ids.migration}-err`} message={errorFor('change.migration')} />
+            </div>
+          )}
         </details>
 
         <div className="sp-actions">
@@ -863,11 +1250,12 @@ function ProposalRow({
       </div>
       <p className="sp-item-meta">
         {proposal.section}
-        {proposal.proposal_type === 'add_term' ? ' · new term' : ' · new list'}
+        {` · ${PROPOSAL_KIND_LABEL[proposal.proposal_type] ?? proposal.proposal_type}`}
         {proposal.proposed_at ? ` · drafted ${proposal.proposed_at}` : ''}
         {proposal.withdrawn_at ? ` · withdrawn ${proposal.withdrawn_at}` : ''}
       </p>
       <p className="sp-item-text">{proposal.description}</p>
+      {proposal.proposal_type === 'schema_change' && proposal.change && <ChangeSummary change={proposal.change} />}
       {gate0 && (
         <dl className="sp-why-list">
           {gate0.problem && (
@@ -903,7 +1291,11 @@ function ProposalRow({
       </p>
 
       <div className="sp-actions">
-        <PortalActions proposalId={proposal.id} />
+        {proposal.proposal_type === 'schema_change' ? (
+          <ChangeRequestActions proposalId={proposal.id} />
+        ) : (
+          <PortalActions proposalId={proposal.id} />
+        )}
         {proposal.status === 'pending' && !confirming && (
           <button
             type="button"
@@ -932,6 +1324,135 @@ function ProposalRow({
         </p>
       )}
     </li>
+  );
+}
+
+/** A schema change request's own facts, from the stored change and nothing else. */
+function ChangeSummary({ change }: { change: ApiSchemaChange }) {
+  return (
+    <dl className="sp-why-list">
+      <dt>Field</dt>
+      <dd className="sp-term">{change.path ?? 'unknown'}</dd>
+      <dt>Kind of value</dt>
+      <dd>
+        {change.value_type ? VALUE_TYPE_LABEL[change.value_type] ?? change.value_type : 'not stated'}
+        {change.unit ? `, in ${change.unit}` : ''}
+      </dd>
+      <dt>Required</dt>
+      <dd>{change.required === true ? 'Yes' : change.required === false ? 'No' : 'Not stated'}</dd>
+      {change.example && (
+        <>
+          <dt>Example</dt>
+          <dd className="sp-term">{change.example}</dd>
+        </>
+      )}
+      {change.parent_open_today === false && (
+        <>
+          <dt>Today</dt>
+          <dd>The schema refuses undeclared keys in {change.parent_path || 'the record root'}.</dd>
+        </>
+      )}
+    </dl>
+  );
+}
+
+/**
+ * Copy the change-request document as Markdown, or download it as Markdown or JSON. It is
+ * fetched when asked for — the server's exact text, never rebuilt here — and it is NOT a
+ * portal payload: there is no "paste into the portal" here, because the portal has no
+ * proposal type for a new field.
+ */
+function ChangeRequestActions({ proposalId }: { proposalId: string }) {
+  const [state, setState] = useState<
+    | { kind: 'idle' }
+    | { kind: 'busy' }
+    | { kind: 'copied'; notes: string[] }
+    | { kind: 'downloaded'; what: string; notes: string[] }
+    | { kind: 'manual'; text: string; notes: string[] }
+    | { kind: 'failed' }
+  >({ kind: 'idle' });
+
+  async function copy() {
+    setState({ kind: 'busy' });
+    let request: Awaited<ReturnType<typeof api.getSchemaProposalChangeRequest>>;
+    try {
+      request = await api.getSchemaProposalChangeRequest(proposalId);
+    } catch {
+      setState({ kind: 'failed' });
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(request.markdown);
+      setState({ kind: 'copied', notes: request.notes });
+    } catch {
+      setState({ kind: 'manual', text: request.markdown, notes: request.notes });
+    }
+  }
+
+  async function download(format: 'md' | 'json') {
+    setState({ kind: 'busy' });
+    try {
+      const request = await api.getSchemaProposalChangeRequest(proposalId);
+      const text = format === 'md' ? request.markdown : changeRequestJsonText(request);
+      const name =
+        format === 'md'
+          ? changeRequestMarkdownFilename(request.filename_stem)
+          : changeRequestJsonFilename(request.filename_stem);
+      const url = URL.createObjectURL(
+        new Blob([text], { type: format === 'md' ? 'text/markdown' : 'application/json' }),
+      );
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setState({ kind: 'downloaded', what: format === 'md' ? 'Markdown' : 'JSON', notes: request.notes });
+    } catch {
+      setState({ kind: 'failed' });
+    }
+  }
+
+  const busy = state.kind === 'busy';
+  const notes = state.kind === 'copied' || state.kind === 'downloaded' || state.kind === 'manual' ? state.notes : [];
+  return (
+    <span className="sp-portal">
+      <button type="button" className="btn btn-secondary" onClick={copy} disabled={busy}>
+        <Copy size={14} strokeWidth={2} aria-hidden="true" /> Copy Change Request
+      </button>
+      <button type="button" className="btn btn-secondary" onClick={() => download('md')} disabled={busy}>
+        <Download size={14} strokeWidth={2} aria-hidden="true" /> Download Markdown
+      </button>
+      <button type="button" className="btn btn-secondary" onClick={() => download('json')} disabled={busy}>
+        <Download size={14} strokeWidth={2} aria-hidden="true" /> Download JSON
+      </button>
+      <span className="sp-portal-status" role="status">
+        {state.kind === 'copied' &&
+          'Copied the change request as Markdown. ISAAC has not sent it. It is for the standard\'s owners, not the portal.'}
+        {state.kind === 'downloaded' &&
+          `Downloaded the change request as ${state.what}. ISAAC has not sent it anywhere.`}
+        {state.kind === 'failed' && 'The change request could not be prepared. Nothing was copied.'}
+        {state.kind === 'manual' && 'Your browser did not allow copying. Select the text below and copy it.'}
+      </span>
+      {notes.length > 0 && (
+        <ul className="sp-portal-notes">
+          {notes.map((note) => (
+            <li key={note}>{note}</li>
+          ))}
+        </ul>
+      )}
+      {state.kind === 'manual' && (
+        <textarea
+          className="input input-mono sp-textarea"
+          readOnly
+          rows={10}
+          aria-label="Change request"
+          value={state.text}
+          onFocus={(e) => e.currentTarget.select()}
+        />
+      )}
+    </span>
   );
 }
 

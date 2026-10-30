@@ -31,6 +31,18 @@ THE UPSTREAM CONTRACT THIS MIRRORS
 ``GET /api/schema-proposals/{id}/portal-payload`` returns exactly the body the portal
 takes, so a person who can reach the portal can send it without retyping.
 
+THE THIRD TYPE IS ISAAC'S OWN, AND IS NEVER A PORTAL PAYLOAD (2026-10-29)
+=========================================================================
+The portal has no proposal type for a new FIELD (read at ``a1cb1c8``: ``create_proposal``,
+``apply_approved_proposal`` and the Propose a Change form know the two types above only).
+``schema_change`` (kind ``add_field``) is therefore a *schema change request*: a parent block
+the vendored schema declares, a field name, a type, whether it is required, and the gate-0
+problem the upstream process (``governance/README.md``) requires. ``portal-payload`` refuses
+it (``409 no_portal_payload``); its export is ``GET .../{id}/change-request``, a Markdown and
+JSON document for the standard's owners, labelled as not a portal proposal. The rules and
+both export formats live in :mod:`isaac_api.schema_proposal_rules`, which imports no web
+framework, so ``isaac bundle propose-terms`` drafts in exactly this format locally.
+
 TWO VOCABULARY SOURCES, BOTH LABELLED, NEITHER LIVE
 ===================================================
 The portal validates a proposal against ITS OWN list (``data/vocabulary.json`` upstream:
@@ -83,11 +95,8 @@ this single-process server.
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
-import re
 import threading
-import unicodedata
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -101,6 +110,70 @@ from isaac_records.official import EXPECTED_VERSION, schema_path
 
 from . import identity as identity_module
 from . import workspace as ws
+
+# The rules and formats live in a module with no web framework, so the local-first CLI can
+# draft in exactly this format (see that module's docstring). Every name this module used
+# to define is re-exported here unchanged.
+from .schema_proposal_rules import (  # noqa: F401  (re-exported)
+    ADD_CATEGORY,
+    ADD_TERM,
+    ATTRIBUTION_UNVERIFIED,
+    ATTRIBUTION_VERIFIED,
+    LIMITS,
+    PORTAL_PROPOSAL_TYPES,
+    PORTAL_PROPOSALS_PATH,
+    PORTAL_SNAPSHOT_COMMIT,
+    PORTAL_SNAPSHOT_FILE,
+    PORTAL_SNAPSHOT_LABEL,
+    PROPOSAL_STATUSES,
+    PROPOSAL_TYPES,
+    ROOT_SECTION,
+    ROOT_SECTION_LABEL,
+    SCHEMA_CHANGE,
+    SCHEMA_CHANGE_KINDS,
+    SCHEMA_CHANGE_SCOPES,
+    SCHEMA_CHANGE_VALUE_TYPES,
+    STATUS_PENDING,
+    STATUS_WITHDRAWN,
+    TERM_SHAPE_FOR_CLIENTS,
+    UPSTREAM_GOVERNANCE,
+    _BODY_KEYS,
+    _CATEGORY_SHAPE,
+    _GATE0_FIELDS,
+    _PATH_LIKE,
+    _SERVER_OWNED_KEYS,
+    _SNAKE_TERM,
+    _TERM_SHAPE,
+    _category_conflict,
+    _clean_string,
+    _error,
+    _field_conflict,
+    _find_section,
+    _portal_key_exists,
+    _portal_term_list,
+    _safe_field_name,
+    _same_proposal,
+    _schema_enum,
+    _section_label,
+    _separator_free,
+    _term_conflict,
+    _text_problem,
+    _validate,
+    _validate_gate0,
+    CHANGE_REQUEST_FORMAT,
+    CHANGE_REQUEST_FORMAT_VERSION,
+    NOT_A_PORTAL_PROPOSAL,
+    change_request,
+    combine_sources,
+    derive_fields,
+    derive_object_paths,
+    derive_portal_vocabulary,
+    derive_vocabulary,
+    portal_body,
+    portal_payload,
+    portal_vocabulary_from_text,
+    schema_vocabulary_from_text,
+)
 
 __all__ = [
     "PROPOSAL_STATUSES",
@@ -122,83 +195,11 @@ SCHEMA_PROPOSALS_TAG: dict = {
     "description": (
         "Drafting and tracking proposals to change the ISAAC vocabulary. "
         "A proposal here is a draft for the standard's owners; it changes nothing "
-        "in the schema, and ISAAC neither approves nor sends it. Review happens in "
-        "the ISAAC portal."
+        "in the schema, and ISAAC neither approves nor sends it. A new term or list is "
+        "reviewed in the ISAAC portal; a schema change request through the upstream "
+        "repository's change process."
     ),
 }
-
-ADD_TERM = "add_term"
-ADD_CATEGORY = "add_category"
-PROPOSAL_TYPES = (ADD_TERM, ADD_CATEGORY)
-
-#: The only two states this build can establish. ``accepted`` and ``rejected`` are
-#: decided in the portal by the standard's owners and are not recorded here.
-STATUS_PENDING = "pending"
-STATUS_WITHDRAWN = "withdrawn"
-PROPOSAL_STATUSES = (STATUS_PENDING, STATUS_WITHDRAWN)
-
-ATTRIBUTION_VERIFIED = "verified"
-ATTRIBUTION_UNVERIFIED = "unverified"
-
-PORTAL_SNAPSHOT_COMMIT = "a1cb1c8"
-PORTAL_SNAPSHOT_LABEL = f"Portal vocabulary (snapshot {PORTAL_SNAPSHOT_COMMIT})"
-PORTAL_SNAPSHOT_FILE = Path(__file__).resolve().parent / "data" / f"portal_vocabulary_{PORTAL_SNAPSHOT_COMMIT}.json"
-
-ROOT_SECTION = "Record Info"
-ROOT_SECTION_LABEL = "Record Info (root fields)"
-
-#: Limits. Description bounds mirror the portal's (a description under 20 characters is
-#: refused there); the others bound what this store will hold.
-LIMITS: dict[str, int] = {
-    "section_max": 100,
-    "category_max": 255,
-    "term_max": 80,
-    "description_min": 20,
-    "description_max": 2000,
-    "problem_max": 2000,
-    "examples_max": 2000,
-    "affected_records_estimate_max": 200,
-    "flip_list_max": 2000,
-    "max_pending": 50,
-    "max_withdrawn_kept": 500,
-    "max_body_bytes": 131_072,
-    "page_max": 100,
-}
-
-#: The portal's own cap on one person's pending proposals is 50. Here the same number is
-#: shared by EVERYONE using this server (one workspace), because nobody is identified; a
-#: withdrawn proposal frees its slot, and only the newest ``max_withdrawn_kept`` withdrawn
-#: ones are kept on disk (the oldest are removed, and the response says so).
-_TERM_SHAPE = re.compile(r"\A[A-Za-z][A-Za-z0-9_./-]*\Z")
-_SNAKE_TERM = re.compile(r"\A[a-z][a-z0-9_]*\Z")
-_PATH_LIKE = re.compile(r"(\.\.|//|\./|/\.)")
-_CATEGORY_SHAPE = re.compile(r"\A[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)*\Z")
-
-_GATE0_FIELDS = ("problem", "examples", "affected_records_estimate", "flip_list")
-
-#: Fields the server owns. A request that carries one is not refused (a form that echoes
-#: a stored proposal back must not fail), but the value is never used, and the response
-#: lists what was ignored so the omission is not silent.
-_SERVER_OWNED_KEYS = frozenset(
-    {
-        "id",
-        "proposal_id",
-        "proposed_by",
-        "proposed_at",
-        "attribution",
-        "status",
-        "reviewed_by",
-        "reviewed_at",
-        "review_comment",
-        "created_utc",
-        "persistence",
-    }
-)
-_BODY_KEYS = frozenset({"proposal_type", "section", "category", "term", "description", "gate0"})
-
-#: The portal's endpoint, stated so a person knows where the payload goes. ISAAC never
-#: calls it.
-PORTAL_PROPOSALS_PATH = "/portal/api/vocabulary/proposals"
 
 PERSISTENCE: dict = {
     "class": "workspace_files",
@@ -206,15 +207,18 @@ PERSISTENCE: dict = {
     "message": (
         "Proposals on this server are temporary. They are kept in this server's "
         "working folder, not in a database, and on the hosted site that folder is "
-        "cleared when the server restarts. Send each proposal to the ISAAC portal "
-        "for review: copy the portal payload or download it as JSON."
+        "cleared when the server restarts. Take each proposal off this server: a new term "
+        "or list as its portal payload (copy it, or download it as JSON) for the ISAAC "
+        "portal; a schema change request as its change-request document (Markdown or JSON) "
+        "for the standard's owners."
     ),
 }
 
 REVIEW_NOTE = (
-    "ISAAC drafts and tracks proposals; it does not approve, apply or send them. "
-    "The people who own the ISAAC standard review proposals in the ISAAC portal, "
-    "and they record any decision there, not here."
+    "ISAAC drafts and tracks proposals; it does not approve, apply or send them, and it "
+    "records no decision. The people who own the ISAAC standard review a new term or list "
+    "in the ISAAC portal, and a schema change request through the upstream repository's "
+    "own change process; any decision is recorded there, not here."
 )
 
 ATTRIBUTION_NOTE = (
@@ -223,214 +227,20 @@ ATTRIBUTION_NOTE = (
 )
 
 
-# --- deriving the vocabulary from the schema ------------------------------------
-
-
-def _is_object_block(node: Any) -> bool:
-    """Is this top-level property a block with fields of its own (an object, or an
-    array of objects)? Everything else is a root field and belongs to ``Record Info``."""
-    if not isinstance(node, dict):
-        return False
-    if isinstance(node.get("properties"), dict):
-        return True
-    items = node.get("items")
-    return isinstance(items, dict) and isinstance(items.get("properties"), dict)
-
-
-def _section_label(block: str) -> str:
-    return block.replace("_", " ").title()
-
-
-def _unique_strings(values: Any) -> list[str]:
-    """The string members of an ``enum``, in schema order, without duplicates."""
-    out: list[str] = []
-    if not isinstance(values, list):
-        return out
-    for value in values:
-        if isinstance(value, str) and value not in out:
-            out.append(value)
-    return out
-
-
-def _collect(node: Any, path: list[str], found: dict[str, dict]) -> None:
-    """Record every enum-bearing property under ``node``, keyed by dotted path.
-
-    Walks ``properties`` and looks through ``items`` (an array's element is the same
-    category as the array). ``oneOf`` / ``anyOf`` alternatives are merged into the same
-    path. ``if`` / ``then`` / ``else`` are deliberately NOT walked: an ``enum`` there
-    is a condition on a value, not a list of the values the field allows.
-    """
-    if not isinstance(node, dict):
-        return
-    values = _unique_strings(node.get("enum"))
-    if values and path:
-        key = ".".join(path)
-        entry = found.setdefault(key, {"path": key, "terms": [], "description": ""})
-        for value in values:
-            if value not in entry["terms"]:
-                entry["terms"].append(value)
-        description = node.get("description")
-        if isinstance(description, str) and not entry["description"]:
-            entry["description"] = description.strip()
-    properties = node.get("properties")
-    if isinstance(properties, dict):
-        for name, child in properties.items():
-            _collect(child, [*path, str(name)], found)
-    items = node.get("items")
-    if isinstance(items, dict):
-        _collect(items, path, found)
-    for key in ("oneOf", "anyOf"):
-        alternatives = node.get(key)
-        if isinstance(alternatives, list):
-            for alternative in alternatives:
-                _collect(alternative, path, found)
-
-
-def derive_vocabulary(schema: dict) -> dict:
-    """Sections, categories and allowed terms, read from ``schema``.
-
-    Pure: takes the parsed schema and returns the structure, so a test can hand it a
-    mutated copy and see the change come through. Section order is the schema's own,
-    with ``Record Info`` (the root fields) first.
-    """
-    properties = schema.get("properties") if isinstance(schema, dict) else None
-    if not isinstance(properties, dict):
-        properties = {}
-
-    root_found: dict[str, dict] = {}
-    blocks: list[tuple[str, dict[str, dict]]] = []
-    for name, node in properties.items():
-        found: dict[str, dict] = {}
-        if _is_object_block(node):
-            _collect(node, [str(name)], found)
-            blocks.append((str(name), found))
-        else:
-            _collect(node, [str(name)], root_found)
-
-    sections: list[dict] = [
-        _section_view(ROOT_SECTION, ROOT_SECTION_LABEL, None, list(root_found.values()))
-    ]
-    for name, found in blocks:
-        sections.append(_section_view(_section_label(name), _section_label(name), name, list(found.values())))
-    return {
-        "sections": sections,
-        "section_count": len(sections),
-        "category_count": sum(len(s["categories"]) for s in sections),
-        "term_count": sum(len(c["terms"]) for s in sections for c in s["categories"]),
-    }
-
-
-def _section_view(section_id: str, label: str, block: str | None, categories: list[dict]) -> dict:
-    return {
-        "id": section_id,
-        "label": label,
-        "block": block,
-        "categories": [
-            {
-                "key": c["path"],
-                "label": c["path"].split(".")[-1],
-                "description": c["description"],
-                "terms": list(c["terms"]),
-            }
-            for c in categories
-        ],
-    }
-
-
-def _text_typed(node: dict) -> bool | None:
-    """Is this schema node a text field? ``True`` for ``string``, ``False`` for any other
-    type (number, integer, boolean, object, an array of those, or a mixed type), ``None``
-    when the node declares no type at all. Arrays are judged by their ``items``."""
-    t = node.get("type")
-    if t is None and isinstance(node.get("items"), dict):
-        return _text_typed(node["items"])
-    if t == "array" and isinstance(node.get("items"), dict):
-        return _text_typed(node["items"])
-    if t is None:
-        return None
-    kinds = {t} if isinstance(t, str) else set(t) if isinstance(t, list) else set()
-    kinds.discard("null")
-    return kinds == {"string"}
-
-
-def derive_fields(schema: dict) -> dict[str, dict]:
-    """Every property path the schema declares, with whether it is a text field.
-
-    ``{"context.temperature_K": {"text": False}, ...}``. Same walk as the vocabulary
-    (``properties``, looking through ``items``). Used to refuse a "new category" for a
-    field the schema already has, and for one that is not a text field.
-    """
-    out: dict[str, dict] = {}
-
-    def walk(node: Any, path: list[str]) -> None:
-        if not isinstance(node, dict):
-            return
-        if path:
-            out.setdefault(".".join(path), {"text": _text_typed(node), "has_enum": bool(node.get("enum"))})
-        props = node.get("properties")
-        if isinstance(props, dict):
-            for name, child in props.items():
-                walk(child, [*path, str(name)])
-        items = node.get("items")
-        if isinstance(items, dict):
-            walk(items, path)
-
-    walk(schema, [])
-    return out
-
-
-def derive_portal_vocabulary(doc: dict) -> dict:
-    """The portal's ``vocabulary.json`` in the same section/category shape.
-
-    A portal entry with a ``values`` list is a TERM LIST (``kind: "terms"``); an entry with
-    only a description or a mapping (the unit alias map, for example) is ``kind: "other"``
-    and carries no terms, so it is shown but cannot take an ``add_term``.
-    """
-    sections: list[dict] = []
-    for name, entries in (doc.items() if isinstance(doc, dict) else ()):
-        if not isinstance(entries, dict):
-            continue
-        cats = []
-        for key, entry in entries.items():
-            if not isinstance(entry, dict):
-                continue
-            values = _unique_strings(entry.get("values"))
-            description = entry.get("description")
-            cats.append(
-                {
-                    "key": str(key),
-                    "label": str(key).split(".")[-1],
-                    "description": description.strip() if isinstance(description, str) else "",
-                    "terms": values,
-                    "kind": "terms" if isinstance(entry.get("values"), list) else "other",
-                }
-            )
-        block = None if name == ROOT_SECTION else str(name).lower().replace(" ", "_")
-        label = ROOT_SECTION_LABEL if name == ROOT_SECTION else str(name)
-        sections.append({"id": str(name), "label": label, "block": block, "categories": cats})
-    return {
-        "sections": sections,
-        "section_count": len(sections),
-        "category_count": sum(1 for s_ in sections for c in s_["categories"]),
-        "term_list_count": sum(1 for s_ in sections for c in s_["categories"] if c["kind"] == "terms"),
-        "term_count": sum(len(c["terms"]) for s_ in sections for c in s_["categories"]),
-    }
-
 
 @lru_cache(maxsize=4)
 def _derive_cached(path_str: str, mtime_ns: int, size: int) -> tuple[str, str]:
     """Parse and derive once per schema file state. Returns ``(sha256, json)``."""
-    text = Path(path_str).read_text(encoding="utf-8")
-    schema = json.loads(text)
-    vocabulary = derive_vocabulary(schema)
-    vocabulary["fields"] = derive_fields(schema)
-    return hashlib.sha256(text.encode("utf-8")).hexdigest(), json.dumps(vocabulary)
+    vocabulary = schema_vocabulary_from_text(Path(path_str).read_text(encoding="utf-8"))
+    digest = vocabulary.pop("schema_sha256")
+    return digest, json.dumps(vocabulary)
 
 
 @lru_cache(maxsize=4)
 def _portal_cached(path_str: str, mtime_ns: int, size: int) -> tuple[str, str]:
-    text = Path(path_str).read_text(encoding="utf-8")
-    return hashlib.sha256(text.encode("utf-8")).hexdigest(), json.dumps(derive_portal_vocabulary(json.loads(text)))
+    vocabulary = portal_vocabulary_from_text(Path(path_str).read_text(encoding="utf-8"))
+    digest = vocabulary.pop("portal_sha256")
+    return digest, json.dumps(vocabulary)
 
 
 def _schema_file() -> Path:
@@ -446,8 +256,9 @@ def _portal_file() -> Path:
 def load_vocabulary() -> dict:
     """The schema-enum vocabulary for the schema file as it is NOW (cached on its stat).
 
-    Carries ``fields`` (every property path and whether it is a text field) beside the
-    sections, and ``schema_sha256``."""
+    Carries ``fields`` (every property path and whether it is a text field) and
+    ``object_paths`` (every place a new field could go) beside the sections, and
+    ``schema_sha256``."""
     path = _schema_file()
     stat = path.stat()
     digest, payload = _derive_cached(str(path), stat.st_mtime_ns, stat.st_size)
@@ -468,348 +279,7 @@ def load_portal_vocabulary() -> dict:
 
 def load_sources() -> dict:
     """Both vocabulary sources and the union of their sections, for one request."""
-    schema_v = load_vocabulary()
-    portal_v = load_portal_vocabulary()
-    sections: list[dict] = []
-    seen: set[str] = set()
-    for source in (portal_v, schema_v):
-        for sec in source["sections"]:
-            if sec["id"] in seen:
-                continue
-            seen.add(sec["id"])
-            sections.append({"id": sec["id"], "label": sec["label"], "block": sec["block"]})
-    return {"schema": schema_v, "portal": portal_v, "sections": sections}
-
-
-def _find_section(sources: dict, section: str) -> dict | None:
-    for entry in sources["sections"]:
-        if entry["id"] == section:
-            return entry
-    return None
-
-
-def _portal_term_list(sources: dict, section: str, key: str) -> dict | None:
-    """The portal's term list for ``key`` in ``section`` (the portal checks both)."""
-    for sec in sources["portal"]["sections"]:
-        if sec["id"] == section:
-            for c in sec["categories"]:
-                if c["key"] == key and c["kind"] == "terms" and c["terms"]:
-                    return c
-    return None
-
-
-def _schema_enum(sources: dict, key: str) -> dict | None:
-    for sec in sources["schema"]["sections"]:
-        for c in sec["categories"]:
-            if c["key"] == key:
-                return c
-    return None
-
-
-def _portal_key_exists(sources: dict, key: str) -> str | None:
-    """The portal section holding a category key (term list or not), else ``None``."""
-    wanted = key.casefold()
-    for sec in sources["portal"]["sections"]:
-        for c in sec["categories"]:
-            if c["key"].casefold() == wanted:
-                return sec["id"]
-    return None
-
-
-def _separator_free(text: str) -> str:
-    """A comparison form: case-folded, with ``_ - / .`` and spaces removed."""
-    return re.sub(r"[\s_\-/.]+", "", text.casefold())
-
-
-# --- validation -----------------------------------------------------------------
-
-
-_SAFE_FIELD_NAME = re.compile(r"\A[A-Za-z0-9_.-]{1,40}\Z")
-
-
-def _safe_field_name(key: Any) -> str | None:
-    """A request key, echoed only when it is plain. A key is attacker-chosen text, and
-    one that cannot be encoded (a lone surrogate) would make the refusal itself crash."""
-    return key if isinstance(key, str) and _SAFE_FIELD_NAME.match(key) else None
-
-
-def _error(field: str | None, code: str, message: str) -> dict:
-    return {"field": field, "code": code, "message": message}
-
-
-def _text_problem(value: str) -> str | None:
-    """Why ``value`` cannot be stored as text, or ``None``. Allows newline and tab."""
-    try:
-        value.encode("utf-8")
-    except UnicodeEncodeError:
-        return "contains a character that cannot be stored"
-    for ch in value:
-        category = unicodedata.category(ch)
-        if category == "Cc" and ch not in "\n\t\r":
-            return "contains a control character"
-        if category == "Cf":
-            # Format characters (bidi overrides such as U+202E, zero-width marks, BOM) are
-            # invisible in a reviewer's screen and can make one word read as another.
-            return "contains an invisible formatting character"
-    return None
-
-
-def _clean_string(
-    body: dict,
-    field: str,
-    *,
-    maximum: int,
-    errors: list[dict],
-    required: bool,
-    minimum: int = 1,
-    label: str | None = None,
-) -> str | None:
-    label = label or field
-    raw = body.get(field)
-    if raw is None or (isinstance(raw, str) and not raw.strip()):
-        if required:
-            errors.append(_error(field, f"{field}_required", f"{label.capitalize()} is required."))
-        return None
-    if not isinstance(raw, str):
-        errors.append(_error(field, f"{field}_invalid", f"{label.capitalize()} must be text."))
-        return None
-    value = unicodedata.normalize("NFC", raw.strip())
-    problem = _text_problem(value)
-    if problem is not None:
-        errors.append(_error(field, f"{field}_invalid", f"{label.capitalize()} {problem}."))
-        return None
-    if len(value) > maximum:
-        errors.append(
-            _error(
-                field,
-                f"{field}_too_long",
-                f"{label.capitalize()} can be at most {maximum} characters; this one is {len(value)}.",
-            )
-        )
-        return None
-    if len(value) < minimum:
-        errors.append(
-            _error(
-                field,
-                f"{field}_too_short",
-                f"{label.capitalize()} needs at least {minimum} characters; this one is {len(value)}.",
-            )
-        )
-        return None
-    return value
-
-
-def _validate(body: dict, sources: dict) -> tuple[dict | None, list[dict], list[str]]:
-    """Check one request body. Returns ``(clean, field_errors, ignored_keys)``.
-
-    ``clean`` is ``None`` whenever there is any error. Conflicts with what already
-    exists (a term already allowed, a duplicate proposal) are not decided here; they
-    are 409s and are raised after the shape is known to be good.
-    """
-    errors: list[dict] = []
-    ignored = sorted(k for k in body if k in _SERVER_OWNED_KEYS)
-    for key in sorted(body):
-        if key not in _BODY_KEYS and key not in _SERVER_OWNED_KEYS:
-            errors.append(
-                _error(
-                    _safe_field_name(key),
-                    "unknown_field",
-                    "This request carries a field a schema proposal does not take.",
-                )
-            )
-
-    proposal_type = body.get("proposal_type")
-    if proposal_type not in PROPOSAL_TYPES:
-        errors.append(
-            _error(
-                "proposal_type",
-                "invalid_proposal_type",
-                "Proposal type must be add_term (a new allowed value) or add_category (a new list of allowed values).",
-            )
-        )
-        proposal_type = None
-
-    section_text = _clean_string(
-        body, "section", maximum=LIMITS["section_max"], errors=errors, required=True
-    )
-    section = _find_section(sources, section_text) if section_text else None
-    if section_text and section is None:
-        errors.append(
-            _error(
-                "section",
-                "unknown_section",
-                "That section is in neither the portal vocabulary snapshot nor the ISAAC schema. Choose one from the list.",
-            )
-        )
-
-    category = _clean_string(
-        body, "category", maximum=LIMITS["category_max"], errors=errors, required=True
-    )
-    term: str | None = None
-
-    if proposal_type == ADD_TERM:
-        term = _clean_string(body, "term", maximum=LIMITS["term_max"], errors=errors, required=True)
-        existing_terms: list[str] = []
-        if section is not None and category:
-            portal_list = _portal_term_list(sources, section["id"], category)
-            schema_list = _schema_enum(sources, category)
-            if portal_list is None and schema_list is not None:
-                # A fixed list in the schema that the portal has no list for: the portal's own
-                # check would refuse a new term for it, so a draft for it could never be sent.
-                errors.append(
-                    _error(
-                        "category",
-                        "category_not_in_portal",
-                        "This is a fixed list in the ISAAC schema, but the portal vocabulary snapshot has no list for it "
-                        "(in this section), so the portal would refuse a new term for it. Raise it with the owners of the "
-                        "standard; no proposal type here fits.",
-                    )
-                )
-            elif portal_list is None:
-                errors.append(
-                    _error(
-                        "category",
-                        "unknown_category",
-                        f"The portal vocabulary snapshot has no list of terms called that in this section. "
-                        "Choose one of its lists, or propose a new category if the field does not exist yet.",
-                    )
-                )
-            else:
-                existing_terms = list(portal_list["terms"]) + [
-                    t for t in (schema_list["terms"] if schema_list else []) if t not in portal_list["terms"]
-                ]
-        if term:
-            if not _TERM_SHAPE.match(term) or _PATH_LIKE.search(term):
-                errors.append(
-                    _error(
-                        "term",
-                        "invalid_term",
-                        "A term is a single word with no spaces, starting with a letter, "
-                        "using only letters, digits, underscore, hyphen, slash or dot, and no path-like '..' or '//' "
-                        "(for example catalytic_reactor_test).",
-                    )
-                )
-            elif existing_terms and all(_SNAKE_TERM.match(t) for t in existing_terms) and not _SNAKE_TERM.match(term):
-                errors.append(
-                    _error(
-                        "term",
-                        "invalid_term",
-                        "Every existing term in this category is lowercase with underscores "
-                        "(like rotating_cylinder), so a new one should be too.",
-                    )
-                )
-    elif proposal_type == ADD_CATEGORY:
-        if "term" in body and body.get("term") not in (None, ""):
-            errors.append(
-                _error(
-                    "term",
-                    "term_not_allowed",
-                    "A new category does not take a term; propose the terms once the category exists.",
-                )
-            )
-        if category:
-            if not _CATEGORY_SHAPE.match(category):
-                errors.append(
-                    _error(
-                        "category",
-                        "invalid_category",
-                        "A category key is a dotted path of field names, such as "
-                        "context.transport.viscosity.",
-                    )
-                )
-            elif section is not None:
-                block = section["block"]
-                first = category.split(".")[0]
-                if block is None and "." in category:
-                    errors.append(
-                        _error(
-                            "category",
-                            "category_outside_section",
-                            "Record Info holds the record's own top-level fields, so its "
-                            "category keys have no dots (for example record_type).",
-                        )
-                    )
-                elif block is not None and first != block:
-                    errors.append(
-                        _error(
-                            "category",
-                            "category_outside_section",
-                            f"A category in the {section['label']} section starts with "
-                            f"'{block}.'.",
-                        )
-                    )
-            field = sources["schema"].get("fields", {}).get(category)
-            if field is not None and field.get("text") is not True and not any(e["field"] == "category" for e in errors):
-                errors.append(
-                    _error(
-                        "category",
-                        "category_not_a_text_field",
-                        "This field already exists in the ISAAC schema and does not take words (it is a number, a "
-                        "yes/no value, a group or a mixed type), so a list of allowed terms does not fit it.",
-                    )
-                )
-
-    description = _clean_string(
-        body,
-        "description",
-        maximum=LIMITS["description_max"],
-        minimum=LIMITS["description_min"],
-        errors=errors,
-        required=True,
-    )
-
-    gate0 = _validate_gate0(body.get("gate0"), errors)
-
-    if errors:
-        return None, errors, ignored
-    return (
-        {
-            "proposal_type": proposal_type,
-            "section": section["id"],
-            "category": category,
-            "term": term,
-            "description": description,
-            "gate0": gate0,
-        },
-        [],
-        ignored,
-    )
-
-
-def _validate_gate0(raw: Any, errors: list[dict]) -> dict | None:
-    """The optional "why, for reviewers" block: four free-text answers."""
-    if raw is None:
-        return None
-    if not isinstance(raw, dict):
-        errors.append(_error("gate0", "gate0_invalid", "The reviewer notes must be an object."))
-        return None
-    for key in raw:
-        if key not in _GATE0_FIELDS:
-            errors.append(
-                _error(
-                    f"gate0.{_safe_field_name(key)}" if _safe_field_name(key) else "gate0",
-                    "unknown_field",
-                    "The reviewer notes take only problem, examples, affected_records_estimate and flip_list.",
-                )
-            )
-    out: dict[str, str] = {}
-    for name in _GATE0_FIELDS:
-        sub: list[dict] = []
-        value = _clean_string(
-            raw,
-            name,
-            maximum=LIMITS[f"{name}_max"],
-            errors=sub,
-            required=False,
-            label=name.replace("_", " "),
-        )
-        for entry in sub:
-            entry["field"] = f"gate0.{name}"
-            entry["code"] = f"gate0_{entry['code']}"
-        errors.extend(sub)
-        if value:
-            out[name] = value
-    return out or None
+    return combine_sources(load_vocabulary(), load_portal_vocabulary())
 
 
 # --- the store ------------------------------------------------------------------
@@ -846,7 +316,36 @@ def _readable(doc: Any, proposal_id: str) -> bool:
         and isinstance(doc.get("section"), str)
         and isinstance(doc.get("category"), str)
         and isinstance(doc.get("description"), str)
+        and (doc.get("proposal_type") != SCHEMA_CHANGE or isinstance(doc.get("change"), dict))
     )
+
+
+#: The keys of a stored schema change that a response may carry, built key by key in
+#: :func:`_change_view` so an unexpected stored key never rides out.
+_CHANGE_VIEW_KEYS = (
+    "kind",
+    "parent_path",
+    "field_name",
+    "path",
+    "value_type",
+    "unit",
+    "required",
+    "example",
+    "scope",
+    "migration",
+    "parent_open_today",
+)
+
+
+def _change_view(doc: dict) -> dict | None:
+    change = doc.get("change")
+    if doc.get("proposal_type") != SCHEMA_CHANGE or not isinstance(change, dict):
+        return None
+    out: dict = {}
+    for key in _CHANGE_VIEW_KEYS:
+        value = change.get(key)
+        out[key] = value if isinstance(value, (str, bool)) or value is None else None
+    return out
 
 
 def _load(proposal_id: str) -> dict | None:
@@ -916,45 +415,6 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _term_conflict(sources: dict, clean: dict) -> dict | None:
-    """The existing term this one duplicates, if any (case and separator insensitive), in the
-    portal list for the category and in the schema enum with the same key."""
-    wanted = _separator_free(clean["term"])
-    portal_list = _portal_term_list(sources, clean["section"], clean["category"])
-    schema_list = _schema_enum(sources, clean["category"])
-    for source, entry in (("portal", portal_list), ("schema", schema_list)):
-        if entry is None:
-            continue
-        for existing in entry["terms"]:
-            if _separator_free(existing) == wanted:
-                return {"existing_term": existing, "existing_in": source}
-    return None
-
-
-def _category_conflict(sources: dict, clean: dict) -> dict | None:
-    """A category key that already exists: as ANY portal entry (a term list or not), as a schema
-    enum, or as a schema field of any kind."""
-    key = clean["category"]
-    in_portal = _portal_key_exists(sources, key)
-    if in_portal is not None:
-        return {"existing_category": key, "existing_in": "portal", "existing_section": in_portal}
-    if _schema_enum(sources, key) is not None:
-        return {"existing_category": key, "existing_in": "schema"}
-    for field in sources["schema"].get("fields", {}):
-        if field.casefold() == key.casefold():
-            return {"existing_category": field, "existing_in": "schema"}
-    return None
-
-
-def _same_proposal(a: dict, b: dict) -> bool:
-    return (
-        a["proposal_type"] == b["proposal_type"]
-        and a["section"] == b["section"]
-        and a["category"].casefold() == b["category"].casefold()
-        and (a.get("term") or "").casefold() == (b.get("term") or "").casefold()
-    )
-
-
 # --- views ----------------------------------------------------------------------
 
 
@@ -980,6 +440,7 @@ def _view(doc: dict) -> dict:
         "proposed_at": doc.get("proposed_at"),
         "withdrawn_at": doc.get("withdrawn_at"),
         "schema_version": doc.get("schema_version"),
+        "change": _change_view(doc),
         "sent_by_isaac": False,
     }
 
@@ -991,37 +452,6 @@ def _envelope(**extra: Any) -> dict:
         "review_note": REVIEW_NOTE,
         "attribution_note": ATTRIBUTION_NOTE,
     }
-
-
-def portal_body(doc: dict) -> dict:
-    """The body of the portal's ``POST /portal/api/vocabulary/proposals``.
-
-    Exactly the upstream field names. ``proposal_type`` is carried for the portal's
-    form (its REST route reads only the other four). The reviewer notes have no field
-    upstream, so they are appended to ``description`` under a plain heading rather than
-    dropped: the portal's reviewer writes the wiki definition from that text.
-    """
-    description = doc["description"]
-    gate0 = doc.get("gate0") if isinstance(doc.get("gate0"), dict) else None
-    if gate0:
-        labels = (
-            ("problem", "The problem"),
-            ("examples", "Examples"),
-            ("affected_records_estimate", "Records affected (estimate)"),
-            ("flip_list", "What would change"),
-        )
-        lines = [f"{label}: {gate0[key]}" for key, label in labels if isinstance(gate0.get(key), str)]
-        if lines:
-            description = description + "\n\nWhy (for reviewers)\n" + "\n".join(lines)
-    body: dict = {
-        "proposal_type": doc["proposal_type"],
-        "section": doc["section"],
-        "category": doc["category"],
-    }
-    if doc["proposal_type"] == ADD_TERM:
-        body["term"] = doc.get("term")
-    body["description"] = description
-    return body
 
 
 # --- identity -------------------------------------------------------------------
@@ -1159,6 +589,10 @@ def _unavailable() -> JSONResponse:
         "A category is a field whose value must be one of a fixed list; a section is a top-level "
         "block of the record, with the record's own root fields under Record Info. `proposal_sections` "
         "is the union a proposal may name, with the portal term lists a new term may join.\n\n"
+        "`schema_change` describes the third proposal type, a new FIELD in the record schema, which the portal "
+        "has no proposal type for: `object_paths` is every block of the vendored schema a field could go in "
+        "(with its section, its existing fields, and whether it accepts undeclared keys today), and "
+        "`upstream` names the upstream repository's own change process.\n\n"
         "The response also carries the limits a proposal is held to, so a client does not carry a second "
         "copy of them. It is read-only: nothing here changes the schema or the portal."
     ),
@@ -1213,7 +647,17 @@ def get_vocabulary() -> dict:
         },
         "proposal_sections": proposal_sections,
         "proposal_types": list(PROPOSAL_TYPES),
+        "portal_proposal_types": list(PORTAL_PROPOSAL_TYPES),
+        "schema_change": {
+            "kinds": list(SCHEMA_CHANGE_KINDS),
+            "value_types": list(SCHEMA_CHANGE_VALUE_TYPES),
+            "scopes": list(SCHEMA_CHANGE_SCOPES),
+            "object_paths": schema_v.get("object_paths") or [],
+            "not_a_portal_proposal": NOT_A_PORTAL_PROPOSAL,
+            "upstream": dict(UPSTREAM_GOVERNANCE),
+        },
         "limits": dict(LIMITS),
+        "term_shape": dict(TERM_SHAPE_FOR_CLIENTS),
         "term_rule": (
             "One word, no spaces, starting with a letter. If every existing term in the "
             "category is lowercase with underscores, a new term must be too."
@@ -1232,6 +676,12 @@ def get_vocabulary() -> dict:
         "`term`, `description`) or `add_category` (needs `section`, `category`, "
         "`description`). An optional `gate0` object holds four free-text answers for "
         "reviewers: `problem`, `examples`, `affected_records_estimate`, `flip_list`.\n\n"
+        "`schema_change` is a third type, ISAAC's own: a request for a new FIELD in the record schema "
+        "(needs `section`, `description`, `gate0.problem` and a `change` object: `parent_path`, a block "
+        "the vendored schema declares; `field_name`; `value_type`; `required`; optional `unit`, `example`, "
+        "`scope`, `migration`). The ISAAC portal has no proposal type for this, so it has no portal "
+        "payload; its export is the change-request document. A field the parent already has is "
+        "`409 field_already_exists`.\n\n"
         "THIS APPROVES NOTHING AND SENDS NOTHING. The proposal is stored as `pending` "
         "on this server; the owners of the standard review it in the ISAAC portal, and "
         "any decision is recorded there. Use the portal-payload operation to get the "
@@ -1254,7 +704,7 @@ def get_vocabulary() -> dict:
         **_R_UNAUTHORIZED,
         409: {
             "description": (
-                "The term or category already exists in the schema, or an identical "
+                "The term, category or field already exists in the schema, or an identical "
                 "proposal is already pending."
             )
         },
@@ -1276,7 +726,8 @@ def post_schema_proposal(
         description=(
             "`{\"proposal_type\": \"add_term\" | \"add_category\", \"section\", "
             "\"category\", \"term\" (add_term only), \"description\", \"gate0\" "
-            "(optional)}`."
+            "(optional)}`, or `{\"proposal_type\": \"schema_change\", \"section\", \"description\", "
+            "\"gate0\", \"change\"}`."
         ),
     ),
 ):
@@ -1303,6 +754,16 @@ def post_schema_proposal(
                 "Use it instead of proposing it.",
                 **conflict,
             )
+    elif clean["proposal_type"] == SCHEMA_CHANGE:
+        conflict = _field_conflict(sources, clean)
+        if conflict is not None:
+            return _refuse(
+                409,
+                "field_already_exists",
+                f"The ISAAC schema already has the field {conflict['existing_field']}. Use it instead of "
+                "proposing it.",
+                **conflict,
+            )
     else:
         conflict = _category_conflict(sources, clean)
         if conflict is not None:
@@ -1323,6 +784,7 @@ def post_schema_proposal(
         "term": clean["term"],
         "description": clean["description"],
         "gate0": clean["gate0"],
+        "change": clean["change"],
         "status": STATUS_PENDING,
         "proposed_by": proposed_by,
         "attribution": attribution,
@@ -1485,10 +947,17 @@ def withdraw_schema_proposal(
         "proposal is entered in the portal's Ontology Editor with the same "
         "fields, and `portal.rest_supported` says which applies. The reviewer notes "
         "have no field upstream, so they are appended to `description` under a "
-        "plain heading."
+        "plain heading.\n\n"
+        "A `schema_change` proposal never has a portal payload, because the portal has no proposal type "
+        "for a new field: it is refused with `409 no_portal_payload`, and its export is the change-request "
+        "operation."
     ),
     response_description="The portal request body and where it goes.",
-    responses={**_R_UNAUTHORIZED, **_R_NOT_FOUND},
+    responses={
+        **_R_UNAUTHORIZED,
+        **_R_NOT_FOUND,
+        409: {"description": "The proposal is a schema change request, which has no portal payload."},
+    },
 )
 def get_schema_proposal_portal_payload(
     proposal_id: str = PathParam(..., description="The proposal's id."),
@@ -1496,35 +965,79 @@ def get_schema_proposal_portal_payload(
     doc = _load(proposal_id)
     if doc is None:
         return _not_found()
-    rest_supported = doc["proposal_type"] == ADD_TERM
+    if doc["proposal_type"] not in PORTAL_PROPOSAL_TYPES:
+        return _refuse(
+            409,
+            "no_portal_payload",
+            NOT_A_PORTAL_PROPOSAL + " Use the change-request document instead.",
+            proposal_type=doc["proposal_type"],
+        )
+    return _envelope(proposal_id=doc["id"], status=doc["status"], **portal_payload(doc))
+
+
+@router.get(
+    "/{proposal_id}/change-request",
+    summary="Get the Change-Request Document for a Schema Change",
+    description=(
+        "The export of a `schema_change` proposal: a document for the owners of the ISAAC "
+        "standard, as Markdown (`markdown`, ready to paste into a discussion or a change file) and "
+        "as JSON (`document`). IT IS NOT A PORTAL PAYLOAD: the ISAAC portal's Propose a Change has "
+        "no proposal type for a new field. Its sections follow the upstream repository's own "
+        "change process (`upstream`): the change, then gate 0 (the problem with counts and "
+        "examples, and the flip list), then the migration plan, version and rollback a schema "
+        "change needs. A section the proposer did not write says so.\n\n"
+        "ISAAC never sends this anywhere and approves nothing; `sent_by_isaac` is `false`. A proposal "
+        "that is a new term or list is refused with `409 not_a_schema_change` (use the portal payload)."
+    ),
+    response_description="The change-request document as Markdown and as JSON.",
+    responses={
+        **_R_UNAUTHORIZED,
+        **_R_NOT_FOUND,
+        409: {"description": "The proposal is a new term or list, which goes to the portal instead."},
+    },
+)
+def get_schema_proposal_change_request(
+    proposal_id: str = PathParam(..., description="The proposal's id."),
+):
+    doc = _load(proposal_id)
+    if doc is None:
+        return _not_found()
+    if doc["proposal_type"] != SCHEMA_CHANGE:
+        return _refuse(
+            409,
+            "not_a_schema_change",
+            "This proposal is a new term or list, which the ISAAC portal takes: use its portal payload.",
+            proposal_type=doc["proposal_type"],
+        )
+    exported = change_request(
+        _view_for_export(doc),
+        schema_version=doc.get("schema_version") or EXPECTED_VERSION,
+        schema_sha256=load_vocabulary().get("schema_sha256"),
+    )
     notes = [
-        "ISAAC has not sent this. Someone with ISAAC portal access has to.",
-        "The ISAAC standard's owners review it in the portal and record any decision there.",
+        "ISAAC has not sent this anywhere. Someone who works with the owners of the ISAAC standard has to.",
+        NOT_A_PORTAL_PROPOSAL,
+        "The upstream repository records proposed changes in "
+        f"{UPSTREAM_GOVERNANCE['drafts']}; its GitHub issues were turned off when this build read it "
+        "(2026-10-29), so there is no issue form to file this in.",
+        "The schema hash is of the copy this server holds now, which may be newer than the one this "
+        "proposal was drafted against; the schema version is the one it was drafted against.",
     ]
-    if doc.get("gate0"):
-        notes.append(
-            "The reviewer notes are appended to the description, because the portal has no separate field for them."
-        )
-    if rest_supported:
-        notes.append(
-            "The portal checks the section and category against its own vocabulary; if the "
-            "portal's list differs from the schema ISAAC reads, it may ask for a different category key."
-        )
-    else:
-        notes.append(
-            "The portal's web endpoint takes new terms only. A new category is entered in the portal's "
-            "Ontology Editor (its Propose a Change form), using these fields; do not post this body to the "
-            "web endpoint, which would refuse it."
-        )
     return _envelope(
         proposal_id=doc["id"],
         status=doc["status"],
-        portal={
-            "method": "POST",
-            "path": PORTAL_PROPOSALS_PATH,
-            "rest_supported": rest_supported,
-        },
-        body=portal_body(doc),
+        format=CHANGE_REQUEST_FORMAT,
+        format_version=CHANGE_REQUEST_FORMAT_VERSION,
+        is_portal_payload=False,
+        markdown=exported["markdown"],
+        document=exported["document"],
+        filename_stem=f"isaac-schema-change-{doc['id']}",
+        upstream=dict(UPSTREAM_GOVERNANCE),
         sent_by_isaac=False,
         notes=notes,
     )
+
+
+def _view_for_export(doc: dict) -> dict:
+    """The stored proposal as the export reads it: the public view, never the raw file."""
+    return _view(doc)

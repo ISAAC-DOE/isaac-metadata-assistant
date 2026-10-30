@@ -683,7 +683,8 @@ Install for use from any directory: `scripts/install_local_cli.sh` (creates or r
 ## 11. Blind cross-checking
 
 `exposures[]` records the first time each command printed a target's parser value
-(`bundle show candidate|conflict|run|question`, `bundle list candidates`, `bundle reveal`);
+(`bundle show candidate|conflict|run|question`, `bundle list candidates`, `bundle reveal`,
+`bundle propose-terms` (§24));
 the exposure is written BEFORE anything is printed, and if it cannot be written nothing is
 printed. `summary.md` shows no non-conflicting parser value. `bundle annotate --blind` is
 honoured only when no exposure exists for that target; otherwise the interpretation is
@@ -1323,3 +1324,69 @@ group or extended-context id moves. A bundle written before this change still ca
 display names; `suggestions.facility_hints` ignores them unless the column test passes, as
 before. `reading.full.json` (the raw engine state, not the contract) is unchanged and still
 holds the engine's names.
+
+## 24. Values outside the vocabulary: `isaac bundle propose-terms` (2026-10-29) — no format bump
+
+```
+isaac bundle propose-terms <bundle_dir> [--out <file.json>] [--force]
+```
+
+Lists the values in a bundle that are **outside a fixed list**, grouped by field, with counts and
+citations, and writes one **draft proposal per term** in the website's own Schema Proposals
+portal format. Everything happens on this machine; **nothing is sent** and no network call is
+made. Code: `apps/api/isaac_api/local_import/propose_terms.py`.
+
+**Which lists.** A field is judged by the vendored schema's `enum` at its path (exactly what
+`bundle.value_problem` refuses, so a confirmed value off it carries the eligibility reason "the
+value does not fit the official field") and by the portal vocabulary snapshot's term list for it
+(`apps/api/isaac_api/data/portal_vocabulary_a1cb1c8.json`, the list the portal checks a proposed
+term against). Both are read at run time; a field with neither is never judged. `missing_from`
+says which list lacks each term.
+
+**Which values**, each counted under `by_origin`:
+- `scientist_confirmed`: a candidate or missing value in state `scientist_confirmed`, with its
+  value as the governing decision leaves it;
+- `parser_reading`: a candidate's value that no scientist has confirmed;
+- `ai_reading`: an AI interpretation's `proposed_value` (`annotate`, `annotate --from-readings`).
+
+**Not read:** a reading pass's findings file. It is not part of a bundle. A term it lists under
+`not_found`, or mentions in its notes, is not counted. On the real corpus, the reaction and
+cell-type terms the coverage note calls "outside the vocabulary" are recorded only there.
+
+**Citations** are `{file, locator}` only: an evidence entry's `relative_path` and `locator`, or an
+AI reading's `source_path` and `excerpt_locator`. No quote is copied out. At most 20 are kept per
+term; `citations_total` and `citations_truncated` say how many there were.
+
+**Drafts.** A draft is made only for a term at a field the portal has a term list for. It is the
+body and notes of `GET /api/schema-proposals/{id}/portal-payload`, built by the same function
+(`schema_proposal_rules.portal_payload`). `description` is **empty**: what a term means is the
+proposer's statement, so every draft is `ready_to_send: false` with `missing: ["description"]`
+(the portal refuses a description under 20 characters). Before drafting, the website's own
+checks run on the term: shape (one word), case convention, and near-duplicates of an allowed
+term (`in situ`, `insitu` against `in_situ`). A term they refuse is listed with
+`drafted: false`, `problems` and the website's own sentence, and is **never rewritten** into one
+they would accept. Also not drafted:
+- a field the portal has no list for: no portal payload exists, and the reason says to raise it
+  as a schema change;
+- a term already in the portal's list but not in the vendored schema's enum: the schema lags the
+  portal, and no term is missing.
+
+**Exposure.** The report carries parser values, so every candidate it prints is recorded in
+`exposures[]` under `bundle propose-terms` before anything is printed or written (§11). That
+write is an ordinary bundle save: on a bundle written by an older build it also raises the format
+to this build's, logging the upgrade in `format_upgrades` and any re-derived eligibility in
+`eligibility_rederived` (§9), exactly as `bundle list candidates` does. A report with no parser
+value writes nothing.
+
+**Output.** JSON with `format: "isaac.term-proposal-drafts"`, `format_version: "1"`,
+`sent_by_isaac: false`, the two lists' labels and hashes, `totals` (fields, terms, occurrences,
+drafts) and `fields[]`. `--out` writes the file atomically. An existing file is refused (exit 4)
+unless `--force`, and so is a directory. A missing bundle exits 6.
+
+**Measured 2026-10-29** on copies of the six real beamtime bundles (counts only): 618
+occurrences of 16 distinct off-list values in 4 fields. All are AI readings; no parser value
+and no confirmed value is off a list. They produce 2 drafts, for one term in two beamtimes: 131
+readings of a potential scale that neither list has. The other 14 are phrases or sentences the
+website refuses as a term, in `system.technique` and in `sample.material.provenance`, a field
+the portal closes with a six-word list. They are listed, not drafted. No exposure was written,
+because no parser value was printed.

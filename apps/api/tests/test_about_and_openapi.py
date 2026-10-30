@@ -861,7 +861,15 @@ def test_every_operation_has_a_summary_that_is_not_the_function_name(client):
     # AT THIS HEAD: 90 PATHS AND 101 METHOD-OPERATIONS (paths 85 -> 90: `/schema-
     # proposals` carries GET and POST, so five new paths carry six operations);
     # `checked` is the second — re-derived over `create_app().openapi()`.
-    assert checked == 101, f"expected 101 documented operations, found {checked}"
+    #
+    # ── 101 -> 102, 2026-10-29: SCHEMA CHANGE REQUESTS, one operation ──────────────
+    # `GET /api/schema-proposals/{proposal_id}/change-request`: the export of the new
+    # `schema_change` proposal type (a new FIELD, which the upstream portal has no proposal
+    # type for). A document only; nothing is sent, approved or applied.
+    #
+    # AT THIS HEAD: 91 PATHS AND 102 METHOD-OPERATIONS (paths 90 -> 91, one new path with
+    # one method); `checked` is the second — re-derived over `create_app().openapi()`.
+    assert checked == 102, f"expected 102 documented operations, found {checked}"
 
 
 def test_the_auto_summary_check_can_actually_fail(client):
@@ -1388,7 +1396,10 @@ EXPECTED_RESPONSE_CODES: dict[tuple[str, str], list[str]] = {
     ("/api/schema-proposals", "post"): ["201", "401", "409", "413", "422", "429", "503"],
     ("/api/schema-proposals/vocabulary", "get"): ["200", "401"],
     ("/api/schema-proposals/{proposal_id}", "get"): ["200", "401", "404", "422"],
-    ("/api/schema-proposals/{proposal_id}/portal-payload", "get"): ["200", "401", "404", "422"],
+    # `409` (2026-10-29): a schema change request has no portal payload.
+    ("/api/schema-proposals/{proposal_id}/portal-payload", "get"): ["200", "401", "404", "409", "422"],
+    # `409`: a new term or list is not a schema change (it has a portal payload instead).
+    ("/api/schema-proposals/{proposal_id}/change-request", "get"): ["200", "401", "404", "409", "422"],
     ("/api/schema-proposals/{proposal_id}/withdraw", "post"): ["200", "401", "404", "409", "422", "503"],
     ("/api/search", "get"): ["200", "401", "404", "422"],
     ("/api/tutorial/sessions", "post"): ["201", "401"],
