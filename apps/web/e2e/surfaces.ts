@@ -46,6 +46,14 @@ export interface Surface {
   readonly ready: { role: Parameters<import('@playwright/test').Page['getByRole']>[0]; name: string | RegExp };
   /** Surfaces that legitimately have no `<h1>` (recorded, not excused — see FINDINGS). */
   readonly expectH1?: boolean;
+  /**
+   * The surface is a LOCAL-BUILD destination whose API the e2e backend does not serve
+   * (`/api/local-bundles/*` exists only on a server started with `ISAAC_LOCAL_BUNDLES_DIR`),
+   * so `app.open()` enables the build flag for this page and answers that API from the
+   * SYNTHETIC fixtures in `e2e/local-imports-mock.ts`, IN THE BROWSER. Every other surface
+   * is opened with neither, so the rest of the catalogue measures exactly the app it did.
+   */
+  readonly localImportsMock?: true;
 }
 
 const recordSub = (id: string, sub: string) => `/record/${id}/${sub}`;
@@ -583,6 +591,68 @@ export const SURFACES: readonly Surface[] = [
    * suite opens is a surface nothing checks — is unchanged and is satisfied by
    * `settings-api`.
    */
+  /*
+   * ── SCHEMA PROPOSALS AND LOCAL IMPORTS, ADDED 2026-10-29 (audit) ──────────
+   *
+   * Neither destination was in this catalogue, so no axe scan, no 320/390 narrow
+   * sweep, no five-project layout probe and no 200% pass had ever loaded either —
+   * the `QA-018` gap again, for two screens a scientist can open from the nav.
+   * Registered with the cost `QA-020` states: new cells, measured on the platform
+   * that runs them (darwin locally, linux from CI).
+   *
+   * Schema Proposals is three `?tab=` panels on one route; all three stay mounted
+   * (hidden, not unmounted), so each tab is its own entry, the same way Settings'
+   * tabs are. The browse and propose gates render only once the vocabulary has
+   * arrived. The Proposals tab has no heading of its own when the server holds no
+   * proposals (the read-only e2e backend holds none), so its gate is the panel's
+   * named region and `app.open`'s loading-panel wait is what keeps the scan off the
+   * skeleton.
+   */
+  {
+    id: 'schema-proposals',
+    name: 'Schema Proposals — Browse the Vocabulary',
+    path: '/schema-proposals',
+    scope: 'ordinary',
+    ready: { role: 'group', name: 'Which list?' },
+  },
+  {
+    id: 'schema-proposals-propose',
+    name: 'Schema Proposals — Propose a Change',
+    path: '/schema-proposals?tab=propose',
+    scope: 'ordinary',
+    ready: { role: 'combobox', name: 'Section' },
+  },
+  {
+    id: 'schema-proposals-list',
+    name: 'Schema Proposals — Proposals',
+    path: '/schema-proposals?tab=proposals',
+    scope: 'ordinary',
+    ready: { role: 'region', name: 'Proposals' },
+  },
+  /*
+   * Local Imports is a LOCAL-BUILD destination (`VITE_ISAAC_LOCAL_IMPORTS=1`) over an
+   * API the e2e backend does not serve — see `localImportsMock` and
+   * `e2e/local-imports-mock.ts`. Both views are gated on headings inside their
+   * `status === 'data'` branches. The questions fixture carries a 57-character value
+   * every run of one group suggests, so the narrow sweeps measure the
+   * "Accept <long value>" buttons at 320/390 and at 200% zoom.
+   */
+  {
+    id: 'local-imports',
+    name: 'Local Imports — Import Progress (synthetic, mocked API)',
+    path: '/local-imports',
+    scope: 'ordinary',
+    ready: { role: 'heading', name: 'Import Progress' },
+    localImportsMock: true,
+  },
+  {
+    id: 'local-imports-questions',
+    name: 'Local Imports — One Bundle’s Questions (synthetic, mocked API)',
+    path: '/local-imports?bundle=synthetic-beamtime',
+    scope: 'ordinary',
+    ready: { role: 'heading', name: /^Questions/ },
+    localImportsMock: true,
+  },
 ] as const;
 
 /**
@@ -667,5 +737,15 @@ export const TABBED_SURFACES = [
        Chrome — the tablist reads exactly these three, in this order. */
     tabs: ['Overview', 'My Stats', 'Build & Verification'],
     panelIdPrefix: 'statistics-tabpanel-',
+  },
+  {
+    // Schema Proposals' own tablist (2026-10-29). Hand-rolled in
+    // `SchemaProposals.tsx` rather than `RovingTabs`, which is exactly why the APG
+    // structure, keyboard and deep-link checks above are worth running on it.
+    id: 'schema-proposals',
+    path: '/schema-proposals',
+    tablistName: 'Schema Proposals sections',
+    tabs: ['Browse the Vocabulary', 'Propose a Change', 'Proposals'],
+    panelIdPrefix: 'schema-proposals-panel-',
   },
 ] as const;
