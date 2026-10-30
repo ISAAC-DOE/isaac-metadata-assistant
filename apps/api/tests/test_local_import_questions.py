@@ -81,7 +81,12 @@ def test_questions_are_deduplicated_ordered_and_fewer_than_v1(grouped):
     assert len(ids) == len(set(ids))
     assert [q["tier"] for q in p["questions"]] == sorted(q["tier"] for q in p["questions"])
     assert p["counts"]["total"] < p["counts"]["fine_grained_v1"] + len(b["conflicts"])
-    assert all(q["answer_command"].startswith("isaac bundle decide <bundle_dir> --question ") for q in p["questions"])
+    # every question with an answer has a command; an informational one (no answer can reach the
+    # record: an array path, or no write route) says so instead of offering one
+    assert all(q["answer_command"].startswith("isaac bundle decide <bundle_dir> --question ")
+               for q in p["questions"] if not q.get("informational"))
+    assert all(q["answer_command"].startswith("# nothing to answer") and q["allowed_decisions"] == []
+               for q in p["questions"] if q.get("informational"))
     assert all(q["why"] for q in p["questions"])
 
 

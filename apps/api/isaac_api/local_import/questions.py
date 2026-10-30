@@ -18,7 +18,13 @@ This module CONSOLIDATES it for a person:
   stated in ``blocking_basis``), then conflicts that affect a record, then optional.
 * Each question carries plain text, why it blocks, hints (a literal and its locator — a
   hint, never an answer), allowed values where the target schema closes the field with an
-  enum, and the exact ``isaac bundle decide --question`` command that answers it.
+  enum, and the exact ``isaac bundle decide --question`` command that answers it — always a
+  TEMPLATE with placeholders, never a value read from the files or an AI.
+* A ``confirm_value`` question whose candidates carry no value asks "What is X?", cites the
+  text the files hold, and does not offer ``confirm``. One about a path no answer can reach the
+  record from (an array path; a path with no write route) is ``informational``: listed under its
+  id, answerable by nothing. A scientist's answer the record cannot take
+  (``eligibility_for_official_record``) is ASKED AGAIN under the question's own id, with why.
 
 Question ids are content-derived (``Q-<sha1(scope|kind|subject)[:10]>``), so they are stable
 across rebuilds; an answered target simply drops out. **That holds across answers too
@@ -62,6 +68,8 @@ REQUIRED_AS_FIELD = {"sample.material": "sample.material.name"}
 #: with the reading as a hint. Only a scientist decision takes it out of the list.
 _UNANSWERED = (B.STATE_MISSING, B.STATE_NEEDS_REVIEW)
 _HINTS_PER_QUESTION = 5
+#: How many other questions ``same_statement_as`` / ``same_reading_as`` name (the count is in the text).
+_CROSS_REFERENCES = 10
 #: The decisions that answer each kind of question. ``decide --question`` refuses any other,
 #: so answering e.g. an absorber question with ``confirm`` can never bulk-confirm the record
 #: GROUPS it targets (the absorber question's targets are groups).
@@ -74,6 +82,29 @@ ALLOWED_DECISIONS: Mapping[str, tuple[str, ...]] = {
     "clock_time_zone": (B.CLOCK_ZONE_DECISION,),
     "confirm_absorber": ("set_absorber", "defer"),
 }
+#: A ``confirm_value`` question whose targets carry NO value (the files hold text, no value this
+#: build derives from it): there is nothing to confirm, so ``confirm`` is not offered. The kind —
+#: and so the question id — is unchanged; only the decisions, text and command differ.
+VALUELESS_DECISIONS: tuple[str, ...] = ("correct", "reject", "defer")
+#: A question about a field the record builder never fills from an answer (an array path, or a
+#: path this build has no write route for): kept under its id, answered by nothing.
+INFORMATIONAL_DECISIONS: tuple[str, ...] = ()
+#: Why the record builder can never fill a path from a scientist's answer, or ``None``.
+_ARRAY_PATH_REASON = ("an array path: the record builder composes it only from structured blocks (an approved "
+                      "processing result, the evidence sidecar), never from a confirmed value")
+_NO_WRITE_PATH_REASON = "this build has no write path for this official field, so a confirmed value stays evidence"
+
+
+def _never_lands(path: str | None, writable: frozenset[str]) -> str | None:
+    """Why no answer at ``path`` can reach a record (``records.compose_group`` skips every ``[]``
+    path; ``bundle.eligibility_for_official_record`` refuses a path outside the write routes)."""
+    if not path:
+        return None
+    if "[]" in path:
+        return _ARRAY_PATH_REASON
+    if path not in writable:
+        return _NO_WRITE_PATH_REASON
+    return None
 
 
 def _is_shared(path: str) -> bool:
@@ -169,8 +200,13 @@ def consolidate(bundle: Mapping) -> dict:
                 base = [p for p in base if p != "context.temperature_K"]
             required_by_mode[mode] = base
         return required_by_mode[mode]
-    groups = [g for g in bundle.get("record_groups") or () if g.get("status") not in ("rejected", "split", "merged")]
+    groups = live_groups(bundle)
     run_by_key = {r["run_key"]: r["run_id"] for r in bundle["runs"]}
+    run_by_id = {r["run_id"]: r for r in bundle["runs"]}
+    cand_by_id = {c["candidate_id"]: c for c in bundle["candidates"]}
+    writable = B._writable_paths()
+    source_path_of = {x["source_id"]: x.get("relative_path") for x in bundle.get("sources") or ()}
+    ai_hints = _ai_hint_index(bundle)
     group_of: dict[str, str] = {}
     for g in groups:
         for key in g.get("member_run_keys") or ():
@@ -207,9 +243,42 @@ def consolidate(bundle: Mapping) -> dict:
             recorded.setdefault(c["target_field_path"], set()).add(json.dumps(c["value"], sort_keys=True))
     answered: dict[str, set[str]] = {}
     decisions = B._decisions_by_target(bundle.get("scientist_decisions") or ())
+    # ASKED AGAIN: a scientist's answer the record cannot take (bundle.eligibility_for_official_record,
+    # e.g. "ex situ" where the schema allows ex_situ) leaves its target unanswered for the record, so
+    # it is asked again — in the SAME bucket, so under the SAME id — with the reason stated. A
+    # start time whose clock zone changed is asked again by its own question below; a path no answer
+    # can ever reach (an array path, no write route) is never asked again (nothing would land).
+    reconfirm_ids = {x["candidate_id"] for x in B.local_clock_reconfirm(bundle)}
+    conflict_again: dict[str, dict] = {}
+
+    def not_eligible_answer(obj: Mapping, kind: str) -> dict | None:
+        if obj.get("value_state") != B.STATE_SCIENTIST_CONFIRMED:
+            return None
+        fit = obj.get("eligibility_for_official_record") or {}
+        if fit.get("eligible", True) or _never_lands(obj.get("target_field_path"), writable):
+            return None
+        if kind == "candidate":
+            if obj["candidate_id"] in reconfirm_ids:
+                return None
+            d = B.candidate_decision(bundle, obj, decisions)
+            value, tid = B.final_value(obj["value"], d, obj.get("readings")), obj["candidate_id"]
+            via = (d or {}).get("target") or {}
+            if via.get("kind") == "conflict":
+                # answered by settling a conflict: THAT question (its id) is asked again
+                conflict_again[via.get("id")] = {"target": {"kind": "conflict", "id": via.get("id")}, "answered": value,
+                                                 "decision_id": (d or {}).get("decision_id"), "reason": fit.get("reason"),
+                                                 "candidate_id": tid}
+                return None
+        else:
+            d = decisions.get(("missing_value", obj["value_id"]))
+            value, tid = B.final_value(None, d), obj["value_id"]
+        return {"target": {"kind": kind, "id": tid}, "answered": value, "decision_id": (d or {}).get("decision_id"),
+                "reason": fit.get("reason")}
+
     path_of_value = {m["value_id"]: m["target_field_path"] for m in bundle["missing_values"]}
+    unfit_values = {m["value_id"] for m in bundle["missing_values"] if not_eligible_answer(m, "missing_value")}
     for (kind, tid), d in decisions.items():
-        if kind == "missing_value" and d.get("value") is not None and tid in path_of_value:
+        if kind == "missing_value" and d.get("value") is not None and tid in path_of_value and tid not in unfit_values:
             answered.setdefault(path_of_value[tid], set()).add(json.dumps(d["value"], sort_keys=True))
 
     def scope_of_run(run_id: str | None) -> str:
@@ -226,7 +295,7 @@ def consolidate(bundle: Mapping) -> dict:
     buckets: dict[tuple, dict] = {}
 
     def add(key: tuple, *, kind: str, path: str | None, target: dict, run_id: str | None, scope: str,
-            blocking: str | None, partition: str | None = None, field: str | None = None):
+            blocking: str | None, partition: str | None = None, field: str | None = None, again: dict | None = None):
         q = buckets.get(key)
         if q is None:
             q = buckets[key] = {
@@ -236,14 +305,21 @@ def consolidate(bundle: Mapping) -> dict:
                 "target_field_path": path,
                 "required_by": blocking,
                 "targets": [],
+                # LINEAR, not quadratic: membership is checked against this set (order is the list's)
+                "target_keys": set(),
                 "per_scope_targets": {},
                 "fields": {},
                 "runs": set(),
+                "asked_again": [],
             }
         if field is not None:
             q["fields"].setdefault(field, []).append(target["id"])
-        if target not in q["targets"]:
+        tkey = (target["kind"], target["id"])
+        if tkey not in q["target_keys"]:
+            q["target_keys"].add(tkey)
             q["targets"].append(target)
+            if again is not None:
+                q["asked_again"].append({**again, **({"field": field} if field is not None else {})})
         q["per_scope_targets"].setdefault(scope_of_run(run_id), []).append(target["id"])
         if run_id:
             q["runs"].add(run_id)
@@ -251,11 +327,14 @@ def consolidate(bundle: Mapping) -> dict:
             q["required_by"] = blocking
 
     for m in bundle["missing_values"]:
+        again = None
         if m["value_state"] not in _UNANSWERED:
-            continue
+            again = not_eligible_answer(m, "missing_value")
+            if again is None:
+                continue
         path, rid = m["target_field_path"], m["run_id"]
         if rid is not None and group_of and rid not in group_of:
-            run = next((r for r in bundle["runs"] if r["run_id"] == rid), None)
+            run = run_by_id.get(rid)
             if run is not None and not run["run_candidate"]:
                 continue
         blocking = required_for(path, rid)
@@ -273,31 +352,37 @@ def consolidate(bundle: Mapping) -> dict:
             scope = scope_of_run(rid)
         if blocking:
             add((scope, "missing_value", path, partition), kind="missing_value", path=path, partition=partition,
-                target={"kind": "missing_value", "id": m["value_id"]}, run_id=rid, scope=scope, blocking=blocking)
+                target={"kind": "missing_value", "id": m["value_id"]}, run_id=rid, scope=scope, blocking=blocking, again=again)
         else:
             # OPTIONAL values are one question per scope, listing each field (answered per
             # field with --field), so they never outnumber the blocking ones.
             add((scope, "optional_values", None, partition), kind="optional_values", path=None, partition=partition,
-                target={"kind": "missing_value", "id": m["value_id"]}, run_id=rid, scope=scope, blocking=None, field=path)
+                target={"kind": "missing_value", "id": m["value_id"]}, run_id=rid, scope=scope, blocking=None, field=path,
+                again=again)
 
     zone_decided = B.clock_zone_decision(bundle) is not None
     for c in bundle["candidates"]:
         path = c["target_field_path"]
-        if not path or c["value_state"] not in (B.STATE_NEEDS_REVIEW, B.STATE_CANDIDATE_EXTRACTED):
+        if not path:
             continue
+        again = None
+        if c["value_state"] not in (B.STATE_NEEDS_REVIEW, B.STATE_CANDIDATE_EXTRACTED):
+            again = not_eligible_answer(c, "candidate")
+            if again is None:
+                continue
         if not zone_decided and B.is_local_clock_start(c):
             continue  # nothing to confirm until the clock's zone is stated: the zone question asks that
         blocking = required_for(path, c["run_id"])
-        if c["value_state"] == B.STATE_CANDIDATE_EXTRACTED and not blocking:
-            continue  # an extracted optional value is not asked about
+        if again is None and c["value_state"] == B.STATE_CANDIDATE_EXTRACTED and not blocking:
+            continue  # an extracted optional value is not asked about (one a scientist answered unfitly is)
         scope = scope_of_run(c["run_id"])
         add((scope, "confirm_value", path, None), kind="confirm_value", path=path, partition=None,
-            target={"kind": "candidate", "id": c["candidate_id"]}, run_id=c["run_id"], scope=scope, blocking=blocking)
+            target={"kind": "candidate", "id": c["candidate_id"]}, run_id=c["run_id"], scope=scope, blocking=blocking,
+            again=again)
 
-    cand_by_id = {c["candidate_id"]: c for c in bundle["candidates"]}
     conflicts_out = []
     for cf in bundle["conflicts"]:
-        if cf["value_state"] not in (B.STATE_CONFLICTING, B.STATE_NEEDS_REVIEW):
+        if cf["value_state"] not in (B.STATE_CONFLICTING, B.STATE_NEEDS_REVIEW) and cf["conflict_id"] not in conflict_again:
             continue
         rids = cf["run_ids"]
         scope = scope_of_run(rids[0]) if rids else "experiment"
@@ -327,7 +412,9 @@ def consolidate(bundle: Mapping) -> dict:
                     "partition": partition,
                     "target_field_path": None,
                     "text": (f"{len(q['fields'])} optional field(s) no parser read a value for: {', '.join(sorted(q['fields']))}. Answer any you know."
-                             + (f" {len(fh)} of them have a suggestion or hint (field_hints)." if (fh := _optional_field_hints(bundle, q["fields"])) else "")),
+                             + (f" {len(fh)} of them have a suggestion or hint (field_hints)." if (fh := _optional_field_hints(bundle, q["fields"], ai_hints)) else "")
+                             + _asked_again_text(q["asked_again"], {f: _eligible_values(f) for f in q["fields"]})),
+                    "asked_again": q["asked_again"],
                     "applies_to": {"groups": len({group_of[r] for r in q["runs"] if r in group_of}), "runs": len(q["runs"]), "targets": len(q["targets"])},
                     "targets": q["targets"],
                     "per_scope_targets": q["per_scope_targets"],
@@ -338,7 +425,7 @@ def consolidate(bundle: Mapping) -> dict:
                     # not listed: eligibility does not refuse an answer outside those lists.
                     "field_allowed_values": {f: a for f in sorted(q["fields"]) if (a := _eligible_values(f))},
                     "hints": [],
-                    "field_hints": _optional_field_hints(bundle, q["fields"]),
+                    "field_hints": fh,
                     "allowed_values": None,
                     "answer_command": (f'isaac bundle decide <bundle_dir> --question {qid} --field <field path> --decision correct --value <value> --by "<your name>"'
                                        + (f"   # a number ({', '.join(numeric_fields)}): add --json, e.g. --value -0.8 --json" if numeric_fields else "")),
@@ -370,64 +457,113 @@ def consolidate(bundle: Mapping) -> dict:
                          + "): answer per group (--only group:<id>) unless they truly are all the same.")
             decision = "correct"
         else:
-            text = f"Is the extracted {_label(path)} ({path}) right? Confirm it, or correct it."
             decision = "confirm"
             answers_differ = False
+        # WHAT A confirm_value QUESTION CAN BE ANSWERED WITH. A target whose candidate carries NO value
+        # (the files hold text this build derives no value from) has nothing to confirm — `decide`
+        # refuses `confirm` on it — so the question asks for the value instead, cites the text the
+        # files hold, and never offers `confirm`. A path no answer can reach is informational.
+        valueless = [t["id"] for t in q["targets"] if t["kind"] == "candidate" and (cand_by_id.get(t["id"]) or {}).get("value") is None]
+        never = _never_lands(path, writable) if kind == "confirm_value" else None
+        decisions_offered = None
+        own_literals: list[dict] = []
+        if kind == "confirm_value":
+            own_literals = _own_literal_hints(source_path_of, [cand_by_id[i] for i in (t["id"] for t in q["targets"]) if i in cand_by_id])
+            summary = next((s for t in q["targets"] if (s := ((cand_by_id.get(t["id"]) or {}).get("state_basis") or {}).get("not_proposable_summary"))), None)
+            if never:
+                text = (f"For information only: the files hold a reading for the {_label(path)} ({path}), and no answer here can "
+                        f"reach the record ({never}). The reading stays evidence; nothing is asked.")
+                decisions_offered = list(INFORMATIONAL_DECISIONS)
+            elif len(valueless) == len(q["targets"]):
+                text = (f"What is the {_label(path)} ({path})? The files hold text for it (see the hints) but no value this "
+                        "build can carry" + (f": {summary.rstrip('.')}" if summary else "")
+                        + ". There is nothing to confirm: give the value yourself (correct), or reject or defer it.")
+                decision = "correct"
+                decisions_offered = list(VALUELESS_DECISIONS)
+            else:
+                text = f"Is the extracted {_label(path)} ({path}) right? Confirm it, or correct it."
+                if valueless:
+                    text += (f" {len(valueless)} of its {len(q['targets'])} target(s) carry no value ({', '.join(valueless[:5])}"
+                             f"{'…' if len(valueless) > 5 else ''}): confirm refuses them; answer those with correct --value, "
+                             "per group (--only group:<group_id>).")
         hints = []
         if path.startswith("attribution.produced_by."):
             hints.append({"kind": "folder_name", "literal": bundle["source_root"]["label"], "locator": "the imported folder's name",
                           "note": "A PI or group name in a folder name is a HINT to ask about, never an answer."})
         if path.startswith("system.facility."):
             hints += S.facility_hints(bundle)
-        ai = S.ai_hints(bundle, [t["id"] for t in q["targets"]])
-        hints = ai + hints
-        if ai:
+        ai = ai_hints([t["id"] for t in q["targets"]])
+        # the text THIS question's own targets hold comes first (a value-less question is answered from it)
+        hints = own_literals + ai + hints
+        if ai and not never:
             top = ai[0]
             cite = top.get("source_path") or top.get("source_id") or "a file"
             text += (f" Suggested from the files (needs your confirmation): {top['literal']!r}, from {cite}"
                      f"{' @ ' + str(top['locator']) if top.get('locator') else ''}"
                      + (f"; {len(ai) - 1} other suggestion(s) differ" if len(ai) > 1 else "") + ".")
+        mine = {t["id"] for t in q["targets"]}
+        shown_own = {h.get("candidate_id") for h in own_literals}
         for c in related.get(path, [])[:_HINTS_PER_QUESTION]:
-            if c["observed_literals"]:
+            if c["observed_literals"] and c["candidate_id"] not in shown_own:
                 ev = next((e for e in c["evidence"] if e["method"] != "ai_interpretation"), None)
                 hints.append({"kind": "related_reading", "candidate_id": c["candidate_id"], "literal": c["observed_literals"][0],
-                              "locator": (ev or {}).get("locator"), "source_id": (ev or {}).get("source_id")})
+                              "locator": (ev or {}).get("locator"), "source_id": (ev or {}).get("source_id"),
+                              # a reading of the same field ELSEWHERE in the import (another run or group) is
+                              # context, not this question's own evidence
+                              "of_this_question": c["candidate_id"] in mine})
+        allowed_here = _eligible_values(path) or enum
+        text += _asked_again_text(q["asked_again"], {path: allowed_here})
         value_arg = "<value>" + (" --json" if numeric else "")
         qid = _qid(scope, kind, path, partition or "")
-        questions.append(
-            {
-                "question_id": qid,
-                "partition": partition,
-                "tier": TIER_BLOCKING if q["required_by"] else TIER_OPTIONAL,
-                "blocking": bool(q["required_by"]),
-                "why": (f"The record cannot be exported without it: the target schema requires {q['required_by']}."
-                        if q["required_by"] else "Optional: the record can be exported without it."),
-                "kind": kind,
-                "scope": scope,
-                "target_field_path": path,
-                "text": text,
-                "applies_to": {"groups": n_groups, "runs": len(q["runs"]), "targets": len(q["targets"])},
-                "targets": q["targets"],
-                "per_scope_targets": q["per_scope_targets"],
-                "hints": hints,
-                "allowed_values": enum,
-                # L2: the answers already given for this field differ — an agent following
-                # answer_command should answer per group (--only), not once for all
-                "answers_differ": answers_differ,
-                "answer_command": (
-                    f'isaac bundle decide <bundle_dir> --question {qid} --decision {decision}'
-                    + (f" --value {value_arg}" if kind == "missing_value" else "")
-                    + ' --by "<your name>"'
-                    + ("   # answers given so far DIFFER: answer per group with --only group:<group_id>" if answers_differ
-                       else "   # per group: add --only group:<group_id>" if len(q["per_scope_targets"]) > 1 else "")
-                ),
-            }
-        )
+        blocking_here = bool(q["required_by"]) and not never
+        per_group_note = ("   # answers given so far DIFFER: answer per group with --only group:<group_id>" if answers_differ
+                          else "   # per group: add --only group:<group_id>" if len(q["per_scope_targets"]) > 1 else "")
+        if never:
+            command = f"# nothing to answer: no answer to {qid} can reach the record ({never})"
+        else:
+            command = (f'isaac bundle decide <bundle_dir> --question {qid} --decision {decision}'
+                       + (f" --value {value_arg}" if decision == "correct" else "")
+                       + ' --by "<your name>"' + per_group_note)
+        entry = {
+            "question_id": qid,
+            "partition": partition,
+            "tier": TIER_BLOCKING if blocking_here else TIER_OPTIONAL,
+            "blocking": blocking_here,
+            "why": (f"The record cannot be exported without it: the target schema requires {q['required_by']}."
+                    if blocking_here else
+                    f"Informational: {never}." if never else "Optional: the record can be exported without it."),
+            "kind": kind,
+            "scope": scope,
+            "target_field_path": path,
+            "text": text,
+            "applies_to": {"groups": n_groups, "runs": len(q["runs"]), "targets": len(q["targets"])},
+            "targets": q["targets"],
+            "per_scope_targets": q["per_scope_targets"],
+            "hints": hints,
+            "allowed_values": enum,
+            # L2: the answers already given for this field differ — an agent following
+            # answer_command should answer per group (--only), not once for all
+            "answers_differ": answers_differ,
+            "answer_command": command,
+        }
+        if kind == "confirm_value":
+            entry["targets_without_a_value"] = len(valueless)
+            entry["lands_in_record"] = not never
+            if never:
+                entry["informational"] = True
+        if q["asked_again"]:
+            entry["asked_again"] = q["asked_again"]
+            entry["reason"] = "answer_not_eligible_for_official_record"
+        if decisions_offered is not None:
+            entry["allowed_decisions"] = decisions_offered
+        questions.append(entry)
     for scope, cf, affects, path, required in conflicts_out:
         node = _node(schema, path) if path else None
         enum = node.get("enum") if isinstance(node, Mapping) and isinstance(node.get("enum"), list) else (vocabulary.get(path) if path else None)
+        again = [conflict_again[cf["conflict_id"]]] if cf["conflict_id"] in conflict_again else []
         questions.append(
             {
+                **({"asked_again": again, "reason": "answer_not_eligible_for_official_record"} if again else {}),
                 "question_id": _qid(scope, "resolve_conflict", cf["conflict_id"]),
                 "partition": None,
                 "tier": TIER_BLOCKING if required else (TIER_CONFLICT if affects else TIER_OPTIONAL),
@@ -439,7 +575,8 @@ def consolidate(bundle: Mapping) -> dict:
                 "kind": "resolve_conflict",
                 "scope": scope,
                 "target_field_path": path,
-                "text": f"The sources disagree ({cf['kind']}{', ' + str(cf['subject']) if cf['subject'] else ''}). Which reading is right?",
+                "text": (f"The sources disagree ({cf['kind']}{', ' + str(cf['subject']) if cf['subject'] else ''}). Which reading is right?"
+                         + _asked_again_text(again, {path: _eligible_values(path) or enum} if path else {})),
                 "applies_to": {"groups": len({group_of[r] for r in cf["run_ids"] if r in group_of}), "runs": len(cf["run_ids"]), "targets": 1},
                 "targets": [{"kind": "conflict", "id": cf["conflict_id"]}],
                 "per_scope_targets": {scope: [cf["conflict_id"]]},
@@ -611,11 +748,13 @@ def consolidate(bundle: Mapping) -> dict:
             s = (1, group_order.get(scope[6:], 10**9))
         else:
             s = (2, run_order.get(scope[4:], 10**9))
-        return (q["tier"], s, q["target_field_path"] or "", q["question_id"])
+        # an informational question (nothing to answer) sorts after every question that has an answer
+        return (q["tier"], bool(q.get("informational")), s, q["target_field_path"] or "", q["question_id"])
 
+    _note_shared_evidence(questions, cand_by_id, bundle)
     questions.sort(key=order)
     for q in questions:
-        q["allowed_decisions"] = list(ALLOWED_DECISIONS.get(q["kind"], ()))
+        q.setdefault("allowed_decisions", list(ALLOWED_DECISIONS.get(q["kind"], ())))
     return {
         "format": FORMAT_ID,
         "format_version": FORMAT_VERSION,
@@ -625,18 +764,167 @@ def consolidate(bundle: Mapping) -> dict:
             "total": len(questions),
             "blocking": sum(q["tier"] == TIER_BLOCKING for q in questions),
             "conflicts_affecting_a_record": sum(q["tier"] == TIER_CONFLICT for q in questions),
-            "optional": sum(q["tier"] == TIER_OPTIONAL for q in questions),
+            "optional": sum(q["tier"] == TIER_OPTIONAL and not q.get("informational") for q in questions),
+            # questions kept under their ids that no answer can reach the record from (an array path,
+            # or a path this build has no write route for): listed, never answerable
+            "informational": sum(bool(q.get("informational")) for q in questions),
+            # targets a scientist answered with a value the record cannot take, asked again
+            "asked_again": sum(len(q.get("asked_again") or ()) for q in questions),
             "fine_grained_v1": len(bundle.get("questions") or ()),
         },
         "questions": questions,
     }
 
 
-def _optional_field_hints(bundle: Mapping, fields: Mapping[str, Sequence[str]]) -> dict[str, list[dict]]:
+def live_groups(bundle: Mapping) -> list[Mapping]:
+    """The record groups that can still become records: not rejected, and not replaced by a split
+    or a merge. Questions, and the nearest group to export, are only ever about these."""
+    return [g for g in bundle.get("record_groups") or () if g.get("status") not in ("rejected", "split", "merged")]
+
+
+def _own_literal_hints(path_of: Mapping[str, str | None], cands: Sequence[Mapping]) -> list[dict]:
+    """The literal text each of a question's OWN candidates holds, with the file and locator it was
+    read at (deduplicated by statement). What the files say — a hint, never an answer.
+    ``path_of``: ``source_id -> relative_path``."""
+    out: list[dict] = []
+    seen: set = set()
+    for c in cands:
+        if not c.get("observed_literals"):
+            continue
+        ev = next((e for e in c.get("evidence") or () if e.get("method") != "ai_interpretation"), None) or {}
+        key = (c["observed_literals"][0], ev.get("source_id"), ev.get("locator"))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"kind": "file_literal", "candidate_id": c["candidate_id"], "literal": c["observed_literals"][0],
+                    "locator": ev.get("locator"), "source_id": ev.get("source_id"),
+                    "relative_path": ev.get("relative_path") or path_of.get(ev.get("source_id")),
+                    "carries_value": c.get("value") is not None,
+                    "note": "The text the file holds for this field, as written. A hint about what to answer, never the answer."})
+        if len(out) >= _HINTS_PER_QUESTION:
+            break
+    return out
+
+
+def _asked_again_text(again: Sequence[Mapping], allowed_by_path: Mapping[str, list | None]) -> str:
+    """The sentence that says why answered targets are asked again, or ``""``: each distinct answer
+    once, with how many targets hold it and the reason it cannot go into the record."""
+    if not again:
+        return ""
+    by_answer: dict[tuple, list[Mapping]] = {}
+    for a in again:
+        by_answer.setdefault((json.dumps(a["answered"], sort_keys=True, default=str), a.get("field"), a.get("reason")), []).append(a)
+    parts = []
+    for (_, field, reason), items in list(by_answer.items())[:3]:
+        parts.append(f"{items[0]['answered']!r}" + (f" for {field}" if field else "")
+                     + f" ({len(items)} target(s): {', '.join(a['target']['id'] for a in items[:3])}{'…' if len(items) > 3 else ''})"
+                     + f": {reason or 'not eligible for the record'}")
+    fields = {a.get("field") for a in again}
+    allowed = [f"{p}: {', '.join(map(str, v))}" for p, v in allowed_by_path.items()
+               if v and (len(allowed_by_path) == 1 or p in fields)]
+    return (f" ASKED AGAIN: {len(again)} answer(s) already given here cannot go into the record — "
+            + "; ".join(parts) + (f"; and {len(by_answer) - 3} other answer(s)" if len(by_answer) > 3 else "")
+            + (f". Allowed values ({'; '.join(allowed)})" if allowed else "")
+            + ". Answer again with a value the record can take.")
+
+
+def _note_shared_evidence(questions: list[dict], cand_by_id: Mapping[str, Mapping], bundle: Mapping) -> None:
+    """Per-group ``confirm_value`` questions about one field that rest on the SAME file statement (or the
+    same literal reading) name each other (``same_statement_as`` / ``same_reading_as``), so one file line
+    asked per group is visibly one statement. And where a BEAMTIME value for that field is open or already
+    answered (it fills every record but DEC-69's run-only fields, records.compose_group), the per-group
+    question does not block: answering the experiment-wide one fills this group's record too. Ids, scopes
+    and targets are untouched (DEC-91): only text, ``blocking`` and ``tier`` change."""
+    from .records import RUN_ONLY_PATHS
+
+    def statement(q):
+        out = set()
+        for t in q["targets"]:
+            c = cand_by_id.get(t["id"])
+            if c is None or not c.get("observed_literals"):
+                return None
+            ev = next((e for e in c.get("evidence") or () if e.get("method") != "ai_interpretation"), None) or {}
+            out.add((c["observed_literals"][0], ev.get("source_id"), ev.get("locator")))
+        return frozenset(out) or None
+
+    per_group = [q for q in questions if q["kind"] == "confirm_value" and q["scope"].startswith("group:")
+                 and not q.get("informational") and q["targets"] and all(t["kind"] == "candidate" for t in q["targets"])]
+    path_of_source = {x["source_id"]: x.get("relative_path") for x in bundle.get("sources") or ()}
+    by_statement: dict[tuple, list[dict]] = {}
+    by_reading: dict[tuple, list[dict]] = {}
+    for q in per_group:
+        st = statement(q)
+        if st is None:
+            continue
+        by_statement.setdefault((q["target_field_path"], st), []).append(q)
+        by_reading.setdefault((q["target_field_path"], frozenset(lit for lit, _, _ in st)), []).append(q)
+    for (path, st), qs in by_statement.items():
+        if len(qs) < 2:
+            continue
+        lit, src, loc = sorted(st, key=repr)[0]
+        where = path_of_source.get(src) or src
+        ids = [o["question_id"] for o in qs]
+        for q in qs:
+            # bounded (never one list of every other group per question: that grows as groups squared)
+            q["same_statement_as"] = [i for i in ids[:_CROSS_REFERENCES + 1] if i != q["question_id"]][:_CROSS_REFERENCES]
+            q["text"] += (f" The same file statement ({where} @ {loc}: {lit!r}) is behind {len(qs) - 1} other group "
+                          f"question(s) for this field (same_statement_as names up to {_CROSS_REFERENCES}): it is one statement in the files, asked per "
+                          "group because each record carries its own answer.")
+    for (path, lits), qs in by_reading.items():
+        rest = [q for q in qs if "same_statement_as" not in q]
+        if len(qs) < 2 or not rest:
+            continue
+        ids = [o["question_id"] for o in qs]
+        for q in rest:
+            q["same_reading_as"] = [i for i in ids[:_CROSS_REFERENCES + 1] if i != q["question_id"]][:_CROSS_REFERENCES]
+            q["text"] += (f" {len(qs) - 1} other group(s) hold the same reading ({', '.join(sorted(map(repr, lits)))}) for this "
+                          f"field in their own files (same_reading_as names up to {_CROSS_REFERENCES}): if they are the same thing, give each the same answer.")
+    # a beamtime value for the field: open at experiment scope, or answered and eligible
+    run_of = {m["value_id"]: m["run_id"] for m in bundle["missing_values"]}
+    run_of.update({cid: c["run_id"] for cid, c in cand_by_id.items()})
+    experiment_q = {q["target_field_path"]: q["question_id"] for q in questions
+                    if q["scope"] == "experiment" and q["kind"] in ("confirm_value", "missing_value") and not q.get("informational")
+                    and any(t["id"] in run_of and run_of[t["id"]] is None for t in q["targets"])}
+    answered_beamtime = {c["target_field_path"] for c in bundle["candidates"]
+                         if c["run_id"] is None and (c.get("eligibility_for_official_record") or {}).get("eligible")}
+    answered_beamtime |= {m["target_field_path"] for m in bundle["missing_values"]
+                          if m["run_id"] is None and (m.get("eligibility_for_official_record") or {}).get("eligible")}
+    for q in per_group:
+        path = q["target_field_path"]
+        if not q["blocking"] or path in RUN_ONLY_PATHS or not (path in experiment_q or path in answered_beamtime):
+            continue
+        q["blocking"], q["tier"] = False, TIER_OPTIONAL
+        q["covered_by"] = experiment_q.get(path) or "an answered beamtime value"
+        q["why"] = (f"Not blocking: {path} is required, and a beamtime-wide value fills it for every record, this group's "
+                    + (f"included — answer the experiment-wide question {experiment_q[path]}." if path in experiment_q
+                       else "included, and one is already answered.")
+                    + " Answer here only with the same thing: if this group's answer differs from the beamtime one, the "
+                    "record builder fills nothing for this field (two confirmed values that differ fill nothing).")
+
+
+def _ai_hint_index(bundle: Mapping):
+    """``ids -> suggestions.ai_hints(bundle, ids)``, with the AI interpretations indexed by target once:
+    each call reads only the interpretations of ``ids`` (in their bundle order, so the output is
+    identical), never the whole list again — per question that was quadratic in a large import."""
+    interps = list(bundle.get("ai_interpretations") or ())
+    at: dict[Any, list[int]] = {}
+    for n, i in enumerate(interps):
+        at.setdefault((i.get("target") or {}).get("id"), []).append(n)
+
+    def hints(ids: Sequence[str]) -> list[dict]:
+        wanted = set(ids)
+        rows = sorted(n for tid in wanted for n in at.get(tid, ()))
+        return S.ai_hints({"ai_interpretations": [interps[n] for n in rows]}, wanted) if rows else []
+
+    return hints
+
+
+def _optional_field_hints(bundle: Mapping, fields: Mapping[str, Sequence[str]], ai_hints=None) -> dict[str, list[dict]]:
     """Per optional field: the AI readings of its targets, and the facility hints."""
+    ai_hints = ai_hints or _ai_hint_index(bundle)
     out: dict[str, list[dict]] = {}
     for path, ids in sorted(fields.items()):
-        hints = S.ai_hints(bundle, ids)
+        hints = ai_hints(ids)
         if path.startswith("system.facility."):
             hints += S.facility_hints(bundle)
         if hints:
@@ -735,7 +1023,6 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping]) -> list[dict
                     f"{sum(1 for _, s in items if s['group_specific_statements'])} of them from processed outputs linked to their runs, "
                     f"the rest only from beamtime-wide statements ({items[0][1]['beamtime_wide_statements']}, e.g. an acquisition macro's name). "
                     "Is that the absorber? Answer once, or per group (a reference foil or blank cell may differ).")
-            element_arg, edge_arg = element, edge
         else:
             partial = sum(1 for _, s in items for r in s["ai_readings"] if r.get("read_for"))
             text = (f"Element {element}, edge {edge} is suggested for {len(items)} group(s): "
@@ -744,7 +1031,13 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping]) -> list[dict
                       "(needs your confirmation: an AI reading is not file evidence). "
                       "Is that the absorber? Answer once, or per group (a reference foil or blank cell may differ)."
                     + (f" {partial} AI reading(s) name only some of a group's runs (see the hints)." if partial else ""))
-            element_arg, edge_arg = "<El>", "<K|L1-L3|M1-M5>"
+        # NEVER A READY-TO-RUN ANSWER: the command is a template whatever the files state, so an agent
+        # cannot record the files' (or an AI's) suggestion on a vague "yes". The suggestion is a hint.
+        suggested = {"kind": "suggested_absorber", "literal": f"{element} {edge}", "element": element, "edge": edge,
+                     "basis": "stated in the files" if not ai_only else ("stated in the files for some groups, an AI reading for the rest"
+                                                                         if from_files else "an AI reading of the files"),
+                     "note": ("What this question suggests, never the answer: type it into --element/--edge only once the "
+                              "scientist has said it is the absorber.")}
         out.append({
             "question_id": qid,
             "partition": None,
@@ -758,10 +1051,11 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping]) -> list[dict
             "applies_to": {"groups": len(items), "runs": sum(len(g.get("member_run_keys") or ()) for g, _ in items), "targets": len(items)},
             "targets": [{"kind": "record_group", "id": g["group_id"]} for g, _ in items],
             "per_scope_targets": {f"group:{g['group_id']}": [g["group_id"]] for g, _ in items},
-            "hints": _absorber_hints(items),
+            # the file (or AI) evidence first, then the pair it adds up to — both hints, neither an answer
+            "hints": _absorber_hints(items) + [suggested],
             "allowed_values": None,
             "answer_command": (f'isaac bundle decide <bundle_dir> --question {qid} --decision set_absorber '
-                               f'--element {element_arg} --edge {edge_arg} --by "<your name>"   # per group: add --only group:<group_id>'),
+                               '--element <El> --edge <K|L1-L3|M1-M5> --by "<your name>"   # per group: add --only group:<group_id>'),
         })
     for g, sug in split:
         qid = _qid(f"group:{g['group_id']}", "confirm_absorber", "")
@@ -840,8 +1134,10 @@ def targets_for(payload: Mapping, question_id: str, only: str | None = None, fie
 def processing_blocked_groups(bundle: Mapping) -> dict[str, str]:
     """``{group_id: reason_code}`` for groups whose latest processing result says the
     protocol does not apply (:func:`bundle.processing_blocked_groups`): there is no curve to
-    approve, so none is asked about."""
-    return {gid: r["applicability"]["reason_code"] for gid, r in B.processing_blocked_groups(bundle).items()}
+    approve, so none is asked about. Only LIVE groups (:func:`live_groups`): a rejected, split or
+    merged group will never be a record, so it blocks nothing."""
+    live = {g["group_id"] for g in live_groups(bundle)}
+    return {gid: r["applicability"]["reason_code"] for gid, r in B.processing_blocked_groups(bundle).items() if gid in live}
 
 
 def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping) -> dict | None:
@@ -854,7 +1150,8 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping) -> dict | N
     the decision named is the blocking reason, never "approve its processing result"."""
     blocked = processing_blocked_groups(bundle)
     best = None
-    for g in bundle.get("record_groups") or ():
+    # only a LIVE group can become a record: a rejected, split or merged one is never "the nearest"
+    for g in live_groups(bundle):
         key = f"group:{g['group_id']}"
         need = sum(
             1 for q in payload["questions"]

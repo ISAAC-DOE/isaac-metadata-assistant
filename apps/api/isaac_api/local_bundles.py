@@ -1014,7 +1014,13 @@ def progress(bundle_dir: Path, bundle: Mapping, check: Mapping) -> dict:
                       "`isaac bundle decide --target <group> --decision confirm`).")
     if not bundle.get("record_groups"):
         blocks.append("No record groups yet: `isaac bundle group` proposes them.")
-    pending = sum(n for s, n in proc_state.items() if s != B.STATE_SCIENTIST_CONFIRMED)
+    # NOT APPROVED means a live group's curve awaiting a decision: a rejected result, a not-applicable
+    # one (no curve to approve: its group is counted on the next line) and any result of a rejected,
+    # split or merged group are not blockers
+    live = {g.get("group_id") for g in Q.live_groups(bundle)}
+    pending = sum(1 for r in bundle.get("processing_results") or ()
+                  if r.get("state") not in (B.STATE_SCIENTIST_CONFIRMED, B.STATE_REJECTED)
+                  and not B.processing_not_applicable(r) and r.get("group_id") in live)
     if pending:
         blocks.append(f"{pending} processing result(s) are not approved.")
     blocked = Q.processing_blocked_groups(bundle) if bundle.get("record_groups") else {}
