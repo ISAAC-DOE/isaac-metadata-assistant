@@ -451,6 +451,12 @@ def annotate(
             raise MutationRefused(f"An AI interpretation cannot target a {kind}.")
         if source_id is not None and source_id not in {s["source_id"] for s in bundle["sources"]}:
             raise MutationRefused(f"Unknown source {source_id!r}.", code=6)
+        named = _target_source_ids(kind, obj)
+        if source_id is not None and named and source_id not in named:
+            raise MutationRefused(
+                f"--source-id {source_id} is not a source of {target_id}; its locators name "
+                f"{', '.join(sorted(named))}. Use one of those, the source `excerpt` printed."
+            )
         prior = exposures_for(bundle, kind, target_id)
         if blind and not prior:
             is_blind, basis = True, "No CLI command had printed this target's parser value before this reading."
@@ -1187,6 +1193,22 @@ def _locators(candidate: Mapping) -> list[dict]:
     ][:B.MAX_EVIDENCE_PER_CANDIDATE]
 
 
+def _target_source_ids(kind: str, obj: Mapping) -> set[str]:
+    """The sources a target's own locators name (what ``excerpt`` reads); empty when it has none
+    (a missing value, a record group, a processing result)."""
+    if kind == "candidate":
+        ids = [e["source_id"] for e in obj["evidence"] if e["method"] != "ai_interpretation"]
+    elif kind == "source":
+        ids = [obj["source_id"]]
+    elif kind == "run":
+        ids = [obj["acquisition_source_id"]] + [s["source_id"] for s in obj["scans"]] + [
+            d["macro_source_id"] for d in obj["declared_by"]
+        ]
+    else:
+        ids = []
+    return {i for i in ids if i}
+
+
 def crosscheck_plan(bundle: Mapping) -> dict:
     """High-value targets to cross-check, with ids and source locators — NO values.
     Also the coverage so far: checked (has an AI reading), blind-checked, unchecked."""
@@ -1330,6 +1352,17 @@ def excerpt(bundle: Mapping, target_id: str, *, source: str | None) -> dict:
         if src["content_sha256"] and entry.content_sha256 != src["content_sha256"]:
             out.append({"source_id": src["source_id"], "relative_path": path, "refused": "the file's bytes changed since the import"})
             continue
+        if (loc["locator"] or "").startswith(B._FILENAME_TOKEN_LOCATOR) or loc["locator"] == "filename":
+            # The source text of a file-name reading IS the name: show it and which token, not the file's lines
+            out.append({
+                "source_id": src["source_id"],
+                "relative_path": path,
+                "locator": loc["locator"],
+                "lines": None,
+                "text": f"file name: {path}\n{loc['locator']}",
+                "truncated": False,
+            })
+            continue
         text, refusal = archive.read_source_text(inventory, path, source_root=root)
         if text is None:
             out.append({"source_id": src["source_id"], "relative_path": path, "refused": str(refusal)})
@@ -1361,12 +1394,6 @@ def excerpt(bundle: Mapping, target_id: str, *, source: str | None) -> dict:
     }
 
 
-def _same(a: Any, b: Any) -> bool:
-    def norm(v):
-        return v.strip().casefold() if isinstance(v, str) else v
-    return norm(a) == norm(b)
-
-
 def reveal(bundle_dir: Path, target_id: str) -> dict:
     """The parser value plus a comparison with every AI reading. RECORDS AN EXPOSURE."""
     with locked(Path(bundle_dir)):
@@ -1377,13 +1404,18 @@ def reveal(bundle_dir: Path, target_id: str) -> dict:
     readings = [i for i in bundle.get("ai_interpretations") or () if i["target"] == {"kind": kind, "id": target_id}]
     if kind == "candidate":
         parser = {"value": obj["value"], "observed_literals": obj["observed_literals"], "value_state": obj["value_state"]}
-        base = obj["value"]
+        base, path = obj["value"], obj["target_field_path"]
     elif kind == "run":
         parser = {"signal_selection": obj["signal_selection"], "label": obj["label"]}
-        base = (obj["signal_selection"] or {}).get("primary_channel")
+        base, path = (obj["signal_selection"] or {}).get("primary_channel"), None
     else:
         parser = {"value": None, "note": f"a {kind} has no parser value"}
-        base = None
+        base, path = None, None
+    from .records import same_value  # numbers numerically, `*_utc` as instants, strings exactly
+
+    def agrees(r):
+        return same_value(path, r["proposed_value"], base) if base is not None else None
+
     return {
         "target": {"kind": kind, "id": target_id},
         "parser": parser,
@@ -1392,7 +1424,8 @@ def reveal(bundle_dir: Path, target_id: str) -> dict:
                 "interpretation_id": r["interpretation_id"],
                 "proposed_value": r["proposed_value"],
                 "blind": r.get("blind", False),
-                "agrees_with_parser": (_same(r["proposed_value"], base) if base is not None else None),
+                "agrees_with_parser": agrees(r),
+                "relation": {True: "supports", False: "contradicts", None: None}[agrees(r)],
             }
             for r in readings
         ],
