@@ -8,8 +8,8 @@ export), `applies_to` (groups/runs/targets), `hints` (flagged as hints; a hint i
 `counts` (`blocking`, `conflicts_affecting_a_record`, `optional`, `informational`, `asked_again`;
 quote these, not `summary.md`'s "Questions: N", which is `fine_grained_v1`) and
 `minimum_for_one_group` ("7 blocking questions plus: confirm the group, approve its processing
-result"). Its two `plus_decisions` are always listed, even when that group is already confirmed and
-approved: check before you say them. The older fine-grained list (`bundle list <bundle> questions`)
+result"). `plus_decisions` names only the decisions not yet made (an empty list once the group is
+confirmed and its result approved). Pages hold at most 200 (`--limit` above that is refused). The older fine-grained list (`bundle list <bundle> questions`)
 is for lookup only.
 
 Order: blocking (export cannot happen without them) → conflicts that affect a record → optional.
@@ -63,7 +63,8 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
   Ask it in their words; **suggest no zone** — no file states one, and the facility's location is
   not evidence about the clock. Record: `decide <bundle> --question <Q> --decision set_clock_time_zone
   --value <the IANA name they give: Area/Location, or UTC> --by "<name>"` (an offset like
-  `-08:00` or an abbreviation like `PST` is refused; ask again for the zone name). Then each start
+  `-08:00` or an abbreviation like `PST` is refused; ask again for the zone name; a value starting
+  with `-` must be written `--value=-08:00` or the command line itself rejects it before any check). Then each start
   time is shown converted to UTC and needs its own `confirm` (bulk allowed). A time that falls in
   the daylight-saving fall-back hour or spring-forward gap gets no value: ask for the UTC start and
   record it with `correct --value YYYY-MM-DDTHH:MM:SSZ` (`confirm` takes no `--value` here). If the
@@ -82,6 +83,13 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
   OUTSIDE the bundle folder (`f=$(mktemp)`, one id per line; delete it afterwards), list each item to
   them first, then `decide --targets-file "$f" --decision confirm --by "<name>"`. Bulk confirm is refused for any
   value with no source evidence; do not work around that.
+- **"The bundle changed since it was read"** (exit 2, nothing written): something else wrote the bundle
+  meanwhile, often the *Local Imports* page. Run `bundle questions` again and re-check the answer still
+  applies before recording it.
+- **Not on the list at all.** When the scientist's answer is a real value the closed list lacks, say so,
+  record nothing, and offer to draft a vocabulary proposal: `<isaac> bundle propose-terms <bundle> --out
+  <file.json>` (outside the bundle; it sends nothing, and each draft needs a description the scientist
+  writes). The value stays missing until the vocabulary has it.
 - Use `--json` with `--value` for numbers/objects. ORCID only if the scientist gives one (`--orcid`).
 - Repeating a decision is harmless (recorded once). A later decision replaces an earlier one.
 

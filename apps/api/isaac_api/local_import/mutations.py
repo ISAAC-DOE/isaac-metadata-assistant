@@ -1785,7 +1785,9 @@ def process(
     )
     if payload.get("status") == "processing_unavailable":
         missing = ", ".join(payload.get("missing") or []) or "its dependencies"
-        raise MutationRefused(f"processing not installed: missing {missing}.", code=2)
+        raise MutationRefused(f"processing not installed (processing_unavailable): missing {missing}. Nothing was "
+                              "processed. Install it with `scripts/setup_isaac_local.sh --with-processing` (from the "
+                              "ISAAC folder), then run `isaac process` again.", code=2)
     produced = [dict(r) for r in payload.get("processing_results") or ()]
 
     def change(bundle):

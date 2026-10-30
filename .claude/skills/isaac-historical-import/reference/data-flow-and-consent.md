@@ -21,7 +21,7 @@ folder as a yes about another.
 
 ## If the answer is "no" or "not sure"
 
-Run `isaac import` and report only its three-line stdout. Do not open `summary.md`, any file in the
+Run `isaac import` and report only its short stdout (three lines, four when it found the scientists' processed files). Do not open `summary.md`, any file in the
 source folder or any bundle file, and do not run `show`, `list candidates`, `excerpt`, `reveal` or
 `extract`. Give the scientist the commands to run in their own terminal and tell them what each
 produces. Offer to continue once they have permission.

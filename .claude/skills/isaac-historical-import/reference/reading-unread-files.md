@@ -33,7 +33,8 @@ the absorbing element and edge, and who produced the data.
 
 ## Recording what you found: one findings file
 
-Write every finding to ONE JSON file (`isaac.reading_findings`), then load it in one step:
+Write every finding to ONE JSON file (`isaac.reading_findings`) in a working folder beside the bundle
+(never inside it), then load it in one step:
 
 ```json
 {"format": "isaac.reading_findings",

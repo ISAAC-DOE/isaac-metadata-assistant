@@ -1035,7 +1035,7 @@ def cmd_bundle_build_records(args) -> int:
 
 
 def cmd_bundle_validate(args) -> int:
-    """Exit 0 only when EVERY draft is exportable; 1 otherwise (each verdict printed)."""
+    """Exit 0 only when EVERY draft is exportable and there is at least one; 1 otherwise (each verdict printed)."""
     from . import records as R
 
     holder: dict = {}
@@ -1045,7 +1045,8 @@ def cmd_bundle_validate(args) -> int:
         return holder["r"]
 
     code = _mutation(run)
-    if code == EXIT_OK and any(v != "exportable" for v in holder["r"]["verdicts"].values()):
+    verdicts = holder["r"]["verdicts"] if code == EXIT_OK else {}
+    if code == EXIT_OK and (not verdicts or any(v != "exportable" for v in verdicts.values())):
         return EXIT_INVALID
     return code
 

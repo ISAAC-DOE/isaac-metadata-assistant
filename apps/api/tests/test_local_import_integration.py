@@ -145,6 +145,8 @@ def test_process_without_its_libraries_says_processing_not_installed(bdir, monke
     code = cli.main(["process", str(bdir)])
     err = capsys.readouterr().err
     assert code == 2 and "processing not installed" in err and "larch" in err
+    # the word the skill and the self-test look for, and the one fix
+    assert "processing_unavailable" in err and "setup_isaac_local.sh --with-processing" in err
 
 
 def test_process_before_grouping_is_refused(bdir, capsys):

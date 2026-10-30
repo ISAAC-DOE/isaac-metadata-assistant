@@ -21,7 +21,9 @@ Details live in `reference/`; open a file only when its step needs it.
 0. **You do not write files.** Never create or edit `bundle.json`, any section file, drafts,
    composition or validation files, or anything else inside a bundle folder. Every change goes through
    a command (`decide`, `annotate`, `group`, `process`, `build-records`). If a command cannot do what
-   is needed, tell the scientist; do not work around it.
+   is needed, tell the scientist; do not work around it. The only files you write yourself are
+   working notes the commands take as input (the findings file, a list of ids for `--targets-file`),
+   and those go in a working folder BESIDE the bundle (e.g. `<bundle>-notes/`), never inside it.
 0b. **Run `decide` only with an answer the scientist gave in THIS conversation.** Never infer one from
    a file, a hint, an earlier session or what seems likely. No answer, no decision (`defer`). Never use
    `build-records --test-marker` with a real scientist; it is for the self-test and puts a test marker
@@ -45,7 +47,7 @@ Details live in `reference/`; open a file only when its step needs it.
    context, not values for a run. Never copy one onto a run unless the scientist says it applies.
 7. **Who produced the data** comes from the scientist. A PI name in the folder name is only a hint
    to offer ("Is this Dr. X's group?"), never an answer.
-8. **Never load `bundle.json` or `reading.full.json` whole**, never paste a large file. Use
+8. **Never load `bundle.json`, `runs.json` or `reading.full.json` whole**, never paste a large file. Use
    `isaac bundle list/show` pages and `summary.md`.
 9. **Never upload, never ask for or print a portal key.** `upload` is `--dry-run` only.
 10. **Say what you checked and what you did not.** Never claim "fully verified".
@@ -96,7 +98,7 @@ If import is refused (exit 3/4/5), read `reference/troubleshooting.md`.
 ## Step 3 · Blind cross-check (BEFORE any command that prints a value)
 
 Read `reference/blind-crosscheck.md`. Order matters: `crosscheck-plan` → pick the high-value
-targets (sample identity, potential/reference, reaction, environment, acquisition time) →
+targets (sample identity, potential/reference, reaction, environment, cell type, acquisition time) →
 `excerpt` (raw source text, no parser value) → write what you read → `annotate --blind` →
 only then `reveal` to compare. After any value has been printed for a target (`show`, `list
 candidates`, `reveal`) its reading is no longer blind and `annotate` records that honestly.
@@ -132,7 +134,9 @@ their file names because no file states the sample; please confirm". The experim
 `bundle group <bundle> --regroup`. (The other experiment question, `clock_time_zone`, asks the instrument clock's
 time zone for SSRL XDC scan start times: `--decision set_clock_time_zone --value <IANA name>`; never suggest one —
 see `reference/questions-and-decisions.md`.) Ask the
-scientist to **confirm, split or merge** each, in batches, with progress. Record with `decide
+scientist to **confirm, split or merge** each, in batches, with progress; a group that is not a result
+at all (alignment, a reference foil, a test scan) can be **left out**: `--decision reject` (it is never
+exported; say so). Record with `decide
 --decision confirm|split|merge` (`--split-into` takes a JSON list of lists of run keys, which you
 build; they never type it; `merge` needs `--merge-with` naming another live group, then a regroup and
 a confirm of the combined group). A merge candidate they say is distinct: `--target <mc id> --decision
@@ -143,7 +147,8 @@ After a regroup, report any `merge_decisions_not_combined` in words.
 ## Step 6 · Processing (a DRAFT protocol)
 
 `<isaac> process <bundle> --source <folder>` once groups are confirmed (`--source` is the folder that was
-imported; the bundle does not record the path, so without it `process` refuses and writes nothing;
+imported; by default the bundle does not record the path, so without it `process` refuses and writes
+nothing; a ZIP import needs the unzipped folder, since processing reads a folder;
 `--no-athena` skips the scientist's own Athena projects). `--group <id>` (with `--source`) redoes only
 that group; every other group's result is kept as it was (`kept_other_groups`). Results are in `<bundle>/processing/processing_results.json`,
 with a `plot.png` and `qc.json` per result in `<bundle>/processing/<group id>/<run id>/` (each result's
@@ -216,7 +221,8 @@ concentration and the pH have their own columns. Details: `reference/questions-a
 
 ## Step 8 · Build and validate
 
-`<isaac> bundle build-records <bundle>` then `<isaac> bundle validate <bundle>`. Read
+`<isaac> bundle build-records <bundle>` then `<isaac> bundle validate <bundle>`. If it reports
+`nothing_validated`, no group is confirmed yet: go back to Step 5. Read
 `reference/records-and-validation.md` and explain every verdict that is not `exportable` in plain
 words with the exact fix, then loop back to the step that fixes it (a question, a group, a
 processing approval: an `incomplete` draft with a `processing_fix` needs its curve approved in Step 6).

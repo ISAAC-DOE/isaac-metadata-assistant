@@ -99,7 +99,8 @@ rules before using real data (`docs/local-first-data-flows.md`). The skill asks 
   reported" or who produced the data. The checks report that for information only: an unknown
   temperature does not stop a record from being exported, and no temperature is guessed.
 - **Readers.** Built in: Beamline 15 SPEC scans and macros, SSRL EXAFS Data Collector text scans,
-  Athena/Demeter exports, PyMca MCA files, simple two-column text. Other formats are listed as
+  Athena/Demeter exports, XDI files, XES tab files, PyMca MCA files, simple two-column text, Larch
+  session (`.larix`) files and Igor (`.pxp`) experiments, and nested ZIPs. Other formats are listed as
   unread and Claude reads what it can.
 - Needs a Mac (Linux works the same way). Uploading is not part of this version.
 

@@ -5,7 +5,7 @@
 | Purpose | Command |
 |---|---|
 | Read a folder or ZIP | `<isaac> import <folder> --out <bundle> [--profile auto\|<id>] [--force] [--record-local-root]` |
-| A page of items | `<isaac> bundle list <bundle> runs\|conflicts\|candidates\|questions\|unread\|groups\|merge-candidates\|processed-outputs [--limit N] [--offset M] [--state S] [--no-values]` |
+| A page of items | `<isaac> bundle list <bundle> runs\|conflicts\|candidates\|questions\|unread\|groups\|merge-candidates\|processed-outputs [--limit N ≤ 200] [--offset M] [--state S] [--no-values]` (`--state` and `--no-values` are for `candidates` only; `--no-values` lists them without printing, so without exposing, any value) |
 | One item | `<isaac> bundle show <bundle> run\|conflict\|candidate\|source\|question\|group\|processed-output <id>` (prints values) |
 | Re-validate the bundle itself | `<isaac> bundle check <bundle>` |
 | What to cross-check | `<isaac> bundle crosscheck-plan <bundle> [--limit N] [--offset M]` (ids and locators, no values) |

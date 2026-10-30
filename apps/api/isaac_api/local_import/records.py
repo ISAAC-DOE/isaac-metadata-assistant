@@ -1036,7 +1036,12 @@ def validate_records(bundle_dir: Path, *, run_portal=None) -> dict:
         report["on_disk_draft_differs"] = group_id in stale
         _atomic_write(out_dir / f"{group_id}.json", _json_bytes(report))
         verdicts[group_id] = report["verdict"]
-    return {"verdicts": verdicts, "on_disk_drafts_ignored_because_they_differ": stale}
+    out = {"verdicts": verdicts, "on_disk_drafts_ignored_because_they_differ": stale}
+    if not verdicts:
+        # an empty verdict list is "nothing checked", never "everything passed"
+        out["nothing_validated"] = ("No record draft to validate: no record group is confirmed yet. Confirm the groups "
+                                    "(`isaac bundle decide --decision confirm`), then run `isaac bundle build-records`.")
+    return out
 
 
 def _was_marked(bundle: Mapping) -> bool:
