@@ -18,6 +18,28 @@ from typing import Any, Mapping
 PROTOCOL_ID = "isaac.xas.v0"
 PROTOCOL_VERSION = "0.1.0"
 PROTOCOL_STATUS = "draft_unreviewed"
+#: THE RULES CHANGED SINCE :data:`PROTOCOL_VERSION`, recorded on every ISAAC result (``rule_versions``).
+#: The protocol version is NOT bumped when a rule changes: it is hashed into every run id
+#: (``run.run_id_for``), so a bump would move EVERY result id, and every decision on one, including groups
+#: the change does not touch. A result a change does touch gets a new id from its own changed outputs.
+#: Instead each result names the rules (with their versions) added or changed since 0.1.0 shipped; it is kept
+#: outside the hashed output files, so it moves no id. Add a rule here when it is added or changed.
+RULE_VERSIONS_SINCE_PROTOCOL_VERSION: dict[str, Any] = {
+    "since_protocol_version": "0.1.0",
+    "rule_ids": [
+        "isaac.athena.already_normalized.v0",
+        "isaac.athena.match_by_name.v1",
+        "isaac.xas.edge_above_noise.v0",
+        "isaac.xas.edge_step_plausible.v0",
+        "isaac.xas.post_edge_level.v1",
+        "isaac.xas.reference_channel_fallback.v1",
+        "isaac.xas.stored_normalized_plausible.v0",
+    ],
+    "statement": (
+        "These rules were added or changed after protocol version 0.1.0 without a version bump (the protocol "
+        "version is part of every result id); a result is judged by the versions named here."
+    ),
+}
 PROTOCOL_NOTICE = (
     "DRAFT — not reviewed by a beamline scientist; Oscar's protocol supersedes on arrival. "
     "Results are review material, never an official value."

@@ -417,21 +417,36 @@ def stored_normalized_implausible(energy, curve, e0, np) -> dict | None:
     }
 
 
-#: THE POST-EDGE LEVEL (``isaac.xas.post_edge_level.v0``). Over the post-edge window (norm1 to norm2 above
-#: E0) a normalised spectrum sits about ONE edge step above the pre-edge line at E0. The level measured
-#: here is ``(mean(mu over the window) - pre_edge_line(E0)) / edge_step``; outside
-#: :data:`POST_EDGE_LEVEL_RANGE` the edge step does not describe the spectrum's jump, so the normalised curve
-#: is not usable. It is measured from the pre-edge line AT E0, not from the normalised curve itself: larch's
-#: ``norm`` also carries the pre-edge line's slope extrapolated across the post-edge window, which on four
-#: real SSRL beamtimes put good spectra (a CoSO4 standard in sucrose, IrO2 in transmission) 0.9 to 1.7 away
-#: from 1 while their jump was right. Measured on every pass/warn curve of those beamtimes (225 with a
-#: window): the level lies between 0.31 and 1.89 for every curve whose plot shows a normalised spectrum;
-#: outside (0, 2) were a TiO2 anatase scan ending 122 eV above E0 (2.44: a quadratic post-edge over 49-120 eV
-#: of EXAFS put the step at 0.58 for a jump of 1.4), a noisy dilute Ir HERFD scan (2.11), two Ti foil
-#: calibration scans ending 19 eV above E0 (3.05, 3.43: the "post-edge" window lies inside the edge; NOT
-#: judged since, see :data:`POST_EDGE_MIN_SPAN_EV`) and a Ti foil whose ln(I0/I1) falls at the edge (-1.75; larch's edge step is |jump|, so the step alone is positive).
+#: THE POST-EDGE LEVEL (``isaac.xas.post_edge_level.v1``). Over the post-edge window (norm1 to norm2 above
+#: E0) a normalised spectrum sits about ONE edge step above the pre-edge line. The level is measured TWO
+#: ways, and the curve fails only when BOTH are outside :data:`POST_EDGE_LEVEL_RANGE` (the edge step then
+#: does not describe the spectrum's jump, so the normalised curve is not usable):
+#:
+#: * from the pre-edge line AT EACH post-edge energy, ``mean(mu - pre_edge_line) / edge_step`` over the
+#:   window (the mean of larch's ``norm``): right for a transmission spectrum, whose absorption background
+#:   falls (or whose pre-edge line has a real slope) across the 50-600 eV window by as much as the edge step;
+#: * from the pre-edge line held at its E0 value, ``(mean(mu) - pre_edge_line(E0)) / edge_step`` (v0's only
+#:   measure): right when the line's slope, fitted over a short pre-edge window, is extrapolated far.
+#:
+#: Why both (review, cycle 3): v0 failed clean synthetic Co K-edges in transmission on a background of 2.5
+#: (levels -0.44 to -0.09) and any spectrum whose pre-edge slope is +-0.01 step/eV (4.0, -2.0); the mean of
+#: ``norm`` alone, measured on four real SSRL beamtimes, put sound dilute Ir HERFD scans (3 pre-edge points
+#: over 15 eV, extrapolated 280 eV) at -0.73 and 2.2 to 2.8.
+#:
+#: Measured with v1 on every curve of those four beamtimes (BL15-2, BL6-2c, two BL4-3) with a post-edge
+#: window and a scan reaching 50 eV above E0 (212 pass/warn): from the line at each energy -0.73 to 2.77
+#: (5th-95th percentile 0.80 to 1.49), from the line at E0 0.34 to 1.89 (0.82 to 1.27); the level nearer 1
+#: lies at 0.50 to 1.89. Outside (0, 2) one way only were 7 sound fluorescence/HERFD curves (the line way),
+#: none in transmission (IrO2 in transmission: 1.39 from the line, 0.35 at E0). Failed both ways: a TiO2
+#: anatase scan ending 122 eV above E0 (2.49 / 2.45: a quadratic post-edge over 49-120 eV of EXAFS put the
+#: step at 0.58 for a jump of 1.4), a noisy dilute Ir HERFD scan (2.11 / 2.11: step half its post-edge
+#: level), a Ti foil whose ln(I0/I1) falls at the edge (-0.88 / -1.82; larch's edge step is |jump|, so the
+#: step alone is positive) and an all-zero signal (3.84). The bounds stay 0 and 2: the measurements do not
+#: move them (sound 0.50 to 1.89, junk at 2.11 and above, or below 0). The two Ti foil calibration scans
+#: ending 19 eV above E0 are not judged (:data:`POST_EDGE_MIN_SPAN_EV`). Verdicts on the four beamtimes are
+#: unchanged from v0; the synthetic transmission spectra above now pass.
 #: Not a protocol parameter: a sanity bound, like :data:`EDGE_STEP_MAX_RANGE_RATIO`.
-POST_EDGE_LEVEL_RULE_ID = "isaac.xas.post_edge_level.v0"
+POST_EDGE_LEVEL_RULE_ID = "isaac.xas.post_edge_level.v1"
 POST_EDGE_LEVEL_RANGE = (0.0, 2.0)
 POST_EDGE_LEVEL_MIN_POINTS = 3
 #: A scan ending less than this far above E0 has no real post-edge window: the level is NOT judged and QC
@@ -465,42 +480,51 @@ def post_edge_window_too_short(energy, e0, np) -> dict | None:
 
 
 def post_edge_level_implausible(energy, mu, pre_edge_curve, e0, step, np, *, norm1, norm2) -> dict | None:
-    """``None`` when the post-edge level (above) is inside :data:`POST_EDGE_LEVEL_RANGE`, or when it cannot be
-    judged (no positive step, no E0, fewer than :data:`POST_EDGE_LEVEL_MIN_POINTS` points in the window);
-    else what was found, with a plain sentence."""
+    """``None`` when either post-edge level (above) is inside :data:`POST_EDGE_LEVEL_RANGE`, or when it cannot
+    be judged (no positive step, no E0, a scan ending too soon above E0, fewer than
+    :data:`POST_EDGE_LEVEL_MIN_POINTS` points in the window); else what was found, with a plain sentence.
+    ``level`` is the level from the pre-edge line at each energy; ``level_from_line_at_e0`` the other."""
     step, e0, norm1, norm2 = _f(step), _f(e0), _f(norm1), _f(norm2)
     if step is None or step <= 0 or e0 is None or norm1 is None or norm2 is None:
         return None
     if post_edge_window_too_short(energy, e0, np):
         return None  # not judged: QC warns post_edge_window_too_short instead
     e, y, pre = (np.asarray(a, dtype=float) for a in (energy, mu, pre_edge_curve))
-    sel = np.isfinite(e) & np.isfinite(y) & (e >= e0 + norm1) & (e <= e0 + norm2)
-    if int(np.sum(sel)) < POST_EDGE_LEVEL_MIN_POINTS:
-        return None
     ok = np.isfinite(pre)
     if not ok.any():
         return None
-    pre_e0 = float(np.interp(e0, e[ok], pre[ok]))
-    level = _f((float(np.mean(y[sel])) - pre_e0) / step)
-    lo, hi = POST_EDGE_LEVEL_RANGE
-    if level is None or lo < level < hi:
+    sel = np.isfinite(e) & np.isfinite(y) & ok & (e >= e0 + norm1) & (e <= e0 + norm2)
+    n = int(np.sum(sel))
+    if n < POST_EDGE_LEVEL_MIN_POINTS:
         return None
-    where = f"over the post-edge window ({norm1:g} to {norm2:g} eV above E0 {e0:g} eV, {int(np.sum(sel))} points)"
-    if level <= lo:
-        said = (f"The spectrum sits below the pre-edge line {where}: its post-edge level is {level:.3g} edge steps, "
-                "so it falls at the edge instead of rising (the edge step is the size of the jump, not its sign). ")
+    pre_e0 = float(np.interp(e0, e[ok], pre[ok]))
+    level = _f(float(np.mean(y[sel] - pre[sel])) / step)
+    at_e0 = _f((float(np.mean(y[sel])) - pre_e0) / step)
+    lo, hi = POST_EDGE_LEVEL_RANGE
+    if level is None or at_e0 is None or lo < level < hi or lo < at_e0 < hi:
+        return None
+    where = f"over the post-edge window ({norm1:g} to {norm2:g} eV above E0 {e0:g} eV, {n} points)"
+    both = (f"{level:.3g} edge steps from the pre-edge line at each energy and {at_e0:.3g} from the line held at "
+            "its E0 value")
+    if level <= lo and at_e0 <= lo:
+        said = (f"The spectrum sits below the pre-edge line {where}: its post-edge level is {both}, so it falls at "
+                "the edge instead of rising (the edge step is the size of the jump, not its sign). ")
+    elif level >= hi and at_e0 >= hi:
+        said = (f"The spectrum sits {level:.3g} edge steps above the pre-edge line {where} ({both}), where a "
+                f"normalised spectrum sits about 1: the edge step {step:.6g} does not describe its jump. ")
     else:
-        said = (f"The spectrum sits {level:.3g} edge steps above the pre-edge line {where}, where a normalised spectrum "
-                f"sits about 1: the edge step {step:.6g} does not describe its jump. ")
+        said = (f"The post-edge level {where} is {both}: neither is near 1, so the edge step {step:.6g} and the "
+                "pre-edge line do not describe the spectrum. ")
     return {
         "rule_id": POST_EDGE_LEVEL_RULE_ID,
         "level": level,
+        "level_from_line_at_e0": at_e0,
         "range": list(POST_EDGE_LEVEL_RANGE),
         "edge_step": step,
         "window_eV": [e0 + norm1, e0 + norm2],
-        "points": int(np.sum(sel)),
-        "statement": said + (f"Outside {lo:g} to {hi:g} the normalised curve is not usable. A person checks the "
-                             "channel, E0 and the post-edge range."),
+        "points": n,
+        "statement": said + (f"Outside {lo:g} to {hi:g} both ways, the normalised curve is not usable. A person "
+                             "checks the channel, E0 and the pre- and post-edge ranges."),
     }
 
 

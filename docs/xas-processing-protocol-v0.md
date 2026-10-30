@@ -3,6 +3,13 @@
 > **DRAFT — not reviewed by a beamline scientist. Oscar's protocol supersedes on arrival.**
 > Status `draft_unreviewed`, version `0.1.0`. Every result is `state: needs_review`. Nothing
 > here produces an official ISAAC value; results are review material for a scientist.
+>
+> **Rule versions, not a version bump.** The protocol version is hashed into every run id (§9), so
+> bumping it would move EVERY result id and orphan every decision, including on groups a change does not
+> touch. Rules added or changed since 0.1.0 are therefore versioned on their own, and every ISAAC result
+> records them in `rule_versions` (`since_protocol_version`, `rule_ids`, `statement`;
+> `processing/protocol.py` `RULE_VERSIONS_SINCE_PROTOCOL_VERSION`), outside the hashed output files. A
+> result a change does touch gets a new id from its own changed outputs.
 
 Code: `apps/api/isaac_api/local_import/grouping.py` (stdlib) and
 `apps/api/isaac_api/local_import/processing/` (numpy + xraylarch, optional extra
@@ -107,9 +114,13 @@ Every choice, its basis and alternatives are in `channel_choice`; flags
 `channel_choice_needs_review` / `channel_from_bl15_selector_suggestion`,
 `energy_column_alternatives`, `multiple_signal_alternatives`.
 
-**Reference channel for a foil on I2.** When a reference or alignment group's ln(I0/I1) fails the
+**Reference channel for a foil on I2** (`isaac.xas.reference_channel_fallback.v1`, recorded as
+`fallback_rule`). When an alignment group's ln(I0/I1), or that of a reference group a run name says is a
+foil or a calibration (a token starting `foil`/`calib` or ending `foil`, e.g. `Tifoil`), fails the
 edge checks of §7 (`no_edge`, `post_edge_not_at_1`, judged on a quick merge of its scans), the
-reference channel is tried — only when a reference-after column (`I2`, `Iref`, `IR`) is a positive
+reference channel is tried. v0 tried it for every `reference` group, and the `std`/`standard`/`ref`
+tokens make a compound standard a reference too: a CoO standard with a dead I1 was switched to
+ln(I0/I2), whose I2 is no reference foil's. It is tried only when a reference-after column (`I2`, `Iref`, `IR`) is a positive
 intensity in every scan AND either a run name says the foil is on it (a `foil` token and an `I2`
 token) or I1 is not a positive intensity in some scan. Candidates in order: ln(I1/I2) (the protocol's
 reference pair) when I1 is a positive intensity in every scan, else ln(I0/I2). The first that passes
@@ -120,7 +131,8 @@ fails on its own) and `basis.reference_channel_tried` + flag `reference_channel_
 what was tried. Never for a sample group. Measured on a real BL4-3 beamtime (`31_Ti_foil_I2_120`): I1
 read −3.6 to 26 counts, so ln(I1/I2) is not tried; ln(I0/I2) is refused too, because I2 RISES about
 270× across the edge (≈300 → ≈80 000 counts, as a fluorescence or yield signal does, not a transmitted
-beam), so ln(I0/I2) falls at the edge (post-edge level −1.0). That group fails with both statements;
+beam), so ln(I0/I2) falls at the edge (post-edge level −0.68 from the pre-edge line at each energy,
+−1.02 at E0; re-measured under v1 of §7). That group fails with both statements;
 which signal its I2 is, is a question for the scientist. Per scan: energy sorted
 (non-monotonic steps counted), exact duplicate energies averaged, non-finite points dropped
 and counted.
@@ -184,20 +196,27 @@ data, e.g. a zero-width post-edge range), and two checks that a curve is a norma
 (sanity bounds in `processing/core.py`, not protocol parameters; each fails with a plain sentence in
 `qc.json` `statements`, and its metric is present only when it fails):
 
-* **`post_edge_not_at_1`** (`isaac.xas.post_edge_level.v0`, metric `post_edge_level`): the post-edge
-  level — mean mu over the post-edge window (norm1 to norm2 above E0) minus the pre-edge line AT E0,
-  over the edge step — is outside 0 to 2. A normalised spectrum sits about 1 step above; below 0 it
-  falls at the edge (larch's edge step is |jump|, so a falling edge still has a positive step). Measured
-  on every pass/warn curve of four real beamtimes (BL15-2, BL6-2c, two BL4-3; 225 with a window): every
-  curve whose plot shows a normalised spectrum lies at 0.31 to 1.89; outside were a TiO2 anatase scan
-  ending 122 eV above E0 (2.44: a quadratic post-edge over 49–120 eV of EXAFS gave a step of 0.58 for a
-  jump of about 1.4), a noisy dilute Ir HERFD scan (2.11: step half its post-edge level, white line 13),
-  two Ti foil calibration scans ending 19 eV above E0 (3.05, 3.43: the "post-edge" window lies inside the
-  edge; their E0 is unaffected) and a Ti foil whose ln(I0/I1) falls (−1.75). The plain mean of larch's
-  `norm` over the window was measured first and is NOT the test: it also carries the pre-edge line's
-  slope extrapolated across the window, which put good spectra (a CoSO4 standard in sucrose 1.93, IrO2
-  in transmission 1.40, nine dilute HERFD scans with 3 pre-edge points 2.1–2.8 or −0.7) far from 1; at
-  |mean − 1| > 0.5 it would have failed 18 curves, most of them sound. **Not judged** when the scan ends
+* **`post_edge_not_at_1`** (`isaac.xas.post_edge_level.v1`, metric `post_edge_level`): the post-edge
+  level over the post-edge window (norm1 to norm2 above E0), in edge steps, is measured TWO ways — from
+  the pre-edge line at each energy (`mean(mu − pre_edge_line) / step`, the mean of larch's `norm`) and
+  from the pre-edge line held at its E0 value (`(mean(mu) − pre_edge_line(E0)) / step`) — and the curve
+  fails only when BOTH are outside 0 to 2 (metric: the first; the finding also carries
+  `level_from_line_at_e0`). A normalised spectrum sits about 1 step above; below 0 it falls at the edge
+  (larch's edge step is |jump|, so a falling edge still has a positive step). Why both: v0 used only the
+  line at E0, which ignores the line's slope across a 50–600 eV window, so sound transmission spectra
+  failed (review: clean synthetic Co K-edges on a background of 2.5 at −0.44 to −0.09; a pre-edge slope
+  of ±0.01 step/eV at −2 or 4); the line at each energy alone is wrong the other way when its slope,
+  fitted over a short pre-edge window, is extrapolated far (real dilute Ir HERFD scans, 3 pre-edge
+  points over 15 eV, extrapolated 280 eV: −0.73, 2.2–2.8). Measured with v1 on the four real beamtimes
+  (BL15-2, BL6-2c, two BL4-3; 212 pass/warn curves judged): from the line at each energy −0.73 to 2.77
+  (5th–95th percentile 0.80–1.49), from the line at E0 0.34 to 1.89 (0.82–1.27), the level nearer 1
+  0.50 to 1.89; 7 sound fluorescence/HERFD curves are outside one way only (none in transmission: IrO2
+  in transmission is 1.39 / 0.35). Failed both ways: a TiO2 anatase scan ending 122 eV above E0
+  (2.49 / 2.45: a quadratic post-edge over 49–120 eV of EXAFS gave a step of 0.58 for a jump of about
+  1.4), a noisy dilute Ir HERFD scan (2.11 / 2.11: step half its post-edge level, white line 13), a Ti
+  foil whose ln(I0/I1) falls (−0.88 / −1.82) and an all-zero signal (3.84, already failing). The bounds
+  stay 0 and 2 (the measurements do not move them), and no verdict on the four beamtimes changed from
+  v0. **Not judged** when the scan ends
   less than 50 eV above E0 (no real post-edge window; measured: scans end 0.9–27 eV or ≥ 64 eV above
   E0): QC warns `post_edge_window_too_short` instead (metric `post_edge_span_eV`, "the scan ends N eV
   above E0, so the normalised level cannot be checked; its edge position is still usable") — 11 such
@@ -209,9 +228,12 @@ data, e.g. a zero-width post-edge range), and two checks that a curve is a norma
   `pre_edge_noise` and are not judged by it. A derivative test (maximum of dmu/dE against its pre-edge
   scatter) was measured too and does not separate that foil (113) from real spectra.
 
-Verdicts changed by the two checks (pass/warn → fail): BL4-3 TiON 2 (the anatase scan, the Ti foil on
-I2), BL15-2 1 (the dilute Ir HERFD scan), BL4-3 MOF-Co 0, BL6-2c 0 (one curve that already failed
-`signal_all_zero` also fails `post_edge_not_at_1`).
+Verdicts changed by the two checks from the build before them (pass/warn → fail): BL4-3 TiON 2 (the
+anatase scan, the Ti foil on I2), BL15-2 1 (the dilute Ir HERFD scan), BL4-3 MOF-Co 0, BL6-2c 0 (one
+curve that already failed `signal_all_zero` also fails `post_edge_not_at_1`). `post_edge_level.v1` and
+`reference_channel_fallback.v1` changed no verdict on the four beamtimes (no real group was a compound
+standard reaching the reference channel); their results keep their ids except the 4 failing
+`post_edge_not_at_1`, whose statement now gives both levels.
 warn: 1 scan, pre-edge noise/step > 0.02, median stderr/step > 0.02, glitches or outlier
 scans flagged, readable scans skipped for lacking the chosen columns
 (`scans_skipped_lacking_chosen_columns`, with `scans_readable` / `scans_skipped_lacking_chosen_columns`

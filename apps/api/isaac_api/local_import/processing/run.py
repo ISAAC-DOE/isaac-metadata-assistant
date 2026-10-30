@@ -32,6 +32,7 @@ Raw data is READ from the source folder (``source_root``, else the bundle's
 
 from __future__ import annotations
 
+import copy
 import datetime as _dt
 import hashlib
 import json
@@ -205,6 +206,8 @@ def _base(group: Mapping, source: str) -> dict:
         "review_flags": ["protocol_draft_unreviewed"],
         "preferred_for_record": False,
         "failure": None,
+        # outside every hashed output file, so it moves no id (protocol.RULE_VERSIONS_SINCE_PROTOCOL_VERSION)
+        **({"rule_versions": copy.deepcopy(P.RULE_VERSIONS_SINCE_PROTOCOL_VERSION)} if source == "isaac_protocol" else {}),
     }
 
 
@@ -471,6 +474,10 @@ def _fallback_from_transmission(attempts, choice, tables, role: str, sel, params
 
 
 REFERENCE_FALLBACK_FLAG = "channel_fallback_reference_channel"
+#: v1 (review, cycle 3): reached only by a run NAMED a foil or calibration (:func:`_names_a_foil`) or an
+#: alignment group; v0 was reached by every ``reference`` group, which a ``std``/``standard``/``ref`` token
+#: makes a compound standard too (``05_SYN_CoO_std_005`` with a dead I1 was switched to ln(I0/I2)).
+REFERENCE_CHANNEL_RULE_ID = "isaac.xas.reference_channel_fallback.v1"
 #: Flag on a choice whose reference channel was tried and was not usable either (the choice is unchanged).
 REFERENCE_TRIED_FLAG = "reference_channel_tried_not_usable"
 
@@ -508,11 +515,22 @@ def _screen(attempts, params: Mapping, np, xafs) -> dict | None:
     return {"failed": C.edge_checks(grid[ok], mean[ok], nm, np), "e0_eV": nm["e0_eV"], "edge_step": nm["edge_step"]}
 
 
+def _foil_token(tok: str) -> bool:
+    """A token that names a foil or a calibration: starting ``foil``/``calib`` (as grouping's role rule) or
+    ending ``foil`` (``Tifoil``, ``Cufoil``). Case-folded."""
+    return tok.startswith(("foil", "calib")) or tok.endswith("foil")
+
+
+def _names_a_foil(stems: Sequence[str]) -> bool:
+    """True when a run name has a foil or calibration token (:func:`_foil_token`)."""
+    return any(_foil_token(t.casefold()) for stem in stems for t in _TOKEN.split(str(stem)) if t)
+
+
 def _names_foil_on(stems: Sequence[str], column: str) -> bool:
     """True when a run name has a ``foil`` token and a token that IS ``column`` (``..._foil_I2_120``)."""
     for stem in stems:
         toks = [t.casefold() for t in _TOKEN.split(str(stem)) if t]
-        if any(t.startswith("foil") for t in toks) and column.casefold() in toks:
+        if any(_foil_token(t) for t in toks) and column.casefold() in toks:
             return True
     return False
 
@@ -525,8 +543,11 @@ def _reference_channel_fallback(attempts, choice, tables, role: str, stems: Sequ
     26 counts, so ln(I0/I1) was a falling noisy trace with no edge (step 2.4 times the pre-edge scatter) that
     QC only warned about. There ln(I1/I2) is not tried (I1 is not a positive intensity) and ln(I0/I2) is
     REFUSED by the checks: that I2 rises about 270 times across the edge, as a fluorescence or yield signal
-    does, so ln(I0/I2) falls (post-edge level -1.0); the group keeps ln(I0/I1) and fails, with what was tried
-    recorded. Which signal that I2 is, is the scientist's question. Only when ALL hold: the group is a reference or alignment group; ln(I0/I1) was chosen; a
+    does, so ln(I0/I2) falls (post-edge level -0.68 from the pre-edge line, -1.02 at E0); the group keeps
+    ln(I0/I1) and fails, with what was tried recorded. Which signal that I2 is, is the scientist's question.
+    Only when ALL hold (:data:`REFERENCE_CHANNEL_RULE_ID`): the group is an alignment group, or a reference
+    group a run name says is a foil or calibration (:func:`_names_a_foil`: a compound standard is a reference
+    by its ``std`` token, and its I2 is not a reference foil's); ln(I0/I1) was chosen; a
     reference-after column (``channels.reference_after_reference``, I2) is a positive intensity in every
     scan; and EITHER a run name says the foil is on it (a ``foil`` token and an ``I2`` token) OR I1 is not a
     positive intensity in some scan. Candidates, in order: ln(I1/I2) (the protocol's reference pair), only
@@ -535,7 +556,7 @@ def _reference_channel_fallback(attempts, choice, tables, role: str, stems: Sequ
     ``basis.fallback_from`` naming what failed and every candidate tried, and QC at least ``warn``. When none
     passes, the choice is unchanged (it fails on its own) and the candidates tried are recorded on it.
     """
-    if choice.mode != MODE_TRANSMISSION or role not in ("reference", "alignment"):
+    if choice.mode != MODE_TRANSMISSION or not (role == "alignment" or (role == "reference" and _names_a_foil(stems))):
         return None
     np, params = ctx.np, ctx.params
     readable = [t for _, t in tables if t.has(choice.i0) and t.has(choice.transmission_after)]
@@ -575,7 +596,7 @@ def _reference_channel_fallback(attempts, choice, tables, role: str, stems: Sequ
     failed = sorted(first["failed"])
     said_failed = "; ".join(first["failed"][k]["statement"] for k in failed)
     if found is None:
-        choice.basis["reference_channel_tried"] = {"failed_checks": failed, "tried": tried, "statement": (
+        choice.basis["reference_channel_tried"] = {"fallback_rule": REFERENCE_CHANNEL_RULE_ID, "failed_checks": failed, "tried": tried, "statement": (
             f"Transmission {choice.signal_name} failed the edge checks ({', '.join(failed)}), and the reference channel "
             f"was tried and was not usable either: {'; '.join(t['signal_name'] + ' ' + t['outcome'] + ' (' + t['reason'] + ')' for t in tried)}.")}
         choice.flags.append(REFERENCE_TRIED_FLAG)
@@ -585,6 +606,7 @@ def _reference_channel_fallback(attempts, choice, tables, role: str, stems: Sequ
         "signal_name": choice.signal_name,
         "rule": choice.basis.get("rule"),
         "reason_code": "transmission_failed_edge_checks",
+        "fallback_rule": REFERENCE_CHANNEL_RULE_ID,
         "failed_checks": failed,
         "tried": tried,
         "statement": (

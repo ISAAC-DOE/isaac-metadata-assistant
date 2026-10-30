@@ -7,7 +7,7 @@
   reads it as scan NNN; nothing looser (no prefix or substring match), and an Athena name that fits
   two record groups still matches neither, with a note.
 * JUNK OR MIS-NORMALISED ISAAC CURVES FAIL. A curve whose post-edge level, measured from the pre-edge
-  line at E0, is not between 0 and 2 edge steps (``post_edge_not_at_1``), or whose edge step is not 5
+  line (since v1 both at each energy and held at E0; see test_local_import_polish_c3r1), is not between 0 and 2 edge steps (``post_edge_not_at_1``), or whose edge step is not 5
   times the pre-edge scatter (``no_edge``), fails with a plain sentence instead of warning.
 * A REFERENCE FOIL WHOSE ln(I0/I1) FAILS THOSE CHECKS tries the reference channel: ln(I1/I2), or
   ln(I0/I2) when I1 is not a positive intensity — only for a foil said to be on I2 or one whose I1 is
@@ -104,7 +104,7 @@ from test_local_import_processing import E0, fluo_scan, make_case, spec_file  # 
 FLAT_PRE = np.zeros(GRID.size)
 
 
-def test_post_edge_level_is_measured_from_the_pre_edge_line_at_e0():
+def test_post_edge_level_fails_a_step_that_does_not_describe_the_jump():
     mu = mu_edge(GRID, step=1.5, offset=0.0)
     pre = np.zeros(GRID.size)
     ok = C.post_edge_level_implausible(GRID, mu, pre, E0, 1.5, np, norm1=60.0, norm2=130.0)
