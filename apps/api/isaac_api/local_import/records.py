@@ -466,8 +466,11 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[di
     # what the record requires and nobody supplied: stays missing, listed. The control mode is the
     # one this DRAFT carries — a confirmed, schema-fitting answer that composed (1.5.0: locally
     # answerable). A potentiostatic draft without a composed set-point (none answered, or held back
-    # by the scale gate above) is therefore incomplete, never exported. No mode is derived from a
-    # set-point, nor a set-point from a mode: an unanswered mode requires nothing.
+    # by the scale gate above) is therefore incomplete, never exported. A galvanostatic draft needs
+    # context.electrochemistry.current_setpoint_mA_cm2 (answerable since 1.7.0, DEC-92): it composes
+    # like any eligible answer, with no companion gate (bundle.COMPOSES_ONLY_WITH has no entry for it),
+    # and only as a number exactly as answered. No mode is derived from a set-point, nor a set-point
+    # from a mode, nor a current density from a current and an area: an unanswered mode requires nothing.
     control = fields.get(B.CONTROL_MODE_PATH, {}).get("value")
     required = list(B.required_record_paths(control_mode=control if isinstance(control, str) else None))
     required += list(B.PORTAL_REQUIRED_PATHS)

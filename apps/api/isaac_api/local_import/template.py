@@ -42,7 +42,10 @@ FORMAT_ID = "isaac.metadata_template"
 #: 1.2.0: File List gains the ISAAC-added column "Control Mode" (``context.electrochemistry.control_mode``,
 #: locally answerable since bundle 1.5.0), after pH. A 1.1.0 workbook is still read: its columns
 #: are the ones 1.1.0 wrote (:data:`COLUMNS_ADDED_IN`), and nothing past pH is read from it.
-FORMAT_VERSION = "1.2.0"
+#: 1.3.0: File List gains the ISAAC-added column "Current Set-point (mA/cm2)"
+#: (``context.electrochemistry.current_setpoint_mA_cm2``, locally answerable since bundle 1.7.0,
+#: DEC-92), after Control Mode. A 1.2.0 workbook is read up to Control Mode, a 1.1.0 one up to pH.
+FORMAT_VERSION = "1.3.0"
 
 SHEET_CAMPAIGN = "Campaign Info"
 SHEET_CONFIG = "Configurations"
@@ -127,11 +130,15 @@ FILE_COLUMNS: tuple[Column, ...] = (
     Column("Control Mode", B.CONTROL_MODE_PATH, isaac_added=True,
            note=("Added by ISAAC (not in ISAAC's base template). How the cell was driven for this run, written "
                  "exactly as one of the listed values. Leave it blank if no cell was driven or nobody knows.")),
+    Column("Current Set-point (mA/cm2)", B.CURRENT_SETPOINT_PATH, isaac_added=True,
+           note=("Added by ISAAC (not in ISAAC's base template). For a galvanostatic run: the commanded current "
+                 "DENSITY in mA/cm2, a number, with its sign as stated. Not a total current in mA: ISAAC never "
+                 "divides by an electrode area. Leave it blank if you do not know it.")),
 )
 #: File List columns a later template version added: ``header -> version``. A workbook of an older
 #: version does not have them; its import reads only the columns that version wrote. Such a
 #: column is only ever APPENDED: cells are read by position, so one inserted mid-sheet would shift them.
-COLUMNS_ADDED_IN: Mapping[str, str] = {"Control Mode": "1.2.0"}
+COLUMNS_ADDED_IN: Mapping[str, str] = {"Control Mode": "1.2.0", "Current Set-point (mA/cm2)": "1.3.0"}
 
 
 def _version_key(version: Any) -> tuple[int, ...] | None:
@@ -527,7 +534,7 @@ def export_template(bundle_dir: Path, out: Path, *, suggestions: bool = True, fo
         "3. File List: one row per run ISAAC found, named by its file's path. Do not edit File Name or reorder rows.",
         "4. Choose each row's Config ID, then fill what you know. Leave a cell blank if you do not know.",
         "5. Electrolyte is the NAME only (e.g. KOH). Put 0.1 M in 'Electrolyte Concentration (M)' as 0.1, and the pH in 'pH'.",
-        "   Those two columns and 'Control Mode', after Gas Feed, are added by ISAAC; they are not in ISAAC's base template.",
+        "   Those two columns, 'Control Mode' and 'Current Set-point (mA/cm2)', after Gas Feed, are added by ISAAC; they are not in ISAAC's base template.",
         "6. 'ISAAC Suggestions' shows what the files already say, with where. It is evidence, not an answer.",
         "7. Then: isaac bundle template import <bundle_dir> <this file> --by \"<your name>\" (preview), add --apply to record.",
     )

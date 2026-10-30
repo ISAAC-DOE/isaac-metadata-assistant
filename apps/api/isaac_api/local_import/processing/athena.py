@@ -102,21 +102,41 @@ def load_project(path: Path, rel_path: str, source_id: str | None, np) -> tuple[
             continue
         ap = getattr(g, "athena_params", None)
         bkg = getattr(ap, "bkg", None)
+        # NEVER A NON-FINITE NUMBER: a project can carry "nan" text (larch reads it as a NaN float),
+        # which is not a JSON number. Each such value becomes None and is NAMED in
+        # ``non_finite_values`` (and on the result, run._athena_result) — never dropped silently.
+        non_finite: list[str] = []
 
         def _p(obj, name):
             v = getattr(obj, name, None) if obj is not None else None
             try:
-                return float(v)
+                f = float(v)
             except (TypeError, ValueError):
                 return v
+            if not math.isfinite(f):
+                non_finite.append(f"params.{name}")
+                return None
+            return f
 
-        eshift = _p(bkg, "eshift") or 0.0
         params = {
             k: _p(bkg, k) for k in ("e0", "pre1", "pre2", "nor1", "nor2", "nnorm", "eshift", "flatten", "step", "fixstep", "z")
         }
+        # A NON-FINITE bkg_eshift: the stored energies' frame is unknown. The group is KEPT (it is one of
+        # the scientist's versions: dropping it would silently make the result-of-record choice), with
+        # its identity intact, but nothing of it is placed on an energy axis (``energy_frame_known``):
+        # no e0, no comparison, no curve file, no plot. Its result says so (ENERGY_FRAME_UNKNOWN_FLAG).
+        frame_known = "params.eshift" not in non_finite
+        if not frame_known:
+            notes.append(f"athena_group_eshift_not_finite:{rel_path}:{gname}")
+        eshift = (params["eshift"] or 0.0) if frame_known else 0.0
         channel_expr = {k: getattr(ap, k, None) for k in ("numerator", "denominator", "ln", "energy_string", "i0_string", "signal_string")} if ap is not None else {}
         e = np.asarray(energy, dtype=float)
         m = np.asarray(mu, dtype=float)
+        e0_raw, step_raw = _finite(getattr(g, "e0", None)), _finite(getattr(g, "edge_step", None))
+        if e0_raw is None:
+            non_finite.append("e0_eV")
+        if step_raw is None:
+            non_finite.append("edge_step")
         is_merge = False
         try:
             is_merge = bool(int(getattr(ap, "is_merge", 0) or 0))
@@ -135,14 +155,38 @@ def load_project(path: Path, rel_path: str, source_id: str | None, np) -> tuple[
                 "mu": m,
                 "norm": np.asarray(g.norm, dtype=float),
                 "flat": np.asarray(getattr(g, "flat", g.norm), dtype=float),
-                "e0_eV": float(g.e0) + float(eshift),
-                "edge_step": float(g.edge_step),
+                "energy_frame_known": frame_known,
+                "e0_eV": (e0_raw + float(eshift)) if (e0_raw is not None and frame_known) else None,
+                "edge_step": step_raw,
                 "params": params,
+                "non_finite_values": non_finite,
                 "channel_expression": {k: (str(v) if v is not None else None) for k, v in channel_expr.items()},
                 "data_hash": hashlib.sha256(e.tobytes() + m.tobytes()).hexdigest(),
             }
         )
     return out, notes
+
+
+#: A version whose ``bkg_eshift`` is not a finite number: listed, never placed on an energy axis.
+ENERGY_FRAME_UNKNOWN_FLAG = "athena_energy_frame_unknown"
+
+
+def frame_known(entry: Mapping) -> bool:
+    return entry.get("energy_frame_known", True) is not False
+
+
+def _finite(x) -> float | None:
+    """``float(x)`` when it is a finite number, else ``None`` (the caller names what was not)."""
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def _mean_or_none(values, np) -> float | None:
+    """The mean, or ``None`` when any value is unknown (never a mean over what is left)."""
+    return None if any(v is None for v in values) else _finite(np.mean(values))
 
 
 def find_projects(bundle: Mapping) -> list[tuple[str, str | None]]:
@@ -165,6 +209,8 @@ def _per_scan_set(pool: Sequence[Mapping], stems: Sequence[str], np) -> dict | N
     per-scan normalised spectra (on the first group's grid), labelled as derived."""
     if np is None or len(pool) < 2 or len({c["prj_relative_path"] for c in pool}) != 1:
         return None
+    if not all(frame_known(c) for c in pool):
+        return None  # a curve in an unknown energy frame is never averaged: the versions stay listed
     sels = [scan_selection(c["label"], stems) for c in pool]
     if any(s is None or len(s) != 1 for s in sels) or len({s[0] for s in sels}) != len(sels):
         return None
@@ -188,8 +234,9 @@ def _per_scan_set(pool: Sequence[Mapping], stems: Sequence[str], np) -> dict | N
             "group_name": base["group_name"],
             "norm": _mean("norm"),
             "flat": _mean("flat"),
-            "e0_eV": float(np.mean([pool[i]["e0_eV"] for i in order])),
-            "edge_step": float(np.mean([pool[i]["edge_step"] for i in order])),
+            "e0_eV": _mean_or_none([pool[i]["e0_eV"] for i in order], np),
+            "edge_step": _mean_or_none([pool[i]["edge_step"] for i in order], np),
+            "non_finite_values": sorted({v for i in order for v in pool[i].get("non_finite_values") or ()}),
             "per_scan_set": {
                 "scans": [sels[i][0] for i in order],
                 "labels": [pool[i]["label"] for i in order],
@@ -339,6 +386,10 @@ def compare(isaac: Mapping, entry: Mapping, params: Mapping, np) -> dict:
         "match_kind": entry.get("_match_kind"),
     }
     out = {"athena_ref": ref, "rule_id": COMPARE_RULE_ID, "metrics": {}, "verdict": "not_comparable", "flags": [], "tolerances": dict(tol)}
+    if not frame_known(entry):
+        out["flags"].append(ENERGY_FRAME_UNKNOWN_FLAG)
+        out["non_finite_values"] = list(entry.get("non_finite_values") or ())
+        return out
     grid = isaac.get("grid")
     y = isaac.get(quantity)
     if grid is None or y is None:
@@ -356,7 +407,7 @@ def compare(isaac: Mapping, entry: Mapping, params: Mapping, np) -> dict:
             "overlap_eV": [lo, hi] if hi > lo else None,
             "e0_isaac_eV": isaac.get("e0_eV"),
             "e0_athena_eV": entry["e0_eV"],
-            "e0_delta_eV": (isaac["e0_eV"] - entry["e0_eV"]) if isaac.get("e0_eV") is not None else None,
+            "e0_delta_eV": (isaac["e0_eV"] - entry["e0_eV"]) if isaac.get("e0_eV") is not None and entry["e0_eV"] is not None else None,
             "edge_step_isaac": isaac.get("edge_step"),
             "edge_step_athena": entry["edge_step"],
             "edge_step_ratio": (isaac["edge_step"] / entry["edge_step"]) if isaac.get("edge_step") and entry["edge_step"] else None,

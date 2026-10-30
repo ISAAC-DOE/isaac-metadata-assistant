@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
@@ -48,16 +49,25 @@ FORMAT_ID = "isaac.local-import-bundle"
 #: ``set_not_counter_positions`` on the experiment (decision field ``not_counter_positions``) —
 #: plus the optional ``superseded_merge_candidates`` section and a merge decision's combined
 #: group (``merged_by_decision``). Nothing becomes newly writable, so no eligibility is STALE.
-FORMAT_VERSION = "1.6.0"
+#: 1.7.0 (additive, DEC-92): a larger writable set — ``context.electrochemistry.current_setpoint_mA_cm2``
+#: (:data:`CURRENT_SETPOINT_PATH`), the set-point the schema requires of a confirmed galvanostatic
+#: run, so eligibility stored by an older build can be STALE, exactly as at 1.3.0 and 1.5.0. No
+#: section, field or enum of the bundle changes.
+FORMAT_VERSION = "1.7.0"
 #: The electrochemical control mode. Its allowed values are the official schema's enum (read at
 #: runtime by :func:`value_problem`); the schema's conditional rules key the set-point a record
 #: requires on it (:func:`required_record_paths`). Never defaulted, never derived.
 CONTROL_MODE_PATH = "context.electrochemistry.control_mode"
+#: The commanded current DENSITY of a galvanostatic run (``number``, mA per cm², the unit in the
+#: name; the schema requires it when ``control_mode`` is ``galvanostatic``). Never defaulted, never
+#: derived — in particular never computed from a total current and an electrode area.
+CURRENT_SETPOINT_PATH = "context.electrochemistry.current_setpoint_mA_cm2"
 #: Paths this build can write that the build of an older format version could not. A value at
 #: one of them whose stored eligibility differs from this build's is STALE, not tampered.
 WRITABLE_ADDED_IN: Mapping[str, frozenset] = {
     "1.3.0": frozenset({"context.electrochemistry.potential_setpoint_V"}),
     "1.5.0": frozenset({CONTROL_MODE_PATH}),
+    "1.7.0": frozenset({CURRENT_SETPOINT_PATH}),
 }
 #: Missing values of a path made writable AT or AFTER this version are numbered after every other
 #: path's (:func:`_value_id_order`), so a re-import by a newer build keeps every value id an
@@ -69,9 +79,13 @@ VALUE_IDS_APPEND_FROM = "1.5.0"
 IMPORT_RULES_ADDED_IN: Mapping[str, tuple] = {
     "1.4.0": (("generic:ssrl_xdc_v1", "ssrl_xdc_scan_start_v1"),),
 }
-_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0")
+_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0")
 #: A field composed into a draft only beside another of the SAME run (interim decision for the
-#: set-point, pending domain-owner review; ``records.compose_group`` applies it).
+#: set-point, pending domain-owner review; ``records.compose_group`` applies it). The CURRENT
+#: set-point has no entry (DEC-92): its unit, mA per cm², is fixed by its name and no schema field
+#: declares a reference it is relative to, as ``potential_scale`` is for a potential; the schema
+#: requires nothing beside it, and an electrode area would matter only to DERIVE a density from a
+#: total current, which is never done.
 COMPOSES_ONLY_WITH: Mapping[str, str] = {
     "context.electrochemistry.potential_setpoint_V": "context.electrochemistry.potential_scale",
 }
@@ -974,6 +988,68 @@ _JSON_TYPES = {
 }
 
 
+def non_finite_numbers(obj: Any, where: str = "") -> Iterable[tuple[str, float]]:
+    """``(json path, value)`` for every NaN / Infinity / -Infinity in ``obj``. Python's ``json``
+    reads and writes them as the bare tokens ``NaN`` / ``Infinity``, which are NOT standard JSON:
+    a bundle holding one is not portable JSON, and no ISAAC field takes one."""
+    if isinstance(obj, float) and not math.isfinite(obj):
+        yield where or "(root)", obj
+    elif isinstance(obj, Mapping):
+        for k, v in obj.items():
+            yield from non_finite_numbers(v, f"{where}/{k}" if where else str(k))
+    elif isinstance(obj, (list, tuple)):
+        for i, v in enumerate(obj):
+            yield from non_finite_numbers(v, f"{where}/{i}" if where else str(i))
+
+
+def non_finite_problem(value: Any) -> str | None:
+    """The one wording for a value that is or holds a non-finite number, else ``None``."""
+    bad = next(iter(non_finite_numbers(value)), None)
+    if bad is None:
+        return None
+    return (f"{bad[1]!r} is not a finite number: NaN, Infinity and -Infinity are not standard JSON "
+            "numbers and no ISAAC field takes one")
+
+
+#: Sections a bundle only ever appends to (their indices never move): a non-finite number in one is
+#: identified by its path. Every other section is derived from them, so its copies follow the source.
+APPEND_ONLY_SECTIONS = ("scientist_decisions", "ai_interpretations", "exposures")
+
+
+def new_non_finite_paths(bundle: Mapping, stored: Mapping | None) -> list[str]:
+    """Non-finite numbers ``bundle`` holds that the STORED file did not: what a write would ADD. One in
+    an append-only section is new when its path was not non-finite in ``stored``; one elsewhere is new
+    when that whole section held none in ``stored`` (a derived copy of an old one may move between
+    entries, but cannot appear in a section that had none unless a new source did)."""
+    old = {p for p, _ in non_finite_numbers(stored)} if stored is not None else set()
+    old_sections = {p.split("/", 1)[0] for p in old}
+    out = []
+    for path, _ in non_finite_numbers(bundle):
+        section = path.split("/", 1)[0]
+        if (path not in old) if section in APPEND_ONLY_SECTIONS else (section not in old_sections):
+            out.append(path)
+    return out
+
+
+def non_finite_findings(bundle: Mapping) -> list[str]:
+    """One line per non-finite number ``bundle`` holds — what `bundle check` NAMES. For a decision's
+    value it says whether a later decision on the same target replaced it."""
+    decisions = bundle.get("scientist_decisions") or ()
+    out = []
+    for path, value in non_finite_numbers(bundle):
+        line = f"{path} holds {value!r}"
+        parts = path.split("/")
+        if parts[0] == "scientist_decisions" and len(parts) > 1 and parts[1].isdigit() and int(parts[1]) < len(decisions):
+            d = decisions[int(parts[1])]
+            t = d.get("target") or {}
+            later = [x.get("decision_id") for x in decisions[int(parts[1]) + 1:] if (x.get("target") or {}) == t]
+            line += (f" (decision {d.get('decision_id')} on {t.get('kind')} {t.get('id')}: "
+                     + (f"replaced by the later decision {later[-1]})" if later else
+                        "still the latest answer, and never eligible — answer that target again)"))
+        out.append(line)
+    return out
+
+
 def value_problem(path: str, value: Any) -> str | None:
     """Why ``value`` cannot stand at ``path`` (review L3), or ``None``.
 
@@ -987,6 +1063,10 @@ def value_problem(path: str, value: Any) -> str | None:
 
     if not hist.is_zoned_utc_value(path, value):
         return f"{path} needs a UTC instant with a zone; {value!r} is not one"
+    # NEVER ELIGIBLE, for any field: Python reads `--value NaN --json` (and 1e999) as a float the
+    # schema's `number` type check would otherwise accept.
+    if (problem := non_finite_problem(value)) is not None:
+        return f"{path}: {problem}"
     if not isinstance(_vendored_schema(), Mapping):
         return (f"the vendored official schema could not be read, so {value!r} cannot be checked against "
                 f"{path}; nothing is eligible until it can")
@@ -1779,6 +1859,11 @@ LOCAL_ANSWER_FIELDS: Mapping[str, str] = {
     # holds and dry samples with no cell at all, so it is never asked once for the whole
     # beamtime. The schema keys the set-point requirement on it (``required_record_paths``).
     CONTROL_MODE_PATH: "run",
+    # 1.7.0 (DEC-92). The commanded current DENSITY (``number``, mA/cm²) the schema requires of a
+    # confirmed galvanostatic run; without a write route such a record could never complete. RUN
+    # scope, like the potential set-point. Stored exactly as answered: never computed from a total
+    # current and an area, never defaulted, never derived from the mode (or the mode from it).
+    CURRENT_SETPOINT_PATH: "run",
 }
 #: THE ONE SHAPE CHECK for an absorber (``set_absorber`` / ``approve_calibration`` decisions,
 #: and a reading pass's ``system.element`` / ``system.edge`` findings): an element SYMBOL's
@@ -3569,10 +3654,13 @@ def _added_since(version: str | None) -> frozenset:
 
 def stale_eligibility(bundle: Mapping) -> list[dict]:
     """Values whose STORED eligibility differs from this build's derivation ONLY because this
-    build can write a field the storing build could not (:data:`WRITABLE_ADDED_IN`). Each with
-    its id, path, state, before/now and why. Empty for a bundle of this format version."""
+    build can write a field the storing build could not (:data:`WRITABLE_ADDED_IN`), or because an
+    older build stored a non-finite answer as eligible, which this build never does. Each with
+    its id, path, state, before/now and why. Empty for a bundle of this format version holding no
+    non-finite answer."""
     added = _added_since(bundle.get("format_version"))
-    if not added:
+    has_non_finite = next(iter(non_finite_numbers(bundle.get("scientist_decisions") or ())), None) is not None
+    if not added and not has_non_finite:
         return []
     expected = apply_derivations(json.loads(json.dumps(bundle)))
     decision_of = _decisions_by_target(bundle.get("scientist_decisions") or ())
@@ -3582,8 +3670,17 @@ def stale_eligibility(bundle: Mapping) -> list[dict]:
             path = obj.get("target_field_path")
             before = bool((obj.get("eligibility_for_official_record") or {}).get("eligible"))
             now = bool(e["eligibility_for_official_record"]["eligible"])
+            d = candidate_decision(bundle, obj, decision_of) if kind == "candidate" else decision_of.get((kind, obj[key]))
+            if before and not now and d is not None and non_finite_problem(
+                    final_value(obj.get("value") if kind == "candidate" else None, d, obj.get("readings"))) is not None:
+                # an older build accepted `--json --value=NaN`; this build never makes a non-finite number eligible
+                out.append({"kind": kind, "id": obj[key], "target_field_path": path, "run_id": obj.get("run_id"),
+                            "value_state": e["value_state"], "eligible_before": before, "eligible_now": now,
+                            "decision_id": d.get("decision_id"),
+                            "reason": ("an older build stored this non-finite number (NaN or infinity) as eligible; this build "
+                                       "never does: not eligible now — answer the field again with a number")})
+                continue
             if path in added and before != now:
-                d = candidate_decision(bundle, obj, decision_of) if kind == "candidate" else decision_of.get((kind, obj[key]))
                 reason = f"this build can now write {path}"
                 if e["value_state"] == STATE_SCIENTIST_CONFIRMED:
                     reason += ("; a scientist confirmed it while the storing build could not write the field: "
@@ -3736,6 +3833,10 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50) -> list[str]:
             return errors
     if not isinstance(bundle, dict) or errors:
         return errors
+    # A non-finite number (NaN, Infinity) is NOT an error here: an older build could store one as an
+    # answer (`decide --json --value=NaN`), and the decision log is append-only, so an error would make
+    # the bundle unwritable for good. It is never eligible (value_problem), `bundle check` NAMES each one
+    # (non_finite_findings), and no write may ADD one (new_non_finite_paths, mutations.save_bundle).
 
     size = len(encode(bundle))
     if size > MAX_BUNDLE_BYTES:

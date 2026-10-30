@@ -84,7 +84,8 @@ def _compose(b, run_id):
 def test_control_mode_is_a_run_scope_local_answer_field_new_in_1_5_0():
     assert B.LOCAL_ANSWER_FIELDS[CM] == B.LOCAL_ANSWER_FIELDS[SCALE] == "run"
     assert CM in B._writable_paths() and CM in B.WRITABLE_ADDED_IN["1.5.0"]
-    assert B.FORMAT_VERSION == "1.6.0" and B._added_since("1.4.0") == frozenset({CM}) and B._added_since("1.5.0") == frozenset()
+    # 1.6.0 added nothing writable; 1.7.0 the current set-point (test_local_import_current_setpoint)
+    assert B._added_since("1.4.0") == frozenset({CM, CURRENT}) and B._added_since("1.5.0") == frozenset({CURRENT})
     assert not Q._is_shared(CM) and not Q._is_shared(SCALE)  # never asked once for the whole beamtime
 
 
@@ -260,7 +261,7 @@ def test_the_v1_questions_ask_the_setpoint_of_a_potentiostatic_run_with_no_parse
 def test_control_mode_value_ids_come_after_every_older_fields_ids(grouped):
     ms = M.load(grouped)["missing_values"]
     nums = [int(m["value_id"].split("-")[1]) for m in ms]
-    older = [n for n, m in zip(nums, ms) if m["target_field_path"] != CM]
+    older = [n for n, m in zip(nums, ms) if m["target_field_path"] not in (CM, CURRENT)]  # CURRENT: 1.7.0, after CM
     newer = [n for n, m in zip(nums, ms) if m["target_field_path"] == CM]
     assert older == list(range(1, len(older) + 1)) and min(newer) > max(older)
 
@@ -295,13 +296,13 @@ def test_a_1_4_0_bundle_with_a_confirmed_mode_is_stale_not_invalid_then_rederive
     after = _json(grouped)
     assert after["format_version"] == B.FORMAT_VERSION and B.validate_bundle(after) == []
     [u] = after["format_upgrades"]
-    assert (u["from_format_version"], u["newly_writable_paths"], u["statement"]) == ("1.4.0", [CM], UPGRADE_14)
+    assert (u["from_format_version"], u["newly_writable_paths"], u["statement"]) == ("1.4.0", [CM, CURRENT], UPGRADE_14)
 
 
 def test_a_1_4_0_bundle_as_that_build_made_it_is_valid_and_upgraded_once_with_no_new_slots(grouped, capsys):
     data = _json(grouped)
-    # a 1.4.0 import has no control-mode missing values (the field was not writable)
-    data["missing_values"] = [m for m in data["missing_values"] if m["target_field_path"] != CM]
+    # a 1.4.0 import has no control-mode or current set-point missing values (neither was writable)
+    data["missing_values"] = [m for m in data["missing_values"] if m["target_field_path"] not in (CM, CURRENT)]
     data["format_version"] = "1.4.0"
     B.refresh_questions(data)
     B.apply_derivations(data)
@@ -312,8 +313,8 @@ def test_a_1_4_0_bundle_as_that_build_made_it_is_valid_and_upgraded_once_with_no
     M.decide(grouped, target_ids=[other["value_id"]], decision="correct", value="in_situ", by=BY, orcid=None)
     assert capsys.readouterr().err.count(UPGRADE_14) == 1
     after = _json(grouped)
-    assert after["format_version"] == B.FORMAT_VERSION and [u["newly_writable_paths"] for u in after["format_upgrades"]] == [[CM]]
-    assert not [m for m in after["missing_values"] if m["target_field_path"] == CM]  # a save adds no answer slot
+    assert after["format_version"] == B.FORMAT_VERSION and [u["newly_writable_paths"] for u in after["format_upgrades"]] == [[CM, CURRENT]]
+    assert not [m for m in after["missing_values"] if m["target_field_path"] in (CM, CURRENT)]  # a save adds no answer slot
 
 
 # --- the metadata template ---------------------------------------------------------------------------

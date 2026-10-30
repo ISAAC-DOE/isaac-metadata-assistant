@@ -115,6 +115,9 @@ def save_bundle(bundle_dir: Path, bundle: dict) -> None:
     # did the set-point: a 1.4.0 bundle is raised to 1.5.0 with a format_upgrades entry naming it
     # newly writable, and any stored control-mode eligibility that moves is logged as re-derived. A
     # save adds no missing value: a 1.4.0 import has no control-mode answer slots until re-imported.
+    # 1.7.0 (DEC-92) does the same for context.electrochemistry.current_setpoint_mA_cm2: a 1.4.0-1.6.0
+    # bundle is raised with a format_upgrades entry naming it, and gets no current set-point slots
+    # until re-imported.
     to_version = (B.FORMAT_VERSION if "processed_outputs" in bundle
                   else "1.1.0" if stored_version in ("1.0.0", "1.1.0") else stored_version)
     if B.needs_format_upgrade(bundle):
@@ -144,6 +147,21 @@ def save_bundle(bundle_dir: Path, bundle: dict) -> None:
         bundle.setdefault(key, [])
     B.refresh_questions(bundle)
     B.apply_derivations(bundle)
+    # NO WRITE ADDS A NON-FINITE NUMBER (NaN / Infinity: not standard JSON). One the STORED file already
+    # holds — an answer an older build accepted, kept by the append-only log — never blocks a write
+    # (a correction must be possible); `bundle check` names it and it is never eligible.
+    if next(iter(B.non_finite_numbers(bundle)), None) is not None:
+        stored_nf = None
+        if B.bundle_path(Path(bundle_dir)).is_file():
+            try:
+                stored_nf = B.load_bundle(Path(bundle_dir))
+            except B.BundleInvalid:
+                stored_nf = None
+        added = B.new_non_finite_paths(bundle, stored_nf)
+        if added:
+            raise MutationRefused(
+                "The change would add a non-finite number (NaN or infinity), which is not standard JSON and no field "
+                f"takes, so nothing was written: {', '.join(added[:10])}", code=5)
     errors = B.validate_bundle(bundle)
     if errors:
         raise MutationRefused(
@@ -247,9 +265,14 @@ def parse_value(raw: str | None, as_json: bool) -> Any:
     if not as_json:
         return raw
     try:
-        return json.loads(raw)
+        value = json.loads(raw)
     except ValueError as exc:
         raise MutationRefused(f"--value is not valid JSON: {exc}") from exc
+    # Python's json accepts NaN / Infinity / -Infinity (and reads 1e999 as Infinity); storing one would
+    # make bundle.json non-standard JSON. Refused here, before anything is recorded.
+    if (problem := B.non_finite_problem(value)) is not None:
+        raise MutationRefused(f"--value {raw}: {problem}; nothing was recorded")
+    return value
 
 
 def _add_interpretation(bundle: dict, kind: str, obj: Mapping, target_id: str, *, value: Any, rationale: str,

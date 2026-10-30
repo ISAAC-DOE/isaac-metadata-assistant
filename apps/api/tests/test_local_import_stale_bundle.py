@@ -226,8 +226,9 @@ def test_the_upgrade_is_logged_once_said_everywhere_and_corrects_the_old_wording
     data = _json(b)
     [u] = data["format_upgrades"]
     assert (u["from_format_version"], u["to_format_version"], u["derived_by_format_version"]) == ("1.2.0", B.FORMAT_VERSION, B.FORMAT_VERSION)
-    # from 1.2.0: the set-point (1.3.0) and the control mode (1.5.0) are both newly writable
-    assert u["decisions_before"] == 3 and u["newly_writable_paths"] == sorted([POT, B.CONTROL_MODE_PATH]) and u["statement"] == UPGRADE
+    # from 1.2.0: the set-point (1.3.0), the control mode (1.5.0) and the current set-point (1.7.0) are newly writable
+    assert u["decisions_before"] == 3 and u["statement"] == UPGRADE
+    assert u["newly_writable_paths"] == sorted([POT, B.CONTROL_MODE_PATH, B.CURRENT_SETPOINT_PATH])
     assert u["upgraded_utc"].endswith("Z")
     # (a) the old "cannot write it yet" wording is corrected; the engine's own text is kept
     after = next(c for c in data["candidates"] if c["candidate_id"] == cid)

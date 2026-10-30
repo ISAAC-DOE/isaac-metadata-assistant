@@ -33,6 +33,7 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import json
+import math
 import re
 import shutil
 import tempfile
@@ -589,7 +590,10 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         res["comparison"] = comparison
         if comparison["verdict"] == "differs":
             res["review_flags"].append("athena_disagrees")
-        _csv(gdir / "athena_normalized.csv", ["energy_eV", "norm", "flat"], [athena_entry["energy"], athena_entry["norm"], athena_entry["flat"]], np)
+        if A.frame_known(athena_entry):
+            _csv(gdir / "athena_normalized.csv", ["energy_eV", "norm", "flat"], [athena_entry["energy"], athena_entry["norm"], athena_entry["flat"]], np)
+        elif A.ENERGY_FRAME_UNKNOWN_FLAG not in res["review_flags"]:
+            res["review_flags"].append(A.ENERGY_FRAME_UNKNOWN_FLAG)
     version_files = []
     if athena_versions:
         # Several distinct Athena versions for this group (e.g. re-normalised, glitch-removed,
@@ -599,10 +603,18 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         for n, v in enumerate(athena_versions, start=1):
             cmp_ = A.compare({"grid": g2, "norm": nm["norm"], "flat": nm["flat"], "e0_eV": nm["e0_eV"], "edge_step": step}, v, params, np)
             _diagnose(cmp_, v, stems, used_entries, grid, M, ctx)
-            name = f"athena_version_{n:02d}.csv"
-            _csv(gdir / name, ["energy_eV", "norm", "flat"], [v["energy"], v["norm"], v["flat"]], np)
-            version_files.append((f"athena_version_{n:02d}", name))
-            res["athena_versions"].append({"version_id": f"{group['group_id']}-v{n:02d}", "provenance": A.version_provenance(v, stems), "comparison": cmp_})
+            listed = {"version_id": f"{group['group_id']}-v{n:02d}", "provenance": A.version_provenance(v, stems), "comparison": cmp_}
+            if A.frame_known(v):
+                name = f"athena_version_{n:02d}.csv"
+                _csv(gdir / name, ["energy_eV", "norm", "flat"], [v["energy"], v["norm"], v["flat"]], np)
+                version_files.append((f"athena_version_{n:02d}", name))
+            else:
+                # LISTED, so the question stays the scientist's; no curve file in an unknown energy frame
+                listed["flags"] = [A.ENERGY_FRAME_UNKNOWN_FLAG]
+                listed["non_finite_values"] = list(v.get("non_finite_values") or ())
+                if A.ENERGY_FRAME_UNKNOWN_FLAG not in res["review_flags"]:
+                    res["review_flags"].append(A.ENERGY_FRAME_UNKNOWN_FLAG)
+            res["athena_versions"].append(listed)
         res["athena_result_of_record"] = None
         res["review_flags"].append("athena_result_of_record_not_selected")
         res["questions"] = [
@@ -627,7 +639,7 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
             norm=nm["norm"],
             flat=nm["flat"],
             e0=nm["e0_eV"],
-            athena=athena_entry,
+            athena=athena_entry if athena_entry is not None and A.frame_known(athena_entry) else None,
             np=np,
         )
     except Exception:  # noqa: BLE001 - a plot failure is a flag, never a processing failure
@@ -656,7 +668,7 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     roles = [("merged", "merged.csv"), ("normalized", "normalized.csv"), ("qc", "qc.json"), ("params", "params.json")]
     if plotted:
         roles.append(("plot", "plot.png"))
-    if athena_entry is not None:
+    if athena_entry is not None and A.frame_known(athena_entry):  # no curve file in an unknown energy frame
         roles.append(("athena_normalized", "athena_normalized.csv"))
     roles.extend(version_files)
     # CONTENT-ADDRESSED RUN DIRECTORY. A decided (approved) result's outputs are never
@@ -687,7 +699,9 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     if athena_entry is not None:
         athena_res = _athena_result(group, athena_entry, files, params, np, ctx)
         athena_res["comparison"] = comparison
-        athena_res["preferred_for_record"] = True
+        # a curve whose energy frame is unknown (non-finite bkg_eshift) is never preferred by default;
+        # its result carries athena_energy_frame_unknown, and a scientist can still approve it
+        athena_res["preferred_for_record"] = A.frame_known(athena_entry)
         athena_res["run_id"] = run_id
         athena_res["result_id"] = f"proc-{group['group_id']}-{run_id}-athena"
         out.append(athena_res)
@@ -712,7 +726,7 @@ def _diagnose(comparison: dict, entry: Mapping, stems: Sequence[str], used_entri
     if sel and set(sel) != set(i for i in idx if i is not None):
         comparison["flags"].append("scientist_selected_subset_of_scans")
     p = entry["params"]
-    if any(p.get(k) is None for k in ("e0", "pre1", "pre2", "nor1", "nor2", "nnorm")):
+    if not A.frame_known(entry) or any(p.get(k) is None for k in ("e0", "pre1", "pre2", "nor1", "nor2", "nnorm")):
         return
     quantity = comparison["metrics"].get("compared_quantity", "flat")
     eshift = float(p.get("eshift") or 0.0)
@@ -740,7 +754,7 @@ def _diagnose(comparison: dict, entry: Mapping, stems: Sequence[str], used_entri
         inside = (e >= ae[0]) & (e <= ae[-1])
         if inside.sum() < 10:
             return None
-        return float(np.sqrt(np.mean((y[inside] - np.interp(e[inside], ae, entry[quantity])) ** 2)))
+        return C._f(np.sqrt(np.mean((y[inside] - np.interp(e[inside], ae, entry[quantity])) ** 2)))
 
     comparison["metrics"]["rms_norm_with_athena_params"] = _rms(list(range(M.shape[0])))
     if sel:
@@ -763,11 +777,28 @@ def _athena_result(group: Mapping, entry: Mapping, files: Sequence[Mapping], par
         }
     ]
     e = entry["energy"]
-    sel = (e >= entry["e0_eV"] + (entry["params"].get("pre1") or -1e9)) & (e <= entry["e0_eV"] + (entry["params"].get("pre2") or -1e9))
+    # A value the project stated as a non-finite number is None on the entry (athena.load_project);
+    # it is NAMED here, so the result never hides it.
+    non_finite = list(entry.get("non_finite_values") or ())
     noise = None
-    if np.sum(sel) >= 3 and entry["edge_step"]:
-        # pre-edge residual of the scientist's own normalised curve (norm ~ 0 before the edge)
-        noise = float(np.std(entry["norm"][sel]))
+    if entry["e0_eV"] is not None:
+        sel = (e >= entry["e0_eV"] + (entry["params"].get("pre1") or -1e9)) & (e <= entry["e0_eV"] + (entry["params"].get("pre2") or -1e9))
+        if np.sum(sel) >= 3 and entry["edge_step"]:
+            # pre-edge residual of the scientist's own normalised curve (norm ~ 0 before the edge)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                noise = C._f(np.std(entry["norm"][sel]))
+            if noise is None:
+                non_finite.append("qc.metrics.pre_edge_noise")
+    if not A.frame_known(entry):
+        res["review_flags"].append(A.ENERGY_FRAME_UNKNOWN_FLAG)
+    if non_finite:
+        res["review_flags"].append("athena_value_not_finite")
+        res["non_finite_values"] = {
+            "paths": non_finite,
+            "reason": ("the scientist's Athena project gives these as non-finite numbers (NaN or infinity), which "
+                       "are not JSON numbers; each is recorded as null, never as a number ISAAC made up"),
+        }
     res["steps"] = [
         {
             "step": "normalize",
@@ -899,6 +930,8 @@ def process_bundle(
             out = process_group(g, ctx, matched.get(g["group_id"]), athena_versions=versions.get(g["group_id"]))
         except Exception as exc:  # noqa: BLE001 - one group's crash is that group's failure, never a pass
             out = [_fail(_base(g, "isaac_protocol"), "processing_error", f"{type(exc).__name__}: {exc}"[:500])]
+        for r in out:
+            _null_non_finite(r)
         (unread_results if g.get("group_kind") in ("unread_acquisition", "generic_run") else results).extend(out)
 
     payload = {
@@ -923,6 +956,39 @@ def process_bundle(
     }
     _write(out_dir / RESULTS_FILE, _json_bytes(payload))
     return payload
+
+
+def _null_non_finite(result: dict) -> None:
+    """LAST GUARD: a NaN or infinity anywhere in a result (not a JSON number; a bundle holding one is
+    refused) becomes null, and every path it was at is NAMED on the result
+    (``non_finite_values.paths``, review flag ``value_not_finite``) — never silent, never a number."""
+
+    def walk(obj, where):
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                if isinstance(v, float) and not math.isfinite(v):
+                    obj[k] = None
+                    found.append(f"{where}{k}")
+                else:
+                    walk(v, f"{where}{k}.")
+        elif isinstance(obj, list):
+            for i, v in enumerate(obj):
+                if isinstance(v, float) and not math.isfinite(v):
+                    obj[i] = None
+                    found.append(f"{where}{i}")
+                else:
+                    walk(v, f"{where}{i}.")
+
+    found: list[str] = []
+    walk(result, "")
+    if found:
+        block = result.setdefault("non_finite_values", {"paths": [], "reason": (
+            "these were computed or read as non-finite numbers (NaN or infinity), which are not JSON "
+            "numbers; each is recorded as null, never as a number ISAAC made up")})
+        block["paths"] = list(block["paths"]) + [p for p in found if p not in block["paths"]]
+        flags = result.setdefault("review_flags", [])
+        if "value_not_finite" not in flags:
+            flags.append("value_not_finite")
 
 
 def summarize(results: Sequence[Mapping]) -> dict:

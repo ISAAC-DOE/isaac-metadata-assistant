@@ -1,6 +1,6 @@
 # ISAAC Local Import Bundle — contract v1
 
-Status: **v1.6.0** (capture decisions — keep apart, the Athena result of record, "no counter" — a merge decision applied as one combined group, and question ids that survive answers, 2026-10-29, §9 "What 1.6.0 added"; v1.5.0 control mode answerable the same day; v1.4.0 the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
+Status: **v1.7.0** (`context.electrochemistry.current_setpoint_mA_cm2` answerable, so a confirmed galvanostatic record can complete, 2026-10-29, §9 "What 1.7.0 added", DEC-92; v1.6.0 capture decisions — keep apart, the Athena result of record, "no counter" — a merge decision applied as one combined group, and question ids that survive answers, 2026-10-29, §9 "What 1.6.0 added"; v1.5.0 control mode answerable the same day; v1.4.0 the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
 [`apps/api/isaac_api/local_import/bundle-v1.schema.json`](../apps/api/isaac_api/local_import/bundle-v1.schema.json)
 (JSON Schema draft 2020-12) plus the checks in
 [`bundle.py`](../apps/api/isaac_api/local_import/bundle.py) `validate_bundle` that JSON
@@ -638,6 +638,35 @@ decision CAPTURES a statement; none takes a scientific decision, and none is def
   throughout. It drops out after `set_counter_positions` even before the regroup applies it; the
   grouping step's own `grouping_questions[]` entry is kept as it wrote it.
 
+### What 1.7.0 added (`context.electrochemistry.current_setpoint_mA_cm2` becomes answerable — DEC-92)
+
+A minor version by the rules above, of the same kind as 1.3.0 and 1.5.0: **the writable set grew**
+(`bundle.WRITABLE_ADDED_IN["1.7.0"]`: `context.electrochemistry.current_setpoint_mA_cm2`,
+`bundle.CURRENT_SETPOINT_PATH`). Nothing in the bundle's shape changes: no section, field or enum is
+added, and the schema change is the version label alone (plus `processed_outputs` required at 1.7.0,
+as at 1.2.0–1.6.0).
+
+- **Why.** Since 1.5.0 a scientist can confirm `control_mode: galvanostatic`, and the schema's own
+  conditional rule then requires `current_setpoint_mA_cm2`, which had no write route: such a record
+  was blocked for good. It now has an answer slot.
+- **STALE, not INVALID, exactly as at 1.3.0 and 1.5.0.** A 1.6.0 (or older) bundle whose stored
+  eligibility for a value at this path differs from this build's derivation reports `STALE:` (`bundle
+  check`, exit 1); any write re-derives it, logs it in `eligibility_rederived[]` and appends one
+  `format_upgrades` entry naming the path in `newly_writable_paths`. A bundle the 1.6.0 build made
+  holds no value at this path (no parser states one and the field had no answer slot), so it checks
+  **VALID**, and its first write logs the upgrade. A write never adds the missing values: re-import to
+  get them. (From 1.4.0 the entry names both `control_mode` and this path; from 1.5.0 only this path,
+  because 1.6.0 made nothing newly writable.)
+- **Value ids of older fields do not move** (`bundle.VALUE_IDS_APPEND_FROM` is still 1.5.0): the
+  current set-point's missing values are numbered after the control mode's, which come after every
+  older field's.
+- **The metadata template is 1.3.0:** File List gains the ISAAC-added numeric column `Current
+  Set-point (mA/cm2)`, appended after `Control Mode`. A 1.2.0 workbook is read up to Control Mode
+  (a 1.1.0 one up to pH); a value typed where a later column would be is reported under
+  `recorded_nowhere`, never dropped silently. A non-number in the column is an invalid cell and
+  nothing is recorded for it.
+- See §20 ("Newly answerable fields") for what the field allows and why it has no companion gate.
+
 ## 10. Exit codes (`isaac import` / `isaac bundle`)
 
 0 ok · 1 `check` found the bundle invalid, or STALE (stored by an older build, §9 "What 1.3.0
@@ -1059,6 +1088,29 @@ anything `scientist_confirmed`.
     never reaches the draft or the export; the group's report lists it under `not_composed` with
     that reason, so it cannot vanish unseen. The questions say which fields need `--json`. The
     metadata template refuses a non-number in a numeric column before anything is recorded.
+  - **A non-finite number is never an answer (2026-10-29, no format bump).** Python's `json` reads
+    `NaN`, `Infinity`, `-Infinity` (and `1e999`) as floats and writes them back as tokens that are
+    not standard JSON. **The previous build accepted `decide --json --value=NaN`, stored the bare
+    token, called the value eligible, and `bundle check` said VALID — silently; that silent VALID
+    was the bug.** Now: `decide`/`annotate --json` refuse such a `--value` before recording anything
+    (`mutations.parse_value`); `bundle.value_problem` makes one ineligible for every field; a save
+    refuses any non-finite number the STORED file did not already hold (`bundle.new_non_finite_paths`),
+    and an import refuses any; the template refuses such a cell; processing turns one into `null` and
+    names it on the result (`non_finite_values`, review flag `athena_value_not_finite` /
+    `value_not_finite`). An Athena group whose `bkg_eshift` is not finite is KEPT, never dropped (a
+    dropped version would silently make the result-of-record choice): it stays a listed version with
+    its identity (project file, group, data hash), so `select_athena_version` still binds to it, but it
+    has no energy axis — no e0, comparison `not_comparable`, no curve file, no plot, never
+    `preferred_for_record` by default — and the flag `athena_energy_frame_unknown` is on the version
+    and on the stored result (the run's `athena.notes` also say `athena_group_eshift_not_finite`).
+  - **Recovery for a bundle that already holds one.** It is never bricked: the token stays in the
+    append-only decision log, and a write that adds nothing new is accepted. `bundle check` reports
+    it as STALE first (the stored "eligible" is refused now; any write or `build-records` re-derives
+    it), and on every later check, VALID or STALE, it NAMES each one under `NON-FINITE:`, saying
+    whether a later decision replaced it. Remedy: answer the target again with a number
+    (`decide --target <id> --decision correct --value=298.15 --json`); that answer is eligible and
+    composes, and the old token is then listed as replaced. Removing the token itself needs a hand
+    edit; nothing requires it.
   - **A set-point needs its scale (interim decision, pending review by the domain owners,
     Oscar and Angel; `bundle.COMPOSES_ONLY_WITH`).** The group's confirmed set-points are checked
     for disagreement FIRST, over all of them: differing values are a `disagreements` entry and
@@ -1117,9 +1169,40 @@ anything `scientist_confirmed`.
       `potentiostatic` and another left unanswered composes `potentiostatic` for the whole group's
       record (and so requires its set-point), as every run-scope field does today. Whether an
       unanswered run should instead hold the group's mode back is not decided here.
-    - **Known gap:** a confirmed `galvanostatic` mode makes `current_setpoint_mA_cm2` required, and
+    - ~~**Known gap:** a confirmed `galvanostatic` mode makes `current_setpoint_mA_cm2` required, and
       that field has no local write route, so such a record is blocked until it gets one. The gate
-      is correct; the answer slot is a follow-up.
+      is correct; the answer slot is a follow-up.~~ **Closed in 1.7.0 (DEC-92): see the next item.**
+  - **`context.electrochemistry.current_setpoint_mA_cm2` is answerable** (`bundle.LOCAL_ANSWER_FIELDS`,
+    `bundle.CURRENT_SETPOINT_PATH`; format 1.7.0, §9 "What 1.7.0 added"), at run scope like the
+    potential set-point. No parser states it, so every run that becomes a record has a missing value
+    for it. Nothing is defaulted.
+    - **A number, by the schema's own `type`.** The vendored schema says only `{"type": "number"}`;
+      `bundle.value_problem` reads that at runtime. `--value -5` without `--json` stores the TEXT
+      `"-5"`, and `"5 mA"` is text either way: confirmed, not eligible ("must be number; got str"),
+      never composed, listed under `not_composed`. The questions' answer commands add `--json` for it
+      (a blocking question's `--value <value> --json`; an optional question names it among the fields
+      that need `--json`). The template refuses a non-number in its column.
+    - **When it is required.** Only through the schema's rule keyed on `control_mode: galvanostatic`
+      (`bundle.required_record_paths`, unchanged): a draft whose composed mode is `galvanostatic`
+      lists it under `missing_required` until an eligible answer composes, and that run's question
+      becomes blocking. `potentiostatic`, `open_circuit` or no confirmed mode require nothing of it.
+    - **No companion gate (DEC-92)** — unlike a potential, which composes only beside its confirmed
+      `potential_scale` (`bundle.COMPOSES_ONLY_WITH`). The potential's gate exists because the schema
+      itself says the number is "on the scale declared by potential_scale": without the scale it has
+      no meaning. Nothing like that holds here. The unit, milliamperes per square centimetre, is in the
+      field's name; no schema field declares a reference or basis it is relative to; and no schema
+      rule requires anything beside it. `sample.geometry.geometric_area_cm2` (optional) would matter
+      only to turn a total current in mA into a density, and that conversion is a derivation, which is
+      never done: the scientist gives the density itself.
+    - **Never derived.** Not from a total current and an area, not from the mode (a confirmed
+      `galvanostatic` fills no current), and no mode from it (a confirmed current leaves the mode
+      missing). Differing confirmed values in one record group are a `disagreements` entry and nothing
+      is filled.
+    - **For domain-owner review (Oscar/Angel):** the schema does not say, for this field, whether the
+      density is per geometric or per electrochemically active area, nor its sign convention (the
+      pinned schema's read-out `current_density_mA_cm2` descriptor is geometric and IUPAC-signed,
+      negative for cathodic, but that is a different field). The value is stored exactly as the
+      scientist gives it; neither is checked or converted.
 
 ## 21. Nested ZIPs and analysis files (`.larix`, `.pxp`) — no format bump
 

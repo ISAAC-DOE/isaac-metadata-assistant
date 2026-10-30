@@ -401,17 +401,23 @@ def test_an_answered_counter_question_drops_out_before_the_regroup_too(syn):
 # --- versioning ---------------------------------------------------------------------------------
 
 
-def test_a_1_5_0_bundle_stays_readable_and_is_relabelled_without_an_upgrade_entry(syn, capsys):
+def test_a_1_5_0_bundle_stays_readable_and_1_6_0_adds_nothing_writable(syn, capsys):
     b = M.load(syn)
+    # as the 1.5.0 build made it: no current set-point answer slots (writable only since 1.7.0, DEC-92)
+    b["missing_values"] = [m for m in b["missing_values"] if m["target_field_path"] != B.CURRENT_SETPOINT_PATH]
     b["format_version"] = "1.5.0"
+    B.refresh_questions(b)
+    B.apply_derivations(b)
     assert B.validate_bundle(b) == []
     (syn / "bundle.json").write_bytes(B.encode(b))
     assert cli.main(["bundle", "check", str(syn)]) == 0
     capsys.readouterr()
     M.decide(syn, target_ids=[b["merge_candidates"][0]["merge_candidate_id"]], decision="keep_apart", value=None, by=BY, orcid=None)
     after = M.load(syn)
-    assert after["format_version"] == "1.6.0" and not after.get("format_upgrades")
-    assert "upgraded from" not in capsys.readouterr().err
+    # the one upgrade entry names only 1.7.0's path: 1.6.0 made nothing newly writable
+    assert after["format_version"] == B.FORMAT_VERSION
+    assert [u["newly_writable_paths"] for u in after["format_upgrades"]] == [[B.CURRENT_SETPOINT_PATH]]
+    assert capsys.readouterr().err.count("upgraded from 1.5.0") == 1
 
 
 # --- review fixes: the merge path (H1, M1-M4) ------------------------------------------------------

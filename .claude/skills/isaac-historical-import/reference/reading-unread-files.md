@@ -60,6 +60,10 @@ Write every finding to ONE JSON file (`isaac.reading_findings`), then load it in
   Look for the scale too (`context.electrochemistry.potential_scale`): a set-point reaches the
   record only beside the confirmed scale of every run it comes from, so a bare number is listed
   as not composed.
+- `context.electrochemistry.current_setpoint_mA_cm2` (a galvanostatic run's set-point) is a NUMBER,
+  a current DENSITY in mA/cm², exactly as a file states it (`-10`, not `"-10 mA/cm2"`). A total
+  current ("5 mA") is not one: never divide it by an electrode area — write no finding for this
+  field and tell the scientist what the file says. It needs no scale beside it.
 - The absorber has no record field: write `system.element` (a symbol, e.g. `Fe`) and
   `system.edge` (exactly `K`, `L1`-`L3` or `M1`-`M5`) as two findings. They are recorded on the
   record GROUPS holding the named runs (every live group for `"experiment"`). Before Step 5 the

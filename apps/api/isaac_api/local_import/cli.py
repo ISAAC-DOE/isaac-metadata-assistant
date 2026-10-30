@@ -480,7 +480,8 @@ def cmd_import(args) -> int:
     except B.BundleBoundsExceeded as exc:
         _err(f"Bounds exceeded: {exc}")
         return EXIT_BOUNDS
-    errors = B.validate_bundle(bundle)
+    errors = B.validate_bundle(bundle) + [
+        f"json: {p} is not a finite number (NaN or infinity is not standard JSON)" for p in B.new_non_finite_paths(bundle, None)]
     if errors:
         _err("The built bundle failed its own v1 validation; nothing was written:")
         for e in errors[:20]:
@@ -747,6 +748,22 @@ def cmd_bundle_show(args) -> int:
     return EXIT_NOT_FOUND
 
 
+def _print_non_finite(bundle) -> None:
+    """NAME every non-finite number bundle.json holds (an answer an older build accepted): the file is
+    not standard JSON there, and none of them is ever eligible. A write never adds one."""
+    from . import bundle as B
+
+    found = B.non_finite_findings(bundle)
+    if not found:
+        return
+    print(f"  NON-FINITE: bundle.json holds {len(found)} NaN/Infinity number(s), stored by an older build; they are "
+          "not standard JSON and never eligible. The decision log is append-only, so they stay; a new answer replaces one:")
+    for line in found[:50]:
+        print(f"    - {line}")
+    if len(found) > 50:
+        print(f"    ... and {len(found) - 50} more")
+
+
 def cmd_bundle_check(args) -> int:
     from . import bundle as B
 
@@ -780,6 +797,7 @@ def cmd_bundle_check(args) -> int:
         print("  Remedy: any change re-derives it under this build and logs each value in `eligibility_rederived`; "
               "`isaac bundle build-records` does that under the bundle lock before composing.")
         print(f"  On that write: {B.upgrade_statement(bundle.get('format_version'), B._added_since(bundle.get('format_version')), B.import_rules_missing(bundle))}.")
+        _print_non_finite(bundle)
         print("  Exit code 1 (EXIT_INVALID): the CLI has no exit code of its own for STALE.")
         return EXIT_INVALID
     bundle = B.load_bundle(path)
@@ -797,6 +815,7 @@ def cmd_bundle_check(args) -> int:
     )
     for u in bundle.get("format_upgrades") or ():
         print(f"  {u['statement']} (by a {u['derived_by_format_version']} build, {u['upgraded_utc']}).")
+    _print_non_finite(bundle)
     print("  This bundle is not an official ISAAC record; official validation does not apply to it.")
     return EXIT_OK
 
