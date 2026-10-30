@@ -278,3 +278,66 @@ def test_a_1_7_0_bundle_is_upgraded_on_its_next_write_and_says_so(b, capsys):
     [u] = after["format_upgrades"]
     assert u["from_format_version"] == "1.7.0" and u["to_format_version"] == "1.8.0"
     assert "200,000" in u["statement"] and u["newly_writable_paths"] == []
+
+
+# --- the lock file, the path in a message, `process --group` (coordinator follow-ups) -----------------
+
+
+def test_a_lock_file_that_is_a_symlink_is_refused_and_its_target_is_never_created(b, tmp_path):
+    target = tmp_path / "elsewhere" / "planted.txt"
+    target.parent.mkdir()
+    lock = b / ".bundle.lock"
+    if lock.exists() or lock.is_symlink():
+        lock.unlink()
+    lock.symlink_to(target)
+    before = _bytes(b)
+    with pytest.raises(M.MutationRefused) as exc:
+        M.decide(b, target_ids=[_miss(b, ENV)["value_id"]], decision="correct", value="ex_situ", **BY)
+    assert exc.value.code == 1 and "symbolic link" in str(exc.value)
+    assert str(tmp_path) not in str(exc.value) and "planted" not in str(exc.value)  # no path in the message
+    assert not target.exists() and _bytes(b) == before
+
+
+def test_a_new_lock_file_is_owner_only(b):
+    lock = b / ".bundle.lock"
+    if lock.exists():
+        lock.unlink()
+    with M.locked(b):
+        pass
+    assert (lock.stat().st_mode & 0o777) == 0o600
+
+
+def test_no_bundle_message_names_the_folder_never_its_absolute_path(tmp_path):
+    empty = tmp_path / "deep" / "not_a_bundle"
+    empty.mkdir(parents=True)
+    for call in (lambda: M.load(empty),
+                 lambda: M.decide_question(empty, question_id="Q-x", decision="confirm", value=None, **BY)):
+        with pytest.raises(M.MutationRefused) as exc:
+            call()
+        assert exc.value.code == 6 and "'not_a_bundle'" in str(exc.value) and str(tmp_path) not in str(exc.value)
+
+
+def _result(gid: str, pid: str) -> dict:
+    return {"result_id": pid, "group_id": gid, "protocol_id": "isaac.xas.synthetic", "protocol_version": "0.1",
+            "protocol_status": "draft_unreviewed", "source": "isaac_protocol", "inputs": [], "steps": [],
+            "outputs": {"files": []}, "qc": {"metrics": {}, "verdict": "pass"}, "comparison": None,
+            "state": "candidate_extracted"}
+
+
+def test_process_with_group_keeps_every_other_groups_undecided_results(b, monkeypatch):
+    from isaac_api.local_import.processing import cli_entry
+
+    g1, g2 = _groups(b)[:2]
+    bundle = M.load(b)
+    bundle["processing_results"] = [_result(g1, "p-old-1"), _result(g2, "p-2")]
+    M.save_bundle(b, bundle)
+    monkeypatch.setattr(cli_entry, "run_process", lambda *a, **k: {
+        "status": "ran", "processing_results": [_result(g1, "p-new-1")], "summary": {}})
+    M.process(b, group_ids=[g1])
+    ids = {r["result_id"] for r in M.load(b)["processing_results"]}
+    assert ids == {"p-new-1", "p-2"}  # g1 re-processed; g2's undecided result untouched
+    # without --group every undecided result is replaced, as before
+    monkeypatch.setattr(cli_entry, "run_process", lambda *a, **k: {
+        "status": "ran", "processing_results": [_result(g1, "p-new-1")], "summary": {}})
+    M.process(b)
+    assert {r["result_id"] for r in M.load(b)["processing_results"]} == {"p-new-1"}

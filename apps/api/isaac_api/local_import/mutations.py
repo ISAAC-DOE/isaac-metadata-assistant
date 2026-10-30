@@ -21,9 +21,11 @@ local user typed — and is never used to decide anything.
 from __future__ import annotations
 
 import copy
+import errno
 import fcntl
 import hashlib
 import json
+import os
 import re
 import sys
 from contextlib import contextmanager
@@ -66,10 +68,25 @@ def now_utc() -> str:
 
 @contextmanager
 def locked(bundle_dir: Path):
-    """An exclusive advisory lock on ``<dir>/.bundle.lock`` for one read-modify-write."""
+    """An exclusive advisory lock on ``<dir>/.bundle.lock`` for one read-modify-write.
+
+    The lock file is opened WITHOUT following a symbolic link (``O_NOFOLLOW``), owner-only when it is
+    created, and not inherited by a child process (``O_CLOEXEC``): a ``.bundle.lock`` planted as a link
+    can never make this create or truncate a file elsewhere. A lock file that cannot be opened safely
+    (a link, no permission, a read-only folder) is refused, exit 1, naming no path."""
     bundle_dir = Path(bundle_dir)
     lock = bundle_dir / ".bundle.lock"
-    with open(lock, "a+") as handle:
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    try:
+        fd = os.open(lock, flags, 0o600)
+    except OSError as exc:
+        why = {errno.ELOOP: "it is a symbolic link", errno.EACCES: "permission is denied",
+               errno.EPERM: "permission is denied", errno.EROFS: "the folder is read-only"}.get(
+                   exc.errno, errno.errorcode.get(exc.errno or 0, type(exc).__name__))
+        raise MutationRefused(
+            f"The bundle's lock file (.bundle.lock) cannot be opened safely: {why}. Nothing was read or written.",
+            code=1) from None
+    with os.fdopen(fd, "r+") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
             yield
@@ -80,7 +97,8 @@ def locked(bundle_dir: Path):
 def load(bundle_dir: Path) -> dict:
     path = B.bundle_path(Path(bundle_dir))
     if not path.is_file():
-        raise MutationRefused(f"No bundle.json at {bundle_dir}.", code=6)
+        # the folder's NAME only: an absolute local path is never put in a message (data minimisation)
+        raise MutationRefused(f"No bundle.json in {Path(bundle_dir).name!r}.", code=6)
     try:
         return B.load_bundle(path)
     except B.BundleInvalid as exc:
@@ -735,7 +753,7 @@ def decide_question(
     # as the CLI always answered: a folder with no bundle.json is exit 6, and nothing (not even the
     # lock file) is created in it
     if not B.bundle_path(Path(bundle_dir)).is_file():
-        raise MutationRefused(f"No bundle.json at {bundle_dir}.", code=6)
+        raise MutationRefused(f"No bundle.json in {Path(bundle_dir).name!r}.", code=6)
     with locked(Path(bundle_dir)):
         _require_version(Path(bundle_dir), expected_version)
         version = bundle_version(bundle_dir)
@@ -1752,8 +1770,12 @@ def process(
             if d is not None and (pid not in fresh_by_id or B.athena_resolve(fresh_by_id[pid], d) is None):
                 decided.add(pid)
         superseded = {g["group_id"] for g in bundle.get("superseded_record_groups") or ()}
+        # `--group` processes ONLY those groups: every other group's results (decided or not) are kept as they are
+        untouched = set() if not group_ids else {g for g in {r.get("group_id") for r in bundle.get("processing_results") or ()}
+                                                     if g not in set(group_ids)}
         # decided results are kept, and so is every result of a SUPERSEDED group (never deleted)
-        keep = [r for r in bundle.get("processing_results") or () if B.processing_id(r) in decided or r.get("group_id") in superseded]
+        keep = [r for r in bundle.get("processing_results") or ()
+                if B.processing_id(r) in decided or r.get("group_id") in superseded or r.get("group_id") in untouched]
         kept = {B.processing_id(r) for r in keep}
         fresh = []
         for r in produced:
