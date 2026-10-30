@@ -673,3 +673,101 @@ def test_re_exporting_a_changed_record_supersedes_the_old_one_and_says_so(bdir, 
     index = json.loads((out / R.EXPORT_INDEX).read_text())
     [entry] = index["records"]
     assert entry["record_id"] == row["record_id"] and entry["replaced_record_ids"] == [old]
+
+
+# --- audit round 2: same-value relations (M1), withdrawn exports (M2), the index's record ids ------------
+
+
+def _decision(kind: str, value) -> dict:
+    return {"decision": kind, "value": value, "decision_id": "d-00001", "decided_utc": FIXED_DECIDED,
+            "decided_by": {"name": "Synthetic Scientist", "identity": "local_unverified"}}
+
+
+FIXED_DECIDED = "2099-01-01T00:00:00Z"
+
+
+@pytest.mark.parametrize("path,run_id,value", [
+    ("timestamps.acquired_start_utc", "run-001", "2100-01-01T00:10:00Z"),  # the parser wrote ...+00:00: one instant
+    ("context.electrochemistry.potential_setpoint_V", "run-008", 1),       # the parser read 1000mV as 1.0 V: one number
+])
+def test_a_correction_to_the_parsers_own_value_is_a_confirmation_the_files_support(bdir, path, run_id, value):
+    c = _cand(M.load(bdir), path, run_id)
+    assert json.dumps(c["value"]) != json.dumps(value)  # another spelling of the same value
+    d = _decision("correct", value)
+    witnesses = R._witnesses(c, value, d)
+    assert witnesses and all(w["relation"] == "supports" and "note" not in w for w in witnesses)
+    conf = R._candidate_confirmation(c, d, value, path, witnesses)
+    assert conf["provenance"] == R.PROVENANCE_CONFIRMED and "previous_value" not in conf
+
+
+@pytest.mark.parametrize("path,run_id,value", [
+    ("timestamps.acquired_start_utc", "run-001", "2100-01-01T00:11:00Z"),
+    ("context.electrochemistry.potential_setpoint_V", "run-008", 0.9),
+])
+def test_a_correction_to_another_value_still_contradicts_the_files(bdir, path, run_id, value):
+    c = _cand(M.load(bdir), path, run_id)
+    d = _decision("correct", value)
+    witnesses = R._witnesses(c, value, d)
+    assert all(w["relation"] == "contradicts" and w["note"] for w in witnesses)
+    conf = R._candidate_confirmation(c, d, value, path, witnesses)
+    assert conf["provenance"] == R.PROVENANCE_CORRECTED and conf["previous_value"] == c["value"]
+
+
+def test_same_value_compares_numbers_instants_and_strings_as_the_reviewer_asked():
+    assert R.same_value("x", 1, 1.0) and not R.same_value("x", 1, 1.0001)
+    assert R.same_value("timestamps.acquired_start_utc", "2100-01-01T00:10:00Z", "2100-01-01T01:10:00+01:00")
+    assert not R.same_value("timestamps.acquired_start_utc", "2100-01-01T00:10:00", "2100-01-01T00:10:00Z")  # no zone
+    assert not R.same_value("sample.material.name", "ZZ1", "zz1") and not R.same_value("sample.material.name", "ZZ1 ", "ZZ1")
+    assert not R.same_value("x", True, 1) and not R.same_value("x", "1", 1)
+
+
+def test_a_record_whose_group_is_now_refused_is_withdrawn_and_never_uploaded(bdir, tmp_path, capsys):
+    _decide_everything(bdir)
+    R.build_records(bdir)
+    out = tmp_path / "records"
+    rid = R.export_records(bdir, out, run_portal=_portal("publish"))["exported"][0]["record_id"]
+    second = R.export_records(bdir, out, run_portal=_portal("reject", errors=[{"path": "x", "message": "SYNTHETIC"}]))
+    [row] = second["refused"]
+    assert row["withdrawn"] is True and row["withdrawn_record_id"] == rid and "WITHDRAWN" in row["previously_exported_statement"]
+    assert second["withdrawn"] == [{"group_id": "g1", "record_id": rid, "withdrawn_files": row["withdrawn_files"],
+                                    "reason": "this export refused the group (portal_reject)"}]
+    assert not (out / f"{rid}.json").exists() and (out / R.WITHDRAWN_DIR / f"{rid}.json").is_file()
+    assert (out / R.WITHDRAWN_DIR / f"{rid}.evidence.json").is_file()
+    assert R.upload_plan(out, None) == []
+    capsys.readouterr()
+    assert cli.main(["bundle", "upload", str(out), "--dry-run"]) == 0
+    assert rid not in capsys.readouterr().out
+    # exportable again with the same content: restored under the same id, back at the top
+    third = R.export_records(bdir, out, run_portal=_portal("publish"))
+    [row3] = third["exported"]
+    assert row3["record_id"] == rid and row3["export"] == "unchanged" and row3["restored_from_withdrawn"] is True
+    assert [p["record"] for p in R.upload_plan(out, None)] == [f"{rid}.json"]
+
+
+def test_a_record_whose_group_is_no_longer_confirmed_is_withdrawn(bdir, tmp_path):
+    _decide_everything(bdir)
+    R.build_records(bdir)
+    out = tmp_path / "records"
+    rid = R.export_records(bdir, out, run_portal=_portal("publish"))["exported"][0]["record_id"]
+    M.decide(bdir, target_ids=["g1"], decision="reject", value=None, **BY)
+    result = R.export_records(bdir, out, run_portal=_portal("publish"))
+    assert not result["exported"] and [w["record_id"] for w in result["withdrawn"]] == [rid]
+    assert "no longer a scientist-confirmed record group" in result["withdrawn"][0]["reason"]
+    assert R.upload_plan(out, None) == [] and (out / R.WITHDRAWN_DIR / f"{rid}.json").is_file()
+    [entry] = json.loads((out / R.EXPORT_INDEX).read_text())["records"]
+    assert entry["record_id"] == rid and entry["withdrawn_utc"]
+
+
+@pytest.mark.parametrize("bad", ["../../outside", "not-a-ulid", 7])
+def test_an_index_naming_something_that_is_not_a_record_id_is_refused_whole(bdir, tmp_path, bad):
+    _decide_everything(bdir)
+    R.build_records(bdir)
+    out = tmp_path / "records"
+    R.export_records(bdir, out, run_portal=_portal("publish"))
+    index = json.loads((out / R.EXPORT_INDEX).read_text())
+    index["records"][0]["record_id"] = bad
+    (out / R.EXPORT_INDEX).write_text(json.dumps(index))
+    before = sorted(p.name for p in out.rglob("*"))
+    with pytest.raises(R.RecordsRefused, match="not an ISAAC record id"):
+        R.export_records(bdir, out, run_portal=_portal("publish"))
+    assert sorted(p.name for p in out.rglob("*")) == before

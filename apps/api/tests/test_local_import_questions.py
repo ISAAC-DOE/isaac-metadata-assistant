@@ -153,6 +153,9 @@ def test_d3_a_record_field_stated_for_only_some_runs_is_still_askable_for_the_ot
 
 
 def test_d4_allowed_values_come_from_the_pinned_vocabulary_when_the_schema_has_no_enum(grouped, tmp_path, monkeypatch):
+    """D4, since audit round 2: the PINNED vocabulary is the repository's verbatim copy at the pinned commit
+    (bundle.allowed_values) — the list decide checks — never whatever an installed checkout's file says, so
+    an installed validator cannot make a question offer a list decide would refuse."""
     from isaac_api.local_import import portal as P
     import sys as _sys
 
@@ -169,7 +172,11 @@ def test_d4_allowed_values_come_from_the_pinned_vocabulary_when_the_schema_has_n
     monkeypatch.setenv(P.PYTHON_ENV, _sys.executable)
     p = Q.consolidate(M.load(grouped))
     form = [q for q in p["questions"] if q["target_field_path"] == "sample.sample_form"]
-    assert form and all(q["allowed_values"] == ["powder", "pellet", "film"] for q in form)
+    B = Q.B
+    pinned = B.allowed_values("sample.sample_form")
+    assert pinned and "powder" in pinned and pinned != ["powder", "pellet", "film"]
+    assert form and all(q["allowed_values"] == pinned for q in form)
+    assert all(B.value_problem("sample.sample_form", v) is None for v in pinned)
 
 
 def test_d5_a_group_list_holds_only_experiment_questions_that_reach_that_group():

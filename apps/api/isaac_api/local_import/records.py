@@ -20,7 +20,8 @@ is listed — nothing is defaulted, no temperature is assumed.
 ``check_exactness`` (vendored v1.05) → the OFFLINE upstream portal check
 (:mod:`.portal`). Every error and warning is kept verbatim in
 ``validation/<group_id>.json`` with a plain-English summary. A disagreement between the
-vendored and upstream schemas is reported as ``blocked_by_schema_drift``.
+vendored and upstream schemas is reported as ``blocked_by_schema_drift`` — "blocked" for the WEBSITE's
+vendored v1.05 schema only, which gates nothing here (the verdict is the portal schema's and the portal's).
 
 ``isaac bundle export`` — writes ``<ULID>.json`` + ``<ULID>.evidence.json`` ONLY for a
 record that passes official validation AND whose portal outcome is ``publish``.
@@ -98,6 +99,53 @@ PROVENANCE_CONFIRMED = "scientist_confirmation"
 PROVENANCE_CORRECTED = "scientist_correction"
 
 
+def _instant(text: Any):
+    """A zoned ISO-8601 instant as an aware ``datetime``, or ``None`` (a local time with no zone is NOT one)."""
+    from datetime import datetime
+
+    if not isinstance(text, str) or not text.strip():
+        return None
+    raw = text.strip()
+    try:
+        parsed = datetime.fromisoformat(raw[:-1] + "+00:00" if raw.endswith(("Z", "z")) else raw)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None and parsed.utcoffset() is not None else None
+
+
+def same_value(path: str | None, a: Any, b: Any) -> bool:
+    """Whether ``a`` and ``b`` are the SAME value for the field at ``path`` — what the evidence's
+    ``relation`` and a confirmation's ``provenance`` are judged by. Numbers numerically (``1`` and ``1.0``
+    are one value; the parser's reading is compared in the unit the parser normalised it to, the field's
+    own, never re-converted here); a ``*_utc`` field's zoned instants as instants
+    (``2100-01-01T00:10:00Z`` = ``2100-01-01T00:10:00+00:00``); a string otherwise EXACTLY (no case,
+    space or fuzzy matching); anything else by its canonical JSON."""
+    if isinstance(a, bool) or isinstance(b, bool):
+        return a is b
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return a == b
+    if isinstance(a, str) and isinstance(b, str):
+        if a == b:
+            return True
+        if path and path.endswith("_utc"):
+            ia, ib = _instant(a), _instant(b)
+            return ia is not None and ib is not None and ia == ib
+        return False
+    return json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
+
+
+def _vouches_for(candidate: Mapping, e: Mapping, path: str | None, value: Any) -> bool:
+    """Whether ONE witness states ``value`` (:func:`same_value` against each value it vouches for)."""
+    for canon in _vouched_by(candidate, e):
+        try:
+            stated = json.loads(canon)
+        except ValueError:
+            continue
+        if same_value(path, stated, value):
+            return True
+    return False
+
+
 def _witnesses(candidate: Mapping, value: Any = None, decision: Mapping | None = None) -> list[dict]:
     """The file's own statements for a composed candidate value, each with its ``relation``.
 
@@ -109,8 +157,9 @@ def _witnesses(candidate: Mapping, value: Any = None, decision: Mapping | None =
     (``supports``) or another value (``contradicts``) — a quote of the old value is never presented
     as support for the new one."""
     out = []
-    mine = json.dumps(value, sort_keys=True)
-    replaced = decision is not None and mine != json.dumps(candidate.get("value"), sort_keys=True)
+    path = candidate.get("target_field_path")
+    # the SAME value (same_value: numerically, as an instant, or exactly) is not a replacement
+    replaced = decision is not None and not same_value(path, value, candidate.get("value"))
     for e in candidate["evidence"]:
         if e["method"] == "ai_interpretation":
             continue  # an interpretation is not observed evidence
@@ -125,7 +174,7 @@ def _witnesses(candidate: Mapping, value: Any = None, decision: Mapping | None =
         }
         if replaced:
             entry["relation_to_parser_value"] = e.get("relation")
-            entry["relation"] = "supports" if mine in _vouched_by(candidate, e) else "contradicts"
+            entry["relation"] = "supports" if _vouches_for(candidate, e, path, value) else "contradicts"
             if entry["relation"] == "contradicts":
                 entry["note"] = ("the file states another value; the value of record is the scientist's decision, "
                                  "not this quote")
@@ -136,12 +185,15 @@ def _witnesses(candidate: Mapping, value: Any = None, decision: Mapping | None =
 def _candidate_confirmation(candidate: Mapping, decision: Mapping, value: Any, path: str, witnesses: Sequence[Mapping]) -> dict:
     """The scientist's confirmation of a composed candidate value, with its PROVENANCE: a
     ``scientist_correction`` (``correct``, or a value no file witness states) names the value it
-    replaced (``previous_value``, the parser's); a ``scientist_confirmation`` is of a value the files state."""
+    replaced (``previous_value``, the parser's); a ``scientist_confirmation`` is of a value the files state.
+    A ``correct`` whose value IS the parser's (:func:`same_value`: ``1`` for ``1.0``, ``...Z`` for
+    ``...+00:00``) changed nothing: it is a confirmation, with no ``previous_value``."""
     entry = _confirmation({**decision, "value": value}, f"Confirm {path}")
     stated = any(w.get("relation") == "supports" for w in witnesses)
-    corrected = decision.get("decision") == "correct" or not stated
+    changed = not same_value(path, value, candidate.get("value"))
+    corrected = (decision.get("decision") == "correct" and changed) or not stated
     entry["provenance"] = PROVENANCE_CORRECTED if corrected else PROVENANCE_CONFIRMED
-    if json.dumps(value, sort_keys=True) != json.dumps(candidate.get("value"), sort_keys=True):
+    if changed:
         entry["previous_value"] = candidate.get("value")
         entry["previous_value_basis"] = ("the parser's value for this candidate" if candidate.get("value") is not None
                                          else "the parser gave no single value (the sources disagree or state none)")
@@ -772,10 +824,12 @@ def schema_drift(record: Mapping, upstream: Mapping | None, portal_check: Mappin
         v_ok = not any("temperature" in e.path + e.message for e in validate_official(probe, _repo_root()).errors)
         if up_ok and not v_ok:
             out["temperature"] = (
-                "The temperature is unknown. Upstream accepts temperature_K: null with "
-                "temperature_basis: not_reported; vendored v1.05 requires a number and has no "
-                "temperature_basis. Nothing is defaulted, so this record is blocked by schema "
-                "drift unless a scientist states the temperature."
+                "The temperature is unknown. The portal's pinned schema, which the local export validates "
+                "against, accepts temperature_K: null with temperature_basis: not_reported, and the record "
+                "says that; the website's older vendored v1.05 schema requires a number and has no "
+                "temperature_basis. This does NOT block the local export: it only means the record does not "
+                "pass the website schema, which is reported for information. Nothing is defaulted; a "
+                "temperature a scientist states satisfies both."
             )
     demanded = _portal_demands_undeclared(portal_check)
     if demanded:
@@ -948,14 +1002,15 @@ def processing_remedy(processing: Mapping) -> str:
     if processing.get("result"):
         said = "; ".join(f"{k}: {processing[k]}" for k in ("series", "qc", "approval") if processing.get(k))
         return (f"the approved result {processing['result']} did not supply them" + (f" ({said})" if said else "")
-                + ". Re-run `isaac process <bundle_dir>` and approve the new result, stating its QC status.")
+                + ". Re-run `isaac process <bundle_dir> --source <the beamtime folder you imported>` and approve the new result, stating its QC status.")
     if waiting:
         return ("no processing result is approved yet: review the draft processing and approve it, stating its QC status: "
                 + " / ".join(f'`isaac bundle decide <bundle_dir> --target {pid} --decision approve --qc-status <value> --by "<your name>"`'
                              for pid in waiting[:3])
                 + (f" (and {len(waiting) - 3} more)" if len(waiting) > 3 else "")
+                + '; a QC status of compromised or failed also needs --qc-note "<what and why>"'
                 + ". Correcting a value does not supply them.")
-    return ("no processing result exists for this group: run `isaac process <bundle_dir>`, then approve the result "
+    return ("no processing result exists for this group: run `isaac process <bundle_dir> --source <the beamtime folder you imported>`, then approve the result "
             '(`isaac bundle decide <bundle_dir> --target <result id> --decision approve --qc-status <value> --by "<your name>"`).')
 
 
@@ -1001,6 +1056,11 @@ EXPORT_INDEX = f"{EXPORT_STATE_DIR}/index.json"
 EXPORT_INDEX_FORMAT = "isaac.local-export-index"
 #: In ``--out``: where a record a re-export REPLACED is moved (never deleted; never in an upload plan).
 SUPERSEDED_DIR = f"{EXPORT_STATE_DIR}/superseded"
+#: In ``--out``: where a record is moved when its group, exported before, is NOT exportable now (refused by
+#: a gate, or no longer a scientist-confirmed group): nothing replaces it, so it is WITHDRAWN, not
+#: superseded. Kept (never deleted), never in an upload plan. A later export of the same content restores
+#: it under its id at the top level.
+WITHDRAWN_DIR = f"{EXPORT_STATE_DIR}/withdrawn"
 
 
 def content_sha256(draft: Mapping, composition: Mapping | None) -> str:
@@ -1021,24 +1081,49 @@ def _read_export_index(out: Path) -> dict:
                              "id each group was given, so a re-export reuses it: restore it, or export to a new --out.", code=1)
     if not isinstance(data, dict) or data.get("format") != EXPORT_INDEX_FORMAT or not isinstance(data.get("records"), list):
         raise RecordsRefused(f"{path} is not an ISAAC export index; nothing was exported. Export to a new --out.", code=1)
+    from isaac_records.ids import is_record_id
+
+    # EVERY record id the index names becomes a FILE NAME in --out (an unchanged re-export rewrites
+    # <id>.json, a replaced or withdrawn one is moved): one that is not a record id is refused, whole.
+    for r in data["records"]:
+        ids = [r.get("record_id"), *(r.get("replaced_record_ids") or ())] if isinstance(r, Mapping) else [None]
+        if not isinstance(r, Mapping) or not isinstance(r.get("replaced_record_ids") or [], list) or any(
+                not (isinstance(x, str) and is_record_id(x)) for x in ids if x is not None):
+            raise RecordsRefused(f"{path} names a record id that is not an ISAAC record id; nothing was exported. "
+                                 "Restore the index, or export to a new --out.", code=1)
     return data
 
 
-def _move_superseded(out: Path, record_id: str) -> list[str]:
-    """Move a replaced record's files out of ``--out``'s top level (so no upload plan lists them)."""
+def _move_superseded(out: Path, record_id: str, into: str = SUPERSEDED_DIR) -> list[str]:
+    """Move a replaced (or, ``into`` :data:`WITHDRAWN_DIR`, a withdrawn) record's files out of ``--out``'s
+    top level, so no upload plan lists them. A copy already there under the same name is replaced by
+    the newer one (the same record id names the same record)."""
     from isaac_records.ids import is_record_id
 
     if not is_record_id(record_id):
         return []
     moved = []
-    dest = out / SUPERSEDED_DIR
+    dest = out / into
     for name in (f"{record_id}.json", f"{record_id}.evidence.json", f"{record_id}.artifacts"):
         src = out / name
         if src.exists() and not src.is_symlink():
             dest.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(src), str(dest / name))
-            moved.append(f"{SUPERSEDED_DIR}/{name}")
+            target = dest / name
+            # only ever the SAME record (an id is reused only for the same content_sha256), withdrawn again
+            if target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target)
+            elif target.exists() or target.is_symlink():
+                target.unlink()
+            shutil.move(str(src), str(target))
+            moved.append(f"{into}/{name}")
     return moved
+
+
+def _withdrawal_statement(record_id: str, exported_utc: Any, moved: Sequence[str], why: str) -> str:
+    where = (f"its files were moved to {WITHDRAWN_DIR}/ (kept, never in an upload plan)" if moved
+             else "no file of it is at the top of --out (nothing to move)")
+    return (f"Record {record_id}, exported for this group on {exported_utc}, is WITHDRAWN: {why}, so it is no longer "
+            f"what the bundle composes; {where}. Do not upload it. If it was already uploaded, the portal still holds it.")
 
 
 def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
@@ -1051,7 +1136,11 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     id its record got and the :func:`content_sha256` it was composed from. Exporting an UNCHANGED group
     again reuses that id and export time, so the files are rewritten byte for byte and no second record
     appears. A CHANGED group gets a new id; the record it replaces is moved to ``superseded/`` (kept,
-    never in an upload plan) and the result says so (``replaced``)."""
+    never in an upload plan) and the result says so (``replaced``). A group exported before that is NOT
+    exportable now — refused by a gate, or no longer a scientist-confirmed group — has its record moved to
+    ``withdrawn/`` (kept, never in an upload plan; nothing replaces it), its index entry marked
+    ``withdrawn_utc``, and the result lists it under ``withdrawn`` (and on its ``refused`` row). Exporting
+    the same content again later restores it under the same id."""
     from isaac_records.export import build_sidecar
     from isaac_records.ids import new_record_id
     from isaac_records.official import validate_official
@@ -1068,6 +1157,23 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     prior_of = {(r.get("bundle_id"), r.get("group_id")): r for r in index["records"] if isinstance(r, Mapping)}
     fresh = fresh_compositions(bundle_dir, bundle, test_marker=_was_marked(bundle))
     confirmed = {gid for gid, _, _ in fresh}
+    withdrawn: list[dict] = []
+
+    def withdraw(earlier: dict, why: str) -> dict:
+        """Move an earlier export's record to WITHDRAWN_DIR and mark its index entry; the row's keys."""
+        from .mutations import now_utc
+
+        rid = earlier["record_id"]
+        moved = _move_superseded(out, rid, WITHDRAWN_DIR) if out.is_dir() else []
+        if not earlier.get("withdrawn_utc") or moved:
+            earlier["withdrawn_utc"] = now_utc()
+            earlier["withdrawn_reason"] = why
+            (out / EXPORT_STATE_DIR).mkdir(parents=True, exist_ok=True)
+            _atomic_write(out / EXPORT_INDEX, (json.dumps(index, indent=2, sort_keys=True) + "\n").encode("utf-8"))
+        info = {"previously_exported_record_id": rid, "withdrawn": True, "withdrawn_record_id": rid, "withdrawn_files": moved,
+                "previously_exported_statement": _withdrawal_statement(rid, earlier.get("exported_utc"), moved, why)}
+        withdrawn.append({"group_id": earlier.get("group_id"), "record_id": rid, "withdrawn_files": moved, "reason": why})
+        return info
     stale = [gid for gid, d, c in fresh if _on_disk_differs(bundle_dir, gid, d, c)]
     orphans = sorted(
         p.name[: -len(".draft.json")] for p in (bundle_dir / DRAFTS_DIR).glob("*.draft.json")
@@ -1079,11 +1185,9 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
             row = {"group_id": group_id, "verdict": report["verdict"], "summary": report["plain_summary"]}
             earlier = prior_of.get((bundle_id, group_id))
             if earlier is not None and earlier.get("record_id"):
-                # SAID, never silent: --out still holds the record an earlier export wrote for this group
-                row["previously_exported_record_id"] = earlier["record_id"]
-                row["previously_exported_statement"] = (
-                    f"{earlier['record_id']}.json in --out is this group's record from an earlier export ({earlier.get('exported_utc')}); "
-                    "it is no longer what the bundle composes, and was left where it is. Do not upload it.")
+                # WITHDRAWN, never left in place: the record an earlier export wrote for this group is moved
+                # out of --out's top level, so `upload --dry-run` no longer lists it, and the row says so
+                row.update(withdraw(earlier, f"this export refused the group ({report['verdict']})"))
             refused.append(row)
             continue
         where = P.locate()
@@ -1132,6 +1236,10 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         if status == "unchanged":
             row["export_statement"] = (f"Unchanged since its export at {at}: the same record id, rewritten byte for byte. "
                                        "No second record was made.")
+            if prior.get("withdrawn_utc"):
+                row["restored_from_withdrawn"] = True
+                row["export_statement"] += (f" It had been withdrawn ({prior['withdrawn_utc']}); the group is exportable "
+                                            "again with the same content, so the record is back at the top of --out.")
         elif status == "replaced":
             row["replaces_record_id"] = prior.get("record_id")
             row["superseded_files"] = moved
@@ -1148,9 +1256,15 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         prior_of[(bundle_id, group_id)] = entry
         (out / EXPORT_STATE_DIR).mkdir(exist_ok=True)
         _atomic_write(out / EXPORT_INDEX, (json.dumps(index, indent=2, sort_keys=True) + "\n").encode("utf-8"))
+    # A group exported before that is no longer a scientist-confirmed group at all (rejected, merged,
+    # regrouped away) is not composed, so it is not in `refused`: its record is withdrawn just the same.
+    for (b_id, g_id), earlier in list(prior_of.items()):
+        if b_id == bundle_id and g_id not in confirmed and earlier.get("record_id"):
+            withdraw(earlier, "the group is no longer a scientist-confirmed record group of this bundle")
     result = {
         "exported": exported,
         "refused": refused,
+        "withdrawn": withdrawn,
         "on_disk_drafts_ignored_because_they_differ": stale,
         "on_disk_drafts_ignored_with_no_confirmed_group": orphans,
     }

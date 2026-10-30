@@ -81,7 +81,15 @@ export interface LocalProgress {
   missing_share: null;
   missing_share_statement: string;
   questions: { total?: number; blocking?: number; conflicts_affecting_a_record?: number; optional?: number; unavailable?: string } | null;
-  minimum_for_one_group: { group_id: string; blocking_questions: number; plus_decisions: string[]; blocked?: string } | null;
+  /** `group_id` is null when every live group has nothing left here (`statement` says so). */
+  minimum_for_one_group: {
+    group_id: string | null;
+    blocking_questions: number;
+    plus_decisions: string[];
+    blocked?: string;
+    groups_with_nothing_left?: number;
+    statement?: string;
+  } | null;
   blocks_export: string[];
   last_validation: { reports: LocalValidationReport[]; statement: string };
 }
@@ -760,4 +768,13 @@ export function ianaZones(): string[] {
   } catch {
     return [];
   }
+}
+
+/** The one sentence the screen says about the nearest record group (`minimum_for_one_group`): a
+ *  decision already made is not in `plus_decisions`, so none is named twice, and a null group says
+ *  that nothing is left here. */
+export function nearestRecordText(m: NonNullable<LocalProgress['minimum_for_one_group']>): string {
+  if (m.group_id === null) return m.statement ?? 'No record group has anything left to answer here.';
+  const plus = m.plus_decisions.length > 0 ? `, plus: ${m.plus_decisions.join('; ')}` : '';
+  return `group ${m.group_id} needs ${m.blocking_questions} blocking answer(s)${plus}.${m.blocked ? ` ${m.blocked}.` : ''}`;
 }

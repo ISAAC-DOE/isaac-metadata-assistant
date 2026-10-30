@@ -156,7 +156,7 @@ def test_the_measured_defect_one_sample_group_answered_keeps_the_unrecorded_ques
     q = next(x for x in payload["questions"] if x["partition"] == "sample=unrecorded" and x["kind"] == "missing_value")
     scope = next(iter(q["per_scope_targets"]))
     M.record_decision(bundle, target_ids=Q.targets_for(payload, q["question_id"], scope), decision="correct",
-                      value="SYNTHETIC TEST VALUE", by=BY, orcid=None)
+                      value=(q.get("allowed_values") or ["SYNTHETIC TEST VALUE"])[0], by=BY, orcid=None)
     B.apply_derivations(bundle)
     after = Q.consolidate(bundle)
     assert _ids(after) <= _ids(payload)

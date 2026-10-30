@@ -17,8 +17,8 @@ This module CONSOLIDATES it for a person:
   local export targets — the pinned upstream schema when installed, else the vendored one,
   stated in ``blocking_basis``), then conflicts that affect a record, then optional.
 * Each question carries plain text, why it blocks, hints (a literal and its locator — a
-  hint, never an answer), allowed values where the target schema closes the field with an
-  enum, and the exact ``isaac bundle decide --question`` command that answers it — always a
+  hint, never an answer), allowed values where a fixed list closes the field
+  (``bundle.allowed_values``: exactly what ``decide`` accepts and the export validates against), and the exact ``isaac bundle decide --question`` command that answers it — always a
   TEMPLATE with placeholders, never a value read from the files or an AI.
 * A ``confirm_value`` question whose candidates carry no value asks "What is X?", cites the
   text the files hold, and does not offer ``confirm``. One about a path no answer can reach the
@@ -111,29 +111,6 @@ def _is_shared(path: str) -> bool:
     return any(path == p.rstrip(".") or path.startswith(p) for p in SHARED_PATHS)
 
 
-def _vocabulary() -> dict[str, list]:
-    """``dotted path -> allowed values`` from the PINNED upstream vocabulary
-    (``data/vocabulary.json``), when the validator is installed. Empty otherwise."""
-    from pathlib import Path
-
-    from . import portal as P
-
-    where = P.locate()
-    if not where.get("available"):
-        return {}
-    try:
-        vocab = json.loads((Path(where["dir"]) / "data" / "vocabulary.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    out: dict[str, list] = {}
-    for section in vocab.values():
-        if isinstance(section, Mapping):
-            for key, entry in section.items():
-                if isinstance(entry, Mapping) and isinstance(entry.get("values"), list):
-                    out[key] = list(entry["values"])
-    return out
-
-
 def _target_schema() -> tuple[dict | None, dict]:
     """The schema blocking is judged against, and a statement of which one."""
     from . import portal as P
@@ -161,11 +138,22 @@ def _node(schema: Mapping | None, path: str) -> Mapping | None:
 
 
 def _eligible_values(path: str) -> list | None:
-    """The vendored schema's ``enum`` at ``path`` — exactly what ``bundle.value_problem`` refuses
-    outside of — or ``None`` when that schema does not close the field."""
-    node = B._schema_node(path)
-    enum = node.get("enum") if isinstance(node, Mapping) else None
-    return list(enum) if isinstance(enum, list) else None
+    """:func:`bundle.allowed_values` — THE list a field takes, the one ``bundle.value_problem`` (so
+    ``decide`` and eligibility) refuses outside of and the export validates against — or ``None``
+    when no fixed list closes the field. Every list a question offers is this one."""
+    return B.allowed_values(path)
+
+
+def _extracted_value_problem(candidate: Mapping | None, writable: frozenset[str]) -> str | None:
+    """Why ``decide`` would refuse to CONFIRM a candidate's extracted value (its field refuses it:
+    ``bundle.value_problem``), or ``None``. A path this build does not write is not checked (``decide``
+    does not check it either); a value-less candidate is the caller's other case."""
+    if not candidate or candidate.get("value") is None or B.is_local_clock_start(candidate):
+        return None  # a local clock time is confirmed as the UTC value its stated zone gives it, not as stored
+    path = candidate.get("target_field_path")
+    if not path or path not in writable:
+        return None
+    return B.value_problem(path, candidate["value"])
 
 
 def _is_numeric(node: Mapping | None) -> bool:
@@ -183,7 +171,6 @@ def _qid(*parts: str) -> str:
 def consolidate(bundle: Mapping) -> dict:
     """``questions.json`` v2 for ``bundle``. Pure: reads the bundle, writes nothing."""
     schema, basis = _target_schema()
-    vocabulary = _vocabulary()
     # THE SET-POINT A CONTROL MODE NEEDS (1.5.0): the target schema's conditional rules make the
     # set-point required for some modes, so a run whose mode a file states or a scientist confirmed
     # (bundle.control_mode_by_run) has its set-point asked as BLOCKING. A run with no mode adds
@@ -252,11 +239,10 @@ def consolidate(bundle: Mapping) -> dict:
     conflict_again: dict[str, dict] = {}
 
     def not_eligible_answer(obj: Mapping, kind: str) -> dict | None:
-        if obj.get("value_state") != B.STATE_SCIENTIST_CONFIRMED:
+        # the ONE definition of "answered, but the record cannot take it" (bundle.unusable_answer_reason)
+        if B.unusable_answer_reason(obj, writable) is None:
             return None
         fit = obj.get("eligibility_for_official_record") or {}
-        if fit.get("eligible", True) or _never_lands(obj.get("target_field_path"), writable):
-            return None
         if kind == "candidate":
             if obj["candidate_id"] in reconfirm_ids:
                 return None
@@ -419,10 +405,8 @@ def consolidate(bundle: Mapping) -> dict:
                     "targets": q["targets"],
                     "per_scope_targets": q["per_scope_targets"],
                     "fields": {f: ids for f, ids in sorted(q["fields"].items())},
-                    # the values the VENDORED schema's enum allows — the one source eligibility checks
-                    # (bundle.value_problem) — so an answer outside a list given here is stored but never
-                    # eligible. A field closed only by the export-target schema or the pinned vocabulary is
-                    # not listed: eligibility does not refuse an answer outside those lists.
+                    # bundle.allowed_values — the one list `decide` and eligibility (bundle.value_problem)
+                    # refuse outside of and the export validates against — for each field it closes
                     "field_allowed_values": {f: a for f in sorted(q["fields"]) if (a := _eligible_values(f))},
                     "hints": [],
                     "field_hints": fh,
@@ -433,10 +417,9 @@ def consolidate(bundle: Mapping) -> dict:
             )
             continue
         node = _node(schema, path)
-        enum = node.get("enum") if isinstance(node, Mapping) and isinstance(node.get("enum"), list) else None
-        if enum is None and path in vocabulary:
-            # D4: a vocabulary-controlled field (no schema enum, but the portal checks it).
-            enum = vocabulary[path]
+        # THE ONE LIST (H1): what is offered is exactly what `decide` accepts and the export validates
+        # against (bundle.allowed_values) — a vocabulary-controlled field included (D4).
+        enum = _eligible_values(path)
         numeric = _is_numeric(node)
         n_groups = len({group_of[r] for r in q["runs"] if r in group_of})
         if kind == "missing_value":
@@ -465,6 +448,13 @@ def consolidate(bundle: Mapping) -> dict:
         # files hold, and never offers `confirm`. A path no answer can reach is informational.
         valueless = [t["id"] for t in q["targets"] if t["kind"] == "candidate" and (cand_by_id.get(t["id"]) or {}).get("value") is None]
         never = _never_lands(path, writable) if kind == "confirm_value" else None
+        # A target whose EXTRACTED value its field refuses (bundle.value_problem — e.g. an older build
+        # stored a confirm of it, now asked again) cannot be confirmed either: `decide` refuses that
+        # confirm, so it is offered only `correct` (or reject / defer), exactly like a value-less one.
+        unfit = ({t["id"]: why for t in q["targets"] if t["kind"] == "candidate" and t["id"] not in valueless
+                  and (why := _extracted_value_problem(cand_by_id.get(t["id"]), writable)) is not None}
+                 if kind == "confirm_value" and not never else {})
+        unconfirmable = set(valueless) | set(unfit)
         decisions_offered = None
         own_literals: list[dict] = []
         if kind == "confirm_value":
@@ -480,12 +470,23 @@ def consolidate(bundle: Mapping) -> dict:
                         + ". There is nothing to confirm: give the value yourself (correct), or reject or defer it.")
                 decision = "correct"
                 decisions_offered = list(VALUELESS_DECISIONS)
+            elif len(unconfirmable) == len(q["targets"]):
+                text = (f"What is the {_label(path)} ({path})? The value extracted from the files does not fit the field ("
+                        + next(iter(unfit.values())).rstrip(".")
+                        + "), so there is nothing to confirm: give the value yourself (correct), or reject or defer it.")
+                decision = "correct"
+                decisions_offered = list(VALUELESS_DECISIONS)
             else:
                 text = f"Is the extracted {_label(path)} ({path}) right? Confirm it, or correct it."
                 if valueless:
                     text += (f" {len(valueless)} of its {len(q['targets'])} target(s) carry no value ({', '.join(valueless[:5])}"
                              f"{'…' if len(valueless) > 5 else ''}): confirm refuses them; answer those with correct --value, "
                              "per group (--only group:<group_id>).")
+                if unfit:
+                    names = sorted(unfit)
+                    text += (f" {len(unfit)} of its {len(q['targets'])} target(s) carry an extracted value the field refuses "
+                             f"({', '.join(names[:5])}{'…' if len(names) > 5 else ''}): confirm refuses them too; answer those "
+                             "with correct --value, per group (--only group:<group_id>).")
         hints = []
         if path.startswith("attribution.produced_by."):
             hints.append({"kind": "folder_name", "literal": bundle["source_root"]["label"], "locator": "the imported folder's name",
@@ -511,15 +512,24 @@ def consolidate(bundle: Mapping) -> dict:
                               # a reading of the same field ELSEWHERE in the import (another run or group) is
                               # context, not this question's own evidence
                               "of_this_question": c["candidate_id"] in mine})
-        allowed_here = _eligible_values(path) or enum
-        text += _asked_again_text(q["asked_again"], {path: allowed_here})
+        text += _asked_again_text(q["asked_again"], {path: enum})
         value_arg = "<value>" + (" --json" if numeric else "")
         qid = _qid(scope, kind, path, partition or "")
         blocking_here = bool(q["required_by"]) and not never
         per_group_note = ("   # answers given so far DIFFER: answer per group with --only group:<group_id>" if answers_differ
                           else "   # per group: add --only group:<group_id>" if len(q["per_scope_targets"]) > 1 else "")
+        # the scopes a `confirm` is accepted for: every target there carries a value its field takes
+        confirmable_scopes = sorted(sc for sc, ids in q["per_scope_targets"].items() if not unconfirmable.intersection(ids))
         if never:
             command = f"# nothing to answer: no answer to {qid} can reach the record ({never})"
+        elif decision == "confirm" and unconfirmable:
+            # A MIXED question: `decide` checks every target and refuses the whole answer when one cannot be
+            # confirmed, so a confirm is offered only per scope where every target can be (confirmable_scopes)
+            command = (f'isaac bundle decide <bundle_dir> --question {qid} --decision confirm --only <scope> --by "<your name>"'
+                       + "   # confirm only a scope in confirmable_scopes"
+                       + (f" ({', '.join(confirmable_scopes[:3])}{'…' if len(confirmable_scopes) > 3 else ''})" if confirmable_scopes else
+                          " (none: answer every scope with --decision correct --value <value>)")
+                       + "; answer the others with --decision correct --value <value>")
         else:
             command = (f'isaac bundle decide <bundle_dir> --question {qid} --decision {decision}'
                        + (f" --value {value_arg}" if decision == "correct" else "")
@@ -548,6 +558,9 @@ def consolidate(bundle: Mapping) -> dict:
         }
         if kind == "confirm_value":
             entry["targets_without_a_value"] = len(valueless)
+            entry["targets_with_an_unfit_value"] = len(unfit)
+            entry["confirmable_scopes"] = confirmable_scopes if "confirm" in (decisions_offered if decisions_offered is not None
+                                                                              else ALLOWED_DECISIONS[kind]) else []
             entry["lands_in_record"] = not never
             if never:
                 entry["informational"] = True
@@ -558,8 +571,7 @@ def consolidate(bundle: Mapping) -> dict:
             entry["allowed_decisions"] = decisions_offered
         questions.append(entry)
     for scope, cf, affects, path, required in conflicts_out:
-        node = _node(schema, path) if path else None
-        enum = node.get("enum") if isinstance(node, Mapping) and isinstance(node.get("enum"), list) else (vocabulary.get(path) if path else None)
+        enum = _eligible_values(path) if path else None
         again = [conflict_again[cf["conflict_id"]]] if cf["conflict_id"] in conflict_again else []
         questions.append(
             {
@@ -576,7 +588,7 @@ def consolidate(bundle: Mapping) -> dict:
                 "scope": scope,
                 "target_field_path": path,
                 "text": (f"The sources disagree ({cf['kind']}{', ' + str(cf['subject']) if cf['subject'] else ''}). Which reading is right?"
-                         + _asked_again_text(again, {path: _eligible_values(path) or enum} if path else {})),
+                         + _asked_again_text(again, {path: enum} if path else {})),
                 "applies_to": {"groups": len({group_of[r] for r in cf["run_ids"] if r in group_of}), "runs": len(cf["run_ids"]), "targets": 1},
                 "targets": [{"kind": "conflict", "id": cf["conflict_id"]}],
                 "per_scope_targets": {scope: [cf["conflict_id"]]},
@@ -1140,32 +1152,63 @@ def processing_blocked_groups(bundle: Mapping) -> dict[str, str]:
     return {gid: r["applicability"]["reason_code"] for gid, r in B.processing_blocked_groups(bundle).items() if gid in live}
 
 
-def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping) -> dict | None:
+def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str | None = None) -> dict | None:
     """The fewest BLOCKING questions that stand between one record group and export —
-    experiment-scope blocking questions plus that group's own — plus the two decisions
-    every group needs (confirm the group, approve its processing).
+    experiment-scope blocking questions plus that group's own — plus the decisions that group
+    still needs: confirming it (unless a scientist already did) and approving its processing result
+    (unless one is approved). A decision already made is never named again.
+
+    A group with NOTHING left here (no blocking question, confirmed, its processing approved) is not
+    "the nearest": it is counted in ``groups_with_nothing_left`` and the nearest group that still needs
+    something is named. When none does, ``group_id`` is ``None`` and the statement says so.
+
+    ``scope`` ``group:<id>`` (``bundle questions --scope``) names THAT group, never another; any other
+    scope (``experiment``, a run) is not one group and leaves the choice open.
 
     A group the processing protocol does not apply to is never offered as "the nearest"
     while another exists: no approval can make it complete. When only such groups are left,
     the decision named is the blocking reason, never "approve its processing result"."""
     blocked = processing_blocked_groups(bundle)
+    approved = {r["group_id"] for r in bundle.get("processing_results") or ()
+                if r.get("state") == B.STATE_SCIENTIST_CONFIRMED and not B.processing_not_applicable(r)}
+    wanted = scope[len("group:"):] if isinstance(scope, str) and scope.startswith("group:") else None
     best = None
+    done: list[str] = []
     # only a LIVE group can become a record: a rejected, split or merged one is never "the nearest"
     for g in live_groups(bundle):
+        if wanted is not None and g["group_id"] != wanted:
+            continue
         key = f"group:{g['group_id']}"
         need = sum(
             1 for q in payload["questions"]
             if q["blocking"] and (q["scope"] == key or (q["scope"] == "experiment" and (key in q["per_scope_targets"] or "experiment" in q["per_scope_targets"])))
         )
-        rank = (g["group_id"] in blocked, need)
-        if best is None or rank < best[2]:
-            best = (g["group_id"], need, rank)
+        plus = []
+        if g.get("status") != B.STATE_SCIENTIST_CONFIRMED:
+            plus.append("confirm the group")
+        if g["group_id"] not in blocked and g["group_id"] not in approved:
+            plus.append("approve its processing result")
+        if not need and not plus and g["group_id"] not in blocked and wanted is None:
+            done.append(g["group_id"])
+            continue
+        rank = (g["group_id"] in blocked, need + len(plus))
+        if best is None or rank < best[3]:
+            best = (g["group_id"], need, plus, rank)
     if best is None:
-        return None
-    out = {"group_id": best[0], "blocking_questions": best[1], "plus_decisions": ["confirm the group", "approve its processing result"]}
+        if wanted is not None:
+            return None  # the named group is not a live record group
+        if not done:
+            return None
+        return {"group_id": None, "blocking_questions": 0, "plus_decisions": [], "groups_with_nothing_left": len(done),
+                "statement": (f"{len(done)} record group(s) have no blocking question and no decision left here (confirmed, "
+                              "processing approved): run `isaac bundle build-records`, `validate` and `export`.")}
+    out = {"group_id": best[0], "blocking_questions": best[1], "plus_decisions": best[2]}
     if best[0] in blocked:
-        out["plus_decisions"] = ["confirm the group"]
         out["blocked"] = f"{B.NO_PROTOCOL_COVERS} ({blocked[best[0]]}); this group cannot become a complete record until one does"
     if blocked:
         out["groups_without_an_applicable_processing_protocol"] = len(blocked)
+    if done:
+        out["groups_with_nothing_left"] = len(done)
+    if wanted is not None:
+        out["scope"] = scope
     return out

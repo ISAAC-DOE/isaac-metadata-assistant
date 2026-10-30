@@ -161,7 +161,7 @@ _SIBLING_PATHS = {
     "context.electrochemistry.electrolyte.concentration_M": ("context.electrochemistry.electrolyte.name",),
 }
 #: Vocabulary sheet: ISAAC's six lists in the template's order, plus Technique (for the
-#: Configurations dropdown). The VALUES come from the target schema / pinned vocabulary.
+#: Configurations dropdown). The VALUES are bundle.allowed_values (what decide accepts and export validates against).
 VOCAB_COLUMNS: tuple[tuple[str, str], ...] = (
     ("Sample Form", "sample.sample_form"),
     ("Environment", "context.environment"),
@@ -197,33 +197,28 @@ def _now_utc() -> str:
 
 
 def field_rules() -> dict[str, dict]:
-    """``path -> {allowed, numeric, integer, in_schema}`` for every template path, read from the
-    schema the local export targets (``questions._target_schema``) and the pinned vocabulary
-    (``questions._vocabulary``) — the same sources the consolidated questions use."""
+    """``path -> {allowed, numeric, integer, in_schema}`` for every template path (:func:`rule_for_path`),
+    read once from the schema the local export targets (``questions._target_schema``)."""
     from . import questions as Q
 
     schema, _basis = Q._target_schema()
-    vocabulary = Q._vocabulary()
     paths = {c.path for c in (*CAMPAIGN_FIELDS, *CONFIG_COLUMNS, *FILE_COLUMNS) if c.path}
     paths |= {p for _, p in VOCAB_COLUMNS}
-    return {path: rule_for_path(path, schema=schema, vocabulary=vocabulary) for path in sorted(paths)}
+    return {path: rule_for_path(path, schema=schema) for path in sorted(paths)}
 
 
-def rule_for_path(path: str, *, schema: Mapping | None = None, vocabulary: Mapping | None = None) -> dict:
-    """What one field accepts, read exactly as :func:`field_rules` reads it for a template column (the
-    target schema, then the vendored one; the pinned vocabulary where the schema has no enum). Used
-    by the template import and by the local questions screen, so a value typed in either is parsed
-    the same way (:func:`parse_answer`)."""
+def rule_for_path(path: str, *, schema: Mapping | None = None) -> dict:
+    """What one field accepts. ``allowed`` is :func:`bundle.allowed_values` — THE list ``decide`` and
+    eligibility accept and the export validates against, the same one every question offers — and
+    the type is read from the target schema, then the vendored one. Used by the template import and
+    by the local questions screen, so a value typed in either is parsed the same way
+    (:func:`parse_answer`) and an offered value is never one ``decide`` refuses."""
     from . import questions as Q
 
     if schema is None:
         schema, _basis = Q._target_schema()
-    if vocabulary is None:
-        vocabulary = Q._vocabulary()
     node = Q._node(schema, path) or B._schema_node(path)
-    enum = node.get("enum") if isinstance(node, Mapping) and isinstance(node.get("enum"), list) else None
-    if enum is None and path in vocabulary:
-        enum = vocabulary[path]
+    enum = B.allowed_values(path)
     declared = node.get("type") if isinstance(node, Mapping) else None
     types = declared if isinstance(declared, list) else [declared] if declared else []
     return {

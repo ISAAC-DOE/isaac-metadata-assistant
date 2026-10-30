@@ -802,7 +802,10 @@ def cmd_bundle_check(args) -> int:
             print(f"  ... and {len(stale) - 50} more")
         print("  Remedy: any change re-derives it under this build and logs each value in `eligibility_rederived`; "
               "`isaac bundle build-records` does that under the bundle lock before composing.")
-        print(f"  On that write: {B.upgrade_statement(bundle.get('format_version'), B._added_since(bundle.get('format_version')), B.import_rules_missing(bundle))}.")
+        if B.needs_format_upgrade(bundle):
+            print(f"  On that write: {B.upgrade_statement(bundle.get('format_version'), B._added_since(bundle.get('format_version')), B.import_rules_missing(bundle))}.")
+        else:  # the same format: only the export target's allowed values re-derive them (bundle.allowed_list_rederivations)
+            print("  On that write: the format stays the same; only these values' eligibility is re-derived and logged.")
         _print_non_finite(bundle)
         print("  Exit code 1 (EXIT_INVALID): the CLI has no exit code of its own for STALE.")
         return EXIT_INVALID
@@ -927,7 +930,7 @@ def cmd_bundle_questions(args) -> int:
             "total": len(rows), "offset": args.offset, "limit": args.limit, "returned": len(page),
             "omitted_before": min(args.offset, len(rows)),
             "omitted_after": max(0, len(rows) - args.offset - len(page)),
-            "minimum_for_one_group": Q.minimum_answers_for_one_group(payload, bundle),
+            "minimum_for_one_group": Q.minimum_answers_for_one_group(payload, bundle, scope=args.scope),
             "questions": page,
         }
 

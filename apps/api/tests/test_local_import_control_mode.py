@@ -115,10 +115,12 @@ def test_allowed_values_are_the_schemas_own_enum_in_questions_and_template(group
     assert T.field_rules()[CM]["allowed"] == vendored
 
 
-def test_allowed_values_follow_a_schema_refresh(monkeypatch):
-    schema = copy.deepcopy(B._vendored_schema())
-    schema["properties"]["context"]["properties"]["electrochemistry"]["properties"]["control_mode"]["enum"] = ["SYNTHETIC_mode"]
-    monkeypatch.setattr(B, "_vendored_schema", lambda: schema)
+def test_allowed_values_follow_a_refresh_of_the_pinned_list(monkeypatch):
+    """Read at runtime, never transcribed: since audit round 2 the list is the export target's
+    (bundle.allowed_values: the pinned vocabulary copy, which for this field equals the schema enum)."""
+    pinned = dict(B._pinned_vocabulary())
+    pinned[CM] = ("SYNTHETIC_mode",)
+    monkeypatch.setattr(B, "_pinned_vocabulary", lambda: pinned)
     assert B.value_problem(CM, "SYNTHETIC_mode") is None
     assert "not one of the schema's allowed values" in B.value_problem(CM, "potentiostatic")
 
@@ -414,10 +416,10 @@ def test_field_allowed_values_lists_only_what_eligibility_refuses_outside_of(gro
         if q["kind"] == "optional_values":
             listed.update(q["field_allowed_values"])
             for f in q["fields"]:
-                node = B._schema_node(f)
-                if isinstance(node, dict) and isinstance(node.get("enum"), list):
-                    assert q["field_allowed_values"][f] == node["enum"]
-                else:  # closed only by the export-target schema or the vocabulary: not listed
+                allowed = B.allowed_values(f)  # the ONE list decide checks and the export validates against
+                if allowed:
+                    assert q["field_allowed_values"][f] == allowed
+                else:
                     assert f not in q["field_allowed_values"]
     assert CM in listed and SCALE in listed
     for f, values in listed.items():  # an answer outside each list really is never eligible

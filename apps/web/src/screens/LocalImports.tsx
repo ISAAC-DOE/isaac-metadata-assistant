@@ -25,6 +25,7 @@ import {
   localImportsBuildEnabled,
   localReasonCodeOf,
   localReasonOf,
+  nearestRecordText,
   perGroupScopes,
   regroupCommand,
   rememberName,
@@ -288,9 +289,7 @@ function ProgressBlock({ name }: { name: string }) {
       </dl>
       {p.minimum_for_one_group && (
         <p className="li-note">
-          {COPY.nearestRecord}: group {p.minimum_for_one_group.group_id} needs {p.minimum_for_one_group.blocking_questions}{' '}
-          blocking answer(s), plus: {p.minimum_for_one_group.plus_decisions.join('; ')}.
-          {p.minimum_for_one_group.blocked ? ` ${p.minimum_for_one_group.blocked}.` : ''}
+          {COPY.nearestRecord}: {nearestRecordText(p.minimum_for_one_group)}
         </p>
       )}
       {p.blocks_export.length > 0 && (
@@ -631,9 +630,7 @@ function QuestionsBody({
       </h2>
       {data.minimum_for_one_group && (
         <p className="li-note">
-          {COPY.nearestRecord}: group {data.minimum_for_one_group.group_id} needs{' '}
-          {data.minimum_for_one_group.blocking_questions} blocking answer(s), plus{' '}
-          {data.minimum_for_one_group.plus_decisions.join('; ')}.
+          {COPY.nearestRecord}: {nearestRecordText(data.minimum_for_one_group)}
         </p>
       )}
       {data.total === 0 && <p className="li-note">No open questions match.</p>}

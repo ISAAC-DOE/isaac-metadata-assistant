@@ -34,7 +34,7 @@ through a CLI command that validates before it writes; a person or model never e
 | decide | `bundle decide` (`--target`, `--targets-file`, or `--question Q [--only group:<id>] [--field <path>]`; `--qc-status`/`--qc-note` with `approve` on a processing result) | `mutations.py` | `scientist_decisions[]` (one per target, each listed) |
 | compose | `bundle build-records [--test-marker]` (self-tests only: writes the fixed self-test marker into the series and QC notes) | `records.py` | `drafts/<group>.draft.json` + `.composition.json` |
 | validate | `bundle validate` | `records.py`, `portal.py` | `validation/<group>.json` |
-| export | `bundle export --out <r>` (idempotent: an unchanged record keeps its id; a changed one gets a new id and the old moves to `<r>/isaac-export/superseded/`) | `records.py` | `<ULID>.json`, `.evidence.json`, `.artifacts/` (exportable only), `<r>/isaac-export/index.json` |
+| export | `bundle export --out <r>` (idempotent: an unchanged record keeps its id; a changed one gets a new id and the old moves to `<r>/isaac-export/superseded/`; one whose group is no longer exportable moves to `<r>/isaac-export/withdrawn/`) | `records.py` | `<ULID>.json`, `.evidence.json`, `.artifacts/` (exportable only), `<r>/isaac-export/index.json` |
 | upload | `bundle upload <r> --dry-run` | `records.py` | nothing; no network, key not read |
 
 `scripts/setup_isaac_local.sh` installs it; `scripts/isaac_selftest.sh` runs the whole chain on the

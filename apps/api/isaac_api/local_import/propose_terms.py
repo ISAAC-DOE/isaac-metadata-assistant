@@ -6,9 +6,10 @@ WHAT COUNTS AS "OUTSIDE THE VOCABULARY"
 A string value at a field path whose allowed values are a FIXED LIST, and which is not on
 that list. Two lists can judge a path, and both are read, never transcribed:
 
-* ``schema`` — the vendored official schema's ``enum`` at the path, exactly what
-  :func:`bundle.value_problem` refuses (so a scientist-confirmed value off this list is the
-  "confirmed, but the value does not fit the official field" eligibility refusal);
+* ``schema`` — the vendored official schema's ``enum`` at the path (the WEBSITE's list; since audit
+  round 2 :func:`bundle.value_problem` refuses outside :func:`bundle.allowed_values`, the export
+  target's list, so a value on the portal's list but not this one is eligible and is reported as a
+  schema that lags the portal, never drafted);
 * ``portal`` — the portal vocabulary snapshot's term list for the path
   (``schema_proposal_rules.PORTAL_SNAPSHOT_FILE``), the list the portal checks an upload and a
   proposed term against. Some paths have only this list.

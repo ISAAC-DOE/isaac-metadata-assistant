@@ -187,6 +187,12 @@ def reachable_source_root(bundle: Mapping, bundle_dir: Path, source_root: Path |
             f"(that is the default), so the raw scan files cannot be read. Pass --source <{what}>."
         )
     if not root.is_dir():
+        if root.is_file() and (zipped or root.suffix.lower() == ".zip"):
+            # `--record-local-root` on a ZIP import records the ZIP itself, which exists: say THAT, never
+            # "not an existing folder" — processing reads the raw scans from a folder
+            raise _refuse(f"Nothing was processed and nothing was written: {named} is a ZIP file, and processing reads "
+                          "the raw scans from a folder, not a ZIP. Unzip it and pass the unzipped folder as "
+                          "--source <the unzipped beamtime folder>.")
         raise _refuse(f"Nothing was processed and nothing was written: {named} is not an existing folder on this "
                       f"computer. Pass --source <{what}>.")
     if not paths:

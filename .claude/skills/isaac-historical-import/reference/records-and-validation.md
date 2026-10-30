@@ -25,9 +25,8 @@ record fares against the website's older schema (vendored v1.05, July) beside th
 schema. Both are for information only and gate nothing; the verdict comes from the portal schema and
 the portal check. An unknown temperature is the usual case: the record says `temperature_K: null`
 with `temperature_basis: not_reported`, which the portal accepts and v1.05 does not. The drift text
-then says "blocked by schema drift unless a scientist states the temperature" and
-`blocked_by_schema_drift: true`, but that is about the website schema: the record can still be
-`exportable`. Tell the scientist so in plain words. The temperature stays an optional question if
+then says so, and that this does not block the local export; `blocked_by_schema_drift: true` is about
+the website schema only: the record can still be `exportable`. Tell the scientist so in plain words. The temperature stays an optional question if
 they know it; never press for one to clear this note, and never default one.
 
 Exit 1 from `validate` means at least one draft is not exportable; that is information, not an error.
@@ -37,7 +36,7 @@ After fixing, run `build-records` then `validate` again. Never hand-edit a draft
 
 `export --out <records>` writes `<ULID>.json`, `<ULID>.evidence.json` and a `<ULID>.artifacts/` folder
 (the processing files) for exportable drafts only and lists the rest with their verdicts. Its index is
-`<records>/isaac-export/index.json`. Exporting again into the same `--out` reuses each unchanged record's id (`export: unchanged`); a changed record gets a new id and the old one is moved to `isaac-export/superseded/` (`export: replaced`) — say which. Then `upload <records> --dry-run`: summarise records, target
+`<records>/isaac-export/index.json`. Exporting again into the same `--out` reuses each unchanged record's id (`export: unchanged`); a changed record gets a new id and the old one is moved to `isaac-export/superseded/` (`export: replaced`); a record whose group is now refused or no longer confirmed is moved to `isaac-export/withdrawn/` (listed under `withdrawn`; if it was uploaded already, the portal still holds it) — say which. Then `upload <records> --dry-run`: summarise records, target
 endpoints and body sizes. State plainly: nothing was sent, this build cannot send, the key was not
 read. Never ask for or print a portal key. Tell the scientist the records are in `<records>` and
 the portal upload is theirs to do.

@@ -137,7 +137,7 @@ MAX_EVIDENCE_PER_CANDIDATE = 256
 MAX_STRING_CHARS = 20_000
 #: The bounds on the two append-only logs (1.8.0; 20,000 before). The schema's ``maxItems`` is the
 #: same number (a test pins it); a write that would pass it is refused up front, with the reason
-#: (``mutations.check_log_room``), before anything is appended.
+#: (``mutations.log_full_message``), before anything is appended.
 MAX_SCIENTIST_DECISIONS = 200_000
 MAX_AI_INTERPRETATIONS = 200_000
 #: bundle.json ceiling. The 9-run fixture is ~1 MB; the real 1,192-file corpus is
@@ -973,16 +973,30 @@ def eligibility_for_official_record(
 UNFIT_REASON_PREFIX = "Confirmed, but the value does not fit the official field: "
 
 
-def value_unfit_reason(obj: Mapping) -> str | None:
-    """For a candidate or missing value: why its SCIENTIST-CONFIRMED value can never go into the record
-    because the official field refuses it (off the schema's enum, the wrong type, not a zoned UTC
-    instant, non-finite), else ``None``. ``decide`` refuses such a value now; an older build stored
-    some. Such a value is answered but not usable: it needs a new answer (``correct``), so a question
-    about it is still open."""
+def unusable_answer_reason(obj: Mapping, writable: frozenset[str] | None = None) -> str | None:
+    """For a candidate or missing value: its eligibility reason when a SCIENTIST-CONFIRMED value can never
+    go into the record although its field is one an answer reaches (not an array path, a path this build
+    writes) — the field refuses the value (:data:`UNFIT_REASON_PREFIX`: off its allowed values, the wrong
+    type, not a zoned UTC instant, non-finite) or there is no value to carry — else ``None``. Such a value
+    is answered but not usable: it needs a new answer (``correct``), so ``questions`` ASKS IT AGAIN under its
+    question's own id (the ONE definition it uses). ``decide`` refuses an unfit value now; an older build
+    stored some."""
     if obj.get("value_state") != STATE_SCIENTIST_CONFIRMED:
         return None
-    reason = str((obj.get("eligibility_for_official_record") or {}).get("reason") or "")
-    return reason[len(UNFIT_REASON_PREFIX):] if reason.startswith(UNFIT_REASON_PREFIX) else None
+    fit = obj.get("eligibility_for_official_record") or {}
+    if fit.get("eligible", True):
+        return None
+    path = obj.get("target_field_path")
+    if path and ("[]" in path or path not in (writable if writable is not None else _writable_paths())):
+        return None  # no answer can ever land there: never asked again (nothing would land)
+    return str(fit.get("reason") or "not eligible for the official record")
+
+
+def value_unfit_reason(obj: Mapping) -> str | None:
+    """:func:`unusable_answer_reason` narrowed to a value its official FIELD refuses (off the field's
+    allowed values, the wrong type, not a zoned UTC instant, non-finite), without the prefix, else ``None``."""
+    reason = unusable_answer_reason(obj)
+    return reason[len(UNFIT_REASON_PREFIX):] if reason and reason.startswith(UNFIT_REASON_PREFIX) else None
 
 
 @lru_cache(maxsize=1)
@@ -993,6 +1007,113 @@ def _vendored_schema() -> dict | None:
         return json.loads(resolve_schema_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+
+
+#: The one upstream vocabulary category the portal does not check (``portal/ontology._SKIP_CATEGORIES``
+#: at the pinned commit): a list there is not a list a record is held to.
+_PORTAL_UNCHECKED_CATEGORIES = frozenset({"descriptors.theoretical_metric"})
+
+
+@lru_cache(maxsize=1)
+def _pinned_vocabulary() -> dict[str, tuple] | None:
+    """``dotted path -> allowed values`` from the repository's VERBATIM copy of the portal vocabulary at
+    the commit the local export validates against (``schema_proposal_rules.PORTAL_SNAPSHOT_FILE``,
+    ``a1cb1c8`` = ``portal.PINNED_COMMIT``; a test pins the two together and, when the pinned validator is
+    installed, pins the copy byte for byte to its ``data/vocabulary.json``). ``None`` when it cannot be read.
+
+    A FILE IN THE REPOSITORY, never the installed validator: eligibility is stored in bundle.json and
+    re-derived by every reader, so it must not depend on what a machine happens to have installed."""
+    from ..schema_proposal_rules import PORTAL_SNAPSHOT_FILE
+
+    try:
+        vocab = json.loads(Path(PORTAL_SNAPSHOT_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    out: dict[str, tuple] = {}
+    for section in vocab.values() if isinstance(vocab, Mapping) else ():
+        if not isinstance(section, Mapping):
+            continue
+        for key, entry in section.items():
+            if (key not in _PORTAL_UNCHECKED_CATEGORIES and isinstance(entry, Mapping)
+                    and isinstance(entry.get("values"), list) and entry["values"]):
+                out[key] = tuple(entry["values"])
+    return out
+
+
+def allowed_values(path: str | None) -> list | None:
+    """THE values a field takes, or ``None`` when no fixed list closes it — the ONE source for what is
+    OFFERED (``questions`` ``allowed_values`` / ``field_allowed_values``, the template's and the local web
+    screen's ``rule_for_path``) and what is CHECKED (:func:`value_problem`, so ``decide`` and eligibility).
+
+    The list the EXPORT validates against: ``isaac bundle export`` gates on the portal's pinned schema
+    (``a1cb1c8``) AND the portal's own ``validate_record_full``, whose vocabulary layer refuses a string
+    off the vocabulary list for its path. At the pinned commit every such list equals the pinned schema's
+    ``enum`` where it has one (a test pins this against the installed validator), so the list is the
+    pinned vocabulary's entry for ``path`` and, for a path the vocabulary has none for, the vendored
+    schema's ``enum`` (which equals the pinned schema's there). The vendored v1.05 schema alone is the
+    WEBSITE's schema, reported for information only: its narrower lists (no ``EPR`` technique, no
+    ``not_reported`` cell type) gate nothing a local export writes."""
+    if not path:
+        return None
+    vocab = _pinned_vocabulary()
+    if vocab is not None and path in vocab:
+        return list(vocab[path])
+    node = _schema_node(path)
+    enum = node.get("enum") if isinstance(node, Mapping) else None
+    return list(enum) if isinstance(enum, list) else None
+
+
+@lru_cache(maxsize=1)
+def _list_moved_paths() -> frozenset[str]:
+    """Paths whose :func:`allowed_values` differ from the vendored schema's ``enum`` (or which only the
+    pinned vocabulary closes): an older build checked them against the vendored ``enum`` alone, so a
+    value stored there may be eligible now and was not, or the reverse (:func:`allowed_list_rederivations`)."""
+    out = set()
+    for path in (_pinned_vocabulary() or {}):
+        node = _schema_node(path)
+        enum = node.get("enum") if isinstance(node, Mapping) else None
+        if not isinstance(enum, list) or list(enum) != allowed_values(path):
+            out.add(path)
+    return frozenset(out)
+
+
+def allowed_list_rederivations(bundle: Mapping) -> list[dict]:
+    """Scientist-confirmed values whose STORED eligibility differs from this build's ONLY because the
+    allowed values of their field are now the export target's list (:func:`allowed_values`), not the
+    vendored schema's ``enum`` alone: e.g. ``EPR`` for ``system.technique`` (eligible now), or a sample
+    form off the portal's list (not eligible now). Same shape as :func:`stale_eligibility`'s entries.
+    Cheap — no re-derivation: on those paths eligibility is exactly "confirmed, a value, written, and
+    :func:`value_problem` finds nothing"."""
+    moved = _list_moved_paths()
+    if not moved:
+        return []
+    writable = _writable_paths()
+    decision_of = None
+    out = []
+    for kind, section, key in (("candidate", "candidates", "candidate_id"), ("missing_value", "missing_values", "value_id")):
+        for obj in bundle.get(section) or ():
+            path = obj.get("target_field_path")
+            if path not in moved or path not in writable or obj.get("value_state") != STATE_SCIENTIST_CONFIRMED:
+                continue
+            if decision_of is None:
+                decision_of = _decisions_by_target(bundle.get("scientist_decisions") or ())
+            d = candidate_decision(bundle, obj, decision_of) if kind == "candidate" else decision_of.get((kind, obj[key]))
+            value = final_value(obj.get("value") if kind == "candidate" else None, d, obj.get("readings"))
+            if value is None:
+                continue
+            before = bool((obj.get("eligibility_for_official_record") or {}).get("eligible"))
+            now = value_problem(path, value) is None
+            if before == now:
+                continue
+            out.append({"kind": kind, "id": obj[key], "target_field_path": path, "run_id": obj.get("run_id"),
+                        "value_state": STATE_SCIENTIST_CONFIRMED, "eligible_before": before, "eligible_now": now,
+                        "decision_id": (d or {}).get("decision_id"),
+                        "reason": (f"this build checks {path} against the list the export is validated against (the "
+                                   "portal's pinned vocabulary), not the website schema's narrower one: "
+                                   + (f"{value!r} is on it, eligible now" if now else
+                                      f"{value!r} is not on it, not eligible now — answer the field again with one of "
+                                      "its allowed values"))[:600]})
+    return out
 
 
 def _schema_node(path: str) -> Mapping | None:
@@ -1086,10 +1207,11 @@ def value_problem(path: str, value: Any) -> str | None:
     """Why ``value`` cannot stand at ``path`` (review L3), or ``None``.
 
     The ``*_utc`` rule (a zoned ISO instant — a local time with no zone is refused,
-    the engine's own ``is_zoned_utc_value``), then the vendored schema's own ``enum``
-    and ``type`` at that path, read at runtime. An open namespace the schema does not
-    declare gets no check, and none is invented. FAILS CLOSED: when the vendored schema cannot be
-    read, every value has a problem — nothing is eligible against a schema nobody checked.
+    the engine's own ``is_zoned_utc_value``), then the field's :func:`allowed_values` (the list the
+    export validates against — the same list every question and form offers) and the vendored
+    schema's ``type`` at that path, read at runtime. An open namespace the schema does not
+    declare gets no check, and none is invented. FAILS CLOSED: when the vendored schema or the pinned
+    vocabulary cannot be read, every value has a problem — nothing is eligible against a list nobody checked.
     """
     from .. import historical_import as hist
 
@@ -1102,12 +1224,15 @@ def value_problem(path: str, value: Any) -> str | None:
     if not isinstance(_vendored_schema(), Mapping):
         return (f"the vendored official schema could not be read, so {value!r} cannot be checked against "
                 f"{path}; nothing is eligible until it can")
+    if _pinned_vocabulary() is None:
+        return (f"the pinned portal vocabulary could not be read, so {value!r} cannot be checked against "
+                f"{path}; nothing is eligible until it can")
+    allowed = allowed_values(path)
+    if allowed is not None and value not in allowed:
+        return f"{value!r} is not one of the schema's allowed values for {path}"
     node = _schema_node(path)
     if node is None:
         return None
-    enum = node.get("enum")
-    if isinstance(enum, list) and value not in enum:
-        return f"{value!r} is not one of the schema's allowed values for {path}"
     declared = node.get("type")
     types = declared if isinstance(declared, list) else [declared] if isinstance(declared, str) else []
     if types and not any(_JSON_TYPES.get(t, lambda v: True)(value) for t in types):
@@ -3410,15 +3535,34 @@ LOCAL_WRITE_PATH_REASON = (
 )
 
 
-def _local_plain_reason(candidate) -> str | None:
+def _hosted_technique_reason() -> str | None:
+    """The engine's short reason for an acquisition-method reading — written for the HOSTED website
+    ("yours to choose in Add to Experiment", a step this local import does not have)."""
+    from ..bl15 import evidence as ev
+    from ..bl15 import mapping as mp
+
+    return mp.CONCEPT_SUMMARIES.get(ev.CONCEPT_ACQUISITION_METHOD)
+
+
+#: The same reason in THIS import's words: the technique is chosen here, by answering its question.
+LOCAL_TECHNIQUE_REASON = ("The files name a method, not one of the schema's techniques, so the technique is yours "
+                          "to choose here, from its allowed values.")
+
+
+def _local_summary(path: str | None, summary: str | None) -> str | None:
+    """The short reason a LOCAL question shows, in this import's own words. The hosted website's
+    wording is unchanged (the engine's text, kept whole in ``not_proposable_reason``)."""
     from .. import historical_import as hist
 
-    reason = _plain_reason(candidate)
-    if reason == hist.PLAIN_REASON_NO_WRITE_PATH and (
-        candidate.target_field_path in UPSTREAM_TARGET_FIELDS or candidate.target_field_path in LOCAL_ANSWER_FIELDS
-    ):
+    if summary == hist.PLAIN_REASON_NO_WRITE_PATH and (path in UPSTREAM_TARGET_FIELDS or path in LOCAL_ANSWER_FIELDS):
         return LOCAL_WRITE_PATH_REASON
-    return reason
+    if summary is not None and summary == _hosted_technique_reason():
+        return LOCAL_TECHNIQUE_REASON
+    return summary
+
+
+def _local_plain_reason(candidate) -> str | None:
+    return _local_summary(candidate.target_field_path, _plain_reason(candidate))
 
 
 def _value_id_order(path: str) -> tuple[int, str]:
@@ -3688,12 +3832,14 @@ def stale_eligibility(bundle: Mapping) -> list[dict]:
     """Values whose STORED eligibility differs from this build's derivation ONLY because this
     build can write a field the storing build could not (:data:`WRITABLE_ADDED_IN`), or because an
     older build stored a non-finite answer as eligible, which this build never does. Each with
-    its id, path, state, before/now and why. Empty for a bundle of this format version holding no
-    non-finite answer."""
+    its id, path, state, before/now and why. Also every value :func:`allowed_list_rederivations`
+    names (its field's allowed values are now the export target's list). Empty for a bundle of this
+    format version holding no non-finite answer and no such value."""
     added = _added_since(bundle.get("format_version"))
     has_non_finite = next(iter(non_finite_numbers(bundle.get("scientist_decisions") or ())), None) is not None
+    moved = allowed_list_rederivations(bundle)
     if not added and not has_non_finite:
-        return []
+        return moved
     expected = apply_derivations(json.loads(json.dumps(bundle)))
     decision_of = _decisions_by_target(bundle.get("scientist_decisions") or ())
     out = []
@@ -3722,7 +3868,8 @@ def stale_eligibility(bundle: Mapping) -> list[dict]:
                 out.append({"kind": kind, "id": obj[key], "target_field_path": path, "run_id": obj.get("run_id"),
                             "value_state": e["value_state"], "eligible_before": before, "eligible_now": now,
                             "decision_id": (d or {}).get("decision_id"), "reason": reason[:600]})
-    return out
+    named = {(x["kind"], x["id"]) for x in out}
+    return out + [x for x in moved if (x["kind"], x["id"]) not in named]
 
 
 def changes_since(version: str | None) -> list[str]:
@@ -3794,14 +3941,13 @@ def refresh_local_write_summaries(bundle: dict) -> int:
     """A candidate whose short reason is the engine's "this build cannot write it yet" while this
     local build DOES write its path gets :data:`LOCAL_WRITE_PATH_REASON` (the engine's full text
     stays in ``not_proposable_reason``). The import does this; an older bundle gets it on save."""
-    from .. import historical_import as hist
-
-    local = set(UPSTREAM_TARGET_FIELDS) | set(LOCAL_ANSWER_FIELDS)
     n = 0
     for c in bundle.get("candidates") or ():
         sb = c.get("state_basis") or {}
-        if c.get("target_field_path") in local and sb.get("not_proposable_summary") == hist.PLAIN_REASON_NO_WRITE_PATH:
-            sb["not_proposable_summary"] = LOCAL_WRITE_PATH_REASON
+        summary = sb.get("not_proposable_summary")
+        local = _local_summary(c.get("target_field_path"), summary)
+        if local != summary:
+            sb["not_proposable_summary"] = local  # also the hosted "Add to Experiment" wording (LOCAL_TECHNIQUE_REASON)
             n += 1
     return n
 

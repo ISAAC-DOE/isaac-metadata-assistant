@@ -137,9 +137,26 @@ def save_bundle(bundle_dir: Path, bundle: dict) -> None:
     # bundle is raised with a format_upgrades entry naming it, and gets no current set-point slots
     # until re-imported. 1.8.0 raises the bounds of the append-only logs (bundle.CHANGES_ADDED_IN): a
     # 1.7.0-or-older bundle is raised with a format_upgrades entry saying so; no eligibility moves.
-    to_version =(B.FORMAT_VERSION if "processed_outputs" in bundle
+    to_version = (B.FORMAT_VERSION if "processed_outputs" in bundle
                   else "1.1.0" if stored_version in ("1.0.0", "1.1.0") else stored_version)
-    if B.needs_format_upgrade(bundle):
+    upgrading = B.needs_format_upgrade(bundle)
+    if not upgrading and B.allowed_list_rederivations(bundle):
+        # A FIELD'S ALLOWED VALUES ARE NOW THE EXPORT TARGET'S LIST (bundle.allowed_values): a value an
+        # older build judged against the vendored enum alone is re-derived by this save — and logged in
+        # `eligibility_rederived`, read from the bundle AS STORED (the cheap check above runs on the
+        # in-memory copy, which may already hold this change's own decision), never silently.
+        stored_l = None
+        if B.bundle_path(Path(bundle_dir)).is_file():
+            try:
+                stored_l = B.load_bundle(Path(bundle_dir))
+            except B.BundleInvalid:
+                stored_l = None
+        if stored_l is not None:
+            live = {("candidate", c["candidate_id"]) for c in bundle.get("candidates") or ()} | {
+                ("missing_value", m["value_id"]) for m in bundle.get("missing_values") or ()}
+            B.record_rederivation(bundle, [x for x in B.allowed_list_rederivations(stored_l) if (x["kind"], x["id"]) in live],
+                                  to_version=to_version)
+    if upgrading:
         stored = None
         if B.bundle_path(Path(bundle_dir)).is_file():
             try:
@@ -607,8 +624,9 @@ def _decided_value_problem(bundle: Mapping, kind: str, obj: Mapping, decision: s
     """Why a ``confirm``/``correct`` would store a value its official field refuses, or ``None``.
 
     The SAME check eligibility makes (:func:`bundle.eligibility_for_official_record`: a path this
-    build writes, then :func:`bundle.value_problem` — the ``*_utc`` rule, the vendored schema's
-    ``enum`` and ``type``), made BEFORE anything is recorded. Without it an off-list answer was
+    build writes, then :func:`bundle.value_problem` — the ``*_utc`` rule, the field's
+    :func:`bundle.allowed_values` (the list every question offers, which the export validates against)
+    and the vendored schema's ``type``), made BEFORE anything is recorded. Without it an off-list answer was
     stored as ``scientist_confirmed`` but never eligible, and its question closed: the record stayed
     blocked with nothing left to ask. A value on a path this build does not write stays evidence and
     is not checked (eligibility does not check it either); when the vendored schema cannot be read,
@@ -634,7 +652,7 @@ def _decided_value_problem(bundle: Mapping, kind: str, obj: Mapping, decision: s
     if problem is None:
         return None
     node = B._schema_node(path) or {}
-    allowed = node.get("enum") if isinstance(node.get("enum"), list) else None
+    allowed = B.allowed_values(path)  # the same list every question offers (bundle.allowed_values)
     hint = ""
     if allowed:
         hint = f" Allowed values for {path}: {', '.join(json.dumps(a) if not isinstance(a, str) else a for a in allowed)}."
@@ -773,7 +791,21 @@ def decide_question(
         return (result, bundle_version(bundle_dir)) if with_version else result
 
 
-def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, edge, positions, value=None, **_rest):
+#: QC statuses that say something is WRONG with the measurement: approving with one needs ``--qc-note``
+#: saying what and why (the historical-import skill asks for it; a bare "compromised" tells a reader nothing).
+QC_STATUSES_NEEDING_A_NOTE = ("compromised", "failed")
+
+
+def qc_note_problem(qc_status: str | None, qc_note: str | None) -> str | None:
+    """Why a QC status cannot be recorded without a note, or ``None`` (one rule for the CLI and the local screen)."""
+    if qc_status in QC_STATUSES_NEEDING_A_NOTE and not (qc_note or "").strip():
+        return (f"--qc-status {qc_status} says something is wrong with the measurement, so it needs --qc-note "
+                f"\"<what is {qc_status} and why>\" — the scientist's own words. Nothing was recorded.")
+    return None
+
+
+def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, edge, positions, value=None,
+                      qc_note=None, **_rest):
     """The checks of :func:`decide` that need no bundle. Returns ``positions`` normalised."""
     problem = B.decider_name_problem(by)
     if problem:
@@ -788,6 +820,9 @@ def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, ed
             raise MutationRefused(f"--qc-status must be one of {', '.join(allowed)} (measurement.qc.status).")
         if decision != "approve":
             raise MutationRefused("--qc-status goes with --decision approve on a processing result.")
+        problem = qc_note_problem(qc_status, qc_note)
+        if problem:
+            raise MutationRefused(problem)
     if decision in ("approve_calibration", "set_absorber"):
         if not B.is_absorber_element(element) or not B.is_absorber_edge(edge):
             raise MutationRefused(f"{decision} needs --element (e.g. Ir) and --edge (K, L1-L3, M1-M5).")
@@ -858,7 +893,7 @@ def record_decision(
     is checked before any entry is appended, so a refusal leaves ``bundle`` unchanged."""
     positions = _decide_arguments(
         target_ids=target_ids, decision=decision, by=by, orcid=orcid, qc_status=qc_status,
-        element=element, edge=edge, positions=positions, value=value,
+        element=element, edge=edge, positions=positions, value=value, qc_note=qc_note,
     )
     bulk = len(target_ids) > 1
 

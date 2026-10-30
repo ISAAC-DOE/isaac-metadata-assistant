@@ -20,7 +20,7 @@
 | Process spectra (draft protocol) | `<isaac> process <bundle> --source <folder> [--group <id> ...] [--no-athena] [--params-file <json>]` (writes `processing/`; exit 2 and nothing written without a readable `--source`; `--group` redoes only the named groups and keeps the others, `kept_other_groups`) |
 | Compose drafts | `<isaac> bundle build-records <bundle>` (never `--test-marker`: self-tests only) |
 | All gates, per draft | `<isaac> bundle validate <bundle>` |
-| Write passing records | `<isaac> bundle export <bundle> --out <records>` (safe to repeat: an unchanged record keeps its id; a changed one gets a new id and the old one moves to `<records>/isaac-export/superseded/`) |
+| Write passing records | `<isaac> bundle export <bundle> --out <records>` (safe to repeat: an unchanged record keeps its id; a changed one gets a new id and the old one moves to `<records>/isaac-export/superseded/`; one whose group is no longer exportable moves to `<records>/isaac-export/withdrawn/`) |
 | What would be uploaded | `<isaac> bundle upload <records> --dry-run [--portal-url <url>]` |
 | Values outside the vocabulary, as draft term proposals | `<isaac> bundle propose-terms <bundle> [--out <file.json>] [--force]` (prints parser values, so marks them exposed; sends nothing; each draft needs a description written by a person) |
 | Pull text and images out of a document | `python -m isaac_api.local_import.extract <file> --out <dir> [--root <folder>]` or `--from-bundle <bundle>/unread_files.json --root <folder> [--limit N]` |

@@ -509,7 +509,9 @@ def test_accept_on_a_confirm_question_states_every_target_value_not_only_the_des
     monkeypatch.setattr(LB, "DESCRIBE_TARGETS", 1)
     body = client.get("/api/local-bundles/alpha/questions", params={"kind": "confirm_value"}).json()
     data = M.load(root / "alpha")
-    valued = [c for c in data["candidates"] if c.get("value") is not None][:5]
+    first = next(c for c in data["candidates"] if c.get("value") is not None)["target_field_path"]
+    # one field's candidates (a confirm question is about ONE field, and only values that field takes are offered)
+    valued = [c for c in data["candidates"] if c.get("value") is not None and c["target_field_path"] == first][:5]
     built = {"kind": "confirm_value", "scope": "experiment", "target_field_path": valued[0]["target_field_path"],
              "targets": [{"kind": "candidate", "id": c["candidate_id"]} for c in valued],
              "per_scope_targets": {"experiment": [c["candidate_id"] for c in valued]}, "hints": []}
@@ -751,6 +753,40 @@ def test_a_read_only_bundle_is_a_clear_refusal_not_a_server_error(root):
             assert str(root) not in r.text and os.path.realpath(root) not in r.text
     finally:
         os.chmod(root / "alpha", 0o755)
+
+
+@pytest.mark.skipif(os.name != "posix" or (hasattr(os, "geteuid") and os.geteuid() == 0), reason="needs POSIX permissions, not root")
+def test_an_unopenable_lock_file_lists_that_bundle_as_not_accessible_and_the_others_still_list(root):
+    """`mutations.locked` refuses a lock file it cannot open safely (here: read-only) with MutationRefused, not
+    OSError. One such bundle must not take the whole list down (it was a 500 and `beta` vanished), and its own
+    routes answer a clear 409 — no path. (Reads take the lock too, as they always have: it was opened for writing
+    before this build, and the questions read records exposures.)"""
+    c = TestClient(create_app(), raise_server_exceptions=False, **LOCAL)
+    env = _question(root / "alpha", lambda q: q["kind"] == "missing_value" and q["target_field_path"] == "context.environment")
+    version = M.bundle_version(root / "alpha")
+    lock = root / "alpha" / ".bundle.lock"
+    lock.touch()
+    os.chmod(lock, 0o444)
+    try:
+        r = c.get("/api/local-bundles")
+        assert r.status_code == 200, r.text
+        by_name = {b["name"]: b for b in r.json()["bundles"]}
+        assert by_name["alpha"]["not_accessible"] is True and by_name["alpha"]["check"]["status"] == "INVALID"
+        assert "permission is denied" in by_name["alpha"]["check"]["errors"][0]
+        assert by_name["beta"]["check"]["status"] != "INVALID" and not by_name["beta"].get("not_accessible")
+        for method, path, body in (("get", "/api/local-bundles/alpha/progress", None),
+                                   ("get", "/api/local-bundles/alpha/questions", None),
+                                   ("post", f"/api/local-bundles/alpha/questions/{env['question_id']}/answer",
+                                    {"decision": "correct", "value": "ex_situ", "by": BY, "expected_version": version})):
+            resp = getattr(c, method)(path, **({"json": body} if body else {}))
+            assert resp.status_code == 409, (path, resp.status_code, resp.text)
+            assert "lock file" in resp.json()["message"] and "Nothing was" in resp.json()["message"]
+            assert "permission is denied" in resp.json()["message"]
+            assert str(root) not in resp.text and os.path.realpath(root) not in resp.text
+        assert c.get("/api/local-bundles/beta/questions").status_code == 200
+        assert M.bundle_version(root / "alpha") == version  # nothing was written
+    finally:
+        os.chmod(lock, 0o644)
 
 
 def test_a_bundle_json_that_vanishes_after_the_check_is_not_reported_by_absolute_path(client, root, monkeypatch):

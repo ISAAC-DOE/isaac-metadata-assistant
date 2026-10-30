@@ -228,7 +228,8 @@ Enforced by the builder (refuse, or clamp visibly and count) and by the validato
   needs_review`, never confirmed); run `shares_file_name_with`, and a conflict of kind
   `same_file_name_different_folders` for acquisitions sharing a name in different folders.
 - Eligibility additionally applies the target field's own checks: a `*_utc` value must be a
-  zoned instant; the vendored schema's `enum` and `type` at that path.
+  zoned instant; the field's allowed values (`bundle.allowed_values`, §26) and the vendored schema's
+  `type` at that path.
 - The validator re-derives `review_status`/`extracted_state` from each candidate's own
   facts, refuses a decision-free value no witness states and no recorded normalisation
   produced, requires a `conflicts[]` entry for every disagreement, and recomputes `counts`
@@ -1167,10 +1168,10 @@ anything `scientist_confirmed`.
   - **`context.electrochemistry.control_mode` is answerable** (`bundle.LOCAL_ANSWER_FIELDS`,
     `bundle.CONTROL_MODE_PATH`; format 1.5.0, §9 "What 1.5.0 added"). No parser states it, so every
     run that becomes a record has a missing value for it. Nothing is defaulted.
-    - **Allowed values are the official schema's own `enum`**, read at runtime by
-      `bundle.value_problem` (the vendored schema; the pinned portal schema declares the same enum
-      and the questions read the export-target schema). No list is written in this repository, so a
-      schema refresh changes what is accepted. `decide` stores what it is given: an answer outside
+    - **Allowed values are the export target's list** (`bundle.allowed_values`, §26: the portal's
+      pinned vocabulary copy, which for this field equals the vendored and pinned schemas' `enum`),
+      read at runtime by `bundle.value_problem`. No list is transcribed into code, so a refresh of the
+      pinned copy changes what is accepted. `decide` stores what it is given: an answer outside
       the enum (e.g. `Potentiostatic`, `OCV`) is `scientist_confirmed` but not eligible ("is not one
       of the schema's allowed values"), never composed, and listed under `not_composed`. If the
       vendored schema cannot be read, `value_problem` refuses every value (fail closed): nothing is
@@ -1418,9 +1419,10 @@ citations, and writes one **draft proposal per term** in the website's own Schem
 portal format. Everything happens on this machine; **nothing is sent** and no network call is
 made. Code: `apps/api/isaac_api/local_import/propose_terms.py`.
 
-**Which lists.** A field is judged by the vendored schema's `enum` at its path (exactly what
-`bundle.value_problem` refuses, so a confirmed value off it carries the eligibility reason "the
-value does not fit the official field") and by the portal vocabulary snapshot's term list for it
+**Which lists.** A field is judged by the vendored schema's `enum` at its path (the WEBSITE's list;
+since §26 `bundle.value_problem` refuses outside the export target's list instead, so a value on the
+portal's list but not the vendored enum is eligible, and is reported here as "the schema lags the
+portal", never drafted) and by the portal vocabulary snapshot's term list for it
 (`apps/api/isaac_api/data/portal_vocabulary_a1cb1c8.json`, the list the portal checks a proposed
 term against). Both are read at run time; a field with neither is never judged. `missing_from`
 says which list lacks each term.
@@ -1477,13 +1479,16 @@ because no parser value was printed.
 
 - **`decide` refuses a value its field refuses** (`mutations._decided_value_problem`, shared by the CLI and
   the local questions screen). A `confirm`/`correct` on a candidate, missing value or conflict whose value
-  eligibility would reject (`bundle.value_problem`: the vendored schema's `enum` and `type`, the `*_utc`
+  eligibility would reject (`bundle.value_problem`: the field's allowed values — since §26 the export
+  target's list, `bundle.allowed_values` — the vendored schema's `type`, the `*_utc`
   rule, non-finite numbers) on a path this build writes is refused, exit 2, naming the allowed values (or
   the `--json` hint for a number); nothing is written, and a bulk answer is all-or-nothing. Before, such a
   value was stored `scientist_confirmed`, was never eligible, and its question closed: the record stayed
   blocked with nothing left to ask. A bundle an older build stored with one still loads and writes;
   `bundle.value_unfit_reason` identifies it, and a later `correct` with an allowed value is recorded.
-  (Asking such values again is `questions.py`'s: a value whose `value_unfit_reason` is set is open.)
+  Asking such values again is `questions.py`'s, through ONE definition: `bundle.unusable_answer_reason`
+  (a scientist-confirmed value that is not eligible on a path an answer reaches — an unfit value, of
+  which `value_unfit_reason` is the narrower view, or no value) is open again under its question's id.
 - **A replay is "unchanged" only when it is the decision that governs now.** A candidate's value is
   governed by the later of its own decision and its conflict's (`bundle.candidate_decision`). After
   `correct` cand → A, `confirm` conflict → B, a second `correct` cand → A is recorded (it changes the
@@ -1502,7 +1507,8 @@ because no parser value was printed.
   `descriptors.outputs` come only from an approved processing result; until one is approved they are in
   `missing_required` (and `missing_from_processing`), the verdict is `incomplete`, and `processing_fix`
   / the summary give the command (`isaac bundle decide <dir> --target <result id> --decision approve
-  --qc-status <value> --by "<name>"`, or `isaac process <dir>` first when there is no result). Before,
+  --qc-status <value> --by "<name>"`, or `isaac process <dir> --source <the beamtime folder you imported>`
+  first when there is no result). Before,
   the verdict was `invalid_official` with "Missing required values: none".
 - **Re-export reuses the record id.** `isaac bundle export` keeps `<out>/isaac-export/index.json`
   (`isaac.local-export-index`: per bundle id and group id, the record id, the `content_sha256` of the
@@ -1510,6 +1516,62 @@ because no parser value was printed.
   that reads `<out>/*.json` as the records sees it. An unchanged group is
   rewritten under the same id and time, byte for byte (`export: unchanged`). A changed group gets a new
   id; the record it replaces is moved to `<out>/isaac-export/superseded/` (kept, never in an upload plan) and the row
-  says so (`export: replaced`, `replaces_record_id`). A group exported before that is now refused lists
-  `previously_exported_record_id`. `upload --dry-run` lists neither. Records exported before the
+  says so (`export: replaced`, `replaces_record_id`). A group exported before that is now refused is
+  WITHDRAWN (§26): its record moves to `<out>/isaac-export/withdrawn/`. `upload --dry-run` lists neither. Records exported before the
   index existed are not recognised (no group id is in a record), so export to a fresh `--out` once.
+
+## 26. Audit round 2 (2026-10-30) — no format bump
+
+- **One list of allowed values: what the export validates against** (`bundle.allowed_values`). The
+  local export gates on the portal's pinned schema (`a1cb1c8`) AND the portal's own
+  `validate_record_full`, whose vocabulary layer refuses a string off the vocabulary list for its path.
+  At the pinned commit every such list equals the pinned schema's `enum` where it has one, so a field's
+  list is the pinned vocabulary's entry for its path (read from the repository's verbatim copy,
+  `apps/api/isaac_api/data/portal_vocabulary_a1cb1c8.json`, never from the installed validator, so
+  stored eligibility does not depend on the machine) and, where the vocabulary has none, the vendored
+  schema's `enum`. It is the ONE source for what is offered (questions' `allowed_values` and
+  `field_allowed_values`, the template's and the local screen's `rule_for_path`) and what is checked
+  (`bundle.value_problem`, so `decide` and eligibility). Before, offering read the export target and
+  checking read the vendored v1.05 enum: `system.technique` listed `EPR` and `decide` refused it, the
+  cell type listed `not_reported` and refused it, and the sample form, material provenance, reaction
+  drive and catalysis listed the portal's words while `decide` accepted anything. A test pins the copy
+  to `portal.PINNED_COMMIT` and, when the pinned validator is installed, to its file byte for byte and
+  every writable path's list to its schema `enum` intersected with its vocabulary list.
+- **Values an older build judged by the vendored list alone** (`bundle.allowed_list_rederivations`) are
+  STALE, not INVALID: `check` lists each (eligible before → now, and why); the next write re-derives
+  them and logs each in `eligibility_rederived` (no format change). E.g. a confirmed `EPR` becomes
+  eligible; a confirmed sample form off the portal's list becomes not eligible and is asked again.
+- **Confirm is offered only where `decide` takes it.** A `confirm_value` target whose extracted value
+  its field refuses (e.g. an older build's confirm of it, now asked again) is answered like a value-less
+  one: `allowed_decisions` are `correct`, `reject`, `defer`. A MIXED question (some targets value-less or
+  unfit) keeps `confirm` for the scopes where every target can be confirmed (`confirmable_scopes`) and
+  its command names `--only <scope>`, since `decide` refuses a whole answer when one target cannot be
+  confirmed; `targets_with_an_unfit_value` counts the unfit ones. The local screen's Accept
+  (`distinct_extracted_values`) lists only values `decide` would confirm, and is empty when no
+  whole-question confirm is offered; a per-group Accept is offered only for a fit value in a
+  confirmable scope.
+- **Same value, not text** (`records.same_value`). A quote's `relation` and a confirmation's
+  `provenance` compare numbers numerically (`1` = `1.0`, the parser's reading in the unit it normalised
+  to), a `*_utc` field's zoned instants as instants (`...Z` = `...+00:00`), and strings exactly. A
+  `correct` whose value is the parser's is a `scientist_confirmation`, with no `previous_value`.
+- **Withdrawn exports.** A group exported before that is not exportable now — refused by a gate, or no
+  longer a scientist-confirmed group — has its record moved to `<out>/isaac-export/withdrawn/` (kept,
+  never in an upload plan; nothing replaces it, so it is not "superseded"), its index entry marked
+  `withdrawn_utc`, and the export result lists it under `withdrawn` (and on its `refused` row:
+  `withdrawn`, `withdrawn_record_id`, `withdrawn_files`). If it was uploaded already, the portal still
+  holds it. Exporting the same content later restores it under the same id (`restored_from_withdrawn`).
+  An index naming anything that is not an ISAAC record id is refused whole, before any file is touched.
+- **A QC status that says something is wrong needs a note.** `decide --qc-status compromised|failed`
+  without `--qc-note` is refused, exit 2, nothing written (`mutations.qc_note_problem`). The local screen
+  records no processing approval (approval stays a command-line act), so there is nothing to enforce there.
+- **The nearest group** (`minimum_for_one_group`) names only the decisions still to make (not "confirm
+  the group" once confirmed, not "approve its processing result" once one is approved), is never a group
+  with nothing left (counted in `groups_with_nothing_left`; `group_id: null` with a statement when every
+  group is done), and with `--scope group:<id>` is that group.
+- **Wording.** The technique question says the technique is chosen here, from its allowed values (the
+  engine's hosted text, "in Add to Experiment", is unchanged on the website and replaced on save in an
+  older bundle). The schema-drift note says an unknown temperature does not block the local export. The
+  processing remedy names `isaac process <bundle_dir> --source <the beamtime folder you imported>`.
+  `process` on a bundle whose recorded local root is a ZIP says it is a ZIP and to pass the unzipped
+  folder as `--source`. A lock file that cannot be opened safely makes THAT bundle "not accessible" in
+  the local screen's list (the others still list) and a 409 on its routes, never a 500.

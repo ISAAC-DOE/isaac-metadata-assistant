@@ -52,7 +52,7 @@ Ask: approve, reject, or needs changes (with a note):
 `decide --target <result_id> --decision approve --qc-status <word> [--qc-note "<why>"] --by "<name>"`, or
 `decide --target <result_id> --decision reject|needs_changes --note "<why>" --by "<name>"`. Rules:
 
-- **QC status is the scientist's.** Approving also needs `--qc-status <word>` (and `--qc-note` when the status says something is compromised or failed). The processing verdict (`pass`/`warn`/`fail`) is shown to help them choose; it is never turned into a status for them, and `warn` never auto-maps. Offer the allowed words from the vocabulary and the flags that bear on the choice.
+- **QC status is the scientist's.** Approving also needs `--qc-status <word>` (and `--qc-note` when the status says something is compromised or failed: `decide` refuses those without one). The processing verdict (`pass`/`warn`/`fail`) is shown to help them choose; it is never turned into a status for them, and `warn` never auto-maps. Offer the allowed words from the vocabulary and the flags that bear on the choice.
 - **Approval is the scientist's**, per group. A `warn` or `fail` is shown prominently and never
   approved on your suggestion. A rejected group yields no series and stays incomplete.
 - The protocol is a **draft until Oscar and Angel review it**. Say so each time you ask.

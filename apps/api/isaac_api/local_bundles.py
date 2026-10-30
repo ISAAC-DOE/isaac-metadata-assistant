@@ -372,6 +372,11 @@ def bundle_lock(bundle_dir: Path):
     stack = ExitStack()
     try:
         stack.enter_context(M.locked(bundle_dir))
+    except M.MutationRefused as exc:
+        # `mutations.locked` refuses a lock file it cannot open safely (a link, no permission, a read-only
+        # folder) with a path-free reason; here that is THIS bundle not being accessible, never a 500 — and
+        # in the bundle list, one such bundle is listed as not accessible while the others still list.
+        raise BundleNotAccessible(f"Bundle {Path(bundle_dir).name!r}: {exc}") from None
     except OSError as exc:
         raise BundleNotAccessible(f"Bundle {Path(bundle_dir).name!r}: its {LOCK_FILE} cannot be opened "
                                   f"({type(exc).__name__}: {exc.strerror or 'refused'}).") from exc
@@ -773,6 +778,7 @@ def describe_question(bundle: Mapping, q: Mapping, *, folder: str,
                       idx: BundleIndex | None = None) -> tuple[dict, list[tuple[str, str]]]:
     """``(display, shown)`` — what the screen shows beside one consolidated question, and the
     candidates whose parser values it shows (each recorded as an exposure before it is returned)."""
+    from .local_import import bundle as B
     from .local_import import suggestions as S
     from .local_import import template as T
 
@@ -782,6 +788,8 @@ def describe_question(bundle: Mapping, q: Mapping, *, folder: str,
     shown: list[tuple[str, str]] = []
     kind_of = {t["id"]: t["kind"] for t in q.get("targets") or ()}
     per_scope_values: list[set[str]] = []
+    path_q = q.get("target_field_path")
+    writable = B._writable_paths()
 
     def runs_of_target(t: Mapping) -> list[str]:
         k, tid = t.get("kind"), t.get("id")
@@ -818,9 +826,15 @@ def describe_question(bundle: Mapping, q: Mapping, *, folder: str,
             entry["own_suggestions"] = own[:5]
             entry["own_suggestions_total"] = len(own)
             agreement = per_target_agreement(idx, ids, kind_of, scope)
-            entry.update(mixed=agreement["mixed"], has_unanimous_value=agreement["has_unanimous_value"],
-                         unanimous_value=agreement["unanimous_value"],
-                         unanimous_from_own_files=agreement["unanimous_from_own_files"],
+            # THE PER-GROUP ACCEPT IS OFFERED ONLY WHERE `decide` WOULD RECORD IT: the value fits its field
+            # (bundle.value_problem), and for a confirm every target of the scope can be confirmed (the
+            # question's confirmable_scopes) — `decide` refuses a whole answer when one target cannot be
+            acceptable = agreement["has_unanimous_value"] and (
+                q.get("kind") != "confirm_value" or scope in (q.get("confirmable_scopes") or ())) and (
+                not path_q or path_q not in writable or B.value_problem(path_q, agreement["unanimous_value"]) is None)
+            entry.update(mixed=agreement["mixed"], has_unanimous_value=acceptable,
+                         unanimous_value=agreement["unanimous_value"] if acceptable else None,
+                         unanimous_from_own_files=acceptable and agreement["unanimous_from_own_files"],
                          per_target=agreement["per_target"][:DESCRIBE_TARGETS] if len(ids) > 1 else [])
             if own:
                 per_scope_values.append({_value_key(o["value"]) for o in own})
@@ -859,11 +873,20 @@ def describe_question(bundle: Mapping, q: Mapping, *, folder: str,
 
     # a confirm_value question's distinct extracted values over EVERY target (not only the described
     # window), so "accept" says exactly what it confirms; each value counted is shown, so exposed
+    # ONLY WHAT `decide` WOULD CONFIRM (this list drives the screen's "Accept"): never an extracted value
+    # its field refuses, and NOTHING when the question offers no whole-question confirm — a value-less or
+    # unfit target makes `decide` refuse the whole answer, so then the person answers per group instead
     distinct: dict[str, dict] = {}
-    if kind == "confirm_value":
+    from .local_import import questions as Q
+
+    whole_confirm = ("confirm" in q.get("allowed_decisions", Q.ALLOWED_DECISIONS.get(kind or "", ()))
+                     and not q.get("targets_without_a_value") and not q.get("targets_with_an_unfit_value"))
+    if kind == "confirm_value" and whole_confirm:
         for t in targets:
             c = cands.get(t.get("id"))
             if c is None or c.get("value") is None:
+                continue
+            if path_q in writable and B.value_problem(path_q, c["value"]) is not None:
                 continue
             shown.append(("candidate", c["candidate_id"]))
             d = distinct.setdefault(_value_key(c["value"]), {"value": c["value"], "targets": 0})
@@ -1315,7 +1338,7 @@ def get_local_bundle_questions(
             display, more = describe_question(data, q, folder=bundle, idx=idx)
             shown += more
             out_questions.append({**q, "display": display})
-        minimum = Q.minimum_answers_for_one_group(payload, data)
+        minimum = Q.minimum_answers_for_one_group(payload, data, scope=scope)
         capture = capture_items(data)
         before = len(data.get("exposures") or ())
         for k, tid in shown:
