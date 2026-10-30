@@ -704,7 +704,7 @@ describe('the questions screen', () => {
     expect(css).toMatch(/\.li-accept\s*\{\s*white-space:\s*normal;\s*overflow-wrap:\s*anywhere;/);
     expect(css).toMatch(/\.li-choices \.btn\s*\{[^}]*overflow-wrap:\s*anywhere;/);
     expect(css).toMatch(/\.li-actions \.btn\s*\{[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;/);
-    expect(css).toMatch(/@media \(max-width: 560px\)\s*\{[^}]*\.li-table-groups thead\s*\{\s*display:\s*none;/);
+    expect(css).toMatch(/@media \(max-width: 720px\)\s*\{[^}]*\.li-table-groups thead\s*\{\s*display:\s*none;/);
   });
 
   it('a group whose runs disagree is never counted under one value, offered no whole-group accept, and shows each run', async () => {

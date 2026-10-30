@@ -68,7 +68,13 @@
   font-size: var(--font-size-meta);
   font-weight: var(--font-weight-semibold);
   white-space: nowrap;
+  max-width: 100%;
 }
+/* A chip inside a suggestion or a table cell says a sentence ("This group's own suggestion — not
+   confirmed"): it wraps there, so it never sets a column's minimum width. */
+.li-choices .li-chip,
+.li-table .li-chip,
+.li-meta .li-chip { white-space: normal; overflow-wrap: anywhere; }
 .li-question-text { margin: 0; line-height: var(--line-height-normal); overflow-wrap: anywhere; }
 
 .li-dl {
@@ -213,7 +219,7 @@
 
 /* The per-group table (P1): the run names lead each row, the group id is secondary, the action column's
    buttons wrap (a long value breaks inside its button; its full text is the button's name and title), and
-   the suggestion column takes the rest. Below 560px it stacks. */
+   the suggestion column takes the rest. Below 720px (a phone, or a laptop window at 200% zoom) it stacks. */
 .li-table-groups { table-layout: auto; }
 .li-col-group { min-width: 8rem; max-width: 18rem; font-weight: var(--font-weight-medium); }
 .li-run-names { display: block; overflow-wrap: anywhere; }
@@ -222,7 +228,7 @@
 .li-col-actions { min-width: 9rem; max-width: 16rem; }
 .li-accept { white-space: normal; overflow-wrap: anywhere; text-align: left; max-width: 100%; }
 .li-provenance { display: block; font-size: var(--font-size-meta); color: var(--text-muted); }
-@media (max-width: 560px) {
+@media (max-width: 720px) {
   .li-table-groups thead { display: none; }
   .li-table-groups,
   .li-table-groups tbody,
