@@ -147,3 +147,14 @@ New rules (a fallback channel, an already-normalised Athena curve, a skip reason
 a NEW result id. An earlier approval stays on the old result and never moves to the new curve: tell the
 scientist "this curve was re-made under a newer rule; please look at it again". A record exported
 before is replaced on the next export (the old one moves to `superseded/`); say so.
+
+## A changed processing setting (`--params-file`), only on the scientist's explicit choice
+
+After `needs_changes`, when the scientist names a different setting ("use I2 as the reference", "fit the
+post-edge from 150 eV"), write a JSON file in the notes folder beside the bundle, shaped
+`{"<section>": {"<key>": <value>}}` with sections and keys from the protocol defaults
+(`apps/api/isaac_api/local_import/processing/protocol.py`, `DEFAULT_PARAMS`: `channels`, `calibration`,
+`deglitch`, `merge`, `normalize`, `qc`, `athena`; each result's `params.json` shows the resolved values). Unknown
+keys are refused. Then `process <bundle> --source <folder> --group <id> --params-file <file>`. Say back
+exactly what changed; every changed value is recorded on the result. Never use it to pass a QC check:
+a threshold is the protocol's, not a fix.
