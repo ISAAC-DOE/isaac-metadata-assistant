@@ -49,7 +49,7 @@ from . import _deps
 from . import athena as A
 from . import core as C
 from . import protocol as P
-from .channels import MODE_TRANSMISSION, choose_channels, dead_candidates
+from .channels import MODE_TRANSMISSION, ChannelChoice, choose_channels, dead_candidates
 from .edges import edge_energy
 from .readers import read_scan_file
 
@@ -470,6 +470,136 @@ def _fallback_from_transmission(attempts, choice, tables, role: str, sel, params
     return alt
 
 
+REFERENCE_FALLBACK_FLAG = "channel_fallback_reference_channel"
+#: Flag on a choice whose reference channel was tried and was not usable either (the choice is unchanged).
+REFERENCE_TRIED_FLAG = "reference_channel_tried_not_usable"
+
+
+def _positive(table, col: str | None) -> bool:
+    """True when ``col`` is a column of ``table`` and every one of its values is a positive number."""
+    if not col or not table.has(col):
+        return False
+    vals = table.columns[col]
+    return bool(vals) and all(v == v and v > 0 for v in vals)
+
+
+def _screen(attempts, params: Mapping, np, xafs) -> dict | None:
+    """:func:`core.edge_checks` on a quick merge of the usable scans of ``attempts`` (mean on the widest scan's
+    grid, as the merge does; no calibration shift: the checks do not depend on it). ``None`` when no curve can
+    be normalised; else ``{"failed": {reason: finding}, "e0_eV", "edge_step"}``."""
+    scans = [sa for _, _, sa, code in attempts if sa is not None and code is None and C.unusable_reason(sa) is None]
+    if not scans:
+        return None
+    try:
+        grid, _ = C.common_grid(scans, np)
+    except C.StepError:
+        return None
+    M = C.interpolate(scans, grid, np)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        mean = np.nanmean(M, axis=0)
+    ok = np.isfinite(mean)
+    if int(ok.sum()) < int(params["merge"]["min_points"]):
+        return None
+    try:
+        nm = C.normalize(grid[ok], mean[ok], params, np, xafs)
+    except C.StepError:
+        return None
+    return {"failed": C.edge_checks(grid[ok], mean[ok], nm, np), "e0_eV": nm["e0_eV"], "edge_step": nm["edge_step"]}
+
+
+def _names_foil_on(stems: Sequence[str], column: str) -> bool:
+    """True when a run name has a ``foil`` token and a token that IS ``column`` (``..._foil_I2_120``)."""
+    for stem in stems:
+        toks = [t.casefold() for t in _TOKEN.split(str(stem)) if t]
+        if any(t.startswith("foil") for t in toks) and column.casefold() in toks:
+            return True
+    return False
+
+
+def _reference_channel_fallback(attempts, choice, tables, role: str, stems: Sequence[str], ctx: _Ctx):
+    """The reference channel when TRANSMISSION ln(I0/I1) fails the edge checks for a foil measured on I2;
+    else ``None``. Never silent; never for a sample.
+
+    Measured on a real BL4-3 beamtime: ``31_Ti_foil_I2_120`` (a Ti foil said to be on I2) had I1 at -3.6 to
+    26 counts, so ln(I0/I1) was a falling noisy trace with no edge (step 2.4 times the pre-edge scatter) that
+    QC only warned about. There ln(I1/I2) is not tried (I1 is not a positive intensity) and ln(I0/I2) is
+    REFUSED by the checks: that I2 rises about 270 times across the edge, as a fluorescence or yield signal
+    does, so ln(I0/I2) falls (post-edge level -1.0); the group keeps ln(I0/I1) and fails, with what was tried
+    recorded. Which signal that I2 is, is the scientist's question. Only when ALL hold: the group is a reference or alignment group; ln(I0/I1) was chosen; a
+    reference-after column (``channels.reference_after_reference``, I2) is a positive intensity in every
+    scan; and EITHER a run name says the foil is on it (a ``foil`` token and an ``I2`` token) OR I1 is not a
+    positive intensity in some scan. Candidates, in order: ln(I1/I2) (the protocol's reference pair), only
+    when I1 is a positive intensity in every scan; else ln(I0/I2) (I1 cannot be read, so the beam is read
+    after it on I2). The first that passes the checks is used, flagged :data:`REFERENCE_FALLBACK_FLAG`, with
+    ``basis.fallback_from`` naming what failed and every candidate tried, and QC at least ``warn``. When none
+    passes, the choice is unchanged (it fails on its own) and the candidates tried are recorded on it.
+    """
+    if choice.mode != MODE_TRANSMISSION or role not in ("reference", "alignment"):
+        return None
+    np, params = ctx.np, ctx.params
+    readable = [t for _, t in tables if t.has(choice.i0) and t.has(choice.transmission_after)]
+    ref = next((c for c in params["channels"]["reference_after_reference"]
+                if readable and all(_positive(t, c) for t in readable)), None)
+    if ref is None:
+        return None
+    i1_positive = all(_positive(t, choice.transmission_after) for t in readable)
+    if not (_names_foil_on(stems, ref) or not i1_positive):
+        return None
+    first = _screen(attempts, params, np, ctx.xafs)
+    if first is None or not first["failed"]:
+        return None
+    tried, found = [], None
+    for num in (choice.transmission_after, choice.i0):
+        alt = ChannelChoice(energy=choice.energy, mode=MODE_TRANSMISSION, i0=num, transmission_after=ref,
+                            reference_pair=choice.reference_pair, basis=dict(choice.basis), alternatives=list(choice.alternatives),
+                            flags=list(choice.flags))
+        row = {"signal_name": alt.signal_name}
+        if num == choice.transmission_after and not i1_positive:
+            row.update(outcome="not_tried", reason=f"{num} is not a positive intensity in every scan")
+        elif num == choice.i0 and i1_positive:
+            row.update(outcome="not_tried", reason=f"{choice.transmission_after} can be read, so the reference pair is ln({choice.transmission_after}/{ref})")
+        elif found is not None:
+            row.update(outcome="not_tried", reason=f"{found.signal_name} passed first")
+        else:
+            got = _screen(_scan_attempts(tables, alt, np), params, np, ctx.xafs)
+            if got is None:
+                row.update(outcome="failed", reason="no curve could be normalised")
+            elif got["failed"]:
+                row.update(outcome="failed", failed_checks=sorted(got["failed"]),
+                           reason=" ".join(f["statement"] for f in got["failed"].values()))
+            else:
+                row.update(outcome="used", e0_eV=got["e0_eV"], edge_step=got["edge_step"])
+                found = alt
+        tried.append(row)
+    failed = sorted(first["failed"])
+    said_failed = "; ".join(first["failed"][k]["statement"] for k in failed)
+    if found is None:
+        choice.basis["reference_channel_tried"] = {"failed_checks": failed, "tried": tried, "statement": (
+            f"Transmission {choice.signal_name} failed the edge checks ({', '.join(failed)}), and the reference channel "
+            f"was tried and was not usable either: {'; '.join(t['signal_name'] + ' ' + t['outcome'] + ' (' + t['reason'] + ')' for t in tried)}.")}
+        choice.flags.append(REFERENCE_TRIED_FLAG)
+        return None
+    found.basis["fallback_from"] = {
+        "mode": MODE_TRANSMISSION,
+        "signal_name": choice.signal_name,
+        "rule": choice.basis.get("rule"),
+        "reason_code": "transmission_failed_edge_checks",
+        "failed_checks": failed,
+        "tried": tried,
+        "statement": (
+            f"Transmission {choice.signal_name} was tried first and failed the edge checks ({', '.join(failed)}): {said_failed} "
+            f"This {role} group's reference channel {found.signal_name} has an edge "
+            f"({ref} is a positive intensity in every scan"
+            + (f"; {choice.transmission_after} is not" if not i1_positive else "")
+            + (f"; the name says the foil is on {ref}" if _names_foil_on(stems, ref) else "")
+            + f"), so {found.signal_name} was used instead; a person confirms this channel."
+        ),
+    }
+    found.flags.append(REFERENCE_FALLBACK_FLAG)
+    return found
+
+
 #: Review flag (and the merge step's flag): a scan used in the merge ends early.
 TRUNCATED_FLAG = "scan_range_truncated"
 
@@ -557,6 +687,10 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         choice.flags.append("channel_from_a_later_scan")
     attempts = _scan_attempts(tables, choice, np)
     fallback = _fallback_from_transmission(attempts, choice, tables, role, sel, params)
+    fallback_flag = FALLBACK_FLAG
+    if fallback is None:
+        fallback = _reference_channel_fallback(attempts, choice, tables, role, stems, ctx)
+        fallback_flag = REFERENCE_FALLBACK_FLAG
     if fallback is not None:
         choice = fallback
         attempts = _scan_attempts(tables, choice, np)
@@ -647,6 +781,7 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     )
 
     implausible = C.edge_step_implausible(nm["edge_step"], mean, np, post_edge=_post_edge_range(nm["resolved_params"]))
+    checks = C.edge_checks(g2, mean, nm, np)
     truncated = _truncation_statement(ginfo, scans_data, pos_sid)
     diags = [sa["diagnostics"] for sa in scans_data]
     read_pts = sum(d["points_read"] for d in diags) or 1
@@ -666,6 +801,9 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         "edge_step": step,
         # only when the step failed the sanity bound (absent otherwise, so an unaffected result is unchanged)
         **({"edge_step_implausible": implausible["ratio"]} if implausible else {}),
+        # only when the check failed (core.edge_checks; absent otherwise, as above)
+        **({"post_edge_level": checks["post_edge_not_at_1"]["level"]} if "post_edge_not_at_1" in checks else {}),
+        **({"edge_to_pre_edge_noise": checks["no_edge"]["edge_to_noise"]} if "no_edge" in checks else {}),
         "pre_edge_noise": nm["pre_edge_noise"],
         "scan_spread": float(np.nanmedian(se) / abs(step)) if (len(scans_data) > 1 and step and np.isfinite(se).any()) else None,
         "glitch_points": dg["flagged_points_total"],
@@ -684,13 +822,15 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     res["qc"] = {"metrics": metrics, "verdict": verdict, "reasons": reasons}
     statements = {}
     if fallback is not None:
-        statements[FALLBACK_FLAG] = choice.basis["fallback_from"]["statement"]
+        statements[fallback_flag] = choice.basis["fallback_from"]["statement"]
     if truncated:
         statements["scans_truncated"] = truncated
         res["review_flags"].append(TRUNCATED_FLAG)
     if implausible:
         statements["edge_step_implausible"] = implausible["statement"]
         res["review_flags"].append("edge_step_implausible")
+    for reason, finding in checks.items():
+        statements[reason] = finding["statement"]
     if statements:  # absent when there is nothing to say, so an unaffected result is unchanged
         res["qc"]["statements"] = statements
     res["steps"].append({"step": "qc", "params": dict(params["qc"]), "outcome": {"verdict": verdict, "reasons": reasons}, "flags": []})

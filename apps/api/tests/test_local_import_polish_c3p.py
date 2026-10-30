@@ -92,3 +92,129 @@ def test_the_no_match_line_names_only_suffixes_the_rule_does_not_accept():
     line = RUN.athena_match_statement(groups, [{"names": ["03_syn_dry_015_a_001"], "label": "y"}], matched={},
                                       notes=[{"code": "athena_group_matches_several_record_groups"}])
     assert "does not accept" not in line and "1 matched several record groups" in line
+
+
+# --- 2. junk or mis-normalised curves fail -------------------------------------------------------------
+
+from isaac_api.local_import.processing import core as C  # noqa: E402
+from isaac_api.local_import.processing import protocol as P  # noqa: E402
+
+from test_local_import_processing import E0, fluo_scan, make_case, spec_file  # noqa: E402
+
+FLAT_PRE = np.zeros(GRID.size)
+
+
+def test_post_edge_level_is_measured_from_the_pre_edge_line_at_e0():
+    mu = mu_edge(GRID, step=1.5, offset=0.0)
+    pre = np.zeros(GRID.size)
+    ok = C.post_edge_level_implausible(GRID, mu, pre, E0, 1.5, np, norm1=60.0, norm2=130.0)
+    assert ok is None
+    low = C.post_edge_level_implausible(GRID, mu, pre, E0, 0.6, np, norm1=60.0, norm2=130.0)
+    assert low["level"] == pytest.approx(1.5 / 0.6 + 0.0001 * 95 / 0.6, rel=0.02) and low["rule_id"] == C.POST_EDGE_LEVEL_RULE_ID
+    assert "2.5" in low["statement"] and "edge steps above the pre-edge line" in low["statement"]
+    falling = C.post_edge_level_implausible(GRID, 2.0 - mu, pre + 2.0, E0, 1.5, np, norm1=60.0, norm2=130.0)
+    assert falling["level"] < 0 and "below the pre-edge line" in falling["statement"]
+    # too few points in the window: not judged
+    assert C.post_edge_level_implausible(GRID, mu, pre, E0, 0.6, np, norm1=133.5, norm2=134.0) is None
+    assert C.POST_EDGE_LEVEL_RANGE == (0.0, 2.0)
+
+
+def test_no_edge_when_the_step_is_not_five_times_the_pre_edge_scatter():
+    assert C.no_edge(0.5, 0.1) is None and C.no_edge(0.5, None) is None
+    bad = C.no_edge(0.7, 0.41)
+    assert bad["edge_to_noise"] == pytest.approx(1 / 0.41) and bad["min_multiple"] == C.EDGE_MIN_NOISE_MULTIPLE == 5.0
+    assert "2.44 times" in bad["statement"]
+    q = P.resolve_params()
+    base = {"scans_used": 2, "points": 200, "edge_step": 1.0}
+    assert C.qc_verdict(base, q) == ("pass", [])
+    assert C.qc_verdict({**base, "edge_to_pre_edge_noise": 2.4}, q) == ("fail", ["no_edge"])
+    assert C.qc_verdict({**base, "post_edge_level": 2.5}, q) == ("fail", ["post_edge_not_at_1"])
+
+
+def _falling_scan(seed):
+    rng = np.random.default_rng(seed)
+    i0 = np.full(GRID.size, 1.0e5)
+    mu = 2.0 - mu_edge(GRID) + rng.normal(0, 0.002, GRID.size)  # the signal FALLS at the edge
+    return {"energy": GRID, "I0": i0, "vortDT": mu * i0 * 0.01}
+
+
+def test_a_curve_that_falls_at_the_edge_fails_with_a_plain_sentence(tmp_path):
+    bdir, root, _ = make_case(tmp_path, [("01_SYN_ZZ1", [spec_file(_falling_scan(s)) for s in (1, 2)], {"sample_name": "ZZ1"})])
+    r = isaac(run_process(bdir, source_root=root))
+    assert r["qc"]["metrics"]["edge_step"] > 0  # larch's edge step is |jump|: the step alone does not say it
+    assert r["qc"]["verdict"] == "fail" and "post_edge_not_at_1" in r["qc"]["reasons"]
+    assert r["qc"]["metrics"]["post_edge_level"] < 0
+    assert "below the pre-edge line" in r["qc"]["statements"]["post_edge_not_at_1"]
+
+
+def test_a_curve_with_no_edge_fails_no_edge(tmp_path):
+    def noise(seed):
+        rng = np.random.default_rng(seed)
+        i0 = np.full(GRID.size, 1.0e5)
+        return {"energy": GRID, "I0": i0, "vortDT": (1.0 + rng.normal(0, 0.05, GRID.size)) * i0 * 0.01}
+
+    bdir, root, _ = make_case(tmp_path, [("01_SYN_ZZ1", [spec_file(noise(s)) for s in (1, 2)], {"sample_name": "ZZ1"})])
+    r = isaac(run_process(bdir, source_root=root))
+    assert r["qc"]["verdict"] == "fail" and "no_edge" in r["qc"]["reasons"], r["qc"]
+    assert r["qc"]["metrics"]["edge_to_pre_edge_noise"] < 5
+    assert "times the pre-edge scatter" in r["qc"]["statements"]["no_edge"]
+
+
+def test_a_good_curve_carries_none_of_the_new_checks(tmp_path):
+    bdir, root, _ = make_case(tmp_path, [("01_SYN_ZZ1", [spec_file(fluo_scan(s)) for s in (1, 2)], {"sample_name": "ZZ1"})])
+    r = isaac(run_process(bdir, source_root=root))
+    assert r["qc"]["verdict"] in ("pass", "warn")
+    assert not {"post_edge_level", "edge_to_pre_edge_noise"} & set(r["qc"]["metrics"])
+    assert "statements" not in r["qc"]
+
+
+# --- 3. a foil on I2 tries the reference channel --------------------------------------------------------
+
+
+def _foil_scan(seed, *, i1_dead=True):
+    """A SYNTHETIC foil measured on I2: I2 = I0 * exp(-mu_foil); I1 dead (a few counts drifting up with
+    energy, some negative: ln(I0/I1) falls, with no edge — the measured shape) or live (I1 = I0 *
+    exp(-mu_foil), so ln(I0/I1) is the foil)."""
+    rng = np.random.default_rng(seed)
+    i0 = np.full(GRID.size, 1.0e5)
+    trans = np.exp(-mu_edge(GRID, step=1.0, offset=0.5))
+    i1 = (2.0 + 20.0 * (GRID - GRID[0]) / (GRID[-1] - GRID[0]) + rng.normal(0, 2.0, GRID.size)) if i1_dead else i0 * trans
+    return {"energy": GRID, "I0": i0, "I1": i1, "I2": i0 * 0.5 * trans * (1 + rng.normal(0, 1e-4, GRID.size))}
+
+
+def test_a_foil_on_i2_whose_i1_is_dead_uses_ln_i0_i2_flagged(tmp_path):
+    bdir, root, _ = make_case(tmp_path, [("31_SYN_Zz_foil_I2_120", [spec_file(_foil_scan(s)) for s in (1, 2)], {})])
+    r = isaac(run_process(bdir, source_root=root))
+    cc = r["channel_choice"]
+    assert cc["signal_name"] == "ln(I0/I2)" and "channel_fallback_reference_channel" in cc["flags"]
+    fb = cc["basis"]["fallback_from"]
+    assert fb["signal_name"] == "ln(I0/I1)" and fb["reason_code"] == "transmission_failed_edge_checks"
+    assert set(fb["failed_checks"]) & {"no_edge", "post_edge_not_at_1"}
+    tried = {t["signal_name"]: t for t in fb["tried"]}
+    assert tried["ln(I1/I2)"]["outcome"] == "not_tried" and "I1" in tried["ln(I1/I2)"]["reason"]
+    assert tried["ln(I0/I2)"]["outcome"] == "used"
+    assert "ln(I0/I1)" in fb["statement"] and "ln(I0/I2)" in fb["statement"] and "a person confirms" in fb["statement"]
+    assert r["qc"]["verdict"] == "warn" and "channel_fallback_transmission_failed_edge_checks" in r["qc"]["reasons"]
+    assert r["qc"]["statements"]["channel_fallback_reference_channel"] == fb["statement"]
+    assert abs(r["qc"]["metrics"]["e0_eV"] - E0) < 1.5
+
+
+def test_a_foil_whose_ln_i0_i1_passes_keeps_it(tmp_path):
+    bdir, root, _ = make_case(tmp_path, [("31_SYN_Zz_foil_I2_120", [spec_file(_foil_scan(s, i1_dead=False)) for s in (1, 2)], {})])
+    r = isaac(run_process(bdir, source_root=root))
+    assert r["channel_choice"]["signal_name"] == "ln(I0/I1)" and "fallback_from" not in r["channel_choice"]["basis"]
+    assert "channel_fallback_reference_channel" not in r["channel_choice"]["flags"]
+
+
+def test_no_reference_channel_when_the_name_does_not_say_i2_and_i1_is_live(tmp_path):
+    def scan(seed):
+        rng = np.random.default_rng(seed)
+        i0 = np.full(GRID.size, 1.0e5)
+        trans = np.exp(-mu_edge(GRID, step=1.0, offset=0.5))
+        # I1 positive and live but flat noise: ln(I0/I1) has no edge; I2 has one
+        return {"energy": GRID, "I0": i0, "I1": 5.0e4 * (1 + rng.normal(0, 0.05, GRID.size)), "I2": i0 * 0.5 * trans}
+
+    bdir, root, _ = make_case(tmp_path, [("02_SYN_Zz_foil_122", [spec_file(scan(s)) for s in (1, 2)], {})])
+    r = isaac(run_process(bdir, source_root=root))
+    assert r["channel_choice"]["signal_name"] == "ln(I0/I1)" and r["qc"]["verdict"] == "fail"
+    assert "fallback_from" not in r["channel_choice"]["basis"]

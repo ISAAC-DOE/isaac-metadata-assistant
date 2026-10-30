@@ -105,7 +105,23 @@ names kept as `name#2`, short rows skipped and counted, binary content refused.
 
 Every choice, its basis and alternatives are in `channel_choice`; flags
 `channel_choice_needs_review` / `channel_from_bl15_selector_suggestion`,
-`energy_column_alternatives`, `multiple_signal_alternatives`. Per scan: energy sorted
+`energy_column_alternatives`, `multiple_signal_alternatives`.
+
+**Reference channel for a foil on I2.** When a reference or alignment group's ln(I0/I1) fails the
+edge checks of §7 (`no_edge`, `post_edge_not_at_1`, judged on a quick merge of its scans), the
+reference channel is tried — only when a reference-after column (`I2`, `Iref`, `IR`) is a positive
+intensity in every scan AND either a run name says the foil is on it (a `foil` token and an `I2`
+token) or I1 is not a positive intensity in some scan. Candidates in order: ln(I1/I2) (the protocol's
+reference pair) when I1 is a positive intensity in every scan, else ln(I0/I2). The first that passes
+the same checks is used, flagged `channel_fallback_reference_channel`, with `basis.fallback_from`
+naming what failed and every candidate tried, and QC warns
+`channel_fallback_transmission_failed_edge_checks`. When none passes, the choice is unchanged (it
+fails on its own) and `basis.reference_channel_tried` + flag `reference_channel_tried_not_usable` say
+what was tried. Never for a sample group. Measured on a real BL4-3 beamtime (`31_Ti_foil_I2_120`): I1
+read −3.6 to 26 counts, so ln(I1/I2) is not tried; ln(I0/I2) is refused too, because I2 RISES about
+270× across the edge (≈300 → ≈80 000 counts, as a fluorescence or yield signal does, not a transmitted
+beam), so ln(I0/I2) falls at the edge (post-edge level −1.0). That group fails with both statements;
+which signal its I2 is, is a question for the scientist. Per scan: energy sorted
 (non-monotonic steps counted), exact duplicate energies averaged, non-finite points dropped
 and counted.
 
@@ -164,7 +180,34 @@ Outputs `normalized.csv` (norm, flat). **All need approval.**
 
 fail: 0 usable scans, < 20 points, edge step ≤ 0, I0 ≤ 0 on > 5 %, all-zero signal, an edge step
 more than 2× the spectrum's own range (`edge_step_implausible`: the post-edge fit did not describe the
-data, e.g. a zero-width post-edge range).
+data, e.g. a zero-width post-edge range), and two checks that a curve is a normalised spectrum at all
+(sanity bounds in `processing/core.py`, not protocol parameters; each fails with a plain sentence in
+`qc.json` `statements`, and its metric is present only when it fails):
+
+* **`post_edge_not_at_1`** (`isaac.xas.post_edge_level.v0`, metric `post_edge_level`): the post-edge
+  level — mean mu over the post-edge window (norm1 to norm2 above E0) minus the pre-edge line AT E0,
+  over the edge step — is outside 0 to 2. A normalised spectrum sits about 1 step above; below 0 it
+  falls at the edge (larch's edge step is |jump|, so a falling edge still has a positive step). Measured
+  on every pass/warn curve of four real beamtimes (BL15-2, BL6-2c, two BL4-3; 225 with a window): every
+  curve whose plot shows a normalised spectrum lies at 0.31 to 1.89; outside were a TiO2 anatase scan
+  ending 122 eV above E0 (2.44: a quadratic post-edge over 49–120 eV of EXAFS gave a step of 0.58 for a
+  jump of about 1.4), a noisy dilute Ir HERFD scan (2.11: step half its post-edge level, white line 13),
+  two Ti foil calibration scans ending 19 eV above E0 (3.05, 3.43: the "post-edge" window lies inside the
+  edge; their E0 is unaffected) and a Ti foil whose ln(I0/I1) falls (−1.75). The plain mean of larch's
+  `norm` over the window was measured first and is NOT the test: it also carries the pre-edge line's
+  slope extrapolated across the window, which put good spectra (a CoSO4 standard in sucrose 1.93, IrO2
+  in transmission 1.40, nine dilute HERFD scans with 3 pre-edge points 2.1–2.8 or −0.7) far from 1; at
+  |mean − 1| > 0.5 it would have failed 18 curves, most of them sound.
+* **`no_edge`** (`isaac.xas.edge_above_noise.v0`, metric `edge_to_pre_edge_noise`): the edge step is
+  less than 5 times the pre-edge scatter (std of mu about the pre-edge line; `1 / pre_edge_noise`).
+  Measured on the 150 pass/warn curves with ≥ 3 pre-edge points: 16.5 to 5600, except that Ti foil read
+  through a dead I1 (2.4). Curves with fewer than 3 pre-edge points (76, mostly BL6-2c) have no
+  `pre_edge_noise` and are not judged by it. A derivative test (maximum of dmu/dE against its pre-edge
+  scatter) was measured too and does not separate that foil (113) from real spectra.
+
+Verdicts changed by the two checks (pass/warn → fail): BL4-3 TiON 4 (the anatase scan, both Ti
+calibration scans, the Ti foil on I2), BL15-2 1 (the dilute Ir HERFD scan), BL4-3 MOF-Co 0, BL6-2c 0
+(one curve that already failed `signal_all_zero` also fails `post_edge_not_at_1`).
 warn: 1 scan, pre-edge noise/step > 0.02, median stderr/step > 0.02, glitches or outlier
 scans flagged, readable scans skipped for lacking the chosen columns
 (`scans_skipped_lacking_chosen_columns`, with `scans_readable` / `scans_skipped_lacking_chosen_columns`
@@ -174,9 +217,20 @@ early (`scans_truncated`, flag `scan_range_truncated`, with the overlap range), 
 transmission to fluorescence (`channel_fallback_transmission_not_positive`: transmission was chosen but
 every scan kept fewer than 20 finite points; the statement in `qc.json` says what was tried). Else pass.
 A scan whose signal is non-finite at most points is skipped as `signal_not_finite` (with `points_read`
-and `nonfinite_dropped`), never as `too_few_points`. **Known limit (for review):** deglitch can flag
-another element's real edge inside the scan range as a glitch (measured: the Mo L3/L2 edges in a MoS2
-sulfur K-edge scan); flags never drop points, but a scientist should be told.
+and `nonfinite_dropped`), never as `too_few_points`.
+
+### Known limits (for review)
+
+* Deglitch can flag another element's real edge inside the scan range as a glitch (measured: the Mo
+  L3/L2 edges in a MoS2 sulfur K-edge scan); flags never drop points, but a scientist should be told.
+* Deglitch flags real spectral features as glitches: white lines and EXAFS oscillations, mostly in
+  groups of one or two scans (the neighbour-line method), where a sharp real feature looks like a
+  spike. Measured on real BL4-3 standards: a CoSO4 standard in sucrose, 32 of 303 points flagged; a
+  0.8 wt% TiO2 anatase, 31 of 173. `glitches_flagged` therefore warns on most curves of those
+  beamtimes. The detector is unchanged (flags never drop points; `exclude_flagged` is false); its
+  thresholds are for the scientist to approve.
+* The two §7 shape checks judge the normalisation made with the default post-edge range: a short scan
+  (calibration foils ending ~20 eV above E0) fails `post_edge_not_at_1` although its E0 is sound.
 
 **The scientist's Athena results.** A group Athena marks already normalised (`is_nor`) is used as
 stored (edge step 1, no re-normalisation), and believed only when it looks normalised: pre-edge mean
@@ -204,9 +258,16 @@ energy axis by value shape.
 
 `.prj` files the bundle inventoried are read with larch (`AthenaProject.read(do_preedge=True)`
 — larch's reproduction of the stored e0/pre1/pre2/nor1/nor2/nnorm/flatten); comparison in
-the scientist's frame (energy + `bkg_eshift`). Matching (`isaac.athena.match_by_name.v0`):
+the scientist's frame (energy + `bkg_eshift`). Matching (`isaac.athena.match_by_name.v1`):
 normalised label/file name equals a member run stem, or stem + `_` + scan selection
-(`5-6`, `001`, `merge…`); exact beats suffix; zero-scan groups take no part; identical data
+(`5-6`, `001`, `merge…`), or stem + the SSRL XDC scan-file suffix `_A.NNN` (normalised `_a_NNN`,
+any case; read as scan NNN) — v1 = v0 + that suffix, measured on two real BL4-3 beamtimes whose
+scientists named each Athena group after the scan file it holds (`<stem>_A.001`): 161 + 29 Athena
+groups matched nothing under v0; under v1 MOF-Co compares 20 record groups (5 agree, 15 differ; 2
+more list several versions) and TiON 10 (2 agree, 8 differ), and for 12 + 9 of them ISAAC's data
+normalised with the scientist's parameters reproduces the scientist's curve (rms < 0.01). Nothing
+looser: no other letter, no prefix or substring matching; a name fitting two record groups matches
+neither and is noted. Exact beats suffix; zero-scan groups take no part; identical data
 count once; one merged group wins; one-group-per-scan in one project is compared as a set
 (mean of the scientist's per-scan normalisations, labelled derived); anything else
 anything else is **several versions**: each is listed in `athena_versions[]` with what its

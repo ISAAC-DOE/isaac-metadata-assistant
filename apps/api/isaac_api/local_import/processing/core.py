@@ -417,6 +417,109 @@ def stored_normalized_implausible(energy, curve, e0, np) -> dict | None:
     }
 
 
+#: THE POST-EDGE LEVEL (``isaac.xas.post_edge_level.v0``). Over the post-edge window (norm1 to norm2 above
+#: E0) a normalised spectrum sits about ONE edge step above the pre-edge line at E0. The level measured
+#: here is ``(mean(mu over the window) - pre_edge_line(E0)) / edge_step``; outside
+#: :data:`POST_EDGE_LEVEL_RANGE` the edge step does not describe the spectrum's jump, so the normalised curve
+#: is not usable. It is measured from the pre-edge line AT E0, not from the normalised curve itself: larch's
+#: ``norm`` also carries the pre-edge line's slope extrapolated across the post-edge window, which on four
+#: real SSRL beamtimes put good spectra (a CoSO4 standard in sucrose, IrO2 in transmission) 0.9 to 1.7 away
+#: from 1 while their jump was right. Measured on every pass/warn curve of those beamtimes (225 with a
+#: window): the level lies between 0.31 and 1.89 for every curve whose plot shows a normalised spectrum;
+#: outside (0, 2) were a TiO2 anatase scan ending 122 eV above E0 (2.44: a quadratic post-edge over 49-120 eV
+#: of EXAFS put the step at 0.58 for a jump of 1.4), a noisy dilute Ir HERFD scan (2.11), two Ti foil
+#: calibration scans ending 19 eV above E0 (3.05, 3.43: the "post-edge" window lies inside the edge) and a Ti
+#: foil whose ln(I0/I1) falls at the edge (-1.75; larch's edge step is |jump|, so the step alone is positive).
+#: Not a protocol parameter: a sanity bound, like :data:`EDGE_STEP_MAX_RANGE_RATIO`.
+POST_EDGE_LEVEL_RULE_ID = "isaac.xas.post_edge_level.v0"
+POST_EDGE_LEVEL_RANGE = (0.0, 2.0)
+POST_EDGE_LEVEL_MIN_POINTS = 3
+
+
+def post_edge_level_implausible(energy, mu, pre_edge_curve, e0, step, np, *, norm1, norm2) -> dict | None:
+    """``None`` when the post-edge level (above) is inside :data:`POST_EDGE_LEVEL_RANGE`, or when it cannot be
+    judged (no positive step, no E0, fewer than :data:`POST_EDGE_LEVEL_MIN_POINTS` points in the window);
+    else what was found, with a plain sentence."""
+    step, e0, norm1, norm2 = _f(step), _f(e0), _f(norm1), _f(norm2)
+    if step is None or step <= 0 or e0 is None or norm1 is None or norm2 is None:
+        return None
+    e, y, pre = (np.asarray(a, dtype=float) for a in (energy, mu, pre_edge_curve))
+    sel = np.isfinite(e) & np.isfinite(y) & (e >= e0 + norm1) & (e <= e0 + norm2)
+    if int(np.sum(sel)) < POST_EDGE_LEVEL_MIN_POINTS:
+        return None
+    ok = np.isfinite(pre)
+    if not ok.any():
+        return None
+    pre_e0 = float(np.interp(e0, e[ok], pre[ok]))
+    level = _f((float(np.mean(y[sel])) - pre_e0) / step)
+    lo, hi = POST_EDGE_LEVEL_RANGE
+    if level is None or lo < level < hi:
+        return None
+    where = f"over the post-edge window ({norm1:g} to {norm2:g} eV above E0 {e0:g} eV, {int(np.sum(sel))} points)"
+    if level <= lo:
+        said = (f"The spectrum sits below the pre-edge line {where}: its post-edge level is {level:.3g} edge steps, "
+                "so it falls at the edge instead of rising (the edge step is the size of the jump, not its sign). ")
+    else:
+        said = (f"The spectrum sits {level:.3g} edge steps above the pre-edge line {where}, where a normalised spectrum "
+                f"sits about 1: the edge step {step:.6g} does not describe its jump. ")
+    return {
+        "rule_id": POST_EDGE_LEVEL_RULE_ID,
+        "level": level,
+        "range": list(POST_EDGE_LEVEL_RANGE),
+        "edge_step": step,
+        "window_eV": [e0 + norm1, e0 + norm2],
+        "points": int(np.sum(sel)),
+        "statement": said + (f"Outside {lo:g} to {hi:g} the normalised curve is not usable. A person checks the "
+                             "channel, E0 and the post-edge range."),
+    }
+
+
+#: THE EDGE ABOVE THE NOISE (``isaac.xas.edge_above_noise.v0``). The edge step must be at least this many
+#: times the pre-edge scatter (the standard deviation of mu about the pre-edge line, ``pre_edge_noise`` =
+#: scatter / step). Measured on every pass/warn curve of four real SSRL beamtimes with >= 3 pre-edge points
+#: (150): the step was 16.5 to 5600 times the scatter, except a Ti foil read through a dead I1 (2.4 times: a
+#: falling noisy trace with no edge). Curves with fewer than 3 pre-edge points have no ``pre_edge_noise`` and
+#: are not judged by this check. Not a protocol parameter: a sanity bound.
+EDGE_NOISE_RULE_ID = "isaac.xas.edge_above_noise.v0"
+EDGE_MIN_NOISE_MULTIPLE = 5.0
+
+
+def no_edge(step, pre_edge_noise) -> dict | None:
+    """``None`` when the edge stands at least :data:`EDGE_MIN_NOISE_MULTIPLE` times above the pre-edge scatter
+    (or there is no scatter to judge by, or no positive step: that fails on its own); else what was found."""
+    step, noise = _f(step), _f(pre_edge_noise)
+    if step is None or step <= 0 or noise is None or noise <= 0:
+        return None
+    multiple = 1.0 / noise
+    if multiple >= EDGE_MIN_NOISE_MULTIPLE:
+        return None
+    return {
+        "rule_id": EDGE_NOISE_RULE_ID,
+        "edge_to_noise": multiple,
+        "min_multiple": EDGE_MIN_NOISE_MULTIPLE,
+        "statement": (
+            f"No edge stands above the noise: the edge step {step:.6g} is only {multiple:.3g} times the pre-edge scatter "
+            f"(the standard deviation of mu about the pre-edge line); a measured edge is at least "
+            f"{EDGE_MIN_NOISE_MULTIPLE:g} times it. This is not a usable spectrum. A person checks the channel."
+        ),
+    }
+
+
+def edge_checks(energy, mu, nm: Mapping, np) -> dict[str, dict]:
+    """The two checks above on a normalisation (:func:`normalize`'s output): ``{qc reason: finding}`` for each
+    that FAILS (empty when both pass or cannot be judged)."""
+    out = {}
+    rp = nm.get("resolved_params") or {}
+    lvl = post_edge_level_implausible(energy, mu, nm["pre_edge_curve"], nm.get("e0_eV"), nm.get("edge_step"), np,
+                                      norm1=rp.get("norm1"), norm2=rp.get("norm2"))
+    if lvl:
+        out["post_edge_not_at_1"] = lvl
+    ne = no_edge(nm.get("edge_step"), nm.get("pre_edge_noise"))
+    if ne:
+        out["no_edge"] = ne
+    return out
+
+
 
 def qc_verdict(metrics: Mapping, params: Mapping) -> tuple[str, list[str]]:
     """pass | warn | fail with the reasons, from DATA-QUALITY metrics only.
@@ -437,6 +540,11 @@ def qc_verdict(metrics: Mapping, params: Mapping) -> tuple[str, list[str]]:
         # present only when the step failed the sanity bound (edge_step_implausible; its value, the
         # step / range ratio, is null for a flat spectrum): never a pass
         fail.append("edge_step_implausible")
+    # each present only when its check failed (post_edge_level_implausible, no_edge): never a pass
+    if "post_edge_level" in metrics:
+        fail.append("post_edge_not_at_1")
+    if "edge_to_pre_edge_noise" in metrics:
+        fail.append("no_edge")
     if (metrics.get("i0_nonpositive_fraction") or 0) > float(q["fail_i0_nonpositive_fraction"]):
         fail.append("i0_nonpositive")
     if metrics.get("signal_all_zero_scans"):
