@@ -737,7 +737,7 @@ that discipline.
 - `isaac bundle export <dir> --out <records_dir>` re-runs every gate and writes
   `<ULID>.json` + `<ULID>.evidence.json` (+ approved processing artifacts) ONLY for
   `exportable`. Everything else is listed with its verdict. Re-export is idempotent (§25):
-  `<records_dir>/isaac-export-index.json` keeps each group's record id.
+  `<records_dir>/isaac-export/index.json` keeps each group's record id.
 - `isaac bundle upload <records_dir> --dry-run [--portal-url URL]` prints the exact requests
   (`POST /portal/api/validate`, then `POST /portal/api/records`), headers with
   `Authorization: Bearer <from $ISAAC_PORTAL_TOKEN, not read>`, body size and sha256. No
@@ -1504,11 +1504,12 @@ because no parser value was printed.
   / the summary give the command (`isaac bundle decide <dir> --target <result id> --decision approve
   --qc-status <value> --by "<name>"`, or `isaac process <dir>` first when there is no result). Before,
   the verdict was `invalid_official` with "Missing required values: none".
-- **Re-export reuses the record id.** `isaac bundle export` keeps `<out>/isaac-export-index.json`
+- **Re-export reuses the record id.** `isaac bundle export` keeps `<out>/isaac-export/index.json`
   (`isaac.local-export-index`: per bundle id and group id, the record id, the `content_sha256` of the
-  draft and composer overrides it was composed from, and the export time). An unchanged group is
+  draft and composer overrides it was composed from, and the export time) — in a subfolder, so nothing
+  that reads `<out>/*.json` as the records sees it. An unchanged group is
   rewritten under the same id and time, byte for byte (`export: unchanged`). A changed group gets a new
-  id; the record it replaces is moved to `<out>/superseded/` (kept, never in an upload plan) and the row
+  id; the record it replaces is moved to `<out>/isaac-export/superseded/` (kept, never in an upload plan) and the row
   says so (`export: replaced`, `replaces_record_id`). A group exported before that is now refused lists
-  `previously_exported_record_id`. `upload --dry-run` never lists the index. Records exported before the
+  `previously_exported_record_id`. `upload --dry-run` lists neither. Records exported before the
   index existed are not recognised (no group id is in a record), so export to a fresh `--out` once.

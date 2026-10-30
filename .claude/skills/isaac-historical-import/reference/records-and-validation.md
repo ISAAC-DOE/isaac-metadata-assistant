@@ -28,7 +28,7 @@ After fixing, run `build-records` then `validate` again. Never hand-edit a draft
 ## Export and upload
 
 `export --out <records>` writes `<ULID>.json` and `<ULID>.evidence.json` for exportable drafts only
-and lists the rest with their verdicts. Exporting again into the same `--out` reuses each unchanged record's id (`export: unchanged`); a changed record gets a new id and the old one is moved to `superseded/` (`export: replaced`) — say which. Then `upload <records> --dry-run`: summarise records, target
+and lists the rest with their verdicts. Exporting again into the same `--out` reuses each unchanged record's id (`export: unchanged`); a changed record gets a new id and the old one is moved to `isaac-export/superseded/` (`export: replaced`) — say which. Then `upload <records> --dry-run`: summarise records, target
 endpoints and body sizes. State plainly: nothing was sent, this build cannot send, the key was not
 read. Never ask for or print a portal key. Tell the scientist the records are in `<records>` and
 the portal upload is theirs to do.

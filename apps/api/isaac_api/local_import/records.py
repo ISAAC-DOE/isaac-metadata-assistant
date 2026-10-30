@@ -992,12 +992,15 @@ def _was_marked(bundle: Mapping) -> bool:
 # --- export ----------------------------------------------------------------------------------------
 
 
+#: The export's own bookkeeping, in a SUBFOLDER of ``--out`` so nothing that reads ``--out/*.json`` as the
+#: records (``upload_plan``, the self-test, a scientist's own script) ever mistakes it for one.
+EXPORT_STATE_DIR = "isaac-export"
 #: In ``--out``: which record id each exported group's record got, keyed by bundle and group, with the
-#: hash of what it was composed from. Not a record: ``upload_plan`` never reads it.
-EXPORT_INDEX = "isaac-export-index.json"
+#: hash of what it was composed from. Not a record.
+EXPORT_INDEX = f"{EXPORT_STATE_DIR}/index.json"
 EXPORT_INDEX_FORMAT = "isaac.local-export-index"
 #: In ``--out``: where a record a re-export REPLACED is moved (never deleted; never in an upload plan).
-SUPERSEDED_DIR = "superseded"
+SUPERSEDED_DIR = f"{EXPORT_STATE_DIR}/superseded"
 
 
 def content_sha256(draft: Mapping, composition: Mapping | None) -> str:
@@ -1032,7 +1035,7 @@ def _move_superseded(out: Path, record_id: str) -> list[str]:
     for name in (f"{record_id}.json", f"{record_id}.evidence.json", f"{record_id}.artifacts"):
         src = out / name
         if src.exists() and not src.is_symlink():
-            dest.mkdir(exist_ok=True)
+            dest.mkdir(parents=True, exist_ok=True)
             shutil.move(str(src), str(dest / name))
             moved.append(f"{SUPERSEDED_DIR}/{name}")
     return moved
@@ -1143,6 +1146,7 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
                             if not (isinstance(r, Mapping) and (r.get("bundle_id"), r.get("group_id")) == (bundle_id, group_id))]
         index["records"].append(entry)
         prior_of[(bundle_id, group_id)] = entry
+        (out / EXPORT_STATE_DIR).mkdir(exist_ok=True)
         _atomic_write(out / EXPORT_INDEX, (json.dumps(index, indent=2, sort_keys=True) + "\n").encode("utf-8"))
     result = {
         "exported": exported,
@@ -1164,8 +1168,8 @@ def upload_plan(records_dir: Path, portal_url: str | None) -> list[dict]:
     base = (portal_url or "<portal-url>").rstrip("/")
     plan = []
     for path in sorted(Path(records_dir).glob("*.json")):
-        if path.name.endswith(".evidence.json") or path.name == EXPORT_INDEX:
-            continue  # a sidecar, or the export index: neither is a record
+        if path.name.endswith(".evidence.json"):
+            continue
         body = path.read_bytes()
         headers = {
             "Content-Type": "application/json",
