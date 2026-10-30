@@ -387,6 +387,46 @@ The orchestrator was Opus 5.5, under the `DEC-17` disclosed fallback.
 | **DEC-92** | **`context.electrochemistry.current_setpoint_mA_cm2` becomes locally answerable, so a record confirmed `galvanostatic` can complete.** Since `DEC-90` a confirmed `galvanostatic` mode makes the schema require the current set-point, and the field had no write route, so such a record stayed blocked for good. It joins `LOCAL_ANSWER_FIELDS` at run scope, like `potential_setpoint_V`: every run that becomes a record gets a missing value for it, numbered after the control mode's so no older value id moves. Eligibility checks it against the vendored schema's `type` (`number`) at runtime, so text such as `"5 mA"`, or `-5` given without `--json`, is confirmed but never composed and is listed under `not_composed`; the questions' answer commands add `--json`. It is required only through the schema's own `galvanostatic` rule, which `required_record_paths` already reads. **No companion gate**, unlike the potential's scale (`COMPOSES_ONLY_WITH`). The metadata template gains an ISAAC-added `Current Set-point (mA/cm2)` column (template 1.3.0; a 1.2.0 or 1.1.0 workbook is still read). Bundle format 1.7.0; an older bundle whose stored eligibility moves reports `STALE`, not `INVALID`, as at 1.3.0 and 1.5.0. | DECIDED 2026-10-29 (capture mechanism only) | project owner ("build anything … finish all of them"); the design was the orchestrator's, mirroring `DEC-88` and `DEC-90` | No scientific decision is taken and nothing is defaulted or inferred: no current is computed from a total current and an electrode area, none from the mode, and no mode from a current (`CLAUDE.md` §5). *Why no companion gate:* the potential's gate exists because the schema says a potential is "on the scale declared by potential_scale", so the number means nothing without it. For the current density the unit (mA per cm²) is in the field's name, the vendored schema declares nothing it is relative to (the node is only `{"type": "number"}`), and no schema rule requires anything beside it. The optional `sample.geometry.geometric_area_cm2` would matter only to turn a total current into a density, which is a derivation and is never done: the scientist gives the density itself. *For Oscar/Angel:* the schema does not say, for this field, whether the density is per geometric or per electrochemically active area, nor its sign convention. The pinned schema's read-out descriptor `current_density_mA_cm2` is geometric and IUPAC-signed, but that is a different field. The value is stored exactly as given and neither is checked. |
 | **DEC-93** | **Schema Proposals gains a third type, an ISAAC-side *schema change request* for a new FIELD, and a term can be proposed from where the gap is found.** (1) The upstream portal defines exactly two proposal types, `add_term` and `add_category` (`portal/database.py` `create_proposal`, `portal/ontology.py` `apply_approved_proposal`, the Propose a Change form in `portal/app.py`, all at `a1cb1c8`). It has none for a field, so ISAAC invents no portal payload. A `schema_change` (kind `add_field`) names a parent block the vendored schema declares (derived, never listed), a field name, a type, required or not, and optionally a unit, an example (checked against the type), a scope and a migration note. `gate0.problem` is required, because the upstream process (`governance/README.md`) blocks a change without a gate-0 proposal. Its export is `GET .../{id}/change-request`: Markdown and JSON shaped after the upstream change files, labelled "not a portal proposal". `portal-payload` refuses it with `409 no_portal_payload`. It lives in the same Propose a Change tab and Proposals list. (2) A "Propose this term" link appears on three surfaces where a scientist sees an off-list value: Validator schema errors (the value is read from the checked record, never parsed from the message), an ingestion proposal outside its field's list, and a run override holding an off-list value. The link is offered only for a portal term list, and never for a spelling the server would refuse as a duplicate (`in situ` for `in_situ`). (3) `isaac bundle propose-terms` lists off-list confirmed values, parser values and AI readings in a local bundle, by field with counts and file/locator citations. It drafts each clean term in the website's own portal-payload format, with an empty description, `ready_to_send: false`, and nothing sent. | DECIDED 2026-10-29 | project owner ("people can propose change in the original portal … if they want to add another thing to the ISAAC schema … someone else will take care of approving"); the design is the orchestrator's | Same honesty as `DEC-83`: nothing is approved, applied or sent, `proposed_by` is null (identity is unverified), and hosted storage is temporary. The upstream repository has GitHub issues turned off (measured 2026-10-29), so the export is a document, not an issue. The rules live in a FastAPI-free module (`schema_proposal_rules.py`) so the local CLI imports no web framework. Measured on copies of the six real bundles (counts only): 618 off-list occurrences of 16 values in 4 fields, all AI readings, giving 2 drafts (one potential-scale term that neither list has). The reaction and cell-type terms the coverage note names are not in any bundle; the reading pass recorded them only in its findings file (`not_found`), which the command does not read. Not built: proposals to change or remove an existing field; a record-description or run-editor link (both offer only the list's own values, so no off-list value can be entered there). |
 
+### DEC-94
+*(2026-10-29; project owner: "You can build anything your goal is to finish all of them")*
+
+**Decided; independently reviewed (three rounds, MERGE-after-fixes, all fixed).** The website gains a **local-only** destination, *Local Imports*: an
+import-progress overview of every bundle in one folder, and one bundle's consolidated questions,
+answered in the browser. It exists only when the API process is started with
+`ISAAC_LOCAL_BUNDLES_DIR` naming that folder, on the scientist's own computer: otherwise
+`create_app` registers no route for it (the ordinary JSON 404, absent from OpenAPI — the MCP
+transport's arrangement), and the nav item needs a local build with `VITE_ISAAC_LOCAL_IMPORTS=1`
+as well. The boot refuses the variable beside `ISAAC_BASE_PATH`.
+
+- **Same code as the CLI.** An answer is `mutations.decide_question` — which `isaac bundle decide
+  --question` now also calls — so the route and the command leave a bundle byte-identical (tested).
+  Identity `local_unverified`, the typed `by` name. The three 1.6.0 capture decisions (`keep_apart`,
+  `merge`, `select_athena_version`) go through `mutate` + `record_decision`, limited to that list.
+- **No lost concurrent write.** Every write names the `bundle_version` (sha256 of `bundle.json`) it
+  was shown: 428 without one, 412 when the stored bundle moved, checked under the bundle's own lock,
+  where the question is also resolved to its targets.
+- **Values are typed by the metadata template's parser** (`template.parse_answer`): a number field
+  takes a number (what `--json` would store), a closed list takes one of its values exactly. This
+  is STRICTER than the CLI, which stores an off-list value as confirmed-but-ineligible; the screen
+  refuses it. No path reaches `scientist_confirmed` that the CLI could not take.
+- **"Same for all groups" previews first** (a dry run through the same code, writing nothing) and
+  writes only against the version that preview was read at. One group's answer writes at once.
+- **Reading the questions records exposures** (the blind protocol) for every parser value shown, at
+  least what `isaac bundle questions` records.
+- **Only this computer, by its own name, from ISAAC's own pages** (after review, H1/M1/M3): loopback
+  client, loopback `Host` with the server's port (421 otherwise — DNS rebinding), `Origin` on the CORS
+  allowlist, and a required `X-ISAAC-Local: 1` header, so a cross-origin simple request cannot read or
+  record anything. The boot also refuses a detectable non-loopback `--host`.
+- **"Same for all" never decides for the groups** (after the owner's browser test on a real 53-group
+  beamtime, where some groups' files said `ex_situ` and others `in_situ`): where the groups' own
+  suggestions differ no scope is pre-chosen, a per-group table shows each group's own suggestion and
+  quote with an Accept for that group alone, and the preview flags every group whose own files suggest
+  a different value, with a count.
+
+**Not built:** a missing-value share (no command computes one; the page says so); `defer`/`reject`
+controls; regrouping from the browser (the screen names `isaac bundle group --regroup`); human
+browser and assistive-technology QA.
+
 ### What `DEC-76`…`DEC-84` do NOT change
 - **The website's truth plane.** `schema/` and the `src/isaac_records` validators and export are unedited. The only change in `src/isaac_records/cli.py` is the additive `import` / `bundle` dispatch.
 - **One hosted read changes, and it is a bug fix.** When an archive has acquisition files with the

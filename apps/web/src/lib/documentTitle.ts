@@ -175,6 +175,9 @@ export function routeDocumentTitle(pathname: string, search: string): string | n
     case '/schema-proposals':
       // `navSchemaProposals`, the SAME string the nav item and the page `<h1>` read.
       return composeDocumentTitle([LABELS.navSchemaProposals]);
+    case '/local-imports':
+      // `navLocalImports`, the SAME string the nav item and the page `<h1>` read.
+      return composeDocumentTitle([LABELS.navLocalImports]);
     case '/memory':
       return composeDocumentTitle([LABELS.navMemory]);
     case '/governance':

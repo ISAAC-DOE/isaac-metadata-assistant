@@ -247,6 +247,59 @@ are separate, none of them a placeholder:
   Endpoint Explorer over the app's own generated OpenAPI document. Every tab is
   informational — this build has no user-adjustable settings.
 
+## Local Imports (local-only, `DEC-94`)
+
+A destination for **import bundles on your own computer** (`isaac import … --out <folder>/<name>`):
+an import-progress overview of every bundle in one folder, and each bundle's consolidated
+questions (`isaac bundle questions`), answered in the browser with the same code as
+`isaac bundle decide --question`. It never exists on a hosted deployment.
+
+```bash
+# Backend: name the folder that HOLDS the bundle folders (each one has a bundle.json)
+ISAAC_LOCAL_BUNDLES_DIR=~/isaac-bundles \
+  .venv/bin/uvicorn isaac_api.app:app --app-dir apps/api --host 127.0.0.1 --port 8000
+
+# Frontend: a local build with the flag, so the nav item may ask the server
+cd apps/web
+VITE_ISAAC_LOCAL_IMPORTS=1 npm run dev
+```
+
+Open `http://localhost:5173/local-imports`. What holds, and what each half refuses:
+
+- **Unset (every hosted deployment): no route is registered** — `/api/local-bundles*` is the ordinary
+  404 and the OpenAPI document does not list it; the nav item is absent. The server refuses to boot
+  with the variable beside `ISAAC_BASE_PATH`, or naming no directory.
+- **Only this computer may ask, by its own name, from ISAAC's own pages.** Every `/api/local-bundles*`
+  request is refused before anything is read unless the client address is loopback (403), the `Host`
+  is `localhost`, `127.0.0.1` or `[::1]` with this server's port (421 — a DNS-rebinding page names its
+  own host), any `Origin` is on the CORS allowlist (`ISAAC_UI_CORS_ORIGINS`, default the Vite dev
+  origins) or this server's own loopback origin (403), and the request carries `X-ISAAC-Local: 1`
+  (403). A custom header cannot be sent cross-origin without a preflight the API grants only to its
+  allowlist, so a page elsewhere — an `<img>`, a form — can neither read the questions nor make the
+  server record exposures.
+- **The server refuses to boot when told to listen beyond loopback** (`--host 0.0.0.0`, `--host=::`,
+  `UVICORN_HOST`), as the hosted image does. A server started another way (another ASGI server,
+  `uvicorn.run(host=…)` in code) is not detected at boot; the per-request loopback check above still
+  refuses every other computer. Start it with `--host 127.0.0.1` (uvicorn's default).
+- **Only bundle folders directly inside that folder** are served; a name with `..`, a leading dot or a
+  symlink that resolves outside is "no such bundle". Only what the bundle holds is shown (its quotes
+  and locators, and `validation/<group>.json` from the last `isaac bundle validate`); no source file
+  is opened.
+- **An answer** is a local, unverified statement by the name you type, written into `bundle.json` on
+  this computer. It names the bundle version the page read; if a command changed the bundle since,
+  nothing is written and the questions are read again. "Same for all groups" lists the exact targets
+  before it writes, and flags every group whose OWN files (or the AI readings made for it) suggest a
+  different value, with that suggestion and its file. Where the groups' own suggestions differ, no scope
+  is pre-chosen: answer group by group in the table (each row shows its own suggestion and quote), or
+  choose "same for all" explicitly. Nothing is uploaded and no portal is called.
+- **Reading the questions records exposures** in the bundle (as `isaac bundle questions` does), so a
+  later blind cross-check knows which parser values were shown.
+
+The five operations are `GET /api/local-bundles`, `GET …/{bundle}/progress`, `GET …/{bundle}/questions`,
+`POST …/{bundle}/questions/{question_id}/answer`, and `POST …/{bundle}/decisions` for the merge,
+keep-apart and Athena-version decisions; with the variable set the OpenAPI document lists them under
+*Local Import Bundles*. Contract: `docs/local-import-bundle-contract.md` §23.
+
 ## Project Memory (Phase 24)
 
 The **Project Memory** nav destination (`/memory`) is a real, read-only

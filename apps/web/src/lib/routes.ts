@@ -21,6 +21,8 @@ export const SETTINGS_TAB_PARAM = 'tab';
  * it — the same split `/record/<id>?view=` makes, with the record in the path.
  */
 export const IMPORT_SESSION_PARAM = 'import';
+/** The bundle (its folder name) a Local Imports link opens. */
+export const LOCAL_BUNDLE_PARAM = 'bundle';
 export const IMPORT_STAGE_PARAM = 'stage';
 
 /*
@@ -499,6 +501,9 @@ export const ROUTES = {
   statistics: '/statistics',
   /** SCHEMA PROPOSALS — drafting proposals to change the official vocabulary. `?tab=browse|propose|proposals`. */
   schemaProposals: '/schema-proposals',
+  /** LOCAL IMPORTS — the import progress overview; `?bundle=<folder name>` opens one bundle's questions. */
+  localImports: '/local-imports',
+  localImportBundle: (name: string) => `/local-imports?${LOCAL_BUNDLE_PARAM}=${encodeURIComponent(name)}`,
   settings: '/settings',
   /**
    * A deep link to one Settings tab, e.g. `/settings?tab=advanced`. A retired
@@ -605,6 +610,7 @@ export const ROUTE_PATTERNS = {
   governance: '/governance',
   statistics: '/statistics',
   schemaProposals: '/schema-proposals',
+  localImports: '/local-imports',
   settings: '/settings',
   record: '/record/:id',
   complete: '/record/:id/complete',

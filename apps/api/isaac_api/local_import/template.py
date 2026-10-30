@@ -206,21 +206,39 @@ def field_rules() -> dict[str, dict]:
     vocabulary = Q._vocabulary()
     paths = {c.path for c in (*CAMPAIGN_FIELDS, *CONFIG_COLUMNS, *FILE_COLUMNS) if c.path}
     paths |= {p for _, p in VOCAB_COLUMNS}
-    out: dict[str, dict] = {}
-    for path in sorted(paths):
-        node = Q._node(schema, path) or B._schema_node(path)
-        enum = node.get("enum") if isinstance(node, Mapping) and isinstance(node.get("enum"), list) else None
-        if enum is None and path in vocabulary:
-            enum = vocabulary[path]
-        declared = node.get("type") if isinstance(node, Mapping) else None
-        types = declared if isinstance(declared, list) else [declared] if declared else []
-        out[path] = {
-            "allowed": list(enum) if enum else None,
-            "numeric": any(t in ("number", "integer") for t in types),
-            "integer": "integer" in types and "number" not in types,
-            "in_schema": node is not None,
-        }
-    return out
+    return {path: rule_for_path(path, schema=schema, vocabulary=vocabulary) for path in sorted(paths)}
+
+
+def rule_for_path(path: str, *, schema: Mapping | None = None, vocabulary: Mapping | None = None) -> dict:
+    """What one field accepts, read exactly as :func:`field_rules` reads it for a template column (the
+    target schema, then the vendored one; the pinned vocabulary where the schema has no enum). Used
+    by the template import and by the local questions screen, so a value typed in either is parsed
+    the same way (:func:`parse_answer`)."""
+    from . import questions as Q
+
+    if schema is None:
+        schema, _basis = Q._target_schema()
+    if vocabulary is None:
+        vocabulary = Q._vocabulary()
+    node = Q._node(schema, path) or B._schema_node(path)
+    enum = node.get("enum") if isinstance(node, Mapping) and isinstance(node.get("enum"), list) else None
+    if enum is None and path in vocabulary:
+        enum = vocabulary[path]
+    declared = node.get("type") if isinstance(node, Mapping) else None
+    types = declared if isinstance(declared, list) else [declared] if declared else []
+    return {
+        "allowed": list(enum) if enum else None,
+        "numeric": any(t in ("number", "integer") for t in types),
+        "integer": "integer" in types and "number" not in types,
+        "in_schema": node is not None,
+    }
+
+
+def parse_answer(raw: Any, rule: Mapping | None) -> tuple[Any, str | None]:
+    """``(value, None)`` or ``(None, why it is refused)`` for one typed answer: the template import's
+    own cell parsing (:func:`_parse`), so a number is stored as a number exactly as ``--json`` would
+    store it, and an enum field takes only one of its allowed values, written exactly."""
+    return _parse(raw, rule)
 
 
 def _parse(raw: Any, rule: Mapping | None) -> tuple[Any, str | None]:

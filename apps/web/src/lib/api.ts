@@ -122,6 +122,16 @@ import type {
   SchemaProposalInput,
   SchemaProposalStatus,
 } from './schemaProposals';
+import type {
+  ApiLocalAnswerPreview,
+  ApiLocalAnswerRecorded,
+  ApiLocalBundleList,
+  ApiLocalBundleProgress,
+  ApiLocalDecisionRecorded,
+  ApiLocalQuestions,
+  LocalAnswerInput,
+  LocalDecisionInput,
+} from './localImports';
 
 /**
  * The base a build with no `VITE_API_BASE` falls back to — the local FastAPI
@@ -792,6 +802,26 @@ async function mutationError(res: Response, path: string): Promise<ApiError> {
 }
 
 const enc = encodeURIComponent;
+
+/*
+ * LOCAL BUNDLES — every request carries `X-ISAAC-Local: 1`. The server refuses one without it,
+ * because a custom header cannot be sent cross-origin without a CORS preflight the API grants only
+ * to its own allowlist: a page on another site (an `<img>`, a form) cannot read the questions or
+ * make the server record that their values were shown.
+ */
+const LOCAL_HEADERS = { 'X-ISAAC-Local': '1' } as const;
+
+async function localGet<T>(path: string): Promise<T> {
+  const res = await request(path, { headers: LOCAL_HEADERS });
+  if (!res.ok) throw await httpErrorWithReason(res, path);
+  return readJson<T>(res, path);
+}
+
+async function localPost<T>(path: string, body: unknown): Promise<T> {
+  const res = await request(path, { method: 'POST', body: JSON.stringify(body), headers: LOCAL_HEADERS });
+  if (!res.ok) throw await httpErrorWithReason(res, path);
+  return readJson<T>(res, path);
+}
 
 /**
  * Drop `undefined` entries, KEEP `null` ones.
@@ -3124,6 +3154,51 @@ export const api = {
   /** A schema change request's export: a document for the standard's owners, never a portal payload. */
   getSchemaProposalChangeRequest(proposalId: string): Promise<ApiSchemaChangeRequest> {
     return getJson<ApiSchemaChangeRequest>(`/schema-proposals/${enc(proposalId)}/change-request`);
+  },
+
+  /* ====================================================================
+   * LOCAL IMPORTS (`/local-bundles/*`) — present only on a server started with
+   * `ISAAC_LOCAL_BUNDLES_DIR` on the scientist's own computer; everywhere else the
+   * list is the ordinary 404. Every write names the `bundle_version` it was shown
+   * (`expected_version`); the server refuses a stale one with 412 and writes nothing.
+   * ==================================================================== */
+
+  listLocalBundles(): Promise<ApiLocalBundleList> {
+    return localGet<ApiLocalBundleList>('/local-bundles');
+  },
+
+  getLocalBundleProgress(name: string): Promise<ApiLocalBundleProgress> {
+    return localGet<ApiLocalBundleProgress>(`/local-bundles/${enc(name)}/progress`);
+  },
+
+  getLocalBundleQuestions(
+    name: string,
+    opts: { kind?: string; blockingOnly?: boolean; offset?: number } = {},
+  ): Promise<ApiLocalQuestions> {
+    const query = new URLSearchParams();
+    if (opts.kind) query.set('kind', opts.kind);
+    if (opts.blockingOnly) query.set('blocking_only', 'true');
+    if (opts.offset) query.set('offset', String(opts.offset));
+    const qs = query.toString();
+    return localGet<ApiLocalQuestions>(`/local-bundles/${enc(name)}/questions${qs ? `?${qs}` : ''}`);
+  },
+
+  previewLocalAnswer(name: string, questionId: string, input: LocalAnswerInput): Promise<ApiLocalAnswerPreview> {
+    return localPost<ApiLocalAnswerPreview>(
+      `/local-bundles/${enc(name)}/questions/${enc(questionId)}/answer`,
+      definedOnly({ ...input, dry_run: true }),
+    );
+  },
+
+  answerLocalQuestion(name: string, questionId: string, input: LocalAnswerInput): Promise<ApiLocalAnswerRecorded> {
+    return localPost<ApiLocalAnswerRecorded>(
+      `/local-bundles/${enc(name)}/questions/${enc(questionId)}/answer`,
+      definedOnly({ ...input, dry_run: false }),
+    );
+  },
+
+  recordLocalDecision(name: string, input: LocalDecisionInput): Promise<ApiLocalDecisionRecorded> {
+    return localPost<ApiLocalDecisionRecorded>(`/local-bundles/${enc(name)}/decisions`, definedOnly({ ...input }));
   },
 
   listImports(): Promise<ApiImportListResponse> {

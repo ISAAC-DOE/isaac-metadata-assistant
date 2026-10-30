@@ -956,21 +956,27 @@ def cmd_bundle_decide(args) -> int:
         targets = _targets_from(args)
         positions = _positions(args.positions)
         if args.question:
-            from . import questions as Q
-
-            payload = Q.consolidate(M.load(Path(args.bundle_dir)))
-            asked = Q.question(payload, args.question)
-            if asked is not None and args.decision not in asked.get("allowed_decisions", ()):
-                raise M.MutationRefused(
-                    f"`{args.decision}` does not answer question {args.question} ({asked['kind']}); "
-                    f"use one of: {', '.join(asked.get('allowed_decisions') or ()) or '(none)'}."
-                )
-            found = Q.targets_for(payload, args.question, args.only, args.field)
-            if not found:
-                raise M.MutationRefused(f"No open question {args.question!r}" + (f" for {args.only}" if args.only else "") + ".", code=6)
-            targets.extend(found)
-            if asked is not None and asked["kind"] == "naming_counter_positions" and args.decision == "set_not_counter_positions" and positions is None:
-                positions = list(asked.get("positions") or [])  # the positions the question asks about now
+            # the question is resolved to its targets under the write's own lock (mutations.decide_question,
+            # shared with the local questions screen)
+            return M.decide_question(
+                Path(args.bundle_dir),
+                question_id=args.question,
+                only=args.only,
+                field=args.field,
+                extra_targets=targets,
+                decision=args.decision,
+                value=M.parse_value(args.value, args.json),
+                by=args.by,
+                orcid=args.orcid,
+                note=args.note,
+                split_into=split,
+                merge_with=args.merge_with,
+                qc_status=args.qc_status,
+                qc_note=args.qc_note,
+                element=args.element,
+                edge=args.edge,
+                positions=positions,
+            )
         return M.decide(
             Path(args.bundle_dir),
             target_ids=targets,

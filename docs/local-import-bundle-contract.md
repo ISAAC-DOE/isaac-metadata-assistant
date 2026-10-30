@@ -1325,6 +1325,50 @@ display names; `suggestions.facility_hints` ignores them unless the column test 
 before. `reading.full.json` (the raw engine state, not the contract) is unchanged and still
 holds the engine's names.
 
+## 23. The local questions screen (2026-10-29, `DEC-94`) — no format bump
+
+The website can read and answer a bundle **on the scientist's own computer only**: the API process
+must be started with `ISAAC_LOCAL_BUNDLES_DIR` naming a folder of bundle folders
+(`apps/api/isaac_api/local_bundles.py`; how to run it: `docs/ui-local-dev.md`). It adds nothing to
+the bundle's shape, so the format version is unchanged.
+
+| Operation | What it does | Writes |
+|---|---|---|
+| `GET /api/local-bundles` | each bundle folder: name, imported-folder label, beamline readings, `format_version`, the `bundle check` status (VALID / STALE / INVALID, decided in `cmd_bundle_check`'s order), counts, readiness, `bundle_version` | nothing |
+| `GET …/{bundle}/progress` | record groups by status, processing results by state, consolidated question counts, `minimum_answers_for_one_group`, what blocks export, the last `validation/<group>.json` verdicts (flagged when older than `bundle.json`); `missing_share` is `null` — no command computes one | nothing |
+| `GET …/{bundle}/questions` | `questions.consolidate` filtered by `kind` / `blocking_only` / `scope`, paged like `bundle questions`; each question gains a `display` block (scopes with run names, suggestions with who made them, file, locator, quote, `confirmed: false`, the value rule from `template.rule_for_path` with a unit read from the field name's suffix) and `capture` lists open merge candidates and unselected Athena versions | `exposures[]`: every parser value shown — at least what `bundle questions` records |
+| `POST …/{bundle}/questions/{id}/answer` | `mutations.decide_question` (also the CLI's `decide --question` path), `dry_run` for a preview | `scientist_decisions[]` |
+| `POST …/{bundle}/decisions` | `keep_apart`, `merge`, `select_athena_version` only, via `mutate` + `record_decision` | `scientist_decisions[]` |
+
+**Who may ask.** Every operation is refused before anything is read unless the client is loopback,
+the `Host` names this computer (`localhost` / `127.0.0.1` / `[::1]` with the server's port; 421
+otherwise), any `Origin` is on the CORS allowlist or the server's own loopback origin, and the request
+carries `X-ISAAC-Local: 1` (403 otherwise). The boot refuses `ISAAC_LOCAL_BUNDLES_DIR` beside
+`ISAAC_BASE_PATH` or a detectable non-loopback `--host` / `UVICORN_HOST`.
+
+**Per-group suggestions.** On missing-value and confirm questions each scope lists its `own_suggestions`
+(its targets' extracted values and the AI readings made for them, never confirmed) and the question says
+`suggestions_differ`. A dry run returns `by_scope` with `differs: true` for every scope whose own
+suggestions exist and do not include the value being written, and the count
+`scopes_whose_files_suggest_otherwise`. A confirm question's distinct values are counted over every target. Each own suggestion carries `from_own_files` — true only when the cited source is one of the scope's
+runs' own files (acquisition or scan file); a reading quoted from another run's file or a shared document
+is `false` and labelled so (`provenance_label`). `only_scopes` answers exactly several named scopes (refused
+whole if any has no open target, and with `only`); the screen's "accept for the groups whose own files
+suggest it" uses it, through the preview, counting only `from_own_files` groups. Targets are per run, so each multi-run scope also carries `per_target`, `mixed` (its runs' suggestions
+differ) and `has_unanimous_value` / `unanimous_value` / `unanimous_from_own_files`; a dry run's `differs` is
+set when ANY target's own suggestions exclude the value, and `differing_targets` names those runs.
+
+**The version a write names.** `bundle_version` is `sha256:` of `bundle.json`'s bytes
+(`mutations.bundle_version`; the routes read `bundle.json` once and hash and parse those same bytes, and a write returns the version read under its own lock). A write without `expected_version` is 428; one whose version is no
+longer stored is 412 (`StaleBundleVersion`), checked under `.bundle.lock` before the load, and the
+question is resolved to its targets under that same lock. `isaac bundle decide` passes no version
+and behaves as before (its `--question` path now resolves targets under the lock too).
+
+**Typing.** A field answer is the text typed, parsed by the metadata template's cell rules
+(`template.parse_answer`): numbers become numbers, as `--json` would make them; a closed list takes an
+allowed value exactly. An off-list value is refused (the CLI would store it confirmed but ineligible).
+Identity is `local_unverified`, with the typed `by` name, exactly as the CLI's `--by`.
+
 ## 24. Values outside the vocabulary: `isaac bundle propose-terms` (2026-10-29) — no format bump
 
 ```

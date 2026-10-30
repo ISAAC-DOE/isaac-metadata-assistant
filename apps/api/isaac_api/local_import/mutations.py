@@ -175,13 +175,55 @@ def save_bundle(bundle_dir: Path, bundle: dict) -> None:
         cli._atomic_write(bundle_dir / name, data)
 
 
-def mutate(bundle_dir: Path, change) -> Any:
-    """Lock, load, apply ``change(bundle)``, save. Returns what ``change`` returned."""
+class StaleBundleVersion(MutationRefused):
+    """The caller read the bundle at one version and it is now another (a CLI command, or
+    another window, wrote it since). Nothing was written; ``current_version`` says what is
+    there now, so the caller can re-read before answering again."""
+
+    def __init__(self, expected: str, current: str | None):
+        super().__init__(
+            f"The bundle changed since it was read (read at {expected}, now {current}); nothing was written. "
+            "Re-read the questions and answer again.",
+            code=2,
+        )
+        self.expected = expected
+        self.current = current
+
+
+def bundle_version(bundle_dir: Path) -> str | None:
+    """The version of ``bundle.json`` as stored: the sha256 of its bytes, or ``None`` when there is
+    no file. Every save rewrites the file, so ANY write (this process's or a CLI command's) moves it.
+    Read it under :func:`locked` when it must agree with what a following write sees."""
+    path = B.bundle_path(Path(bundle_dir))
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def _require_version(bundle_dir: Path, expected_version: str | None) -> None:
+    """Under the caller's lock: refuse when ``expected_version`` is given and is not what is stored."""
+    if expected_version is None:
+        return
+    current = bundle_version(bundle_dir)
+    if current != expected_version:
+        raise StaleBundleVersion(expected_version, current)
+
+
+def mutate(bundle_dir: Path, change, *, expected_version: str | None = None, with_version: bool = False) -> Any:
+    """Lock, load, apply ``change(bundle)``, save. Returns what ``change`` returned.
+
+    ``expected_version`` (a :func:`bundle_version`) is checked UNDER THE LOCK, before the load: a
+    caller that showed a person the bundle at one version cannot write over a change made since
+    (the CLI passes none, as it always has). ``with_version`` returns ``(result, version)``, the
+    version read under the same lock right after the save."""
     with locked(Path(bundle_dir)):
+        _require_version(Path(bundle_dir), expected_version)
         bundle = load(bundle_dir)
         result = change(bundle)
         save_bundle(bundle_dir, bundle)
-        return result
+        return (result, bundle_version(bundle_dir)) if with_version else result
 
 
 # --- target lookup ---------------------------------------------------------------------------
@@ -514,12 +556,13 @@ def decide(
     element: str | None = None,
     edge: str | None = None,
     positions: Sequence[int] | None = None,
+    expected_version: str | None = None,
 ) -> dict:
     """Record a scientist decision for each target (ALL-OR-NOTHING), idempotently.
 
     Replaying the same decision for a target whose latest decision is already identical
     records nothing new. Each target is its own entry even in a bulk call, sharing a
-    ``batch_id``.
+    ``batch_id``. ``expected_version``: see :func:`mutate` (the CLI passes none).
     """
     params = dict(
         target_ids=target_ids, decision=decision, value=value, by=by, orcid=orcid, note=note,
@@ -527,7 +570,102 @@ def decide(
         element=element, edge=edge, positions=positions,
     )
     _decide_arguments(**params)  # refused before the lock is taken, as always
-    return mutate(bundle_dir, lambda bundle: record_decision(bundle, **params))
+    return mutate(bundle_dir, lambda bundle: record_decision(bundle, **params), expected_version=expected_version)
+
+
+def question_targets(payload: Mapping, question_id: str, *, decision: str, only: str | None, field: str | None,
+                     positions: Sequence[int] | None,
+                     only_scopes: Sequence[str] | None = None) -> tuple[list[str], list[int] | None]:
+    """``decide --question``: the targets a consolidated question's answer is recorded on, and the
+    positions it names. ONE implementation for the CLI and the local questions screen.
+
+    Refuses a decision that does not answer the question (so e.g. an absorber question can never
+    bulk-confirm the record GROUPS it targets), and a question with no open target in that scope
+    (``--only``) or field (``--field``). The counter question answered with
+    ``set_not_counter_positions`` and no positions names the positions it asks about now."""
+    from . import questions as Q
+
+    asked = Q.question(payload, question_id)
+    if asked is not None and decision not in asked.get("allowed_decisions", ()):
+        raise MutationRefused(
+            f"`{decision}` does not answer question {question_id} ({asked['kind']}); "
+            f"use one of: {', '.join(asked.get('allowed_decisions') or ()) or '(none)'}."
+        )
+    if only_scopes:
+        # SEVERAL SCOPES (the local screen's "accept for the groups whose files suggest it"): exactly their
+        # targets, and refused whole when any named scope has no open target — never a partial answer
+        if only:
+            raise MutationRefused("Name one scope (--only) or several, not both.")
+        found = []
+        for sc in dict.fromkeys(only_scopes):
+            got = Q.targets_for(payload, question_id, sc, field)
+            if not got:
+                raise MutationRefused(f"No open question {question_id!r} for {sc}; nothing was recorded.", code=6)
+            found += [t for t in got if t not in found]
+    else:
+        found = Q.targets_for(payload, question_id, only, field)
+    if not found:
+        raise MutationRefused(f"No open question {question_id!r}" + (f" for {only}" if only else "") + ".", code=6)
+    if asked is not None and asked["kind"] == "naming_counter_positions" and decision == B.NOT_COUNTER_DECISION and positions is None:
+        positions = list(asked.get("positions") or [])  # the positions the question asks about now
+    return list(found), (list(positions) if positions is not None else None)
+
+
+def decide_question(
+    bundle_dir: Path,
+    *,
+    question_id: str,
+    only: str | None = None,
+    only_scopes: Sequence[str] | None = None,
+    field: str | None = None,
+    extra_targets: Sequence[str] = (),
+    decision: str,
+    value: Any,
+    by: str,
+    orcid: str | None,
+    note: str | None = None,
+    split_into: Sequence[Sequence[str]] | None = None,
+    merge_with: Sequence[str] | None = None,
+    qc_status: str | None = None,
+    qc_note: str | None = None,
+    element: str | None = None,
+    edge: str | None = None,
+    positions: Sequence[int] | None = None,
+    expected_version: str | None = None,
+    dry_run: bool = False,
+    with_version: bool = False,
+) -> Any:
+    """``isaac bundle decide --question`` — the CLI and the local questions screen both call this.
+
+    The question is resolved to its targets UNDER THE SAME LOCK as the write, from the bundle that
+    write changes, so an answer can never land on targets another command changed in between. With
+    ``expected_version`` the stored version is checked first, under that lock. ``dry_run`` resolves
+    and checks exactly as a write would (every target, every refusal) on a copy and writes nothing:
+    it returns the targets a write would record and the version it was read at. ``with_version``
+    returns ``(result, version)`` for a write, the version read under the lock right after the save."""
+    from . import questions as Q
+
+    # as the CLI always answered: a folder with no bundle.json is exit 6, and nothing (not even the
+    # lock file) is created in it
+    if not B.bundle_path(Path(bundle_dir)).is_file():
+        raise MutationRefused(f"No bundle.json at {bundle_dir}.", code=6)
+    with locked(Path(bundle_dir)):
+        _require_version(Path(bundle_dir), expected_version)
+        version = bundle_version(bundle_dir)
+        bundle = load(bundle_dir)
+        found, positions = question_targets(Q.consolidate(bundle), question_id, decision=decision, only=only,
+                                            field=field, positions=positions, only_scopes=only_scopes)
+        params = dict(
+            target_ids=list(extra_targets) + found, decision=decision, value=value, by=by, orcid=orcid, note=note,
+            split_into=split_into, merge_with=merge_with, qc_status=qc_status, qc_note=qc_note,
+            element=element, edge=edge, positions=positions,
+        )
+        if dry_run:
+            planned = record_decision(copy.deepcopy(bundle), **params)
+            return {"dry_run": True, "bundle_version": version, "target_ids": params["target_ids"], **planned}
+        result = record_decision(bundle, **params)
+        save_bundle(bundle_dir, bundle)
+        return (result, bundle_version(bundle_dir)) if with_version else result
 
 
 def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, edge, positions, value=None, **_rest):

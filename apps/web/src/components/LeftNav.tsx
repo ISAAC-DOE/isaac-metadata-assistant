@@ -1,8 +1,9 @@
 import './chrome.css';
 import { Link } from 'react-router-dom';
-import { BarChart3, FilePenLine, Inbox, LayoutList, Settings } from './icons';
+import { BarChart3, FilePenLine, Inbox, Laptop, LayoutList, Settings } from './icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
+import { useLocalImportsAvailable } from '../lib/localImports';
 import type { LucideIcon } from './icons';
 
 export type NavKey =
@@ -12,6 +13,7 @@ export type NavKey =
   | 'governance'
   | 'statistics'
   | 'schemaProposals'
+  | 'localImports'
   | 'settings';
 
 /**
@@ -141,6 +143,20 @@ const ITEMS: { key: NavKey; label: string; icon: LucideIcon; to: string }[] = [
   { key: 'settings', label: LABELS.navSettings, icon: Settings, to: ROUTES.settings },
 ];
 
+/*
+ * LOCAL IMPORTS — NOT IN `ITEMS`, because it is not a destination every build has. It is
+ * shown only when this is a local build started for it AND the server says it serves a
+ * folder of import bundles (`useLocalImportsAvailable`, which in a hosted build asks
+ * nothing and stays false). Placed after Historical Import: both are imports, and the
+ * label says which one never leaves this computer.
+ */
+const LOCAL_IMPORTS_ITEM = {
+  key: 'localImports' as const,
+  label: LABELS.navLocalImports,
+  icon: Laptop,
+  to: ROUTES.localImports,
+};
+
 /**
  * WHERE A DEMOTED DESTINATION NOW LIVES — so a reader standing on one is not
  * looking at a navigation list with nothing marked in it.
@@ -189,9 +205,13 @@ interface LeftNavProps {
  */
 export function LeftNav({ active }: LeftNavProps) {
   const ancestor = active === undefined ? undefined : NAV_PARENT[active];
+  const localImports = useLocalImportsAvailable();
+  const items = localImports
+    ? ITEMS.flatMap((item) => (item.key === 'imports' ? [item, LOCAL_IMPORTS_ITEM] : [item]))
+    : ITEMS;
   return (
     <nav className="leftnav" aria-label="Primary">
-      {ITEMS.map(({ key, label, icon: Icon, to }) => {
+      {items.map(({ key, label, icon: Icon, to }) => {
         const isActive = key === active;
         const isAncestor = !isActive && key === ancestor;
         return (
