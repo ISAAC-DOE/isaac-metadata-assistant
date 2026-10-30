@@ -392,7 +392,7 @@ def test_the_rules_module_imports_no_web_framework():
         "bad = sorted(m for m in sys.modules if m.split('.')[0] in ('fastapi', 'starlette', 'pydantic', 'uvicorn')); "
         "print(','.join(bad))"
     )
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True, env=_subprocess_env())
     assert out.stdout.strip() == "", out.stdout
 
 
@@ -413,3 +413,13 @@ def test_the_term_shape_served_to_the_browser_is_the_one_the_server_enforces(cli
         served = bool(re.search(shape["term"], term)) and not re.search(shape["path_like"], term)
         server = bool(rules._TERM_SHAPE.match(term)) and not rules._PATH_LIKE.search(term)
         assert served == server, term
+
+
+def _subprocess_env() -> dict:
+    """A child interpreter finds this tree's packages the way the test process does
+    (CI imports them by path, not from an installed copy)."""
+    import os
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[3]
+    return {**os.environ, "PYTHONPATH": os.pathsep.join([str(repo / "src"), str(repo / "apps" / "api")])}

@@ -252,7 +252,8 @@ def test_it_is_in_the_isaac_help():
     from isaac_records import cli as top
 
     out = subprocess.run(
-        [sys.executable, "-m", "isaac_records.cli", "bundle", "--help"], capture_output=True, text=True, check=False
+        [sys.executable, "-m", "isaac_records.cli", "bundle", "--help"], capture_output=True, text=True, check=False,
+        env=_subprocess_env(),
     )
     assert "propose-terms" in out.stdout
     assert top.LOCAL_IMPORT_COMMANDS == ("import", "bundle", "process")
@@ -268,7 +269,7 @@ def test_propose_terms_imports_no_web_framework(clean_bundle, tmp_path):
         "or m == 'isaac_api.routes' or m == 'isaac_api.schema_proposals'); "
         "print('RESULT', rc, ','.join(bad))"
     )
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True, env=_subprocess_env())
     result = [line for line in out.stdout.splitlines() if line.startswith("RESULT ")]
     assert result == ["RESULT 0 "], out.stdout + out.stderr
 
@@ -282,3 +283,13 @@ def test_the_rules_used_are_the_websites(monkeypatch):
 
     monkeypatch.setattr(R, "_TERM_SHAPE", re.compile(r"\A[A-Z]+\Z"))
     assert P._draft(sources, "context.electrochemistry.cell_type", "three_electrode_static_cell", lists)["drafted"] is False
+
+
+def _subprocess_env() -> dict:
+    """A child interpreter finds this tree's packages the way the test process does
+    (CI imports them by path, not from an installed copy)."""
+    import os
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[3]
+    return {**os.environ, "PYTHONPATH": os.pathsep.join([str(repo / "src"), str(repo / "apps" / "api")])}

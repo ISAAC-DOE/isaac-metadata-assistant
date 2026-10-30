@@ -250,7 +250,7 @@ def test_a_nan_energy_shift_on_one_of_two_versions_never_makes_the_scientists_ch
 
 
 def test_a_non_finite_e0_or_edge_step_is_named_on_the_athena_entry(tmp_path, monkeypatch):
-    import numpy as np
+    np = pytest.importorskip("numpy", reason="needs the optional `processing` extra")
 
     from isaac_api.local_import.processing import athena as A
 
@@ -273,7 +273,7 @@ def test_a_non_finite_e0_or_edge_step_is_named_on_the_athena_entry(tmp_path, mon
 
 
 def test_a_nan_in_the_scientists_curve_gives_a_null_noise_named_on_the_result(tmp_path, monkeypatch):
-    import numpy as np
+    np = pytest.importorskip("numpy", reason="needs the optional `processing` extra")
 
     from isaac_api.local_import.processing import athena as A
     from isaac_api.local_import.processing.cli_entry import run_process
