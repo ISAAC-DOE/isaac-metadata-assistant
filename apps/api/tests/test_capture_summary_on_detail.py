@@ -435,6 +435,125 @@ def test_the_summary_tracks_a_write_rather_than_being_stamped_once(
     assert _assert_parity(client, experiment_id)["notes_total"] == 2
 
 
+def test_every_capture_write_that_moves_the_summary_also_moves_the_detail_etag(
+    client, experiment_id
+):
+    """THE SERVER HALF OF "THE SIDEBAR STAYS TRUE LIVE" (added 2026-10-29).
+
+    The deleted ``useCaptureSummary`` re-read the two list routes whenever the change
+    feed's ``note``/``proposal`` positions moved. The bundle-borne count moves only
+    when the BUNDLE refetches, and the frontend deliberately refetches nothing for a
+    proposal-only feed summary (``recordChanges.needsCanonicalRefetch``). What makes
+    that safe is that every capture write ALSO moves the record's own ETag, so the
+    record poller's conditional GET answers 200 and refetches.
+    ``capture-summary-request-graph.test.tsx`` pins the client half; this pins that
+    the premise holds for every write that can change one of the three numbers —
+    note capture, dismissal, and each proposal transition reachable in a
+    default-configured build (``accepted`` answers ``409 human_actor_required``; see
+    ``_proposals_in_states``).
+
+    Each step asserts BOTH that the summary moved (otherwise the step proves
+    nothing about it) and that the ETag moved.
+
+    MUTATIONS (both run 2026-10-29, both reverted):
+
+    * ``Experiment.etag()`` answering a constant once the record holds a proposal
+      — **1 RED**, this test alone ("reject it: the record ETag did not move"); the
+      other 13 stay green, which is the point: nothing else here would notice a
+      record poller that can no longer see a proposal act.
+    * proposals removed from ``workspace._authoritative_signature`` — **6 RED**,
+      this one included, but at the SUMMARY assertion rather than the ETag one:
+      ``save_versioned`` writes nothing when the signature is unchanged, so the
+      proposal never persists at all. The ETag moving is structurally coupled to
+      the write landing; this test is what pins it at the wire.
+    """
+    path = _record_scoped_path(client, experiment_id)
+
+    def step(label: str, act, expect: dict) -> None:
+        etag_before = _etag(client, experiment_id)
+        act()
+        detail = client.get(f"/api/experiments/{experiment_id}")
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["capture_summary"] == expect, label
+        assert detail.headers["ETag"] != etag_before, f"{label}: the record ETag did not move"
+        # …and a conditional GET with the OLD tag is answered 200, which is what the
+        # record poller actually issues.
+        conditional = client.get(
+            f"/api/experiments/{experiment_id}", headers={"If-None-Match": etag_before}
+        )
+        assert conditional.status_code == 200, f"{label}: a stale tag was answered 304"
+
+    def propose(value: str) -> str:
+        response = client.post(
+            f"/api/experiments/{experiment_id}/proposals",
+            json={
+                "note_id": note_holder["id"],
+                "target_field_path": path,
+                "proposed_value": value,
+                "rule": "a test fixture proposed it",
+            },
+            headers={"If-Match": _etag(client, experiment_id)},
+        )
+        assert response.status_code == 200, response.text
+        return response.json()["proposal"]["proposal_id"]
+
+    note_holder: dict = {}
+    proposal_ids: dict[str, str] = {}
+
+    step(
+        "capture a note",
+        lambda: note_holder.update(_capture_note(client, experiment_id, "one")),
+        {"notes_total": 1, "proposals_open": 0, "unreadable_entries": 0},
+    )
+    step(
+        "capture a second note",
+        lambda: _capture_note(client, experiment_id, "two"),
+        {"notes_total": 2, "proposals_open": 0, "unreadable_entries": 0},
+    )
+    step(
+        "open a proposal",
+        lambda: proposal_ids.update(a=propose("first")),
+        {"notes_total": 2, "proposals_open": 1, "unreadable_entries": 0},
+    )
+    step(
+        "reject it",
+        lambda: _review(client, experiment_id, proposal_ids["a"], "reject"),
+        {"notes_total": 2, "proposals_open": 0, "unreadable_entries": 0},
+    )
+    step(
+        "open another",
+        lambda: proposal_ids.update(b=propose("second")),
+        {"notes_total": 2, "proposals_open": 1, "unreadable_entries": 0},
+    )
+    step(
+        "withdraw it",
+        lambda: _review(client, experiment_id, proposal_ids["b"], "withdraw"),
+        {"notes_total": 2, "proposals_open": 0, "unreadable_entries": 0},
+    )
+    step(
+        "open a third",
+        lambda: proposal_ids.update(c=propose("third")),
+        {"notes_total": 2, "proposals_open": 1, "unreadable_entries": 0},
+    )
+    step(
+        "supersede it",
+        lambda: _review(client, experiment_id, proposal_ids["c"], "supersede"),
+        {"notes_total": 2, "proposals_open": 0, "unreadable_entries": 0},
+    )
+    # Dismissal does not change `notes_total` (a dismissed note is still held —
+    # see the notes-total test), so it is the one write here whose summary is
+    # UNMOVED; its ETag must move all the same, for the notes panel's sake, and the
+    # summary must still equal the list routes'.
+    etag_before = _etag(client, experiment_id)
+    _dismiss(client, experiment_id, note_holder["id"])
+    assert _etag(client, experiment_id) != etag_before
+    assert _assert_parity(client, experiment_id) == {
+        "notes_total": 2,
+        "proposals_open": 0,
+        "unreadable_entries": 0,
+    }
+
+
 def test_the_capture_block_appears_on_every_response_built_from_the_detail_bundle(
     ordinary_client,
 ):
