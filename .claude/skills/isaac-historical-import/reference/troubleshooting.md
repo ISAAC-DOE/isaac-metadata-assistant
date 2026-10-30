@@ -11,6 +11,10 @@
 | a mutation exit 5 | "That change would leave the summary invalid, so nothing was saved." | read the message; fix the cause (usually a missing value with a decision) |
 | `excerpt` refused: file changed | "The original file changed since import." | re-import into a new folder |
 | `decide` exit 2 | "That decision isn't allowed for this item." | read the allowed list in the message; for conflicts/missing values give `--value` |
+| `decide` exit 2: "not one of the schema's allowed values" | "That answer isn't one the record can hold." | show the allowed values it lists, map their words to one, say it back, and ask; nothing was recorded |
+| `decide` exit 2: merge "needs --merge-with" or "names no record group" | "I need to know which group to merge it with." | list the groups again and name a live one |
+| `process` exit 2: "Pass --source" | "ISAAC needs the original folder to read the scans." | run it again with `--source <the imported folder>`; nothing was written |
+| `setup_isaac_local.sh` says the installed skill differs from the ISAAC folder's | "My instructions here are out of date." | `scripts/setup_isaac_local.sh --install-skill` from the ISAAC folder, then restart Claude Code |
 | process unavailable | "Curves and quality checks need an extra install." | `scripts/setup_isaac_local.sh --with-processing`; continue without it |
 | validate exit 1 | "Some records aren't ready; here is why." | Step 8 table |
 | the bundle folder looks inconsistent | "Something in the working folder doesn't add up." | `<isaac> bundle check <bundle>`; exit 1 prints exactly what is wrong |

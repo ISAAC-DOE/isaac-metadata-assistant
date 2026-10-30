@@ -12,7 +12,7 @@ When a scientist asks "what should this record hold?", answer from the upstream 
 
 | Verdict | Tell the scientist | Fix |
 |---|---|---|
-| `incomplete` | "These required facts are still missing: …" (list them from `missing_required`) | answer the blocking questions (Step 7: `bundle questions --blocking-only`); `measurement.series`, `measurement.qc.status` and `descriptors.outputs` come only from an approved processing result: run the command `processing_fix` names (approve it and state its QC status, Step 6) — correcting a value never supplies them |
+| `incomplete` | "These required facts are still missing: …" (list them from `missing_required`) | answer the blocking questions (Step 7: `bundle questions --blocking-only`). `measurement.series`, `measurement.qc.status` and `descriptors.outputs` are listed as missing until the group's processing result is approved; the file's `processing_fix` says so. The fix is Step 6: show the curve, and approve it only when the scientist does, with the QC status they choose. `processing_fix` holds a template (`--qc-status <value>`): never run it as it is. Correcting a value never supplies them. When it says to re-run `isaac process`, add `--source <folder>` |
 | `invalid_official` | "A value is in the wrong form: …" (quote the validator's message) | correct that value with `decide --decision correct` |
 | `portal_check_unavailable` | "The offline portal check is not installed, so this cannot count as ready." | `scripts/install_portal_validator.sh`, then `validate` again |
 | `portal_check_degraded` | "The portal check ran only partly, so this cannot count as ready." | re-install the validator; if it persists, report it |
@@ -20,15 +20,24 @@ When a scientist asks "what should this record hold?", answer from the upstream 
 | `portal_reject` | "The portal would reject this: …" | fix the stated value or leave it unexported |
 | `exportable` | "Passes every check." | export |
 
-`validation/<group>.json` also has a `schema_drift` block (differences between the vendored website schema and the pinned portal schema, such as an unknown temperature). It is information, not a verdict: the verdict it leads to is `invalid_official` or `portal_reject`, with the validator's own message. Quote the message.
+`validation/<group>.json` also has a `website_schema` result and a `schema_drift` block: how the
+record fares against the website's older schema (vendored v1.05, July) beside the pinned portal
+schema. Both are for information only and gate nothing; the verdict comes from the portal schema and
+the portal check. An unknown temperature is the usual case: the record says `temperature_K: null`
+with `temperature_basis: not_reported`, which the portal accepts and v1.05 does not. The drift text
+then says "blocked by schema drift unless a scientist states the temperature" and
+`blocked_by_schema_drift: true`, but that is about the website schema: the record can still be
+`exportable`. Tell the scientist so in plain words. The temperature stays an optional question if
+they know it; never press for one to clear this note, and never default one.
 
 Exit 1 from `validate` means at least one draft is not exportable; that is information, not an error.
 After fixing, run `build-records` then `validate` again. Never hand-edit a draft or an evidence file.
 
 ## Export and upload
 
-`export --out <records>` writes `<ULID>.json` and `<ULID>.evidence.json` for exportable drafts only
-and lists the rest with their verdicts. Exporting again into the same `--out` reuses each unchanged record's id (`export: unchanged`); a changed record gets a new id and the old one is moved to `isaac-export/superseded/` (`export: replaced`) — say which. Then `upload <records> --dry-run`: summarise records, target
+`export --out <records>` writes `<ULID>.json`, `<ULID>.evidence.json` and a `<ULID>.artifacts/` folder
+(the processing files) for exportable drafts only and lists the rest with their verdicts. Its index is
+`<records>/isaac-export/index.json`. Exporting again into the same `--out` reuses each unchanged record's id (`export: unchanged`); a changed record gets a new id and the old one is moved to `isaac-export/superseded/` (`export: replaced`) — say which. Then `upload <records> --dry-run`: summarise records, target
 endpoints and body sizes. State plainly: nothing was sent, this build cannot send, the key was not
 read. Never ask for or print a portal key. Tell the scientist the records are in `<records>` and
 the portal upload is theirs to do.

@@ -31,7 +31,10 @@ ISAAC portal expects, plus a plain list of what is still missing. **It never upl
 
    You want to see `0 failed` at the end. Lines marked `SKIP` are parts you have not installed.
 
-Run `scripts/setup_isaac_local.sh --check` any time to see what is installed.
+Run `scripts/setup_isaac_local.sh --check` any time to see what is installed. It also tells you
+when the skill copy in `~/.claude/skills` differs from the one in the ISAAC folder (for example after
+you update the folder). Claude Code uses that copy, so refresh it with
+`scripts/setup_isaac_local.sh --install-skill` and restart Claude Code.
 
 ## Run it
 
@@ -53,7 +56,12 @@ Run `scripts/setup_isaac_local.sh --check` any time to see what is installed.
    7. **Questions.** Only what blocks a record comes first, asked once for the whole beamtime where
       the answer is shared ("this applies to 9 groups") and once per group where it differs. Claude
       tells you how many answers make a group ready (often 4 to 7). Conflicts that affect a record
-      come next; "I don't know" is fine and the value stays missing.
+      come next; "I don't know" is fine and the value stays missing. Where the record takes only
+      fixed words (for example `in_situ`, `powder`), Claude matches your words to one of them and
+      asks you to confirm it; ISAAC refuses any other word. Some items are only listed for
+      information, because no answer could go into the record; you are not asked about them.
+      If you prefer, you can answer the same questions in a browser on your own computer: the
+      *Local Imports* page (setup in `docs/ui-local-dev.md`). It runs the same checks.
    8. **Checks.** Each record is checked against the schema and the portal's rules. Claude explains
       anything that fails and how to fix it.
 4. **What you get:** a folder of records (`<id>.json` and `<id>.evidence.json`) for every record that
@@ -86,8 +94,10 @@ rules before using real data (`docs/local-first-data-flows.md`). The skill asks 
 - **Spot checks are not verification.** Claude's independent reading covers a sample of key facts;
   the summary says how many.
 - **Names are not verified.** Decisions are recorded as `local_unverified`.
-- **Records can be blocked** where the portal needs something the July (v1.05) schema cannot hold,
-  for example an unknown temperature. The checks say so; nothing is guessed to get past them.
+- **Two schemas.** Records are checked against the schema the portal uses. The ISAAC website's
+  older July (v1.05) schema cannot hold some of what the portal needs, for example "temperature not
+  reported" or who produced the data. The checks report that for information only: an unknown
+  temperature does not stop a record from being exported, and no temperature is guessed.
 - **Readers.** Built in: Beamline 15 SPEC scans and macros, SSRL EXAFS Data Collector text scans,
   Athena/Demeter exports, PyMca MCA files, simple two-column text. Other formats are listed as
   unread and Claude reads what it can.

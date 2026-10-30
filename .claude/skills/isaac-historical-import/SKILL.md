@@ -55,6 +55,10 @@ Details live in `reference/`; open a file only when its step needs it.
 Find the command: read `checkout-path.txt` beside this file (if present) and use
 `<that path>/.venv/bin/isaac` (call it `<isaac>`; the `python` in the same folder is `<python>`);
 otherwise use `isaac` from PATH. Run `<isaac> import --help`.
+If `checkout-path.txt` exists, check this installed copy of the skill is current:
+`diff -rq -x checkout-path.txt <that path>/.claude/skills/isaac-historical-import <this skill's folder>`.
+Any difference means this copy is out of date: give the ONE fix, `scripts/setup_isaac_local.sh
+--install-skill` (from the ISAAC folder), then restart Claude Code. Do not continue on an old copy.
 If it says the import package is missing, or the command is not found, stop and give the ONE fix:
 `scripts/setup_isaac_local.sh` (from the ISAAC folder). Then check the optional parts and
 report each in one line:
@@ -83,8 +87,11 @@ Record their answer in your next message.
 
 `<isaac> import <folder> --out <bundle>` (choose `<bundle>` outside the source folder; ask
 before overwriting; `--force` only on request). Then read **only** `<bundle>/summary.md`.
-Tell the scientist, in 4 lines, what was found: files, runs, how many questions, how many files
-no reader could open. If import is refused (exit 3/4/5), read `reference/troubleshooting.md`.
+Tell the scientist, in 4 lines, what was found: files, runs, conflicts, how many files no reader
+could open (import prints these). Do not quote `summary.md`'s "Questions: N" (it counts fine-grained
+items) or its "Run groups" (file-name groups, not records). The question count comes in Step 7,
+from `bundle questions` → `counts`; running it now would show values before the spot check.
+If import is refused (exit 3/4/5), read `reference/troubleshooting.md`.
 
 ## Step 3 · Blind cross-check (BEFORE any command that prints a value)
 
@@ -103,7 +110,8 @@ Prioritise logbooks, beamtime notes and proposals. For `.docx/.pptx/.xlsx` run
 `<python> -m isaac_api.local_import.extract <file> --root <folder> --out <bundle>/extracted`, read
 the text it returns, and open embedded images and PDFs with the Read tool. Plain-text files of
 other kinds: Read them directly. Then read what code DID read for statements no parser maps
-(readmes, macro comments, run labels, documents beside the folder). Write every finding to ONE
+(readmes, macro comments, run labels). Read only inside the folder the scientist approved: if a
+document beside it looks relevant, name it and ask before opening it. Write every finding to ONE
 findings file and load it with `annotate --from-readings` (preview, then `--apply`); the format is in
 the reference. Tell the scientist what each file turned out to hold. Unreadable binaries: say so.
 
@@ -126,14 +134,20 @@ time zone for SSRL XDC scan start times: `--decision set_clock_time_zone --value
 see `reference/questions-and-decisions.md`.) Ask the
 scientist to **confirm, split or merge** each, in batches, with progress. Record with `decide
 --decision confirm|split|merge` (`--split-into` takes a JSON list of lists of run keys, which you
-build; they never type it).
+build; they never type it; `merge` needs `--merge-with` naming another live group, then a regroup and
+a confirm of the combined group). A merge candidate they say is distinct: `--target <mc id> --decision
+keep_apart`. Positions they say are NOT counters: `--target experiment --decision set_not_counter_positions
+--positions N`.
+After a regroup, report any `merge_decisions_not_combined` in words.
 
 ## Step 6 · Processing (a DRAFT protocol)
 
 `<isaac> process <bundle> --source <folder>` once groups are confirmed (`--source` is the folder that was
-imported; the bundle does not record the path; `--group <id>` limits it; `--no-athena` skips the
-scientist's own Athena projects). Results are in `<bundle>/processing/processing_results.json`,
-with a `plot.png` and `qc.json` per group in `<bundle>/processing/<group id>/`. For each group show:
+imported; the bundle does not record the path, so without it `process` refuses and writes nothing;
+`--no-athena` skips the scientist's own Athena projects). `--group <id>` (with `--source`) redoes only
+that group; every other group's result is kept as it was (`kept_other_groups`). Results are in `<bundle>/processing/processing_results.json`,
+with a `plot.png` and `qc.json` per result in `<bundle>/processing/<group id>/<run id>/` (each result's
+`outputs.files` names them). For each group show:
 the quality verdict in words, glitch flags, whether it agrees with the scientist's own Athena
 output when one exists, and the plot: open the PNG with Read and describe it. Ask approve / reject /
 needs changes per group. **A result with `applicability.status: not_applicable` is not a curve and
@@ -145,16 +159,18 @@ result says scans were skipped** (QC reason `scans_skipped_lacking_chosen_column
 flag `channel_from_a_later_scan`), say it in plain words from its metrics, e.g. "14 of 165 scans were
 used; 150 had different columns (they may be motor or alignment scans); please confirm these belong
 in one record" — never present the curve as the whole group. **When approving, also ask for the QC status**: it is the scientist's
-call and `warn` is never turned into a status for them. Show the allowed words (the pinned
-vocabulary lists them; `isaac bundle decide --help` names the option) and what the QC flags were:
+call and `warn` is never turned into a status for them. Show the allowed words (today `valid`,
+`compromised`, `failed`, `pending`; `decide` refuses any other and lists them) and the QC flags:
 `decide --target <result_id> --decision approve --qc-status <word> [--qc-note "<what is compromised or
-failed, and why>"] --by "<name>"` (`result_id` looks like `proc-<group id>-isaac`; a note is needed
-for a status that says something is wrong). Reject / needs changes use the same `--target`. **Calibration shift.** If a result's flags say the calibration reference is unconfirmed, or processing proposes
+failed, and why>"] --by "<name>"` (`result_id` is in `processing_results.json`, e.g.
+`proc-rg-…-r-<hash>-isaac`; ask for a note when the status says something is wrong). Reject / needs
+changes use the same `--target`. If a result lists several of their Athena versions, ask which is the
+result of record: `--decision select_athena_version --value <version id>` (it approves nothing). **Calibration shift.** If a result's flags say the calibration reference is unconfirmed, or processing proposes
 shifting the energy axis, do not apply anything. Explain in plain words: "The curve could be moved a
 little in energy so a reference foil's edge lands where it should. I need you to tell me which
 element and edge that reference is." Ask only then, per group. On their answer:
 `decide --target <group id> --decision approve_calibration --element <symbol> --edge <K|L1-L3|M1-M5> --by "<name>"`,
-then `process --group <group id>` again so the approved shift can be used. No answer, no shift.
+then `process --source <folder> --group <group id>` again so the approved shift can be used. No answer, no shift.
 Always say: **the processing protocol is a draft
 until Oscar and Angel review it**; an approval means "I looked at this curve and accept it for this
 record", not "the method is validated". If `process` reports `processing_unavailable`, say what
@@ -170,9 +186,23 @@ exact `decide --question` command. Lead with the minimum: "**N answers make grou
 N groups; answer once, or tell me which groups differ" (`--only group:<id>` overrides one group).
 Then conflicts that affect a record, then the optional rest only if the scientist wants them
 (`--scope group:<id>` shows one group). Batch 3 to 5 per message, by theme, with progress.
-Use the scientist's own words as the value; always pass `--by "<their name>"`. Missing values they
-cannot answer stay missing (`defer`). Never pick a side of a conflict. For several evidence-backed
-confirmations the scientist accepts together, `--targets-file` (list each item back first).
+
+- **Closed lists.** When a field has `allowed_values`, map their words to one allowed value, say it
+  back ("in situ → `in_situ`, right?") and record it only on their yes. `decide` refuses any value
+  the field's schema rejects (it lists the allowed ones); a bulk answer is refused whole.
+- **No value yet.** When a question has no value ("What is X?", no `confirm` in `allowed_decisions`),
+  never invent one: ask the question, then `correct --value <their answer>`.
+- **Not asked.** `informational` questions (no `allowed_decisions`, a `#` command) cannot reach the
+  record: mention them once, as "listed for information". A per-group question with `covered_by` is
+  answered by that experiment question; ask per group only if they say a group differs.
+- **Asked again** (`asked_again`): an earlier answer cannot go into the record; give the reason and ask.
+- **Absorber.** Its command is a template; the files' pair is only a hint. Say the element and edge
+  back and run it only on a clear yes to that pair, never on a vague yes.
+
+Always pass `--by "<their name>"`. Missing values they cannot answer stay missing (`defer`). Never pick
+a side of a conflict. For several evidence-backed confirmations the scientist accepts together,
+`--targets-file` (list each item back first). A scientist may also answer in the local-only *Local
+Imports* web page (`docs/ui-local-dev.md`); it runs the same checks. Run `bundle questions` again after.
 
 **Then offer the template** for everything the files never state (facility, beamline,
 environment, cell type, reaction, sample form and formula): "I can give you one spreadsheet to
@@ -189,7 +219,8 @@ concentration and the pH have their own columns. Details: `reference/questions-a
 `<isaac> bundle build-records <bundle>` then `<isaac> bundle validate <bundle>`. Read
 `reference/records-and-validation.md` and explain every verdict that is not `exportable` in plain
 words with the exact fix, then loop back to the step that fixes it (a question, a group, a
-processing approval). Never edit a draft file and never relax a check.
+processing approval: an `incomplete` draft with a `processing_fix` needs its curve approved in Step 6).
+Never edit a draft file and never relax a check.
 
 ## Step 9 · Export and dry run
 

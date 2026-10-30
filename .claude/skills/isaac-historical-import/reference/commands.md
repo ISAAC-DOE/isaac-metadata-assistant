@@ -5,29 +5,29 @@
 | Purpose | Command |
 |---|---|
 | Read a folder or ZIP | `<isaac> import <folder> --out <bundle> [--profile auto\|<id>] [--force] [--record-local-root]` |
-| A page of items | `<isaac> bundle list <bundle> runs\|conflicts\|candidates\|questions\|unread [--limit N] [--offset M] [--state S] [--no-values]` |
-| One item | `<isaac> bundle show <bundle> run\|conflict\|candidate\|source\|question <id>` (prints values) |
+| A page of items | `<isaac> bundle list <bundle> runs\|conflicts\|candidates\|questions\|unread\|groups\|merge-candidates\|processed-outputs [--limit N] [--offset M] [--state S] [--no-values]` |
+| One item | `<isaac> bundle show <bundle> run\|conflict\|candidate\|source\|question\|group\|processed-output <id>` (prints values) |
 | Re-validate the bundle itself | `<isaac> bundle check <bundle>` |
 | What to cross-check | `<isaac> bundle crosscheck-plan <bundle> [--limit N] [--offset M]` (ids and locators, no values) |
 | Raw source text at a target | `<isaac> bundle excerpt <bundle> <id> [--source <folder>]` (no parser value; needs the original folder) |
 | Record an AI reading | `<isaac> bundle annotate <bundle> --target <id> --value <text> [--json] --excerpt-locator "<where>" [--source-id <src>] --model "<model name>" [--blind] --rationale "<why>"` |
 | Show the parser value, compare | `<isaac> bundle reveal <bundle> <id>` (marks the target as exposed) |
 | Consolidated questions (use these) | `<isaac> bundle questions <bundle> [--scope experiment\|group:<id>\|run:<id>] [--blocking-only] [--limit N] [--offset M]` |
-| Scientist decision | `<isaac> bundle decide <bundle> (--target <id> \| --targets-file <file> \| --question <Q> [--only group:<id>] [--field <path>]) --decision <d> [--value <v>] [--json] --by "<name>" [--orcid 0000-0000-0000-0000] [--note "<text>"] [--split-into '<json>'] [--merge-with <group ids>] [--qc-status <word> [--qc-note "<text>"]] [--element <symbol> --edge <edge>] [--positions N,N]` (`--qc-status` only with a processing result and `approve`; `--element`/`--edge` only with a record group and `approve_calibration` (the calibration reference) or `set_absorber` (the absorber); with `--question`, only a decision in that question's `allowed_decisions`) |
+| Scientist decision | `<isaac> bundle decide <bundle> (--target <id> \| --targets-file <file> \| --question <Q> [--only group:<id>] [--field <path>]) --decision <d> [--value <v>] [--json] --by "<name>" [--orcid 0000-0000-0000-0000] [--note "<text>"] [--split-into '<json>'] [--merge-with <group ids>] [--qc-status <word> [--qc-note "<text>"]] [--element <symbol> --edge <edge>] [--positions N,N]` (refuses, writing nothing, a value the field's schema rejects, and lists the allowed values; a bulk call is refused whole; `--qc-status` only with a processing result and `approve`; `--element`/`--edge` only with a record group and `approve_calibration` (the calibration reference) or `set_absorber` (the absorber); with `--question`, only a decision in that question's `allowed_decisions`) |
 | Metadata template | `<isaac> bundle template export <bundle> --out <file.xlsx> [--force] [--no-suggestions]`; `<isaac> bundle template import <bundle> <file.xlsx> --by "<name>" [--orcid ...] [--apply] [--supersede] [--json]` (preview unless `--apply`) |
 | Group runs into records | `<isaac> bundle group <bundle> [--regroup]` (proposes groups inside the bundle) |
 | See the groups | `<isaac> bundle list <bundle> groups [--limit N] [--offset M]` · `<isaac> bundle list <bundle> merge-candidates` · `<isaac> bundle show <bundle> group <id>` |
-| Process spectra (draft protocol) | `<isaac> process <bundle> --source <folder> [--group <id> ...] [--no-athena] [--params-file <json>]` (writes `processing/`) |
+| Process spectra (draft protocol) | `<isaac> process <bundle> --source <folder> [--group <id> ...] [--no-athena] [--params-file <json>]` (writes `processing/`; exit 2 and nothing written without a readable `--source`; `--group` redoes only the named groups and keeps the others, `kept_other_groups`) |
 | Compose drafts | `<isaac> bundle build-records <bundle>` (never `--test-marker`: self-tests only) |
 | All gates, per draft | `<isaac> bundle validate <bundle>` |
-| Write passing records | `<isaac> bundle export <bundle> --out <records>` |
+| Write passing records | `<isaac> bundle export <bundle> --out <records>` (safe to repeat: an unchanged record keeps its id; a changed one gets a new id and the old one moves to `<records>/isaac-export/superseded/`) |
 | What would be uploaded | `<isaac> bundle upload <records> --dry-run [--portal-url <url>]` |
 | Values outside the vocabulary, as draft term proposals | `<isaac> bundle propose-terms <bundle> [--out <file.json>] [--force]` (prints parser values, so marks them exposed; sends nothing; each draft needs a description written by a person) |
 | Pull text and images out of a document | `python -m isaac_api.local_import.extract <file> --out <dir> [--root <folder>]` or `--from-bundle <bundle>/unread_files.json --root <folder> [--limit N]` |
 
 Decisions by target kind: candidate / missing value / conflict: `confirm` `correct` `reject` `defer`;
-record group: `confirm` `split` `merge` `reject` `defer` `approve_calibration` (needs `--element` and `--edge`), `set_absorber` (needs `--element` and `--edge`; changes nothing else about the group); the experiment (`--target experiment`): `set_counter_positions` (needs `--positions`), `set_clock_time_zone` (needs `--value` with the IANA name, Area/Location or `UTC`, of the time zone the INSTRUMENT CLOCK that wrote the scan headers was set to; offsets and abbreviations are refused); processing result: `approve` (always with `--qc-status`) `reject`
-`needs_changes` `defer`. `confirm` and `correct` on a conflict or missing value need `--value`.
+record group: `confirm` `split` `merge` (needs `--merge-with` naming another live record group) `reject` `defer` `approve_calibration` (needs `--element` and `--edge`), `set_absorber` (needs `--element` and `--edge`; changes nothing else about the group); merge candidate (`mc-...`): `keep_apart` (the groups are distinct; no group changes); the experiment (`--target experiment`): `set_counter_positions` (needs `--positions`), `set_not_counter_positions` (needs `--positions`, or `--question` on the counter question; grouping is unchanged), `set_clock_time_zone` (needs `--value` with the IANA name, Area/Location or `UTC`, of the time zone the INSTRUMENT CLOCK that wrote the scan headers was set to; offsets and abbreviations are refused); processing result: `approve` (always with `--qc-status`: `valid`, `compromised`, `failed` or `pending` today; `decide` lists them if a word is wrong) `reject`
+`needs_changes` `defer`, and `select_athena_version` (`--value` one of the result's `athena_versions[].version_id`; picks the scientist's Athena result of record, approves nothing). `confirm` and `correct` on a conflict or missing value need `--value`. The control mode (`context.electrochemistry.control_mode`) is an ordinary value: `correct --value <allowed mode>`, with `--field` on an optional-values question.
 
 Exit codes: 0 ok · 1 not valid / not exportable (validate, export, check) · 2 usage or refused
 decision (upload without --dry-run is also 2) · 3 input refused · 4 output refused · 5 bounds

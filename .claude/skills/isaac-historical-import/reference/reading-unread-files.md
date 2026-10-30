@@ -24,7 +24,8 @@
 
 The files code DID read still hold statements no parser maps: readmes, macro comments
 (e.g. "wait while running CVs" says the cell was under potential control), SPEC `#C` lines, the
-run labels and folder names, and documents beside the folder (proposals, slides). Read those too.
+run labels and folder names. Read those too. A document beside the folder (a proposal, slides) is
+outside what the scientist approved: name it and ask before opening it.
 Look hardest for what the files most often leave unstated: facility and beamline, environment
 (operando / in situ / ex situ), cell type, reaction, electrolyte (name and concentration), pH,
 potential scale (RHE, Ag/AgCl, ...), the potential set-point (volts), sample form and formula,
@@ -40,7 +41,7 @@ Write every finding to ONE JSON file (`isaac.reading_findings`), then load it in
    "field_path": "context.environment",
    "value": "in_situ",
    "applies_to": {"scope": "runs", "run_labels": ["<runs[].label exactly>"]},
-   "source": {"path": "<relative to the imported folder, or ../<name> beside it>", "locator": "line 65"},
+   "source": {"path": "<relative to the imported folder; ../<name> only for a file beside it the scientist let you open>", "locator": "line 65"},
    "quote": "<verbatim, at most 25 words>",
    "strength": "stated | inferred",
    "reasoning": "<why the quote supports the value; the one inference step, if any>"}]}

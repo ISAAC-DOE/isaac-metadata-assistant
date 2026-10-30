@@ -5,8 +5,12 @@ returns `questions.json` v2: shared questions asked ONCE (experiment scope), run
 to their record group, blocking first. Each question has `question_id`, `text`, `why` (why it blocks
 export), `applies_to` (groups/runs/targets), `hints` (flagged as hints; a hint is never an answer),
 `allowed_values` where the schema closes the field, and `answer_command`. The reply also has
-`counts` and `minimum_for_one_group` ("7 blocking questions plus: confirm the group, approve its
-processing result"). The older fine-grained list (`bundle list <bundle> questions`) is for lookup only.
+`counts` (`blocking`, `conflicts_affecting_a_record`, `optional`, `informational`, `asked_again`;
+quote these, not `summary.md`'s "Questions: N", which is `fine_grained_v1`) and
+`minimum_for_one_group` ("7 blocking questions plus: confirm the group, approve its processing
+result"). Its two `plus_decisions` are always listed, even when that group is already confirmed and
+approved: check before you say them. The older fine-grained list (`bundle list <bundle> questions`)
+is for lookup only.
 
 Order: blocking (export cannot happen without them) → conflicts that affect a record → optional.
 
@@ -16,9 +20,38 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
 - Plain words. Show each reading with where it came from ("the file name says A; the logbook says B").
   Do not recommend a side. Offer "I don't know / leave it open".
 - Take the answer in the scientist's own words; convert to the value the question needs
-  (a number with its unit, a name). Echo your conversion back if it is not obvious.
+  (a number with its unit, a name). When the question has `allowed_values` (a closed list), map
+  their words to exactly one allowed value and say it back ("in situ" → `in_situ`; "a pressed
+  pellet" → `pellet`); record it only on their yes. If none fits, say so and offer the list; never
+  stretch a word to fit. `decide` refuses a value the field's schema rejects (not on the list, wrong
+  type, a time not in UTC), lists the allowed values and records nothing; when one target of a bulk
+  answer is refused, nothing is recorded for any.
 - Ask `produced_by` ("who made these measurements?") once, per beamtime; offer a folder-name hint
   as a question, not an answer. Use their own name for `--by` once, ask for it once, reuse it.
+
+## Questions that need care
+
+- **No value to confirm.** Text like "What is the technique? The files hold text for it … but no
+  value this build can carry", with no `confirm` in `allowed_decisions`, means there is nothing to
+  accept. Never invent a value and never confirm one. Ask "What is X?", show the file's text (the
+  `file_literal` hint) as a hint, and record `correct --value <their answer>`.
+- **Informational** (`"informational": true`, empty `allowed_decisions`, an `answer_command` that is
+  only a `#` comment): no answer can reach the record. Do not ask the scientist. Mention them once,
+  as a count "listed for information", and move on.
+- **`covered_by`**: a per-group question (often the technique) whose field a beamtime-wide answer
+  fills. It is not blocking: answer the experiment question it names. Ask per group only when the
+  scientist says a group differs (two different confirmed values fill nothing).
+- **Asked again** (`asked_again`, or a `why_asked_again` hint): an answer stored earlier cannot go into
+  the record (an older build accepted it). The question keeps its id and says why; tell the scientist
+  the reason and the allowed values, and ask again.
+- **The absorber** (`confirm_absorber`): `answer_command` is a template with `<El>` and `<edge>`; the
+  files' pair is only a `suggested_absorber` hint. Say the pair back ("Zz, L3 edge, for all 9
+  groups?") and run `--decision set_absorber --element <El> --edge <edge>` only on a clear yes to that
+  pair. "Yes, probably" or "sure" is not an answer; ask again. Never run the template as it is.
+- **Control mode** (`context.electrochemistry.control_mode`) is an ordinary value among a group's
+  optional fields: `--field context.electrochemistry.control_mode --decision correct --value <one of
+  its allowed values>`. A potentiostatic mode makes the potential set-point required; a galvanostatic
+  one, the current set-point.
 
 ## Recording
 
@@ -37,6 +70,9 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
   zone is changed later to a different zone, every start confirmed under the old one stops counting
   until confirmed again: `decide` reports how many, and `bundle questions` asks them again; say so.
 - **QC status** is asked when approving processing, not here (Step 6).
+- **In a browser.** The local-only *Local Imports* page (`docs/ui-local-dev.md`) shows the same
+  questions and records answers through the same checks. If the scientist uses it, run `bundle
+  questions` again before you go on; never assume what they answered.
 - **Never** pass `--test-marker` to `build-records` with a real scientist; it is for the self-test.
 
 - Conflict: `decide --target <conflict id> --decision correct --value "<chosen or new value>" --by "<name>" --note "<why, in their words>"` (use `confirm --value` when they pick one of the listed readings).

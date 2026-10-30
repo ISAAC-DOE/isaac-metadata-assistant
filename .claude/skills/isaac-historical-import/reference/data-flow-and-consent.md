@@ -29,4 +29,6 @@ produces. Offer to continue once they have permission.
 ## Never
 
 Do not route file text to another tool or service. Do not paste file contents into a message
-beyond the excerpt a question needs. Do not read files outside the folder you were given.
+beyond the excerpt a question needs. Read only inside the folder the scientist approved. If a
+document beside it (a proposal, slides) looks relevant, name it and ask before opening it; their
+yes covers that one file. Cite it as `../<name>` only after they agree.

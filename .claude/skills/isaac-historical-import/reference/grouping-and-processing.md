@@ -15,13 +15,23 @@ Get the groups with `bundle list <bundle> groups` and one in full with `bundle s
 
 - confirm → `decide --target <group id> --decision confirm`
 - split → ask which runs go where, then `--decision split --split-into '[["<run key>","<run key>"],["<run key>"]]'`
-- merge → `--decision merge --merge-with <other group ids>`
+- merge → three steps: `decide --target <group id> --decision merge --merge-with <other group ids> --by "<name>"`
+  (refused unless `--merge-with` names another live record group of this bundle), then
+  `bundle group <bundle> --regroup`, then confirm the ONE combined group it proposes. The regroup
+  combines them only when nothing recorded tells them apart (any differing file-name token blocks
+  it); otherwise it keeps a merge candidate saying why. Tell the scientist which happened. The
+  regroup also lists older merge decisions it could not apply (`merge_decisions_not_combined`):
+  say each in words. If the names differ only in a run counter, answer the counter question instead.
+- a merge candidate the scientist says is two distinct things → `decide --target <mc id> --decision
+  keep_apart --by "<name>"` (no group changes).
 - Say "7 of 12 groups confirmed" after each batch. A reference or alignment run is its own group.
 - Beamtime-wide notes are not group members.
 
 ## Processing (draft protocol `isaac.xas.v0`)
 
-`isaac process <bundle> --source <folder>` computes, per confirmed group, a normalised spectrum, an edge position, a quality
+`isaac process <bundle> --source <folder>` (always give `--source`: without a readable one it exits 2 and
+writes nothing; `--group <id>` redoes only that group and keeps every other group's result,
+`kept_other_groups`) computes, per confirmed group, a normalised spectrum, an edge position, a quality
 verdict (pass / warn / fail), glitch flags, and compares with the scientist's own Athena output when
 it finds one. Show per group, in words:
 
@@ -36,7 +46,7 @@ it finds one. Show per group, in words:
   process" (`no_scans`). Do not call it a fail, show no plot, and ask nothing — `decide` refuses
   every decision on it, and the group cannot become a complete record until a protocol covers it;
 - whether it agrees with Athena, and by how much, or "no Athena output found";
-- the plot PNG (`<bundle>/processing/<group id>/plot.png`): open it with Read, describe the curve (edge, pre/post-edge, obvious artefacts); the numbers are in `qc.json` beside it and in `processing/processing_results.json`.
+- the plot PNG (`<bundle>/processing/<group id>/<run id>/plot.png`; the result's `outputs.files` gives the path): open it with Read, describe the curve (edge, pre/post-edge, obvious artefacts); the numbers are in `qc.json` beside it and in `processing/processing_results.json`.
 
 Ask: approve, reject, or needs changes (with a note):
 `decide --target <result_id> --decision approve --qc-status <word> [--qc-note "<why>"] --by "<name>"`, or
@@ -48,6 +58,10 @@ Ask: approve, reject, or needs changes (with a note):
 - The protocol is a **draft until Oscar and Angel review it**. Say so each time you ask.
 - If processing is unavailable, say "curves and quality checks are not available; records will stay
   incomplete" and continue.
+- **Several Athena versions.** When a result lists more than one of the scientist's Athena versions
+  (`athena_versions[]`), ask which one is their result of record and record `decide --target
+  <result_id> --decision select_athena_version --value <version_id> --by "<name>"`. It changes no QC
+  status and no processed value, and it is not an approval.
 
 ## Calibration shift (only when processing proposes one)
 
@@ -55,7 +69,7 @@ Processing never shifts the energy axis on its own. When a result's flags say th
 is unconfirmed, explain it plainly and ask the scientist which element and edge the reference foil
 measures (`--element Ir`, `--edge L3` style). Record `decide --target <group id> --decision
 approve_calibration --element <symbol> --edge <K|L1-L3|M1-M5> --by "<name>"`, then run
-`process --group <group id>` again. Without that decision the shift is not applied; do not guess the
+`process --source <folder> --group <group id>` again. Without that decision the shift is not applied; do not guess the
 element or edge from a file name.
 
 ## Groups that need an explanation
@@ -67,4 +81,6 @@ element or edge from a file name.
 - `naming_counter_positions` (an experiment-scope question): which positions of the file name are running
   counters, not sample identity. Ask once. Answer with `decide <bundle> --target experiment --decision
   set_counter_positions --positions 2,3 --by "<name>"`, then `bundle group <bundle> --regroup` (decided
-  groups are kept).
+  groups are kept). When they say a position is NOT a counter: `decide <bundle> --target experiment
+  --decision set_not_counter_positions --positions 2 --by "<name>"` (grouping is unchanged; the
+  question drops out).
