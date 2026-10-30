@@ -272,11 +272,33 @@ Open `http://localhost:5173/local-imports`. What holds, and what each half refus
 - **Only this computer may ask, by its own name, from ISAAC's own pages.** Every `/api/local-bundles*`
   request is refused before anything is read unless the client address is loopback (403), the `Host`
   is `localhost`, `127.0.0.1` or `[::1]` with this server's port (421 — a DNS-rebinding page names its
-  own host), any `Origin` is on the CORS allowlist (`ISAAC_UI_CORS_ORIGINS`, default the Vite dev
-  origins) or this server's own loopback origin (403), and the request carries `X-ISAAC-Local: 1`
-  (403). A custom header cannot be sent cross-origin without a preflight the API grants only to its
-  allowlist, so a page elsewhere — an `<img>`, a form — can neither read the questions nor make the
-  server record exposures.
+  own host), any `Origin` is on the local bundles' OWN allowlist or is this server's own loopback
+  origin (403), and the request carries `X-ISAAC-Local: 1` (403). A custom header cannot be sent
+  cross-origin without a preflight the API grants only to its allowlist, so a page elsewhere — an
+  `<img>`, a form — can neither read the questions nor make the server record exposures.
+- **The local bundles' origin allowlist is not the app's CORS list.** It is
+  `ISAAC_LOCAL_BUNDLES_ORIGINS` (comma-separated; default `http://localhost:5173,http://127.0.0.1:5173`,
+  the ISAAC web dev server). Only loopback origins (`http(s)://localhost|127.0.0.1|[::1]:<port>`) are
+  honoured: any other entry is ignored and the server prints a `WARNING` at start-up. An origin in
+  `ISAAC_UI_CORS_ORIGINS` (added, say, for a hosted tool) may NOT use local bundles unless it is also
+  in this list, and start-up says so. A local origin must ALSO be in `ISAAC_UI_CORS_ORIGINS`, or the
+  browser's preflight fails (start-up warns about that too).
+- **Residual risk: an origin is a port, not an application.** Any page served from an allowed origin
+  — `http://localhost:5173` is Vite's default port, so ANOTHER Vite project you run there while this
+  server is up — is, to the browser and to this server, the ISAAC web app: it can read every bundle's
+  questions (recording exposures) and record answers by any typed name. Nothing at the Origin level
+  can tell the two apart, and no secret helps unless it reaches ISAAC's page by a route the other
+  page cannot take (a token printed at server start and pasted into the page, or injected by ISAAC's
+  own Vite build): an endpoint handing it out would hand it to the same-origin impostor too. That is
+  not built (it needs a web change). Until it is: don't run another dev server on the allowed ports
+  while `ISAAC_LOCAL_BUNDLES_DIR` is set, or set `ISAAC_LOCAL_BUNDLES_ORIGINS` to a port only ISAAC
+  uses (and start ISAAC's Vite there with `--strictPort`, also adding it to `ISAAC_UI_CORS_ORIGINS`).
+  The server prints this as a `NOTE` at start-up. Processes on this computer running as you are
+  outside this protection entirely (they can read the bundle folder directly).
+- **A bundle whose lock cannot be taken is refused, not a server error.** A `.bundle.lock` that is a
+  symlink, or a bundle in a read-only folder (the lock cannot be created), is listed as `INVALID`
+  with `not_accessible: true`; its other routes answer 409 `bundle_not_accessible`. No response body
+  names an absolute path: refusals name the bundle by its folder name.
 - **The server refuses to boot when told to listen beyond loopback** (`--host 0.0.0.0`, `--host=::`,
   `UVICORN_HOST`), as the hosted image does. A server started another way (another ASGI server,
   `uvicorn.run(host=…)` in code) is not detected at boot; the per-request loopback check above still

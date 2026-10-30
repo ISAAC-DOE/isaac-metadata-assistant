@@ -37,6 +37,7 @@ WHAT IT SERVES, AND WHAT IT NEVER DOES
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import ipaddress
 import json
@@ -44,6 +45,7 @@ import os
 import re
 import sys
 from collections import OrderedDict
+from contextlib import ExitStack, contextmanager
 from urllib.parse import urlsplit
 from datetime import datetime, timezone
 from pathlib import Path
@@ -54,6 +56,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 LOCAL_BUNDLES_ENV = "ISAAC_LOCAL_BUNDLES_DIR"
+#: The page origins that may use these routes — THEIR OWN list, not the app's CORS allowlist
+#: (``ISAAC_UI_CORS_ORIGINS``), so an origin added there for another reason never reaches a bundle.
+#: Comma-separated; only loopback ``http(s)://host:port`` origins are honoured (anything else is
+#: ignored, with a warning at start-up). Default: the ISAAC web dev server (``apps/web/vite.config.ts``).
+LOCAL_BUNDLES_ORIGINS_ENV = "ISAAC_LOCAL_BUNDLES_ORIGINS"
+DEFAULT_LOCAL_BUNDLES_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
 TAG_LOCAL_BUNDLES = "Local Import Bundles"
 LOCAL_BUNDLES_TAG: dict = {
     "name": TAG_LOCAL_BUNDLES,
@@ -126,9 +134,59 @@ def launch_hosts(argv: Sequence[str] | None = None, environ: Mapping[str, str] |
     return hosts
 
 
+def _origin_is_loopback(origin: str) -> bool:
+    """``http(s)://<loopback host>[:port]`` and nothing more (no path, query, user info)."""
+    try:
+        parts = urlsplit(origin)
+        parts.port  # noqa: B018 - raises ValueError for a port that is not a number
+    except ValueError:
+        return False
+    return (parts.scheme in ("http", "https") and _is_loopback(parts.hostname) and not parts.username
+            and not parts.password and parts.path in ("", "/") and not parts.query and not parts.fragment)
+
+
+def _configured_origins() -> tuple[list[str], list[str]]:
+    """``(honoured, ignored)``: the configured origins (else the default), split by loopback."""
+    raw = os.environ.get(LOCAL_BUNDLES_ORIGINS_ENV)
+    given = [o.strip().rstrip("/").lower() for o in (raw or "").split(",") if o.strip()]
+    given = given or list(DEFAULT_LOCAL_BUNDLES_ORIGINS)
+    return [o for o in given if _origin_is_loopback(o)], [o for o in given if not _origin_is_loopback(o)]
+
+
+def startup_warnings() -> list[str]:
+    """What start-up says about who may use local bundles, when it is not what one might assume."""
+    honoured, ignored = _configured_origins()
+    out = []
+    if ignored:
+        out.append(f"{LOCAL_BUNDLES_ORIGINS_ENV}: ignoring {', '.join(ignored)}: local bundles are served only to pages "
+                   "on this computer (http://localhost:<port>, http://127.0.0.1:<port>, http://[::1]:<port>).")
+    from .app import _cors_origins
+
+    cors = {o.rstrip("/").lower() for o in _cors_origins()}
+    unreachable = [o for o in honoured if o not in cors]
+    if unreachable:
+        out.append(f"{LOCAL_BUNDLES_ORIGINS_ENV}: {', '.join(unreachable)} is not in ISAAC_UI_CORS_ORIGINS, so a browser "
+                   "on it cannot pass the CORS preflight and cannot use local bundles.")
+    allowed = ", ".join(honoured) or "this server's own origin"
+    others = sorted(cors - set(honoured))
+    if others:
+        out.append(f"ISAAC_UI_CORS_ORIGINS also allows {', '.join(others)}; those origins may NOT use local bundles "
+                   f"(only {allowed}).")
+    return out
+
+
+def startup_note() -> str:
+    """The residual risk, said once at start-up: an origin is a scheme, host and port, not an app."""
+    allowed = ", ".join(_configured_origins()[0]) or "this server's own origin"
+    return (f"Local bundles: any page served from {allowed} can use them (an origin is a scheme, host and port, "
+            "not an application); keep other web projects off those ports while this server runs. "
+            "See docs/ui-local-dev.md.")
+
+
 def validate_local_bundles_config_or_raise() -> None:
     """Boot refusal: the variable names no directory, is set beside a deployment base path, or the
-    server was (detectably) told to listen on a non-loopback interface."""
+    server was (detectably) told to listen on a non-loopback interface. Prints
+    :func:`startup_warnings` to stderr."""
     root = configured_root()
     if root is None:
         return
@@ -146,6 +204,9 @@ def validate_local_bundles_config_or_raise() -> None:
         )
     if not root.is_dir():
         raise RuntimeError(f"{LOCAL_BUNDLES_ENV} must name an existing directory of local import bundles.")
+    for line in startup_warnings():
+        print(f"WARNING: {line}", file=sys.stderr)
+    print(f"NOTE: {startup_note()}", file=sys.stderr)
 
 
 # --- who may ask: this computer, by its own name, from this app's own pages -----------------------
@@ -177,15 +238,16 @@ def _host_and_port(value: str) -> tuple[str, int | None]:
 
 
 def _allowed_origins() -> list[str]:
-    from .app import _cors_origins  # the app's own CORS allowlist, read at request time
-
-    return [o.rstrip("/") for o in _cors_origins()]
+    """This router's OWN allowlist (:data:`LOCAL_BUNDLES_ORIGINS_ENV`), loopback origins only, read
+    at request time. Never the app's CORS list: a remote origin configured there is not honoured."""
+    return _configured_origins()[0]
 
 
 def require_local_request(request: Request) -> None:
     """Every ``/api/local-bundles/*`` request: refused unless it comes from THIS computer, names it
     by a loopback Host (so a DNS-rebinding page cannot reach it under its own name), carries no
-    Origin outside the app's CORS allowlist (or this server's own loopback origin), and sends
+    Origin outside this router's own loopback allowlist (:func:`_allowed_origins`) or this server's
+    own loopback origin, and sends
     :data:`LOCAL_HEADER`. Absent the configuration, the ordinary 404."""
     if not is_requested():
         raise HTTPException(status_code=404, detail="Not Found")
@@ -209,7 +271,7 @@ def require_local_request(request: Request) -> None:
                     and (parts.port or (443 if parts.scheme == "https" else 80)) == server_port)
         except ValueError:  # an unparseable origin (e.g. a port that is not a number) is not ours
             same = False
-        if o not in _allowed_origins() and not same:
+        if o.lower() not in _allowed_origins() and not same:
             raise _deny(403, "origin_not_allowed", "This page's origin may not use local bundles.")
     if request.headers.get(LOCAL_HEADER) != LOCAL_HEADER_VALUE:
         raise _deny(403, "local_header_required",
@@ -264,6 +326,79 @@ def _no_bundle() -> JSONResponse:
                    "No bundle folder by that name directly inside the local bundles directory.")
 
 
+def _scrub(message: str) -> str:
+    """A refusal's text with every absolute path to the local bundles directory replaced by the
+    bundle's own name: a response body never says where on this computer the bundles are."""
+    raw = configured_root()
+    prefixes = set()
+    for p in (raw, _root()):
+        if p is not None:
+            prefixes.add(str(p))
+            prefixes.add(os.path.realpath(str(p)))
+    for prefix in sorted((x for x in prefixes if x and x != os.sep), key=len, reverse=True):
+        message = message.replace(prefix + os.sep, "").replace(prefix, "<local bundles directory>")
+    return message
+
+
+class BundleNotAccessible(Exception):
+    """The bundle's lock cannot be taken, or its folder cannot be read or written (a read-only
+    folder, a ``.bundle.lock`` that is a symlink). Said by bundle name, never by path."""
+
+
+LOCK_FILE = ".bundle.lock"
+
+
+def _lock_refusal(bundle_dir: Path) -> str | None:
+    """Why the bundle's lock may not be taken here, or ``None``. A ``.bundle.lock`` that is a
+    symlink is refused (``mutations.locked`` would open the link's target)."""
+    lock = Path(bundle_dir) / LOCK_FILE
+    if lock.is_symlink():
+        return f"Bundle {Path(bundle_dir).name!r}: its {LOCK_FILE} is a symlink, which is refused; remove it."
+    if not lock.exists() and not os.access(bundle_dir, os.W_OK):
+        return (f"Bundle {Path(bundle_dir).name!r} is in a read-only folder: its {LOCK_FILE} cannot be created, so it "
+                "is not read here (every read and write takes that lock).")
+    return None
+
+
+@contextmanager
+def bundle_lock(bundle_dir: Path):
+    """``mutations.locked`` for this router: refused (:class:`BundleNotAccessible`) when the lock
+    cannot be taken, instead of a server error."""
+    from .local_import import mutations as M
+
+    why = _lock_refusal(bundle_dir)
+    if why:
+        raise BundleNotAccessible(why)
+    stack = ExitStack()
+    try:
+        stack.enter_context(M.locked(bundle_dir))
+    except OSError as exc:
+        raise BundleNotAccessible(f"Bundle {Path(bundle_dir).name!r}: its {LOCK_FILE} cannot be opened "
+                                  f"({type(exc).__name__}: {exc.strerror or 'refused'}).") from exc
+    with stack:
+        yield
+
+
+def _not_accessible(exc: Exception, name: str) -> JSONResponse:
+    if isinstance(exc, BundleNotAccessible):
+        message = str(exc)
+    else:  # an OSError's own text names the file's absolute path: never sent
+        message = (f"Bundle {name!r} could not be read or written on this computer "
+                   f"({type(exc).__name__}: {getattr(exc, 'strerror', None) or 'refused'}; a read-only folder?).")
+    return _refuse(409, "bundle_not_accessible", _scrub(message) + " Nothing was written.")
+
+
+def _io_refusals(route):
+    """A route's lock and file-system failures become a 409 naming the bundle, never a 500."""
+    @functools.wraps(route)
+    def wrapped(*args, **kwargs):
+        try:
+            return route(*args, **kwargs)
+        except (BundleNotAccessible, OSError) as exc:
+            return _not_accessible(exc, str(kwargs.get("bundle") or ""))
+    return wrapped
+
+
 def read_bundle(bundle_dir: Path) -> tuple[str, dict]:
     """``(bundle_version, bundle)`` from ONE read of ``bundle.json`` — the contained file
     (``records.contained_file``: no ``..``, no symlink out), opened once, size-checked on the open
@@ -276,7 +411,7 @@ def read_bundle(bundle_dir: Path) -> tuple[str, dict]:
 
     path = R.contained_file(Path(bundle_dir), B.BUNDLE_FILE)
     if path is None:
-        raise M.MutationRefused(f"No bundle.json at {bundle_dir}.", code=6)
+        raise M.MutationRefused(f"No bundle.json in bundle {Path(bundle_dir).name!r}.", code=6)
     try:
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         with os.fdopen(fd, "rb") as handle:
@@ -998,6 +1133,9 @@ def _open(name: str) -> tuple[Path | None, JSONResponse | None]:
     bdir = resolve_bundle_dir(root, name)
     if bdir is None:
         return None, _no_bundle()
+    why = _lock_refusal(bdir)
+    if why:
+        return None, _not_accessible(BundleNotAccessible(why), name)
     return bdir, None
 
 
@@ -1005,13 +1143,14 @@ def _refusal(exc: Exception) -> JSONResponse:
     from .local_import import mutations as M
 
     if isinstance(exc, M.StaleBundleVersion):
-        return _refuse(412, "stale_bundle_version", str(exc), current_version=exc.current)
+        return _refuse(412, "stale_bundle_version", _scrub(str(exc)), current_version=exc.current)
     code = getattr(exc, "code", 2)
+    message = _scrub(str(exc))
     if code == 6:
-        return _refuse(404, "not_found_in_bundle", str(exc))
+        return _refuse(404, "not_found_in_bundle", message)
     if code in (1, 5):
-        return _refuse(409, "bundle_refused", str(exc))
-    return _refuse(422, "refused", str(exc))
+        return _refuse(409, "bundle_refused", message)
+    return _refuse(422, "refused", message)
 
 
 @router.get(
@@ -1026,6 +1165,7 @@ def _refusal(exc: Exception) -> JSONResponse:
     response_description="The bundles, newest first, and how many folder entries are not bundles.",
     responses={**_R_UNAUTHORIZED, **_R_LOCAL, **_R_NOT_FOUND},
 )
+@_io_refusals
 def list_local_bundles():
     from .local_import import mutations as M
 
@@ -1035,19 +1175,32 @@ def list_local_bundles():
     if root is None:
         return _refuse(404, "not_found", "Not Found")
     bundles, skipped = [], 0
-    for entry in sorted(root.iterdir(), key=lambda p: p.name):
+    try:
+        entries = sorted(root.iterdir(), key=lambda p: p.name)
+    except OSError as exc:
+        return _refuse(409, "directory_not_accessible",
+                       f"The local bundles directory {root.name!r} cannot be listed ({type(exc).__name__}: "
+                       f"{exc.strerror or 'refused'}).")
+    for entry in entries:
         bdir = resolve_bundle_dir(root, entry.name)
         if bdir is None:
             skipped += 1
             continue
-        with M.locked(bdir):
-            try:
-                version, bundle = read_bundle(bdir)
-            except M.MutationRefused as exc:
-                bundles.append({"name": entry.name, "check": {"status": "INVALID", "errors": [str(exc)], "error_count": 1,
-                                                              "stale_values": 0, "statement": "The bundle cannot be read."},
-                                "bundle_version": M.bundle_version(bdir)})
-                continue
+        try:
+            with bundle_lock(bdir):
+                try:
+                    version, bundle = read_bundle(bdir)
+                except M.MutationRefused as exc:
+                    bundles.append({"name": entry.name, "check": {"status": "INVALID", "errors": [_scrub(str(exc))], "error_count": 1,
+                                                                  "stale_values": 0, "statement": "The bundle cannot be read."},
+                                    "bundle_version": M.bundle_version(bdir)})
+                    continue
+        except (BundleNotAccessible, OSError) as exc:
+            body = json.loads(_not_accessible(exc, entry.name).body)
+            bundles.append({"name": entry.name, "check": {"status": "INVALID", "errors": [body["message"]], "error_count": 1,
+                                                          "stale_values": 0, "statement": "The bundle cannot be read here."},
+                            "bundle_version": None, "not_accessible": True})
+            continue
         check = check_status(version, bundle)
         counts = bundle.get("counts") or {}
         bundles.append({
@@ -1084,13 +1237,14 @@ def list_local_bundles():
     response_description="The bundle's header and its progress.",
     responses={**_R_UNAUTHORIZED, **_R_LOCAL, **_R_NOT_FOUND},
 )
+@_io_refusals
 def get_local_bundle_progress(bundle: str = PathParam(..., max_length=255, description="The bundle's folder name.")):
     from .local_import import mutations as M
 
     bdir, refused = _open(bundle)
     if refused is not None:
         return refused
-    with M.locked(bdir):
+    with bundle_lock(bdir):
         try:
             version, data = read_bundle(bdir)
         except M.MutationRefused as exc:
@@ -1117,6 +1271,7 @@ def get_local_bundle_progress(bundle: str = PathParam(..., max_length=255, descr
     response_description="The questions page, its counts, the capture decisions and the bundle version.",
     responses={**_R_UNAUTHORIZED, **_R_LOCAL, **_R_NOT_FOUND, **_R_CONFLICT},
 )
+@_io_refusals
 def get_local_bundle_questions(
     bundle: str = PathParam(..., max_length=255, description="The bundle's folder name."),
     kind: str | None = Query(None, max_length=64, description="Only questions of this kind."),
@@ -1131,7 +1286,7 @@ def get_local_bundle_questions(
     bdir, refused = _open(bundle)
     if refused is not None:
         return refused
-    with M.locked(bdir):
+    with bundle_lock(bdir):
         try:
             _read_version, data = read_bundle(bdir)
         except M.MutationRefused as exc:
@@ -1265,6 +1420,7 @@ def _typed_value(q: Mapping, body: LocalAnswerRequest) -> tuple[Any, str | None]
     response_description="What was recorded (or, for a dry run, would be), and the bundle version after.",
     responses={**_R_UNAUTHORIZED, **_R_LOCAL, **_R_NOT_FOUND, **_R_CONFLICT, **_R_STALE, **_R_REFUSED},
 )
+@_io_refusals
 def post_local_bundle_answer(
     bundle: str = PathParam(..., max_length=255, description="The bundle's folder name."),
     question_id: str = PathParam(..., max_length=64, description="The consolidated question's id."),
@@ -1341,6 +1497,7 @@ def post_local_bundle_answer(
     response_description="What was recorded and the bundle version after.",
     responses={**_R_UNAUTHORIZED, **_R_LOCAL, **_R_NOT_FOUND, **_R_CONFLICT, **_R_STALE, **_R_REFUSED},
 )
+@_io_refusals
 def post_local_bundle_decision(
     bundle: str = PathParam(..., max_length=255, description="The bundle's folder name."),
     body: LocalDecisionRequest = Body(...),

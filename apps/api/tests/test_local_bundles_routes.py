@@ -684,3 +684,94 @@ def test_a_multi_run_group_whose_runs_disagree_is_mixed_and_the_preview_names_th
     (g,) = p["by_scope"]
     assert g["differs"] is True and [t["target_id"] for t in g["differing_targets"]] == [t2]
     assert p["scopes_whose_files_suggest_otherwise"] == 1
+
+
+# --- audit hardening: own origin allowlist, the lock, a read-only bundle, no absolute path in a body ---
+
+
+def test_the_local_origins_are_their_own_list_not_the_apps_cors_list(root, monkeypatch):
+    """An origin added to ISAAC_UI_CORS_ORIGINS (for another reason) does not reach a bundle."""
+    monkeypatch.setenv("ISAAC_UI_CORS_ORIGINS", "http://localhost:5173,https://tools.example.org,http://localhost:3000")
+    c = local_client()
+    assert c.get("/api/local-bundles", headers={"origin": "https://tools.example.org"}).status_code == 403
+    assert c.get("/api/local-bundles", headers={"origin": "http://localhost:3000"}).status_code == 403
+    assert c.get("/api/local-bundles", headers={"origin": "http://localhost:5173"}).status_code == 200
+    assert c.get("/api/local-bundles", headers={"origin": "http://127.0.0.1:5173"}).status_code == 200
+
+
+def test_a_non_loopback_local_origin_is_refused_even_when_configured(root, monkeypatch):
+    monkeypatch.setenv(LB.LOCAL_BUNDLES_ORIGINS_ENV, "https://tools.example.org, http://192.168.1.5:5173, http://localhost:5180")
+    monkeypatch.setenv("ISAAC_UI_CORS_ORIGINS", "https://tools.example.org,http://192.168.1.5:5173,http://localhost:5180")
+    c = local_client()
+    for origin in ("https://tools.example.org", "http://192.168.1.5:5173", "http://localhost:5173"):
+        r = c.get("/api/local-bundles", headers={"origin": origin})
+        assert r.status_code == 403 and r.json()["detail"]["error"] == "origin_not_allowed", origin
+    assert c.get("/api/local-bundles", headers={"origin": "http://localhost:5180"}).status_code == 200
+    assert c.get("/api/local-bundles", headers={"origin": "http://127.0.0.1:8000"}).status_code == 200  # same origin
+    warnings = LB.startup_warnings()
+    assert any("ignoring https://tools.example.org, http://192.168.1.5:5173" in w for w in warnings)
+
+
+def test_start_up_warns_about_ignored_origins_and_states_the_residual_risk(root, monkeypatch, capsys):
+    monkeypatch.setenv(LB.LOCAL_BUNDLES_ORIGINS_ENV, "https://tools.example.org")
+    create_app()
+    err = capsys.readouterr().err
+    assert "WARNING: ISAAC_LOCAL_BUNDLES_ORIGINS: ignoring https://tools.example.org" in err
+    assert "NOTE: Local bundles: any page served from this server's own origin can use them" in err
+
+
+def test_a_symlinked_bundle_lock_is_refused_and_its_target_is_not_created(client, root, tmp_path):
+    target = tmp_path / "elsewhere" / "created-by-the-lock"
+    target.parent.mkdir()
+    lock = root / "alpha" / ".bundle.lock"
+    lock.unlink(missing_ok=True)
+    lock.symlink_to(target)
+    for r in (client.get("/api/local-bundles/alpha/progress"), client.get("/api/local-bundles/alpha/questions"),
+              client.post("/api/local-bundles/alpha/questions/Q-x/answer",
+                          json={"decision": "correct", "value": "x", "by": BY, "expected_version": "sha256:x"})):
+        assert r.status_code == 409 and r.json()["error"] == "bundle_not_accessible" and "symlink" in r.json()["message"]
+    listed = next(b for b in client.get("/api/local-bundles").json()["bundles"] if b["name"] == "alpha")
+    assert listed["not_accessible"] and "symlink" in listed["check"]["errors"][0]
+    assert not target.exists()
+
+
+@pytest.mark.skipif(os.name != "posix" or (hasattr(os, "geteuid") and os.geteuid() == 0), reason="needs POSIX permissions, not root")
+def test_a_read_only_bundle_is_a_clear_refusal_not_a_server_error(root):
+    c = TestClient(create_app(), raise_server_exceptions=False, **LOCAL)
+    (root / "alpha" / ".bundle.lock").unlink(missing_ok=True)
+    os.chmod(root / "alpha", 0o555)
+    try:
+        r = c.get("/api/local-bundles")
+        assert r.status_code == 200
+        alpha = next(b for b in r.json()["bundles"] if b["name"] == "alpha")
+        assert alpha["check"]["status"] == "INVALID" and "read-only" in alpha["check"]["errors"][0]
+        assert next(b for b in r.json()["bundles"] if b["name"] == "beta")["check"]["status"] != "INVALID"
+        for path in ("/api/local-bundles/alpha/progress", "/api/local-bundles/alpha/questions"):
+            r = c.get(path)
+            assert r.status_code == 409 and r.json()["error"] == "bundle_not_accessible", path
+            assert str(root) not in r.text and os.path.realpath(root) not in r.text
+    finally:
+        os.chmod(root / "alpha", 0o755)
+
+
+def test_a_bundle_json_that_vanishes_after_the_check_is_not_reported_by_absolute_path(client, root, monkeypatch):
+    real = LB.resolve_bundle_dir
+
+    def racing(r, name):
+        found = real(r, name)
+        if found is not None:
+            (found / "bundle.json").unlink()  # the race: gone between the check and the read
+        return found
+
+    monkeypatch.setattr(LB, "resolve_bundle_dir", racing)
+    r = client.get("/api/local-bundles/alpha/progress")
+    assert r.status_code == 404
+    assert str(root) not in r.text and os.path.realpath(root) not in r.text and "alpha" in r.json()["message"]
+
+
+def test_a_refusal_message_naming_the_directory_is_scrubbed(root):
+    from isaac_api.local_import import mutations as M
+
+    exc = M.MutationRefused(f"No bundle.json at {os.path.realpath(root)}/alpha.", code=6)
+    body = json.loads(LB._refusal(exc).body)
+    assert body["message"] == "No bundle.json at alpha."
