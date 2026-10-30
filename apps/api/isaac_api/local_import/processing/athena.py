@@ -330,6 +330,7 @@ def _per_scan_set(pool: Sequence[Mapping], stems: Sequence[str], np) -> dict | N
             "per_scan_set": {
                 "scans": [sels[i][0] for i in order],
                 "labels": [pool[i]["label"] for i in order],
+                "athena_groups": [pool[i]["group_name"] for i in order],
                 "e0_eV": [pool[i]["e0_eV"] for i in order],
                 "edge_step": [pool[i]["edge_step"] for i in order],
                 "params": [pool[i]["params"] for i in order],

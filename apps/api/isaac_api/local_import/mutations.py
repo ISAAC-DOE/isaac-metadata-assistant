@@ -670,6 +670,19 @@ def scan_subset_note(bundle: Mapping, result: Mapping) -> str | None:
             f"({SCAN_SUBSET_FLAG}): its E0 and curve describe those scans, not the full merge.")
 
 
+def approval_files(result: Mapping) -> list[dict]:
+    """The files an approval of ``result`` binds to (role, path and hash of each output file)."""
+    return [{"role": f.get("role"), "relative_path": f.get("relative_path"), "sha256": f.get("sha256")}
+            for f in (result.get("outputs") or {}).get("files") or ()]
+
+
+def approval_is_stale(approval: Mapping | None, result: Mapping) -> bool:
+    """``True`` when ``approval`` binds to other files than ``result`` now lists: the record composer
+    uses nothing from it (records.py). An approval an older build recorded with no binding is not stale."""
+    bound = (approval or {}).get("approved_files")
+    return bound is not None and json.dumps(bound, sort_keys=True) != json.dumps(approval_files(result), sort_keys=True)
+
+
 def approved_sibling_problem(bundle: Mapping, obj: Mapping, planned: Sequence[Mapping] = ()) -> str | None:
     """Why approving the processing result ``obj`` is refused because ANOTHER result of its group is already
     approved (or is approved in the same call, ``planned``), else ``None``.
@@ -692,9 +705,17 @@ def approved_sibling_problem(bundle: Mapping, obj: Mapping, planned: Sequence[Ma
         return None
     old = B.processing_id(others[0])
     notes = " ".join(n for n in (scan_subset_note(bundle, r) for r in (others[0], obj)) if n)
+    if approval_is_stale(state_of.get(("processing_result", old)), others[0]):
+        # "keep it (nothing more to do)" would be false: the composer uses nothing from a stale approval
+        keep = (f"{old}'s approval no longer matches its files (it names other files than {old} now lists), so "
+                f"no record uses it. The options: keep {old} by approving it again after reviewing its current "
+                f'files (`isaac bundle decide <bundle_dir> --target {old} --decision approve --qc-status <value> '
+                f'--by "<your name>"`); or withdraw its approval first — ')
+    else:
+        keep = f"The options: keep {old} (nothing more to do); or withdraw its approval first — "
     return (
         f"{pid} cannot be approved: {old} is already approved for group {gid}, and a record uses exactly one "
-        f"processing result. The options: keep {old} (nothing more to do); or withdraw its approval first — "
+        f"processing result. {keep}"
         f'reject it (`isaac bundle decide <bundle_dir> --target {old} --decision reject --by "<your name>"`) or '
         f'defer it (`isaac bundle decide <bundle_dir> --target {old} --decision defer --by "<your name>"`) — and '
         f"then approve {pid}." + (f" {notes}" if notes else "") + " Nothing was recorded."
@@ -1138,7 +1159,8 @@ def record_decision(
                 json.dumps(prior.get("clock_zone_binding"), sort_keys=True),
                 json.dumps(prior.get("athena_version_provenance"), sort_keys=True),
                 json.dumps(prior.get("same_conditions_tokens")),
-            ) == signature:
+            ) == signature and not (kind == "processing_result" and decision == "approve" and approval_is_stale(prior, obj)):
+                # an approval restated after its result's files changed binds it to them: a new statement
                 unchanged.append(tid)
                 continue
             entry = {
@@ -1175,10 +1197,7 @@ def record_decision(
                 entry["clock_zone_binding"] = binding
             if kind == "processing_result" and decision == "approve":
                 # AN APPROVAL BINDS TO EXACTLY THIS RESULT'S FILES (and their hashes).
-                entry["approved_files"] = [
-                    {"role": f.get("role"), "relative_path": f.get("relative_path"), "sha256": f.get("sha256")}
-                    for f in (obj.get("outputs") or {}).get("files") or ()
-                ]
+                entry["approved_files"] = approval_files(obj)
             if qc_status is not None:
                 # THE PERSON STATES THE QC STATUS; what they were shown is kept beside it.
                 qc = obj.get("qc") or {}

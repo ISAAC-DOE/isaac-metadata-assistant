@@ -1424,14 +1424,14 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
         if not targets:
             asked = beamtime_question(path) if cell["scope"] == "run" else None
             if asked is not None:
-                command = asked["command"]
+                generic = asked["command"].replace('--by "<your name>"', f"--by {shlex.quote(by)}")
+                command = generic
                 if isinstance(value, str) and "--json" not in command:
                     command = re.sub(r"--value <[^>]*>", lambda _m: f"--value {shlex.quote(value)}", command)
-                command = command.replace('--by "<your name>"', f"--by {shlex.quote(by)}")
                 report["asked_beamtime_wide"].append({
                     "cell": cell["cell"], "header": cell["header"], "value": value, "run_id": cell["run_id"],
                     "target_field_path": path, "question_id": asked["question_id"], "answered": asked["answered"],
-                    "command": command,
+                    "command": command, "_generic_command": generic,
                     "reason": (f"this bundle asks {path} once for the whole beamtime (question {asked['question_id']}"
                                + (", answered" if asked["answered"] else "") + "), not per run, so this cell is not "
                                "recorded; " + ("to change that answer" if asked["answered"] else "answer that question")
@@ -1443,6 +1443,21 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
             continue
         for decision, kind, obj, tid in targets:
             planned.append((cell, decision, kind, obj, tid))
+
+    # ONE QUESTION, CELLS THAT DIFFER: one command per value would be wrong (running them in turn leaves the
+    # last standing, for every run). The cells name the values; the scientist says which applies.
+    by_question: dict[str, set[str]] = {}
+    for x in report["asked_beamtime_wide"]:
+        by_question.setdefault(x["question_id"], set()).add(repr(x["value"]))
+    for x in report["asked_beamtime_wide"]:
+        generic = x.pop("_generic_command")
+        values = sorted(by_question[x["question_id"]])
+        if len(values) > 1:
+            x["command"], x["values_differ"] = generic, values
+            x["reason"] = (f"this bundle asks {x['target_field_path']} once for the whole beamtime (question "
+                           f"{x['question_id']}" + (", answered" if x["answered"] else "") + "), not per run, and this "
+                           f"workbook's cells for it hold {len(values)} different values ({', '.join(values)}): nothing is "
+                           "recorded, and the scientist says which applies to the whole beamtime, then: " + generic)
 
     # Two cells of THIS workbook giving one target different values: neither is recorded.
     values_of: dict[str, set[str]] = {}
@@ -1636,12 +1651,19 @@ def _beamtime_lines(items: Sequence[Mapping]) -> list[str]:
     beamtime, and the command that answers it (with the cell's value, when the cells agree)."""
     groups: dict[tuple, list[str]] = {}
     for x in items:
-        groups.setdefault((x["header"], x["target_field_path"], x["question_id"], x["answered"], x["command"]), []).append(x["cell"])
+        key = (x["header"], x["target_field_path"], x["question_id"], x["answered"], x["command"], tuple(x.get("values_differ") or ()))
+        groups.setdefault(key, []).append(x["cell"])
     out = []
-    for (header, path, qid, answered, command), cells in groups.items():
+    for (header, path, qid, answered, command, differ), cells in groups.items():
         more = f" and {len(cells) - _CELLS_SHOWN} more" if len(cells) > _CELLS_SHOWN else ""
-        out.append(f"  {header} -> {path}: {len(cells)} cell(s) ({', '.join(cells[:_CELLS_SHOWN])}{more}); question {qid}"
-                   + (" (answered; to change it)" if answered else "") + f": {command}")
+        line = f"  {header} -> {path}: {len(cells)} cell(s) ({', '.join(cells[:_CELLS_SHOWN])}{more}); question {qid}"
+        if differ:
+            # never one command per value: the scientist says which value applies to the whole beamtime
+            line += (f": these cells hold {len(differ)} different values ({', '.join(differ)}), so the scientist must say "
+                     "which applies" + (", then change the answer" if answered else ", then answer it") + f": {command}")
+        else:
+            line += (" (answered; to change it)" if answered else "") + f": {command}"
+        out.append(line)
     return out
 
 

@@ -1058,7 +1058,11 @@ def _diagnose(comparison: dict, entry: Mapping, stems: Sequence[str], used_entri
 
 def _athena_result(group: Mapping, entry: Mapping, files: Sequence[Mapping], params: Mapping, np, ctx: _Ctx) -> dict:
     res = _base(group, "scientist_athena")
-    res["review_flags"] = ["scientist_processed_data", "isaac_did_not_change_scientist_values"]
+    members = entry.get("per_scan_set") if entry.get("_match_kind") == "per_scan_set" else None
+    # A SET of the scientist's per-scan groups is ISAAC's mean of them (athena._per_scan_set), not values
+    # ISAAC left unchanged: the flag and the input say so, and name every member group
+    res["review_flags"] = ["scientist_processed_data",
+                           "isaac_computed_mean_of_scientist_per_scan_curves" if members else "isaac_did_not_change_scientist_values"]
     res["inputs"] = [
         {
             "source_id": entry["prj_source_id"],
@@ -1067,6 +1071,7 @@ def _athena_result(group: Mapping, entry: Mapping, files: Sequence[Mapping], par
             "relative_path": entry["prj_relative_path"],
             "athena_group": entry["group_name"],
             "match_kind": entry.get("_match_kind"),
+            **({"per_scan_set": {k: list(members.get(k) or ()) for k in ("athena_groups", "labels", "scans")}} if members else {}),
         }
     ]
     e = entry["energy"]

@@ -58,6 +58,7 @@ import argparse
 import hashlib
 import json
 import re
+import shlex
 import struct
 import sys
 import zipfile
@@ -1004,7 +1005,7 @@ def _write_sheet_text(out_dir: Path, manifest: dict, sheet: dict, number: int, o
     if rest:
         end = sheet["rows_in_sheet"]
         lines += ["", f"[rows {rest['rows_offset'] + 1}..{end} are NOT in this file: page them with --sheet "
-                      f"{sheet['name']!r} --rows-offset {rest['rows_offset']} --rows-limit {rest['rows_limit']} "
+                      f"{shlex.quote(str(sheet['name']))} --rows-offset {rest['rows_offset']} --rows-limit {rest['rows_limit']} "
                       "(the manifest's read_rest.command)]"]
     directory = out_dir / manifest["_dirname"]
     directory.mkdir(parents=True, exist_ok=True)
@@ -1482,8 +1483,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _with_commands(manifest: dict, args) -> None:
     """Each cut sheet's ``read_rest`` gets the exact command that reads its next page."""
-    import shlex
-
     # THE INTERPRETER THAT RAN THIS, not a bare `python` (which may not be on PATH): the command runs as printed
     base = [sys.executable or "python", "-m", "isaac_api.local_import.extract", args.file, "--out", args.out]
     if args.root:
@@ -1533,9 +1532,29 @@ def _compact(doc: dict, out: str) -> None:
                                 "run its command for the next page until no read_rest is left.")
 
 
+def _out_problem(out: Path, root: str | None, file: str | None) -> str | None:
+    """Why ``--out`` is refused, or ``None``. The extractor writes text and image files under ``--out``: never
+    into the scientist's folder (``--root``, or the file's own folder) and never into a bundle (any folder
+    up from ``--out`` holding a ``bundle.json``). Working files go in a folder BESIDE the bundle."""
+    target = out.expanduser().resolve()
+    for name, folder in (("--root", root), ("the file's folder", str(Path(file).parent) if file else None)):
+        if folder and target.is_relative_to(Path(folder).expanduser().resolve()):
+            return (f"--out {out} is inside {name} ({folder}): the extractor never writes into the scientist's folder. "
+                    "Give an --out outside it, e.g. <bundle>-notes/extracted beside the bundle.")
+    for folder in (target, *target.parents):
+        if (folder / "bundle.json").is_file():
+            return (f"--out {out} is inside the bundle at {folder}: working files never go inside a bundle. "
+                    "Give an --out beside it, e.g. <bundle>-notes/extracted.")
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     out = Path(args.out)
+    problem = _out_problem(out, args.root, args.file)
+    if problem:
+        print(f"refused: {problem} Nothing was written.", file=sys.stderr)
+        return 3
     paging = args.sheet is not None or args.rows_offset or args.rows_limit is not None
     if paging and (args.from_bundle or not args.file):
         print("--sheet, --rows-offset and --rows-limit page one spreadsheet: give the file, not --from-bundle", file=sys.stderr)

@@ -116,9 +116,9 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
 - Conflict: `decide --target <conflict id> --decision correct --value "<chosen or new value>" --by "<name>" --note "<why, in their words>"` (use `confirm --value` when they pick one of the listed readings that fits the field).
 - Missing value they know: `--decision confirm|correct --value <v>`; they do not know: `--decision defer`.
 - Extracted value they accept: `--decision confirm`; reject: `--decision reject`.
-- Several evidence-backed values the scientist accepts together: write their ids to a temporary file
-  in the notes folder beside the bundle (`<bundle>-notes/`, one id per line), never inside the bundle, list each item to
-  them first, then `decide --targets-file "$f" --decision confirm --by "<name>"`. Bulk confirm is refused for any
+- Several evidence-backed values the scientist accepts together: write their ids to `<bundle>-notes/ids.txt`
+  (the notes folder beside the bundle, one id per line), never inside the bundle, list each item to
+  them first, then `decide --targets-file <bundle>-notes/ids.txt --decision confirm --by "<name>"`. Bulk confirm is refused for any
   value with no source evidence; do not work around that.
 - **"The bundle changed since it was read"** (exit 2, nothing written): something else wrote the bundle
   meanwhile, often the *Local Imports* page. Run `bundle questions` again and re-check the answer still

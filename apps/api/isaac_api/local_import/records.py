@@ -37,7 +37,7 @@ import hashlib
 import json
 import re
 import shutil
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
 from . import bundle as B
@@ -645,25 +645,53 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
                 "auto",
                 "E0 reported by the scientist-approved processing result.",
             )
+            evidence = [conf]
             if r.get("source") == "scientist_athena":
-                # THE SCIENTIST'S OWN ATHENA PROCESSING made this E0 and curve; ISAAC's protocol only read them
-                # (unchanged), so the descriptor is attributed to Athena and its value is imported, never "auto"
                 ref = next(iter(r.get("inputs") or ()), {}) or {}
-                where = ", ".join(x for x in (ref.get("relative_path"), f"Athena group {ref['athena_group']}"
-                                              if ref.get("athena_group") else None) if x)
-                label = f"athena:{ref.get('relative_path') or 'project'}" + (f"#{ref['athena_group']}" if ref.get("athena_group") else "")
-                generated_by = {"agent": "Athena", "notes": (
-                    f"The scientist's own Athena processing{f' ({where})' if where else ''}: E0 and the normalised "
-                    f"curve are the scientist's values, read unchanged by ISAAC ({r['protocol_id']} "
-                    f"{r['protocol_version']}) and approved by a scientist.")}
+                # THE PROJECT'S FILE NAME ONLY in the record: a folder name can carry a sample's or a person's
+                # name. Where the project is in the beamtime goes to the evidence sidecar, as every source file does.
+                prj = PurePosixPath(str(ref.get("relative_path") or "")).name or None
+                members = ref.get("per_scan_set") if isinstance(ref.get("per_scan_set"), Mapping) else {}
+                groups = [str(g) for g in members.get("athena_groups") or ()]
+                if ref.get("match_kind") == "per_scan_set":
+                    # A SET OF THE SCIENTIST'S PER-SCAN GROUPS (athena._per_scan_set): ISAAC's protocol AVERAGED
+                    # their normalisations and E0s. That is an ISAAC computation, never the scientist's merge and
+                    # never values "read unchanged"; the descriptor is ISAAC's (auto) and names the set.
+                    n = len(groups) or len(members.get("labels") or ()) or None
+                    which = f" (groups {', '.join(groups)}" + (f", in {prj})" if prj else ")") if groups else (f" (in {prj})" if prj else "")
+                    of = f"{n} of the scientist's" if n else "the scientist's"
+                    by = f"computed by ISAAC {r['protocol_id']} {r['protocol_version']}"
+                    label = (f"{r['protocol_id']}@{r['protocol_version']}:mean of athena:{prj or 'project'}#"
+                             + ("+".join(groups) if groups else f"{ref.get('athena_group') or 'group'}+per-scan groups"))
+                    generated_by = {"agent": r["protocol_id"], "version": str(r["protocol_version"]), "notes": (
+                        f"The mean of {of} per-scan Athena normalisations{which}, {by}: the scientist kept one "
+                        "Athena group per scan, and ISAAC averaged their curves and E0s. It is not a merge the "
+                        "scientist made; a scientist approved it.")}
+                    definition = (f"Mean E0 of {of} per-scan Athena normalisations, {by}; approved by a "
+                                  "scientist. Not a merge the scientist made.")
+                else:
+                    # THE SCIENTIST'S OWN ATHENA PROCESSING made this E0 and curve; ISAAC's protocol only read them
+                    # (unchanged), so the descriptor is attributed to Athena and its value is imported, never "auto"
+                    where = ", ".join(x for x in (prj, f"Athena group {ref['athena_group']}"
+                                                  if ref.get("athena_group") else None) if x)
+                    label = f"athena:{prj or 'project'}" + (f"#{ref['athena_group']}" if ref.get("athena_group") else "")
+                    generated_by = {"agent": "Athena", "notes": (
+                        f"The scientist's own Athena processing{f' ({where})' if where else ''}: E0 and the normalised "
+                        f"curve are the scientist's values, read unchanged by ISAAC ({r['protocol_id']} "
+                        f"{r['protocol_version']}) and approved by a scientist.")}
+                    source = "imported"
+                    definition = "E0 from the scientist's own Athena processing, approved by a scientist; ISAAC did not change it."
                 from .mutations import scan_subset_note
 
                 subset = scan_subset_note(bundle, r)
                 if subset:
                     generated_by["notes"] += " " + subset
                     used["scan_selection"] = subset
-                source = "imported"
-                definition = "E0 from the scientist's own Athena processing, approved by a scientist; ISAAC did not change it."
+                if ref.get("relative_path"):
+                    named = groups or ([str(ref["athena_group"])] if ref.get("athena_group") else [])
+                    evidence.append({"source_type": "document", "source_file": ref["relative_path"],
+                                     "locator": ("Athena group" + ("s " if len(named) > 1 else " ") + ", ".join(named))
+                                     if named else "Athena project"})
             draft["descriptors_outputs"] = [
                 {
                     "label": label,
@@ -678,7 +706,7 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
                             "unit": "eV",
                             "uncertainty": uncertainty,
                             "definition": definition,
-                            "evidence": [conf],
+                            "evidence": evidence,
                         }
                     ],
                 }

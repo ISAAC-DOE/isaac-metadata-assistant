@@ -114,8 +114,11 @@ Ask: approve, reject, or needs changes (with a note):
   or approve it: its E0 and curve describe those scans, not ISAAC's full merge. `decide` says it on
   approval, and the record's E0 descriptor notes it.
 - **Who made the E0.** An approved Athena result's E0 descriptor is attributed to the scientist's Athena
-  processing (`generated_by.agent: Athena`, `source: imported`, the project and Athena group in `notes`);
-  an approved ISAAC result's names ISAAC's protocol (`isaac.xas.v0`, `source: auto`).
+  processing (`generated_by.agent: Athena`, `source: imported`, the project's file name and Athena group in
+  `notes`); an approved ISAAC result's names ISAAC's protocol (`isaac.xas.v0`, `source: auto`). When the
+  scientist kept one Athena group per scan (`match_kind: per_scan_set`), the curve and E0 are ISAAC's MEAN of
+  those groups, not a merge the scientist made: the descriptor says so, names the groups, and is ISAAC's
+  (`source: auto`). Say that plainly before they approve it. A record names no folder, only the project's file name.
 - **A result with no curve** (no output file, e.g. `no_usable_scan`) cannot be approved; `decide`
   refuses. Say why in words and offer: reject the result; `needs_changes` (the protocol needs a setting
   the scientist chooses; only on their explicit choice re-process with `--params-file`); or leave the
