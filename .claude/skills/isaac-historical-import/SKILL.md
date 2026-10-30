@@ -109,7 +109,7 @@ verification. Skip this step if the scientist says it is not wanted; say that it
 
 `<isaac> bundle list <bundle> unread --limit 50` (page). Read `reference/reading-unread-files.md`.
 Prioritise logbooks, beamtime notes and proposals. For `.docx/.pptx/.xlsx` run
-`<python> -m isaac_api.local_import.extract <file> --root <folder> --out <bundle>/extracted`, read
+`<python> -m isaac_api.local_import.extract <file> --root <folder> --out <bundle>-notes/extracted`, read
 the text it returns, and open embedded images and PDFs with the Read tool. Plain-text files of
 other kinds: Read them directly. Then read what code DID read for statements no parser maps
 (readmes, macro comments, run labels). Read only inside the folder the scientist approved: if a
@@ -134,7 +134,8 @@ answer it once (`set_counter_positions --positions N`, or `last`); say its `regr
 `clock_time_zone`, needs the instrument clock's IANA zone; never suggest one.
 Ask the scientist to **confirm, split or merge** each, in batches, with progress. A group that is not
 a result (alignment, a reference foil, a test scan) can be **left out** with `reject`; say it is never
-exported. Several groups accepted as shown: list each back, then one `--targets-file` confirm.
+exported. Several groups accepted as shown: list each back, then one `--targets-file` confirm; never
+bulk-confirm a group with no scans or one no processing protocol covers: it can never be exported.
 After a regroup, say any `merge_decisions_not_combined` in words and offer its `next_commands` (never
 run one without the scientist's answer). A `--same-conditions` merge needs a yes to "same sample AND
 same conditions? the names differ in: …" with those words; `pristine`/`cycled` are conditions, not labels.

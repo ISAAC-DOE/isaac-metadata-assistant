@@ -11,7 +11,7 @@
 
 ## Tools
 
-- Word/PowerPoint/Excel: `<python> -m isaac_api.local_import.extract <file> --root <folder> --out <bundle>/extracted`
+- Word/PowerPoint/Excel: `<python> -m isaac_api.local_import.extract <file> --root <folder> --out <bundle>-notes/extracted`
   (or `--from-bundle <bundle>/unread_files.json --root <folder> --limit 20` for a batch). It prints a JSON
   manifest: text in reading order, tables as rows, every embedded image written to disk with its
   position, alt text and caption, bounded previews for sheets (the bound is stated), and counters for
