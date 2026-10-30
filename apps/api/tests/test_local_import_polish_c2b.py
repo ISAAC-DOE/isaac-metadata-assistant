@@ -330,3 +330,15 @@ def test_export_says_plainly_what_it_wrote_and_refused(bdir, tmp_path):
     assert R.export_outcome(0, 3, 0, out) == "Wrote 0 record(s), refused 3 group(s). Nothing was written (exit 1)."
     assert R.export_outcome(2, 0, 0, out).endswith("(exit 0).")
 
+
+
+def test_a_run_id_that_is_also_another_runs_stem_is_ambiguous():
+    """Review (cycle 2): a file named `run-002` beside the run whose id is run-002 named two runs, and
+    the id silently won. Now the reference names both, so the findings loader refuses it."""
+    from isaac_api.local_import import suggestions as S
+
+    bundle = {"runs": [{"run_id": "run-001", "stem": "run-002", "label": "a"},
+                       {"run_id": "run-002", "stem": "Pt_01", "label": "b"}], "sources": []}
+    index = S.run_reference_index(bundle)
+    assert index["run-002"] == {"run-001", "run-002"}
+    assert index["run-001"] == {"run-001"} and index["Pt_01"] == {"run-002"}

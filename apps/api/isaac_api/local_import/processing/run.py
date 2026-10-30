@@ -950,7 +950,7 @@ def _athena_result(group: Mapping, entry: Mapping, files: Sequence[Mapping], par
     }
     bad = entry.get("edge_step_implausible")
     if bad:
-        metrics["edge_step_implausible"] = bad["ratio"]
+        metrics["edge_step_implausible"] = bad["ratio"] if "ratio" in bad else bad.get("post_edge_mean")
     verdict, reasons = C.qc_verdict(metrics, params)
     res["qc"] = {"metrics": metrics, "verdict": verdict, "reasons": reasons}
     if bad:

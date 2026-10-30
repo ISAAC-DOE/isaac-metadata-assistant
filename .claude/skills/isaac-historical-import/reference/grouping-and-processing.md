@@ -140,3 +140,10 @@ element or edge from a file name.
   question drops out). When they do not know: `decide <bundle> --question <Q> --decision defer --by
   "<name>"` records it; grouping is unchanged, the question stays, marked `deferred`, and a later
   answer supersedes it. Never guess a position for them.
+
+## After a new build re-processes
+
+New rules (a fallback channel, an already-normalised Athena curve, a skip reason) can give a group
+a NEW result id. An earlier approval stays on the old result and never moves to the new curve: tell the
+scientist "this curve was re-made under a newer rule; please look at it again". A record exported
+before is replaced on the next export (the old one moves to `superseded/`); say so.

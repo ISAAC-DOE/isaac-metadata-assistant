@@ -162,6 +162,8 @@ def load_project(path: Path, rel_path: str, source_id: str | None, np) -> tuple[
             # the stored spectrum is the scientist's normalised curve: used as stored, step 1 by definition
             # (larch's re-fit of it is not the scientist's processing and is discarded)
             norm, flat, step_raw = m.copy(), m.copy(), 1.0
+            # ... believed only when it looks normalised (review): else handled as an implausible step
+            implausible = C.stored_normalized_implausible(e, m, e0_raw, np)
         else:
             implausible = C.edge_step_implausible(step_raw, m, np, post_edge=_post_edge(params))
         if e0_raw is None:
@@ -469,7 +471,10 @@ def compare(isaac: Mapping, entry: Mapping, params: Mapping, np) -> dict:
         # NEVER COMPARE A BROKEN CURVE: the reproduced normalisation is not the scientist's spectrum
         bad = entry["edge_step_implausible"]
         out["flags"].append(EDGE_STEP_IMPLAUSIBLE_FLAG)
-        out["metrics"] = {"e0_athena_eV": entry["e0_eV"], "edge_step_athena": entry["edge_step"], "edge_step_to_range": bad["ratio"]}
+        out["metrics"] = {"e0_athena_eV": entry["e0_eV"], "edge_step_athena": entry["edge_step"],
+                          **{k: bad[k] for k in ("ratio", "pre_edge_mean", "post_edge_mean") if k in bad}}
+        if "ratio" in out["metrics"]:
+            out["metrics"]["edge_step_to_range"] = out["metrics"].pop("ratio")
         out["reason"] = f"The scientist's Athena normalisation was not compared: {bad['statement']}"
         return out
     grid = isaac.get("grid")

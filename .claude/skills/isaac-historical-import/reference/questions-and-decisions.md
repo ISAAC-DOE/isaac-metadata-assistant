@@ -42,6 +42,8 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
 
 ## Questions that need care
 
+- **One-group questions** show `scope: group:<id>` even when their id was made at experiment scope
+  (`id_scope`); `--scope experiment` no longer lists them. Answer them like any group question.
 - **Deferred** (`deferred: {by, decided_utc}`): the scientist said "I don't know". It is still counted
   and sorts last; do not ask it again unless they offer an answer.
 - **A conflict with `affects_record: false`** (`no_record_field`): the readings differ, but no record

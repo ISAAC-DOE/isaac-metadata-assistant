@@ -162,18 +162,27 @@ Outputs `normalized.csv` (norm, flat). **All need approval.**
 
 ## 7. QC (data quality only; provenance flags do not move it)
 
-fail: 0 usable scans, < 20 points, edge step ≤ 0, I0 ≤ 0 on > 5 %, all-zero signal.
+fail: 0 usable scans, < 20 points, edge step ≤ 0, I0 ≤ 0 on > 5 %, all-zero signal, an edge step
+more than 2× the spectrum's own range (`edge_step_implausible`: the post-edge fit did not describe the
+data, e.g. a zero-width post-edge range).
 warn: 1 scan, pre-edge noise/step > 0.02, median stderr/step > 0.02, glitches or outlier
 scans flagged, readable scans skipped for lacking the chosen columns
 (`scans_skipped_lacking_chosen_columns`, with `scans_readable` / `scans_skipped_lacking_chosen_columns`
 metrics), |shift| > 2 eV, reference E0 spread > 0.5 eV, ≥ 3 identical maximum signal
-values (saturation), non-monotonic energy, non-finite points, some I0 ≤ 0, a fallback from
+values (saturation), non-monotonic energy, non-finite points, some I0 ≤ 0, a kept scan that ends
+early (`scans_truncated`, flag `scan_range_truncated`, with the overlap range), a fallback from
 transmission to fluorescence (`channel_fallback_transmission_not_positive`: transmission was chosen but
 every scan kept fewer than 20 finite points; the statement in `qc.json` says what was tried). Else pass.
 A scan whose signal is non-finite at most points is skipped as `signal_not_finite` (with `points_read`
 and `nonfinite_dropped`), never as `too_few_points`. **Known limit (for review):** deglitch can flag
 another element's real edge inside the scan range as a glitch (measured: the Mo L3/L2 edges in a MoS2
 sulfur K-edge scan); flags never drop points, but a scientist should be told.
+
+**The scientist's Athena results.** A group Athena marks already normalised (`is_nor`) is used as
+stored (edge step 1, no re-normalisation), and believed only when it looks normalised: pre-edge mean
+within 0.25 of 0 and post-edge mean within 0.25 of 1 (20 eV below / 50 eV above E0). Otherwise, and for
+any Athena group whose reproduced edge step is implausible, the curve is not compared, not plotted
+and not preferred, and its QC fails with the plain sentence. **Thresholds need approval.**
 `qc.json` records metrics, reasons and thresholds. **Thresholds need approval.**
 
 **Not applicable is not a verdict.** A group listing no scan (`no_scans`), or none of whose readable

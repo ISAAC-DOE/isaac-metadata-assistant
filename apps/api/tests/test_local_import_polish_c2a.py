@@ -255,3 +255,28 @@ def test_record_processing_steps_list_only_what_was_applied(bdir):
     assert _steps(bdir, [applied, MERGE, NORM]) == ["calibration", "spectrum_merging", "normalization"]
     one = {**MERGE, "outcome": {"n_scans": 1}}
     assert _steps(bdir, [CAL_NOT_APPLIED, one, NORM]) == ["normalization"]
+
+
+def test_a_curve_marked_normalised_that_is_not_is_never_used_as_the_scientists_result(tmp_path):
+    """Review (cycle 2): the `is_nor` flag alone was trusted. A raw curve (pre-edge ~3, post-edge ~8)
+    stored with the flag fails like an implausible step: not compared, not preferred."""
+    from isaac_api.local_import.processing import athena as A
+
+    scans = [spec_file(fluo_scan(s)) for s in (1, 2)]
+    bdir, root, bundle = make_case(tmp_path, [("01_SYN_ZZ1", scans, {"sample_name": "ZZ1"})])
+    _prj(root / "SYN.prj", "01_SYN_ZZ1.nor", 3.0 + 5.0 * _normalised(), {"is_nor": "1"})
+    bundle["unread_files"].append({"source_id": "prj-1", "relative_path": "SYN.prj"})
+    (bdir / "bundle.json").write_text(json.dumps(bundle))
+    isa, sci = _results(run_process(bdir, source_root=root))
+    assert sci["qc"]["verdict"] == "fail" and sci["preferred_for_record"] is False
+    assert "marks this curve already normalised" in sci["qc"]["statements"]["edge_step_implausible"]
+    cmp_ = isa["comparison"]
+    assert cmp_["verdict"] == "not_comparable" and A.EDGE_STEP_IMPLAUSIBLE_FLAG in cmp_["flags"]
+    assert cmp_["metrics"]["post_edge_mean"] > 7
+
+
+def test_stored_normalized_check():
+    assert C.stored_normalized_implausible(FINE, _normalised(), E0, np) is None
+    bad = C.stored_normalized_implausible(FINE, 2 * _normalised(), E0, np)
+    assert bad and bad["post_edge_mean"] == pytest.approx(2.0, abs=0.05)
+    assert C.stored_normalized_implausible(FINE, _normalised(), None, np) is None

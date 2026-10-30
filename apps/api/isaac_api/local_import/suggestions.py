@@ -284,8 +284,8 @@ def run_reference_index(bundle: Mapping) -> dict[str, set[str]]:
         for ref in (r["run_id"], r.get("stem"), paths.get(r["run_id"]), r.get("label")):
             if isinstance(ref, str) and ref:
                 index.setdefault(ref, set()).add(r["run_id"])
-    for r in bundle["runs"]:  # a run id names exactly its run, whatever else is spelt the same
-        index[r["run_id"]] = {r["run_id"]}
+    # a run id that is ALSO another run's stem, path or label (a file named ``run-002``) names two runs:
+    # refused by the caller like any other ambiguous reference, never silently resolved to the id (review)
     return index
 
 

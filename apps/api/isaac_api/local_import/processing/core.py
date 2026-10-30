@@ -380,6 +380,43 @@ def edge_step_implausible(step, signal, np, *, post_edge: str | None = None) -> 
     }
 
 
+#: A curve Athena marks already normalised (``is_nor``) is used as stored; it is believed only when it looks
+#: normalised: its pre-edge mean near 0 and its post-edge mean near 1 (review: the flag alone was trusted).
+NORMALIZED_CHECK_RULE_ID = "isaac.xas.stored_normalized_plausible.v0"
+NORMALIZED_CHECK_TOLERANCE = 0.25
+NORMALIZED_CHECK_PRE_EDGE_EV = -20.0
+NORMALIZED_CHECK_POST_EDGE_EV = 50.0
+
+
+def stored_normalized_implausible(energy, curve, e0, np) -> dict | None:
+    """``None`` when a curve stored as already normalised looks normalised (or there is too little on
+    either side of ``e0`` to judge); else what was found, with a plain sentence. Same shape as
+    :func:`edge_step_implausible`, so the curve is handled the same way: not compared, not preferred."""
+    e0 = _f(e0)
+    if e0 is None:
+        return None
+    e, y = np.asarray(energy, dtype=float), np.asarray(curve, dtype=float)
+    ok = np.isfinite(e) & np.isfinite(y)
+    pre = y[ok & (e < e0 + NORMALIZED_CHECK_PRE_EDGE_EV)]
+    post = y[ok & (e > e0 + NORMALIZED_CHECK_POST_EDGE_EV)]
+    if pre.size < 3 or post.size < 3:
+        return None
+    pre_mean, post_mean = float(pre.mean()), float(post.mean())
+    if abs(pre_mean) <= NORMALIZED_CHECK_TOLERANCE and abs(post_mean - 1.0) <= NORMALIZED_CHECK_TOLERANCE:
+        return None
+    return {
+        "rule_id": NORMALIZED_CHECK_RULE_ID,
+        "pre_edge_mean": pre_mean,
+        "post_edge_mean": post_mean,
+        "tolerance": NORMALIZED_CHECK_TOLERANCE,
+        "statement": (
+            f"Athena marks this curve already normalised, but its pre-edge mean is {pre_mean:.3g} and its "
+            f"post-edge mean is {post_mean:.3g} (a normalised curve is near 0 and 1, within "
+            f"{NORMALIZED_CHECK_TOLERANCE}); it is not used as the scientist's normalised result. A person checks it."
+        ),
+    }
+
+
 
 def qc_verdict(metrics: Mapping, params: Mapping) -> tuple[str, list[str]]:
     """pass | warn | fail with the reasons, from DATA-QUALITY metrics only.
