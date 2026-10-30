@@ -66,6 +66,16 @@ it finds one. Show per group, in words:
   in `statements`; never offer to approve that curve. On a scientist's Athena curve the comparison is
   `not_comparable` with flag `athena_edge_step_implausible` and a `reason`; it is not overlaid on the
   plot and not preferred;
+- **a curve that is not a usable spectrum** (`fail` with `no_edge`: the edge is not distinguishable from
+  the pre-edge scatter; or `post_edge_not_at_1`: the normalised level after the edge is far from 1, so
+  the normalisation did not work): say the sentence in `statements` and what the plot shows; offer
+  reject or `needs_changes`, never approval;
+- **a short scan** (`warn` with `post_edge_window_too_short`: the scan ends soon after the edge, so its
+  normalised level cannot be checked): say that its edge position is still usable but its normalised
+  curve is not checked; the scientist decides whether that is enough for this record;
+- **a reference foil whose channel was switched** (flag `channel_fallback_reference_channel`, or
+  `reference_channel_tried_not_usable` when every alternative failed too): say which signal was tried
+  and why, and ask the scientist which detector the foil was really on — never assume it;
 - **or, when the result has `applicability.status: not_applicable`, no verdict at all**: say "no
   ISAAC processing protocol covers this data yet" (`no_xas_channel`: no absorption channel could be
   formed; name the reader and the layout it states, never a technique) or "no scans, nothing to
