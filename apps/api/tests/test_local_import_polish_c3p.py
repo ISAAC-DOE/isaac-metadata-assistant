@@ -218,3 +218,21 @@ def test_no_reference_channel_when_the_name_does_not_say_i2_and_i1_is_live(tmp_p
     r = isaac(run_process(bdir, source_root=root))
     assert r["channel_choice"]["signal_name"] == "ln(I0/I1)" and r["qc"]["verdict"] == "fail"
     assert "fallback_from" not in r["channel_choice"]["basis"]
+
+
+def test_a_scan_ending_too_soon_above_e0_warns_and_its_level_is_not_judged(tmp_path):
+    short = GRID[GRID <= E0 + 20]  # a calibration-style scan: ends 20 eV above E0
+    mu = mu_edge(short, step=1.5, offset=0.0)
+    assert C.post_edge_level_implausible(short, mu, np.zeros(short.size), E0, 0.3, np, norm1=8.0, norm2=20.0) is None
+    found = C.post_edge_window_too_short(short, E0, np)
+    assert found["post_e0_span_eV"] == pytest.approx(20.0) and found["min_span_eV"] == C.POST_EDGE_MIN_SPAN_EV == 50.0
+    assert "ends 20 eV above E0" in found["statement"] and "edge position is still usable" in found["statement"]
+    assert C.post_edge_window_too_short(GRID, E0, np) is None
+    q = P.resolve_params()
+    assert C.qc_verdict({"scans_used": 2, "points": 200, "edge_step": 1.0, "post_edge_span_eV": 20.0}, q) == ("warn", ["post_edge_window_too_short"])
+    scans = [spec_file(fluo_scan(s, e=short)) for s in (1, 2)]
+    bdir, root, _ = make_case(tmp_path, [("01_SYN_Zz_foil_calib_075", scans, {})])
+    r = isaac(run_process(bdir, source_root=root))
+    assert "post_edge_not_at_1" not in r["qc"]["reasons"] and "post_edge_window_too_short" in r["qc"]["reasons"]
+    assert r["qc"]["verdict"] == "warn" and r["qc"]["metrics"]["post_edge_span_eV"] < 50
+    assert "edge position is still usable" in r["qc"]["statements"]["post_edge_window_too_short"]

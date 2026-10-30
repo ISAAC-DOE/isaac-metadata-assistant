@@ -197,7 +197,11 @@ data, e.g. a zero-width post-edge range), and two checks that a curve is a norma
   `norm` over the window was measured first and is NOT the test: it also carries the pre-edge line's
   slope extrapolated across the window, which put good spectra (a CoSO4 standard in sucrose 1.93, IrO2
   in transmission 1.40, nine dilute HERFD scans with 3 pre-edge points 2.1–2.8 or −0.7) far from 1; at
-  |mean − 1| > 0.5 it would have failed 18 curves, most of them sound.
+  |mean − 1| > 0.5 it would have failed 18 curves, most of them sound. **Not judged** when the scan ends
+  less than 50 eV above E0 (no real post-edge window; measured: scans end 0.9–27 eV or ≥ 64 eV above
+  E0): QC warns `post_edge_window_too_short` instead (metric `post_edge_span_eV`, "the scan ends N eV
+  above E0, so the normalised level cannot be checked; its edge position is still usable") — 11 such
+  curves on the four beamtimes, among them the two Ti calibration scans (19 eV), which therefore warn.
 * **`no_edge`** (`isaac.xas.edge_above_noise.v0`, metric `edge_to_pre_edge_noise`): the edge step is
   less than 5 times the pre-edge scatter (std of mu about the pre-edge line; `1 / pre_edge_noise`).
   Measured on the 150 pass/warn curves with ≥ 3 pre-edge points: 16.5 to 5600, except that Ti foil read
@@ -205,9 +209,9 @@ data, e.g. a zero-width post-edge range), and two checks that a curve is a norma
   `pre_edge_noise` and are not judged by it. A derivative test (maximum of dmu/dE against its pre-edge
   scatter) was measured too and does not separate that foil (113) from real spectra.
 
-Verdicts changed by the two checks (pass/warn → fail): BL4-3 TiON 4 (the anatase scan, both Ti
-calibration scans, the Ti foil on I2), BL15-2 1 (the dilute Ir HERFD scan), BL4-3 MOF-Co 0, BL6-2c 0
-(one curve that already failed `signal_all_zero` also fails `post_edge_not_at_1`).
+Verdicts changed by the two checks (pass/warn → fail): BL4-3 TiON 2 (the anatase scan, the Ti foil on
+I2), BL15-2 1 (the dilute Ir HERFD scan), BL4-3 MOF-Co 0, BL6-2c 0 (one curve that already failed
+`signal_all_zero` also fails `post_edge_not_at_1`).
 warn: 1 scan, pre-edge noise/step > 0.02, median stderr/step > 0.02, glitches or outlier
 scans flagged, readable scans skipped for lacking the chosen columns
 (`scans_skipped_lacking_chosen_columns`, with `scans_readable` / `scans_skipped_lacking_chosen_columns`
@@ -229,8 +233,8 @@ and `nonfinite_dropped`), never as `too_few_points`.
   0.8 wt% TiO2 anatase, 31 of 173. `glitches_flagged` therefore warns on most curves of those
   beamtimes. The detector is unchanged (flags never drop points; `exclude_flagged` is false); its
   thresholds are for the scientist to approve.
-* The two §7 shape checks judge the normalisation made with the default post-edge range: a short scan
-  (calibration foils ending ~20 eV above E0) fails `post_edge_not_at_1` although its E0 is sound.
+* The §7 post-edge level cannot judge a scan ending < 50 eV above E0 (`post_edge_window_too_short`
+  warns; its normalised curve is unchecked, its E0 usable).
 
 **The scientist's Athena results.** A group Athena marks already normalised (`is_nor`) is used as
 stored (edge step 1, no re-normalisation), and believed only when it looks normalised: pre-edge mean

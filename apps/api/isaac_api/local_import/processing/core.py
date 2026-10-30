@@ -428,12 +428,40 @@ def stored_normalized_implausible(energy, curve, e0, np) -> dict | None:
 #: window): the level lies between 0.31 and 1.89 for every curve whose plot shows a normalised spectrum;
 #: outside (0, 2) were a TiO2 anatase scan ending 122 eV above E0 (2.44: a quadratic post-edge over 49-120 eV
 #: of EXAFS put the step at 0.58 for a jump of 1.4), a noisy dilute Ir HERFD scan (2.11), two Ti foil
-#: calibration scans ending 19 eV above E0 (3.05, 3.43: the "post-edge" window lies inside the edge) and a Ti
-#: foil whose ln(I0/I1) falls at the edge (-1.75; larch's edge step is |jump|, so the step alone is positive).
+#: calibration scans ending 19 eV above E0 (3.05, 3.43: the "post-edge" window lies inside the edge; NOT
+#: judged since, see :data:`POST_EDGE_MIN_SPAN_EV`) and a Ti foil whose ln(I0/I1) falls at the edge (-1.75; larch's edge step is |jump|, so the step alone is positive).
 #: Not a protocol parameter: a sanity bound, like :data:`EDGE_STEP_MAX_RANGE_RATIO`.
 POST_EDGE_LEVEL_RULE_ID = "isaac.xas.post_edge_level.v0"
 POST_EDGE_LEVEL_RANGE = (0.0, 2.0)
 POST_EDGE_LEVEL_MIN_POINTS = 3
+#: A scan ending less than this far above E0 has no real post-edge window: the level is NOT judged and QC
+#: warns ``post_edge_window_too_short`` instead (as ``no_edge`` is not judged with < 3 pre-edge points).
+#: Measured on the four beamtimes' pass/warn curves: scans end 0.9 to 27 eV above E0 (calibration foils,
+#: short XANES scans) or at least 64 eV; the two Ti calibration scans (19 eV) have a sound E0 but a
+#: "post-edge" window inside the edge.
+POST_EDGE_MIN_SPAN_EV = 50.0
+
+
+def post_edge_window_too_short(energy, e0, np) -> dict | None:
+    """``None`` when the scan reaches at least :data:`POST_EDGE_MIN_SPAN_EV` above ``e0`` (or there is no E0);
+    else the span, with a plain sentence. The post-edge level is then not judged."""
+    e0 = _f(e0)
+    e = np.asarray(energy, dtype=float)
+    e = e[np.isfinite(e)]
+    if e0 is None or e.size == 0:
+        return None
+    span = float(e.max()) - e0
+    if span >= POST_EDGE_MIN_SPAN_EV:
+        return None
+    return {
+        "rule_id": POST_EDGE_LEVEL_RULE_ID,
+        "post_e0_span_eV": span,
+        "min_span_eV": POST_EDGE_MIN_SPAN_EV,
+        "statement": (
+            f"The scan ends {span:.3g} eV above E0 {e0:g} eV (under {POST_EDGE_MIN_SPAN_EV:g} eV), so there is no real "
+            "post-edge window and the normalised level cannot be checked; its edge position is still usable."
+        ),
+    }
 
 
 def post_edge_level_implausible(energy, mu, pre_edge_curve, e0, step, np, *, norm1, norm2) -> dict | None:
@@ -443,6 +471,8 @@ def post_edge_level_implausible(energy, mu, pre_edge_curve, e0, step, np, *, nor
     step, e0, norm1, norm2 = _f(step), _f(e0), _f(norm1), _f(norm2)
     if step is None or step <= 0 or e0 is None or norm1 is None or norm2 is None:
         return None
+    if post_edge_window_too_short(energy, e0, np):
+        return None  # not judged: QC warns post_edge_window_too_short instead
     e, y, pre = (np.asarray(a, dtype=float) for a in (energy, mu, pre_edge_curve))
     sel = np.isfinite(e) & np.isfinite(y) & (e >= e0 + norm1) & (e <= e0 + norm2)
     if int(np.sum(sel)) < POST_EDGE_LEVEL_MIN_POINTS:
@@ -555,6 +585,9 @@ def qc_verdict(metrics: Mapping, params: Mapping) -> tuple[str, list[str]]:
         # readable scans of the group that lack the chosen columns were left out: a person
         # confirms they belong elsewhere (e.g. motor/alignment scans), so never a pass
         warn.append("scans_skipped_lacking_chosen_columns")
+    if "post_edge_span_eV" in metrics:
+        # present only when the scan ends too soon above E0 for the post-edge level to be judged
+        warn.append("post_edge_window_too_short")
     if metrics.get("truncated_scans"):
         # a scan that ends early is kept where it has data, so part of the merged curve averages fewer
         # scans than are listed as used: a person checks it (the plain sentence is in qc.statements)

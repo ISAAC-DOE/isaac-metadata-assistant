@@ -782,6 +782,7 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
 
     implausible = C.edge_step_implausible(nm["edge_step"], mean, np, post_edge=_post_edge_range(nm["resolved_params"]))
     checks = C.edge_checks(g2, mean, nm, np)
+    short = C.post_edge_window_too_short(g2, nm["e0_eV"], np)
     truncated = _truncation_statement(ginfo, scans_data, pos_sid)
     diags = [sa["diagnostics"] for sa in scans_data]
     read_pts = sum(d["points_read"] for d in diags) or 1
@@ -804,6 +805,7 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         # only when the check failed (core.edge_checks; absent otherwise, as above)
         **({"post_edge_level": checks["post_edge_not_at_1"]["level"]} if "post_edge_not_at_1" in checks else {}),
         **({"edge_to_pre_edge_noise": checks["no_edge"]["edge_to_noise"]} if "no_edge" in checks else {}),
+        **({"post_edge_span_eV": short["post_e0_span_eV"]} if short else {}),
         "pre_edge_noise": nm["pre_edge_noise"],
         "scan_spread": float(np.nanmedian(se) / abs(step)) if (len(scans_data) > 1 and step and np.isfinite(se).any()) else None,
         "glitch_points": dg["flagged_points_total"],
@@ -831,6 +833,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         res["review_flags"].append("edge_step_implausible")
     for reason, finding in checks.items():
         statements[reason] = finding["statement"]
+    if short:
+        statements["post_edge_window_too_short"] = short["statement"]
     if statements:  # absent when there is nothing to say, so an unaffected result is unchanged
         res["qc"]["statements"] = statements
     res["steps"].append({"step": "qc", "params": dict(params["qc"]), "outcome": {"verdict": verdict, "reasons": reasons}, "flags": []})
