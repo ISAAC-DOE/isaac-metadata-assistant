@@ -10772,7 +10772,7 @@
       },
       {
         "path": "docs/ui-local-dev.md",
-        "sha256": "1e0cd74e51e2bd585daad703d8c371af416964dd001cc2433d8a9132cfc382c3"
+        "sha256": "4a87f0524884cbe94b5b5b7966eda2695459947ca5a7bd4b215a47e3ca7fd671"
       },
       {
         "path": "pyproject.toml",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "1fb001789fc3f307acd6d751489f8fa1f2e89d612f4d87e2ab6ba90ce682b9d5"
+    "served_manifest_fingerprint": "3cd99699a1a4be62900ebb02731bf369b8f52430a618c228bc37f66f305ab35c"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
