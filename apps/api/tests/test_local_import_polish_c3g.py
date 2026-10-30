@@ -217,3 +217,56 @@ def test_a_live_candidate_is_shown_and_asked_as_before(tmp_path, capsys):
     assert [m["merge_candidate_id"] for m in capture_items(M.load(b))["merge_candidates"]] == [mc["merge_candidate_id"]]
     group = _cli_json(["bundle", "show", str(b), "group", mc["group_ids"][0]], capsys)
     assert [q for q in group["questions"] if q.get("merge_candidate_id") == mc["merge_candidate_id"]]
+
+
+def _older_build_pending_merge(tmp_path):
+    """What a build before this fix wrote after `decide --decision merge` and before the regroup: the merge
+    decision alone made the group `merged` (the format version is the same, 1.9.0)."""
+    b = _xdc(tmp_path, ["SYN_03_MOFdry_015_A", "SYN_03_MOFdry_016_A"])
+    before = _groups(b)
+    g1, g2 = (g for g, _, _ in before)
+    M.decide(b, target_ids=[g1], decision="merge", value=None, by=BY, orcid=None, merge_with=[g2])
+    data = json.loads((b / "bundle.json").read_text())
+    next(g for g in data["record_groups"] if g["group_id"] == g1)["status"] = "merged"
+    (b / "bundle.json").write_text(json.dumps(data, indent=1))
+    return b, before, g1, g2
+
+
+def test_an_older_builds_merged_status_for_a_pending_merge_is_valid_history(tmp_path, capsys):
+    b, before, g1, g2 = _older_build_pending_merge(tmp_path)
+    capsys.readouterr()
+    assert cli.main(["bundle", "check", str(b)]) == 0
+    said = capsys.readouterr().out
+    assert said.startswith("VALID:") and "INVALID" not in said and "STALE" not in said
+    assert (f"1 record group(s) ({g1}) are stored as merged by an older build, for a merge decision no regroup has "
+            "applied yet: valid history.") in said
+    assert "the next change to the bundle rewrites them so" in said and "--regroup" in said
+    assert B.validate_bundle(json.loads((b / "bundle.json").read_text())) == []
+    # a real status mismatch is still an error
+    data = json.loads((b / "bundle.json").read_text())
+    next(g for g in data["record_groups"] if g["group_id"] == g2)["status"] = "merged"
+    assert any(f"record group {g2} is merged" in e for e in B.validate_bundle(data))
+
+
+def test_every_command_reads_the_older_bundle_and_the_next_save_rewrites_it(tmp_path, capsys):
+    b, before, g1, g2 = _older_build_pending_merge(tmp_path)
+    for argv in (["bundle", "list", str(b), "groups", "--all"], ["bundle", "list", str(b), "merge-candidates"],
+                 ["bundle", "show", str(b), "group", g1], ["bundle", "questions", str(b)], ["bundle", "list", str(b), "runs"]):
+        assert cli.main(argv) == 0, argv
+    assert cli.main(["bundle", "check", str(b)]) == 0
+    # the next save (any decision) rewrites the status by this build's rule: proposed, the merge pending
+    M.decide(b, target_ids=["experiment"], decision="set_clock_time_zone", value="UTC", by=BY, orcid=None)
+    assert _groups(b) == before
+    capsys.readouterr()
+    assert cli.main(["bundle", "check", str(b)]) == 0
+    assert "stored as merged by an older build" not in capsys.readouterr().out
+    # and the regroup applies the merge or says why not, under the same ids
+    out = M.group(b, regroup=True)
+    assert _groups(b) == before and [x["decision_id"] for x in out["merge_decisions_not_combined"]] == ["d-00001"]
+
+
+def test_the_regroup_reads_the_older_status_directly(tmp_path):
+    b, before, g1, g2 = _older_build_pending_merge(tmp_path)
+    out = M.group(b, regroup=True)
+    assert _groups(b) == before and [x["decision_id"] for x in out["merge_decisions_not_combined"]] == ["d-00001"]
+    assert cli.main(["bundle", "check", str(b)]) == 0

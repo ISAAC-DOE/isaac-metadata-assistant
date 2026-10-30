@@ -1250,6 +1250,12 @@ def cmd_bundle_check(args) -> int:
     )
     for u in bundle.get("format_upgrades") or ():
         print(f"  {u['statement']} (by a {u['derived_by_format_version']} build, {u['upgraded_utc']}).")
+    older_merged = B.older_build_merged_groups(bundle)
+    if older_merged:
+        print(f"  {len(older_merged)} record group(s) ({', '.join(older_merged[:5])}{' …' if len(older_merged) > 5 else ''}) are "
+              "stored as merged by an older build, for a merge decision no regroup has applied yet: valid history. This "
+              "build reads them as proposed with the merge pending; the next change to the bundle rewrites them so, and "
+              "`isaac bundle group <bundle_dir> --regroup` applies the merge or says why not.")
     _print_non_finite(bundle)
     print("  This bundle is not an official ISAAC record; official validation does not apply to it.")
     return EXIT_OK

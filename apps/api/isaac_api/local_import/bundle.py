@@ -4014,6 +4014,21 @@ def upgraded_before(bundle: Mapping, path: str | None, decision: Mapping | None)
     return None
 
 
+def older_build_merged_groups(bundle: Mapping, expected: Mapping | None = None) -> list[str]:
+    """Record groups an OLDER build stored as ``merged`` for a merge decision no regroup has applied yet:
+    before polish c3 the decision alone made a group ``merged``; this build derives it ``proposed`` (the
+    merge pending) until a regroup combines its runs. That stored status was right under the rule that
+    wrote it, so it is valid history, never an error; the next save re-derives it (:func:`apply_derivations`)."""
+    if not any(g.get("status") == "merged" for g in bundle.get("record_groups") or ()):
+        return []
+    if expected is None:
+        expected = apply_derivations(json.loads(json.dumps(bundle)))
+    latest = _decisions_by_target([d for d in bundle.get("scientist_decisions") or () if d.get("decision") in GROUP_STATUS_DECISIONS])
+    return [g["group_id"] for g, e in zip(bundle.get("record_groups") or (), expected.get("record_groups") or ())
+            if g.get("status") == "merged" and e.get("status") == "proposed"
+            and (latest.get(("record_group", g["group_id"])) or {}).get("decision") == "merge"]
+
+
 def validate_allowing_stale(bundle: Any, *, max_errors: int = 50) -> tuple[list[str], list[dict]]:
     """``(errors, stale)``: :func:`validate_bundle` with every STALE eligibility (and the count
     it moves) taken as this build re-derives it. ``errors`` empty and ``stale`` non-empty means
@@ -4356,8 +4371,9 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50) -> list[str]:
     for c, e in zip(bundle["conflicts"], expected["conflicts"]):
         if c["value_state"] != e["value_state"]:
             errors.append(f"state: {c['conflict_id']} is {c['value_state']} but only {e['value_state']} is supported")
+    older_merged = set(older_build_merged_groups(bundle, expected))
     for g, e in zip(bundle.get("record_groups") or (), expected.get("record_groups") or ()):
-        if g["status"] != e["status"]:
+        if g["status"] != e["status"] and g["group_id"] not in older_merged:
             errors.append(f"state: record group {g['group_id']} is {g['status']} but only {e['status']} is supported")
     for po, e in zip(bundle.get("processed_outputs") or (), expected.get("processed_outputs") or ()):
         if [l["group_id"] for l in po["proposed_links"]] != [l["group_id"] for l in e["proposed_links"]]:
