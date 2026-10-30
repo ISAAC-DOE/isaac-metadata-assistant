@@ -7,7 +7,7 @@ technique, same conditions. Repeats of the same sample in the same condition bel
 (domain owner, 28 Oct 2026). The code proposes groups and splits whenever anything differs or is
 unknown; it never merges silently.
 
-Get the groups with `bundle list <bundle> groups` and one in full with `bundle show <bundle> group <id>`; `bundle list <bundle> merge-candidates` names groups the code could not decide about (a candidate with fewer than two live groups left proposes nothing: it is listed only with `--all`, its `show` says why, and it is never asked). Present each group like this (no ids unless asked):
+Get the groups with `bundle list <bundle> groups` and one in full with `bundle show <bundle> group <id>`; `bundle list <bundle> merge-candidates --limit 20 --offset 0` names groups the code could not decide about (a candidate with fewer than two live groups left proposes nothing: it is listed only with `--all`, its `show` says why, and it is never asked). Every list returns one page: when it says `"more": "5 more: --offset 20"`, run it again with that `--offset` until no `more` is left, before you say how many there are. Present each group like this (no ids unless asked):
 
 > **Group 4 of 12** — sample "SYN_sample_A", acid electrolyte, after 500 cycles, 0.8 V: 3 scans.
 > Split from the next group because the potential differs (0.8 V vs 1.0 V).
@@ -136,7 +136,8 @@ element or edge from a file name.
 - `sample_key_basis: name_stem`: no file states the sample, so runs were grouped by the stem of their file
   names. Say so, and ask the scientist to confirm or split.
 - **A groups row** (`bundle list <bundle> groups`) has `files` (the first 3 member stems; `files_more`
-  counts the rest), `scans`, `reader` (the runs' source type) and, when known, `cannot_export_reason`:
+  counts the rest), `scans`, `reader` (the runs' source type), `exported_file` when a member is the
+  scientist's exported/processed file of a run (kept as context, its data not merged: say so), and, when known, `cannot_export_reason`:
   `no_scans` (no run lists a scan) or `processing_not_applicable:<code>` (e.g. an `.mca` or `xes` file:
   no ISAAC protocol covers it). The page's `cannot_export` counts them over the whole list. Such a group
   can never become an exportable record as it stands: present it as such, leave it out of a bulk confirm,

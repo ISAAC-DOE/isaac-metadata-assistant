@@ -147,6 +147,9 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
   when the scientist says the sheet is the newer answer.
 - Columns recorded nowhere (no official field, or no target in this bundle) are listed with their
   cells. Tell the scientist; do not move their values into another field.
+- A run's cell for a field this bundle asks ONCE for the whole beamtime (e.g. Technique, a shared
+  macro) is listed under "Asked once for the whole beamtime" with that question's id and command; it
+  is not recorded. Ask the scientist that question (the cell's value is in the command) and run it.
 - The preview names, one line each, every cell that would REPLACE an extracted value or CONTRADICT the
   run's own file name (a typed `0.8` for an `m800mV` file, pH `2` for a `pH12` one) under "Replaces or
   contradicts a file reading". Read each one back and ask; never let a "correct N" count stand for them.

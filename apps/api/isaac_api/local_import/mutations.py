@@ -1231,6 +1231,14 @@ def _target_source_ids(kind: str, obj: Mapping) -> set[str]:
     return {i for i in ids if i}
 
 
+def _scan_locator(scan: Mapping, part: str | None = None) -> str:
+    """Where one scan is: ``scan 3`` (``scan 3 channel columns``) in a file of numbered scans, or the scan
+    file itself when it holds one scan and states no scan number (never "scan None")."""
+    if scan.get("scan_index") is None:
+        return ("the scan file's " + part if part else "the scan file") + " (one scan, no scan number)"
+    return f"scan {scan['scan_index']}" + (f" {part}" if part else "")
+
+
 def crosscheck_plan(bundle: Mapping) -> dict:
     """High-value targets to cross-check, with ids and source locators — NO values.
     Also the coverage so far: checked (has an AI reading), blind-checked, unchecked."""
@@ -1264,12 +1272,12 @@ def crosscheck_plan(bundle: Mapping) -> dict:
     sources = {s["source_id"]: s for s in bundle["sources"]}
     for run in bundle["runs"]:
         locs = [{"source_id": run["acquisition_source_id"], "relative_path": sources.get(run["acquisition_source_id"], {}).get("relative_path"), "locator": "the acquisition file"}]
-        locs += [{"source_id": s["source_id"], "relative_path": s["relative_path"], "locator": f"scan {s['scan_index']}"} for s in run["scans"]]
+        locs += [{"source_id": s["source_id"], "relative_path": s["relative_path"], "locator": _scan_locator(s)} for s in run["scans"]]
         locs += [{"source_id": d["macro_source_id"], "relative_path": d["macro_path"], "locator": f"newfile block {d['block_index']}"} for d in run["declared_by"]]
         add("run", run["run_id"], "run_association", run["run_id"], locs)
         if run["signal_selection"]:
             add("run", run["run_id"], "herfd_signal_choice", run["run_id"],
-                [{"source_id": s["source_id"], "relative_path": s["relative_path"], "locator": f"scan {s['scan_index']} channel columns"} for s in run["scans"]])
+                [{"source_id": s["source_id"], "relative_path": s["relative_path"], "locator": _scan_locator(s, "channel columns")} for s in run["scans"]])
     for c in bundle["candidates"]:
         path = c["target_field_path"] or ""
         category = None

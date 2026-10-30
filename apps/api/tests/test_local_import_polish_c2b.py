@@ -300,7 +300,10 @@ def test_the_conflict_count_says_why_it_differs_from_the_conflicting_values(tmp_
     no_value = sum(1 for cf in b["conflicts"] if not cf.get("candidate_id"))
     line = next(x for x in (out / "summary.md").read_text().splitlines() if x.startswith("- Conflicts:"))
     assert f"Conflicts: {c['conflicts']} (" in line and f"{no_value} about files, not one value" in line
-    assert f"on the {c['conflicting_candidates']} conflicting value(s)" in line
+    conflicting = sum(1 for cf in b["conflicts"] if cf.get("candidate_id") and next(
+        x for x in b["candidates"] if x["candidate_id"] == cf["candidate_id"])["value_state"] == "conflicting")
+    assert (f"{conflicting} where the sources disagree on a value" in line if conflicting == c["conflicting_candidates"]
+            else f"{conflicting} on {c['conflicting_candidates']} value(s) the sources disagree about" in line)
     assert f"{c['conflicts']} conflicts (" in printed and f"{no_value} about files, not one value" in printed
     # where every conflict is on a conflicting value, nothing extra is said
     plain = copy.deepcopy(b)

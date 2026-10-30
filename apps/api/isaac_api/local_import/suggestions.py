@@ -289,6 +289,43 @@ def run_reference_index(bundle: Mapping) -> dict[str, set[str]]:
     return index
 
 
+#: A finding whose field names one of these is about WHERE or BY WHOM the data was taken: its skip lists
+#: every such path this bundle holds (``system.facility.*``, ``attribution.produced_by.*``).
+_FACILITY_WORDS = ("facility", "beamline", "organization", "organisation", "instrument", "site", "endstation", "institution")
+_FACILITY_PREFIXES = ("system.facility.", "attribution.produced_by.")
+
+
+def nearest_field_paths(path: str, paths: Iterable[str], *, n: int = 3) -> list[str]:
+    """The field paths of this bundle a finding's unknown ``path`` most likely meant: those it is the tail
+    of (``facility.beamline`` -> ``system.facility.beamline``), else those with its last segment
+    (``sample.form`` -> ``sample.sample_form``), else the closest spellings. A suggestion, never applied."""
+    import difflib
+
+    held = sorted({p for p in paths if p})
+    tail = [p for p in held if p.endswith("." + path)]
+    if tail:
+        return tail[:n]
+    last = path.rsplit(".", 1)[-1]
+    same_last = [p for p in held if p.rsplit(".", 1)[-1] == last or p.rsplit(".", 1)[-1].endswith("_" + last)]
+    if same_last:
+        return same_last[:n]
+    return difflib.get_close_matches(path, held, n=n, cutoff=0.75)
+
+
+def unknown_field_reason(path: str, paths: Iterable[str], near: list[str]) -> str:
+    """Why a finding on a field path this bundle has no target for is skipped, with the nearest real path(s)
+    and, for a facility field, every facility path this bundle holds."""
+    reason = f"this bundle has no missing value or candidate for {path}"
+    if near:
+        reason += f"; did you mean {' or '.join(near)}?"
+    words = set(re.split(r"[._]", path.lower()))
+    if words & set(_FACILITY_WORDS):
+        facility = sorted(p for p in set(paths) if p and p.startswith(_FACILITY_PREFIXES))
+        if facility:
+            reason += f" The facility and producer fields here are: {', '.join(facility)}."
+    return reason + " Kept in the findings file only: fix field_path and load the file again."
+
+
 def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id: str) -> dict:
     """Plan the AI interpretations for one findings file. Pure: writes nothing.
 
@@ -350,8 +387,9 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
             else:
                 members = [path]
             if path not in paths and members == [path]:
-                skipped.append({"finding": fid, "field_path": path,
-                                "reason": "this bundle has no missing value or candidate for this field; kept in the findings file only"})
+                near = nearest_field_paths(path, paths)
+                skipped.append({"finding": fid, "field_path": path, "did_you_mean": near,
+                                "reason": unknown_field_reason(path, paths, near)})
                 continue
         scope = (f.get("applies_to") or {}).get("scope") if isinstance(f.get("applies_to"), Mapping) else None
         if scope == "experiment":

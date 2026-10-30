@@ -14,6 +14,7 @@ name, lists allowed values once; the extractor pages a cut sheet. Synthetic only
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import openpyxl
 import pytest
@@ -168,8 +169,10 @@ def test_a_cut_sheet_says_exactly_how_to_read_the_rest_and_paging_reads_it(tmp_p
                                     "--rows-offset", "50", "--rows-limit", "50"])
     assert code == 0, err
     [sheet] = page["sheets"]
-    assert [r["row"] for r in sheet["preview_rows"]] == list(range(51, 79))
-    assert sheet["preview_rows"][0]["cells"] == ["S_51_dir", 5.1]
+    # the printed manifest names the page's text file (polish c4-b); the rows are in it
+    rows = [ln for ln in Path(sheet["text_file"]).read_text(encoding="utf-8").splitlines() if ln.startswith("row ")]
+    assert [int(ln.split(":")[0][4:]) for ln in rows] == list(range(51, 79))
+    assert rows[0] == "row 51: S_51_dir | 5.1"
     assert sheet["rows_returned"] == "51..78" and not sheet["preview_rows_not_returned"] and "read_rest" not in sheet
     assert sheet["rows_before_this_page"] == 50 and "header_rows" not in sheet
 

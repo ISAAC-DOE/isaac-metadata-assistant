@@ -429,7 +429,9 @@ def _conflict_breakdown(bundle: Mapping) -> str:
     conflicting = on_state.pop("conflicting", 0)
     if not on_state and not about_no_value:
         return ""
-    parts = [f"{conflicting} on the {bundle['counts']['conflicting_candidates']} conflicting value(s)"]
+    values = bundle["counts"]["conflicting_candidates"]
+    parts = [f"{conflicting} where the sources disagree on a value" if conflicting == values else
+             f"{conflicting} on {values} value(s) the sources disagree about"]
     said = {"needs_review": "that need review (not conflicting)", "scientist_confirmed": "a scientist has decided",
             "rejected": "a scientist rejected"}
     parts += [f"{n} on value(s) {said.get(state, 'in state ' + state)}" for state, n in sorted(on_state.items())]
@@ -755,6 +757,12 @@ def group_list_extras(bundle: Mapping) -> dict[str, dict]:
             row["files_more"] = len(stems) - GROUP_ROW_FILES
         row["scans"] = scans
         row["reader"] = ", ".join(dict.fromkeys(str(r.get("source_type")) for r in members)) or None
+        # a member joined as CONTEXT (the scientist's exported/processed file of a run, its data not merged) is
+        # marked on the row too, not only by `show group`
+        exported = [str(runs[k].get("stem") or runs[k]["run_id"]) for k in g.get("context_run_keys") or () if k in runs]
+        if exported:
+            row["exported_file"] = exported[:GROUP_ROW_FILES]
+            row["exported_file_note"] = "the scientist's exported/processed file of a run: context, its data not merged"
         na = blocked.get(g["group_id"])
         if na is not None:
             row["cannot_export_reason"] = f"processing_not_applicable:{(na.get('applicability') or {}).get('reason_code')}"
@@ -887,6 +895,12 @@ def _exposed_by_show(kind: str, obj: Mapping) -> list[tuple[str, str]]:
     return []
 
 
+def _more(left: int, next_offset: int) -> dict:
+    """``{"more": "5 more: --offset 20"}`` when a page leaves rows after it: how to read the rest, said plainly
+    (``omitted_after`` alone was missed on a real beamtime), or ``{}``."""
+    return {"more": f"{left} more: --offset {next_offset}"} if left > 0 else {}
+
+
 def cmd_bundle_list(args) -> int:
     if args.limit < 1 or args.limit > MAX_LIMIT or args.offset < 0:
         _err(f"--limit must be 1..{MAX_LIMIT} and --offset must be >= 0.")
@@ -973,6 +987,7 @@ def cmd_bundle_list(args) -> int:
         "returned": len(page),
         "omitted_before": min(args.offset, total),
         "omitted_after": max(0, total - args.offset - len(page)),
+        **_more(total - args.offset - len(page), args.offset + len(page)),
         **({"not_listed": dict(sorted(not_listed.items())),
             "not_listed_note": ("groups that are decision history (merged, rejected, split), not records: pass --all to list them"
                                 if args.kind == "groups" else
@@ -1367,6 +1382,7 @@ def cmd_bundle_questions(args) -> int:
             "total": len(kept), "offset": args.offset, "limit": args.limit, "returned": len(page),
             "omitted_before": min(args.offset, len(kept)),
             "omitted_after": max(0, len(kept) - args.offset - len(page)),
+            **_more(len(kept) - args.offset - len(page), args.offset + len(page)),
             **({"skipped_deferred": len(rows) - len(kept)} if args.skip_deferred else {}),
             "minimum_for_one_group": Q.minimum_answers_for_one_group(payload, bundle, scope=args.scope,
                                                                      bundle_dir=Path(args.bundle_dir), reports=reports),
@@ -1528,6 +1544,7 @@ def cmd_bundle_crosscheck_plan(args) -> int:
         plan["returned"] = len(plan["items"])
         plan["omitted_before"] = min(args.offset, len(items))
         plan["omitted_after"] = max(0, len(items) - args.offset - plan["returned"])
+        plan.update(_more(plan["omitted_after"], args.offset + plan["returned"]))
         return plan
 
     return _mutation(run)

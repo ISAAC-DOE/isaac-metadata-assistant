@@ -38,6 +38,7 @@ from __future__ import annotations
 import math
 import os
 import re
+import shlex
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -1357,6 +1358,38 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                                              "value": cell["value"], "readings": readings, "outcome": outcome,
                                              **({"adopted": cell["adopted"]} if cell.get("adopted") else {})})
 
+    report["asked_beamtime_wide"] = []
+    asked_of: dict[str, dict | None] = {}
+    payload_box: list[Mapping] = []
+
+    def beamtime_question(path: str) -> dict | None:
+        """The question that asks ``path`` ONCE for the whole beamtime, when this bundle holds the field only
+        at experiment scope (a beamtime candidate, its shared conflict, a record-scope missing value): a run's
+        cell has no target of its own then, and that question is what answers it (an answered question too,
+        with the same id). ``None`` when no such question exists. Built once, only when a cell needs it."""
+        if path in asked_of:
+            return asked_of[path]
+        from . import questions as Q
+
+        ids = {m["value_id"] for m in index.missing_by_run.get((None, path), [])}
+        ids |= {c["candidate_id"] for c in index.cands_by_run.get((None, path), [])}
+        ids |= {cf["conflict_id"] for cf in bundle.get("conflicts") or () if cf.get("candidate_id") in ids}
+        found = None
+        if ids:
+            if not payload_box:
+                payload_box.append(Q.consolidate(bundle, include_answered=True))
+            for q in payload_box[0]["questions"]:
+                if q["kind"] not in Q.VALUE_KINDS or q.get("informational"):
+                    continue
+                hit = next((tids for field, tids in Q._value_paths(q) if field == path and ids.intersection(tids)), None)
+                if hit is not None:
+                    found = {"question_id": q["question_id"], "command": Q.scoped_answer_command(q, path),
+                             "answered": any(tid in hit and d.get("decision") in (B.CONFIRMING_DECISIONS | {"reject"})
+                                             for (_kind, tid), d in latest.items())}
+                    break
+        asked_of[path] = found
+        return found
+
     reached = cells.get("file_list_run_ids") or set()
     planned: list[tuple[dict, str, str, Mapping, str]] = []  # (cell, decision, kind, obj, target_id)
     for cell in cells["cells"]:
@@ -1389,6 +1422,22 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
             for c in index.cands_by_run.get((cell["run_id"], path), []):
                 targets.append(("confirm" if _same_value(c["value"], value) else "correct", "candidate", c, c["candidate_id"]))
         if not targets:
+            asked = beamtime_question(path) if cell["scope"] == "run" else None
+            if asked is not None:
+                command = asked["command"]
+                if isinstance(value, str) and "--json" not in command:
+                    command = re.sub(r"--value <[^>]*>", lambda _m: f"--value {shlex.quote(value)}", command)
+                command = command.replace('--by "<your name>"', f"--by {shlex.quote(by)}")
+                report["asked_beamtime_wide"].append({
+                    "cell": cell["cell"], "header": cell["header"], "value": value, "run_id": cell["run_id"],
+                    "target_field_path": path, "question_id": asked["question_id"], "answered": asked["answered"],
+                    "command": command,
+                    "reason": (f"this bundle asks {path} once for the whole beamtime (question {asked['question_id']}"
+                               + (", answered" if asked["answered"] else "") + "), not per run, so this cell is not "
+                               "recorded; " + ("to change that answer" if asked["answered"] else "answer that question")
+                               + f": {command}"),
+                })
+                continue
             report["nowhere"].append({"cell": cell["cell"], "header": cell["header"], "value": value,
                                       "reason": f"this run has no missing or extracted value for {path} in this bundle"})
             continue
@@ -1530,6 +1579,8 @@ def import_template(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None 
         "refused": report["refused"],
         "unmapped_columns": list(cells["unmapped"].values()),
         "recorded_nowhere": report["nowhere"],
+        # a run's cell for a field this bundle asks once for the beamtime: the question that answers it
+        "asked_beamtime_wide": report["asked_beamtime_wide"],
         "rows_refused": cells["rows_refused"],
         "extracted_values_left_alone": report["left_alone"],
         "campaign_not_filled": report["campaign_not_filled"],
@@ -1577,6 +1628,20 @@ def _grouped_cells(items: Sequence[Mapping], *, key: str = "header") -> list[str
     for (header, reason), cells in groups.items():
         more = f" and {len(cells) - _CELLS_SHOWN} more" if len(cells) > _CELLS_SHOWN else ""
         out.append(f"  {header}: {len(cells)} cell(s) ({', '.join(cells[:_CELLS_SHOWN])}{more}): {reason}")
+    return out
+
+
+def _beamtime_lines(items: Sequence[Mapping]) -> list[str]:
+    """One line per column, question and command: the cells, the question asking the field once for the
+    beamtime, and the command that answers it (with the cell's value, when the cells agree)."""
+    groups: dict[tuple, list[str]] = {}
+    for x in items:
+        groups.setdefault((x["header"], x["target_field_path"], x["question_id"], x["answered"], x["command"]), []).append(x["cell"])
+    out = []
+    for (header, path, qid, answered, command), cells in groups.items():
+        more = f" and {len(cells) - _CELLS_SHOWN} more" if len(cells) > _CELLS_SHOWN else ""
+        out.append(f"  {header} -> {path}: {len(cells)} cell(s) ({', '.join(cells[:_CELLS_SHOWN])}{more}); question {qid}"
+                   + (" (answered; to change it)" if answered else "") + f": {command}")
     return out
 
 
@@ -1655,6 +1720,14 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
         add("")
         add("Recorded nowhere (no target for that run/field):")
         lines += _grouped_cells(rep["recorded_nowhere"])
+    if rep.get("asked_beamtime_wide"):
+        add("")
+        add("Asked once for the whole beamtime (these cells are not recorded; the question's command answers it):")
+        if full:
+            for x in rep["asked_beamtime_wide"]:
+                add(f"  {x['cell']} {x.get('run_id') or ''} {x['header']} = {x['value']!r}: {x['reason']}")
+        else:
+            lines += _beamtime_lines(rep["asked_beamtime_wide"])
     if rep["unmapped_columns"]:
         add("")
         add("Unmapped columns:")
@@ -1684,6 +1757,8 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
         f"{len(rep['invalid_cells'])} invalid; {len(rep['clashes'])} clash(es); {len(rep['refused'])} refused; "
         f"{sum(len(u['cells']) for u in rep['unmapped_columns'])} cell(s) in {len(rep['unmapped_columns'])} unmapped column(s); "
         f"{len(rep['recorded_nowhere'])} recorded nowhere; {len(rep['rows_refused'])} row(s) refused"
+        + (f"; {len(rep['asked_beamtime_wide'])} cell(s) asked once for the whole beamtime (its question answers them)"
+           if rep.get("asked_beamtime_wide") else "")
         + (f"; {len(rep['replaces_or_contradicts_a_file_reading'])} replace or contradict a file reading"
            if rep.get("replaces_or_contradicts_a_file_reading") else "")
         + (f"; {len(rep['awaiting_ruling'])} disagreement(s) awaiting a ruling" if rep.get("awaiting_ruling") else "")

@@ -28,8 +28,10 @@ a counter saying how much*. ``status`` is one of:
 
 Formats: ``.docx`` / ``.pptx`` (text in reading order, tables as rows, every embedded image
 with sha256, position and alt text/caption), ``.xlsx`` (sheets, dimensions, a bounded cell
-preview, formulas as formulas, merged ranges; a sheet cut at the preview bound says in its ``read_rest``
-exactly how to page the rest with ``--sheet``/``--rows-offset``/``--rows-limit``), ``.pdf`` (page count and metadata only),
+preview, formulas as formulas, merged ranges; each sheet's returned rows also go to a text file under
+``--out``, and the PRINTED manifest names that file instead of holding the rows; a sheet cut at the preview
+bound says in its ``read_rest`` exactly how to page the rest with ``--sheet``/``--rows-offset``/``--rows-limit``,
+as a command that runs with the interpreter that printed it), ``.pdf`` (page count and metadata only),
 images (dimensions where cheap), everything else unreadable.
 
 WHAT IT WILL NOT DO
@@ -954,6 +956,7 @@ def _extract_xlsx(path: Path, manifest: dict, out_dir: Path, limits: Limits, pag
             )
             if col_cut:
                 trunc["preview_columns_not_returned"] = trunc.get("preview_columns_not_returned", 0) + col_cut
+            sheets[-1]["text_file"] = _write_sheet_text(out_dir, manifest, sheets[-1], names.index(name) + 1, len(names), limits)
     finally:
         wb.close()
     manifest["sheets"] = sheets
@@ -970,6 +973,44 @@ def _extract_xlsx(path: Path, manifest: dict, out_dir: Path, limits: Limits, pag
            "--rows-offset <read_rest.rows_offset> --rows-limit <read_rest.rows_limit> (each sheet's read_rest says exactly)."
            if cut else "No sheet was cut.")
     )
+
+
+def _sheet_cell_text(v: Any) -> str:
+    if v is None:
+        return ""
+    return str(v).replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+
+
+def _write_sheet_text(out_dir: Path, manifest: dict, sheet: dict, number: int, of: int, limits: Limits) -> str:
+    """One sheet's returned rows as plain text for the Read tool, one line per non-empty row
+    (``row N: a | b | c``), with what was cut said at the end. The rows are the preview's: the same
+    bound, never more. A page (``--rows-offset``) gets its own file, so it never overwrites the first."""
+    _first, _, last = str(sheet["rows_returned"]).partition("..")
+    paged = sheet.get("rows_before_this_page")
+    lines = [f"# {manifest['source_relative_path']}: sheet {number} of {of}, {sheet['name']!r} ({sheet['state']})",
+             f"rows {sheet['rows_returned']} of {sheet['rows_in_sheet'] if sheet['rows_in_sheet'] is not None else 'an unknown number'}, "
+             f"at most {limits.max_preview_cols} columns and {limits.max_preview_cell_chars} characters a cell; formulas as formula "
+             "text; empty rows left out. What a cell says is source evidence, not a value."]
+    merged = sheet.get("merged_ranges") or {}
+    if merged.get("ranges"):
+        more = merged.get("total", 0) - len(merged["ranges"])
+        lines.append("merged ranges: " + ", ".join(merged["ranges"]) + (f" (and {more} more)" if more > 0 else ""))
+    lines.append("")
+    for r in sheet["preview_rows"]:
+        lines.append(f"row {r['row']}: " + " | ".join(_sheet_cell_text(c) for c in r["cells"]))
+    if sheet.get("preview_columns_not_returned"):
+        lines += ["", f"[{sheet['preview_columns_not_returned']} cell(s) past column {limits.max_preview_cols} are NOT in this file]"]
+    rest = sheet.get("read_rest")
+    if rest:
+        end = sheet["rows_in_sheet"]
+        lines += ["", f"[rows {rest['rows_offset'] + 1}..{end} are NOT in this file: page them with --sheet "
+                      f"{sheet['name']!r} --rows-offset {rest['rows_offset']} --rows-limit {rest['rows_limit']} "
+                      "(the manifest's read_rest.command)]"]
+    directory = out_dir / manifest["_dirname"]
+    directory.mkdir(parents=True, exist_ok=True)
+    name = f"sheet-{number:02d}" + (f"-rows-{paged + 1}-{last or 'none'}" if paged else "") + ".txt"
+    (directory / name).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return f"{directory.name}/{name}"
 
 
 def _rows_in(dimensions: str | None) -> int | None:
@@ -1443,7 +1484,8 @@ def _with_commands(manifest: dict, args) -> None:
     """Each cut sheet's ``read_rest`` gets the exact command that reads its next page."""
     import shlex
 
-    base = ["python", "-m", "isaac_api.local_import.extract", args.file, "--out", args.out]
+    # THE INTERPRETER THAT RAN THIS, not a bare `python` (which may not be on PATH): the command runs as printed
+    base = [sys.executable or "python", "-m", "isaac_api.local_import.extract", args.file, "--out", args.out]
     if args.root:
         base += ["--root", args.root]
     for sheet in manifest.get("sheets") or ():
@@ -1461,6 +1503,34 @@ def _trim_limits(doc: dict, show: bool) -> None:
     for m in [doc, *(doc.get("extractions") or ())]:
         if isinstance(m, dict) and m.pop("limits", None) is not None:
             m["limits_shown"] = "no (--show-limits prints every bound); every cut is counted in truncation"
+
+
+#: What a printed sheet keeps: where its rows went and how to page them. The rows themselves are in its text file.
+_SHEET_ROWS_KEYS = ("header_rows", "header_rows_note", "preview_rows")
+
+
+def _compact(doc: dict, out: str) -> None:
+    """The PRINTED manifest is compact: each sheet's rows are in the text file it names (a 100 KB manifest of
+    rows on stdout is not a way to read a workbook), and every text file is named by its path under ``--out``
+    so it opens as printed. ``extract_source`` itself still returns the rows."""
+    for m in [doc, *(doc.get("extractions") or ())]:
+        if not isinstance(m, dict):
+            continue
+        if m.get("text_file"):
+            m["text_file"] = str(Path(out) / m["text_file"])
+        for sheet in m.get("sheets") or ():
+            for key in _SHEET_ROWS_KEYS:
+                sheet.pop(key, None)
+            sheet.pop("preview_bounds", None)
+            sheet.pop("formulas_shown_as", None)  # the text file's header says it
+            merged = sheet.get("merged_ranges")
+            if isinstance(merged, dict) and merged.get("scanned"):
+                sheet["merged_ranges"] = merged.get("total", 0)  # how many; the text file lists them
+            if sheet.get("text_file"):
+                sheet["text_file"] = str(Path(out) / sheet["text_file"])
+        if m.get("sheets"):
+            m["read_sheets"] = ("Each sheet's returned rows are in its text_file (Read it). A sheet with read_rest is cut: "
+                                "run its command for the next page until no read_rest is left.")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1508,6 +1578,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"refused: {exc}", file=sys.stderr)
         return 3
     _trim_limits(result, args.show_limits)
+    _compact(result, args.out)
     json.dump(result, sys.stdout, indent=2, ensure_ascii=False)
     sys.stdout.write("\n")
     return 0

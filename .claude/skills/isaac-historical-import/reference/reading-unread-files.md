@@ -12,13 +12,15 @@
 ## Tools
 
 - Word/PowerPoint/Excel: `<python> -m isaac_api.local_import.extract <file> --root <folder> --out <bundle>-notes/extracted`
-  (or `--from-bundle <bundle>/unread_files.json --root <folder> --limit 20` for a batch). It prints a JSON
-  manifest: text in reading order, tables as rows, every embedded image written to disk with its
-  position, alt text and caption, bounded previews for sheets (the bound is stated), and counters for
-  anything cut. Read the text file it names; open images with Read.
+  (or `--from-bundle <bundle>/unread_files.json --root <folder> --limit 20` for a batch). It prints a compact
+  JSON manifest and writes what it read under `--out`: a document's text in reading order (tables as rows)
+  in `text_file`, each sheet's rows (the first 50, the bound is stated) in that sheet's own `text_file`
+  (`row 3: a | b | c`), every embedded image with its position, alt text and caption, and counters for
+  anything cut. Read each text file it names (the path is printed as it opens); open images with Read.
 - **A cut sheet is not read; page it.** A sheet past the preview bound has `preview_rows_not_returned`
-  and a `read_rest` with the exact command for the next page:
+  and a `read_rest` with the exact command for the next page (it starts with the interpreter that ran it):
   `<python> -m isaac_api.local_import.extract <file> --root <folder> --out <dir> --sheet "<name>" --rows-offset 50 --rows-limit 50`.
+  Each page goes to its own text file (`sheet-01-rows-51-100.txt`).
   Run it until no `read_rest` is left before you say what the sheet holds; the last rows are often
   where the errors are. `--show-limits` prints every bound (left out by default).
 - PDFs: Read with a page range of at most 20 pages (`pages: "1-20"`). The manifest lists ranges.
@@ -64,6 +66,12 @@ Write every finding to ONE JSON file (`isaac.reading_findings`) in a working fol
 - `"scope": "runs"` whenever the statement is about particular samples or conditions;
   `"experiment"` only when the source says it of the whole beamtime. Two files that disagree:
   write both findings and tell the scientist. Never pick one.
+- `field_path` is the FULL path, as `bundle questions` prints it. Where and by whom: the facility is
+  `system.facility.facility_name`, the beamline `system.facility.beamline`, the endstation
+  `system.facility.endstation`, the site `system.facility.site`, the facility's organization
+  `system.facility.organization`; who produced the data is `attribution.produced_by.group` and
+  `attribution.produced_by.organization`. A short path (`facility.beamline`) is skipped, and the skip
+  names the path it most likely meant (`did_you_mean`): fix the file and load it again.
 - Vocabulary fields take one allowed value (see `bundle questions` → `allowed_values`).
 - For `context.electrochemistry.electrolyte` give the whole statement ("0.1 M KOH"); it is
   offered on both the name and the concentration for the scientist to split.
