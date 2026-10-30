@@ -1295,6 +1295,12 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
 
   const answerControls: ReactNode = (() => {
     switch (d.answer_kind) {
+      case 'informational':
+        return (
+          <p className="li-hint" data-testid="li-informational">
+            {COPY.informational}
+          </p>
+        );
       case 'confirm_value':
         return (
           <>
@@ -1310,7 +1316,7 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
               </p>
             )}
             <AnswerForm onAnswer={() => submit('correct', { value })}>
-              <ValueInput id={valueId} rule={rule} value={value} onChange={setValue} label="Or correct it" />
+              <ValueInput id={valueId} rule={rule} value={value} onChange={setValue} label={d.distinct_extracted_values.length > 0 ? 'Or correct it' : 'Your answer'} />
               {answerButton(false)}
             </AnswerForm>
           </>
@@ -1587,7 +1593,7 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
         />
       )}
 
-      {multi && (
+      {multi && d.answer_kind !== 'informational' && (
         <fieldset className="li-fieldset">
           <legend>Answer for</legend>
           <label className="li-radio">
@@ -1654,10 +1660,12 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
         />
       )}
 
-      <details className="li-details">
-        <summary>Command-line equivalent</summary>
-        <pre className="li-command">{q.answer_command}</pre>
-      </details>
+      {d.answer_kind !== 'informational' && (
+        <details className="li-details">
+          <summary>Command-line equivalent</summary>
+          <pre className="li-command">{q.answer_command}</pre>
+        </details>
+      )}
     </li>
   );
 }

@@ -901,6 +901,9 @@ def describe_question(bundle: Mapping, q: Mapping, *, folder: str,
         "resolve_conflict": "conflict", "naming_counter_positions": "counter_positions",
         "clock_time_zone": "clock_zone", "confirm_absorber": "absorber",
     }.get(kind, "other")
+    if q.get("informational"):
+        # no answer can reach the record from this path yet: shown, never answered
+        answer_kind = "informational"
     settles_many = q.get("scope") == "experiment" and (len(q.get("per_scope_targets") or {}) > 1 or len(targets) > 1
                                                        or kind in ("naming_counter_positions", "clock_time_zone"))
     return {

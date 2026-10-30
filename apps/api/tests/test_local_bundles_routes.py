@@ -775,3 +775,14 @@ def test_a_refusal_message_naming_the_directory_is_scrubbed(root):
     exc = M.MutationRefused(f"No bundle.json at {os.path.realpath(root)}/alpha.", code=6)
     body = json.loads(LB._refusal(exc).body)
     assert body["message"] == "No bundle.json at alpha."
+
+
+def test_an_informational_question_is_shown_with_nothing_to_answer(client):
+    # a path no answer can reach the record from is listed for information only (never answerable)
+    r = client.get("/api/local-bundles/alpha/questions", params={"limit": 200})
+    assert r.status_code == 200
+    qs = r.json()["questions"]
+    info = [q for q in qs if q.get("informational")]
+    assert info, "the fixture has questions on paths no answer can reach"
+    assert all(q["display"]["answer_kind"] == "informational" for q in info)
+    assert all(q["display"]["answer_kind"] != "informational" for q in qs if not q.get("informational"))

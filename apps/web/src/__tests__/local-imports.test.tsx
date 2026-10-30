@@ -433,6 +433,38 @@ describe('the questions screen', () => {
     expect([...select.options].map((o) => o.value)).toEqual(['', 'operando', 'in_situ', 'ex_situ']);
   });
 
+  it('an informational question shows a note and no answer controls, scope choice or command', async () => {
+    const infoQ = question({
+      question_id: 'Q-info000001',
+      kind: 'confirm_value',
+      blocking: false,
+      tier: 3,
+      target_field_path: 'assets[].uri',
+      text: 'What is assets[].uri?',
+      per_scope_targets: { 'group:g1': ['cand-0001'], 'group:g2': ['cand-0002'] },
+      allowed_decisions: [],
+      answer_command: '# nothing to answer: no answer for assets[].uri reaches the record',
+      display: display({
+        answer_kind: 'informational',
+        scopes: [
+          { scope: 'group:g1', kind: 'group', group_id: 'g1', label: 'Record group g1', target_count: 1, run_names: ['SYN_run_A'], run_count: 1,
+            own_suggestions: [], own_suggestions_total: 0, mixed: false, has_unanimous_value: false, unanimous_from_own_files: false, unanimous_value: null },
+          { scope: 'group:g2', kind: 'group', group_id: 'g2', label: 'Record group g2', target_count: 1, run_names: ['SYN_run_B'], run_count: 1,
+            own_suggestions: [], own_suggestions_total: 0, mixed: false, has_unanimous_value: false, unanimous_from_own_files: false, unanimous_value: null },
+        ],
+      }),
+    });
+    stubQuestions({}, [infoQ]);
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const card = (await screen.findByRole('heading', { name: infoQ.text })).closest('li') as HTMLElement;
+    const c = within(card);
+    expect(c.getByTestId('li-informational')).toHaveTextContent(COPY.informational);
+    expect(c.queryByRole('button', { name: COPY.answer })).toBeNull();
+    expect(c.queryByRole('textbox')).toBeNull();
+    expect(c.queryByRole('radio')).toBeNull();
+    expect(c.queryByText('Command-line equivalent')).toBeNull();
+  });
+
   it('offers a number with its unit, an IANA zone, element and edge, and counter positions', async () => {
     stubQuestions();
     renderAt(ROUTES.localImportBundle('synthetic-beamtime'));

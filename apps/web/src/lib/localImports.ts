@@ -166,6 +166,7 @@ export type LocalAnswerKind =
   | 'counter_positions'
   | 'clock_zone'
   | 'absorber'
+  | 'informational'
   | 'other';
 
 export interface LocalQuestionDisplay {
@@ -562,6 +563,8 @@ export const LOCAL_IMPORTS_COPY = {
   previewCancelled: 'Nothing was written.',
   previewIds: 'Technical ids (for the command line)',
   chooseGroup: 'Choose which group this answer is for.',
+  informational:
+    'Nothing to answer here. The files mention this, but ISAAC cannot yet put an answer for it into a record, so it is listed for your information only.',
   groupGone: 'The group chosen before is no longer asked about here (it may have been answered). Choose a group.',
   goneElsewhere: 'This question was already answered (perhaps in another window or on the command line). Nothing was written; the questions are being read again.',
   answeredHere: 'Answered:',
