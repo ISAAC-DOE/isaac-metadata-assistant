@@ -9,6 +9,7 @@
 #   --install-skill                         copy the Claude Code skill into ~/.claude/skills
 #   --skill-dir DIR                         where skills go (default: ~/.claude/skills)
 #   --check                                 change nothing; only report what is and is not installed
+#                                           (including whether an installed skill copy is out of date)
 #   -h, --help
 #
 # What it does (idempotent; safe to re-run; needs no sudo):
@@ -61,6 +62,27 @@ have_cli()        { ( cd / && "$VENV/bin/python" -c 'import isaac_api.local_impo
 have_processing() { ( cd / && "$VENV/bin/python" -c 'import numpy, larch' ) >/dev/null 2>&1; }
 have_portal()     { compgen -G "$HOME/.cache/isaac/portal-validator/*/venv/bin/python" >/dev/null 2>&1; }
 
+# The installed skill is a COPY. Scientists start `claude` outside this folder, so Claude Code runs
+# that copy, which can be older than this checkout's. Compare them (ignoring checkout-path.txt and
+# Finder files); read-only.
+skill_state() {
+  local src="$CHECKOUT/.claude/skills/$SKILL_NAME" dest="$SKILL_DIR/$SKILL_NAME" recorded=""
+  if [[ ! -f "$dest/SKILL.md" ]]; then
+    echo "$SKIP skill not installed at $dest (re-run with --install-skill)"; return
+  fi
+  if [[ ! -f "$src/SKILL.md" ]]; then
+    echo "$OK skill installed at $dest (this checkout has no copy to compare with)"; return
+  fi
+  [[ -f "$dest/checkout-path.txt" ]] && recorded="$(head -n 1 "$dest/checkout-path.txt")"
+  if ! diff -rq -x checkout-path.txt -x .DS_Store "$src" "$dest" >/dev/null 2>&1; then
+    echo "[stale] skill at $dest differs from this checkout's copy, so Claude Code is using other instructions. Refresh: scripts/setup_isaac_local.sh --install-skill (then restart Claude Code)"
+  elif [[ "$recorded" != "$CHECKOUT" ]]; then
+    echo "[stale] skill at $dest points at another ISAAC folder (${recorded:-none recorded}). Refresh from this one: scripts/setup_isaac_local.sh --install-skill"
+  else
+    echo "$OK skill installed at $dest, same as this checkout's"
+  fi
+}
+
 if [[ $CHECK_ONLY -eq 0 && $WITH_CLI -eq 1 ]]; then
   # A Python >= 3.11 must exist, or uv must be able to fetch one. Explain, don't guess.
   if [[ ! -x "$VENV/bin/python" ]] && ! command -v uv >/dev/null 2>&1; then
@@ -100,13 +122,11 @@ if [[ $CHECK_ONLY -eq 0 && $WITH_PORTAL -eq 1 ]]; then
   fi
 fi
 
-SKILL_STATE="$SKIP not requested (re-run with --install-skill)"
-if [[ $INSTALL_SKILL -eq 1 ]]; then
+SKILL_STATE=""
+if [[ $INSTALL_SKILL -eq 1 && $CHECK_ONLY -eq 0 ]]; then
   SRC="$CHECKOUT/.claude/skills/$SKILL_NAME"
   DEST="$SKILL_DIR/$SKILL_NAME"
-  if [[ $CHECK_ONLY -eq 1 ]]; then
-    if [[ -f "$DEST/SKILL.md" ]]; then SKILL_STATE="$OK installed at $DEST"; else SKILL_STATE="$BAD not installed at $DEST"; fi
-  elif [[ ! -f "$SRC/SKILL.md" ]]; then
+  if [[ ! -f "$SRC/SKILL.md" ]]; then
     SKILL_STATE="$BAD the skill is missing from this checkout ($SRC)"; PROBLEMS=$((PROBLEMS+1))
   else
     echo "== 4/4 Claude Code skill"
@@ -117,9 +137,10 @@ if [[ $INSTALL_SKILL -eq 1 ]]; then
     printf '%s\n' "$CHECKOUT" > "$TMP/checkout-path.txt"
     rm -rf "$DEST"
     mv "$TMP" "$DEST"
-    SKILL_STATE="$OK copied to $DEST"
+    echo "Copied to $DEST"
   fi
 fi
+[[ -n "$SKILL_STATE" ]] || SKILL_STATE="$(skill_state)"
 
 # --- final checklist (what is true now, measured, not assumed) -------------------------------
 echo
