@@ -571,41 +571,29 @@ decision CAPTURES a statement; none takes a scientific decision, and none is def
   holding the runs of the merged group and of every group in `merge_with` are replaced by ONE
   proposed group, id `rg-` + sha256(experiment key, its runs, `merged-by:<decision id>`), flag
   `merged_by_scientist_decision`, and `merged_by_decision` {`decision_id`, `merged_group_id`,
-  `merge_with`, `decided_by`, `from_groups`, `basis_keys_dropped`, `name_number_positions`,
-  `statement`}; its basis keeps every reading the groups agree on — compared on what it says
-  (value, kind), never on its per-run evidence ids, which are united — and drops (and names) the
-  rest; (3) `decide --target <combined group> --decision confirm` — only this makes it a record.
-  The regroup output lists `combined_by_merge_decision` and `merge_decisions_not_combined`.
+  `merge_with`, `decided_by`, `from_groups`, `basis_keys_dropped`, `statement`}; its basis keeps
+  every reading the groups agree on — compared on what it says (value, kind), never on its per-run
+  evidence ids, which are united — and drops (and names) the rest; (3) `decide --target <combined
+  group> --decision confirm` — only this makes it a record. The regroup output lists
+  `combined_by_merge_decision` and `merge_decisions_not_combined`.
   **The check FAILS CLOSED** (`mutations._merge_blockers`): the groups are combined only when
   NOTHING the import read or a scientist confirmed tells them apart — none of their runs is in a
-  confirmed group; they share one role; every basis reading agrees (the name stem standing in for
-  an unstated sample aside — it is the file name the merge rules on); the independent condition
-  check (`grouping.condition_violations`) finds only the names; the runs' file names have the same
-  tokens except **counter-shaped numbers** at the same positions (`name_number_positions`, and the
-  differing values in `name_numbers` [{`position`, `values`}], e.g. `02` vs `03`, shown when
-  confirming): digits only — no unit, sign, decimal point or letter; **zero-padded and of one width**
-  (`02`/`03`, never `1`/`10`, `25`/`80` or `400`/`500`, which may be values); **at no position a
-  `set_not_counter_positions` answer names** (the scientist said it is not a counter); and **not next
-  to a unit or keyword token** (`025_C`, `E_01`, `pH_02`, `02_min`). The unit/keyword list is DERIVED
-  from what the import's readers already recognise (the BL15 filename reader's mV / V / p-volt,
-  filter / f, nm / wtpc / wpc, step, pH, before/after … cycling / cv and its flow units; the grouping
-  step's `_ZERO_UNITS` and `FIELD_UNITS`), plus a short supplement for quantities no reader parses
-  yet: C, K, degC, h, hr, min, s, sec, cycle(s), cyc, mA, uA, A, E (`mutations._unit_words`). And no
-  confirmed, eligible run-level answer (an answered missing value or a confirmed reading, e.g. the
-  control mode) differs. Any other difference keeps the `scientist_decided_merge` candidate, its
-  detail naming each blocker and the differing tokens: `0.05V`/`0.5V` (the decimal point splits the
-  token, so no potential is read), `1MKOH`/`0p1MKOH`, `10ug`/`50ug`, `SYNcat`/`SYNdog`, `E1`/`E2`,
-  `step01`/`step02`, `before`/`after`, an extra `newspot` token — all measured, all kept apart.
-  Merge candidates that named a combined group name it instead. **A combined group that was itself
-  decided** (rejected, split, or merged again) is that ruling on exactly that group: the regroup does
-  not propose it again and asks no candidate about it (`merge_decisions_not_combined` says "already
+  confirmed group; they share one role; every basis reading agrees (the name stem standing in for an
+  unstated sample aside); the independent condition check (`grouping.condition_violations`) finds
+  only the names; **the runs' file names have exactly the same tokens**; and no confirmed, eligible
+  run-level answer (an answered missing value or a confirmed reading, e.g. the control mode) differs.
+  **There is no exception by token shape.** Three review rounds measured that any shape rule leaks
+  (`0.05V`/`0.5V` and `1.02`/`1.03` split on the decimal point; `05_mM`, `02_hrs`, `05_rpm` are units
+  no list covered; `400`/`500` is a unitless potential), so ANY differing token blocks and the
+  `scientist_decided_merge` candidate stays open, its detail naming the differing tokens and pointing
+  to the counter question: saying a name position IS a run counter is `set_counter_positions`, after
+  which `isaac bundle group --regroup` joins those runs itself (no merge is needed). Merge candidates
+  that named a combined group name it instead. **A combined group that was itself decided**
+  (rejected, split, or merged again) is that ruling on exactly that group: the regroup does not
+  propose it again and asks no candidate about it (`merge_decisions_not_combined` says "already
   decided"); a merge of the combined group with another group is a new decision, combined in turn.
-  **A not-counter answer AFTER a merge** at a position the combined group was combined across is
-  never silent: `decide` says so (`contradicts_combined_groups`, also on stderr), the group carries
-  the derived `merged_by_decision.contradicted_by_not_counter` {`positions`, `decision_ids`, `note`},
-  `confirm` of it is refused, and the next regroup reopens a proposed one as a
-  `scientist_decided_merge` candidate naming the answer. A group already confirmed stays (binding)
-  and stays flagged. A later `set_counter_positions` naming the position withdraws the contradiction.
+  Because a combined group's runs never differ in their names, a later not-counter answer cannot
+  contradict one (the 1.6.0 draft's `contradicted_by_not_counter` flag is gone with the exception).
 - **`select_athena_version`** (`decide --target <processing result> --decision select_athena_version
   --value <version id> --by NAME`): which of the result's listed `athena_versions[].version_id` is the
   scientist's result of record. ANY other value is refused (nothing recorded), as is a result that
@@ -625,7 +613,9 @@ decision CAPTURES a statement; none takes a scientific decision, and none is def
   the projects sorted by path and group name), so adding or removing a project file renumbers them.
   The decision records `athena_version_provenance` {`prj_relative_path`, `athena_group`,
   `data_sha256_prefix`} (refused when two listed versions share it), and `athena_result_of_record` is
-  the version with that identity (`bundle.athena_resolve`). A selection alone does not freeze the
+  the version with that identity (`bundle.athena_resolve`). Replaying a selection is "unchanged" only
+  when it names the same identity (re-selecting an id that a renumbering gave to another curve is a new
+  decision), and `changed_after_approval` compares identities, not ids. A selection alone does not freeze the
   result against `isaac process`: a fresh result of the same id replaces it when it holds a version
   with that identity — re-pointed to its new id if it moved, said in
   `athena_result_of_record_basis.repointed` {`decision_value`, `now`, `note`} — and otherwise the OLD

@@ -2977,7 +2977,7 @@
         },
         "merged_by_decision": {
           "type": "object",
-          "description": "1.6.0: present on the ONE group `bundle group --regroup` proposes for a scientist's merge decision (decision_id, merged_group_id, merge_with, decided_by, from_groups, basis_keys_dropped, name_number_positions, statement). Proposed only; a confirm decision makes it a record."
+          "description": "1.6.0: present on the ONE group `bundle group --regroup` proposes for a scientist's merge decision (decision_id, merged_group_id, merge_with, decided_by, from_groups, basis_keys_dropped, statement). Proposed only; a confirm decision makes it a record."
         }
       }
     },

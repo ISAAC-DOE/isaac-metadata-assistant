@@ -786,18 +786,25 @@ def _derive_athena_selection(bundle: Mapping) -> None:
             # A CHANGE AFTER THE APPROVAL IS SAID, never silent (it is not wired into export): the
             # approval was given while another version (or none) was the result of record.
             decisions = list(bundle.get("scientist_decisions") or ())
-            pid, listed = processing_id(r), set(athena_version_ids(r))
+            pid = processing_id(r)
             approve_at = next((i for i in range(len(decisions) - 1, -1, -1)
                                if decisions[i].get("target") == {"kind": "processing_result", "id": pid}
                                and decisions[i].get("decision") == "approve"), None)
             if approve_at is not None:
-                at_approval = next((x.get("value") for x in reversed(decisions[:approve_at])
-                                    if x.get("decision") == ATHENA_SELECT_DECISION
-                                    and x.get("target") == {"kind": "processing_result", "id": pid} and x.get("value") in listed), None)
-                if at_approval != d["value"]:
+                # compared on the version's IDENTITY (ids are positional and may have moved)
+                prior = next((x for x in reversed(decisions[:approve_at])
+                              if x.get("decision") == ATHENA_SELECT_DECISION
+                              and x.get("target") == {"kind": "processing_result", "id": pid}), None)
+
+                def _ident(x):
+                    p = x.get("athena_version_provenance")
+                    return json.dumps(p if isinstance(p, Mapping) else {"value": x.get("value")}, sort_keys=True)
+
+                if prior is None or _ident(prior) != _ident(d):
                     r["athena_result_of_record_basis"]["changed_after_approval"] = {
                         "approval_decision_id": decisions[approve_at].get("decision_id"),
-                        "selected_at_approval": at_approval,
+                        "selected_at_approval": None if prior is None else prior.get("value"),
+                        "selected_at_approval_provenance": None if prior is None else prior.get("athena_version_provenance"),
                         "note": "the result of record was selected or changed after this result was approved; "
                                 "the approval and the record's processed values are unchanged by it",
                     }
@@ -824,35 +831,6 @@ def _derive_merge_candidate_status(bundle: Mapping) -> None:
         elif mc.get("status") == "kept_apart":
             mc["status"] = "proposed"
             mc.pop("kept_apart_by_decision_id", None)
-
-
-def merge_contradictions(bundle: Mapping, group: Mapping) -> dict | None:
-    """For a group a merge decision combined (``merged_by_decision``): the positions where its run
-    names differ that a ``set_not_counter_positions`` answer states are NOT counters, with those
-    decisions — the scientist's two statements disagree. ``None`` otherwise."""
-    mbd = group.get("merged_by_decision")
-    if not isinstance(mbd, Mapping):
-        return None
-    said = not_counter_positions(bundle)
-    hit = sorted(p for p in mbd.get("name_number_positions") or () if p in said)
-    if not hit:
-        return None
-    return {"positions": hit, "decision_ids": sorted({said[p].get("decision_id") for p in hit}),
-            "note": "a later answer states these name positions are NOT run counters, but this group was combined "
-                    "across them by a merge decision: it cannot be confirmed as it stands; `isaac bundle group --regroup` "
-                    "reopens the merge as a candidate (a confirmed one stays, flagged here)"}
-
-
-def _derive_merge_contradictions(bundle: Mapping) -> None:
-    for g in bundle.get("record_groups") or ():
-        mbd = g.get("merged_by_decision")
-        if not isinstance(mbd, dict):
-            continue
-        c = merge_contradictions(bundle, g)
-        if c is None:
-            mbd.pop("contradicted_by_not_counter", None)
-        else:
-            mbd["contradicted_by_not_counter"] = c
 
 
 def not_counter_positions(bundle: Mapping) -> dict[int, Mapping]:
@@ -1575,7 +1553,6 @@ def apply_derivations(bundle: dict) -> dict:
     _derive_processed_links(bundle)
     _derive_merge_candidate_ids(bundle)
     _derive_merge_candidate_status(bundle)
-    _derive_merge_contradictions(bundle)
     _derive_athena_selection(bundle)
     bundle["readiness"]["eligible_value_count"] = eligible
     states = [c["value_state"] for c in bundle["candidates"]]
@@ -4057,10 +4034,6 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50) -> list[str]:
         for part in ("athena_result_of_record", "athena_result_of_record_basis", "review_flags", "questions"):
             if json.dumps(r.get(part), sort_keys=True) != json.dumps(e.get(part), sort_keys=True):
                 errors.append(f"state: processing result {processing_id(r)} {part} is not what its select_athena_version decisions give")
-    for g, e in zip(bundle.get("record_groups") or (), expected.get("record_groups") or ()):
-        if json.dumps((g.get("merged_by_decision") or {}).get("contradicted_by_not_counter"), sort_keys=True) != json.dumps(
-                (e.get("merged_by_decision") or {}).get("contradicted_by_not_counter"), sort_keys=True):
-            errors.append(f"state: record group {g['group_id']} contradicted_by_not_counter is not what its decisions give")
     for mc, e in zip(bundle.get("merge_candidates") or (), expected.get("merge_candidates") or ()):
         if (mc.get("status"), mc.get("kept_apart_by_decision_id")) != (e.get("status"), e.get("kept_apart_by_decision_id")):
             errors.append(f"state: merge candidate {mc.get('merge_candidate_id')} is {mc.get('status')} but its decisions give {e.get('status')}")

@@ -453,7 +453,28 @@ def _combined(b: Path) -> list[dict]:
     return [g for g in M.load(b)["record_groups"] if g.get("merged_by_decision") and g["status"] in B.LIVE_GROUP_STATUSES]
 
 
+@pytest.fixture()
+def names_agree(monkeypatch):
+    """For tests of the regroup's bookkeeping (H1, M3), not of the name check: the file-name
+    blockers are taken out, as if the groups' names agreed token for token. Every other blocker stays."""
+    orig = M._merge_blockers
+    monkeypatch.setattr(M, "_merge_blockers", lambda *a: [r for r in orig(*a) if "file names" not in r])
+
+
 @pytest.mark.parametrize("stems", [
+    ["Q4_02_SYNcat_pH2_400mV", "Q4_03_SYNcat_pH2_400mV"],   # counter-shaped: still blocked, sent to the counter question
+    ["Q4_SYNcat_pH2_1.02", "Q4_SYNcat_pH2_1.03"],            # decimals split on "." look zero-padded
+    ["Q4_SYNcat_pH_7.02", "Q4_SYNcat_pH_7.05"],
+    ["Q4_SYNcat_E_0.02_vsRHE", "Q4_SYNcat_E_0.03_vsRHE"],
+    ["Q4_SYNcat_05_mM", "Q4_SYNcat_10_mM"],                  # unit words no list covered
+    ["Q4_SYNcat_02_hrs", "Q4_SYNcat_03_hrs"],
+    ["Q4_SYNcat_05_mg", "Q4_SYNcat_06_mg"],
+    ["Q4_SYNcat_05_rpm", "Q4_SYNcat_09_rpm"],
+    ["Q4_SYNcat_400_pH2", "Q4_SYNcat_500_pH2"],
+    ["Q4_SYNcat_E_1", "Q4_SYNcat_E_2"],
+    ["Q4_SYNcat_after_10_cycles", "Q4_SYNcat_after_500_cycles"],
+    ["Q4_SYNcat_25_C", "Q4_SYNcat_80_C"],
+    ["Q4_1_SYNcat_pH2_400mV", "Q4_10_SYNcat_pH2_400mV"],
     ["Q4_SYNcat_pH2_0.05V", "Q4_SYNcat_pH2_0.5V"],
     ["Q4_SYNcat_1MKOH_400mV", "Q4_SYNcat_0p1MKOH_400mV"],
     ["Q4_SYNcat_10ug_400mV", "Q4_SYNcat_50ug_400mV"],
@@ -464,9 +485,10 @@ def _combined(b: Path) -> list[dict]:
     ["Q4_SYNcat_pH2_400mV", "Q4_SYNcat_pH2_400mV_newspot"],
 ])
 @pytest.mark.parametrize("direction", [0, 1])
-def test_a_merge_across_any_differing_name_token_but_a_bare_number_fails_closed(tmp_path, stems, direction):
-    """M1: what the import did not read as a condition is NOT "only the file name". Each pair, merged
-    either way round, keeps the candidate open with a reason naming the differing tokens."""
+def test_a_merge_across_any_differing_name_token_fails_closed(tmp_path, stems, direction):
+    """M1 (third review): ANY differing file-name token blocks — there is no exception by token shape.
+    Each pair, merged either way round, keeps the candidate open with a reason naming the differing
+    tokens and pointing to the counter question."""
     b = _grouped_stems(tmp_path, stems)
     g = M.load(b)["record_groups"]
     assert len(g) == 2
@@ -474,28 +496,45 @@ def test_a_merge_across_any_differing_name_token_but_a_bare_number_fails_closed(
     out = _merge(b, target["group_id"], [other["group_id"]])
     assert _combined(b) == [] and out["combined_by_merge_decision"] == []
     [nc] = out["merge_decisions_not_combined"]
-    assert "file names" in nc["reason"]
+    assert "file names" in nc["reason"] and "set_counter_positions" in nc["reason"]
+    assert all(t in nc["reason"] for t in set(stems[0].split("_")) ^ set(stems[1].split("_")) if "." not in t)
     [mc] = [m for m in M.load(b)["merge_candidates"] if m["reasons"][0]["code"] == "scientist_decided_merge"]
     assert "were not combined" in mc["reasons"][0]["detail"]
     assert cli.main(["bundle", "check", str(b)]) == 0
 
 
-@pytest.mark.parametrize("direction", [0, 1])
-def test_a_merge_across_a_bare_number_combines_and_keeps_what_the_groups_agree_on(tmp_path, direction):
-    """The one name difference a merge decision may settle: a bare whole number at the same position
-    (what the counter question asks about). M2: agreed readings (pH, potential ...) survive with the
-    evidence ids of both groups; only the name stem is dropped."""
+def test_no_shape_based_exception_exists_and_the_counter_question_joins_the_runs(tmp_path):
+    """The mechanism for "this number is a counter" is the counter question, never the token's shape:
+    02/03 is blocked as a merge, then set_counter_positions + regroup joins the runs (grouping does it)."""
+    b = _grouped_stems(tmp_path, ["Q4_02_SYNcat_pH2_400mV", "Q4_03_SYNcat_pH2_400mV"])
+    g1, g2 = M.load(b)["record_groups"]
+    out = _merge(b, g1["group_id"], [g2["group_id"]])
+    assert _combined(b) == [] and "differ at token 2 (02 / 03)" in out["merge_decisions_not_combined"][0]["reason"]
+    M.decide(b, target_ids=["experiment"], decision="set_counter_positions", value=None, by=BY, orcid=None, positions=[2])
+    M.group(b, regroup=True)
+    live = [x for x in M.load(b)["record_groups"] if x["status"] in B.LIVE_GROUP_STATUSES]
+    assert [len(x["member_run_keys"]) for x in live] == [2] and not live[0].get("merged_by_decision")
+    # and on the check itself: names differing only in a zero-padded fixed-width number are refused
+    bundle = M.load(_grouped_stems(tmp_path / "again", ["Q4_02_SYNcat_pH2_400mV", "Q4_03_SYNcat_pH2_400mV"]))
+    h1, h2 = bundle["record_groups"]
+    combined = M._combine_for_merge([h1, h2], {"decision_id": "d-99999", "decided_by": {"name": BY}}, h1["group_id"], "exp")
+    assert any("differ at token 2 (02 / 03)" in r for r in M._merge_blockers(bundle, {}, [h1, h2], combined))
+    for g in (h1, h2):  # the same name for both: nothing about the names blocks
+        next(r for r in bundle["runs"] if r["run_key"] == g["member_run_keys"][0])["stem"] = "Q4_02_SYNcat_pH2_400mV"
+    assert not [r for r in M._merge_blockers(bundle, {}, [h1, h2], combined) if "file names" in r]
+
+
+def test_a_combined_basis_keeps_what_the_groups_agree_on_with_both_evidence_ids(tmp_path):
+    """M2: agreed readings (pH, potential ...) survive with the evidence ids of both groups; only the
+    name stem is dropped."""
     b = _grouped_stems(tmp_path, ["Q4_02_SYNcat_pH2_400mV", "Q4_03_SYNcat_pH2_400mV"])
     g = M.load(b)["record_groups"]
-    target, other = (g[0], g[1]) if direction == 0 else (g[1], g[0])
-    _merge(b, target["group_id"], [other["group_id"]])
-    [c] = _combined(b)
+    c = M._combine_for_merge(g, {"decision_id": "d-99999", "decided_by": {"name": BY}}, g[0]["group_id"], "exp")
     cond = c["basis"]["conditions"]
     assert cond["ph"]["value"] == 2 and "potential_magnitude" in cond
     for key, entry in cond.items():
         assert set(entry["candidate_ids"]) == set(g[0]["basis"]["conditions"][key]["candidate_ids"]) | set(g[1]["basis"]["conditions"][key]["candidate_ids"])
     assert c["merged_by_decision"]["basis_keys_dropped"] == ["sample.sample_name_stem"]
-    assert c["merged_by_decision"]["name_number_positions"] == [2]
 
 
 def test_a_combined_basis_keeps_an_agreed_sample_reading_and_the_questions_see_it(grouped):
@@ -520,7 +559,7 @@ def test_a_combined_basis_keeps_an_agreed_sample_reading_and_the_questions_see_i
     assert any("potential_magnitude" in r for r in M._merge_blockers(bundle, {}, [h1, h2], combined))
 
 
-def test_rejecting_the_combined_group_then_regrouping_does_not_re_propose_it(tmp_path):
+def test_rejecting_the_combined_group_then_regrouping_does_not_re_propose_it(tmp_path, names_agree):
     """H1: the combined id (runs + merge decision id) was re-proposed while the rejected combined
     group stayed in history, so the regroup raised `duplicate group_id`."""
     b = _grouped_stems(tmp_path, ["Q4_02_SYNcat_pH2_400mV", "Q4_03_SYNcat_pH2_400mV"])
@@ -540,7 +579,7 @@ def test_rejecting_the_combined_group_then_regrouping_does_not_re_propose_it(tmp
     assert cli.main(["bundle", "check", str(b)]) == 0
 
 
-def test_merging_the_combined_group_again_then_regrouping_combines_all_three(tmp_path):
+def test_merging_the_combined_group_again_then_regrouping_combines_all_three(tmp_path, names_agree):
     """H1: a combined group merged again is history; the regroup proposes the new combination once."""
     b = _grouped_stems(tmp_path, ["Q4_02_SYNcat_pH2_400mV", "Q4_03_SYNcat_pH2_400mV", "Q4_04_SYNcat_pH2_400mV"])
     g1, g2, g3 = M.load(b)["record_groups"]
@@ -579,7 +618,7 @@ def test_a_merge_with_a_confirmed_group_is_not_combined_and_says_why(tmp_path):
 
 
 @pytest.mark.parametrize("same", [False, True])
-def test_differing_confirmed_run_answers_keep_a_merge_apart(tmp_path, same):
+def test_differing_confirmed_run_answers_keep_a_merge_apart(tmp_path, same, names_agree):
     """M3: a confirmed, eligible run-level answer (here the control mode) that differs between the
     groups blocks the combination; the same answer does not."""
     b = _grouped_stems(tmp_path, ["Q4_02_SYNcat_pH2_400mV", "Q4_03_SYNcat_pH2_400mV"])
@@ -691,26 +730,6 @@ def test_a_renumbering_re_processing_keeps_the_selection_on_the_same_curve(athen
 # --- re-review item 1: the bare-number exception ------------------------------------------------------
 
 
-@pytest.mark.parametrize("stems,needle", [
-    (["Q4_SYNcat_400_pH2", "Q4_SYNcat_500_pH2"], "zero-padded"),
-    (["Q4_SYNcat_E_1", "Q4_SYNcat_E_2"], "zero-padded"),
-    (["Q4_SYNcat_after_10_cycles", "Q4_SYNcat_after_500_cycles"], "zero-padded"),
-    (["Q4_SYNcat_after_010_cycles", "Q4_SYNcat_after_500_cycles"], "zero-padded"),
-    (["Q4_SYNcat_after_010_cycles", "Q4_SYNcat_after_050_cycles"], "next to the unit or keyword"),
-    (["Q4_SYNcat_25_C", "Q4_SYNcat_80_C"], "zero-padded"),
-    (["Q4_1_SYNcat_pH2_400mV", "Q4_10_SYNcat_pH2_400mV"], "zero-padded"),
-])
-@pytest.mark.parametrize("direction", [0, 1])
-def test_a_bare_number_that_may_be_a_value_fails_closed(tmp_path, stems, needle, direction):
-    b = _grouped_stems(tmp_path, stems)
-    g = M.load(b)["record_groups"]
-    assert len(g) == 2
-    target, other = (g[0], g[1]) if direction == 0 else (g[1], g[0])
-    out = _merge(b, target["group_id"], [other["group_id"]])
-    assert _combined(b) == []
-    assert any(needle in x["reason"] for x in out["merge_decisions_not_combined"]), out["merge_decisions_not_combined"]
-
-
 @pytest.mark.parametrize("direction", [0, 1])
 def test_a_not_counter_answer_before_a_merge_keeps_the_merge_apart(tmp_path, direction):
     b = _grouped_stems(tmp_path, ["Q4_02_SYNcat_pH2_400mV", "Q4_03_SYNcat_pH2_400mV"])
@@ -719,47 +738,58 @@ def test_a_not_counter_answer_before_a_merge_keeps_the_merge_apart(tmp_path, dir
     target, other = (g[0], g[1]) if direction == 0 else (g[1], g[0])
     out = _merge(b, target["group_id"], [other["group_id"]])
     assert _combined(b) == []
-    assert any("states is NOT a run counter" in x["reason"] for x in out["merge_decisions_not_combined"])
+    assert any("differ at token 2 (02 / 03)" in x["reason"] for x in out["merge_decisions_not_combined"])
 
 
-def test_a_not_counter_answer_after_a_merge_flags_the_combined_group_and_reopens_it(tmp_path, capsys):
-    b = _grouped_stems(tmp_path, ["Q4_02_SYNcat_pH2_400mV", "Q4_03_SYNcat_pH2_400mV"])
-    g1, g2 = M.load(b)["record_groups"]
-    _merge(b, g1["group_id"], [g2["group_id"]])
-    [c] = _combined(b)
-    assert c["merged_by_decision"]["name_numbers"] == [{"position": 2, "values": ["02", "03"]}]  # what the scientist sees
-    res = M.decide(b, target_ids=["experiment"], decision=B.NOT_COUNTER_DECISION, value=None, by=BY, orcid=None, positions=[2])
-    assert res["contradicts_combined_groups"] == [c["group_id"]] and "CONTRADICTS" in capsys.readouterr().err
-    [c2] = _combined(b)
-    assert c2["merged_by_decision"]["contradicted_by_not_counter"]["positions"] == [2]
-    with pytest.raises(M.MutationRefused, match="state are NOT run counters"):
-        M.decide(b, target_ids=[c["group_id"]], decision="confirm", value=None, by=BY, orcid=None)
-    assert cli.main(["bundle", "check", str(b)]) == 0
-    out = M.group(b, regroup=True)  # reopened: no combined group, the merge is a candidate again
-    assert _combined(b) == [] and any("NOT a run counter" in x["reason"] for x in out["merge_decisions_not_combined"])
-    assert [m for m in M.load(b)["merge_candidates"] if m["reasons"][0]["code"] == "scientist_decided_merge"]
-    # a later set_counter_positions takes the statement back: the merge combines again
-    M.decide(b, target_ids=["experiment"], decision="set_counter_positions", value=None, by=BY, orcid=None, positions=[2])
-    M.group(b, regroup=True)
-    assert cli.main(["bundle", "check", str(b)]) == 0
+
+def _renumber(athena: Path, monkeypatch, provs) -> None:
+    """Re-process p1 with versions of these provenances (in this order), numbered afresh."""
+    from isaac_api.local_import.processing import cli_entry
+
+    fresh = copy.deepcopy(_p1(athena))
+    fresh.pop("athena_result_of_record_basis", None)
+    fresh["state"] = "candidate_extracted"
+    fresh["athena_versions"] = [{"version_id": f"g1-v{n:02d}", "provenance": p, "comparison": {}} for n, p in enumerate(provs, 1)]
+    monkeypatch.setattr(cli_entry, "run_process", lambda *a, **k: {"processing_results": [fresh]})
+    M.process(athena)
 
 
-def test_the_unit_words_are_derived_from_the_import_readers():
-    words = M._unit_words()
-    assert {"mv", "v", "ph", "step", "filter", "sccm", "ev"} <= words  # from the readers
-    assert {"c", "k", "cycles", "e", "min"} <= words                    # the documented supplement
-    assert M._unit_like("pH2") and M._unit_like("E1") and M._unit_like("cycles") and not M._unit_like("SYNcat")
+def test_re_selecting_an_id_that_now_names_another_curve_is_recorded_not_unchanged(athena, monkeypatch):
+    """M2 (third review): the repeat check compares the version's identity, not its positional id."""
+    M.decide(athena, target_ids=["p1"], decision="select_athena_version", value="g1-v01", by=BY, orcid=None)
+    _renumber(athena, monkeypatch, [_prov(2), _prov(1)])  # g1-v01 is now the OTHER curve
+    assert _p1(athena)["athena_result_of_record"] == "g1-v02"  # the selection followed its curve
+    res = M.decide(athena, target_ids=["p1"], decision="select_athena_version", value="g1-v01", by=BY, orcid=None)
+    assert res["recorded"] == ["p1"] and res["unchanged"] == []
+    d = M.load(athena)["scientist_decisions"][-1]
+    assert d["athena_version_provenance"]["prj_relative_path"] == _prov(2)["prj_relative_path"]
+    assert _p1(athena)["athena_result_of_record"] == "g1-v01"
+    # and a true repeat (same id, same curve) is still unchanged
+    assert M.decide(athena, target_ids=["p1"], decision="select_athena_version", value="g1-v01", by=BY, orcid=None)["unchanged"] == ["p1"]
 
 
-@pytest.mark.parametrize("names", [("Q4_SYNcat_E_01", "Q4_SYNcat_E_02"), ("Q4_SYNcat_025_C", "Q4_SYNcat_080_C"),
-                                   ("Q4_SYNcat_pH_02", "Q4_SYNcat_pH_03"), ("Q4_SYNcat_02_min", "Q4_SYNcat_03_min")])
-def test_a_zero_padded_number_next_to_a_unit_or_keyword_blocks_a_merge(tmp_path, names):
-    """(b) of the re-review, on the check itself: the grouping step already treats some of these
-    names as one group, so the two holders are given their names in memory."""
-    b = _grouped_stems(tmp_path, ["Q4_02_SYNcat_pH2_400mV", "Q4_03_SYNcat_pH2_400mV"])
-    bundle = M.load(b)
-    g1, g2 = bundle["record_groups"]
-    for g, name in ((g1, names[0]), (g2, names[1])):
-        next(r for r in bundle["runs"] if r["run_key"] == g["member_run_keys"][0])["stem"] = name
-    combined = M._combine_for_merge([g1, g2], {"decision_id": "d-99999", "decided_by": {"name": BY}}, g1["group_id"], "exp")
-    assert any("next to the unit or keyword" in x for x in M._merge_blockers(bundle, {}, [g1, g2], combined))
+def test_changed_after_approval_compares_identity_not_ids(athena, monkeypatch):
+    M.decide(athena, target_ids=["p1"], decision="select_athena_version", value="g1-v01", by=BY, orcid=None)
+    M.decide(athena, target_ids=["p1"], decision="approve", value=None, by=BY, orcid=None, qc_status="valid")
+    _renumber(athena, monkeypatch, [_prov(3), _prov(1), _prov(2)])  # the approved selection is now g1-v02
+    # the result was approved, so it is kept (a state decision freezes it): renumber a fresh copy instead
+    b = M.load(athena)
+    r = b["processing_results"][-1]
+    r["athena_versions"] = [{"version_id": f"g1-v{n:02d}", "provenance": p, "comparison": {}} for n, p in enumerate([_prov(3), _prov(1), _prov(2)], 1)]
+    M.save_bundle(athena, b)
+    assert _p1(athena)["athena_result_of_record"] == "g1-v02"
+    M.decide(athena, target_ids=["p1"], decision="select_athena_version", value="g1-v02", by=BY, orcid=None)  # same curve, new id
+    assert "changed_after_approval" not in _p1(athena)["athena_result_of_record_basis"]
+    M.decide(athena, target_ids=["p1"], decision="select_athena_version", value="g1-v01", by=BY, orcid=None)  # old id, other curve
+    note = _p1(athena)["athena_result_of_record_basis"]["changed_after_approval"]
+    assert note["selected_at_approval"] == "g1-v01" and note["selected_at_approval_provenance"]["prj_relative_path"] == _prov(1)["prj_relative_path"]
+
+
+def test_a_version_indistinguishable_by_identity_cannot_be_selected(athena):
+    b = M.load(athena)
+    r = b["processing_results"][-1]
+    r["athena_versions"][1]["provenance"] = dict(r["athena_versions"][0]["provenance"])
+    M.save_bundle(athena, b)
+    with pytest.raises(M.MutationRefused, match="cannot be told apart from another listed version"):
+        M.decide(athena, target_ids=["p1"], decision="select_athena_version", value="g1-v01", by=BY, orcid=None)
+    assert not [d for d in M.load(athena)["scientist_decisions"] if d["decision"] == "select_athena_version"]

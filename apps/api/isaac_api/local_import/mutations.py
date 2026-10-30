@@ -610,14 +610,6 @@ def record_decision(
                     "Approving a processing result needs --qc-status (one of "
                     + ", ".join(qc_status_vocabulary()) + "): the QC status is a person's statement."
                 )
-            if kind == "record_group" and decision == "confirm" and B.merge_contradictions(bundle, obj):
-                c = B.merge_contradictions(bundle, obj)
-                raise MutationRefused(
-                    f"{tid} was combined by a merge decision across name position(s) {', '.join(map(str, c['positions']))}, "
-                    f"which decision(s) {', '.join(c['decision_ids'])} state are NOT run counters. Run "
-                    "`isaac bundle group <dir> --regroup` (the merge is reopened as a candidate), or record "
-                    "set_counter_positions if they are counters. Nothing was recorded."
-                )
             if kind == "record_group" and decision == "confirm":
                 # R-4: a group whose runs now sit in ANOTHER live group cannot be confirmed
                 # (e.g. a rejected group after a regroup re-proposed its runs)
@@ -671,9 +663,13 @@ def record_decision(
             binding = (B.local_clock_binding(obj, zone_d)
                        if kind == "candidate" and decision == "confirm" and B.is_local_clock_start(obj) and zone_d is not None
                        else None)
+            # an Athena selection is compared on the version's IDENTITY, not its positional id: after a
+            # renumbering, `g1-v01` may now be another curve, and re-selecting it is a new statement
+            identity = (B.athena_version_identity(next(v for v in obj.get("athena_versions") or () if v.get("version_id") == value))
+                        if decision == B.ATHENA_SELECT_DECISION else None)
             signature = (decision, json.dumps(value, sort_keys=True), decided_by["name"], orcid,
                          json.dumps(split_into or []), json.dumps(merge_with or []), qc_status, qc_note, element, edge,
-                         json.dumps(positions or []), json.dumps(binding, sort_keys=True))
+                         json.dumps(positions or []), json.dumps(binding, sort_keys=True), json.dumps(identity, sort_keys=True))
             if prior is not None and (
                 prior.get("decision"),
                 json.dumps(prior.get("value"), sort_keys=True),
@@ -687,6 +683,7 @@ def record_decision(
                 prior.get("edge"),
                 json.dumps(prior.get("positions") or prior.get("not_counter_positions") or []),
                 json.dumps(prior.get("clock_zone_binding"), sort_keys=True),
+                json.dumps(prior.get("athena_version_provenance"), sort_keys=True),
             ) == signature:
                 unchanged.append(tid)
                 continue
@@ -715,8 +712,7 @@ def record_decision(
             if decision == B.ATHENA_SELECT_DECISION:
                 # the version's own identity, so a re-processing that renumbers the versions cannot make
                 # this selection point at another curve (B.athena_resolve)
-                entry["athena_version_provenance"] = B.athena_version_identity(
-                    next(v for v in obj.get("athena_versions") or () if v.get("version_id") == value))
+                entry["athena_version_provenance"] = identity
             if binding is not None:
                 entry["clock_zone_binding"] = binding
             if kind == "processing_result" and decision == "approve":
@@ -737,15 +733,6 @@ def record_decision(
         statement = CAPTURE_STATEMENTS.get(decision)
         if statement:
             result["statement"] = statement.format(value=value, positions=", ".join(map(str, positions or ())))
-        if decision == B.NOT_COUNTER_DECISION:
-            hit = [g["group_id"] for g in bundle.get("record_groups") or () if B.merge_contradictions(bundle, g)]
-            if hit:
-                # NEVER SILENT: a group a merge combined across these positions now contradicts this answer
-                result["contradicts_combined_groups"] = hit
-                result["statement"] += (f" It CONTRADICTS {len(hit)} group(s) a merge decision combined across these positions "
-                                        f"({', '.join(hit[:5])}): each is flagged (contradicted_by_not_counter) and cannot be "
-                                        "confirmed; a regroup reopens a proposed one as a merge candidate.")
-                print(f"isaac: {result['statement']}", file=sys.stderr)
         if decision == B.CLOCK_ZONE_DECISION:
             after = B.apply_derivations(json.loads(json.dumps(bundle)))
             stale = B.local_clock_reconfirm(after)
@@ -1074,9 +1061,9 @@ def group(bundle_dir: Path, *, regroup: bool = False) -> dict:
         # group it names in merge_with are proposed as ONE combined group, for the scientist to confirm,
         # only when nothing the import or a scientist recorded tells them apart (FAIL CLOSED,
         # :func:`_merge_blockers`): none is in a confirmed group, they share a role, every basis reading
-        # agrees, the independent condition check finds nothing but the names, the names differ only in
-        # BARE WHOLE NUMBERS at the same token positions (what the counter question asks about), and no
-        # confirmed run-level answer differs. Anything else keeps the candidate below, naming why.
+        # agrees, the independent condition check finds nothing but the names, the file names have the
+        # same tokens (ANY differing token blocks: the counter question says a position is a counter),
+        # and no confirmed run-level answer differs. Anything else keeps the candidate below, naming why.
         by_id_all = {g["group_id"]: g for g in [*(bundle.get("superseded_record_groups") or ()), *existing]}
         # the combined group a previous regroup made for a decision still holds the runs of its
         # merge_with groups after those were replaced, so a later regroup reproduces it
@@ -1117,10 +1104,6 @@ def group(bundle_dir: Path, *, regroup: bool = False) -> dict:
                 if blockers:
                     why = "; ".join(blockers)
                 else:
-                    numbers = merge_name_numbers(bundle, combined)
-                    combined["merged_by_decision"]["name_number_positions"] = [n["position"] for n in numbers]
-                    # the differing VALUES, so the scientist sees "02 vs 03" when confirming
-                    combined["merged_by_decision"]["name_numbers"] = numbers
                     first = order[holders[0]["group_id"]]
                     fresh = [g for g in fresh if g["group_id"] not in gids]
                     fresh.insert(min(first, len(fresh)), combined)
@@ -1282,16 +1265,21 @@ _MERGE_NAME_ONLY_BASIS = frozenset({("sample", "sample_name_stem")})
 _MERGE_NAME_ONLY_VIOLATIONS = frozenset({"name_non_counter_tokens", "sample_name_stem"})
 
 
+#: Where a merge blocked by a file-name difference is sent: the mechanism for "this number is a counter".
+COUNTER_POINTER = ("; if the differing number is a run or acquisition counter, answer the counter question "
+                   "(isaac bundle decide <bundle_dir> --target experiment --decision set_counter_positions "
+                   "--positions <n> ...) and regroup: the grouping step then joins these runs itself")
+
+
 def _merge_blockers(bundle: Mapping, payload: Mapping, holders: Sequence[Mapping], combined: Mapping) -> list[str]:
     """Why ``holders`` must NOT be combined for a merge decision — empty only when nothing the import
     read or a scientist confirmed tells them apart (FAIL CLOSED, DEC-91):
 
     * every basis reading agrees (value and kind; the name stem aside);
     * the independent condition check (:func:`grouping.condition_violations`) finds only the names;
-    * the runs' file names have the same tokens except BARE WHOLE NUMBERS (digits only: no unit,
-      sign, decimal point or letter) at the same positions — the tokens the counter question asks
-      about. ``0.05V``/``0.5V``, ``1MKOH``/``0p1MKOH``, ``10ug``/``50ug``, ``SYNcat``/``SYNdog``,
-      ``E1``/``E2``, ``step01``/``step02``, ``before``/``after`` or an extra token all block;
+    * the runs' file names have exactly the same tokens — ANY differing token blocks, whatever its
+      shape (the reason points to the counter question, which is how a scientist says a position
+      is a run counter: the grouping step then joins those runs itself);
     * no confirmed, eligible run-level answer (a scientist's or a confirmed reading) differs."""
     from . import grouping as G
 
@@ -1314,30 +1302,20 @@ def _merge_blockers(bundle: Mapping, payload: Mapping, holders: Sequence[Mapping
     other = sorted({v["key"] for v in viol if v["key"] not in _MERGE_NAME_ONLY_VIOLATIONS})
     if other:
         out.append(f"their runs differ in condition(s) {', '.join(other)}")
+    # ANY differing file-name token blocks (DEC-91, third review): no exception by token shape —
+    # decimals split on ".", unit words no list covers, and unitless values all looked like counters.
+    # Saying a name position IS a run counter is the counter question's job (set_counter_positions);
+    # the grouping step then joins the runs itself, so no merge is needed for them.
     stems = _merge_stems(bundle, holders)
-    toks = [[G._unit_token(t) for t in G._stem_tokens(x)] for x in stems]
-    not_counter = B.not_counter_positions(bundle)
+    toks = [G._stem_tokens(x) for x in stems]
     if toks and len({len(t) for t in toks}) > 1:
-        out.append("their file names have different tokens (" + " / ".join(sorted({"_".join(t) for t in toks})) + ")")
+        out.append("their file names have different tokens (" + " / ".join(sorted({"_".join(t) for t in toks})) + ")"
+                   + COUNTER_POINTER)
     elif toks:
         for i in range(len(toks[0])):
             col = sorted({t[i] for t in toks})
-            if len(col) < 2:
-                continue
-            shown = " / ".join(col)
-            if not all(c.isdigit() for c in col):
-                out.append(f"their file names differ at token {i + 1} ({shown}), which is not a bare number")
-            elif i + 1 in not_counter:
-                out.append(f"their file names differ at token {i + 1} ({shown}), which decision "
-                           f"{not_counter[i + 1].get('decision_id')} states is NOT a run counter")
-            elif len({len(c) for c in col}) > 1 or not all(c.startswith("0") for c in col):
-                out.append(f"their file names differ at token {i + 1} ({shown}), which is not a zero-padded "
-                           "fixed-width number (the shape of a run counter)")
-            else:
-                near = [t[j] for t in toks for j in (i - 1, i + 1) if 0 <= j < len(t) and _unit_like(t[j])]
-                if near:
-                    out.append(f"their file names differ at token {i + 1} ({shown}), next to the unit or keyword "
-                               f"{sorted(set(near))[0]!r}, so the number may be a value")
+            if len(col) > 1:
+                out.append(f"their file names differ at token {i + 1} ({' / '.join(col)})" + COUNTER_POINTER)
     answers = _confirmed_run_answers(bundle, {r for h in holders for r in h.get("member_run_ids") or ()})
     diff_answers = sorted(path for path, vals in answers.items() if len(vals) > 1)
     if diff_answers:
@@ -1349,44 +1327,6 @@ def _merge_stems(bundle: Mapping, groups: Sequence[Mapping]) -> list[str]:
     runs = {r["run_key"]: r for r in bundle.get("runs") or ()}
     context = {k for g in groups for k in g.get("context_run_keys") or ()}
     return [runs[k].get("stem") or "" for g in groups for k in g.get("member_run_keys") or () if k in runs and k not in context]
-
-
-def merge_name_numbers(bundle: Mapping, group: Mapping) -> list[dict]:
-    """``[{position, values}]``: each 1-based token position where a combined group's run names differ
-    (bare zero-padded numbers, by :func:`_merge_blockers`), with the DIFFERING VALUES — what the
-    scientist sees when confirming ("02 vs 03")."""
-    from . import grouping as G
-
-    toks = [[G._unit_token(t) for t in G._stem_tokens(x)] for x in _merge_stems(bundle, [group])]
-    if not toks or len({len(t) for t in toks}) > 1:
-        return []
-    return [{"position": i + 1, "values": sorted({t[i] for t in toks})} for i in range(len(toks[0])) if len({t[i] for t in toks}) > 1]
-
-
-def _unit_words() -> frozenset[str]:
-    """Tokens that make a neighbouring bare number a VALUE, not a counter. DERIVED from what the
-    import's own readers already recognise as units or condition keywords — the BL15 filename reader
-    (bl15.filenames: mV / V / p-volt, filter / f, nm / wtpc / wpc loading, step, pH, before/after
-    ... cycling / cv, and its flow units) and the grouping step's unit sets (grouping._ZERO_UNITS,
-    FIELD_UNITS) — plus a SHORT documented supplement for quantities no reader parses yet but that a
-    file name writes beside a bare number: temperature (C, K, degC), time (h, hr, min, s, sec),
-    cycles (cycle, cycles, cyc), current (mA, uA, A) and the electrode letter E."""
-    from . import grouping as G
-    from ..bl15 import filenames as F
-
-    derived = {"mv", "v", "filter", "ffilter", "f", "nm", "wtpc", "wpc", "step", "ph", "before", "after", "cycling", "cv"}
-    derived |= {k.casefold() for k in getattr(F, "_FLOW_UNITS", {})}
-    derived |= {u.casefold() for u in G._ZERO_UNITS} | {u.casefold() for u in G.FIELD_UNITS.values()}
-    supplement = {"c", "k", "degc", "h", "hr", "min", "s", "sec", "cycle", "cycles", "cyc", "ma", "ua", "a", "e"}
-    return frozenset(derived | supplement)
-
-
-def _unit_like(token: str) -> bool:
-    """A token that IS a unit/keyword, or starts with one before a number (``pH2``, ``E1``)."""
-    import re as _re
-
-    low = token.casefold()
-    return low in _unit_words() or _re.sub(r"[-+]?\d.*$", "", low) in _unit_words() - {""}
 
 
 def _confirmed_run_answers(bundle: Mapping, run_ids: set) -> dict[str, set[str]]:

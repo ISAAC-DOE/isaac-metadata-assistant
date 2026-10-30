@@ -150,11 +150,10 @@ def test_the_validator_refuses_a_run_in_two_live_groups(tmp_path, capsys):
 
 
 
-def test_a_merge_decision_is_history_and_its_runs_become_one_combined_group(tmp_path, capsys):
-    """R-1: a `merged` group must not hold (freeze) its runs. DEC-91 (1.6.0): the regroup APPLIES the
-    merge — the runs of both groups (which differ only in a file-name number here) are proposed as ONE
-    combined group, which a confirm makes one record. Before 1.6.0 only a candidate was carried, and
-    no decision could turn it into one group."""
+def test_a_merge_decision_is_history_and_its_runs_stay_proposable(tmp_path, capsys):
+    """R-1: a `merged` group must not hold (freeze) its runs. DEC-91 (third review): these runs' names
+    differ (02 / 03), so the merge is NOT combined — the candidate stays open, naming the token and
+    pointing to the counter question, which is how the runs become one group."""
     if not FIXTURE.is_dir():
         pytest.skip("synthetic fixture corpus not present")
     src, b = _folder(tmp_path), tmp_path / "bundle"
@@ -167,15 +166,15 @@ def test_a_merge_decision_is_history_and_its_runs_become_one_combined_group(tmp_
     a = M.load(b)
     assert next(g for g in a["record_groups"] if g["group_id"] == g1["group_id"])["status"] == "merged"  # kept as history
     live = [g for g in a["record_groups"] if g["status"] in ("proposed", "scientist_confirmed")]
-    [combined] = live
-    assert set(combined["member_run_keys"]) == set(g1["member_run_keys"]) | set(g2["member_run_keys"])
-    assert combined["group_id"] not in (g1["group_id"], g2["group_id"]) and "merged_by_scientist_decision" in combined["flags"]
-    merge_d = next(d for d in a["scientist_decisions"] if d["decision"] == "merge")
-    assert combined["merged_by_decision"]["decision_id"] == merge_d["decision_id"]
-    assert combined["merged_by_decision"]["name_number_positions"] == [2]  # the names differ only in a bare number
-    assert not [m for m in a["merge_candidates"] if m["reasons"][0]["code"] == "scientist_decided_merge"]
-    assert json.loads(out)["combined_by_merge_decision"][0]["group_id"] == combined["group_id"]
-    M.decide(b, target_ids=[combined["group_id"]], decision="confirm", value=None, by="SYNTHETIC TEST", orcid=None)
+    assert {k for g in live for k in g["member_run_keys"]} >= set(g1["member_run_keys"]) | set(g2["member_run_keys"])
+    [mc] = [m for m in a["merge_candidates"] if m["reasons"][0]["code"] == "scientist_decided_merge"]
+    assert "differ at token 2 (02 / 03)" in mc["reasons"][0]["detail"] and "set_counter_positions" in mc["reasons"][0]["detail"]
+    assert json.loads(out)["combined_by_merge_decision"] == []
+    M.decide(b, target_ids=["experiment"], decision="set_counter_positions", value=None, by="SYNTHETIC TEST", orcid=None, positions=[2])
+    assert _run(["bundle", "group", str(b), "--regroup"], capsys)[0] == 0
+    [one] = [g for g in M.load(b)["record_groups"] if g["status"] == "proposed"]
+    assert len(one["member_run_keys"]) == 2
+    M.decide(b, target_ids=[one["group_id"]], decision="confirm", value=None, by="SYNTHETIC TEST", orcid=None)
     assert _run(["bundle", "check", str(b)], capsys)[0] == 0
 
 
@@ -314,7 +313,7 @@ def test_no_group_lists_a_merge_candidate_that_no_longer_exists_and_the_validato
         ids_seen.append(([g["group_id"] for g in a["record_groups"]], sorted(m["merge_candidate_id"] for m in a["merge_candidates"])))
         assert _refs(a) == {"bad_mc": [], "duplicate_mc_ids": 0, "dangling": []}
     assert ids_seen[0] == ids_seen[1] == ids_seen[2]  # stable
-    rp = next(g for g in a["record_groups"] if g.get("merged_by_decision"))  # DEC-91: the combined group
+    rp = next(g for g in a["record_groups"] if g["status"] == "proposed")  # DEC-91: not combined (names differ)
     M.decide(b, target_ids=[rp["group_id"]], decision="confirm", value=None, by="SYNTHETIC TEST", orcid=None)
     assert _run(["bundle", "group", str(b), "--regroup"], capsys)[0] == 0
     a = M.load(b)

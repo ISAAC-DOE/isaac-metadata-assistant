@@ -1180,10 +1180,11 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
                         "MERGING two groups takes three steps: (1) --target <group> --decision merge --merge-with <group...>; "
                         "(2) isaac bundle group <dir> --regroup, which proposes ONE combined group (flag "
                         "merged_by_scientist_decision) only when nothing recorded tells them apart: no confirmed run, one role, "
-                        "every recorded reading and confirmed run answer equal, and file names differing only in zero-padded "
-                        "fixed-width numbers (02/03: no unit, sign, decimal or letter, not beside a unit or keyword, not at "
-                        "a position stated not a counter); otherwise it keeps a scientist_decided_merge candidate "
-                        "naming why; (3) --target <combined group> --decision confirm")
+                        "every recorded reading and confirmed run answer equal, and IDENTICAL file-name tokens (any differing "
+                        "token blocks, whatever its shape); otherwise it keeps a scientist_decided_merge candidate naming "
+                        "why. If the names differ only in a run counter, answer the counter question instead "
+                        "(set_counter_positions, then regroup: the grouping step joins those runs); "
+                        "(3) --target <combined group> --decision confirm")
     q.add_argument("--value", help="the value; for set_clock_time_zone the IANA name (Area/Location, or UTC) of the time zone "
                                    "the INSTRUMENT CLOCK that wrote the scan headers was set to (no offset, no abbreviation)")
     q.add_argument("--json", action="store_true", help="parse --value as JSON")
