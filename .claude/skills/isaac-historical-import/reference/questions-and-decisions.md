@@ -159,15 +159,17 @@ Only when the scientist says **in this conversation** that a filled ISAAC metada
 and to use it (a sheet you found in the folder is not that; ask first). Never retype it for them.
 
 1. `<isaac> bundle template adopt <bundle> <their.xlsx> --out <adopted.xlsx>` (outside the bundle
-   folder). It refuses anything that is not a filled copy of ISAAC's template (the blank one too, and a
-   sheet ISAAC exported: that one is imported). It maps their File List rows to runs by folder name
-   (`<stem>_dir` and the files inside it) and writes the bundle's template: an answer cell holds THEIR
+   folder). It refuses anything that is not a filled copy of ISAAC's template (the blank one too, known
+   by its example values even if it ships example File List rows, and a sheet ISAAC exported: that one is
+   imported). It maps their File List rows to runs by the run's OWN folder or name (`<stem>_dir` and the
+   files directly inside it; a parent folder such as `raw` names no run) and writes the bundle's template: an answer cell holds THEIR
    value only where no file reading contradicts it, with a note citing their cell (`'File List'!K31`).
    Every value a file reading contradicts (an extracted value, a potential or pH file-name token, an AI
    reading of a file), or that the field does not take, is NOT in an answer cell: it is a row of the
    `Disagreements` sheet with their value, the file's reading and its source, and an empty "Your ruling".
 2. Say the summary: rows matched, cells adopted, their columns not read, unmatched rows and runs (those
-   runs get nothing from the sheet). Then read **every** disagreement back, one by one, in plain words:
+   runs get nothing from the sheet), and the rows that reach more than one run, with the count (a scan
+   and its `_dir` calibration file are two runs; one value of theirs goes to each). Then read **every** disagreement back, one by one, in plain words:
    "your sheet says 0.8 V for O4_17; the file name says m800mV, which these names use for −0.8 V". For
    a not-allowed value, give the field's allowed list once and map their words to one value only on
    their yes; for an electrolyte with a concentration, ask for the name and the concentration
@@ -179,6 +181,11 @@ and to use it (a sheet you found in the folder is not that; ask first). Never re
 4. `<isaac> bundle template import <bundle> <adopted.xlsx> --by "<name>"` previews: say the decisions,
    the rulings it read, and each "awaiting your ruling" row (nothing is recorded for those). Add
    `--apply` only on their yes. Re-importing the same file after more rulings is harmless.
+   A file reading added AFTER the adopt (an AI reading of a scan file, say) that contradicts an adopted
+   cell is named under "Replaces or contradicts a file reading" as *not recorded* and listed as awaiting
+   a ruling "(not yet on the Disagreements sheet)": run `template adopt` again so it gets a Disagreements
+   row to rule on. A cell the scientist TYPED (an ordinary exported template, or a ruling) that a file
+   reading contradicts is named the same way as *you typed it* and is still recorded: read it back first.
 
 ## Never
 

@@ -23,7 +23,9 @@ decide``. Each decision's note cites its cell. Without ``apply`` nothing is writ
 that would change an earlier scientist decision is a clash and is skipped unless
 ``supersede``. A column with no official field, or no target in this bundle, is reported
 with its cells: nothing is dropped silently, and no mapping is guessed. A cell that REPLACES an
-extracted value or contradicts the run's own file-name token (``m800mV``) is named on its own line.
+extracted value, or contradicts the run's own file-name token (``m800mV``) or an AI reading of a file,
+is named on its own line; one ``adopt`` copied from their sheet before that reading existed is not
+recorded but awaits a ruling.
 
 ADOPT (``isaac bundle template adopt``) reads the scientist's OWN filled copy of ISAAC's template
 (no ``_isaac`` sheet) and writes this bundle's template from it: their value goes into an answer
@@ -1025,7 +1027,8 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
     rules = field_rules()
     by_header = {(c.get("sheet"), c.get("header")): c for c in marker["columns"]}
     known = {c.header: c for c in (*CAMPAIGN_FIELDS, *CONFIG_COLUMNS, *FILE_COLUMNS)}
-    out: dict[str, list] = {"cells": [], "invalid": [], "unmapped": {}, "nowhere": [], "rows_refused": [], "awaiting_ruling": []}
+    out: dict[str, Any] = {"cells": [], "invalid": [], "unmapped": {}, "nowhere": [], "rows_refused": [], "awaiting_ruling": [],
+                           "adopted_from": (marker.get("meta") or {}).get("adopted_from")}
     adopted = marker.get("adopted") or {}
     for name in (SHEET_CAMPAIGN, SHEET_CONFIG, SHEET_FILES):
         if name not in wb.sheetnames:
@@ -1076,12 +1079,15 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
             unmapped(sheet, col, ref, value)
             return
         note = cite(sheet, ref) + (f" (via {via})" if via else "") + (f" ({because})" if because else "")
-        origin = adopted.get(_cell_ref(sheet, ref))
-        if origin and not because:
+        origin = adopted.get(_cell_ref(sheet, ref)) if not because else None
+        if origin:
             note += f" (adopted from {origin.get('their_file')} {origin.get('their_cell')})"
         out["cells"].append({"cell": _cell_ref(sheet, ref) + (f" via {via}" if via else ""), "sheet": sheet,
                              "header": col.header, "path": col.path, "value": value, "scope": scope,
-                             "run_id": run["run_id"] if run else None, "note": note})
+                             "run_id": run["run_id"] if run else None, "note": note,
+                             # ``template adopt`` copied it from their sheet (no file reading contradicted it then)
+                             **({"adopted": {"their_file": origin.get("their_file"), "their_cell": origin.get("their_cell")}}
+                                if origin else {})})
 
     # Campaign Info: the rows THIS workbook's version wrote (1.3.0 and earlier: five, "Organization")
     wsc = wb[SHEET_CAMPAIGN]
@@ -1316,14 +1322,17 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                                "left_alone": [], "campaign_not_filled": [], "contradictions": []}
     runs_by_id = {r["run_id"]: r for r in bundle["runs"]}
     contradicted: set[tuple[str, str]] = set()
+    awaiting: list[dict] = []
+    # a file reading is what adopt compares (:class:`_Adopter`): a parser value, a file-name token, an AI
+    # reading of a FILE; an AI reading of the sheet the cells were adopted from is that sheet, not a file
+    adopter = _Adopter(bundle, index, field_rules(), str(cells.get("adopted_from") or ""))
 
-    def contradiction(cell: Mapping, kind: str, obj: Mapping) -> None:
-        """A cell that REPLACES an extracted value, or contradicts the run's own file-name token, is
-        named on its own line: a count of ``correct`` decisions never shows it. A literal from which no
-        value was derived (a macro's file name, a sample token) is not a reading of a value: answering
-        it replaces nothing."""
+    def file_readings(cell: Mapping, decision: str, kind: str, obj: Mapping) -> list[str]:
+        """What a file says against this cell for this target, one line each. A literal from which no value
+        was derived (a macro's file name, a sample token) is not a reading of a value: answering it
+        replaces nothing."""
         readings = []
-        if kind == "candidate" and obj.get("value") is not None:
+        if decision == "correct" and kind == "candidate" and obj.get("value") is not None:
             ev = next((e for e in obj["evidence"] if e["method"] != "ai_interpretation"), None)
             readings.append(f"replaces extracted {_shown(obj['value'])} — {_ev_where(index, ev)}")
         run = runs_by_id.get(obj.get("run_id") or "")
@@ -1331,11 +1340,23 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
             for t in name_token_readings(run_names(bundle, run), cell["path"]):
                 if not _agrees(t["value"], cell["value"]):
                     readings.append(f"contradicts the file name token {t['token']} ({t['value']!r}) in {t['name']}")
+        for r in adopter.against(cell["value"], obj.get("run_id"), cell["path"]):
+            if r["kind"] == "ai_reading":
+                readings.append(f"contradicts the {r['source']}: {_shown(r['value'])}")
+        return readings
+
+    def contradiction(cell: Mapping, obj: Mapping, readings: list[str], outcome: str) -> None:
+        """A cell that REPLACES an extracted value, or contradicts the run's file-name token or an AI reading
+        of a file, is named on its own line: a count of ``correct`` decisions never shows it. ``outcome``
+        says what happens to it: ``recorded_as_typed`` (the scientist typed it, or ruled it) or
+        ``awaiting_ruling`` (adopted from their sheet before the reading existed: not recorded)."""
         key = (cell["cell"], obj.get("run_id") or "")
         if readings and key not in contradicted:
             contradicted.add(key)
             report["contradictions"].append({"cell": cell["cell"], "run_id": obj.get("run_id"), "target_field_path": cell["path"],
-                                             "value": cell["value"], "readings": readings})
+                                             "value": cell["value"], "readings": readings, "outcome": outcome,
+                                             **({"adopted": cell["adopted"]} if cell.get("adopted") else {})})
+
     reached = cells.get("file_list_run_ids") or set()
     planned: list[tuple[dict, str, str, Mapping, str]] = []  # (cell, decision, kind, obj, target_id)
     for cell in cells["cells"]:
@@ -1405,13 +1426,24 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                     "reason": "an earlier scientist decision gives a different value; skipped (pass --supersede to record this one)",
                 })
                 continue
+        readings = file_readings(cell, decision, kind, obj)
+        if readings and cell.get("adopted"):
+            # adopted because no file reading contradicted it THEN; one does now. The scientist never typed
+            # this cell here, so it is not recorded until they rule (a fresh adopt lists it as a disagreement).
+            origin = cell["adopted"]
+            contradiction(cell, obj, readings, "awaiting_ruling")
+            awaiting.append({"id": None, "cell": cell["cell"], "header": cell["header"], "target_field_path": cell["path"],
+                             "run_id": obj.get("run_id"), "target": {"kind": kind, "id": tid}, "their_value": cell["value"],
+                             "why": (f"adopted from {origin.get('their_file')} {origin.get('their_cell')}, but a file reading "
+                                     f"now contradicts it: {'; '.join(readings)}. Run `isaac bundle template adopt` again: "
+                                     "it lists this as a disagreement to rule on")})
+            continue
         call = calls.setdefault((cell["cell"], decision), {"cell": cell, "decision": decision, "tids": []})
         call["tids"].append(tid)
         report["decisions"].append({"cell": cell["cell"], "sheet": cell["sheet"], "header": cell["header"],
                                     "target": {"kind": kind, "id": tid}, "target_field_path": cell["path"],
                                     "run_id": obj.get("run_id"), "decision": decision, "value": cell["value"]})
-        if decision == "correct":
-            contradiction(cell, kind, obj)
+        contradiction(cell, obj, readings, "recorded_as_typed")
 
     recorded: list[str] = []
     unchanged: list[str] = []
@@ -1429,7 +1461,9 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
         unchanged += res["unchanged"]
     report["decisions"] = [d for d in report["decisions"] if d["target"]["id"] not in refused_targets]
     kept = {(d["cell"], d.get("run_id") or "") for d in report["decisions"]}
-    report["contradictions"] = [c for c in report["contradictions"] if (c["cell"], c.get("run_id") or "") in kept]
+    report["contradictions"] = [c for c in report["contradictions"]
+                                if c["outcome"] == "awaiting_ruling" or (c["cell"], c.get("run_id") or "") in kept]
+    report["awaiting_ruling"] = awaiting
     report["recorded_target_ids"] = recorded
     report["unchanged_target_ids"] = unchanged
     return report
@@ -1478,7 +1512,7 @@ def import_template(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None 
                 M.save_bundle(Path(bundle_dir), bundle)
     else:
         cells, report = run(current)  # in memory only; nothing is saved
-    return {
+    return _as_text_dates({  # an invalid cell is shown as read, and a date cell reads as a datetime
         "applied": apply,
         "template": xlsx.name,
         "bundle_id": current["bundle_id"],
@@ -1486,7 +1520,7 @@ def import_template(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None 
         "cells_read": cells.get("read", 0),
         "decisions": report["decisions"],
         "replaces_or_contradicts_a_file_reading": report["contradictions"],
-        "awaiting_ruling": cells["awaiting_ruling"],
+        "awaiting_ruling": cells["awaiting_ruling"] + report["awaiting_ruling"],
         "recorded": len(report["recorded_target_ids"]) if apply else 0,
         "would_record": len(report["recorded_target_ids"]),
         "unchanged": len(report["unchanged_target_ids"]),
@@ -1501,7 +1535,7 @@ def import_template(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None 
         "campaign_not_filled": report["campaign_not_filled"],
         "statement": ("Recorded as scientist decisions (identity: self_reported_local_user, unverified)."
                       if apply else "PREVIEW: nothing was written. Add --apply to record these decisions."),
-    }
+    })
 
 
 #: How many cells a compact report names per column before it says how many more.
@@ -1591,12 +1625,17 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
         add("Replaces or contradicts a file reading (one line each; read each back before --apply):")
         for x in rep["replaces_or_contradicts_a_file_reading"]:
             run = f" {x['run_id']}" if x.get("run_id") else ""
-            add(f"  {x['cell']}{run} {x['target_field_path']} = {x['value']!r}: {'; '.join(x['readings'])}")
+            if x.get("outcome") == "awaiting_ruling":
+                said = "not recorded: adopted from your sheet before this reading, awaiting your ruling"
+            else:
+                said = ("recorded" if rep["applied"] else "would be recorded") + ": you typed it"
+            add(f"  {x['cell']}{run} {x['target_field_path']} = {x['value']!r} [{said}]: {'; '.join(x['readings'])}")
     if rep.get("awaiting_ruling"):
         add("")
         add("Disagreements awaiting your ruling (nothing recorded for them):")
         for x in rep["awaiting_ruling"]:
-            add(f"  {x['id']} {x['cell']} {x['header']}: theirs {x['their_value']!r}; {x['why']}")
+            run = f" {x['run_id']}" if x.get("run_id") else ""
+            add(f"  {x['id'] or '(not yet on the Disagreements sheet)'} {x['cell']}{run} {x['header']}: theirs {x['their_value']!r}; {x['why']}")
     in_full = [("Clashes (skipped)", "clashes"), ("Refused", "refused"), ("Rows refused", "rows_refused")]
     if full:
         in_full.insert(0, ("Invalid cells (recorded as nothing)", "invalid_cells"))
@@ -1671,9 +1710,71 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
 THEIR_FILE_HEADER_ALIASES: Mapping[str, str] = {"folder name": "File Name", "sample": "Sample Name"}
 _TAKEN_NAME_SUFFIX = "_dir"
 
+#: ISAAC's BLANK metadata template (``ISAAC_Metadata_Template.xlsx`` as it is handed out) holds these example
+#: values in Campaign Info (column B, by the label in column A) and these two example Configurations rows
+#: (by header). Import never mistakes it for answers because it has no ``_isaac`` sheet (:func:`_marker`);
+#: adopt reads exactly such workbooks, so it recognises the blank by these values: a copy whose Campaign
+#: Info and Configurations still hold exactly them, and nothing else, is the blank, whatever its File List
+#: holds (a later blank may ship example rows there).
+BLANK_TEMPLATE_CAMPAIGN_EXAMPLES: Mapping[str, Any] = {
+    "Facility Name": "SSRL", "Organization": "SLAC National Accelerator Laboratory", "Beamline/Instrument": "15-2",
+    "Start Date": "2026-01-01", "Proposal ID": None}
+BLANK_TEMPLATE_CONFIG_EXAMPLES: tuple[Mapping[str, Any], ...] = (
+    {"Config ID": "Config_A", "Technique": "XAS", "Mode": "Fluorescence", "Primary Signal Channel": "VortDT",
+     "Normalization Channel": "I0", "Detectors": "Canberra 100", "Energy Calibration": "Cu-Foil deriv=0 -> 8979eV",
+     "Beamline Setup": "Standard Setup"},
+    {"Config ID": "Config_B", "Technique": "XAS", "Mode": "Transmission", "Primary Signal Channel": "I1",
+     "Normalization Channel": "I0", "Detectors": "Ion Chambers", "Energy Calibration": "Cu-Foil deriv=0 -> 8979eV",
+     "Beamline Setup": "Changed detector"},
+)
+
 
 def _norm_header(value: Any) -> str:
     return " ".join(str(value or "").split()).casefold()
+
+
+def _blank_value(value: Any) -> Any:
+    """A cell as the blank's example values are compared: text trimmed, a date as its ISO day, empty = None."""
+    from datetime import date
+
+    if isinstance(value, datetime) and value.time() == datetime.min.time():
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, str):
+        return value.strip() or None
+    return value
+
+
+def _still_the_blank(wb) -> bool:
+    """Campaign Info and Configurations hold exactly the blank's example values and nothing else."""
+    from collections import Counter
+
+    def pairs(items):
+        return {(_norm_header(k), _blank_value(v)) for k, v in items if _blank_value(v) is not None}
+
+    wc = wb[SHEET_CAMPAIGN]
+    campaign = pairs((wc.cell(row=r, column=1).value, wc.cell(row=r, column=2).value) for r in range(2, wc.max_row + 1))
+    if campaign != pairs(BLANK_TEMPLATE_CAMPAIGN_EXAMPLES.items()):
+        return False
+    wcf = wb[SHEET_CONFIG]
+    header = [c.value for c in wcf[1]]
+    rows = Counter(frozenset(p) for row in wcf.iter_rows(min_row=2) if (p := pairs(zip(header, (c.value for c in row)))))
+    return rows == Counter(frozenset(pairs(r.items())) for r in BLANK_TEMPLATE_CONFIG_EXAMPLES)
+
+
+def _as_text_dates(obj: Any) -> Any:
+    """``obj`` with every date or datetime as its ISO text (a midnight datetime as its day), so the report
+    prints as JSON. Nothing else changes."""
+    from datetime import date
+
+    if isinstance(obj, Mapping):
+        return {k: _as_text_dates(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_as_text_dates(v) for v in obj]
+    if isinstance(obj, date):
+        return _blank_value(obj)
+    return obj
 
 
 def _refuse_unofficial(name: str, why: str) -> TemplateRefused:
@@ -1705,13 +1806,21 @@ def _their_sheet(wb, name: str) -> dict:
         raise TemplateRefused(
             f"{name} is ISAAC's blank metadata template (its File List names no file or folder): its other cells are "
             "the template's example values, not anyone's answers. Nothing was written.", code=EXIT_INPUT_REFUSED)
+    if _still_the_blank(wb):
+        raise TemplateRefused(
+            f"{name} is ISAAC's blank metadata template: its Campaign Info and Configurations hold exactly the "
+            "template's example values (Facility Name 'SSRL', Beamline/Instrument '15-2', Start Date 2026-01-01, "
+            "Config_A and Config_B), so its File List rows are taken as examples too, not anyone's answers. If you "
+            "did fill it, put your own values in Campaign Info and Configurations (or clear the examples) and adopt "
+            "it again. Nothing was written.", code=EXIT_INPUT_REFUSED)
     return {"files": wf, "header": header, "names": names}
 
 
 def _match_runs(bundle: Mapping, their_name: str) -> list[str]:
-    """The run ids a File List row names: a run whose file sits in a folder of that name, or whose file
-    or stem IS that name (``<name>_dir`` also names the run ``<name>``: SPEC keeps the scan file beside
-    its ``_dir`` folder). Exact names only: nothing is case-folded or guessed."""
+    """The run ids a File List row names: a run whose file sits DIRECTLY in a folder of that name, or whose
+    file or stem IS that name (``<name>_dir`` also names the run ``<name>``: SPEC keeps the scan file beside
+    its ``_dir`` folder). An ancestor folder (``raw``, a day's folder above the runs' own) names no run, so a
+    row never takes every run below it. Exact names only: nothing is case-folded or guessed."""
     want = {their_name}
     if their_name.endswith(_TAKEN_NAME_SUFFIX) and len(their_name) > len(_TAKEN_NAME_SUFFIX):
         want.add(their_name[: -len(_TAKEN_NAME_SUFFIX)])
@@ -1721,7 +1830,7 @@ def _match_runs(bundle: Mapping, their_name: str) -> list[str]:
         rel = (sources.get(run.get("acquisition_source_id")) or {}).get("relative_path") or ""
         parts = [p for p in rel.split("/") if p]
         last = parts[-1] if parts else ""
-        if (their_name in parts[:-1] or rel in want or last in want or str(run.get("stem") or "") in want
+        if ((len(parts) > 1 and parts[-2] == their_name) or rel in want or last in want or str(run.get("stem") or "") in want
                 or (last.rsplit(".", 1)[0] in want if "." in last else False)):
             out.append(run["run_id"])
     return out
@@ -1828,7 +1937,8 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
         file_col = {c.header: j for j, c in enumerate(FILE_COLUMNS, start=1)}
         result: dict[str, Any] = {"their_file": their_file, "cells_adopted": 0, "disagreements": [], "not_adopted": [],
                                   "unmatched_rows": [], "unmatched_runs": [], "rows_matched": 0, "runs_matched": 0,
-                                  "runs_on_several_rows": [], "runs_outside_live_groups": [], "their_columns_not_read": [],
+                                  "runs_on_several_rows": [], "rows_reaching_several_runs": [], "runs_outside_live_groups": [],
+                                  "their_columns_not_read": [],
                                   "their_columns_mapped": []}
         adopted_cells: list[tuple[str, str]] = []  # (our cell, their cell)
         groups: dict[tuple, dict] = {}  # disagreement key -> entry
@@ -1963,6 +2073,10 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
             runs_of_row[r] = ids
             for rid in ids:
                 rows_of_run.setdefault(rid, []).append(r)
+        # a row that reaches several runs (a scan beside its ``_dir`` calibration file, or a folder of runs) is
+        # said with its count: one value of theirs goes to each of them
+        result["rows_reaching_several_runs"] = [{"row": _cell_ref(SHEET_FILES, f"A{r}"), "name": name, "runs": len(runs_of_row[r]),
+                                                 "run_ids": runs_of_row[r]} for r, name in theirs["names"] if len(runs_of_row[r]) > 1]
         several = {rid for rid, rs in rows_of_run.items() if len(rs) > 1}
         result["runs_on_several_rows"] = [{"run_id": rid, "rows": [_cell_ref(SHEET_FILES, f"A{r}") for r in rows_of_run[rid]],
                                            "reason": "more than one of your File List rows names this run, so neither is adopted for it"}
@@ -2113,6 +2227,7 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
 
     exported = export_template(bundle_dir, out, suggestions=suggestions, force=force, _fill=fill,
                                _command="bundle template adopt")
+    exported["adopted"] = _as_text_dates(exported["adopted"])  # their cells as read: a date cell is a datetime
     exported["statement"] = (f"Answer cells hold your sheet's value only where no file reading contradicts it; each cites "
                              f"its cell in {their_file}. Nothing that contradicts a file is in an answer cell: rule on each "
                              f"row of the {SHEET_DISAGREE} sheet (Your ruling), then `template import`.")
@@ -2152,6 +2267,8 @@ def render_adopt_summary(result: Mapping) -> str:
         for header, allowed in a.get("allowed_values", {}).items():
             lines.append(f"  allowed for {header}: {', '.join(map(str, allowed))}")
     for title, key, shown in (("Your rows that match no run", "unmatched_rows", lambda x: f"{x['row']} {x['name']}"),
+                              ("Your rows that reach more than one run (each value goes to every one)", "rows_reaching_several_runs",
+                               lambda x: f"{x['row']} {x['name']} -> {x['runs']} runs"),
                               ("Runs on none of your rows", "unmatched_runs", lambda x: x["file_name"]),
                               ("Runs on several of your rows (not adopted)", "runs_on_several_rows", lambda x: f"{x['run_id']} ({', '.join(x['rows'])})")):
         items = a[key]
