@@ -1138,25 +1138,15 @@ def cmd_bundle_group(args) -> int:
 def cmd_process(args) -> int:
     from . import mutations as M
 
-    def run():
-        result = M.process(
+    return _mutation(
+        lambda: M.process(
             Path(args.bundle_dir),
             source=args.source,
             group_ids=args.group or None,
             athena=not args.no_athena,
             params_file=args.params_file,
         )
-        # `--group`: the other groups' undecided results were carried forward unchanged
-        # (processing.cli_entry.run_process); they are not new, so they are not counted as new.
-        from .processing.cli_entry import OTHER_GROUPS_KEPT
-
-        kept = (result.get("summary") or {}).pop(OTHER_GROUPS_KEPT, None) if isinstance(result, dict) else None
-        if isinstance(kept, int) and isinstance(result.get("new"), int):
-            result["new"] -= kept
-            result["kept_other_groups"] = kept
-        return result
-
-    return _mutation(run)
+    )
 
 
 def cmd_bundle_template_export(args) -> int:

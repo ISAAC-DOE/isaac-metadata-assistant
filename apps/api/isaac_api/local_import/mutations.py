@@ -1785,13 +1785,18 @@ def process(
                 r["state"] = B.STATE_NEEDS_REVIEW
             fresh.append(r)
         bundle["processing_results"] = keep + fresh
-        return {
+        kept_decided = sum(B.processing_id(r) in decided or r.get("group_id") in superseded for r in keep)
+        out = {
             "processing_results": len(bundle["processing_results"]),
-            "kept_decided": len(keep),
+            "kept_decided": kept_decided,
             "new": len(fresh),
             "summary": payload.get("summary"),
             "statement": "Draft, unreviewed processing. Nothing goes into a record until a scientist approves it.",
         }
+        if group_ids:
+            # the groups NOT named keep their results as stored (`new` counts only the named groups')
+            out["kept_other_groups"] = len(keep) - kept_decided
+        return out
 
     return mutate(bundle_dir, change)
 

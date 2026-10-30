@@ -122,9 +122,6 @@ def run_group(bundle_dir: Path | str, *, write: bool = True, bundle: Mapping | N
     return payload
 
 
-#: The key ``run_process`` adds to ``summary`` on a ``--group`` run: how many undecided results of
-#: OTHER groups it carried forward unchanged (so the bundle writer keeps them; see run_process).
-OTHER_GROUPS_KEPT = "results_of_other_groups_kept"
 
 
 def _refuse(message: str):
@@ -238,7 +235,7 @@ def run_process(
     only input that applies a calibration shift. Each run writes to
     ``processing/<group_id>/<run_id>/``; earlier runs are never overwritten.
     """
-    from ..bundle import PROCESSING_STATE_DECISIONS, PROCESSING_UNDECIDED_STATES, load_bundle, processing_id
+    from ..bundle import load_bundle
     from .run import process_bundle
 
     bundle_dir = Path(bundle_dir)
@@ -261,18 +258,4 @@ def run_process(
         bundle=bundle,
         calibration_approvals=calibration_approvals,
     )
-    if group_ids and payload.get("status") == "processed":
-        # `--group` REPLACES ONLY THAT GROUP'S RESULTS. The bundle writer (mutations.process) keeps the
-        # decided results and the superseded groups' and replaces every other stored result with this
-        # run's, so the undecided results of the groups NOT named are carried forward here, unchanged.
-        wanted = set(group_ids)
-        decided = {d["target"]["id"] for d in bundle.get("scientist_decisions") or ()
-                   if (d.get("target") or {}).get("kind") == "processing_result" and d.get("decision") in PROCESSING_STATE_DECISIONS}
-        known = {g.get("group_id") for g in bundle.get("record_groups") or ()}
-        others = [dict(r) for r in bundle.get("processing_results") or ()
-                  if r.get("group_id") not in wanted and r.get("group_id") in known
-                  and processing_id(r) not in decided and r.get("state") in PROCESSING_UNDECIDED_STATES]
-        payload["processing_results"] = others + list(payload.get("processing_results") or ())
-        if isinstance(payload.get("summary"), dict):
-            payload["summary"][OTHER_GROUPS_KEPT] = len(others)
     return payload
