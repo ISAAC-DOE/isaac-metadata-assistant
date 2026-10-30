@@ -121,119 +121,76 @@ the reference. Tell the scientist what each file turned out to hold. Unreadable 
 
 `<isaac> bundle group <bundle>` (`--regroup` replaces undecided groups only; decided ones are kept).
 If `bundle group --help` fails, say "grouping is not in this build", skip Steps 5, 6, 8 and 9, and
-stop after Step 7. Read `reference/grouping-and-processing.md`. List the proposed groups with
-`<isaac> bundle list <bundle> groups --limit 10` (page it), one group in full with `<isaac> bundle show
-<bundle> group <id>`, and groups the code thinks might belong together with `<isaac> bundle list <bundle>
-merge-candidates`. Never read a groups file by hand. Present each group in plain words: the sample,
-the conditions, how many scans, and why runs were split ("these two differ in potential"). Say plainly when a group needs care:
-`merged_despite_engine_reading` = "the importer read something different in these files, but I grouped
-them because the rest matches; please confirm"; `sample_key_basis: name_stem` = "I grouped these by
-their file names because no file states the sample; please confirm". The experiment question
-`naming_counter_positions` asks which filename positions hold a counter; answer it once:
-`decide <bundle> --target experiment --decision set_counter_positions --positions N --by "<name>"`
-(`--positions last` when the counter is always the last token), then `bundle group <bundle> --regroup`. (The other experiment question, `clock_time_zone`, asks the instrument clock's
-time zone for SSRL XDC scan start times: `--decision set_clock_time_zone --value <IANA name>`; never suggest one —
-see `reference/questions-and-decisions.md`.) Ask the
-scientist to **confirm, split or merge** each, in batches, with progress; a group that is not a result
-at all (alignment, a reference foil, a test scan) can be **left out**: `--decision reject` (it is never
-exported; say so). When the scientist accepts several groups as shown, confirm them together: write
-the group ids to a notes file (one per line) and `decide <bundle> --targets-file <file> --decision confirm
---by "<name>"`, after listing each group back. Record with `decide
---decision confirm|split|merge` (`--split-into` takes a JSON list of lists of run keys, which you
-build; they never type it; `merge` needs `--merge-with` naming another live group, then a regroup and
-a confirm of the combined group). A merge candidate they say is distinct: `--target <mc id> --decision
-keep_apart`. Positions they say are NOT counters: `--target experiment --decision set_not_counter_positions
---positions N`.
-After a regroup, report any `merge_decisions_not_combined` in words and offer its `next_commands`
-(never run one without the scientist's answer). A merge candidate with `caution` names different
-samples or conditions: say that first.
+stop after Step 7. Read `reference/grouping-and-processing.md` (every decision's syntax is there).
+List groups with `<isaac> bundle list <bundle> groups --limit 10` (page it; live groups only), one in
+full with `<isaac> bundle show <bundle> group <id>`, and possible merges with `<isaac> bundle list
+<bundle> merge-candidates`. Never read a groups file by hand. Present each group in plain words: the
+sample, the conditions, how many scans, and why runs were split ("these two differ in potential").
+Say plainly when a group needs care (`merged_despite_engine_reading`, `sample_key_basis: name_stem`:
+see the reference), and say a merge candidate's `caution` before asking about it.
+The experiment question `naming_counter_positions` asks which filename positions hold a counter;
+answer it once (`set_counter_positions --positions N`, or `last`), then regroup. The other,
+`clock_time_zone`, needs the instrument clock's IANA zone; never suggest one.
+Ask the scientist to **confirm, split or merge** each, in batches, with progress. A group that is not
+a result (alignment, a reference foil, a test scan) can be **left out** with `reject`; say it is never
+exported. Several groups accepted as shown: list each back, then one `--targets-file` confirm.
+After a regroup, say any `merge_decisions_not_combined` in words and offer its `next_commands` (never
+run one without the scientist's answer).
 
 ## Step 6 · Processing (a DRAFT protocol)
 
-`<isaac> process <bundle> --source <folder>` once groups are confirmed (`--source` is the folder that was
-imported; by default the bundle does not record the path, so without it `process` refuses and writes
-nothing; a ZIP import needs the unzipped folder, since processing reads a folder;
-`--no-athena` skips the scientist's own Athena projects). `--group <id>` (with `--source`) redoes only
-that group; every other group's result is kept as it was (`kept_other_groups`). Rejected, merged and
-split groups are skipped (`not_live_groups`). Never read `processing_results.json` (it can be over a MB):
-`<isaac> bundle list <bundle> processing-results --limit 20` gives each result's `result_id`, verdict,
-applicability, failure, flags, key metrics, `plot` path and Athena agreement, a page at a time; the plot
-and `qc.json` are in `<bundle>/processing/<group id>/<run id>/`. If `process` says why none of the
-scientist's Athena groups matched (`athena.statement`), tell them in those words. For each group show:
-the quality verdict in words, glitch flags, whether it agrees with the scientist's own Athena
-output when one exists, and the plot: open the PNG with Read and describe it. Ask approve / reject /
-needs changes per group. **A result with `applicability.status: not_applicable` is not a curve and
-has no verdict** — never call it a fail and never ask to approve it (`decide` refuses): say "no
-ISAAC processing protocol covers this data yet" (`no_xas_channel`, naming the reader and layout it
-states, e.g. `xes_tab_v1`) or "this group has no scans, so there is nothing to process"
-(`no_scans`); such a group stays incomplete. `isaac process` prints these counts apart. **When a
-result says scans were skipped** (QC reason `scans_skipped_lacking_chosen_columns`, often with the
-flag `channel_from_a_later_scan`), say it in plain words from its metrics, e.g. "14 of 165 scans were
-used; 150 had different columns (they may be motor or alignment scans); please confirm these belong
-in one record" — never present the curve as the whole group. **When approving, also ask for the QC status**: it is the scientist's
-call and `warn` is never turned into a status for them. Show the allowed words (today `valid`,
-`compromised`, `failed`, `pending`; `decide` refuses any other and lists them) and the QC flags:
-`decide --target <result_id> --decision approve --qc-status <word> [--qc-note "<what is compromised or
-failed, and why>"] --by "<name>"` (`result_id` from `list processing-results`, e.g.
-`proc-rg-…-r-<hash>-isaac`; ask for a note when the status says something is wrong). Reject / needs
-changes use the same `--target`. **A result with no curve** (no output file, e.g. `no_usable_scan`)
-cannot be approved (`decide` refuses): say why in words, and offer reject, or `needs_changes` (the
-protocol needs a different setting the scientist chooses; only on their explicit choice re-process it
-with `--params-file`), or leaving the group out (`reject` on the group). If a result lists several of their Athena versions, ask which is the
-result of record: `--decision select_athena_version --value <version id>` (it approves nothing). **Calibration shift.** If a result's flags say the calibration reference is unconfirmed, or processing proposes
-shifting the energy axis, do not apply anything. Explain in plain words: "The curve could be moved a
-little in energy so a reference foil's edge lands where it should. I need you to tell me which
-element and edge that reference is." Ask only then, per group. On their answer:
-`decide --target <group id> --decision approve_calibration --element <symbol> --edge <K|L1-L3|M1-M5> --by "<name>"`,
-then `process --source <folder> --group <group id>` again so the approved shift can be used. No answer, no shift.
-Always say: **the processing protocol is a draft
-until Oscar and Angel review it**; an approval means "I looked at this curve and accept it for this
-record", not "the method is validated". If `process` reports `processing_unavailable`, say what
-that costs (no curves, records stay incomplete) and continue.
+`<isaac> process <bundle> --source <folder>` once groups are confirmed (`--source` is the folder that
+was imported; a ZIP import needs the unzipped folder; without a readable one `process` refuses and
+writes nothing). Read the Processing section of `reference/grouping-and-processing.md`. Page results
+with `<isaac> bundle list <bundle> processing-results --limit 20` (never read `processing_results.json`).
+For each group show the verdict in words, glitch flags, skipped scans, agreement with the scientist's
+own Athena output, and the plot (open the PNG with Read and describe it). Ask approve / reject / needs
+changes. **When approving, also ask for the QC status**: the scientist's call, never mapped from `warn`
+(`--qc-status valid|compromised|failed|pending`, with `--qc-note` when something is wrong).
+Never call a `not_applicable` result a fail or ask to approve it ("no ISAAC processing protocol covers
+this data yet"); a result with **no curve** cannot be approved; offer the reference's three options.
+A calibration shift is applied only after the scientist names the reference's element and edge.
+Always say: **the processing protocol is a draft until Oscar and Angel review it**; an approval means
+"I looked at this curve and accept it for this record", not "the method is validated". If processing
+is not installed, say what that costs (no curves, records stay incomplete) and continue.
 
 ## Step 7 · Questions
 
 Read `reference/questions-and-decisions.md`. Drive them with the consolidated list, never the raw
-one: `<isaac> bundle questions <bundle> --blocking-only --limit 10` first. Each question already
-carries plain text, why it blocks export, hints (a hint is never an answer), allowed values and the
-exact `decide --question` command. Lead with the minimum: "**N answers make group X exportable**"
-(from `minimum_for_one_group`). Ask **experiment-scope questions once**, in the words "this applies to
-N groups; answer once, or tell me which groups differ" (`--only group:<id>` overrides one group).
-Then conflicts that affect a record, then the optional rest only if the scientist wants them
-(`--scope group:<id>` shows one group). Batch 3 to 5 per message, by theme, with progress.
-**More than about 5 groups:** per-group questions would take dozens of messages. After the
-experiment-scope questions, offer the template (below) first and ask per group only what it leaves.
+one: `<isaac> bundle questions <bundle> --blocking-only --limit 10` first. Each question carries plain
+text, why it blocks export, hints (a hint is never an answer) and the exact `decide --question`
+command; allowed values are in `allowed_values_by_field`. A question is blocking only when a live
+group's record needs it. Lead with the minimum: "**N answers make group X exportable**" from
+`minimum_for_one_group`: answer each of its `questions` (with `--only <only>` when set), say its
+`unasked_required` items with their commands, then its `plus_decisions`. Ask **experiment-scope
+questions once**: "this applies to N groups; answer once, or tell me which groups differ"
+(`--only group:<id>` overrides one group). Then conflicts that affect a record (`affects_record:
+false` ones change no record: mention their count only), then the optional rest if wanted
+(`--scope group:<id>` shows what blocks one group). Batch 3 to 5 per message, by theme, with
+progress. A question the scientist deferred is marked `deferred` and sorts last: do not re-ask it
+unless they offer (`--skip-deferred` leaves them out). **More than about 5 groups:** after the
+experiment-scope questions, offer the template first and ask per group only what it leaves.
 
-- **Closed lists.** When a field has `allowed_values`, map their words to one allowed value, say it
-  back ("in situ → `in_situ`, right?") and record it only on their yes. `decide` refuses any value
-  the field's schema rejects (it lists the allowed ones); a bulk answer is refused whole.
-- **No value yet.** When a question has no value ("What is X?", no `confirm` in `allowed_decisions`),
-  never invent one: ask the question, then `correct --value <their answer>`.
-- **Not asked.** `informational` questions (no `allowed_decisions`, a `#` command) cannot reach the
-  record: mention them once, as "listed for information". A per-group question with `covered_by` is
-  answered by that experiment question; ask per group only if they say a group differs.
-- **Asked again** (`asked_again`): an earlier answer cannot go into the record; give the reason and ask.
-- **Absorber.** Its command is a template; the files' pair is only a hint. Say the element and edge
-  back and run it only on a clear yes to that pair, never on a vague yes.
+- **Closed lists.** Map their words to one allowed value, say it back ("in situ → `in_situ`,
+  right?") and record it only on their yes; `decide` refuses any other value and lists the allowed.
+- **No value yet** (no `confirm` in `allowed_decisions`): never invent one; ask, then `correct --value`.
+- **Not asked.** `informational` questions cannot reach a record: mention them once. A `covered_by`
+  question is answered by that experiment question; ask per group only if a group differs.
+- **Asked again** (`asked_again`): an earlier answer cannot go into the record; give the reason, ask.
+- **Absorber.** Say the element and edge back; run it only on a clear yes to that pair.
+- **AI readings are not file evidence**: say "my reading of the files suggests…", never "the files say".
 
 Always pass `--by "<their name>"`. Missing values they cannot answer stay missing (`defer`). Never pick
-a side of a conflict. For several evidence-backed confirmations the scientist accepts together,
-`--targets-file` (list each item back first). A scientist may also answer in the local-only *Local
-Imports* web page (`docs/ui-local-dev.md`); it runs the same checks. Run `bundle questions` again after.
+a side of a conflict. A scientist may also answer in the local-only *Local Imports* web page
+(`docs/ui-local-dev.md`); run `bundle questions` again after.
 
-**Then offer the template** for everything the files never state (facility, beamline, who
-produced the data (their group and organization), domain, environment, cell type, reaction with its
-drive and catalysis, sample form and formula): "I can give you one spreadsheet to
-fill in one sitting." `<isaac> bundle template export <bundle> --out <file.xlsx>`; the answer
-cells are empty and the `ISAAC Suggestions` sheet shows what each run's own files say, with where.
-"Facility organization" is the facility's (e.g. SLAC / SSRL); the scientist's own institution goes in
-"Your organization (who produced the data)", their group in "Your group". When they
-return it: `<isaac> bundle template import <bundle> <file.xlsx> --by "<name>"` (a preview, nothing
-written), read the preview back (one line per cell or column with its decision count, then every invalid
-cell, clash and column recorded nowhere; `--full` lists every decision, only if they want it), and
-only on their yes add `--apply`. Never fill the sheet for them, and never import ISAAC's blank
-template: it holds example values, and import refuses it. Electrolyte is the name only; its
-concentration and the pH have their own columns. Details: `reference/questions-and-decisions.md`.
+**Then offer the template** for everything the files never state (who produced the data, domain,
+environment, cell type, reaction with its drive and catalysis, sample form and formula, facility):
+"I can give you one spreadsheet to fill in one sitting." `<isaac> bundle template export <bundle>
+--out <file.xlsx>` (answer cells empty; `ISAAC Suggestions` shows what each run's own files say). On its
+return, `<isaac> bundle template import <bundle> <file.xlsx> --by "<name>"` previews; read it back
+(decisions per cell or column, every invalid cell and clash) and add `--apply` only on their yes.
+Never fill the sheet for them; never import ISAAC's blank template. Details in the reference.
 
 ## Step 8 · Build and validate
 

@@ -37,7 +37,7 @@ Get the groups with `bundle list <bundle> groups` and one in full with `bundle s
 
 `isaac process <bundle> --source <folder>` (always give `--source`: without a readable one it exits 2 and
 writes nothing; `--group <id>` redoes only that group and keeps every other group's result,
-`kept_other_groups`) computes, per confirmed group, a normalised spectrum, an edge position, a quality
+`kept_other_groups`; rejected, merged and split groups are skipped, `not_live_groups`) computes, per live group, a normalised spectrum, an edge position, a quality
 verdict (pass / warn / fail), glitch flags, and compares with the scientist's own Athena output when
 it finds one. Show per group, in words:
 
@@ -52,13 +52,21 @@ it finds one. Show per group, in words:
   process" (`no_scans`). Do not call it a fail, show no plot, and ask nothing — `decide` refuses
   every decision on it, and the group cannot become a complete record until a protocol covers it;
 - whether it agrees with Athena, and by how much, or "no Athena output found";
-- the plot PNG (`<bundle>/processing/<group id>/<run id>/plot.png`; the result's `outputs.files` gives the path): open it with Read, describe the curve (edge, pre/post-edge, obvious artefacts); the numbers are in `qc.json` beside it and in `processing/processing_results.json`.
+- the plot PNG (`<bundle>/processing/<group id>/<run id>/plot.png`; the result's `outputs.files` gives the path): open it with Read, describe the curve (edge, pre/post-edge, obvious artefacts); the numbers are in `qc.json` beside it. Never read `processing/processing_results.json` (it can be
+  over a MB): `<isaac> bundle list <bundle> processing-results --limit 20` pages each result's
+  `result_id`, verdict, applicability, failure, flags, key metrics, `plot` path and Athena agreement.
+- when `process` says why none of the scientist's Athena groups matched (`athena.statement`), say it
+  in those words.
 
 Ask: approve, reject, or needs changes (with a note):
 `decide --target <result_id> --decision approve --qc-status <word> [--qc-note "<why>"] --by "<name>"`, or
 `decide --target <result_id> --decision reject|needs_changes --note "<why>" --by "<name>"`. Rules:
 
 - **QC status is the scientist's.** Approving also needs `--qc-status <word>` (and `--qc-note` when the status says something is compromised or failed: `decide` refuses those without one). The processing verdict (`pass`/`warn`/`fail`) is shown to help them choose; it is never turned into a status for them, and `warn` never auto-maps. Offer the allowed words from the vocabulary and the flags that bear on the choice.
+- **A result with no curve** (no output file, e.g. `no_usable_scan`) cannot be approved; `decide`
+  refuses. Say why in words and offer: reject the result; `needs_changes` (the protocol needs a setting
+  the scientist chooses; only on their explicit choice re-process with `--params-file`); or leave the
+  group out (`reject` on the group).
 - **Approval is the scientist's**, per group. A `warn` or `fail` is shown prominently and never
   approved on your suggestion. A rejected group yields no series and stays incomplete.
 - The protocol is a **draft until Oscar and Angel review it**. Say so each time you ask.

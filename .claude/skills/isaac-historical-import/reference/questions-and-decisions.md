@@ -1,14 +1,25 @@
 # Questions and decisions (Step 7)
 
-`<isaac> bundle questions <bundle> [--scope experiment|group:<id>|run:<id>] [--blocking-only] [--limit N] [--offset M]`
+`<isaac> bundle questions <bundle> [--scope experiment|group:<id>|run:<id>] [--blocking-only] [--limit N] [--offset M] [--skip-deferred] [--with-targets]`
 returns `questions.json` v2: shared questions asked ONCE (experiment scope), run questions collapsed
 to their record group, blocking first. Each question has `question_id`, `text`, `why` (why it blocks
 export), `applies_to` (groups/runs/targets), `hints` (flagged as hints; a hint is never an answer),
-`allowed_values` where the schema closes the field, and `answer_command`. The reply also has
-`counts` (`blocking`, `conflicts_affecting_a_record`, `optional`, `informational`, `asked_again`;
+`answer_command`. The reply is compact by default: each question has `targets_count`,
+`scopes_count` and `groups_count` instead of its target lists (`decide --question` resolves them;
+`--with-targets` prints them), allowed values sit once in `allowed_values_by_field`, default decisions
+in `allowed_decisions_by_kind` (a question lists `allowed_decisions` only when it differs), standard
+hint notes in `hint_notes`. A question blocks only when a live group's record needs one of its
+fields (`blocks_groups`, `required_fields`; reaction drive and catalysis only once a reaction is in
+the record, `required_when`); questions only about runs in no live group say `outside_live_groups`.
+The reply also has
+`counts` (for the scope asked; `counts_whole_bundle` beside it when `--scope` is given: `blocking`,
+`conflicts_affecting_a_record`, `conflicts_without_a_record_field`, `optional`, `informational`,
+`asked_again`, `deferred`, `outside_live_groups`;
 quote these, not `summary.md`'s "Questions: N", which is `fine_grained_v1`) and
 `minimum_for_one_group` ("7 blocking questions plus: confirm the group, approve its processing
-result"). `plus_decisions` names only the decisions not yet made (an empty list once the group is
+result"): its `questions[]` list each question to answer with the `only` scope to use,
+`unasked_required[]` names required fields no question asks (with `reason` and `command`), and
+`plus_decisions` names only the decisions not yet made (an empty list once the group is
 confirmed and its result approved). Pages hold at most 200 (`--limit` above that is refused). The older fine-grained list (`bundle list <bundle> questions`)
 is for lookup only.
 
@@ -30,6 +41,11 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
   as a question, not an answer. Use their own name for `--by` once, ask for it once, reuse it.
 
 ## Questions that need care
+
+- **Deferred** (`deferred: {by, decided_utc}`): the scientist said "I don't know". It is still counted
+  and sorts last; do not ask it again unless they offer an answer.
+- **A conflict with `affects_record: false`** (`no_record_field`): the readings differ, but no record
+  field carries them (a comment line, a unit spelling). Say how many there are; do not ask each.
 
 - **No value to confirm.** Text like "What is the technique? The files hold text for it … but no
   value this build can carry", with no `confirm` in `allowed_decisions`, means there is nothing to
