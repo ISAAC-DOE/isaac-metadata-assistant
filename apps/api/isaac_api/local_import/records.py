@@ -216,12 +216,12 @@ def _confirmation(decision: Mapping, question: str) -> dict:
     return entry
 
 
-def _absorber_implicit(bundle: Mapping, group: Mapping) -> list[dict]:
+def _absorber_implicit(bundle: Mapping, group: Mapping, absorber_decisions: Mapping | None = None) -> list[dict]:
     """``implicit[]`` entries ``absorbing_element`` and ``edge`` for one group, or ``[]``."""
     from . import suggestions as S
 
     sug = S.absorber_for_group(bundle, group)
-    decision = S.absorber_decisions(bundle).get(group["group_id"])
+    decision = (S.absorber_decisions(bundle) if absorber_decisions is None else absorber_decisions).get(group["group_id"])
     witnesses = [
         {"source_type": "document", "source_file": w.get("relative_path") or "(unlocated)", "locator": w.get("locator"),
          "quote": w.get("literal") or f"{w.get('element') or ''} {w.get('edge') or ''}".strip(),
@@ -296,10 +296,51 @@ def _read_series_file(path: Path) -> tuple[list[float], list[float]] | str:
     return (xs, ys) if xs else "the file holds no data rows"
 
 
-def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[dict, dict]:
-    """``(draft, composition_report)`` for ONE scientist-confirmed record group."""
-    decisions = B._decisions_by_target(bundle.get("scientist_decisions") or ())
-    runs_by_key = {r["run_key"]: r for r in bundle["runs"]}
+def composition_index(bundle: Mapping, decision_of: Mapping[tuple[str, str], Mapping] | None = None) -> dict:
+    """What :func:`compose_group` reads from the WHOLE bundle (the decision log, the conflicts, the processing
+    results), read once. A caller composing many groups of ONE bundle builds it once and passes it to each
+    call, so composing every group is linear in the bundle, not (groups x decisions); the result is exactly
+    what each call would build for itself. Never reused across a change to the bundle. ``decision_of``:
+    :func:`bundle._decisions_by_target` of this bundle, when the caller already built it."""
+    from . import suggestions as S
+
+    results = bundle.get("processing_results") or ()
+    return {
+        "decisions": B._decisions_by_target(bundle.get("scientist_decisions") or ()) if decision_of is None else decision_of,
+        "conflict_ids_of": B.conflict_ids_by_candidate(bundle),
+        "processing_blocked": B.processing_blocked_groups(bundle),
+        # read only for an approved result: none, nothing to read
+        "processing_state": (B.processing_state_decisions(bundle)
+                             if any(r.get("state") == B.STATE_SCIENTIST_CONFIRMED for r in results) else {}),
+        "absorber": S.absorber_decisions(bundle),
+        "processing_of": _processing_by_group(bundle),
+        "runs_by_key": {r["run_key"]: r for r in bundle["runs"]},
+        # every value by its id (a group's own values are among them: the same objects): its run, and its kind
+        "run_of": {**{c["candidate_id"]: c["run_id"] for c in bundle["candidates"]},
+                   **{m["value_id"]: m["run_id"] for m in bundle["missing_values"]}},
+        "obj_of": {**{c["candidate_id"]: ("candidate", c) for c in bundle["candidates"]},
+                   **{m["value_id"]: ("missing_value", m) for m in bundle["missing_values"]}},
+        # read when first needed, then kept: B.required_record_paths(control_mode=...) per mode (it reads the
+        # schema file each call), and B.clock_zone_decision (only a confirmed local-clock start time asks for it)
+        "required_by_mode": {},
+        "memo": {},
+    }
+
+
+def _processing_by_group(bundle: Mapping) -> dict[str, list]:
+    out: dict[str, list] = {}
+    for r in bundle.get("processing_results") or ():
+        out.setdefault(r["group_id"], []).append(r)
+    return out
+
+
+def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict | None = None) -> tuple[dict, dict]:
+    """``(draft, composition_report)`` for ONE scientist-confirmed record group. ``index``
+    (:func:`composition_index` of this same bundle) saves re-reading the whole bundle per group."""
+    if index is None:
+        index = composition_index(bundle)
+    decisions = index["decisions"]
+    runs_by_key = index["runs_by_key"]
     member_runs = [runs_by_key[k] for k in group["member_run_keys"] if k in runs_by_key]
     member_ids = {r["run_id"] for r in member_runs}
     report: dict[str, Any] = {
@@ -335,7 +376,7 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[di
         if "[]" in path:
             report["not_composed"].append({"candidate_id": c["candidate_id"], "path": path, "reason": "an array path; composed only from structured blocks"})
             continue
-        d = B.candidate_decision(bundle, c)
+        d = B.candidate_decision(bundle, c, decisions, index["conflict_ids_of"])
         value = B.final_value(c["value"], d, c.get("readings"))
         witnesses = _witnesses(c, value, d)
         evidence = witnesses + [_candidate_confirmation(c, d, value, path, witnesses)]
@@ -345,7 +386,10 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[di
             # gives its own UTC value, so no zone stands behind it.) DEFENCE IN DEPTH: the zone is
             # credited ONLY when the composed value IS what the rule produced under that zone and
             # the confirmation is bound to it — never for a value the rule did not give.
-            zone_d = B.clock_zone_decision(bundle)
+            memo = index["memo"]
+            if "clock_zone" not in memo:
+                memo["clock_zone"] = B.clock_zone_decision(bundle)
+            zone_d = memo["clock_zone"]
             binding = d.get("clock_zone_binding") or {}
             produced = B.local_clock_start(c, zone_d)["value"] if zone_d is not None else None
             if (zone_d is not None and produced is not None and value == produced
@@ -368,8 +412,7 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[di
             (value, [_confirmation(d, f"What is {m['target_field_path']}?")], m["value_id"])
         )
 
-    run_of = {c["candidate_id"]: c["run_id"] for c in bundle["candidates"]}
-    run_of.update({m["value_id"]: m["run_id"] for m in bundle["missing_values"]})
+    run_of = index["run_of"]
 
     fields: dict[str, dict] = {}
     for path, options in sorted(proposals.items()):
@@ -405,15 +448,15 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[di
     # write, whose GOVERNING decision was made before this build upgraded the bundle (under the old
     # wording, "this build cannot write it yet"). A decision made after the upgrade, under the
     # corrected wording, is not listed: the scientist answered knowing the field is written.
-    obj_of = {c["candidate_id"]: ("candidate", c) for c in bundle["candidates"]}
-    obj_of.update({m["value_id"]: ("missing_value", m) for m in bundle["missing_values"]})
+    obj_of = index["obj_of"]
     report["composed_only_by_this_build"] = []
     for f in report["filled"]:
         for i in f["from"]:
             kind, obj = obj_of.get(i, (None, None))
             if obj is None:
                 continue
-            d = B.candidate_decision(bundle, obj) if kind == "candidate" else decisions.get(("missing_value", i))
+            d = (B.candidate_decision(bundle, obj, decisions, index["conflict_ids_of"]) if kind == "candidate"
+                 else decisions.get(("missing_value", i)))
             u = B.upgraded_before(bundle, obj.get("target_field_path"), d)
             if u is not None:
                 report["composed_only_by_this_build"].append({
@@ -437,18 +480,18 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[di
     # THE ABSORBER (sidecar only: the official schema has no field for it). A scientist's
     # set_absorber decision gives the value; otherwise the files' suggestion is carried with
     # value null, exactly as the hosted path carries an unconfirmed edge.
-    absorber = _absorber_implicit(bundle, group)
+    absorber = _absorber_implicit(bundle, group, index["absorber"])
     if absorber:
         draft["implicit"] += absorber
         report["absorber"] = {"element": absorber[0]["value"], "edge": absorber[1]["value"],
                               "confirmed": absorber[0]["value"] is not None}
 
     # processing (series, qc, E0 descriptor) — ONLY an approved result
-    mine = [r for r in bundle.get("processing_results") or () if r["group_id"] == group["group_id"]]
+    mine = list(index["processing_of"].get(group["group_id"], ()))
     approved = [r for r in mine if r["state"] == B.STATE_SCIENTIST_CONFIRMED and not B.processing_not_applicable(r)]
     # A group whose LATEST result says the protocol does not apply cannot get an approved
     # curve from it: that is a blocking reason in its own words, never a fake approval.
-    latest_na = B.processing_blocked_groups(bundle).get(group["group_id"])
+    latest_na = index["processing_blocked"].get(group["group_id"])
     not_applicable = [latest_na] if latest_na else []
     blocked_by_protocol = latest_na is not None
     if len(approved) > 1:
@@ -457,7 +500,7 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[di
         r = approved[0]
         pid = B.processing_id(r)
         # the APPROVAL (latest state decision): a later select_athena_version never stands in for it
-        d = B.processing_state_decisions(bundle)[("processing_result", pid)]
+        d = index["processing_state"][("processing_result", pid)]
         conf = _confirmation({**d, "value": f"approved {pid}"}, f"Approve processing result {pid}")
         used: dict[str, Any] = {"result": pid, "group_id": group["group_id"]}
         files = (r.get("outputs") or {}).get("files") or []
@@ -586,7 +629,11 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path) -> tuple[di
     # and only as a number exactly as answered. No mode is derived from a set-point, nor a set-point
     # from a mode, nor a current density from a current and an area: an unanswered mode requires nothing.
     control = fields.get(B.CONTROL_MODE_PATH, {}).get("value")
-    required = list(B.required_record_paths(control_mode=control if isinstance(control, str) else None))
+    mode = control if isinstance(control, str) else None
+    by_mode = index["required_by_mode"]
+    if mode not in by_mode:
+        by_mode[mode] = tuple(B.required_record_paths(control_mode=mode))
+    required = list(by_mode[mode])
     required += list(B.PORTAL_REQUIRED_PATHS)
     if "context.reaction.name" in fields:
         required += list(B.REACTION_REQUIRED_PATHS)

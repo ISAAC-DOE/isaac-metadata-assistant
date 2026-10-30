@@ -1269,19 +1269,35 @@ def final_value(base_value: Any, decision: Mapping | None, readings: Sequence | 
 _final_value = final_value  # LOCAL-1 name, kept
 
 
-def candidate_decision(bundle: Mapping, candidate: Mapping, decision_of=None) -> Mapping | None:
+def candidate_decision(bundle: Mapping, candidate: Mapping, decision_of=None, conflict_ids_of=None) -> Mapping | None:
     """The decision that governs a candidate: the LATER of one naming the candidate and
-    one naming its conflict (a person resolving a conflict decides its value)."""
-    decisions = list(bundle.get("scientist_decisions") or ())
+    one naming its conflict (a person resolving a conflict decides its value).
+
+    ``decision_of`` (:func:`_decisions_by_target`) and ``conflict_ids_of`` (:func:`conflict_ids_by_candidate`),
+    when a caller built them once for this bundle, save re-reading the whole decision log and conflict list."""
     if decision_of is None:
-        decision_of = _decisions_by_target(decisions)
+        decision_of = _decisions_by_target(bundle.get("scientist_decisions") or ())
     own = decision_of.get(("candidate", candidate["candidate_id"]))
-    conflict_ids = [c["conflict_id"] for c in bundle["conflicts"] if c.get("candidate_id") == candidate["candidate_id"]]
+    if conflict_ids_of is None:
+        conflict_ids = [c["conflict_id"] for c in bundle["conflicts"] if c.get("candidate_id") == candidate["candidate_id"]]
+    else:
+        conflict_ids = conflict_ids_of.get(candidate["candidate_id"], ())
     via = [decision_of.get(("conflict", cid)) for cid in conflict_ids]
     options = [d for d in [own, *via] if d is not None]
     if not options:
         return None
+    if len(options) == 1:
+        return options[0]
+    decisions = list(bundle.get("scientist_decisions") or ())
     return max(options, key=lambda d: decisions.index(d) if d in decisions else -1)
+
+
+def conflict_ids_by_candidate(bundle: Mapping) -> dict[str, list[str]]:
+    """``{candidate_id: [conflict_id, ...]}`` in bundle order: the conflicts :func:`candidate_decision` reads."""
+    out: dict[str, list[str]] = {}
+    for c in bundle["conflicts"]:
+        out.setdefault(c.get("candidate_id"), []).append(c["conflict_id"])
+    return out
 
 
 # --- the SSRL XDC scan start time, and the instrument clock's time zone (1.4.0) ---------------

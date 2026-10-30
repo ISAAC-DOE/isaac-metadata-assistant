@@ -1085,3 +1085,62 @@ describe('audit fixes', () => {
     expect(await within(card).findByText(COPY.copied)).toBeInTheDocument();
   });
 });
+
+describe('review round 2: the minimum’s unasked fields and the counts the split leaves out are shown', () => {
+  const minimum = {
+    group_id: 'g2',
+    blocking_questions: 0,
+    plus_decisions: ['confirm the group'],
+    questions: [],
+    unasked_required: [
+      { path: 'sample.sample_form', answerable: false, reason: 'SERVER-SAID: reason', command: 'isaac bundle decide …' },
+      { path: 'context.environment', answerable: false, reason: 'SERVER-SAID: reason', command: 'isaac bundle decide …' },
+    ],
+  };
+  const notCounted =
+    'Neither blocking nor counted as optional: 2 disagreement(s) about something no record field holds (settling one ' +
+    'changes no record); 1 question(s) about runs no record group holds (no record is built from them).';
+
+  it('the progress overview names the unasked fields and the two counts', async () => {
+    vi.stubEnv('VITE_ISAAC_LOCAL_IMPORTS', '1');
+    stubFetchRoutes({
+      'GET /api/local-bundles': { body: listBody },
+      'GET /api/local-bundles/synthetic-beamtime/progress': {
+        body: {
+          ...progressBody,
+          progress: {
+            ...progressBody.progress,
+            questions: { total: 8, blocking: 1, conflicts_affecting_a_record: 0, optional: 4, conflicts_without_a_record_field: 2, outside_live_groups: 1 },
+            minimum_for_one_group: minimum,
+          },
+        },
+      },
+    });
+    renderAt(ROUTES.localImports);
+    expect(await screen.findByTestId('li-not-counted')).toHaveTextContent(notCounted);
+    expect(
+      screen.getByText(/group g2 needs 2 required fields no question asks yet: sample form, environment; plus: confirm the group\./),
+    ).toBeInTheDocument();
+  });
+
+  it('the questions page shows the two counts beside its own, and nothing when both are zero', async () => {
+    vi.stubEnv('VITE_ISAAC_LOCAL_IMPORTS', '1');
+    const body = questionsBody([envQ]);
+    stubFetchRoutes({
+      'GET /api/local-bundles': { body: listBody },
+      [`GET ${QPATH}`]: { body: { ...body, counts: { ...body.counts, conflicts_without_a_record_field: 2, outside_live_groups: 1 }, minimum_for_one_group: minimum } },
+    });
+    const view = renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    expect(await screen.findByTestId('li-not-counted')).toHaveTextContent(notCounted);
+    expect(screen.getByText(/needs 2 required fields no question asks yet: sample form, environment/)).toBeInTheDocument();
+    view.unmount();
+    __resetLocalImportsAvailability();
+    stubFetchRoutes({
+      'GET /api/local-bundles': { body: listBody },
+      [`GET ${QPATH}`]: { body: { ...body, counts: { ...body.counts, conflicts_without_a_record_field: 0, outside_live_groups: 0 } } },
+    });
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    expect(await screen.findByRole('heading', { level: 2, name: /Questions/ })).toBeInTheDocument();
+    expect(screen.queryByTestId('li-not-counted')).toBeNull();
+  });
+});

@@ -26,6 +26,7 @@ import {
   localReasonCodeOf,
   localReasonOf,
   nearestRecordText,
+  notCountedText,
   perGroupScopes,
   regroupCommand,
   rememberName,
@@ -269,6 +270,11 @@ function ProgressBlock({ name }: { name: string }) {
           {p.questions && typeof p.questions.total === 'number'
             ? `${p.questions.total} (${p.questions.blocking ?? 0} blocking export, ${p.questions.optional ?? 0} optional)`
             : 'Not available for this bundle'}
+          {notCountedText(p.questions) && (
+            <div className="li-meta" data-testid="li-not-counted">
+              {notCountedText(p.questions)}
+            </div>
+          )}
         </dd>
         <dt>Record groups</dt>
         <dd>
@@ -628,6 +634,11 @@ function QuestionsBody({
           record, {data.counts.optional} optional)
         </span>
       </h2>
+      {notCountedText(data.counts) && (
+        <p className="li-meta" data-testid="li-not-counted">
+          {notCountedText(data.counts)}
+        </p>
+      )}
       {data.minimum_for_one_group && (
         <p className="li-note">
           {COPY.nearestRecord}: {nearestRecordText(data.minimum_for_one_group)}

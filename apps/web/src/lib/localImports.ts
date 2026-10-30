@@ -69,6 +69,18 @@ export interface LocalValidationReport {
   older_than_bundle: boolean;
 }
 
+/** `questions.question_counts`: the tier-3 counts are split so none is counted twice. */
+export interface LocalQuestionCounts {
+  total: number;
+  blocking: number;
+  conflicts_affecting_a_record: number;
+  optional: number;
+  /** Disagreements about something no record field holds: settling one changes no record. */
+  conflicts_without_a_record_field?: number;
+  /** Questions whose every target is in a run no live record group holds: no record is built from them. */
+  outside_live_groups?: number;
+}
+
 export interface LocalProgress {
   check: LocalBundleCheck;
   runs: number | null;
@@ -80,12 +92,16 @@ export interface LocalProgress {
   readiness: { stage?: string | null; eligible_value_count?: number | null; blocking?: Record<string, number> | null; official_record_ready: false };
   missing_share: null;
   missing_share_statement: string;
-  questions: { total?: number; blocking?: number; conflicts_affecting_a_record?: number; optional?: number; unavailable?: string } | null;
+  questions: (Partial<LocalQuestionCounts> & { unavailable?: string }) | null;
   /** `group_id` is null when every live group has nothing left here (`statement` says so). */
   minimum_for_one_group: {
     group_id: string | null;
     blocking_questions: number;
     plus_decisions: string[];
+    /** The open questions that fill the fields the record composer lists as missing (one per field). */
+    questions?: { question_id: string; fields: string[]; only: string | null; deferred?: boolean }[];
+    /** Fields the composer requires that no open question asks, with why and the command that settles it. */
+    unasked_required?: { path: string; answerable: boolean; reason: string; command: string; targets?: number }[];
     blocked?: string;
     groups_with_nothing_left?: number;
     statement?: string;
@@ -237,7 +253,7 @@ export interface LocalAthenaSelection {
 
 export interface ApiLocalQuestions {
   bundle: LocalBundleHeader;
-  counts: { total: number; blocking: number; conflicts_affecting_a_record: number; optional: number };
+  counts: LocalQuestionCounts;
   blocking_basis: { schema: string; source: string; commit: string | null };
   total: number;
   offset: number;
@@ -615,6 +631,11 @@ export const LOCAL_IMPORTS_COPY = {
   selectAthena: 'Use this version',
   athenaQuestion: 'Which Athena version is the final result for',
   nearestRecord: 'Closest to a finished record',
+  unaskedRequiredOne: 'required field no question asks yet',
+  unaskedRequiredMany: 'required fields no question asks yet',
+  conflictsWithoutField: 'disagreement(s) about something no record field holds (settling one changes no record)',
+  outsideLiveGroups: 'question(s) about runs no record group holds (no record is built from them)',
+  notCountedAbove: 'Neither blocking nor counted as optional',
   failedToRead: 'The server refused to read this.',
   notIsaac: 'Something other than this ISAAC server answered (a web page, not data). Check that the server on this computer is running, then try again.',
   retry: 'Retry',
@@ -775,6 +796,37 @@ export function ianaZones(): string[] {
  *  that nothing is left here. */
 export function nearestRecordText(m: NonNullable<LocalProgress['minimum_for_one_group']>): string {
   if (m.group_id === null) return m.statement ?? 'No record group has anything left to answer here.';
-  const plus = m.plus_decisions.length > 0 ? `, plus: ${m.plus_decisions.join('; ')}` : '';
-  return `group ${m.group_id} needs ${m.blocking_questions} blocking answer(s)${plus}.${m.blocked ? ` ${m.blocked}.` : ''}`;
+  // the required fields no question asks are NAMED, never counted as answers to give
+  const unasked = m.unasked_required ?? [];
+  const answers = m.questions ? m.questions.length : m.blocking_questions;
+  const parts = answers > 0 || unasked.length === 0 ? [`${answers} blocking answer(s)`] : [];
+  if (unasked.length > 0) {
+    const words = unasked.length === 1 ? LOCAL_IMPORTS_COPY.unaskedRequiredOne : LOCAL_IMPORTS_COPY.unaskedRequiredMany;
+    parts.push(`${unasked.length} ${words}: ${unasked.map((u) => fieldWords(u.path)).join(', ')}`);
+  }
+  const plus = m.plus_decisions.length > 0 ? `${unasked.length > 0 ? ';' : ','} plus: ${m.plus_decisions.join('; ')}` : '';
+  return `group ${m.group_id} needs ${parts.join(' and ')}${plus}.${m.blocked ? ` ${m.blocked}.` : ''}`;
+}
+
+/** Last path segments that say nothing alone ("group", "name"): their parent is named with them. */
+const VAGUE_FIELD = new Set(['name', 'group', 'organization', 'value', 'type', 'status', 'id']);
+
+/** A record field path in plain words: its last segment ("sample.sample_form" → "sample form"), with its parent
+ *  when the last segment alone says nothing ("attribution.produced_by.group" → "produced by group"). */
+export function fieldWords(path: string): string {
+  const segs = path.split('.').map((x) => x.replace(/\[\]$/, '').replace(/_/g, ' '));
+  const last = segs[segs.length - 1] ?? path;
+  return VAGUE_FIELD.has(last) && segs.length > 1 ? `${segs[segs.length - 2]} ${last}` : last;
+}
+
+/** The short line naming the open questions the blocking / optional split leaves out (the server's tier-3 split:
+ *  `questions.question_counts`), or null when both are zero or the server does not send them. */
+export function notCountedText(c: LocalProgress['questions'] | LocalQuestionCounts | undefined): string | null {
+  const fieldless = c?.conflicts_without_a_record_field ?? 0;
+  const outside = c?.outside_live_groups ?? 0;
+  const parts = [
+    ...(fieldless > 0 ? [`${fieldless} ${LOCAL_IMPORTS_COPY.conflictsWithoutField}`] : []),
+    ...(outside > 0 ? [`${outside} ${LOCAL_IMPORTS_COPY.outsideLiveGroups}`] : []),
+  ];
+  return parts.length > 0 ? `${LOCAL_IMPORTS_COPY.notCountedAbove}: ${parts.join('; ')}.` : null;
 }

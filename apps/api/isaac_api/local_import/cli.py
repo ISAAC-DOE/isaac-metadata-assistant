@@ -1033,7 +1033,8 @@ def cmd_bundle_questions(args) -> int:
 
     def run():
         bundle = M.load(Path(args.bundle_dir))
-        payload = Q.consolidate(bundle)
+        reports: dict = {}  # composed once: consolidate's reports are reused by the minimum below
+        payload = Q.consolidate(bundle, compositions_out=reports)
         rows = Q.filter_questions(payload, scope=args.scope, blocking_only=args.blocking_only)
         kept = [q for q in rows if not (args.skip_deferred and q.get("deferred"))]
         page = kept[args.offset : args.offset + args.limit]
@@ -1054,7 +1055,7 @@ def cmd_bundle_questions(args) -> int:
             "omitted_after": max(0, len(kept) - args.offset - len(page)),
             **({"skipped_deferred": len(rows) - len(kept)} if args.skip_deferred else {}),
             "minimum_for_one_group": Q.minimum_answers_for_one_group(payload, bundle, scope=args.scope,
-                                                                     bundle_dir=Path(args.bundle_dir)),
+                                                                     bundle_dir=Path(args.bundle_dir), reports=reports),
             **({"questions": page} if args.with_targets else _compact_page(page)),
         }
 

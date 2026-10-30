@@ -48,6 +48,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
+import operator
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -116,14 +117,16 @@ _OUTSIDE_LIVE_GROUPS = ("Not blocking: every target is in a run no live record g
                         "or split, or it was never grouped), so no record is built from it.")
 
 
-def compositions(bundle: Mapping, bundle_dir: Path | None = None) -> dict[str, dict]:
+def compositions(bundle: Mapping, bundle_dir: Path | None = None, *,
+                 decision_of: Mapping[tuple[str, str], Mapping] | None = None) -> dict[str, dict]:
     """``{group_id: composition report}`` for every LIVE record group, whatever its status: THE
     ``records.compose_group`` computation ``build-records`` and ``validate`` use, so "blocking" and the nearest
     group are judged by what the composer actually requires, never by a second reading of the schema.
 
     Without ``bundle_dir`` no processing file is read: the composer then sees no processing result, so its
     processing-derived entries (series, QC status, outputs) are not meaningful and callers use only the
-    entries ``from`` :data:`FROM_AN_ANSWER`."""
+    entries ``from`` :data:`FROM_AN_ANSWER`. ``decision_of``: :func:`bundle._decisions_by_target` of this bundle, when
+    the caller already built it."""
     from . import records as R
 
     view = bundle if bundle_dir is not None else {**bundle, "processing_results": []}
@@ -137,14 +140,21 @@ def compositions(bundle: Mapping, bundle_dir: Path | None = None) -> dict[str, d
     for kind in ("candidates", "missing_values"):
         for n, obj in enumerate(bundle[kind]):
             by_run.setdefault(obj.get("run_id"), {"candidates": [], "missing_values": []})[kind].append((n, obj))
+    # THE WHOLE-BUNDLE READS (decision log, conflicts, processing) once for every group, never once per group
+    index = R.composition_index(view, decision_of=decision_of)
     out = {}
     for g in live_groups(bundle):
         runs = [None] + [run_key_to_id[k] for k in g.get("member_run_keys") or () if k in run_key_to_id]
-        part = {kind: [o for _, o in sorted((x for r in dict.fromkeys(runs) for x in (by_run.get(r) or {}).get(kind, ())),
-                                             key=lambda x: x[0])]
-                for kind in ("candidates", "missing_values")}
-        out[g["group_id"]] = R.compose_group({**view, **part}, g, where)[1]
+        part = {}
+        for kind in ("candidates", "missing_values"):
+            rows = [x for r in dict.fromkeys(runs) for x in (by_run.get(r) or {}).get(kind, ())]
+            rows.sort(key=_first)  # bundle order: each run's rows already are, so this merges them
+            part[kind] = [o for _, o in rows]
+        out[g["group_id"]] = R.compose_group({**view, **part}, g, where, index)[1]
     return out
+
+
+_first = operator.itemgetter(0)
 
 
 def _answer_missing(report: Mapping) -> list[str]:
@@ -247,8 +257,12 @@ def _qid(*parts: str) -> str:
     return "Q-" + hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:10]
 
 
-def consolidate(bundle: Mapping) -> dict:
-    """``questions.json`` v2 for ``bundle``. Pure: reads the bundle, writes nothing."""
+def consolidate(bundle: Mapping, *, compositions_out: dict | None = None) -> dict:
+    """``questions.json`` v2 for ``bundle``. Pure: reads the bundle, writes nothing.
+
+    ``compositions_out``, when given, receives the composer's report per live group that "blocking" was judged
+    by (:func:`compositions`, no processing file read), for :func:`minimum_answers_for_one_group` to reuse on
+    this same, unchanged bundle instead of composing every group again."""
     schema, basis = _target_schema()
     # THE SET-POINT A CONTROL MODE NEEDS (1.5.0): the target schema's conditional rules make the
     # set-point required for some modes, so a run whose mode a file states or a scientist confirmed
@@ -864,7 +878,10 @@ def consolidate(bundle: Mapping) -> dict:
         return (q["tier"], bool(q.get("informational")), bool(q.get("deferred")), s, q["target_field_path"] or "", q["question_id"])
 
     if has_groups:
-        basis = {**basis, "record_composer": _agree_with_composer(questions, bundle, group_of, cand_by_id)}
+        reports = compositions(bundle, decision_of=decisions)
+        if compositions_out is not None:
+            compositions_out.update(reports)
+        basis = {**basis, "record_composer": _agree_with_composer(questions, bundle, group_of, cand_by_id, reports)}
     _note_shared_evidence(questions, cand_by_id, bundle)
     _mark_deferred(questions, decisions)
     questions.sort(key=order)
@@ -922,7 +939,7 @@ def scope_counts(payload: Mapping, scope: str | None) -> dict:
 
 
 def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mapping[str, str],
-                         cand_by_id: Mapping[str, Mapping]) -> dict:
+                         cand_by_id: Mapping[str, Mapping], reports: Mapping[str, Mapping]) -> dict:
     """BLOCKING IS WHAT THE RECORD COMPOSER REQUIRES (records.compose_group, the list ``build-records`` and
     ``validate`` report): a value question blocks exactly when, for at least one LIVE record group it reaches,
     the composer lists one of its fields as missing and only an answer can supply it. So a conditionally
@@ -932,7 +949,6 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
     and ``why`` change, and what was decided is stated in ``blocks_groups`` / ``required_fields``."""
     from .records import RUN_ONLY_PATHS
 
-    reports = compositions(bundle)
     missing = {gid: set(_answer_missing(rep)) for gid, rep in reports.items()}
     filled = {gid: {f["path"] for f in rep.get("filled") or ()} for gid, rep in reports.items()}
     every = set(missing)
@@ -956,6 +972,14 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
             return every
         return {group_of[rid]} if rid in group_of else set()
 
+    needed_by: dict[str, set[str]] = {}
+
+    def needs(path: str) -> set[str]:
+        """The live groups the composer lists a field as missing for that an answer at ``path`` fills (once per path)."""
+        if path not in needed_by:
+            needed_by[path] = {g for g, ms in missing.items() if any(_fills(path, m) for m in ms)}
+        return needed_by[path]
+
     changed = 0
     for q in questions:
         if q["kind"] not in VALUE_KINDS or q.get("informational") or q.get("no_record_field"):
@@ -968,7 +992,7 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
             for tid in ids:
                 gs = reached(kinds.get(tid, ""), tid, path)
                 groups_reached |= gs
-                hit = {g for g in gs if any(_fills(path, m) for m in missing[g])}
+                hit = gs & needs(path)
                 if hit:
                     needing |= hit
                     fields.add(path)
@@ -1450,7 +1474,7 @@ def _unasked(bundle: Mapping, group: Mapping, path: str, report: Mapping) -> dic
 
 
 def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str | None = None,
-                                  bundle_dir: Path | None = None) -> dict | None:
+                                  bundle_dir: Path | None = None, reports: Mapping[str, Mapping] | None = None) -> dict | None:
     """The fewest answers that stand between one record group and export, judged by THE RECORD COMPOSER
     (:func:`compositions`: the missing-required list ``build-records`` and ``validate`` report): for each field the
     composer lists as missing for the group that only an answer supplies, ONE open question that fills it
@@ -1472,13 +1496,24 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
     measurement run) — is never offered as "the nearest" while another exists, and one whose curve FAILED QC only
     after every group without one. When only such groups are left, ``blocked`` says why, never "approve its
     processing result". ``bundle_dir`` lets the composer read the approved processing files (a changed file then
-    shows as what is missing); without it only the answer-supplied fields are composed."""
+    shows as what is missing); without it only the answer-supplied fields are composed.
+
+    ``reports``: the reports :func:`consolidate` composed for this same, unchanged bundle (its
+    ``compositions_out``), reused instead of composing every live group again. They read no processing file, which
+    changes nothing used here except for a group with an approved processing result (its curve, QC status and
+    outputs): with ``bundle_dir`` such a group, and any group the reports lack, is composed again here."""
     blocked = processing_blocked_groups(bundle)
     wanted = scope[len("group:"):] if isinstance(scope, str) and scope.startswith("group:") else None
     live = [g for g in live_groups(bundle) if wanted is None or g["group_id"] == wanted]
     if not live:
         return None
-    reports = compositions({**bundle, "record_groups": live}, bundle_dir)
+    if reports is None:
+        reports = compositions({**bundle, "record_groups": live}, bundle_dir)
+    else:
+        again = [g for g in live if g["group_id"] not in reports
+                 or (bundle_dir is not None and _curve(bundle, g["group_id"])["state"] == "approved")]
+        reports = {**{g["group_id"]: reports[g["group_id"]] for g in live if g["group_id"] in reports},
+                   **(compositions({**bundle, "record_groups": again}, bundle_dir) if again else {})}
     # INDEXED once: (composer path, the groups each (question, field) reaches, or every group via a beamtime target)
     asks: list[tuple[str, dict, str, set, bool]] = []
     for q in payload["questions"]:
@@ -1489,6 +1524,15 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
             mine = set(ids)
             groups = {sc[len("group:"):] for sc, tids in pst.items() if sc.startswith("group:") and mine.intersection(tids)}
             asks.append((_composer_path(field), q, field, groups, bool(mine.intersection(pst.get("experiment", ())))))
+    # ...and which of them each group can use (in that order): every beamtime-wide one, plus its own
+    everywhere: list[int] = []
+    asks_of: dict[str, list[int]] = {}
+    for i, (_, _, _, groups, anywhere) in enumerate(asks):
+        if anywhere:
+            everywhere.append(i)
+        else:
+            for owner in groups:
+                asks_of.setdefault(owner, []).append(i)
     best = None
     done: list[str] = []
     for n, g in enumerate(live):
@@ -1496,10 +1540,11 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
         rep = reports[gid]
         chosen: dict[str, dict] = {}
         unasked: list[dict] = []
+        usable = [asks[i] for i in sorted(everywhere + asks_of.get(gid, []))]
         for path in _answer_missing(rep):
             options, seen = [], set()
-            for cpath, q, field, groups, everywhere in asks:
-                if (cpath == path or cpath.startswith(path + ".")) and (everywhere or gid in groups) and q["question_id"] not in seen:
+            for cpath, q, field, _, _ in usable:
+                if (cpath == path or cpath.startswith(path + ".")) and q["question_id"] not in seen:
                     seen.add(q["question_id"])
                     options.append((not q["blocking"], bool(q.get("deferred")), q["scope"] != "experiment", q, field))
             if not options:
