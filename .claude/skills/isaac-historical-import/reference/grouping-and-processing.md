@@ -18,10 +18,16 @@ Get the groups with `bundle list <bundle> groups` and one in full with `bundle s
 - merge → three steps: `decide --target <group id> --decision merge --merge-with <other group ids> --by "<name>"`
   (refused unless `--merge-with` names another live record group of this bundle), then
   `bundle group <bundle> --regroup`, then confirm the ONE combined group it proposes. The regroup
-  combines them only when nothing recorded tells them apart (any differing file-name token blocks
-  it); otherwise it keeps a merge candidate saying why. Tell the scientist which happened. The
-  regroup also lists older merge decisions it could not apply (`merge_decisions_not_combined`):
-  say each in words. If the names differ only in a run counter, answer the counter question instead.
+  combines them when the names differ only at positions the scientist declared counters, or only in a
+  repeat marker (`again`, `repeat`, `rep2`, `redo`), or when the scientist confirmed the same sample for
+  every run; runs whose conditions differ, or whose names differ in a quantity (`400mV`, `0p5wt`), are
+  never combined. Tell the scientist which happened. When it could not combine them it lists the
+  merge in `merge_decisions_not_combined`, with a reason and `next_commands` (the counter answer, or
+  one sample confirmation per run): say the reason in words and offer exactly those steps, asking the
+  scientist for any value they need; then regroup again.
+- a merge candidate with `caution` (its file names state different samples or conditions, or the build
+  classified no condition at all): say the caution sentence first; merging such groups would usually
+  make one wrong record. `bundle show <bundle> merge-candidate <id>` shows its run labels (no values).
 - a merge candidate the scientist says is two distinct things → `decide --target <mc id> --decision
   keep_apart --by "<name>"` (no group changes).
 - Say "7 of 12 groups confirmed" after each batch. A reference or alignment run is its own group.
@@ -80,7 +86,8 @@ element or edge from a file name.
   names. Say so, and ask the scientist to confirm or split.
 - `naming_counter_positions` (an experiment-scope question): which positions of the file name are running
   counters, not sample identity. Ask once. Answer with `decide <bundle> --target experiment --decision
-  set_counter_positions --positions 2,3 --by "<name>"`, then `bundle group <bundle> --regroup` (decided
+  set_counter_positions --positions 2,3 --by "<name>"` (`--positions last` when the counter is
+  always the last token, whatever the name's length), then `bundle group <bundle> --regroup` (decided
   groups are kept). When they say a position is NOT a counter: `decide <bundle> --target experiment
   --decision set_not_counter_positions --positions 2 --by "<name>"` (grouping is unchanged; the
   question drops out).

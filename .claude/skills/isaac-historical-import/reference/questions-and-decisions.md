@@ -100,9 +100,13 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
   Electrolyte is the name only: "0.1 M KOH" goes in as Electrolyte `KOH` and Electrolyte
   Concentration (M) `0.1` (ISAAC's added columns, with pH, after Gas Feed). Take the split from the
   scientist; do not split it for them. Answer cells are empty;
-  `ISAAC Suggestions` shows extracted values, hints and AI readings with file and locator.
-- Import: `<isaac> bundle template import <bundle> <file.xlsx> --by "<name>"` previews; add
-  `--apply` only after the scientist has seen the preview. Each cell becomes decisions; each note
+  `ISAAC Suggestions` shows that run's own extracted values, hints and AI readings with file and
+  locator. Campaign Info also holds "Your group" and "Your organization (who produced the data)"
+  (distinct from "Facility organization") and "Domain"; File List ends with "Reaction Drive" and
+  "Reaction Catalysis" (dropdowns of their allowed values). A sheet exported by an older build (the old
+  "Organization" label) still imports.
+- Import: `<isaac> bundle template import <bundle> <file.xlsx> --by "<name>"` previews compactly
+  (one line per cell or column; `--full` for every decision); add `--apply` only after the scientist has seen the preview. Each cell becomes decisions; each note
   cites its cell. Invalid cells (not an allowed value exactly, not a number) record nothing.
 - A cell that disagrees with an earlier decision is a clash and is skipped. Use `--supersede` only
   when the scientist says the sheet is the newer answer.

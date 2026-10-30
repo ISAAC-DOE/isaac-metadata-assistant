@@ -130,19 +130,23 @@ the conditions, how many scans, and why runs were split ("these two differ in po
 them because the rest matches; please confirm"; `sample_key_basis: name_stem` = "I grouped these by
 their file names because no file states the sample; please confirm". The experiment question
 `naming_counter_positions` asks which filename positions hold a counter; answer it once:
-`decide <bundle> --target experiment --decision set_counter_positions --positions N --by "<name>"`, then
-`bundle group <bundle> --regroup`. (The other experiment question, `clock_time_zone`, asks the instrument clock's
+`decide <bundle> --target experiment --decision set_counter_positions --positions N --by "<name>"`
+(`--positions last` when the counter is always the last token), then `bundle group <bundle> --regroup`. (The other experiment question, `clock_time_zone`, asks the instrument clock's
 time zone for SSRL XDC scan start times: `--decision set_clock_time_zone --value <IANA name>`; never suggest one —
 see `reference/questions-and-decisions.md`.) Ask the
 scientist to **confirm, split or merge** each, in batches, with progress; a group that is not a result
 at all (alignment, a reference foil, a test scan) can be **left out**: `--decision reject` (it is never
-exported; say so). Record with `decide
+exported; say so). When the scientist accepts several groups as shown, confirm them together: write
+the group ids to a notes file (one per line) and `decide <bundle> --targets-file <file> --decision confirm
+--by "<name>"`, after listing each group back. Record with `decide
 --decision confirm|split|merge` (`--split-into` takes a JSON list of lists of run keys, which you
 build; they never type it; `merge` needs `--merge-with` naming another live group, then a regroup and
 a confirm of the combined group). A merge candidate they say is distinct: `--target <mc id> --decision
 keep_apart`. Positions they say are NOT counters: `--target experiment --decision set_not_counter_positions
 --positions N`.
-After a regroup, report any `merge_decisions_not_combined` in words.
+After a regroup, report any `merge_decisions_not_combined` in words and offer its `next_commands`
+(never run one without the scientist's answer). A merge candidate with `caution` names different
+samples or conditions: say that first.
 
 ## Step 6 · Processing (a DRAFT protocol)
 
@@ -150,9 +154,12 @@ After a regroup, report any `merge_decisions_not_combined` in words.
 imported; by default the bundle does not record the path, so without it `process` refuses and writes
 nothing; a ZIP import needs the unzipped folder, since processing reads a folder;
 `--no-athena` skips the scientist's own Athena projects). `--group <id>` (with `--source`) redoes only
-that group; every other group's result is kept as it was (`kept_other_groups`). Results are in `<bundle>/processing/processing_results.json`,
-with a `plot.png` and `qc.json` per result in `<bundle>/processing/<group id>/<run id>/` (each result's
-`outputs.files` names them). For each group show:
+that group; every other group's result is kept as it was (`kept_other_groups`). Rejected, merged and
+split groups are skipped (`not_live_groups`). Never read `processing_results.json` (it can be over a MB):
+`<isaac> bundle list <bundle> processing-results --limit 20` gives each result's `result_id`, verdict,
+applicability, failure, flags, key metrics, `plot` path and Athena agreement, a page at a time; the plot
+and `qc.json` are in `<bundle>/processing/<group id>/<run id>/`. If `process` says why none of the
+scientist's Athena groups matched (`athena.statement`), tell them in those words. For each group show:
 the quality verdict in words, glitch flags, whether it agrees with the scientist's own Athena
 output when one exists, and the plot: open the PNG with Read and describe it. Ask approve / reject /
 needs changes per group. **A result with `applicability.status: not_applicable` is not a curve and
@@ -167,9 +174,12 @@ in one record" — never present the curve as the whole group. **When approving,
 call and `warn` is never turned into a status for them. Show the allowed words (today `valid`,
 `compromised`, `failed`, `pending`; `decide` refuses any other and lists them) and the QC flags:
 `decide --target <result_id> --decision approve --qc-status <word> [--qc-note "<what is compromised or
-failed, and why>"] --by "<name>"` (`result_id` is in `processing_results.json`, e.g.
+failed, and why>"] --by "<name>"` (`result_id` from `list processing-results`, e.g.
 `proc-rg-…-r-<hash>-isaac`; ask for a note when the status says something is wrong). Reject / needs
-changes use the same `--target`. If a result lists several of their Athena versions, ask which is the
+changes use the same `--target`. **A result with no curve** (no output file, e.g. `no_usable_scan`)
+cannot be approved (`decide` refuses): say why in words, and offer reject, or `needs_changes` (the
+protocol needs a different setting the scientist chooses; only on their explicit choice re-process it
+with `--params-file`), or leaving the group out (`reject` on the group). If a result lists several of their Athena versions, ask which is the
 result of record: `--decision select_athena_version --value <version id>` (it approves nothing). **Calibration shift.** If a result's flags say the calibration reference is unconfirmed, or processing proposes
 shifting the energy axis, do not apply anything. Explain in plain words: "The curve could be moved a
 little in energy so a reference foil's edge lands where it should. I need you to tell me which
@@ -191,6 +201,8 @@ exact `decide --question` command. Lead with the minimum: "**N answers make grou
 N groups; answer once, or tell me which groups differ" (`--only group:<id>` overrides one group).
 Then conflicts that affect a record, then the optional rest only if the scientist wants them
 (`--scope group:<id>` shows one group). Batch 3 to 5 per message, by theme, with progress.
+**More than about 5 groups:** per-group questions would take dozens of messages. After the
+experiment-scope questions, offer the template (below) first and ask per group only what it leaves.
 
 - **Closed lists.** When a field has `allowed_values`, map their words to one allowed value, say it
   back ("in situ → `in_situ`, right?") and record it only on their yes. `decide` refuses any value
@@ -209,12 +221,16 @@ a side of a conflict. For several evidence-backed confirmations the scientist ac
 `--targets-file` (list each item back first). A scientist may also answer in the local-only *Local
 Imports* web page (`docs/ui-local-dev.md`); it runs the same checks. Run `bundle questions` again after.
 
-**Then offer the template** for everything the files never state (facility, beamline,
-environment, cell type, reaction, sample form and formula): "I can give you one spreadsheet to
+**Then offer the template** for everything the files never state (facility, beamline, who
+produced the data (their group and organization), domain, environment, cell type, reaction with its
+drive and catalysis, sample form and formula): "I can give you one spreadsheet to
 fill in one sitting." `<isaac> bundle template export <bundle> --out <file.xlsx>`; the answer
-cells are empty and the `ISAAC Suggestions` sheet shows what the files say, with where. When they
+cells are empty and the `ISAAC Suggestions` sheet shows what each run's own files say, with where.
+"Facility organization" is the facility's (e.g. SLAC / SSRL); the scientist's own institution goes in
+"Your organization (who produced the data)", their group in "Your group". When they
 return it: `<isaac> bundle template import <bundle> <file.xlsx> --by "<name>"` (a preview, nothing
-written), read the preview back (decisions, invalid cells, clashes, columns recorded nowhere), and
+written), read the preview back (one line per cell or column with its decision count, then every invalid
+cell, clash and column recorded nowhere; `--full` lists every decision, only if they want it), and
 only on their yes add `--apply`. Never fill the sheet for them, and never import ISAAC's blank
 template: it holds example values, and import refuses it. Electrolyte is the name only; its
 concentration and the pH have their own columns. Details: `reference/questions-and-decisions.md`.
@@ -230,7 +246,10 @@ Never edit a draft file and never relax a check.
 
 ## Step 9 · Export and dry run
 
-`<isaac> bundle export <bundle> --out <records>` writes only `exportable` records.
+`<isaac> bundle export <bundle> --out <records>` writes only `exportable` records. Its reply gives counts (`refused_total`,
+`refused_by_reason`, `missing_required_by_field`) and the first 3 refusals; `--full` lists all. **If
+nothing is exportable**, export writes nothing: do not run the dry run (there is nothing to show); say "no record
+is ready yet", name what blocks the nearest group (from Step 8), and stop at Step 10.
 `<isaac> bundle upload <records> --dry-run` shows what *would* be sent: summarise it (how many
 records, where to) and say **nothing was sent and this build cannot send**. The scientist uploads
 through the ISAAC portal themselves.

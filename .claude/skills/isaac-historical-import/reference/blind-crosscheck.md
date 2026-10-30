@@ -8,6 +8,9 @@ code error can be caught instead of echoed. It is a spot check, never a verifica
 1. `crosscheck-plan <bundle> --limit 30` — ids, categories and file locators. No values.
 2. Choose targets: sample identity, potential/reference basis, reaction, environment, cell type,
    acquisition time. Prefer ones with several sources. Tell the scientist how many you will check.
+   Items carry `field_path`, `excerptable`, `locators` (at most 5) and `locators_total`, high-value
+   items first. Only `excerptable: true` items can be read blind; a missing value (`excerptable: false`)
+   has no source text, so it goes to the scientist as a question, never into the cross-check count.
 3. For each target: `excerpt <bundle> <id> --source <folder>` — the raw source text at that locator.
 4. Read it. Write down what YOU read (a short value and the quote's locator).
 5. `annotate <bundle> --target <id> --value "<your reading>" --excerpt-locator "<where>" --source-id <src> --model "<your model name>" --blind --rationale "<one line>"`.

@@ -26,5 +26,6 @@
 | the scientist asks to upload | "This build can only show what would be sent. Upload through the ISAAC portal." | `upload --dry-run` only |
 
 Never retry a refused command with a flag that weakens a check, and never pass `process --params-file`
-to loosen a quality threshold: a changed parameter is the scientist's protocol decision, not a fix. If something is unexpected, show the
+on your own to loosen a quality threshold: a changed parameter is the scientist's protocol decision,
+made explicitly after `needs_changes`, never a way past a refusal. If something is unexpected, show the
 exact message and ask the scientist how to proceed.
