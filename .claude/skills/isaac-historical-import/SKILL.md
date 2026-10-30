@@ -149,7 +149,9 @@ changes. **When approving, also ask for the QC status**: the scientist's call, n
 (`--qc-status valid|compromised|failed|pending`, with `--qc-note` when something is wrong).
 Never call a `not_applicable` result a fail or ask to approve it ("no ISAAC processing protocol covers
 this data yet"); a result with **no curve** cannot be approved; offer the reference's three options.
-A calibration shift is applied only after the scientist names the reference's element and edge.
+A calibration shift is applied only after the scientist names the reference's element and edge:
+`decide --target <group id> --decision approve_calibration --element <symbol> --edge <edge> --by "<name>"`,
+then `process --source <folder> --group <group id>` again. No answer, no shift.
 Always say: **the processing protocol is a draft until Oscar and Angel review it**; an approval means
 "I looked at this curve and accept it for this record", not "the method is validated". If processing
 is not installed, say what that costs (no curves, records stay incomplete) and continue.
