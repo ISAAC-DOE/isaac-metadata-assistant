@@ -109,7 +109,9 @@ def test_the_absorber_is_asked_once_and_a_set_absorber_answer_reaches_the_sideca
     out = grouped()
     b = _load(out)
     [q] = [q for q in Q.consolidate(b)["questions"] if q["kind"] == "confirm_absorber"]
-    assert q["blocking"] is False and q["scope"] == "experiment" and "Zz" in q["text"]
+    # built at experiment scope (its id), shown as the one group it applies to (polish c2b)
+    assert q["blocking"] is False and q["id_scope"] == "experiment" and "Zz" in q["text"]
+    assert q["scope"] == f"group:{_group_of(b, 'SYN_cell')['group_id']}"
     assert q["hints"][0]["kind"] == "processed_output_header"
     group = _group_of(b, "SYN_cell")
     draft, report = R.compose_group(b, group, out)
@@ -753,7 +755,8 @@ def test_a_runs_scope_reading_on_a_bigger_group_says_which_runs_it_was_read_for(
     sug = S.absorber_for_group(b, group)
     assert all(r["run_ids"] == [rid] and r["read_for"] == f"read for 1 of 2 runs in this group: SYN_run ({rid})" for r in sug["ai_readings"])
     [q] = [q for q in Q.consolidate(b)["questions"] if q["kind"] == "confirm_absorber"]
-    assert q["scope"] == "experiment" and "2 AI reading(s) name only some of a group's runs (see the hints)" in q["text"]
+    assert q["scope"] == f"group:{group['group_id']}" and q["id_scope"] == "experiment"
+    assert "2 AI reading(s) name only some of a group's runs (see the hints)" in q["text"]
     hints = [h for h in q["hints"] if h["kind"] == "ai_suggestion"]
     assert hints and all("read for 1 of 2 runs in this group: SYN_run" in h["note"] for h in hints)
     assert all(h["read_for"] == [{"group_id": group["group_id"], "run_ids": [rid], "text": f"read for 1 of 2 runs in this group: SYN_run ({rid})"}] for h in hints)

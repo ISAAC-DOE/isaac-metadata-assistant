@@ -927,7 +927,8 @@ def describe_question(bundle: Mapping, q: Mapping, *, folder: str,
     if q.get("informational"):
         # no answer can reach the record from this path yet: shown, never answered
         answer_kind = "informational"
-    settles_many = q.get("scope") == "experiment" and (len(q.get("per_scope_targets") or {}) > 1 or len(targets) > 1
+    # `id_scope`: the scope a one-group question was built at (questions._say_the_one_group), as before
+    settles_many = q.get("id_scope", q.get("scope")) == "experiment" and (len(q.get("per_scope_targets") or {}) > 1 or len(targets) > 1
                                                        or kind in ("naming_counter_positions", "clock_time_zone"))
     return {
         "folder": folder,

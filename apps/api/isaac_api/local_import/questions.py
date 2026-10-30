@@ -87,7 +87,8 @@ ALLOWED_DECISIONS: Mapping[str, tuple[str, ...]] = {
     "optional_values": ("confirm", "correct", "reject", "defer"),
     "confirm_value": ("confirm", "correct", "reject", "defer"),
     "resolve_conflict": ("confirm", "correct", "reject", "defer"),
-    "naming_counter_positions": ("set_counter_positions", B.NOT_COUNTER_DECISION),
+    # `defer` records "I don't know": the question stays, marked deferred; grouping is unchanged by it
+    "naming_counter_positions": ("set_counter_positions", B.NOT_COUNTER_DECISION, "defer"),
     "clock_time_zone": (B.CLOCK_ZONE_DECISION,),
     "confirm_absorber": ("set_absorber", "defer"),
 }
@@ -759,10 +760,12 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None) -> dic
                 "hints": [{"kind": "grouping", "literal": gq.get("examples") or gq.get("options"), "locator": "the grouping step"}],
                 "allowed_values": None,
                 "answered": answered_positions,
+                **({"deferred": deferred} if (deferred := counter_deferral(bundle)) else {}),
                 "answer_command": (
                     'isaac bundle decide <bundle_dir> --target experiment --decision set_counter_positions '
                     '--positions <n[,m] or last> --by "<your name>"  &&  isaac bundle group <bundle_dir> --regroup'
                     f'   # none is a counter: isaac bundle decide <bundle_dir> --question {qid} --decision {B.NOT_COUNTER_DECISION} --by "<your name>"'
+                    f'   # not known: isaac bundle decide <bundle_dir> --question {qid} --decision defer --by "<your name>"'
                 ),
             }
         )
@@ -884,6 +887,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None) -> dic
         basis = {**basis, "record_composer": _agree_with_composer(questions, bundle, group_of, cand_by_id, reports)}
     _note_shared_evidence(questions, cand_by_id, bundle)
     _mark_deferred(questions, decisions)
+    _say_the_one_group(questions)
     questions.sort(key=order)
     for q in questions:
         q.setdefault("allowed_decisions", list(ALLOWED_DECISIONS.get(q["kind"], ())))
@@ -1031,6 +1035,25 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
             "live_groups": len(every), "blocking_changed_to_agree": changed}
 
 
+#: The experiment decisions that answer (or defer) the counter question, latest first wins.
+COUNTER_QUESTION_DECISIONS = ("set_counter_positions", B.NOT_COUNTER_DECISION, "defer")
+
+
+def counter_deferral(bundle: Mapping) -> dict | None:
+    """``{by, decided_utc, decision_id}`` when the LATEST answer to the counter question is ``defer`` ("I don't
+    know"), else ``None``. A later set_counter_positions / set_not_counter_positions answer supersedes it. A
+    defer moves no position and no group (grouping reads only the two position decisions)."""
+    last = None
+    for d in bundle.get("scientist_decisions") or ():
+        if (isinstance(d, Mapping) and d.get("target") == {"kind": "experiment", "id": "experiment"}
+                and d.get("decision") in COUNTER_QUESTION_DECISIONS):
+            last = d
+    if last is None or last.get("decision") != "defer":
+        return None
+    return {"by": (last.get("decided_by") or {}).get("name"), "decided_utc": last.get("decided_utc"),
+            "decision_id": last.get("decision_id")}
+
+
 def _mark_deferred(questions: list[dict], decisions: Mapping[tuple[str, str], Mapping]) -> None:
     """"I DON'T KNOW" IS VISIBLE: a value question whose every target's latest decision is ``defer`` carries
     ``deferred`` (who, when) — still asked, still counted, sorted after the questions not deferred."""
@@ -1042,6 +1065,23 @@ def _mark_deferred(questions: list[dict], decisions: Mapping[tuple[str, str], Ma
             last = max(ds, key=lambda d: (str(d.get("decided_utc") or ""), str(d.get("decision_id") or "")))
             q["deferred"] = {"by": (last.get("decided_by") or {}).get("name"), "decided_utc": last.get("decided_utc"),
                              "decision_id": last.get("decision_id"), "targets": len(ds)}
+
+
+def _say_the_one_group(questions: list[dict]) -> None:
+    """A question built at experiment scope whose every target is in ONE record group says that group.
+
+    A sample field asked per sample reading (partition ``sample=<reading>``) is built at experiment scope, and
+    when only one group holds that reading the question was labelled ``scope: experiment`` while applying to one
+    group (BL6-2c: 69 ``sample.material.name`` and 69 ``sample.sample_form`` questions). The displayed ``scope``
+    is now ``group:<id>``. THE ID IS UNCHANGED (DEC-91): ``_qid`` hashes the scope string the question was built
+    at, which stays ``experiment`` and is kept as ``id_scope``; only the label moves."""
+    for q in questions:
+        pst = q.get("per_scope_targets") or {}
+        if q["scope"] == "experiment" and len(pst) == 1:
+            (only,) = pst
+            if only.startswith("group:"):
+                q["id_scope"] = q["scope"]
+                q["scope"] = only
 
 
 def live_groups(bundle: Mapping) -> list[Mapping]:

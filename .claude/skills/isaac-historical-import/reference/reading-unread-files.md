@@ -41,7 +41,7 @@ Write every finding to ONE JSON file (`isaac.reading_findings`) in a working fol
  "findings": [{
    "field_path": "context.environment",
    "value": "in_situ",
-   "applies_to": {"scope": "runs", "run_labels": ["<runs[].label exactly>"]},
+   "applies_to": {"scope": "runs", "runs": ["<the run's stem, as `bundle list <bundle> runs` prints it>"]},
    "source": {"path": "<relative to the imported folder; ../<name> only for a file beside it the scientist let you open>", "locator": "line 65"},
    "quote": "<verbatim, at most 25 words>",
    "strength": "stated | inferred",
@@ -50,6 +50,12 @@ Write every finding to ONE JSON file (`isaac.reading_findings`) in a working fol
 
 - `stated`: the file says it. `inferred`: ONE written step from what it says. Nothing from
   what a lab "usually" does. A name in a file or folder name is evidence; say it is a name.
+- **Naming runs.** `runs` takes each run's `stem` (the file name the scientist knows) or its `run_id`,
+  both printed by `<isaac> bundle list <bundle> runs`; where two runs share a stem (the same name in
+  two folders) the row also prints `path`, and that path or the `run_id` names one of them. Never use
+  `label`: it reorders the name's tokens and drops some, so two runs (`_12_1200mV`, `_1_1200mV`) can
+  share one. A reference that names more than one run is skipped, never spread over both. (An older
+  findings file's `run_labels` is still read, with the same rule.)
 - `"scope": "runs"` whenever the statement is about particular samples or conditions;
   `"experiment"` only when the source says it of the whole beamtime. Two files that disagree:
   write both findings and tell the scientist. Never pick one.
@@ -85,7 +91,8 @@ Then:
 ```
 
 The preview lists, per finding, how many targets it reaches and every finding it could NOT place
-(no such field in this bundle, a run label that does not exist): fix those or tell the scientist.
+(no such field in this bundle, a run reference that does not exist or names more than one run): fix
+those or tell the scientist.
 Each reading is an AI interpretation: cited, `needs_review` at most, never eligible on its own.
 The questions in Step 7 show it as a suggestion beside the question; the scientist's answer is
 what counts. Re-applying the same file adds nothing. Never present your reading as confirmed.

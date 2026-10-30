@@ -267,6 +267,28 @@ def _live_run_ids(bundle: Mapping) -> set[str]:
             for k in g.get("member_run_keys") or () if k in by_key}
 
 
+def run_paths(bundle: Mapping) -> dict[str, str | None]:
+    """``{run_id: relative path of its acquisition file}`` (``None`` when the name is withheld)."""
+    path_of = {s["source_id"]: s.get("relative_path") for s in bundle.get("sources") or ()}
+    return {r["run_id"]: path_of.get(r.get("acquisition_source_id")) for r in bundle["runs"]}
+
+
+def run_reference_index(bundle: Mapping) -> dict[str, set[str]]:
+    """``{reference: {run_id, ...}}`` for every way a findings file may name a run: its run id, its file
+    STEM (``bundle list <dir> runs`` prints it), its acquisition file's relative path, or its label. A
+    label is a reordered token list and two runs can share one; a stem can be shared too (the same name in
+    two folders): a reference naming more than one run is refused by the caller, never spread over both."""
+    index: dict[str, set[str]] = {}
+    paths = run_paths(bundle)
+    for r in bundle["runs"]:
+        for ref in (r["run_id"], r.get("stem"), paths.get(r["run_id"]), r.get("label")):
+            if isinstance(ref, str) and ref:
+                index.setdefault(ref, set()).add(r["run_id"])
+    for r in bundle["runs"]:  # a run id names exactly its run, whatever else is spelt the same
+        index[r["run_id"]] = {r["run_id"]}
+    return index
+
+
 def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id: str) -> dict:
     """Plan the AI interpretations for one findings file. Pure: writes nothing.
 
@@ -278,9 +300,7 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
     has no target in this bundle is reported, never forced onto another field."""
     if not isinstance(findings, Mapping) or not isinstance(findings.get("findings"), list):
         raise ReadingsRefused("The findings file must be a JSON object with a `findings` list.")
-    runs_by_label: dict[str, list[str]] = {}
-    for r in bundle["runs"]:
-        runs_by_label.setdefault(r["label"], []).append(r["run_id"])
+    runs_by_ref = run_reference_index(bundle)
     key_of = {r["run_id"]: r["run_key"] for r in bundle["runs"]}
     live = _live_run_ids(bundle)
     live_groups = [g for g in bundle.get("record_groups") or () if g.get("status") in B.LIVE_GROUP_STATUSES]
@@ -338,15 +358,28 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
             run_ids = sorted(live) + [None]
             groups = live_groups
         elif scope == "runs":
-            labels = (f.get("applies_to") or {}).get("run_labels")
+            # `runs` (1.9.x) or the older `run_labels`: each entry a run's file stem, run id, path or label
+            applies = f.get("applies_to") or {}
+            labels = applies.get("runs") if "runs" in applies else applies.get("run_labels")
             if not isinstance(labels, list) or not labels or not all(isinstance(l, str) for l in labels):
-                skipped.append({"finding": fid, "field_path": path, "reason": "applies_to.run_labels must be a non-empty list of run labels"})
+                skipped.append({"finding": fid, "field_path": path, "reason": (
+                    "applies_to.runs (or run_labels) must be a non-empty list of run references: each run's file stem "
+                    "as `bundle list <dir> runs` prints it, or its run id")})
                 continue
-            unknown = [l for l in labels if l not in runs_by_label]
+            unknown = [l for l in labels if l not in runs_by_ref]
             if unknown:
-                skipped.append({"finding": fid, "field_path": path, "reason": f"run labels not in this bundle: {unknown[:5]}"})
+                skipped.append({"finding": fid, "field_path": path, "reason": (
+                    f"run labels not in this bundle: {unknown[:5]} (name a run by its file stem or run id, as "
+                    "`bundle list <dir> runs` prints them)")})
                 continue
-            named = {rid for l in labels for rid in runs_by_label[l]}
+            ambiguous = {l: sorted(runs_by_ref[l]) for l in labels if len(runs_by_ref[l]) > 1}
+            if ambiguous:
+                said = "; ".join(f"{l!r} names {', '.join(ids[:5])}" for l, ids in list(ambiguous.items())[:3])
+                skipped.append({"finding": fid, "field_path": path, "reason": (
+                    f"a run reference names more than one run ({said}): name each run by its run id (or its path "
+                    "when two runs share a file stem); nothing was spread over both")})
+                continue
+            named = {rid for l in labels for rid in runs_by_ref[l]}
             run_ids = sorted(named & live)
             named_keys = {key_of[rid] for rid in named}
             groups = [g for g in live_groups if named_keys & set(g.get("member_run_keys") or ())]

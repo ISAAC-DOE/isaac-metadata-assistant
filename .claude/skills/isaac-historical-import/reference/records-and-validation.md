@@ -1,8 +1,15 @@
 # Build, validate, export (Steps 8–9)
 
 `build-records` writes one draft per confirmed group (`drafts/`), listing every required value nobody
-supplied. `validate` runs, per draft: the draft checks, an export dry run, the official schema and
-exactness checks, and the offline portal check. Read `validation/<group id>.json` for the details.
+supplied. Its reply is counts: `drafts_total`, `complete` / `incomplete`, `by_reason`,
+`missing_required_by_field`, the first 3 drafts and `skipped_by_status`; `--full` prints every row, and
+`drafts/index.json` always holds them all. `validate` runs, per draft: the draft checks, an export dry
+run, the official schema and exactness checks, and the offline portal check. Its reply opens with
+`exportable` / `not_exportable`, `by_reason` (verdicts and processing blockers, counted),
+`missing_required_by_field` and `not_exportable_first` (3 groups with their plain reasons), then the
+`verdicts` map. Explain the counts first ("all 78 lack the producing group; 70 wait for a curve
+approval; 5 have no protocol"), then open `validation/<group id>.json` only for a group they leave
+unexplained.
 
 ## Record shape guidance
 
@@ -35,7 +42,10 @@ After fixing, run `build-records` then `validate` again. Never hand-edit a draft
 ## Export and upload
 
 `export --out <records>` writes `<ULID>.json`, `<ULID>.evidence.json` and a `<ULID>.artifacts/` folder
-(the processing files) for exportable drafts only and lists the rest with their verdicts. Its index is
+(the processing files) for exportable drafts only and lists the rest with their verdicts. Its reply
+opens with `outcome` ("Wrote N record(s), refused M group(s)") and `records_written` / `groups_refused`.
+It exits 1 whenever any group is refused, **even when it wrote records**: read `outcome`, never the exit
+code alone, before telling the scientist what is ready. Its index is
 `<records>/isaac-export/index.json`. Exporting again into the same `--out` reuses each unchanged record's id (`export: unchanged`); a changed record gets a new id and the old one is moved to `isaac-export/superseded/` (`export: replaced`); a record whose group is now refused or no longer confirmed is moved to `isaac-export/withdrawn/` (listed under `withdrawn`; if it was uploaded already, the portal still holds it) — say which. Then `upload <records> --dry-run`: summarise records, target
 endpoints and body sizes. State plainly: nothing was sent, this build cannot send, the key was not
 read. Never ask for or print a portal key. Tell the scientist the records are in `<records>` and

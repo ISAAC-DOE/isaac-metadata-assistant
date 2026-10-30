@@ -17,7 +17,9 @@
 | `setup_isaac_local.sh` says the installed skill differs from the ISAAC folder's | "My instructions here are out of date." | `scripts/setup_isaac_local.sh --install-skill` from the ISAAC folder, then restart Claude Code |
 | `process` exit 2: "processing not installed (processing_unavailable)" | "Curves and quality checks need an extra install." | `scripts/setup_isaac_local.sh --with-processing`; continue without it |
 | `process` exit 2: "is a ZIP file" | "Processing reads the scans from a folder, not a ZIP." | unzip it (outside the bundle), then `--source <the unzipped folder>` |
-| validate exit 1 | "Some records aren't ready; here is why." | Step 8 table |
+| validate exit 1 | "Some records aren't ready; here is why." | Step 8 table; its `by_reason`, `missing_required_by_field` and `not_exportable_first` say why without opening each file |
+| export exit 1 | read its `outcome` first: "Wrote N record(s), refused M group(s)". If N > 0: "N records are ready in <records>; M groups still need something." If N = 0: "No record is ready yet." | exit 1 means *some* group was refused, never by itself that nothing was written; explain the refusals from `refused_by_reason` (Step 8), dry-run the written ones (Step 9) |
+| `annotate --from-readings` skips a finding: "run labels not in this bundle" or "names more than one run" | "I named a run in a way ISAAC can't place." | name each run by its `stem` or `run_id` from `bundle list <bundle> runs` (a `path` when two runs share a stem), then preview again |
 | validate exit 1 with `nothing_validated` | "There's nothing to check yet: no group is confirmed." | Step 5 (confirm groups), then `build-records` |
 | `bundle check` prints `STALE` (exit 1) | "This working folder was made by an older ISAAC; it is not broken." | `<isaac> bundle build-records <bundle>` re-derives it and logs what changed; say how many values it lists |
 | any command exit 2: "The bundle changed since it was read" | "Something else (often the Local Imports page) changed it a moment ago; nothing was saved." | run `bundle questions` again, then repeat the answer if it still applies |

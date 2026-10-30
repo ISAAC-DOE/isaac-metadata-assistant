@@ -636,6 +636,13 @@ decision CAPTURES a statement; none takes a scientific decision, and none is def
   decision says so. Refused for a position the latest `set_counter_positions` names (record
   `set_counter_positions` without it instead); a later `set_counter_positions` naming a position
   takes over (latest statement per position, `bundle.not_counter_positions`).
+- **`defer` on the experiment** (`decide --question <counter question> --decision defer --by NAME`, or
+  `--target experiment --decision defer`): "I don't know which positions are counters". Recorded as an
+  ordinary `defer` decision on the experiment target; it names no position, so grouping is unchanged by
+  it. The counter question stays open under the same id and carries `deferred` {`by`, `decided_utc`,
+  `decision_id`} while the latest of the question's answers (`set_counter_positions`,
+  `set_not_counter_positions`, `defer`) is a defer (`questions.counter_deferral`); a later answer
+  supersedes it. No shape changes: `defer` and the experiment target were already in the schema.
 - **An answered counter question drops out.** The consolidated `naming_counter_positions` question
   asks only about its positions that no answer covers (a counter by the latest
   `set_counter_positions`, or not one by `set_not_counter_positions`), lists them in `positions`,

@@ -91,7 +91,8 @@ Record their answer in your next message.
 before overwriting; `--force` only on request). Then read **only** `<bundle>/summary.md`.
 Tell the scientist, in 4 lines, what was found: files, runs, conflicts, how many files no reader
 could open (import prints these). Do not quote `summary.md`'s "Questions: N" (it counts fine-grained
-items) or its "Run groups" (file-name groups, not records). The question count comes in Step 7,
+items) or its "Run groups" (file-name groups, not records; "not in a file-name group" is runs whose
+names carry no group token). Its "Conflicts: N (…)" says why N differs from the conflicting values. The question count comes in Step 7,
 from `bundle questions` → `counts`; running it now would show values before the spot check.
 If import is refused (exit 3/4/5), read `reference/troubleshooting.md`.
 
@@ -115,27 +116,30 @@ other kinds: Read them directly. Then read what code DID read for statements no 
 (readmes, macro comments, run labels). Read only inside the folder the scientist approved: if a
 document beside it looks relevant, name it and ask before opening it. Write every finding to ONE
 findings file and load it with `annotate --from-readings` (preview, then `--apply`); the format is in
-the reference. Tell the scientist what each file turned out to hold. Unreadable binaries: say so.
+the reference. Name runs by their file `stem` or `run_id` from `bundle list <bundle> runs`, never by
+`label` (labels reorder tokens and can repeat). Tell the scientist what each file turned out to hold. Unreadable binaries: say so.
 
 ## Step 5 · Groups
 
 `<isaac> bundle group <bundle>` (`--regroup` replaces undecided groups only; decided ones are kept).
 If `bundle group --help` fails, say "grouping is not in this build", skip Steps 5, 6, 8 and 9, and
 stop after Step 7. Read `reference/grouping-and-processing.md` (every decision's syntax is there).
-List groups with `<isaac> bundle list <bundle> groups --limit 10` (page it; live groups only), one in
-full with `<isaac> bundle show <bundle> group <id>`, and possible merges with `<isaac> bundle list
-<bundle> merge-candidates`. Never read a groups file by hand. Present each group in plain words: the
+List groups with `<isaac> bundle list <bundle> groups --limit 10` (page it; live groups only): each
+row has its `files` (first 3 stems), `scans`, `reader` and, when it can never export as it stands,
+`cannot_export_reason` (`no_scans`, `processing_not_applicable:<code>`). Open one in full with `bundle
+show <bundle> group <id>` only when the row is not enough; possible merges: `bundle list <bundle>
+merge-candidates`. Never read a groups file by hand. Present each group in plain words: the
 sample, the conditions, how many scans, and why runs were split ("these two differ in potential").
 Say plainly when a group needs care (`merged_despite_engine_reading`, `sample_key_basis: name_stem`:
 see the reference), and say a merge candidate's `caution` before asking about it.
 The experiment question `naming_counter_positions` asks which filename positions hold a counter;
 answer it once (`set_counter_positions --positions N`, or `last`); say its `regroup_preview.statement`
-(what it would join), then regroup. The other,
+(what it would join), then regroup. "I don't know" is `--decision defer`: grouping is unchanged. The other,
 `clock_time_zone`, needs the instrument clock's IANA zone; never suggest one.
 Ask the scientist to **confirm, split or merge** each, in batches, with progress. A group that is not
 a result (alignment, a reference foil, a test scan) can be **left out** with `reject`; say it is never
-exported. Several groups accepted as shown: list each back, then one `--targets-file` confirm; never
-bulk-confirm a group with no scans or one no processing protocol covers: it can never be exported.
+exported. Several groups accepted as shown: list each back, then one `--targets-file` confirm; leave
+out every group with a `cannot_export_reason` and say why (no curve can ever be made for it).
 After a regroup, say any `merge_decisions_not_combined` in words and offer its `next_commands` (never
 run one without the scientist's answer). A `--same-conditions` merge needs a yes to "same sample AND
 same conditions? the names differ in: …" with those words; `pristine`/`cycled` are conditions, not labels.
@@ -199,17 +203,20 @@ Never fill the sheet for them; never import ISAAC's blank template. Details in t
 
 ## Step 8 · Build and validate
 
-`<isaac> bundle build-records <bundle>` then `<isaac> bundle validate <bundle>`. If it reports
-`nothing_validated`, no group is confirmed yet: go back to Step 5. Read
-`reference/records-and-validation.md` and explain every verdict that is not `exportable` in plain
-words with the exact fix, then loop back to the step that fixes it (a question, a group, a
+`<isaac> bundle build-records <bundle>` (counts and the first 3 drafts; `--full` prints all) then
+`<isaac> bundle validate <bundle>`. If it reports `nothing_validated`, no group is confirmed yet: go
+back to Step 5. Read `reference/records-and-validation.md`; explain the verdicts from validate's
+`by_reason`, `missing_required_by_field` and `not_exportable_first` in plain words with the exact fix
+(open `validation/<group_id>.json` only for a group those do not explain), then loop back to the step that fixes it (a question, a group, a
 processing approval: an `incomplete` draft with a `processing_fix` needs its curve approved in Step 6).
 Never edit a draft file and never relax a check.
 
 ## Step 9 · Export and dry run
 
-`<isaac> bundle export <bundle> --out <records>` writes only `exportable` records. Its reply gives counts (`refused_total`,
-`refused_by_reason`, `missing_required_by_field`) and the first 3 refusals; `--full` lists all. **If
+`<isaac> bundle export <bundle> --out <records>` writes only `exportable` records. Its reply opens with
+`outcome` ("Wrote N record(s), refused M group(s)"): exit 1 means *some* group was refused, not that
+nothing was written. Then counts (`refused_total`, `refused_by_reason`, `missing_required_by_field`)
+and the first 3 refusals; `--full` lists all. **If
 nothing is exportable**, export writes nothing: do not run the dry run (there is nothing to show); say "no record
 is ready yet", name what blocks the nearest group (from Step 8), and stop at Step 10.
 `<isaac> bundle upload <records> --dry-run` shows what *would* be sent: summarise it (how many

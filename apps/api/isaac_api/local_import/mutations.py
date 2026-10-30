@@ -1018,9 +1018,11 @@ def record_decision(
             prior = latest.get((kind, tid))
             if kind == "experiment":
                 # several decision kinds share the one experiment target: replaying one is compared
-                # with the latest of ITS kind (a zone restated after a counter answer is unchanged)
+                # with the latest of ITS kind (a zone restated after a counter answer is unchanged); a defer
+                # is the counter question's "I don't know", compared with that question's latest answer
+                same = ("set_counter_positions", B.NOT_COUNTER_DECISION, "defer") if decision == "defer" else (decision,)
                 prior = next((d for d in reversed(bundle.get("scientist_decisions") or ())
-                              if d.get("target") == {"kind": "experiment", "id": tid} and d.get("decision") == decision), None)
+                              if d.get("target") == {"kind": "experiment", "id": tid} and d.get("decision") in same), None)
             elif kind == "processing_result":
                 # an Athena-version selection (1.6.0) and the state decisions share the target: each is
                 # compared with the latest of its own class
@@ -1129,6 +1131,12 @@ def record_decision(
                 f"conditions — their file names differ only in: {words}, which you said are labels, not conditions. "
                 "Regroup (`isaac bundle group <bundle_dir> --regroup`) to apply it: the runs are combined only when the "
                 "same sample is confirmed for every run and nothing else recorded tells them apart.")
+        if decision == "defer" and recorded and all(kind == "experiment" for kind, _ in planned):
+            result["statement"] = (
+                "Recorded: you do not know which filename token positions are run/acquisition counters (defer). "
+                "Grouping is unchanged: no position is recorded as a counter or as not one, and no group moved. The "
+                "counter question stays open, marked deferred; answer it later with set_counter_positions or "
+                "set_not_counter_positions.")
         if decision == "set_counter_positions" and recorded:
             # what this answer would do on the next regroup, said BEFORE it (the scientist is told what it joins)
             result["regroup_preview"] = counter_answer_preview(bundle)

@@ -72,7 +72,7 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
 ## Recording
 
 - **An answer to a consolidated question:** `decide <bundle> --question <Q> --decision correct|confirm --value <v> --by "<name>" [--note "..."]`. It records one decision per target, each listed in the reply; read the list back. `--only group:<id>` answers for one group only (a per-group override of an experiment-wide answer); `--field <path>` picks the one field when a question covers several optional fields.
-- **Experiment-scope question:** say "This applies to N groups. One answer for all, or do some differ?" Only split when the scientist says so.
+- **Experiment-scope question:** say "This applies to N groups. One answer for all, or do some differ?" Only split when the scientist says so. A question built at experiment scope whose targets all sit in ONE group (a sample field asked per sample reading) is shown with that group's `scope: group:<id>` and carries `id_scope: experiment`: the scope its id was made from, kept so the id never changes. Ask it for that group only.
 - **The instrument clock's time zone** (`clock_time_zone`, experiment scope, optional): SSRL XDC
   (beamline 4-3 style) scan headers write the start as a local clock time with no zone, so those
   start times have no value until the scientist states the zone the instrument clock was set to.

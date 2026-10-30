@@ -21,7 +21,11 @@ COMMANDS
     A bounded page as JSON, with ``total`` and how many were omitted before and after.
     Never truncates silently. ``processing-results``: one compact row per result (id, group, verdict,
     applicability, key QC flags and metrics, plot path, Athena agreement, state); ``--state`` filters it
-    by state as it filters ``candidates`` by value_state.
+    by state as it filters ``candidates`` by value_state. ``groups`` and ``runs`` print one row per line: a
+    ``groups`` row carries up to three member file stems (``files``, ``files_more``), ``scans``, ``reader`` and,
+    when the group can never export as it stands, ``cannot_export_reason`` (``no_scans`` or
+    ``processing_not_applicable:<code>``, counted over the whole list in ``cannot_export``); a ``runs`` row
+    carries the run's file ``stem`` (and ``path`` when two runs share a stem).
 
 ``isaac bundle show <dir> run|conflict|candidate|source|question <id>``
     One object as JSON. ``processing-result <result_id>``: one processing result, compact (QC, flags,
@@ -55,7 +59,8 @@ EXIT CODES
       the source folder
  5    bounds exceeded, or the built bundle failed its own validation — nothing written
  6    not found: no bundle at ``<dir>``, or no object with that id
- 1    (also) ``validate``/``export``: some draft is not exportable / was not exported
+ 1    (also) ``validate``/``export``: some draft is not exportable / was not exported. ``export`` exits 1
+      even when it WROTE some records: its reply's ``outcome`` says "Wrote N record(s), refused M group(s)"
 ====  ===========================================================================
 
 NOTHING IS EXECUTED. Macros and scripts in the archive are read as text by the
@@ -295,7 +300,7 @@ def render_summary(bundle: Mapping) -> str:
         f"{counts['unmapped']} unmapped (kept as evidence)"
     )
     add(
-        f"- Conflicts: {counts['conflicts']} · Missing values: {counts['missing_values']} "
+        f"- Conflicts: {counts['conflicts']}{_conflict_breakdown(bundle)} · Missing values: {counts['missing_values']} "
         f"(nothing defaulted) · Questions: {counts['questions']}"
     )
     add(f"- People named in the sources: {counts['contributors']} (evidence, not the naming profile)")
@@ -334,8 +339,10 @@ def render_summary(bundle: Mapping) -> str:
         for s in samples[:_SUMMARY_LIST_ROWS]:
             # COUNTS ONLY, never the readings themselves: summary.md is read before any
             # blind cross-check, so it must not show a non-conflicting parser value.
+            # Runs whose file names carry no group token are in no file-name group: said so, never "group None".
             add(
-                f"- group {s['group_token']}: {len(s['run_ids'])} runs "
+                (f"- group {s['group_token']}: " if s["group_token"] is not None else "- not in a file-name group: ")
+                + f"{len(s['run_ids'])} runs "
                 f"({', '.join(s['run_ids'][:6])}{'…' if len(s['run_ids']) > 6 else ''}); "
                 f"{len(s['sample_name_readings'])} distinct sample-name reading(s)"
             )
@@ -404,6 +411,31 @@ def render_summary(bundle: Mapping) -> str:
     add(readiness["next_step"])
     add("")
     return "\n".join(lines)
+
+
+def _conflict_breakdown(bundle: Mapping) -> str:
+    """Why the conflict count differs from the count of values in the ``conflicting`` state, or ``""`` when it
+    does not: a conflict about a value that is still ``needs_review`` (or decided since), or one about files
+    rather than one value (the same file name in two folders), is a conflict without a conflicting value."""
+    cand = {c["candidate_id"]: c for c in bundle.get("candidates") or ()}
+    on_state: dict[str, int] = {}
+    about_no_value = 0
+    for cf in bundle.get("conflicts") or ():
+        c = cand.get(cf.get("candidate_id") or "")
+        if c is None:
+            about_no_value += 1
+        else:
+            on_state[c["value_state"]] = on_state.get(c["value_state"], 0) + 1
+    conflicting = on_state.pop("conflicting", 0)
+    if not on_state and not about_no_value:
+        return ""
+    parts = [f"{conflicting} on the {bundle['counts']['conflicting_candidates']} conflicting value(s)"]
+    said = {"needs_review": "that need review (not conflicting)", "scientist_confirmed": "a scientist has decided",
+            "rejected": "a scientist rejected"}
+    parts += [f"{n} on value(s) {said.get(state, 'in state ' + state)}" for state, n in sorted(on_state.items())]
+    if about_no_value:
+        parts.append(f"{about_no_value} about files, not one value")
+    return " (" + "; ".join(parts) + ")"
 
 
 def _consolidated(bundle: Mapping) -> dict:
@@ -541,7 +573,7 @@ def cmd_import(args) -> int:
     print(f"Wrote an ISAAC Local Import Bundle to {out}")
     print(
         f"  {c['sources']} files, {c['runs']} runs, {c['candidates']} values "
-        f"({c['conflicts']} conflicts, {c['needs_review']} need review, "
+        f"({c['conflicts']} conflicts{_conflict_breakdown(bundle)}, {c['needs_review']} need review, "
         f"{c['missing_values']} missing, {c['unread_files']} unread files)"
     )
     if n_athena := sum(1 for u in bundle["unread_files"] if _is_athena_project(u)):
@@ -585,6 +617,9 @@ def _row(kind: str, obj: Mapping, group_status: Mapping | None = None) -> dict:
     if kind == "runs":
         return {
             "run_id": obj["run_id"],
+            # the FILE STEM, the name a scientist recognises (a label reorders and drops tokens, and two runs can
+            # share one); `annotate --from-readings` takes it, or the run id, to name a run
+            "stem": obj.get("stem"),
             "label": obj["label"],
             "legacy_number": obj["legacy_number"],
             "legacy_number_shared": obj["legacy_number_shared"],
@@ -692,6 +727,41 @@ def _row(kind: str, obj: Mapping, group_status: Mapping | None = None) -> dict:
     if later:
         row["read_by"] = later
     return row
+
+
+#: How many member file names a ``bundle list <dir> groups`` row shows (the rest are counted).
+GROUP_ROW_FILES = 3
+#: ``cannot_export_reason`` codes on a ``bundle list <dir> groups`` row, said once on the page.
+CANNOT_EXPORT_NOTE = ("Such a group can never become an exportable record as it stands; leave it out of a bulk confirm. "
+                      "no_scans: none of its runs lists a scan. processing_not_applicable:<code>: no ISAAC processing "
+                      "protocol covers this data yet.")
+
+
+def group_list_extras(bundle: Mapping) -> dict[str, dict]:
+    """``{group_id: fields}`` a ``bundle list <dir> groups`` row adds: a few member FILE NAMES (the run's stem,
+    the name a scientist recognises), the scan count, the reader (the runs' source type) and, when known,
+    ``cannot_export_reason``. File names and counts only — no parser value, so no exposure."""
+    from . import bundle as B
+
+    runs = {r["run_key"]: r for r in bundle.get("runs") or ()}
+    blocked = B.processing_blocked_groups(bundle)
+    out: dict[str, dict] = {}
+    for g in bundle.get("record_groups") or ():
+        members = [runs[k] for k in g.get("member_run_keys") or () if k in runs]
+        stems = [str(r.get("stem") or r["run_id"]) for r in members]
+        scans = sum(int(r.get("scan_count") or 0) for r in members)
+        row: dict[str, Any] = {"files": stems[:GROUP_ROW_FILES]}
+        if len(stems) > GROUP_ROW_FILES:
+            row["files_more"] = len(stems) - GROUP_ROW_FILES
+        row["scans"] = scans
+        row["reader"] = ", ".join(dict.fromkeys(str(r.get("source_type")) for r in members)) or None
+        na = blocked.get(g["group_id"])
+        if na is not None:
+            row["cannot_export_reason"] = f"processing_not_applicable:{(na.get('applicability') or {}).get('reason_code')}"
+        elif members and scans == 0:
+            row["cannot_export_reason"] = "no_scans"
+        out[g["group_id"]] = row
+    return out
 
 
 def _is_athena_project(unread_row: Mapping) -> bool:
@@ -832,6 +902,26 @@ def cmd_bundle_list(args) -> int:
     page = rows[args.offset : args.offset + args.limit]
     status = {g["group_id"]: g.get("status") for g in bundle.get("record_groups") or ()}
     items = [_row(args.kind, r, status) for r in page]
+    cannot_export: dict[str, int] = {}
+    if args.kind == "groups":
+        extras = group_list_extras(bundle)
+        for item in items:
+            item.update(extras.get(item["group_id"]) or {})
+        for r in rows:  # counted over every listed group, not only this page
+            reason = (extras.get(r["group_id"]) or {}).get("cannot_export_reason")
+            if reason:
+                cannot_export[reason] = cannot_export.get(reason, 0) + 1
+    if args.kind == "runs" and page:
+        # a stem two runs share (the same name in two folders) is told apart by the file's relative path
+        from . import suggestions as S
+
+        stems: dict[str, int] = {}
+        for r in bundle.get("runs") or ():
+            stems[str(r.get("stem"))] = stems.get(str(r.get("stem")), 0) + 1
+        paths = S.run_paths(bundle) if any(stems.get(str(i.get("stem")), 0) > 1 for i in items) else {}
+        for item in items:
+            if stems.get(str(item.get("stem")), 0) > 1:
+                item["path"] = paths.get(item["run_id"])
     if args.kind == "merge-candidates":
         from . import grouping as G
 
@@ -850,25 +940,24 @@ def cmd_bundle_list(args) -> int:
             except M.MutationRefused as exc:
                 _err(f"Nothing printed: {exc}")
                 return exc.code
-    print(
-        json.dumps(
-            {
-                "kind": args.kind,
-                "total": total,
-                "offset": args.offset,
-                "limit": args.limit,
-                "returned": len(page),
-                "omitted_before": min(args.offset, total),
-                "omitted_after": max(0, total - args.offset - len(page)),
-                **({"not_listed": dict(sorted(not_listed.items())),
-                    "not_listed_note": "groups that are decision history (merged, rejected, split), not records: pass --all to list them"}
-                   if not_listed else {}),
-                "items": items,
-            },
-            indent=1,
-            ensure_ascii=False,
-        )
-    )
+    payload = {
+        "kind": args.kind,
+        "total": total,
+        "offset": args.offset,
+        "limit": args.limit,
+        "returned": len(page),
+        "omitted_before": min(args.offset, total),
+        "omitted_after": max(0, total - args.offset - len(page)),
+        **({"not_listed": dict(sorted(not_listed.items())),
+            "not_listed_note": "groups that are decision history (merged, rejected, split), not records: pass --all to list them"}
+           if not_listed else {}),
+        **({"cannot_export": dict(sorted(cannot_export.items(), key=lambda kv: (-kv[1], kv[0]))),
+            "cannot_export_note": CANNOT_EXPORT_NOTE} if cannot_export else {}),
+        "items": items,
+    }
+    # ONE LINE PER ROW for groups and runs (1.9.x polish): a 10-group page with file names, scans and reader
+    # stays near 4 KB, and a row reads as a table row. Still one JSON document.
+    print(_dumps_rows_inline(payload) if args.kind in INLINE_ROW_KINDS else json.dumps(payload, indent=1, ensure_ascii=False))
     return EXIT_OK
 
 
@@ -973,6 +1062,19 @@ def _processing_result_view(bundle: Mapping, r: Mapping) -> dict:
         "questions": r.get("questions") or [],
         "result_file": f"{run_dir}/result.json" if run_dir else None,
     })
+
+
+#: ``bundle list`` kinds printed one row per line (see :func:`_dumps_rows_inline`).
+INLINE_ROW_KINDS = ("groups", "runs")
+
+
+def _dumps_rows_inline(payload: Mapping) -> str:
+    """``payload`` as indented JSON, except that each of its ``items`` is printed on ONE line."""
+    rows = [json.dumps(item, ensure_ascii=False) for item in payload["items"]]
+    head = json.dumps({k: v for k, v in payload.items() if k != "items"}, indent=1, ensure_ascii=False)
+    if not rows:
+        return head[:-2] + ',\n "items": []\n}'
+    return head[:-2] + ',\n "items": [\n  ' + ",\n  ".join(rows) + "\n ]\n}"
 
 
 def cmd_bundle_show(args) -> int:
@@ -1396,10 +1498,56 @@ def cmd_bundle_reveal(args) -> int:
     return _mutation(lambda: M.reveal(Path(args.bundle_dir), args.id))
 
 
+#: How many drafts and skipped groups ``bundle build-records`` prints in full by default (``--full`` prints all).
+BUILD_ROWS_SHOWN = 3
+
+
+def compact_build(result: Mapping) -> dict:
+    """``bundle build-records``'s reply as counts: drafts complete / incomplete, why (counted), which required
+    fields are missing (counted), the first :data:`BUILD_ROWS_SHOWN` drafts and where the rest are. Measured on a
+    real BL6-2c bundle: 78 drafts and 116 skipped groups printed 52 KB."""
+    from . import records as R
+
+    drafts = list(result.get("drafts") or ())
+    skipped = list(result.get("skipped_groups") or ())
+    if len(drafts) <= BUILD_ROWS_SHOWN and len(skipped) <= BUILD_ROWS_SHOWN:
+        return dict(result)
+    rows = [{"verdict": "complete" if d.get("complete") else "incomplete",
+             "processing_blocker": d.get("processing_blocker") or ("processing_not_applicable" if d.get("blocked") else None),
+             "missing_required": d.get("missing_required")} for d in drafts]
+    by_reason, by_field = R.refusal_counts(rows)
+    disagreeing = sum(1 for d in drafts if d.get("disagreements"))
+    if disagreeing:
+        by_reason["disagreements"] = disagreeing
+    by_status: dict[str, int] = {}
+    for g in skipped:
+        by_status[g.get("status")] = by_status.get(g.get("status"), 0) + 1
+    out = {k: v for k, v in result.items() if k not in ("drafts", "skipped_groups")}
+    out.update(
+        drafts_total=len(drafts),
+        complete=sum(1 for d in drafts if d.get("complete")),
+        incomplete=sum(1 for d in drafts if not d.get("complete")),
+        by_reason=by_reason,
+        missing_required_by_field=by_field,
+        drafts=drafts[:BUILD_ROWS_SHOWN],
+        drafts_omitted=max(0, len(drafts) - BUILD_ROWS_SHOWN),
+        skipped_groups_total=len(skipped),
+        skipped_by_status=dict(sorted(by_status.items(), key=lambda kv: str(kv[0]))),
+        skipped_reason="only a scientist-confirmed record group becomes a draft",
+        full_list=(f"{R.DRAFTS_DIR}/index.json lists every draft and skipped group; pass --full to print them all. "
+                   "`isaac bundle validate <bundle_dir>` says why each draft is not exportable."),
+    )
+    return out
+
+
 def cmd_bundle_build_records(args) -> int:
     from . import records as R
 
-    return _mutation(lambda: R.build_records(Path(args.bundle_dir), test_marker=args.test_marker))
+    def run():
+        result = R.build_records(Path(args.bundle_dir), test_marker=args.test_marker)
+        return result if args.full else compact_build(result)
+
+    return _mutation(run)
 
 
 def cmd_bundle_validate(args) -> int:
@@ -1427,21 +1575,17 @@ def compact_export(result: Mapping) -> dict:
     """``bundle export``'s reply without every refused group's full summary: counts by reason, the
     first :data:`EXPORT_REFUSED_SHOWN` refusals in full, and where the rest are. Measured on a real
     BL4-3 bundle with nothing exportable: 35 refusals printed 40 KB."""
+    from . import records as R
+
     refused = list(result.get("refused") or ())
     if len(refused) <= EXPORT_REFUSED_SHOWN:
         return dict(result)
-    by_reason: dict[str, int] = {}
-    by_field: dict[str, int] = {}
-    for row in refused:
-        for key in filter(None, (row.get("verdict"), row.get("processing_blocker"))):
-            by_reason[key] = by_reason.get(key, 0) + 1
-        for path in row.get("missing_required") or ():
-            by_field[path] = by_field.get(path, 0) + 1
+    by_reason, by_field = R.refusal_counts(refused)
     out = {k: v for k, v in result.items() if k != "refused"}
     out.update(
         refused_total=len(refused),
-        refused_by_reason=dict(sorted(by_reason.items(), key=lambda kv: (-kv[1], kv[0]))),
-        missing_required_by_field=dict(sorted(by_field.items(), key=lambda kv: (-kv[1], kv[0]))),
+        refused_by_reason=by_reason,
+        missing_required_by_field=by_field,
         refused=refused[:EXPORT_REFUSED_SHOWN],
         refused_omitted=len(refused) - EXPORT_REFUSED_SHOWN,
         refused_full_list=("Pass --full to print every refused group's summary, or run `isaac bundle validate "
@@ -1745,6 +1889,7 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q = bsub.add_parser("build-records", help="compose one ISAAC draft per confirmed record group")
     q.add_argument("bundle_dir")
     q.add_argument("--test-marker", action="store_true", help="SELF-TESTS ONLY: write the fixed self-test marker into the series and QC notes")
+    q.add_argument("--full", action="store_true", help="print every draft and skipped group (default: counts and the first few; drafts/index.json has them all)")
     q.set_defaults(func=cmd_bundle_build_records)
 
     q = bsub.add_parser("validate", help="validate drafts: draft, export dry-run, official, exactness, offline portal")

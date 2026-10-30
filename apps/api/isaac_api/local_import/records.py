@@ -808,6 +808,10 @@ def build_records(bundle_dir: Path, *, test_marker: bool = False) -> dict:
                 "complete": not report["missing_required"] and not report["disagreements"],
             }
             | ({"blocked": report["processing"]["reason"]} if (report.get("processing") or {}).get("not_applicable") else {})
+            # why the processing-derived values are missing, in validate's and export's one word
+            | ({"processing_blocker": processing_blocker(report.get("processing") or {})}
+               if any(m.get("from") == "an approved processing result" for m in report["missing_required"])
+               or (report.get("processing") or {}).get("not_applicable") else {})
         )
     skipped = [
         {"group_id": g["group_id"], "status": g["status"], "reason": "only a scientist-confirmed record group becomes a draft"}
@@ -1139,6 +1143,31 @@ def processing_remedy(processing: Mapping) -> str:
             '(`isaac bundle decide <bundle_dir> --target <result id> --decision approve --qc-status <value> --by "<your name>"`).')
 
 
+#: How many not-exportable groups ``validate`` (and a compact ``build-records``) name with their reasons.
+REASONS_SHOWN = 3
+#: The plain-summary lines that say nothing about why ONE group is not exportable (left off the compact rows).
+_BOILERPLATE_PREFIXES = ("Website schema (vendored", "This is NOT an official record")
+
+
+def refusal_counts(rows: Sequence[Mapping]) -> tuple[dict[str, int], dict[str, int]]:
+    """``(by_reason, missing_required_by_field)`` over rows carrying ``verdict``, ``processing_blocker`` and
+    ``missing_required``: the counts ``export`` (``refused_by_reason``) and ``validate`` (``by_reason``) print."""
+    by_reason: dict[str, int] = {}
+    by_field: dict[str, int] = {}
+    for row in rows:
+        for key in filter(None, (row.get("verdict"), row.get("processing_blocker"))):
+            by_reason[key] = by_reason.get(key, 0) + 1
+        for path in row.get("missing_required") or ():
+            by_field[path] = by_field.get(path, 0) + 1
+    return (dict(sorted(by_reason.items(), key=lambda kv: (-kv[1], kv[0]))),
+            dict(sorted(by_field.items(), key=lambda kv: (-kv[1], kv[0]))))
+
+
+def plain_reasons(summary: Sequence[str]) -> list[str]:
+    """A group's plain-summary lines without the two that are the same for every group."""
+    return [line for line in summary if not str(line).startswith(_BOILERPLATE_PREFIXES)]
+
+
 def validate_records(bundle_dir: Path, *, run_portal=None) -> dict:
     """Validate a FRESH composition of every confirmed group (review C1/I1). An on-disk
     draft that differs from it is flagged and never used."""
@@ -1151,7 +1180,7 @@ def validate_records(bundle_dir: Path, *, run_portal=None) -> dict:
     marked = _was_marked(bundle)
     out_dir = bundle_dir / VALIDATION_DIR
     out_dir.mkdir(exist_ok=True)
-    verdicts, stale = {}, []
+    verdicts, stale, not_exportable = {}, [], []
     for group_id, draft, composition in fresh_compositions(bundle_dir, bundle, test_marker=marked):
         if _on_disk_differs(bundle_dir, group_id, draft, composition):
             stale.append(group_id)
@@ -1161,7 +1190,26 @@ def validate_records(bundle_dir: Path, *, run_portal=None) -> dict:
         report["on_disk_draft_differs"] = group_id in stale
         _atomic_write(out_dir / f"{group_id}.json", _json_bytes(report))
         verdicts[group_id] = report["verdict"]
-    out = {"verdicts": verdicts, "on_disk_drafts_ignored_because_they_differ": stale}
+        if report["verdict"] != "exportable":
+            not_exportable.append({"group_id": group_id, "verdict": report["verdict"],
+                                   "missing_required": report["missing_required"],
+                                   "processing_blocker": report["processing_blocker"],
+                                   "reasons": plain_reasons(report["plain_summary"])})
+    out: dict = {}
+    if verdicts:
+        # WHY, COUNTED, FIRST (1.9.x polish): the verdict map alone meant opening every validation file to explain it
+        by_reason, by_field = refusal_counts(not_exportable)
+        out.update(
+            exportable=sum(1 for v in verdicts.values() if v == "exportable"),
+            not_exportable=len(not_exportable),
+            by_reason=by_reason,
+            missing_required_by_field=by_field,
+            not_exportable_first=[{k: row[k] for k in ("group_id", "verdict", "reasons")}
+                                  for row in not_exportable[:REASONS_SHOWN]],
+            not_exportable_omitted=max(0, len(not_exportable) - REASONS_SHOWN),
+            reports=f"{VALIDATION_DIR}/<group_id>.json holds each group's full report (every gate, verbatim).",
+        )
+    out.update(verdicts=verdicts, on_disk_drafts_ignored_because_they_differ=stale)
     if not verdicts:
         # an empty verdict list is "nothing checked", never "everything passed"
         out["nothing_validated"] = ("No record draft to validate: no record group is confirmed yet. Confirm the groups "
@@ -1393,6 +1441,11 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         if b_id == bundle_id and g_id not in confirmed and earlier.get("record_id"):
             withdraw(earlier, "the group is no longer a scientist-confirmed record group of this bundle")
     result = {
+        # SAID PLAINLY FIRST (1.9.x polish): the exit code is 1 whenever any group is refused, even when records
+        # were written, so a reader of the exit code alone would take "wrote 3, refused 75" for "nothing exported"
+        "outcome": export_outcome(len(exported), len(refused), len(withdrawn), out),
+        "records_written": len(exported),
+        "groups_refused": len(refused),
         "exported": exported,
         "refused": refused,
         "withdrawn": withdrawn,
@@ -1406,6 +1459,21 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
              f"Nothing was exported by this run; `upload --dry-run` on {out} lists only records an earlier export left there.")
             + " `isaac bundle validate <bundle_dir>` says what each group still needs.")
     return result
+
+
+def export_outcome(written: int, refused: int, withdrawn: int, out: Path) -> str:
+    """One sentence: what ``export`` wrote and refused, and what its exit code means for that."""
+    text = f"Wrote {written} record(s), refused {refused} group(s)."
+    if written and refused:
+        text += (f" The exit code is 1 because some groups were refused; the {written} record(s) written are valid "
+                 f"for the portal's pinned schema and are in {out}.")
+    elif refused:
+        text += " Nothing was written (exit 1)."
+    elif written:
+        text += " Every confirmed group was exported (exit 0)."
+    if withdrawn:
+        text += f" {withdrawn} earlier record(s) were withdrawn (see `withdrawn`)."
+    return text
 
 
 # --- upload (dry run only) -------------------------------------------------------------------------

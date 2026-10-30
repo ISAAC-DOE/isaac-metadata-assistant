@@ -632,7 +632,8 @@ DECISIONS_BY_KIND: Mapping[str, frozenset[str]] = {
     "conflict": frozenset({"confirm", "correct", "reject", "defer"}),
     "record_group": frozenset({"confirm", "split", "merge", "reject", "defer", "approve_calibration", "set_absorber"}),
     "processing_result": frozenset({"approve", "reject", "needs_changes", "defer", "select_athena_version"}),
-    "experiment": frozenset({"set_counter_positions", "set_clock_time_zone", "set_not_counter_positions"}),
+    # `defer` (1.9.x polish): "I don't know" to the counter question — recorded, changes no grouping
+    "experiment": frozenset({"set_counter_positions", "set_clock_time_zone", "set_not_counter_positions", "defer"}),
     # 1.6.0: a merge candidate is decided only to say its groups are DISTINCT; merging stays a
     # record-group decision (``merge --merge-with``)
     "merge_candidate": frozenset({"keep_apart"}),

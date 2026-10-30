@@ -122,6 +122,12 @@ element or edge from a file name.
   something that differs. Say what differs in words and ask; confirming is the scientist's call.
 - `sample_key_basis: name_stem`: no file states the sample, so runs were grouped by the stem of their file
   names. Say so, and ask the scientist to confirm or split.
+- **A groups row** (`bundle list <bundle> groups`) has `files` (the first 3 member stems; `files_more`
+  counts the rest), `scans`, `reader` (the runs' source type) and, when known, `cannot_export_reason`:
+  `no_scans` (no run lists a scan) or `processing_not_applicable:<code>` (e.g. an `.mca` or `xes` file:
+  no ISAAC protocol covers it). The page's `cannot_export` counts them over the whole list. Such a group
+  can never become an exportable record as it stands: present it as such, leave it out of a bulk confirm,
+  and offer `reject` (it is kept as decision history) or leaving it unconfirmed.
 - `naming_counter_positions` (an experiment-scope question): which positions of the file name are running
   counters, not sample identity. Ask once. Answer with `decide <bundle> --target experiment --decision
   set_counter_positions --positions 2,3 --by "<name>"` (`--positions last` when the counter is
@@ -131,4 +137,6 @@ element or edge from a file name.
   `regroup_preview.statement` says how many groups the answer would join: tell the scientist before
   regrouping. When they say a position is NOT a counter: `decide <bundle> --target experiment
   --decision set_not_counter_positions --positions 2 --by "<name>"` (grouping is unchanged; the
-  question drops out).
+  question drops out). When they do not know: `decide <bundle> --question <Q> --decision defer --by
+  "<name>"` records it; grouping is unchanged, the question stays, marked `deferred`, and a later
+  answer supersedes it. Never guess a position for them.
