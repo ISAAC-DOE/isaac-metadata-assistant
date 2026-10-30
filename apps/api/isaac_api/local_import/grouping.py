@@ -1590,6 +1590,35 @@ def merge_candidate_groups(bundle: Mapping, mc: Mapping, *, cap: int = RUN_LABEL
     return out
 
 
+#: ``bundle list <dir> merge-candidates``: the ``not_listed`` key of a candidate that proposes nothing.
+INERT_CANDIDATE = "fewer_than_two_live_groups"
+
+
+def merge_candidate_inert(bundle: Mapping, mc: Mapping) -> str | None:
+    """Why a stored merge candidate proposes NOTHING now, or ``None`` when it still proposes a merge.
+
+    A merge needs two live parts: groups that can still become records (proposed or confirmed), plus
+    the runs it names itself (``run_keys``, one part). A candidate whose groups a scientist has since
+    rejected, split or merged down to fewer than two proposes nothing (polish c3: a candidate of 26
+    rejected groups was still listed as ``proposed``). It is kept — same id, same stored record, so a
+    decision naming it keeps its target — but it is not listed by default and its question is never asked."""
+    from . import bundle as B
+
+    status = {g["group_id"]: g.get("status") for g in bundle.get("record_groups") or ()}
+    named = list(mc.get("group_ids") or ())
+    live = [x for x in named if status.get(x) in B.LIVE_GROUP_STATUSES]
+    if len(live) + (1 if mc.get("run_keys") else 0) >= 2:
+        return None
+    gone: dict[str, int] = {}
+    for x in named:
+        if x not in live:
+            gone[status.get(x) or "no longer a record group"] = gone.get(status.get(x) or "no longer a record group", 0) + 1
+    return (f"it proposes nothing: {len(live)} of its {len(named)} groups {'is' if len(live) == 1 else 'are'} live"
+            + (f" ({', '.join(f'{n} {s}' for s, n in sorted(gone.items()))})" if gone else "")
+            + ", and a merge needs at least two. It is kept under its id but not asked, and `bundle list <bundle_dir> "
+            "merge-candidates` lists it only with --all.")
+
+
 BINDING_RULE_ID = "isaac.grouping.binding_groups.v0"
 
 

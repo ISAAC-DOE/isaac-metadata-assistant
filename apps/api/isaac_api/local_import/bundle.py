@@ -1795,11 +1795,31 @@ def apply_derivations(bundle: dict) -> dict:
     status_of = _decisions_by_target(
         [d for d in bundle.get("scientist_decisions") or () if d.get("decision") in GROUP_STATUS_DECISIONS]
     )
+    merge_decided: list[tuple[Mapping, dict]] = []
     for g in bundle.get("record_groups") or ():
         # only a STATUS decision moves a group's status (a calibration approval does not)
         d = status_of.get(("record_group", g["group_id"]))
         kind = d.get("decision") if d is not None else None
         g["status"] = GROUP_STATUS_BY_DECISION.get(None if kind == "defer" else kind, "proposed")
+        if kind == "merge":
+            merge_decided.append((d, g))
+    if merge_decided:
+        # A MERGE IS `merged` ONLY ONCE IT WAS APPLIED (polish c3): while no other live group holds any of
+        # its runs (no regroup combined them yet, or the regroup could not), the group is exactly what it
+        # was — proposed, under its own id — and the merge decision is pending (`isaac bundle group
+        # --regroup` applies it, or says in merge_decisions_not_combined why not). Before, the decision
+        # alone made it `merged`, so a merge the regroup could not combine still retired the group and the
+        # regroup re-proposed its runs under a new id. Latest merge first: a combined group merged on
+        # again, but not yet combined, is pending and still holds the runs of the group it was made from.
+        pending = {id(g) for _, g in merge_decided}
+        held = {k for g in bundle["record_groups"] if g.get("status") in LIVE_GROUP_STATUSES and id(g) not in pending
+                for k in g.get("member_run_keys") or ()}
+        made = {id(d): i for i, d in enumerate(bundle.get("scientist_decisions") or ())}
+        for d, g in sorted(merge_decided, key=lambda dg: -made.get(id(dg[0]), -1)):
+            runs = set(g.get("member_run_keys") or ())
+            if not held & runs:
+                g["status"] = "proposed"
+                held |= runs
     state_of = processing_state_decisions(bundle)
     for r in bundle.get("processing_results") or ():
         d = state_of.get(("processing_result", processing_id(r)))

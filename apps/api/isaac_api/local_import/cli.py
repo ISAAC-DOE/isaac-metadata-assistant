@@ -781,12 +781,26 @@ def _mc_reason_code(obj: Mapping) -> str | None:
     return obj.get("reason_code") or G.merge_reason_code(obj.get("reasons") or ())
 
 
+def _group_view(bundle: Mapping, obj: Mapping) -> Mapping:
+    """``bundle show group``: the stored group, without the question of a merge candidate that proposes
+    nothing now (:func:`grouping.merge_candidate_inert`; polish c3) — that question is never asked."""
+    from . import grouping as G
+
+    inert = {mc.get("merge_candidate_id") for mc in bundle.get("merge_candidates") or ()
+             if mc.get("merge_candidate_id") in set(obj.get("merge_candidate_ids") or ()) and G.merge_candidate_inert(bundle, mc)}
+    if not inert:
+        return obj
+    return {**obj, "questions": [q for q in obj.get("questions") or ()
+                                 if not (isinstance(q, Mapping) and q.get("merge_candidate_id") in inert)]}
+
+
 def _merge_candidate_view(bundle: Mapping, obj: Mapping) -> dict:
     """``bundle show merge-candidate``: what the candidate proposes, its groups' run labels, its caution
     and its reasons by code — no reading's value (those stay in bundle.json), so no exposure."""
     from . import grouping as G
 
     shown_keys = ("code", "group_id", "decision_id", "key", "why_unknown", "detail")
+    inert = G.merge_candidate_inert(bundle, obj)
     return {
         "merge_candidate_id": obj.get("merge_candidate_id"),
         "status": obj.get("status"),
@@ -795,10 +809,12 @@ def _merge_candidate_view(bundle: Mapping, obj: Mapping) -> dict:
         "reason_codes": obj.get("reason_codes") or sorted({r.get("code") for r in obj.get("reasons") or () if r.get("code")}),
         "caution": list(obj.get("caution") or ()),
         "groups": G.merge_candidate_groups(bundle, obj, cap=50),
-        "question": (obj.get("question") or {}).get("text"),
+        # never asked once it proposes nothing (polish c3): why is said instead
+        "question": None if inert else (obj.get("question") or {}).get("text"),
+        **({"proposes_nothing": inert} if inert else {}),
         "reasons": [{k: r[k] for k in shown_keys if k in r} for r in obj.get("reasons") or ()],
         "kept_apart_by_decision_id": obj.get("kept_apart_by_decision_id"),
-        "answer_with": [
+        "answer_with": [] if inert else [
             f"isaac bundle decide <bundle_dir> --target {(obj.get('group_ids') or ['<group>'])[0]} --decision merge "
             f"--merge-with {' '.join((obj.get('group_ids') or [])[1:]) or '<group>'} --by \"<your name>\"  &&  isaac bundle group <bundle_dir> --regroup",
             f"isaac bundle decide <bundle_dir> --target {obj.get('merge_candidate_id')} --decision keep_apart --by \"<your name>\"",
@@ -889,8 +905,17 @@ def cmd_bundle_list(args) -> int:
             if r.get("status") not in B.LIVE_GROUP_STATUSES:
                 not_listed[r.get("status")] = not_listed.get(r.get("status"), 0) + 1
         rows = [r for r in rows if r.get("status") in B.LIVE_GROUP_STATUSES]
-    elif args.all and args.kind != "groups":
-        _err("--all applies only to `groups`.")
+    elif args.kind == "merge-candidates" and not args.all:
+        # polish c3: a candidate with fewer than two LIVE groups proposes nothing (grouping.merge_candidate_inert);
+        # it is kept, counted here, and listed with --all
+        from . import grouping as G
+
+        inert = [r for r in rows if G.merge_candidate_inert(bundle, r)]
+        if inert:
+            not_listed[G.INERT_CANDIDATE] = len(inert)
+            rows = [r for r in rows if not G.merge_candidate_inert(bundle, r)]
+    elif args.all and args.kind not in ("groups", "merge-candidates"):
+        _err("--all applies only to `groups` and `merge-candidates`.")
         return EXIT_USAGE
     if args.state:
         if args.kind not in ("candidates", "processing-results"):
@@ -949,7 +974,10 @@ def cmd_bundle_list(args) -> int:
         "omitted_before": min(args.offset, total),
         "omitted_after": max(0, total - args.offset - len(page)),
         **({"not_listed": dict(sorted(not_listed.items())),
-            "not_listed_note": "groups that are decision history (merged, rejected, split), not records: pass --all to list them"}
+            "not_listed_note": ("groups that are decision history (merged, rejected, split), not records: pass --all to list them"
+                                if args.kind == "groups" else
+                                "merge candidates with fewer than two live groups left (the others were rejected, split or "
+                                "merged): they propose nothing and are not asked; pass --all to list them")}
            if not_listed else {}),
         **({"cannot_export": dict(sorted(cannot_export.items(), key=lambda kv: (-kv[1], kv[0]))),
             "cannot_export_note": CANNOT_EXPORT_NOTE} if cannot_export else {}),
@@ -1102,7 +1130,11 @@ def cmd_bundle_show(args) -> int:
                 except M.MutationRefused as exc:
                     _err(f"Nothing printed: {exc}")
                     return exc.code
-            print(json.dumps(_merge_candidate_view(bundle, obj) if args.kind == "merge-candidate" else obj, indent=1, ensure_ascii=False))
+            if args.kind == "merge-candidate":
+                obj = _merge_candidate_view(bundle, obj)
+            elif args.kind == "group":
+                obj = _group_view(bundle, obj)
+            print(json.dumps(obj, indent=1, ensure_ascii=False))
             return EXIT_OK
     if args.kind == "question":
         # the id `bundle questions` prints (a consolidated question) is not a fine-grained one
@@ -1797,7 +1829,8 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--offset", type=int, default=0)
     q.add_argument("--state", help="candidates: filter by value_state; processing-results: filter by state")
     q.add_argument("--no-values", action="store_true", help="candidates only: omit parser values (records no exposure)")
-    q.add_argument("--all", action="store_true", help="groups only: also list merged, rejected and split groups (decision history)")
+    q.add_argument("--all", action="store_true", help="groups: also list merged, rejected and split groups (decision history); "
+                   "merge-candidates: also list those with fewer than two live groups (they propose nothing)")
     q.set_defaults(func=cmd_bundle_list)
     q = bsub.add_parser("show", help="one object by id")
     q.add_argument("bundle_dir")

@@ -1482,11 +1482,14 @@ def group(bundle_dir: Path, *, regroup: bool = False) -> dict:
     whether some decision names it:
 
     * BINDING (``scientist_confirmed``): kept, and its runs are never re-proposed;
-    * HISTORY (``rejected``, ``split``, ``merged``): kept as the record of that decision; its
-      runs are proposed afresh. A fresh proposal identical to a rejected or split group is
-      not re-proposed (the scientist ruled on exactly that); one identical to a MERGED group
-      is re-proposed under a distinct id with a merge candidate carrying the merge decision
-      (nothing applies ``merge_with``; the scientist confirms the merge);
+    * HISTORY (``rejected``, ``split``): kept as the record of that decision; its runs are
+      proposed afresh. A fresh proposal identical to a rejected or split group is not
+      re-proposed (the scientist ruled on exactly that);
+    * a group whose latest status decision is ``merge``: its merge is applied again (DEC-91,
+      below). Applied — another live group now holds its runs — it is kept as history
+      (``merged``); NOT applied, it is exactly what it was: the fresh proposal reproduces it
+      under its own id, live, and the decision stays pending (polish c3: before, it was retired
+      and its runs re-proposed under a new id, so ids changed although nothing merged);
     * ``proposed`` (undecided, deferred, calibration-only): replaced. If a decision or a
       processing result still names it and the fresh proposal does not reproduce it, it moves
       to ``superseded_record_groups[]`` so they keep their target.
@@ -1500,264 +1503,8 @@ def group(bundle_dir: Path, *, regroup: bool = False) -> dict:
         from .processing import cli_entry
     except ImportError as exc:  # pragma: no cover - the package ships with the checkout
         raise MutationRefused(f"grouping is not installed: {exc}", code=2) from exc
-    from . import grouping as G
 
-    def change(bundle):
-        refusal = B.legacy_refusal(bundle)
-        if refusal:
-            raise MutationRefused(refusal, code=2)
-        existing = list(bundle.get("record_groups") or ())
-        if existing and not regroup:
-            raise MutationRefused("This bundle already has record groups; pass --regroup to replace the undecided ones.")
-        binding = [g for g in existing if g.get("status") in B.BINDING_GROUP_STATUSES]
-        history = [g for g in existing if g.get("status") in B.HISTORY_GROUP_STATUSES]
-        replaced = [g for g in existing if g not in binding and g not in history]
-        keep = binding + history
-        kept_by_id = {g["group_id"]: g for g in keep}
-        exp_key = G.experiment_key_of(bundle)
-        full = cli_entry.build_groups_payload(bundle)  # over the FULL bundle
-        bind_of = {rk: g["group_id"] for g in binding for rk in g.get("member_run_keys") or ()}
-        exports_of_binding = {
-            rk: bind_of[i["related_run_key"]]
-            for rk, issues in (full.get("engine_reading_issues") or {}).get("per_run", {}).items()
-            for i in issues
-            if rk not in bind_of and i.get("code") == "exported_file_read_as_acquisition" and i.get("related_run_key") in bind_of
-        }
-        excluded = set(bind_of) | set(exports_of_binding)
-        if excluded:
-            view = {**bundle, "runs": [r for r in bundle.get("runs") or () if r.get("run_key") not in excluded]}
-            payload = cli_entry.build_groups_payload(view, context=bundle)
-        else:
-            payload = full
-        decisions = bundle.get("scientist_decisions") or ()
-        merge_decision = {
-            d["target"]["id"]: d for d in decisions
-            if d["target"]["kind"] == "record_group" and d.get("decision") == "merge"
-        }
-        fresh, renamed = [], {}
-        for g0 in payload["record_groups"]:
-            g = dict(g0)
-            hist = kept_by_id.get(g["group_id"])
-            if hist is not None:
-                if hist.get("status") != "merged":
-                    continue  # identical to a rejected/split group (or the bound group itself)
-                old = g["group_id"]
-                g["group_id"] = G.group_id_for(exp_key, list(g["member_run_keys"]) + [f"reproposed-after:{old}"])
-                g["reproposed_after_group_id"] = old
-                g["flags"] = list(g.get("flags") or []) + ["reproposed_after_merge_decision"]
-                renamed[old] = g["group_id"]
-            g["status"] = "proposed"  # only a decision moves it
-            g.setdefault("condition_violations", [])  # carried; a proposed group must have none
-            fresh.append(g)
-        fresh_of = {k: g["group_id"] for g in fresh for k in g.get("member_run_keys") or ()}
-        merge_candidates = [
-            {**mc, "group_ids": [renamed.get(x, x) for x in mc.get("group_ids") or ()]}
-            for mc in payload.get("merge_candidates") or ()
-        ]
-        merge_candidates += G.binding_merge_candidates(
-            full["record_groups"], fresh, bind_of, exports_of_binding, experiment_key=exp_key
-        )
-        # A MERGE DECISION IS APPLIED (DEC-91; before 1.6.0 it was only carried as a candidate, which no
-        # decision could turn into one group — a dead end). The runs of the merged group and of every
-        # group it names in merge_with are proposed as ONE combined group, for the scientist to confirm,
-        # only when nothing the import or a scientist recorded tells them apart (FAIL CLOSED,
-        # :func:`_merge_blocker_details`): none is in a confirmed group, they share a role, every basis
-        # reading agrees, the independent condition check finds nothing but the names, the file names
-        # agree but for declared counters and repeat markers (or the scientist confirmed one sample for
-        # every run), and no confirmed run-level answer differs. Anything else keeps the candidate below,
-        # naming why and the commands that move it on (1.9.0: before, a counter answer was the only
-        # advice, and it changed nothing for runs that state no sample — a dead end measured on real data).
-        by_id_all = {g["group_id"]: g for g in [*(bundle.get("superseded_record_groups") or ()), *existing]}
-        # the combined group a previous regroup made for a decision still holds the runs of its
-        # merge_with groups after those were replaced, so a later regroup reproduces it
-        combined_runs_of: dict[str, list[str]] = {}
-        for g in existing:
-            mbd = g.get("merged_by_decision")
-            if isinstance(mbd, Mapping) and mbd.get("decision_id"):
-                combined_runs_of.setdefault(mbd["decision_id"], []).extend(g.get("member_run_keys") or ())
-        combined_by: list[dict] = []
-        not_combined: list[dict] = []
-        runs_by_key = {r["run_key"]: r for r in bundle.get("runs") or ()}
-        for gid, d in sorted(merge_decision.items()):
-            if (by_id_all.get(gid) or {}).get("status") != "merged":
-                continue  # a later status decision superseded the merge
-            runs_named = [k for x in [gid, *(d.get("merge_with") or [])] for k in (by_id_all.get(x) or {}).get("member_run_keys") or ()]
-            runs_named += [k for k in combined_runs_of.get(d["decision_id"], ()) if k not in runs_named]
-            gids = sorted({fresh_of[k] if k in fresh_of else bind_of[k] for k in runs_named if k in fresh_of or k in bind_of})
-            if len(gids) < 2:
-                if d["decision_id"] not in combined_runs_of:
-                    # NEVER SILENT: a merge decision that names nothing to merge (no merge_with, an unknown
-                    # id, the group itself, a group that is no longer live — `decide` refuses these now, but
-                    # an older bundle may hold one), or whose runs are all in one group already, combined
-                    # nothing. (One a previous regroup DID combine, now confirmed or re-proposed whole, is
-                    # not listed: it was applied.)
-                    not_combined.append({"decision_id": d["decision_id"],
-                                         "reason": _merge_not_applicable(d, gid, by_id_all, gids)})
-                continue
-            why, steps = None, []
-            holders = [g for g in fresh if g["group_id"] in gids]
-            if any(k in bind_of for k in runs_named):
-                why = "a run of it is in a confirmed group, whose runs are never re-proposed"
-            elif len(holders) != len(gids) or len({h.get("role") for h in holders}) != 1:
-                why = "the groups holding its runs do not share one role"
-            if why is None:
-                order = {g["group_id"]: i for i, g in enumerate(fresh)}
-                holders.sort(key=lambda h: order[h["group_id"]])
-                combined = _combine_for_merge(holders, d, gid, exp_key)
-                prior = kept_by_id.get(combined["group_id"])
-                if prior is not None:
-                    # H1: the combined group was itself decided (rejected, split or merged): that is the
-                    # scientist's ruling on exactly this group, so it is not proposed again — and no
-                    # candidate re-asks it
-                    not_combined.append({"decision_id": d["decision_id"],
-                                         "reason": f"the combined group {combined['group_id']} was already decided ({prior.get('status')})"})
-                    continue
-                blockers = _merge_blocker_details(bundle, payload, holders, combined, d)
-                if blockers:
-                    why = "; ".join(r for r, _ in blockers)
-                    steps = list(dict.fromkeys(c for _, cs in blockers for c in cs))
-                else:
-                    first = order[holders[0]["group_id"]]
-                    fresh = [g for g in fresh if g["group_id"] not in gids]
-                    fresh.insert(min(first, len(fresh)), combined)
-                    for h in holders:
-                        renamed[h["group_id"]] = combined["group_id"]
-                        for k in h.get("member_run_keys") or ():
-                            fresh_of[k] = combined["group_id"]
-                    combined_by.append({"decision_id": d["decision_id"], "group_id": combined["group_id"], "from_groups": gids})
-                    continue
-            not_combined.append({"decision_id": d["decision_id"], "reason": why, "next_commands": steps})
-            reason = {"code": "scientist_decided_merge", "decision_id": d["decision_id"], "group_id": gid,
-                      "detail": f"a scientist decided to merge these runs' former groups, but they were not combined: {why}. "
-                                "Confirm or reject each group, or record a new decision."}
-            same = next((mc for mc in merge_candidates if sorted(mc.get("group_ids") or ()) == gids and not mc.get("run_keys")), None)
-            if same is not None:
-                # ONE candidate per set of groups: the rule's candidate for exactly these groups keeps its id
-                # (a scientist's answers key on it) and leads with the decision (before 1.9.0 the pair was
-                # listed twice, under two ids)
-                merge_candidates[merge_candidates.index(same)] = {
-                    **same, "reasons": [reason, *(same.get("reasons") or ())], "reason_code": "scientist_decided_merge",
-                    "reason_codes": sorted({"scientist_decided_merge", *(same.get("reason_codes") or ())})}
-                continue
-            mcid = "mc-" + hashlib.sha256((exp_key + "\n" + "\n".join(gids)).encode()).hexdigest()[:16]
-            merge_candidates.append({
-                "merge_candidate_id": mcid, "experiment_key": exp_key, "group_ids": gids, "run_keys": [],
-                "status": "proposed", "rule_id": G.BINDING_RULE_ID, "reasons": [reason],
-                "reason_code": "scientist_decided_merge", "reason_codes": ["scientist_decided_merge"],
-                "caution": G.merge_candidate_caution({h["group_id"]: h for h in holders}, runs_by_key, gids),
-            })
-        if combined_by:
-            # a candidate that named a group now combined names the combined group instead; one left
-            # naming a single group (and no run) has nothing left to merge
-            remapped, seen_mc = [], set()
-            for mc in merge_candidates:
-                gids2 = sorted({renamed.get(x, x) for x in mc.get("group_ids") or ()})
-                if gids2 != sorted(mc.get("group_ids") or ()):
-                    if len(gids2) < 2 and not mc.get("run_keys"):
-                        continue
-                    mc = {**mc, "group_ids": gids2,
-                          "merge_candidate_id": "mc-" + hashlib.sha256((exp_key + "\n" + "\n".join(gids2 + list(mc.get("run_keys") or []))).encode()).hexdigest()[:16]}
-                if mc["merge_candidate_id"] in seen_mc:
-                    continue
-                seen_mc.add(mc["merge_candidate_id"])
-                remapped.append(mc)
-            merge_candidates = remapped
-        bundle["record_groups"] = keep + fresh
-        ids = {g["group_id"] for g in bundle["record_groups"]}
-        before_mc = list(bundle.get("merge_candidates") or ())
-        bundle["merge_candidates"] = [dict(mc) for mc in merge_candidates if mc.get("group_ids") and set(mc["group_ids"]) <= ids]
-        # 1.6.0: a merge candidate a decision names (keep_apart) that this regroup no longer proposes is
-        # kept in superseded_merge_candidates, so the decision keeps its target; one proposed again
-        # leaves it (its decision applies to it again by id)
-        mc_now = {mc["merge_candidate_id"] for mc in bundle["merge_candidates"]}
-        mc_named = {d["target"]["id"] for d in decisions if d["target"]["kind"] == "merge_candidate"}
-        sup_mc = [x for x in bundle.get("superseded_merge_candidates") or () if x["merge_candidate_id"] not in mc_now]
-        known_mc = {x["merge_candidate_id"] for x in sup_mc}
-        for mc in before_mc:
-            mcid = mc.get("merge_candidate_id")
-            if mcid in mc_named and mcid not in mc_now and mcid not in known_mc:
-                sup_mc.append({"merge_candidate_id": mcid, "group_ids": list(mc.get("group_ids") or []),
-                               "run_keys": list(mc.get("run_keys") or []), "superseded_utc": now_utc(),
-                               "reason": "no longer proposed by `isaac bundle group --regroup`; a decision names it, so it "
-                                         "is kept here as that decision's target. It is not an open question."})
-        if sup_mc or "superseded_merge_candidates" in bundle:
-            bundle["superseded_merge_candidates"] = sup_mc
-        mc_ids_of: dict[str, list[str]] = {}
-        for mc in bundle["merge_candidates"]:
-            for x in mc["group_ids"]:
-                mc_ids_of.setdefault(x, []).append(mc["merge_candidate_id"])
-        for g in fresh:
-            g["merge_candidate_ids"] = mc_ids_of.get(g["group_id"], [])
-        # A replaced group that a decision, a processing result OR an AI reading (an absorber
-        # finding is recorded on a group) names is kept as superseded, so every reference stays
-        # resolvable. Its readings stay on it; they do not move to the new groups (apply the
-        # findings file again for those).
-        named = {d["target"]["id"] for d in decisions if d["target"]["kind"] == "record_group"}
-        named |= {i["target"]["id"] for i in bundle.get("ai_interpretations") or () if i["target"]["kind"] == "record_group"}
-        results_of: dict[str, list[str]] = {}
-        for r in bundle.get("processing_results") or ():
-            results_of.setdefault(r.get("group_id"), []).append(B.processing_id(r))
-        superseded = [s for s in bundle.get("superseded_record_groups") or () if s["group_id"] not in ids]
-        known = {s["group_id"] for s in superseded}
-        for g in replaced:
-            gid = g["group_id"]
-            if gid in ids or gid in known or (gid not in named and gid not in results_of):
-                continue
-            superseded.append(
-                {
-                    "group_id": gid,
-                    "member_run_keys": list(g.get("member_run_keys") or []),
-                    "status": "proposed",
-                    "superseded_utc": now_utc(),
-                    "reason": (
-                        "replaced by `isaac bundle group --regroup`; a decision, processing result or AI reading names it, "
-                        "so it is kept here as their target. It is not a record."
-                    ),
-                    "processing_result_ids": results_of.get(gid, []),
-                }
-            )
-        if superseded or "superseded_record_groups" in bundle:
-            bundle["superseded_record_groups"] = superseded
-        questions = [
-            dict(q) for q in (full.get("experiment_questions") or full.get("questions") or ())
-            if isinstance(q, Mapping)
-        ]
-        if excluded:
-            # N-3: the counter question is the beamtime's (full bundle), but an answer cannot
-            # merge a CONFIRMED group's runs; say so where that changes what it resolves.
-            view_q = next((q for q in payload.get("experiment_questions") or () if q.get("kind") == "naming_counter_positions"), None)
-            for q in questions:
-                if q.get("kind") != "naming_counter_positions":
-                    continue
-                left = dict((view_q or {}).get("candidates_resolved_by_position") or {})
-                if left != dict(q.get("candidates_resolved_by_position") or {}):
-                    q["candidates_resolved_by_position_excluding_confirmed"] = left
-                    q["text"] = str(q.get("text") or "") + (
-                        " Runs of a confirmed group are not merged by the answer; they are offered as a merge candidate instead."
-                    )
-        bundle["grouping_questions"] = questions
-        return {
-            "record_groups": len(bundle["record_groups"]),
-            # the groups that are (or may become) records; the rest is decision history (merged, rejected, split)
-            "live_record_groups": sum(1 for g in bundle["record_groups"] if g.get("status") in B.LIVE_GROUP_STATUSES),
-            "kept_decided": len(keep),
-            "kept_binding": len(binding),
-            "kept_history": len(history),
-            "superseded": len(superseded),
-            "proposed": len(fresh),
-            "merge_candidates": len(bundle["merge_candidates"]),
-            "combined_by_merge_decision": combined_by,
-            "merge_decisions_not_combined": not_combined,
-            "rule_id": payload.get("rule_id"),
-            "statement": "Proposed groups only. A scientist confirms, splits, merges or rejects each one.",
-            "read_them_with": [
-                "isaac bundle list <bundle_dir> groups",
-                "isaac bundle show <bundle_dir> group <group_id>",
-                "isaac bundle list <bundle_dir> merge-candidates",
-            ],
-        }
-
-    result = mutate(bundle_dir, change)
+    result = mutate(bundle_dir, lambda bundle: _regroup(bundle, regroup=regroup))
     # record_groups.json is kept as a MIRROR of bundle.json's record_groups (so LOCAL-P's
     # processing reads exactly the persisted groups and never re-proposes its own).
     from .cli import _atomic_write, _json_bytes
@@ -1777,6 +1524,278 @@ def group(bundle_dir: Path, *, regroup: bool = False) -> dict:
     return result
 
 
+def _regroup(bundle: dict, *, regroup: bool = True) -> dict:
+    """:func:`group` applied to an ALREADY-LOADED bundle (the caller's lock, or a copy: the counter answer's
+    preview runs it on one). Saves nothing and writes no mirror."""
+    try:
+        from .processing import cli_entry
+    except ImportError as exc:  # pragma: no cover - the package ships with the checkout
+        raise MutationRefused(f"grouping is not installed: {exc}", code=2) from exc
+    from . import grouping as G
+
+    refusal = B.legacy_refusal(bundle)
+    if refusal:
+        raise MutationRefused(refusal, code=2)
+    existing = list(bundle.get("record_groups") or ())
+    if existing and not regroup:
+        raise MutationRefused("This bundle already has record groups; pass --regroup to replace the undecided ones.")
+    decisions = bundle.get("scientist_decisions") or ()
+    # the merge decisions in force: a group's LATEST status decision is a merge (a later confirm,
+    # reject, split or defer supersedes it), applied in the order the scientist made them
+    merge_decision = {
+        tid: d for (kind, tid), d in B._decisions_by_target(
+            [d for d in decisions if d.get("decision") in B.GROUP_STATUS_DECISIONS]).items()
+        if kind == "record_group" and d.get("decision") == "merge"
+    }
+    binding = [g for g in existing if g.get("status") in B.BINDING_GROUP_STATUSES]
+    # a merge-decided group is not history until its merge is applied again below
+    history = [g for g in existing if g.get("status") in B.HISTORY_GROUP_STATUSES and g["group_id"] not in merge_decision]
+    replaced = [g for g in existing if g not in binding and g not in history]
+    kept_by_id = {g["group_id"]: g for g in binding + history}
+    exp_key = G.experiment_key_of(bundle)
+    full = cli_entry.build_groups_payload(bundle)  # over the FULL bundle
+    bind_of = {rk: g["group_id"] for g in binding for rk in g.get("member_run_keys") or ()}
+    exports_of_binding = {
+        rk: bind_of[i["related_run_key"]]
+        for rk, issues in (full.get("engine_reading_issues") or {}).get("per_run", {}).items()
+        for i in issues
+        if rk not in bind_of and i.get("code") == "exported_file_read_as_acquisition" and i.get("related_run_key") in bind_of
+    }
+    excluded = set(bind_of) | set(exports_of_binding)
+    if excluded:
+        view = {**bundle, "runs": [r for r in bundle.get("runs") or () if r.get("run_key") not in excluded]}
+        payload = cli_entry.build_groups_payload(view, context=bundle)
+    else:
+        payload = full
+    fresh, renamed = [], {}
+    for g0 in payload["record_groups"]:
+        g = dict(g0)
+        if g["group_id"] in kept_by_id:
+            continue  # identical to a rejected/split group (or the bound group itself)
+        g["status"] = "proposed"  # only a decision moves it
+        g.setdefault("condition_violations", [])  # carried; a proposed group must have none
+        fresh.append(g)
+    fresh_of = {k: g["group_id"] for g in fresh for k in g.get("member_run_keys") or ()}
+    merge_candidates = [dict(mc) for mc in payload.get("merge_candidates") or ()]
+    merge_candidates += G.binding_merge_candidates(
+        full["record_groups"], fresh, bind_of, exports_of_binding, experiment_key=exp_key
+    )
+    # A MERGE DECISION IS APPLIED (DEC-91; before 1.6.0 it was only carried as a candidate, which no
+    # decision could turn into one group — a dead end). The runs of the merged group and of every
+    # group it names in merge_with are proposed as ONE combined group, for the scientist to confirm,
+    # only when nothing the import or a scientist recorded tells them apart (FAIL CLOSED,
+    # :func:`_merge_blocker_details`): none is in a confirmed group, they share a role, every basis
+    # reading agrees, the independent condition check finds nothing but the names, the file names
+    # agree but for declared counters and repeat markers (or the scientist confirmed one sample for
+    # every run), and no confirmed run-level answer differs. Anything else keeps the candidate below,
+    # naming why and the commands that move it on (1.9.0: before, a counter answer was the only
+    # advice, and it changed nothing for runs that state no sample — a dead end measured on real data).
+    by_id_all = {g["group_id"]: g for g in [*(bundle.get("superseded_record_groups") or ()), *existing]}
+    # the combined group a previous regroup made for a decision still holds the runs of its
+    # merge_with groups after those were replaced, so a later regroup reproduces it
+    combined_runs_of: dict[str, list[str]] = {}
+    for g in existing:
+        mbd = g.get("merged_by_decision")
+        if isinstance(mbd, Mapping) and mbd.get("decision_id"):
+            combined_runs_of.setdefault(mbd["decision_id"], []).extend(g.get("member_run_keys") or ())
+    combined_by: list[dict] = []
+    not_combined: list[dict] = []
+    runs_by_key = {r["run_key"]: r for r in bundle.get("runs") or ()}
+    made = {id(d): i for i, d in enumerate(decisions)}
+    for gid, d in sorted(merge_decision.items(), key=lambda kv: made[id(kv[1])]):
+        runs_named = [k for x in [gid, *(d.get("merge_with") or [])] for k in (by_id_all.get(x) or {}).get("member_run_keys") or ()]
+        runs_named += [k for k in combined_runs_of.get(d["decision_id"], ()) if k not in runs_named]
+        gids = sorted({fresh_of[k] if k in fresh_of else bind_of[k] for k in runs_named if k in fresh_of or k in bind_of})
+        if len(gids) < 2:
+            if d["decision_id"] not in combined_runs_of:
+                # NEVER SILENT: a merge decision that names nothing to merge (no merge_with, an unknown
+                # id, the group itself, a group that is no longer live — `decide` refuses these now, but
+                # an older bundle may hold one), or whose runs are all in one group already, combined
+                # nothing. (One a previous regroup DID combine, now confirmed or re-proposed whole, is
+                # not listed: it was applied.)
+                not_combined.append({"decision_id": d["decision_id"],
+                                     "reason": _merge_not_applicable(d, gid, by_id_all, gids)})
+            continue
+        why, steps = None, []
+        holders = [g for g in fresh if g["group_id"] in gids]
+        if any(k in bind_of for k in runs_named):
+            why = "a run of it is in a confirmed group, whose runs are never re-proposed"
+        elif len(holders) != len(gids) or len({h.get("role") for h in holders}) != 1:
+            why = "the groups holding its runs do not share one role"
+        if why is None:
+            order = {g["group_id"]: i for i, g in enumerate(fresh)}
+            holders.sort(key=lambda h: order[h["group_id"]])
+            combined = _combine_for_merge(holders, d, gid, exp_key)
+            prior = kept_by_id.get(combined["group_id"])
+            if prior is not None:
+                # H1: the combined group was itself decided (rejected, split or merged): that is the
+                # scientist's ruling on exactly this group, so it is not proposed again — and no
+                # candidate re-asks it
+                not_combined.append({"decision_id": d["decision_id"],
+                                     "reason": f"the combined group {combined['group_id']} was already decided ({prior.get('status')})"})
+                continue
+            blockers = _merge_blocker_details(bundle, payload, holders, combined, d)
+            if blockers:
+                why = "; ".join(r for r, _ in blockers)
+                steps = list(dict.fromkeys(c for _, cs in blockers for c in cs))
+            else:
+                first = order[holders[0]["group_id"]]
+                fresh = [g for g in fresh if g["group_id"] not in gids]
+                fresh.insert(min(first, len(fresh)), combined)
+                for h in holders:
+                    renamed[h["group_id"]] = combined["group_id"]
+                    for k in h.get("member_run_keys") or ():
+                        fresh_of[k] = combined["group_id"]
+                combined_by.append({"decision_id": d["decision_id"], "group_id": combined["group_id"], "from_groups": gids})
+                continue
+        not_combined.append({"decision_id": d["decision_id"], "reason": why, "next_commands": steps})
+        reason = {"code": "scientist_decided_merge", "decision_id": d["decision_id"], "group_id": gid,
+                  "detail": f"a scientist decided to merge these runs' groups, but they were not combined: {why}. "
+                            "The groups stay as they are and the merge decision stays pending (each regroup applies it "
+                            "again). Confirm or reject each group, or record a new decision."}
+        same = next((mc for mc in merge_candidates if sorted(mc.get("group_ids") or ()) == gids and not mc.get("run_keys")), None)
+        if same is not None:
+            # ONE candidate per set of groups: the rule's candidate for exactly these groups keeps its id
+            # (a scientist's answers key on it) and leads with the decision (before 1.9.0 the pair was
+            # listed twice, under two ids)
+            merge_candidates[merge_candidates.index(same)] = {
+                **same, "reasons": [reason, *(same.get("reasons") or ())], "reason_code": "scientist_decided_merge",
+                "reason_codes": sorted({"scientist_decided_merge", *(same.get("reason_codes") or ())})}
+            continue
+        mcid = "mc-" + hashlib.sha256((exp_key + "\n" + "\n".join(gids)).encode()).hexdigest()[:16]
+        merge_candidates.append({
+            "merge_candidate_id": mcid, "experiment_key": exp_key, "group_ids": gids, "run_keys": [],
+            "status": "proposed", "rule_id": G.BINDING_RULE_ID, "reasons": [reason],
+            "reason_code": "scientist_decided_merge", "reason_codes": ["scientist_decided_merge"],
+            "caution": G.merge_candidate_caution({h["group_id"]: h for h in holders}, runs_by_key, gids),
+        })
+    if combined_by:
+        # a candidate that named a group now combined names the combined group instead; one left
+        # naming a single group (and no run) has nothing left to merge
+        remapped, seen_mc = [], set()
+        for mc in merge_candidates:
+            gids2 = sorted({renamed.get(x, x) for x in mc.get("group_ids") or ()})
+            if gids2 != sorted(mc.get("group_ids") or ()):
+                if len(gids2) < 2 and not mc.get("run_keys"):
+                    continue
+                mc = {**mc, "group_ids": gids2,
+                      "merge_candidate_id": "mc-" + hashlib.sha256((exp_key + "\n" + "\n".join(gids2 + list(mc.get("run_keys") or []))).encode()).hexdigest()[:16]}
+            if mc["merge_candidate_id"] in seen_mc:
+                continue
+            seen_mc.add(mc["merge_candidate_id"])
+            remapped.append(mc)
+        merge_candidates = remapped
+    # A MERGE APPLIED (now, or by an earlier regroup whose combined group is confirmed or merged on) keeps
+    # its group as history: another live group holds its runs, so it is `merged` (bundle.apply_derivations).
+    # One NOT applied is in `fresh` under its own id, as it was; one whose runs the proposal now groups
+    # otherwise is superseded below (the decision names it).
+    fresh_ids = {g["group_id"] for g in fresh}
+    live_runs = {k for g in [*binding, *fresh] for k in g.get("member_run_keys") or ()}
+    applied = {g["group_id"] for g in replaced if g["group_id"] in merge_decision and g["group_id"] not in fresh_ids
+               and live_runs & set(g.get("member_run_keys") or ())}
+    for g in replaced:
+        if g["group_id"] in applied:
+            g["status"] = "merged"  # what bundle.apply_derivations gives it: another live group holds its runs
+    was_history = {id(g) for g in history}
+    history = [g for g in existing if id(g) in was_history or g["group_id"] in applied]
+    replaced = [g for g in replaced if g["group_id"] not in applied]
+    keep = binding + history
+    bundle["record_groups"] = keep + fresh
+    ids = {g["group_id"] for g in bundle["record_groups"]}
+    before_mc = list(bundle.get("merge_candidates") or ())
+    bundle["merge_candidates"] = [dict(mc) for mc in merge_candidates if mc.get("group_ids") and set(mc["group_ids"]) <= ids]
+    # 1.6.0: a merge candidate a decision names (keep_apart) that this regroup no longer proposes is
+    # kept in superseded_merge_candidates, so the decision keeps its target; one proposed again
+    # leaves it (its decision applies to it again by id)
+    mc_now = {mc["merge_candidate_id"] for mc in bundle["merge_candidates"]}
+    mc_named = {d["target"]["id"] for d in decisions if d["target"]["kind"] == "merge_candidate"}
+    sup_mc = [x for x in bundle.get("superseded_merge_candidates") or () if x["merge_candidate_id"] not in mc_now]
+    known_mc = {x["merge_candidate_id"] for x in sup_mc}
+    for mc in before_mc:
+        mcid = mc.get("merge_candidate_id")
+        if mcid in mc_named and mcid not in mc_now and mcid not in known_mc:
+            sup_mc.append({"merge_candidate_id": mcid, "group_ids": list(mc.get("group_ids") or []),
+                           "run_keys": list(mc.get("run_keys") or []), "superseded_utc": now_utc(),
+                           "reason": "no longer proposed by `isaac bundle group --regroup`; a decision names it, so it "
+                                     "is kept here as that decision's target. It is not an open question."})
+    if sup_mc or "superseded_merge_candidates" in bundle:
+        bundle["superseded_merge_candidates"] = sup_mc
+    mc_ids_of: dict[str, list[str]] = {}
+    for mc in bundle["merge_candidates"]:
+        for x in mc["group_ids"]:
+            mc_ids_of.setdefault(x, []).append(mc["merge_candidate_id"])
+    for g in fresh:
+        g["merge_candidate_ids"] = mc_ids_of.get(g["group_id"], [])
+    # A replaced group that a decision, a processing result OR an AI reading (an absorber
+    # finding is recorded on a group) names is kept as superseded, so every reference stays
+    # resolvable. Its readings stay on it; they do not move to the new groups (apply the
+    # findings file again for those).
+    named = {d["target"]["id"] for d in decisions if d["target"]["kind"] == "record_group"}
+    named |= {i["target"]["id"] for i in bundle.get("ai_interpretations") or () if i["target"]["kind"] == "record_group"}
+    results_of: dict[str, list[str]] = {}
+    for r in bundle.get("processing_results") or ():
+        results_of.setdefault(r.get("group_id"), []).append(B.processing_id(r))
+    superseded = [s for s in bundle.get("superseded_record_groups") or () if s["group_id"] not in ids]
+    known = {s["group_id"] for s in superseded}
+    for g in replaced:
+        gid = g["group_id"]
+        if gid in ids or gid in known or (gid not in named and gid not in results_of):
+            continue
+        superseded.append(
+            {
+                "group_id": gid,
+                "member_run_keys": list(g.get("member_run_keys") or []),
+                "status": "proposed",
+                "superseded_utc": now_utc(),
+                "reason": (
+                    "replaced by `isaac bundle group --regroup`; a decision, processing result or AI reading names it, "
+                    "so it is kept here as their target. It is not a record."
+                ),
+                "processing_result_ids": results_of.get(gid, []),
+            }
+        )
+    if superseded or "superseded_record_groups" in bundle:
+        bundle["superseded_record_groups"] = superseded
+    questions = [
+        dict(q) for q in (full.get("experiment_questions") or full.get("questions") or ())
+        if isinstance(q, Mapping)
+    ]
+    if excluded:
+        # N-3: the counter question is the beamtime's (full bundle), but an answer cannot
+        # merge a CONFIRMED group's runs; say so where that changes what it resolves.
+        view_q = next((q for q in payload.get("experiment_questions") or () if q.get("kind") == "naming_counter_positions"), None)
+        for q in questions:
+            if q.get("kind") != "naming_counter_positions":
+                continue
+            left = dict((view_q or {}).get("candidates_resolved_by_position") or {})
+            if left != dict(q.get("candidates_resolved_by_position") or {}):
+                q["candidates_resolved_by_position_excluding_confirmed"] = left
+                q["text"] = str(q.get("text") or "") + (
+                    " Runs of a confirmed group are not merged by the answer; they are offered as a merge candidate instead."
+                )
+    bundle["grouping_questions"] = questions
+    return {
+        "record_groups": len(bundle["record_groups"]),
+        # the groups that are (or may become) records; the rest is decision history (merged, rejected, split)
+        "live_record_groups": sum(1 for g in bundle["record_groups"] if g.get("status") in B.LIVE_GROUP_STATUSES),
+        "kept_decided": len(keep),
+        "kept_binding": len(binding),
+        "kept_history": len(history),
+        "superseded": len(superseded),
+        "proposed": len(fresh),
+        "merge_candidates": len(bundle["merge_candidates"]),
+        "combined_by_merge_decision": combined_by,
+        "merge_decisions_not_combined": not_combined,
+        "rule_id": payload.get("rule_id"),
+        "statement": "Proposed groups only. A scientist confirms, splits, merges or rejects each one.",
+        "read_them_with": [
+            "isaac bundle list <bundle_dir> groups",
+            "isaac bundle show <bundle_dir> group <group_id>",
+            "isaac bundle list <bundle_dir> merge-candidates",
+        ],
+    }
+
+
 def _merge_not_applicable(d: Mapping, gid: str, by_id_all: Mapping, gids: Sequence[str]) -> str:
     """The reason a stored merge decision combined nothing (``merge_decisions_not_combined``)."""
     named = [x for x in d.get("merge_with") or () if x != gid]
@@ -1791,8 +1810,8 @@ def _merge_not_applicable(d: Mapping, gid: str, by_id_all: Mapping, gids: Sequen
         why = f"its runs are all in one group now ({gids[0]}), so there is nothing to combine"
     else:
         why = "none of the runs it names is in a live group now"
-    return (why + "; it merged nothing, and its group stays `merged` (not a record). Decide that group again "
-            "(confirm, reject, or merge with --merge-with <group id>).")
+    return (why + "; it merged nothing, and the groups stay as they are (the merge decision is pending, not applied). "
+            "Decide that group again (confirm, reject, or merge with --merge-with <group id>).")
 
 
 def _reading_core(v: Any) -> str:
@@ -2111,11 +2130,36 @@ def _same_conditions_tokens(bundle: Mapping, kind: str, obj: Mapping, merge_with
     return differ
 
 
+def _merges_combined(bundle: Mapping) -> dict[str, dict]:
+    """``{decision_id: combined_by_merge_decision entry}``: what a regroup of ``bundle`` now would combine,
+    computed by THE regroup (:func:`_regroup`) on a copy. Nothing is changed; ``{}`` when it cannot run."""
+    if not bundle.get("record_groups"):
+        return {}
+    try:
+        out = _regroup(copy.deepcopy(dict(bundle)), regroup=True)
+    except MutationRefused:
+        return {}
+    return {x["decision_id"]: x for x in out["combined_by_merge_decision"]}
+
+
+def merge_decisions_unblocked(bundle: Mapping, answer: Mapping) -> list[dict]:
+    """The pending merge decisions the next regroup would combine BECAUSE of ``answer`` (a decision in
+    ``bundle``): combined with it, not without it. Each regroup is run on a copy; nothing is changed."""
+    with_it = _merges_combined(bundle)
+    if not with_it:
+        return []
+    without = _merges_combined({**bundle, "scientist_decisions": [d for d in bundle.get("scientist_decisions") or () if d is not answer]})
+    return [{"decision_id": did, "group_ids": list(x["from_groups"]), "combined_group_id": x["group_id"]}
+            for did, x in with_it.items() if did not in without]
+
+
 def counter_answer_preview(bundle: Mapping) -> dict:
     """What the latest counter answer would do on the next regroup, said before it: how many of the
-    current proposed groups the grouping step would join (and into how many), and how many it would split.
-    Computed as the regroup computes it (runs of confirmed groups are never re-proposed); merge decisions
-    are applied at the regroup as always and are not counted here. Nothing is changed."""
+    current proposed groups the grouping step would join (and into how many), how many it would split,
+    and which pending merge decisions it would let the regroup combine (``merge_decisions_unblocked``:
+    polish c3 — a counter answer that joins no group by the naming rule can still let a merge through,
+    and the preview said "would join none"). Computed as the regroup computes it (runs of confirmed
+    groups are never re-proposed; the merges by the regroup itself, on a copy). Nothing is changed."""
     from . import grouping as G
 
     bound = {k for g in bundle.get("record_groups") or () if g.get("status") in B.BINDING_GROUP_STATUSES
@@ -2136,14 +2180,24 @@ def counter_answer_preview(bundle: Mapping) -> dict:
             joined |= cur
             into += 1
     split = sum(1 for v in lands.values() if len(v) > 1)
+    answer = next((d for d in reversed(bundle.get("scientist_decisions") or ())
+                   if d.get("target") == {"kind": "experiment", "id": "experiment"} and d.get("decision") == "set_counter_positions"), None)
+    unblocked = merge_decisions_unblocked(bundle, answer) if answer is not None else []
     regroup = "`isaac bundle group <bundle_dir> --regroup`"
     said = (f"would join {len(joined)} of the current groups into {into}" if joined else "would join none of the current groups")
+    said += f" and split {split}" if split else ""
+    if unblocked:
+        n = len(unblocked)
+        shown = "; ".join(f"{u['decision_id']}: {' + '.join(u['group_ids'])}" for u in unblocked[:5]) + (" …" if n > 5 else "")
+        merges = (f"would let {n} pending merge decision{'s' if n != 1 else ''} ({shown}) combine "
+                  f"{'their' if n != 1 else 'its'} groups into one proposed group{' each' if n != 1 else ''}, for the scientist to confirm")
+        said = f"{said}, and {merges}" if joined or split else f"{merges} (the naming rule itself joins no other group)"
     return {
         "groups_joined": len(joined),
         "into": into,
         "groups_split": split,
+        "merge_decisions_unblocked": unblocked,
         "statement": f"On the next regroup ({regroup}) this answer {said}"
-                     + (f" and split {split}" if split else "")
                      + ". Nothing is regrouped until then; tell the scientist before regrouping.",
     }
 

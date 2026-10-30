@@ -134,7 +134,7 @@ Say plainly when a group needs care (`merged_despite_engine_reading`, `sample_ke
 see the reference), and say a merge candidate's `caution` before asking about it.
 The experiment question `naming_counter_positions` asks which filename positions hold a counter;
 answer it once (`set_counter_positions --positions N`, or `last`); say its `regroup_preview.statement`
-(what it would join), then regroup. "I don't know" is `--decision defer`: grouping is unchanged. The other,
+(what it would join or let merge), then regroup. "I don't know" is `--decision defer`: grouping is unchanged. The other,
 `clock_time_zone`, needs the instrument clock's IANA zone; never suggest one.
 Ask the scientist to **confirm, split or merge** each, in batches, with progress. A group that is not
 a result (alignment, a reference foil, a test scan) can be **left out** with `reject`; say it is never

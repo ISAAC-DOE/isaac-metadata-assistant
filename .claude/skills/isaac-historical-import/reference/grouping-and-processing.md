@@ -7,7 +7,7 @@ technique, same conditions. Repeats of the same sample in the same condition bel
 (domain owner, 28 Oct 2026). The code proposes groups and splits whenever anything differs or is
 unknown; it never merges silently.
 
-Get the groups with `bundle list <bundle> groups` and one in full with `bundle show <bundle> group <id>`; `bundle list <bundle> merge-candidates` names groups the code could not decide about. Present each group like this (no ids unless asked):
+Get the groups with `bundle list <bundle> groups` and one in full with `bundle show <bundle> group <id>`; `bundle list <bundle> merge-candidates` names groups the code could not decide about (a candidate with fewer than two live groups left proposes nothing: it is listed only with `--all`, its `show` says why, and it is never asked). Present each group like this (no ids unless asked):
 
 > **Group 4 of 12** — sample "SYN_sample_A", acid electrolyte, after 500 cycles, 0.8 V: 3 scans.
 > Split from the next group because the potential differs (0.8 V vs 1.0 V).
@@ -26,8 +26,9 @@ Get the groups with `bundle list <bundle> groups` and one in full with `bundle s
   conditions? the names differ in: pristine / cycled" — `pristine`/`cycled`, `before`/`after`,
   `soaked`, `OCV` are usually conditions, and then the answer is separate records. Runs whose
   conditions differ, or whose names differ in a quantity or any letters-and-digits token (`400mV`, `0p5wt`, `T300K`, `spot2`), are never
-  combined. Tell the scientist which happened. When it could not combine them it lists the merge in
-  `merge_decisions_not_combined`, with a reason and `next_commands` (the counter answer, or one sample
+  combined. Tell the scientist which happened. When it could not combine them, nothing changes: the
+  groups keep their ids and stay proposed, the merge stays pending (each regroup tries it again), and
+  it is listed in `merge_decisions_not_combined`, with a reason and `next_commands` (the counter answer, or one sample
   confirmation per run and the merge again with `--same-conditions`): say the reason in words and
   offer exactly those steps, asking the scientist for any value they need; then regroup again.
 - a merge candidate with `caution` (its file names state different samples or conditions, or the build
@@ -134,7 +135,8 @@ element or edge from a file name.
   always the last token, whatever the name's length; where some names sharing a prefix end in a
   shorter run of numbers, `…_3` beside `…_3_001`, only the longest is read as ending in a counter),
   then `bundle group <bundle> --regroup` (decided groups are kept). The reply's
-  `regroup_preview.statement` says how many groups the answer would join: tell the scientist before
+  `regroup_preview.statement` says how many groups the answer would join and which pending merge
+  decisions it would let the regroup combine (`merge_decisions_unblocked`): tell the scientist before
   regrouping. When they say a position is NOT a counter: `decide <bundle> --target experiment
   --decision set_not_counter_positions --positions 2 --by "<name>"` (grouping is unchanged; the
   question drops out). When they do not know: `decide <bundle> --question <Q> --decision defer --by

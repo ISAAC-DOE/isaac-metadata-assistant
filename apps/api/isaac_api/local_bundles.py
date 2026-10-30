@@ -956,12 +956,13 @@ def capture_items(bundle: Mapping) -> dict:
     """The open capture decisions (bundle 1.6.0): merge candidates still proposed, and processing
     results with Athena versions and no result of record selected."""
     from .local_import import bundle as B
+    from .local_import import grouping as G
 
     runs, groups = _group_runs(bundle)
     merges = []
     for mc in bundle.get("merge_candidates") or ():
-        if mc.get("status") != "proposed":
-            continue
+        if mc.get("status") != "proposed" or G.merge_candidate_inert(bundle, mc):
+            continue  # decided, or proposing nothing: fewer than two live groups left (polish c3)
         merges.append({
             "merge_candidate_id": mc.get("merge_candidate_id"),
             "group_ids": list(mc.get("group_ids") or ()),

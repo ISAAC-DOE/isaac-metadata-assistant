@@ -153,7 +153,9 @@ def test_the_validator_refuses_a_run_in_two_live_groups(tmp_path, capsys):
 def test_a_merge_decision_is_history_and_its_runs_stay_proposable(tmp_path, capsys):
     """R-1: a `merged` group must not hold (freeze) its runs. DEC-91 (third review): these runs' names
     differ (02 / 03), so the merge is NOT combined — the candidate stays open, naming the token and
-    pointing to the counter question, which is how the runs become one group."""
+    pointing to the counter question, which is how the runs become one group. Polish c3: a merge NOT
+    combined leaves its group exactly as it was (proposed, same id; before, it was retired as `merged`
+    and its run re-proposed under a new id); once the runs are joined, it is history (`merged`)."""
     if not FIXTURE.is_dir():
         pytest.skip("synthetic fixture corpus not present")
     src, b = _folder(tmp_path), tmp_path / "bundle"
@@ -164,7 +166,7 @@ def test_a_merge_decision_is_history_and_its_runs_stay_proposable(tmp_path, caps
     rc, out = _run(["bundle", "group", str(b), "--regroup"], capsys)
     assert rc == 0
     a = M.load(b)
-    assert next(g for g in a["record_groups"] if g["group_id"] == g1["group_id"])["status"] == "merged"  # kept as history
+    assert next(g for g in a["record_groups"] if g["group_id"] == g1["group_id"])["status"] == "proposed"  # unchanged: pending
     live = [g for g in a["record_groups"] if g["status"] in ("proposed", "scientist_confirmed")]
     assert {k for g in live for k in g["member_run_keys"]} >= set(g1["member_run_keys"]) | set(g2["member_run_keys"])
     [mc] = [m for m in a["merge_candidates"] if m["reasons"][0]["code"] == "scientist_decided_merge"]
@@ -174,6 +176,7 @@ def test_a_merge_decision_is_history_and_its_runs_stay_proposable(tmp_path, caps
     assert _run(["bundle", "group", str(b), "--regroup"], capsys)[0] == 0
     [one] = [g for g in M.load(b)["record_groups"] if g["status"] == "proposed"]
     assert len(one["member_run_keys"]) == 2
+    assert next(g for g in M.load(b)["record_groups"] if g["group_id"] == g1["group_id"])["status"] == "merged"  # now history
     M.decide(b, target_ids=[one["group_id"]], decision="confirm", value=None, by="SYNTHETIC TEST", orcid=None)
     assert _run(["bundle", "check", str(b)], capsys)[0] == 0
 
