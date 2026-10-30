@@ -25,6 +25,7 @@ import errno
 import fcntl
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -831,8 +832,21 @@ def decide_question(
         _require_version(Path(bundle_dir), expected_version)
         version = bundle_version(bundle_dir)
         bundle = load(bundle_dir)
-        found, positions = question_targets(Q.consolidate(bundle), question_id, decision=decision, only=only,
-                                            field=field, positions=positions, only_scopes=only_scopes)
+        resolve = dict(decision=decision, only=only, field=field, positions=positions, only_scopes=only_scopes)
+        try:
+            found, positions = question_targets(Q.consolidate(bundle), question_id, **resolve)
+        except MutationRefused as exc:
+            # AN ANSWERED QUESTION is resolved too, under the id it was asked with (its answered targets back in:
+            # consolidate(include_answered=True)): a later decision replaces an earlier one, a repeat records
+            # nothing, and every check below applies exactly as to an open question.
+            answered = Q.consolidate(bundle, include_answered=True) if exc.code == 6 else None
+            asked = Q.question(answered, question_id) if answered is not None else None
+            if asked is None or asked["kind"] not in Q.VALUE_KINDS:
+                raise
+            try:
+                found, positions = question_targets(answered, question_id, **resolve)
+            except MutationRefused as again:
+                raise (exc if again.code == 6 else again) from None
         params = dict(
             target_ids=list(extra_targets) + found, decision=decision, value=value, by=by, orcid=orcid, note=note,
             split_into=split_into, merge_with=merge_with, qc_status=qc_status, qc_note=qc_note,
@@ -1421,22 +1435,38 @@ def reveal(bundle_dir: Path, target_id: str) -> dict:
         base, path = None, None
     from .records import same_value  # numbers numerically, `*_utc` as instants, strings exactly
 
-    def agrees(r):
-        return same_value(path, r["proposed_value"], base) if base is not None else None
+    node = B._schema_node(path) if path else None
+    declared = (node or {}).get("type")
+    numeric_field = bool({"number", "integer"} & set(declared if isinstance(declared, list) else [declared]))
 
+    def compare(r) -> dict:
+        proposed = r["proposed_value"]
+        if base is None:
+            return {"agrees_with_parser": None}
+        # A NUMBER GIVEN AS TEXT (`annotate --value "0.4"` without --json) for a numeric field, against a numeric
+        # parser value: compared as the number it parses as, and said so — never "contradicts" for 0.4 vs "0.4"
+        if (numeric_field and isinstance(proposed, str) and isinstance(base, (int, float)) and not isinstance(base, bool)):
+            try:
+                number = float(proposed.strip())
+            except ValueError:
+                number = None
+            if number is not None and math.isfinite(number):
+                return {"agrees_with_parser": same_value(path, number, base), "compared_as": "number",
+                        "comparison_note": (f"the AI reading {proposed!r} was recorded as text (annotate without --json); "
+                                            f"{path} is a number, so it was compared as {number:g} with the parser's {base!r}")}
+        return {"agrees_with_parser": same_value(path, proposed, base)}
+
+    out = []
+    for r in readings:
+        got = compare(r)
+        out.append({"interpretation_id": r["interpretation_id"], "proposed_value": r["proposed_value"],
+                    "blind": r.get("blind", False), "agrees_with_parser": got["agrees_with_parser"],
+                    "relation": {True: "supports", False: "contradicts", None: None}[got["agrees_with_parser"]],
+                    **{k: v for k, v in got.items() if k != "agrees_with_parser"}})
     return {
         "target": {"kind": kind, "id": target_id},
         "parser": parser,
-        "ai_readings": [
-            {
-                "interpretation_id": r["interpretation_id"],
-                "proposed_value": r["proposed_value"],
-                "blind": r.get("blind", False),
-                "agrees_with_parser": agrees(r),
-                "relation": {True: "supports", False: "contradicts", None: None}[agrees(r)],
-            }
-            for r in readings
-        ],
+        "ai_readings": out,
         "exposure_recorded": True,
     }
 

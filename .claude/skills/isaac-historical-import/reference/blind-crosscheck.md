@@ -18,7 +18,9 @@ code error can be caught instead of echoed. It is a spot check, never a verifica
    `--source-id` must be a source the excerpt showed (a target whose locators name sources refuses
    any other, exit 2); a target with no source locators takes any known source.
 6. Only after annotating: `reveal <bundle> <id>` and compare (`agrees_with_parser` and `relation`: the same number, the same
-   instant written two ways, or the same string agree; anything else differs). Agreement, difference or not
+   instant written two ways, or the same string agree; anything else differs). For a numeric field, a
+   reading given as text (`--value "0.4"` without `--json`) is compared as the number it parses as, and
+   says so (`compared_as: number`, `comparison_note`); prefer `--value 0.4 --json` for numbers. Agreement, difference or not
    comparable — say which, in plain words. A difference is a question for the scientist, never
    something you settle.
 

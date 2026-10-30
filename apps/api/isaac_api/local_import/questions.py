@@ -41,6 +41,12 @@ question that was withheld until it existed — the documented unlocks: a stated
 unlocks the start-time confirmations it gives; a stated control mode makes its set-point
 required (that missing value moves from the optional question to a blocking one); a later zone
 change re-asks the confirmations it undid. None of these renames an existing question.
+
+An ANSWERED question keeps its id too: ``consolidate(include_answered=True)`` puts its answered targets back,
+so ``decide --question`` re-answers it (a later decision replaces an earlier one) and ``bundle show question``
+shows it with its current answers (:func:`answered_question`). A conflict none of whose readings its field
+takes (zoneless ``#D`` times for a ``*_utc`` field, readings off a closed list) is answered with ``correct``,
+and shows the UTC readings the bundle holds for that run (:func:`_conflict_answer`).
 """
 
 from __future__ import annotations
@@ -178,6 +184,52 @@ def _fills(question_path: str | None, missing: str) -> bool:
     return p == missing or p.startswith(missing + ".")
 
 
+def _required_when(path: str | None) -> str | None:
+    """When a CONDITIONALLY required field is required (:data:`_REQUIRED_WHEN`, or a member an optional object
+    requires once the record carries it: ``records.required_members_with``), or ``None``."""
+    if not path:
+        return None
+    if path in _REQUIRED_WHEN:
+        return _REQUIRED_WHEN[path]
+    from .records import required_members_with
+
+    leaf = path.rsplit(".", 1)[-1]
+    for obj, members in required_members_with(path):
+        if path == f"{obj}.{leaf}" and leaf in members and len(members) > 1:
+            return (f"the record carries another member of {obj} (the schema requires {' and '.join(members)} "
+                    "together)")
+    return None
+
+
+def scoped_answer_command(q: Mapping, field: str, group_id: str | None = None) -> str:
+    """The ``decide --question`` command that answers ``field`` of question ``q`` — for ``group_id`` alone when the
+    question reaches other groups too. A template: a placeholder for the value, never one read from the files."""
+    pst = q.get("per_scope_targets") or {}
+    only = f"group:{group_id}" if group_id and f"group:{group_id}" in pst and len(pst) > 1 else None
+    if q["kind"] == "confirm_value" and "confirm" in (q.get("allowed_decisions") or ALLOWED_DECISIONS[q["kind"]]):
+        decision = "--decision confirm"
+    else:
+        decision = ("--decision correct --value " + ("<one of its allowed values>" if _eligible_values(field) else "<value>")
+                    + (" --json" if _is_numeric(B._schema_node(field)) else ""))
+    return (f"isaac bundle decide <bundle_dir> --question {q['question_id']}"
+            + (f" --field {field}" if q["kind"] == "optional_values" else "") + (f" --only {only}" if only else "")
+            + f' {decision} --by "<your name>"')
+
+
+def command_for_targets(payload: Mapping, target_ids: Sequence[str], path: str, group_id: str | None = None) -> str | None:
+    """:func:`scoped_answer_command` for the open question that asks ``path`` of any of ``target_ids``, or ``None``."""
+    wanted = set(target_ids)
+    if not wanted:
+        return None
+    for q in payload["questions"]:
+        if q["kind"] not in VALUE_KINDS or q.get("informational"):
+            continue
+        for field, ids in _value_paths(q):
+            if field == path and wanted.intersection(ids):
+                return scoped_answer_command(q, field, group_id)
+    return None
+
+
 def _value_paths(q: Mapping) -> list[tuple[str, list[str]]]:
     """``[(field path, target ids)]`` a value question asks about (an optional-values question: per field)."""
     if q["kind"] == "optional_values":
@@ -258,12 +310,18 @@ def _qid(*parts: str) -> str:
     return "Q-" + hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:10]
 
 
-def consolidate(bundle: Mapping, *, compositions_out: dict | None = None) -> dict:
+def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, include_answered: bool = False) -> dict:
     """``questions.json`` v2 for ``bundle``. Pure: reads the bundle, writes nothing.
 
     ``compositions_out``, when given, receives the composer's report per live group that "blocking" was judged
     by (:func:`compositions`, no processing file read), for :func:`minimum_answers_for_one_group` to reuse on
-    this same, unchanged bundle instead of composing every group again."""
+    this same, unchanged bundle instead of composing every group again.
+
+    ``include_answered`` puts the targets a scientist ANSWERED back into the questions that asked them (a value
+    question the import asked: a missing value, a needs-review or blocking extracted candidate, a conflict). The
+    buckets, and so the ids, are the same ones (DEC-91: a question's scope and partition never depend on an
+    answer), so an answered question is found under the id it was asked with: what ``decide --question`` resolves
+    when the question is no longer open, and what ``bundle show question`` shows (:func:`answered_question`)."""
     schema, basis = _target_schema()
     # THE SET-POINT A CONTROL MODE NEEDS (1.5.0): the target schema's conditional rules make the
     # set-point required for some modes, so a run whose mode a file states or a scientist confirmed
@@ -415,7 +473,8 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None) -> dic
         again = None
         if m["value_state"] not in _UNANSWERED:
             again = not_eligible_answer(m, "missing_value")
-            if again is None:
+            if again is None and not (include_answered and m.get("extracted_state", B.STATE_MISSING) in _UNANSWERED
+                                      and ("missing_value", m["value_id"]) in decisions):
                 continue
         path, rid = m["target_field_path"], m["run_id"]
         if rid is not None and group_of and rid not in group_of:
@@ -451,14 +510,19 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None) -> dic
         if not path:
             continue
         again = None
-        if c["value_state"] not in (B.STATE_NEEDS_REVIEW, B.STATE_CANDIDATE_EXTRACTED):
+        state = c["value_state"]
+        if state not in (B.STATE_NEEDS_REVIEW, B.STATE_CANDIDATE_EXTRACTED):
             again = not_eligible_answer(c, "candidate")
             if again is None:
-                continue
+                # ANSWERED (include_answered): asked as it was extracted, before the answer
+                state = c.get("extracted_state")
+                if not (include_answered and state in (B.STATE_NEEDS_REVIEW, B.STATE_CANDIDATE_EXTRACTED)
+                        and B.candidate_decision(bundle, c, decisions) is not None):
+                    continue
         if not zone_decided and B.is_local_clock_start(c):
             continue  # nothing to confirm until the clock's zone is stated: the zone question asks that
         blocking = required_for(path, c["run_id"])
-        if again is None and c["value_state"] == B.STATE_CANDIDATE_EXTRACTED and not blocking:
+        if again is None and state == B.STATE_CANDIDATE_EXTRACTED and not blocking:
             continue  # an extracted optional value is not asked about (one a scientist answered unfitly is)
         scope = scope_of_run(c["run_id"])
         add((scope, "confirm_value", path, None), kind="confirm_value", path=path, partition=None,
@@ -467,7 +531,8 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None) -> dic
 
     conflicts_out = []
     for cf in bundle["conflicts"]:
-        if cf["value_state"] not in (B.STATE_CONFLICTING, B.STATE_NEEDS_REVIEW) and cf["conflict_id"] not in conflict_again:
+        if (cf["value_state"] not in (B.STATE_CONFLICTING, B.STATE_NEEDS_REVIEW) and cf["conflict_id"] not in conflict_again
+                and not (include_answered and ("conflict", cf["conflict_id"]) in decisions)):
             continue
         rids = cf["run_ids"]
         scope = scope_of_run(rids[0]) if rids else "experiment"
@@ -683,10 +748,18 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None) -> dic
         no_field = (None if required else "something no record field holds (e.g. a comment line or a unit spelling)" if not path
                     else (f"{path}, which no record field takes an answer for ({lands})" if (lands := _never_lands(path, writable)) else None))
         reaches = bool(required) or (bool(affects) and no_field is None)
+        qid = _qid(scope, "resolve_conflict", cf["conflict_id"])
+        answer = _conflict_answer(qid, cf, path, enum, writable, related, source_path_of, _is_numeric(_node(schema, path)) if path else False)
+        n_groups = len({group_of[r] for r in cf["run_ids"] if r in group_of})
+        applies = {"groups": n_groups, "runs": len(cf["run_ids"]), "targets": 1}
+        if not cf["run_ids"] and reaches and has_groups:
+            # A BEAMTIME-WIDE disagreement (no run named) fills every record built: it reaches every live group, as
+            # the composer counts it (blocks_groups), never "0 groups"
+            applies = {"groups": len(groups), "runs": len(group_of), "targets": 1, "beamtime_wide": True}
         questions.append(
             {
                 **({"asked_again": again, "reason": "answer_not_eligible_for_official_record"} if again else {}),
-                "question_id": _qid(scope, "resolve_conflict", cf["conflict_id"]),
+                "question_id": qid,
                 "partition": None,
                 "tier": TIER_BLOCKING if required else (TIER_CONFLICT if reaches else TIER_OPTIONAL),
                 "blocking": bool(required),
@@ -701,18 +774,15 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None) -> dic
                 "kind": "resolve_conflict",
                 "scope": scope,
                 "target_field_path": path,
-                "text": (f"The sources disagree ({cf['kind']}{', ' + str(cf['subject']) if cf['subject'] else ''}). Which reading is right?"
-                         + _asked_again_text(again, {path: enum} if path else {})),
-                "applies_to": {"groups": len({group_of[r] for r in cf["run_ids"] if r in group_of}), "runs": len(cf["run_ids"]), "targets": 1},
+                "text": (f"The sources disagree ({cf['kind']}{', ' + str(cf['subject']) if cf['subject'] else ''}). "
+                         + answer["text"] + _asked_again_text(again, {path: enum} if path else {})),
+                "applies_to": applies,
                 "targets": [{"kind": "conflict", "id": cf["conflict_id"]}],
                 "per_scope_targets": {scope: [cf["conflict_id"]]},
-                "hints": [
-                    {"kind": "reading", "literal": r["value"], "locator": (r["witnesses"][0] if r["witnesses"] else {}).get("locator"),
-                     "source_id": (r["witnesses"][0] if r["witnesses"] else {}).get("source_id")}
-                    for r in cf["readings"][:_HINTS_PER_QUESTION]
-                ],
+                "hints": answer["hints"],
                 "allowed_values": enum,
-                "answer_command": f'isaac bundle decide <bundle_dir> --question {_qid(scope, "resolve_conflict", cf["conflict_id"])} --decision confirm --value <one reading> --by "<your name>"',
+                **answer["fields"],
+                "answer_command": answer["command"],
             }
         )
 
@@ -954,6 +1024,8 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
     from .records import RUN_ONLY_PATHS
 
     missing = {gid: set(_answer_missing(rep)) for gid, rep in reports.items()}
+    because_of = {gid: {m["path"]: m["required_because"] for m in rep.get("missing_required") or () if m.get("required_because")}
+                  for gid, rep in reports.items()}
     filled = {gid: {f["path"] for f in rep.get("filled") or ()} for gid, rep in reports.items()}
     every = set(missing)
     order_of = {gid: i for i, gid in enumerate(missing)}
@@ -1012,9 +1084,9 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
             path = q["target_field_path"] or ""
             if not groups_reached:
                 q["why"] = _OUTSIDE_LIVE_GROUPS
-            elif path in _REQUIRED_WHEN:
-                q["required_when"] = _REQUIRED_WHEN[path]
-                q["why"] = (f"Not blocking now: a record requires {path} only once {_REQUIRED_WHEN[path]}, and no record "
+            elif (when := _required_when(path)):
+                q["required_when"] = when
+                q["why"] = (f"Not blocking now: a record requires {path} only once {when}, and no record "
                             "group this question reaches has that yet (what `build-records` and `validate` check). "
                             "Answer it if you know it; it blocks once that is so.")
             elif all(any(_fills(path, f) or _fills(f, _composer_path(path)) for f in filled[g]) for g in groups_reached):
@@ -1028,9 +1100,13 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
             changed += 1
             q["blocking"], q["tier"] = True, TIER_BLOCKING
             q["required_fields"] = sorted(fields)
+            because = next((b for g in sorted(needing) for f in sorted(fields) if (b := because_of.get(g, {}).get(f))), None)
             q["why"] = (f"The record cannot be exported without it: the record composer (what `build-records` and "
                         f"`validate` check) lists {', '.join(sorted(fields))} as missing for {len(needing)} record "
-                        "group(s) this question reaches, and only an answer supplies it.")
+                        "group(s) this question reaches, and only an answer supplies it"
+                        + (f" ({because})" if because else "") + ".")
+            if because:
+                q["required_because"] = because
     return {"basis": "records.compose_group: the missing-required list build-records and validate report",
             "live_groups": len(every), "blocking_changed_to_agree": changed}
 
@@ -1134,6 +1210,98 @@ def _asked_again_text(again: Sequence[Mapping], allowed_by_path: Mapping[str, li
             + "; ".join(parts) + (f"; and {len(by_answer) - 3} other answer(s)" if len(by_answer) > 3 else "")
             + (f". Allowed values ({'; '.join(allowed)})" if allowed else "")
             + ". Answer again with a value the record can take.")
+
+
+def _first_witness(reading: Mapping) -> Mapping:
+    return (reading.get("witnesses") or [{}])[0] or {}
+
+
+def _conflict_answer(qid: str, cf: Mapping, path: str | None, enum: list | None, writable: frozenset[str],
+                     related: Mapping[str, Sequence[Mapping]], source_path_of: Mapping[str, Any], numeric: bool) -> dict:
+    """What a conflict question asks, the hints it shows and the answer it offers: ``{"text", "hints", "fields",
+    "command"}``.
+
+    WHICH READINGS THE FIELD TAKES. ``decide`` refuses a reading its field refuses (``bundle.value_problem``: a
+    ``*_utc`` field takes only a zoned instant, a closed field only its allowed values), so a conflict none of
+    whose readings fits — ``#D`` local clock times with no zone, a macro name or a Python helper line read as a
+    technique — cannot be answered with ``confirm --value <one reading>``. It says so, and offers ``correct``. For a
+    ``*_utc`` field it shows the UTC instants the bundle ALREADY holds for the same run(s) (another statement in
+    the files, e.g. a ``#E`` epoch line), each with its source: hints, never the answer — the command stays a
+    template. A path this build does not write is not checked (``decide`` does not check it either). Neither the
+    question's id nor its targets change (DEC-91)."""
+    hints = []
+    for r in cf["readings"][:_HINTS_PER_QUESTION]:
+        w = _first_witness(r)
+        hints.append({"kind": "reading", "literal": r["value"], "locator": w.get("locator"), "source_id": w.get("source_id"),
+                      **({"relative_path": w["relative_path"]} if w.get("relative_path") else {})})
+    default = {"text": "Which reading is right?", "hints": hints, "fields": {},
+               "command": f'isaac bundle decide <bundle_dir> --question {qid} --decision confirm --value <one reading> --by "<your name>"'}
+    if not path or path not in writable or not cf["readings"]:
+        return default
+    problems = [B.value_problem(path, r["value"]) for r in cf["readings"]]
+    fit = sum(p is None for p in problems)
+    for h, p in zip(hints, problems):
+        h["fits_field"] = p is None
+    fields: dict[str, Any] = {"readings_that_fit_the_field": fit}
+    is_utc = path.endswith("_utc")
+    utc: list[dict] = []
+    if is_utc:
+        runs = set(cf.get("run_ids") or ())
+        for c in related.get(path, ()):
+            if (c["candidate_id"] == cf.get("candidate_id") or c.get("value") is None
+                    or (c.get("run_id") not in runs if runs else c.get("run_id") is not None)
+                    or B.value_problem(path, c["value"]) is not None):
+                continue
+            ev = next((e for e in c.get("evidence") or () if e.get("method") != "ai_interpretation"), None) or {}
+            rule = next((n.get("rule_id") for n in ev.get("normalization") or () if n.get("rule_id")), None)
+            utc.append({"candidate_id": c["candidate_id"], "value": c["value"], "run_id": c.get("run_id"),
+                        "observed_literal": (c.get("observed_literals") or [None])[0], "locator": ev.get("locator"),
+                        "source_id": ev.get("source_id"),
+                        "relative_path": ev.get("relative_path") or source_path_of.get(ev.get("source_id")),
+                        "rule_id": rule, "value_state": c.get("value_state")})
+        fields["utc_readings"] = utc
+        hints += [{"kind": "utc_reading", "literal": u["value"], "candidate_id": u["candidate_id"], "locator": u["locator"],
+                   "source_id": u["source_id"], "relative_path": u["relative_path"], "observed_literal": u["observed_literal"],
+                   "note": ("A UTC instant this bundle already holds for the same run, from another statement in the files. "
+                            "A hint: record it only once the scientist says it is the start.")} for u in utc]
+    if fit == len(problems):
+        return {**default, "hints": hints, "fields": fields}
+    where = ", ".join(dict.fromkeys(str(_first_witness(r).get("locator")) for r in cf["readings"][:3]))
+    if fit:
+        bad = len(problems) - fit
+        text = (f"{bad} of the {len(problems)} readings cannot be recorded as they stand ("
+                + next(p for p in problems if p is not None).rstrip(".")
+                + "): confirm only one that the field takes, or give the right value yourself (correct).")
+        return {**default, "text": default["text"] + " " + text, "hints": hints, "fields": fields}
+    if is_utc:
+        text = (f"These readings are local clock times with no time zone (read at {where}), so they cannot be recorded: "
+                f"{path} takes only a UTC instant, and `confirm --value <one reading>` is refused.")
+        if utc:
+            text += (f" The bundle already holds {len(utc)} UTC reading(s) for this run (utc_readings): "
+                     + "; ".join(f"{u['value']} ({u['candidate_id']}, from {u['observed_literal']!r} at "
+                                 f"{u['relative_path'] or u['source_id']} @ {u['locator']}"
+                                 + (f", rule {u['rule_id']}" if u["rule_id"] else "") + ")" for u in utc[:3])
+                     + ". If that is the start, answer with it (correct); otherwise give the UTC start yourself.")
+        else:
+            text += " No UTC reading of this start is held in the bundle: give the UTC start yourself (correct)."
+        comment = ("   # the UTC reading(s) this bundle holds (utc_readings): "
+                   + ", ".join(f"{u['value']} ({u['candidate_id']})" for u in utc[:3]) if utc else
+                   "   # the local readings name no zone and are refused")
+        placeholder = "<UTC instant, YYYY-MM-DDTHH:MM:SSZ>"
+    elif enum:
+        shown = ", ".join(map(str, enum[:8])) + (f", … ({len(enum)} in all)" if len(enum) > 8 else "")
+        text = (f"None of these readings is a value {path} takes (allowed_values: {shown}), so none can be confirmed as "
+                "it stands: answer with the allowed value that is right (correct), or reject or defer it.")
+        comment = "   # one of allowed_values"
+        placeholder = "<allowed value>"
+    else:
+        text = (f"None of these readings fits {path} (" + next(p for p in problems if p is not None).rstrip(".")
+                + "): answer with the value that is right (correct), or reject or defer it.")
+        comment = "   # a number: add --json" if numeric else ""
+        placeholder = "<value>"
+    return {"text": text, "hints": hints, "fields": fields,
+            "command": (f"isaac bundle decide <bundle_dir> --question {qid} --decision correct --value {placeholder}"
+                        + (" --json" if numeric and not is_utc else "") + f' --by "<your name>"{comment}')}
 
 
 def _note_shared_evidence(questions: list[dict], cand_by_id: Mapping[str, Mapping], bundle: Mapping) -> None:
@@ -1439,6 +1607,46 @@ def question(payload: Mapping, question_id: str) -> Mapping | None:
     return next((q for q in payload["questions"] if q["question_id"] == question_id), None)
 
 
+def answered_question(bundle: Mapping, question_id: str, payload: Mapping | None = None,
+                      open_payload: Mapping | None = None) -> dict | None:
+    """A value question with its ANSWERED targets back in (``consolidate(include_answered=True)``, the same id),
+    and what each target carries now: ``current_answers`` (each distinct latest decision once, with how many
+    targets hold it, who, when, and — for an optional-values question — the field), ``answered_targets`` and
+    ``status`` (``answered`` when no target is still open, else ``open``). ``None`` when no value question has that
+    id even then. ``payload``: that ``include_answered`` payload, and ``open_payload`` the plain one, when the
+    caller built them."""
+    payload = payload or consolidate(bundle, include_answered=True)
+    q = question(payload, question_id)
+    if q is None or q["kind"] not in VALUE_KINDS:
+        return None
+    decisions = B._decisions_by_target(bundle.get("scientist_decisions") or ())
+    cand_by_id = {c["candidate_id"]: c for c in bundle["candidates"]}
+    field_of = {i: f for f, ids in (q.get("fields") or {}).items() for i in ids}
+    answers: dict[tuple, dict] = {}
+    answered = 0
+    for t in q["targets"]:
+        if t["kind"] == "candidate":
+            c = cand_by_id.get(t["id"])
+            d = B.candidate_decision(bundle, c, decisions) if c is not None else None
+        else:
+            d = decisions.get((t["kind"], t["id"]))
+        if d is None or d.get("decision") == "defer":
+            continue
+        answered += 1
+        key = (field_of.get(t["id"]), d.get("decision"), json.dumps(d.get("value"), sort_keys=True, default=str))
+        a = answers.setdefault(key, {**({"field": key[0]} if key[0] else {}), "decision": d.get("decision"),
+                                     "value": d.get("value"), "targets": 0, "by": None, "decided_utc": None, "decision_id": None})
+        a["targets"] += 1
+        if str(d.get("decided_utc") or "") >= str(a["decided_utc"] or ""):
+            a.update(by=(d.get("decided_by") or {}).get("name"), decided_utc=d.get("decided_utc"), decision_id=d.get("decision_id"))
+    still_open = (question(open_payload or consolidate(bundle), question_id) is not None
+                  if answered < len(q["targets"]) else False)
+    return {**q, "status": "open" if still_open else "answered", "answered_targets": answered,
+            "current_answers": sorted(answers.values(), key=lambda a: (str(a.get("field") or ""), -a["targets"])),
+            "statement": ("A later `decide --question` on this id replaces these answers (the same checks apply); "
+                          "repeating one records nothing new.")}
+
+
 def targets_for(payload: Mapping, question_id: str, only: str | None = None, field: str | None = None) -> list[str]:
     q = question(payload, question_id)
     if q is None:
@@ -1513,6 +1721,30 @@ def _unasked(bundle: Mapping, group: Mapping, path: str, report: Mapping) -> dic
             "command": reject + "   # if it should not become a record; this build cannot fill this field for it"}
 
 
+def _recommended(report: Mapping, usable: Sequence[tuple], gid: str) -> list[dict]:
+    """For each of the composer's stated-potential warnings for group ``gid`` (``records``: the file names state a
+    potential the record will not carry), the open question to answer for it — RECOMMENDED, never blocking —
+    with the warning, its command made the question's (:func:`scoped_answer_command`), as ``why``."""
+    from .records import STATED_POTENTIAL_WARNING, potential_warning_text
+
+    out = []
+    for w in report.get("warnings") or ():
+        if w.get("code") != STATED_POTENTIAL_WARNING:
+            continue
+        wanted = set(w.get("targets") or ())
+        hit = next(((q, field) for _, q, field, _, _ in usable
+                    if field == w["needs"] and wanted.intersection(dict(_value_paths(q)).get(field, ()))), None)
+        if hit is None:
+            out.append({"question_id": None, "fields": [w["needs"]], "only": None, "blocking": False, "why": w["text"]})
+            continue
+        q, field = hit
+        pst = q.get("per_scope_targets") or {}
+        out.append({"question_id": q["question_id"], "fields": [field],
+                    "only": f"group:{gid}" if f"group:{gid}" in pst and len(pst) > 1 else None, "blocking": False,
+                    "why": potential_warning_text({**w, "command": scoped_answer_command(q, field, gid)})})
+    return out
+
+
 def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str | None = None,
                                   bundle_dir: Path | None = None, reports: Mapping[str, Mapping] | None = None) -> dict | None:
     """The fewest answers that stand between one record group and export, judged by THE RECORD COMPOSER
@@ -1575,12 +1807,14 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
                 asks_of.setdefault(owner, []).append(i)
     best = None
     done: list[str] = []
+    warned_done: list[str] = []
     for n, g in enumerate(live):
         gid = g["group_id"]
         rep = reports[gid]
         chosen: dict[str, dict] = {}
         unasked: list[dict] = []
         usable = [asks[i] for i in sorted(everywhere + asks_of.get(gid, []))]
+        because = {m["path"]: m["required_because"] for m in rep.get("missing_required") or () if m.get("required_because")}
         for path in _answer_missing(rep):
             options, seen = [], set()
             for cpath, q, field, _, _ in usable:
@@ -1598,6 +1832,9 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
                 "only": f"group:{gid}" if q["scope"] == "experiment" and f"group:{gid}" in pst and "experiment" not in pst else None,
                 **({"deferred": True} if q.get("deferred") else {})})
             entry["fields"].append(field if q["kind"] == "optional_values" else path)
+            if path in because:
+                # a CONDITIONAL requirement (an object the record carries requires this member): why, said
+                entry.setdefault("required_because", {})[path] = because[path]
         plus, hard, soft = [], [], None
         if g.get("status") != B.STATE_SCIENTIST_CONFIRMED:
             plus.append("confirm the group")
@@ -1629,23 +1866,32 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
         if cannot:
             hard.append(f"{', '.join(u['path'] for u in cannot)}: {cannot[0]['reason']}")
         need = len(chosen) + sum(1 for u in unasked if u["answerable"])
+        warned = _recommended(rep, usable, gid)
         if not need and not plus and not hard and wanted is None:
             done.append(gid)
+            warned_done += [r["why"] for r in warned]
             continue
         rank = (bool(hard), soft is not None, need + len(plus), n)
         if best is None or rank < best["rank"]:
             best = {"rank": rank, "group_id": gid, "need": need, "plus": plus, "questions": list(chosen.values()),
-                    "unasked": unasked, "hard": hard, "soft": soft, "missing": [m["path"] for m in rep.get("missing_required") or ()]}
+                    "unasked": unasked, "hard": hard, "soft": soft, "missing": [m["path"] for m in rep.get("missing_required") or ()],
+                    "recommended": warned}
     if best is None:
         if not done:
             return None
         return {"group_id": None, "blocking_questions": 0, "plus_decisions": [], "groups_with_nothing_left": len(done),
                 "statement": (f"{len(done)} record group(s) have no blocking question and no decision left here (confirmed, "
-                              "processing approved): run `isaac bundle build-records`, `validate` and `export`.")}
+                              "processing approved): run `isaac bundle build-records`, `validate` and `export`."),
+                **({"warnings": warned_done[:_HINTS_PER_QUESTION], "warnings_total": len(warned_done)} if warned_done else {})}
     out = {"group_id": best["group_id"], "blocking_questions": best["need"], "plus_decisions": best["plus"],
            "questions": best["questions"], "unasked_required": best["unasked"],
            "missing_required_now": best["missing"],
            "basis": "records.compose_group: the missing-required list build-records and validate report"}
+    if best["recommended"]:
+        # NOT BLOCKING, NOT COUNTED in blocking_questions: the record exports without it, but without the condition
+        # its file names state (records: the stated-potential warning)
+        out["recommended"] = best["recommended"]
+        out["warnings"] = [r["why"] for r in best["recommended"]]
     if best["hard"]:
         out["blocked"] = "; ".join(best["hard"])
     if best["soft"]:

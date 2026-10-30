@@ -1127,14 +1127,23 @@ def _show_consolidated_question(args) -> int:
 
     def run():
         bundle = M.load(Path(args.bundle_dir))
-        q = Q.question(Q.consolidate(bundle), args.id)
+        payload = Q.consolidate(bundle)
+        q = Q.question(payload, args.id)
+        extra: dict = {}
+        if q is None or q["kind"] in Q.VALUE_KINDS:
+            # AN ANSWERED QUESTION (or an open one with answered targets: an optional-values field answered) is shown
+            # under the id it was asked with, with what its answered targets carry now
+            seen = Q.answered_question(bundle, args.id, open_payload=payload)
+            if seen is not None and (q is None or seen["answered_targets"]):
+                extra = {k: seen[k] for k in ("status", "answered_targets", "current_answers", "statement")}
+                q = q or seen
         if q is None:
             raise M.MutationRefused(
                 f"No question with id {args.id!r} in this bundle (`isaac bundle questions <dir>` lists the ids).", code=EXIT_NOT_FOUND)
         shown = _question_exposures([q])
         if shown:
             M.expose_and_load(Path(args.bundle_dir), shown, "bundle show question")
-        return _compact_question(q)
+        return {**{k: v for k, v in _compact_question(q).items() if k not in extra}, **extra}
 
     return _mutation(run)
 

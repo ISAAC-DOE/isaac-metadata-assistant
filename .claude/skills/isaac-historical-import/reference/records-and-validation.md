@@ -6,8 +6,15 @@ supplied. Its reply is counts: `drafts_total`, `complete` / `incomplete`, `by_re
 `drafts/index.json` always holds them all. `validate` runs, per draft: the draft checks, an export dry
 run, the official schema and exactness checks, and the offline portal check. Its reply opens with
 `exportable` / `not_exportable`, `by_reason` (verdicts and processing blockers, counted),
-`missing_required_by_field` and `not_exportable_first` (3 groups with their plain reasons), then the
-`verdicts` map. Explain the counts first ("all 78 lack the producing group; 70 wait for a curve
+`missing_required_by_field` and `not_exportable_first` (3 groups with their plain reasons and
+`first_official_error`, the portal-target schema's first message, e.g. `context.electrochemistry.electrolyte:
+'concentration_M' is a required property`), then the `verdicts` map. The required list includes what an
+object the record carries requires (an electrolyte name makes `concentration_M` required, with
+`required_because` in the composition file), so `build-records` says it before `validate` does.
+Both replies also carry `warnings` (`warnings_total`): a group whose file names state a potential
+(`400mV`, `m800mV`) that its record will not carry until the potential scale (or the set-point) is
+confirmed, with the command that lets it in. It is not a refusal: the record can still be exportable,
+without the condition that defines it. Say each one to the scientist and ask the scale question. Explain the counts first ("all 78 lack the producing group; 70 wait for a curve
 approval; 5 have no protocol"), then open `validation/<group id>.json` only for a group they leave
 unexplained.
 
@@ -20,7 +27,7 @@ When a scientist asks "what should this record hold?", answer from the upstream 
 | Verdict | Tell the scientist | Fix |
 |---|---|---|
 | `incomplete` | "These required facts are still missing: …" (list them from `missing_required`) | answer the blocking questions (Step 7: `bundle questions --blocking-only`). `measurement.series`, `measurement.qc.status` and `descriptors.outputs` are listed as missing until the group's processing result is approved; the file's `processing_fix` says so. The fix is Step 6: show the curve, and approve it only when the scientist does, with the QC status they choose. `processing_fix` holds a template (`--qc-status <value>`): never run it as it is. Correcting a value never supplies them. When it says to re-run `isaac process`, add `--source <folder>` |
-| `invalid_official` | "A value is in the wrong form: …" (quote the validator's message) | correct that value with `decide --decision correct` |
+| `invalid_official` | "A value is in the wrong form: …" (quote `first_official_error`) | correct that value with `decide --decision correct` |
 | `portal_check_unavailable` | "The offline portal check is not installed, so this cannot count as ready." | `scripts/install_portal_validator.sh`, then `validate` again |
 | `portal_check_degraded` | "The portal check ran only partly, so this cannot count as ready." | re-install the validator; if it persists, report it |
 | `portal_hold` | "The portal would hold this record for a warning: …" | explain the warning; ask whether to fix or leave unexported |

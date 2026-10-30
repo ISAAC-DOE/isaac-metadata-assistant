@@ -10,7 +10,10 @@ export), `applies_to` (groups/runs/targets), `hints` (flagged as hints; a hint i
 in `allowed_decisions_by_kind` (a question lists `allowed_decisions` only when it differs), standard
 hint notes in `hint_notes`. A question blocks only when a live group's record needs one of its
 fields (`blocks_groups`, `required_fields`; reaction drive and catalysis only once a reaction is in
-the record, `required_when`); questions only about runs in no live group say `outside_live_groups`.
+the record, `required_when`; a member an object the record carries requires, e.g. the electrolyte's
+`concentration_M` once its name is answered, with `required_because`); questions only about runs in no
+live group say `outside_live_groups`. A beamtime-wide conflict (no run named) counts every live group
+it reaches (`applies_to.beamtime_wide: true`, `groups` = `blocks_groups`).
 The reply also has
 `counts` (for the scope asked; `counts_whole_bundle` beside it when `--scope` is given: `blocking`,
 `conflicts_affecting_a_record`, `conflicts_without_a_record_field`, `optional`, `informational`,
@@ -20,7 +23,9 @@ quote these, not `summary.md`'s "Questions: N", which is `fine_grained_v1`) and
 result"): its `questions[]` list each question to answer with the `only` scope to use,
 `unasked_required[]` names required fields no question asks (with `reason` and `command`), and
 `plus_decisions` names only the decisions not yet made (an empty list once the group is
-confirmed and its result approved). Pages hold at most 200 (`--limit` above that is refused). The older fine-grained list (`bundle list <bundle> questions`)
+confirmed and its result approved). `recommended[]` (never blocking, not counted) names a question
+worth answering for that group, with the warning that explains it (`warnings`): today, a potential the
+file names state that the record will not carry until its scale is confirmed. Pages hold at most 200 (`--limit` above that is refused). The older fine-grained list (`bundle list <bundle> questions`)
 is for lookup only.
 
 Order: blocking (export cannot happen without them) → conflicts that affect a record → optional.
@@ -48,6 +53,14 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
   and sorts last; do not ask it again unless they offer an answer.
 - **A conflict with `affects_record: false`** (`no_record_field`): the readings differ, but no record
   field carries them (a comment line, a unit spelling). Say how many there are; do not ask each.
+- **A conflict no reading of which the field takes** (`readings_that_fit_the_field: 0`; each reading
+  hint has `fits_field`): `confirm --value <one reading>` would be refused, so `answer_command` is
+  `correct --value <…>`. Start times: the `#D` readings are local clock times with no zone and can never
+  be recorded; `utc_readings` (also `utc_reading` hints) lists the UTC instants the bundle already holds
+  for that run, each with its source (e.g. the `#E` epoch line). Show them as readings, ask which is the
+  start, and record `correct --value <the instant they choose>`; never pick it for them. A closed field
+  (e.g. the technique read from macro names or Python helper lines): show `allowed_values` and record
+  the one they name. When only some readings fit, `confirm` one of those.
 
 - **No value to confirm.** Text like "What is the technique? The files hold text for it … but no
   value this build can carry", with no `confirm` in `allowed_decisions`, means there is nothing to
@@ -94,7 +107,7 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
   questions` again before you go on; never assume what they answered.
 - **Never** pass `--test-marker` to `build-records` with a real scientist; it is for the self-test.
 
-- Conflict: `decide --target <conflict id> --decision correct --value "<chosen or new value>" --by "<name>" --note "<why, in their words>"` (use `confirm --value` when they pick one of the listed readings).
+- Conflict: `decide --target <conflict id> --decision correct --value "<chosen or new value>" --by "<name>" --note "<why, in their words>"` (use `confirm --value` when they pick one of the listed readings that fits the field).
 - Missing value they know: `--decision confirm|correct --value <v>`; they do not know: `--decision defer`.
 - Extracted value they accept: `--decision confirm`; reject: `--decision reject`.
 - Several evidence-backed values the scientist accepts together: write their ids to a temporary file
@@ -109,7 +122,11 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
   <file.json>` (outside the bundle; it sends nothing, and each draft needs a description the scientist
   writes). The value stays missing until the vocabulary has it.
 - Use `--json` with `--value` for numbers/objects. ORCID only if the scientist gives one (`--orcid`).
-- Repeating a decision is harmless (recorded once). A later decision replaces an earlier one.
+- Repeating a decision is harmless (recorded once). A later decision replaces an earlier one, also
+  through `--question`: `decide --question <Q>` resolves a question that is already answered (by an
+  earlier answer or a template import) under the same id, with the same checks. `bundle show <bundle>
+  question <Q>` shows an answered question with `status: answered` and `current_answers` (each
+  decision, value, how many targets, who, when); an open one with answered fields lists those too.
 
 ## The template (answer everything the files never state, in one sitting)
 

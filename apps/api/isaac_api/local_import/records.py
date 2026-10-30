@@ -32,8 +32,10 @@ without ``--dry-run`` it refuses.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
+import re
 import shutil
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -52,6 +54,51 @@ SETPOINT_NEEDS_SCALE = ("a potential setpoint needs its confirmed potential_scal
                         "is relative to")
 SETPOINT_GROUP_NEEDS_SCALE = ("another run of this record group has this potential setpoint without its confirmed "
                               "potential_scale, so the group's setpoint is not filled")
+#: The composer's ``from`` for a required value only an answer supplies (``questions.FROM_AN_ANSWER``).
+FROM_AN_ANSWER = "a scientist's answer"
+#: A file-name token that states a potential: a number with ``V`` / ``mV`` (``400mV``, ``m800mV``, ``1p2V``,
+#: ``-0.5V``). Only RECOGNISES the statement, to warn that the record will not carry it: no value is read from it.
+_POTENTIAL_TOKEN = re.compile(r"^(?:m|n|neg|minus|-|\+)?\d+(?:[p.]\d+)?m?V$", re.IGNORECASE)
+STATED_POTENTIAL_WARNING = "stated_potential_not_in_record"
+
+
+@functools.lru_cache(maxsize=512)
+def required_members_with(path: str) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """``((object path, its required members), ...)`` for each OPTIONAL object above ``path`` (below a record
+    section) whose schema lists members it requires: once a record carries ``path``, it carries that object, and
+    the object's ``required`` members with it — the schema's own rule, read from the vendored schema the
+    composer's required list is read from (``bundle.required_record_paths``). The electrolyte is the case met:
+    ``context.electrochemistry.electrolyte`` requires ``name`` AND ``concentration_M``, so a record with a name
+    and no concentration fails the official schema. An array path is never one (composed from structured blocks)."""
+    if "[]" in path:
+        return ()
+    parts = path.split(".")
+    out = []
+    for n in range(2, len(parts)):
+        obj = ".".join(parts[:n])
+        node = B._schema_node(obj) or {}
+        req = node.get("required") if node.get("type") == "object" else None
+        if isinstance(req, list) and req:
+            out.append((obj, tuple(str(r) for r in req)))
+    return tuple(out)
+
+
+def _object_member_requirements(fields: Mapping[str, Mapping]) -> list[dict]:
+    """The members an object the draft carries requires and the draft lacks: ``[{path, from, required_because}]``
+    (:func:`required_members_with`), each once, in path order. A field the draft holds only as a ``missing``
+    envelope carries nothing, so it requires nothing."""
+    present = {p for p, env in fields.items() if (env or {}).get("status") != "missing"}
+    out: dict[str, dict] = {}
+    for p in sorted(present):
+        for obj, members in required_members_with(p):
+            for m in members:
+                member = f"{obj}.{m}"
+                if member in out or any(q == member or q.startswith(member + ".") for q in present):
+                    continue
+                out[member] = {"path": member, "from": FROM_AN_ANSWER,
+                               "required_because": (f"the record carries {p}, so it carries {obj}, which the schema "
+                                                    f"requires to hold {' and '.join(members)}")}
+    return list(out.values())
 
 
 def _id_key(target_id: str) -> str:
@@ -693,7 +740,101 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
         if not any(p == field or p.startswith(field + ".") for p in fields):
             fields[field] = {"value": None, "status": "missing", "evidence": []}
             report["missing_required"].append({"path": field, "from": "a scientist's answer"})
+    # WHAT AN OBJECT THE RECORD CARRIES REQUIRES (the schema's own rule, known before validation): an electrolyte
+    # name makes concentration_M required. Listed like any other required value, so build-records, the questions
+    # and the minimum say it, never only `validate`'s official-schema error.
+    for need in _object_member_requirements(fields):
+        fields[need["path"]] = {"value": None, "status": "missing", "evidence": []}
+        report["missing_required"].append(need)
+    report["warnings"] = _stated_potential_warnings(bundle, group, member_ids, fields, proposals)
     return draft, report
+
+
+def _stated_potentials(bundle: Mapping, member_ids: set) -> list[dict]:
+    """Each potential a member run's FILE NAME states, as the import already holds it: a set-point candidate read
+    from a file-name token (its literal and the volts it was read as), or an unmapped file-name token shaped like a
+    potential (:data:`_POTENTIAL_TOKEN`, its literal only: nothing is read from it). Bundle order, each once."""
+    out, seen = [], set()
+    for c in bundle["candidates"]:
+        if c.get("run_id") not in member_ids:
+            continue
+        for e in c.get("evidence") or ():
+            if e.get("method") == "ai_interpretation" or not str(e.get("locator") or "").startswith("filename token"):
+                continue
+            lit = e.get("literal_value")
+            if c.get("target_field_path") == SETPOINT_PATH:
+                value = c.get("value") if isinstance(c.get("value"), (int, float)) and not isinstance(c.get("value"), bool) else None
+            elif c.get("statement_key") == "unknown_token" and isinstance(lit, str) and _POTENTIAL_TOKEN.match(lit):
+                value = None
+            else:
+                continue
+            key = (lit, value)  # one statement however many of the run's files repeat it
+            if key not in seen:
+                seen.add(key)
+                out.append({"literal": lit, "relative_path": e.get("relative_path"), "candidate_id": c["candidate_id"],
+                            "read_as_V": value, "value_state": c.get("value_state")})
+    return out
+
+
+def _stated_potential_warnings(bundle: Mapping, group: Mapping, member_ids: set, fields: Mapping,
+                               proposals: Mapping[str, list]) -> list[dict]:
+    """A WARNING (never a refusal) for a group whose file names state a potential that its record will not carry:
+    the condition that defines the record would be silently absent. Why it is absent — no confirmed potential
+    scale (a set-point composes only beside one, :data:`bundle.COMPOSES_ONLY_WITH`) or no confirmed set-point —
+    and the command that lets it in (``targets``: the open scale / set-point values of the member runs). A record
+    that carries a set-point gets none; so does one whose file names state no potential."""
+    if SETPOINT_PATH in fields:
+        return []
+    stated = _stated_potentials(bundle, member_ids)
+    if not stated:
+        return []
+    answered = [v for v, _, _ in proposals.get(SETPOINT_PATH, ()) if isinstance(v, (int, float)) and not isinstance(v, bool)]
+    scale_missing = SCALE_PATH not in fields
+    needs = SCALE_PATH if scale_missing else SETPOINT_PATH
+    targets = [o.get("candidate_id") or o.get("value_id")
+               for o in list(bundle["candidates"]) + list(bundle["missing_values"])
+               if o.get("target_field_path") == needs and o.get("run_id") in member_ids
+               and o.get("value_state") in (B.STATE_MISSING, B.STATE_NEEDS_REVIEW, B.STATE_CANDIDATE_EXTRACTED)]
+    if targets and targets[0].startswith("cand-") and needs == SETPOINT_PATH:
+        command = f'isaac bundle decide <bundle_dir> --target {targets[0]} --decision confirm --by "<your name>"'
+    elif targets:
+        command = (f"isaac bundle decide <bundle_dir> --target {targets[0]} --decision correct --value "
+                   + ("<potential scale>" if needs == SCALE_PATH else "<volts> --json") + ' --by "<your name>"')
+    else:
+        command = f"isaac bundle questions <bundle_dir> --scope group:{group['group_id']}   # answer {needs} there"
+    if len(targets) > 1:
+        command += f"   # and the same for {', '.join(targets[1:4])}{'…' if len(targets) > 4 else ''}"
+    w = {"code": STATED_POTENTIAL_WARNING, "group_id": group["group_id"], "path": SETPOINT_PATH, "needs": needs,
+         "stated": stated, "answered_V": answered, "targets": targets, "command": command}
+    return [{**w, "text": potential_warning_text(w)}]
+
+
+def potential_warning_text(w: Mapping) -> str:
+    """The plain sentence for a :data:`STATED_POTENTIAL_WARNING` warning, ending with its command."""
+    lits = "; ".join(s["literal"] + (f", read as {s['read_as_V']:g} V" if s.get("read_as_V") is not None else "")
+                     + (f" in {s['relative_path']}" if s.get("read_as_V") is None and s.get("relative_path") else "")
+                     for s in w["stated"][:3])
+    if w.get("answered_V"):
+        lits += "; the set-point answered for it: " + ", ".join(f"{v:g} V" for v in w["answered_V"][:3])
+    until = "the potential scale is confirmed" if w["needs"] == SCALE_PATH else "the potential set-point is confirmed"
+    return (f"the file names state a potential ({lits}) but the record will not carry it until {until}: "
+            f"{w['command']}")
+
+
+def with_question_commands(bundle: Mapping, warnings: list[dict], payload: Mapping | None = None) -> list[dict]:
+    """``warnings`` with each command answered through its consolidated question when one asks the value
+    (``questions.command_for_targets``), and each ``text`` written. ``payload``: the questions, when built."""
+    if not warnings:
+        return warnings
+    from . import questions as Q
+
+    payload = payload or Q.consolidate(bundle)
+    out = []
+    for w in warnings:
+        cmd = Q.command_for_targets(payload, w.get("targets") or (), w["needs"], w["group_id"]) or w["command"]
+        w = {**w, "command": cmd}
+        out.append({**w, "text": potential_warning_text(w)})
+    return out
 
 
 #: The ONLY self-test marker (review minor): a fixed constant, never free text.
@@ -792,8 +933,14 @@ def build_records(bundle_dir: Path, *, test_marker: bool = False) -> dict:
     from .cli import _atomic_write, _json_bytes
 
     index = []
-    for g in groups:
-        draft, report = compose_group(bundle, g, bundle_dir)
+    composed = [(g, *compose_group(bundle, g, bundle_dir)) for g in groups]
+    # THE WARNINGS (a stated condition the record will not carry), each command made its question's, once
+    warned = with_question_commands(bundle, [w for _, _, report in composed for w in report.get("warnings") or ()])
+    warnings_of: dict[str, list[dict]] = {}
+    for w in warned:
+        warnings_of.setdefault(w["group_id"], []).append(w)
+    for g, draft, report in composed:
+        report["warnings"] = warnings_of.get(g["group_id"], [])
         if test_marker:
             report["test_marker"] = {"text": TEST_MARKER, "placed": _apply_test_marker(draft)}
         _atomic_write(out_dir / f"{g['group_id']}.draft.json", _json_bytes(draft))
@@ -812,6 +959,7 @@ def build_records(bundle_dir: Path, *, test_marker: bool = False) -> dict:
             | ({"processing_blocker": processing_blocker(report.get("processing") or {})}
                if any(m.get("from") == "an approved processing result" for m in report["missing_required"])
                or (report.get("processing") or {}).get("not_applicable") else {})
+            | ({"warnings": [w["text"] for w in report["warnings"]]} if report["warnings"] else {})
         )
     skipped = [
         {"group_id": g["group_id"], "status": g["status"], "reason": "only a scientist-confirmed record group becomes a draft"}
@@ -820,6 +968,7 @@ def build_records(bundle_dir: Path, *, test_marker: bool = False) -> dict:
     ]
     result = {"drafts": index, "skipped_groups": skipped, "test_marker": bool(test_marker),
               "statement": "Drafts, not records. A draft with missing required values is incomplete and is never exported."}
+    result.update(warning_summary(warned))
     if rederived_now:
         result["eligibility_rederived_now"] = rederived_now
     _atomic_write(out_dir / "index.json", _json_bytes(result))
@@ -1149,6 +1298,31 @@ REASONS_SHOWN = 3
 _BOILERPLATE_PREFIXES = ("Website schema (vendored", "This is NOT an official record")
 
 
+#: How many warnings ``build-records`` and ``validate`` print in full (``warnings_total`` counts them all).
+WARNINGS_SHOWN = 5
+
+
+def warning_summary(warned: Sequence[Mapping]) -> dict:
+    """``{"warnings": [{group_id, code, text, command}, ...], "warnings_total": n}`` for the reply, or ``{}``."""
+    if not warned:
+        return {}
+    return {"warnings": [{k: w[k] for k in ("group_id", "code", "text", "command")} for w in warned[:WARNINGS_SHOWN]],
+            "warnings_total": len(warned),
+            **({"warnings_omitted": len(warned) - WARNINGS_SHOWN} if len(warned) > WARNINGS_SHOWN else {})}
+
+
+def first_official_error(report: Mapping) -> str | None:
+    """``"<path>: <message>"`` of the first error the portal-target schema gave (else the portal check's first
+    schema error), or ``None``: the words ``Portal-target schema … FAIL (1 error(s))`` stood for."""
+    errors = list((report.get("official_validation") or {}).get("errors") or ())
+    if not errors:
+        errors = list((((report.get("portal_check") or {}).get("result") or {}).get("schema_errors")) or ())
+    if not errors:
+        return None
+    e = errors[0]
+    return f"{e.get('path')}: {e.get('message')}" if isinstance(e, Mapping) else str(e)
+
+
 def refusal_counts(rows: Sequence[Mapping]) -> tuple[dict[str, int], dict[str, int]]:
     """``(by_reason, missing_required_by_field)`` over rows carrying ``verdict``, ``processing_blocker`` and
     ``missing_required``: the counts ``export`` (``refused_by_reason``) and ``validate`` (``by_reason``) print."""
@@ -1181,20 +1355,24 @@ def validate_records(bundle_dir: Path, *, run_portal=None) -> dict:
     out_dir = bundle_dir / VALIDATION_DIR
     out_dir.mkdir(exist_ok=True)
     verdicts, stale, not_exportable = {}, [], []
-    for group_id, draft, composition in fresh_compositions(bundle_dir, bundle, test_marker=marked):
+    fresh = fresh_compositions(bundle_dir, bundle, test_marker=marked)
+    warned = with_question_commands(bundle, [w for _, _, comp in fresh for w in comp.get("warnings") or ()])
+    for group_id, draft, composition in fresh:
         if _on_disk_differs(bundle_dir, group_id, draft, composition):
             stale.append(group_id)
         report = validate_draft_file(draft, run_portal=run_portal, composition=composition)
         report["group_id"] = group_id
         report["composed_from"] = "the validated bundle, now (an on-disk draft is never trusted)"
         report["on_disk_draft_differs"] = group_id in stale
+        report["warnings"] = [w for w in warned if w["group_id"] == group_id]
         _atomic_write(out_dir / f"{group_id}.json", _json_bytes(report))
         verdicts[group_id] = report["verdict"]
         if report["verdict"] != "exportable":
             not_exportable.append({"group_id": group_id, "verdict": report["verdict"],
                                    "missing_required": report["missing_required"],
                                    "processing_blocker": report["processing_blocker"],
-                                   "reasons": plain_reasons(report["plain_summary"])})
+                                   "reasons": plain_reasons(report["plain_summary"]),
+                                   **({"first_official_error": e} if (e := first_official_error(report)) else {})})
     out: dict = {}
     if verdicts:
         # WHY, COUNTED, FIRST (1.9.x polish): the verdict map alone meant opening every validation file to explain it
@@ -1204,11 +1382,12 @@ def validate_records(bundle_dir: Path, *, run_portal=None) -> dict:
             not_exportable=len(not_exportable),
             by_reason=by_reason,
             missing_required_by_field=by_field,
-            not_exportable_first=[{k: row[k] for k in ("group_id", "verdict", "reasons")}
+            not_exportable_first=[{k: row[k] for k in ("group_id", "verdict", "reasons", "first_official_error") if k in row}
                                   for row in not_exportable[:REASONS_SHOWN]],
             not_exportable_omitted=max(0, len(not_exportable) - REASONS_SHOWN),
             reports=f"{VALIDATION_DIR}/<group_id>.json holds each group's full report (every gate, verbatim).",
         )
+    out.update(warning_summary(warned))
     out.update(verdicts=verdicts, on_disk_drafts_ignored_because_they_differ=stale)
     if not verdicts:
         # an empty verdict list is "nothing checked", never "everything passed"

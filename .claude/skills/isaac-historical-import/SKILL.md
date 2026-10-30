@@ -186,6 +186,8 @@ experiment-scope questions, offer the template first and ask per group only what
 - **Not asked.** `informational` questions cannot reach a record: mention them once. A `covered_by`
   question is answered by that experiment question; ask per group only if a group differs.
 - **Asked again** (`asked_again`): an earlier answer cannot go into the record; give the reason, ask.
+- **No reading fits** (`readings_that_fit_the_field: 0`): say why (local `#D` times have no zone; off the list), show
+  `utc_readings` / allowed values, and record `correct --value` with their choice.
 - **Absorber.** Say the element and edge back; run it only on a clear yes to that pair.
 - **AI readings are not file evidence**: say "my reading of the files suggests…", never "the files say".
 
@@ -209,6 +211,7 @@ back to Step 5. Read `reference/records-and-validation.md`; explain the verdicts
 `by_reason`, `missing_required_by_field` and `not_exportable_first` in plain words with the exact fix
 (open `validation/<group_id>.json` only for a group those do not explain), then loop back to the step that fixes it (a question, a group, a
 processing approval: an `incomplete` draft with a `processing_fix` needs its curve approved in Step 6).
+Say every `warnings` item (a potential the file names state that the record will not carry) with its command.
 Never edit a draft file and never relax a check.
 
 ## Step 9 · Export and dry run
