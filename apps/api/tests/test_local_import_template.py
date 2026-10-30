@@ -20,10 +20,13 @@ from tests_support_records import BY, pristine_bundle  # noqa: F401
 TEMPLATE_FILE_LIST_HEADERS = ["File Name", "Config ID", "Sample Name", "Sample Formula", "Sample Form", "Environment",
                               "Reaction", "Cell Type", "Flow Mode", "Electrolyte", "Potential (V)", "Potential Scale", "Gas Feed"]
 # ISAAC's two additions come AFTER the template's own columns
-FILE_LIST_HEADERS = [*TEMPLATE_FILE_LIST_HEADERS, "Electrolyte Concentration (M)", "pH", "Control Mode", "Current Set-point (mA/cm2)"]
+FILE_LIST_HEADERS = [*TEMPLATE_FILE_LIST_HEADERS, "Electrolyte Concentration (M)", "pH", "Control Mode", "Current Set-point (mA/cm2)",
+                     "Reaction Drive", "Reaction Catalysis"]
 CONFIG_HEADERS = ["Config ID", "Technique", "Mode", "Primary Signal Channel", "Normalization Channel", "Detectors",
                   "Energy Calibration", "Beamline Setup", "Notes"]
-CAMPAIGN_LABELS = ["Facility Name", "Organization", "Beamline/Instrument", "Start Date", "Proposal ID"]
+# the template's own five rows (1.4.0 says whose organization row 4 is), then ISAAC's three
+CAMPAIGN_LABELS = ["Facility Name", "Facility organization (e.g. SLAC / SSRL)", "Beamline/Instrument", "Start Date", "Proposal ID",
+                   "Your group (who produced the data)", "Your organization (who produced the data)", "Domain"]
 WHO = "Synthetic Scientist"
 
 
@@ -90,7 +93,7 @@ def test_export_has_the_template_sheets_headers_and_one_row_per_live_group_run(g
     assert [c.value for c in wb["File List"][1]] == FILE_LIST_HEADERS
     assert [c.value for c in wb["ISAAC Suggestions"][1]] == FILE_LIST_HEADERS
     assert [c.value for c in wb["Configurations"][1]] == CONFIG_HEADERS
-    assert [wb["Campaign Info"][f"A{r}"].value for r in range(3, 8)] == CAMPAIGN_LABELS
+    assert [wb["Campaign Info"][f"A{r}"].value for r in range(3, 11)] == CAMPAIGN_LABELS
 
     b = M.load(grouped)
     rows = T.live_rows(b)
@@ -100,13 +103,13 @@ def test_export_has_the_template_sheets_headers_and_one_row_per_live_group_run(g
     assert fl.max_row == 1 + len(rows)
 
     # EVERY answer cell is empty: Campaign Info, Configurations (header only), File List B..M
-    assert all(wb["Campaign Info"][f"B{r}"].value is None for r in range(3, 8))
+    assert all(wb["Campaign Info"][f"B{r}"].value is None for r in range(3, 11))
     assert all(c.value is None for row in wb["Configurations"].iter_rows(min_row=2) for c in row)
     assert all(c.value is None for row in fl.iter_rows(min_row=2, min_col=2) for c in row)
 
     # the hidden marker: format, version, bundle, time, row -> run, column -> path
     meta = {v[0]: v[1] for v in wb["_isaac"].iter_rows(values_only=True) if v[0] and v[1] is not None}
-    assert meta["format"] == "isaac.metadata_template" and meta["format_version"] == "1.3.0"  # 1.2.0 adds Control Mode, 1.3.0 the current set-point
+    assert meta["format"] == "isaac.metadata_template" and meta["format_version"] == "1.4.0"  # 1.2.0 adds Control Mode, 1.3.0 the current set-point, 1.4.0 producer/domain/reaction
     assert meta["bundle_id"] == b["bundle_id"] and meta["exported_utc"].endswith("Z")
     mapped_rows = [v for v in wb["_isaac"].iter_rows(values_only=True) if v[0] == "File List" and isinstance(v[1], int)]
     assert [(v[1], v[2], v[3], v[4]) for v in mapped_rows] == [(i, r["run_id"], r["run_key"], r["group_id"]) for i, r in enumerate(rows, 2)]

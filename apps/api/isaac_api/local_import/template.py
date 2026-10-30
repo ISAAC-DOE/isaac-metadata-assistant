@@ -45,7 +45,14 @@ FORMAT_ID = "isaac.metadata_template"
 #: 1.3.0: File List gains the ISAAC-added column "Current Set-point (mA/cm2)"
 #: (``context.electrochemistry.current_setpoint_mA_cm2``, locally answerable since bundle 1.7.0,
 #: DEC-92), after Control Mode. A 1.2.0 workbook is read up to Control Mode, a 1.1.0 one up to pH.
-FORMAT_VERSION = "1.3.0"
+#: 1.4.0: the template can FINISH a record. Every field the record composer requires a scientist to
+#: supply has a cell: Campaign Info gains "Your group", "Your organization" (``attribution.produced_by.*``)
+#: and "Domain" (``system.domain``), appended after the template's own five rows; File List gains
+#: "Reaction Drive" and "Reaction Catalysis" (``context.reaction.*``, required once a run states a
+#: reaction), appended after the current set-point. Campaign Info's "Organization" was always the
+#: FACILITY's (``system.facility.organization``) and now says so; a 1.3.0 workbook, which still reads
+#: "Organization" and has five rows, imports as it did (:func:`campaign_fields_of`).
+FORMAT_VERSION = "1.4.0"
 
 SHEET_CAMPAIGN = "Campaign Info"
 SHEET_CONFIG = "Configurations"
@@ -84,18 +91,51 @@ class Column:
     isaac_added: bool = False
     #: a note shown on the header cell
     note: str | None = None
+    #: other labels the SAME cell had in another template version (same cell, same path): an
+    #: already-exported workbook still imports
+    aliases: tuple[str, ...] = ()
 
 
 # ISAAC's own template: sheet names and header text, in its order. No example value.
 CAMPAIGN_TITLE = "ISAAC Campaign Metadata"
 CAMPAIGN_FIRST_ROW = 3
-CAMPAIGN_FIELDS: tuple[Column, ...] = (
+_FACILITY_ORG_NOTE = ("The organization that RUNS the facility (e.g. SLAC / SSRL for SSRL), not yours: your own "
+                      "institution goes in 'Your organization (who produced the data)'.")
+#: Campaign Info as template 1.3.0 and earlier wrote it: the template's own five rows.
+CAMPAIGN_FIELDS_1_3: tuple[Column, ...] = (
     Column("Facility Name", "system.facility.facility_name"),
-    Column("Organization", "system.facility.organization"),
+    Column("Organization", "system.facility.organization", aliases=("Facility organization (e.g. SLAC / SSRL)",)),
     Column("Beamline/Instrument", "system.facility.beamline"),
     Column("Start Date", None, "the schema has no campaign start date (timestamps.acquired_start_utc is each run's own UTC instant)"),
     Column("Proposal ID", None, "the schema has no proposal id field"),
 )
+#: 1.4.0: the facility's organization says whose it is, and the record-scope fields the composer
+#: requires (the producer, the domain) follow the template's own rows. Rows are read by position,
+#: so a row is only ever APPENDED.
+CAMPAIGN_FIELDS: tuple[Column, ...] = (
+    CAMPAIGN_FIELDS_1_3[0],
+    Column("Facility organization (e.g. SLAC / SSRL)", "system.facility.organization", note=_FACILITY_ORG_NOTE,
+           aliases=("Organization",)),
+    *CAMPAIGN_FIELDS_1_3[2:],
+    Column("Your group (who produced the data)", "attribution.produced_by.group", isaac_added=True,
+           note=("Added by ISAAC (not in ISAAC's base template). The group or PI that produced these data, as you "
+                 "would write it on the record. ISAAC never takes it from a folder name.")),
+    Column("Your organization (who produced the data)", "attribution.produced_by.organization", isaac_added=True,
+           note=("Added by ISAAC (not in ISAAC's base template). YOUR institution (e.g. your university), "
+                 "not the facility's: that is 'Facility organization'.")),
+    Column("Domain", "system.domain", isaac_added=True,
+           note="Added by ISAAC (not in ISAAC's base template). One of the listed values; beamline data are 'experimental'."),
+)
+
+
+def campaign_fields_of(version: Any) -> tuple[Column, ...]:
+    """The Campaign Info rows a workbook of template ``version`` has, in order: 1.3.0 and earlier
+    (or an unreadable version) have the template's five, with the facility's organization labelled
+    "Organization"."""
+    have = _version_key(version)
+    return CAMPAIGN_FIELDS if have is not None and have >= (1, 4, 0) else CAMPAIGN_FIELDS_1_3
+
+
 CONFIG_COLUMNS: tuple[Column, ...] = (
     Column("Config ID", None, "a key that joins File List rows to this sheet; not itself a value"),
     Column("Technique", "system.technique"),
@@ -134,11 +174,18 @@ FILE_COLUMNS: tuple[Column, ...] = (
            note=("Added by ISAAC (not in ISAAC's base template). For a galvanostatic run: the commanded current "
                  "DENSITY in mA/cm2, a number, with its sign as stated. Not a total current in mA: ISAAC never "
                  "divides by an electrode area. Leave it blank if you do not know it.")),
+    Column("Reaction Drive", "context.reaction.drive", isaac_added=True,
+           note=("Added by ISAAC (not in ISAAC's base template). For a run that states a reaction: what drove it, "
+                 "exactly as one of the listed values (e.g. electrochemical). Leave it blank otherwise.")),
+    Column("Reaction Catalysis", "context.reaction.catalysis", isaac_added=True,
+           note=("Added by ISAAC (not in ISAAC's base template). For a run that states a reaction: its catalysis, "
+                 "exactly as one of the listed values (e.g. heterogeneous). Leave it blank otherwise.")),
 )
 #: File List columns a later template version added: ``header -> version``. A workbook of an older
 #: version does not have them; its import reads only the columns that version wrote. Such a
 #: column is only ever APPENDED: cells are read by position, so one inserted mid-sheet would shift them.
-COLUMNS_ADDED_IN: Mapping[str, str] = {"Control Mode": "1.2.0", "Current Set-point (mA/cm2)": "1.3.0"}
+COLUMNS_ADDED_IN: Mapping[str, str] = {"Control Mode": "1.2.0", "Current Set-point (mA/cm2)": "1.3.0",
+                                       "Reaction Drive": "1.4.0", "Reaction Catalysis": "1.4.0"}
 
 
 def _version_key(version: Any) -> tuple[int, ...] | None:
@@ -171,6 +218,9 @@ VOCAB_COLUMNS: tuple[tuple[str, str], ...] = (
     ("Reaction", "context.electrochemistry.reaction"),
     ("Technique", "system.technique"),
     ("Control Mode", B.CONTROL_MODE_PATH),  # ISAAC-added (1.2.0), after ISAAC's own lists
+    ("Domain", "system.domain"),  # ISAAC-added (1.4.0): Campaign Info
+    ("Reaction Drive", "context.reaction.drive"),  # ISAAC-added (1.4.0): File List
+    ("Reaction Catalysis", "context.reaction.catalysis"),
 )
 _ID_COLUMNS = ("File Name", "Config ID")
 
@@ -202,7 +252,7 @@ def field_rules() -> dict[str, dict]:
     from . import questions as Q
 
     schema, _basis = Q._target_schema()
-    paths = {c.path for c in (*CAMPAIGN_FIELDS, *CONFIG_COLUMNS, *FILE_COLUMNS) if c.path}
+    paths = {c.path for c in (*CAMPAIGN_FIELDS, *CAMPAIGN_FIELDS_1_3, *CONFIG_COLUMNS, *FILE_COLUMNS) if c.path}
     paths |= {p for _, p in VOCAB_COLUMNS}
     return {path: rule_for_path(path, schema=schema) for path in sorted(paths)}
 
@@ -392,6 +442,7 @@ class _Suggester:
             for t in q["targets"]:
                 if t["kind"] == "missing_value" and q.get("hints"):
                     self.hints_of.setdefault(t["id"], q["hints"])
+        self.run_of_candidate = {c["candidate_id"]: c["run_id"] for c in bundle["candidates"]}
         self.ai_of: dict[tuple[str, str], list[dict]] = {}
         for i in bundle.get("ai_interpretations") or ():
             t = i.get("target") or {}
@@ -425,10 +476,23 @@ class _Suggester:
         self._expose("candidate", c["candidate_id"])
         return [f"{what} [{c['value_state']}] — {_ev_where(self.index, ev)}", *self._ai("candidate", c["candidate_id"])]
 
-    def _missing(self, m: Mapping, *, with_hints: bool = True) -> list[str]:
+    def _row_hints(self, hints: Sequence[Mapping], run_id: str) -> list[Mapping]:
+        """The hints of a consolidated question that are THIS run's own evidence. A beamtime-wide
+        question (e.g. the environment of every run) carries readings of OTHER runs ("'dry' in
+        run 83") and beamtime-wide hints (the folder's name) as context; beside one row's cell
+        those read as that row's evidence, so they are not shown there. The row's own AI
+        readings are shown from its own targets (:meth:`_ai`)."""
+        return [h for h in hints if h.get("candidate_id") and self.run_of_candidate.get(h["candidate_id"]) == run_id]
+
+    def _missing(self, m: Mapping, *, with_hints: bool = True, row_of: str | None = None) -> list[str]:
+        """``row_of``: the File List row's run — its cell shows only that run's own hints. The
+        Campaign Info block (``row_of=None``) shows the question's beamtime-wide hints."""
         out = []
         if with_hints:
-            for h in self.hints_of.get(m["value_id"], [])[:2]:
+            hints = self.hints_of.get(m["value_id"], [])
+            if row_of is not None:
+                hints = self._row_hints(hints, row_of)
+            for h in hints[:2]:
                 if h.get("candidate_id"):
                     self._expose("candidate", h["candidate_id"])
                 src = (self.index.sources.get(h.get("source_id") or "") or {}).get("relative_path")
@@ -441,7 +505,7 @@ class _Suggester:
         for c in self.index.cands_by_run.get((run_id, path), []):
             lines += self._candidate(c)
         for m in self.index.missing_by_run.get((run_id, path), []):
-            lines += self._missing(m)
+            lines += self._missing(m, row_of=run_id)
         for other in _SIBLING_PATHS.get(path, ()):
             label = f" of {other.rsplit('.', 2)[-2]}.{other.rsplit('.', 1)[-1]} (the same reading; split it)"
             sib = [x for c in self.index.cands_by_run.get((run_id, other), []) for x in self._ai("candidate", c["candidate_id"], label)]
@@ -538,22 +602,28 @@ def export_template(bundle_dir: Path, out: Path, *, suggestions: bool = True, fo
     ws["A1"] = CAMPAIGN_TITLE
     ws["A1"].font = bold
     for i, col in enumerate(CAMPAIGN_FIELDS):
-        ws.cell(row=CAMPAIGN_FIRST_ROW + i, column=1, value=col.header)
+        label = ws.cell(row=CAMPAIGN_FIRST_ROW + i, column=1, value=col.header)
+        label.font = Font(italic=col.isaac_added)
+        if col.note:
+            label.comment = Comment(col.note, "ISAAC")
         ws.cell(row=CAMPAIGN_FIRST_ROW + i, column=2).number_format = "@"
     instructions = (
         "Instructions:",
         "1. Fill in Campaign Info above. One answer applies to every run listed in File List.",
+        "   'Facility organization' is the facility's (e.g. SLAC / SSRL); 'Your organization' and 'Your group' are who produced the data.",
         "2. Configurations: add one row per setup (Config ID, Technique, ...).",
         "3. File List: one row per run ISAAC found, named by its file's path. Do not edit File Name or reorder rows.",
         "4. Choose each row's Config ID, then fill what you know. Leave a cell blank if you do not know.",
         "5. Electrolyte is the NAME only (e.g. KOH). Put 0.1 M in 'Electrolyte Concentration (M)' as 0.1, and the pH in 'pH'.",
-        "   Those two columns, 'Control Mode' and 'Current Set-point (mA/cm2)', after Gas Feed, are added by ISAAC; they are not in ISAAC's base template.",
+        "   Those two columns, 'Control Mode', 'Current Set-point (mA/cm2)', 'Reaction Drive' and 'Reaction Catalysis', after Gas Feed,",
+        "   are added by ISAAC; they are not in ISAAC's base template. Drive and catalysis are needed for a run that states a reaction.",
         "6. 'ISAAC Suggestions' shows what the files already say, with where. It is evidence, not an answer.",
         "7. Then: isaac bundle template import <bundle_dir> <this file> --by \"<your name>\" (preview), add --apply to record.",
     )
+    first_instruction = CAMPAIGN_FIRST_ROW + len(CAMPAIGN_FIELDS) + 2
     for i, line in enumerate(instructions):
-        ws.cell(row=10 + i, column=1, value=line)
-    ws.column_dimensions["A"].width = 24
+        ws.cell(row=first_instruction + i, column=1, value=line)
+    ws.column_dimensions["A"].width = 40
     ws.column_dimensions["B"].width = 48
 
     # Configurations: header only.
@@ -610,6 +680,8 @@ def export_template(bundle_dir: Path, out: Path, *, suggestions: bool = True, fo
         dropdown(wf, col.path, f"{_letter(j)}2:{_letter(j)}{last}")
     for j, col in enumerate(CONFIG_COLUMNS, start=1):
         dropdown(wc, col.path, f"{_letter(j)}2:{_letter(j)}{1 + CONFIG_ROWS}")
+    for i, col in enumerate(CAMPAIGN_FIELDS):
+        dropdown(ws, col.path, f"B{CAMPAIGN_FIRST_ROW + i}")
     cfg = DataValidation(type="list", formula1=f"'{SHEET_CONFIG}'!$A$2:$A${1 + CONFIG_ROWS}", allow_blank=True)
     wf.add_data_validation(cfg)
     cfg.add(f"B2:B{last}")
@@ -718,11 +790,38 @@ def export_template(bundle_dir: Path, out: Path, *, suggestions: bool = True, fo
         "bundle_id": bundle["bundle_id"],
         "exported_utc": exported,
         "file_list_rows": len(rows),
+        "sheets": list(wb.sheetnames),
+        "hidden_sheets": [n for n in wb.sheetnames if wb[n].sheet_state == "hidden"],
+        "bundle_dir": str(bundle_dir),
         "columns": columns_report,
         "suggestions": {"shown": suggester is not None, "cells_by_column": coverage,
                         "exposures_recorded": len(suggester.exposed) if suggester else 0},
         "statement": "Every answer cell is empty. ISAAC Suggestions is evidence, not an answer.",
     }
+
+
+def render_export_summary(result: Mapping) -> str:
+    """The short text ``template export`` prints: where, how many rows, which sheets, how to import.
+    The column mapping is in ``--json`` (and in the workbook's hidden ``_isaac`` sheet)."""
+    hidden = set(result.get("hidden_sheets") or ())
+    visible = [n for n in result.get("sheets") or () if n not in hidden]
+    mapped = [c for c in result["columns"] if c["status"] == "mapped"]
+    not_here = [c for c in result["columns"] if c["status"] == "no_target_in_bundle"]
+    sug = result["suggestions"]
+    lines = [
+        f"Wrote {result['written']} (template {result['format_version']}, bundle {result['bundle_id']}).",
+        f"{result['file_list_rows']} File List row(s), one per run of a live record group. Sheets: {', '.join(visible)}"
+        + (f" (hidden: {', '.join(n for n in result['sheets'] if n in hidden)})." if hidden else "."),
+        f"{len(mapped)} answer cell(s)/column(s) map to a field of this bundle; {len(not_here)} map to a field this bundle "
+        "holds no target for, and the rest to no official field (--json lists every column).",
+        (f"ISAAC Suggestions: {sum(sug['cells_by_column'].values())} cell(s) of evidence; "
+         f"{sug['exposures_recorded']} exposure(s) recorded." if sug["shown"] else
+         "ISAAC Suggestions: not shown (--no-suggestions); no exposure recorded."),
+        result["statement"],
+        f"When it is filled: isaac bundle template import {result.get('bundle_dir') or '<bundle_dir>'} {result['written']} "
+        '--by "<your name>"   (a preview; add --apply to record)',
+    ]
+    return "\n".join(lines)
 
 
 # --- import -------------------------------------------------------------------------------------
@@ -825,13 +924,14 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
         entry["cells"].append({"cell": _cell_ref(sheet, ref), "value": value, **({"note": reason} if reason else {})})
 
     def check_header(sheet, ws, where: str, col: Column, label_cell: str | None = None):
-        mapped = by_header.get((sheet, col.header))
+        labels = (col.header, *col.aliases)  # an alias is the same cell and path under another version's label
+        mapped = next((by_header[(sheet, h)] for h in labels if (sheet, h) in by_header), None)
         if mapped is None or str(mapped.get("cell_or_column")) != where or mapped.get("target_field_path") != col.path:
             raise TemplateRefused(
                 f"The `_isaac` sheet does not map {sheet!r} {col.header!r} to {where} as this build writes it. "
                 "Re-export the template with this build.", code=EXIT_INPUT_REFUSED)
         shown = ws[label_cell].value if label_cell else ws[f"{where}1"].value
-        if (shown or "").strip() != col.header:
+        if (shown or "").strip() not in labels:
             raise TemplateRefused(
                 f"{_cell_ref(sheet, label_cell or where + '1')} should read {col.header!r} but reads {shown!r}: "
                 "the columns were moved or renamed, so no cell can be mapped safely. Re-export the template.",
@@ -855,9 +955,10 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
                              "header": col.header, "path": col.path, "value": value, "scope": scope,
                              "run_id": run["run_id"] if run else None, "note": note})
 
-    # Campaign Info
+    # Campaign Info: the rows THIS workbook's version wrote (1.3.0 and earlier: five, "Organization")
     wsc = wb[SHEET_CAMPAIGN]
-    for i, col in enumerate(CAMPAIGN_FIELDS):
+    workbook_version = (marker.get("meta") or {}).get("format_version")
+    for i, col in enumerate(campaign_fields_of(workbook_version)):
         row = CAMPAIGN_FIRST_ROW + i
         check_header(SHEET_CAMPAIGN, wsc, f"B{row}", col, label_cell=f"A{row}")
         raw, why = _raw(wsc[f"B{row}"])
@@ -912,7 +1013,6 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
 
     # File List
     wfl = wb[SHEET_FILES]
-    workbook_version = (marker.get("meta") or {}).get("format_version")
     file_columns = file_columns_of(workbook_version)
     for j, col in enumerate(file_columns, start=1):
         check_header(SHEET_FILES, wfl, _letter(j), col)
@@ -1100,7 +1200,8 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                 continue
         call = calls.setdefault((cell["cell"], decision), {"cell": cell, "decision": decision, "tids": []})
         call["tids"].append(tid)
-        report["decisions"].append({"cell": cell["cell"], "target": {"kind": kind, "id": tid}, "target_field_path": cell["path"],
+        report["decisions"].append({"cell": cell["cell"], "sheet": cell["sheet"], "header": cell["header"],
+                                    "target": {"kind": kind, "id": tid}, "target_field_path": cell["path"],
                                     "run_id": obj.get("run_id"), "decision": decision, "value": cell["value"]})
 
     recorded: list[str] = []
@@ -1190,35 +1291,94 @@ def import_template(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None 
     }
 
 
-def render_report(rep: Mapping) -> str:
-    """Plain text for the terminal."""
+#: How many cells a compact report names per column before it says how many more.
+_CELLS_SHOWN = 3
+
+
+def _decision_lines(rep: Mapping) -> list[str]:
+    """One line per Campaign Info cell, Configurations cell, or File List column: how many
+    decisions it gives, of which kind, to which field."""
+    groups: dict[str, dict] = {}
+    for d in rep["decisions"]:
+        sheet = d.get("sheet") or ""
+        if sheet == SHEET_FILES:
+            key = f"{SHEET_FILES} / {d.get('header')}"
+        else:
+            key = f"{d['cell'].split(' via ', 1)[0]} {d.get('header') or ''}".rstrip()
+        g = groups.setdefault(key, {"path": d["target_field_path"], "n": 0, "kinds": {}, "runs": set(), "values": set(),
+                                    "per_row": sheet == SHEET_FILES or " via " in d["cell"]})
+        g["n"] += 1
+        g["kinds"][d["decision"]] = g["kinds"].get(d["decision"], 0) + 1
+        g["values"].add(repr(d["value"]))
+        if d.get("run_id"):
+            g["runs"].add(d["run_id"])
+    out = []
+    for key, g in groups.items():
+        kinds = ", ".join(f"{k} {n}" for k, n in sorted(g["kinds"].items()))
+        rows = f" over {len(g['runs'])} row(s)" if g["per_row"] else ""
+        value = f" = {next(iter(g['values']))}" if len(g["values"]) == 1 else f"; {len(g['values'])} distinct values"
+        out.append(f"  {key} -> {g['path']}: {g['n']} decision(s){rows} ({kinds}){value}")
+    return out
+
+
+def _grouped_cells(items: Sequence[Mapping], *, key: str = "header") -> list[str]:
+    """One line per column (and reason) with a few of its cells named, for a long list of cells."""
+    groups: dict[tuple, list[str]] = {}
+    for x in items:
+        groups.setdefault((x.get(key), x.get("reason")), []).append(x.get("cell") or f"row {x.get('row')}")
+    out = []
+    for (header, reason), cells in groups.items():
+        more = f" and {len(cells) - _CELLS_SHOWN} more" if len(cells) > _CELLS_SHOWN else ""
+        out.append(f"  {header}: {len(cells)} cell(s) ({', '.join(cells[:_CELLS_SHOWN])}{more}): {reason}")
+    return out
+
+
+def render_report(rep: Mapping, *, full: bool = False) -> str:
+    """Plain text for the terminal. COMPACT by default: one line per cell or column with its number
+    of decisions, then every invalid cell, clash, refusal and refused row in full, and the totals.
+    ``full``: one line per decision and per cell, as ``--json`` holds them."""
     lines = []
     add = lines.append
     add(("APPLIED" if rep["applied"] else "PREVIEW (nothing written)") + f": template {rep['template']} -> bundle {rep['bundle_id']}")
     add("")
     verb = "recorded" if rep["applied"] else "would record"
-    add(f"Decisions ({verb}):")
-    for d in rep["decisions"]:
-        where = f" {d['run_id']}" if d.get("run_id") else ""
-        add(f"  {d['cell']}: {d['decision']} {d['target']['kind']} {d['target']['id']}{where} {d['target_field_path']} = {d['value']!r}")
+    if full:
+        add(f"Decisions ({verb}):")
+        for d in rep["decisions"]:
+            where = f" {d['run_id']}" if d.get("run_id") else ""
+            add(f"  {d['cell']}: {d['decision']} {d['target']['kind']} {d['target']['id']}{where} {d['target_field_path']} = {d['value']!r}")
+    else:
+        add(f"Decisions ({verb}), one line per cell or column:")
+        lines += _decision_lines(rep)
     if not rep["decisions"]:
         add("  (none)")
-    for title, key in (("Invalid cells (recorded as nothing)", "invalid_cells"), ("Clashes (skipped)", "clashes"),
-                       ("Refused", "refused"), ("Recorded nowhere (no target for that run/field)", "recorded_nowhere"),
-                       ("Rows refused", "rows_refused")):
+    in_full = [("Invalid cells (recorded as nothing)", "invalid_cells"), ("Clashes (skipped)", "clashes"),
+               ("Refused", "refused"), ("Rows refused", "rows_refused")]
+    if full:
+        in_full.insert(3, ("Recorded nowhere (no target for that run/field)", "recorded_nowhere"))
+    for title, key in in_full:
         if rep[key]:
             add("")
             add(f"{title}:")
             for x in rep[key]:
                 add(f"  {x.get('cell', 'row ' + str(x.get('row')))}: {x.get('reason')}"
                     + (f" (value {x['value']!r})" if "value" in x else ""))
+    if rep["recorded_nowhere"] and not full:
+        add("")
+        add("Recorded nowhere (no target for that run/field):")
+        lines += _grouped_cells(rep["recorded_nowhere"])
     if rep["unmapped_columns"]:
         add("")
         add("Unmapped columns:")
         for u in rep["unmapped_columns"]:
-            add(f"  {u['sheet']} / {u['header']}: {u['reason']}")
-            for c in u["cells"]:
-                add(f"    {c['cell']} = {c['value']!r}")
+            if full:
+                add(f"  {u['sheet']} / {u['header']}: {u['reason']}")
+                for c in u["cells"]:
+                    add(f"    {c['cell']} = {c['value']!r}")
+            else:
+                cells = [c["cell"] for c in u["cells"]]
+                more = f" and {len(cells) - _CELLS_SHOWN} more" if len(cells) > _CELLS_SHOWN else ""
+                add(f"  {u['sheet']} / {u['header']}: {len(cells)} cell(s) ({', '.join(cells[:_CELLS_SHOWN])}{more}); {u['reason']}")
     if rep.get("campaign_not_filled"):
         add("")
         add("Campaign Info answers not filled for runs outside the File List:")
@@ -1238,4 +1398,6 @@ def render_report(rep: Mapping) -> str:
         f"{len(rep['recorded_nowhere'])} recorded nowhere; {len(rep['rows_refused'])} row(s) refused."
     )
     add(rep["statement"])
+    if not full:
+        add("(--full lists every decision and cell; --json prints the whole report.)")
     return "\n".join(lines)

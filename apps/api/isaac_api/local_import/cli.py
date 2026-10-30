@@ -1313,7 +1313,10 @@ def cmd_bundle_template_export(args) -> int:
     except T.TemplateRefused as exc:
         _err(str(exc))
         return exc.code
-    _print(result)
+    if args.json:
+        _print(result)
+    else:
+        print(T.render_export_summary(result))
     return EXIT_OK
 
 
@@ -1334,7 +1337,7 @@ def cmd_bundle_template_import(args) -> int:
     if args.json:
         _print(report)
     else:
-        print(T.render_report(report))
+        print(T.render_report(report, full=args.full))
     return EXIT_OK
 
 
@@ -1508,6 +1511,7 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     t.add_argument("--out", required=True, help="the .xlsx file to write")
     t.add_argument("--force", action="store_true", help="replace an existing --out file")
     t.add_argument("--no-suggestions", action="store_true", help="leave the ISAAC Suggestions sheet empty (records no exposure)")
+    t.add_argument("--json", action="store_true", help="print the full result as JSON, with every column's mapping")
     t.set_defaults(func=cmd_bundle_template_export)
     t = tsub.add_parser("import", help="read a filled template: preview by default, --apply to record decisions")
     t.add_argument("bundle_dir")
@@ -1517,6 +1521,8 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     t.add_argument("--apply", action="store_true", help="record the decisions (default: preview, nothing written)")
     t.add_argument("--supersede", action="store_true", help="record a cell even where an earlier decision gives a different value")
     t.add_argument("--json", action="store_true", help="print the full report as JSON")
+    t.add_argument("--full", action="store_true",
+                   help="list every decision and cell (default: one line per cell or column, problems in full)")
     t.set_defaults(func=cmd_bundle_template_import)
     return parser
 

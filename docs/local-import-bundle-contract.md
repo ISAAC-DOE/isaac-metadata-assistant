@@ -1029,6 +1029,24 @@ sample form and formula). The template lets a scientist answer them in one sitti
   "recorded nowhere". A row's File Name must match the export exactly (no trimming); a row
   whose name was edited or moved is refused, never re-matched by guess, and a mapping that
   names one file or run on two rows is refused outright.
+- **Template 1.4.0: the template can finish a record.** Every field the record composer needs a
+  scientist to supply has a cell. Campaign Info gains three rows after the template's own five:
+  B8 **Your group (who produced the data)** (`attribution.produced_by.group`), B9 **Your
+  organization (who produced the data)** (`attribution.produced_by.organization`) and B10
+  **Domain** (`system.domain`, a dropdown). File List gains **Reaction Drive** and **Reaction
+  Catalysis** (`context.reaction.drive` / `.catalysis`, dropdowns), after the current
+  set-point. Every list is `bundle.allowed_values`. Campaign Info B4, always
+  `system.facility.organization`, now reads **Facility organization (e.g. SLAC / SSRL)**. A
+  1.3.0 workbook, which reads "Organization" there and has five rows, still imports
+  (`template.campaign_fields_of`, `Column.aliases`). A File List cell's suggestion is that run's
+  own evidence: a consolidated question's readings of OTHER runs, and beamtime-wide hints such
+  as the folder name, are not shown beside a row (the Campaign Info block still shows them).
+- Output: `template export` prints a short summary (path, rows, sheets, how to import);
+  `--json` gives the full result with every column's mapping. `template import` prints one line
+  per Campaign Info or Configurations cell and per File List column (the number of decisions,
+  their kind, the value), then every invalid cell, clash, refusal and refused row in full,
+  then totals; cells recorded nowhere and unmapped columns get one line per column. `--full`
+  lists every decision and cell; `--json` prints the whole report.
 
 ## 20. Suggestions: the absorber, facility hints, and a Claude reading pass
 

@@ -291,8 +291,11 @@ def test_a_1_6_0_bundle_as_that_build_made_it_is_valid_and_upgraded_once_with_no
 
 
 def test_the_template_current_setpoint_column_takes_a_number_only(grouped, tmp_path, capsys):
-    assert T.FORMAT_VERSION == "1.3.0" and T.COLUMNS_ADDED_IN[COLUMN] == "1.3.0"
-    assert [c.header for c in T.FILE_COLUMNS][-2:] == ["Control Mode", COLUMN]  # appended, never inserted
+    assert T.COLUMNS_ADDED_IN[COLUMN] == "1.3.0"
+    headers = [c.header for c in T.FILE_COLUMNS]
+    # appended, never inserted: right after Control Mode; only later versions' columns follow it
+    assert headers[headers.index(COLUMN) - 1] == "Control Mode"
+    assert all(T.COLUMNS_ADDED_IN.get(h, "0") > "1.3.0" for h in headers[headers.index(COLUMN) + 1:])
     assert T.field_rules()[CURRENT]["numeric"] is True
     xlsx = _export(grouped, tmp_path)
     wb = openpyxl.load_workbook(xlsx)
