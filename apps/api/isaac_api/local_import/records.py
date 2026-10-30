@@ -556,7 +556,9 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
     not_applicable = [latest_na] if latest_na else []
     blocked_by_protocol = latest_na is not None
     if len(approved) > 1:
-        report["processing"] = {"used": None, "reason": "more than one approved processing result; a person chooses one"}
+        # NEVER "no processing result": there are two (or more), and the record uses exactly one of them
+        report["processing"] = {"used": None, "reason": "more than one approved processing result; a person chooses one",
+                                "group_id": group["group_id"], "approved_results": [B.processing_id(r) for r in approved]}
     elif approved:
         r = approved[0]
         pid = B.processing_id(r)
@@ -637,20 +639,45 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
                 if isinstance(sigma, (int, float))
                 else {"sigma": None, "basis": "not_reported"}
             )
+            label, generated_by, source, definition = (
+                f"{r['protocol_id']}@{r['protocol_version']}",
+                {"agent": r["protocol_id"], "version": str(r["protocol_version"])},
+                "auto",
+                "E0 reported by the scientist-approved processing result.",
+            )
+            if r.get("source") == "scientist_athena":
+                # THE SCIENTIST'S OWN ATHENA PROCESSING made this E0 and curve; ISAAC's protocol only read them
+                # (unchanged), so the descriptor is attributed to Athena and its value is imported, never "auto"
+                ref = next(iter(r.get("inputs") or ()), {}) or {}
+                where = ", ".join(x for x in (ref.get("relative_path"), f"Athena group {ref['athena_group']}"
+                                              if ref.get("athena_group") else None) if x)
+                label = f"athena:{ref.get('relative_path') or 'project'}" + (f"#{ref['athena_group']}" if ref.get("athena_group") else "")
+                generated_by = {"agent": "Athena", "notes": (
+                    f"The scientist's own Athena processing{f' ({where})' if where else ''}: E0 and the normalised "
+                    f"curve are the scientist's values, read unchanged by ISAAC ({r['protocol_id']} "
+                    f"{r['protocol_version']}) and approved by a scientist.")}
+                from .mutations import scan_subset_note
+
+                subset = scan_subset_note(bundle, r)
+                if subset:
+                    generated_by["notes"] += " " + subset
+                    used["scan_selection"] = subset
+                source = "imported"
+                definition = "E0 from the scientist's own Athena processing, approved by a scientist; ISAAC did not change it."
             draft["descriptors_outputs"] = [
                 {
-                    "label": f"{r['protocol_id']}@{r['protocol_version']}",
+                    "label": label,
                     "generated_utc": d.get("decided_utc"),
-                    "generated_by": {"agent": r["protocol_id"], "version": str(r["protocol_version"])},
+                    "generated_by": generated_by,
                     "descriptors": [
                         {
                             "name": "edge_position",
                             "kind": "absolute",
-                            "source": "auto",
+                            "source": source,
                             "value": e0,
                             "unit": "eV",
                             "uncertainty": uncertainty,
-                            "definition": "E0 reported by the scientist-approved processing result.",
+                            "definition": definition,
                             "evidence": [conf],
                         }
                     ],
@@ -1236,6 +1263,8 @@ def processing_blocker(processing: Mapping) -> str:
     """One word for why a group's processing-derived values are missing (the export's counts)."""
     if processing.get("not_applicable"):
         return "processing_not_applicable"
+    if processing.get("approved_results"):
+        return "more_than_one_approved_result"
     if processing.get("result"):
         return "approved_result_has_no_curve" if processing.get("no_curve") else "approved_result_not_usable"
     if processing.get("awaiting_approval"):
@@ -1256,6 +1285,16 @@ def processing_remedy(processing: Mapping) -> str:
     gid = processing.get("group_id") or "<group id>"
     leave_out = f'leave the group out of the records (`isaac bundle decide <bundle_dir> --target {gid} --decision reject --by "<your name>"`)'
     no_curve = dict(processing.get("no_curve_results") or {})
+    several = list(processing.get("approved_results") or ())
+    if several:
+        # an older build let a second approval through; `decide` now refuses it. Re-processing changes nothing
+        how_many = "two" if len(several) == 2 else str(len(several))
+        return (f"{how_many} results approved for this group; approve exactly one: {', '.join(several)}. A record uses "
+                "one processing result, so with more than one approved it uses none. Keep the one the record should "
+                "use and withdraw the other approval: "
+                + " / ".join(f'`isaac bundle decide <bundle_dir> --target {pid} --decision defer --by "<your name>"`'
+                             for pid in several)
+                + " (or --decision reject).")
     if processing.get("result") and processing.get("no_curve"):
         # NEVER "re-run and approve the new result": the same parameters give the same no-curve result
         pid = processing["result"]

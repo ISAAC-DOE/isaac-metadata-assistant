@@ -3,7 +3,10 @@
 `<isaac> bundle questions <bundle> [--scope experiment|group:<id>|run:<id>] [--blocking-only] [--limit N] [--offset M] [--skip-deferred] [--with-targets]`
 returns `questions.json` v2: shared questions asked ONCE (experiment scope), run questions collapsed
 to their record group, blocking first. Each question has `question_id`, `text`, `why` (why it blocks
-export), `applies_to` (groups/runs/targets), `hints` (flagged as hints; a hint is never an answer),
+export), `applies_to` (groups/runs/targets), `hints` (flagged as hints; a hint is never an answer; an AI
+suggestion read for fewer runs than the question asks about carries `read_for`, e.g. "read for 2 of 86
+runs", and the question's text says it — say that count with the suggestion, never offer it as a reading
+of the whole beamtime),
 `answer_command`. The reply is compact by default: each question has `targets_count`,
 `scopes_count` and `groups_count` instead of its target lists (`decide --question` resolves them;
 `--with-targets` prints them), allowed values sit once in `allowed_values_by_field`, default decisions
@@ -23,7 +26,10 @@ quote these, not `summary.md`'s "Questions: N", which is `fine_grained_v1`) and
 result"): its `questions[]` list each question to answer with the `only` scope to use,
 `unasked_required[]` names required fields no question asks (with `reason` and `command`), and
 `plus_decisions` names only the decisions not yet made (an empty list once the group is
-confirmed and its result approved). `recommended[]` (never blocking, not counted) names a question
+confirmed and its result approved). It never names a group that cannot export while another exists: no
+ISAAC protocol covers its data, its result has no curve, or none of its runs lists a scan (`no_scans`, the
+`cannot_export_reason` of `bundle list <bundle> groups`). When only such groups are left, `blocked` says why
+in words and `plus_decisions` never says "approve its processing result" for them. `recommended[]` (never blocking, not counted) names a question
 worth answering for that group, with the warning that explains it (`warnings`): today, a potential the
 file names state that the record will not carry until its scale is confirmed. Pages hold at most 200 (`--limit` above that is refused). The older fine-grained list (`bundle list <bundle> questions`)
 is for lookup only.

@@ -20,7 +20,10 @@ code error can be caught instead of echoed. It is a spot check, never a verifica
 6. Only after annotating: `reveal <bundle> <id>` and compare (`agrees_with_parser` and `relation`: the same number, the same
    instant written two ways, or the same string agree; anything else differs). For a numeric field, a
    reading given as text (`--value "0.4"` without `--json`) is compared as the number it parses as, and
-   says so (`compared_as: number`, `comparison_note`); prefer `--value 0.4 --json` for numbers. Agreement, difference or not
+   says so (`compared_as: number`, `comparison_note`); prefer `--value 0.4 --json` for numbers. When the
+   parser holds no value for the target (a missing value, a value-less candidate), `agrees_with_parser` and
+   `relation` are null and `comparison_note` says there is nothing to compare: say "not comparable", never
+   "agrees". Agreement, difference or not
    comparable — say which, in plain words. A difference is a question for the scientist, never
    something you settle.
 

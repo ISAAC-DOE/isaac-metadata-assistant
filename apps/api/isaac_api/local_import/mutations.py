@@ -648,6 +648,59 @@ def no_curve_refusal(result: Mapping) -> str:
     )
 
 
+#: The comparison flag an Athena curve carries when the scientist used fewer scans than ISAAC merged.
+SCAN_SUBSET_FLAG = "scientist_selected_subset_of_scans"
+
+
+def scan_subset_note(bundle: Mapping, result: Mapping) -> str | None:
+    """One plain line when ``result`` is the scientist's Athena curve and it used only some of the group's
+    scans (``scientist_selected_subset_of_scans``), else ``None``. The scan numbers come from the Athena label
+    (``comparison.athena_scan_selection``); the total is what ISAAC's result of the same run merged."""
+    comparison = result.get("comparison") or {}
+    if result.get("source") != "scientist_athena" or SCAN_SUBSET_FLAG not in (comparison.get("flags") or ()):
+        return None
+    chosen = [str(n) for n in comparison.get("athena_scan_selection") or ()]
+    sibling = next((r for r in bundle.get("processing_results") or ()
+                    if r.get("group_id") == result.get("group_id") and r.get("source") == "isaac_protocol"
+                    and r.get("run_id") == result.get("run_id")), None)
+    total = len([i for i in (sibling or {}).get("inputs") or () if not i.get("skip_reason")])
+    of = f" of the {total} scan(s) ISAAC merged" if total else ""
+    which = f"scans {', '.join(chosen)}{of}" if chosen else f"a subset of the scans{of}"
+    return (f"The scientist's Athena curve for group {result.get('group_id')} uses only {which} "
+            f"({SCAN_SUBSET_FLAG}): its E0 and curve describe those scans, not the full merge.")
+
+
+def approved_sibling_problem(bundle: Mapping, obj: Mapping, planned: Sequence[Mapping] = ()) -> str | None:
+    """Why approving the processing result ``obj`` is refused because ANOTHER result of its group is already
+    approved (or is approved in the same call, ``planned``), else ``None``.
+
+    A record uses exactly one processing result. With two approved, the composer used neither, and the group
+    read as having no processing result at all. The newer approval does NOT silently replace the older one: the
+    older is a person's signed statement (with its QC status), so the scientist withdraws it themselves."""
+    pid, gid = B.processing_id(obj), obj.get("group_id")
+    same_call = [B.processing_id(r) for r in planned if r.get("group_id") == gid and B.processing_id(r) != pid]
+    if same_call:
+        return (f"{same_call[0]} and {pid} are both results of group {gid}, and a record uses exactly one processing "
+                "result: approve one of them. Nothing was recorded.")
+    # FROM THE DECISIONS, not the stored state: a caller deciding several times on one loaded bundle (the
+    # template import) has not re-derived the states in between
+    state_of = B.processing_state_decisions(bundle)
+    others = [r for r in bundle.get("processing_results") or ()
+              if r.get("group_id") == gid and B.processing_id(r) != pid and not B.processing_not_applicable(r)
+              and (state_of.get(("processing_result", B.processing_id(r))) or {}).get("decision") == "approve"]
+    if not others:
+        return None
+    old = B.processing_id(others[0])
+    notes = " ".join(n for n in (scan_subset_note(bundle, r) for r in (others[0], obj)) if n)
+    return (
+        f"{pid} cannot be approved: {old} is already approved for group {gid}, and a record uses exactly one "
+        f"processing result. The options: keep {old} (nothing more to do); or withdraw its approval first — "
+        f'reject it (`isaac bundle decide <bundle_dir> --target {old} --decision reject --by "<your name>"`) or '
+        f'defer it (`isaac bundle decide <bundle_dir> --target {old} --decision defer --by "<your name>"`) — and '
+        f"then approve {pid}." + (f" {notes}" if notes else "") + " Nothing was recorded."
+    )
+
+
 def merge_with_problem(bundle: Mapping, group_id: str, merge_with: Sequence[str] | None) -> str | None:
     """Why a ``merge`` of ``group_id`` with ``merge_with`` names nothing to merge, or ``None``.
 
@@ -983,6 +1036,10 @@ def record_decision(
         for tid in target_ids:
             kind, obj = resolve_target(bundle, tid)
             _check_decision(bundle, kind, obj, decision, value, bulk=bulk, merge_with=merge_with)
+            if kind == "processing_result" and decision == "approve":
+                problem = approved_sibling_problem(bundle, obj, [o for k, o in planned if k == "processing_result"])
+                if problem is not None:
+                    raise MutationRefused(problem)
             if same_conditions:
                 acknowledged[tid] = _same_conditions_tokens(bundle, kind, obj, merge_with)
             if qc_status is not None and kind != "processing_result":
@@ -1154,6 +1211,12 @@ def record_decision(
         if decision == "set_counter_positions" and recorded:
             # what this answer would do on the next regroup, said BEFORE it (the scientist is told what it joins)
             result["regroup_preview"] = counter_answer_preview(bundle)
+        if decision == "approve" and recorded:
+            # WHAT WAS APPROVED, said when it is not the full merge (the Athena curve's own scan subset)
+            notes = [n for kind, obj in planned if kind == "processing_result" and B.processing_id(obj) in recorded
+                     and (n := scan_subset_note(bundle, obj))]
+            if notes:
+                result["statement"] = "Recorded. " + " ".join(notes)
         if decision == "needs_changes":
             # WHAT needs_changes DOES, said: it moves nothing but the result's review, and it freezes the
             # result against a plain re-run (bundle.apply_derivations, process: a state decision keeps it)
@@ -1424,6 +1487,10 @@ def excerpt(bundle: Mapping, target_id: str, *, source: str | None) -> dict:
     }
 
 
+#: Why ``reveal`` gives no ``agrees_with_parser`` for a reading: there is no parser value to hold it against.
+NO_PARSER_VALUE_NOTE = "the parser holds no value for this target, so there is nothing to compare"
+
+
 def reveal(bundle_dir: Path, target_id: str) -> dict:
     """The parser value plus a comparison with every AI reading. RECORDS AN EXPOSURE."""
     with locked(Path(bundle_dir)):
@@ -1450,7 +1517,7 @@ def reveal(bundle_dir: Path, target_id: str) -> dict:
     def compare(r) -> dict:
         proposed = r["proposed_value"]
         if base is None:
-            return {"agrees_with_parser": None}
+            return {"agrees_with_parser": None, "comparison_note": NO_PARSER_VALUE_NOTE}
         # A NUMBER GIVEN AS TEXT (`annotate --value "0.4"` without --json) for a numeric field, against a numeric
         # parser value: compared as the number it parses as, and said so — never "contradicts" for 0.4 vs "0.4"
         if (numeric_field and isinstance(proposed, str) and isinstance(base, (int, float)) and not isinstance(base, bool)):

@@ -102,6 +102,20 @@ Ask: approve, reject, or needs changes (with a note):
 `decide --target <result_id> --decision reject|needs_changes --note "<why>" --by "<name>"`. Rules:
 
 - **QC status is the scientist's.** Approving also needs `--qc-status <word>` (and `--qc-note` when the status says something is compromised or failed: `decide` refuses those without one). The processing verdict (`pass`/`warn`/`fail`) is shown to help them choose; it is never turned into a status for them, and `warn` never auto-maps. Offer the allowed words from the vocabulary and the flags that bear on the choice.
+- **One approved result per group.** A group can hold ISAAC's result (`…-isaac`) and one for the
+  scientist's own Athena curve (`…-athena`, often `preferred_for_record: true`); the record uses exactly
+  one. Approving one while the other is approved is refused (`decide` names the approved one):
+  keep it, or withdraw it first (`--decision defer` or `reject` on it) and then approve the other. A bundle
+  an older build let hold two approvals says so in `validate` (`processing_blocker:
+  more_than_one_approved_result`, "two results approved for this group; approve exactly one: <ids>");
+  re-processing does not help, deferring one does.
+- **Scans the Athena curve uses.** When an Athena result's comparison flags
+  `scientist_selected_subset_of_scans` (its label names e.g. scans 5-6 of 6), say so plainly when you show
+  or approve it: its E0 and curve describe those scans, not ISAAC's full merge. `decide` says it on
+  approval, and the record's E0 descriptor notes it.
+- **Who made the E0.** An approved Athena result's E0 descriptor is attributed to the scientist's Athena
+  processing (`generated_by.agent: Athena`, `source: imported`, the project and Athena group in `notes`);
+  an approved ISAAC result's names ISAAC's protocol (`isaac.xas.v0`, `source: auto`).
 - **A result with no curve** (no output file, e.g. `no_usable_scan`) cannot be approved; `decide`
   refuses. Say why in words and offer: reject the result; `needs_changes` (the protocol needs a setting
   the scientist chooses; only on their explicit choice re-process with `--params-file`); or leave the

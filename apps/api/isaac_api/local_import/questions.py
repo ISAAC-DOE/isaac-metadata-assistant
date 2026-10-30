@@ -668,7 +668,9 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             top = ai[0]
             cite = top.get("source_path") or top.get("source_id") or "a file"
             # AN AI READING IS NOT FILE EVIDENCE: no parser read this value, so it is never worded as one the files state
-            text += (f" An AI reading of the files suggests {top['literal']!r} (not file evidence: it needs your "
+            text += (f" An AI reading of the files suggests {top['literal']!r}"
+                     + (f", {top['read_for']}" if top.get("read_for") else "")
+                     + " (not file evidence: it needs your "
                      f"confirmation), citing {cite}{' @ ' + str(top['locator']) if top.get('locator') else ''}"
                      + (f"; {len(ai) - 1} other AI suggestion(s) differ" if len(ai) > 1 else "") + ".")
         mine = {t["id"] for t in q["targets"]}
@@ -1386,11 +1388,24 @@ def _ai_hint_index(bundle: Mapping):
     at: dict[Any, list[int]] = {}
     for n, i in enumerate(interps):
         at.setdefault((i.get("target") or {}).get("id"), []).append(n)
+    run_of = {**{c["candidate_id"]: c.get("run_id") for c in bundle.get("candidates") or ()},
+              **{m["value_id"]: m.get("run_id") for m in bundle.get("missing_values") or ()}}
 
     def hints(ids: Sequence[str]) -> list[dict]:
         wanted = set(ids)
         rows = sorted(n for tid in wanted for n in at.get(tid, ()))
-        return S.ai_hints({"ai_interpretations": [interps[n] for n in rows]}, wanted) if rows else []
+        out = S.ai_hints({"ai_interpretations": [interps[n] for n in rows]}, wanted) if rows else []
+        for h in out:
+            # A READING OF FEWER RUNS THAN THE QUESTION ASKS ABOUT says so: "applies to 82 groups" beside an AI
+            # suggestion read from one file must never read as a beamtime-wide reading
+            covered = {(interps[n].get("target") or {}).get("id") for n in rows
+                       if repr(interps[n].get("proposed_value")) == repr(h["literal"])}
+            runs_all = {run_of.get(t) for t in wanted}
+            if None not in runs_all and len({run_of.get(t) for t in covered}) < len(runs_all):
+                h["read_for"] = f"read for {len({run_of.get(t) for t in covered})} of {len(runs_all)} runs"
+            elif len(covered) < len(wanted):
+                h["read_for"] = f"read for {len(covered)} of {len(wanted)} targets"
+        return out
 
     return hints
 
@@ -1671,6 +1686,20 @@ def processing_blocked_groups(bundle: Mapping) -> dict[str, str]:
     return {gid: r["applicability"]["reason_code"] for gid, r in B.processing_blocked_groups(bundle).items() if gid in live}
 
 
+def scanless_groups(bundle: Mapping, groups: Sequence[Mapping]) -> set[str]:
+    """The ids of ``groups`` whose runs list no scan at all (every member's ``scan_count`` is 0): nothing to
+    process, so no processing result can be made and the group can never export as it stands. The rule
+    ``bundle list <dir> groups`` states as ``cannot_export_reason: no_scans``; ``isaac process`` records such a
+    group as not applicable (``no_scans``)."""
+    runs = {r["run_key"]: r for r in bundle.get("runs") or ()}
+    out = set()
+    for g in groups:
+        members = [runs[k] for k in g.get("member_run_keys") or () if k in runs]
+        if members and not any(int(r.get("scan_count") or 0) for r in members):
+            out.add(g["group_id"])
+    return out
+
+
 def _curve(bundle: Mapping, gid: str) -> dict:
     """What approving this group's processing could give it: ``{"state": "approved" | "curve" | "no_curve" | "none",
     "verdict", "reasons"}``. ``no_curve``: every undecided result lists no normalised spectrum (e.g. QC
@@ -1764,7 +1793,8 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
     scope (``experiment``, a run) is not one group and leaves the choice open.
 
     A group no answer or approval can complete — the processing protocol does not apply to it, its processing
-    result has no curve (e.g. QC ``too_few_common_points``), or a required field nothing can be stored on (no
+    result has no curve (e.g. QC ``too_few_common_points``), none of its runs lists a scan (:func:`scanless_groups`,
+    before ``isaac process`` has recorded it as ``no_scans``), or a required field nothing can be stored on (no
     measurement run) — is never offered as "the nearest" while another exists, and one whose curve FAILED QC only
     after every group without one. When only such groups are left, ``blocked`` says why, never "approve its
     processing result". ``bundle_dir`` lets the composer read the approved processing files (a changed file then
@@ -1779,6 +1809,7 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
     live = [g for g in live_groups(bundle) if wanted is None or g["group_id"] == wanted]
     if not live:
         return None
+    scanless = scanless_groups(bundle, live)
     if reports is None:
         reports = compositions({**bundle, "record_groups": live}, bundle_dir)
     else:
@@ -1841,6 +1872,12 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
         curve = _curve(bundle, gid)
         if gid in blocked:
             hard.append(f"{B.NO_PROTOCOL_COVERS} ({blocked[gid]}); this group cannot become a complete record until one does")
+        elif curve["state"] == "none" and gid in scanless:
+            # never "approve its processing result": there is no scan to process, so no result can ever be made
+            # (`isaac process` records it as not applicable, no_scans). The same rule as `bundle list groups`.
+            hard.append("none of its runs lists a scan, so there is nothing to process and no processing result can be "
+                        "made: it cannot become a complete record as it stands; reject the group if it is not a measurement "
+                        f'(`isaac bundle decide <bundle_dir> --target {gid} --decision reject --by "<your name>"`)')
         elif curve["state"] == "no_curve":
             # never "approve its processing result": with no output file `decide` refuses that approval, and without a
             # normalised spectrum it would supply no series. The real steps are named instead.
@@ -1858,7 +1895,7 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
                 from .records import processing_remedy
 
                 plus.append(f"processing: {processing_remedy(rep.get('processing') or {})}")
-        else:
+        elif gid not in scanless:
             plus.append("approve its processing result")
             if curve.get("verdict") == "fail":
                 soft = f"its processing QC verdict is fail ({', '.join(curve['reasons']) or 'no reason given'})"
