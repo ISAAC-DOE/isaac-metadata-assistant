@@ -284,12 +284,17 @@ PLAIN_MISREADING = {
 }
 
 _REPEAT_TOKEN = re.compile(r"^(again|repeat|rep\d*|redo)$", re.IGNORECASE)
+#: The counter position meaning "the LAST token of the name, whatever its length" (bundle 1.9.0;
+#: ``decide --positions last``). Measured on a real beamtime: the counter was always the last token,
+#: at positions 3..10, and a fixed position list also named a non-counter token of the longer names.
+LAST_POSITION = -1
 
 
 def _is_counter_token(toks: Sequence[str], i: int, positions: set, known: set) -> bool:
     """Is the digit token ``toks[i]`` a COUNTER? Only when:
 
-    * a scientist's ``set_counter_positions`` decision names its 1-based position; or
+    * a scientist's ``set_counter_positions`` decision names its 1-based position, or
+      :data:`LAST_POSITION` and it is the last token; or
     * it follows a repeat marker (``again_2``); or
     * it is the XDAC acquisition counter ``<digits>_<letter>`` at the end (``_098_A``), a
       fixed format of that exporter; or
@@ -306,7 +311,7 @@ def _is_counter_token(toks: Sequence[str], i: int, positions: set, known: set) -
     t = toks[i]
     if not t.isdigit():
         return False
-    if (i + 1) in positions:
+    if (i + 1) in positions or (LAST_POSITION in positions and i == len(toks) - 1):
         return True
     if i > 0 and _REPEAT_TOKEN.match(toks[i - 1]):
         return True
@@ -1018,20 +1023,25 @@ def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: froz
             for key in m["soft"]:
                 reasons.append({"code": "conflicting_unknown_key", "group_id": gid_of_run[m["run"]["run_key"]], "key": key})
         mcid = "mc-" + hashlib.sha256((exp_key + "\n" + "\n".join(gids)).encode()).hexdigest()[:16]
+        caution = merge_candidate_caution(by_gid, runs_by_key, gids)
         nq = _question(
             "merge_candidate",
-            f"{len(gids)} groups agree on every condition this build classifies, and differ only in what it cannot decide "
+            "".join(f"CAUTION: {c['statement']} " for c in caution)
+            + f"{len(gids)} groups agree on every condition this build classifies, and differ only in what it cannot decide "
             f"({', '.join(sorted({r['code'] for r in reasons})) or 'unclassified keys'}). Merge them into one record?",
             [k for gid in gids for k in by_gid[gid]["member_run_keys"]],
             merge_candidate_id=mcid,
             group_ids=gids,
         )
-        mc = {"merge_candidate_id": mcid, "experiment_key": exp_key, "group_ids": gids, "status": "proposed", "reasons": reasons, "question": nq, "rule_id": GROUPING_RULE_ID}
+        mc = {"merge_candidate_id": mcid, "experiment_key": exp_key, "group_ids": gids, "status": "proposed", "reasons": reasons,
+              "reason_code": merge_reason_code(reasons), "reason_codes": sorted({r["code"] for r in reasons}), "caution": caution,
+              "question": nq, "rule_id": GROUPING_RULE_ID}
         merge_candidates.append(mc)
         for gid in gids:
             by_gid[gid]["merge_candidate_ids"].append(mcid)
             by_gid[gid]["questions"].append(nq)
 
+    runs_by_key = {r["run_key"]: r for r in runs}
     for pool in pools.values():
         _add_candidate(pool)
     run_info = {i["run"]["run_key"]: i for i in infos}
@@ -1079,11 +1089,11 @@ def counter_positions_decision(bundle: Mapping) -> dict | None:
     Positions are read ONLY through :func:`local_import.mutations.counter_positions` (the
     records agent's reader of ``scientist_decisions``); the matching entry supplies just its
     ``decision_id`` and decider for provenance. Positions are 1-based file-name token
-    positions; anything not a list of positive whole numbers is ignored."""
+    positions, or :data:`LAST_POSITION` (the last token); anything else is ignored."""
     from .mutations import counter_positions
 
     pos = counter_positions(bundle)
-    if not pos or not all(isinstance(x, int) and not isinstance(x, bool) and x > 0 for x in pos):
+    if not pos or not all(isinstance(x, int) and not isinstance(x, bool) and (x > 0 or x == LAST_POSITION) for x in pos):
         return None
     entry: Mapping = {}
     for d in bundle.get("scientist_decisions") or ():
@@ -1144,7 +1154,8 @@ def counter_question(pos_count: Mapping[int, int], counter_decision: Mapping | N
         "scope": "experiment",
         "target": "experiment",
         "text": "In this beamtime, is the " + " / ".join(ordinal(p) for p in positions)
-        + " token of the file names a run counter? (e.g. XX_02_… vs XX_03_…). If yes, runs whose names differ only there are proposed as one group.",
+        + " token of the file names a run counter? (e.g. XX_02_… vs XX_03_…). If yes, runs whose names differ only there are proposed as one group."
+        " If the counter is always the LAST token, whatever the name's length, answer `last`.",
         "positions": positions,
         "candidates_resolved_by_position": {str(p): int(pos_count[p]) for p in positions},
         "answer_shape": {"decision": "set_counter_positions", "target": {"kind": "experiment", "id": "experiment"}, "positions": positions, "decided_by": "<name>"},
@@ -1463,6 +1474,77 @@ def summarize_groups(groups: Sequence[Mapping]) -> dict:
     }
 
 
+#: Which reason a merge candidate is listed under (``reason_code``): the first of these it carries.
+MERGE_REASON_ORDER = (
+    "scientist_decided_merge", "matches_binding_group", "exported_file_read_as_acquisition", "condition_check_failed",
+    "blocked_by_engine_reading", "sample_identity_not_stated", "numeric_name_token_differs", "unknown_key_differs",
+    "conflicting_unknown_key",
+)
+#: A candidate with no reason: its groups agree on every condition classified, and nothing else was found.
+AGREE_ON_CLASSIFIED = "agree_on_classified_conditions"
+CAUTION_NAMES_DIFFER = "names_state_different_samples_or_conditions"
+CAUTION_NOTHING_CLASSIFIED = "no_condition_classified"
+#: Run labels a merge-candidate listing shows per group (the rest are counted).
+RUN_LABELS_PER_GROUP = 5
+
+
+def merge_reason_code(reasons: Sequence[Mapping]) -> str:
+    """The one code a merge candidate is listed under (:data:`MERGE_REASON_ORDER`)."""
+    codes = {r.get("code") for r in reasons or () if isinstance(r, Mapping) and r.get("code")}
+    return next((c for c in MERGE_REASON_ORDER if c in codes), None) or (sorted(codes) or [AGREE_ON_CLASSIFIED])[0]
+
+
+def merge_candidate_caution(groups_by_id: Mapping[str, Mapping], runs_by_key: Mapping[str, Mapping], group_ids: Sequence[str]) -> list[dict]:
+    """Why saying yes to a merge candidate could make one WRONG record — empty when nothing says so.
+
+    * its groups' file names differ in more than numbers and repeat markers (``name_stem_key(loose=True)``):
+      measured on a real beamtime, one candidate of 29 groups would have combined elemental S, a dry MOF and
+      the MOF at three potentials, whose names said so, because no source stated their samples;
+    * no group states a sample, environment or condition the build classified: nothing read shows the
+      runs are one measurement."""
+    groups = [groups_by_id[g] for g in group_ids if g in groups_by_id]
+    stems_of: dict[str, str] = {}
+    for g in groups:
+        context = set(g.get("context_run_keys") or ())
+        for k in g.get("member_run_keys") or ():
+            if k in runs_by_key and k not in context:
+                stems_of.setdefault(name_stem_key(runs_by_key[k].get("stem") or "", loose=True), runs_by_key[k].get("stem") or "")
+    out = []
+    if len(stems_of) > 1:
+        shown = list(stems_of.values())[:3]
+        out.append({
+            "code": CAUTION_NAMES_DIFFER,
+            "statement": f"These file names name different samples or conditions ({' / '.join(shown)}{' …' if len(stems_of) > 3 else ''}); "
+                         "merging them would make one wrong record — check before saying yes.",
+        })
+    if groups and not any((g.get("basis") or {}).get(part) for g in groups for part in ("sample", "environment", "conditions")):
+        out.append({
+            "code": CAUTION_NOTHING_CLASSIFIED,
+            "statement": "This build classified no sample or condition for these runs, so nothing read from their files shows they "
+                         "are the same measurement; merging them could make one wrong record — check before saying yes.",
+        })
+    return out
+
+
+def merge_candidate_groups(bundle: Mapping, mc: Mapping, *, cap: int = RUN_LABELS_PER_GROUP) -> list[dict]:
+    """Each group a merge candidate names, with its runs' file-name stems (at most ``cap``, the rest
+    counted) — what a scientist needs to see before saying yes. File names only; no parser value."""
+    runs = {r["run_key"]: r for r in bundle.get("runs") or ()}
+    groups = {g["group_id"]: g for g in [*(bundle.get("superseded_record_groups") or ()), *(bundle.get("record_groups") or ())]}
+
+    def labels(keys: Sequence[str]) -> dict:
+        names = [runs[k].get("stem") or runs[k].get("label") or k for k in keys if k in runs]
+        return {"runs": len(keys), "run_labels": names[:cap], "run_labels_omitted": max(0, len(names) - cap)}
+
+    out = []
+    for gid in mc.get("group_ids") or ():
+        g = groups.get(gid) or {}
+        out.append({"group_id": gid, "status": g.get("status"), "role": g.get("role"), **labels(list(g.get("member_run_keys") or ()))})
+    if mc.get("run_keys"):
+        out.append({"group_id": None, "status": None, "role": None, **labels(list(mc["run_keys"]))})
+    return out
+
+
 BINDING_RULE_ID = "isaac.grouping.binding_groups.v0"
 
 
@@ -1495,7 +1577,8 @@ def binding_merge_candidates(
         seen.add(key)
         mcid = "mc-" + hashlib.sha256((experiment_key + "\n" + "\n".join(group_ids + run_keys)).encode()).hexdigest()[:16]
         out.append({"merge_candidate_id": mcid, "experiment_key": experiment_key, "group_ids": group_ids,
-                    "run_keys": run_keys, "status": "proposed", "reasons": [reason], "rule_id": BINDING_RULE_ID})
+                    "run_keys": run_keys, "status": "proposed", "reasons": [reason], "reason_code": reason["code"],
+                    "reason_codes": [reason["code"]], "rule_id": BINDING_RULE_ID})
 
     for f in full_groups:
         members = list(f.get("member_run_keys") or ())

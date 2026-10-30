@@ -70,7 +70,7 @@ def test_the_current_setpoint_is_a_run_scope_local_answer_field_new_in_1_7_0():
     assert CURRENT == "context.electrochemistry.current_setpoint_mA_cm2"
     assert B.LOCAL_ANSWER_FIELDS[CURRENT] == B.LOCAL_ANSWER_FIELDS[POT] == "run"
     assert CURRENT in B._writable_paths() and B.WRITABLE_ADDED_IN["1.7.0"] == frozenset({CURRENT})
-    assert B._VERSION_ORDER.index("1.7.0") == B._VERSION_ORDER.index(B.FORMAT_VERSION) - 1  # 1.8.0 adds bounds only
+    assert B._VERSION_ORDER.index("1.7.0") == B._VERSION_ORDER.index(B.FORMAT_VERSION) - 2  # 1.8.0 bounds, 1.9.0 `last`: neither writable
     assert B._added_since("1.6.0") == frozenset({CURRENT}) and B._added_since("1.7.0") == frozenset()
     assert not Q._is_shared(CURRENT)  # never asked once for the whole beamtime
     # DEC-92: no companion gate — the schema declares no reference for a current density
@@ -82,7 +82,7 @@ def test_the_bundle_schema_accepts_1_7_0_and_requires_processed_outputs_there(gr
     data = _json(grouped)
     assert data["format_version"] == B.FORMAT_VERSION and B.validate_bundle(data) == []
     data["format_version"] = "1.7.0"
-    assert B.validate_bundle(data) == []  # a 1.7.0 bundle still validates under the 1.8.0 schema
+    assert B.validate_bundle(data) == []  # a 1.7.0 bundle still validates under the newer schema
     del data["processed_outputs"]
     assert B.validate_bundle(data)  # 1.7.0, like 1.2.0-1.6.0, requires processed_outputs
 
@@ -240,7 +240,7 @@ def test_the_cli_stores_a_number_with_json_and_text_without(grouped, capsys):
 
 
 UPGRADE_16 = ("upgraded from 1.6.0; fields this build can newly write have no answer slots on runs that lacked a parsed "
-              "value — re-import to get them; " + B.CHANGES_ADDED_IN["1.8.0"])  # 1.8.0: the log bounds, disclosed
+              "value — re-import to get them" + "".join(f"; {c}" for c in B.CHANGES_ADDED_IN.values()))  # 1.8.0, 1.9.0: disclosed
 
 
 def test_a_1_6_0_bundle_with_a_confirmed_current_setpoint_is_stale_not_invalid_then_rederived(grouped, capsys):

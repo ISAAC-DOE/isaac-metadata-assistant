@@ -213,7 +213,7 @@ def test_the_log_bounds_match_the_other_bounds_and_the_schema():
     assert props["scientist_decisions"]["maxItems"] == B.MAX_SCIENTIST_DECISIONS == 200_000
     assert props["ai_interpretations"]["maxItems"] == B.MAX_AI_INTERPRETATIONS == 200_000
     assert props["missing_values"]["maxItems"] == props["exposures"]["maxItems"] == 200_000
-    assert B.FORMAT_VERSION == "1.8.0" and "1.8.0" in props["format_version"]["enum"]
+    assert "1.8.0" in props["format_version"]["enum"] and B.FORMAT_VERSION in props["format_version"]["enum"]
 
 
 def _filler(n: int, target_id: str) -> list[dict]:
@@ -274,9 +274,9 @@ def test_a_1_7_0_bundle_is_upgraded_on_its_next_write_and_says_so(b, capsys):
     M.decide(b, target_ids=[_miss(b, ENV)["value_id"]], decision="correct", value="ex_situ", **BY)
     assert "1.8.0 raises the bounds on scientist_decisions" in capsys.readouterr().err
     after = M.load(b)
-    assert after["format_version"] == "1.8.0"
+    assert after["format_version"] == B.FORMAT_VERSION  # 1.9.0 since (the last-token counter)
     [u] = after["format_upgrades"]
-    assert u["from_format_version"] == "1.7.0" and u["to_format_version"] == "1.8.0"
+    assert u["from_format_version"] == "1.7.0" and u["to_format_version"] == B.FORMAT_VERSION
     assert "200,000" in u["statement"] and u["newly_writable_paths"] == []
 
 

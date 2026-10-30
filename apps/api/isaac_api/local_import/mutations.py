@@ -35,6 +35,8 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from . import bundle as B
 
+#: The most file-name positions one counter answer names (the schema's ``positions`` maxItems).
+MAX_COUNTER_POSITIONS = 8
 ORCID_RE = re.compile(r"\A[0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{3}[0-9X]\Z")
 MAX_EXCERPT_CHARS = 4_000
 MAX_EXCERPTS = 5
@@ -829,16 +831,22 @@ def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, ed
     elif element or edge:
         raise MutationRefused("--element/--edge go with --decision approve_calibration or set_absorber on a record group.")
     if decision in ("set_counter_positions", B.NOT_COUNTER_DECISION):
+        from .grouping import LAST_POSITION
+
         if (
             not positions
-            or len(positions) > 8
-            or any(not isinstance(n, int) or isinstance(n, bool) or n < 1 for n in positions)
+            or len(positions) > MAX_COUNTER_POSITIONS
+            or any(not isinstance(n, int) or isinstance(n, bool) or (n < 1 and n != LAST_POSITION) for n in positions)
         ):
             raise MutationRefused(
-                "--positions must be 1 to 8 positive whole numbers, e.g. --positions 2 or --positions 2,3"
+                f"--positions must be 1 to {MAX_COUNTER_POSITIONS} positions: positive whole numbers, or `last` for the last "
+                "token whatever the name's length, e.g. --positions 2, --positions 2,3 or --positions last"
                 + (" (answering the counter question with --question names its open positions for you)."
                    if decision == B.NOT_COUNTER_DECISION else ".")
             )
+        if decision == B.NOT_COUNTER_DECISION and LAST_POSITION in positions:
+            raise MutationRefused("`last` goes with set_counter_positions (the last token IS a counter); "
+                                  "set_not_counter_positions names whole-number positions only.")
         positions = sorted(set(positions)) if decision == B.NOT_COUNTER_DECISION else list(positions)
     elif positions:
         raise MutationRefused("--positions goes with --target experiment --decision set_counter_positions or set_not_counter_positions.")
@@ -1375,10 +1383,12 @@ def group(bundle_dir: Path, *, regroup: bool = False) -> dict:
         # decision could turn into one group — a dead end). The runs of the merged group and of every
         # group it names in merge_with are proposed as ONE combined group, for the scientist to confirm,
         # only when nothing the import or a scientist recorded tells them apart (FAIL CLOSED,
-        # :func:`_merge_blockers`): none is in a confirmed group, they share a role, every basis reading
-        # agrees, the independent condition check finds nothing but the names, the file names have the
-        # same tokens (ANY differing token blocks: the counter question says a position is a counter),
-        # and no confirmed run-level answer differs. Anything else keeps the candidate below, naming why.
+        # :func:`_merge_blocker_details`): none is in a confirmed group, they share a role, every basis
+        # reading agrees, the independent condition check finds nothing but the names, the file names
+        # agree but for declared counters and repeat markers (or the scientist confirmed one sample for
+        # every run), and no confirmed run-level answer differs. Anything else keeps the candidate below,
+        # naming why and the commands that move it on (1.9.0: before, a counter answer was the only
+        # advice, and it changed nothing for runs that state no sample — a dead end measured on real data).
         by_id_all = {g["group_id"]: g for g in [*(bundle.get("superseded_record_groups") or ()), *existing]}
         # the combined group a previous regroup made for a decision still holds the runs of its
         # merge_with groups after those were replaced, so a later regroup reproduces it
@@ -1389,6 +1399,7 @@ def group(bundle_dir: Path, *, regroup: bool = False) -> dict:
                 combined_runs_of.setdefault(mbd["decision_id"], []).extend(g.get("member_run_keys") or ())
         combined_by: list[dict] = []
         not_combined: list[dict] = []
+        runs_by_key = {r["run_key"]: r for r in bundle.get("runs") or ()}
         for gid, d in sorted(merge_decision.items()):
             if (by_id_all.get(gid) or {}).get("status") != "merged":
                 continue  # a later status decision superseded the merge
@@ -1405,7 +1416,7 @@ def group(bundle_dir: Path, *, regroup: bool = False) -> dict:
                     not_combined.append({"decision_id": d["decision_id"],
                                          "reason": _merge_not_applicable(d, gid, by_id_all, gids)})
                 continue
-            why = None
+            why, steps = None, []
             holders = [g for g in fresh if g["group_id"] in gids]
             if any(k in bind_of for k in runs_named):
                 why = "a run of it is in a confirmed group, whose runs are never re-proposed"
@@ -1423,9 +1434,10 @@ def group(bundle_dir: Path, *, regroup: bool = False) -> dict:
                     not_combined.append({"decision_id": d["decision_id"],
                                          "reason": f"the combined group {combined['group_id']} was already decided ({prior.get('status')})"})
                     continue
-                blockers = _merge_blockers(bundle, payload, holders, combined)
+                blockers = _merge_blocker_details(bundle, payload, holders, combined)
                 if blockers:
-                    why = "; ".join(blockers)
+                    why = "; ".join(r for r, _ in blockers)
+                    steps = list(dict.fromkeys(c for _, cs in blockers for c in cs))
                 else:
                     first = order[holders[0]["group_id"]]
                     fresh = [g for g in fresh if g["group_id"] not in gids]
@@ -1436,14 +1448,25 @@ def group(bundle_dir: Path, *, regroup: bool = False) -> dict:
                             fresh_of[k] = combined["group_id"]
                     combined_by.append({"decision_id": d["decision_id"], "group_id": combined["group_id"], "from_groups": gids})
                     continue
-            not_combined.append({"decision_id": d["decision_id"], "reason": why})
+            not_combined.append({"decision_id": d["decision_id"], "reason": why, "next_commands": steps})
+            reason = {"code": "scientist_decided_merge", "decision_id": d["decision_id"], "group_id": gid,
+                      "detail": f"a scientist decided to merge these runs' former groups, but they were not combined: {why}. "
+                                "Confirm or reject each group, or record a new decision."}
+            same = next((mc for mc in merge_candidates if sorted(mc.get("group_ids") or ()) == gids and not mc.get("run_keys")), None)
+            if same is not None:
+                # ONE candidate per set of groups: the rule's candidate for exactly these groups keeps its id
+                # (a scientist's answers key on it) and leads with the decision (before 1.9.0 the pair was
+                # listed twice, under two ids)
+                merge_candidates[merge_candidates.index(same)] = {
+                    **same, "reasons": [reason, *(same.get("reasons") or ())], "reason_code": "scientist_decided_merge",
+                    "reason_codes": sorted({"scientist_decided_merge", *(same.get("reason_codes") or ())})}
+                continue
             mcid = "mc-" + hashlib.sha256((exp_key + "\n" + "\n".join(gids)).encode()).hexdigest()[:16]
             merge_candidates.append({
                 "merge_candidate_id": mcid, "experiment_key": exp_key, "group_ids": gids, "run_keys": [],
-                "status": "proposed", "rule_id": G.BINDING_RULE_ID,
-                "reasons": [{"code": "scientist_decided_merge", "decision_id": d["decision_id"], "group_id": gid,
-                             "detail": f"a scientist decided to merge these runs' former groups, but they were not combined: {why}. "
-                                       "Confirm or reject each group, or record a new decision."}],
+                "status": "proposed", "rule_id": G.BINDING_RULE_ID, "reasons": [reason],
+                "reason_code": "scientist_decided_merge", "reason_codes": ["scientist_decided_merge"],
+                "caution": G.merge_candidate_caution({h["group_id"]: h for h in holders}, runs_by_key, gids),
             })
         if combined_by:
             # a candidate that named a group now combined names the combined group instead; one left
@@ -1537,6 +1560,8 @@ def group(bundle_dir: Path, *, regroup: bool = False) -> dict:
         bundle["grouping_questions"] = questions
         return {
             "record_groups": len(bundle["record_groups"]),
+            # the groups that are (or may become) records; the rest is decision history (merged, rejected, split)
+            "live_record_groups": sum(1 for g in bundle["record_groups"] if g.get("status") in B.LIVE_GROUP_STATUSES),
             "kept_decided": len(keep),
             "kept_binding": len(binding),
             "kept_history": len(history),
@@ -1606,26 +1631,55 @@ _MERGE_NAME_ONLY_BASIS = frozenset({("sample", "sample_name_stem")})
 _MERGE_NAME_ONLY_VIOLATIONS = frozenset({"name_non_counter_tokens", "sample_name_stem"})
 
 
-#: Where a merge blocked by a file-name difference is sent: the mechanism for "this number is a counter".
-COUNTER_POINTER = ("; if the differing number is a run or acquisition counter, answer the counter question "
-                   "(isaac bundle decide <bundle_dir> --target experiment --decision set_counter_positions "
-                   "--positions <n> ...) and regroup: the grouping step then joins these runs itself")
+#: The field a scientist states a run's sample in; the same confirmed value for every run lets a merge
+#: decision combine runs whose file names differ (the scientist has said what the names could not).
+MERGE_SAMPLE_PATH = "sample.material.name"
+#: A file-name token stating a quantity with its unit (``400mV``, ``0p5wt``, ``25C``), a decimal (``7p02``,
+#: written ``7.02``) or a pH (``pH7``): possibly a condition this build does not classify. Names that
+#: differ in one are never combined, whatever else was confirmed.
+_CONDITION_LIKE_TOKEN = re.compile(r"^[-+]?\d+(?:p\d+)?[a-z%]+$|^[-+]?\d+p\d+$|^ph\d", re.IGNORECASE)
+_DECIMAL_POINT = re.compile(r"(?<=\d)\.(?=\d)")
+#: A whole number written beside its unit or label as a separate token (``05_mM``, ``25_C``, ``E_1``,
+#: ``pH_7``) states a quantity too. These lists only ever BLOCK a combination (fail closed): a word
+#: missing from them leaves such a pair to the scientist's sample confirmation, never to a token shape.
+_UNIT_WORDS = frozenset({"v", "mv", "k", "c", "f", "h", "hr", "hrs", "min", "mins", "s", "sec", "m", "mm", "um", "nm", "mg",
+                         "ug", "g", "wt", "rpm", "cycle", "cycles", "ma", "ua", "bar", "mbar", "torr", "ev", "kev", "ph"})
+_LABEL_WORDS = frozenset({"ph", "e", "t", "temp", "v", "i", "u"})
+_NEVER_COMBINED = (": runs whose files state different samples or conditions are never combined into one record (it would "
+                   "be wrong). Keep them as separate records — confirm each group on its own: ")
+
+
+def _cmds(commands: Sequence[str]) -> str:
+    return "; ".join(f"`{c}`" for c in commands)
 
 
 def _merge_blockers(bundle: Mapping, payload: Mapping, holders: Sequence[Mapping], combined: Mapping) -> list[str]:
-    """Why ``holders`` must NOT be combined for a merge decision — empty only when nothing the import
-    read or a scientist confirmed tells them apart (FAIL CLOSED, DEC-91):
+    """Why ``holders`` must NOT be combined for a merge decision (the reasons of :func:`_merge_blocker_details`)."""
+    return [reason for reason, _ in _merge_blocker_details(bundle, payload, holders, combined)]
 
-    * every basis reading agrees (value and kind; the name stem aside);
-    * the independent condition check (:func:`grouping.condition_violations`) finds only the names;
-    * the runs' file names have exactly the same tokens — ANY differing token blocks, whatever its
-      shape (the reason points to the counter question, which is how a scientist says a position
-      is a run counter: the grouping step then joins those runs itself);
-    * no confirmed, eligible run-level answer (a scientist's or a confirmed reading) differs."""
+
+def _merge_blocker_details(bundle: Mapping, payload: Mapping, holders: Sequence[Mapping], combined: Mapping) -> list[tuple[str, list[str]]]:
+    """``(reason, next commands)`` for each reason ``holders`` must NOT be combined for a merge decision —
+    empty only when nothing the import read or a scientist confirmed tells them apart (FAIL CLOSED, DEC-91):
+
+    * every basis reading agrees (value and kind; the name stem aside), and the independent condition
+      check (:func:`grouping.condition_violations`) finds only the names — otherwise they were measured
+      under different conditions and are NEVER combined;
+    * the file names agree once the tokens a scientist declared run counters (``set_counter_positions``,
+      ``last`` included) and repeat markers (``again``, ``rep2`` …, :func:`_merge_name_tokens`) are left
+      out — or, where they still differ, the scientist confirmed the same sample (:data:`MERGE_SAMPLE_PATH`)
+      for every run and no differing token states a quantity (:data:`_CONDITION_LIKE_TOKEN`). A token's
+      SHAPE alone never makes it a counter (DEC-91, third review): decimals split on ".", unit words and
+      unitless values all looked like counters;
+    * no confirmed, eligible run-level answer differs.
+
+    Every reason names the commands that move the merge on, and each one, followed, does (tested): a
+    counter answer or the sample confirmation where those apply, else keeping the groups apart."""
     from . import grouping as G
 
-    out: list[str] = []
-    differing = []
+    keep_apart = [f'isaac bundle decide <bundle_dir> --target {h["group_id"]} --decision confirm --by "<your name>"' for h in holders]
+    never: list[str] = []
+    differing, unknown = [], []
     for part in sorted({p for h in holders for p in (h.get("basis") or {})}):
         vals = [(h.get("basis") or {}).get(part) for h in holders]
         if not all(isinstance(v, Mapping) or v is None for v in vals):
@@ -1636,31 +1690,187 @@ def _merge_blockers(bundle: Mapping, payload: Mapping, holders: Sequence[Mapping
             if (part, key) in _MERGE_NAME_ONLY_BASIS:
                 continue
             if len({_reading_core((v or {}).get(key)) for v in vals}) > 1:
-                differing.append(f"{part}.{key}")
+                # a key this build does not classify is no condition it read: it is what a merge decides
+                (unknown if part == "unclassified" else differing).append((part, key))
+    differing = [f"{part}.{key}" for part, key in differing]
     if differing:
-        out.append(f"their recorded readings differ ({', '.join(differing)})")
+        never.append(f"the files state different {', '.join(differing)} for them")
     viol = G.condition_violations(bundle, {**payload, "record_groups": [combined]})
     other = sorted({v["key"] for v in viol if v["key"] not in _MERGE_NAME_ONLY_VIOLATIONS})
     if other:
-        out.append(f"their runs differ in condition(s) {', '.join(other)}")
-    # ANY differing file-name token blocks (DEC-91, third review): no exception by token shape —
-    # decimals split on ".", unit words no list covers, and unitless values all looked like counters.
-    # Saying a name position IS a run counter is the counter question's job (set_counter_positions);
-    # the grouping step then joins the runs itself, so no merge is needed for them.
+        never.append(f"they were measured under different conditions ({', '.join(other)})")
     stems = _merge_stems(bundle, holders)
-    toks = [G._stem_tokens(x) for x in stems]
-    if toks and len({len(t) for t in toks}) > 1:
-        out.append("their file names have different tokens (" + " / ".join(sorted({"_".join(t) for t in toks})) + ")"
-                   + COUNTER_POINTER)
-    elif toks:
-        for i in range(len(toks[0])):
-            col = sorted({t[i] for t in toks})
-            if len(col) > 1:
-                out.append(f"their file names differ at token {i + 1} ({' / '.join(col)})" + COUNTER_POINTER)
+    declared = list(counter_positions(bundle) or ())
+    kept = [_merge_name_tokens(x, declared) for x in stems]
+    sample, sample_conflict = _confirmed_sample(bundle, holders)
+    names_reason = unknown_reason = None
+    if len({tuple(t for _, t, _ in k) for k in kept}) > 1:
+        stated = _stated_quantities(stems)
+        if stated:
+            never.append(f"their file names state different conditions ({' / '.join(stated)})")
+        elif sample is None:
+            names_reason = _names_differ(bundle, kept, stems, declared, holders, sample_conflict)
+    # An unclassified reading read off the file names (``unknown_token``, ``new_spot`` …) is the names'
+    # business, settled above; one from elsewhere is settled only by the same confirmed sample.
+    in_names = {t.casefold() for x in stems for t in G._stem_tokens(x)}
+    off_names = [f"{part}.{key}" for part, key in unknown
+                 if not all(_name_literals(((h.get("basis") or {}).get(part) or {}).get(key), in_names) for h in holders)]
+    if off_names and sample is None:
+        steps = [] if sample_conflict else _sample_commands(bundle, holders)
+        unknown_reason = (f"the files state different {', '.join(off_names)} for them, which this build does not classify"
+                          + (" — if these runs measured the same sample, confirm it for each run, with the same name each time: "
+                             + _cmds(steps) if steps else ""), steps)
+    out: list[tuple[str, list[str]]] = [(r + _NEVER_COMBINED + _cmds(keep_apart), keep_apart) for r in never]
+    for text, steps in [x for x in (names_reason, unknown_reason) if x is not None]:
+        if never:  # a counter or sample answer cannot combine runs whose conditions differ: none is offered
+            out.append((text.split(" — ")[0], []))
+            continue
+        if steps:
+            out.append((text + "; then regroup (`isaac bundle group <bundle_dir> --regroup`), which applies the merge", steps))
+        else:
+            out.append((text + _NEVER_NAMES + _cmds(keep_apart), keep_apart))
     answers = _confirmed_run_answers(bundle, {r for h in holders for r in h.get("member_run_ids") or ()})
     diff_answers = sorted(path for path, vals in answers.items() if len(vals) > 1)
     if diff_answers:
-        out.append(f"confirmed answers for their runs differ ({', '.join(diff_answers)})")
+        out.append((f"confirmed answers for their runs differ ({', '.join(diff_answers)}); if one is wrong, correct it, else keep "
+                    "them as separate records — confirm each group on its own: " + _cmds(keep_apart), keep_apart))
+    return out
+
+
+_NEVER_NAMES = ("; nothing recorded can say they are one measurement, so keep them as separate records — confirm each group "
+                "on its own: ")
+
+
+def _stated_quantities(stems: Sequence[str]) -> list[str]:
+    """The file-name tokens that differ between ``stems`` AND state a quantity: a number with its unit
+    (:data:`_CONDITION_LIKE_TOKEN`, a decimal kept whole), or a whole number beside a unit or label word
+    (:data:`_UNIT_WORDS`, :data:`_LABEL_WORDS`), shown with that word."""
+    from . import grouping as G
+
+    lists = [[t for t in G._stem_tokens(_DECIMAL_POINT.sub("p", x)) if not G._REPEAT_TOKEN.match(t)] for x in stems]
+    sets = [set(t) for t in lists]
+    differ = set().union(*sets) - set.intersection(*sets)
+    out = set()
+    for toks in lists:
+        for j, t in enumerate(toks):
+            if t not in differ:
+                continue
+            if _CONDITION_LIKE_TOKEN.match(t):
+                out.add(t)
+            elif t.isdigit():
+                nxt = toks[j + 1] if j + 1 < len(toks) else ""
+                prev = toks[j - 1] if j else ""
+                if nxt.casefold() in _UNIT_WORDS:
+                    out.add(f"{t} {nxt}")
+                elif prev.casefold() in _LABEL_WORDS:
+                    out.add(f"{prev} {t}")
+    return sorted(out)
+
+
+def _name_literals(entry: Any, tokens: set[str]) -> bool:
+    """Is this basis reading's value nothing but file-name tokens (``tokens``, casefolded)? Absent counts."""
+    if entry is None:
+        return True
+    v = entry.get("value") if isinstance(entry, Mapping) else None
+    vals = v if isinstance(v, list) else [v]
+    return all(isinstance(x, str) and all(t.casefold() in tokens for t in x.replace("_", " ").split()) for x in vals)
+
+
+def _merge_name_tokens(stem: str, declared: Sequence[int]) -> list[tuple[int, str, bool]]:
+    """``(1-based position, token, is the last token)`` of each file-name token a merge compares: every
+    token but a repeat marker (and the number right after one, ``again_2``) and a digit token at a
+    position the scientist declared a run counter (``grouping.LAST_POSITION``: the last token)."""
+    from . import grouping as G
+
+    toks = G._stem_tokens(stem)
+    positions = {int(x) for x in declared}
+    out = []
+    for i, t in enumerate(toks):
+        if G._REPEAT_TOKEN.match(t) or (t.isdigit() and i > 0 and G._REPEAT_TOKEN.match(toks[i - 1])):
+            continue
+        if t.isdigit() and ((i + 1) in positions or (G.LAST_POSITION in positions and i == len(toks) - 1)):
+            continue
+        out.append((i + 1, t, i == len(toks) - 1))
+    return out
+
+
+def _names_differ(bundle: Mapping, kept: Sequence[Sequence[tuple]], stems: Sequence[str], declared: Sequence[int],
+                  holders: Sequence[Mapping], sample_conflict: bool) -> tuple[str, list[str]]:
+    """The reason file names keep a merge apart, and the commands that would let it through: the counter
+    answer when the names differ only in whole numbers at one position (or always the last token) that
+    no scientist said is NOT a counter, and the sample confirmation unless a different sample is
+    confirmed already. Either one, followed, combines the runs on the next regroup."""
+    from . import grouping as G
+
+    steps: list[str] = []
+    if len({len(k) for k in kept}) > 1:
+        text = "their file names have different tokens (" + " / ".join(sorted(set(stems))) + ")"
+    else:
+        cols = [i for i in range(len(kept[0])) if len({k[i][1] for k in kept}) > 1]
+        text = "their file names differ " + ", ".join(
+            f"at token {kept[0][i][0]} ({' / '.join(sorted({k[i][1] for k in kept}))})" for i in cols)
+        new: set[int] = set()
+        said_not = set(B.not_counter_positions(bundle))
+        for i in cols:
+            col = [k[i] for k in kept]
+            if not all(t.isdigit() for _, t, _ in col):
+                new = set()
+                break
+            if all(last for _, _, last in col) and not ({p for p, _, _ in col} & said_not):
+                new.add(G.LAST_POSITION)
+            elif len({p for p, _, _ in col}) == 1 and col[0][0] not in said_not:
+                new.add(col[0][0])
+            else:
+                new = set()
+                break
+        positions = sorted(set(declared) | new, key=lambda p: (p == G.LAST_POSITION, p))
+        if new and len(positions) <= MAX_COUNTER_POSITIONS:
+            shown = ",".join("last" if p == G.LAST_POSITION else str(p) for p in positions)
+            steps.append(f'isaac bundle decide <bundle_dir> --target experiment --decision set_counter_positions --positions {shown} --by "<your name>"')
+            text += (" — if that number counts runs or acquisitions in EVERY file name of this beamtime, say so (it applies to "
+                     "the whole beamtime): " + _cmds(steps))
+    sample_steps = [] if sample_conflict else _sample_commands(bundle, holders)
+    if sample_steps:
+        text += (("; or, " if steps else " — ") + "if these runs measured the same sample, confirm it for each run, "
+                 "with the same name each time: " + _cmds(sample_steps))
+    return text, steps + sample_steps
+
+
+def _confirmed_sample(bundle: Mapping, holders: Sequence[Mapping]) -> tuple[Any, bool]:
+    """``(value, conflict)``: the ONE sample (:data:`MERGE_SAMPLE_PATH`) a scientist confirmed for every
+    measurement run of ``holders`` (else ``None``), and whether different ones are confirmed."""
+    run_id_of = {r["run_key"]: r.get("run_id") for r in bundle.get("runs") or ()}
+    seen: set[str] = set()
+    every = True
+    for h in holders:
+        context = set(h.get("context_run_keys") or ())
+        for k in h.get("member_run_keys") or ():
+            if k in context:
+                continue
+            vals = _confirmed_run_answers(bundle, {run_id_of.get(k)}).get(MERGE_SAMPLE_PATH) or set()
+            every = every and bool(vals)
+            seen |= vals
+    return (json.loads(next(iter(seen))) if every and len(seen) == 1 else None), len(seen) > 1
+
+
+def _sample_commands(bundle: Mapping, holders: Sequence[Mapping]) -> list[str]:
+    """One ``decide`` per measurement run of ``holders`` with no confirmed sample yet, on its sample value
+    (a reading, else the missing value); none when some run has neither (no command could state it)."""
+    run_id_of = {r["run_key"]: r.get("run_id") for r in bundle.get("runs") or ()}
+    out = []
+    for h in holders:
+        context = set(h.get("context_run_keys") or ())
+        for k in h.get("member_run_keys") or ():
+            rid = run_id_of.get(k)
+            if k in context or _confirmed_run_answers(bundle, {rid}).get(MERGE_SAMPLE_PATH):
+                continue
+            target = next((c["candidate_id"] for c in bundle.get("candidates") or ()
+                           if c.get("run_id") == rid and c.get("target_field_path") == MERGE_SAMPLE_PATH), None)
+            target = target or next((m["value_id"] for m in bundle.get("missing_values") or ()
+                                     if m.get("run_id") == rid and m.get("target_field_path") == MERGE_SAMPLE_PATH), None)
+            if target is None:
+                return []
+            out.append(f'isaac bundle decide <bundle_dir> --target {target} --decision correct --value "<the sample>" --by "<your name>"')
     return out
 
 

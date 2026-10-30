@@ -1,6 +1,6 @@
 # ISAAC Local Import Bundle — contract v1
 
-Status: **v1.8.0** (the bounds on `scientist_decisions` and `ai_interpretations` raised to 200,000, so an append-only log can no longer lock a bundle; decide refuses a value its field refuses, 2026-10-29, §9 "What 1.8.0 added", §25; v1.7.0 `context.electrochemistry.current_setpoint_mA_cm2` answerable, so a confirmed galvanostatic record can complete, 2026-10-29, §9 "What 1.7.0 added", DEC-92; v1.6.0 capture decisions — keep apart, the Athena result of record, "no counter" — a merge decision applied as one combined group, and question ids that survive answers, 2026-10-29, §9 "What 1.6.0 added"; v1.5.0 control mode answerable the same day; v1.4.0 the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
+Status: **v1.9.0** (`set_counter_positions` may name the LAST file-name token, `--positions last`, and a scientist's merge has a working path, 2026-10-30, §9 "What 1.9.0 added", §27; v1.8.0 the bounds on `scientist_decisions` and `ai_interpretations` raised to 200,000, so an append-only log can no longer lock a bundle; decide refuses a value its field refuses, 2026-10-29, §9 "What 1.8.0 added", §25; v1.7.0 `context.electrochemistry.current_setpoint_mA_cm2` answerable, so a confirmed galvanostatic record can complete, 2026-10-29, §9 "What 1.7.0 added", DEC-92; v1.6.0 capture decisions — keep apart, the Athena result of record, "no counter" — a merge decision applied as one combined group, and question ids that survive answers, 2026-10-29, §9 "What 1.6.0 added"; v1.5.0 control mode answerable the same day; v1.4.0 the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
 [`apps/api/isaac_api/local_import/bundle-v1.schema.json`](../apps/api/isaac_api/local_import/bundle-v1.schema.json)
 (JSON Schema draft 2020-12) plus the checks in
 [`bundle.py`](../apps/api/isaac_api/local_import/bundle.py) `validate_bundle` that JSON
@@ -583,14 +583,16 @@ decision CAPTURES a statement; none takes a scientific decision, and none is def
   NOTHING the import read or a scientist confirmed tells them apart — none of their runs is in a
   confirmed group; they share one role; every basis reading agrees (the name stem standing in for an
   unstated sample aside); the independent condition check (`grouping.condition_violations`) finds
-  only the names; **the runs' file names have exactly the same tokens**; and no confirmed, eligible
+  only the names; **the runs' file names have the same tokens** once repeat markers and the positions a
+  scientist declared run counters are left out — or, where they still differ, the same
+  `sample.material.name` is confirmed for every run (1.9.0, §27); and no confirmed, eligible
   run-level answer (an answered missing value or a confirmed reading, e.g. the control mode) differs.
   **There is no exception by token shape.** Three review rounds measured that any shape rule leaks
   (`0.05V`/`0.5V` and `1.02`/`1.03` split on the decimal point; `05_mM`, `02_hrs`, `05_rpm` are units
   no list covered; `400`/`500` is a unitless potential), so ANY differing token blocks and the
-  `scientist_decided_merge` candidate stays open, its detail naming the differing tokens and pointing
-  to the counter question: saying a name position IS a run counter is `set_counter_positions`, after
-  which `isaac bundle group --regroup` joins those runs itself (no merge is needed). Merge candidates
+  `scientist_decided_merge` candidate stays open, its detail naming the differing tokens; since 1.9.0
+  the `merge_decisions_not_combined` entry also lists `next_commands` that, followed, combine the runs
+  on the next regroup (§27). Merge candidates
   that named a combined group name it instead. **A combined group that was itself decided**
   (rejected, split, or merged again) is that ruling on exactly that group: the regroup does not
   propose it again and asks no candidate about it (`merge_decisions_not_combined` says "already
@@ -686,6 +688,20 @@ and `processed_outputs` is required at 1.8.0 as at 1.2.0–1.7.0.
   to stderr, shown by `check` and summary.md). No eligibility moves for it.
 - **A write past either bound is refused up front** (exit 2) with a sentence naming the log, how many it
   holds and the bound; nothing is appended (§7, §25).
+
+### What 1.9.0 added (the last token as a counter)
+
+A minor version: the schema **accepts more**. A `set_counter_positions` decision may name `-1` among
+its `positions` — the LAST file-name token, whatever the name's length (`grouping.LAST_POSITION`;
+`decide --positions last`, or `3,last`). Measured on a real beamtime, the counter was always the last
+token, at positions 3..10, and a fixed list also named a non-counter token of the longer names.
+`set_not_counter_positions` takes whole-number positions only. Nothing else changes, nothing becomes
+newly writable, and `processed_outputs` is required at 1.9.0 as at 1.2.0–1.8.0.
+
+- **A 1.9.0 validator accepts 1.0.0–1.8.0 bundles;** a 1.8.0 validator refuses a 1.9.0 one (the label),
+  and one holding `-1`.
+- **The upgrade is disclosed**: the first write by this build of an older bundle appends one
+  `format_upgrades` entry whose statement includes `bundle.CHANGES_ADDED_IN["1.9.0"]`.
 
 ## 10. Exit codes (`isaac import` / `isaac bundle`)
 
@@ -1575,3 +1591,37 @@ because no parser value was printed.
   `process` on a bundle whose recorded local root is a ZIP says it is a ZIP and to pass the unzipped
   folder as `--source`. A lock file that cannot be opened safely makes THAT bundle "not accessible" in
   the local screen's list (the others still list) and a 409 on its routes, never a 500.
+
+## 27. A scientist's merge has a working path (2026-10-30) — format 1.9.0 for `last` only
+
+Found walking the skill on two real beamtimes (`tests/test_local_import_merge_paths.py`, synthetic):
+a merge of two repeat runs that state no sample was refused, and the counter answer the refusal named
+changed nothing (the grouping step never joins runs with no stated sample; the merge check ignored the
+answer). Default behaviour on an undecided bundle is unchanged: the same groups, merge-candidate and
+question ids (measured on the synthetic fixtures and both beamtimes).
+
+- **A merge decision is combined** (`mutations._merge_blocker_details`) when, besides everything §9's
+  merge check already requires, the file names agree once repeat markers (`again`, `repeat`, `rep2`,
+  `redo`, and a number right after one) and the digit tokens at positions declared run counters
+  (`set_counter_positions`, `last` included) are left out — or, where they still differ, a scientist
+  confirmed the same `sample.material.name` for every run. A token's shape alone still never makes it a
+  counter. An unclassified reading read off the names (`unknown_token`, `new_spot`) follows the names;
+  one from elsewhere needs the same confirmed sample.
+- **Never combined:** runs whose classified readings or conditions differ, and names that differ in a
+  token stating a quantity (`400mV`, `0p5wt`, a decimal `7.02`, `pH7`) whatever was confirmed. The
+  reason says so plainly and names keeping them apart (confirm each group).
+- **Every refusal names commands that work.** `merge_decisions_not_combined[].next_commands` lists them,
+  and the reason quotes each in backticks: the counter answer (only when the names differ in whole
+  numbers at one position, or always the last token, that no scientist said is not a counter), the
+  sample confirmation (one `decide` per run, unless different samples are confirmed), else confirming
+  each group. Tests follow each one and regroup.
+- **One candidate per set of groups.** A refused merge whose groups already have the rule's candidate
+  leads that candidate with `scientist_decided_merge`, under the rule candidate's id.
+- **Merge candidates say what they are:** `reason_code` (`grouping.MERGE_REASON_ORDER`), `reason_codes`,
+  and `caution` — `names_state_different_samples_or_conditions` when the groups' names differ in more
+  than numbers and repeat markers, `no_condition_classified` when no group states a sample, environment
+  or condition — each with a plain sentence that also leads the candidate's question. `bundle list
+  merge-candidates` adds each group's run labels (file-name stems, 5 per group, the rest counted);
+  `bundle show <dir> merge-candidate <id>` shows one (no reading's value, so no exposure).
+- **Live groups by default.** `bundle list groups` lists proposed and confirmed groups and counts the
+  rest under `not_listed`; `--all` lists history too. `bundle group` adds `live_record_groups`.

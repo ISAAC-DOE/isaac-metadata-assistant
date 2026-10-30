@@ -325,7 +325,7 @@ def test_set_counter_positions_is_validated_idempotent_and_superseded(bdir, caps
     assert d["positions"] == [2] and d["decided_by"]["identity"] == "local_unverified" and d["decision_id"]
     assert cli.main(argv + ["--positions", "2"]) == 0  # replay: no new entry
     assert len(M.load(bdir)["scientist_decisions"]) == 1
-    for bad in ("0", "-1", "a", "1,2,3,4,5,6,7,8,9"):
+    for bad in ("0", "-2", "a", "1,2,3,4,5,6,7,8,9"):  # 1.9.0: -1 (`last`) is the last token, accepted
         assert cli.main(argv + ["--positions", bad]) == 2
     assert cli.main(argv + ["--positions", "2,3"]) == 0
     b = M.load(bdir)

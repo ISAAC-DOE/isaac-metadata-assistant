@@ -193,7 +193,8 @@ def test_a_merge_across_a_differing_condition_is_not_combined_and_says_why(tmp_p
     a = M.load(b)
     assert not any("merged_by_scientist_decision" in (g.get("flags") or ()) for g in a["record_groups"])
     [mc] = [m for m in a["merge_candidates"] if m["reasons"][0]["code"] == "scientist_decided_merge"]
-    assert "were not combined" in mc["reasons"][0]["detail"] and "differ in condition" in mc["reasons"][0]["detail"]
+    assert "were not combined" in mc["reasons"][0]["detail"] and "different conditions" in mc["reasons"][0]["detail"]
+    assert "never combined" in mc["reasons"][0]["detail"]  # said plainly (1.9.0), with keeping them apart as the step
     live = [g for g in a["record_groups"] if g["status"] in ("proposed", "scientist_confirmed")]
     assert not any(set(g1["member_run_keys"]) | set(g2["member_run_keys"]) <= set(g["member_run_keys"]) for g in live)
     assert _run(["bundle", "check", str(b)], capsys)[0] == 0

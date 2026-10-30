@@ -648,7 +648,7 @@ def consolidate(bundle: Mapping) -> dict:
                 "answered": answered_positions,
                 "answer_command": (
                     'isaac bundle decide <bundle_dir> --target experiment --decision set_counter_positions '
-                    '--positions <n[,m]> --by "<your name>"  &&  isaac bundle group <bundle_dir> --regroup'
+                    '--positions <n[,m] or last> --by "<your name>"  &&  isaac bundle group <bundle_dir> --regroup'
                     f'   # none is a counter: isaac bundle decide <bundle_dir> --question {qid} --decision {B.NOT_COUNTER_DECISION} --by "<your name>"'
                 ),
             }

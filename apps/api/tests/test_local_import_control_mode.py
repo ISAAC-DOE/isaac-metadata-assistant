@@ -278,7 +278,7 @@ def test_control_mode_value_ids_come_after_every_older_fields_ids(grouped):
 
 
 UPGRADE_14 = ("upgraded from 1.4.0; fields this build can newly write have no answer slots on runs that lacked a parsed "
-              "value — re-import to get them; " + B.CHANGES_ADDED_IN["1.8.0"])  # 1.8.0: the log bounds, disclosed
+              "value — re-import to get them" + "".join(f"; {c}" for c in B.CHANGES_ADDED_IN.values()))  # 1.8.0, 1.9.0: disclosed
 
 
 def test_a_1_4_0_bundle_with_a_confirmed_mode_is_stale_not_invalid_then_rederived(grouped, capsys):

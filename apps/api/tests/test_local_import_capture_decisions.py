@@ -471,8 +471,8 @@ def _combined(b: Path) -> list[dict]:
 def names_agree(monkeypatch):
     """For tests of the regroup's bookkeeping (H1, M3), not of the name check: the file-name
     blockers are taken out, as if the groups' names agreed token for token. Every other blocker stays."""
-    orig = M._merge_blockers
-    monkeypatch.setattr(M, "_merge_blockers", lambda *a: [r for r in orig(*a) if "file names" not in r])
+    orig = M._merge_blocker_details
+    monkeypatch.setattr(M, "_merge_blocker_details", lambda *a: [r for r in orig(*a) if "file names" not in r[0]])
 
 
 @pytest.mark.parametrize("stems", [
@@ -502,7 +502,9 @@ def names_agree(monkeypatch):
 def test_a_merge_across_any_differing_name_token_fails_closed(tmp_path, stems, direction):
     """M1 (third review): ANY differing file-name token blocks — there is no exception by token shape.
     Each pair, merged either way round, keeps the candidate open with a reason naming the differing
-    tokens and pointing to the counter question."""
+    tokens and the commands that move it on (1.9.0: a counter answer only where the names differ in
+    whole numbers at one position, the sample confirmation, or keeping them apart; following them is
+    tested in test_local_import_merge_paths)."""
     b = _grouped_stems(tmp_path, stems)
     g = M.load(b)["record_groups"]
     assert len(g) == 2
@@ -510,7 +512,8 @@ def test_a_merge_across_any_differing_name_token_fails_closed(tmp_path, stems, d
     out = _merge(b, target["group_id"], [other["group_id"]])
     assert _combined(b) == [] and out["combined_by_merge_decision"] == []
     [nc] = out["merge_decisions_not_combined"]
-    assert "file names" in nc["reason"] and "set_counter_positions" in nc["reason"]
+    assert "file names" in nc["reason"] and nc["next_commands"]
+    assert all(f"`{c}`" in nc["reason"] for c in nc["next_commands"])
     assert all(t in nc["reason"] for t in set(stems[0].split("_")) ^ set(stems[1].split("_")) if "." not in t)
     [mc] = [m for m in M.load(b)["merge_candidates"] if m["reasons"][0]["code"] == "scientist_decided_merge"]
     assert "were not combined" in mc["reasons"][0]["detail"]
@@ -649,8 +652,8 @@ def test_differing_confirmed_run_answers_keep_a_merge_apart(tmp_path, same, name
         assert len(_combined(b)) == 1
     else:
         assert _combined(b) == []
-        assert [x["reason"] for x in out["merge_decisions_not_combined"]] == [
-            f"confirmed answers for their runs differ ({B.CONTROL_MODE_PATH})"]
+        assert [x["reason"].split(";")[0] for x in out["merge_decisions_not_combined"]] == [
+            f"confirmed answers for their runs differ ({B.CONTROL_MODE_PATH})"]  # then its next step (1.9.0)
 
 
 # --- review fixes: the Athena selection (M4, L3) ---------------------------------------------------

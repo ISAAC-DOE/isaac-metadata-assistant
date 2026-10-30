@@ -91,7 +91,7 @@ BUNDLE_FILES = (
 )
 
 LIST_KINDS = ("runs", "conflicts", "candidates", "questions", "unread", "groups", "merge-candidates", "processed-outputs")
-SHOW_KINDS = ("run", "conflict", "candidate", "source", "question", "group", "processed-output")
+SHOW_KINDS = ("run", "conflict", "candidate", "source", "question", "group", "merge-candidate", "processed-output")
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 200
 #: The target size of summary.md (bytes). Sections are windowed to stay near it.
@@ -292,9 +292,18 @@ def render_summary(bundle: Mapping) -> str:
     add(f"- People named in the sources: {counts['contributors']} (evidence, not the naming profile)")
     groups = bundle.get("record_groups") or []
     if groups or bundle.get("processing_results"):
+        # live groups are counted; a merged, rejected or split group is decision history, said apart
+        live = [g for g in groups if g["status"] in B.LIVE_GROUP_STATUSES]
+        history: dict[str, int] = {}
+        for g in groups:
+            if g["status"] not in B.LIVE_GROUP_STATUSES:
+                history[g["status"]] = history.get(g["status"], 0) + 1
         add(
-            f"- Record groups: {len(groups)} ({sum(1 for g in groups if g['status'] == 'scientist_confirmed')} "
-            f"confirmed) · processing results: {len(bundle.get('processing_results') or [])}"
+            f"- Record groups: {len(live)} ({sum(1 for g in live if g['status'] == 'scientist_confirmed')} "
+            f"confirmed)"
+            + (f" and {len(groups) - len(live)} kept as decision history ("
+               + ", ".join(f"{n} {k}" for k, n in sorted(history.items())) + ")" if history else "")
+            + f" · processing results: {len(bundle.get('processing_results') or [])}"
         )
     if bundle.get("processing_results"):
         # Counts only. A group the protocol does not apply to is reported apart from the QC
@@ -601,11 +610,13 @@ def _row(kind: str, obj: Mapping) -> dict:
             "conditions_named": sorted((obj.get("basis") or {}).get("conditions") or {})[:20],
         }
     if kind == "merge-candidates":
+        # the groups' run labels (file names, no parser value) are added by cmd_bundle_list
         return {
             "merge_candidate_id": obj.get("merge_candidate_id") or obj.get("id"),
             "status": obj.get("status"),
             "group_ids": list(obj.get("group_ids") or [])[:50],
-            "reason_code": obj.get("reason_code") or obj.get("code") or obj.get("basis"),
+            "reason_code": _mc_reason_code(obj),
+            "caution": [c.get("statement") for c in obj.get("caution") or () if isinstance(c, Mapping)],
         }
     if kind == "processed-outputs":
         # what the files state about themselves, and the proposed link; no parser value
@@ -633,6 +644,39 @@ def _row(kind: str, obj: Mapping) -> dict:
     }
 
 
+def _mc_reason_code(obj: Mapping) -> str | None:
+    """A merge candidate's ``reason_code`` (stored since 1.9.0; derived from its reasons for an older one)."""
+    from . import grouping as G
+
+    return obj.get("reason_code") or G.merge_reason_code(obj.get("reasons") or ())
+
+
+def _merge_candidate_view(bundle: Mapping, obj: Mapping) -> dict:
+    """``bundle show merge-candidate``: what the candidate proposes, its groups' run labels, its caution
+    and its reasons by code — no reading's value (those stay in bundle.json), so no exposure."""
+    from . import grouping as G
+
+    shown_keys = ("code", "group_id", "decision_id", "key", "why_unknown", "detail")
+    return {
+        "merge_candidate_id": obj.get("merge_candidate_id"),
+        "status": obj.get("status"),
+        "rule_id": obj.get("rule_id"),
+        "reason_code": _mc_reason_code(obj),
+        "reason_codes": obj.get("reason_codes") or sorted({r.get("code") for r in obj.get("reasons") or () if r.get("code")}),
+        "caution": list(obj.get("caution") or ()),
+        "groups": G.merge_candidate_groups(bundle, obj, cap=50),
+        "question": (obj.get("question") or {}).get("text"),
+        "reasons": [{k: r[k] for k in shown_keys if k in r} for r in obj.get("reasons") or ()],
+        "kept_apart_by_decision_id": obj.get("kept_apart_by_decision_id"),
+        "answer_with": [
+            f"isaac bundle decide <bundle_dir> --target {(obj.get('group_ids') or ['<group>'])[0]} --decision merge "
+            f"--merge-with {' '.join((obj.get('group_ids') or [])[1:]) or '<group>'} --by \"<your name>\"  &&  isaac bundle group <bundle_dir> --regroup",
+            f"isaac bundle decide <bundle_dir> --target {obj.get('merge_candidate_id')} --decision keep_apart --by \"<your name>\"",
+        ],
+        "notice": "Readings' values are not printed here; `isaac bundle show <bundle_dir> group <group_id>` prints a group's.",
+    }
+
+
 _LIST_SECTION = {
     "groups": "record_groups",
     "merge-candidates": "merge_candidates",
@@ -650,6 +694,7 @@ _SHOW_SECTION = {
     "candidate": ("candidates", "candidate_id"),
     "source": ("sources", "source_id"),
     "question": ("questions", "question_id"),
+    "merge-candidate": ("merge_candidates", "merge_candidate_id"),
     "processed-output": ("processed_outputs", "processed_output_id"),
 }
 
@@ -692,6 +737,19 @@ def cmd_bundle_list(args) -> int:
     if bundle is None:
         return code
     rows = list(bundle.get(_LIST_SECTION[args.kind]) or [])
+    not_listed: dict[str, int] = {}
+    if args.kind == "groups" and not args.all:
+        # LIVE GROUPS ONLY by default (1.9.0): a merged, rejected or split group is the history of a
+        # decision, not a record (before, a merge left 62 groups listed for 61 runs). --all lists them too.
+        from . import bundle as B
+
+        for r in rows:
+            if r.get("status") not in B.LIVE_GROUP_STATUSES:
+                not_listed[r.get("status")] = not_listed.get(r.get("status"), 0) + 1
+        rows = [r for r in rows if r.get("status") in B.LIVE_GROUP_STATUSES]
+    elif args.all and args.kind != "groups":
+        _err("--all applies only to `groups`.")
+        return EXIT_USAGE
     if args.state:
         if args.kind != "candidates":
             _err("--state applies only to `candidates`.")
@@ -700,6 +758,11 @@ def cmd_bundle_list(args) -> int:
     total = len(rows)
     page = rows[args.offset : args.offset + args.limit]
     items = [_row(args.kind, r) for r in page]
+    if args.kind == "merge-candidates":
+        from . import grouping as G
+
+        for item, r in zip(items, page):
+            item["groups"] = G.merge_candidate_groups(bundle, r)
     if args.kind == "candidates":
         if args.no_values:
             for item in items:
@@ -723,6 +786,9 @@ def cmd_bundle_list(args) -> int:
                 "returned": len(page),
                 "omitted_before": min(args.offset, total),
                 "omitted_after": max(0, total - args.offset - len(page)),
+                **({"not_listed": dict(sorted(not_listed.items())),
+                    "not_listed_note": "groups that are decision history (merged, rejected, split), not records: pass --all to list them"}
+                   if not_listed else {}),
                 "items": items,
             },
             indent=1,
@@ -748,7 +814,7 @@ def cmd_bundle_show(args) -> int:
                 except M.MutationRefused as exc:
                     _err(f"Nothing printed: {exc}")
                     return exc.code
-            print(json.dumps(obj, indent=1, ensure_ascii=False))
+            print(json.dumps(_merge_candidate_view(bundle, obj) if args.kind == "merge-candidate" else obj, indent=1, ensure_ascii=False))
             return EXIT_OK
     _err(f"No {args.kind} with id {args.id!r} in this bundle.")
     return EXIT_NOT_FOUND
@@ -940,12 +1006,15 @@ def cmd_bundle_questions(args) -> int:
 def _positions(raw: str | None):
     from . import mutations as M
 
+    from .grouping import LAST_POSITION
+
     if raw is None:
         return None
     try:
-        return [int(x) for x in raw.split(",") if x.strip()]
+        return [LAST_POSITION if x.strip().casefold() == "last" else int(x) for x in raw.split(",") if x.strip()]
     except ValueError as exc:
-        raise M.MutationRefused("--positions must be whole numbers separated by commas, e.g. 2,3.") from exc
+        raise M.MutationRefused("--positions must be whole numbers or `last` (the last token, whatever the name's length) "
+                                "separated by commas, e.g. 2,3 or last.") from exc
 
 
 def cmd_bundle_decide(args) -> int:
@@ -1223,6 +1292,7 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--offset", type=int, default=0)
     q.add_argument("--state", help="candidates only: filter by value_state")
     q.add_argument("--no-values", action="store_true", help="candidates only: omit parser values (records no exposure)")
+    q.add_argument("--all", action="store_true", help="groups only: also list merged, rejected and split groups (decision history)")
     q.set_defaults(func=cmd_bundle_list)
     q = bsub.add_parser("show", help="one object by id")
     q.add_argument("bundle_dir")
@@ -1266,10 +1336,11 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
                         "MERGING two groups takes three steps: (1) --target <group> --decision merge --merge-with <group...>; "
                         "(2) isaac bundle group <dir> --regroup, which proposes ONE combined group (flag "
                         "merged_by_scientist_decision) only when nothing recorded tells them apart: no confirmed run, one role, "
-                        "every recorded reading and confirmed run answer equal, and IDENTICAL file-name tokens (any differing "
-                        "token blocks, whatever its shape); otherwise it keeps a scientist_decided_merge candidate naming "
-                        "why. If the names differ only in a run counter, answer the counter question instead "
-                        "(set_counter_positions, then regroup: the grouping step joins those runs); "
+                        "every recorded reading and confirmed run answer equal (runs measured under different conditions are "
+                        "never combined), and file names that agree once repeat markers (again, rep2 ...) and the positions "
+                        "declared run counters (set_counter_positions) are left out — or, where they still differ, the same "
+                        "sample.material.name confirmed for every run and no differing token stating a quantity (400mV, 0p5wt); "
+                        "otherwise its merge_decisions_not_combined entry gives the reason and next_commands that move it on; "
                         "(3) --target <combined group> --decision confirm")
     q.add_argument("--value", help="the value; for set_clock_time_zone the IANA name (Area/Location, or UTC) of the time zone "
                                    "the INSTRUMENT CLOCK that wrote the scan headers was set to (no offset, no abbreviation)")
@@ -1284,7 +1355,8 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--element", help="record group + approve_calibration (the calibration reference) or set_absorber (the absorber): an element, e.g. Ir")
     q.add_argument("--edge", help="with --element: the edge (K, L1-L3, M1-M5)")
     q.add_argument("--positions", help="--target experiment + set_counter_positions or set_not_counter_positions: "
-                                       "1-based filename token positions, e.g. 2 or 2,3")
+                                       "1-based filename token positions, e.g. 2 or 2,3; set_counter_positions also takes "
+                                       "last (the last token, whatever the name's length), e.g. last or 3,last")
     q.set_defaults(func=cmd_bundle_decide)
 
     q = bsub.add_parser("questions", help="consolidated questions: asked once, at the right scope, blocking first")

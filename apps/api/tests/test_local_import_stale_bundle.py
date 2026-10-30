@@ -36,8 +36,9 @@ BY = "SYNTHETIC TEST"
 POT = "context.electrochemistry.potential_setpoint_V"
 SCALE = "context.electrochemistry.potential_scale"
 UPGRADE = ("upgraded from 1.2.0; fields this build can newly write have no answer slots on runs that lacked a parsed "
-           "value — re-import to get them; " + getattr(B, "CHANGES_ADDED_IN", {}).get("1.8.0", ""))  # 1.8.0: the log
-# bounds, disclosed (getattr: this module is also imported by an OLD build's tree, which has no such constant)
+           "value — re-import to get them" + "".join(f"; {c}" for c in getattr(B, "CHANGES_ADDED_IN", {}).values()))
+# 1.8.0 (the log bounds) and 1.9.0 (the last-token counter), disclosed (getattr: this module is also imported by an
+# OLD build's tree, which has no such constant)
 OLD_COMMIT = "ed731bcc"  # the last commit whose build could not write the set-point
 REPO = Path(__file__).resolve().parents[3]
 
