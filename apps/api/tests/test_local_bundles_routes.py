@@ -160,7 +160,7 @@ def test_the_new_operations_meet_the_documentation_rules_every_operation_meets(c
         if "local-bundles" in where:
             assert not any(p.search(text) for p in _INTERNAL_MARKERS), where
     total = sum(1 for _ in _operations(schema))
-    assert total == 101 + 5  # the hosted 101 (test_about_and_openapi) plus these five
+    assert total == 102 + 5  # the hosted 102 (test_about_and_openapi) plus these five
 
 
 # --- the directory boundary -------------------------------------------------------------------
