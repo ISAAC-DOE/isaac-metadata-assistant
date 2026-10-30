@@ -4,7 +4,9 @@ The choice is always RECORDED with its basis and the alternatives, and always ne
 review. For BL15-2 HERFD the bundle carries ``bl15/signals.py``'s own proposal
 (``run.signal_selection``); when it proposes a channel that the scan has, it is used.
 Otherwise common channel names are matched in the protocol's priority order, preferring
-transmission for reference/alignment groups and fluorescence for samples.
+transmission for reference/alignment groups and fluorescence for samples. When transmission is
+not positive in every scan of a group, :mod:`.run` takes the next alternative
+(``exclude_modes``), flagged ``channel_fallback_transmission_not_positive``.
 """
 
 from __future__ import annotations
@@ -126,7 +128,10 @@ def choose_channels(
     params: Mapping,
     role: str = "sample",
     bl15_selection: Mapping | None = None,
+    exclude_modes: Sequence[str] = (),
 ) -> ChannelChoice:
+    """``exclude_modes``: modes NOT taken (still listed as alternatives) — the fallback when a
+    group's transmission channel is not positive in any scan (:mod:`.run`)."""
     cp = params["channels"]
     flags: list[str] = []
     present = [c for c in cp["energy_candidates"] if table.has(c)]
@@ -171,7 +176,7 @@ def choose_channels(
         if sel.get("selector_id"):
             choice.basis["bl15_signal_selection_not_used"] = sel.get("reason_code") or sel.get("status")
         order = [MODE_TRANSMISSION, MODE_FLUORESCENCE] if role in ("reference", "alignment") else [MODE_FLUORESCENCE, MODE_TRANSMISSION]
-        for mode in order:
+        for mode in (m for m in order if m not in exclude_modes):
             if mode == MODE_TRANSMISSION and i0 and after:
                 choice.mode = MODE_TRANSMISSION
                 choice.transmission_after = after

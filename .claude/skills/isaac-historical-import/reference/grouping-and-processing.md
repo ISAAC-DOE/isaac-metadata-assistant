@@ -51,6 +51,11 @@ it finds one. Show per group, in words:
   `channel_from_a_later_scan` when the first scan was one of them): the used / readable / skipped
   counts in plain words — "14 of 165 scans were used; 150 had different columns (they may be motor
   or alignment scans); please confirm these belong in one record";
+- **when the channel fell back** (reason and flag `channel_fallback_transmission_not_positive`: a
+  group named as a reference or standard takes transmission first, but I0 or I1 was not positive in
+  every scan, so fluorescence was used): say the sentence in `qc.json` → `statements` and ask the
+  scientist to confirm the channel. A scan skipped `signal_not_finite` has its points but a signal
+  that is never finite (I0 or I1 ≤ 0); never call that "too few points";
 - **or, when the result has `applicability.status: not_applicable`, no verdict at all**: say "no
   ISAAC processing protocol covers this data yet" (`no_xas_channel`: no absorption channel could be
   formed; name the reader and the layout it states, never a technique) or "no scans, nothing to

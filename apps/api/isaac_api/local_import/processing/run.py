@@ -19,7 +19,9 @@ when :func:`channels.choose_channels` forms no channel (energy axis + signal) in
 group's readable scans and no scan with an energy axis has a signal-side candidate column
 that is present but dead (that is ``fail signal_channel_dead``). When only some scans form a
 channel, the first that does supplies the choice, the others are skipped and counted, and
-QC warns ``scans_skipped_lacking_chosen_columns``. What the data states about itself (run source type, the reader
+QC warns ``scans_skipped_lacking_chosen_columns``. When the chosen channel is transmission and
+it is not positive in every scan, the next alternative (fluorescence) is used, never silently
+(:func:`_fallback_from_transmission`). What the data states about itself (run source type, the reader
 and profile that claimed it, that reader's stated LAYOUT, the scan format and column labels)
 is reported as literals beside it; no technique is inferred.
 
@@ -47,7 +49,7 @@ from . import _deps
 from . import athena as A
 from . import core as C
 from . import protocol as P
-from .channels import choose_channels, dead_candidates
+from .channels import MODE_TRANSMISSION, choose_channels, dead_candidates
 from .edges import edge_energy
 from .readers import read_scan_file
 
@@ -404,6 +406,70 @@ def _csv(path: Path, header: Sequence[str], cols: Sequence, np) -> None:
     _write(path, ("\n".join(lines) + "\n").encode("utf-8"))
 
 
+def _scan_attempts(tables, choice, np) -> list[tuple]:
+    """``(entry, table, arrays | None, skip code | None)`` per readable scan under ``choice``."""
+    out = []
+    for entry, table in tables:
+        try:
+            out.append((entry, table, C.scan_arrays(table, choice, np), None))
+        except C.StepError as exc:
+            out.append((entry, table, None, exc.code))
+    return out
+
+
+FALLBACK_FLAG = "channel_fallback_transmission_not_positive"
+
+
+def _fallback_from_transmission(attempts, choice, tables, role: str, sel, params: Mapping):
+    """The next alternative channel when TRANSMISSION fails the whole group, else ``None``.
+
+    Only when transmission was chosen and, in EVERY scan that has its columns, fewer than
+    ``merge.min_points`` of its points are finite because some are not (I0 or I1 not positive).
+    Measured on a real BL4-3 beamtime: dilute standards in sucrose pellets are named as
+    standards (role ``reference``, so transmission first) but were measured in fluorescence;
+    I1 is negative at every point. Transmission that works in any scan is kept. Like the
+    channel choice itself, the first readable scan that forms the alternative supplies it.
+    The fallback is never silent: flag :data:`FALLBACK_FLAG`, ``basis.fallback_from`` with a
+    plain statement of what was tried and why it was abandoned, and QC at least ``warn``.
+    """
+    if choice.mode != MODE_TRANSMISSION:
+        return None
+    min_points = int(params["merge"]["min_points"])
+    tried = [(entry, sa["diagnostics"]) for entry, _, sa, _ in attempts if sa is not None]
+    if not tried or any(d["points_read"] - d["nonfinite_dropped"] >= min_points or not d["nonfinite_dropped"] for _, d in tried):
+        return None
+    found = None
+    for k, (_, table) in enumerate(tables):
+        alt = choose_channels(table, params=params, role=role, bl15_selection=sel, exclude_modes=(MODE_TRANSMISSION,))
+        if _formed(alt):
+            found = (k, alt)
+            break
+    if found is None:
+        return None
+    k, alt = found
+    if k:
+        alt.basis["chosen_from_scan_position"] = k
+        alt.flags.append("channel_from_a_later_scan")
+    read = sum(d["points_read"] for _, d in tried)
+    dropped = sum(d["nonfinite_dropped"] for _, d in tried)
+    alt.basis["fallback_from"] = {
+        "mode": MODE_TRANSMISSION,
+        "signal_name": choice.signal_name,
+        "rule": choice.basis.get("rule"),
+        "reason_code": "transmission_not_positive",
+        "min_points": min_points,
+        "scans": [{"source_id": e.get("source_id"), "points_read": d["points_read"], "nonfinite_dropped": d["nonfinite_dropped"]} for e, d in tried],
+        "statement": (
+            f"Transmission {choice.signal_name} was tried first (a {role} group takes transmission first) and abandoned: "
+            f"I0 or I1 is not positive, so {dropped} of its {read} points were not finite and every one of the "
+            f"{len(tried)} scans kept fewer than {min_points}. Fluorescence {alt.signal_name} was used instead; "
+            "a person confirms this channel."
+        ),
+    }
+    alt.flags.append(FALLBACK_FLAG)
+    return alt
+
+
 def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None, athena_versions: Sequence[Mapping] | None = None) -> list[dict]:
     np, params = ctx.np, ctx.params
     res = _base(group, "isaac_protocol")
@@ -459,17 +525,20 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         k, choice = found
         choice.basis["chosen_from_scan_position"] = k
         choice.flags.append("channel_from_a_later_scan")
+    attempts = _scan_attempts(tables, choice, np)
+    fallback = _fallback_from_transmission(attempts, choice, tables, role, sel, params)
+    if fallback is not None:
+        choice = fallback
+        attempts = _scan_attempts(tables, choice, np)
     res["channel_choice"] = choice.to_state()
     res["review_flags"] += choice.flags
     scans_data, used_entries, headers = [], [], []
-    for entry, table in tables:
-        try:
-            sa = C.scan_arrays(table, choice, np)
-        except C.StepError as exc:
-            entry["skip_reason"] = exc.code
-            continue
-        if sa["energy"].size < 5:
-            entry["skip_reason"] = "too_few_points"
+    for entry, table, sa, code in attempts:
+        code = code or C.unusable_reason(sa)
+        if code:
+            entry["skip_reason"] = code
+            if code == C.SIGNAL_NOT_FINITE:
+                entry["diagnostics"] = sa["diagnostics"]  # points_read, nonfinite_dropped: why it is unusable
             continue
         entry.update(used=True, channel=choice.signal_name, diagnostics=sa["diagnostics"])
         scans_data.append(sa)
@@ -477,6 +546,9 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         headers.extend(table.header_lines)
     if not scans_data:
         causes = sorted({e.get("skip_reason") or "?" for e in res["inputs"]})
+        nonfinite = [e["diagnostics"] for e in res["inputs"] if e.get("skip_reason") == C.SIGNAL_NOT_FINITE]
+        if nonfinite:
+            res["qc"]["metrics"] = {k: sum(d[k] for d in nonfinite) for k in ("points_read", "nonfinite_dropped")}
         return [_fail(res, "no_usable_scan", ";".join(causes))]
 
     cal = _calibration(group, stems, scans_data, headers, ctx)
@@ -555,6 +627,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         "scans_used": len(scans_data),
         # only when scans WERE skipped (absent otherwise, so an unaffected result is unchanged)
         **({"scans_readable": len(tables), "scans_skipped_lacking_chosen_columns": lacking} if lacking else {}),
+        # only when the role's first channel was abandoned (absent otherwise, as above)
+        **({"channel_fallback": choice.basis["fallback_from"]["reason_code"]} if fallback is not None else {}),
         "points": int(g2.size),
         "e0_eV": nm["e0_eV"],
         "edge_step": step,
@@ -574,6 +648,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     }
     verdict, reasons = C.qc_verdict(metrics, params)
     res["qc"] = {"metrics": metrics, "verdict": verdict, "reasons": reasons}
+    if fallback is not None:
+        res["qc"]["statements"] = {FALLBACK_FLAG: choice.basis["fallback_from"]["statement"]}
     res["steps"].append({"step": "qc", "params": dict(params["qc"]), "outcome": {"verdict": verdict, "reasons": reasons}, "flags": []})
 
     # outputs

@@ -94,6 +94,26 @@ def scan_arrays(table: ScanTable, choice: ChannelChoice, np) -> dict:
     return {"energy": E, "mu": mu, "mu_ref": mu_ref, "diagnostics": diag}
 
 
+#: A scan with fewer usable points than this is skipped.
+MIN_SCAN_POINTS = 5
+SIGNAL_NOT_FINITE = "signal_not_finite"
+
+
+def unusable_reason(sa: Mapping) -> str | None:
+    """Why a scan's arrays (:func:`scan_arrays`) cannot be used, or ``None``.
+
+    ``signal_not_finite`` when the scan HAS the points but its chosen signal is non-finite at
+    too many of them (I0 or I1 not positive): measured on a real BL4-3 dilute standard, I1 is
+    negative at all 303 points, so ln(I0/I1) dropped every one — that is not ``too_few_points``.
+    """
+    if sa["energy"].size >= MIN_SCAN_POINTS:
+        return None
+    d = sa["diagnostics"]
+    if d["nonfinite_dropped"] and d["points_read"] >= MIN_SCAN_POINTS:
+        return SIGNAL_NOT_FINITE
+    return "too_few_points"
+
+
 # --- calibration ---------------------------------------------------------------------------
 
 
@@ -343,6 +363,10 @@ def qc_verdict(metrics: Mapping, params: Mapping) -> tuple[str, list[str]]:
         # readable scans of the group that lack the chosen columns were left out: a person
         # confirms they belong elsewhere (e.g. motor/alignment scans), so never a pass
         warn.append("scans_skipped_lacking_chosen_columns")
+    if metrics.get("channel_fallback"):
+        # the role's first channel was abandoned (``channel_fallback_<why>``): a person confirms
+        # the channel that was used, so never a pass
+        warn.append(f"channel_fallback_{metrics['channel_fallback']}")
     if (metrics.get("pre_edge_noise") or 0) > float(q["warn_pre_edge_noise"]):
         warn.append("pre_edge_noise")
     if (metrics.get("scan_spread") or 0) > float(q["warn_scan_spread"]):
