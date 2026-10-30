@@ -4,7 +4,7 @@ and compare the scientist's normalisation with the ISAAC protocol's.
 The scientist's Athena output is PREFERRED for the record; a disagreement is a review
 item, never an override in either direction.
 
-MATCHING RULE (``isaac.athena.match_by_name.v0``)
+MATCHING RULE (``isaac.athena.match_by_name.v1``)
 ===============================================
 
 A name is normalised: casefold; one trailing ``.txt``/``.dat``/``.xmu``/``.nor``/``.csv``
@@ -13,7 +13,17 @@ removed; runs of whitespace, ``-`` and ``.`` become ``_``. An Athena group's nam
 (for an unread acquisition, its stem). An Athena group MATCHES a record group when one of
 its names EQUALS a stem (exact), or is the stem followed by ``_`` and a scan-selection
 suffix — digits and digit ranges (``5_6``, ``001``), or ``merge``/``mrg``/``avg``/
-``average``/``mean``/``sum`` (+ anything) — (suffix match).
+``average``/``mean``/``sum`` (+ anything) — (suffix match), or is the stem followed by the
+SSRL XDC scan-file suffix ``_A.NNN`` (normalised ``_a_NNN``; any case) — the name of one of
+that run's own scan files (``xdc_scan_file`` match, read as scan NNN by :func:`scan_selection`).
+
+v1 = v0 + the XDC scan-file suffix, nothing else. Measured on two real SSRL BL4-3 beamtimes: the
+scientists named their Athena groups after the scan file each holds (``03_<sample>_016_A.001``;
+the EXAFS Data Collector writes a run's scans as ``<stem>_A.NNN``), and under v0 161 + 29 Athena
+groups matched no record group. Only that exact shape is accepted: another letter (``_B.001``), no
+separator (``_A001``) or anything after the number is not, and there is no prefix or substring
+matching. A name that fits two record groups (``x`` + ``_A.001`` and ``x_A`` + ``_001``) is
+ambiguous like any other and matches neither.
 
 * an Athena group matching several record groups: an exact match wins over suffix matches;
   still several -> ambiguous, matched to none, and noted;
@@ -70,7 +80,7 @@ from typing import Iterable, Mapping, Sequence
 
 from . import core as C
 
-MATCH_RULE_ID = "isaac.athena.match_by_name.v0"
+MATCH_RULE_ID = "isaac.athena.match_by_name.v1"
 COMPARE_RULE_ID = "isaac.athena.compare.v0"
 
 _EXT = re.compile(r"\.(txt|dat|xmu|nor|csv)$", re.IGNORECASE)
@@ -78,6 +88,10 @@ _SEP = re.compile(r"[\s\-.]+")
 _MERGE_WORD = r"(merge|merged|mrg|avg|average|mean|sum)"
 _SCAN_SUFFIX = re.compile(r"^(\d+(_\d+)*|" + _MERGE_WORD + r"\w*|scans?_?\d+(_\d+)*|\d+_?to_?\d+)$")
 _HAS_MERGE_WORD = re.compile(r"(^|_)" + _MERGE_WORD + r"(_|$|\d)")
+#: The SSRL XDC scan-file suffix after ``<stem>_`` in a NORMALISED name (``_A.001`` -> ``a_001``).
+_XDC_SCAN_FILE = re.compile(r"^a_(\d+)$")
+#: The same suffix after ``<stem>`` in a raw label (``_A.001``, ``_a_001``, ``.a.001``), case-insensitive.
+_XDC_SCAN_FILE_RAW = re.compile(r"^[_\-. ][aA][._](\d+)$")
 
 
 def normalise_name(name: str) -> str:
@@ -87,15 +101,25 @@ def normalise_name(name: str) -> str:
 
 
 def _match_kind(names: Iterable[str], stem: str) -> str | None:
+    """``exact`` | ``suffix`` | ``xdc_scan_file`` | ``None`` for normalised ``names`` against one stem."""
     best = None
     for n in names:
         if not n or not stem:
             continue
         if n == stem:
             return "exact"
-        if n.startswith(stem + "_") and _SCAN_SUFFIX.match(n[len(stem) + 1 :]):
-            best = "suffix"
+        if n.startswith(stem + "_"):
+            tail = n[len(stem) + 1 :]
+            if _SCAN_SUFFIX.match(tail):
+                best = "suffix"
+            elif _XDC_SCAN_FILE.match(tail) and best is None:
+                best = "xdc_scan_file"
     return best
+
+
+def accepted_suffix(tail: str) -> bool:
+    """True when the rule accepts ``tail`` (what follows ``<stem>_`` in a normalised name)."""
+    return bool(_SCAN_SUFFIX.match(tail) or _XDC_SCAN_FILE.match(tail))
 
 
 # --- reading projects -------------------------------------------------------------------------
@@ -367,7 +391,7 @@ def match_with_versions(groups: Sequence[Mapping], entries: Sequence[Mapping], n
         for gid, gstems in stems.items():
             kinds = [k for k in (_match_kind(entry["names"], s) for s in gstems) if k]
             if kinds:
-                hits.append((gid, "exact" if "exact" in kinds else "suffix"))
+                hits.append((gid, "exact" if "exact" in kinds else ("suffix" if "suffix" in kinds else kinds[0])))
         if not hits:
             continue
         exact = [h for h in hits if h[1] == "exact"]
@@ -417,8 +441,9 @@ _RANGE = re.compile(r"^(\d+)\s*-\s*(\d+)$")
 
 def scan_selection(label: str, stems: Sequence[str]) -> list[int] | None:
     """Scan numbers a scientist's Athena label selects after the run stem (``..._5-6`` ->
-    [5, 6]; ``..._1-3_7`` -> [1, 2, 3, 7]; XDAC ``...A.003`` -> [3]); None when the label
-    states no selection."""
+    [5, 6]; ``..._1-3_7`` -> [1, 2, 3, 7]; XDAC ``...A.003`` -> [3], whether or not the stem
+    ends in ``A``: ``<stem>_A.003`` is that run's scan file 3); None when the label states no
+    selection."""
     raw = PurePosixPath(str(label)).name
     raw = _EXT.sub("", raw)
     low = raw.casefold()
@@ -426,6 +451,9 @@ def scan_selection(label: str, stems: Sequence[str]) -> list[int] | None:
         st = str(stem).casefold()
         if not st or not low.startswith(st) or len(low) == len(st) or low[len(st)] not in "_-. ":
             continue
+        xdc = _XDC_SCAN_FILE_RAW.match(raw[len(st) :])
+        if xdc:
+            return [int(xdc.group(1))]
         rest = raw[len(st) + 1 :]
         out: list[int] = []
         for tok in re.split(r"[_,\s.]+", rest):

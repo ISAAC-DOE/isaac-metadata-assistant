@@ -233,11 +233,12 @@ def test_an_athena_project_is_listed_as_read_by_processing(tmp_path, capsys):
 
 def test_process_says_in_one_line_why_no_athena_group_matched():
     groups = [{"group_id": "g1", "_stems": ["03_SYN_dry_015"], "_has_scans": True}]
-    entries = [{"names": ["03_syn_dry_015_a_001"], "label": "x"}, {"names": ["03_syn_dry_015_a_002"], "label": "y"},
+    # (``_a_001``, the XDC scan-file suffix measured on BL4-3, is accepted since match_by_name.v1)
+    entries = [{"names": ["03_syn_dry_015_b_001"], "label": "x"}, {"names": ["03_syn_dry_015_b_002"], "label": "y"},
                {"names": ["unrelated"], "label": "z"}]
     line = RUN.athena_match_statement(groups, entries, matched={}, notes=[])
     assert "3 Athena group(s)" in line and "matched no record group" in line
-    assert "2 of them" in line and "'_a_001'" in line
+    assert "2 of them" in line and "'_b_001'" in line
     assert RUN.athena_match_statement(groups, [], matched={}, notes=[]) is None
     assert RUN.athena_match_statement(groups, entries, matched={"g1": {}}, notes=[]) is None
 

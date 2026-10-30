@@ -1114,14 +1114,16 @@ def athena_match_statement(groups: Sequence[Mapping], entries: Sequence[Mapping]
     """ONE LINE saying why the Athena groups that were read matched NO record group, or ``None`` when
     there were none to match or some matched. Names how many Athena names BEGIN with a group's scan
     name but end in a suffix the match rule does not accept (measured on a real BL4-3 beamtime: 161
-    Athena groups named ``<scan>_a_001``, none matched), and how many matched several groups."""
+    Athena groups named ``<scan>_a_001``, none matched under v0; v1 accepts that XDC scan-file suffix),
+    and how many matched several groups. A name the rule accepts is never counted as a near miss."""
     if not entries or matched:
         return None
     stems = {A.normalise_name(s) for g in groups if g.get("_has_scans", True) for s in g.get("_stems") or ()}
     stems.discard("")
     near, suffixes = 0, []
     for e in entries:
-        tails = [n[len(st):] for n in e.get("names") or () for st in stems if n and n.startswith(st + "_")]
+        tails = [n[len(st):] for n in e.get("names") or () for st in stems
+                 if n and n.startswith(st + "_") and not A.accepted_suffix(n[len(st) + 1:])]
         if tails:
             near += 1
             tail = min(tails, key=len)
@@ -1129,7 +1131,8 @@ def athena_match_statement(groups: Sequence[Mapping], entries: Sequence[Mapping]
                 suffixes.append(tail)
     ambiguous = sum(1 for n in notes if n.get("code") == "athena_group_matches_several_record_groups")
     line = (f"Athena: {len(entries)} Athena group(s) were read and matched no record group under rule {A.MATCH_RULE_ID} "
-            "(an Athena name equal to a group's scan name, or that name plus a scan or merge suffix such as _001 or _merged)")
+            "(an Athena name equal to a group's scan name, or that name plus a scan or merge suffix such as _001 or _merged, "
+            "or plus an XDC scan-file suffix such as _A.001)")
     if near:
         shown = ", ".join(f"'{t}'" for t in suffixes[:_STATED_SUFFIXES]) + (" …" if len(suffixes) > _STATED_SUFFIXES else "")
         line += f"; {near} of them begin with a group's scan name but end in a suffix the rule does not accept ({shown})"
