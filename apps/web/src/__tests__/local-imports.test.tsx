@@ -9,6 +9,7 @@ import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { stubFetchRoutes, type RouteEntry } from '../test/apiFixtures';
 import {
+  CHECK_STATUS_LABEL,
   LOCAL_IMPORTS_COPY as COPY,
   __resetLocalImportsAvailability,
   sectionQuestions,
@@ -292,6 +293,24 @@ const progressBody: ApiLocalBundleProgress = {
 const QPATH = '/api/local-bundles/synthetic-beamtime/questions';
 const APATH = (id: string) => `POST /api/local-bundles/synthetic-beamtime/questions/${id}/answer`;
 
+/** A dry-run answer naming exactly `scopes` of envQ. */
+function previewOf(scopes: string[], value: unknown = 'in_situ') {
+  const by = envQ.display.scopes.filter((sc) => scopes.includes(sc.scope));
+  const ids = by.flatMap((sc) => envQ.per_scope_targets[sc.scope]);
+  return {
+    dry_run: true, question_id: envQ.question_id, would_record: ids, unchanged: [], target_ids: ids, value, bundle_version: VERSION,
+    statement: 'SERVER-SAID: nothing was written.', scopes_total: by.length, scopes_whose_files_suggest_otherwise: 0,
+    by_scope: by.map((sc) => ({ scope: sc.scope, label: sc.label, run_names: sc.run_names, run_count: sc.run_names.length,
+      target_ids: envQ.per_scope_targets[sc.scope], own_suggestions: sc.own_suggestions ?? [], compared: true, differs: false,
+      differing_targets: [] })),
+  };
+}
+
+function recordedBody(id: string, recorded: string[], version = VERSION_2) {
+  return { dry_run: false, question_id: id, result: { recorded, unchanged: [], batch_id: null }, value: 'x',
+    bundle_version: version, identity: 'local_unverified', statement: 'SERVER-SAID: recorded.' };
+}
+
 function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -355,9 +374,14 @@ describe('the destination is absent unless this is a local build on a server tha
     const labels = within(nav).getAllByRole('link').map((a) => a.textContent);
     expect(labels.indexOf(LABELS.navLocalImports)).toBe(labels.indexOf(LABELS.navImports) + 1);
     expect(await screen.findByText('SERVER-SAID: 1 blocking question(s) are open.')).toBeInTheDocument();
-    expect(screen.getByText('STALE')).toBeInTheDocument();
+    // the check status in plain words; the raw code stays available in the chip's title
+    const chip = screen.getByText(CHECK_STATUS_LABEL.STALE).closest('.li-chip') as HTMLElement;
+    expect(chip).toHaveAttribute('title', expect.stringMatching(/^STALE: /));
+    expect(screen.queryByText('STALE')).toBeNull();
     expect(screen.getByText('SYN_2099_beamtime')).toBeInTheDocument();
-    expect(screen.getByText('SERVER-SAID: no missing share is computed.')).toBeInTheDocument();
+    // the "missing-value share" row said only that it is not available: it is gone
+    expect(screen.queryByText('SERVER-SAID: no missing share is computed.')).toBeNull();
+    expect(screen.queryByText(/Missing-value share/)).toBeNull();
   });
 });
 
@@ -423,12 +447,24 @@ describe('the questions screen', () => {
     expect(screen.getByRole('button', { name: 'None of these is a counter' })).toBeInTheDocument();
   });
 
-  it('needs a name before it sends anything', async () => {
+  it('needs a name before it sends anything: the name field is focused and the error said again on every try', async () => {
     const calls = stubQuestions();
     renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
     const card = (await screen.findByRole('heading', { name: envQ.text })).closest('li') as HTMLElement;
-    fireEvent.click(within(card).getByRole('button', { name: `${COPY.acceptSuggestion}: ex_situ` }));
-    expect(await within(card).findByRole('alert')).toHaveTextContent(COPY.nameNeeded);
+    const accept = within(card).getByRole('button', { name: `${COPY.acceptSuggestion}: ex_situ` });
+    fireEvent.click(accept);
+    const nameField = screen.getByLabelText(COPY.yourName);
+    const first = await screen.findByTestId('li-name-error');
+    expect(first).toHaveAttribute('role', 'alert');
+    expect(first).toHaveTextContent(COPY.nameNeeded);
+    expect(nameField).toHaveFocus();
+    expect(nameField).toHaveAttribute('aria-invalid', 'true');
+    expect(nameField.getAttribute('aria-describedby')).toContain(first.id);
+    // a second try re-announces: a NEW alert element (same words), and focus goes back to the field
+    accept.focus();
+    fireEvent.click(accept);
+    await waitFor(() => expect(screen.getByTestId('li-name-error')).not.toBe(first));
+    expect(nameField).toHaveFocus();
     expect(calls.filter((k) => k.startsWith('POST'))).toEqual([]);
   });
 
@@ -446,11 +482,13 @@ describe('the questions screen', () => {
     expect(calls.filter((k) => k.startsWith('POST'))).toEqual([]);
   });
 
-  it('the per-group table shows each group’s own suggestion and accepts it for that group alone', async () => {
+  it('the per-group table shows each group’s own suggestion and accepts it for that group alone — after a preview', async () => {
     const posts: Record<string, unknown>[] = [];
     stubQuestions({
       [APATH(envQ.question_id)]: (init) => {
-        posts.push(bodyOf(init));
+        const body = bodyOf(init);
+        posts.push(body);
+        if (body.dry_run) return { body: previewOf(['group:g2']) };
         return { body: { dry_run: false, question_id: envQ.question_id, result: { recorded: ['miss-0002'], unchanged: [], batch_id: null },
           value: 'in_situ', bundle_version: VERSION_2, identity: 'local_unverified', statement: 'SERVER-SAID: recorded.' } };
       },
@@ -462,8 +500,14 @@ describe('the questions screen', () => {
     expect(row).toHaveTextContent('SYNTHETIC in situ cell');
     expect(row).toHaveTextContent('SYN_run_B.dat @ header line 2');
     fireEvent.click(within(row).getByRole('button', { name: 'Accept in_situ for Record group g2' }));
-    await waitFor(() => expect(posts).toHaveLength(1));
-    expect(posts[0]).toMatchObject({ decision: 'correct', value: 'in_situ', only: 'group:g2', dry_run: false, expected_version: VERSION });
+    // nothing is written by the click: a dry run first, for that group alone
+    const preview = await screen.findByRole('group', { name: /This will write one answer to each of these/ });
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatchObject({ decision: 'correct', value: 'in_situ', only: 'group:g2', dry_run: true, expected_version: VERSION });
+    expect(within(preview).getByTestId('li-preview-runs')).toHaveTextContent('Run SYN_run_B');
+    fireEvent.click(within(preview).getByRole('button', { name: COPY.previewWrite }));
+    await waitFor(() => expect(posts).toHaveLength(2));
+    expect(posts[1]).toMatchObject({ decision: 'correct', value: 'in_situ', only: 'group:g2', dry_run: false });
   });
 
   it('"same for all" previews every target, flags groups whose own files say otherwise, and reports the server’s count', async () => {
@@ -531,7 +575,8 @@ describe('the questions screen', () => {
     releaseRead();
     await waitFor(() => expect(screen.getByTestId('li-announcement')).toHaveTextContent(COPY.refreshed));
     expect(screen.getByTestId('li-announcement')).toHaveTextContent('Recorded 1 answer(s)');
-    await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: /Questions/ })).toHaveFocus());
+    // the question is still asked (other groups are open): focus stays on THIS card, on its "Answered" line
+    await waitFor(() => expect(within(card).getByText(/Answered: Recorded 1 answer\(s\)/)).toHaveFocus());
     expect(headers).toEqual(['1', '1']);
   });
 
@@ -582,8 +627,10 @@ describe('the questions screen', () => {
     fireEvent.change(screen.getByLabelText('Value (in K)'), { target: { value: '295' } });
     fireEvent.click(screen.getByRole('button', { name: COPY.answer }));
     await waitFor(() => expect(reads).toBe(2));
-    expect(await screen.findByTestId('li-announcement')).toHaveTextContent(COPY.staleWrite);
-    expect(screen.getByTestId('li-announcement')).not.toHaveTextContent(/command|another window/);
+    // said on the card that was refused
+    const card = screen.getByRole('heading', { name: tempQ.text }).closest('li') as HTMLElement;
+    expect(await within(card).findByRole('alert')).toHaveTextContent(COPY.staleWrite);
+    expect(within(card).getByRole('alert')).not.toHaveTextContent(/command|another window/);
     // once the re-read has ARRIVED, the card was not unmounted by it: what was typed is still there
     await waitFor(() => expect(screen.getByTestId('li-announcement')).toHaveTextContent(COPY.refreshed));
     expect(screen.getByLabelText('Value (in K)')).toHaveValue('295');
@@ -615,7 +662,7 @@ describe('the questions screen', () => {
     const first = within(table).getAllByRole('rowheader')[0];
     expect(first.firstElementChild).toHaveClass('li-run-names');
     expect(first.querySelector('.li-group-id')).toHaveTextContent('group g2');
-    for (const b of within(table).getAllByRole('button')) expect(b).toHaveClass('li-nowrap');
+    for (const b of within(table).getAllByRole('button')) expect(b).toHaveClass('li-accept');
     // the group with nothing suggested is behind a disclosure with its count
     const summary = screen.getByText(`${COPY.nothingSuggestedRows} (1)`);
     expect(summary.closest('details')).not.toHaveAttribute('open');
@@ -651,10 +698,12 @@ describe('the questions screen', () => {
     expect(await screen.findByRole('group', { name: /This will write one answer to each of these/ })).toHaveTextContent('miss-0002');
   });
 
-  it('the stylesheet keeps action buttons whole and stacks the table on a phone-width screen', () => {
+  it('the stylesheet lets an "Accept <long value>" button wrap (no sideways scroll) and stacks the table on a phone', () => {
     const css = readFileSync(join(process.cwd(), 'src', 'screens', 'local-imports.css'), 'utf8');
-    expect(css).toMatch(/\.li-nowrap\s*\{\s*white-space:\s*nowrap;/);
-    expect(css).toMatch(/\.li-col-actions\s*\{\s*min-width:\s*13rem;/);
+    expect(css).not.toMatch(/\.li-nowrap/);
+    expect(css).toMatch(/\.li-accept\s*\{\s*white-space:\s*normal;\s*overflow-wrap:\s*anywhere;/);
+    expect(css).toMatch(/\.li-choices \.btn\s*\{[^}]*overflow-wrap:\s*anywhere;/);
+    expect(css).toMatch(/\.li-actions \.btn\s*\{[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;/);
     expect(css).toMatch(/@media \(max-width: 560px\)\s*\{[^}]*\.li-table-groups thead\s*\{\s*display:\s*none;/);
   });
 
@@ -672,5 +721,335 @@ describe('the questions screen', () => {
     // the bulk accepts name only unanimous own-file groups: ex_situ -> g1, in_situ -> g2 (never g5)
     expect(screen.getByRole('button', { name: 'Accept in_situ for the 1 group(s) whose own files all suggest it' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Accept ex_situ for the 1 group(s) whose own files all suggest it' })).toBeInTheDocument();
+  });
+});
+
+describe('audit fixes', () => {
+  function stub(routes: Record<string, RouteEntry>, qs: LocalQuestion[]) {
+    vi.stubEnv('VITE_ISAAC_LOCAL_IMPORTS', '1');
+    return stubFetchRoutes({
+      'GET /api/local-bundles': { body: listBody },
+      [`GET ${QPATH}`]: { body: questionsBody(qs) },
+      ...routes,
+    });
+  }
+  async function open(name = 'Synthetic Scientist') {
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    fireEvent.change(await screen.findByLabelText(COPY.yourName), { target: { value: name } });
+  }
+  const cardOf = (q: LocalQuestion) => screen.getByRole('heading', { name: q.text }).closest('li') as HTMLElement;
+  const withoutScope = (q: LocalQuestion, scope: string): LocalQuestion => ({
+    ...q,
+    per_scope_targets: Object.fromEntries(Object.entries(q.per_scope_targets).filter(([k]) => k !== scope)),
+    display: { ...q.display, scopes: q.display.scopes.filter((sc) => sc.scope !== scope) },
+  });
+
+  it('F1: a group answered "this group only" and no longer listed is not sent again: a new choice is required', async () => {
+    const posts: Record<string, unknown>[] = [];
+    let reads = 0;
+    // g4 has one run: "this group only" writes at once
+    stub({
+      [`GET ${QPATH}`]: () => {
+        reads += 1;
+        return { body: questionsBody([reads === 1 ? envQ : withoutScope(envQ, 'group:g4')], reads === 1 ? VERSION : VERSION_2) };
+      },
+      [APATH(envQ.question_id)]: (init) => {
+        posts.push(bodyOf(init));
+        return { body: recordedBody(envQ.question_id, ['miss-0004'], VERSION_2) };
+      },
+    }, [envQ]);
+    await open();
+    let card = cardOf(envQ);
+    fireEvent.click(within(card).getByRole('radio', { name: COPY.thisGroupOnly }));
+    fireEvent.change(within(card).getByRole('combobox', { name: 'Which group' }), { target: { value: 'group:g4' } });
+    fireEvent.change(within(card).getByLabelText('Your answer'), { target: { value: 'operando' } });
+    fireEvent.click(within(card).getByRole('button', { name: COPY.answer }));
+    await waitFor(() => expect(reads).toBe(2));
+    await waitFor(() => expect(screen.getByTestId('li-announcement')).toHaveTextContent(COPY.refreshed));
+    card = cardOf(envQ);
+    const which = within(card).getByRole('combobox', { name: 'Which group' }) as HTMLSelectElement;
+    // what is shown is what would be sent: nothing chosen
+    expect(which.value).toBe('');
+    expect([...which.options].map((o) => o.value)).not.toContain('group:g4');
+    expect(within(card).getByTestId('li-group-gone')).toHaveTextContent(COPY.groupGone);
+    fireEvent.click(within(card).getByRole('button', { name: COPY.answer }));
+    expect(await within(card).findByRole('alert')).toHaveTextContent(COPY.groupGone);
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatchObject({ only: 'group:g4' });
+  });
+
+  it('F2: a second quick answer is sent with the version the first write returned, before any re-read lands', async () => {
+    const posts: { path: string; body: Record<string, unknown> }[] = [];
+    let reads = 0;
+    const holds: (() => void)[] = [];
+    stub({
+      [`GET ${QPATH}`]: async () => {
+        reads += 1;
+        if (reads > 1) await new Promise<void>((resolve) => holds.push(resolve));
+        return { body: questionsBody([tempQ, absorberQ], VERSION) };
+      },
+      [APATH(tempQ.question_id)]: (init) => {
+        posts.push({ path: 'temp', body: bodyOf(init) });
+        return { body: recordedBody(tempQ.question_id, ['miss-0100'], VERSION_2) };
+      },
+      [APATH(absorberQ.question_id)]: (init) => {
+        posts.push({ path: 'abs', body: bodyOf(init) });
+        return { body: recordedBody(absorberQ.question_id, ['g2'], 'sha256:' + 'c'.repeat(64)) };
+      },
+    }, [tempQ, absorberQ]);
+    await open();
+    fireEvent.change(screen.getByLabelText('Value (in K)'), { target: { value: '295' } });
+    fireEvent.click(within(cardOf(tempQ)).getByRole('button', { name: COPY.answer }));
+    await waitFor(() => expect(posts).toHaveLength(1));
+    await waitFor(() => expect(reads).toBe(2)); // the re-read is in flight, held
+    fireEvent.click(within(cardOf(absorberQ)).getByRole('button', { name: COPY.acceptSuggestion }));
+    await waitFor(() => expect(posts).toHaveLength(2));
+    expect(posts[0].body.expected_version).toBe(VERSION);
+    expect(posts[1].body.expected_version).toBe(VERSION_2);
+    // the OLDER re-read (still carrying VERSION) lands last: the newer version is still the one used
+    holds.forEach((h) => h());
+    await waitFor(() => expect(screen.getByTestId('li-announcement')).toHaveTextContent(COPY.refreshed));
+    // both cards' messages are said; neither replaced the other
+    expect(screen.getByTestId('li-announcement')).toHaveTextContent(`Recorded 1 answer(s) to “${tempQ.text.slice(0, 20)}`);
+    expect(screen.getByTestId('li-announcement')).toHaveTextContent(`Recorded 1 answer(s) to “${absorberQ.text.slice(0, 20)}`);
+  });
+
+  it('F2: a 412 is said on the card that got it, and another card’s "Recorded" stays', async () => {
+    stub({
+      [APATH(tempQ.question_id)]: { body: recordedBody(tempQ.question_id, ['miss-0100'], VERSION_2) },
+      [APATH(absorberQ.question_id)]: { status: 412, body: { error: 'stale_bundle_version', message: 'SERVER-SAID: changed.', current_version: VERSION_2 } },
+    }, [tempQ, absorberQ]);
+    await open();
+    fireEvent.change(screen.getByLabelText('Value (in K)'), { target: { value: '295' } });
+    fireEvent.click(within(cardOf(tempQ)).getByRole('button', { name: COPY.answer }));
+    await waitFor(() => expect(within(cardOf(tempQ)).getByText(/Answered: Recorded 1 answer/)).toBeInTheDocument());
+    fireEvent.click(within(cardOf(absorberQ)).getByRole('button', { name: COPY.acceptSuggestion }));
+    expect(await within(cardOf(absorberQ)).findByRole('alert')).toHaveTextContent(COPY.staleWrite);
+    await waitFor(() => expect(screen.getByTestId('li-announcement')).toHaveTextContent(COPY.refreshed));
+    expect(within(cardOf(tempQ)).getByText(/Answered: Recorded 1 answer/)).toBeInTheDocument();
+    expect(within(cardOf(tempQ)).queryByText(COPY.staleWrite)).toBeNull();
+    expect(screen.getByTestId('li-announcement')).not.toHaveTextContent(COPY.staleWrite);
+  });
+
+  it('F3: accepting one group’s value previews every run, marking the runs with no reading', async () => {
+    const reading = { ...MIXED_E1, value: 'ex_situ', relative_path: 'SYN_run_F1.dat', quote: 'SYNTHETIC F1 ex situ' };
+    const g6 = {
+      scope: 'group:g6', kind: 'group' as const, group_id: 'g6', label: 'Record group g6', target_count: 2,
+      run_names: ['SYN_run_F1', 'SYN_run_F2'], run_count: 2, own_suggestions: [reading], own_suggestions_total: 1,
+      mixed: false, has_unanimous_value: true, unanimous_value: 'ex_situ', unanimous_from_own_files: true,
+      per_target: [
+        { target_id: 'miss-0601', run_id: 'run-F1', run_name: 'SYN_run_F1', own_suggestions: [reading] },
+        { target_id: 'miss-0602', run_id: 'run-F2', run_name: 'SYN_run_F2', own_suggestions: [] },
+      ],
+    };
+    const q = { ...envQ, per_scope_targets: { ...envQ.per_scope_targets, 'group:g6': ['miss-0601', 'miss-0602'] },
+      display: { ...envQ.display, scopes: [...envQ.display.scopes, g6] } };
+    const posts: Record<string, unknown>[] = [];
+    stub({
+      [APATH(envQ.question_id)]: (init) => {
+        posts.push(bodyOf(init));
+        return { body: { ...previewOf([]), would_record: ['miss-0601', 'miss-0602'], target_ids: ['miss-0601', 'miss-0602'], value: 'ex_situ',
+          scopes_total: 1, by_scope: [{ scope: 'group:g6', label: 'Record group g6', run_names: g6.run_names, run_count: 2,
+            target_ids: ['miss-0601', 'miss-0602'], own_suggestions: [reading], compared: true, differs: false, differing_targets: [] }] } };
+      },
+    }, [q]);
+    await open();
+    const row = screen.getByText('SYN_run_F1, SYN_run_F2', { selector: '.li-run-names' }).closest('tr') as HTMLElement;
+    fireEvent.click(within(row).getByRole('button', { name: 'Accept ex_situ for Record group g6' }));
+    const preview = await screen.findByRole('group', { name: /This will write one answer to each of these/ });
+    expect(posts).toEqual([expect.objectContaining({ only: 'group:g6', dry_run: true })]);
+    const runs = within(preview).getByTestId('li-preview-runs');
+    const f1 = within(runs).getByText('Run SYN_run_F1').closest('li') as HTMLElement;
+    const f2 = within(runs).getByText('Run SYN_run_F2').closest('li') as HTMLElement;
+    expect(f1).toHaveTextContent('its files suggest ex_situ');
+    expect(f2).toHaveAttribute('data-no-reading', 'true');
+    expect(f2).toHaveTextContent(COPY.previewNoReading);
+    // run names, not ids, in the list; the ids are behind a disclosure
+    const ids = within(preview).getByText(COPY.previewIds).closest('details') as HTMLElement;
+    expect(ids).not.toHaveAttribute('open');
+    expect(ids).toHaveTextContent('miss-0601');
+  });
+
+  it('F4: a 403 refusal shows the server’s reason and never sign-in copy', async () => {
+    stub({
+      [`GET ${QPATH}`]: { status: 403, body: { detail: { error: 'origin_not_allowed', message: "SERVER-SAID: This page's origin may not use local bundles." } } },
+    }, []);
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const refused = await screen.findByTestId('li-refused');
+    expect(refused).toHaveTextContent("SERVER-SAID: This page's origin may not use local bundles.");
+    expect(refused).toHaveTextContent('HTTP 403');
+    expect(screen.queryByText(/Sign-In Required/i)).toBeNull();
+    expect(screen.queryByText(/sign-in/i)).toBeNull();
+    // the region is named even though the Questions heading does not exist in this state
+    expect(screen.getByRole('region', { name: COPY.questionsTitle })).toBeInTheDocument();
+  });
+
+  it('F4: a 422 validation error shows what the server said, named by field', async () => {
+    stub({
+      [APATH(tempQ.question_id)]: {
+        status: 422,
+        body: { detail: [{ type: 'string_too_long', loc: ['body', 'by'], msg: 'String should have at most 200 characters', input: 'x' }] },
+      },
+    }, [tempQ]);
+    await open();
+    fireEvent.change(screen.getByLabelText('Value (in K)'), { target: { value: '295' } });
+    fireEvent.click(screen.getByRole('button', { name: COPY.answer }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Your name: String should have at most 200 characters');
+  });
+
+  it('F4: the page holds the server’s limits — name 200, element 3 — and keeps a generated note under 2,000', async () => {
+    const posts: Record<string, unknown>[] = [];
+    const longPath = 'notes/' + 'p'.repeat(3_000) + '.txt';
+    const fq = question({
+      question_id: 'Q-note000001', scope: 'group:g1', per_scope_targets: { 'group:g1': ['miss-0700'] },
+      targets: [{ kind: 'missing_value', id: 'miss-0700' }],
+      display: display({
+        scopes: [{ scope: 'group:g1', kind: 'group', group_id: 'g1', label: 'Record group g1', target_count: 1, run_names: ['SYN_run_A'] }],
+        suggestions: [{ who: 'parser', who_label: 'ISAAC’s parser', hint_kind: 'x', value: 'ex_situ', relative_path: longPath, locator: 'line 1',
+          quote: null, model_id: null, field: null, note: null, acceptable: true, confirmed: false }],
+      }),
+    });
+    stub({
+      [APATH(fq.question_id)]: (init) => {
+        posts.push(bodyOf(init));
+        return { body: recordedBody(fq.question_id, ['miss-0700']) };
+      },
+    }, [fq, absorberQ]);
+    await open();
+    expect(screen.getByLabelText(COPY.yourName)).toHaveAttribute('maxlength', '200');
+    expect(screen.getByLabelText('Element')).toHaveAttribute('maxlength', '3');
+    fireEvent.click(within(cardOf(fq)).getByRole('button', { name: `${COPY.acceptSuggestion}: ex_situ` }));
+    await waitFor(() => expect(posts).toHaveLength(1));
+    const note = String(posts[0].note);
+    expect(note.length).toBeLessThanOrEqual(2_000);
+    expect(note.startsWith('Accepted the suggestion shown')).toBe(true);
+    expect(note.endsWith('…')).toBe(true);
+  });
+
+  it('F5: a question answered elsewhere (404 not_found_in_bundle) says so and reads the questions again', async () => {
+    let reads = 0;
+    stub({
+      [`GET ${QPATH}`]: () => {
+        reads += 1;
+        return { body: questionsBody(reads === 1 ? [tempQ, absorberQ] : [absorberQ]) };
+      },
+      [APATH(tempQ.question_id)]: { status: 404, body: { error: 'not_found_in_bundle', message: "SERVER-SAID: No open question 'Q-temp000001'." } },
+    }, [tempQ, absorberQ]);
+    await open();
+    fireEvent.change(screen.getByLabelText('Value (in K)'), { target: { value: '295' } });
+    fireEvent.click(within(cardOf(tempQ)).getByRole('button', { name: COPY.answer }));
+    await waitFor(() => expect(reads).toBe(2));
+    await waitFor(() => expect(screen.getByTestId('li-announcement')).toHaveTextContent(COPY.refreshed));
+    expect(screen.getByTestId('li-announcement')).toHaveTextContent(COPY.goneElsewhere);
+    expect(screen.queryByRole('heading', { name: tempQ.text })).toBeNull();
+    // focus moves to the next open question, not the page heading
+    await waitFor(() => expect(screen.getByRole('heading', { name: absorberQ.text })).toHaveFocus());
+  });
+
+  it('F6: two failed re-reads in a row each say so — "Reading the questions again…" never sticks', async () => {
+    let reads = 0;
+    stub({
+      [`GET ${QPATH}`]: () => {
+        reads += 1;
+        return reads === 1 ? { body: questionsBody([tempQ]) } : { status: 503, body: { detail: 'down' } };
+      },
+      [APATH(tempQ.question_id)]: { body: recordedBody(tempQ.question_id, ['miss-0100']) },
+    }, [tempQ]);
+    await open();
+    fireEvent.change(screen.getByLabelText('Value (in K)'), { target: { value: '295' } });
+    fireEvent.click(screen.getByRole('button', { name: COPY.answer }));
+    await waitFor(() => expect(screen.getByTestId('li-announcement')).toHaveTextContent(COPY.refreshFailed));
+    fireEvent.click(screen.getByRole('button', { name: COPY.answer }));
+    await waitFor(() => expect(reads).toBe(3));
+    await waitFor(() => expect(screen.getByTestId('li-announcement')).toHaveTextContent(COPY.refreshFailed));
+    expect(screen.getByTestId('li-announcement')).not.toHaveTextContent(COPY.refreshing);
+  });
+
+  it('F7: a failed availability check is not remembered — the nav item appears once the API answers', async () => {
+    vi.stubEnv('VITE_ISAAC_LOCAL_IMPORTS', '1');
+    let up = false;
+    stubFetchRoutes({
+      'GET /api/local-bundles': () => (up ? { body: listBody } : { status: 503, body: { detail: 'starting' } }),
+      'GET /api/local-bundles/synthetic-beamtime/progress': { body: progressBody },
+    });
+    renderAt(ROUTES.localImports);
+    const nav = screen.getByRole('navigation', { name: 'Primary' });
+    await screen.findByRole('button', { name: 'Retry' }).catch(() => undefined);
+    expect(within(nav).queryByRole('link', { name: LABELS.navLocalImports })).toBeNull();
+    up = true;
+    window.dispatchEvent(new Event('focus'));
+    expect(await within(nav).findByRole('link', { name: LABELS.navLocalImports })).toBeInTheDocument();
+  });
+
+  it('Cancel on a preview writes nothing, says so, and returns focus to the button that opened it', async () => {
+    const posts: Record<string, unknown>[] = [];
+    stub({
+      [APATH(envQ.question_id)]: (init) => {
+        posts.push(bodyOf(init));
+        return { body: previewOf(['group:g2']) };
+      },
+    }, [envQ]);
+    await open();
+    const accept = screen.getByRole('button', { name: 'Accept in_situ for Record group g2' });
+    accept.focus();
+    fireEvent.click(accept);
+    const preview = await screen.findByRole('group', { name: /This will write one answer to each of these/ });
+    fireEvent.click(within(preview).getByRole('button', { name: COPY.previewCancel }));
+    await waitFor(() => expect(accept).toHaveFocus());
+    expect(within(cardOf(envQ)).getByTestId('li-card-status')).toHaveTextContent(COPY.previewCancelled);
+    expect(posts.every((p) => p.dry_run === true)).toBe(true);
+  });
+
+  it('Enter in a value field answers (a form), and Previous/Next move focus to the questions heading', async () => {
+    const posts: Record<string, unknown>[] = [];
+    const page = (offset: number) => ({ ...questionsBody([tempQ]), total: 400, offset, limit: 200, returned: 1,
+      omitted_before: offset, omitted_after: offset === 0 ? 199 : 0 });
+    stub({
+      [`GET ${QPATH}`]: (_init, key) => ({ body: page(key?.includes('offset=200') ? 200 : 0) }),
+      [APATH(tempQ.question_id)]: (init) => {
+        posts.push(bodyOf(init));
+        return { body: recordedBody(tempQ.question_id, ['miss-0100']) };
+      },
+    }, [tempQ]);
+    await open();
+    const field = screen.getByLabelText('Value (in K)');
+    fireEvent.change(field, { target: { value: '295' } });
+    fireEvent.submit(field.closest('form') as HTMLFormElement);
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toMatchObject({ value: '295', field: 'context.temperature_K' });
+    expect(within(field.closest('form') as HTMLElement).getByRole('button', { name: COPY.answer })).toHaveAttribute('type', 'submit');
+    fireEvent.click(screen.getByRole('button', { name: 'Next questions' }));
+    await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: /Questions/ })).toHaveFocus());
+  });
+
+  it('keeps the name across reloads, and survives a storage that throws', async () => {
+    stub({}, [tempQ]);
+    const first = renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    fireEvent.change(await screen.findByLabelText(COPY.yourName), { target: { value: 'Synthetic Scientist' } });
+    first.unmount();
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    expect(await screen.findByLabelText(COPY.yourName)).toHaveValue('Synthetic Scientist');
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    fireEvent.change(screen.getByLabelText(COPY.yourName), { target: { value: 'Another Name' } });
+    expect(screen.getByLabelText(COPY.yourName)).toHaveValue('Another Name');
+  });
+
+  it('copy: plain words, and the regroup step is named as a command-line step with a copy button', async () => {
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    stub({}, [counterQ, envQ]);
+    await open();
+    const page = document.body.textContent ?? '';
+    expect(page).not.toMatch(/answer slot|exposure\(s\)|blind cross-check|Blocking is judged against|result of record|\btargets\b/);
+    expect(page).not.toMatch(/Nearest record|Fewest answers to one record/);
+    const card = cardOf(counterQ);
+    expect(card).toHaveTextContent('That step is done in the command line');
+    const command = within(card).getByLabelText('Command that proposes the groups again');
+    expect(command).toHaveTextContent('isaac bundle group "<folder of bundles>/synthetic-beamtime" --regroup');
+    fireEvent.click(within(card).getByRole('button', { name: /Copy command/ }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('isaac bundle group "<folder of bundles>/synthetic-beamtime" --regroup'));
+    expect(await within(card).findByText(COPY.copied)).toBeInTheDocument();
   });
 });

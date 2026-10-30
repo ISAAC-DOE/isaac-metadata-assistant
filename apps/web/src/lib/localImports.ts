@@ -321,14 +321,28 @@ export function localImportsBuildEnabled(): boolean {
 }
 
 let availability: Promise<boolean> | null = null;
+let available = false;
 
-/** Does THIS server serve local bundles? One request per session; never throws. */
+/**
+ * Does THIS server serve local bundles? Never throws.
+ *
+ * Only a YES is remembered for the session. A failed check — the API not up yet when the page
+ * first loaded, a refusal, a 404 from a server started without the folder — is forgotten, so the
+ * next check asks again; while one check is in flight every caller shares it.
+ */
 export function localImportsAvailableOnce(): Promise<boolean> {
   if (!localImportsBuildEnabled()) return Promise.resolve(false);
+  if (available) return Promise.resolve(true);
   if (!availability) {
     availability = api.listLocalBundles().then(
-      () => true,
-      () => false,
+      () => {
+        available = true;
+        return true;
+      },
+      () => {
+        availability = null;
+        return false;
+      },
     );
   }
   return availability;
@@ -337,22 +351,175 @@ export function localImportsAvailableOnce(): Promise<boolean> {
 /** Test seam: forget the cached answer. */
 export function __resetLocalImportsAvailability(): void {
   availability = null;
+  available = false;
 }
 
-/** `true` once the server has said it serves local bundles; `false` before, and in every hosted build. */
+/** When a "no" is asked again, in ms after the first check (then on focus / coming back online only). */
+export const AVAILABILITY_RETRY_MS = [3_000, 10_000, 30_000] as const;
+
+/**
+ * `true` once the server has said it serves local bundles; `false` before, and in every hosted
+ * build. A "no" is checked again a few times with backoff, and whenever the window regains focus
+ * or comes back online, so the nav item appears once the API is up.
+ */
 export function useLocalImportsAvailable(): boolean {
-  const [available, setAvailable] = useState(false);
+  const [yes, setYes] = useState(available);
   useEffect(() => {
     if (!localImportsBuildEnabled()) return undefined;
     let alive = true;
-    void localImportsAvailableOnce().then((yes) => {
-      if (alive) setAvailable(yes);
-    });
+    let attempt = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const check = () => {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = undefined;
+      void localImportsAvailableOnce().then((ok) => {
+        if (!alive) return;
+        setYes(ok);
+        if (!ok && attempt < AVAILABILITY_RETRY_MS.length) {
+          timer = setTimeout(check, AVAILABILITY_RETRY_MS[attempt]);
+          attempt += 1;
+        }
+      });
+    };
+    const again = () => {
+      if (!available) check();
+    };
+    check();
+    window.addEventListener('focus', again);
+    window.addEventListener('online', again);
     return () => {
       alive = false;
+      if (timer !== undefined) clearTimeout(timer);
+      window.removeEventListener('focus', again);
+      window.removeEventListener('online', again);
     };
   }, []);
-  return available;
+  return yes;
+}
+
+// --- the server's limits, and its reasons ---------------------------------------------------
+
+/**
+ * The request limits `apps/api/isaac_api/local_bundles.py` enforces (`LocalAnswerRequest` /
+ * `LocalDecisionRequest`), so the page refuses what the server would, before sending it.
+ */
+export const LOCAL_LIMITS = {
+  /** `by: str = Field(max_length=200)` */
+  nameMax: 200,
+  /** `element: str | None = Field(default=None, max_length=3)` */
+  elementMax: 3,
+  /** `note: str | None = Field(default=None, max_length=2_000)` */
+  noteMax: 2_000,
+  /** `value: str | None = Field(default=None, max_length=20_000)` (an answer's value) */
+  valueMax: 20_000,
+} as const;
+
+/**
+ * `text` cut to at most `max` UTF-16 units (so at most `max` characters as the server counts them),
+ * ending in "…" when cut, never splitting a surrogate pair.
+ */
+export function clampText(text: string, max: number): string {
+  if (text.length <= max) return text;
+  let end = max - 1;
+  const code = text.charCodeAt(end - 1);
+  if (code >= 0xd800 && code <= 0xdbff) end -= 1;
+  return `${text.slice(0, end)}…`;
+}
+
+const FIELD_NAME: Record<string, string> = {
+  by: 'Your name',
+  value: 'The answer',
+  note: 'The note',
+  element: 'Element',
+  edge: 'Edge',
+  only: 'The group',
+  only_scopes: 'The groups',
+  field: 'The field',
+  positions: 'The positions',
+  expected_version: 'The bundle version',
+};
+
+/**
+ * The server's own reason for a refusal, or `undefined`. Reads every shape this API answers with:
+ * `{message}` (the routes' own refusals), `{detail: "…"}`, `{detail: {error, message}}` (the
+ * 403/421 guards, raised as `HTTPException`) and FastAPI's 422 `{detail: [{loc, msg}]}`, each
+ * item named by the field it is about. An HTML page (`htmlIntercept`) has no reason of ISAAC's.
+ */
+export function localReasonOf(err: unknown): string | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  if ((err as { htmlIntercept?: unknown }).htmlIntercept === true) return undefined;
+  const body = (err as { body?: unknown }).body;
+  if (typeof body !== 'object' || body === null) return undefined;
+  const text = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
+  const b = body as { message?: unknown; detail?: unknown };
+  const own = text(b.message);
+  if (own) return own;
+  const detail = b.detail;
+  if (text(detail)) return text(detail);
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((d) => {
+        if (typeof d !== 'object' || d === null) return undefined;
+        const msg = text((d as { msg?: unknown }).msg);
+        if (!msg) return undefined;
+        const loc = (d as { loc?: unknown }).loc;
+        const path = Array.isArray(loc) ? loc.filter((p) => p !== 'body').map(String) : [];
+        const name = path.length ? (FIELD_NAME[path[0]] ?? path.join('.')) : '';
+        return name ? `${name}: ${msg}` : msg;
+      })
+      .filter((m): m is string => m !== undefined);
+    return parts.length ? parts.join('; ') : undefined;
+  }
+  if (typeof detail === 'object' && detail !== null) return text((detail as { message?: unknown }).message);
+  return undefined;
+}
+
+/** The server's refusal CODE (`error`), wherever the body carries it, or `undefined`. */
+export function localReasonCodeOf(err: unknown): string | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const body = (err as { body?: unknown }).body as { error?: unknown; detail?: unknown } | undefined;
+  if (body && typeof body === 'object') {
+    if (typeof body.error === 'string') return body.error;
+    const d = body.detail as { error?: unknown } | undefined;
+    if (d && typeof d === 'object' && typeof d.error === 'string') return d.error;
+  }
+  const reason = (err as { reason?: unknown }).reason;
+  return typeof reason === 'string' ? reason : undefined;
+}
+
+/** A bundle check status in plain words; the raw code stays available beside it. */
+export const CHECK_STATUS_LABEL: Record<LocalBundleCheck['status'], string> = {
+  VALID: 'Checks out',
+  STALE: 'Made by an older ISAAC — refresh it',
+  INVALID: 'Has errors',
+};
+
+// --- remembering the name typed ---------------------------------------------------------------
+
+const NAME_KEY = 'isaac.localImports.by';
+
+/** The name typed last time on this computer, or ''. Never throws. */
+export function rememberedName(): string {
+  try {
+    return (window.localStorage.getItem(NAME_KEY) ?? '').slice(0, LOCAL_LIMITS.nameMax);
+  } catch {
+    return '';
+  }
+}
+
+/** Remember (or, for '', forget) the name. Never throws: a blocked storage just does not remember. */
+export function rememberName(name: string): void {
+  try {
+    if (name.trim()) window.localStorage.setItem(NAME_KEY, name);
+    else window.localStorage.removeItem(NAME_KEY);
+  } catch {
+    // storage blocked or full: the name is still used for this page
+  }
+}
+
+/** The command that proposes the groups again — a step the command line does, not this page. */
+export function regroupCommand(bundleName: string): string {
+  return `isaac bundle group "<folder of bundles>/${bundleName}" --regroup`;
 }
 
 // --- copy ------------------------------------------------------------------------------------
@@ -389,6 +556,14 @@ export const LOCAL_IMPORTS_COPY = {
   sameForAll: 'Same for all groups in this beamtime',
   thisGroupOnly: 'This group only',
   previewTitle: 'This will write one answer to each of these',
+  previewNoReading: 'no reading in its files — this answer will be recorded for it too',
+  previewHasReading: 'its files suggest',
+  previewCancelled: 'Nothing was written.',
+  previewIds: 'Technical ids (for the command line)',
+  chooseGroup: 'Choose which group this answer is for.',
+  groupGone: 'The group chosen before is no longer asked about here (it may have been answered). Choose a group.',
+  goneElsewhere: 'This question was already answered (perhaps in another window or on the command line). Nothing was written; the questions are being read again.',
+  answeredHere: 'Answered:',
   previewWrite: 'Write these answers',
   previewCancel: 'Cancel',
   preview: 'Preview',
@@ -418,13 +593,21 @@ export const LOCAL_IMPORTS_COPY = {
   athenaTitle: 'Athena Version of Record',
   keepApart: 'Keep apart',
   mergeThem: 'Merge these groups',
-  mergeAfter: 'A merge takes effect when the groups are proposed again: run `isaac bundle group <bundle folder> --regroup`.',
+  mergeAfter:
+    'A merge takes effect only once the groups are proposed again. That step is done in the command line, not on this page: run this command, then reload this page.',
   counterAfter:
-    'Naming counter positions changes how runs are grouped once the groups are proposed again: run `isaac bundle group <bundle folder> --regroup`.',
-  selectAthena: 'Record as result of record',
+    'The runs are regrouped by these positions only once the groups are proposed again. That step is done in the command line, not on this page: run this command, then reload this page.',
+  copyCommand: 'Copy command',
+  copied: 'Copied.',
+  copyRefused: 'Your browser did not allow copying. Select the command and copy it.',
+  selectAthena: 'Use this version',
+  athenaQuestion: 'Which Athena version is the final result for',
+  nearestRecord: 'Closest to a finished record',
+  failedToRead: 'The server refused to read this.',
+  notIsaac: 'Something other than this ISAAC server answered (a web page, not data). Check that the server on this computer is running, then try again.',
+  retry: 'Retry',
   chipBlocks: 'Blocks Export',
   chipOptional: 'Optional',
-  missingShare: 'Missing-value share',
   lastValidation: 'Last validation',
   blocksExport: 'What still blocks export',
 } as const;

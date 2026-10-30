@@ -6,23 +6,33 @@ import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
 import { BackendDown, LoadingPanel } from '../components/FetchStates';
+import { Copy } from '../components/icons';
 import { LABELS } from '../lib/labels';
-import { api } from '../lib/api';
+import { api, type ApiError } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
-import { serverMessageOf, statusOf } from '../lib/mutationErrors';
+import { statusOf } from '../lib/mutationErrors';
 import { LOCAL_BUNDLE_PARAM, ROUTES } from '../lib/routes';
 import {
   ABSORBER_EDGES,
+  CHECK_STATUS_LABEL,
   KIND_LABEL,
   LOCAL_IMPORTS_COPY as COPY,
+  LOCAL_LIMITS,
   answerText,
+  clampText,
   groupBySuggestion,
   ianaZones,
   localImportsBuildEnabled,
+  localReasonCodeOf,
+  localReasonOf,
   perGroupScopes,
+  regroupCommand,
+  rememberName,
+  rememberedName,
   sectionQuestions,
   shownValue,
   type ApiLocalAnswerPreview,
+  type ApiLocalAnswerRecorded,
   type ApiLocalQuestions,
   type LocalAnswerInput,
   type LocalAthenaSelection,
@@ -48,9 +58,10 @@ import {
  *   2. A SUGGESTION IS NEVER SHOWN AS AN ANSWER. Every one is labelled "Suggested — not
  *      confirmed" with who made it; a hint (a folder name, a related reading) cannot be
  *      accepted at all.
- *   3. "SAME FOR ALL" NEVER WRITES BLIND. It first asks the server which targets the answer
- *      would be written to (a dry run that writes nothing) and lists them; only "Write these
- *      answers" writes, and only against the version that list was read at.
+ *   3. AN ANSWER FOR MORE THAN ONE RUN NEVER WRITES BLIND. "Same for all", a bulk accept, and
+ *      accepting a value for one group first ask the server what the answer would be written to
+ *      (a dry run that writes nothing) and list every group and run, marking the runs whose files
+ *      have no reading; only "Write these answers" writes, against the version that list was read at.
  *   4. IT SENDS NOTHING ANYWHERE. Every request goes to the server on this computer, which
  *      writes the bundle with the command line's own code.
  */
@@ -100,9 +111,9 @@ function NotServed() {
 
 function CheckChip({ check }: { check: LocalBundleCheck }) {
   return (
-    <span className="li-chip" title={check.statement}>
+    <span className="li-chip" title={`${check.status}: ${check.statement}`} data-status={check.status}>
       <span className="sr-only">Bundle check: </span>
-      {check.status}
+      {CHECK_STATUS_LABEL[check.status] ?? check.status}
     </span>
   );
 }
@@ -119,6 +130,62 @@ function namesText(names: string[], total?: number, limit = 6): string {
   return more > 0 ? `${shown}, and ${more} more` : shown;
 }
 
+/**
+ * A read that failed. A refusal (any 4xx) or a page that is not ISAAC's is said in the server's own
+ * words (or as "not this server") — never as a sign-in problem: this page runs only on this
+ * computer, where there is no sign-in. A server that is down or broken gets the shared down state.
+ */
+function LocalFailure({ error, onRetry }: { error: ApiError; onRetry?: () => void }) {
+  const refused = error.htmlIntercept || (error.status !== undefined && error.status >= 400 && error.status < 500);
+  if (!refused) return <BackendDown error={error} onRetry={onRetry} />;
+  const reason = error.htmlIntercept ? COPY.notIsaac : localReasonOf(error);
+  return (
+    <div className="li-notice" role="alert" data-testid="li-refused">
+      <p>
+        {COPY.failedToRead}
+        {error.status ? ` (HTTP ${error.status})` : ''}
+      </p>
+      {reason && <p>{reason}</p>}
+      {onRetry && (
+        <p className="li-actions">
+          <button type="button" className="btn btn-secondary" onClick={onRetry}>
+            {COPY.retry}
+          </button>
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** A command the person runs in the command line, with a copy button. */
+function CommandBlock({ command, label }: { command: string; label: string }) {
+  const [said, setSaid] = useState('');
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(command);
+      setSaid(COPY.copied);
+    } catch {
+      setSaid(COPY.copyRefused);
+    }
+  }
+  return (
+    <div className="li-command-block">
+      <pre className="li-command" aria-label={label}>
+        {command}
+      </pre>
+      <p className="li-actions">
+        <button type="button" className="btn btn-secondary" onClick={copy}>
+          <Copy size={14} strokeWidth={2} aria-hidden="true" /> {COPY.copyCommand}
+          <span className="sr-only">: {command}</span>
+        </button>
+        <span className="li-meta" role="status">
+          {said}
+        </span>
+      </p>
+    </div>
+  );
+}
+
 // --- the overview --------------------------------------------------------------------------------
 
 function Overview() {
@@ -126,7 +193,7 @@ function Overview() {
   if (list.status === 'loading') return <LoadingPanel label="Reading the local bundles…" />;
   if (list.status === 'error') {
     if (list.error.status === 404) return <NotServed />;
-    return <BackendDown error={list.error} onRetry={list.reload} />;
+    return <LocalFailure error={list.error} onRetry={list.reload} />;
   }
   const { bundles, not_bundles: notBundles, directory_name: dir } = list.data;
   return (
@@ -192,7 +259,7 @@ function ProgressBlock({ name }: { name: string }) {
   const progress = useFetch(() => api.getLocalBundleProgress(name), [name]);
   if (progress.status === 'loading') return <p className="li-meta">Reading progress…</p>;
   if (progress.status === 'error') {
-    return <p className="li-note">Progress could not be read: {serverMessageOf(progress.error) ?? progress.error.message}</p>;
+    return <p className="li-note">Progress could not be read: {localReasonOf(progress.error) ?? progress.error.message}</p>;
   }
   const p = progress.data.progress;
   return (
@@ -220,12 +287,10 @@ function ProgressBlock({ name }: { name: string }) {
                 .join(', ')
             : 'None yet'}
         </dd>
-        <dt>{COPY.missingShare}</dt>
-        <dd>{p.missing_share_statement}</dd>
       </dl>
       {p.minimum_for_one_group && (
         <p className="li-note">
-          Nearest record: group {p.minimum_for_one_group.group_id} needs {p.minimum_for_one_group.blocking_questions}{' '}
+          {COPY.nearestRecord}: group {p.minimum_for_one_group.group_id} needs {p.minimum_for_one_group.blocking_questions}{' '}
           blocking answer(s), plus: {p.minimum_for_one_group.plus_decisions.join('; ')}.
           {p.minimum_for_one_group.blocked ? ` ${p.minimum_for_one_group.blocked}.` : ''}
         </p>
@@ -263,68 +328,180 @@ function ProgressBlock({ name }: { name: string }) {
 
 // --- one bundle's questions -------------------------------------------------------------------
 
+/** Where focus goes once the questions have been read again after a write. */
+interface FocusPlan {
+  /** The card that wrote (a question id, or a capture decision's id). */
+  id: string;
+  /** Every card's id, in the order shown, when it wrote. */
+  order: string[];
+}
+
 interface WriteHandlers {
   name: string;
   by: string;
   version: string;
-  onWritten: (message: string) => void;
-  onStale: () => void;
+  /** No name typed: the name field is focused and its error said (again, on every attempt). */
+  needName: () => void;
+  /** A write the server recorded: say it, adopt the version it returned, read the questions again. */
+  onWritten: (id: string, message: string, versions: { sentWith: string; now?: string }) => void;
+  /** Read the questions again after a refusal (412, or a question answered elsewhere). */
+  onReread: (id: string, message: string | null) => void;
 }
 
 function BundleQuestions({ name }: { name: string }) {
   const [blockingOnly, setBlockingOnly] = useState(false);
   const [kind, setKind] = useState('');
   const [offset, setOffset] = useState(0);
-  const [by, setBy] = useState('');
+  const [by, setByState] = useState(rememberedName);
+  const [nameError, setNameError] = useState(0);
   const [announcement, setAnnouncement] = useState('');
   const questionsHeading = useRef<HTMLHeadingElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
   const questions = useFetch(
     () => api.getLocalBundleQuestions(name, { blockingOnly, kind: kind || undefined, offset }),
     [name, blockingOnly, kind, offset],
   );
   const byId = useId();
 
+  const setBy = (v: string) => {
+    setByState(v);
+    rememberName(v);
+    if (v.trim()) setNameError(0);
+  };
+  const needName = useCallback(() => {
+    setNameError((n) => n + 1);
+    nameRef.current?.focus();
+  }, []);
+
+  /*
+   * THE VERSION A WRITE RETURNED IS USED AT ONCE. Every write answers with the bundle's new
+   * `bundle_version`; waiting for the background read to bring it meant a second quick answer was
+   * sent with the old one and refused (412). The version a write was SENT with is remembered as
+   * superseded, so a read that arrives with it (older than the write) cannot put it back.
+   */
+  const [versions, setVersions] = useState<{ superseded: string[]; adopted: string | null }>({
+    superseded: [],
+    adopted: null,
+  });
+  const shownData = questions.status === 'data' ? questions.data : null;
+  const dataVersion = shownData?.bundle.bundle_version ?? '';
+  const version =
+    versions.adopted !== null && versions.superseded.includes(dataVersion) ? versions.adopted : dataVersion;
+
+  const order = useMemo(() => {
+    if (shownData === null) return [];
+    const d = shownData;
+    return [
+      ...sectionQuestions(d.questions).flatMap((sec) => sec.questions.map((q) => q.question_id)),
+      ...d.capture.merge_candidates.map((m) => m.merge_candidate_id),
+      ...d.capture.athena_selections.map((a) => a.processing_id),
+    ];
+  }, [shownData]);
+  const orderRef = useRef(order);
+  orderRef.current = order;
+
   /*
    * AFTER A WRITE THE QUESTIONS ARE READ AGAIN SILENTLY — the cards stay mounted, so what a person
-   * typed survives (a 412 above all) — and "Refreshed" is said only once that read has ARRIVED. A
-   * read that fails says so instead; nothing claims the page reflects the write before it does.
+   * typed survives — and "Refreshed" is said only once that read has ARRIVED; a read that fails
+   * says so instead. Messages from several quick writes are all said (none replaces another), and
+   * only the LATEST read speaks, so an earlier one cannot leave "Reading…" on the page.
    */
-  const pending = useRef<{ message: string; focus: boolean } | null>(null);
-  const shownData = questions.status === 'data' ? questions.data : null;
-  const lastData = useRef(shownData);
-  useEffect(() => {
-    if (shownData !== null && pending.current && shownData !== lastData.current) {
-      const { message, focus } = pending.current;
-      pending.current = null;
-      setAnnouncement(`${message} ${COPY.refreshed}`);
-      if (focus) questionsHeading.current?.focus();
-    }
-    lastData.current = shownData;
-  }, [shownData]);
-  useEffect(() => {
-    if (questions.refreshFailed && pending.current) {
-      setAnnouncement(`${pending.current.message} ${COPY.refreshFailed}`);
-      pending.current = null;
-    }
-  }, [questions.refreshFailed]);
-
   const { reloadSilent } = questions;
-  const onWritten = useCallback(
-    (message: string) => {
-      pending.current = { message, focus: true };
-      setAnnouncement(`${message} ${COPY.refreshing}`);
-      reloadSilent();
+  const pendingMessages = useRef<string[]>([]);
+  const pendingPlan = useRef<FocusPlan | null>(null);
+  const ticket = useRef(0);
+  const [focusPlan, setFocusPlan] = useState<FocusPlan | null>(null);
+  const reread = useCallback(
+    (message: string | null, plan: FocusPlan | null) => {
+      if (message) pendingMessages.current.push(message);
+      if (plan) pendingPlan.current = plan;
+      const mine = ++ticket.current;
+      setAnnouncement([...pendingMessages.current, COPY.refreshing].join(' '));
+      void reloadSilent().then((outcome) => {
+        if (mine !== ticket.current) return;
+        const said = pendingMessages.current;
+        pendingMessages.current = [];
+        const next = pendingPlan.current;
+        pendingPlan.current = null;
+        if (outcome === 'applied') {
+          setAnnouncement([...said, COPY.refreshed].join(' '));
+          if (next) setFocusPlan(next);
+        } else if (outcome === 'failed') {
+          setAnnouncement([...said, COPY.refreshFailed].join(' '));
+        } else {
+          setAnnouncement(said.join(' '));
+        }
+      });
     },
     [reloadSilent],
   );
-  const onStale = useCallback(() => {
-    pending.current = { message: COPY.staleWrite, focus: false };
-    setAnnouncement(`${COPY.staleWrite} ${COPY.refreshing}`);
-    reloadSilent();
-  }, [reloadSilent]);
+  const onWritten = useCallback(
+    (id: string, message: string, v: { sentWith: string; now?: string }) => {
+      const now = v.now;
+      if (now && now !== v.sentWith) {
+        setVersions((cur) => ({ superseded: [...cur.superseded, v.sentWith].slice(-50), adopted: now }));
+      }
+      reread(message, { id, order: orderRef.current });
+    },
+    [reread],
+  );
+  const onReread = useCallback(
+    (id: string, message: string | null) => reread(message, message ? { id, order: orderRef.current } : null),
+    [reread],
+  );
 
+  /*
+   * FOCUS KEEPS THE PERSON'S PLACE. Once the questions have been read again: the card that wrote, if
+   * it is still asked (its "Answered" line); else the next open question after it (or the one before
+   * it, at the end of the list); only when none is left, the Questions heading.
+   */
+  useEffect(() => {
+    if (!focusPlan || shownData === null) return;
+    setFocusPlan(null);
+    const root = sectionRef.current;
+    if (!root) return;
+    const cards = new Map(
+      [...root.querySelectorAll<HTMLElement>('[data-card-id]')].map((el) => [el.dataset.cardId ?? '', el]),
+    );
+    const own = cards.get(focusPlan.id);
+    if (own) {
+      (own.querySelector<HTMLElement>('[data-li-recorded]') ?? own.querySelector<HTMLElement>('[data-li-title]'))?.focus();
+      return;
+    }
+    const at = focusPlan.order.indexOf(focusPlan.id);
+    const candidates = at < 0 ? [] : [...focusPlan.order.slice(at + 1), ...focusPlan.order.slice(0, at).reverse()];
+    for (const id of candidates) {
+      const el = cards.get(id)?.querySelector<HTMLElement>('[data-li-title]');
+      if (el) {
+        el.focus();
+        return;
+      }
+    }
+    questionsHeading.current?.focus();
+  }, [focusPlan, shownData]);
+
+  /* Previous / Next questions: once the new page has arrived, focus its heading. */
+  const pageFocus = useRef(false);
+  const onPage = useCallback((next: number) => {
+    pageFocus.current = true;
+    setOffset(next);
+  }, []);
+  useEffect(() => {
+    if (pageFocus.current && shownData !== null) {
+      pageFocus.current = false;
+      questionsHeading.current?.focus();
+    }
+  }, [shownData]);
+
+  const hasData = shownData !== null;
   return (
-    <section className="li-panel" aria-labelledby="li-questions-title">
+    <section
+      className="li-panel"
+      ref={sectionRef}
+      aria-labelledby={hasData ? 'li-questions-title' : undefined}
+      aria-label={hasData ? undefined : COPY.questionsTitle}
+    >
       <p className="li-meta">
         <Link to={ROUTES.localImports}>{COPY.backToAll}</Link>
       </p>
@@ -340,15 +517,24 @@ function BundleQuestions({ name }: { name: string }) {
         <label htmlFor={byId}>{COPY.yourName}</label>
         <input
           id={byId}
+          ref={nameRef}
           className="input"
           value={by}
           autoComplete="name"
+          maxLength={LOCAL_LIMITS.nameMax}
           onChange={(e) => setBy(e.target.value)}
-          aria-describedby={`${byId}-hint`}
+          aria-invalid={nameError ? true : undefined}
+          aria-describedby={`${byId}-hint${nameError ? ` ${byId}-err` : ''}`}
         />
         <p id={`${byId}-hint`} className="li-hint">
           {COPY.yourNameHint}
         </p>
+        {nameError > 0 && (
+          // keyed by the attempt, so a repeat click is announced again
+          <p key={nameError} id={`${byId}-err`} className="li-error" role="alert" data-testid="li-name-error">
+            {COPY.nameNeeded}
+          </p>
+        )}
       </div>
       <div className="li-filters" role="group" aria-label="Filter the questions">
         <label className="li-check">
@@ -383,27 +569,21 @@ function BundleQuestions({ name }: { name: string }) {
       </div>
       {questions.status === 'loading' && <LoadingPanel label="Reading the questions…" />}
       {questions.status === 'error' &&
-        (questions.error.status === 404 && questions.error.reason !== 'bundle_not_found' ? (
+        (questions.error.status === 404 && localReasonCodeOf(questions.error) !== 'bundle_not_found' ? (
           <NotServed />
         ) : questions.error.status === 404 ? (
           <div className="li-notice" role="alert">
-            <p>{serverMessageOf(questions.error) ?? 'No bundle by that name.'}</p>
+            <p>{localReasonOf(questions.error) ?? 'No bundle by that name.'}</p>
           </div>
         ) : (
-          <BackendDown error={questions.error} onRetry={questions.reload} />
+          <LocalFailure error={questions.error} onRetry={questions.reload} />
         ))}
       {questions.status === 'data' && (
         <QuestionsBody
           data={questions.data}
           headingRef={questionsHeading}
-          handlers={{
-            name,
-            by,
-            version: questions.data.bundle.bundle_version ?? '',
-            onWritten,
-            onStale,
-          }}
-          onPage={setOffset}
+          handlers={{ name, by, version, needName, onWritten, onReread }}
+          onPage={onPage}
         />
       )}
     </section>
@@ -433,14 +613,14 @@ function QuestionsBody({
           <dd>{b.source_label ?? '—'}</dd>
           <dt>Beamline</dt>
           <dd>{beamlineText(b.beamline)}</dd>
-          <dt>Blocking is judged against</dt>
-          <dd>{data.blocking_basis.schema}</dd>
+          <dt>Export rules used</dt>
+          <dd title={data.blocking_basis.source}>ISAAC record schema ({data.blocking_basis.schema})</dd>
         </dl>
         <p className="li-meta">{data.statement}</p>
         {data.exposures_recorded > 0 && (
           <p className="li-meta">
-            Showing these suggestions was recorded in the bundle ({data.exposures_recorded} exposure(s)), as `isaac bundle
-            questions` records it, so a later blind cross-check knows they were seen.
+            This page noted in the bundle that these suggestions were shown to you ({data.exposures_recorded}), as the
+            command line does, so that a later independent check knows you had seen them.
           </p>
         )}
       </div>
@@ -453,7 +633,7 @@ function QuestionsBody({
       </h2>
       {data.minimum_for_one_group && (
         <p className="li-note">
-          Fewest answers to one record: group {data.minimum_for_one_group.group_id} needs{' '}
+          {COPY.nearestRecord}: group {data.minimum_for_one_group.group_id} needs{' '}
           {data.minimum_for_one_group.blocking_questions} blocking answer(s), plus{' '}
           {data.minimum_for_one_group.plus_decisions.join('; ')}.
         </p>
@@ -509,7 +689,7 @@ function SuggestionItem({ s }: { s: LocalSuggestion }) {
       <p className="li-value">
         <span className="sr-only">Value: </span>
         <code>{shownValue(s.value)}</code>
-        {s.targets && s.targets > 1 ? <span className="li-meta"> — for {s.targets} targets</span> : null}
+        {s.targets && s.targets > 1 ? <span className="li-meta"> — for {s.targets} of the values asked about</span> : null}
       </p>
       <dl className="li-dl li-dl-tight">
         <dt>File</dt>
@@ -543,7 +723,7 @@ function OwnSuggestions({ own, total }: { own: LocalOwnSuggestion[]; total?: num
         <li key={i} className="li-own">
           <span className="li-chip">{o.from_own_files === true ? COPY.groupOwnSuggestion : COPY.groupOtherSuggestion}</span>{' '}
           <code>{shownValue(o.value)}</code>
-          {o.targets > 1 ? ` (${o.targets} targets)` : ''} — {o.who_label}
+          {o.targets > 1 ? ` (for ${o.targets} runs)` : ''} — {o.who_label}
           {o.model_id ? ` (${o.model_id})` : ''}
           {o.relative_path || o.locator ? `, ${o.relative_path ?? 'file not recorded'} @ ${o.locator ?? 'no locator'}` : ''}
           <span className="li-provenance">{o.provenance_label}</span>
@@ -599,6 +779,7 @@ function ValueInput({
             id={id}
             className="input"
             value={value}
+            maxLength={LOCAL_LIMITS.valueMax}
             inputMode={rule?.numeric ? 'decimal' : undefined}
             onChange={(e) => onChange(e.target.value)}
           />
@@ -610,8 +791,61 @@ function ValueInput({
   );
 }
 
+/** A form whose Enter (in its text field) does what its submit button does. */
+function AnswerForm({ onAnswer, children }: { onAnswer: () => void; children: ReactNode }) {
+  return (
+    <form
+      className="li-form"
+      noValidate
+      onSubmit={(e) => {
+        e.preventDefault();
+        onAnswer();
+      }}
+    >
+      {children}
+    </form>
+  );
+}
+
+/**
+ * Each run of one scope, from the QUESTION's own description of it, with what its files suggest —
+ * and, marked, the runs whose files have no reading at all, which the answer is written to as well.
+ * `null` when the question does not describe the scope run by run.
+ */
+function RunReadings({ scope }: { scope: LocalScope | undefined }) {
+  if (!scope) return null;
+  const perRun =
+    (scope.per_target ?? []).length > 0
+      ? (scope.per_target ?? []).map((t) => ({ key: t.target_id, name: t.run_name, own: t.own_suggestions }))
+      : scope.target_count === 1 && scope.run_names.length === 1
+        ? [{ key: scope.scope, name: scope.run_names[0], own: scope.own_suggestions ?? [] }]
+        : [];
+  if (perRun.length === 0) return null;
+  const notListed = scope.target_count - perRun.length;
+  return (
+    <ul className="li-choices li-run-readings" data-testid="li-preview-runs">
+      {perRun.map((r) => (
+        <li key={r.key} data-no-reading={r.own.length === 0 ? 'true' : undefined}>
+          <span className="li-run-names">Run {r.name ?? 'without a name'}</span>
+          {r.own.length === 0 ? (
+            <span className="li-meta">
+              <span className="li-chip">No reading</span> {COPY.previewNoReading}
+            </span>
+          ) : (
+            <span className="li-meta">
+              {COPY.previewHasReading} {[...new Set(r.own.map((o) => shownValue(o.value)))].join(' or ')}
+            </span>
+          )}
+        </li>
+      ))}
+      {notListed > 0 && <li className="li-meta">and {notListed} more run(s) not listed here</li>}
+    </ul>
+  );
+}
+
 function PreviewBox({
   preview,
+  scopes,
   busy,
   onWrite,
   onCancel,
@@ -619,6 +853,7 @@ function PreviewBox({
   titleId,
 }: {
   preview: ApiLocalAnswerPreview;
+  scopes: LocalScope[];
   busy: boolean;
   onWrite: () => void;
   onCancel: () => void;
@@ -631,10 +866,14 @@ function PreviewBox({
       differing.flatMap((g) => g.differing_targets.flatMap((t) => t.own_suggestions.map((o) => shownValue(o.value)))),
     ),
   ].filter((v) => v !== shownValue(preview.value));
+  const byKey = new Map(scopes.map((sc) => [sc.scope, sc]));
+  // a few groups: every run is listed; many: each group's runs behind its own disclosure
+  const inline = preview.by_scope.length <= 3;
   return (
     <div className="li-preview" role="group" tabIndex={-1} ref={boxRef} aria-labelledby={titleId}>
       <p id={titleId} className="li-preview-title">
-        {COPY.previewTitle} ({preview.would_record.length}):
+        {COPY.previewTitle} ({preview.by_scope.length} {preview.by_scope.length === 1 ? 'group' : 'groups'},{' '}
+        {preview.would_record.length} value(s)):
       </p>
       {differing.length > 0 && (
         <p className="li-warning" data-testid="li-preview-differs">
@@ -647,7 +886,7 @@ function PreviewBox({
         {preview.by_scope.map((g) => (
           <li key={g.scope} className={g.differs ? 'li-differs' : undefined}>
             {g.label}
-            {g.run_names.length ? ` — ${namesText(g.run_names, g.run_count)}` : ''}: {g.target_ids.join(', ')}
+            {g.run_names.length ? ` — ${namesText(g.run_names, g.run_count)}` : ''}
             {g.differs && (
               <>
                 {' '}
@@ -655,7 +894,7 @@ function PreviewBox({
                 <ul className="li-choices">
                   {g.differing_targets.map((t) => (
                     <li key={t.target_id}>
-                      <span className="li-run-names">Run {t.run_name ?? t.target_id}</span>
+                      <span className="li-run-names">Run {t.run_name ?? 'without a name'}</span>
                       <OwnSuggestions own={t.own_suggestions} />
                     </li>
                   ))}
@@ -663,15 +902,32 @@ function PreviewBox({
               </>
             )}
             {!g.compared && g.own_suggestions.length > 0 && <OwnSuggestions own={g.own_suggestions} />}
+            {inline ? (
+              <RunReadings scope={byKey.get(g.scope)} />
+            ) : (
+              byKey.get(g.scope) && (
+                <details className="li-details">
+                  <summary>Its runs</summary>
+                  <RunReadings scope={byKey.get(g.scope)} />
+                </details>
+              )
+            )}
           </li>
         ))}
       </ul>
       {preview.unchanged.length > 0 && (
-        <p className="li-meta">Already answered the same way, so not written again: {preview.unchanged.join(', ')}.</p>
+        <p className="li-meta">{preview.unchanged.length} value(s) already answered the same way, so not written again.</p>
       )}
       <p className="li-meta">
         Value: <code>{shownValue(preview.value)}</code>. {preview.statement}
       </p>
+      <details className="li-details">
+        <summary>{COPY.previewIds}</summary>
+        <p className="li-meta li-ids">
+          Written to: {preview.would_record.join(', ') || 'none'}
+          {preview.unchanged.length > 0 ? `. Unchanged: ${preview.unchanged.join(', ')}` : ''}.
+        </p>
+      </details>
       <p className="li-actions">
         <button type="button" className="btn btn-primary" disabled={busy} onClick={onWrite}>
           {COPY.previewWrite}
@@ -709,7 +965,7 @@ function PerGroupRow({
           <ul className="li-choices" data-testid="li-per-run">
             {(g.per_target ?? []).map((t) => (
               <li key={t.target_id}>
-                <span className="li-run-names">Run {t.run_name ?? t.target_id}</span>
+                <span className="li-run-names">Run {t.run_name ?? 'without a name'}</span>
                 <OwnSuggestions own={t.own_suggestions} />
               </li>
             ))}
@@ -725,8 +981,9 @@ function PerGroupRow({
             <li>
               <button
                 type="button"
-                className="btn btn-secondary li-nowrap"
+                className="btn btn-secondary li-accept"
                 disabled={busy}
+                title={`${confirm ? 'Confirm' : 'Accept'} ${shownValue(g.unanimous_value)}`}
                 onClick={() => onAcceptOne(g, g.unanimous_value)}
               >
                 {confirm ? 'Confirm' : 'Accept'} {shownValue(g.unanimous_value)}
@@ -735,7 +992,7 @@ function PerGroupRow({
             </li>
           )}
           <li>
-            <button type="button" className="btn btn-secondary li-nowrap" disabled={busy} onClick={() => onAnswerThis(g)}>
+            <button type="button" className="btn btn-secondary li-accept" disabled={busy} onClick={() => onAnswerThis(g)}>
               {COPY.answerThisGroup}
               <span className="sr-only"> ({g.label})</span>
             </button>
@@ -847,6 +1104,15 @@ function PerGroupTable({
   );
 }
 
+interface SubmitScope {
+  /** Exactly this one group (`only`). */
+  scope?: string;
+  /** Exactly these groups (`only_scopes`), always through the preview. */
+  scopes?: string[];
+  /** Preview first even for one group (an accepted value is written to every run of the group). */
+  preview?: boolean;
+}
+
 function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandlers }) {
   const d = q.display;
   const uid = useId();
@@ -854,7 +1120,9 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
   const multi = groups.length > 1;
   // U1: where the groups' own files suggest different values, no scope is chosen for the person
   const [scopeMode, setScopeMode] = useState<'all' | 'one' | null>(multi && d.suggestions_differ ? null : 'all');
-  const [only, setOnly] = useState(groups[0]?.scope ?? '');
+  // which group "This group only" is for: none until the person chooses one
+  const [only, setOnly] = useState('');
+  const [groupGone, setGroupGone] = useState(false);
   const [value, setValue] = useState('');
   const optionalFields = Object.keys(d.fields);
   const [field, setField] = useState(optionalFields[0] ?? '');
@@ -862,12 +1130,32 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
   const [element, setElement] = useState(d.suggested_absorber?.element ?? '');
   const [edge, setEdge] = useState(d.suggested_absorber?.edge ?? '');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ text: string; n: number } | null>(null);
+  const [status, setStatus] = useState('');
+  const [recorded, setRecorded] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ input: LocalAnswerInput; result: ApiLocalAnswerPreview } | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const errorRef = useRef<HTMLParagraphElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
   const valueId = `${uid}-v`;
   const zones = useMemo(() => (d.answer_kind === 'clock_zone' ? ianaZones() : []), [d.answer_kind]);
+
+  /*
+   * THE CHOSEN GROUP MUST STILL BE ASKED ABOUT. A question's id does not change when one of its
+   * groups is answered, so after answering group A "this group only" the card stays mounted with A
+   * chosen while A is no longer listed — the dropdown showed the first remaining group while the
+   * next Answer sent A, which the server refused. The choice is cleared (a new one is required),
+   * and the dropdown and what is sent read the same value.
+   */
+  const onlyListed = groups.some((g) => g.scope === only);
+  const chosen = onlyListed ? only : '';
+  useEffect(() => {
+    if (only !== '' && !onlyListed) {
+      setOnly('');
+      setGroupGone(true);
+    }
+  }, [only, onlyListed]);
 
   useEffect(() => {
     if (preview) previewRef.current?.focus();
@@ -876,51 +1164,80 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
     if (error) errorRef.current?.focus();
   }, [error]);
 
+  const say = (text: string) => setError((cur) => ({ text, n: (cur?.n ?? 0) + 1 }));
+
   const acceptable = d.suggestions.filter((s) => s.acceptable);
   const others = d.suggestions.filter((s) => !s.acceptable);
   const fieldSuggestions = field ? (d.field_suggestions[field] ?? []) : [];
   const rule = d.answer_kind === 'optional_values' ? (d.fields[field] ?? null) : d.value_rule;
-  const selected = groups.find((g) => g.scope === only);
+  const selected = groups.find((g) => g.scope === chosen);
   const perGroupTable = multi && d.suggestions_differ && (d.answer_kind === 'field_value' || d.answer_kind === 'confirm_value');
 
   function fail(err: unknown) {
+    const code = localReasonCodeOf(err);
     if (statusOf(err) === 412) {
-      handlers.onStale();
+      // said HERE, on the card that was refused — another card's "Recorded" is not replaced
+      say(COPY.staleWrite);
+      handlers.onReread(q.question_id, null);
       return;
     }
-    setError(serverMessageOf(err) ?? 'The answer could not be recorded. Nothing was written.');
+    if (statusOf(err) === 404 && code === 'not_found_in_bundle') {
+      say(COPY.goneElsewhere);
+      handlers.onReread(q.question_id, COPY.goneElsewhere);
+      return;
+    }
+    say(localReasonOf(err) ?? 'The answer could not be recorded. Nothing was written.');
   }
 
   function recordedMessage(n: number) {
     return `Recorded ${n} answer(s) to “${q.text.slice(0, 80)}”.`;
   }
 
-  /** `forScope` answers exactly that one group (a row of the per-group table), at once; `forScopes`
-   * answers exactly those groups, always through the preview. */
-  async function submit(decision: string, extra: Partial<LocalAnswerInput> = {}, forScope?: string, forScopes?: string[]) {
+  function written(result: ApiLocalAnswerRecorded, sentWith: string) {
+    const message = recordedMessage(result.result.recorded.length);
+    setRecorded(message);
+    handlers.onWritten(q.question_id, message, { sentWith, now: result.bundle_version });
+  }
+
+  async function submit(decision: string, extra: Partial<LocalAnswerInput> = {}, how: SubmitScope = {}) {
     setError(null);
+    setStatus('');
+    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (!handlers.by.trim()) {
-      setError(COPY.nameNeeded);
+      handlers.needName();
       return;
     }
-    if (forScope === undefined && forScopes === undefined && multi && scopeMode === null) {
-      setError(COPY.chooseScope);
+    if (how.scope === undefined && how.scopes === undefined && multi && scopeMode === null) {
+      say(COPY.chooseScope);
       return;
     }
-    const oneScope = forScopes ? undefined : (forScope ?? (multi && scopeMode === 'one' ? only : undefined));
+    if (how.scope === undefined && how.scopes === undefined && multi && scopeMode === 'one' && !chosen) {
+      say(groupGone ? COPY.groupGone : COPY.chooseGroup);
+      return;
+    }
+    if (extra.element !== undefined && extra.element.trim().length > LOCAL_LIMITS.elementMax) {
+      say(`Element: at most ${LOCAL_LIMITS.elementMax} characters (a chemical symbol, for example Fe).`);
+      return;
+    }
+    const oneScope = how.scopes ? undefined : (how.scope ?? (multi && scopeMode === 'one' ? chosen : undefined));
     const input: LocalAnswerInput = {
       decision,
-      by: handlers.by,
+      by: handlers.by.trim(),
       expected_version: handlers.version,
       ...(oneScope ? { only: oneScope } : {}),
-      ...(forScopes ? { only_scopes: forScopes } : {}),
+      ...(how.scopes ? { only_scopes: how.scopes } : {}),
       ...(d.answer_kind === 'optional_values' ? { field } : {}),
       ...extra,
+      ...(extra.note !== undefined ? { note: clampText(extra.note, LOCAL_LIMITS.noteMax) } : {}),
     };
-    // every answer that writes to more than one group — or to targets this page did not describe one by
-    // one — is previewed first, listing every target; one group's answer is written at once
+    // every answer that writes to more than one run — several groups, a group of several runs, an
+    // accepted value, or targets this page did not describe one by one — is previewed first, listing
+    // every group and run; only an answer for exactly one run is written at once
+    const oneGroup = oneScope ? groups.find((g) => g.scope === oneScope) : undefined;
     const needsPreview =
-      forScopes !== undefined ||
+      how.preview === true ||
+      how.scopes !== undefined ||
+      (oneScope !== undefined && (oneGroup?.target_count ?? 1) > 1) ||
       (oneScope === undefined && (multi || d.settles_many || d.targets_described < d.targets_total));
     setBusy(true);
     try {
@@ -929,7 +1246,7 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
         setPreview({ input, result });
       } else {
         const result = await api.answerLocalQuestion(handlers.name, q.question_id, input);
-        handlers.onWritten(recordedMessage(result.result.recorded.length));
+        written(result, input.expected_version);
       }
     } catch (err) {
       fail(err);
@@ -942,14 +1259,15 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
     if (!preview) return;
     setBusy(true);
     setError(null);
+    const sentWith = preview.result.bundle_version;
     try {
       const result = await api.answerLocalQuestion(handlers.name, q.question_id, {
         ...preview.input,
-        expected_version: preview.result.bundle_version,
+        expected_version: sentWith,
       });
       setPreview(null);
       // the SERVER's count of what it recorded, never the preview's
-      handlers.onWritten(recordedMessage(result.result.recorded.length));
+      written(result, sentWith);
     } catch (err) {
       setPreview(null);
       fail(err);
@@ -957,6 +1275,25 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
       setBusy(false);
     }
   }
+
+  function cancelPreview() {
+    setPreview(null);
+    setStatus(COPY.previewCancelled);
+    // back to the control that opened the preview, if it is still there; else the question itself
+    const back = opener.current;
+    requestAnimationFrame(() => {
+      if (back && back.isConnected && !(back as HTMLButtonElement).disabled) back.focus();
+      else titleRef.current?.focus();
+    });
+  }
+
+  const answerButton = (primary = true) => (
+    <p className="li-actions">
+      <button type="submit" className={`btn ${primary ? 'btn-primary' : 'btn-secondary'}`} disabled={busy}>
+        {COPY.answer}
+      </button>
+    </p>
+  );
 
   const answerControls: ReactNode = (() => {
     switch (d.answer_kind) {
@@ -969,17 +1306,15 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
                   {COPY.acceptSuggestion}
                 </button>
                 <span className="li-meta">
-                  Confirms each target’s own extracted value:{' '}
+                  Confirms each run’s own extracted value:{' '}
                   {d.distinct_extracted_values.map((v) => `${shownValue(v.value)} (${v.targets})`).join(', ')}.
                 </span>
               </p>
             )}
-            <ValueInput id={valueId} rule={rule} value={value} onChange={setValue} label="Or correct it" />
-            <p className="li-actions">
-              <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => submit('correct', { value })}>
-                {COPY.answer}
-              </button>
-            </p>
+            <AnswerForm onAnswer={() => submit('correct', { value })}>
+              <ValueInput id={valueId} rule={rule} value={value} onChange={setValue} label="Or correct it" />
+              {answerButton(false)}
+            </AnswerForm>
           </>
         );
       case 'conflict':
@@ -1001,17 +1336,15 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
                 ))}
               </ul>
             )}
-            <ValueInput id={valueId} rule={rule} value={value} onChange={setValue} label="Or another value" />
-            <p className="li-actions">
-              <button type="button" className="btn btn-primary" disabled={busy} onClick={() => submit('correct', { value })}>
-                {COPY.answer}
-              </button>
-            </p>
+            <AnswerForm onAnswer={() => submit('correct', { value })}>
+              <ValueInput id={valueId} rule={rule} value={value} onChange={setValue} label="Or another value" />
+              {answerButton()}
+            </AnswerForm>
           </>
         );
       case 'optional_values':
         return (
-          <>
+          <AnswerForm onAnswer={() => submit('correct', { value })}>
             <div className="li-field">
               <label htmlFor={`${uid}-f`}>Field</label>
               <select id={`${uid}-f`} className="input li-select" value={field} onChange={(e) => setField(e.target.value)}>
@@ -1026,12 +1359,8 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
               <SuggestionItem key={i} s={s} />
             ))}
             <ValueInput id={valueId} rule={rule} value={value} onChange={setValue} label="Value" />
-            <p className="li-actions">
-              <button type="button" className="btn btn-primary" disabled={busy} onClick={() => submit('correct', { value })}>
-                {COPY.answer}
-              </button>
-            </p>
-          </>
+            {answerButton()}
+          </AnswerForm>
         );
       case 'counter_positions':
         return (
@@ -1065,11 +1394,12 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
               </button>
             </p>
             <p className="li-hint">{COPY.counterAfter}</p>
+            <CommandBlock command={regroupCommand(handlers.name)} label="Command that proposes the groups again" />
           </>
         );
       case 'clock_zone':
         return (
-          <>
+          <AnswerForm onAnswer={() => submit('set_clock_time_zone', { value })}>
             <div className="li-field">
               <label htmlFor={`${uid}-z`}>Time zone the instrument clock was set to (IANA name, e.g. America/Los_Angeles, or UTC)</label>
               <input id={`${uid}-z`} className="input" list={`${uid}-zones`} value={value} onChange={(e) => setValue(e.target.value)} />
@@ -1082,16 +1412,12 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
               )}
               <p className="li-hint">No file states it, so nothing is suggested.</p>
             </div>
-            <p className="li-actions">
-              <button type="button" className="btn btn-primary" disabled={busy} onClick={() => submit('set_clock_time_zone', { value })}>
-                {COPY.answer}
-              </button>
-            </p>
-          </>
+            {answerButton()}
+          </AnswerForm>
         );
       case 'absorber':
         return (
-          <>
+          <AnswerForm onAnswer={() => submit('set_absorber', { element, edge })}>
             {d.suggested_absorber && (
               <p className="li-meta">
                 <span className="li-chip">{COPY.suggestedNotConfirmed}</span> Element {d.suggested_absorber.element}, edge{' '}
@@ -1101,7 +1427,13 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
             <div className="li-row">
               <div className="li-field">
                 <label htmlFor={`${uid}-el`}>Element</label>
-                <input id={`${uid}-el`} className="input li-short" value={element} onChange={(e) => setElement(e.target.value)} />
+                <input
+                  id={`${uid}-el`}
+                  className="input li-short"
+                  value={element}
+                  maxLength={LOCAL_LIMITS.elementMax}
+                  onChange={(e) => setElement(e.target.value)}
+                />
               </div>
               <div className="li-field">
                 <label htmlFor={`${uid}-ed`}>Edge</label>
@@ -1116,13 +1448,13 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
               </div>
             </div>
             <p className="li-actions">
-              <button type="button" className="btn btn-primary" disabled={busy} onClick={() => submit('set_absorber', { element, edge })}>
+              <button type="submit" className="btn btn-primary" disabled={busy}>
                 {d.suggested_absorber && element === d.suggested_absorber.element && edge === d.suggested_absorber.edge
                   ? COPY.acceptSuggestion
                   : COPY.answer}
               </button>
             </p>
-          </>
+          </AnswerForm>
         );
       case 'field_value':
       default:
@@ -1149,26 +1481,29 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
                 ))}
               </ul>
             )}
-            <ValueInput id={valueId} rule={rule} value={value} onChange={setValue} label="Your answer" />
-            <p className="li-actions">
-              <button type="button" className="btn btn-primary" disabled={busy} onClick={() => submit('correct', { value })}>
-                {COPY.answer}
-              </button>
-            </p>
+            <AnswerForm onAnswer={() => submit('correct', { value })}>
+              <ValueInput id={valueId} rule={rule} value={value} onChange={setValue} label="Your answer" />
+              {answerButton()}
+            </AnswerForm>
           </>
         );
     }
   })();
 
   return (
-    <li className="li-card li-question" aria-labelledby={`${uid}-t`}>
+    <li className="li-card li-question" aria-labelledby={`${uid}-t`} data-card-id={q.question_id}>
       <div className="li-card-head">
         <span className="li-chip">{q.blocking ? COPY.chipBlocks : COPY.chipOptional}</span>
         <span className="li-meta">{KIND_LABEL[q.kind] ?? q.kind}</span>
       </div>
-      <h4 id={`${uid}-t`} className="li-h4 li-question-text">
+      <h4 id={`${uid}-t`} className="li-h4 li-question-text" tabIndex={-1} ref={titleRef} data-li-title>
         {q.text}
       </h4>
+      {recorded && (
+        <p className="li-recorded" tabIndex={-1} data-li-recorded>
+          {COPY.answeredHere} {recorded}
+        </p>
+      )}
       <dl className="li-dl">
         <dt>Record (runs)</dt>
         <dd>{d.record_run_names.length ? namesText(d.record_run_names) : 'The whole beamtime'}</dd>
@@ -1182,7 +1517,7 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
         )}
         <dt>Applies to</dt>
         <dd>
-          {q.applies_to.groups} group(s), {q.applies_to.runs} run(s), {q.applies_to.targets} answer slot(s)
+          {q.applies_to.groups} group(s), {q.applies_to.runs} run(s); answering records {q.applies_to.targets} value(s)
         </dd>
         <dt>Why</dt>
         <dd>{q.why}</dd>
@@ -1228,7 +1563,7 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
           onAcceptOne={(g, v) =>
             d.answer_kind === 'confirm_value'
               ? // offered only where every run's own extracted value IS v, so confirming confirms v
-                submit('confirm', {}, g.scope)
+                submit('confirm', {}, { scope: g.scope, preview: true })
               : submit(
                   'correct',
                   {
@@ -1237,17 +1572,18 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
                       .map((o) => `${o.provenance_label}; ${o.who_label}${o.relative_path ? `, ${o.relative_path}` : ''}${o.locator ? ` @ ${o.locator}` : ''}`)
                       .join(' | ')}).`,
                   },
-                  g.scope,
+                  { scope: g.scope, preview: true },
                 )
           }
           onAcceptMany={(value, scopes) =>
             d.answer_kind === 'confirm_value'
-              ? submit('confirm', {}, undefined, scopes)
-              : submit('correct', { value: answerText(value) }, undefined, scopes)
+              ? submit('confirm', {}, { scopes })
+              : submit('correct', { value: answerText(value) }, { scopes })
           }
           onAnswerThis={(g) => {
             setScopeMode('one');
             setOnly(g.scope);
+            setGroupGone(false);
             document.getElementById(valueId)?.focus();
           }}
         />
@@ -1269,15 +1605,24 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
               <select
                 className="input li-select"
                 aria-label="Which group"
-                value={only}
-                onChange={(e) => setOnly(e.target.value)}
+                value={chosen}
+                onChange={(e) => {
+                  setOnly(e.target.value);
+                  setGroupGone(false);
+                }}
               >
+                <option value="">Choose a group…</option>
                 {groups.map((g) => (
                   <option key={g.scope} value={g.scope}>
                     {g.label}: {namesText(g.run_names, g.run_count, 3)}
                   </option>
                 ))}
               </select>
+              {groupGone && !chosen && (
+                <p className="li-hint" data-testid="li-group-gone">
+                  {COPY.groupGone}
+                </p>
+              )}
               {selected && (
                 <div className="li-selected-group" data-testid="li-selected-group">
                   <OwnSuggestions own={selected.own_suggestions ?? []} total={selected.own_suggestions_total} />
@@ -1291,17 +1636,21 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
       {answerControls}
 
       {error && (
-        <p className="li-error" role="alert" tabIndex={-1} ref={errorRef}>
-          {error}
+        <p key={error.n} className="li-error" role="alert" tabIndex={-1} ref={errorRef}>
+          {error.text}
         </p>
       )}
+      <p className="li-meta" role="status" data-testid="li-card-status">
+        {status}
+      </p>
 
       {preview && (
         <PreviewBox
           preview={preview.result}
+          scopes={q.display.scopes}
           busy={busy}
           onWrite={confirmPreview}
-          onCancel={() => setPreview(null)}
+          onCancel={cancelPreview}
           boxRef={previewRef}
           titleId={`${uid}-pv`}
         />
@@ -1329,6 +1678,7 @@ function CaptureSection({ data, handlers }: { data: ApiLocalQuestions; handlers:
         <>
           <h4 className="li-h4">{COPY.mergeTitle}</h4>
           <p className="li-hint">{COPY.mergeAfter}</p>
+          <CommandBlock command={regroupCommand(handlers.name)} label="Command that proposes the groups again" />
           <ol className="li-list">
             {merges.map((m) => (
               <MergeCard key={m.merge_candidate_id} m={m} handlers={handlers} />
@@ -1350,35 +1700,62 @@ function CaptureSection({ data, handlers }: { data: ApiLocalQuestions; handlers:
   );
 }
 
-function useDecision(handlers: WriteHandlers) {
+function useDecision(id: string, handlers: WriteHandlers) {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ text: string; n: number } | null>(null);
+  const [recorded, setRecorded] = useState<string | null>(null);
+  const say = (text: string) => setError((cur) => ({ text, n: (cur?.n ?? 0) + 1 }));
   async function record(input: Omit<Parameters<typeof api.recordLocalDecision>[1], 'by' | 'expected_version'>, done: string) {
     setError(null);
     if (!handlers.by.trim()) {
-      setError(COPY.nameNeeded);
+      handlers.needName();
       return;
     }
     setBusy(true);
+    const sentWith = handlers.version;
     try {
-      await api.recordLocalDecision(handlers.name, { ...input, by: handlers.by, expected_version: handlers.version });
-      handlers.onWritten(done);
+      const result = await api.recordLocalDecision(handlers.name, { ...input, by: handlers.by.trim(), expected_version: sentWith });
+      setRecorded(done);
+      handlers.onWritten(id, done, { sentWith, now: result.bundle_version });
     } catch (err) {
-      if (statusOf(err) === 412) handlers.onStale();
-      else setError(serverMessageOf(err) ?? 'The decision could not be recorded. Nothing was written.');
+      if (statusOf(err) === 412) {
+        say(COPY.staleWrite);
+        handlers.onReread(id, null);
+      } else if (statusOf(err) === 404 && localReasonCodeOf(err) === 'not_found_in_bundle') {
+        say(COPY.goneElsewhere);
+        handlers.onReread(id, COPY.goneElsewhere);
+      } else {
+        say(localReasonOf(err) ?? 'The decision could not be recorded. Nothing was written.');
+      }
     } finally {
       setBusy(false);
     }
   }
-  return { busy, error, record };
+  const feedback = (
+    <>
+      {recorded && (
+        <p className="li-recorded" tabIndex={-1} data-li-recorded>
+          {COPY.answeredHere} {recorded}
+        </p>
+      )}
+      {error && (
+        <p key={error.n} className="li-error" role="alert">
+          {error.text}
+        </p>
+      )}
+    </>
+  );
+  return { busy, record, feedback };
 }
 
 function MergeCard({ m, handlers }: { m: LocalMergeCandidate; handlers: WriteHandlers }) {
-  const { busy, error, record } = useDecision(handlers);
+  const { busy, record, feedback } = useDecision(m.merge_candidate_id, handlers);
   const [first, ...rest] = m.group_ids;
   return (
-    <li className="li-card">
-      {m.question && <p className="li-question-text">{m.question}</p>}
+    <li className="li-card" data-card-id={m.merge_candidate_id}>
+      <p className="li-question-text" tabIndex={-1} data-li-title>
+        {m.question ?? `Merge or keep apart: groups ${m.group_ids.join(', ')}`}
+      </p>
       <ul className="li-bullets">
         {m.groups.map((g) => (
           <li key={g.group_id}>
@@ -1406,23 +1783,19 @@ function MergeCard({ m, handlers }: { m: LocalMergeCandidate; handlers: WriteHan
           </button>
         )}
       </p>
-      {error && (
-        <p className="li-error" role="alert">
-          {error}
-        </p>
-      )}
+      {feedback}
     </li>
   );
 }
 
 function AthenaCard({ a, handlers }: { a: LocalAthenaSelection; handlers: WriteHandlers }) {
-  const { busy, error, record } = useDecision(handlers);
+  const { busy, record, feedback } = useDecision(a.processing_id, handlers);
   const [version, setVersion] = useState(a.versions[0]?.version_id ?? '');
   const id = useId();
   return (
-    <li className="li-card">
-      <p className="li-question-text">
-        Which Athena version is the result of record for {a.processing_id}
+    <li className="li-card" data-card-id={a.processing_id}>
+      <p className="li-question-text" tabIndex={-1} data-li-title>
+        {COPY.athenaQuestion} {a.processing_id}
         {a.run_names.length ? ` (runs ${namesText(a.run_names)})` : ''}?
       </p>
       <div className="li-field">
@@ -1443,17 +1816,13 @@ function AthenaCard({ a, handlers }: { a: LocalAthenaSelection; handlers: WriteH
           className="btn btn-primary"
           disabled={busy || !version}
           onClick={() =>
-            record({ target: a.processing_id, decision: 'select_athena_version', value: version }, `Recorded: ${version} is the result of record.`)
+            record({ target: a.processing_id, decision: 'select_athena_version', value: version }, `Recorded: ${version} is the final result.`)
           }
         >
           {COPY.selectAthena}
         </button>
       </p>
-      {error && (
-        <p className="li-error" role="alert">
-          {error}
-        </p>
-      )}
+      {feedback}
     </li>
   );
 }
