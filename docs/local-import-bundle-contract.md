@@ -779,6 +779,24 @@ Exit codes for the LOCAL-2 commands: `validate` and `export` exit 1 when any dra
   protocol and stores `processing_results[]` for groups in the bundle, each undecided (a
   result claiming confirmation is stored `needs_review`); decided results are kept. Exit 2
   "processing not installed" when its libraries are missing, or before grouping.
+  **The raw scans must be readable.** They are read from `--source`, else from the folder the
+  bundle recorded at import (`source_root.local_root_hint`, only with `--record-local-root`;
+  each scan is still checked against its recorded `content_sha256`). Exit 2, naming
+  `--source <the beamtime folder you imported>`, with NOTHING written (no `record_groups.json`,
+  no `processing/`, `bundle.json` unchanged) when neither is given, when that folder does not
+  exist, or when not one scan file the groups list is found there with its imported bytes. Some
+  scans missing is not refused: each is reported on its own result (`source_file_not_found`).
+  **`--group ID` (repeatable) replaces only the named groups' results.** Every other group's
+  results are kept exactly as stored, decided or not (the output counts them as
+  `kept_other_groups`; `new` counts only the named groups'). Within a named group, an undecided
+  result is replaced by this run's. A DECIDED result (approve, reject, needs_changes, defer) is
+  never replaced or removed: its decision is bound to its `result_id`, which is derived from
+  the protocol version, the group and the sha256 of every input and parameter. Re-processing
+  with the same inputs yields the same `result_id`, so the decided result stays and no
+  duplicate is stored; with different inputs or parameters the new result gets a new id and is
+  stored, undecided, BESIDE the decided one, which keeps its state until a scientist decides the
+  new one. `processing/processing_results.json` holds the last run's results only (the bundle
+  holds them all).
 
 ## 15. Known residue (DEC-77; the hosted path is deliberately unchanged)
 
