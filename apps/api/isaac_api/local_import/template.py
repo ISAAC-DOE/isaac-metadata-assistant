@@ -437,11 +437,20 @@ class _Suggester:
         self.live = live
         self.exposed: list[tuple[str, str]] = []
         self.hints_of: dict[str, list[dict]] = {}
+        self.field_hints_of: dict[str, list[dict]] = {}
         payload = Q.consolidate(bundle)
         for q in payload["questions"]:
             for t in q["targets"]:
                 if t["kind"] == "missing_value" and q.get("hints"):
                     self.hints_of.setdefault(t["id"], q["hints"])
+            # an OPTIONAL field (the facility's name, organization, beamline) is asked in an optional-values
+            # question, whose hints are per field (``field_hints``), not on the question: without these the
+            # facility hints (the folder's name, the acquisition system's column names) never reached the sheet.
+            # An AI reading is not a hint from the files: it is shown from the target's own interpretations.
+            for path, hints in (q.get("field_hints") or {}).items():
+                files = [h for h in hints if h.get("kind") != "ai_suggestion"]
+                if files:
+                    self.field_hints_of.setdefault(path, files)
         self.run_of_candidate = {c["candidate_id"]: c["run_id"] for c in bundle["candidates"]}
         self.ai_of: dict[tuple[str, str], list[dict]] = {}
         for i in bundle.get("ai_interpretations") or ():
@@ -489,15 +498,15 @@ class _Suggester:
         Campaign Info block (``row_of=None``) shows the question's beamtime-wide hints."""
         out = []
         if with_hints:
-            hints = self.hints_of.get(m["value_id"], [])
+            hints = self.hints_of.get(m["value_id"]) or self.field_hints_of.get(m["target_field_path"], [])
             if row_of is not None:
                 hints = self._row_hints(hints, row_of)
             for h in hints[:2]:
                 if h.get("candidate_id"):
                     self._expose("candidate", h["candidate_id"])
                 src = (self.index.sources.get(h.get("source_id") or "") or {}).get("relative_path")
-                out.append(f"hint ({h.get('kind')}, never an answer): {_shown(h.get('literal'))}"
-                           + f" — {src or '(source)'} @ {h.get('locator') or '(no locator)'}")
+                where = f"{src} @ {h.get('locator') or '(no locator)'}" if src else (h.get("locator") or "(source)")
+                out.append(f"hint ({h.get('kind')}, never an answer): {_shown(h.get('literal'))} — {where}")
         return out + self._ai("missing_value", m["value_id"])
 
     def for_run(self, run_id: str, path: str) -> str:

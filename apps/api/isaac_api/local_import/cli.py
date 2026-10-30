@@ -262,10 +262,14 @@ def render_summary(bundle: Mapping) -> str:
     add("")
     add("## Counts")
     add("")
+    unread = bundle["unread_files"]
+    athena = [u for u in unread if _is_athena_project(u)]
     add(
         f"- Files: {counts['sources']} inventoried, {counts['unread_files']} unread or refused"
         + (f" (walk stopped: {root['truncated_reason']})" if root.get("truncated_reason") else "")
     )
+    if athena:
+        add(f"  - {_athena_read_by_process(len(athena))} (the import has no reader for them, so they stay in the unread count)")
     add(
         f"- Runs: {counts['runs']} ({counts['runs_sharing_a_legacy_number']} share a legacy "
         f"number with another run; all are kept)"
@@ -373,15 +377,18 @@ def render_summary(bundle: Mapping) -> str:
         add(f"- … {len(ordered) - _SUMMARY_LIST_ROWS} more fields: `isaac bundle list <dir> questions`")
     add("")
 
-    unread = bundle["unread_files"]
     add("## Unread files")
     add("")
     if not unread:
         add("Every inventoried file had a reader.")
-    for u in unread[:_SUMMARY_LIST_ROWS]:
+    if athena:
+        # an Athena project is not unread: `isaac process` reads it (the import has no reader for it)
+        add(f"- {_athena_read_by_process(len(athena))} (`isaac bundle list <dir> unread` shows each with its `read_by`).")
+    others = [u for u in unread if not _is_athena_project(u)]
+    for u in others[:_SUMMARY_LIST_ROWS]:
         add(f"- {_clip(u['relative_path'] or '(name withheld)', 60)} — {u['reason_code']}")
-    if len(unread) > _SUMMARY_LIST_ROWS:
-        add(f"- … {len(unread) - _SUMMARY_LIST_ROWS} more: `isaac bundle list <dir> unread`")
+    if len(others) > _SUMMARY_LIST_ROWS:
+        add(f"- … {len(others) - _SUMMARY_LIST_ROWS} more: `isaac bundle list <dir> unread`")
     add("")
 
     add("## Readiness")
@@ -535,6 +542,8 @@ def cmd_import(args) -> int:
         f"({c['conflicts']} conflicts, {c['needs_review']} need review, "
         f"{c['missing_values']} missing, {c['unread_files']} unread files)"
     )
+    if n_athena := sum(1 for u in bundle["unread_files"] if _is_athena_project(u)):
+        print(f"  {_athena_read_by_process(n_athena)}")
     if c.get("processed_output_files"):
         print(
             f"  {c['processed_output_files']} processed files from the scientists (Athena/Demeter), "
@@ -679,6 +688,16 @@ def _row(kind: str, obj: Mapping, group_status: Mapping | None = None) -> dict:
     if later:
         row["read_by"] = later
     return row
+
+
+def _is_athena_project(unread_row: Mapping) -> bool:
+    """An unread row whose file a LATER command reads (an Athena ``.prj``: see :data:`READ_LATER_BY_SUFFIX`)."""
+    return str(unread_row.get("relative_path") or "").lower().endswith(tuple(READ_LATER_BY_SUFFIX))
+
+
+def _athena_read_by_process(n: int) -> str:
+    """What the summary and the import output say about Athena projects (the stored unread_files keep them)."""
+    return f"{n} Athena project{'s are' if n != 1 else ' is'} read by `isaac process`, not at import"
 
 
 def _mc_reason_code(obj: Mapping) -> str | None:
@@ -867,8 +886,39 @@ def cmd_bundle_show(args) -> int:
                     return exc.code
             print(json.dumps(_merge_candidate_view(bundle, obj) if args.kind == "merge-candidate" else obj, indent=1, ensure_ascii=False))
             return EXIT_OK
+    if args.kind == "question":
+        # the id `bundle questions` prints (a consolidated question) is not a fine-grained one
+        return _show_consolidated_question(args)
     _err(f"No {args.kind} with id {args.id!r} in this bundle.")
     return EXIT_NOT_FOUND
+
+
+def _question_exposures(page: Sequence[Mapping]) -> list[tuple[str, str]]:
+    """The parser values a page of consolidated questions prints: each hint's candidate and each
+    resolve-conflict question's conflict (what `bundle questions` and `bundle show question` record)."""
+    shown = [("candidate", h["candidate_id"]) for q in page for h in q["hints"] if h.get("candidate_id")]
+    shown += [("conflict", q["targets"][0]["id"]) for q in page if q["kind"] == "resolve_conflict"]
+    return shown
+
+
+def _show_consolidated_question(args) -> int:
+    """``bundle show <dir> question <Q-…>`` for a consolidated question id: that one question, compact as
+    in `bundle questions`, with the exposures `bundle questions` would record for it, written before printing."""
+    from . import mutations as M
+    from . import questions as Q
+
+    def run():
+        bundle = M.load(Path(args.bundle_dir))
+        q = Q.question(Q.consolidate(bundle), args.id)
+        if q is None:
+            raise M.MutationRefused(
+                f"No question with id {args.id!r} in this bundle (`isaac bundle questions <dir>` lists the ids).", code=EXIT_NOT_FOUND)
+        shown = _question_exposures([q])
+        if shown:
+            M.expose_and_load(Path(args.bundle_dir), shown, "bundle show question")
+        return _compact_question(q)
+
+    return _mutation(run)
 
 
 def _print_non_finite(bundle) -> None:
@@ -1039,8 +1089,7 @@ def cmd_bundle_questions(args) -> int:
         kept = [q for q in rows if not (args.skip_deferred and q.get("deferred"))]
         page = kept[args.offset : args.offset + args.limit]
         # HINTS SHOW PARSER LITERALS: that is an exposure, recorded before printing.
-        shown = [("candidate", h["candidate_id"]) for q in page for h in q["hints"] if h.get("candidate_id")]
-        shown += [("conflict", q["targets"][0]["id"]) for q in page if q["kind"] == "resolve_conflict"]
+        shown = _question_exposures(page)
         if shown:
             M.expose_and_load(Path(args.bundle_dir), shown, "bundle questions")
         return {

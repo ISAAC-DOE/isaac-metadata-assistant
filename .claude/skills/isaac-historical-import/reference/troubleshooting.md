@@ -7,7 +7,7 @@
 | import exit 4 | "The output folder isn't empty or is inside your data." | choose a new, empty folder outside the data; `--force` only if they ask |
 | import exit 5 | "ISAAC read the files but could not make a valid summary of them." | run `<isaac> import` again for the message; report the exact message to the ISAAC team; do not retry blindly |
 | a beamtime with 0 runs | "No reader for these file types yet; N files were left unread." | go to Step 4 for what can be read; generic readers run automatically where present |
-| `bundle show` / `excerpt` exit 6 | "That item doesn't exist in this bundle." | list again; ids change only when you re-import |
+| `bundle show` (any kind, including a `question` id from `bundle questions`) / `excerpt` exit 6 | "That item doesn't exist in this bundle." | list again; ids change only when you re-import |
 | a mutation exit 5 | "That change would leave the summary invalid, so nothing was saved." | read the message; fix the cause (usually a missing value with a decision) |
 | `excerpt` exits 0 but its reply has `"refused"` (file changed, no longer in the folder, or inside a nested ZIP) | "I can't show that file's text: <the reason in its words>." | for a changed file, re-import into a new folder; otherwise read it another way (Step 4) |
 | `decide` exit 2 | "That decision isn't allowed for this item." | read the allowed list in the message; for conflicts/missing values give `--value` |
