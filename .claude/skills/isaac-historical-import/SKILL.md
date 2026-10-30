@@ -157,7 +157,9 @@ writes nothing). Read the Processing section of `reference/grouping-and-processi
 with `<isaac> bundle list <bundle> processing-results --limit 20` (never read `processing_results.json`).
 For each group show the verdict in words, glitch flags, skipped scans, agreement with the scientist's
 own Athena output, and the plot (open the PNG with Read and describe it). Ask approve / reject / needs
-changes. **When approving, also ask for the QC status**: the scientist's call, never mapped from `warn`
+changes. **A group can have two results**: ISAAC's curve (`…-isaac`) and the scientist's own Athena
+curve (`…-athena`); show both, say which scans each used, ask which is the record's, and approve
+exactly one (`decide` refuses a second). **When approving, also ask for the QC status**: the scientist's call, never mapped from `warn`
 (`--qc-status valid|compromised|failed|pending`, with `--qc-note` when something is wrong).
 Never call a `not_applicable` result a fail or ask to approve it ("no ISAAC processing protocol covers
 this data yet"); a result with **no curve** cannot be approved; offer the reference's three options.
