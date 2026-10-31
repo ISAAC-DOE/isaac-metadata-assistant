@@ -113,7 +113,7 @@ The single key is `SemanticCandidate.review_status` (itself derived from `kind`,
 | `review_status == "needs_review"`: a target path exists but something holds the value — mapping `needs_domain_review`, `blocked_by_build` (no write path), local time with no zone, a structural run/experiment candidate, a beamtime-scope value, a logbook sentence with no value | `needs_review` |
 | `review_status == "sources_conflict"` (`unresolved_reason == "sources_disagree"`) | `conflicting` |
 | `review_status == "unmapped"` (field kind, `target_field_path is None`; mapping `not_expressible`) | `unmapped` |
-| `review_status == "ready"` but every file witness is a notes (logbook) sentence about the WHOLE beamtime (a `bl15.notes.*_statement.v1` reading with no `section`, no `file_numbers`, no `named_samples`; polish c6-a): beamtime context, not the run's value. The local import holds it (`state_basis.not_proposable_reason` = `bundle.BEAMTIME_WIDE_REASON`, so `review_status` re-derives to `needs_review`); an older bundle is held the same way on `mutations.load` / `save_bundle`. No shape change, no format bump; the hosted engine is unchanged | `needs_review` |
+| `review_status == "ready"` but every file witness is a notes (logbook) sentence about the WHOLE beamtime (a `bl15.notes.*_statement.v1` reading with no `section`, no `file_numbers`, no `named_samples`; polish c6-a): beamtime context, not the run's value. The local import holds it (`state_basis.not_proposable_reason` = `bundle.BEAMTIME_WIDE_REASON`, so `review_status` re-derives to `needs_review`); an older bundle is held the same way IN MEMORY by every reader (`mutations.load`, the CLI's `list` / `show` / `check`, the web page's `read_bundle`; the counts it moves move with it, and a read writes nothing: the version stays the stored bytes' hash), and on disk by the next save (`save_bundle`), which logs each value the stored file gave as extracted in `eligibility_rederived[]` (reason `bundle.BEAMTIME_WIDE_REDERIVED_REASON`; eligibility does not move: an extracted value was never eligible) and prints one stderr line ("held N value(s) read only from a beamtime-wide notes sentence for review"). The per-value log, not `format_upgrades[]`: the hold changes no format and no writable path, and a `format_upgrades` entry marks an upgrade done and drives the composition's disclosure rule (polish c6-r). No shape change, no format bump; the hosted engine is unchanged | `needs_review` |
 | `review_status == "resolved"` (a stored convention rule or standing resolution applied) and proposable | `candidate_extracted` (`method: stored_rule`) |
 | `review_status == "resolved"`, not proposable | `needs_review` |
 | a writable target path no candidate states for that run (or for the record) | `missing` |
@@ -728,7 +728,9 @@ Install for use from any directory: `scripts/install_local_cli.sh` (creates or r
 
 `exposures[]` records the first time each command printed a target's parser value
 (`bundle show candidate|conflict|run|question`, `bundle list candidates`, `bundle reveal`,
-`bundle propose-terms` (§24));
+`bundle propose-terms` (§24), `bundle questions`: each hint's candidate, each conflict, and every
+candidate whose value a confirm question's text states — `questions.confirm_value_shown`, all of
+them, not only the hinted ones; polish c6-r);
 the exposure is written BEFORE anything is printed, and if it cannot be written nothing is
 printed. `summary.md` shows no non-conflicting parser value. `bundle annotate --blind` is
 honoured only when no exposure exists for that target; otherwise the interpretation is
@@ -856,7 +858,8 @@ Exit codes for the LOCAL-2 commands: `validate` and `export` exit 1 when any dra
 - `questions.json` is now **v2** (`isaac.questions` 2.0.0, `bundle.questions`' fine-grained v1
   list is unchanged inside `bundle.json`). `isaac bundle questions <dir> [--scope
   experiment|group:<id>|run:<id>] [--blocking-only] [--limit --offset]` prints it (hints are
-  parser literals, so printing records an exposure). Rules: experiment > record group > run;
+  parser literals, and a confirm question's text states every value `confirm` records, so printing
+  records an exposure of each). Rules: experiment > record group > run;
   shared fields asked once at experiment scope unless the bundle records differing values;
   sample fields shared across groups with the same sample reading, or asked once with the
   choice stated when nothing records any sample reading; run-level questions collapse to the

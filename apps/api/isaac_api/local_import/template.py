@@ -1396,7 +1396,7 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
         found = None
         if ids:
             if not payload_box:
-                payload_box.append(Q.consolidate(bundle, include_answered=True))
+                payload_box.append(Q.consolidate(bundle, include_answered=True, explain_counter=False))
             for q in payload_box[0]["questions"]:
                 if q["kind"] not in Q.VALUE_KINDS or q.get("informational"):
                     continue
@@ -2046,6 +2046,12 @@ class _Adopter:
         return bad
 
 
+def _compared_values(ad: "_Adopter", readings: Sequence[Mapping], path: str) -> tuple[str, ...]:
+    """The distinct values ``readings`` hold, as compared (``_comparable``: ``'0'`` and ``0.0`` are one), each a
+    ``repr``. A reading with no comparable form keeps its own value; ``0`` / ``0.0`` is a value (L3, c6-r)."""
+    return tuple(sorted({repr(r["value"] if (cv := ad._comparable(r["value"], path)) is None else cv) for r in readings}))
+
+
 def _shown_reading(r: Mapping) -> str:
     return f"{_shown(r['value'])} ({r['source']})"
 
@@ -2117,7 +2123,7 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
             if bad:
                 # one row per cell of theirs and the VALUES the files read (a scan file and its calibration
                 # file under one folder name are one disagreement); every source is kept
-                key = ("file_reading", sheet, col.header, their_ref, tuple(sorted({repr(ad._comparable(r["value"], path) or r["value"]) for r in bad})))
+                key = ("file_reading", sheet, col.header, their_ref, _compared_values(ad, bad, path))
                 disagree(key, kind="file_reading", sheet=sheet, header=col.header, path=path, their_value=value,
                          reason="a file reading says otherwise", scope="experiment" if run_id is None else "run",
                          _readings=[_shown_reading(r) for r in bad], _their_cells=[their_ref], _runs=runs,

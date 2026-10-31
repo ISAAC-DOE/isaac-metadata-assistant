@@ -409,7 +409,8 @@ def read_bundle(bundle_dir: Path) -> tuple[str, dict]:
     (``records.contained_file``: no ``..``, no symlink out), opened once, size-checked on the open
     handle before parsing (``bundle.MAX_BUNDLE_BYTES``), so the version and the content are the same
     bytes. The version is :func:`mutations.bundle_version`'s (sha256 of the bytes). Raises
-    ``MutationRefused`` (code 6 absent, 1 unreadable) as ``mutations.load`` does."""
+    ``MutationRefused`` (code 6 absent, 1 unreadable) as ``mutations.load`` does, and holds a beamtime-wide
+    notes value for review in memory as it does (``bundle.hold_beamtime_wide_statements``; nothing is written)."""
     from .local_import import bundle as B
     from .local_import import mutations as M
     from .local_import import records as R
@@ -432,6 +433,10 @@ def read_bundle(bundle_dir: Path) -> tuple[str, dict]:
         raise M.MutationRefused(f"Unreadable bundle: bundle.json is not readable JSON: {exc}", code=1) from exc
     if not isinstance(data, dict):
         raise M.MutationRefused("Unreadable bundle: bundle.json does not hold a JSON object", code=1)
+    if isinstance(data.get("candidates"), list) and all(isinstance(c, dict) for c in data["candidates"]):
+        # what `mutations.load` reads (M1, c6-r): an older build's beamtime-wide notes value is held for review IN
+        # MEMORY, so this page's counts and questions are the CLI's. The version stays the stored bytes' hash.
+        B.hold_beamtime_wide_statements(data)
     return "sha256:" + hashlib.sha256(raw).hexdigest(), data
 
 
@@ -1336,6 +1341,8 @@ def get_local_bundle_questions(
         # whose extracted value this page shows beside a confirm question
         shown = [("candidate", h["candidate_id"]) for q in page for h in q["hints"] if h.get("candidate_id")]
         shown += [("conflict", q["targets"][0]["id"]) for q in page if q["kind"] == "resolve_conflict"]
+        # ...and every candidate whose value a confirm question's TEXT states (questions.confirm_value_shown)
+        shown += [("candidate", cid) for q in page for cid in Q.confirm_value_shown(data, q)]
         out_questions = []
         idx = BundleIndex(data)
         for q in page:

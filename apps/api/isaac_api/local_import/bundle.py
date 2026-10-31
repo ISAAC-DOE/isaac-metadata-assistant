@@ -2123,8 +2123,9 @@ def _extracted_state_of(candidate) -> str:
 # (`review_status_from_basis`) gives `needs_review` — and every group it reaches is asked, with the
 # sentence. A sample section's own statement (which overrides the beamtime's for its runs) and one
 # naming particular samples are not held. The stored shape is unchanged (no format bump): an
-# older build's bundle, where the value is extracted, stays valid, and is held when it is loaded
-# (`mutations.load`) and saved (`mutations.save_bundle`).
+# older build's bundle, where the value is extracted, stays valid, and is held IN MEMORY by every reader
+# (`mutations.load`, the CLI's list/show/check, `local_bundles.read_bundle`; a read writes nothing) and on disk by
+# the next save (`mutations.save_bundle`), which logs each such value in `eligibility_rederived` (c6-r).
 
 BEAMTIME_WIDE_REASON = (
     "Read only from a notes statement about the whole beamtime: it sits before any sample section of the "
@@ -2181,13 +2182,68 @@ def _hold_for_review(candidate: dict) -> None:
 
 def hold_beamtime_wide_statements(bundle: dict) -> list[str]:
     """Hold every extracted candidate :func:`beamtime_wide_statement` finds for review, in place; the ids
-    held. Idempotent (a held candidate is no longer proposable). ``apply_derivations`` re-derives counts."""
-    held = []
+    held. Idempotent (a held candidate is no longer proposable). The counts a held value moves
+    (``counts.candidate_extracted`` / ``needs_review``, ``readiness.blocking.needs_review``) move with it, so a
+    READ-ONLY command that holds in memory (``cli``'s list/show/check, ``local_bundles.read_bundle``) shows
+    what :func:`apply_derivations` would store, and the held bundle validates as the stored one does."""
+    held, moved = [], 0
     for c in bundle.get("candidates") or ():
         if c.get("extracted_state") == STATE_CANDIDATE_EXTRACTED and beamtime_wide_statement(c):
+            was = c.get("value_state")
             _hold_for_review(c)
+            moved += was == STATE_CANDIDATE_EXTRACTED and c.get("value_state") == STATE_NEEDS_REVIEW
             held.append(c["candidate_id"])
+    counts = bundle.get("counts")
+    if moved and isinstance(counts, dict) and isinstance(counts.get("candidate_extracted"), int):
+        counts["candidate_extracted"] -= moved
+        counts["needs_review"] = int(counts.get("needs_review") or 0) + moved
+        blocking = (bundle.get("readiness") or {}).get("blocking")
+        if isinstance(blocking, dict):
+            blocking["needs_review"] = counts["needs_review"]
     return held
+
+
+#: ``eligibility_rederived[].reason`` for a value a save HOLDS that the stored file gave as extracted (M2, c6-r).
+BEAMTIME_WIDE_REDERIVED_REASON = "Held for review by this build; an older build stored it as an extracted value. " + BEAMTIME_WIDE_REASON
+
+
+def held_statement(n: int) -> str:
+    """The one line a save prints to stderr (and ``bundle check`` says) when it holds ``n`` such values."""
+    return f"held {n} value(s) read only from a beamtime-wide notes sentence for review"
+
+
+def log_beamtime_wide_holds(bundle: dict, stored: Mapping | None, *, to_version: str) -> list[str]:
+    """Log in ``eligibility_rederived`` every candidate ``bundle`` now holds for review (:data:`BEAMTIME_WIDE_REASON`)
+    that ``stored`` — the file AS STORED, read under the caller's lock — gives as an extracted value (an older
+    build's bundle, held by :func:`hold_beamtime_wide_statements`); the ids logged. Run after
+    :func:`apply_derivations`, so ``value_state`` and ``eligible_now`` are what is written. The per-value log, not
+    ``format_upgrades``: the hold moves stored states value by value and changes no format or writable path (a
+    ``format_upgrades`` entry marks a format upgrade done and drives the composition's disclosure rule)."""
+    if not stored:
+        return []
+    was = {c.get("candidate_id"): c for c in stored.get("candidates") or () if isinstance(c, Mapping)
+           and c.get("extracted_state") == STATE_CANDIDATE_EXTRACTED and beamtime_wide_statement(c)}
+    if not was:
+        return []
+    from datetime import datetime, timezone
+
+    at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    decision_of = _decisions_by_target(bundle.get("scientist_decisions") or ())
+    log = bundle.setdefault("eligibility_rederived", [])
+    logged = []
+    for c in bundle.get("candidates") or ():
+        before = was.get(c["candidate_id"])
+        if before is None or (c.get("state_basis") or {}).get("not_proposable_reason") != BEAMTIME_WIDE_REASON:
+            continue
+        d = candidate_decision(bundle, c, decision_of)
+        log.append({"kind": "candidate", "id": c["candidate_id"], "target_field_path": c.get("target_field_path") or "",
+                    "from_format_version": str(stored.get("format_version")), "to_format_version": to_version,
+                    "rederived_utc": at, "value_state": c["value_state"],
+                    "eligible_before": bool((before.get("eligibility_for_official_record") or {}).get("eligible")),
+                    "eligible_now": bool(c["eligibility_for_official_record"]["eligible"]),
+                    "decision_id": (d or {}).get("decision_id"), "reason": BEAMTIME_WIDE_REDERIVED_REASON})
+        logged.append(c["candidate_id"])
+    return logged
 
 
 # --- the builder -----------------------------------------------------------------

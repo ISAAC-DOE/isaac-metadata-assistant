@@ -651,10 +651,14 @@ def _load(dir_arg: str):
         _err(f"No bundle.json at {dir_arg}.")
         return None, EXIT_NOT_FOUND
     try:
-        return B.load_bundle(path), EXIT_OK
+        bundle = B.load_bundle(path)
     except B.BundleInvalid as exc:
         _err(f"Unreadable bundle: {exc}")
         return None, EXIT_INVALID
+    # what `mutations.load` reads (M1, c6-r): an older build's beamtime-wide notes value is held for review
+    # IN MEMORY, so list/show agree with `bundle questions` and the web page. A read writes nothing.
+    B.hold_beamtime_wide_statements(bundle)
+    return bundle, EXIT_OK
 
 
 def _short(value: Any, n: int = 200) -> Any:
@@ -1263,12 +1267,17 @@ def cmd_bundle_show(args) -> int:
     return EXIT_NOT_FOUND
 
 
-def _question_exposures(page: Sequence[Mapping]) -> list[tuple[str, str]]:
-    """The parser values a page of consolidated questions prints: each hint's candidate and each
-    resolve-conflict question's conflict (what `bundle questions` and `bundle show question` record)."""
+def _question_exposures(page: Sequence[Mapping], bundle: Mapping) -> list[tuple[str, str]]:
+    """The parser values a page of consolidated questions prints: each hint's candidate, each
+    resolve-conflict question's conflict, and every candidate whose extracted value a confirm question's
+    TEXT states (``questions.confirm_value_shown``: all of them, not only the hinted ones — H1, c6-r). What
+    `bundle questions` and `bundle show question` record, as the web page records its own."""
+    from . import questions as Q
+
     shown = [("candidate", h["candidate_id"]) for q in page for h in q["hints"] if h.get("candidate_id")]
     shown += [("conflict", q["targets"][0]["id"]) for q in page if q["kind"] == "resolve_conflict"]
-    return shown
+    shown += [("candidate", cid) for q in page for cid in Q.confirm_value_shown(bundle, q)]
+    return list(dict.fromkeys(shown))
 
 
 def _show_consolidated_question(args) -> int:
@@ -1292,7 +1301,7 @@ def _show_consolidated_question(args) -> int:
         if q is None:
             raise M.MutationRefused(
                 f"No question with id {args.id!r} in this bundle (`isaac bundle questions <dir>` lists the ids).", code=EXIT_NOT_FOUND)
-        shown = _question_exposures([q])
+        shown = _question_exposures([q], bundle)
         if shown:
             M.expose_and_load(Path(args.bundle_dir), shown, "bundle show question")
         return {**{k: v for k, v in _compact_question(q).items() if k not in extra}, **extra}
@@ -1356,6 +1365,9 @@ def cmd_bundle_check(args) -> int:
         print("  Exit code 1 (EXIT_INVALID): the CLI has no exit code of its own for STALE.")
         return EXIT_INVALID
     bundle = B.load_bundle(path)
+    # the value states as this build reads them (M1, c6-r): a beamtime-wide notes value an older build stored as
+    # extracted is held for review in memory (nothing is written); the next change stores it and logs it
+    held = B.hold_beamtime_wide_statements(bundle)
     states: dict[str, int] = {}
     for c in bundle["candidates"]:
         states[c["value_state"]] = states.get(c["value_state"], 0) + 1
@@ -1370,6 +1382,10 @@ def cmd_bundle_check(args) -> int:
     )
     for u in bundle.get("format_upgrades") or ():
         print(f"  {u['statement']} (by a {u['derived_by_format_version']} build, {u['upgraded_utc']}).")
+    if held:
+        print(f"  This build {B.held_statement(len(held))} (in memory: nothing is written), and the value states above "
+              "count them so. An older build stored them as extracted: the next change to the bundle stores them held "
+              "and logs each in `eligibility_rederived`.")
     older_merged = B.older_build_merged_groups(bundle)
     if older_merged:
         print(f"  {len(older_merged)} record group(s) ({', '.join(older_merged[:5])}{' …' if len(older_merged) > 5 else ''}) are "
@@ -1474,7 +1490,7 @@ def cmd_bundle_questions(args) -> int:
         kept = [q for q in rows if not (args.skip_deferred and q.get("deferred"))]
         page = kept[args.offset : args.offset + args.limit]
         # HINTS SHOW PARSER LITERALS: that is an exposure, recorded before printing.
-        shown = _question_exposures(page)
+        shown = _question_exposures(page, bundle)
         if shown:
             M.expose_and_load(Path(args.bundle_dir), shown, "bundle questions")
         return {

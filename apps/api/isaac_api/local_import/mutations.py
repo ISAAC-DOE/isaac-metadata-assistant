@@ -207,6 +207,19 @@ def save_bundle(bundle_dir: Path, bundle: dict) -> None:
         bundle.setdefault(key, [])
     B.refresh_questions(bundle)
     B.apply_derivations(bundle)
+    # A HOLD OF A VALUE THE STORED FILE GIVES AS EXTRACTED IS NEVER SILENT (M2, c6-r): each is logged in
+    # `eligibility_rederived`, read from the bundle AS STORED (under the caller's lock), and one line goes to stderr
+    # once the write succeeds. Read only when this bundle holds such a value (a fresh import's are held already:
+    # the stored file then gives them held, and nothing is logged).
+    held_now: list = []
+    if any((c.get("state_basis") or {}).get("not_proposable_reason") == B.BEAMTIME_WIDE_REASON for c in bundle["candidates"]):
+        stored_h = None
+        if B.bundle_path(Path(bundle_dir)).is_file():
+            try:
+                stored_h = B.load_bundle(Path(bundle_dir))
+            except B.BundleInvalid:
+                stored_h = None
+        held_now = B.log_beamtime_wide_holds(bundle, stored_h, to_version=to_version)
     # NO WRITE ADDS A NON-FINITE NUMBER (NaN / Infinity: not standard JSON). One the STORED file already
     # holds — an answer an older build accepted, kept by the append-only log — never blocks a write
     # (a correction must be possible); `bundle check` names it and it is never eligible.
@@ -233,6 +246,9 @@ def save_bundle(bundle_dir: Path, bundle: dict) -> None:
     cli._atomic_write(bundle_dir / B.BUNDLE_FILE, B.encode(bundle))
     for name, data in cli.section_payloads(bundle).items():
         cli._atomic_write(bundle_dir / name, data)
+    if held_now:
+        print(f"isaac: {B.held_statement(len(held_now))} (an older build stored them as extracted; logged in bundle.json "
+              "eligibility_rederived)", file=sys.stderr)
 
 
 class StaleBundleVersion(MutationRefused):
@@ -924,7 +940,7 @@ def decide_question(
             # consolidate(include_answered=True)): a later decision replaces an earlier one, a repeat records
             # nothing, and every check below applies exactly as to an open question. Every kind that drops out once
             # answered (Q.RESOLVABLE_WHEN_ANSWERED): a value, the absorber, the counter positions, the clock zone.
-            answered = Q.consolidate(bundle, include_answered=True) if exc.code == 6 else None
+            answered = Q.consolidate(bundle, include_answered=True, explain_counter=False) if exc.code == 6 else None
             asked = Q.question(answered, question_id) if answered is not None else None
             if asked is None or asked["kind"] not in Q.RESOLVABLE_WHEN_ANSWERED:
                 raise

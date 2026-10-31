@@ -316,8 +316,13 @@ def _label(path: str) -> str:
 
 
 #: The unit a field's own NAME fixes (the record carries the bare number in that unit), by name suffix.
-#: Longest first. A field with none takes the unit its reading was normalised to, when one is recorded.
+#: Longest first.
 _UNIT_BY_SUFFIX = (("_mA_cm2", "mA/cm²"), ("_eV", "eV"), ("_mm", "mm"), ("_V", "V"), ("_K", "K"), ("_M", "M"))
+#: Fields KNOWN to carry no unit in their name, by path, with the unit the target schema states for the record
+#: (``None``: it states none). Only these take the unit their reading was normalised to — and, when the schema
+#: states one, only that unit. Any other field without a unit suffix is said with no unit: a reading's own unit
+#: (``wt%`` for a mass fraction) need not be the one the record carries (L2, c6-r).
+_UNIT_NOT_IN_NAME: Mapping[str, str | None] = {"context.electrochemistry.pH": None}
 #: The longest file literal a question's text quotes (the hints carry it in full).
 _QUOTED_LITERAL_CHARS = 240
 
@@ -327,8 +332,12 @@ def _unit_of(path: str, candidate: Mapping) -> str | None:
     for suffix, unit in _UNIT_BY_SUFFIX:
         if leaf.endswith(suffix):
             return unit
+    if path not in _UNIT_NOT_IN_NAME:
+        return None
     units = [n.get("unit") for e in candidate.get("evidence") or () for n in e.get("normalization") or () if n.get("unit")]
-    return str(units[-1]) if units else None
+    reading = str(units[-1]) if units else None
+    schema_unit = _UNIT_NOT_IN_NAME[path]
+    return reading if reading is not None and (schema_unit is None or reading == schema_unit) else None
 
 
 def _shown_value(value: Any, unit: str | None) -> str:
@@ -370,6 +379,26 @@ def _confirmed_value_text(path: str, cands: Sequence[Mapping]) -> str:
     return text
 
 
+def _confirmable_candidates(targets: Sequence[Mapping], cand_by_id: Mapping[str, Mapping],
+                            writable: frozenset[str]) -> list[Mapping]:
+    """The candidate targets ``confirm`` can record: each carries a value its field takes (not value-less, not
+    unfit: ``_extracted_value_problem``). Their values are what :func:`_confirmed_value_text` prints."""
+    return [c for t in targets if t.get("kind") == "candidate" and (c := cand_by_id.get(t.get("id"))) is not None
+            and c.get("value") is not None and _extracted_value_problem(c, writable) is None]
+
+
+def confirm_value_shown(bundle: Mapping, q: Mapping) -> list[str]:
+    """The candidates whose extracted VALUE question ``q``'s text prints (H1, c6-r): for a ``confirm_value``
+    question that offers ``confirm``, every confirmable target — its text states each distinct value with its
+    count, so a value shared by several targets is shown for each of them. Every one is an exposure, recorded
+    by ``bundle questions`` / ``bundle show question`` before printing (as the web page records its own).
+    Empty for any other question (a value-less, unfit or informational one prints no extracted value)."""
+    if q.get("kind") != "confirm_value" or "confirm" not in (q.get("allowed_decisions") or ALLOWED_DECISIONS["confirm_value"]):
+        return []
+    cand_by_id = {c["candidate_id"]: c for c in bundle.get("candidates") or ()}
+    return [c["candidate_id"] for c in _confirmable_candidates(q.get("targets") or (), cand_by_id, B._writable_paths())]
+
+
 def _sample_reading_text(groups: Sequence[str], written: Mapping[str, Sequence[tuple[str, str]]]) -> str:
     """The sample reading a partition's groups share, as the FILES write it (the partition key is lowercased):
     "sample name 'ZZ1', sample or electrode number '01'"; a key the groups spell differently lists each spelling."""
@@ -386,7 +415,12 @@ def _qid(*parts: str) -> str:
     return "Q-" + hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:10]
 
 
-def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, include_answered: bool = False) -> dict:
+#: The counter question's id (the grouping step's experiment-wide question; DEC-91: never changes).
+COUNTER_QUESTION_ID = _qid("experiment", "naming_counter_positions", _COUNTER_GQ_ID)
+
+
+def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, include_answered: bool = False,
+                explain_counter: bool = True) -> dict:
     """``questions.json`` v2 for ``bundle``. Pure: reads the bundle, writes nothing.
 
     ``compositions_out``, when given, receives the composer's report per live group that "blocking" was judged
@@ -398,7 +432,11 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     keeps an answered absorber, counter or clock-zone question (:data:`RESOLVABLE_WHEN_ANSWERED`). The
     buckets, and so the ids, are the same ones (DEC-91: a question's scope and partition never depend on an
     answer), so an answered question is found under the id it was asked with: what ``decide --question`` resolves
-    when the question is no longer open, and what ``bundle show question`` shows (:func:`answered_question`)."""
+    when the question is no longer open, and what ``bundle show question`` shows (:func:`answered_question`).
+
+    ``explain_counter=False`` (with ``include_answered``): an answered counter question's text says only
+    "Answered." — whether the current groups follow the answer needs a regroup preview (``grouping.propose``),
+    which a caller that only resolves targets (``decide --question``, the template) does not need."""
     schema, basis = _target_schema()
     # THE SET-POINT A CONTROL MODE NEEDS (1.5.0): the target schema's conditional rules make the
     # set-point required for some modes, so a run whose mode a file states or a scientist confirmed
@@ -740,8 +778,8 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 decisions_offered = list(VALUELESS_DECISIONS)
             else:
                 # HIGH2 (c6-a): the question states exactly what `confirm` records — the value and its unit
-                confirmable = [cand_by_id[t["id"]] for t in q["targets"] if t["kind"] == "candidate"
-                               and t["id"] in cand_by_id and t["id"] not in unconfirmable]
+                # (exactly the candidates `confirm_value_shown` names, so each value printed is recorded as an exposure)
+                confirmable = _confirmable_candidates(q["targets"], cand_by_id, writable)
                 text = (f"Is the extracted {_label(path)} ({path}) right?" + _confirmed_value_text(path, confirmable)
                         + " Confirm it, or correct it.")
                 if valueless:
@@ -902,20 +940,24 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     if include_answered and not counter_gqs and (said_counter or said_not):
         # ANSWERED: the grouping step no longer lists the question (a regroup applied the answer, or it never asked it
         # and the answer was given straight to `decide`), but its id is the one it would be asked with, so it is still
-        # found. Worded from what the bundle shows: while a regroup would still change a group or free a merge, the
-        # answer is NOT applied yet (a question the grouping step asked is listed above until a regroup removes it, so
-        # reaching here with an effect still pending means it was never asked)
-        from .mutations import counter_answer_preview
+        # found. Worded from what the regroup preview SHOWS, and only that (L4, c6-r): while the next regroup would
+        # still change a group or free a merge, the answer is not applied to the current groups yet. The preview
+        # proposes every group again (`grouping.propose`: ~0.6 s on 180 synthetic runs), so it is computed only when
+        # the text is shown (`explain_counter`); a caller resolving targets alone gets the plain "Answered."
+        pending: Mapping = {}
+        if said_counter and explain_counter:
+            from .mutations import counter_answer_preview
 
-        pending = counter_answer_preview(bundle) if said_counter else {}
+            pending = counter_answer_preview(bundle)
         applied_now = not (pending.get("groups_joined") or pending.get("groups_split") or pending.get("merge_decisions_unblocked"))
         counter_gqs = [{"id": _COUNTER_GQ_ID, "kind": "naming_counter_positions",
                         "positions": sorted(p for p in said_counter | set(said_not) if p > 0),
                         "text": "Which filename token positions are run or acquisition counters? ("
-                                + ("Answered; the current groups already follow it, so the grouping step has nothing left "
+                                + ("Answered." if said_counter and not explain_counter else
+                                   "Answered; the current groups already follow it, so the grouping step has nothing left "
                                    "to ask." if applied_now else
-                                   "Answered directly, and not applied yet: the grouping step did not ask this, and no "
-                                   "regroup has run since. " + str(pending.get("statement") or "")) + ")"}]
+                                   "Answered, and not applied yet to the current groups. "
+                                   + str(pending.get("statement") or "")) + ")"}]
     for gq in counter_gqs:
         asked_positions = [int(p) for p in gq.get("positions") or () if isinstance(p, int)]
         open_positions = [p for p in asked_positions if p not in said_counter and p not in said_not]
@@ -1821,7 +1863,8 @@ def answered_question(bundle: Mapping, question_id: str, payload: Mapping | None
     set_absorber (or defer), the counter question's the latest answer to it, the clock-zone question's the latest
     zone stated; an answer carries its ``element``/``edge`` or ``positions`` when it has them. Such a question is
     ``open`` while the open list still asks it (a counter position, a group not yet answered)."""
-    payload = payload or consolidate(bundle, include_answered=True)
+    # the regroup preview that words an answered counter question is computed only when that question is asked for
+    payload = payload or consolidate(bundle, include_answered=True, explain_counter=question_id == COUNTER_QUESTION_ID)
     q = question(payload, question_id)
     if q is None or q["kind"] not in RESOLVABLE_WHEN_ANSWERED:
         return None
