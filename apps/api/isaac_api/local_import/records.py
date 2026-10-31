@@ -592,6 +592,20 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
         # NEVER "no processing result": there are two (or more), and the record uses exactly one of them
         report["processing"] = {"used": None, "reason": "more than one approved processing result; a person chooses one",
                                 "group_id": group["group_id"], "approved_results": [B.processing_id(r) for r in approved]}
+    elif approved and (approved[0].get("outputs") or {}).get("files") and unusable_curve_reasons(approved[0]):
+        # c8-r: AN APPROVAL AN OLDER BUILD LET THROUGH for a curve whose QC says it is NOT A USABLE SPECTRUM
+        # (mutations.UNUSABLE_CURVE_REASONS; `decide` refuses that approval now). Nothing from it composes — no
+        # series, QC status, steps or E0 — so the record is blocked, as an approved result with no curve is.
+        r = approved[0]
+        reasons = unusable_curve_reasons(r)
+        statements = (r.get("qc") or {}).get("statements") or {}
+        report["processing"] = {
+            "used": None, "result": B.processing_id(r), "group_id": group["group_id"],
+            "unusable_curve": ", ".join(reasons),
+            **({"unusable_curve_said": " ".join(str(statements[x]) for x in reasons if statements.get(x))}
+               if any(statements.get(x) for x in reasons) else {}),
+            "reason": "the approved processing result is not a usable spectrum; nothing from it is used",
+        }
     elif approved:
         r = approved[0]
         pid = B.processing_id(r)
@@ -1386,7 +1400,9 @@ def processing_blocker(processing: Mapping) -> str:
     if processing.get("approved_results"):
         return "more_than_one_approved_result"
     if processing.get("result"):
-        return "approved_result_has_no_curve" if processing.get("no_curve") else "approved_result_not_usable"
+        if processing.get("no_curve"):
+            return "approved_result_has_no_curve"
+        return "approved_result_not_a_usable_spectrum" if processing.get("unusable_curve") else "approved_result_not_usable"
     if processing.get("awaiting_approval"):
         return "processing_awaiting_approval"
     if processing.get("unusable_curve_results"):
@@ -1430,6 +1446,18 @@ def processing_remedy(processing: Mapping) -> str:
                 f'approval (`isaac bundle decide <bundle_dir> --target {pid} --decision reject --by "<your name>"`), then '
                 f"either re-process the group with other parameters ({reprocess_command(gid)}) and approve the new result "
                 f"if it has a curve, or {leave_out}.")
+    if processing.get("result") and processing.get("unusable_curve"):
+        # c8-r: approved before `decide` refused it; never "re-run and approve": the same parameters give the same curve
+        pid = processing["result"]
+        why = f" ({processing['unusable_curve_said']})" if processing.get("unusable_curve_said") else ""
+        return (f"the approved result {pid} is not a usable spectrum: its QC fails {processing['unusable_curve']}{why}, "
+                "so its curve does not describe the data and nothing from it goes into the record (it was approved "
+                "before `decide` refused such an approval). Re-running `isaac process` with the same parameters gives "
+                "the same result. Withdraw the approval: reject the result "
+                f'(`isaac bundle decide <bundle_dir> --target {pid} --decision reject --by "<your name>"`), or mark it '
+                f"needs_changes (`--target {pid} --decision needs_changes`) and re-process the group with a setting the "
+                f"scientist chooses ({reprocess_command(gid)}), then approve the new result if its curve is usable; "
+                f"or {leave_out}.")
     if processing.get("result"):
         said = "; ".join(f"{k}: {processing[k]}" for k in ("series", "qc", "approval") if processing.get(k))
         return (f"the approved result {processing['result']} did not supply them" + (f" ({said})" if said else "")

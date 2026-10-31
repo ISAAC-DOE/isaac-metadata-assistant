@@ -116,6 +116,9 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   absorber; a scan header's region-file name (e.g. `TiK_XANES.rgn`) is not counted, though processing reads
   it to propose a reference foil's edge (its calibration `reference.basis: stated_by_evidence`). If the
   scientist asks, say exactly that: both read the same header; only processing used the region name.
+  A split part's question may carry an `answered_before_split` hint (the pair answered for the group it
+  was split from): it is a hint, never the part's answer; read it back and record it per part only on
+  the scientist's yes.
 - **The counter question** (`naming_counter_positions`): its text shows real file names of this
   bundle with the asked token in brackets (`SYNnp_on_Au_[12]_1500mV` vs `SYNnp_on_Au_[2]_1500mV`;
   also `example_names`), and one name where that token is not a number (`SYNfilm_on_Au_[OCV]`). Show
@@ -158,7 +161,9 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   record it with `correct --value YYYY-MM-DDTHH:MM:SSZ` (`confirm` takes no `--value` here). If the
   zone is changed later to a different zone, every start confirmed under the old one stops counting
   until confirmed again: `decide` reports how many, and `bundle questions` asks them again; say so.
-  If they do not know the zone: `--question <Q> --decision defer`. That records "I don't know":
+  If they do not know the zone: `--question <Q> --decision defer` (no `--value`: a `defer` on the
+  experiment takes none, and `--target experiment --decision defer --value …` is refused; the question
+  chooses which "I don't know" it is). That records "I don't know":
   no start time is converted, the question stays under its id, marked `deferred`, and the counter
   question is not touched. Once a zone is recorded, `defer` is refused (it would not withdraw the
   zone); to change the zone, state it again.

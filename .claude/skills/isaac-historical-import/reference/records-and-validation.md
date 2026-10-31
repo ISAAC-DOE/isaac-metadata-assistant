@@ -17,8 +17,12 @@ confirmed, with the command that lets it in. When no set-point was read from the
 such as `-500mV`) and no scale is confirmed, the warning names BOTH (`also_needs`, `also_command`): ask the
 set-point in volts and the scale together, so the scientist is not asked twice. A run a generic reader found
 (SSRL XDC) warns too: from its file name (`500mV`, `m600mV`, `1800mV`) and from a scan-header comment
-token (`0.5Vrhe`, with the scale written on it); a run whose name and header state different potentials
-(`…_m600mV` with `0Vrhe`) is named as a disagreement for the scientist to settle, and a name stating open
+token (`0.5Vrhe`, with the scale written on it, spelled as written: `Hg/HgO`, `Ag/AgCl`; a header token
+with no scale counts only at |V| ≤ 3 and not in brackets, so `800V`, `12V` or `(1.2V)` is not a
+potential); a run whose name and header write different numbers on the SAME scale (or neither writes
+one) is named as a disagreement for the scientist to settle, while a name with no scale beside a header
+on RHE (`…_m600mV` with `0Vrhe`) may be one potential on two scales: the warning says "different numbers
+on possibly different scales" and to ask which applies. A name stating open
 circuit (`OCV`) warns until the control mode is confirmed. None of these is read as a value. It is not a refusal: the record can still be exportable,
 without the condition that defines it. Say each one to the scientist and ask the scale question. Explain the counts first ("all 78 lack the producing group; 70 wait for a curve
 approval; 5 have no protocol"), then open `validation/<group id>.json` only for a group they leave

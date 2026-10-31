@@ -312,12 +312,15 @@ def test_a_potential_in_the_name_and_the_header_names_both_steps_and_the_headers
     assert f"--field {SETPOINT}" in text and f"--field {SCALE}" in text
 
 
-def test_a_name_and_a_header_that_disagree_are_both_named(grouped):
+def test_a_name_and_a_header_that_write_different_numbers_are_both_named(grouped):
     b = _confirm_groups(grouped)
     [w] = _warnings_of(grouped, b, "SYN_cat_m600mV_102")
     rid = _run_id(b, "SYN_cat_m600mV_102")
-    assert f"DISAGREE for 1 run(s) ({rid}: file name m600mV, scan header 0Vrhe)" in w["text"]
-    assert "neither is used" in w["text"]
+    # c8-r: the name writes no scale and the header writes RHE, so they may be one potential on two scales: never
+    # "disagree", the scientist is asked which applies
+    assert (f"different numbers on possibly different scales for 1 run(s) ({rid}: file name m600mV, scan header "
+            "0Vrhe; the header writes RHE, the name none): ask which applies") in w["text"]
+    assert "disagree for" not in w["text"].lower() and "neither is used" in w["text"]
 
 
 def test_a_name_that_states_open_circuit_warns_until_the_control_mode_is_confirmed(grouped):

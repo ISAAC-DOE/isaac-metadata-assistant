@@ -32,6 +32,13 @@ Get the groups with `bundle list <bundle> groups` and one in full with `bundle s
   reply lists `split_decisions_not_applied` (an older bundle's split with no usable lists), say why and
   record the split again with `--split-into`; `splits_applied[].applied_now` means an older split's groups
   were only made now: present them like a fresh split.
+  Once its parts are live, the split group itself is not deferred, merged, confirmed or split again
+  (`decide` refuses, naming the parts: decide those instead). Splitting it again into the same lists
+  after both parts were rejected is refused too (the parts would be the same groups): confirm the
+  rejected part instead (the refusal gives the command), or split into other lists. A part is never
+  asked "these runs look like repeats — merge them?" (the scientist named its runs). An absorber
+  answered for the group before the split is NOT carried to the parts: each part's absorber question
+  shows it as an `answered_before_split` hint and says so; ask the scientist to confirm it per part.
 - merge → three steps: `<isaac> bundle decide <bundle> --target <group id> --decision merge --merge-with <other group ids> --by "<name>"`
   (refused unless `--merge-with` names another live record group of this bundle), then
   `bundle group <bundle> --regroup`, then confirm the ONE combined group it proposes. The regroup
@@ -161,7 +168,14 @@ Ask: approve, reject, or needs changes (with a note):
   approve` exits 2 with the result's own QC sentence and the same three options. `validate` never offers
   that approval (`processing_blocker: processing_result_not_a_usable_spectrum`, "… is not offered for
   approval: its QC fails …"); when the group has another result that can be approved (e.g. the Athena
-  curve), it offers that one and says why not the other.
+  curve), it offers that one and says why not the other. `bundle questions`' minimum never says "approve
+  its processing result" for such a group: it is `blocked` with the same options, and never offered as
+  the nearest group while another exists.
+- **An older approval of such a curve** (made before `decide` refused it) is not used: nothing from the
+  result composes (no series, QC status, steps or E0), the record is incomplete with
+  `processing_blocker: approved_result_not_a_usable_spectrum`, and `validate` says "the approved result …
+  is not a usable spectrum". Say so, and offer withdrawing the approval: reject the result, or
+  `needs_changes` and re-process with a setting the scientist chooses, or reject the group.
 - **Approval is the scientist's**, per group. A `warn` is shown prominently and is their call; never
   suggest approving it. Any other `fail` (e.g. `too_few_points`) is approved only if the scientist asks
   to, with the QC status they state. A rejected group yields no series and stays incomplete.

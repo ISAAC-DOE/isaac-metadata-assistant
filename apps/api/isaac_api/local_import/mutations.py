@@ -583,19 +583,40 @@ def _check_decision(bundle: Mapping, kind: str, obj: Mapping, decision: str, val
         if problem is not None:
             raise MutationRefused(f"{problem} Nothing was recorded.")
     if kind == "record_group" and decision == "split":
-        # c8-s: a split makes ONE group per list, so its lists name each of the group's runs exactly once; and a
-        # group whose runs another live group now holds (its parts, after an earlier split) is not split again
+        # c8-s: a split makes ONE group per list, so its lists name each of the group's runs exactly once
         problem = split_into_problem(bundle, obj, split_into)
         if problem is not None:
             raise MutationRefused(f"{problem} Nothing was recorded.")
+    if kind == "record_group" and decision in ("split", "defer", "merge"):
+        # c8-s / c8-r: a group whose runs another live group now holds (its parts, after an earlier split) is not
+        # split, deferred (made a proposal again) or merged: each would put a run in two live groups
         mine = set(obj.get("member_run_keys") or ())
         holders = [g["group_id"] for g in bundle.get("record_groups") or ()
                    if g["group_id"] != obj["group_id"] and g.get("status") in B.LIVE_GROUP_STATUSES
                    and mine & set(g.get("member_run_keys") or ())]
         if holders:
             raise MutationRefused(
-                f"The runs of {obj['group_id']} are now in {', '.join(holders[:5])}; split (or decide) that group "
+                f"The runs of {obj['group_id']} are now in {', '.join(holders[:5])}; {decision} (or decide) that group "
                 "instead. Nothing was recorded.")
+    if kind == "record_group" and decision == "split":
+        # c8-r: A SPLIT INTO GROUPS THIS BUNDLE ALREADY HOLDS (the same lists as an earlier split of this group, whose
+        # parts were then rejected): a part's id is derived from its runs and this group, so it would be made twice
+        from .grouping import experiment_key_of
+
+        exp_key = experiment_key_of(bundle)
+        held = {g["group_id"]: g for g in bundle.get("record_groups") or ()}
+        again = [held[pid] for pid in (split_part_id(exp_key, obj, part) for part in split_into) if pid in held]
+        if again:
+            said = ", ".join(f"{g['group_id']} ({g.get('status')})" for g in again[:5])
+            rejected = [g["group_id"] for g in again if g.get("status") == B.STATE_REJECTED]
+            remedy = (f"To make a rejected part a record again, confirm it (`isaac bundle decide <bundle_dir> --target "
+                      f'{rejected[0]} --decision confirm --by "<your name>"`'
+                      + (f", and the same for {', '.join(rejected[1:4])}" if len(rejected) > 1 else "") + ")"
+                      if rejected else "Decide those groups instead")
+            raise MutationRefused(
+                f"This split of {obj['group_id']} would make {said}, which an earlier split of it with the same lists "
+                f"already made: a part is the same group whenever it holds the same runs. {remedy}; or split "
+                f"{obj['group_id']} into other lists. Nothing was recorded.")
     if kind == "processing_result" and B.processing_not_applicable(obj):
         app = obj.get("applicability") or {}
         raise MutationRefused(
@@ -920,6 +941,15 @@ def decide(
 #: instrument clock's time zone"). The counter question and the clock question share the experiment target, and a
 #: ``defer`` with no value has always been the counter question's; the bundle format has no other field for it.
 CLOCK_ZONE_DEFER_VALUE = "clock_time_zone"
+
+
+#: c8-r: a ``defer`` on the experiment says "I don't know" to ONE question, chosen by the question, never by a
+#: value the scientist types (``--value clock_time_zone`` recorded a clock deferral without the clock question).
+EXPERIMENT_DEFER_VALUE_REFUSAL = (
+    "`defer` on the experiment takes no --value: it is \"I don't know\" to one question, and the question says "
+    "which. Answer the question itself: `isaac bundle decide <bundle_dir> --question <question id> --decision defer "
+    '--by "<your name>"` (the counter question, or the instrument clock\'s time zone question; `isaac bundle '
+    "questions <bundle_dir>` lists them). Nothing was recorded.")
 
 
 def is_clock_zone_deferral(d: Mapping) -> bool:
@@ -1329,6 +1359,7 @@ def decide_question(
                 found, _slots, override = got
             if asked["kind"] == "confirm_absorber" and decision == "set_absorber" and only is None:
                 found, kept_overrides = _keep_absorber_overrides(bundle, found)
+        clock_defer = False
         if decision == "defer" and (Q.question(Q.consolidate(bundle, include_answered=True, explain_counter=False),
                                                question_id) or {}).get("kind") == "clock_time_zone":
             # c8-a: the clock question's "I don't know", told apart from the counter question's on the same target
@@ -1338,11 +1369,14 @@ def decide_question(
                     f"The instrument clock's time zone is already recorded ({zone_d.get('value')}, "
                     f"{zone_d.get('decision_id')}); a defer would not withdraw it, and the start times stay converted "
                     f"with it. To change it, state the zone again: {B.CLOCK_ZONE_COMMAND}. Nothing was recorded.")
-            value = CLOCK_ZONE_DEFER_VALUE
+            if value is not None:
+                raise MutationRefused(EXPERIMENT_DEFER_VALUE_REFUSAL)
+            value, clock_defer = CLOCK_ZONE_DEFER_VALUE, True
         params = dict(
             target_ids=list(extra_targets) + found, decision=decision, value=value, by=by, orcid=orcid, note=note,
             split_into=split_into, merge_with=merge_with, qc_status=qc_status, qc_note=qc_note,
             element=element, edge=edge, positions=positions, same_conditions=same_conditions,
+            **({"clock_zone_defer": True} if clock_defer else {}),
         )
         def reached(on: dict, result: dict) -> dict:
             # read from the bundle the decision was recorded on (a dry run's copy too), its states derived as the
@@ -1421,7 +1455,7 @@ def qc_note_problem(qc_status: str | None, qc_note: str | None) -> str | None:
 
 
 def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, edge, positions, value=None,
-                      qc_note=None, same_conditions=False, split_into=None, **_rest):
+                      qc_note=None, same_conditions=False, split_into=None, clock_zone_defer=False, **_rest):
     """The checks of :func:`decide` that need no bundle. Returns ``positions`` normalised."""
     problem = B.decider_name_problem(by)
     if problem:
@@ -1430,6 +1464,9 @@ def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, ed
         raise MutationRefused("--orcid must look like 0000-0000-0000-0000 (last character may be X).")
     if not target_ids:
         raise MutationRefused("No target given.")
+    if (decision == "defer" and value is not None and "experiment" in target_ids
+            and not (clock_zone_defer and value == CLOCK_ZONE_DEFER_VALUE)):
+        raise MutationRefused(EXPERIMENT_DEFER_VALUE_REFUSAL)
     if qc_status is not None:
         allowed = qc_status_vocabulary()
         if qc_status not in allowed:
@@ -1588,14 +1625,17 @@ def record_decision(
     edge: str | None = None,
     positions: Sequence[int] | None = None,
     same_conditions: bool = False,
+    clock_zone_defer: bool = False,
 ) -> dict:
     """:func:`decide` applied to an ALREADY-LOADED bundle, under the caller's lock. Saves
     nothing: the caller saves through :func:`save_bundle` (or :func:`mutate`). Every target
-    is checked before any entry is appended, so a refusal leaves ``bundle`` unchanged."""
+    is checked before any entry is appended, so a refusal leaves ``bundle`` unchanged.
+    ``clock_zone_defer``: set ONLY by :func:`decide_question` for the clock question's ``defer``, whose value
+    (:data:`CLOCK_ZONE_DEFER_VALUE`) it sets itself; a ``defer`` on the experiment otherwise takes no value."""
     positions = _decide_arguments(
         target_ids=target_ids, decision=decision, by=by, orcid=orcid, qc_status=qc_status,
         element=element, edge=edge, positions=positions, value=value, qc_note=qc_note, same_conditions=same_conditions,
-        split_into=split_into,
+        split_into=split_into, clock_zone_defer=clock_zone_defer,
     )
     bulk = len(target_ids) > 1
 
@@ -3198,6 +3238,17 @@ def split_into_problem(bundle: Mapping, group: Mapping, split_into: Any) -> str 
     return None
 
 
+def split_part_id(exp_key: str, parent: Mapping, named: Sequence[str]) -> str:
+    """The id of the part a split of ``parent`` makes from the run keys ``named`` (:func:`split_parts`):
+    :func:`grouping.group_id_for` over its runs, in the parent's order, and ``split-from:<parent id>``."""
+    from . import grouping as G
+
+    want = set(named)
+    order = list(parent.get("member_run_keys") or ())
+    members = [k for k in order if k in want] + [k for k in dict.fromkeys(named) if k not in set(order)]
+    return G.group_id_for(exp_key, members + [f"split-from:{parent['group_id']}"])
+
+
 def split_parts(bundle: Mapping, parent: Mapping, decision: Mapping) -> list[dict]:
     """The groups a split ``decision`` of ``parent`` makes: ONE proposed group per list of ``split_into``, in its
     order, each holding exactly the runs that list names.
@@ -3218,7 +3269,7 @@ def split_parts(bundle: Mapping, parent: Mapping, decision: Mapping) -> list[dic
     for i, named in enumerate(lists, 1):
         want = set(named)
         members = [k for k in order if k in want] + [k for k in named if k not in set(order)]
-        gid = G.group_id_for(exp_key, members + [f"split-from:{parent['group_id']}"])
+        gid = split_part_id(exp_key, parent, named)
         view = {**bundle, "runs": [r for r in runs if r.get("run_key") in want]}
         holders = [g for g in G.propose(view, context=bundle)["record_groups"] if want & set(g.get("member_run_keys") or ())]
         if len(holders) == 1 and set(holders[0].get("member_run_keys") or ()) == want:
@@ -3235,7 +3286,8 @@ def split_parts(bundle: Mapping, parent: Mapping, decision: Mapping) -> list[dic
             "experiment_key": part.get("experiment_key") or exp_key,
             "basis": part.get("basis") or {},
             "split_reasons": part.get("split_reasons") or [],
-            "questions": part.get("questions") or [],
+            # c8-r: never "these runs look like repeats — merge them?": the scientist named this part's runs
+            "questions": [q for q in part.get("questions") or () if q.get("code") != "confirm_repeats_merge"],
             "status": "proposed",
             "merge_candidate_ids": [],
             "flags": [f for f in part.get("flags") or () if f not in ("reproposed_after_merge_decision", SPLIT_PART_FLAG)]

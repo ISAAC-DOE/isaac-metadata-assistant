@@ -1761,6 +1761,41 @@ def _ai_pair(sug: Mapping) -> tuple[str, str] | None:
     return (next(iter(els)), next(iter(eds))) if len(els) == 1 and len(eds) == 1 else None
 
 
+def _answered_before_split(bundle: Mapping, groups: Sequence[Mapping], decided: Mapping[str, Mapping]) -> list[dict]:
+    """c8-r: the absorber a scientist answered (set_absorber) for the group ``groups``' runs were SPLIT FROM (a split
+    part's ``split_by_decision``, followed up a split of a part), one hint per answer naming the parts it covers.
+    A HINT the scientist confirms for each part, never the part's answer: a split says the runs are not one
+    measurement, so nothing decided for the whole is carried to a part on its own."""
+    by_id = {g["group_id"]: g for g in bundle.get("record_groups") or ()}
+    hints: dict[tuple, dict] = {}
+    for g in groups:
+        cur, seen = g, set()
+        while (sp := cur.get("split_by_decision")) and sp.get("split_group_id") not in seen:
+            pid = sp["split_group_id"]
+            seen.add(pid)
+            d = decided.get(pid)
+            if d is not None:
+                h = hints.setdefault((pid, d["element"], d["edge"]), {
+                    "kind": "answered_before_split", "group_id": pid, "element": d["element"], "edge": d["edge"],
+                    "literal": f"{d['element']} {d['edge']}", "by": (d.get("decided_by") or {}).get("name"),
+                    "decision_id": d.get("decision_id"), "parts": [],
+                    "note": (f"Answered for group {pid}, which these runs were split from: not this part's answer. "
+                             "Type it into --element/--edge only once the scientist has said it holds for the part.")})
+                h["parts"].append(g["group_id"])
+                break
+            cur = by_id.get(pid) or {}
+    return list(hints.values())
+
+
+def _before_split_text(hints: Sequence[Mapping]) -> str:
+    """The sentence a split part's absorber question adds for :func:`_answered_before_split`'s hints (``""``: none)."""
+    return "".join(
+        f" Before group {h['group_id']} was split, {h['by'] or 'a scientist'} answered {h['literal']} for it (it "
+        f"held the runs of {', '.join(h['parts'][:3])}{' …' if len(h['parts']) > 3 else ''}): that answer is not "
+        "carried to the parts, each is a group of its own now; confirm it for each part with set_absorber, or answer "
+        "otherwise." for h in hints[:_HINTS_PER_QUESTION])
+
+
 def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_answered: bool = False) -> list[dict]:
     """The absorbing element and edge, asked ONCE per distinct suggestion over the groups
     the files agree on (or, where no file states it, the AI readings agree on), and per group
@@ -1803,6 +1838,8 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_a
                     + (f" {partial} AI reading(s) name only some of a group's runs (see the hints)." if partial else ""))
         # NEVER A READY-TO-RUN ANSWER: the command is a template whatever the files state, so an agent
         # cannot record the files' (or an AI's) suggestion on a vague "yes". The suggestion is a hint.
+        before = _answered_before_split(bundle, [g for g, _ in items], decided)
+        text += _before_split_text(before)
         suggested = {"kind": "suggested_absorber", "literal": f"{element} {edge}", "element": element, "edge": edge,
                      "basis": "stated in the files" if not ai_only else ("stated in the files for some groups, an AI reading for the rest"
                                                                          if from_files else "an AI reading of the files"),
@@ -1822,7 +1859,7 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_a
             "targets": [{"kind": "record_group", "id": g["group_id"]} for g, _ in items],
             "per_scope_targets": {f"group:{g['group_id']}": [g["group_id"]] for g, _ in items},
             # the file (or AI) evidence first, then the pair it adds up to — both hints, neither an answer
-            "hints": _absorber_hints(items) + [suggested],
+            "hints": _absorber_hints(items) + [suggested] + before,
             "allowed_values": None,
             "answer_command": (f'isaac bundle decide <bundle_dir> --question {qid} --decision set_absorber '
                                '--element <El> --edge <K|L1-L3|M1-M5> --by "<your name>"   # per group: add --only group:<group_id>'),
@@ -1844,6 +1881,8 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_a
         for r in sug["ai_readings"]:
             if r.get("read_for"):
                 text += f" The AI reading {r['half']} {r['value']} was {r['read_for']}."
+        before = _answered_before_split(bundle, [g], decided)
+        text += _before_split_text(before)
         out.append({
             "question_id": qid,
             "partition": None,
@@ -1857,7 +1896,7 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_a
             "applies_to": {"groups": 1, "runs": len(g.get("member_run_keys") or ()), "targets": 1},
             "targets": [{"kind": "record_group", "id": g["group_id"]}],
             "per_scope_targets": {f"group:{g['group_id']}": [g["group_id"]]},
-            "hints": _absorber_hints([(g, sug)]),
+            "hints": _absorber_hints([(g, sug)]) + before,
             "allowed_values": None,
             "answer_command": f'isaac bundle decide <bundle_dir> --question {qid} --decision set_absorber --element <El> --edge <K|L1-L3|M1-M5> --by "<your name>"',
         })
@@ -2000,17 +2039,34 @@ NOT_PROCESSED_YET = "run `isaac process` first: it has no processing result yet,
 
 
 def _curve(bundle: Mapping, gid: str) -> dict:
-    """What approving this group's processing could give it: ``{"state": "approved" | "curve" | "no_curve" | "none",
-    "verdict", "reasons"}``. ``no_curve``: every undecided result lists no normalised spectrum (e.g. QC
-    ``too_few_common_points``), so an approval supplies no series and the record stays incomplete."""
+    """What approving this group's processing could give it: ``{"state": "approved" | "curve" | "no_curve" |
+    "unusable" | "none", "verdict", "reasons"}``. ``no_curve``: every undecided result lists no normalised spectrum
+    (e.g. QC ``too_few_common_points``), so an approval supplies no series and the record stays incomplete.
+    ``unusable`` (c8-r): every undecided result with a curve fails QC as NOT A USABLE SPECTRUM
+    (:data:`mutations.UNUSABLE_CURVE_REASONS`), which ``decide`` refuses to approve — or the one approved result is
+    such a curve (an older build's approval, ``approved: True``), which composes nothing."""
+    from .mutations import unusable_curve_reasons
     from .records import SPECTRUM_ROLES
 
+    def unusable(r: Mapping) -> list[str]:
+        return unusable_curve_reasons(r) if (r.get("outputs") or {}).get("files") else []
+
     mine = [r for r in bundle.get("processing_results") or () if r.get("group_id") == gid and not B.processing_not_applicable(r)]
-    if any(r.get("state") == B.STATE_SCIENTIST_CONFIRMED for r in mine):
+    approved = [r for r in mine if r.get("state") == B.STATE_SCIENTIST_CONFIRMED]
+    if len(approved) == 1 and unusable(approved[0]):
+        return {"state": "unusable", "approved": True, "result_id": B.processing_id(approved[0]),
+                "reasons": unusable(approved[0])}
+    if approved:
         return {"state": "approved"}
     open_ = [r for r in mine if r.get("state") in B.PROCESSING_UNDECIDED_STATES]
     if not open_:
         return {"state": "none"}
+    # never offered for approval (c8-a): a curve whose QC says it is not a usable spectrum
+    offered = [r for r in open_ if not unusable(r)]
+    if not offered:
+        return {"state": "unusable", "result_id": B.processing_id(open_[-1]), "reasons": unusable(open_[-1]),
+                "verdict": (open_[-1].get("qc") or {}).get("verdict")}
+    open_ = offered
     # THE LATEST undecided result is the one an approval would name. With NO output file `decide --decision approve`
     # refuses it outright; with files but no normalised spectrum an approval supplies no series. Either way: no curve.
     latest = open_[-1]
@@ -2153,7 +2209,8 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
     scope (``experiment``, a run) is not one group and leaves the choice open.
 
     A group no answer or approval can complete — the processing protocol does not apply to it, its processing
-    result has no curve (e.g. QC ``too_few_common_points``), none of its runs lists a scan (:func:`scanless_groups`,
+    result has no curve (e.g. QC ``too_few_common_points``) or is not a usable spectrum (c8-r: QC ``no_edge``,
+    ``edge_step_implausible``, ``post_edge_not_at_1``), none of its runs lists a scan (:func:`scanless_groups`,
     before ``isaac process`` has recorded it as ``no_scans``), or a required field nothing can be stored on (no
     measurement run) — is never offered as "the nearest" while another exists, and one whose curve FAILED QC only
     after every group without one. When only such groups are left, ``blocked`` says why, never "approve its
@@ -2250,6 +2307,22 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
                         f'(`isaac bundle decide <bundle_dir> --target {pid} --decision reject|needs_changes --by "<your name>"`) '
                         "and re-run `isaac process`, or reject the group if it is not a measurement "
                         f'(`isaac bundle decide <bundle_dir> --target {gid} --decision reject --by "<your name>"`)')
+        elif curve["state"] == "unusable":
+            # c8-r: never "approve its processing result": `decide` refuses to approve a curve that is not a usable
+            # spectrum (and an older approval of one composes nothing). The steps records.processing_remedy names.
+            from .mutations import reprocess_command
+
+            pid, why = curve["result_id"], ", ".join(curve["reasons"])
+            steps = (f'reject it or mark it needs_changes (`isaac bundle decide <bundle_dir> --target {pid} --decision '
+                     f'reject|needs_changes --by "<your name>"`) and re-process the group with a setting the scientist '
+                     f"chooses ({reprocess_command(gid)}), then approve the new result if its curve is usable; or reject "
+                     f'the group if it is not a measurement (`isaac bundle decide <bundle_dir> --target {gid} --decision '
+                     f'reject --by "<your name>"`)')
+            hard.append(f"its approved processing result {pid} is not a usable spectrum (QC fails {why}), so nothing "
+                        f"from it goes into the record: withdraw the approval — {steps}"
+                        if curve.get("approved") else
+                        f"its processing result {pid} is not offered for approval: its QC fails {why}, so its curve is "
+                        f"not a usable spectrum: {steps}")
         elif curve["state"] == "approved":
             struct = [m for m in rep.get("missing_required") or () if m.get("from") != FROM_AN_ANSWER]
             if bundle_dir is not None and struct:
@@ -2328,6 +2401,13 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
 _HEADER_POTENTIAL_TOKEN = re.compile(
     r"^(?P<v>(?:m|n|neg|minus|-|\+)?\d+(?:[p.]\d+)?m?V)(?:_?(?:vs)?_?(?P<scale>RHE|SHE|NHE|SCE|Ag/?AgCl|Hg/?HgO|MSE))?$",
     re.IGNORECASE)
+#: c8-r: each reference-electrode scale a header token may write, in ITS OWN spelling (``Hg/HgO``, never ``HG/HGO``).
+_SCALE_SPELLING = {"rhe": "RHE", "she": "SHE", "nhe": "NHE", "sce": "SCE", "mse": "MSE",
+                   "ag/agcl": "Ag/AgCl", "agagcl": "Ag/AgCl", "hg/hgo": "Hg/HgO", "hghgo": "Hg/HgO"}
+#: c8-r: the largest size (volts) a scan-header token with NO scale written onto it is taken to state a potential
+#: at: an electrode potential is a few volts at most, while a header's ``800V``, ``1500V`` or ``12V`` is a detector
+#: bias or a supply. A token with a scale (``12V_RHE``) is taken whatever its size.
+HEADER_POTENTIAL_MAX_V = 3.0
 #: A file-name token that states open circuit (no set-point is applied): ``OCV``, ``OCP``.
 _OPEN_CIRCUIT_TOKEN = re.compile(r"^OC[VP]$", re.IGNORECASE)
 CONTROL_MODE_PATH = "context.electrochemistry.control_mode"
@@ -2343,6 +2423,26 @@ def _token_volts(literal: str) -> float | None:
     if m.group("unit").lower() == "mv":
         number /= 1000.0
     return -number if (m.group("sign") or "").lower() in ("m", "n", "neg", "minus", "-") else number
+
+
+def header_potential(token: str) -> dict | None:
+    """``{"literal", "scale"}`` when a SCAN HEADER comment token states a potential, else ``None`` (c8-r). A token
+    with a scale written onto it (``0.5Vrhe``, ``0.1V_vs_Hg/HgO``) states one; a token with none only at the size a
+    potential can have (|V| <= :data:`HEADER_POTENTIAL_MAX_V`) and not in brackets: ``800V``, ``12V``, ``5v`` or a
+    parenthesised ``(1.2V)`` (a device's setting beside its name) are not. The scale keeps its own spelling. Only
+    RECOGNISES the statement, for a warning: nothing is read as a value."""
+    bare = token.strip(",;")
+    bracketed = bare != bare.strip("()")
+    bare = bare.strip("()")
+    m = _HEADER_POTENTIAL_TOKEN.match(bare)
+    if m is None:
+        return None
+    scale = _SCALE_SPELLING.get((m.group("scale") or "").lower())
+    if scale is None:
+        volts = _token_volts(bare)
+        if bracketed or volts is None or abs(volts) > HEADER_POTENTIAL_MAX_V:
+            return None
+    return {"literal": bare, "scale": scale}
 
 
 def _generic_member_runs(bundle: Mapping, member_ids: set) -> list[Mapping]:
@@ -2376,10 +2476,9 @@ def stated_potentials_beyond_candidates(bundle: Mapping, member_ids: set) -> lis
         found = [("file name", tok, first, "file name", None) for tok in _name_tokens(r) if _POTENTIAL_TOKEN.match(tok)]
         for e in headers.get(r["run_id"], ()):
             for tok in e["raw_literal"].split():
-                m = _HEADER_POTENTIAL_TOKEN.match(tok.strip(",;()"))
-                if m:
-                    found.append(("scan header", tok.strip(",;()"), e.get("relative_path"), e.get("locator"),
-                                  (m.group("scale") or "").upper().replace("AG/AGCL", "Ag/AgCl").replace("AGAGCL", "Ag/AgCl") or None))
+                got = header_potential(tok)
+                if got:
+                    found.append(("scan header", got["literal"], e.get("relative_path"), e.get("locator"), got["scale"]))
         for where, lit, rel, locator, scale in found:
             if (r["run_id"], where + lit) in seen:
                 continue
@@ -2411,20 +2510,37 @@ def stated_potential_notes(w: Mapping) -> str:
             "scan header (a comment line), not the file name"
             + (f", with the scale ({', '.join(scales)}); no reader reads the set-point or the scale from it, so both "
                "are asked" if scales else "") + ".")
-    by_run: dict[str, dict[str, list[str]]] = {}
+    by_run: dict[str, dict[str, list[tuple[str, str | None]]]] = {}
     for s in stated:
         for rid in s.get("runs") or ([s["run_id"]] if s.get("run_id") else []):
-            by_run.setdefault(rid, {}).setdefault(s.get("stated_in") or "", []).append(s["literal"])
-    differ = []
+            by_run.setdefault(rid, {}).setdefault(s.get("stated_in") or "", []).append((s["literal"], s.get("scale")))
+    differ, scales_differ = [], []
     for rid, places in by_run.items():
         names, heads = places.get("file name") or [], places.get("scan header") or []
-        nv = {v for v in map(_token_volts, names) if v is not None}
-        hv = {v for v in map(_token_volts, heads) if v is not None}
-        if nv and hv and not (nv & hv):
-            differ.append(f"{rid}: file name {'/'.join(dict.fromkeys(names))}, scan header {'/'.join(dict.fromkeys(heads))}")
+        nv = {v for v in (_token_volts(lit) for lit, _ in names) if v is not None}
+        hv = {v for v in (_token_volts(lit) for lit, _ in heads) if v is not None}
+        if not (nv and hv) or nv & hv:
+            continue
+        said = (f"{rid}: file name {'/'.join(dict.fromkeys(lit for lit, _ in names))}, "
+                f"scan header {'/'.join(dict.fromkeys(lit for lit, _ in heads))}")
+        name_scales, head_scales = {sc for _, sc in names}, {sc for _, sc in heads}
+        if name_scales == head_scales:
+            # THE SAME SCALE (or none on either): two numbers for one potential, a real disagreement
+            differ.append(said)
+        else:
+            # c8-r: m600mV (no scale) and 0Vrhe may be ONE potential written on two scales: never "disagree"
+            def written(scales: set) -> str:
+                return "/".join(sorted(sc for sc in scales if sc)) or "none"
+
+            scales_differ.append(f"{said}; the header writes {written(head_scales)}, the name {written(name_scales)}")
     if differ:
-        text += (f" The file name and the scan header DISAGREE for {len(differ)} run(s) ({'; '.join(differ[:3])}"
-                 + ("; …" if len(differ) > 3 else "") + "): ask the scientist which is right; neither is used.")
+        text += (f" The file name and the scan header disagree for {len(differ)} run(s) ({'; '.join(differ[:3])}"
+                 + ("; …" if len(differ) > 3 else "") + "), on the same scale: ask the scientist which is right; "
+                 "neither is used.")
+    if scales_differ:
+        text += (f" The file name and the scan header write different numbers on possibly different scales for "
+                 f"{len(scales_differ)} run(s) ({'; '.join(scales_differ[:3])}" + ("; …" if len(scales_differ) > 3 else "")
+                 + "): ask which applies; neither is used.")
     return text
 
 
