@@ -244,7 +244,7 @@ def test_a_value_a_file_reading_contradicts_goes_to_disagreements_and_its_answer
     # the beamline against the folder's AI reading; their sheet's own AI reading is not a file's
     bl = _d(a, "Beamline/Instrument")
     assert bl["their_value"] == "62b" and bl["scope"] == "experiment"
-    assert [r for r in bl["readings"] if "'SYN-7'" in r] and not [r for r in bl["readings"] if "62b" in r]
+    assert [r for r in bl["readings"] if "'SYN-7'" in r] and not [r for r in bl["readings"] if "AI reading" in r and "62b" in r]
     assert wb["Campaign Info"]["B5"].value is None
     assert a["ai_readings_of_their_sheet_not_compared"] >= 1
 
@@ -265,7 +265,9 @@ def test_not_allowed_and_name_only_values_are_listed_once_each_with_the_allowed_
     assert env["their_value"] == "aqueous_electrochemistry" and len(env["answer_cells"]) == 8
     assert a["allowed_values"]["Environment"] == B.allowed_values("context.environment")
     name = _d(a, "Electrolyte", kind="name_only")
-    assert "put 0.1 in 'Electrolyte Concentration (M)'" in name["reason"] and len(name["answer_cells"]) == 8
+    # on this path the scientist types only rulings: the name in "Your ruling", the concentration in its own ruling cell
+    assert "(0.1 M)" in name["reason"] and "'Your ruling: concentration (M)'" in name["reason"]
+    assert len(name["answer_cells"]) == 8
     fl = openpyxl.load_workbook(out)["File List"]
     assert all(fl[f"{_col(h)}{_row_of(out, 'run-001')}"].value is None for h in ("Environment", "Electrolyte"))
     # the compact summary names every disagreement; each allowed list appears once

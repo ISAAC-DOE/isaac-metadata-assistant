@@ -67,7 +67,8 @@ def test_a_technique_cell_answered_by_the_beamtime_question_names_that_question(
     assert code == 0
     assert "recorded nowhere: this run has no" not in text
     line = next(ln for ln in text.splitlines() if ln.startswith("  Technique") and q["question_id"] in ln)
-    assert asked["command"] in line and "'Configurations'!B2 via 'File List'!" in line
+    # the Configurations cell is named once (c7-s L2), however many File List rows reach it
+    assert asked["command"] in line and "('Configurations'!B2)" in line
     assert "1 cell(s) asked once for the whole beamtime" in text
     assert not M.load(grouped)["scientist_decisions"]  # a preview
 

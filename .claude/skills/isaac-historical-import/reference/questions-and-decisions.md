@@ -117,6 +117,12 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
 ## Recording
 
 - **An answer to a consolidated question:** `decide <bundle> --question <Q> --decision correct|confirm --value <v> --by "<name>" [--note "..."]`. It records one decision per target, each listed in the reply; read the list back. `--only group:<id>` answers for one group only (a per-group override of an experiment-wide answer); `--field <path>` picks the one field when a question covers several optional fields.
+  A question the files ask ONCE for the whole beamtime (one beamtime-wide target, e.g. Technique from a shared
+  macro; its reply says "It reaches every record group of the beamtime: N groups, M runs") also takes
+  `--only group:<id>` with `correct` (or `confirm --value`): the answer is recorded for that group's runs only,
+  on their own targets or on a per-run answer slot, never on the beamtime-wide target. The reply says so. If the
+  beamtime-wide question is later answered with a different value, that group gets two values and fills
+  nothing for the field: say it before recording either.
 - **Experiment-scope question:** say "This applies to N groups. One answer for all, or do some differ?" Only split when the scientist says so. A question built at experiment scope whose targets all sit in ONE group (a sample field asked per sample reading) is shown with that group's `scope: group:<id>` and carries `id_scope: experiment`: the scope its id was made from, kept so the id never changes. Ask it for that group only.
 - **The instrument clock's time zone** (`clock_time_zone`, experiment scope, optional): SSRL XDC
   (beamline 4-3 style) scan headers write the start as a local clock time with no zone, so those
@@ -183,8 +189,8 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
 - Columns recorded nowhere (no official field, or no target in this bundle) are listed with their
   cells. Tell the scientist; do not move their values into another field.
 - A run's cell for a field this bundle asks ONCE for the whole beamtime (e.g. Technique, a shared
-  macro) is listed under "Asked once for the whole beamtime" with that question's id and command; it
-  is not recorded. Ask the scientist that question (the cell's value is in the command) and run it.
+  macro) is listed under "Asked once for the whole beamtime" with that question's id and command (each
+  cell named once, with how many runs reach it); it is not recorded. Ask the scientist that question (the cell's value is in the command) and run it.
   This holds only for a run that has no target of its own for the field: a run whose files state their
   own value (e.g. its own macro name, so it has a per-run Technique candidate) takes the cell as a
   decision on that candidate like any other cell (a `confirm` if the value matches, else a `correct`),
@@ -208,18 +214,34 @@ and to use it (a sheet you found in the folder is not that; ask first). Never re
    value only where no file reading contradicts it, with a note citing their cell (`'File List'!K31`).
    Every value a file reading contradicts (an extracted value, a potential or pH file-name token, an AI
    reading of a file), or that the field does not take, is NOT in an answer cell: it is a row of the
-   `Disagreements` sheet with their value, the file's reading and its source, and an empty "Your ruling".
+   `Disagreements` sheet with their value, EVERY reading of that field for those runs with its source (each
+   marked `differs:` or `agrees:`; read both kinds back), and an empty "Your ruling". A Campaign Info
+   beamline (or a one-word facility acronym) that names another one than a facility HINT (the folder's name,
+   or the acquisition system the scan headers match: what `ISAAC Suggestions` shows) is a row too, kind
+   `hint`: compared without `BL` and separators, so `BL15-2`, `BL152` and `15-2` agree and `62b` does not. A
+   hint is not a reading; say both and let them rule. The facility's organization is in no hint and is not
+   compared.
 2. Say the summary: rows matched, cells adopted, their columns not read, unmatched rows and runs (those
    runs get nothing from the sheet), and the rows that reach more than one run, with the count (a scan
    and its `_dir` calibration file are two runs; one value of theirs goes to each). Then read **every** disagreement back, one by one, in plain words:
    "your sheet says 0.8 V for Q4_07; the file name says m800mV, which these names use for −0.8 V". For
    a not-allowed value, give the field's allowed list once and map their words to one value only on
    their yes; for an electrolyte with a concentration, ask for the name and the concentration
-   separately. Never pick a side, and never suggest a ruling.
+   separately. A not-allowed row may carry a hint from a column adopt does not read ("your sheet's column I
+   'Environment mode' says 'insitu' (= `in_situ`)"): say it as their own sheet's words, never as the answer.
+   Rows count runs ("for 77 run(s), from 38 of your cell(s)"). When a reaction is adopted or on a row, the
+   summary says it makes Reaction Drive and Reaction Catalysis required for N groups: ask those too. Never
+   pick a side, and never suggest a ruling.
 3. **Their rulings go in the sheet, by them**: they type each ruling in the "Your ruling" column of
    `Disagreements` (the value to record, exactly as the field takes it; blank records nothing). Do not
    type it for them. A ruling reaches exactly the runs that row names, and its decision cites the
-   ruling cell and their original cell.
+   ruling cell and their original cell. An Electrolyte row whose value states a concentration
+   ("0.01 M HClO4") takes the NAME in "Your ruling" and the concentration in mol/L in "Your ruling:
+   concentration (M)" (column J), both recorded for that row's runs: that is the one path for it here (no
+   per-group command). J on any other row records nothing and is said. A ruling for a field the bundle asks
+   once for the whole beamtime (Technique) is recorded per run for exactly the row's runs (a per-run answer
+   slot where a run has none), never on the beamtime-wide question; the preview names it and how many groups
+   that question still covers.
 4. `<isaac> bundle template import <bundle> <adopted.xlsx> --by "<name>"` previews: say the decisions,
    the rulings it read, and each "awaiting your ruling" row (nothing is recorded for those). Add
    `--apply` only on their yes. Re-importing the same file after more rulings is harmless.
@@ -228,6 +250,8 @@ and to use it (a sheet you found in the folder is not that; ask first). Never re
    a ruling "(not yet on the Disagreements sheet)": run `template adopt` again so it gets a Disagreements
    row to rule on. A cell the scientist TYPED (an ordinary exported template, or a ruling) that a file
    reading contradicts is named the same way as *you typed it* and is still recorded: read it back first.
+   The same holds for a typed Campaign Info beamline a facility hint names differently: named once (not once
+   per run), recorded as typed; an adopted one is held back until adopt is run again.
 
 ## Never
 

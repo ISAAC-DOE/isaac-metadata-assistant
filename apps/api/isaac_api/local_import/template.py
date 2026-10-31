@@ -30,7 +30,11 @@ recorded but awaits a ruling.
 ADOPT (``isaac bundle template adopt``) reads the scientist's OWN filled copy of ISAAC's template
 (no ``_isaac`` sheet) and writes this bundle's template from it: their value goes into an answer
 cell only where no file reading contradicts it; every other one is a row of the ``Disagreements``
-sheet with an empty "Your ruling" cell, which IMPORT reads for exactly the runs that row names.
+sheet with an empty "Your ruling" cell, which IMPORT reads for exactly the runs that row names. A row lists every
+reading of its field (agreeing ones marked); a Campaign Info beamline or facility acronym that names another one
+than a facility hint (the folder's name, the acquisition system's) is a row too; an Electrolyte row that states a
+concentration takes it in its own ruling cell ("Your ruling: concentration (M)"). A ruling for a field the bundle
+asks once for the whole beamtime is recorded per run (``mutations.run_answer_targets``), never beamtime-wide.
 """
 
 from __future__ import annotations
@@ -74,8 +78,12 @@ SHEET_MARKER = "_isaac"
 #: that the field does not take, with an empty "Your ruling" column (:data:`DISAGREE_RULING_COLUMN`).
 SHEET_DISAGREE = "Disagreements"
 DISAGREE_HEADERS = ("ID", "What", "Field", "Their value", "Their cell(s)", "File reading(s)", "Run(s)", "Your ruling",
-                    "Where your ruling goes")
+                    "Where your ruling goes", "Your ruling: concentration (M)")
 DISAGREE_RULING_COLUMN = "H"
+#: c7-s: an Electrolyte row whose value also states a concentration ("0.01 M HClO4") takes TWO rulings, the name in
+#: "Your ruling" and the concentration (mol/L) here, both recorded for exactly that row's runs. Appended after
+#: "Where your ruling goes", so a workbook adopt wrote before it (nine columns) still imports as it did.
+DISAGREE_CONC_COLUMN = "J"
 
 EXIT_USAGE = 2
 EXIT_INPUT_REFUSED = 3
@@ -423,6 +431,77 @@ def run_names(bundle: Mapping, run: Mapping) -> list[str]:
     if parts:
         parts[-1] = parts[-1].rsplit(".", 1)[0] if "." in parts[-1] else parts[-1]
     return list(dict.fromkeys([str(run.get("stem") or ""), *parts]))
+
+
+# --- facility hints: a HINT to compare against, never a value ---------------------------------------
+#
+# The folder's name (``SSRL_BL152_2019-05_…``) and, when its scan headers match, the acquisition system's name are
+# what ``ISAAC Suggestions`` shows beside the facility cells: hints, never answers. A Campaign Info beamline (or a
+# facility acronym) that names ANOTHER beamline than such a hint is not adopted (``template adopt``) and is named in
+# the import preview: ``62b`` beside ``BL152`` is a different beamline in any spelling, ``BL15-2`` / ``BL152`` /
+# ``15-2`` are one. The organization that runs a facility is in no hint, so it is not compared.
+BEAMLINE_PATH = "system.facility.beamline"
+FACILITY_NAME_PATH = "system.facility.facility_name"
+HINTED_PATHS = (BEAMLINE_PATH, FACILITY_NAME_PATH)
+_BEAMLINE_TOKEN = re.compile(r"(?i)BL[-.]?\d+(?:[-.]\d+)?[a-z]?")
+_FACILITY_TOKEN = re.compile(r"[A-Z][A-Za-z]{1,9}(?:-[A-Z0-9]{1,4})?")
+
+
+_HINT_WHERE = {"folder_name": "the imported folder's name",
+               "acquisition_system": "the acquisition system the scan headers' column names match"}
+
+
+def beamline_form(value: Any) -> str | None:
+    """A beamline as it is compared: case-folded, a leading ``BL`` / ``beamline`` and every separator dropped
+    (``BL15-2``, ``BL152``, ``bl 15.2`` and ``15-2`` are all ``152``; ``62b`` is ``62b``)."""
+    if not isinstance(value, str):
+        return None
+    text = re.sub(r"^\s*(?:beamline|bl)(?=[\s\-_.]*\d)", "", value.strip().casefold())
+    return re.sub(r"[\s\-_.]", "", text) or None
+
+
+def facility_hint_readings(bundle: Mapping, path: str) -> list[dict]:
+    """``[{value, form, source}]``: the beamline (``BL\\d…``) or facility acronym (the word right before such a
+    beamline: ``SSRL`` in ``SSRL_BL152``) each facility hint names, with the hint and where it comes from. Nothing
+    for any other path, or for a hint that names neither."""
+    if path not in HINTED_PATHS:
+        return []
+    from . import suggestions as S
+
+    out: dict[tuple, dict] = {}
+    for h in S.facility_hints(bundle):
+        literal = str(h.get("literal") or "")
+        tokens = [t for t in re.split(r"[_\s/,;()]+", literal) if t]
+        for i, tok in enumerate(tokens):
+            if not _BEAMLINE_TOKEN.fullmatch(tok):
+                continue
+            value = tok if path == BEAMLINE_PATH else (tokens[i - 1] if i and _FACILITY_TOKEN.fullmatch(tokens[i - 1]) else None)
+            if value is None:
+                continue
+            form = beamline_form(value) if path == BEAMLINE_PATH else value.casefold()
+            where = _HINT_WHERE.get(str(h.get("kind")), str(h.get("kind")))
+            out.setdefault((form, literal), {"value": value, "form": form, "kind": "hint",
+                                             "source": f"{where} {literal!r}"})
+    return list(out.values())
+
+
+def facility_hint_lines(bundle: Mapping, path: str, value: Any) -> list[str]:
+    """One line per facility hint that names a DIFFERENT beamline (or facility acronym) than ``value``; empty when
+    every hint agrees, none names one, or ``value`` is not comparable (a facility name of several words is never
+    compared: a folder names an acronym, not a facility's full name)."""
+    readings = facility_hint_readings(bundle, path)
+    if not readings or not isinstance(value, str):
+        return []
+    if path == BEAMLINE_PATH:
+        mine = beamline_form(value)
+    else:
+        mine = value.strip().casefold() if _FACILITY_TOKEN.fullmatch(value.strip()) else None
+    if not mine:
+        return []
+    what = "beamline" if path == BEAMLINE_PATH else "facility"
+    return [f"differs from a hint: {r['source']} names {what} {r['value']!r}"
+            + (f" (compared without 'BL' and separators: {r['form']!r}, yours {mine!r})" if path == BEAMLINE_PATH else "")
+            + "; a hint, never an answer" for r in readings if r["form"] != mine]
 
 
 def _agrees(a: Any, b: Any) -> bool:
@@ -1270,6 +1349,9 @@ def _read_rulings(wb, marker: Mapping, runs: Mapping, known: Mapping[str, Column
         raise TemplateRefused(f"The `_isaac` sheet lists disagreements but the workbook has no {SHEET_DISAGREE!r} sheet. "
                               "Run `template adopt` again. Nothing was recorded.", code=EXIT_INPUT_REFUSED)
     ws = wb[SHEET_DISAGREE]
+    # a workbook adopt wrote before the concentration ruling column (nine columns) has no column J to read
+    conc_column = str(ws[f"{DISAGREE_CONC_COLUMN}1"].value or "").strip() == DISAGREE_HEADERS[9]
+    conc_col = next(c for c in FILE_COLUMNS if c.path == ELECTROLYTE_CONC_PATH)
     for e in entries:
         try:
             row = int(e.get("row"))
@@ -1278,18 +1360,48 @@ def _read_rulings(wb, marker: Mapping, runs: Mapping, known: Mapping[str, Column
                                   "again. Nothing was recorded.", code=EXIT_INPUT_REFUSED) from None
         did = str(e.get("id"))
         ref = f"{DISAGREE_RULING_COLUMN}{row}"
+        conc_ref = f"{DISAGREE_CONC_COLUMN}{row}"
         shown = ws[f"A{row}"].value
         if shown != did:
             out["rows_refused"].append({"row": row, "cells": [_cell_ref(SHEET_DISAGREE, ref)],
                                         "reason": f"{_cell_ref(SHEET_DISAGREE, f'A{row}')} should read {did!r} but reads "
                                                   f"{shown!r}: the Disagreements rows were moved, so no ruling on it is read"})
             continue
-        raw, why = _raw(ws[ref])
         col = known.get(str(e.get("header")))
         if col is None or col.path != e.get("target_field_path"):
             raise TemplateRefused(f"The `_isaac` sheet maps disagreement {did} to a column this build does not know "
                                   f"({e.get('header')!r}). Run `template adopt` again. Nothing was recorded.",
                                   code=EXIT_INPUT_REFUSED)
+        because = f"your ruling on disagreement {did}" + (f": {e.get('their_file')} {e.get('their_cells')}" if e.get("their_cells") else "")
+        runs_named = [] if e.get("scope") == "experiment" else [t for t in str(e.get("targets") or "").split(";") if t]
+
+        def record(cell_ref: str, column: Column, raw: Any, why_said: str):
+            out["read"] = out.get("read", 0) + 1
+            if e.get("scope") == "experiment":
+                take(SHEET_DISAGREE, cell_ref, column, raw, run=None, scope="experiment", because=why_said)
+                return
+            for run_id in runs_named:
+                run = runs.get(run_id)
+                if run is None:
+                    out["nowhere"].append({"cell": _cell_ref(SHEET_DISAGREE, cell_ref), "header": column.header, "value": raw,
+                                           "reason": f"the run {run_id!r} is not in this bundle"})
+                    continue
+                take(SHEET_DISAGREE, cell_ref, column, raw, run=run, scope="run", because=why_said)
+
+        # M3: the CONCENTRATION of an electrolyte row ("0.01 M HClO4"), ruled in its own column, for the same runs
+        if conc_column:
+            craw, cwhy = _raw(ws[conc_ref])
+            if cwhy:
+                out["invalid"].append({"cell": _cell_ref(SHEET_DISAGREE, conc_ref), "header": conc_col.header,
+                                       "value": ws[conc_ref].value, "reason": cwhy})
+            elif craw is not None and e.get("kind") != "name_only":
+                out["nowhere"].append({"cell": _cell_ref(SHEET_DISAGREE, conc_ref), "header": DISAGREE_HEADERS[9], "value": craw,
+                                       "reason": f"only an Electrolyte row that also states a concentration takes a "
+                                                 f"concentration ruling; {did} is about {col.header}"})
+            elif craw is not None:
+                record(conc_ref, conc_col, craw, f"your concentration ruling on disagreement {did}"
+                       + (f": {e.get('their_file')} {e.get('their_cells')}" if e.get("their_cells") else ""))
+        raw, why = _raw(ws[ref])
         if why:
             out["invalid"].append({"cell": _cell_ref(SHEET_DISAGREE, ref), "header": col.header, "value": ws[ref].value, "reason": why})
             continue
@@ -1297,21 +1409,9 @@ def _read_rulings(wb, marker: Mapping, runs: Mapping, known: Mapping[str, Column
             reading = ws[f"F{row}"].value
             out["awaiting_ruling"].append({"id": did, "cell": _cell_ref(SHEET_DISAGREE, ref), "header": col.header,
                                            "target_field_path": col.path, "their_value": ws[f"D{row}"].value,
-                                           "why": ("file reading " + "; ".join(str(reading).splitlines())) if reading else ws[f"B{row}"].value})
+                                           "why": ("readings: " + "; ".join(str(reading).splitlines())) if reading else ws[f"B{row}"].value})
             continue
-        out["read"] = out.get("read", 0) + 1
-        because = f"your ruling on disagreement {did}" + (f": {e.get('their_file')} {e.get('their_cells')}" if e.get("their_cells") else "")
-        targets = str(e.get("targets") or "")
-        if e.get("scope") == "experiment":
-            take(SHEET_DISAGREE, ref, col, raw, run=None, scope="experiment", because=because)
-            continue
-        for run_id in [t for t in targets.split(";") if t]:
-            run = runs.get(run_id)
-            if run is None:
-                out["nowhere"].append({"cell": _cell_ref(SHEET_DISAGREE, ref), "header": col.header, "value": raw,
-                                       "reason": f"the run {run_id!r} is not in this bundle"})
-                continue
-            take(SHEET_DISAGREE, ref, col, raw, run=run, scope="run", because=because)
+        record(ref, col, raw, because)
 
 
 def _same_value(a: Any, b: Any) -> bool:
@@ -1411,6 +1511,12 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
 
     reached = cells.get("file_list_run_ids") or set()
     planned: list[tuple[dict, str, str, Mapping, str]] = []  # (cell, decision, kind, obj, target_id)
+    # H1: a Campaign Info beamline (or facility acronym) naming another one than a facility hint — named once per
+    # cell (never once per run it fills); held back when adopt copied it, recorded when the scientist typed it
+    hinted = {c["cell"]: lines for c in cells["cells"]
+              if c["scope"] == "experiment" and (lines := facility_hint_lines(bundle, c["path"], c["value"]))}
+    report["ruled_per_run"] = []
+    slots_added: list[str] = []
     for cell in cells["cells"]:
         path, value = cell["path"], cell["value"]
         targets: list[tuple[str, str, Mapping, str]] = []
@@ -1442,7 +1548,20 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                 targets.append(("confirm" if _same_value(c["value"], value) else "correct", "candidate", c, c["candidate_id"]))
         if not targets:
             asked = beamtime_question(path) if cell["scope"] == "run" else None
-            if asked is not None:
+            if asked is not None and cell["sheet"] == SHEET_DISAGREE and cell.get("run_id"):
+                # M1(b): A RULING NAMES ITS RUNS. Its value is recorded for exactly them — on a per-run answer slot
+                # when the import asks the field once for the beamtime (as `decide --question --only group:<id>`
+                # does), never on the beamtime-wide target, which would reach every run of the beamtime
+                ids, added = M.run_answer_targets(bundle, path, [cell["run_id"]], question_id=asked["question_id"],
+                                                  how=f"their ruling {cell['cell'].split(' via ', 1)[0]}")
+                slots_added += added
+                slot_of = {m["value_id"]: m for m in bundle["missing_values"]}
+                for vid in ids:
+                    targets.append(("correct", "missing_value", slot_of[vid], vid))
+                report["ruled_per_run"].append({"cell": cell["cell"], "header": cell["header"], "target_field_path": path,
+                                                "run_id": cell["run_id"], "question_id": asked["question_id"],
+                                                "answered": asked["answered"], "slots_added": len(added)})
+            elif asked is not None:
                 generic = asked["command"].replace('--by "<your name>"', f"--by {shlex.quote(by)}")
                 command = generic
                 if isinstance(value, str) and "--json" not in command:
@@ -1457,9 +1576,10 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                                + f": {command}"),
                 })
                 continue
-            report["nowhere"].append({"cell": cell["cell"], "header": cell["header"], "value": value,
-                                      "reason": f"this run has no missing or extracted value for {path} in this bundle"})
-            continue
+            else:
+                report["nowhere"].append({"cell": cell["cell"], "header": cell["header"], "value": value,
+                                          "reason": f"this run has no missing or extracted value for {path} in this bundle"})
+                continue
         for decision, kind, obj, tid in targets:
             planned.append((cell, decision, kind, obj, tid))
 
@@ -1509,6 +1629,24 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                     "reason": "an earlier scientist decision gives a different value; skipped (pass --supersede to record this one)",
                 })
                 continue
+        if cell["cell"] in hinted:
+            # once per cell: a Campaign Info answer fills every run's target, and one hint line covers them all
+            key = (cell["cell"], "")
+            if key not in contradicted:
+                contradicted.add(key)
+                outcome = "awaiting_ruling" if cell.get("adopted") else "recorded_as_typed"
+                report["contradictions"].append({"cell": cell["cell"], "run_id": None, "target_field_path": cell["path"],
+                                                 "value": cell["value"], "readings": hinted[cell["cell"]], "outcome": outcome,
+                                                 "hint": True, **({"adopted": cell["adopted"]} if cell.get("adopted") else {})})
+                if cell.get("adopted"):
+                    origin = cell["adopted"]
+                    awaiting.append({"id": None, "cell": cell["cell"], "header": cell["header"], "target_field_path": cell["path"],
+                                     "run_id": None, "target": None, "their_value": cell["value"],
+                                     "why": (f"adopted from {origin.get('their_file')} {origin.get('their_cell')}, but it "
+                                             f"{'; '.join(hinted[cell['cell']])}. Run `isaac bundle template adopt` again: it "
+                                             "lists this as a disagreement to rule on")})
+            if cell.get("adopted"):
+                continue
         readings = file_readings(cell, decision, kind, obj)
         if readings and cell.get("adopted"):
             # adopted because no file reading contradicted it THEN; one does now. The scientist never typed
@@ -1543,13 +1681,85 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
         recorded += res["recorded"]
         unchanged += res["unchanged"]
     report["decisions"] = [d for d in report["decisions"] if d["target"]["id"] not in refused_targets]
+    # a per-run slot whose answer was not recorded (refused, a clash) is never left behind as an empty question
+    gone = set(M.drop_unrecorded_slots(bundle, slots_added))
+    report["decisions"] = [d for d in report["decisions"] if d["target"]["id"] not in gone]
     kept = {(d["cell"], d.get("run_id") or "") for d in report["decisions"]}
+    kept_cells = {d["cell"] for d in report["decisions"]}
     report["contradictions"] = [c for c in report["contradictions"]
-                                if c["outcome"] == "awaiting_ruling" or (c["cell"], c.get("run_id") or "") in kept]
+                                if c["outcome"] == "awaiting_ruling" or (c["cell"], c.get("run_id") or "") in kept
+                                or (c.get("hint") and c["cell"] in kept_cells)]
+    report["ruled_per_run"] = _ruled_per_run_summary(bundle, report["ruled_per_run"], report["decisions"])
+    report["reaction_needs"] = reaction_followups(bundle, report["decisions"])
     report["awaiting_ruling"] = awaiting
     report["recorded_target_ids"] = recorded
     report["unchanged_target_ids"] = unchanged
     return report
+
+
+REACTION_PATHS = ("context.electrochemistry.reaction", "context.reaction.name")
+
+
+def _run_group_of(bundle: Mapping) -> dict[str, str]:
+    """``run_id -> group_id`` of the first live group holding it."""
+    by_key = _live_group_of(bundle)
+    return {r["run_id"]: by_key[r["run_key"]] for r in bundle["runs"] if r["run_key"] in by_key}
+
+
+def reaction_lacking(bundle: Mapping, run_ids: Sequence[str], answered_now: set[tuple[str, str]]) -> dict | None:
+    """L3: a run that states a reaction needs its drive and catalysis (``bundle.REACTION_REQUIRED_PATHS``). For the
+    runs ``run_ids`` that get a reaction now: ``{fields, runs, groups}`` still unanswered — no scientist-confirmed
+    value for the run (or the beamtime) and none in ``answered_now`` (``(run_id, path)``) — or ``None``."""
+    group_of = _run_group_of(bundle)
+    objs = [*(bundle.get("candidates") or ()), *(bundle.get("missing_values") or ())]
+    confirmed = {(o.get("run_id"), o.get("target_field_path")) for o in objs
+                 if o.get("value_state") == B.STATE_SCIENTIST_CONFIRMED}
+    lacking: dict[str, set[str]] = {}
+    for rid in dict.fromkeys(run_ids):
+        for path in B.REACTION_REQUIRED_PATHS:
+            if (rid, path) in answered_now or (rid, path) in confirmed or (None, path) in confirmed:
+                continue
+            lacking.setdefault(path, set()).add(rid)
+    if not lacking:
+        return None
+    runs = set().union(*lacking.values())
+    return {"fields": sorted(lacking), "runs": len(runs), "groups": len({group_of[r] for r in runs if r in group_of})}
+
+
+def reaction_followups(bundle: Mapping, decisions: Sequence[Mapping]) -> dict | None:
+    """:func:`reaction_lacking` for the runs an import gives a reaction."""
+    runs = [d["run_id"] for d in decisions if d.get("target_field_path") in REACTION_PATHS and d.get("run_id")]
+    if not runs:
+        return None
+    return reaction_lacking(bundle, runs, {(d.get("run_id"), d.get("target_field_path")) for d in decisions})
+
+
+def _reaction_needs_line(x: Mapping, verb: str) -> str:
+    return (f"A reaction {verb} makes {' and '.join(x['fields'])} required for {x['groups']} group(s) ({x['runs']} run(s)) "
+            "that have no answer for it yet: fill 'Reaction Drive' and 'Reaction Catalysis' (File List) for those runs, or "
+            "answer their questions (`isaac bundle questions <bundle_dir>`).")
+
+
+def _ruled_per_run_summary(bundle: Mapping, entries: Sequence[Mapping], decisions: Sequence[Mapping]) -> list[dict]:
+    """One entry per ruling cell recorded per run for a field asked once for the beamtime: how many runs it reached,
+    how many answer slots it added, and how many groups the beamtime-wide question still covers."""
+    if not entries:
+        return []
+    recorded = {(d["cell"], d.get("run_id")) for d in decisions}
+    group_of = _run_group_of(bundle)
+    total = len({g for g in group_of.values()})
+    out: dict[tuple, dict] = {}
+    for x in entries:
+        if (x["cell"], x["run_id"]) not in recorded:
+            continue
+        e = out.setdefault((x["cell"], x["question_id"]), {k: x[k] for k in ("cell", "header", "target_field_path",
+                                                                           "question_id", "answered")} | {"runs": 0, "slots_added": 0})
+        e["runs"] += 1
+        e["slots_added"] += x["slots_added"]
+    for e in out.values():
+        touched = {group_of.get(d.get("run_id")) for d in decisions if d.get("target_field_path") == e["target_field_path"]}
+        e["groups_left_to_the_question"] = max(total - len(touched - {None}), 0)
+    return list(out.values())
 
 
 def import_template(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None = None,
@@ -1615,6 +1825,10 @@ def import_template(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None 
         "recorded_nowhere": report["nowhere"],
         # a run's cell for a field this bundle asks once for the beamtime: the question that answers it
         "asked_beamtime_wide": report["asked_beamtime_wide"],
+        # a ruling for a field asked once for the beamtime: recorded per run, for exactly the runs its row names
+        "ruled_per_run": report["ruled_per_run"],
+        # a reaction recorded here makes drive and catalysis required where nothing answers them yet
+        "reaction_needs": report["reaction_needs"],
         "rows_refused": cells["rows_refused"],
         "extracted_values_left_alone": report["left_alone"],
         "campaign_not_filled": report["campaign_not_filled"],
@@ -1668,14 +1882,21 @@ def _grouped_cells(items: Sequence[Mapping], *, key: str = "header") -> list[str
 def _beamtime_lines(items: Sequence[Mapping]) -> list[str]:
     """One line per column, question and command: the cells, the question asking the field once for the
     beamtime, and the command that answers it (with the cell's value, when the cells agree)."""
-    groups: dict[tuple, list[str]] = {}
+    groups: dict[tuple, dict] = {}
     for x in items:
         key = (x["header"], x["target_field_path"], x["question_id"], x["answered"], x["command"], tuple(x.get("values_differ") or ()))
-        groups.setdefault(key, []).append(x["cell"])
+        g = groups.setdefault(key, {"cells": [], "runs": set()})
+        cell = x["cell"].split(" via ", 1)[0]
+        if cell not in g["cells"]:  # one cell (a Technique reached through many rows) is named once
+            g["cells"].append(cell)
+        if x.get("run_id"):
+            g["runs"].add(x["run_id"])
     out = []
-    for (header, path, qid, answered, command, differ), cells in groups.items():
+    for (header, path, qid, answered, command, differ), g in groups.items():
+        cells = g["cells"]
         more = f" and {len(cells) - _CELLS_SHOWN} more" if len(cells) > _CELLS_SHOWN else ""
-        line = f"  {header} -> {path}: {len(cells)} cell(s) ({', '.join(cells[:_CELLS_SHOWN])}{more}); question {qid}"
+        runs = f"{len(g['runs'])} run(s) from " if g["runs"] else ""
+        line = f"  {header} -> {path}: {runs}{len(cells)} cell(s) ({', '.join(cells[:_CELLS_SHOWN])}{more}); question {qid}"
         if differ:
             # never one command per value: the scientist says which value applies to the whole beamtime
             line += (f": these cells hold {len(differ)} different values ({', '.join(differ)}), so the scientist must say "
@@ -1769,6 +1990,19 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
                 add(f"  {x['cell']} {x.get('run_id') or ''} {x['header']} = {x['value']!r}: {x['reason']}")
         else:
             lines += _beamtime_lines(rep["asked_beamtime_wide"])
+    if rep.get("ruled_per_run"):
+        add("")
+        add("Rulings for a field asked once for the whole beamtime (recorded for exactly the runs each row names):")
+        for x in rep["ruled_per_run"]:
+            slots = f" ({x['slots_added']} answer slot(s) added)" if x["slots_added"] else ""
+            add(f"  {x['cell']} {x['header']} -> {x['target_field_path']}: recorded per run for {x['runs']} run(s) that have no "
+                f"target of their own for it{slots}. Question {x['question_id']} "
+                + ("(answered) " if x["answered"] else "") + f"still covers {x['groups_left_to_the_question']} group(s) this "
+                "import records nothing for; if its beamtime-wide answer differs from this ruling, these runs' groups get two "
+                "values and fill nothing for it.")
+    if rep.get("reaction_needs"):
+        add("")
+        add("Then required: " + _reaction_needs_line(rep["reaction_needs"], "recorded by this import"))
     if rep["unmapped_columns"]:
         add("")
         add("Unmapped columns:")
@@ -1798,7 +2032,8 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
         f"{len(rep['invalid_cells'])} invalid; {len(rep['clashes'])} clash(es); {len(rep['refused'])} refused; "
         f"{sum(len(u['cells']) for u in rep['unmapped_columns'])} cell(s) in {len(rep['unmapped_columns'])} unmapped column(s); "
         f"{len(rep['recorded_nowhere'])} recorded nowhere; {len(rep['rows_refused'])} row(s) refused"
-        + (f"; {len(rep['asked_beamtime_wide'])} cell(s) asked once for the whole beamtime (its question answers them)"
+        + (f"; {len({x['run_id'] for x in rep['asked_beamtime_wide']})} run(s) from "
+           f"{len({x['cell'].split(' via ', 1)[0] for x in rep['asked_beamtime_wide']})} cell(s) asked once for the whole beamtime (its question answers them)"
            if rep.get("asked_beamtime_wide") else "")
         + (f"; {len(rep['replaces_or_contradicts_a_file_reading'])} replace or contradict a file reading"
            if rep.get("replaces_or_contradicts_a_file_reading") else "")
@@ -2032,6 +2267,13 @@ class _Adopter:
 
     def against(self, value: Any, run_id: str | None, path: str) -> list[dict]:
         """The readings that CONTRADICT ``value``. A candidate shown here is an exposure."""
+        return self.compare(value, run_id, path)[0]
+
+    def compare(self, value: Any, run_id: str | None, path: str) -> tuple[list[dict], list[dict]]:
+        """``(contradicting, agreeing)``: EVERY reading of ``path`` for the run, split by whether it contradicts
+        ``value`` (a Disagreements row lists both, so the scientist rules seeing all of them). A reading with no
+        comparable value is in neither. A contradicting candidate is an exposure (it is always shown); an agreeing
+        one is exposed by :meth:`expose` where it is shown."""
         pool = self.readings(run_id, path)
         if path in (ELECTROLYTE_NAME_PATH, ELECTROLYTE_CONC_PATH):
             # the statement is one reading of both cells, whichever of the two fields it was recorded on
@@ -2039,11 +2281,20 @@ class _Adopter:
             seen = {(repr(r["value"]), r["source"]) for r in pool}
             pool += [r for r in self.readings(run_id, other)
                      if electrolyte_statement_parts(r["value"]) and (repr(r["value"]), r["source"]) not in seen]
-        bad = [r for r in pool if self._contradicts(r, path, value)]
-        for r in bad:
+        bad, good = [], []
+        for r in pool:
+            if self._contradicts(r, path, value):
+                bad.append(r)
+            elif self._comparable(r["value"], path) is not None or (
+                    path in (ELECTROLYTE_NAME_PATH, ELECTROLYTE_CONC_PATH) and electrolyte_statement_parts(r["value"])):
+                good.append(r)
+        self.expose(bad)
+        return bad, good
+
+    def expose(self, readings: Sequence[Mapping]) -> None:
+        for r in readings:
             if r.get("target") and r["target"] not in self.exposed:
                 self.exposed.append(r["target"])
-        return bad
 
 
 def _compared_values(ad: "_Adopter", readings: Sequence[Mapping], path: str) -> tuple[str, ...]:
@@ -2056,9 +2307,33 @@ def _shown_reading(r: Mapping) -> str:
     return f"{_shown(r['value'])} ({r['source']})"
 
 
-def _refs_shown(refs: Sequence[str], n: int = _CELLS_SHOWN) -> str:
-    more = f" and {len(refs) - n} more ({len(refs)} cells)" if len(refs) > n else ""
+def _refs_shown(refs: Sequence[str], n: int = _CELLS_SHOWN, *, noun: str = "cells") -> str:
+    more = f" and {len(refs) - n} more ({len(refs)} {noun})" if len(refs) > n else ""
     return ", ".join(refs[:n]) + more
+
+
+def _loose(text: Any) -> str:
+    """A value as an unread column is matched to an allowed one: case-folded, every non-alphanumeric dropped
+    (``insitu``, ``in-situ`` and ``In Situ`` are all ``in_situ``'s ``insitu``)."""
+    return re.sub(r"[^0-9a-z]", "", str(text).casefold())
+
+
+def _unread_hint_text(h: Mapping, runs: int) -> str:
+    rows = f" on {h['rows']} of these {runs} run(s)" if runs and h["rows"] < runs else ""
+    return (f"your sheet's column {h['column']} ({h['header']!r}) says {h['value']!r} (= `{h['allowed_value']}`){rows} "
+            "— a hint from a column adopt does not read, never adopted")
+
+
+def _adopt_name_only_reason(value: Any) -> str | None:
+    """Why an Electrolyte value that also states a concentration is not adopted, saying where each part of a
+    ruling goes on THIS path: the scientist types only rulings here, so the name goes in "Your ruling" and the
+    concentration in "Your ruling: concentration (M)". ISAAC never splits it for them."""
+    if electrolyte_name_problem(value) is None:
+        return None
+    m = _CONCENTRATION_IN_NAME.search(value)
+    stated = f"{m.group(1)} {m.group(2)}" if m else "a concentration"
+    return (f"name only: {value!r} also states a concentration ({stated}); rule with the NAME in 'Your ruling' and the "
+            f"concentration in mol/L in '{DISAGREE_HEADERS[9]}' (column {DISAGREE_CONC_COLUMN}), both for this row's runs")
 
 
 def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool = False, suggestions: bool = True) -> dict:
@@ -2083,19 +2358,41 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
                                   "their_columns_not_read": [],
                                   "their_columns_mapped": []}
         adopted_cells: list[tuple[str, str]] = []  # (our cell, their cell)
+        adopted_paths: set[tuple[str | None, str]] = set()  # (run_id, path) of each adopted answer cell
         groups: dict[tuple, dict] = {}  # disagreement key -> entry
 
         def disagree(key, **entry):
             g = groups.get(key)
             if g is None:
-                g = groups[key] = {**entry, "their_cells": [], "runs": [], "answer_cells": [], "readings": []}
+                g = groups[key] = {**entry, "their_cells": [], "runs": [], "answer_cells": [], "readings": [],
+                                   "unread_hints": {}}
             for k in ("their_cells", "runs", "answer_cells", "readings"):
                 for v in entry.get("_" + k, ()):
                     if v not in g[k]:
                         g[k].append(v)
+            for h in entry.get("_unread_hints", ()):
+                g["unread_hints"][h] = g["unread_hints"].get(h, 0) + 1
             return g
 
-        def judge(sheet, our_ref, col: Column, raw: Any, their_ref: str, run_id: str | None):
+        wf_theirs = theirs["files"]
+
+        def unread_hints(their_row: int | None, allowed: Sequence | None) -> list[tuple]:
+            """M4: ``[(column, header, their text, the allowed value it is)]`` — a column of THEIR row adopt does not
+            read that holds, loosely written (``insitu``), one of the field's allowed values (``in_situ``). A hint
+            beside the row, never adopted."""
+            if their_row is None or not allowed:
+                return []
+            out = []
+            for c in result["their_columns_not_read"]:
+                text = wf_theirs[f"{c['column']}{their_row}"].value
+                if not isinstance(text, str) or not text.strip():
+                    continue
+                match = next((a for a in allowed if isinstance(a, str) and _loose(a) == _loose(text)), None)
+                if match is not None:
+                    out.append((c["column"], c["header"], text.strip(), match))
+            return out
+
+        def judge(sheet, our_ref, col: Column, raw: Any, their_ref: str, run_id: str | None, their_row: int | None = None):
             """Adopt one of their cells into ``our_ref``, or record why not. ``run_id=None``: Campaign Info."""
             path = col.path
             rule = rules.get(path or "")
@@ -2105,7 +2402,7 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
                 value, why = _parse(raw, rule)
             kind = None
             if not why and path == ELECTROLYTE_NAME_PATH:
-                why = electrolyte_name_problem(value)
+                why = _adopt_name_only_reason(value)
                 kind = "name_only" if why else None
             runs = [run_id] if run_id else []
             target_cell = _cell_ref(sheet, our_ref)
@@ -2117,22 +2414,31 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
                 disagree((kind, sheet, col.header, repr(raw)), kind=kind, sheet=sheet, header=col.header, path=path,
                          their_value=raw, reason=shown_reason, allowed=allowed if not_allowed else None,
                          scope="experiment" if run_id is None else "run",
-                         _their_cells=[their_ref], _runs=runs, _answer_cells=[target_cell])
+                         _their_cells=[their_ref], _runs=runs, _answer_cells=[target_cell],
+                         _unread_hints=unread_hints(their_row, allowed) if not_allowed else ())
                 return
-            bad = ad.against(value, run_id, path)
-            if bad:
+            bad, good = ad.compare(value, run_id, path)
+            # H1: a Campaign Info beamline (or facility acronym) naming another one than the folder's name or the
+            # acquisition system's — a hint, not a reading, but never adopted over it: the scientist rules
+            hinted = facility_hint_lines(bundle, path, value) if run_id is None else []
+            if bad or hinted:
                 # one row per cell of theirs and the VALUES the files read (a scan file and its calibration
-                # file under one folder name are one disagreement); every source is kept
-                key = ("file_reading", sheet, col.header, their_ref, _compared_values(ad, bad, path))
-                disagree(key, kind="file_reading", sheet=sheet, header=col.header, path=path, their_value=value,
-                         reason="a file reading says otherwise", scope="experiment" if run_id is None else "run",
-                         _readings=[_shown_reading(r) for r in bad], _their_cells=[their_ref], _runs=runs,
-                         _answer_cells=[target_cell])
+                # file under one folder name are one disagreement); every source is kept, the agreeing ones too
+                kind = "file_reading" if bad else "hint"
+                ad.expose(good)
+                key = (kind, sheet, col.header, their_ref, _compared_values(ad, bad, path))
+                disagree(key, kind=kind, sheet=sheet, header=col.header, path=path, their_value=value,
+                         reason="a file reading says otherwise" if bad else "a hint names another one",
+                         scope="experiment" if run_id is None else "run",
+                         _readings=[f"differs: {_shown_reading(r)}" for r in bad] + hinted
+                         + [f"agrees: {_shown_reading(r)}" for r in good],
+                         _their_cells=[their_ref], _runs=runs, _answer_cells=[target_cell])
                 return
             ws = wb[sheet]
             ws[our_ref] = value
             ws[our_ref].comment = Comment(f"From your sheet: {their_file} {their_ref}", "ISAAC")
             adopted_cells.append((target_cell, their_ref))
+            adopted_paths.add((run_id, path))
             result["cells_adopted"] += 1
 
         # Campaign Info: by label, whatever row it is on
@@ -2223,7 +2529,6 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
         result["runs_on_several_rows"] = [{"run_id": rid, "rows": [_cell_ref(SHEET_FILES, f"A{r}") for r in rows_of_run[rid]],
                                            "reason": "more than one of your File List rows names this run, so neither is adopted for it"}
                                           for rid in sorted(several)]
-        wf_theirs = theirs["files"]
         for r, name in theirs["names"]:
             ids = runs_of_row[r]
             here = [rid for rid in ids if rid in live and rid not in several]
@@ -2255,14 +2560,16 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
                         tech = cfg["technique"]
                         if tech is not None and str(tech).strip():
                             value, why = _parse(tech, rules.get(tech_col.path))
-                            bad = [] if why else ad.against(value, rid, tech_col.path)
+                            bad, good = ([], []) if why else ad.compare(value, rid, tech_col.path)
                             if why or bad:
+                                ad.expose(good)
                                 kind = "file_reading" if bad else ("not_allowed" if (rules.get(tech_col.path) or {}).get("allowed") else "invalid")
                                 key = (kind, SHEET_CONFIG, "Technique", cfg["ref"], tuple(sorted({repr(b["value"]) for b in bad})))
                                 disagree(key, kind=kind, sheet=SHEET_CONFIG, header="Technique", path=tech_col.path, their_value=tech,
                                          reason=("a file reading says otherwise" if bad else "not an allowed value" if kind == "not_allowed"
                                                  else why.partition("; allowed: ")[0]),
-                                         _readings=[_shown_reading(b) for b in bad], scope="run",
+                                         _readings=[f"differs: {_shown_reading(b)}" for b in bad]
+                                         + [f"agrees: {_shown_reading(b)}" for b in good], scope="run",
                                          allowed=(rules.get(tech_col.path) or {}).get("allowed") if kind == "not_allowed" else None,
                                          _their_cells=[cfg["ref"], their_ref], _runs=[rid], _answer_cells=[_cell_ref(SHEET_FILES, our_ref)])
                                 continue
@@ -2280,13 +2587,13 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
                         result["not_adopted"].append({"cell": their_ref, "header": col.header, "value": raw, "run_id": rid,
                                                       "reason": index.status(col)[1]})
                         continue
-                    judge(SHEET_FILES, f"{_letter(file_col[col.header])}{orow}", col, raw, their_ref, rid)
+                    judge(SHEET_FILES, f"{_letter(file_col[col.header])}{orow}", col, raw, their_ref, rid, their_row=r)
         matched_runs = {rid for rids in runs_of_row.values() for rid in rids if rid in live and rid not in several}
         result["runs_matched"] = len(matched_runs)
         result["unmatched_runs"] = [{"run_id": r["run_id"], "file_name": r["file_name"]} for r in rows if r["run_id"] not in matched_runs]
 
         # Disagreements: one row per disagreement; the answer cell stays EMPTY and says why
-        order = {"file_reading": 0, "name_only": 1, "not_allowed": 2, "invalid": 3}
+        order = {"file_reading": 0, "hint": 1, "name_only": 2, "not_allowed": 3, "invalid": 4}
         entries = sorted(groups.values(), key=lambda g: order[g["kind"]])
         wd = wb.create_sheet(SHEET_DISAGREE, index=wb.sheetnames.index(SHEET_SUGGEST))
         from openpyxl.styles import Alignment, Font
@@ -2297,17 +2604,28 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
         wd[f"{DISAGREE_RULING_COLUMN}1"].comment = Comment(
             "Type the value to record for this row, exactly as the field takes it (a number for a number field; one of "
             "the allowed values for a list). Leave it blank and nothing is recorded for it. ISAAC never picks a side.", "ISAAC")
-        what = {"file_reading": "your value contradicts a file reading", "name_only": "",
-                "not_allowed": "", "invalid": "cannot be adopted as written: "}
+        wd[f"{DISAGREE_CONC_COLUMN}1"].comment = Comment(
+            "Only for an Electrolyte row whose value also states a concentration: the concentration in mol/L, a number "
+            "(e.g. 0.01 for 0.01 M). It is recorded as Electrolyte Concentration (M) for exactly the runs of that row; the "
+            "name goes in 'Your ruling'. Leave it blank on every other row.", "ISAAC")
+        what = {"file_reading": "your value contradicts a file reading",
+                "hint": "your value names another one than a hint (the folder's or the acquisition system's name; a hint, "
+                        "not a file reading)",
+                "name_only": "", "not_allowed": "", "invalid": "cannot be adopted as written: "}
         allowed_once: dict[str, list] = {}
         for i, g in enumerate(entries, start=1):
             g["id"] = f"D{i}"
             row = 1 + i
             g["row"] = row
-            values = (g["id"], what[g["kind"]] if g["kind"] == "file_reading" else what[g["kind"]] + g["reason"]
-                      + (" (each field's allowed values are listed once, below)" if g["kind"] == "not_allowed" else ""),
-                      g["header"], g["their_value"], _refs_shown(g["their_cells"]), "\n".join(g["readings"]) or None,
-                      _refs_shown(g["runs"]) if g["runs"] else "every File List run", None, _refs_shown(g["answer_cells"]))
+            g["unread_hints"] = [{"column": c, "header": h, "value": v, "allowed_value": a, "rows": n}
+                                 for (c, h, v, a), n in g["unread_hints"].items()]
+            said = what[g["kind"]] if g["kind"] in ("file_reading", "hint") else what[g["kind"]] + g["reason"] + (
+                " (each field's allowed values are listed once, below)" if g["kind"] == "not_allowed" else "")
+            if g["unread_hints"]:
+                said += ". " + "; ".join(_unread_hint_text(h, len(g["runs"])) for h in g["unread_hints"])
+            values = (g["id"], said, g["header"], g["their_value"], _refs_shown(g["their_cells"]), "\n".join(g["readings"]) or None,
+                      _refs_shown(g["runs"], noun="runs") if g["runs"] else "every File List run", None,
+                      _refs_shown(g["answer_cells"]), None)
             for j, v in enumerate(values, start=1):
                 c = wd.cell(row=row, column=j, value=v if not isinstance(v, str) or not v.startswith("=") else "'" + v)
                 c.alignment = Alignment(wrap_text=True, vertical="top")
@@ -2360,9 +2678,16 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
         marker.cell(row=r + 1, column=2, value=their_file)
 
         result["disagreements"] = [{k: g[k] for k in ("id", "kind", "header", "path", "their_value", "their_cells", "readings",
-                                                      "runs", "answer_cells", "reason", "scope")} | {"ruling_cell": _cell_ref(SHEET_DISAGREE, f"{DISAGREE_RULING_COLUMN}{g['row']}")}
+                                                      "runs", "answer_cells", "reason", "scope", "unread_hints")}
+                                   | {"ruling_cell": _cell_ref(SHEET_DISAGREE, f"{DISAGREE_RULING_COLUMN}{g['row']}")}
+                                   | ({"concentration_ruling_cell": _cell_ref(SHEET_DISAGREE, f"{DISAGREE_CONC_COLUMN}{g['row']}")}
+                                      if g["kind"] == "name_only" else {})
                                    for g in entries]
         result["allowed_values"] = allowed_once
+        # L3: a reaction (adopted, or to be ruled on its row) makes drive and catalysis required for its runs
+        reaction_runs = [rid for rid, p in adopted_paths if p in REACTION_PATHS and rid] + [
+            rid for g in entries if g["path"] in REACTION_PATHS for rid in g["runs"]]
+        result["reaction_needs"] = reaction_lacking(bundle, reaction_runs, adopted_paths) if reaction_runs else None
         result["ai_readings_of_their_sheet_not_compared"] = ad.sheet_readings_skipped
         result["_exposed"] = ad.exposed
         return result
@@ -2391,21 +2716,33 @@ def render_adopt_summary(result: Mapping) -> str:
         lines.append(f"Your columns not read ({len(a['their_columns_not_read'])}): "
                      + ", ".join(f"{c['column']} {c['header']!r}" for c in a["their_columns_not_read"]) + ".")
     file_ds = [d for d in a["disagreements"] if d["kind"] == "file_reading"]
-    other = [d for d in a["disagreements"] if d["kind"] != "file_reading"]
+    hint_ds = [d for d in a["disagreements"] if d["kind"] == "hint"]
+    other = [d for d in a["disagreements"] if d["kind"] not in ("file_reading", "hint")]
     lines.append("")
-    lines.append(f"Disagreements with a file reading ({len(file_ds)}; not adopted, each awaits your ruling):")
+    lines.append(f"Disagreements with a file reading ({len(file_ds)}; not adopted, each awaits your ruling; every reading "
+                 "is listed, the agreeing ones too):")
     for d in file_ds:
-        runs = _refs_shown(d["runs"]) if d["runs"] else "every run"
+        runs = _refs_shown(d["runs"], noun="runs") if d["runs"] else "every run"
         lines.append(f"  {d['id']} {runs} {d['header']}: yours {_shown(d['their_value'])} ({_refs_shown(d['their_cells'], 2)}); "
                      f"files: {'; '.join(d['readings'])}")
     if not file_ds:
         lines.append("  (none)")
+    if hint_ds:
+        lines.append("")
+        lines.append(f"Disagreements with a hint ({len(hint_ds)}; not adopted, each awaits your ruling; a hint is not a file "
+                     "reading, so say both and let the scientist rule):")
+        for d in hint_ds:
+            lines.append(f"  {d['id']} {d['header']}: yours {_shown(d['their_value'])} ({_refs_shown(d['their_cells'], 2)}); "
+                         f"{'; '.join(d['readings'])}")
     if other:
         lines.append("")
         lines.append(f"Not adopted as written ({len(other)}; each awaits your ruling):")
         for d in other:
-            lines.append(f"  {d['id']} {d['header']} {_shown(d['their_value'])} in {len(d['answer_cells'])} cell(s) "
-                         f"({_refs_shown(d['their_cells'], 2)}): {d['reason']}")
+            reach = f"for {len(d['runs'])} run(s)" if d["runs"] else "for every File List run"
+            lines.append(f"  {d['id']} {d['header']} {_shown(d['their_value'])} {reach}, from {len(d['their_cells'])} of your "
+                         f"cell(s) ({_refs_shown(d['their_cells'], 2)}): {d['reason']}")
+            for h in d.get("unread_hints") or ():
+                lines.append(f"     hint: {_unread_hint_text(h, len(d['runs']))}")
         for header, allowed in a.get("allowed_values", {}).items():
             lines.append(f"  allowed for {header}: {', '.join(map(str, allowed))}")
     for title, key, shown in (("Your rows that match no run", "unmatched_rows", lambda x: f"{x['row']} {x['name']}"),
@@ -2424,6 +2761,8 @@ def render_adopt_summary(result: Mapping) -> str:
             by_header.setdefault(x["header"], []).append(x)
         lines.append(f"Cells with nowhere to go ({len(a['not_adopted'])}; not copied): " + "; ".join(
             f"{h} {len(xs)} cell(s) ({xs[0]['reason']})" for h, xs in by_header.items()) + ".")
+    if a.get("reaction_needs"):
+        lines.append(_reaction_needs_line(a["reaction_needs"], "(adopted, or once ruled on its Disagreements row)"))
     if a.get("ai_readings_of_their_sheet_not_compared"):
         lines.append(f"{a['ai_readings_of_their_sheet_not_compared']} AI reading(s) of your sheet itself were not compared: they are your sheet, not the files.")
     lines.append("")
