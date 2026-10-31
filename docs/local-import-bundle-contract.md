@@ -1936,7 +1936,12 @@ adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
   one is listed (`stale_rulings` or `clashes`), naming the target that stopped it. `--by` is compared stripped, as a
   decision stores it. One person importing two copies of one workbook that rule differently, each with `--supersede`
   and the same `--by`, alternates the value at each import, as intended: each import is their own correction of the
-  value their last one recorded.
+  value their last one recorded. (c14p) A target that already holds the ruling's value never holds back the rest (it
+  is listed: "the value is already X; adopt again to settle this row"); a cell held back with another target's clash
+  is listed with `blocked_by` naming it, and the summary counts those apart from the clashes. An adopted cell, never
+  a ruling, is "this cell", and is settled by adopting again then importing with `--supersede`. The rule is
+  asymmetric on purpose: an adopted Campaign Info cell is all or nothing, while the same cell typed into a template
+  that was never adopted is not gated and records target by target, as before.
   Settled, it says "already recorded: <value> (<date>); leave blank to keep" (the adopt result's `already_recorded`,
   counted apart in the summary); otherwise it awaits a ruling and says "recorded `12` (date); your sheet says `2`:
   rule which" (`recorded_note`). An Electrolyte row stating a concentration is settled only when the name and the

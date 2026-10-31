@@ -172,9 +172,9 @@ def test_adopted_file_list_cells_of_two_sheets_never_flip_flop_with_supersede(gr
         assert set(stale) == set(names.values()), cycle
         tid = names["run-001"]
         assert stale[tid]["reason"] == (
-            f"ruled on a workbook adopted with nothing recorded here; this ruling was made before {first[tid]} recorded "
-            "the value now, so it never saw it: nothing is recorded for it, even with --supersede, and the value "
-            "recorded now is kept. Adopt again and rule against what is recorded now, or record this value directly: "
+            f"this cell was adopted with nothing recorded here, before {first[tid]} recorded the value now, so it never "
+            "saw it: nothing is recorded for it, even with --supersede, and the value recorded now is kept. Adopt "
+            "again, then import with --supersede, or record this value directly: "
             f"isaac bundle decide <bundle_dir> --target {tid} --decision correct --value='ZZ other catalyst' "
             "--by \"<your name>\"")
         rep = _imp(grouped, tmp_path / "A.xlsx", capsys, "--supersede")
@@ -184,7 +184,8 @@ def test_adopted_file_list_cells_of_two_sheets_never_flip_flop_with_supersede(gr
     rep = _imp(grouped, tmp_path / "B.xlsx", capsys)  # without --supersede: it says --supersede will not help
     [clash] = [c for c in rep["clashes"] if c["target"]["id"] == names["run-001"]]
     assert clash["reason"].startswith("an earlier scientist decision gives a different value; skipped, and --supersede "
-                                      "does not record it either: this ruling was not made against the value recorded now")
+                                      "does not record it either: this cell was not made against the value recorded now. "
+                                      "Adopt again, then import with --supersede")
 
 
 def test_adopt_keeps_the_decisions_each_adopted_cell_read(grouped, tmp_path, capsys, ticking):

@@ -102,7 +102,7 @@ def test_an_adopted_campaign_info_answer_is_all_or_nothing_under_supersede(group
             assert stale[tid]["reason"].startswith(
                 f"this cell reaches 9 targets and is recorded for all of them or none, and {tids[0]} (run-001) was not "
                 "made against the value recorded there now (its own line says why); nothing is recorded for this one "
-                "either. Adopt again and rule against what is recorded now"), stale[tid]["reason"]
+                "either. Adopt again, then import with --supersede"), stale[tid]["reason"]
             assert stale[tid]["reason"].endswith(T.decide_command(tid, "correct", "Synthetic Light Source"))
     assert _on(grouped, tids) == n  # nothing recorded
     assert {t: _latest_value(grouped, t) for t in tids} == {tids[0]: "ZZ Since Source",
