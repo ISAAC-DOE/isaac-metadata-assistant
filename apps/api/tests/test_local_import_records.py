@@ -314,7 +314,9 @@ def test_replaying_the_same_decision_is_idempotent(bdir):
     first = M.decide(bdir, target_ids=[cid], decision="confirm", value=None, **BY)
     before = (bdir / "bundle.json").read_bytes()
     second = M.decide(bdir, target_ids=[cid], decision="confirm", value=None, **BY)
-    assert first["recorded"] == [cid] and second == {"recorded": [], "unchanged": [cid], "batch_id": None}
+    assert first["recorded"] == [cid] and second == {"statement": second["statement"], "recorded": [], "unchanged": [cid],
+                                                     "batch_id": None}
+    assert second["statement"].startswith("Nothing new recorded: 1 run already has this answer (confirmed)")
     assert len(M.load(bdir)["scientist_decisions"]) == 1
     assert json.loads((bdir / "bundle.json").read_bytes())["scientist_decisions"] == json.loads(before)["scientist_decisions"]
 

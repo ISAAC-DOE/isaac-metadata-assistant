@@ -916,10 +916,11 @@ def decide_question(
         except MutationRefused as exc:
             # AN ANSWERED QUESTION is resolved too, under the id it was asked with (its answered targets back in:
             # consolidate(include_answered=True)): a later decision replaces an earlier one, a repeat records
-            # nothing, and every check below applies exactly as to an open question.
+            # nothing, and every check below applies exactly as to an open question. Every kind that drops out once
+            # answered (Q.RESOLVABLE_WHEN_ANSWERED): a value, the absorber, the counter positions, the clock zone.
             answered = Q.consolidate(bundle, include_answered=True) if exc.code == 6 else None
             asked = Q.question(answered, question_id) if answered is not None else None
-            if asked is None or asked["kind"] not in Q.VALUE_KINDS:
+            if asked is None or asked["kind"] not in Q.RESOLVABLE_WHEN_ANSWERED:
                 raise
             try:
                 found, positions = question_targets(answered, question_id, **resolve)
@@ -1027,6 +1028,78 @@ CAPTURE_STATEMENTS: Mapping[str, str] = {
 }
 
 
+#: Record-group decisions that are not about the group's own state: each is compared with the latest of its own
+#: kind when a repeat is judged (a set_absorber restated after the group was confirmed records nothing).
+_GROUP_SIDE_DECISIONS = ("set_absorber", "approve_calibration")
+
+
+def _shown_value(value: Any) -> str:
+    text = repr(value) if isinstance(value, str) else json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    return text if len(text) <= 60 else text[:57] + "…"
+
+
+def plain_statement(bundle: Mapping, planned: Sequence[tuple[str, Mapping]], target_ids: Sequence[str],
+                    recorded: Sequence[str], *, decision: str, value: Any, element: str | None = None,
+                    edge: str | None = None, positions: Sequence[int] | None = None, qc_status: str | None = None) -> str:
+    """ONE plain sentence for a decide reply that says nothing else: what was recorded, for how many of what (groups,
+    runs, the whole beamtime …) and which fields — e.g. "Pt L3 recorded for 194 groups.", "deferred for 140 runs:
+    environment." The reply's id lists stay beside it; this sentence is for the person."""
+    what = {
+        "set_absorber": f"{element} {edge} recorded",
+        "approve_calibration": f"calibration {element} {edge} approved",
+        "confirm": "confirmed", "reject": "rejected", "defer": "deferred", "correct": f"{_shown_value(value)} recorded",
+        "approve": "approved" + (f" (QC status {qc_status})" if qc_status else ""),
+        "merge": "merge recorded", "split": "split recorded",
+        "set_counter_positions": f"counter position(s) {', '.join(map(str, positions or ()))} recorded",
+        B.CLOCK_ZONE_DECISION: f"instrument clock time zone {value} recorded",
+    }.get(decision, f"{decision} recorded")
+    cand_path = {c["candidate_id"]: c.get("target_field_path") for c in bundle.get("candidates") or ()}
+
+    def count(n: int, noun: str) -> str:
+        return f"{n} {noun}{'' if n == 1 else 's'}"
+
+    def subject(ids: set[str]) -> tuple[str, str]:
+        nouns = {"record_group": "group", "processing_result": "processing result", "merge_candidate": "merge candidate",
+                 "conflict": "conflict", "source": "source", "run": "run"}
+        by_kind: dict[str, list[Mapping]] = {}
+        for tid, (kind, obj) in zip(target_ids, planned):
+            if tid in ids:
+                by_kind.setdefault(kind, []).append(obj)
+        parts, fields = [], []
+        for kind, objs in by_kind.items():
+            if kind in ("candidate", "missing_value"):
+                runs = {o.get("run_id") for o in objs}
+                if runs - {None}:
+                    parts.append(count(len(runs - {None}), "run"))
+                if None in runs:
+                    parts.append("the whole beamtime")
+            elif kind == "experiment":
+                parts.append("the beamtime")
+            else:
+                parts.append(count(len(objs), nouns.get(kind, kind.replace("_", " "))))
+            for o in objs:
+                path = o.get("target_field_path") if kind in ("candidate", "missing_value") else (
+                    cand_path.get(o.get("candidate_id")) if kind == "conflict" else None)
+                label = path.rsplit(".", 1)[-1].replace("_", " ") if path else None
+                if label and label not in fields:
+                    fields.append(label)
+        named = ", ".join(fields[:3]) + ("…" if len(fields) > 3 else "")
+        return " and ".join(parts), named
+
+    done = set(recorded)
+    rest = {t for t in target_ids if t not in done}
+    if not done:
+        who, fields = subject(rest)
+        had = f"{element} {edge}" if decision == "set_absorber" else f"this answer ({what})"
+        plural = not who.startswith(("1 ", "the "))
+        return f"Nothing new recorded: {who} already {'have' if plural else 'has'} {had}" + (f": {fields}." if fields else ".")
+    who, fields = subject(done)
+    out = f"{what} for {who}" + (f": {fields}" if fields else "") + "."
+    if rest:
+        out += f" {subject(rest)[0]} already had it (nothing new recorded for them)."
+    return out
+
+
 def record_decision(
     bundle: dict,
     *,
@@ -1126,6 +1199,11 @@ def record_decision(
                 prior = next((d for d in reversed(bundle.get("scientist_decisions") or ())
                               if d.get("target") == {"kind": kind, "id": tid}
                               and (d.get("decision") == B.ATHENA_SELECT_DECISION) == selecting), None)
+            elif kind == "record_group" and decision in _GROUP_SIDE_DECISIONS:
+                # an absorber (or calibration) answer and the group's own state decisions share the target: a
+                # repeated set_absorber after the group was confirmed is compared with the latest set_absorber
+                prior = next((d for d in reversed(bundle.get("scientist_decisions") or ())
+                              if d.get("target") == {"kind": kind, "id": tid} and d.get("decision") == decision), None)
             elif kind in ("candidate", "conflict") and prior is not None:
                 # A CANDIDATE'S VALUE IS GOVERNED BY THE LATER of its own decision and its conflict's
                 # (bundle.candidate_decision). A replay is "unchanged" only when this target's latest
@@ -1285,7 +1363,11 @@ def record_decision(
             }
             if newly:
                 print(f"isaac: {result['clock_zone']['statement']}", file=sys.stderr)
-        return result
+        # A PLAIN STATEMENT FIRST (the id lists stay, for --json consumers): what was recorded, for how many of what
+        statement = result.pop("statement", None) or plain_statement(
+            bundle, planned, target_ids, recorded, decision=decision, value=value, element=element, edge=edge,
+            positions=positions, qc_status=qc_status)
+        return {"statement": statement, **result}
 
     return change(bundle)
 

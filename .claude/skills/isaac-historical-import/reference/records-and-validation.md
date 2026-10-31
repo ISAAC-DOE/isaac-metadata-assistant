@@ -13,7 +13,9 @@ object the record carries requires (an electrolyte name makes `concentration_M` 
 `required_because` in the composition file), so `build-records` says it before `validate` does.
 Both replies also carry `warnings` (`warnings_total`): a group whose file names state a potential
 (`400mV`, `m800mV`) that its record will not carry until the potential scale (or the set-point) is
-confirmed, with the command that lets it in. It is not a refusal: the record can still be exportable,
+confirmed, with the command that lets it in. When no set-point was read from the names (an unread token
+such as `-500mV`) and no scale is confirmed, the warning names BOTH (`also_needs`, `also_command`): ask the
+set-point in volts and the scale together, so the scientist is not asked twice. It is not a refusal: the record can still be exportable,
 without the condition that defines it. Say each one to the scientist and ask the scale question. Explain the counts first ("all 78 lack the producing group; 70 wait for a curve
 approval; 5 have no protocol"), then open `validation/<group id>.json` only for a group they leave
 unexplained.

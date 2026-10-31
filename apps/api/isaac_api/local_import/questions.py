@@ -44,7 +44,10 @@ change re-asks the confirmations it undid. None of these renames an existing que
 
 An ANSWERED question keeps its id too: ``consolidate(include_answered=True)`` puts its answered targets back,
 so ``decide --question`` re-answers it (a later decision replaces an earlier one) and ``bundle show question``
-shows it with its current answers (:func:`answered_question`). A conflict none of whose readings its field
+shows it with its current answers (:func:`answered_question`). Every kind that drops out of the open list once
+answered (:data:`RESOLVABLE_WHEN_ANSWERED`): the value kinds, the absorber question (its answered groups back
+in), the counter question (its answered positions back in, even after the regroup that applied them) and the
+clock-zone question. A conflict none of whose readings its field
 takes (zoneless ``#D`` times for a ``*_utc`` field, readings off a closed list) is answered with ``correct``,
 and shows the UTC readings the bundle holds for that run (:func:`_conflict_answer`).
 """
@@ -55,6 +58,7 @@ import functools
 import hashlib
 import json
 import operator
+import re
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -111,6 +115,11 @@ _ARRAY_PATH_REASON = ("an array path: the record builder composes it only from s
 _NO_WRITE_PATH_REASON = "this build has no write path for this official field, so a confirmed value stays evidence"
 #: The question kinds that ask for a record VALUE (the ones the record composer's missing list can concern).
 VALUE_KINDS = ("missing_value", "optional_values", "confirm_value", "resolve_conflict")
+#: The kinds an ANSWERED question of is still found under its id (``consolidate(include_answered=True)``):
+#: ``decide --question`` re-answers it and ``bundle show question`` shows it with ``status`` and its answers.
+RESOLVABLE_WHEN_ANSWERED = VALUE_KINDS + ("confirm_absorber", "naming_counter_positions", "clock_time_zone")
+#: The grouping step's one counter question id (grouping.counter_question): the consolidated id derives from it.
+_COUNTER_GQ_ID = "rgq-experiment-counter-positions"
 #: ``records.compose_group``'s ``from`` for a required value only an answer supplies (the others come from an
 #: approved processing result).
 FROM_AN_ANSWER = "a scientist's answer"
@@ -318,7 +327,8 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     this same, unchanged bundle instead of composing every group again.
 
     ``include_answered`` puts the targets a scientist ANSWERED back into the questions that asked them (a value
-    question the import asked: a missing value, a needs-review or blocking extracted candidate, a conflict). The
+    question the import asked: a missing value, a needs-review or blocking extracted candidate, a conflict), and
+    keeps an answered absorber, counter or clock-zone question (:data:`RESOLVABLE_WHEN_ANSWERED`). The
     buckets, and so the ids, are the same ones (DEC-91: a question's scope and partition never depend on an
     answer), so an answered question is found under the id it was asked with: what ``decide --question`` resolves
     when the question is no longer open, and what ``bundle show question`` shows (:func:`answered_question`)."""
@@ -799,16 +809,33 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                              for d in bundle.get("scientist_decisions") or ())
     said_counter = set(counter_positions(bundle) or ())
     said_not = B.not_counter_positions(bundle)
-    for gq in bundle.get("grouping_questions") or ():
-        if not isinstance(gq, Mapping) or gq.get("kind") != "naming_counter_positions":
-            continue
+    counter_gqs = [gq for gq in bundle.get("grouping_questions") or ()
+                   if isinstance(gq, Mapping) and gq.get("kind") == "naming_counter_positions"]
+    if include_answered and not counter_gqs and (said_counter or said_not):
+        # ANSWERED, AND APPLIED: the regroup that applied a counter answer no longer asks the question (no merge is
+        # blocked by those positions now), but its id is the one it was asked with, so it is still found
+        counter_gqs = [{"id": _COUNTER_GQ_ID, "kind": "naming_counter_positions",
+                        "positions": sorted(p for p in said_counter | set(said_not) if p > 0),
+                        "text": "Which filename token positions are run or acquisition counters? (Answered, and the "
+                                "regroup applied it: the grouping step no longer asks it.)"}]
+    for gq in counter_gqs:
         asked_positions = [int(p) for p in gq.get("positions") or () if isinstance(p, int)]
         open_positions = [p for p in asked_positions if p not in said_counter and p not in said_not]
-        if asked_positions and not open_positions:
-            continue  # every position it asks about is answered: it drops out
+        if asked_positions and not open_positions and not include_answered:
+            continue  # every position it asks about is answered: it drops out of the open list
         qid = _qid("experiment", "naming_counter_positions", str(gq.get("id") or gq.get("text") or ""))
         text = str(gq.get("text") or "Which filename token positions are run or acquisition counters?")
-        if len(open_positions) < len(asked_positions):
+        # REAL NAMES, NOT A PATTERN: the file names this bundle holds, the asked token marked
+        examples = _counter_examples(bundle, open_positions or asked_positions)
+        if examples and _COUNTER_PLACEHOLDER in text:
+            text = text.replace(_COUNTER_PLACEHOLDER, "(e.g. " + "; ".join(
+                f"the {_ordinal(p)} token: " + " vs ".join(ex["differ"])
+                + (f", while it is not a number in {ex['elsewhere']}" if ex["elsewhere"] else "")
+                for p, ex in examples.items()) + ")")
+        example_names = {str(p): ex["differ"] + ([ex["elsewhere"]] if ex["elsewhere"] else []) for p, ex in examples.items()}
+        if asked_positions and not open_positions:
+            text += " Already answered: every position it asks about (" + ", ".join(map(str, asked_positions)) + ")."
+        elif len(open_positions) < len(asked_positions):
             text += (" Already answered: position(s) " + ", ".join(str(p) for p in asked_positions if p not in open_positions)
                      + f"; still open: {', '.join(map(str, open_positions))}.")
         text += (" If none of the open positions is a counter (the numbers name distinct samples, electrodes or "
@@ -825,11 +852,15 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 "scope": "experiment",
                 "target_field_path": None,
                 "text": text,
-                "positions": open_positions,
+                # answered (include_answered): the positions a no-counter answer names again, never one said to be a counter
+                "positions": open_positions or [p for p in asked_positions if p not in said_counter] or asked_positions,
+                **({"example_names": example_names} if example_names else {}),
                 "applies_to": {"groups": len(groups), "runs": len(bundle["runs"]), "targets": 1},
                 "targets": [{"kind": "experiment", "id": "experiment"}],
                 "per_scope_targets": {"experiment": ["experiment"]},
-                "hints": [{"kind": "grouping", "literal": gq.get("examples") or gq.get("options"), "locator": "the grouping step"}],
+                "hints": [{"kind": "grouping", "literal": ([n for names in example_names.values() for n in names] if example_names
+                                                           else gq.get("examples") or gq.get("options")),
+                           "locator": "file names in this bundle, the asked token in [brackets]" if example_names else "the grouping step"}],
                 "allowed_values": None,
                 "answered": answered_positions,
                 **({"deferred": deferred} if (deferred := counter_deferral(bundle)) else {}),
@@ -845,6 +876,10 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     # THE INSTRUMENT CLOCK'S TIME ZONE (1.4.0): asked once for the beamtime while local-clock start
     # times wait on it. No value is suggested: no file states one (CLAUDE.md §5).
     zq = B.clock_zone_question(bundle)
+    if zq is None and include_answered and B.clock_zone_decision(bundle) is not None:
+        # ANSWERED: the question as it was asked, before any zone was stated (the same text, so the same id)
+        zq = B.clock_zone_question({**bundle, "scientist_decisions": [
+            d for d in bundle.get("scientist_decisions") or () if d.get("decision") != B.CLOCK_ZONE_DECISION]})
     if zq is not None:
         qid = _qid("experiment", "clock_time_zone", "instrument_clock")
         questions.append(
@@ -938,7 +973,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             }
         )
 
-    questions += _absorber_questions(bundle, groups)
+    questions += _absorber_questions(bundle, groups, include_answered=include_answered)
 
     def order(q):
         scope = q["scope"]
@@ -1115,6 +1150,55 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
 
 #: The experiment decisions that answer (or defer) the counter question, latest first wins.
 COUNTER_QUESTION_DECISIONS = ("set_counter_positions", B.NOT_COUNTER_DECISION, "defer")
+#: The pattern the grouping step's counter question shows (grouping.counter_question), replaced by real names.
+_COUNTER_PLACEHOLDER = "(e.g. XX_02_… vs XX_03_…)"
+
+
+def _ordinal(n: int) -> str:
+    return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+def _marked_token(stem: str, position: int) -> str | None:
+    """``stem`` with its ``position``-th token (1-based, split as grouping splits names: a sign on a number stays
+    on it) in [brackets], every separator kept; ``None`` when the name has fewer tokens."""
+    from .grouping import _SIGN
+
+    marked = _SIGN.sub("\x00", str(stem))  # same length: the spans hold for the name itself
+    spans = [m.span() for m in re.finditer(r"[^_\-\s.]+", marked)]
+    if not 1 <= position <= len(spans):
+        return None
+    a, b = spans[position - 1]
+    return f"{stem[:a]}[{stem[a:b]}]{stem[b:]}"
+
+
+def _counter_examples(bundle: Mapping, positions: Sequence[int]) -> dict[int, dict]:
+    """For each asked position: ``differ`` — the names (at most 2) of one merge candidate whose names differ there in
+    a number (what the question is asked for), the token marked — and ``elsewhere``, one name of the bundle where
+    that token is not a number (or ``None``). Real names of this bundle, never a pattern."""
+    from .grouping import _stem_tokens
+
+    runs_by_key = {r["run_key"]: r for r in bundle.get("runs") or ()}
+    groups = {g["group_id"]: g for g in bundle.get("record_groups") or ()}
+    out: dict[int, dict] = {}
+    for mc in bundle.get("merge_candidates") or ():
+        if not any(r.get("code") == "numeric_name_token_differs" for r in mc.get("reasons") or ()):
+            continue
+        stems = []
+        for gid in mc.get("group_ids") or ():
+            keys = (groups.get(gid) or {}).get("member_run_keys") or ()
+            stem = (runs_by_key.get(keys[0]) or {}).get("stem") if keys else None
+            if stem and stem not in stems:
+                stems.append(stem)
+        toks = [_stem_tokens(s) for s in stems]
+        for p in positions:
+            col = [t[p - 1] for t in toks if 1 <= p <= len(t)]
+            if p not in out and len(stems) >= 2 and len(col) == len(toks) and len(set(col)) > 1 and all(c.isdigit() for c in col):
+                out[p] = {"differ": [_marked_token(s, p) for s in stems[:2]], "elsewhere": None}
+    for p, ex in out.items():
+        other = next((r["stem"] for r in bundle.get("runs") or () if r.get("stem") and len(t := _stem_tokens(r["stem"])) >= p
+                      and not t[p - 1].isdigit()), None)
+        ex["elsewhere"] = _marked_token(other, p) if other else None
+    return {p: out[p] for p in positions if p in out}
 
 
 def counter_deferral(bundle: Mapping) -> dict | None:
@@ -1495,16 +1579,20 @@ def _ai_pair(sug: Mapping) -> tuple[str, str] | None:
     return (next(iter(els)), next(iter(eds))) if len(els) == 1 and len(eds) == 1 else None
 
 
-def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping]) -> list[dict]:
+def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_answered: bool = False) -> list[dict]:
     """The absorbing element and edge, asked ONCE per distinct suggestion over the groups
     the files agree on (or, where no file states it, the AI readings agree on), and per group
     where they disagree, are partial, or an AI reading differs from the files. Optional: the
-    official schema has no absorber field (a confirmed one is carried in the evidence sidecar)."""
+    official schema has no absorber field (a confirmed one is carried in the evidence sidecar).
+
+    A group a scientist answered (set_absorber) drops out; ``include_answered`` keeps it, in the SAME bucket:
+    the buckets are read from the files' (and AI readings') suggestion only, never from an answer, so an answered
+    question is found under the id it was asked with."""
     decided = S.absorber_decisions(bundle)
     by_pair: dict[tuple, list] = {}
     split: list[tuple[Mapping, dict]] = []
     for g in groups:
-        if g["group_id"] in decided:
+        if g["group_id"] in decided and not include_answered:
             continue
         sug = S.absorber_for_group(bundle, g)
         if sug["status"] == "agrees" and not sug["ai_disagrees_with_files"]:
@@ -1629,10 +1717,15 @@ def answered_question(bundle: Mapping, question_id: str, payload: Mapping | None
     targets hold it, who, when, and — for an optional-values question — the field), ``answered_targets`` and
     ``status`` (``answered`` when no target is still open, else ``open``). ``None`` when no value question has that
     id even then. ``payload``: that ``include_answered`` payload, and ``open_payload`` the plain one, when the
-    caller built them."""
+    caller built them.
+
+    Every kind of :data:`RESOLVABLE_WHEN_ANSWERED`: an absorber question's answer is each group's latest
+    set_absorber (or defer), the counter question's the latest answer to it, the clock-zone question's the latest
+    zone stated; an answer carries its ``element``/``edge`` or ``positions`` when it has them. Such a question is
+    ``open`` while the open list still asks it (a counter position, a group not yet answered)."""
     payload = payload or consolidate(bundle, include_answered=True)
     q = question(payload, question_id)
-    if q is None or q["kind"] not in VALUE_KINDS:
+    if q is None or q["kind"] not in RESOLVABLE_WHEN_ANSWERED:
         return None
     decisions = B._decisions_by_target(bundle.get("scientist_decisions") or ())
     cand_by_id = {c["candidate_id"]: c for c in bundle["candidates"]}
@@ -1640,7 +1733,9 @@ def answered_question(bundle: Mapping, question_id: str, payload: Mapping | None
     answers: dict[tuple, dict] = {}
     answered = 0
     for t in q["targets"]:
-        if t["kind"] == "candidate":
+        if q["kind"] not in VALUE_KINDS:
+            d = _latest_answer_to(bundle, q["kind"], t)
+        elif t["kind"] == "candidate":
             c = cand_by_id.get(t["id"])
             d = B.candidate_decision(bundle, c, decisions) if c is not None else None
         else:
@@ -1648,18 +1743,34 @@ def answered_question(bundle: Mapping, question_id: str, payload: Mapping | None
         if d is None or d.get("decision") == "defer":
             continue
         answered += 1
-        key = (field_of.get(t["id"]), d.get("decision"), json.dumps(d.get("value"), sort_keys=True, default=str))
+        stated = {k: d[k] for k in ("element", "edge") if d.get(k)}
+        if d.get("positions") or d.get("not_counter_positions"):
+            stated["positions"] = list(d.get("positions") or d.get("not_counter_positions"))
+        key = (field_of.get(t["id"]), d.get("decision"), json.dumps(d.get("value"), sort_keys=True, default=str),
+               json.dumps(stated, sort_keys=True))
         a = answers.setdefault(key, {**({"field": key[0]} if key[0] else {}), "decision": d.get("decision"),
-                                     "value": d.get("value"), "targets": 0, "by": None, "decided_utc": None, "decision_id": None})
+                                     "value": d.get("value"), **stated, "targets": 0, "by": None, "decided_utc": None,
+                                     "decision_id": None})
         a["targets"] += 1
         if str(d.get("decided_utc") or "") >= str(a["decided_utc"] or ""):
             a.update(by=(d.get("decided_by") or {}).get("name"), decided_utc=d.get("decided_utc"), decision_id=d.get("decision_id"))
     still_open = (question(open_payload or consolidate(bundle), question_id) is not None
-                  if answered < len(q["targets"]) else False)
+                  if answered < len(q["targets"]) or q["kind"] not in VALUE_KINDS else False)
     return {**q, "status": "open" if still_open else "answered", "answered_targets": answered,
             "current_answers": sorted(answers.values(), key=lambda a: (str(a.get("field") or ""), -a["targets"])),
             "statement": ("A later `decide --question` on this id replaces these answers (the same checks apply); "
                           "repeating one records nothing new.")}
+
+
+def _latest_answer_to(bundle: Mapping, kind: str, target: Mapping) -> Mapping | None:
+    """The latest decision that answers a question of ``kind`` (not a value kind) for ``target``: on a record
+    group, only a decision the absorber question takes (a group's confirm is not an absorber answer)."""
+    if kind == "clock_time_zone":
+        return B.clock_zone_decision(bundle)
+    allowed = COUNTER_QUESTION_DECISIONS if kind == "naming_counter_positions" else ALLOWED_DECISIONS.get(kind, ())
+    want = {"kind": target["kind"], "id": target["id"]}
+    return next((d for d in reversed(bundle.get("scientist_decisions") or ())
+                 if isinstance(d, Mapping) and d.get("target") == want and d.get("decision") in allowed), None)
 
 
 def targets_for(payload: Mapping, question_id: str, only: str | None = None, field: str | None = None) -> list[str]:
@@ -1760,17 +1871,27 @@ def _recommended(report: Mapping, usable: Sequence[tuple], gid: str) -> list[dic
     for w in report.get("warnings") or ():
         if w.get("code") != STATED_POTENTIAL_WARNING:
             continue
-        wanted = set(w.get("targets") or ())
-        hit = next(((q, field) for _, q, field, _, _ in usable
-                    if field == w["needs"] and wanted.intersection(dict(_value_paths(q)).get(field, ()))), None)
-        if hit is None:
-            out.append({"question_id": None, "fields": [w["needs"]], "only": None, "blocking": False, "why": w["text"]})
-            continue
-        q, field = hit
-        pst = q.get("per_scope_targets") or {}
-        out.append({"question_id": q["question_id"], "fields": [field],
-                    "only": f"group:{gid}" if f"group:{gid}" in pst and len(pst) > 1 else None, "blocking": False,
-                    "why": potential_warning_text({**w, "command": scoped_answer_command(q, field, gid)})})
+        # BOTH STEPS when the warning names two (no set-point read and no scale): one recommendation each, the
+        # warning's text (with both commands made the questions') as the why of each
+        steps = [("needs", "targets", "command")] + ([("also_needs", "also_targets", "also_command")] if w.get("also_needs") else [])
+        cmds, hits = {}, []
+        for need, tkey, ckey in steps:
+            wanted = set(w.get(tkey) or ())
+            hit = next(((q, field) for _, q, field, _, _ in usable
+                        if field == w[need] and wanted.intersection(dict(_value_paths(q)).get(field, ()))), None)
+            hits.append((w[need], hit))
+            if hit is not None:
+                cmds[ckey] = scoped_answer_command(hit[0], hit[1], gid)
+        why = potential_warning_text({**w, **cmds}) if cmds else w["text"]
+        for need, hit in hits:
+            if hit is None:
+                out.append({"question_id": None, "fields": [need], "only": None, "blocking": False, "why": why})
+                continue
+            q, field = hit
+            pst = q.get("per_scope_targets") or {}
+            out.append({"question_id": q["question_id"], "fields": [field],
+                        "only": f"group:{gid}" if f"group:{gid}" in pst and len(pst) > 1 else None, "blocking": False,
+                        "why": why})
     return out
 
 

@@ -85,6 +85,12 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
   files' pair is only a `suggested_absorber` hint. Say the pair back ("Zz, L3 edge, for all 9
   groups?") and run `--decision set_absorber --element <El> --edge <edge>` only on a clear yes to that
   pair. "Yes, probably" or "sure" is not an answer; ask again. Never run the template as it is.
+  A group that differs (a reference foil) is answered with `--only group:<id>`, before or after the
+  answer for all.
+- **The counter question** (`naming_counter_positions`): its text shows real file names of this
+  bundle with the asked token in brackets (`PtCCNPs_on_Au_[12]_1500mV` vs `PtCCNPs_on_Au_[2]_1500mV`;
+  also `example_names`), and one name where that token is not a number (`50nmPt_on_Au_[OCV]`). Show
+  them as they are; ask whether that number marks repeats of one measurement.
 - **Control mode** (`context.electrochemistry.control_mode`) is an ordinary value among a group's
   optional fields: `--field context.electrochemistry.control_mode --decision correct --value <one of
   its allowed values>`. A potentiostatic mode makes the potential set-point required; a galvanostatic
@@ -130,9 +136,14 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
 - Use `--json` with `--value` for numbers/objects. ORCID only if the scientist gives one (`--orcid`).
 - Repeating a decision is harmless (recorded once). A later decision replaces an earlier one, also
   through `--question`: `decide --question <Q>` resolves a question that is already answered (by an
-  earlier answer or a template import) under the same id, with the same checks. `bundle show <bundle>
-  question <Q>` shows an answered question with `status: answered` and `current_answers` (each
-  decision, value, how many targets, who, when); an open one with answered fields lists those too.
+  earlier answer or a template import) under the same id, with the same checks. This holds for every
+  kind: a value, the absorber (`--only group:<id>` for one group), the counter question, the clock
+  zone. `bundle show <bundle> question <Q>` shows an answered question with `status: answered` and
+  `current_answers` (each decision, value, `element`/`edge` or `positions`, how many targets, who,
+  when); an open one with answered parts lists those too.
+- **Every `decide` reply starts with a `statement`** ("Pt L3 recorded for 194 groups.", "deferred for
+  140 runs: environment.", "Nothing new recorded: …"). Read that sentence back to the scientist; the
+  id lists after it are for checking, not for reading out.
 
 ## The template (answer everything the files never state, in one sitting)
 

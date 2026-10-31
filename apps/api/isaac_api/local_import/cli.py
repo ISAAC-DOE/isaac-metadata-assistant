@@ -1281,7 +1281,7 @@ def _show_consolidated_question(args) -> int:
         payload = Q.consolidate(bundle)
         q = Q.question(payload, args.id)
         extra: dict = {}
-        if q is None or q["kind"] in Q.VALUE_KINDS:
+        if q is None or q["kind"] in Q.RESOLVABLE_WHEN_ANSWERED:
             # AN ANSWERED QUESTION (or an open one with answered targets: an optional-values field answered) is shown
             # under the id it was asked with, with what its answered targets carry now
             seen = Q.answered_question(bundle, args.id, open_payload=payload)

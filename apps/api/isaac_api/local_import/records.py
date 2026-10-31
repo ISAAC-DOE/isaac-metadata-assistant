@@ -675,10 +675,14 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
                     where = ", ".join(x for x in (prj, f"Athena group {ref['athena_group']}"
                                                   if ref.get("athena_group") else None) if x)
                     label = f"athena:{prj or 'project'}" + (f"#{ref['athena_group']}" if ref.get("athena_group") else "")
+                    # generated_utc (REQUIRED by the schema) is the approval's time: the bundle holds no date for the
+                    # Athena processing itself, so the notes say which time it is rather than let it read as the
+                    # scientist's processing date
                     generated_by = {"agent": "Athena", "notes": (
                         f"The scientist's own Athena processing{f' ({where})' if where else ''}: E0 and the normalised "
                         f"curve are the scientist's values, read unchanged by ISAAC ({r['protocol_id']} "
-                        f"{r['protocol_version']}) and approved by a scientist.")}
+                        f"{r['protocol_version']}) and approved by a scientist. generated_utc is when a scientist "
+                        "approved ISAAC's reading of it, not when the Athena processing was done.")}
                     source = "imported"
                     definition = "E0 from the scientist's own Athena processing, approved by a scientist; ISAAC did not change it."
                 from .mutations import scan_subset_note
@@ -836,7 +840,9 @@ def _stated_potential_warnings(bundle: Mapping, group: Mapping, member_ids: set,
     """A WARNING (never a refusal) for a group whose file names state a potential that its record will not carry:
     the condition that defines the record would be silently absent. Why it is absent — no confirmed potential
     scale (a set-point composes only beside one, :data:`bundle.COMPOSES_ONLY_WITH`) or no confirmed set-point —
-    and the command that lets it in (``targets``: the open scale / set-point values of the member runs). A record
+    and the command that lets it in (``targets``: the open scale / set-point values of the member runs). When the
+    scale is missing AND no set-point was read from the names or answered, BOTH steps are named (``also_needs``,
+    ``also_targets``, ``also_command``: the set-point), so the scientist is not sent round twice. A record
     that carries a set-point gets none; so does one whose file names state no potential."""
     if SETPOINT_PATH in fields:
         return []
@@ -845,22 +851,36 @@ def _stated_potential_warnings(bundle: Mapping, group: Mapping, member_ids: set,
         return []
     answered = [v for v, _, _ in proposals.get(SETPOINT_PATH, ()) if isinstance(v, (int, float)) and not isinstance(v, bool)]
     scale_missing = SCALE_PATH not in fields
+
+    def open_targets(path: str) -> list[str]:
+        return [o.get("candidate_id") or o.get("value_id")
+                for o in list(bundle["candidates"]) + list(bundle["missing_values"])
+                if o.get("target_field_path") == path and o.get("run_id") in member_ids
+                and o.get("value_state") in (B.STATE_MISSING, B.STATE_NEEDS_REVIEW, B.STATE_CANDIDATE_EXTRACTED)]
+
+    def command_for(path: str, targets: Sequence[str]) -> str:
+        if targets and targets[0].startswith("cand-") and path == SETPOINT_PATH:
+            command = f'isaac bundle decide <bundle_dir> --target {targets[0]} --decision confirm --by "<your name>"'
+        elif targets:
+            command = (f"isaac bundle decide <bundle_dir> --target {targets[0]} --decision correct --value "
+                       + ("<potential scale>" if path == SCALE_PATH else "<volts> --json") + ' --by "<your name>"')
+        else:
+            command = f"isaac bundle questions <bundle_dir> --scope group:{group['group_id']}   # answer {path} there"
+        if len(targets) > 1:
+            command += f"   # and the same for {', '.join(targets[1:4])}{'…' if len(targets) > 4 else ''}"
+        return command
+
     needs = SCALE_PATH if scale_missing else SETPOINT_PATH
-    targets = [o.get("candidate_id") or o.get("value_id")
-               for o in list(bundle["candidates"]) + list(bundle["missing_values"])
-               if o.get("target_field_path") == needs and o.get("run_id") in member_ids
-               and o.get("value_state") in (B.STATE_MISSING, B.STATE_NEEDS_REVIEW, B.STATE_CANDIDATE_EXTRACTED)]
-    if targets and targets[0].startswith("cand-") and needs == SETPOINT_PATH:
-        command = f'isaac bundle decide <bundle_dir> --target {targets[0]} --decision confirm --by "<your name>"'
-    elif targets:
-        command = (f"isaac bundle decide <bundle_dir> --target {targets[0]} --decision correct --value "
-                   + ("<potential scale>" if needs == SCALE_PATH else "<volts> --json") + ' --by "<your name>"')
-    else:
-        command = f"isaac bundle questions <bundle_dir> --scope group:{group['group_id']}   # answer {needs} there"
-    if len(targets) > 1:
-        command += f"   # and the same for {', '.join(targets[1:4])}{'…' if len(targets) > 4 else ''}"
+    targets = open_targets(needs)
     w = {"code": STATED_POTENTIAL_WARNING, "group_id": group["group_id"], "path": SETPOINT_PATH, "needs": needs,
-         "stated": stated, "answered_V": answered, "targets": targets, "command": command}
+         "stated": stated, "answered_V": answered, "targets": targets, "command": command_for(needs, targets)}
+    # BOTH STEPS AT ONCE: no scale, and NO set-point value read from the names (the potential is an unread token,
+    # e.g. `m500mV` kept as unknown_token) nor answered: confirming the scale alone would only move the warning on
+    # to the set-point, so both are named now, each with its command
+    unread = not answered and all(s.get("read_as_V") is None for s in stated)
+    also = open_targets(SETPOINT_PATH) if scale_missing and unread else []
+    if also:
+        w.update(also_needs=SETPOINT_PATH, also_targets=also, also_command=command_for(SETPOINT_PATH, also))
     return [{**w, "text": potential_warning_text(w)}]
 
 
@@ -871,6 +891,11 @@ def potential_warning_text(w: Mapping) -> str:
                      for s in w["stated"][:3])
     if w.get("answered_V"):
         lits += "; the set-point answered for it: " + ", ".join(f"{v:g} V" for v in w["answered_V"][:3])
+    if w.get("also_needs"):
+        # no value was read for the set-point: the scientist gives the volts AND the scale, both commands now
+        return (f"the file names state a potential ({lits}) but the record will not carry it until the potential scale is "
+                "confirmed AND a set-point is given (no set-point value was read from the file names: give it in volts). "
+                f"Both: {w['also_command']}  ;  {w['command']}")
     until = "the potential scale is confirmed" if w["needs"] == SCALE_PATH else "the potential set-point is confirmed"
     return (f"the file names state a potential ({lits}) but the record will not carry it until {until}: "
             f"{w['command']}")
@@ -888,6 +913,9 @@ def with_question_commands(bundle: Mapping, warnings: list[dict], payload: Mappi
     for w in warnings:
         cmd = Q.command_for_targets(payload, w.get("targets") or (), w["needs"], w["group_id"]) or w["command"]
         w = {**w, "command": cmd}
+        if w.get("also_needs"):
+            w["also_command"] = (Q.command_for_targets(payload, w.get("also_targets") or (), w["also_needs"], w["group_id"])
+                                 or w["also_command"])
         out.append({**w, "text": potential_warning_text(w)})
     return out
 
