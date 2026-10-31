@@ -468,11 +468,13 @@ export function HelpPanel() {
                   A value gets into a record because a person put it there — typed into a
                   record or run field, or given as an answer to a question above.
                   No control here reads one of your files and fills a field from it. The
-                  upload route refuses every request. Three controls read a file you pick:
+                  upload route refuses every request. Four controls read a file you pick:
                   the Validator and the campaign-sheet CSV comparison, which report what
-                  they found and apply nothing to a record, and Historical Import&rsquo;s
+                  they found and apply nothing to a record; Historical Import&rsquo;s
                   file staging, which opens one only to work out a checksum you asked for
-                  and sends no part of the file anywhere.
+                  and sends no part of the file anywhere; and Schema Proposals&rsquo; local-import
+                  drafts loader, which lists the terms in a drafts file in your browser and
+                  sends only a proposal you write and save, never the file.
                 </p>
                 <p style={{ marginTop: 8 }}>
                   Dictating into Capture does not write a field either. It stores every

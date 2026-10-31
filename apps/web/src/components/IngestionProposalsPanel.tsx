@@ -169,6 +169,7 @@ import { formatWhen } from '../lib/labels';
 import { focusWhenPresent } from '../lib/focusHandoff';
 import type { ApiHealthProposalAcceptance } from '../lib/types';
 import './ingestionProposals.css';
+import { ProposeTermLink } from './ProposeTermLink';
 
 /** Same narrowing `UnmappedNotesPanel` uses — a non-`ApiError` throw still renders. */
 function asApiError(err: unknown): ApiError {
@@ -2906,7 +2907,13 @@ function ProposalCard({
           <span className="proposal-unavailable-label">Not an allowed value: </span>
           &ldquo;{renderValue(proposal.proposed_value)}&rdquo; is not one of the values the
           official schema allows for {fieldLabel}, so it cannot be accepted as proposed.
-          Choose the value that was meant, then accept &mdash; nothing is chosen for you.
+          Choose the value that was meant, then accept &mdash; nothing is chosen for you.{' '}
+          {/* Offered only when the field is a portal term list; navigation, nothing written. */}
+          <ProposeTermLink
+            fieldPath={proposal.target_field_path}
+            term={proposal.proposed_value}
+            from="ingestion_proposal"
+          />
         </p>
       )}
 

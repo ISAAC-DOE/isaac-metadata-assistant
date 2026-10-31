@@ -113,6 +113,26 @@ import type {
   RecordBundle,
 } from './types';
 import { readTutorialSession } from './tutorialSession';
+import type {
+  ApiSchemaChangeRequest,
+  ApiSchemaPortalPayload,
+  ApiSchemaProposalList,
+  ApiSchemaProposalResponse,
+  ApiSchemaVocabulary,
+  SchemaProposalInput,
+  SchemaProposalStatus,
+} from './schemaProposals';
+import type {
+  ApiLocalAnsweredQuestions,
+  ApiLocalAnswerPreview,
+  ApiLocalAnswerRecorded,
+  ApiLocalBundleList,
+  ApiLocalBundleProgress,
+  ApiLocalDecisionRecorded,
+  ApiLocalQuestions,
+  LocalAnswerInput,
+  LocalDecisionInput,
+} from './localImports';
 
 /**
  * The base a build with no `VITE_API_BASE` falls back to — the local FastAPI
@@ -783,6 +803,26 @@ async function mutationError(res: Response, path: string): Promise<ApiError> {
 }
 
 const enc = encodeURIComponent;
+
+/*
+ * LOCAL BUNDLES — every request carries `X-ISAAC-Local: 1`. The server refuses one without it,
+ * because a custom header cannot be sent cross-origin without a CORS preflight the API grants only
+ * to its own allowlist: a page on another site (an `<img>`, a form) cannot read the questions or
+ * make the server record that their values were shown.
+ */
+const LOCAL_HEADERS = { 'X-ISAAC-Local': '1' } as const;
+
+async function localGet<T>(path: string): Promise<T> {
+  const res = await request(path, { headers: LOCAL_HEADERS });
+  if (!res.ok) throw await httpErrorWithReason(res, path);
+  return readJson<T>(res, path);
+}
+
+async function localPost<T>(path: string, body: unknown): Promise<T> {
+  const res = await request(path, { method: 'POST', body: JSON.stringify(body), headers: LOCAL_HEADERS });
+  if (!res.ok) throw await httpErrorWithReason(res, path);
+  return readJson<T>(res, path);
+}
 
 /**
  * Drop `undefined` entries, KEEP `null` ones.
@@ -3076,6 +3116,103 @@ export const api = {
    * `createProposal` does — the same trap `updateRun`'s comment names, in the
    * other direction.
    * ====================================================================== */
+
+  /* ======================================================================
+   * SCHEMA PROPOSALS — drafting and tracking proposals to change the official
+   * vocabulary. NONE of these approves, applies or sends anything: the owners of
+   * the standard review a proposal in the ISAAC portal. A proposal serves no
+   * `ETag` and no operation here takes `If-Match`: the store has no revision
+   * contract, and a write is serialised on the server.
+   * ==================================================================== */
+
+  getSchemaVocabulary(): Promise<ApiSchemaVocabulary> {
+    return getJson<ApiSchemaVocabulary>('/schema-proposals/vocabulary');
+  },
+
+  listSchemaProposals(
+    opts: { limit?: number; offset?: number; status?: SchemaProposalStatus } = {},
+  ): Promise<ApiSchemaProposalList> {
+    const query = new URLSearchParams();
+    if (opts.limit !== undefined) query.set('limit', String(opts.limit));
+    if (opts.offset !== undefined) query.set('offset', String(opts.offset));
+    if (opts.status !== undefined) query.set('status', opts.status);
+    const qs = query.toString();
+    return getJson<ApiSchemaProposalList>(`/schema-proposals${qs ? `?${qs}` : ''}`);
+  },
+
+  createSchemaProposal(input: SchemaProposalInput): Promise<ApiSchemaProposalResponse> {
+    return postJson<ApiSchemaProposalResponse>('/schema-proposals', input);
+  },
+
+  withdrawSchemaProposal(proposalId: string): Promise<ApiSchemaProposalResponse> {
+    return postJson<ApiSchemaProposalResponse>(`/schema-proposals/${enc(proposalId)}/withdraw`);
+  },
+
+  getSchemaProposalPortalPayload(proposalId: string): Promise<ApiSchemaPortalPayload> {
+    return getJson<ApiSchemaPortalPayload>(`/schema-proposals/${enc(proposalId)}/portal-payload`);
+  },
+
+  /** A schema change request's export: a document for the standard's owners, never a portal payload. */
+  getSchemaProposalChangeRequest(proposalId: string): Promise<ApiSchemaChangeRequest> {
+    return getJson<ApiSchemaChangeRequest>(`/schema-proposals/${enc(proposalId)}/change-request`);
+  },
+
+  /* ====================================================================
+   * LOCAL IMPORTS (`/local-bundles/*`) — present only on a server started with
+   * `ISAAC_LOCAL_BUNDLES_DIR` on the scientist's own computer; everywhere else the
+   * list is the ordinary 404. Every write names the `bundle_version` it was shown
+   * (`expected_version`); the server refuses a stale one with 412 and writes nothing.
+   * ==================================================================== */
+
+  listLocalBundles(): Promise<ApiLocalBundleList> {
+    return localGet<ApiLocalBundleList>('/local-bundles');
+  },
+
+  getLocalBundleProgress(name: string): Promise<ApiLocalBundleProgress> {
+    return localGet<ApiLocalBundleProgress>(`/local-bundles/${enc(name)}/progress`);
+  },
+
+  getLocalBundleQuestions(
+    name: string,
+    opts: { kind?: string; blockingOnly?: boolean; offset?: number } = {},
+  ): Promise<ApiLocalQuestions> {
+    const query = new URLSearchParams();
+    if (opts.kind) query.set('kind', opts.kind);
+    if (opts.blockingOnly) query.set('blocking_only', 'true');
+    if (opts.offset) query.set('offset', String(opts.offset));
+    const qs = query.toString();
+    return localGet<ApiLocalQuestions>(`/local-bundles/${enc(name)}/questions${qs ? `?${qs}` : ''}`);
+  },
+
+  /** The answered questions (`bundle show question`'s `status: answered`); reading them records that command's exposures. */
+  getLocalBundleAnsweredQuestions(
+    name: string,
+    opts: { kind?: string; offset?: number } = {},
+  ): Promise<ApiLocalAnsweredQuestions> {
+    const query = new URLSearchParams();
+    if (opts.kind) query.set('kind', opts.kind);
+    if (opts.offset) query.set('offset', String(opts.offset));
+    const qs = query.toString();
+    return localGet<ApiLocalAnsweredQuestions>(`/local-bundles/${enc(name)}/questions/answered${qs ? `?${qs}` : ''}`);
+  },
+
+  previewLocalAnswer(name: string, questionId: string, input: LocalAnswerInput): Promise<ApiLocalAnswerPreview> {
+    return localPost<ApiLocalAnswerPreview>(
+      `/local-bundles/${enc(name)}/questions/${enc(questionId)}/answer`,
+      definedOnly({ ...input, dry_run: true }),
+    );
+  },
+
+  answerLocalQuestion(name: string, questionId: string, input: LocalAnswerInput): Promise<ApiLocalAnswerRecorded> {
+    return localPost<ApiLocalAnswerRecorded>(
+      `/local-bundles/${enc(name)}/questions/${enc(questionId)}/answer`,
+      definedOnly({ ...input, dry_run: false }),
+    );
+  },
+
+  recordLocalDecision(name: string, input: LocalDecisionInput): Promise<ApiLocalDecisionRecorded> {
+    return localPost<ApiLocalDecisionRecorded>(`/local-bundles/${enc(name)}/decisions`, definedOnly({ ...input }));
+  },
 
   listImports(): Promise<ApiImportListResponse> {
     return getJson<ApiImportListResponse>('/imports');

@@ -43,6 +43,7 @@
 import { test as base, expect, type Locator, type Page } from '@playwright/test';
 import { API_BASE } from './env';
 import type { Surface } from './surfaces';
+import { assertLocalImportsFlagInjected, installLocalImports, uninstallLocalImports } from './local-imports-mock';
 import {
   TUTORIAL_SESSION_HEADER,
   disposeWorkedExampleSession,
@@ -102,12 +103,14 @@ function makeApp(page: Page): AppHelper {
 
   return {
     async goto(path: string) {
+      await uninstallLocalImports(page);
       await settle(path);
     },
     async enterExampleScope() {
       return enterWorkedExample(page);
     },
     async gotoExample(path: string) {
+      await uninstallLocalImports(page);
       await enterWorkedExample(page);
       await settle(path);
     },
@@ -116,7 +119,13 @@ function makeApp(page: Page): AppHelper {
       // requests, and the first request the app makes is issued during its
       // initial render.
       if (surface.scope === 'example') await enterWorkedExample(page);
+      // A local-build surface gets its flag and its synthetic API (installed AFTER any
+      // scope route, so it wins); every other surface is opened without either, even on
+      // a page where an earlier surface had them. See `e2e/local-imports-mock.ts`.
+      if (surface.localImportsMock) await installLocalImports(page);
+      else await uninstallLocalImports(page);
       await settle(surface.path);
+      if (surface.localImportsMock) assertLocalImportsFlagInjected(page);
       await expect(page.getByRole(surface.ready.role, { name: surface.ready.name }).first()).toBeVisible({
         timeout: 20_000,
       });

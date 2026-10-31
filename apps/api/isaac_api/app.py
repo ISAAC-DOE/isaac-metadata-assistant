@@ -40,6 +40,9 @@ from .routes import (
     storage_unavailable_handler,
     tutorial_scope_error_handler,
 )
+from .schema_proposals import SCHEMA_PROPOSALS_TAG
+from .schema_proposals import router as schema_proposals_router
+from . import local_bundles
 from .spa import mount_spa
 
 # Default: the Vite dev server origins. Deployed environments override via
@@ -114,6 +117,11 @@ def create_app() -> FastAPI:
     # `ISAAC_ASSISTANT_PROVIDER=anthropc` boots happily with no assistant, and the
     # first person to notice is a scientist wondering why nothing answers.
     validate_provider_config_or_raise()
+    # LOCAL BUNDLES (the local questions screen): refuse to boot when ISAAC_LOCAL_BUNDLES_DIR names
+    # no directory, or is set beside a deployment base path. Unset — every hosted deployment — this
+    # does nothing, and nothing below registers a route for it.
+    local_bundles.validate_local_bundles_config_or_raise()
+    serve_local_bundles = local_bundles.is_requested()
     # Deploy base path (ISAAC_BASE_PATH); "" locally. Resolved once and applied
     # to the router prefix and the SPA mount below.
     base = base_path()
@@ -151,7 +159,8 @@ def create_app() -> FastAPI:
         # Documentation metadata only (consumed when the OpenAPI document is
         # generated, never at request time): the group descriptions for the tags
         # the routes carry. Defined next to the routes so the names cannot drift.
-        openapi_tags=OPENAPI_TAGS,
+        openapi_tags=[*OPENAPI_TAGS, SCHEMA_PROPOSALS_TAG,
+                      *([local_bundles.LOCAL_BUNDLES_TAG] if serve_local_bundles else [])],
         description=(
             "Every verdict this API reports is produced by the deterministic "
             "`isaac_records` core, in process, so an answer here is byte-identical "
@@ -282,6 +291,14 @@ def create_app() -> FastAPI:
     # to the historical behavior. mount_spa is a no-op unless ISAAC_STATIC_DIR
     # points at a built frontend; registered last so API routes win.
     app.include_router(router, prefix=base)
+    # Schema Proposals live in their own module so the large route table is not
+    # touched; see `schema_proposals.py` for what they do and do not do.
+    app.include_router(schema_proposals_router, prefix=base)
+    # LOCAL BUNDLES — registered ONLY when the process was started with ISAAC_LOCAL_BUNDLES_DIR, the
+    # same arrangement as the MCP transport below: a deployment without it has no such route (the
+    # ordinary JSON 404) and its OpenAPI document does not mention one. See `local_bundles.py`.
+    if serve_local_bundles:
+        app.include_router(local_bundles.router, prefix=base)
     # --- MCP Streamable HTTP transport, mounted ONLY when configured ----------
     # `mcp_transport_or_none` returns None unless ISAAC_MCP_DEPLOYMENT resolves to
     # a binding that declares `serves_transport` — which nothing does by default,

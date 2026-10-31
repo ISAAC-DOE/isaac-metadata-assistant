@@ -124,7 +124,31 @@ def cmd_new_id(args, root: Path) -> int:
     return 0
 
 
+#: Subcommands served by the OPTIONAL local-first import package
+#: (``isaac_api.local_import``, under ``apps/api``). Dispatched before this module's
+#: own parsing and imported lazily, so the four commands above never load it.
+LOCAL_IMPORT_COMMANDS = ("import", "bundle", "process")
+
+
+def _run_local_import(argv: list[str]) -> int:
+    try:
+        from isaac_api.local_import import cli as local_cli
+    except ModuleNotFoundError as exc:
+        if (exc.name or "").split(".")[0] != "isaac_api":
+            raise
+        print(
+            "`isaac import` and `isaac bundle` need the ISAAC local import package: "
+            "run scripts/install_local_cli.sh from an ISAAC checkout.",
+            file=sys.stderr,
+        )
+        return 2
+    return local_cli.main(argv)
+
+
 def main(argv: list[str] | None = None) -> int:
+    raw = list(sys.argv[1:] if argv is None else argv)
+    if raw and raw[0] in LOCAL_IMPORT_COMMANDS:
+        return _run_local_import(raw)
     parser = argparse.ArgumentParser(prog="isaac", description=__doc__)
     parser.add_argument("--root", help="repo root (default: walk up from cwd to find schema/)")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -153,7 +177,18 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("new-id", help="print a fresh ULID record_id")
     p.set_defaults(func=cmd_new_id)
 
+    for name, text in (
+        ("import", "read a folder or ZIP into an ISAAC Local Import Bundle (not an official record)"),
+        ("bundle", "list, show or check an ISAAC Local Import Bundle, or draft term proposals from it (propose-terms)"),
+        ("process", "run the draft XAS processing protocol over a bundle's record groups"),
+    ):
+        p = sub.add_parser(name, help=text, add_help=False)
+        p.add_argument("rest", nargs=argparse.REMAINDER)
+        p.set_defaults(func=lambda a, _root: _run_local_import([a.command, *a.rest]))
+
     args = parser.parse_args(argv)
+    if args.command in LOCAL_IMPORT_COMMANDS:
+        return args.func(args, None)
     root = find_root(args.root)
     if args.command != "new-id" and not (root / "schema" / "isaac_record_v1.json").exists():
         print(f"No official schema at {root}/schema/isaac_record_v1.json (use --root).", file=sys.stderr)

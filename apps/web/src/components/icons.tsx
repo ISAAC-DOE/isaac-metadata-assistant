@@ -5,6 +5,13 @@
  */
 import {
   BookMarked,
+  // SCHEMA PROPOSALS destination glyph: a document with a pen, i.e. drafting a change
+  // to a document. Paired with its text label at the one call site (`LeftNav`).
+  FilePenLine,
+  // LOCAL IMPORTS destination glyph: a laptop, i.e. "on this computer" — the one fact that
+  // sets that destination apart (nothing about it leaves the machine). Paired with its text
+  // label at the one call site (`LeftNav`).
+  Laptop,
   // THE WIDGET GLYPHS (`components/Widget.tsx`). `Info` is the widget's
   // "about these figures" affordance — a plain circled i, never a question mark
   // (that is `HelpTip`'s field-definition `?`, a different job). The other four
@@ -275,6 +282,8 @@ export {
    * alone.
    */
   Inbox,
+  FilePenLine,
+  Laptop,
   History,
   CornerRightUp,
   Hourglass,
