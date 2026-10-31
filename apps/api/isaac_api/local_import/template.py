@@ -1039,10 +1039,15 @@ def export_template(bundle_dir: Path, out: Path, *, suggestions: bool = True, fo
         if off_list and not str(_keep_off_list.get("by") or "").strip():
             # NO NAME, NO REQUEST: a word is kept as someone's request only when they are named (`--by`, passed once
             # the scientist says the sheet is theirs); without one nothing is kept, and the summary says so
+            # c14 MED-1: a word the scientist has since replaced with an allowed value (a request kept earlier, by
+            # anyone, answered since) is said as such, whether or not a name is given, and listed apart
+            words = [{k: r[k] for k in ("field_path", "term", "header", "cells", "run_ids")}
+                     for r in off_list_requests(off_list)]
+            say_answered_since(bundle, [(w, same_word_requests(bundle, w)) for w in words])
             filled["vocabulary_requests_not_kept"] = {
                 "reason": "no name given",
-                "words": [{k: r[k] for k in ("field_path", "term", "header", "cells", "run_ids")}
-                          for r in off_list_requests(off_list)],
+                "words": [w for w in words if not (w.get("answered_since") or {}).get("every_run")],
+                "answered_since": [w for w in words if (w.get("answered_since") or {}).get("every_run")],
             }
         elif off_list:
             # THEIR OFF-LIST WORDS ARE KEPT (template adopt), recorded before the file exists, as exposures are
@@ -1194,7 +1199,7 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
     by_header = {(c.get("sheet"), c.get("header")): c for c in marker["columns"]}
     known = {c.header: c for c in (*CAMPAIGN_FIELDS, *CONFIG_COLUMNS, *FILE_COLUMNS)}
     out: dict[str, Any] = {"cells": [], "invalid": [], "unmapped": {}, "nowhere": [], "rows_refused": [], "awaiting_ruling": [],
-                           "off_list": [], "adopted_from": (marker.get("meta") or {}).get("adopted_from")}
+                           "already_recorded": [], "off_list": [], "adopted_from": (marker.get("meta") or {}).get("adopted_from")}
     adopted = marker.get("adopted") or {}
     for name in (SHEET_CAMPAIGN, SHEET_CONFIG, SHEET_FILES):
         if name not in wb.sheetnames:
@@ -1405,15 +1410,51 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
         if tech is not None and cid not in used and cid not in duplicate:
             out["nowhere"].append({"cell": _cell_ref(SHEET_CONFIG, tech[0]), "header": "Technique", "value": tech[1],
                                    "reason": f"no File List row chose Config ID {cid!r}, so it reaches no run"})
-    _read_rulings(wb, marker, runs, known, take, out)
+    answers_box: list[Mapping] = []
+
+    def recorded(path: str | None, run_ids: Sequence[str], scope: str) -> dict | None:
+        from . import propose_terms as P
+
+        if not answers_box:  # read once, only when a blank ruling is found
+            answers_box.append(P.allowed_answers(bundle, [str(e.get("target_field_path")) for e in marker.get("disagreements") or ()]))
+        return recorded_ruling(answers_box[0], path, run_ids, scope)
+
+    _read_rulings(wb, marker, runs, known, take, out, recorded)
     return out
 
 
-def _read_rulings(wb, marker: Mapping, runs: Mapping, known: Mapping[str, Column], take, out: dict) -> None:
+def recorded_ruling(answers: Mapping, path: str | None, run_ids: Sequence[str], scope: str) -> dict | None:
+    """c14 MED-1: what a Disagreements row's field ALREADY holds, when a scientist's confirming decision gives it an
+    allowed value for every run the row names (``scope`` ``experiment``: the beamtime-wide answer), else ``None``.
+    ``answers``: ``propose_terms.allowed_answers`` for the rows' fields (alias-aware; the only values a record takes).
+    ``{values, decided_utc, runs, statement}``: "already recorded: 'in_situ' (2099-01-01); leave blank to keep" — a
+    sheet adopted again after the scientist ruled is never read back as awaiting their ruling."""
+    from . import propose_terms as P
+
+    if not path:
+        return None
+    reach = [None] if scope == "experiment" or not run_ids else list(dict.fromkeys(run_ids))
+    got = []
+    for rid in reach:
+        here = P._answers_for_run(answers, path, rid)
+        if not here:
+            return None
+        got += here
+    values = P._distinct([a[0] for a in got])
+    timed = sorted((t, a[1]) for a in got if (t := P._utc(a[1])) is not None)
+    when = timed[-1][1] if timed else None
+    return {"values": values, "decided_utc": when, "runs": sum(1 for r in reach if r is not None),
+            "statement": f"already recorded: {', '.join(_shown(v) for v in values)}" + (f" ({when[:10]})" if when else "")
+                         + "; leave blank to keep"}
+
+
+def _read_rulings(wb, marker: Mapping, runs: Mapping, known: Mapping[str, Column], take, out: dict,
+                  recorded=None) -> None:
     """A workbook ``template adopt`` wrote: each Disagreements row's "Your ruling" cell, typed by the
     scientist, is read like an answer cell for exactly the targets ``_isaac`` names for that row. An
-    empty ruling records nothing and is listed (``awaiting_ruling``); nothing ISAAC chose is ever
-    read from that sheet."""
+    empty ruling records nothing and is listed (``awaiting_ruling``), or, on a row whose field a scientist's decision
+    already answers for every run it names (``recorded``: :func:`recorded_ruling`), keeps that value and is listed
+    apart (``already_recorded``, c14 MED-1); nothing ISAAC chose is ever read from that sheet."""
     entries = marker.get("disagreements") or ()
     if not entries:
         return
@@ -1479,6 +1520,13 @@ def _read_rulings(wb, marker: Mapping, runs: Mapping, known: Mapping[str, Column
             continue
         if raw is None:
             reading = ws[f"F{row}"].value
+            held = recorded(col.path, runs_named, str(e.get("scope"))) if recorded is not None else None
+            if held is not None:
+                # a blank ruling on a row already settled keeps what is recorded: never read back as awaiting a ruling
+                out["already_recorded"].append({"id": did, "cell": _cell_ref(SHEET_DISAGREE, ref), "header": col.header,
+                                                "target_field_path": col.path, "their_value": ws[f"D{row}"].value,
+                                                "recorded": held})
+                continue
             out["awaiting_ruling"].append({"id": did, "cell": _cell_ref(SHEET_DISAGREE, ref), "header": col.header,
                                            "target_field_path": col.path, "their_value": ws[f"D{row}"].value,
                                            "why": ("readings: " + "; ".join(str(reading).splitlines())) if reading else ws[f"B{row}"].value})
@@ -1883,20 +1931,71 @@ def keep_off_list_cells(bundle: dict, cells: Sequence[Mapping], *, by: str | Non
         kept.append({**row, "request_id": request["request_id"], "new": new})
         if not new:
             earlier.append((kept[-1], request))
-    if earlier:
-        answers = P.allowed_answers(bundle, [r["field_path"] for _, r in earlier])
-        live, log = P.live_run_ids(bundle), list(bundle.get("scientist_decisions") or ())
-        for row, request in earlier:
-            answered = P.request_answered_runs(request, answers, live=live, log=log)["answered"]
-            if answered:
-                values = P._distinct([v for vs in answered.values() for v in vs])
-                row["answered_since"] = {
-                    "runs": sum(1 for r in answered if r is not None), "values": values,
-                    **({"whole_beamtime": True} if None in answered else {}),
-                    "statement": (f"The sheet still says {row['term']!r} for {row['field_path']} on {P._reach(list(answered))}, "
-                                  f"but it was answered since with {P._shown(values)}; to keep the word, "
-                                  f"`isaac bundle decide ... --value \"{row['term']}\" --as-said`.")}
+    say_answered_since(bundle, [(row, [request]) for row, request in earlier])
     return kept
+
+
+def say_answered_since(bundle: Mapping, pairs: Sequence[tuple[dict, Sequence[Mapping]]]) -> None:
+    """Add ``answered_since`` to each sheet word ``row`` whose ``requests`` (the one kept earlier, or, with no name
+    given, every request for the same field and word) were answered since with an allowed value
+    (``propose_terms.request_answered_runs``): ``{runs, values, every_run, statement}``. ``every_run``: each live run
+    the row names is answered, so the word is not drafted and nothing is to do unless the scientist wants it kept.
+    Read only; nothing is stamped (a sheet read again is not the scientist saying their word again)."""
+    from . import propose_terms as P
+
+    pairs = [(row, reqs) for row, reqs in pairs if reqs]
+    if not pairs:
+        return
+    answers = P.allowed_answers(bundle, [row["field_path"] for row, _ in pairs])
+    live, log = P.live_run_ids(bundle), list(bundle.get("scientist_decisions") or ())
+    for row, requests in pairs:
+        wanted = [r for r in row.get("run_ids") or () if live is None or r in live] or (
+            [] if row.get("run_ids") else [None])
+        answered: dict[str | None, list] = {}
+        still: set[str | None] = set()  # a run another request of theirs still asks the word for is not answered
+        for request in requests:
+            st = P.request_answered_runs(request, answers, live=live, log=log)
+            for rid, vs in st["answered"].items():
+                answered.setdefault(rid, []).extend(vs)
+            still |= {*st["needed"], *st["before"], *st["same"], *st["unknown"]}
+        answered = {r: v for r, v in answered.items() if r not in still}
+        if len(requests) > 1 or row.get("run_ids") != list(requests[0].get("run_ids") or ()):
+            answered = {r: v for r, v in answered.items() if r in wanted}  # only what this row asks about
+        if not answered:
+            continue
+        values = P._distinct([v for vs in answered.values() for v in vs])
+        row["answered_since"] = {
+            "runs": sum(1 for r in answered if r is not None), "values": values,
+            **({"whole_beamtime": True} if None in answered else {}),
+            "every_run": bool(wanted) and all(r in answered for r in wanted),
+            "statement": (f"The sheet still says {row['term']!r} for {row['field_path']} on {P._reach(list(answered))}, "
+                          f"but it was answered since with {P._shown(values)}; to keep the word, "
+                          f"`isaac bundle decide ... --value \"{row['term']}\" --as-said`.")}
+
+
+def same_word_requests(bundle: Mapping, row: Mapping) -> list[Mapping]:
+    """Every vocabulary request the bundle keeps for ``row``'s field and word, whoever kept it and wherever."""
+    return [r for r in bundle.get("vocabulary_requests") or () if isinstance(r, Mapping)
+            and r.get("field_path") == row["field_path"] and r.get("term") == row["term"]]
+
+
+def _request_sections(items: Sequence[Mapping], applied: bool, heading: str) -> list[str]:
+    """The kept (or, in a preview, to-be-kept) requests under ``heading``, and apart from them, under their own
+    heading, the words answered since for every run (c14 MED-1): not drafted, so never under "propose-terms can
+    draft it"."""
+    open_ = [r for r in items if not (r.get("answered_since") or {}).get("every_run")]
+    done = [r for r in items if (r.get("answered_since") or {}).get("every_run")]
+    out = []
+    if open_:
+        out += ["", heading, *_request_lines(open_, applied)]
+    if done:
+        out += ["", ANSWERED_SINCE_HEADING, *_request_lines(done, applied)]
+    return out
+
+
+#: The heading for sheet words already replaced with an allowed value (c14 MED-1, LOW-6).
+ANSWERED_SINCE_HEADING = ("Answered since (your sheet still says the word, but it was replaced with an allowed value for "
+                          "every run named; not drafted; nothing to do unless you want your own word kept):")
 
 
 def _request_lines(items: Sequence[Mapping], applied: bool) -> list[str]:
@@ -1982,6 +2081,8 @@ def import_template(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None 
         "decisions": report["decisions"],
         "replaces_or_contradicts_a_file_reading": report["contradictions"],
         "awaiting_ruling": cells["awaiting_ruling"] + report["awaiting_ruling"],
+        # c14 MED-1: a Disagreements row left blank whose field a scientist's decision already answers: kept as recorded
+        "disagreements_already_recorded": cells["already_recorded"],
         "recorded": len(report["recorded_target_ids"]) if apply else 0,
         "would_record": len(report["recorded_target_ids"]),
         "unchanged": len(report["unchanged_target_ids"]),
@@ -2135,6 +2236,11 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
         for x in rep["awaiting_ruling"]:
             run = f" {x['run_id']}" if x.get("run_id") else ""
             add(f"  {x['id'] or '(not yet on the Disagreements sheet)'} {x['cell']}{run} {x['header']}: theirs {x['their_value']!r}; {x['why']}")
+    if rep.get("disagreements_already_recorded"):
+        add("")
+        add("Disagreements already recorded (left blank, so the recorded value is kept; nothing new is recorded for them):")
+        for x in rep["disagreements_already_recorded"]:
+            add(f"  {x['id']} {x['cell']} {x['header']}: theirs {x['their_value']!r}; {x['recorded']['statement']}")
     in_full = [("Clashes (skipped)", "clashes"), ("Refused", "refused"), ("Rows refused", "rows_refused")]
     if full:
         in_full.insert(0, ("Invalid cells (recorded as nothing)", "invalid_cells"))
@@ -2144,10 +2250,10 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
         add("Invalid cells (recorded as nothing):")
         lines += _invalid_lines(rep["invalid_cells"])
     if rep.get("vocabulary_requests"):
-        add("")
-        add(("Kept" if rep["applied"] else "With --apply, kept") + " as vocabulary requests (not decisions, not values: "
-            "each is a word its field's list lacks; `isaac bundle propose-terms` can draft it):")
-        lines += _request_lines(rep["vocabulary_requests"], rep["applied"])
+        lines += _request_sections(rep["vocabulary_requests"], rep["applied"],
+                                   ("Kept" if rep["applied"] else "With --apply, kept") + " as vocabulary requests (not "
+                                   "decisions, not values: each is a word its field's list lacks; `isaac bundle "
+                                   "propose-terms` can draft it):")
     for title, key in in_full:
         if rep[key]:
             add("")
@@ -2211,7 +2317,8 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
     add("")
     add(
         f"Summary: {rep['cells_read']} cells read; {rep['recorded'] if rep['applied'] else rep['would_record']} decision(s) "
-        f"{verb}; {rep['unchanged']} unchanged; {len(rep['already_decided_same_value'])} already decided with the same value; "
+        f"{verb}; {rep['unchanged']} unchanged; {len(rep['already_decided_same_value'])} decision(s) (from "
+        f"{len({str(x['cell']).split(' via ', 1)[0] for x in rep['already_decided_same_value']})} cell(s)) already recorded; "
         f"{len(rep['invalid_cells'])} invalid; {len(rep['clashes'])} clash(es); {len(rep['refused'])} refused; "
         f"{sum(len(u['cells']) for u in rep['unmapped_columns'])} cell(s) in {len(rep['unmapped_columns'])} unmapped column(s); "
         f"{len(rep['recorded_nowhere'])} recorded nowhere; {len(rep['rows_refused'])} row(s) refused"
@@ -2221,6 +2328,8 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
         + (f"; {len(rep['replaces_or_contradicts_a_file_reading'])} replace or contradict a file reading"
            if rep.get("replaces_or_contradicts_a_file_reading") else "")
         + (f"; {len(rep['awaiting_ruling'])} disagreement(s) awaiting a ruling" if rep.get("awaiting_ruling") else "")
+        + (f"; {len(rep['disagreements_already_recorded'])} disagreement(s) already recorded (blank: kept)"
+           if rep.get("disagreements_already_recorded") else "")
         + (f"; {len({x['group_id'] for x in rep['not_reached']})} group(s) not reached by a beamtime-wide answer"
            if rep.get("not_reached") else "")
         + "."
@@ -2796,6 +2905,13 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
         # Disagreements: one row per disagreement; the answer cell stays EMPTY and says why
         order = {"file_reading": 0, "hint": 1, "name_only": 2, "not_allowed": 3, "invalid": 4}
         entries = sorted(groups.values(), key=lambda g: order[g["kind"]])
+        # c14 MED-1: a row whose field the scientist already answered for every run it names says so (adopting again
+        # after a new reading must not ask for rulings already given); a blank ruling there keeps the recorded value
+        from . import propose_terms as P
+
+        answers = P.allowed_answers(bundle, [g["path"] for g in entries if g["path"]]) if entries else {}
+        for g in entries:
+            g["already_recorded"] = recorded_ruling(answers, g["path"], g["runs"], g["scope"])
         wd = wb.create_sheet(SHEET_DISAGREE, index=wb.sheetnames.index(SHEET_SUGGEST))
         from openpyxl.styles import Alignment, Font
 
@@ -2824,6 +2940,8 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
                 " (each field's allowed values are listed once, below)" if g["kind"] == "not_allowed" else "")
             if g["unread_hints"]:
                 said += ". " + "; ".join(_unread_hint_text(h, len(g["runs"])) for h in g["unread_hints"])
+            if g["already_recorded"]:
+                said = f"{g['already_recorded']['statement']}. {said}"
             values = (g["id"], said, g["header"], g["their_value"], _refs_shown(g["their_cells"]), "\n".join(g["readings"]) or None,
                       _refs_shown(g["runs"], noun="runs") if g["runs"] else "every File List run", None,
                       _refs_shown(g["answer_cells"]), None)
@@ -2831,6 +2949,11 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
                 c = wd.cell(row=row, column=j, value=v if not isinstance(v, str) or not v.startswith("=") else "'" + v)
                 c.alignment = Alignment(wrap_text=True, vertical="top")
             wd[f"{DISAGREE_RULING_COLUMN}{row}"].number_format = "@" if not (rules.get(g["path"] or "") or {}).get("numeric") else "General"
+            if g["already_recorded"]:
+                wd[f"{DISAGREE_RULING_COLUMN}{row}"].comment = Comment(
+                    f"{g['already_recorded']['statement'][0].upper()}{g['already_recorded']['statement'][1:]}: a blank "
+                    "ruling records nothing new. A different value here is recorded only with `template import "
+                    "--supersede`.", "ISAAC")
             if g.get("allowed"):
                 allowed_once.setdefault(g["header"], list(g["allowed"]))
             for ref in g["answer_cells"]:
@@ -2879,7 +3002,8 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
         marker.cell(row=r + 1, column=2, value=their_file)
 
         result["disagreements"] = [{k: g[k] for k in ("id", "kind", "header", "path", "their_value", "their_cells", "readings",
-                                                      "runs", "answer_cells", "reason", "scope", "unread_hints")}
+                                                      "runs", "answer_cells", "reason", "scope", "unread_hints",
+                                                      "already_recorded")}
                                    | {"ruling_cell": _cell_ref(SHEET_DISAGREE, f"{DISAGREE_RULING_COLUMN}{g['row']}")}
                                    | ({"concentration_ruling_cell": _cell_ref(SHEET_DISAGREE, f"{DISAGREE_CONC_COLUMN}{g['row']}")}
                                       if g["kind"] == "name_only" else {})
@@ -2931,45 +3055,64 @@ def render_adopt_summary(result: Mapping) -> str:
     file_ds = [d for d in a["disagreements"] if d["kind"] == "file_reading"]
     hint_ds = [d for d in a["disagreements"] if d["kind"] == "hint"]
     other = [d for d in a["disagreements"] if d["kind"] not in ("file_reading", "hint")]
+    settled = [d for d in a["disagreements"] if d.get("already_recorded")]
+    if settled:
+        # c14 MED-1: a row the scientist already ruled on (their decision stands for every run it names) is not asked again
+        lines.append(f"Disagreements already recorded: {len(settled)} of {len(a['disagreements'])} (each says what is "
+                     f"recorded; a blank ruling keeps it); {len(a['disagreements']) - len(settled)} await your ruling.")
+
+    def waiting(ds: Sequence[Mapping]) -> str:
+        done = sum(1 for d in ds if d.get("already_recorded"))
+        return ("each awaits your ruling" if not done else
+                f"{len(ds) - done} await your ruling, {done} already recorded (a blank ruling keeps it)")
+
+    def recorded(d: Mapping) -> str:
+        return f" [{d['already_recorded']['statement']}]" if d.get("already_recorded") else ""
+
     lines.append("")
-    lines.append(f"Disagreements with a file reading ({len(file_ds)}; not adopted, each awaits your ruling; every reading "
+    lines.append(f"Disagreements with a file reading ({len(file_ds)}; not adopted, {waiting(file_ds)}; every reading "
                  "is listed, the agreeing ones too):")
     for d in file_ds:
         runs = _refs_shown(d["runs"], noun="runs") if d["runs"] else "every run"
         lines.append(f"  {d['id']} {runs} {d['header']}: yours {_shown(d['their_value'])} ({_refs_shown(d['their_cells'], 2)}); "
-                     f"files: {'; '.join(d['readings'])}")
+                     f"files: {'; '.join(d['readings'])}{recorded(d)}")
     if not file_ds:
         lines.append("  (none)")
     if hint_ds:
         lines.append("")
-        lines.append(f"Disagreements with a hint ({len(hint_ds)}; not adopted, each awaits your ruling; a hint is not a file "
+        lines.append(f"Disagreements with a hint ({len(hint_ds)}; not adopted, {waiting(hint_ds)}; a hint is not a file "
                      "reading, so say both and let the scientist rule):")
         for d in hint_ds:
             lines.append(f"  {d['id']} {d['header']}: yours {_shown(d['their_value'])} ({_refs_shown(d['their_cells'], 2)}); "
-                         f"{'; '.join(d['readings'])}")
+                         f"{'; '.join(d['readings'])}{recorded(d)}")
     if other:
         lines.append("")
-        lines.append(f"Not adopted as written ({len(other)}; each awaits your ruling):")
+        lines.append(f"Not adopted as written ({len(other)}; {waiting(other)}):")
         for d in other:
             reach = f"for {len(d['runs'])} run(s)" if d["runs"] else "for every File List run"
             lines.append(f"  {d['id']} {d['header']} {_shown(d['their_value'])} {reach}, from {len(d['their_cells'])} of your "
-                         f"cell(s) ({_refs_shown(d['their_cells'], 2)}): {d['reason']}")
+                         f"cell(s) ({_refs_shown(d['their_cells'], 2)}): {d['reason']}{recorded(d)}")
             for h in d.get("unread_hints") or ():
                 lines.append(f"     hint: {_unread_hint_text(h, len(d['runs']))}")
         for header, allowed in a.get("allowed_values", {}).items():
             lines.append(f"  allowed for {header}: {', '.join(map(str, allowed))}")
     if a.get("vocabulary_requests"):
-        lines.append("")
-        lines.append("Kept as vocabulary requests (not decisions, not values: each is a word its field's list lacks; "
-                     "`isaac bundle propose-terms` can draft it):")
-        lines += _request_lines(a["vocabulary_requests"], True)
+        lines += _request_sections(a["vocabulary_requests"], True, "Kept as vocabulary requests (not decisions, not "
+                                   "values: each is a word its field's list lacks; `isaac bundle propose-terms` can draft it):")
     if a.get("vocabulary_requests_not_kept"):
-        words = a["vocabulary_requests_not_kept"]["words"]
-        lines.append("")
-        lines.append(f"Off-list values were not kept as requests: no name given ({len(words)} word(s): "
-                     + "; ".join(f"{w['header']} {w['term']!r}" for w in words[:10])
-                     + (f" and {len(words) - 10} more" if len(words) > 10 else "")
-                     + "). Pass --by only after the scientist says the sheet is theirs.")
+        not_kept = a["vocabulary_requests_not_kept"]
+        words = not_kept["words"]
+        if words:
+            lines.append("")
+            lines.append(f"Off-list values were not kept as requests: no name given ({len(words)} word(s): "
+                         + "; ".join(f"{w['header']} {w['term']!r}" for w in words[:10])
+                         + (f" and {len(words) - 10} more" if len(words) > 10 else "")
+                         + "). Pass --by only after the scientist says the sheet is theirs.")
+            lines += [f"     {w['answered_since']['statement']}" for w in words if w.get("answered_since")]
+        if not_kept.get("answered_since"):
+            lines.append("")
+            lines.append(ANSWERED_SINCE_HEADING)
+            lines += [f"  {w['header']} {w['term']!r}: {w['answered_since']['statement']}" for w in not_kept["answered_since"]]
     for title, key, shown in (("Your rows that match no run", "unmatched_rows", lambda x: f"{x['row']} {x['name']}"),
                               ("Your rows that reach more than one run (each value goes to every one)", "rows_reaching_several_runs",
                                lambda x: f"{x['row']} {x['name']} -> {x['runs']} runs"),

@@ -2004,9 +2004,12 @@ def cmd_bundle_propose_terms(args) -> int:
     merged = ""
     if change is not None:
         kept = change["descriptions_kept"]
+        answered_kept = change.get("descriptions_kept_for_answered_terms") or 0
         merged = (f" Updated the earlier file: {len(change['added'])} term(s) added, {change['updated']} updated, "
                   + ("a description in the file was kept (who wrote it is not known), " if kept == 1 else
                      f"{kept} descriptions in the file were kept (who wrote them is not known), " if kept else "")
+                  + (f"{answered_kept} description(s) of terms answered since kept only in case the scientist asks for "
+                     "the word again (not to be filed), " if answered_kept else "")
                   + f"{change['carried_over']} carried over (no longer found in the bundle: not current, never proposed). "
                   "No draft is marked ready to send.")
     print(
@@ -2019,6 +2022,7 @@ def cmd_bundle_propose_terms(args) -> int:
            "for: ask the scientist whether they still want the term." if totals.get("answered_before_request") else "")
         + (f" {totals['order_unclear']} draft(s) name runs whose allowed value cannot be placed before or after the word: "
            "ask the scientist." if totals.get("order_unclear") else "")
+        + (f" {totals['need_one_word']} term(s) need a one-word form (ask)." if totals.get("need_one_word") else "")
         + f"{merged} Nothing was sent; "
         "each draft needs a description in your words before it can go to the ISAAC portal."
     )

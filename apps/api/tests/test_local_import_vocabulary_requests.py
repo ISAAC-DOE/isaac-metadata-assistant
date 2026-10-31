@@ -618,7 +618,14 @@ def test_propose_terms_does_not_draft_a_term_answered_since_and_says_how_many_ru
     assert draft["answered_before_request_with"] == ["in_situ"] and draft["runs_answered_before_request"] == 1
     assert ("1 run(s) already held `in_situ` before the word was asked for; ask the scientist whether they still want "
             "the term.") == draft["answered_before_request_note"]
-    assert draft["runs_answered"] == 1 and draft["runs_still_needing_it"] == 0  # run-002 answered after the sheet's request
+    # c14 MED-3: the draft is the new request's alone (run-001); the sheet's, answered for both runs, is set apart
+    assert draft["runs_answered"] == 0 and draft["runs_still_needing_it"] == 0 and "partly_answered" not in draft
+    assert again["runs"] == 1 and again["run_ids"] == ["run-001"] and again["count"] == 1
+    assert again["answered_requests_apart"] == 1 and draft["earlier_requests_answered"] == ["vr-00001"]
+    assert {c["ref"]["id"] for c in again["citations"]} == {"vr-00002"}
+    assert draft["earlier_requests_answered_note"] == (
+        "The new request is for 1 run(s) (which hold `in_situ` from before it); the earlier request (vr-00001, from a "
+        "cell of the filled template, 2 run(s)) was answered since and is not part of this draft.")
     # the as-said request is their live word; the sheet's, answered for both runs, is set aside
     assert [n["source"]["kind"] for n in again["scientist_notes"]] == ["decide_answer"]
     assert [n["source"]["kind"] for n in again["answered_scientist_notes"]] == ["template_cell"]

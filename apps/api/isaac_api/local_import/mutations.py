@@ -1124,6 +1124,7 @@ def decide(
     with locked(Path(bundle_dir)):
         _require_version(Path(bundle_dir), expected_version)
         bundle = load(bundle_dir)
+        before = open_requests_before(bundle, decision)
         try:
             result = record_decision(bundle, **params)
         except OffListRefused as exc:
@@ -1133,7 +1134,7 @@ def decide(
                                        source={"kind": "decide_answer", "command": "bundle decide", "decision": decision,
                                                "question_id": None, "as_said": True}) from None
         save_bundle(bundle_dir, bundle)
-        return _said_on_list(result, as_said)
+        return _said_on_list(_with_answered(result, bundle, before), as_said)
 
 
 # --- vocabulary requests (1.10.0) ---------------------------------------------------------------
@@ -1196,19 +1197,89 @@ def keep_vocabulary_request(bundle: dict, *, field_path: str, term: str, by: str
     return request, True
 
 
-def vocabulary_kept_sentence(request: Mapping, new: bool, reaffirmed: bool = False) -> str:
+#: What the record holds meanwhile for a run with no allowed value (c14 MED-2).
+STAYS_MISSING = "the field stays missing until the vocabulary has the term or you answer with an allowed value"
+
+
+def meanwhile_sentence(bundle: Mapping, field_path: str, run_ids: Sequence[str]) -> str:
+    """What the record exports for ``field_path`` while a word waits on the vocabulary (c14 MED-2), from what a
+    scientist's confirming decision gives each run (``propose_terms.held_values``, the only value eligible for a
+    record): the value held, with the question to ask, or that the field stays missing."""
+    from . import propose_terms as P
+
+    held, empty = P.held_values(bundle, field_path, run_ids)
+    values = P._distinct([v for vs in held.values() for v in vs])
+    keeps = f"the record keeps {P._shown(values)} meanwhile; ask whether that is acceptable until the term exists"
+    if not held:
+        return STAYS_MISSING
+    if not empty:
+        return keeps
+    return f"for {P._reach(list(held))} {keeps}; for {P._reach(empty)} {STAYS_MISSING}"
+
+
+def vocabulary_kept_sentence(request: Mapping, new: bool, reaffirmed: bool = False, bundle: Mapping | None = None) -> str:
     """What a refusal says about the answer it kept (the same words for ``decide`` and the template). ``reaffirmed``:
-    the same ``--as-said`` answer was given again, and the kept request's ``reaffirmed_utc`` now says so."""
+    the same ``--as-said`` answer was given again, and the kept request's ``reaffirmed_utc`` now says so. ``bundle``:
+    the bundle it was kept on, so the reply names the allowed value the record keeps meanwhile
+    (:func:`meanwhile_sentence`), or says the field stays missing."""
     from . import propose_terms as P
 
     kept = "" if new else ", kept earlier and reaffirmed now" if reaffirmed else ", kept earlier"
+    meanwhile = (meanwhile_sentence(bundle, request["field_path"], request.get("run_ids") or ()) if bundle is not None
+                 else STAYS_MISSING)
     said = (f"{request['term']!r} is kept as a vocabulary request; `isaac bundle propose-terms` can draft it "
-            f"({request['request_id']}{kept}: not a decision and not a value; the field keeps "
-            "what it has, or stays missing, until the vocabulary has the term or you answer with an allowed value).")
+            f"({request['request_id']}{kept}: not a decision and not a value; {meanwhile}).")
     same = P.equivalent_term(request["field_path"], request["term"])
     if same is not None:
         said += f" It is the same as an existing term: use `{same}` (an existing term), e.g. `--value {same}`."
     return said
+
+
+def open_requests_before(bundle: Mapping, decision: str) -> set[str]:
+    """The vocabulary requests still open before a value decision (``propose_terms.open_request_ids``), read only
+    when the decision gives a value and the bundle keeps a request: what :func:`requests_answered_sentence` compares."""
+    from . import propose_terms as P
+
+    if decision not in B.CONFIRMING_DECISIONS - {"approve"} or not bundle.get("vocabulary_requests"):
+        return set()
+    return P.open_request_ids(bundle)
+
+
+def requests_answered_sentence(bundle: Mapping, before: set[str]) -> tuple[str | None, list[str]]:
+    """c14 LOW-4: ``(sentence, request ids)`` for each request the decision just recorded on ``bundle`` answers: open
+    before it (``before``, :func:`open_requests_before`) and no longer open now, read exactly as ``propose-terms`` reads
+    it. Said per word: "This answers your request for 'oxidation' (vr-00002); it is no longer drafted", or what still
+    drafts it (another request of theirs that is still open, or readings no scientist confirmed)."""
+    from . import propose_terms as P
+
+    if not before:
+        return None, []
+    now = P.open_request_ids(bundle)
+    requests = [r for r in bundle.get("vocabulary_requests") or () if isinstance(r, Mapping)]
+    done = [r for r in requests if r.get("request_id") in before - now]
+    by_term: dict[tuple, list[Mapping]] = {}
+    for r in done:
+        by_term.setdefault((r.get("field_path"), r.get("term")), []).append(r)
+    said = []
+    for (path, term), reqs in by_term.items():
+        others = [r["request_id"] for r in requests if (r.get("field_path"), r.get("term")) == (path, term)
+                  and r.get("request_id") in now]
+        if others:
+            tail = f"your other request(s) for it ({', '.join(others)}) are still drafted"
+        elif n := P.readings_keeping(bundle, path, term):
+            tail = f"it is drafted now only for {n} reading(s) no scientist confirmed"
+        else:
+            tail = "it is no longer drafted"
+        said.append(f"This answers your request for {term!r} ({', '.join(r['request_id'] for r in reqs)}); {tail}.")
+    return (" ".join(said) or None), [r["request_id"] for r in done]
+
+
+def _with_answered(result: Mapping, bundle: Mapping, before: set[str]) -> Mapping:
+    """``result`` with :func:`requests_answered_sentence` said (and ``answers_requests``) when there is one."""
+    sentence, ids = requests_answered_sentence(bundle, before)
+    if not sentence:
+        return result
+    return {**result, "statement": " ".join(x for x in (result.get("statement"), sentence) if x), "answers_requests": ids}
 
 
 def _off_list_targets(bundle: Mapping, target_ids: Sequence[str], field_path: str, term: str,
@@ -1254,7 +1325,7 @@ def _keep_refused_answer(bundle_dir: Path, bundle: dict, exc: "OffListRefused", 
     reaffirmed = not new and request["source"].get("as_said") is True  # keep_vocabulary_request stamped reaffirmed_utc
     if new or reaffirmed:
         save_bundle(bundle_dir, bundle)
-    return OffListRefused(f"{exc} {vocabulary_kept_sentence(request, new, reaffirmed)}", field_path=exc.field_path, term=exc.term,
+    return OffListRefused(f"{exc} {vocabulary_kept_sentence(request, new, reaffirmed, bundle)}", field_path=exc.field_path, term=exc.term,
                           code=exc.code, problem=exc.problem)
 
 
@@ -1724,6 +1795,7 @@ def decide_question(
             planned = reached(copied, record_decision(copied, **params))
             planned = {**planned, "statement": _would_say(planned.get("statement"))}
             return _with_kept(kept_overrides, {"dry_run": True, "bundle_version": version, "target_ids": params["target_ids"], **planned})
+        before = open_requests_before(bundle, decision)
         try:
             recorded = record_decision(bundle, **params)
         except OffListRefused as exc:
@@ -1734,7 +1806,7 @@ def decide_question(
                                        note=note, slots=slots_added, slot_runs=[r for r in slot_runs if r],
                                        source={"kind": "decide_answer", "command": "bundle decide", "decision": decision,
                                                "question_id": question_id, "as_said": True}) from None
-        result = _said_on_list(_with_kept(kept_overrides, reached(bundle, recorded)), as_said)
+        result = _said_on_list(_with_answered(_with_kept(kept_overrides, reached(bundle, recorded)), bundle, before), as_said)
         save_bundle(bundle_dir, bundle)
         return (result, bundle_version(bundle_dir)) if with_version else result
 

@@ -1718,7 +1718,7 @@ def validate_records(bundle_dir: Path, *, run_portal=None, full: bool = False) -
                                where=f"{VALIDATION_DIR}/<group_id>.json lists each group's"))
     from .propose_terms import pending_vocabulary
 
-    pending = pending_vocabulary(bundle, fresh)
+    pending = pending_vocabulary(bundle, fresh, verdicts)
     if pending:
         # A MISSING VALUE WAITING ON A PROPOSAL IS SAID (1.10.0): the scientist gave a word the list lacks
         out["pending_vocabulary"] = pending

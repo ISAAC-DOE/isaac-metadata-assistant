@@ -92,6 +92,9 @@ request keeps the draft (``answered_before_request``: ask whether they still wan
 second, ``answered_same_step``, or against a request whose time cannot be read, ``answered_order_unknown``, is said
 apart, never as before); a draft answered
 for some runs says so (``partly_answered``); a run in no live record group is said apart and counts for nothing.
+A draft counts only what still asks for the term: a request answered since is set apart (its runs, count and
+citations are not the draft's; ``earlier_requests_answered_note`` names it), so a word asked for again on one run is a
+draft for that one run, never for the sheet request it replaced; ``partly_answered`` is read over the open requests.
 
 A SECOND RUN (``--merge``): :func:`merge_reports` updates an existing drafts file instead of
 replacing it: new terms are added, counts, citations, runs and notes are this run's (notes come only
@@ -410,6 +413,65 @@ def request_answered_runs(req: Mapping, answers: Mapping, *, live: set[str] | No
     return out
 
 
+def request_still_open(state: Mapping) -> bool:
+    """Whether one request's :func:`request_answered_runs` still asks for the term: a run it names needs it, or holds
+    an allowed value not given after it. A request whose runs are all answered, or all in no live record group, does not."""
+    return bool(state["needed"]) or any(state[h] for h in ("before", "same", "unknown"))
+
+
+def request_fully_answered(state: Mapping) -> bool:
+    """Whether one request's :func:`request_answered_runs` reads as ANSWERED: an allowed value given after it for some
+    run it names, and nothing still open (:func:`request_still_open`; a run in no live record group counts for nothing)."""
+    return bool(state["answered"]) and not request_still_open(state)
+
+
+def held_values(bundle: Mapping, path: str, run_ids: Sequence[str]) -> tuple[dict[str | None, list[Any]], list[str | None]]:
+    """``({run: [allowed values]}, [runs holding none])``: what a scientist's confirming decision now gives ``path``
+    (alias-aware, :func:`allowed_answers`) for each run (``[]``: the whole beamtime, the one run ``None``), whenever it
+    was given. Only such a value is eligible for a record, so a run that holds one exports it."""
+    answers = allowed_answers(bundle, [path])
+    held: dict[str | None, list[Any]] = {}
+    empty: list[str | None] = []
+    for rid in list(dict.fromkeys(run_ids)) or [None]:
+        got = _answers_for_run(answers, path, rid)
+        if got:
+            held[rid] = _distinct([a[0] for a in got])
+        else:
+            empty.append(rid)
+    return held, empty
+
+
+def open_request_ids(bundle: Mapping) -> set[str]:
+    """The vocabulary requests :func:`propose_terms` would still draft a term for (:func:`request_still_open`)."""
+    requests = [r for r in bundle.get("vocabulary_requests") or () if isinstance(r, Mapping)]
+    if not requests:
+        return set()
+    answers = allowed_answers(bundle, [r.get("field_path") for r in requests])
+    live, log = live_run_ids(bundle), list(bundle.get("scientist_decisions") or ())
+    return {r.get("request_id") for r in requests if request_still_open(request_answered_runs(r, answers, live=live, log=log))}
+
+
+def readings_keeping(bundle: Mapping, path: str, term: str) -> int:
+    """How many values other than a vocabulary request hold ``term`` at ``path`` (an AI reading whose target no
+    scientist answered with an allowed value, a parser value, an off-list value a scientist confirmed): what keeps a
+    term drafted once every request for it is answered, counted as :func:`collect` counts them."""
+    decision_of = B._decisions_by_target(list(bundle.get("scientist_decisions") or ()))
+    n = 0
+    for c in bundle.get("candidates") or ():
+        if c.get("target_field_path") == path:
+            value = B.final_value(c.get("value"), B.candidate_decision(bundle, c, decision_of), c.get("readings"))
+            n += term in _strings(value)
+    index = {("candidate", c["candidate_id"]): c for c in bundle.get("candidates") or ()}
+    index.update({("missing_value", m["value_id"]): m for m in bundle.get("missing_values") or ()})
+    for interp in bundle.get("ai_interpretations") or ():
+        target = interp.get("target") or {}
+        obj = index.get((target.get("kind"), target.get("id")))
+        if (_interpretation_path(bundle, interp, index) == path and term in _strings(interp.get("proposed_value"))
+                and not _answered_with_allowed_value(bundle, target, obj, path, decision_of)):
+            n += 1
+    return n
+
+
 def _distinct(values: Sequence[Any]) -> list[Any]:
     """``values`` once each, in order (a list value is compared by its JSON)."""
     seen: dict[str, Any] = {}
@@ -657,7 +719,12 @@ def _answered_since(occs: Sequence[Mapping], requests: Mapping, answers: Mapping
     requests: still needed, then answered before the request, then answered after it), or ``None`` when there is
     nothing to say. ``answered`` (the term is NOT drafted) only when every live run the scientist named holds an
     allowed value given after their request and nothing else keeps the term (no reading, no off-list value).
-    ``answered_requests``: the requests every one of whose runs is answered (their notes are set aside)."""
+    ``answered_requests``: the requests every one of whose runs is answered (:func:`request_fully_answered`; their
+    notes, runs, counts and citations are set aside).
+
+    c14 MED-3: the counts are over the OPEN requests only (not answered, and naming a live run or the whole beamtime),
+    so a word asked for again on one run is never a draft for the earlier sheet request it replaced; that request is
+    said apart (``earlier_requests_answered``). Only when no request is open are they all read, as one answered term."""
     asked = [requests[o["ref"]["id"]] for o in occs if o["origin"] == ORIGIN_REQUEST and o["ref"].get("id") in requests]
     if not asked:
         return None
@@ -666,15 +733,18 @@ def _answered_since(occs: Sequence[Mapping], requests: Mapping, answers: Mapping
     after: dict[str | None, list[Any]] = {}
     held: dict[str, dict[str | None, list[Any]]] = {"before": {}, "same": {}, "unknown": {}}
     outside: set[str] = set()
-    answered_requests: set[str] = set()
+    per = [(req, request_answered_runs(req, answers, live=live, log=log)) for req in asked]
+    answered_requests = {req.get("request_id") for req, st in per if request_fully_answered(st)}
+    # what still asks for the term; a request whose every run is in no live record group is neither open nor answered
+    still_open = [(req, st) for req, st in per if request_still_open(st)]
 
     def mark(rid: str | None, how: str) -> None:
         if rank[how] >= rank.get(state.get(rid, "answered"), 0):
             state[rid] = how
 
-    for req in asked:
-        st = request_answered_runs(req, answers, live=live, log=log)
+    for req, st in per:
         outside |= set(st["outside"])
+    for req, st in still_open or per:
         for rid, values in st["answered"].items():
             mark(rid, "answered")
             after.setdefault(rid, []).extend(values)
@@ -684,13 +754,12 @@ def _answered_since(occs: Sequence[Mapping], requests: Mapping, answers: Mapping
                 held[how].setdefault(rid, []).extend(values)
         for rid in st["needed"]:
             mark(rid, "needed")
-        if st["answered"] and not any(st[h] for h in held) and not st["needed"]:
-            answered_requests.add(req.get("request_id"))
     done = [r for r, s in state.items() if s == "answered"]
     unsure = {how: [r for r, s in state.items() if s == how] for how in held}
     early = [r for runs in unsure.values() for r in runs]  # each holds an allowed value not given after the request
     needed = [r for r, s in state.items() if s == "needed"]
-    if not done and not early and not outside:
+    set_apart = sorted(answered_requests) if still_open else []
+    if not done and not early and not outside and not set_apart:
         return None
     unconfirmed = sum(1 for o in occs if o["origin"] in (ORIGIN_PARSER, ORIGIN_AI))
     confirmed = sum(1 for o in occs if o["origin"] == ORIGIN_CONFIRMED)
@@ -701,6 +770,21 @@ def _answered_since(occs: Sequence[Mapping], requests: Mapping, answers: Mapping
                             "answered_requests": sorted(answered_requests)}
     if None in state:
         info["whole_beamtime"] = state[None]
+    if set_apart:
+        named = [r for req, st in still_open for r in [*st["answered"], *st["needed"], *(x for h in held for x in st[h])]]
+        named = list(dict.fromkeys(named))
+        early_values = _distinct([v for rid in unsure["before"] for v in held["before"][rid]])
+        earlier = [req for req, _st in per if req.get("request_id") in answered_requests]
+        their_runs = {r for req in earlier for r in req.get("run_ids") or ()}
+        where = _distinct([_SAID_IN.get((req.get("source") or {}).get("kind"), "an answer") for req in earlier])
+        one = len(earlier) == 1
+        info["earlier_requests_answered"] = set_apart
+        info["earlier_requests_answered_note"] = (
+            f"The new request is for {_reach(named) or 'no live run'}"
+            + (f" (which hold {_shown(early_values)} from before it)" if early_values else "")
+            + f"; the earlier request{'' if one else 's'} ({', '.join(set_apart)}, from {' and '.join(where)}"
+            + (f", {len(their_runs)} run(s)" if their_runs else ", the whole beamtime")
+            + f") {'was' if one else 'were'} answered since and {'is' if one else 'are'} not part of this draft.")
     if outside:
         info["runs_in_no_live_group"] = len(outside)
         info["runs_in_no_live_group_note"] = (f"{len(outside)} run(s) the scientist named are in no live record group: "
@@ -763,19 +847,23 @@ def propose_terms(bundle: Mapping, sources: Mapping) -> dict:
         terms = []
         for term in sorted(by_field[path]):
             occs = by_field[path][term]
-            counts = {origin: 0 for origin in ORIGINS}
-            for o in occs:
-                counts[o["origin"]] += 1
-            citations: list[dict] = []
-            seen: set = set()
-            total_citations = 0
-            run_ids = sorted({r for o in occs for r in o.get("run_ids") or ()})
             since = _answered_since(occs, requests, answers, live=live, log=log)
             # a request the scientist has since answered is not their live word for the term: its note is set aside
             set_aside = set(since.pop("answered_requests")) if since is not None else set()
             notes = [o["note"] for o in occs if o.get("note") and o["ref"].get("id") not in set_aside]
             answered_notes = [o["note"] for o in occs if o.get("note") and o["ref"].get("id") in set_aside]
-            for o in occs:
+            # c14 MED-3: what a draft counts (runs, count, citations: what the Schema Proposals page files) is only what
+            # still asks for the term; an answered request is listed apart. A term answered throughout keeps them all.
+            still = [o for o in occs if not (o["origin"] == ORIGIN_REQUEST and o["ref"].get("id") in set_aside)]
+            counted = still or occs
+            counts = {origin: 0 for origin in ORIGINS}
+            for o in counted:
+                counts[o["origin"]] += 1
+            citations: list[dict] = []
+            seen: set = set()
+            total_citations = 0
+            run_ids = sorted({r for o in counted for r in o.get("run_ids") or ()})
+            for o in counted:
                 for cit in o["citations"]:
                     key = (cit.get("file"), cit.get("locator"), tuple(cit.get("run_ids") or ()))
                     if key in seen:
@@ -796,8 +884,9 @@ def propose_terms(bundle: Mapping, sources: Mapping) -> dict:
             terms.append(
                 {
                     "term": term,
-                    "count": len(occs),
+                    "count": len(counted),
                     "by_origin": counts,
+                    **({"answered_requests_apart": len(occs) - len(still)} if still and len(still) < len(occs) else {}),
                     "missing_from": sorted({m for o in occs for m in o["missing_from"]}),
                     "runs": len(run_ids),
                     "run_ids": run_ids,
@@ -850,10 +939,12 @@ def propose_terms(bundle: Mapping, sources: Mapping) -> dict:
 
 
 def _answer_totals(fields: Sequence[Mapping]) -> dict:
-    """``answered_since`` (terms not drafted because they are answered), and the drafts that say
-    ``partly_answered`` or ``answered_before_request``. A carried-over term is none of them."""
+    """``answered_since`` (terms not drafted because they are answered), the drafts that say ``partly_answered`` or
+    ``answered_before_request``, and ``need_one_word`` (terms not drafted until the scientist gives them as one word:
+    the draft's ``ask``). A carried-over term is none of them."""
     current = [t.get("draft") or {} for f in fields for t in f["terms"] if not t.get("carried_over")]
     return {"answered_since": sum(1 for d in current if d.get("answered") is True),
+            "need_one_word": sum(1 for d in current if not d.get("drafted") and d.get("ask")),
             "partly_answered": sum(1 for d in current if d.get("drafted") and d.get("partly_answered")),
             "answered_before_request": sum(1 for d in current if d.get("drafted") and d.get("answered_before_request")),
             "order_unclear": sum(1 for d in current if d.get("drafted")
@@ -878,6 +969,9 @@ def _description(term_entry: Mapping) -> str:
 #: Said on a draft whose description came from the drafts file: the file is editable, so who wrote it is not known.
 DESCRIPTION_FROM_FILE_NOTE = ("The description was kept from the drafts file. Who wrote it is not known: the file can be "
                               "edited by anyone, so read it with the scientist before it is filed. ISAAC sends nothing.")
+#: Said on a term answered since (not drafted) whose description came from the drafts file (c14 LOW-1): it is not filed.
+ANSWERED_DESCRIPTION_NOTE = ("The description was kept from the drafts file only in case the scientist asks for the word "
+                             "again; the term is answered since, so it is not to be filed. Who wrote it is not known.")
 #: Said on a term this run no longer finds.
 CARRIED_OVER_NOTE = ("No longer found in the bundle: this run of `bundle propose-terms` does not find this term, so it is "
                      "not current and is not proposed. It is kept from the earlier file only so a written description "
@@ -910,7 +1004,7 @@ def merge_reports(old: Any, new: Mapping, sources: Mapping) -> tuple[dict, dict]
                     before[(str(f.get("field_path")), t["term"])] = dict(t)
     merged = {**new, "fields": [dict(f, terms=[dict(t) for t in f["terms"]]) for f in new["fields"]]}
     added: list[dict] = []
-    kept_descriptions = updated = 0
+    kept_descriptions = kept_answered = updated = 0
     seen: set[tuple[str, str]] = set()
     for f in merged["fields"]:
         for t in f["terms"]:
@@ -940,10 +1034,11 @@ def merge_reports(old: Any, new: Mapping, sources: Mapping) -> tuple[dict, dict]
                     draft["problems"] = [{"field": e["field"], "code": e["code"], "message": e["message"]} for e in errors]
                 t["draft"] = draft
             elif text and draft.get("answered") is True:
-                # answered since: not drafted, but a description written for it is not lost (who wrote it is not known)
-                kept_descriptions += 1
+                # answered since: not drafted, and never to be filed; a description written for it is kept only in case
+                # the scientist asks for the word again (who wrote it is not known), and counted apart
+                kept_answered += 1
                 t["draft"] = {**draft, "description_kept_from_earlier_file": True, "description_written_by": None,
-                              "earlier_description": text, "description_note": DESCRIPTION_FROM_FILE_NOTE}
+                              "earlier_description": text, "description_note": ANSWERED_DESCRIPTION_NOTE}
     carried = 0
     by_path = {f["field_path"]: f for f in merged["fields"]}
     for (path, term), prior in before.items():
@@ -996,7 +1091,8 @@ def merge_reports(old: Any, new: Mapping, sources: Mapping) -> tuple[dict, dict]
         **_answer_totals(merged["fields"]),
     }
     change = {"merged_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "terms_before": len(before),
-              "added": added, "updated": updated, "descriptions_kept": kept_descriptions, "carried_over": carried,
+              "added": added, "updated": updated, "descriptions_kept": kept_descriptions,
+              "descriptions_kept_for_answered_terms": kept_answered, "carried_over": carried,
               "descriptions_kept_written_by": "not known"}
     merged["merges"] = [*(old.get("merges") or ()), change] if isinstance(old.get("merges"), list) else [change]
     return merged, change
@@ -1008,7 +1104,8 @@ def merge_reports(old: Any, new: Mapping, sources: Mapping) -> tuple[dict, dict]
 PENDING_GROUPS_SHOWN = 10
 
 
-def pending_vocabulary(bundle: Mapping, fresh: Sequence[tuple[str, Mapping, Mapping]]) -> list[dict]:
+def pending_vocabulary(bundle: Mapping, fresh: Sequence[tuple[str, Mapping, Mapping]],
+                       verdicts: Mapping[str, str] | None = None) -> list[dict]:
     """``[{field_path, term, groups, groups_total, request_ids}]``: each vocabulary request whose field is still
     missing from a confirmed group's draft that it concerns (a group holding one of its runs; every group for a
     request about the whole beamtime). ``validate`` says them, so a missing value waiting on a proposal is named.
@@ -1016,7 +1113,11 @@ def pending_vocabulary(bundle: Mapping, fresh: Sequence[tuple[str, Mapping, Mapp
     The field is the one the answer FILLS (:func:`_fills`: a reaction asked at ``context.electrochemistry.reaction``
     is filled at ``context.reaction.name``), and a group whose runs the request names all hold an allowed answer
     there (:func:`allowed_answers`: a ruling, a template cell, ``decide``) is not waiting, whatever the composer
-    did with it (a disagreement between runs is said elsewhere, never as a vocabulary wait)."""
+    did with it (a disagreement between runs is said elsewhere, never as a vocabulary wait).
+
+    ``verdicts`` (``validate``'s ``{group: verdict}``): a field the record does not require (a cell type waiting on a
+    proposal) does not keep its group from export, so ``groups_exportable`` counts those groups and the statement says
+    so (c14 LOW-2), never reading as a block."""
     out: dict[tuple[str, str], dict] = {}
     requests = [r for r in bundle.get("vocabulary_requests") or () if isinstance(r, Mapping)]
     answers = allowed_answers(bundle, [r.get("field_path") for r in requests]) if requests else {}
@@ -1042,10 +1143,18 @@ def pending_vocabulary(bundle: Mapping, fresh: Sequence[tuple[str, Mapping, Mapp
     for row in out.values():
         same = equivalent_term(row["field_path"], row["term"])
         row["groups_total"] = len(row["groups"])
+        exportable = sum(1 for g in row["groups"] if (verdicts or {}).get(g) == "exportable")
         row["groups"] = row["groups"][:PENDING_GROUPS_SHOWN]
         row["statement"] = (f"{row['field_path']} is missing for {row['groups_total']} group(s) whose answer "
                             f"{row['term']!r} is not on the list: "
                             + (f"use `{same}` (an existing term)." if same else
                                "it waits on a vocabulary proposal (`isaac bundle propose-terms`), or an allowed value."))
+        if verdicts is not None:
+            row["groups_exportable"] = exportable
+            if exportable and exportable == row["groups_total"]:
+                row["statement"] += " This does not block export; the record is written without it."
+            elif exportable:
+                row["statement"] += (f" For {exportable} of these group(s) this does not block export; the record is "
+                                     "written without it.")
         rows.append(row)
     return sorted(rows, key=lambda r: (r["field_path"], r["term"]))

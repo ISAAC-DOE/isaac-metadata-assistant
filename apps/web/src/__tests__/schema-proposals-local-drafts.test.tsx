@@ -507,10 +507,11 @@ describe('termDrafts', () => {
     const file = structuredClone(DRAFTS_FILE);
     const xmcd = file.fields[0].terms[0] as Record<string, unknown>;
     xmcd.draft = { ...(xmcd.draft as Record<string, unknown>), runs_in_no_live_group_note: 'SYN outside.',
-      partly_answered: 'SYN partly.', answered_before_request_note: '  ', answered: 'yes' };
+      partly_answered: 'SYN partly.', answered_before_request_note: '  ', answered: 'yes',
+      earlier_requests_answered_note: 'SYN earlier request answered.' };
     const parsed = parseTermDraftsFile(JSON.stringify(file));
     if (!parsed.ok) throw new Error(parsed.message);
-    expect(parsed.file.drafts[0].answerNotes).toEqual(['SYN partly.', 'SYN outside.']);
+    expect(parsed.file.drafts[0].answerNotes).toEqual(['SYN partly.', 'SYN earlier request answered.', 'SYN outside.']);
     expect(parsed.file.drafts[0].answered).toBe(false); // only `true` is read as answered
   });
 
