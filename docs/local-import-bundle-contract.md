@@ -113,6 +113,7 @@ The single key is `SemanticCandidate.review_status` (itself derived from `kind`,
 | `review_status == "needs_review"`: a target path exists but something holds the value — mapping `needs_domain_review`, `blocked_by_build` (no write path), local time with no zone, a structural run/experiment candidate, a beamtime-scope value, a logbook sentence with no value | `needs_review` |
 | `review_status == "sources_conflict"` (`unresolved_reason == "sources_disagree"`) | `conflicting` |
 | `review_status == "unmapped"` (field kind, `target_field_path is None`; mapping `not_expressible`) | `unmapped` |
+| `review_status == "ready"` but every file witness is a notes (logbook) sentence about the WHOLE beamtime (a `bl15.notes.*_statement.v1` reading with no `section`, no `file_numbers`, no `named_samples`; polish c6-a): beamtime context, not the run's value. The local import holds it (`state_basis.not_proposable_reason` = `bundle.BEAMTIME_WIDE_REASON`, so `review_status` re-derives to `needs_review`); an older bundle is held the same way on `mutations.load` / `save_bundle`. No shape change, no format bump; the hosted engine is unchanged | `needs_review` |
 | `review_status == "resolved"` (a stored convention rule or standing resolution applied) and proposable | `candidate_extracted` (`method: stored_rule`) |
 | `review_status == "resolved"`, not proposable | `needs_review` |
 | a writable target path no candidate states for that run (or for the record) | `missing` |

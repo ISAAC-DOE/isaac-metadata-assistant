@@ -2112,6 +2112,84 @@ def _extracted_state_of(candidate) -> str:
     return REVIEW_STATUS_TO_STATE.get(status, STATE_NEEDS_REVIEW)
 
 
+# --- a notes statement about the WHOLE beamtime is context, not a run's value (polish c6-a) -------------
+#
+# The engine applies a logbook sentence written before any sample section (`bl15.notes`: no
+# `section`, no file numbers, names no sample) to every measurement, as a READY proposal; the
+# hosted engine and its state are untouched. Locally such a value is never a silent extracted
+# value of a run (the skill's Rule 6): measured on a real beamtime, a sentence that only mentioned
+# a cell in passing became the cell type of 93 runs, asked about in 5 groups.
+# It is HELD for review here — `not_proposable_reason` says why, so the validator's re-derivation
+# (`review_status_from_basis`) gives `needs_review` — and every group it reaches is asked, with the
+# sentence. A sample section's own statement (which overrides the beamtime's for its runs) and one
+# naming particular samples are not held. The stored shape is unchanged (no format bump): an
+# older build's bundle, where the value is extracted, stays valid, and is held when it is loaded
+# (`mutations.load`) and saved (`mutations.save_bundle`).
+
+BEAMTIME_WIDE_REASON = (
+    "Read only from a notes statement about the whole beamtime: it sits before any sample section of the "
+    "notes, so no section lists this run, and it names no sample. A beamtime-wide statement is context, "
+    "not a value of this run, until a scientist says it applies here (the engine proposed it for every run; "
+    "this local build holds it for review)."
+)
+BEAMTIME_WIDE_SUMMARY = (
+    "read only from a notes statement about the whole beamtime, not from this run's own files: confirm it "
+    "only if it applies here."
+)
+
+
+def _logbook_rule_ids() -> frozenset[str]:
+    from ..bl15 import conditions as cond  # local: bl15 imports historical_import
+
+    return frozenset(rule for _path, rule, _name in cond.FIELDS.values())
+
+
+def beamtime_wide_statement(candidate: Mapping) -> bool:
+    """True when ``candidate`` would carry a value as READY and its ONLY file evidence is a notes (logbook)
+    sentence about the whole beamtime: every witness is normalised by a logbook rule
+    (``bl15.conditions.FIELDS``) into a reading with no sample ``section``, no file numbers and no named
+    samples. An AI interpretation is not file evidence and is not counted either way."""
+    sb = candidate.get("state_basis") or {}
+    if candidate.get("kind") != "field" or candidate.get("value") is None or not sb.get("proposable"):
+        return False
+    if sb.get("resolved_by_rule") is not None or sb.get("unresolved_reason") is not None:
+        return False
+    rules = _logbook_rule_ids()
+    witnesses = [e for e in candidate.get("evidence") or () if e.get("method") != "ai_interpretation"]
+    if not witnesses:
+        return False
+    for e in witnesses:
+        readings = [n.get("to") for n in e.get("normalization") or ()
+                    if n.get("rule_id") in rules and isinstance(n.get("to"), Mapping)]
+        if not readings or any(r.get("section") or r.get("file_numbers") or r.get("named_samples") for r in readings):
+            return False
+    return True
+
+
+def _hold_for_review(candidate: dict) -> None:
+    sb = candidate["state_basis"]
+    sb.update(review_status="needs_review", proposable=False, not_proposable_reason=BEAMTIME_WIDE_REASON,
+              not_proposable_summary=BEAMTIME_WIDE_SUMMARY)
+    candidate["extracted_state"] = STATE_NEEDS_REVIEW
+    if candidate.get("value_state") == STATE_CANDIDATE_EXTRACTED:
+        # no decision and no AI interpretation governs it (either would have given another state)
+        candidate["value_state"] = STATE_NEEDS_REVIEW
+        candidate["eligibility_for_official_record"] = eligibility_for_official_record(
+            STATE_NEEDS_REVIEW, target_field_path=candidate.get("target_field_path"), value=candidate.get("value"),
+            writable_paths=frozenset())
+
+
+def hold_beamtime_wide_statements(bundle: dict) -> list[str]:
+    """Hold every extracted candidate :func:`beamtime_wide_statement` finds for review, in place; the ids
+    held. Idempotent (a held candidate is no longer proposable). ``apply_derivations`` re-derives counts."""
+    held = []
+    for c in bundle.get("candidates") or ():
+        if c.get("extracted_state") == STATE_CANDIDATE_EXTRACTED and beamtime_wide_statement(c):
+            _hold_for_review(c)
+            held.append(c["candidate_id"])
+    return held
+
+
 # --- the builder -----------------------------------------------------------------
 
 
@@ -2239,7 +2317,7 @@ def _candidate_record(c, *, bundle_cid: str, run_id: str | None, key: str, evide
         if e["literal_value"] not in distinct:
             distinct.append(e["literal_value"])
     literals = distinct[:MAX_OBSERVED_LITERALS]
-    return {
+    record = {
         "candidate_id": bundle_cid,
         "engine_candidate_id": c.candidate_id,
         "kind": c.kind,
@@ -2291,6 +2369,9 @@ def _candidate_record(c, *, bundle_cid: str, run_id: str | None, key: str, evide
             writable_paths=writable,
         ),
     }
+    if extracted == STATE_CANDIDATE_EXTRACTED and beamtime_wide_statement(record):
+        _hold_for_review(record)  # a beamtime-wide notes statement is context, not this run's value
+    return record
 
 
 # --- what the build applies vs what the files show (2026-10-29) ----------------------------------

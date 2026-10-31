@@ -119,9 +119,13 @@ def load(bundle_dir: Path) -> dict:
         # the folder's NAME only: an absolute local path is never put in a message (data minimisation)
         raise MutationRefused(f"No bundle.json in {Path(bundle_dir).name!r}.", code=6)
     try:
-        return B.load_bundle(path)
+        bundle = B.load_bundle(path)
     except B.BundleInvalid as exc:
         raise MutationRefused(f"Unreadable bundle: {exc}", code=1) from exc
+    # an older build's bundle holds a beamtime-wide notes statement as a run's extracted value: held for
+    # review here, in memory, so every question and template reads it as the import now gives it (c6-a)
+    B.hold_beamtime_wide_statements(bundle)
+    return bundle
 
 
 def save_bundle(bundle_dir: Path, bundle: dict) -> None:
@@ -197,6 +201,7 @@ def save_bundle(bundle_dir: Path, bundle: dict) -> None:
         print(f"isaac: {entry['statement']} (bundle format {stored_version} -> {to_version}; "
               "logged in bundle.json format_upgrades)", file=sys.stderr)
     B.refresh_local_write_summaries(bundle)
+    B.hold_beamtime_wide_statements(bundle)  # what the import now gives (bundle.BEAMTIME_WIDE_REASON); no format change
     bundle["format_version"] = to_version
     for key in ("record_groups", "processing_results", "exposures"):
         bundle.setdefault(key, [])

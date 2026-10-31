@@ -68,6 +68,19 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
   (e.g. the technique read from macro names or Python helper lines): show `allowed_values` and record
   the one they name. When only some readings fit, `confirm` one of those.
 
+- **A confirm question states its value.** Its text says exactly what `confirm` records, with the unit
+  the field's name fixes and the file text it was read from: "The files give `0.06` V (from: '060mV');
+  `confirm` records exactly that." Say that value back ("0.06 V for this group, right?") and confirm only on
+  their yes; when the text lists several values, `confirm` records each target's own.
+- **A beamtime-wide notes statement** ("It is read only from a notes statement about the whole beamtime"):
+  a logbook sentence before any sample section, naming no sample, is context, not a run's value (Rule 6).
+  The import holds it for review (`needs_review`, never a silent extracted value; an older bundle is held
+  the same way when next loaded), so every group it reaches is asked, once per group, with the sentence.
+  Show the sentence and ask whether it applies to these runs; a sentence that only mentions the thing in
+  passing is usually a `reject` or a `correct`. Answer all groups at once only when they say it applies to all.
+- **Sample questions asked once for several groups** name the shared sample reading as the files write it
+  ("with the same sample reading (sample name 'ZZ1', sample or electrode number '01', as the files write
+  it)"). Say that reading when you ask.
 - **No value to confirm.** Text like "What is the technique? The files hold text for it … but no
   value this build can carry", with no `confirm` in `allowed_decisions`, means there is nothing to
   accept. Never invent a value and never confirm one. Ask "What is X?", show the file's text (the

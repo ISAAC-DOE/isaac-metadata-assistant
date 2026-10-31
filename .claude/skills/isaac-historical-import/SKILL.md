@@ -189,6 +189,7 @@ experiment-scope questions, offer the template first and ask per group only what
 
 - **Closed lists.** Map their words to one allowed value, say it back ("in situ → `in_situ`,
   right?") and record it only on their yes; `decide` refuses any other value and lists the allowed.
+- **Confirm.** A confirm question states the value (and unit) it records: say it back, confirm on a yes.
 - **No value yet** (no `confirm` in `allowed_decisions`): never invent one; ask, then `correct --value`.
 - **Not asked.** `informational` questions cannot reach a record: mention them once. A `covered_by`
   question is answered by that experiment question; ask per group only if a group differs.

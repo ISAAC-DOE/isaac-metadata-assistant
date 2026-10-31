@@ -315,6 +315,73 @@ def _label(path: str) -> str:
     return path.rsplit(".", 1)[-1].replace("_", " ")
 
 
+#: The unit a field's own NAME fixes (the record carries the bare number in that unit), by name suffix.
+#: Longest first. A field with none takes the unit its reading was normalised to, when one is recorded.
+_UNIT_BY_SUFFIX = (("_mA_cm2", "mA/cm²"), ("_eV", "eV"), ("_mm", "mm"), ("_V", "V"), ("_K", "K"), ("_M", "M"))
+#: The longest file literal a question's text quotes (the hints carry it in full).
+_QUOTED_LITERAL_CHARS = 240
+
+
+def _unit_of(path: str, candidate: Mapping) -> str | None:
+    leaf = path.rsplit(".", 1)[-1]
+    for suffix, unit in _UNIT_BY_SUFFIX:
+        if leaf.endswith(suffix):
+            return unit
+    units = [n.get("unit") for e in candidate.get("evidence") or () for n in e.get("normalization") or () if n.get("unit")]
+    return str(units[-1]) if units else None
+
+
+def _shown_value(value: Any, unit: str | None) -> str:
+    """``value`` exactly as ``confirm`` records it, in backticks, with the field's unit for a number."""
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, sort_keys=True)
+    number = isinstance(value, (int, float)) and not isinstance(value, bool)
+    return f"`{text}`" + (f" {unit}" if unit and number else "")
+
+
+def _quoted(literal: str) -> str:
+    s = str(literal)
+    return "'" + (s if len(s) <= _QUOTED_LITERAL_CHARS else s[: _QUOTED_LITERAL_CHARS - 1] + "…") + "'"
+
+
+def _confirmed_value_text(path: str, cands: Sequence[Mapping]) -> str:
+    """What ``confirm`` records for these candidates, said back with the text each was read from (HIGH2, c6-a):
+    "The files give `0.06` V (from: '060mV'); `confirm` records exactly that." — one value — or each distinct
+    value with its count. A value read only from a beamtime-wide notes statement says so."""
+    seen: dict[str, list] = {}
+    for c in cands:
+        key = json.dumps(c["value"], sort_keys=True, default=str)
+        if key not in seen:
+            lit = (c.get("observed_literals") or [None])[0]
+            # a start time is the UTC value the stated clock zone gives the header's LOCAL time, not the text itself
+            source = ("from the local clock time {} under the stated time zone" if B.is_local_clock_start(c) else "from: {}")
+            seen[key] = [_shown_value(c["value"], _unit_of(path, c)), lit, 0, source]
+        seen[key][2] += 1
+    if not seen:
+        return ""
+    said = [f"{shown}" + (f" ({source.format(_quoted(lit))})" if lit is not None else "") for shown, lit, _n, source in seen.values()]
+    if len(said) == 1:
+        text = f" The files give {said[0]}; `confirm` records exactly that."
+    else:
+        text = (f" The files give {len(said)} different values: "
+                + "; ".join(f"{s} for {n} target(s)" for s, (_v, _l, n, _s) in zip(said, seen.values()))
+                + ". `confirm` records each target's own value.")
+    if any((c.get("state_basis") or {}).get("not_proposable_reason") == B.BEAMTIME_WIDE_REASON for c in cands):
+        text += f" It is {B.BEAMTIME_WIDE_SUMMARY}"
+    return text
+
+
+def _sample_reading_text(groups: Sequence[str], written: Mapping[str, Sequence[tuple[str, str]]]) -> str:
+    """The sample reading a partition's groups share, as the FILES write it (the partition key is lowercased):
+    "sample name 'ZZ1', sample or electrode number '01'"; a key the groups spell differently lists each spelling."""
+    spellings: dict[str, list[str]] = {}
+    for gid in groups:
+        for key, literal in written.get(gid) or ():
+            if literal not in spellings.setdefault(key, []):
+                spellings[key].append(literal)
+    return ", ".join(f"{key.replace('_', ' ')} " + " or ".join(_quoted(s) for s in lits[:3]) + ("…" if len(lits) > 3 else "")
+                     for key, lits in spellings.items())
+
+
 def _qid(*parts: str) -> str:
     return "Q-" + hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:10]
 
@@ -380,11 +447,21 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     # A SAMPLE PARTITION: groups whose grouping basis records the SAME sample reading share
     # their sample questions (never across a differing reading; never for an empty basis).
     sample_key_of_group: dict[str, str] = {}
+    # ...and that reading as the FILES write it (the key above is lowercased), for the question's text (LOW5)
+    sample_written_of_group: dict[str, list[tuple[str, str]]] = {}
     for g in groups:
         sample = (g.get("basis") or {}).get("sample")
         if isinstance(sample, Mapping) and sample:
             canon = {k: (v.get("value") if isinstance(v, Mapping) else v) for k, v in sorted(sample.items())}
             sample_key_of_group[g["group_id"]] = json.dumps(canon, sort_keys=True)
+            written = []
+            for k, v in sorted(sample.items()):
+                ids = v.get("candidate_ids") if isinstance(v, Mapping) else None
+                lit = next((lits[0] for i in ids or () if (lits := (cand_by_id.get(i) or {}).get("observed_literals"))), None)
+                shown = lit if lit is not None else canon[k]
+                if shown is not None and not isinstance(shown, (list, dict)):
+                    written.append((k, str(shown)))
+            sample_written_of_group[g["group_id"]] = written
 
     # what the FILES record for each field (a differing recorded condition blocks experiment-wide
     # propagation). ID STABILITY (DEC-91): the scope and partition of a question — and so its id —
@@ -572,6 +649,10 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                     "partition": partition,
                     "target_field_path": None,
                     "text": (f"{len(q['fields'])} optional field(s) no parser read a value for: {', '.join(sorted(q['fields']))}. Answer any you know."
+                             + (f" Asked once for the groups with the same sample reading ({reading}, as the files write it)."
+                                if partition and partition.startswith("sample=") and partition != "sample=unrecorded"
+                                and (reading := _sample_reading_text(sorted({group_of[r] for r in q["runs"] if r in group_of}),
+                                                                     sample_written_of_group)) else "")
                              + (_field_hints_text(fh) if (fh := _optional_field_hints(bundle, q["fields"], ai_hints)) else "")
                              + _asked_again_text(q["asked_again"], {f: _eligible_values(f) for f in q["fields"]})),
                     "asked_again": q["asked_again"],
@@ -605,7 +686,10 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                     text += (" that record no sample reading — answer once ONLY if they are all the same sample;"
                              " otherwise answer per group (--only group:<id>).")
                 else:
-                    text += (" with the same sample reading" if partition else "") + " — answer once, or per group."
+                    reading = _sample_reading_text(sorted({group_of[r] for r in q["runs"] if r in group_of}),
+                                                   sample_written_of_group) if partition else ""
+                    text += ((" with the same sample reading" + (f" ({reading}, as the files write it)" if reading else ""))
+                             if partition else "") + " — answer once, or per group."
                 if outside(q["runs"]):
                     text += (f" {outside(q['runs'])} of its {len(q['runs'])} run(s) are in no live record group (rejected, "
                              "merged or split, or never grouped): no record is built from them.")
@@ -655,7 +739,11 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 decision = "correct"
                 decisions_offered = list(VALUELESS_DECISIONS)
             else:
-                text = f"Is the extracted {_label(path)} ({path}) right? Confirm it, or correct it."
+                # HIGH2 (c6-a): the question states exactly what `confirm` records — the value and its unit
+                confirmable = [cand_by_id[t["id"]] for t in q["targets"] if t["kind"] == "candidate"
+                               and t["id"] in cand_by_id and t["id"] not in unconfirmable]
+                text = (f"Is the extracted {_label(path)} ({path}) right?" + _confirmed_value_text(path, confirmable)
+                        + " Confirm it, or correct it.")
                 if valueless:
                     text += (f" {len(valueless)} of its {len(q['targets'])} target(s) carry no value ({', '.join(valueless[:5])}"
                              f"{'…' if len(valueless) > 5 else ''}): confirm refuses them; answer those with correct --value, "
