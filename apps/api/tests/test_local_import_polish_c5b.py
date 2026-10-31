@@ -171,7 +171,7 @@ def test_list_unread_says_what_read_by_means_once(bdir, capsys):
 
 def test_summary_collapses_a_folders_repeated_unread_lines(bdir):
     b = M.load(bdir)
-    b["unread_files"] = [_unread(f"src-8{n:03d}", f"Normalized/Igor aligned/2_PtCCParticle_{n:02d}.itx") for n in range(10)]
+    b["unread_files"] = [_unread(f"src-8{n:03d}", f"Normalized/Igor aligned/2_SYNParticle_{n:02d}.itx") for n in range(10)]
     b["unread_files"].append(_unread("src-8999", "notes/readme.txt"))
     b["counts"]["unread_files"] = len(b["unread_files"])
     text = cli.render_summary(b)
@@ -198,7 +198,7 @@ def test_summary_after_decisions_does_not_say_nothing_is_confirmed(bdir):
 
 def test_summary_tells_two_long_folders_apart_by_their_ends(bdir):
     b = M.load(bdir)
-    root = "Normalized/Igor aligned and Athena normalized/2_PtCCParticlesOnAu"
+    root = "Normalized/Igor aligned and Athena normalized/2_SYNParticlesOnAu"
     b["unread_files"] = [_unread(f"src-7{n:03d}", f"{root}/PeakFits_{year}Renorm/f_{n}.pxp")
                          for year in (2021, 2023) for n in range(3)]
     b["counts"]["unread_files"] = len(b["unread_files"])

@@ -539,7 +539,7 @@ def _reference_channel_fallback(attempts, choice, tables, role: str, stems: Sequ
     """The reference channel when TRANSMISSION ln(I0/I1) fails the edge checks for a foil measured on I2;
     else ``None``. Never silent; never for a sample.
 
-    Measured on a real BL4-3 beamtime: ``31_Ti_foil_I2_120`` (a Ti foil said to be on I2) had I1 at -3.6 to
+    Measured on a real BL4-3 beamtime: a Ti foil run said to be on I2 (a Ti foil said to be on I2) had I1 at -3.6 to
     26 counts, so ln(I0/I1) was a falling noisy trace with no edge (step 2.4 times the pre-edge scatter) that
     QC only warned about. There ln(I1/I2) is not tried (I1 is not a positive intensity) and ln(I0/I2) is
     REFUSED by the checks: that I2 rises about 270 times across the edge, as a fluorescence or yield signal

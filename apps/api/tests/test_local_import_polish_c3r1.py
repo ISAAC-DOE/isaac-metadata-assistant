@@ -131,9 +131,9 @@ def test_an_alignment_group_with_a_dead_i1_uses_the_reference_channel(tmp_path):
 
 
 def test_names_a_foil():
-    assert RUN._names_a_foil(["31_Ti_foil_I2_120"]) and RUN._names_a_foil(["01_Tifoil_calib_1x3mm_075"])
+    assert RUN._names_a_foil(["31_Zz_foil_I2_120"]) and RUN._names_a_foil(["01_Zzfoil_calib_075"])
     assert RUN._names_a_foil(["x", "Co_calibration_02"])
-    assert not RUN._names_a_foil(["05_SYN_CoO_std_005"]) and not RUN._names_a_foil(["08_std_CoSO4_ref_030"])
+    assert not RUN._names_a_foil(["05_SYN_CoO_std_005"]) and not RUN._names_a_foil(["08_std_ZZSO4_ref_030"])
 
 
 # --- rule versions instead of a protocol bump --------------------------------------------------------------

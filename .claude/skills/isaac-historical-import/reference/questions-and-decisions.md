@@ -86,10 +86,11 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
   groups?") and run `--decision set_absorber --element <El> --edge <edge>` only on a clear yes to that
   pair. "Yes, probably" or "sure" is not an answer; ask again. Never run the template as it is.
   A group that differs (a reference foil) is answered with `--only group:<id>`, before or after the
-  answer for all.
+  answer for all. Re-running the answer for all later never undoes it: the reply names each group that
+  kept its own answer (`kept_per_group_answers`); say so, and change one only with `--only`.
 - **The counter question** (`naming_counter_positions`): its text shows real file names of this
-  bundle with the asked token in brackets (`PtCCNPs_on_Au_[12]_1500mV` vs `PtCCNPs_on_Au_[2]_1500mV`;
-  also `example_names`), and one name where that token is not a number (`50nmPt_on_Au_[OCV]`). Show
+  bundle with the asked token in brackets (`SYNnp_on_Au_[12]_1500mV` vs `SYNnp_on_Au_[2]_1500mV`;
+  also `example_names`), and one name where that token is not a number (`SYNfilm_on_Au_[OCV]`). Show
   them as they are; ask whether that number marks repeats of one measurement.
 - **Control mode** (`context.electrochemistry.control_mode`) is an ordinary value among a group's
   optional fields: `--field context.electrochemistry.control_mode --decision correct --value <one of
@@ -190,7 +191,7 @@ and to use it (a sheet you found in the folder is not that; ask first). Never re
 2. Say the summary: rows matched, cells adopted, their columns not read, unmatched rows and runs (those
    runs get nothing from the sheet), and the rows that reach more than one run, with the count (a scan
    and its `_dir` calibration file are two runs; one value of theirs goes to each). Then read **every** disagreement back, one by one, in plain words:
-   "your sheet says 0.8 V for O4_17; the file name says m800mV, which these names use for −0.8 V". For
+   "your sheet says 0.8 V for Q4_07; the file name says m800mV, which these names use for −0.8 V". For
    a not-allowed value, give the field's allowed list once and map their words to one value only on
    their yes; for an electrolyte with a concentration, ask for the name and the concentration
    separately. Never pick a side, and never suggest a ruling.

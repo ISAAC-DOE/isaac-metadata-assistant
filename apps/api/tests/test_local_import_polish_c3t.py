@@ -77,7 +77,7 @@ def test_the_preview_names_each_cell_that_replaces_or_contradicts_a_reading_even
 
 
 def test_name_token_readings_are_a_comparison_only():
-    names = ["O4_17_PtCNPs_5wp_pH2_m800mV", "O4_17_PtCNPs_5wp_pH2_m800mV_dir"]
+    names = ["Q4_17_SYNcat_pH2_m800mV", "Q4_17_SYNcat_pH2_m800mV_dir"]
     assert T.name_token_readings(names, T.POTENTIAL_PATH) == [{"value": -0.8, "token": "m800mV", "name": names[0]}]
     assert [r["value"] for r in T.name_token_readings(["X_1p5V", "X_000mV", "X_10MNaOH_100mMHClO4"], T.POTENTIAL_PATH)] == [1.5, 0.0]
     assert [r["value"] for r in T.name_token_readings(["X_pH12_400mV"], T.PH_PATH)] == [12]

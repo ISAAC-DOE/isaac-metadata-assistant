@@ -128,7 +128,7 @@ the same checks is used, flagged `channel_fallback_reference_channel`, with `bas
 naming what failed and every candidate tried, and QC warns
 `channel_fallback_transmission_failed_edge_checks`. When none passes, the choice is unchanged (it
 fails on its own) and `basis.reference_channel_tried` + flag `reference_channel_tried_not_usable` say
-what was tried. Never for a sample group. Measured on a real BL4-3 beamtime (`31_Ti_foil_I2_120`): I1
+what was tried. Never for a sample group. Measured on a real BL4-3 beamtime (a Ti foil run said to be on I2): I1
 read −3.6 to 26 counts, so ln(I1/I2) is not tried; ln(I0/I2) is refused too, because I2 RISES about
 270× across the edge (≈300 → ≈80 000 counts, as a fluorescence or yield signal does, not a transmitted
 beam), so ln(I0/I2) falls at the edge (post-edge level −0.68 from the pre-edge line at each energy,

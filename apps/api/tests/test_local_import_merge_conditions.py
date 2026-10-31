@@ -192,7 +192,7 @@ def test_last_exempts_only_the_shorter_names_of_a_prefix():
     exempt = G.last_counter_exempt(["A_pH2_3", "A_pH2_4", "A_pH2_3_001", "B_x_015", "B_x_016", "C_s1_7_x_25"])
     assert exempt == {"a_ph2_3", "a_ph2_4"}
     # BL4-3 shape: every name ends in a counter, names of different length: nothing exempt
-    assert G.last_counter_exempt(["01_MoS2_s1_015", "01_MoS2_s1_016", "08_std_CoSO4_x_030", "SYN_7_x_25"]) == frozenset()
+    assert G.last_counter_exempt(["01_SYNzz_s1_015", "01_SYNzz_s1_016", "08_std_ZZSO4_x_030", "SYN_7_x_25"]) == frozenset()
 
 
 def test_last_still_joins_counters_on_names_of_different_length(tmp_path):
@@ -207,11 +207,11 @@ def test_last_still_joins_counters_on_names_of_different_length(tmp_path):
 
 
 def test_a_bl43_style_merge_with_last_is_still_combined(tmp_path):
-    b = _xdc(tmp_path, ["01_MoS2_s1_015_A", "01_MoS2_s1_016_A", "08_std_CoSO4_x_030_A"])
+    b = _xdc(tmp_path, ["01_SYNzz_s1_015_A", "01_SYNzz_s1_016_A", "08_std_ZZSO4_x_030_A"])
     M.decide(b, target_ids=["experiment"], decision="set_counter_positions", value=None, by=BY, orcid=None, positions=[-1])
     M.group(b, regroup=True)
     by_stem = {tuple(_stems_of(b, g)): g for g in _live(b)}
-    g1, g2 = by_stem[("01_MoS2_s1_015",)], by_stem[("01_MoS2_s1_016",)]
+    g1, g2 = by_stem[("01_SYNzz_s1_015",)], by_stem[("01_SYNzz_s1_016",)]
     out = _merge(b, g1["group_id"], [g2["group_id"]])
     assert out["merge_decisions_not_combined"] == [] and len(_combined(b)) == 1
 

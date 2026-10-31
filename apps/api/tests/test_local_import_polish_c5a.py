@@ -333,7 +333,7 @@ def test_the_counter_question_shows_real_file_names_with_the_asked_token_marked(
 
 
 def test_a_marked_name_keeps_its_separators_and_signs():
-    assert Q._marked_token("50nmPt_on_Au_OCV_15_1500mV", 4) == "50nmPt_on_Au_[OCV]_15_1500mV"
+    assert Q._marked_token("SYNfilm_on_Au_OCV_15_1500mV", 4) == "SYNfilm_on_Au_[OCV]_15_1500mV"
     assert Q._marked_token("Pt-C_x_-50mV.dat", 4) == "Pt-C_x_[-50mV].dat"
     assert Q._marked_token("a_b", 3) is None
 
@@ -387,3 +387,23 @@ def test_a_value_answer_says_the_value_and_the_field(bdir):
     assert reply["statement"] == "confirmed for 1 run: acquired start utc."
     reply = M.decide(bdir, target_ids=[_miss(b, "system.domain", None)], decision="correct", value="experimental", **BY)
     assert reply["statement"] == "'experimental' recorded for the whole beamtime: domain."
+
+
+def test_re_answering_the_whole_absorber_question_keeps_a_per_group_answer(grouped, capsys):
+    """Review (cycle 5): answer for all, override one group, then re-run the answer for all — the override
+    was silently undone. It is now kept and named; `--only` is the way to change it."""
+    S = __import__("isaac_api.local_import.suggestions", fromlist=["absorber_decisions"])
+    groups = [t["id"] for t in Q.question(Q.consolidate(M.load(grouped)), ABSORBER)["targets"]]
+    assert _run(capsys, *_absorber_argv(grouped))[0] == 0
+    assert _run(capsys, *_absorber_argv(grouped, "Au", "L3", "--only", f"group:{groups[0]}"))[0] == 0
+    code, out, err = _run(capsys, *_absorber_argv(grouped))  # Fe K for all, again
+    assert code == 0, err
+    reply = json.loads(out)
+    assert reply["kept_per_group_answers"] == [{"group_id": groups[0], "element": "Au", "edge": "L3"}]
+    assert f"{groups[0]} keeps Au L3" in reply["statement"]
+    got = {g: (d["element"], d["edge"]) for g, d in S.absorber_decisions(M.load(grouped)).items()}
+    assert got[groups[0]] == ("Au", "L3") and {got[g] for g in groups[1:]} == {("Fe", "K")}
+    # changing the whole question's answer still leaves the override alone
+    assert _run(capsys, *_absorber_argv(grouped, "Co", "K"))[0] == 0
+    got = {g: (d["element"], d["edge"]) for g, d in S.absorber_decisions(M.load(grouped)).items()}
+    assert got[groups[0]] == ("Au", "L3") and {got[g] for g in groups[1:]} == {("Co", "K")}

@@ -906,6 +906,7 @@ def decide_question(
     # lock file) is created in it
     if not B.bundle_path(Path(bundle_dir)).is_file():
         raise MutationRefused(f"No bundle.json in {Path(bundle_dir).name!r}.", code=6)
+    kept_overrides: list[dict] = []
     with locked(Path(bundle_dir)):
         _require_version(Path(bundle_dir), expected_version)
         version = bundle_version(bundle_dir)
@@ -926,6 +927,8 @@ def decide_question(
                 found, positions = question_targets(answered, question_id, **resolve)
             except MutationRefused as again:
                 raise (exc if again.code == 6 else again) from None
+            if asked["kind"] == "confirm_absorber" and decision == "set_absorber" and only is None:
+                found, kept_overrides = _keep_absorber_overrides(bundle, found)
         params = dict(
             target_ids=list(extra_targets) + found, decision=decision, value=value, by=by, orcid=orcid, note=note,
             split_into=split_into, merge_with=merge_with, qc_status=qc_status, qc_note=qc_note,
@@ -933,10 +936,40 @@ def decide_question(
         )
         if dry_run:
             planned = record_decision(copy.deepcopy(bundle), **params)
-            return {"dry_run": True, "bundle_version": version, "target_ids": params["target_ids"], **planned}
-        result = record_decision(bundle, **params)
+            return _with_kept(kept_overrides, {"dry_run": True, "bundle_version": version, "target_ids": params["target_ids"], **planned})
+        result = _with_kept(kept_overrides, record_decision(bundle, **params))
         save_bundle(bundle_dir, bundle)
         return (result, bundle_version(bundle_dir)) if with_version else result
+
+
+def _keep_absorber_overrides(bundle: Mapping, group_ids: Sequence[str]) -> tuple[list[str], list[dict]]:
+    """Re-answering an ANSWERED absorber question for all its groups (no ``--only``) never undoes a per-group
+    answer (review, cycle 5): a group whose current element/edge differs from the one most of the question's
+    groups now hold keeps it, and is named; ``--only group:<id>`` changes one. Returns (groups to record, kept)."""
+    from collections import Counter
+
+    from . import suggestions as S
+
+    current = S.absorber_decisions(bundle)
+    pairs = {g: (current[g]["element"], current[g]["edge"]) for g in group_ids if g in current}
+    if not pairs:
+        return list(group_ids), []
+    common, _ = Counter(pairs.values()).most_common(1)[0]
+    kept = [{"group_id": g, "element": pairs[g][0], "edge": pairs[g][1]} for g in group_ids if g in pairs and pairs[g] != common]
+    keep = {k["group_id"] for k in kept}
+    return [g for g in group_ids if g not in keep], kept
+
+
+def _with_kept(kept: Sequence[Mapping], result: dict) -> dict:
+    """``result`` with the per-group absorber answers a whole-question re-answer left alone, said first."""
+    if not kept:
+        return result
+    said = "; ".join(f"{k['group_id']} keeps {k['element']} {k['edge']}" for k in kept[:5]) + (
+        f"; and {len(kept) - 5} more" if len(kept) > 5 else "")
+    note = (f"{len(kept)} group(s) answered on their own were left as they are ({said}); change one with "
+            "`--only group:<id>`.")
+    return {"statement": " ".join(x for x in (result.get("statement"), note) if x), "kept_per_group_answers": list(kept),
+            **{k: v for k, v in result.items() if k != "statement"}}
 
 
 #: QC statuses that say something is WRONG with the measurement: approving with one needs ``--qc-note``
