@@ -1892,6 +1892,7 @@ def keep_off_list_cells(bundle: dict, cells: Sequence[Mapping], *, by: str | Non
                 values = P._distinct([v for vs in answered.values() for v in vs])
                 row["answered_since"] = {
                     "runs": sum(1 for r in answered if r is not None), "values": values,
+                    **({"whole_beamtime": True} if None in answered else {}),
                     "statement": (f"The sheet still says {row['term']!r} for {row['field_path']} on {P._reach(list(answered))}, "
                                   f"but it was answered since with {P._shown(values)}; to keep the word, "
                                   f"`isaac bundle decide ... --value \"{row['term']}\" --as-said`.")}
@@ -1963,6 +1964,15 @@ def import_template(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None 
     else:
         cells, report = run(current)  # in memory only; nothing is saved
         requests = [{**r, "request_id": None, "new": None} for r in off_list_requests(cells["off_list"])]
+        if requests and current.get("vocabulary_requests"):
+            # what --apply would say of a request kept earlier and answered since, read from a copy (nothing is saved)
+            import copy
+
+            would = keep_off_list_cells(copy.deepcopy(current), cells["off_list"], by=by, orcid=orcid, file=xlsx.name,
+                                        kind="template_cell", command="bundle template import")
+            for row, w in zip(requests, would):
+                if w.get("answered_since"):
+                    row["answered_since"] = w["answered_since"]
     return _as_text_dates({  # an invalid cell is shown as read, and a date cell reads as a datetime
         "applied": apply,
         "template": xlsx.name,

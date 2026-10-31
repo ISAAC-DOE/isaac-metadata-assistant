@@ -672,6 +672,106 @@ def test_the_allowed_value_given_again_after_their_word_is_recorded_and_answers_
     assert len(M.load(grouped)["scientist_decisions"]) == before + 1  # nothing asked since: unchanged, as ever
 
 
+def _n(bdir: Path) -> int:
+    return len(M.load(bdir)["scientist_decisions"])
+
+
+def test_a_request_whose_time_cannot_be_read_makes_no_replay_new(grouped, capsys, ticking):
+    """c13h MED-1: propose-terms can never answer it by order, so re-recording would loop forever."""
+    t = _miss_of(grouped, ENV, "run-001")["value_id"]
+    assert _decide(grouped, capsys, "--target", t, "--decision", "correct", "--value", "in_situ")[0] == 0
+    assert _said(grouped, capsys, "--target", t, "--decision", "correct", "--value", "aqueous_electrochemistry")[0] == 2
+    bundle = M.load(grouped)
+    bundle["vocabulary_requests"][0]["requested_utc"] = "2099-02-30T00:00:00Z"  # the schema's shape, not a real date
+    M.save_bundle(grouped, bundle)
+    assert B.check_bundle(grouped) == []
+    n0 = _n(grouped)
+    for _ in range(3):
+        assert _decide(grouped, capsys, "--target", t, "--decision", "correct", "--value", "in_situ")[0] == 0
+    assert _n(grouped) == n0
+    draft = _term(_report(grouped, capsys), ENV, "aqueous_electrochemistry")["draft"]
+    assert draft["drafted"] is True and draft["answered_order_unknown"] is True
+
+
+def test_a_beamtime_request_on_a_run_only_field_is_not_reached_by_run_targets(grouped, capsys, ticking):
+    """c13h MED-2: the reach mirrors propose-terms: identical replays on run targets add nothing."""
+    tids = [_miss_of(grouped, ENV, r)["value_id"] for r in ("run-001", "run-002")]
+    for t in tids:
+        assert _decide(grouped, capsys, "--target", t, "--decision", "correct", "--value", "in_situ")[0] == 0
+    bundle = M.load(grouped)
+    M.keep_vocabulary_request(bundle, field_path=ENV, term="ZZ_word", by=WHO, run_ids=[], scope="experiment",
+                              source={"kind": "decide_answer", "command": "bundle decide", "as_said": True})
+    M.save_bundle(grouped, bundle)
+    n0 = _n(grouped)
+    for t in tids:
+        assert _decide(grouped, capsys, "--target", t, "--decision", "correct", "--value", "in_situ")[0] == 0
+    assert _n(grouped) == n0
+
+
+def _reach_bundle(path, *, req_runs, target_run, live_runs=("run-1",)):
+    return {
+        "vocabulary_requests": [{"request_id": "vr-00001", "field_path": path, "term": "ZZ_word", "run_ids": list(req_runs),
+                                 "requested_utc": "2000-01-01T00:00:01Z", "source": {"kind": "decide_answer"}}],
+        "record_groups": [{"group_id": "rg-1", "status": "proposed", "member_run_keys": [f"k-{r}" for r in live_runs]}],
+        "runs": [{"run_id": r, "run_key": f"k-{r}"} for r in ("run-1", "run-2")],
+        "candidates": [], "conflicts": [],
+    }, {"value_id": "mv-ZZ", "run_id": target_run, "target_field_path": path}
+
+
+@pytest.mark.parametrize("path, req_runs, target_run, expected", [
+    (SCALE, ["run-1"], "run-1", True),     # a run target, a request naming it
+    (SCALE, ["run-2"], "run-1", False),    # naming another run
+    (SCALE, [], "run-1", False),           # a beamtime-wide request reaches only a beamtime-wide target
+    (SCALE, [], None, True),
+    (SCALE, ["run-1"], None, True),        # a beamtime-wide value fills a field that takes one
+    (ENV, ["run-1"], None, False),         # never a run-only field (DEC-69)
+    (SCALE, ["run-2"], "run-2", False),    # every run it names is in no live record group
+])
+def test_a_replay_is_new_only_where_propose_terms_would_read_it_as_an_answer(path, req_runs, target_run, expected):
+    bundle, obj = _reach_bundle(path, req_runs=req_runs, target_run=target_run)
+    prior = {"decision": "correct", "value": "RHE" if path == SCALE else "in_situ", "decided_utc": "2000-01-01T00:00:00Z"}
+    assert M.restated_after_request(bundle, "missing_value", obj, prior) is expected
+    # never for a request said before the earlier decision
+    later = {**prior, "decided_utc": "2000-01-01T00:00:02Z"}
+    assert M.restated_after_request(bundle, "missing_value", obj, later) is False
+
+
+def test_in_the_requests_own_second_a_replay_waits_for_a_later_one(grouped, capsys, monkeypatch):
+    """c13h LOW-1: a decision in the request's second could not tell which came last either; a later one does."""
+    monkeypatch.setattr(M, "now_utc", lambda: "2099-01-01T00:00:05Z")
+    t = _miss_of(grouped, ENV, "run-001")["value_id"]
+    assert _decide(grouped, capsys, "--target", t, "--decision", "correct", "--value", "in_situ")[0] == 0
+    assert _said(grouped, capsys, "--target", t, "--decision", "correct", "--value", "aqueous_electrochemistry")[0] == 2
+    n0 = _n(grouped)
+    for _ in range(3):
+        assert _decide(grouped, capsys, "--target", t, "--decision", "correct", "--value", "in_situ")[0] == 0
+    assert _n(grouped) == n0
+    assert _term(_report(grouped, capsys), ENV, "aqueous_electrochemistry")["draft"]["answered_same_step"] is True
+    clock = iter(f"2099-01-01T00:01:{s:02d}Z" for s in range(60))
+    monkeypatch.setattr(M, "now_utc", lambda: next(clock))
+    for _ in range(2):
+        assert _decide(grouped, capsys, "--target", t, "--decision", "correct", "--value", "in_situ")[0] == 0
+    assert _n(grouped) == n0 + 1  # recorded once, then unchanged as ever
+    assert _term(_report(grouped, capsys), ENV, "aqueous_electrochemistry")["draft"]["answered"] is True
+
+
+def test_a_template_preview_says_what_was_answered_since(grouped, capsys, tmp_path, ticking):
+    """c13h LOW-4: the preview (no --apply) says it too, and writes nothing."""
+    _env_sheet(grouped, tmp_path)
+    for rid in ("run-001", "run-002"):
+        assert _decide(grouped, capsys, "--target", _miss_of(grouped, ENV, rid)["value_id"], "--decision", "correct",
+                       "--value", "in_situ")[0] == 0
+    before = (grouped / "bundle.json").read_bytes()
+    capsys.readouterr()
+    assert cli.main(["bundle", "template", "import", str(grouped), str(tmp_path / "t.xlsx"), "--by", WHO, "--json"]) == 0
+    [row] = json.loads(capsys.readouterr().out)["vocabulary_requests"]
+    assert row["request_id"] is None and row["answered_since"]["runs"] == 2 and "whole_beamtime" not in row["answered_since"]
+    assert "but it was answered since with `in_situ`" in row["answered_since"]["statement"]
+    assert cli.main(["bundle", "template", "import", str(grouped), str(tmp_path / "t.xlsx"), "--by", WHO]) == 0
+    assert "but it was answered since with `in_situ`" in capsys.readouterr().out
+    assert (grouped / "bundle.json").read_bytes() == before
+
+
 def test_a_value_in_the_same_step_or_against_an_unreadable_request_time_is_said_apart_and_drafted():
     """L3: neither a tie nor an unknown order is said as "before"; the term stays drafted."""
     occs = [{"origin": P.ORIGIN_REQUEST, "ref": {"id": "vr-00001"}}]

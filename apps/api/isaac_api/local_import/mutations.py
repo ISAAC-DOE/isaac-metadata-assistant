@@ -984,29 +984,65 @@ def _decided_value_target(bundle: Mapping, kind: str, obj: Mapping, decision: st
     return None
 
 
-def restated_after_request(bundle: Mapping, kind: str, obj: Mapping, prior: Mapping) -> bool:
-    """c13g M1: whether a value decision identical to ``prior`` (the target's latest) is restated AFTER a vocabulary
-    request on its field (alias-aware, ``propose_terms._fills``) that reaches the runs the target applies to and is
-    newer than ``prior`` (or either time cannot be read). Then it is a new statement and is recorded: the scientist
-    asked for their own word since, and answering with the allowed value again is what answers that request. Without
-    it ``in_situ``, then ``--as-said`` their word, then ``in_situ`` again recorded nothing and the word stayed drafted."""
-    requests = bundle.get("vocabulary_requests") or ()
-    got = _decided_value_target(bundle, kind, obj, str(prior.get("decision")), prior.get("value")) if requests else None
+def _request_index(bundle: Mapping) -> dict:
+    """The bundle's vocabulary requests read once for :func:`restated_after_request`: ``{"by_fills": {filled path:
+    [(request path, run ids, time last said)]}, "live": live run ids or None}`` (``propose_terms`` reads them so)."""
+    from . import propose_terms as P
+
+    by_fills: dict[str, list[tuple[str, frozenset, Any]]] = {}
+    for req in bundle.get("vocabulary_requests") or ():
+        if isinstance(req, Mapping) and isinstance(req.get("field_path"), str):
+            by_fills.setdefault(P._fills(req["field_path"]), []).append(
+                (req["field_path"], frozenset(req.get("run_ids") or ()), P.request_time(req)))
+    return {"by_fills": by_fills, "live": P.live_run_ids(bundle) if by_fills else None}
+
+
+def restated_after_request(bundle: Mapping, kind: str, obj: Mapping, prior: Mapping, index: dict | None = None) -> bool:
+    """c13g M1: whether a value decision identical to ``prior`` (the target's latest) is a NEW statement, because a
+    vocabulary request on its field (alias-aware, ``propose_terms._fills``) that this target could answer was said
+    since ``prior`` (or ``prior``'s time cannot be read). Then it is recorded: answering with the allowed value again
+    is what answers that request (``in_situ``, then ``--as-said`` their word, then ``in_situ`` again).
+
+    It mirrors how ``propose_terms.request_answered_runs`` reads an answer, so a re-recorded decision always answers
+    what made it one and an identical replay after that is unchanged, as ever: a run target reaches a request naming
+    that run (in a live record group); a beamtime-wide target reaches a request about the whole beamtime, or naming a
+    live run, except at a run-only path (``records.RUN_ONLY_PATHS``, DEC-69); a request whose time cannot be read is
+    never answered by order, so it makes nothing new; and nothing is re-recorded unless now is strictly later than
+    the request (in its second, the new decision could not tell which came last either). ``index``: the caller's
+    :func:`_request_index` cache for this bundle (filled on first use). ``decide`` only: a sheet import records
+    nothing for a cell equal to the current value."""
+    if not bundle.get("vocabulary_requests"):
+        return False
+    got = _decided_value_target(bundle, kind, obj, str(prior.get("decision")), prior.get("value"))
     if got is None or not got[0]:
         return False
     from . import propose_terms as P
+    from .records import RUN_ONLY_PATHS
 
+    if index is None:
+        index = {}
+    if not index:
+        index.update(_request_index(bundle))
     fills = P._fills(got[0])
+    live = index["live"]
     runs = set(obj.get("run_ids") or ()) if kind == "conflict" else {obj.get("run_id")} - {None}
     said = P._utc(prior.get("decided_utc"))
-    for req in requests:
-        if not isinstance(req, Mapping) or not isinstance(req.get("field_path"), str) or P._fills(req["field_path"]) != fills:
+    now = None
+    for path, theirs, asked in index["by_fills"].get(fills, ()):
+        if asked is None:
+            continue  # cannot be placed: propose-terms never reads it as answered, so a replay would answer nothing
+        named = {r for r in theirs if live is None or r in live}
+        if theirs and not named:
+            continue  # every run it names is in no live record group: it needs nothing here
+        if runs:
+            reaches = bool(named & runs)
+        else:
+            run_only = bool({got[0], fills, path} & RUN_ONLY_PATHS)
+            reaches = not run_only  # a beamtime-wide value never fills a run-only field
+        if not reaches or (said is not None and asked < said):
             continue
-        theirs = set(req.get("run_ids") or ())
-        if theirs and runs and not theirs & runs:
-            continue
-        asked = P.request_time(req)
-        if asked is None or said is None or asked >= said:
+        now = now if now is not None else P._utc(now_utc())
+        if now is not None and now > asked:
             return True
     return False
 
@@ -1069,7 +1105,9 @@ def decide(
     """Record a scientist decision for each target (ALL-OR-NOTHING), idempotently.
 
     Replaying the same decision for a target whose latest decision is already identical
-    records nothing new. Each target is its own entry even in a bulk call, sharing a
+    records nothing new, except an approval restated after its result's files changed and a value restated after a
+    vocabulary request on its field that it can answer (:func:`restated_after_request`): those are recorded with a new
+    ``decision_id`` and time, so a record exported again cites the new decision. Each target is its own entry even in a bulk call, sharing a
     ``batch_id``. ``expected_version``: see :func:`mutate` (the CLI passes none). ``as_said``
     (``--as-said``): a value refused only for being off its field's list is kept as a vocabulary
     request under ``by``; without it nothing is kept (:class:`OffListRefused`).
@@ -2024,6 +2062,7 @@ def record_decision(
         split_made: list[tuple[dict, dict]] = []
         held_before = len(decisions)
         zone_d = B.clock_zone_decision(bundle)
+        request_index: dict = {}  # restated_after_request's reading of the vocabulary requests, made once per call
         for tid, (kind, obj) in zip(target_ids, planned):
             prior = latest.get((kind, tid))
             if kind == "experiment":
@@ -2087,7 +2126,7 @@ def record_decision(
                 json.dumps(prior.get("athena_version_provenance"), sort_keys=True),
                 json.dumps(prior.get("same_conditions_tokens")),
             ) == signature and not (kind == "processing_result" and decision == "approve" and approval_is_stale(prior, obj)) and not (
-                    restated_after_request(bundle, kind, obj, prior)):
+                    restated_after_request(bundle, kind, obj, prior, request_index)):
                 # an approval restated after its result's files changed binds it to them: a new statement; so is a
                 # value restated after the scientist asked for their own word on its field (c13g M1)
                 unchanged.append(tid)

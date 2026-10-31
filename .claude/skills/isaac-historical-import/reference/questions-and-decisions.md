@@ -207,7 +207,8 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   A term whose draft says `answered: true` is not drafted: the scientist has since given an allowed value
   (`answered_with`) for every run they asked it for, so never offer it. Say a draft's `partly_answered` sentence
   when you offer it; with `answered_before_request`, `answered_same_step` or `answered_order_unknown`, ask
-  whether they still want the term.
+  whether they still want the term. If they now choose the allowed value, record it with `decide` (it is
+  recorded again and answers the request); a sheet cell equal to the current value records nothing.
   A term with a space is not drafted; its `ask` says what to ask for (one word, e.g. `cathodic_corrosion`):
   record their one-word answer again, never rewrite it yourself. They write each description themselves on
   the Schema Proposals page (Propose a Change → Load drafts from a local import), never in the file and
