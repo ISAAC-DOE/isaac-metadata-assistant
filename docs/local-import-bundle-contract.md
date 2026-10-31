@@ -1516,6 +1516,30 @@ value writes nothing.
 drafts) and `fields[]`. `--out` writes the file atomically. An existing file is refused (exit 4)
 unless `--force`, and so is a directory. A missing bundle exits 6.
 
+**On the website (2026-10-30).** The Schema Proposals page (*Propose a Change*) has a
+**Load drafts from a local import** control. It reads this file with the browser's own file
+reader and does not upload it. It lists every term with its field, its counts (`count`,
+`by_origin`), runs (the term's `runs` when the file has one; otherwise the distinct
+`ref.run_id` of its citations, only when every citation names one and none were left out; else
+"not stated"), the scientist's own words (a term's `scientist_notes` when the file carries them;
+format 1 carries none, and the page says so), its citations and the problems the file reports.
+A term with `drafted: false`, or one the server's current vocabulary would refuse, is listed
+with its reason and has no button. **Propose This Term** opens the ordinary form on that list and
+term. The section comes from the server's `proposal_sections`, the description is **empty and
+required** (at least 20 characters, written by the scientist), and the reviewer notes are filled
+only from the file: `gate0.problem` (the count, field and missing lists), `gate0.examples` (the
+citations, within the limit, with "and N more"), and `gate0.affected_records_estimate` (the
+counts). `gate0.flip_list` is never filled. A note the file has no fact for is left empty and
+marked required. Nothing is sent until the scientist saves. Saving sends one proposal to the ISAAC
+server the page talks to: the server on this computer in a local build, or the hosted server,
+where proposals are temporary. The proposal carries a `source` block:
+`{kind: "local_import", format: "isaac.term-proposal-drafts", bundle_id?, field_path, term,
+occurrences, runs?, citations_total}`. The server accepts it on `add_term` only
+(`schema_proposal_rules._validate_source`). Its `field_path` and `term` must be the proposal's
+own category and term, any other key is `unknown_field`, and it requires `gate0.examples` and
+`gate0.affected_records_estimate`. The status stays `pending`, a duplicate pending proposal is
+still `409`, and nothing is approved, applied or sent.
+
 **Measured 2026-10-29** on copies of the six real beamtime bundles (counts only): 618
 occurrences of 16 distinct off-list values in 4 fields. All are AI readings; no parser value
 and no confirmed value is off a list. They produce 2 drafts, for one term in two beamtimes: 131

@@ -431,6 +431,19 @@ const LOCAL_ONLY_FILE_CONTROLS: [string, string][] = [
   ['the historical-import file staging panel', 'components/ImportFileStaging.tsx'],
 ];
 
+/**
+ * FOUR ON 2026-10-30, AND THE FOURTH IS DIFFERENT IN KIND AGAIN. The Schema Proposals page
+ * reads the drafts file `isaac bundle propose-terms --out` writes, in the browser, and lists
+ * its terms. The file is never posted; a proposal the scientist then saves (their own
+ * description, with the file's counts and citations as reviewer notes) is. So it is neither a
+ * reader that posts what it reads nor one that sends nothing: it gets its own list, and its
+ * "nothing is sent until Save" property is pinned by behaviour in
+ * `schema-proposals-local-drafts.test.tsx`.
+ */
+const FILE_TO_PROPOSAL_CONTROLS: [string, string][] = [
+  ['the Schema Proposals local-import drafts loader', 'screens/SchemaProposals.tsx'],
+];
+
 describe('R1b §1 · the file-reading controls exist, so the absolute claim is false', () => {
   it.each(FILE_READING_CONTROLS)('%s reads the chosen file', (_what, path) => {
     const src = rawSource(path);
@@ -460,6 +473,16 @@ describe('R1b §1 · the file-reading controls exist, so the absolute claim is f
     expect(src).not.toMatch(/FormData/);
     // ...and the reader is told so, in words, in the component itself.
     expect(src).toMatch(/not sent to ISAAC/);
+  });
+
+  it('the Schema Proposals drafts loader reads the chosen file in the browser and parses it there', () => {
+    const src = rawSource('screens/SchemaProposals.tsx');
+    expect(src).toMatch(/file\.text\(\)/);
+    expect(src).toMatch(/new FileReader\(\)/);
+    expect(src).toMatch(/type="file"/);
+    expect(src).toMatch(/parseTermDraftsFile\(text\)/);
+    // No form upload of the file: the page builds JSON proposals, never multipart.
+    expect(src).not.toMatch(/FormData/);
   });
 
   it('the Governance page mounts one of them, and the policy that names it links there', () => {
@@ -498,7 +521,11 @@ describe('R1b §1 · the file-reading controls exist, so the absolute claim is f
    * what this test is FOR — a count in prose goes stale silently and this does
    * not — so the number moves with the code and the reason moves with it.
    */
-  it('EXACTLY these three non-test files declare a file input — no fourth control', () => {
+  /*
+   * *** FOUR AS OF 2026-10-30 *** — `screens/SchemaProposals.tsx` joins (its own list above).
+   *   ~~'EXACTLY these three non-test files declare a file input — no fourth control'~~
+   */
+  it('EXACTLY these four non-test files declare a file input — no fifth control', () => {
     const ATTRIBUTE = 'type="file"';
     function walk(dir: string): string[] {
       const out: string[] = [];
@@ -531,6 +558,7 @@ describe('R1b §1 · the file-reading controls exist, so the absolute claim is f
       'components/CsvReconcilePanel.tsx',
       'components/ImportFileStaging.tsx',
       'components/RecordValidator.tsx',
+      'screens/SchemaProposals.tsx',
     ]);
 
     // The names the copy uses are exactly the paths asserted above, so the prose
@@ -539,7 +567,7 @@ describe('R1b §1 · the file-reading controls exist, so the absolute claim is f
     // two — summing them here is what stops a future slice adding a fourth to
     // whichever list happens to be less guarded.
     expect(
-      [...FILE_READING_CONTROLS, ...LOCAL_ONLY_FILE_CONTROLS]
+      [...FILE_READING_CONTROLS, ...LOCAL_ONLY_FILE_CONTROLS, ...FILE_TO_PROPOSAL_CONTROLS]
         .map(([, path]) => path)
         .sort(),
     ).toEqual(declaring);
@@ -1113,6 +1141,8 @@ const BOTH_READERS_NAMED: [string, RegExp][] = [
   ['the record validator', /validator/i],
   ['the campaign-sheet CSV comparison', /(csv|campaign[- ]sheet)/i],
   ['the historical-import file staging', /historical import|file staging/i],
+  // 2026-10-30: the fourth reader, the Schema Proposals page's local-import drafts loader.
+  ['the Schema Proposals drafts loader', /schema proposals/i],
 ];
 
 /**

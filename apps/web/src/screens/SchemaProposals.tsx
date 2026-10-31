@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
@@ -17,7 +18,7 @@ import { LeftNav } from '../components/LeftNav';
 import { BackendDown, LoadingPanel } from '../components/FetchStates';
 import { Copy, Download } from '../components/icons';
 import { LABELS, formatWhen } from '../lib/labels';
-import { api } from '../lib/api';
+import { api, isHostedBuild } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
 import { serverMessageOf } from '../lib/mutationErrors';
 import {
@@ -32,6 +33,7 @@ import {
   isProposeSource,
   portalBodyFilename,
   portalBodyText,
+  canProposeTerm,
   portalSectionFor,
   proposalHeadline,
   schemaFieldErrors,
@@ -51,6 +53,16 @@ import {
   type SchemaProposalInput,
   type SchemaProposalType,
 } from '../lib/schemaProposals';
+import {
+  TERM_DRAFTS_MAX_BYTES,
+  countsSentence,
+  citationLine,
+  gate0FromDraft,
+  parseTermDraftsFile,
+  sourceFromDraft,
+  type LocalTermDraft,
+  type LocalTermDraftsFile,
+} from '../lib/termDrafts';
 
 /**
  * SCHEMA PROPOSALS — browse the vocabulary, draft a proposal to change it, and
@@ -514,6 +526,13 @@ function ProposePanel({
   const [description, setDescription] = useState('');
   const [gate0, setGate0] = useState<Record<string, string>>({});
   const [from, setFrom] = useState<ProposeSource | null>(null);
+  /** The local-import draft the form was opened on, with the reviewer notes its file could not fill. */
+  const [localDraft, setLocalDraft] = useState<{
+    draft: LocalTermDraft;
+    bundleId: string | null;
+    missing: (keyof ApiSchemaProposalGate0)[];
+  } | null>(null);
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
   // A new field (schema change request).
   const [parentPath, setParentPath] = useState<string | null>(null);
   const [fieldName, setFieldName] = useState('');
@@ -551,6 +570,7 @@ function ProposePanel({
     setParentPath(null);
     if (prefill.term !== undefined) setTerm(prefill.term);
     setFrom(prefill.from ?? null);
+    setLocalDraft(null);
     if (prefill.from && prefill.term !== undefined) {
       // THE SOURCE SURFACE IS NOTED where reviewers read it, in words the reader can change.
       setGate0((prev) => ({
@@ -582,6 +602,34 @@ function ProposePanel({
   useEffect(() => {
     if (saved) savedRef.current?.focus();
   }, [saved]);
+
+  /*
+   * OPEN THE FORM ON ONE DRAFT FROM A LOCAL IMPORT. The section is the server's own for the
+   * list (never the file's), the list and the term are the file's, the description is EMPTY,
+   * and the reviewer notes are the file's counts and citations. Nothing is sent: the scientist
+   * writes the description and saves, or does not.
+   */
+  function openLocalDraft(draft: LocalTermDraft, bundleId: string | null) {
+    const section = portalSectionFor(vocabulary, draft.category);
+    if (section === null) return;
+    const filled = gate0FromDraft(draft, bundleId, limits);
+    setType('add_term');
+    setSectionId(section);
+    setCategory(draft.category);
+    setParentPath(null);
+    setTerm(draft.term);
+    setDescription('');
+    setGate0({ ...filled.gate0 });
+    setFrom(null);
+    setLocalDraft({ draft, bundleId, missing: filled.missing });
+    setErrors([]);
+    setTopMessage(null);
+    setSaved(null);
+    // The one box left to the scientist gets focus, after the form has re-rendered.
+    window.setTimeout(() => descriptionRef.current?.focus(), 0);
+  }
+
+  const fromLocalDraft = localDraft !== null && type === 'add_term';
 
   const errorFor = (field: string) => errors.find((e) => e.field === field)?.message;
   const changeFields = ['change', ...['kind', 'parent_path', 'field_name', 'value_type', 'unit', 'required', 'example', 'scope', 'migration'].map((k) => `change.${k}`)];
@@ -637,6 +685,8 @@ function ProposePanel({
         ...(type === 'add_term' ? { term: term.trim() } : {}),
         ...(Object.keys(note).length > 0 ? { gate0: note } : {}),
       };
+      const source = fromLocalDraft && localDraft ? sourceFromDraft(localDraft.draft, localDraft.bundleId) : null;
+      if (source) input.source = source;
     }
     try {
       const response = await api.createSchemaProposal(input);
@@ -645,6 +695,7 @@ function ProposePanel({
       setDescription('');
       setGate0({});
       setFrom(null);
+      setLocalDraft(null);
       setFieldName('');
       setExample('');
       setMigration('');
@@ -700,6 +751,8 @@ function ProposePanel({
         </div>
       )}
 
+      <LocalDraftsLoader vocabulary={vocabulary} onUse={openLocalDraft} />
+
       {(topMessage || elsewhere.length > 0) && (
         <div className="sp-error-summary" role="alert" tabIndex={-1} ref={summaryRef}>
           <p className="sp-error-title">{topMessage}</p>
@@ -718,6 +771,29 @@ function ProposePanel({
           Opened from {PROPOSE_SOURCES[from]}, with the list and the value as they appeared there. Check the term
           before saving: the portal takes one word, and nothing here has changed what you saw.
         </p>
+      )}
+
+      {fromLocalDraft && localDraft && (
+        <div className="sp-notice" role="note">
+          <p>
+            Opened on a draft from a local import: the list <code className="sp-term">{localDraft.draft.category}</code>{' '}
+            and the term <code className="sp-term">{localDraft.draft.term}</code> as the drafts file holds them. The
+            description is empty: write what the term means and where it is used, in your own words. The reviewer
+            notes below come from the file&apos;s counts and citations; change them if they are wrong.
+          </p>
+          {localDraft.missing.length > 0 && (
+            <p>
+              The file has nothing for{' '}
+              {localDraft.missing.map((k) => GATE0_FIELDS.find((g) => g.key === k)?.label ?? k).join(' or ')}, so it
+              is empty and marked required: write it yourself.
+            </p>
+          )}
+          <div className="sp-actions">
+            <button type="button" className="btn btn-secondary" onClick={() => setLocalDraft(null)}>
+              Stop Using This Draft
+            </button>
+          </div>
+        </div>
       )}
 
       <form className="sp-form" onSubmit={onSubmit} noValidate>
@@ -1025,6 +1101,7 @@ function ProposePanel({
           <label htmlFor={ids.description}>{isField ? 'Definition (required)' : 'Description (required)'}</label>
           <textarea
             id={ids.description}
+            ref={descriptionRef}
             className="input sp-textarea"
             rows={4}
             value={description}
@@ -1046,8 +1123,14 @@ function ProposePanel({
           <FieldError id={`${ids.description}-err`} message={errorFor('description')} />
         </div>
 
-        <details className="sp-why" open={isField || from !== null ? true : undefined}>
-          <summary>{isField ? 'Why (for reviewers): the problem is required for a new field' : 'Why (for reviewers), optional'}</summary>
+        <details className="sp-why" open={isField || from !== null || fromLocalDraft ? true : undefined}>
+          <summary>
+            {isField
+              ? 'Why (for reviewers): the problem is required for a new field'
+              : fromLocalDraft
+                ? 'Why (for reviewers): the examples and records affected are required for a draft from a local import'
+                : 'Why (for reviewers), optional'}
+          </summary>
           <p className="sp-hint">
             Reviewers of changes to the standard look for the problem, who it affects and what would change.
             These answers travel with your {isField ? 'change request' : 'description'}.
@@ -1055,11 +1138,14 @@ function ProposePanel({
           {GATE0_FIELDS.map((g) => {
             const fieldId = `${ids.description}-gate0-${g.key}`;
             const err = errorFor(`gate0.${g.key}`);
+            const requiredHere =
+              (isField && g.key === 'problem') ||
+              (fromLocalDraft && (g.key === 'examples' || g.key === 'affected_records_estimate'));
             return (
               <div className="sp-field" key={g.key}>
                 <label htmlFor={fieldId}>
                   {g.label}
-                  {isField && g.key === 'problem' ? ' (required)' : ''}
+                  {requiredHere ? ' (required)' : ''}
                 </label>
                 <textarea
                   id={fieldId}
@@ -1067,6 +1153,7 @@ function ProposePanel({
                   rows={g.rows}
                   value={gate0[g.key] ?? ''}
                   onChange={(e) => setGate0((prev) => ({ ...prev, [g.key]: e.target.value }))}
+                  aria-required={requiredHere ? true : undefined}
                   aria-invalid={err ? true : undefined}
                   aria-describedby={`${fieldId}-hint${err ? ` ${fieldId}-err` : ''}`}
                 />
@@ -1107,6 +1194,195 @@ function ProposePanel({
         </div>
       </form>
     </section>
+  );
+}
+
+// --- Load drafts from a local import ---------------------------------------------
+
+/** Read a chosen file to text, in this browser — the same fallback the Validator uses. */
+function readFileText(file: File): Promise<string> {
+  if (typeof file.text === 'function') return file.text();
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ''));
+    reader.onerror = () => reject(reader.error ?? new Error('The file could not be read.'));
+    reader.readAsText(file);
+  });
+}
+
+/** Why a draft cannot be filed here, or null when it can. The file's own reason comes first. */
+function whyNotFileable(vocabulary: ApiSchemaVocabulary, d: LocalTermDraft): string | null {
+  if (!d.drafted || d.body === null) {
+    return d.reason ?? 'The drafts file did not draft this term, and gives no reason.';
+  }
+  if (d.body.proposal_type !== 'add_term' || d.body.category !== d.category || d.body.term !== d.term) {
+    return 'The draft in the file does not match its own field and term, so it is not filed from here.';
+  }
+  if (portalSectionFor(vocabulary, d.category) === null) {
+    return `The vocabulary on this server has no portal term list ${d.category}, so the portal would refuse a new term for it.`;
+  }
+  if (!canProposeTerm(vocabulary, d.category, d.term)) {
+    return 'The vocabulary on this server would refuse this term now: the list may already hold it, or the term is not one word. The file was written against an earlier list.';
+  }
+  if (d.count === null || d.count < 1) {
+    return 'The drafts file gives no count for this term, so there is nothing to say how often it was read.';
+  }
+  return null;
+}
+
+function LocalDraftsLoader({
+  vocabulary,
+  onUse,
+}: {
+  vocabulary: ApiSchemaVocabulary;
+  onUse: (draft: LocalTermDraft, bundleId: string | null) => void;
+}) {
+  const ids = { heading: useId(), input: useId(), hint: useId() };
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState<LocalTermDraftsFile | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [announce, setAnnounce] = useState('');
+
+  async function onFileChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // choosing the same file again reads it again
+    if (!file) return;
+    setFileName(file.name);
+    setLoaded(null);
+    setProblem(null);
+    setAnnounce('');
+    if (file.size > TERM_DRAFTS_MAX_BYTES) {
+      setProblem(`This file is ${Math.ceil(file.size / 1024)} KB, larger than a drafts file can be, so it was not read.`);
+      return;
+    }
+    let text: string;
+    try {
+      text = await readFileText(file);
+    } catch {
+      setProblem('This browser could not read the file. Nothing was read and nothing was sent.');
+      return;
+    }
+    const parsed = parseTermDraftsFile(text);
+    if (!parsed.ok) {
+      setProblem(parsed.message);
+      return;
+    }
+    setLoaded(parsed.file);
+    const can = parsed.file.drafts.filter((d) => whyNotFileable(vocabulary, d) === null).length;
+    const total = parsed.file.drafts.length;
+    setAnnounce(
+      total === 0
+        ? 'The drafts file lists no terms outside the vocabulary.'
+        : `Read ${total} ${total === 1 ? 'term' : 'terms'} from ${file.name}: ${can} can be proposed, ${total - can} cannot. Nothing was sent.`,
+    );
+  }
+
+  return (
+    <section className="sp-notice sp-drafts" aria-labelledby={ids.heading}>
+      <h2 className="sp-h2" id={ids.heading}>
+        {COPY.localImportTitle}
+      </h2>
+      <p>{COPY.localImportLead}</p>
+      <p>{isHostedBuild ? COPY.localImportWhereHosted : COPY.localImportWhereLocal}</p>
+      <div className="sp-field">
+        <label htmlFor={ids.input}>Drafts file (JSON)</label>
+        <input
+          id={ids.input}
+          type="file"
+          accept="application/json,.json"
+          className="sp-file"
+          aria-describedby={ids.hint}
+          onChange={onFileChange}
+        />
+        <p className="sp-hint" id={ids.hint}>
+          The file <code>isaac bundle propose-terms &lt;bundle&gt; --out &lt;file.json&gt;</code> wrote.
+          {fileName ? ` Last chosen: ${fileName}.` : ''}
+        </p>
+      </div>
+      <p className="sr-only" role="status" aria-live="polite">
+        {announce}
+      </p>
+      {problem && (
+        <p className="sp-field-error" role="alert">
+          {problem}
+        </p>
+      )}
+      {loaded && loaded.drafts.length === 0 && <p>The drafts file lists no terms outside the vocabulary.</p>}
+      {loaded && loaded.drafts.length > 0 && (
+        <ul className="sp-list" aria-label="Drafts in the file">
+          {loaded.drafts.map((d) => (
+            <LocalDraftItem
+              key={d.key}
+              draft={d}
+              whyNot={whyNotFileable(vocabulary, d)}
+              onUse={() => onUse(d, loaded.bundleId)}
+            />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function LocalDraftItem({ draft, whyNot, onUse }: { draft: LocalTermDraft; whyNot: string | null; onUse: () => void }) {
+  const counts = countsSentence(draft);
+  const lists = draft.missingFrom.map((m) => (m === 'portal' ? "the portal's list" : m === 'schema' ? "the ISAAC schema's list" : m));
+  return (
+    <li className="sp-item">
+      <h3 className="sp-item-title">
+        <code className="sp-term">{draft.term}</code>
+      </h3>
+      <dl className="sp-why-list">
+        <dt>Field</dt>
+        <dd>
+          <code className="sp-term">{draft.fieldPath}</code>
+        </dd>
+        <dt>How often</dt>
+        <dd>
+          {counts ?? 'The file gives no count.'}
+          {draft.runs === null ? ' Runs: not stated in the file.' : ''}
+        </dd>
+        {lists.length > 0 && (
+          <>
+            <dt>Not on</dt>
+            <dd>{lists.join(' or ')}</dd>
+          </>
+        )}
+        <dt>Your words</dt>
+        <dd>
+          {draft.scientistNotes.length > 0
+            ? draft.scientistNotes.map((n) => `“${n}”`).join(' ')
+            : 'The file has none for this term.'}
+        </dd>
+        <dt>Where it was read</dt>
+        <dd>
+          {draft.citations.length === 0
+            ? 'The file cites nothing for this term.'
+            : draft.citations.slice(0, 3).map(citationLine).join('\n') +
+              ((draft.citationsTotal ?? draft.citations.length) > 3
+                ? `\nand ${(draft.citationsTotal ?? draft.citations.length) - 3} more`
+                : '')}
+        </dd>
+        {draft.problems.length > 0 && (draft.drafted || !draft.reason) && (
+          <>
+            <dt>Problems the file reports</dt>
+            <dd>{draft.problems.map((p) => p.message).join(' ')}</dd>
+          </>
+        )}
+      </dl>
+      {whyNot === null ? (
+        <div className="sp-actions">
+          <button type="button" className="btn btn-secondary" onClick={onUse}>
+            Propose This Term
+          </button>
+          <span className="sp-hint">Opens the form below with the description empty. Nothing is sent until you save.</span>
+        </div>
+      ) : (
+        <p className="sp-item-text">
+          <strong>Cannot be proposed from here.</strong> {whyNot}
+        </p>
+      )}
+    </li>
   );
 }
 
@@ -1285,6 +1561,14 @@ function ProposalRow({
         )}
       </p>
       <p className="sp-item-text">{proposal.description}</p>
+      {proposal.source && (
+        <p className="sp-item-meta">
+          {COPY.localImportFiledFrom}
+          {proposal.source.bundle_id ? ` (${proposal.source.bundle_id})` : ''}
+          {proposal.source.occurrences !== null ? `: ${proposal.source.occurrences} readings` : ''}
+          {proposal.source.runs !== null ? ` in ${proposal.source.runs} runs` : ''}.
+        </p>
+      )}
       {proposal.proposal_type === 'schema_change' && proposal.change && <ChangeSummary change={proposal.change} />}
       {gate0 && (
         <dl className="sp-why-list">

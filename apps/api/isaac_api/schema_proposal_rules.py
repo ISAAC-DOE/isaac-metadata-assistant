@@ -153,7 +153,22 @@ _SERVER_OWNED_KEYS = frozenset(
         "persistence",
     }
 )
-_BODY_KEYS = frozenset({"proposal_type", "section", "category", "term", "description", "gate0", "change"})
+_BODY_KEYS = frozenset({"proposal_type", "section", "category", "term", "description", "gate0", "change", "source"})
+
+#: WHERE A PROPOSAL CAME FROM, when it is not typed from scratch: a draft in the file
+#: ``isaac bundle propose-terms --out`` writes (``local_import.propose_terms.FORMAT_ID``; named
+#: here rather than imported, because that module imports this one). The Schema Proposals page
+#: reads the file IN THE BROWSER and files one draft at a time; the block says which draft, by
+#: the file's own field, term and counts, so a reviewer can tell a counted gap from a typed one.
+#: The counts and citations themselves travel as the reviewer notes (``gate0``), which the
+#: portal body already carries, so a local-import proposal must have ``gate0.examples`` (the
+#: citations) and ``gate0.affected_records_estimate`` (the counts). Nothing in it is trusted as
+#: more than the proposer's statement of where the term came from: the server cannot see the file.
+SOURCE_LOCAL_IMPORT = "local_import"
+LOCAL_IMPORT_DRAFTS_FORMAT = "isaac.term-proposal-drafts"
+_SOURCE_KEYS = ("kind", "format", "bundle_id", "field_path", "term", "occurrences", "runs", "citations_total")
+_SOURCE_COUNT_MAX = 10_000_000
+_SOURCE_GATE0_REQUIRED = ("examples", "affected_records_estimate")
 
 #: The portal's endpoint, stated so a person knows where the payload goes. ISAAC never
 #: calls it.
@@ -760,6 +775,7 @@ def _validate(body: dict, sources: dict) -> tuple[dict | None, list[dict], list[
     )
 
     gate0 = _validate_gate0(body.get("gate0"), errors)
+    source = _validate_source(body.get("source"), proposal_type, category, term, gate0, errors)
     if proposal_type == SCHEMA_CHANGE and not (gate0 or {}).get("problem") and not any(
         e["field"] == "gate0.problem" or e["field"] == "gate0" for e in errors
     ):
@@ -786,6 +802,7 @@ def _validate(body: dict, sources: dict) -> tuple[dict | None, list[dict], list[
             "description": description,
             "gate0": gate0,
             "change": change,
+            "source": source,
         },
         [],
         ignored,
@@ -1016,6 +1033,133 @@ def _validate_gate0(raw: Any, errors: list[dict]) -> dict | None:
         if value:
             out[name] = value
     return out or None
+
+
+def _source_count(raw: dict, name: str, minimum: int, errors: list[dict], *, required: bool) -> int | None:
+    value = raw.get(name)
+    if value is None:
+        if required:
+            errors.append(
+                _error(f"source.{name}", f"source_{name}_required", f"The draft's {name.replace('_', ' ')} is required.")
+            )
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= _SOURCE_COUNT_MAX:
+        errors.append(
+            _error(
+                f"source.{name}",
+                f"source_{name}_invalid",
+                f"The draft's {name.replace('_', ' ')} must be a whole number of at least {minimum}.",
+            )
+        )
+        return None
+    return value
+
+
+def _validate_source(
+    raw: Any,
+    proposal_type: str | None,
+    category: str | None,
+    term: str | None,
+    gate0: dict | None,
+    errors: list[dict],
+) -> dict | None:
+    """The optional ``source`` block: which draft of a local import's drafts file this is.
+
+    Strict, like every other block: an unknown key is ``unknown_field``. The draft's field and
+    term must BE the proposal's category and term (a block naming another draft is refused, not
+    re-pointed), and the counts and citations must reach reviewers as ``gate0`` notes."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        errors.append(_error("source", "source_invalid", "Where the proposal came from must be an object."))
+        return None
+    for key in raw:
+        if key not in _SOURCE_KEYS:
+            errors.append(
+                _error(
+                    f"source.{_safe_field_name(key)}" if _safe_field_name(key) else "source",
+                    "unknown_field",
+                    "Where the proposal came from takes only kind, format, bundle_id, field_path, term, "
+                    "occurrences, runs and citations_total.",
+                )
+            )
+    if raw.get("kind") != SOURCE_LOCAL_IMPORT:
+        errors.append(
+            _error(
+                "source.kind",
+                "source_kind_invalid",
+                "The only source a proposal can name is local_import: a draft from the file "
+                "`isaac bundle propose-terms --out` writes.",
+            )
+        )
+        return None
+    if proposal_type != ADD_TERM:
+        errors.append(
+            _error(
+                "source",
+                "source_not_for_type",
+                "A local import drafts new terms only, so only a new term can name one as its source.",
+            )
+        )
+        return None
+    if raw.get("format") != LOCAL_IMPORT_DRAFTS_FORMAT:
+        errors.append(
+            _error(
+                "source.format",
+                "source_format_invalid",
+                f"The drafts file's format must be {LOCAL_IMPORT_DRAFTS_FORMAT}, as `isaac bundle propose-terms` writes it.",
+            )
+        )
+    sub: list[dict] = []
+    bundle_id = _clean_string(raw, "bundle_id", maximum=200, errors=sub, required=False, label="bundle id")
+    field_path = _clean_string(raw, "field_path", maximum=LIMITS["category_max"], errors=sub, required=True, label="draft's field")
+    draft_term = _clean_string(raw, "term", maximum=LIMITS["term_max"], errors=sub, required=True, label="draft's term")
+    for entry in sub:
+        entry["field"] = f"source.{entry['field']}"
+        entry["code"] = f"source_{entry['code']}"
+    errors.extend(sub)
+    if field_path is not None and category and field_path.replace("[]", "") != category:
+        errors.append(
+            _error(
+                "source.field_path",
+                "source_field_path_mismatch",
+                f"The draft is for the field {field_path}, but this proposal is for {category}. "
+                "Open the draft again to propose it.",
+            )
+        )
+    if draft_term is not None and term and draft_term != term:
+        errors.append(
+            _error(
+                "source.term",
+                "source_term_mismatch",
+                f"The draft is for the term {draft_term}, but this proposal is for {term}. The term the file "
+                "holds is proposed as it is, or the proposal is written without the draft.",
+            )
+        )
+    occurrences = _source_count(raw, "occurrences", 1, errors, required=True)
+    runs = _source_count(raw, "runs", 0, errors, required=False)
+    citations_total = _source_count(raw, "citations_total", 0, errors, required=True)
+    for name in _SOURCE_GATE0_REQUIRED:
+        if not (gate0 or {}).get(name) and not any(e["field"] == f"gate0.{name}" for e in errors):
+            errors.append(
+                _error(
+                    f"gate0.{name}",
+                    f"gate0_{name}_required",
+                    "A proposal from a local import carries the file's "
+                    + ("citations (file and place) as its examples" if name == "examples" else "counts as its records affected")
+                    + "; write them if the file did not have them.",
+                )
+            )
+    return {
+        "kind": SOURCE_LOCAL_IMPORT,
+        "format": LOCAL_IMPORT_DRAFTS_FORMAT,
+        "bundle_id": bundle_id,
+        "field_path": field_path,
+        "term": draft_term,
+        "occurrences": occurrences,
+        "runs": runs,
+        "citations_total": citations_total,
+    }
 
 
 # --- conflicts with what already exists ----------------------------------------

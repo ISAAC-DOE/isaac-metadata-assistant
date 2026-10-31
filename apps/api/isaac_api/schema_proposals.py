@@ -128,11 +128,13 @@ from .schema_proposal_rules import (  # noqa: F401  (re-exported)
     PROPOSAL_STATUSES,
     PROPOSAL_TYPES,
     ROOT_SECTION,
+    LOCAL_IMPORT_DRAFTS_FORMAT,
     ROOT_SECTION_LABEL,
     SCHEMA_CHANGE,
     SCHEMA_CHANGE_KINDS,
     SCHEMA_CHANGE_SCOPES,
     SCHEMA_CHANGE_VALUE_TYPES,
+    SOURCE_LOCAL_IMPORT,
     STATUS_PENDING,
     STATUS_WITHDRAWN,
     TERM_SHAPE_FOR_CLIENTS,
@@ -142,6 +144,7 @@ from .schema_proposal_rules import (  # noqa: F401  (re-exported)
     _GATE0_FIELDS,
     _PATH_LIKE,
     _SERVER_OWNED_KEYS,
+    _SOURCE_KEYS,
     _SNAKE_TERM,
     _TERM_SHAPE,
     _category_conflict,
@@ -441,8 +444,25 @@ def _view(doc: dict) -> dict:
         "withdrawn_at": doc.get("withdrawn_at"),
         "schema_version": doc.get("schema_version"),
         "change": _change_view(doc),
+        "source": _source_view(doc),
         "sent_by_isaac": False,
     }
+
+
+def _source_view(doc: dict) -> dict | None:
+    """The stored ``source`` block, key by key, or ``None``. A value of the wrong type in a stored
+    file is shown as ``None`` rather than passed through."""
+    source = doc.get("source")
+    if not isinstance(source, dict) or source.get("kind") != SOURCE_LOCAL_IMPORT:
+        return None
+    out: dict = {}
+    for key in _SOURCE_KEYS:
+        value = source.get(key)
+        if key in ("occurrences", "runs", "citations_total"):
+            out[key] = value if isinstance(value, int) and not isinstance(value, bool) else None
+        else:
+            out[key] = value if isinstance(value, str) else None
+    return out
 
 
 def _envelope(**extra: Any) -> dict:
@@ -682,6 +702,13 @@ def get_vocabulary() -> dict:
         "`scope`, `migration`). The ISAAC portal has no proposal type for this, so it has no portal "
         "payload; its export is the change-request document. A field the parent already has is "
         "`409 field_already_exists`.\n\n"
+        "An optional `source` says the proposal was filed from a draft in the file "
+        "`isaac bundle propose-terms --out` writes, which the Schema Proposals page reads in the browser: "
+        "`{\"kind\": \"local_import\", \"format\": \"isaac.term-proposal-drafts\", \"bundle_id\", "
+        "\"field_path\", \"term\", \"occurrences\", \"runs\" (optional), \"citations_total\"}`. Only a new "
+        "term takes one; its `field_path` and `term` must be the proposal's own category and term, any other "
+        "key is `unknown_field`, and the file's citations and counts must be in `gate0.examples` and "
+        "`gate0.affected_records_estimate`. The description is still the proposer's own, at least 20 characters.\n\n"
         "THIS APPROVES NOTHING AND SENDS NOTHING. The proposal is stored as `pending` "
         "on this server; the owners of the standard review it in the ISAAC portal, and "
         "any decision is recorded there. Use the portal-payload operation to get the "
@@ -726,7 +753,7 @@ def post_schema_proposal(
         description=(
             "`{\"proposal_type\": \"add_term\" | \"add_category\", \"section\", "
             "\"category\", \"term\" (add_term only), \"description\", \"gate0\" "
-            "(optional)}`, or `{\"proposal_type\": \"schema_change\", \"section\", \"description\", "
+            "(optional), \"source\" (optional, add_term only)}`, or `{\"proposal_type\": \"schema_change\", \"section\", \"description\", "
             "\"gate0\", \"change\"}`."
         ),
     ),
@@ -785,6 +812,7 @@ def post_schema_proposal(
         "description": clean["description"],
         "gate0": clean["gate0"],
         "change": clean["change"],
+        "source": clean["source"],
         "status": STATUS_PENDING,
         "proposed_by": proposed_by,
         "attribution": attribution,

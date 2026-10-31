@@ -37,7 +37,9 @@ WHAT WAS BUILT (see ISAAC_Skill_Plan_2026-10-28.md rev 2 + DEC-76..84):
   * .claude/skills/isaac-historical-import (+ reference/), scripts/setup_isaac_local.sh,
     install_local_cli.sh, install_portal_validator.sh, isaac_selftest.sh (40/0/0).
   * Schema Proposals website section (/schema-proposals): portal add_term/add_category format,
-    portal vocabulary snapshot a1cb1c8 + schema enums, no approve path, temporary storage disclosed.
+    portal vocabulary snapshot a1cb1c8 + schema enums, no approve path, temporary storage disclosed;
+    loads a `bundle propose-terms` drafts file in the browser and files one draft at a time with a
+    `source` block (2026-10-30; contract §24).
   * Designs only (not implemented): docs/mcp-staged-bundle-import-design.md,
     docs/orcid-account-linking-design.md, docs/local-first-data-flows.md.
 

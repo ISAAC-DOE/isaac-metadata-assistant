@@ -182,6 +182,7 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   record nothing, and offer to draft a vocabulary proposal: `<isaac> bundle propose-terms <bundle> --out
   <file.json>` (outside the bundle; it sends nothing, and each draft needs a description the scientist
   writes). The value stays missing until the vocabulary has it.
+  The scientist can load that drafts file on the website's Schema Proposals page (Propose a Change → Load drafts from a local import) and write each description there; nothing is sent until they save a proposal.
 - Use `--json` with `--value` for numbers/objects. ORCID only if the scientist gives one (`--orcid`).
 - Repeating a decision is harmless (recorded once). A later decision replaces an earlier one, also
   through `--question`: `decide --question <Q>` resolves a question that is already answered (by an

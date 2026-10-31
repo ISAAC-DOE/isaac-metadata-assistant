@@ -138,6 +138,35 @@ export interface ApiSchemaProposalGate0 {
   flip_list?: string;
 }
 
+/**
+ * Where a new term came from when it was filed from a local import's drafts file
+ * (`isaac bundle propose-terms --out`), which the page reads in the browser
+ * (`lib/termDrafts.ts`). The server checks that `field_path` and `term` are the proposal's own
+ * and refuses any other key; the citations and counts travel as `gate0` notes.
+ */
+export interface ApiSchemaProposalSourceInput {
+  kind: 'local_import';
+  format: 'isaac.term-proposal-drafts';
+  bundle_id?: string;
+  field_path: string;
+  term: string;
+  occurrences: number;
+  runs?: number;
+  citations_total: number;
+}
+
+/** The stored `source`, as the server returns it (each key present; unknown values null). */
+export interface ApiSchemaProposalSource {
+  kind: 'local_import';
+  format: string | null;
+  bundle_id: string | null;
+  field_path: string | null;
+  term: string | null;
+  occurrences: number | null;
+  runs: number | null;
+  citations_total: number | null;
+}
+
 /** The `change` of a stored schema change request, as the server returns it. */
 export interface ApiSchemaChange {
   kind: string | null;
@@ -170,6 +199,8 @@ export interface ApiSchemaProposal {
   schema_version: string | null;
   /** Only on a `schema_change`; `null` (or absent, from an older server) otherwise. */
   change?: ApiSchemaChange | null;
+  /** Set when the proposal was filed from a local import's drafts file; absent from an older server. */
+  source?: ApiSchemaProposalSource | null;
   sent_by_isaac: false;
 }
 
@@ -257,6 +288,8 @@ export interface SchemaProposalInput {
   gate0?: ApiSchemaProposalGate0;
   /** Only for a `schema_change`. */
   change?: SchemaChangeInput;
+  /** Only for a new term filed from a local import's drafts file. */
+  source?: ApiSchemaProposalSourceInput;
 }
 
 export interface SchemaFieldError {
@@ -474,6 +507,18 @@ export const SCHEMA_PROPOSALS_COPY = {
   schemaChangeSaved:
     'Saved as a draft on this server \u2014 not sent anywhere. Drafts here are temporary; copy or ' +
     'download the change-request document to share it with the standard\'s owners.',
+  localImportTitle: 'Load drafts from a local import',
+  localImportLead:
+    'Choose the drafts file the command below wrote on your computer. This page reads it in your ' +
+    'browser and does not upload it. Each term it lists is shown with its field, how often it was read and ' +
+    'what the file reports; a term the file could draft opens the form below, where you write its description.',
+  localImportWhereLocal:
+    'Nothing leaves your computer: this page talks to the ISAAC server running on this computer, and a ' +
+    'proposal you save is kept there as a draft, not sent anywhere.',
+  localImportWhereHosted:
+    'The file stays on your computer. Only a proposal you save is sent, to the hosted ISAAC server this ' +
+    'page came from, where it is kept as a temporary draft and sent nowhere else.',
+  localImportFiledFrom: 'From a local import’s drafts file',
   unverifiedAuthor:
     'Author not recorded: who is using this server is not verified, so nobody is named on a proposal.',
 } as const;
