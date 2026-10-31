@@ -223,7 +223,8 @@ an element/edge already named for the group: approved, proposed, or the group's 
   `reference_edge_in_too_few_scans` or `no_reference_available`): say the `reference_statement` ("only 1 of
   16 scans shows a usable reference edge; an in-scan reference needs one in at least 2 scans") and do NOT
   ask for an element or edge: no shift can be approved, and `approve_calibration` is refused.
-- **A reference is proposed** (flag `calibration_reference_unconfirmed`): say how many scans show a
+- **A reference is proposed** (`calibration.reference_proposed: true` in `show processing-result`; the flag
+  `calibration_reference_unconfirmed` alone only means no reference is approved yet): say how many scans show a
   reference edge and where ("2 of 2 scans show a reference edge at 4974.6 eV"), then ask which element and
   edge the reference measures (`--element Ir`, `--edge L3` style). Never guess it from a file name. Record
   `<isaac> bundle decide <bundle> --target <group id> --decision approve_calibration --element <symbol> --edge <K|L1-L3|M1-M5> --by "<name>"`.
