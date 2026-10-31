@@ -91,8 +91,8 @@ Write every finding to ONE JSON file (`isaac.reading_findings`) in a working fol
 - The absorber has no record field: write `system.element` (a symbol, e.g. `Fe`) and
   `system.edge` (exactly `K`, `L1`-`L3` or `M1`-`M5`) as two findings. They are recorded on the
   record GROUPS holding the named runs (every live group for `"experiment"`). Before Step 5 the
-  preview skips them ("no live record group yet"): apply the same file again after grouping
-  (re-applying adds only what is new). They feed the absorber question in Step 7 as AI
+  preview skips them ("no live record group yet"): apply the same file again in Step 5, after the
+  counter question's regroup (re-applying adds only what is new). They feed the absorber question in Step 7 as AI
   suggestions beside any file evidence. After a `--regroup`, apply it again for the new groups
   (the earlier readings stay on the replaced groups and are not moved). A `"runs"` finding on a
   group with other runs says which runs it was read for; tell the scientist.

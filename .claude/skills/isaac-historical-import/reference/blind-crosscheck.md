@@ -35,8 +35,9 @@ code error can be caught instead of echoed. It is a spot check, never a verifica
 
 - `--blind` counts only if no command had printed that target's value. If `annotate` stores
   `blind: false`, say so; do not call it blind.
-- Do not open `bundle.json`, `runs.json` or `reading.full.json` before step 5; the tool cannot see
-  that, and a blind claim is only as good as your discipline.
+- Never open `bundle.json`, `runs.json`, `reading.full.json`, `record_groups.json` or
+  `processing_results.json` (SKILL.md Rule 8); the tool cannot see that, and a blind claim is only as
+  good as your discipline.
 - `summary.md` shows no parser value except in conflicts. Conflicts are therefore never blind.
 - Report: "checked N of M high-value items (K blind); the rest were not examined." M is `high_value_total`;
   N and K are `coverage.high_value_checked` and `coverage.high_value_blind_checked` (a reading of an item outside

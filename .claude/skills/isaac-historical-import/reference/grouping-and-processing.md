@@ -7,15 +7,23 @@ technique, same conditions. Repeats of the same sample in the same condition bel
 (domain owner, 28 Oct 2026). The code proposes groups and splits whenever anything differs or is
 unknown; it never merges silently.
 
+**Order:** `bundle group`, then the counter question (`naming_counter_positions`, below; shown by
+`<isaac> bundle questions <bundle> --scope experiment`) and a regroup, then apply the findings file
+again (absorber findings), and only then confirm, split or merge. A regroup keeps every decided group,
+so a counter answer given after a group is confirmed can no longer join it.
+
 Get the groups with `bundle list <bundle> groups` and one in full with `bundle show <bundle> group <id>`; `bundle list <bundle> merge-candidates --limit 20 --offset 0` names groups the code could not decide about (a candidate with fewer than two live groups left proposes nothing: it is listed only with `--all`, its `show` says why, and it is never asked). Every list returns one page: when it says `"more": "5 more: --offset 20"`, run it again with that `--offset` until no `more` is left, before you say how many there are. Present each group like this (no ids unless asked):
 
 > **Group 4 of 12** — sample "SYN_sample_A", acid electrolyte, after 500 cycles, 0.8 V: 3 scans.
 > Split from the next group because the potential differs (0.8 V vs 1.0 V).
 > Confirm, split, or merge?
 
-- confirm → `decide --target <group id> --decision confirm`
-- split → ask which runs go where, then `--decision split --split-into '[["<run key>","<run key>"],["<run key>"]]'`
-- merge → three steps: `decide --target <group id> --decision merge --merge-with <other group ids> --by "<name>"`
+- confirm → `<isaac> bundle decide <bundle> --target <group id> --decision confirm --by "<name>"`
+- split → ask which runs go where, then
+  `<isaac> bundle decide <bundle> --target <group id> --decision split --split-into '[["<run key>","<run key>"],["<run key>"]]' --by "<name>"`.
+  A run key is an entry of the group's `member_run_keys` (`bundle show <bundle> group <id>`); it is not
+  the `run_id` or `stem`. Ask the scientist in file names, then use the matching keys.
+- merge → three steps: `<isaac> bundle decide <bundle> --target <group id> --decision merge --merge-with <other group ids> --by "<name>"`
   (refused unless `--merge-with` names another live record group of this bundle), then
   `bundle group <bundle> --regroup`, then confirm the ONE combined group it proposes. The regroup
   combines them when the names differ only at positions the scientist declared counters, or only in a
@@ -35,15 +43,17 @@ Get the groups with `bundle list <bundle> groups` and one in full with `bundle s
 - a merge candidate with `caution` (its file names state different samples or conditions, or the build
   classified no condition at all): say the caution sentence first; merging such groups would usually
   make one wrong record. `bundle show <bundle> merge-candidate <id>` shows its run labels (no values).
-- a merge candidate the scientist says is two distinct things → `decide --target <mc id> --decision
-  keep_apart --by "<name>"` (no group changes).
+- a merge candidate the scientist says is two distinct things →
+  `<isaac> bundle decide <bundle> --target <mc id> --decision keep_apart --by "<name>"` (no group changes).
 - Say "7 of 12 groups confirmed" after each batch. A reference or alignment run is its own group.
 - Beamtime-wide notes are not group members.
 
 ## Processing (draft protocol `isaac.xas.v0`)
 
-`isaac process <bundle> --source <folder>` (always give `--source`: without a readable one it exits 2 and
-writes nothing; `--group <id>` redoes only that group and keeps every other group's result,
+`isaac process <bundle> --source <folder>` (always give `--source`; the bundle records the folder only
+with `import --record-local-root`, and without a readable one `process` exits 2 and writes nothing. After
+a ZIP import, ask the scientist to unzip it outside the bundle and confirm the folder is the data they
+approved; `--group <id>` redoes only that group and keeps every other group's result,
 `kept_other_groups`; rejected, merged and split groups are skipped, `not_live_groups`) computes, per live group, a normalised spectrum, an edge position, a quality
 verdict (pass / warn / fail), glitch flags, and compares with the scientist's own Athena output when
 it finds one. Show per group, in words:
@@ -106,8 +116,8 @@ it finds one. Show per group, in words:
   in those words.
 
 Ask: approve, reject, or needs changes (with a note):
-`decide --target <result_id> --decision approve --qc-status <word> [--qc-note "<why>"] --by "<name>"`, or
-`decide --target <result_id> --decision reject|needs_changes --note "<why>" --by "<name>"`. Rules:
+`<isaac> bundle decide <bundle> --target <result_id> --decision approve --qc-status <word> [--qc-note "<why>"] --by "<name>"`, or
+`<isaac> bundle decide <bundle> --target <result_id> --decision reject|needs_changes --note "<why>" --by "<name>"`. Rules:
 
 - **QC status is the scientist's.** Approving also needs `--qc-status <word>` (and `--qc-note` when the status says something is compromised or failed: `decide` refuses those without one). The processing verdict (`pass`/`warn`/`fail`) is shown to help them choose; it is never turned into a status for them, and `warn` never auto-maps. Offer the allowed words from the vocabulary and the flags that bear on the choice.
 - **One approved result per group.** A group can hold ISAAC's result (`…-isaac`) and one for the
@@ -131,14 +141,17 @@ Ask: approve, reject, or needs changes (with a note):
   refuses. Say why in words and offer: reject the result; `needs_changes` (the protocol needs a setting
   the scientist chooses; only on their explicit choice re-process with `--params-file`); or leave the
   group out (`reject` on the group).
-- **Approval is the scientist's**, per group. A `warn` or `fail` is shown prominently and never
-  approved on your suggestion. A rejected group yields no series and stays incomplete.
-- The protocol is a **draft until Oscar and Angel review it**. Say so each time you ask.
+- **Approval is the scientist's**, per group. A `warn` is shown prominently and is their call; never
+  suggest approving it. A `fail` for `edge_step_implausible`, `no_edge` or `post_edge_not_at_1` is never
+  offered for approval (offer reject or `needs_changes`); any other `fail` is approved only if the
+  scientist asks to. A rejected group yields no series and stays incomplete.
+- The protocol is a **draft until the ISAAC processing reviewers (Oscar and Angel) review it**. Say so
+  each time you ask.
 - If processing is unavailable, say "curves and quality checks are not available; records will stay
   incomplete" and continue.
 - **Several Athena versions.** When a result lists more than one of the scientist's Athena versions
-  (`athena_versions[]`), ask which one is their result of record and record `decide --target
-  <result_id> --decision select_athena_version --value <version_id> --by "<name>"`. It changes no QC
+  (`athena_versions[]`), ask which one is their result of record and record
+  `<isaac> bundle decide <bundle> --target <result_id> --decision select_athena_version --value <version_id> --by "<name>"`. It changes no QC
   status and no processed value, and it is not an approval.
 - **The record lists only what was applied.** `measurement.processing.steps` comes from the approved
   result's steps, without a calibration whose shift was not applied (`outcome.applied: false`) and
@@ -149,9 +162,9 @@ Ask: approve, reject, or needs changes (with a note):
 
 Processing never shifts the energy axis on its own. When a result's flags say the calibration reference
 is unconfirmed, explain it plainly and ask the scientist which element and edge the reference foil
-measures (`--element Ir`, `--edge L3` style). Record `decide --target <group id> --decision
-approve_calibration --element <symbol> --edge <K|L1-L3|M1-M5> --by "<name>"`, then run
-`process --source <folder> --group <group id>` again. Without that decision the shift is not applied; do not guess the
+measures (`--element Ir`, `--edge L3` style). Record
+`<isaac> bundle decide <bundle> --target <group id> --decision approve_calibration --element <symbol> --edge <K|L1-L3|M1-M5> --by "<name>"`,
+then run `process --source <folder> --group <group id>` again. Without that decision the shift is not applied; do not guess the
 element or edge from a file name.
 When a result carries `reference_edge_not_found` (the reference's edge is not in the scan range, e.g. the
 monochromator was calibrated on a foil outside the grid), say so and do NOT ask for the reference's element and edge:
@@ -171,17 +184,17 @@ an `approve_calibration` would be meaningless, and no shift is proposed.
   can never become an exportable record as it stands: present it as such, leave it out of a bulk confirm,
   and offer `reject` (it is kept as decision history) or leaving it unconfirmed.
 - `naming_counter_positions` (an experiment-scope question): which positions of the file name are running
-  counters, not sample identity. Ask once. Answer with `decide <bundle> --target experiment --decision
-  set_counter_positions --positions 2,3 --by "<name>"` (`--positions last` when the counter is
+  counters, not sample identity. Ask once, before any group is confirmed. Answer with
+  `<isaac> bundle decide <bundle> --target experiment --decision set_counter_positions --positions 2,3 --by "<name>"` (`--positions last` when the counter is
   always the last token, whatever the name's length; where some names sharing a prefix end in a
   shorter run of numbers, `…_3` beside `…_3_001`, only the longest is read as ending in a counter),
   then `bundle group <bundle> --regroup` (decided groups are kept). The reply's
   `regroup_preview.statement` says how many groups the answer would join and which pending merge
   decisions it would let the regroup combine (`merge_decisions_unblocked`): tell the scientist before
-  regrouping. When they say a position is NOT a counter: `decide <bundle> --target experiment
-  --decision set_not_counter_positions --positions 2 --by "<name>"` (grouping is unchanged; the
-  question drops out). When they do not know: `decide <bundle> --target experiment --decision defer --by
-  "<name>"` records it; grouping is unchanged, the question stays, marked `deferred`, and a later
+  regrouping. When they say a position is NOT a counter:
+  `<isaac> bundle decide <bundle> --target experiment --decision set_not_counter_positions --positions 2 --by "<name>"`
+  (grouping is unchanged; the question drops out). When they say they do not know:
+  `<isaac> bundle decide <bundle> --target experiment --decision defer --by "<name>"` records it; grouping is unchanged, the question stays, marked `deferred`, and a later
   answer supersedes it. Never guess a position for them.
 
 ## After a new build re-processes
@@ -198,6 +211,6 @@ post-edge from 150 eV"), write a JSON file in the notes folder beside the bundle
 `{"<section>": {"<key>": <value>}}` with sections and keys from the protocol defaults
 (`apps/api/isaac_api/local_import/processing/protocol.py`, `DEFAULT_PARAMS`: `channels`, `calibration`,
 `deglitch`, `merge`, `normalize`, `qc`, `athena`; each result's `params.json` shows the resolved values). Unknown
-keys are refused. Then `process <bundle> --source <folder> --group <id> --params-file <file>`. Say back
+keys are refused. Then `<isaac> process <bundle> --source <folder> --group <id> --params-file <file>`. Say back
 exactly what changed; every changed value is recorded on the result. Never use it to pass a QC check:
 a threshold is the protocol's, not a fix.

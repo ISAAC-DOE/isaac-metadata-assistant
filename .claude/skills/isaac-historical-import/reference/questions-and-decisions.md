@@ -35,7 +35,11 @@ worth answering for that group, with the warning that explains it (`warnings`): 
 file names state that the record will not carry until its scale is confirmed. Pages hold at most 200 (`--limit` above that is refused). The older fine-grained list (`bundle list <bundle> questions`)
 is for lookup only.
 
-Order: blocking (export cannot happen without them) → conflicts that affect a record → optional.
+Order (SKILL.md Step 7): the minimum for one group → experiment-scope questions, once → the template
+(below) for what the files never state, then per group only what it leaves → conflicts that affect a
+record → optional. The counter question (`naming_counter_positions`) is asked earlier, in Step 5,
+before any group is confirmed. Every printed command with `<placeholders>` (`answer_command`,
+`next_commands`) is a template: fill it from the scientist's answer, never run it as it is.
 
 ## How to ask
 
@@ -50,14 +54,15 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
   type, a time not in UTC), lists the allowed values and records nothing; when one target of a bulk
   answer is refused, nothing is recorded for any.
 - Ask `produced_by` ("who made these measurements?") once, per beamtime; offer a folder-name hint
-  as a question, not an answer. Use their own name for `--by` once, ask for it once, reuse it.
+  as a question, not an answer. `--by` is the name the scientist gave in Step 1; do not ask again.
 
 ## Questions that need care
 
 - **One-group questions** show `scope: group:<id>` even when their id was made at experiment scope
   (`id_scope`); `--scope experiment` no longer lists them. Answer them like any group question.
 - **Deferred** (`deferred: {by, decided_utc}`): the scientist said "I don't know". It is still counted
-  and sorts last; do not ask it again unless they offer an answer.
+  and sorts last; do not ask it again unless they offer an answer (`--skip-deferred` leaves them out).
+  A question they did not answer at all is not deferred: record nothing.
 - **A conflict with `affects_record: false`** (`no_record_field`): the readings differ, but no record
   field carries them (a comment line, a unit spelling). Say how many there are; do not ask each.
 - **A conflict no reading of which the field takes** (`readings_that_fit_the_field: 0`; each reading
@@ -116,7 +121,7 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
 
 ## Recording
 
-- **An answer to a consolidated question:** `decide <bundle> --question <Q> --decision correct|confirm --value <v> --by "<name>" [--note "..."]`. It records one decision per target, each listed in the reply; read the list back. `--only group:<id>` answers for one group only (a per-group override of an experiment-wide answer); `--field <path>` picks the one field when a question covers several optional fields.
+- **An answer to a consolidated question:** `<isaac> bundle decide <bundle> --question <Q> --decision correct|confirm --value <v> --by "<name>" [--note "..."]`. It records one decision per target, each listed in the reply; read the list back. `--only group:<id>` answers for one group only (a per-group override of an experiment-wide answer); `--field <path>` picks the one field when a question covers several optional fields.
   A question the files ask ONCE for the whole beamtime (one beamtime-wide target, e.g. Technique from a shared
   macro; its reply says "It reaches every record group of the beamtime: N groups, M runs") also takes
   `--only group:<id>` with `correct` (or `confirm --value`): the answer is recorded for that group's runs only,
@@ -138,8 +143,8 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
   (beamline 4-3 style) scan headers write the start as a local clock time with no zone, so those
   start times have no value until the scientist states the zone the instrument clock was set to.
   Ask it in their words; **suggest no zone** — no file states one, and the facility's location is
-  not evidence about the clock. Record: `decide <bundle> --question <Q> --decision set_clock_time_zone
-  --value <the IANA name they give: Area/Location, or UTC> --by "<name>"` (an offset like
+  not evidence about the clock. Record:
+  `<isaac> bundle decide <bundle> --question <Q> --decision set_clock_time_zone --value <the IANA name they give: Area/Location, or UTC> --by "<name>"` (an offset like
   `-08:00` or an abbreviation like `PST` is refused; ask again for the zone name; a value starting
   with `-` must be written `--value=-08:00` or the command line itself rejects it before any check). Then each start
   time is shown converted to UTC and needs its own `confirm` (bulk allowed). A time that falls in
@@ -153,12 +158,12 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
   questions` again before you go on; never assume what they answered.
 - **Never** pass `--test-marker` to `build-records` with a real scientist; it is for the self-test.
 
-- Conflict: `decide --target <conflict id> --decision correct --value "<chosen or new value>" --by "<name>" --note "<why, in their words>"` (use `confirm --value` when they pick one of the listed readings that fits the field).
-- Missing value they know: `--decision confirm|correct --value <v>`; they do not know: `--decision defer`.
+- Conflict: `<isaac> bundle decide <bundle> --target <conflict id> --decision correct --value "<chosen or new value>" --by "<name>" --note "<why, in their words>"` (use `confirm --value` when they pick one of the listed readings that fits the field).
+- Missing value they know: `--decision confirm|correct --value <v>`; they say they do not know: `--decision defer`.
 - Extracted value they accept: `--decision confirm`; reject: `--decision reject`.
 - Several evidence-backed values the scientist accepts together: write their ids to `<bundle>-notes/ids.txt`
   (the notes folder beside the bundle, one id per line), never inside the bundle, list each item to
-  them first, then `decide --targets-file <bundle>-notes/ids.txt --decision confirm --by "<name>"`. Bulk confirm is refused for any
+  them first, then `<isaac> bundle decide <bundle> --targets-file <bundle>-notes/ids.txt --decision confirm --by "<name>"`. Bulk confirm is refused for any
   value with no source evidence; do not work around that.
 - **"The bundle changed since it was read"** (exit 2, nothing written): something else wrote the bundle
   meanwhile, often the *Local Imports* page. Run `bundle questions` again and re-check the answer still
