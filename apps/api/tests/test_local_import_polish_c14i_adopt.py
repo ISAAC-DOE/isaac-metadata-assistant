@@ -84,7 +84,7 @@ def test_ruling_the_kept_value_again_after_an_edit_ties_it_to_the_sheet(grouped,
     assert ph["recorded_note"].startswith("recorded `2` (")
     _rule(again, tmp_path / "again_ruled.xlsx", {ph["id"]: 2})
     _ties_then_settles(grouped, theirs, tmp_path / "again_ruled.xlsx", ph["id"], 2, capsys, tmp_path)
-    assert _ruling_notes(grouped)[-1]["note"].endswith("'File List'!H8 = 3)")
+    assert _ruling_notes(grouped)[-1]["note"].split(" (adopt id ")[0].endswith("'File List'!H8 = 3)")  # c14m: then the id
 
 
 def test_ruling_for_a_file_value_confirmed_before_the_sheet_ties_it(grouped, tmp_path, capsys, ticking):
@@ -97,7 +97,7 @@ def test_ruling_for_a_file_value_confirmed_before_the_sheet_ties_it(grouped, tmp
     assert ph["recorded_note"].startswith("recorded `12` (")
     _rule(first, tmp_path / "ruled.xlsx", {ph["id"]: 12})
     _ties_then_settles(grouped, theirs, tmp_path / "ruled.xlsx", ph["id"], 12, capsys, tmp_path)
-    assert _ruling_notes(grouped)[-1]["note"].endswith("'File List'!H8 = 2)")
+    assert _ruling_notes(grouped)[-1]["note"].split(" (adopt id ")[0].endswith("'File List'!H8 = 2)")
 
 
 def test_a_plain_cell_matching_the_recorded_value_records_nothing(grouped, tmp_path, capsys, ticking):
@@ -154,7 +154,7 @@ def test_a_ruling_from_a_workbook_adopted_before_the_value_was_kept_names_no_val
     code, rep, err = _import(grouped, tmp_path / "legacy.xlsx", capsys, "--apply")
     assert code == 0, err
     [d] = _ruling_notes(grouped)
-    assert d["note"].endswith(f"{THEIRS} 'File List'!H8)") and " = " not in d["note"]
+    assert d["note"].split(" (adopt id ")[0].endswith(f"{THEIRS} 'File List'!H8)") and " = " not in d["note"]
 
 
 # --- LOW-3 ----------------------------------------------------------------------------------------------------

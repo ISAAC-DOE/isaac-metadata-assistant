@@ -40,10 +40,12 @@ asks once for the whole beamtime is recorded per run (``mutations.run_answer_tar
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import math
 import os
 import re
+import secrets
 import shlex
 import tempfile
 from dataclasses import dataclass
@@ -1203,7 +1205,11 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
                            "already_recorded": [], "off_list": [], "adopted_from": (marker.get("meta") or {}).get("adopted_from"),
                            "exported_utc": (marker.get("meta") or {}).get("exported_utc"),
                            # c14l MED-2: how many decisions the log held when `template adopt` wrote it
-                           "decisions_at_adopt": (marker.get("meta") or {}).get("decisions_at_adopt")}
+                           "decisions_at_adopt": (marker.get("meta") or {}).get("decisions_at_adopt"),
+                           # c14m MED-2: a hash of the decisions it held then (:func:`decisions_fingerprint`)
+                           "decisions_fingerprint": (marker.get("meta") or {}).get("decisions_fingerprint"),
+                           # c14m MED-3: this adoption's own id, which each of its rulings' notes carries
+                           "adopt_id": _adopt_id((marker.get("meta") or {}).get("adopt_id"))}
     adopted = marker.get("adopted") or {}
     for name in (SHEET_CAMPAIGN, SHEET_CONFIG, SHEET_FILES):
         if name not in wb.sheetnames:
@@ -1239,7 +1245,7 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
 
     def take(sheet, ref, col: Column, raw: Any, *, run: Mapping | None, scope: str, via: str | None = None,
              because: str | None = None, ruling: tuple[str, str, Any] | None = None,
-             against: Sequence[str] | None = None):
+             against: Sequence[str] | None = None, adopt_id: str | None = None):
         rule = rules.get(col.path or "")
         value, why = _parse(raw, rule)
         if not why and col.path == ELECTROLYTE_NAME_PATH:
@@ -1260,6 +1266,8 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
             unmapped(sheet, col, ref, value)
             return
         note = cite(sheet, ref) + (f" (via {via})" if via else "") + (f" ({because})" if because else "")
+        if because and adopt_id:
+            note += _adopt_note(adopt_id)  # c14m MED-3: after the provenance, which :func:`_ruled_here` still reads
         origin = adopted.get(_cell_ref(sheet, ref)) if not because else None
         if origin:
             note += f" (adopted from {origin.get('their_file')} {origin.get('their_cell')})"
@@ -1444,12 +1452,15 @@ def _ruled_here(log: Sequence[Mapping], place: int, provenance: tuple[str, str, 
     file> <their cells> = <their value>" for the same file and cells (the Dn number may change between adopts; the cells
     do not) and the value their sheet held there THEN agrees with the one it holds now (``provenance`` = (their file,
     their cells, their value); c14h MED-1: a cell the scientist edited since is a new disagreement, never settled by the
-    old ruling). A note written before the value was kept (no `` = ``) is not a ruling here: the row awaits one."""
+    old ruling). A note written before the value was kept (no `` = ``) is not a ruling here: the row awaits one.
+    c14m MED-3: a note may end with the adoption's id (:func:`_adopt_note`) after that provenance; one without it
+    (written before it was kept) reads as before."""
     if provenance is None or not (0 <= place < len(log)):
         return False
     note = (log[place] or {}).get("note") if isinstance(log[place], Mapping) else None
     their = re.escape(f"{provenance[0]} {provenance[1]}")
-    found = isinstance(note, str) and re.search(rf"\(your (?:concentration )?ruling on disagreement D\d+: {their} = (.+)\)$", note)
+    found = isinstance(note, str) and re.search(
+        rf"\(your (?:concentration )?ruling on disagreement D\d+: {their} = (.+?)\)(?:{_ADOPT_NOTE_RE})?$", note)
     if not found:
         return False
     if found.group(1) == _ruled_on_text(provenance[2]):
@@ -1467,6 +1478,29 @@ def _ruled_in_chain(log: Sequence[Mapping], chain: Sequence[int], provenance: tu
     (:func:`_ruled_here`). Two sheets of theirs ruled the same value then both stay settled: the later tie extends the
     run, it never replaces the earlier ruling; a different value, a reject or a defer ends the run."""
     return any(_ruled_here(log, p, provenance) for p in chain)
+
+
+#: c14m MED-3: how a ruling's note names the adoption it was ruled on (:func:`_adopt_note`, :func:`_note_adopt_id`)
+_ADOPT_NOTE_RE = r" \(adopt id ([0-9a-f]{32})\)"
+
+
+def _adopt_id(value: Any) -> str | None:
+    """c14m MED-3: the ``_isaac`` ``adopt_id`` (32 hex digits, random per ``template adopt``), or ``None`` for a
+    workbook adopted before it was kept, or a damaged value."""
+    text = value.strip().lower() if isinstance(value, str) else None
+    return text if text and re.fullmatch(r"[0-9a-f]{32}", text) else None
+
+
+def _adopt_note(adopt_id: str) -> str:
+    """c14m MED-3: appended to a ruling's note, after its provenance (:func:`_ruled_here` still reads it)."""
+    return f" (adopt id {adopt_id})"
+
+
+def _note_adopt_id(decision: Any) -> str | None:
+    """c14m MED-3: the adoption a decision's ruling was made on (:func:`_adopt_note`), or ``None``."""
+    note = decision.get("note") if isinstance(decision, Mapping) else None
+    found = isinstance(note, str) and re.search(_ADOPT_NOTE_RE + "$", note)
+    return found.group(1) if found else None
 
 
 def _ruled_on_text(value: Any) -> str:
@@ -1491,6 +1525,9 @@ def _marker_their_value(entry: Mapping) -> tuple[Any, bool]:
 #: c14k LOW-2: what :func:`_marker_governing` reads from a damaged ``governing_decisions`` value; never a decision id,
 #: and a ruling carrying it is never tied (:func:`_rules_against_now`), unlike ``[]`` (adopted with nothing recorded)
 GOVERNING_DAMAGED = "(damaged)"
+#: c14m MED-2: what a ruling's ``ruled_against`` holds when its workbook is unplaceable (:func:`_placed`): the bundle's
+#: decisions changed since it was adopted, so the ids it was ruled against may name other decisions now
+GOVERNING_UNPLACEABLE = "(unplaceable)"
 
 
 def _marker_governing(entry: Mapping) -> list[str] | None:
@@ -1593,12 +1630,40 @@ def governing_decisions(answers: Mapping, log: Sequence[Mapping], paths: Sequenc
 def _adopt_position(value: Any, log_length: int) -> int | None:
     """c14l MED-2: the ``_isaac`` ``decisions_at_adopt`` value (how many decisions the log held when ``template adopt``
     wrote the workbook), or ``None`` for a workbook adopted before it was kept, or a damaged value (not a whole number,
-    or more decisions than the log holds now): such a workbook is read as before (:func:`_rules_against_now`)."""
-    if isinstance(value, str) and value.strip().isdigit():
-        value = int(value.strip())
+    or more decisions than the log holds now): such a workbook is read as before (:func:`_rules_against_now`).
+    c14m LOW-3: only ASCII digits are a whole number here (``"²".isdigit()`` is true, and ``int("²")`` raises)."""
+    if isinstance(value, str):
+        text = value.strip()
+        value = int(text) if text.isascii() and text.isdecimal() else None
     if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= log_length:
         return None
     return value
+
+
+def decisions_fingerprint(log: Sequence[Mapping], n: int) -> str:
+    """c14m MED-2: a sha256 over the first ``n`` decisions of ``log`` (each one's ``decision_id``, ``decided_utc``,
+    ``target``, ``decision`` and ``value``, as canonical JSON; ``n`` 0 hashes the empty prefix). ``template adopt``
+    keeps it beside ``decisions_at_adopt``: a copied or restored bundle keeps its ``bundle_id``, and decision ids
+    (``d-NNNNN``) repeat after a fork, so only this says the log still begins with the decisions the workbook saw."""
+    rows = [[d.get(k) for k in ("decision_id", "decided_utc", "target", "decision", "value")] if isinstance(d, Mapping)
+            else None for d in list(log)[:n]]
+    text = json.dumps(rows, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _placed(cells: Mapping, log: Sequence[Mapping]) -> tuple[int | None, bool]:
+    """c14m MED-2: ``(adopted_at, unplaceable)`` of a workbook against the decision log it is imported into. A workbook
+    that keeps a fingerprint (:func:`decisions_fingerprint`) is placed only when the log's first ``decisions_at_adopt``
+    decisions hash to it; otherwise (copied or restored, a fork, a damaged value) it is UNPLACEABLE: neither its place
+    nor its ``governing_decisions`` ids are trusted, so none of its rulings is tied or recorded over another value. A
+    workbook adopted before the fingerprint was kept is placed as before (:func:`_adopt_position`)."""
+    adopted_at = _adopt_position(cells.get("decisions_at_adopt"), len(log))
+    kept = cells.get("decisions_fingerprint")
+    if kept is None:
+        return adopted_at, False
+    if adopted_at is None or not isinstance(kept, str) or kept.strip().lower() != decisions_fingerprint(log, adopted_at):
+        return None, True
+    return adopted_at, False
 
 
 def _since_adopt(place: int | None, decision: Mapping | None, adopted_at: int | None, exported_utc: Any) -> bool:
@@ -1617,7 +1682,7 @@ def _since_adopt(place: int | None, decision: Mapping | None, adopted_at: int | 
 
 def _rules_against_now(cell: Mapping, prior: Mapping, exported_utc: Any, chain: Sequence[Mapping] = (),
                        history: Sequence[Mapping] | None = None, *, adopted_at: int | None = None,
-                       places: Mapping[int, int] | None = None, keeps: bool = True) -> bool:
+                       places: Mapping[int, int] | None = None, keeps: bool = True, adopt_id: str | None = None) -> bool:
     """c14j MED-1: whether a Disagreements ruling (``cell``) was made against the value that governs its target now.
     ``chain`` (c14k MED-1, :class:`_Chains`): the decisions of the unbroken same-value run ending at ``prior``, the
     decision that governs now (``()``: ``prior`` alone). Made against it when the decisions its row read when adopted
@@ -1635,13 +1700,20 @@ def _rules_against_now(cell: Mapping, prior: Mapping, exported_utc: Any, chain: 
     ``history`` counts, as before. c14l MED-1: ``keeps`` ``False`` is a ruling that gives a DIFFERENT value, read
     before ``--supersede`` records it over ``prior``: made against ``prior`` only when one of ``chain`` was among the
     decisions it was ruled against, or (``adopted_at``) nothing was recorded on the target since the workbook was
-    adopted (``prior`` was there to see); never by a run that only began since (it never saw that value)."""
+    adopted (``prior`` was there to see); never by a run that only began since (it never saw that value).
+
+    c14m MED-2: a ruling of an unplaceable workbook (:func:`_placed`, ``ruled_against`` ``[GOVERNING_UNPLACEABLE]``)
+    is never made against it. c14m MED-3: one of ``chain`` recorded from THIS adoption (its note carries ``adopt_id``,
+    :func:`_note_adopt_id`) means the scientist ruled the value recorded now on this very workbook: their correction is
+    made against it. Another adoption of the same sheet has another id, so two of them never flip the value."""
     from . import propose_terms as P
 
     run = list(chain) or [prior]
     against = cell.get("ruled_against")
-    if against is not None and GOVERNING_DAMAGED in against:
-        return False  # c14k LOW-2: what it was ruled against cannot be read
+    if against is not None and (GOVERNING_DAMAGED in against or GOVERNING_UNPLACEABLE in against):
+        return False  # c14k LOW-2: what it was ruled against cannot be read (c14m MED-2: nor trusted)
+    if adopt_id is not None and any(_note_adopt_id(d) == adopt_id for d in run):
+        return True
     if against is not None:
         if any(d.get("decision_id") in against for d in run):
             return True
@@ -1794,6 +1866,7 @@ def _read_rulings(wb, marker: Mapping, runs: Mapping, known: Mapping[str, Column
     # a workbook adopt wrote before the concentration ruling column (nine columns) has no column J to read
     conc_column = str(ws[f"{DISAGREE_CONC_COLUMN}1"].value or "").strip() == DISAGREE_HEADERS[9]
     conc_col = next(c for c in FILE_COLUMNS if c.path == ELECTROLYTE_CONC_PATH)
+    adopt_id = _adopt_id((marker.get("meta") or {}).get("adopt_id"))  # c14m MED-3: carried by each ruling's note
     for e in entries:
         try:
             row = int(e.get("row"))
@@ -1832,7 +1905,7 @@ def _read_rulings(wb, marker: Mapping, runs: Mapping, known: Mapping[str, Column
             out["read"] = out.get("read", 0) + 1
             if e.get("scope") == "experiment":
                 take(SHEET_DISAGREE, cell_ref, column, raw, run=None, scope="experiment", because=why_said, ruling=tie,
-                     against=against)
+                     against=against, adopt_id=adopt_id)
                 return
             for run_id in runs_named:
                 run = runs.get(run_id)
@@ -1841,7 +1914,7 @@ def _read_rulings(wb, marker: Mapping, runs: Mapping, known: Mapping[str, Column
                                            "reason": f"the run {run_id!r} is not in this bundle"})
                     continue
                 take(SHEET_DISAGREE, cell_ref, column, raw, run=run, scope="run", because=why_said, ruling=tie,
-                     against=against)
+                     against=against, adopt_id=adopt_id)
 
         # M3: the CONCENTRATION of an electrolyte row ("0.01 M HClO4"), ruled in its own column, for the same runs
         craw = None
@@ -1904,8 +1977,28 @@ def _same_value(a: Any, b: Any) -> bool:
     return type(a) is type(b) and a == b
 
 
+#: c14m MED-2: why a ruling of an unplaceable workbook (:func:`_placed`) is neither tied nor recorded over a value
+UNPLACEABLE_REASON = "this bundle's decisions changed since the workbook was adopted (copied or restored?); adopt again"
+
+
+def decide_command(target: str | None, decision: str, value: Any) -> str:
+    """c14m LOW-2: the ``isaac bundle decide`` command that records ``value`` on ``target`` now, outside the workbook
+    (text as typed; any other value as JSON with ``--json``). ``confirm`` (a candidate whose extracted value it is)
+    takes no value."""
+    shown = ("" if decision == "confirm" else f" --value {shlex.quote(value)}" if isinstance(value, str)
+             else f" --value {shlex.quote(_ruled_on_text(value))} --json")
+    return (f"isaac bundle decide <bundle_dir> --target {target or '<target id>'} --decision {decision}{shown} "
+            '--by "<your name>"')
+
+
+def _or_decide(target: str | None, decision: str, value: Any) -> str:
+    """c14m LOW-2: the end of every stale and clash reason: the immediate alternative, with the target filled in."""
+    return f", or record this value directly: {decide_command(target, decision, value)}"
+
+
 def _stale_reason(cell: Mapping, chain: Sequence[Mapping], chains: "_Chains", run: Sequence[int],
-                  exported_utc: Any, *, adopted_at: int | None = None, keeps: bool = True) -> str:
+                  exported_utc: Any, *, adopted_at: int | None = None, keeps: bool = True,
+                  target: str | None = None, decision: str = "correct") -> str:
     """c14k MED-1: why a ruling that keeps the recorded value is not tied (:func:`plan_and_record`): its workbook was
     adopted before the run of that value began (``chain``, latest first; :class:`_Chains`). The decision that ended the
     previous run is named only when it is known to come after the workbook (not among the decisions it was ruled
@@ -1913,21 +2006,31 @@ def _stale_reason(cell: Mapping, chain: Sequence[Mapping], chains: "_Chains", ru
     place (``adopted_at``) or, without it, a readable time strictly after the workbook's proves it
     (:func:`_since_adopt`); a reject, a defer or a value recorded before the adopt is never said to have come since.
     c14l MED-1: ``keeps`` ``False``: a ruling giving a different value that ``--supersede`` does not record, because it
-    was not made against the value recorded now (:func:`_rules_against_now`)."""
+    was not made against the value recorded now (:func:`_rules_against_now`).
+
+    c14m: an unplaceable workbook says so (MED-2, :data:`UNPLACEABLE_REASON`); a ruling refused because the scientist's
+    own earlier ruling on this row, from another adoption of the same sheet, is what is recorded now names it (MED-3);
+    a workbook adopted with nothing recorded on the target never says "made against an earlier value" (LOW-1); and every
+    reason ends with the ``decide`` command for ``target`` (LOW-2, :func:`decide_command`)."""
     from . import propose_terms as P
 
+    alternative = _or_decide(target, decision, cell.get("value"))
     first = chain[-1].get("decision_id") or "the decision that governs now"
     against = cell.get("ruled_against")
+    if against is not None and GOVERNING_UNPLACEABLE in against:
+        return (f"{UNPLACEABLE_REASON} and rule against what is recorded now; nothing is recorded for this ruling"
+                + ("" if keeps else ", even with --supersede,") + f" and the value recorded now is kept{alternative}")
     ended = chains.before(run[-1]) if run else None
     changed = chains.log[ended] if ended is not None else None
     since = ""
     if against is not None and GOVERNING_DAMAGED in against:
         if keeps:
             return ("ruled on a workbook whose `_isaac` governing_decisions value is damaged, so it is never tied; the "
-                    "recorded value is kept and nothing is recorded for this ruling. Adopt again to settle this sheet")
+                    "recorded value is kept and nothing is recorded for this ruling. Adopt again to settle this sheet"
+                    + alternative)
         return ("ruled on a workbook whose `_isaac` governing_decisions value is damaged, so it is never recorded over "
                 "another value, even with --supersede; the value recorded now is kept and nothing is recorded for this "
-                "ruling. Adopt again and rule against what is recorded now")
+                "ruling. Adopt again and rule against what is recorded now" + alternative)
     if (changed is not None and against is not None and changed.get("decision_id") not in against
             and _since_adopt(ended, changed, adopted_at, exported_utc)):
         did = changed.get("decision_id")
@@ -1938,13 +2041,24 @@ def _stale_reason(cell: Mapping, chain: Sequence[Mapping], chains: "_Chains", ru
         lead = (f"ruled on a workbook adopted before {first}" if placed
                 else f"ruled on a workbook whose adoption time cannot be placed after {first}")
         return (f"{lead}{since}; the recorded value is kept and nothing is recorded for this ruling. Adopt again to settle "
-                "this sheet")
+                "this sheet" + alternative)
+    tail = (" nothing is recorded for it, even with --supersede, and the value recorded now is kept. Adopt again and "
+            "rule against what is recorded now" + alternative)
+    # c14m MED-3: their own earlier ruling on this row, from another adoption of this sheet, governs now
+    own = next((chains.log[p].get("decision_id") for p in run if _ruled_here(chains.log, p, cell.get("ruling"))), None)
+    if own is not None:
+        return (f"your earlier ruling on this row ({own}) is what is recorded now; this ruling, on another adoption of "
+                f"the same sheet, was not made against it, so{tail}")
     # a ruling read before --supersede: "adopted before" only when the log's place or the time proves it
     placed = bool(run) and _since_adopt(run[-1], chain[-1], adopted_at, exported_utc)
+    history = chains.history(run[0]) if run else list(chain)
+    if placed and against is not None and not any(d.get("decision_id") in against for d in history):
+        # c14m LOW-1: adopted with nothing recorded on the target: there was no earlier value to rule against
+        return (f"ruled on a workbook adopted with nothing recorded here; this ruling was made before {first} recorded "
+                f"the value now, so it never saw it{since}:{tail}")
     lead = (f"ruled on a workbook adopted before {first}{since}; this ruling was made against an earlier value, so"
             if placed else f"ruled on a workbook not shown to have been adopted against {first}, so")
-    return (f"{lead} nothing is recorded for it, even with --supersede, and the value recorded now is kept. Adopt again and "
-            "rule against what is recorded now")
+    return f"{lead}{tail}"
 
 
 def _prior(bundle: Mapping, kind: str, obj: Mapping, latest: Mapping) -> Mapping | None:
@@ -2133,19 +2247,30 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
     tied: set[str] = set()  # c14i MED-1: a ruling's same value, recorded again to tie it to their sheet
     chains = _Chains(bundle)  # c14k MED-1: the same-value run that ends at each target's governing decision
     place_of = {id(d): i for i, d in enumerate(chains.log)}
-    # c14l MED-2: the decision log's length when the workbook was adopted ("recorded since" is a place, not a time)
-    adopted_at = _adopt_position(cells.get("decisions_at_adopt"), len(chains.log))
-    placing = dict(adopted_at=adopted_at, places=place_of)
+    # c14l MED-2: the decision log's length when the workbook was adopted ("recorded since" is a place, not a time);
+    # c14m MED-2: trusted only while the log still begins with the decisions it held then (else unplaceable)
+    adopted_at, unplaceable = _placed(cells, chains.log)
+    # c14m MED-3: a decision this very adoption recorded (its note carries the id) was ruled against the value now
+    placing = dict(adopted_at=adopted_at, places=place_of, adopt_id=None if unplaceable else cells.get("adopt_id"))
     seen_target: set[str] = set()
+    # c14m MED-1: every target each Disagreements ruling cell reaches, as a `stale_rulings` entry would list it
+    reached: dict[str, list[dict]] = {}
     for cell, decision, kind, obj, tid in planned:
+        if unplaceable and cell["sheet"] == SHEET_DISAGREE:
+            cell = {**cell, "ruled_against": [GOVERNING_UNPLACEABLE]}  # c14m MED-2: its governing ids name nothing sure
         if tid in split:
             report["clashes"].append({"cell": cell["cell"], "target": {"kind": kind, "id": tid}, "value": cell["value"],
-                                      "reason": "another cell of this workbook gives this target a different value; neither is recorded"})
+                                      "reason": "another cell of this workbook gives this target a different value; neither "
+                                                "is recorded" + _or_decide(tid, decision, cell["value"])})
             continue
         if tid in seen_target or (tid in ruled and not cell.get("ruling")):
             continue
         seen_target.add(tid)
         prior = _prior(bundle, kind, obj, latest)
+        if cell["sheet"] == SHEET_DISAGREE:
+            reached.setdefault(cell["cell"], []).append({
+                "cell": cell["cell"], "target": {"kind": kind, "id": tid}, "value": cell["value"], "run_id": obj.get("run_id"),
+                "header": cell["header"], "decision_id": (prior or {}).get("decision_id"), "_decision": decision})
         if prior is not None and prior.get("decision") in (B.CONFIRMING_DECISIONS | {"reject"}):
             base = obj.get("value") if kind == "candidate" else None
             before = B.final_value(base, prior)
@@ -2172,7 +2297,7 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                                         "run_id": obj.get("run_id"), "header": cell["header"],
                                         "decision_id": prior.get("decision_id"),
                                         "reason": _stale_reason(cell, chain, chains, run, cells.get("exported_utc"),
-                                                                adopted_at=adopted_at)})
+                                                                adopted_at=adopted_at, target=tid, decision=decision)})
                 continue
             elif same:
                 report["already"].append({"cell": cell["cell"], "target": {"kind": kind, "id": tid}, "value": cell["value"],
@@ -2190,10 +2315,12 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                         "existing": {"decision": prior.get("decision"), "value": before, "decision_id": prior.get("decision_id"),
                                      "decided_by": (prior.get("decided_by") or {}).get("name")},
                         "reason": ("an earlier scientist decision gives a different value; skipped, and --supersede does not "
-                                   "record it either: this ruling was not made against the value recorded now. Adopt again "
-                                   "and rule against what is recorded now" if unseen else
+                                   "record it either: " + (UNPLACEABLE_REASON + " and rule against what is recorded now"
+                                                           if unplaceable else "this ruling was not made against the value "
+                                                           "recorded now. Adopt again and rule against what is recorded now")
+                                   + _or_decide(tid, decision, cell["value"]) if unseen else
                                    "an earlier scientist decision gives a different value; skipped (pass --supersede to "
-                                   "record this one)"),
+                                   "record this one" + _or_decide(tid, decision, cell["value"]) + ")"),
                     })
                     continue
                 if unseen:
@@ -2201,7 +2328,8 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                                             "run_id": obj.get("run_id"), "header": cell["header"],
                                             "decision_id": prior.get("decision_id"),
                                             "reason": _stale_reason(cell, chain, chains, run, cells.get("exported_utc"),
-                                                                    adopted_at=adopted_at, keeps=False)})
+                                                                    adopted_at=adopted_at, keeps=False, target=tid,
+                                                                    decision=decision)})
                     continue
         if cell["cell"] in hinted and tid not in tied:  # c14j LOW-1: a tied ruling changes no value
             # once per cell: a Campaign Info answer fills every run's target, and one hint line covers them all
@@ -2241,6 +2369,27 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                                     "run_id": obj.get("run_id"), "decision": decision, "value": cell["value"]})
         if tid not in tied:  # c14j LOW-1: a tied ruling keeps the recorded value, so it replaces no file reading
             contradiction(cell, obj, readings, "recorded_as_typed")
+
+    # c14m MED-1: A RULING CELL IS ALL OR NOTHING. When any target it reaches was not made against the value recorded
+    # now (listed in `stale_rulings`), nothing is recorded for any of them, and every one is listed there (as two cells
+    # of this workbook giving one target different values record neither): a whole-beamtime ruling is never applied
+    # to some runs and not others
+    stale_cells = {x["cell"] for x in report["stale"] if x["cell"] in reached}
+    if stale_cells:
+        listed = {(x["cell"], x["target"]["id"]): x for x in report["stale"]}
+        report["stale"] = [x for x in report["stale"] if x["cell"] not in stale_cells]
+        for name in (n for n in reached if n in stale_cells):
+            first = next(x for x in reached[name] if (name, x["target"]["id"]) in listed)
+            for x in reached[name]:
+                how = x.pop("_decision")
+                report["stale"].append(listed.get((name, x["target"]["id"])) or {**x, "reason": (
+                    f"this ruling reaches {len(reached[name])} targets and is recorded for all of them or none, and "
+                    f"{first['target']['id']}{' (' + first['run_id'] + ')' if first.get('run_id') else ''} was not made "
+                    "against the value recorded there now (its own line says why); nothing is recorded for this one "
+                    "either. Adopt again and rule against what is recorded now" + _or_decide(x["target"]["id"], how, x["value"]))})
+        for key in ("decisions", "tied", "already"):
+            report[key] = [d for d in report[key] if d["cell"] not in stale_cells]
+        calls = {k: c for k, c in calls.items() if k[0] not in stale_cells}
 
     recorded: list[str] = []
     unchanged: list[str] = []
@@ -2860,6 +3009,9 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
         for x in rep["extracted_values_left_alone"]:
             add(f"  {x['cell']} {x['target_field_path']}: {x['candidates']} extracted value(s); {x['reason']}")
     add("")
+    # c14m MED-1: "not tied … (nothing recorded)" counts only the ruling cells that recorded nothing
+    unrecorded = ({str(x["cell"]).split(" via ", 1)[0] for x in rep.get("stale_rulings") or ()}
+                  - {str(d["cell"]).split(" via ", 1)[0] for d in rep.get("decisions") or ()})
     add(
         f"Summary: {rep['cells_read']} cells read; {rep['recorded'] if rep['applied'] else rep['would_record']} decision(s) "
         f"{verb}{_tied_summary(rep)}; {rep['unchanged']} unchanged; {len(rep['already_decided_same_value'])} decision(s) (from "
@@ -2873,8 +3025,7 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
         + (f"; {len(rep['replaces_or_contradicts_a_file_reading'])} replace or contradict a file reading"
            if rep.get("replaces_or_contradicts_a_file_reading") else "")
         + (f"; {len(rep['awaiting_ruling'])} disagreement(s) awaiting a ruling" if rep.get("awaiting_ruling") else "")
-        + (f"; {len({str(x['cell']).split(' via ', 1)[0] for x in rep['stale_rulings']})} ruling cell(s) not tied to "
-           "your sheet (nothing recorded)" if rep.get("stale_rulings") else "")
+        + (f"; {len(unrecorded)} ruling cell(s) not tied to your sheet (nothing recorded)" if unrecorded else "")
         + (f"; {len(rep['disagreements_already_recorded'])} disagreement(s) already recorded (blank: kept)"
            if rep.get("disagreements_already_recorded") else "")
         + (f"; {len({x['group_id'] for x in rep['not_reached']})} group(s) not reached by a beamtime-wide answer"
@@ -3566,6 +3717,14 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
         # c14l MED-2: the decision log's length at adopt; a decision at or after this place was recorded since
         marker.cell(row=r + 2, column=1, value="decisions_at_adopt")
         marker.cell(row=r + 2, column=2, value=len(chains.log))
+        # c14m MED-2: and a hash of those decisions: a copied, restored or forked bundle (same bundle_id, decision
+        # ids that repeat) whose log no longer begins with them leaves the workbook unplaceable (:func:`_placed`)
+        marker.cell(row=r + 3, column=1, value="decisions_fingerprint")
+        marker.cell(row=r + 3, column=2, value=decisions_fingerprint(chains.log, len(chains.log)))
+        # c14m MED-3: this adoption's own id, carried by each ruling's note: a scientist correcting a ruling they made
+        # on this workbook rules against the value recorded now; another adoption of the same sheet has another id
+        marker.cell(row=r + 4, column=1, value="adopt_id")
+        marker.cell(row=r + 4, column=2, value=secrets.token_hex(16))
 
         result["disagreements"] = [{k: g[k] for k in ("id", "kind", "header", "path", "their_value", "their_cells", "readings",
                                                       "runs", "answer_cells", "reason", "scope", "unread_hints",

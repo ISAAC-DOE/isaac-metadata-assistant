@@ -1903,6 +1903,22 @@ adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
   says "N ruling cell(s) not tied to your sheet (nothing recorded)"; each reason says why. A damaged
   `governing_decisions` list (any element that is not a decision id) is never tied. A ruling takes its target from a
   File List cell giving the same value.
+  (c14m) **The rule.** A ruling is made against the value recorded now when one of the same-value run that governs
+  now is among the decisions its row read at adopt (`governing_decisions`), or was recorded from this very workbook
+  (adopt writes a random `_isaac` `adopt_id`, and each ruling's note ends with "(adopt id <id>)" after its provenance,
+  so a scientist correcting their own ruling supersedes it; another adoption of the same sheet has another id), or
+  nothing was recorded on the target since the adopt (a ruling that keeps the value: nothing but that run). Only then
+  is a same-value ruling tied, or a different value recorded with `--supersede`; otherwise the ruling is listed in
+  `stale_rulings` with its reason ("your earlier ruling on this row (d-N) is what is recorded now"; "made before d-N
+  recorded the value now, so it never saw it" for a workbook adopted with nothing recorded), which ends with the
+  command that records it directly (`isaac bundle decide <bundle_dir> --target <id> --decision correct --value <v>
+  --by "<your name>"`; adopting again also works), as every clash reason does. "Since" is a place in the log, trusted
+  only while the log's first `decisions_at_adopt` decisions hash to the `_isaac` `decisions_fingerprint` (sha256 of
+  each one's `decision_id`, `decided_utc`, `target`, `decision` and `value` as canonical JSON); a copied, restored or
+  forked bundle (same `bundle_id`, decision ids that repeat) fails it, and the workbook is unplaceable: nothing of it
+  is tied or recorded over another value ("this bundle's decisions changed since the workbook was adopted (copied or
+  restored?); adopt again"). A ruling cell is all or nothing: when any target it reaches is stale, none is recorded
+  and every one is listed. A workbook without the fingerprint or the adopt id is read as before.
   Settled, it says "already recorded: <value> (<date>); leave blank to keep" (the adopt result's `already_recorded`,
   counted apart in the summary); otherwise it awaits a ruling and says "recorded `12` (date); your sheet says `2`:
   rule which" (`recorded_note`). An Electrolyte row stating a concentration is settled only when the name and the

@@ -563,7 +563,7 @@ def scan_selection(label: str, stems: Sequence[str]) -> list[int] | None:
                 if b < a or b - a > 500:
                     return None
                 out.extend(range(a, b + 1))
-            elif tok.isdigit():
+            elif tok.isdecimal():  # c14m LOW-3: "²".isdigit() is true, and int("²") raises
                 out.append(int(tok))
             else:
                 return None

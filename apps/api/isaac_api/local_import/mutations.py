@@ -869,7 +869,7 @@ def scan_subset_note(bundle: Mapping, result: Mapping) -> str | None:
         several = len({run_of.get(i.get("source_id")) for i in inputs}) > 1
         how = (f" (the run{'s state' if several else ' states'} no scan index; each scan's number is read from its file "
                "name)")
-    unlisted = [n for n in chosen if not (n.isdigit() and int(n) in set(numbers))]
+    unlisted = [n for n in chosen if not (n.isdecimal() and int(n) in set(numbers))]  # c14m LOW-3: "²" is a digit
     if unlisted:
         # a number the run does not have is not "a scan ISAAC did not merge": which scans it means is unknown
         return (f"The scientist's Athena curve for group {gid} names scan(s) {', '.join(unlisted)}, which the "

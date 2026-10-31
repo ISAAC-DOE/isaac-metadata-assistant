@@ -1293,7 +1293,7 @@ def non_finite_findings(bundle: Mapping) -> list[str]:
     for path, value in non_finite_numbers(bundle):
         line = f"{path} holds {value!r}"
         parts = path.split("/")
-        if parts[0] == "scientist_decisions" and len(parts) > 1 and parts[1].isdigit() and int(parts[1]) < len(decisions):
+        if parts[0] == "scientist_decisions" and len(parts) > 1 and parts[1].isdecimal() and int(parts[1]) < len(decisions):
             d = decisions[int(parts[1])]
             t = d.get("target") or {}
             later = [x.get("decision_id") for x in decisions[int(parts[1]) + 1:] if (x.get("target") or {}) == t]

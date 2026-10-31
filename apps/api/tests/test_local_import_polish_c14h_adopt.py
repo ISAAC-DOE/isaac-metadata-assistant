@@ -58,8 +58,9 @@ def _ruling_notes(grouped):
 def test_a_ruling_note_names_the_value_it_was_made_on(grouped, tmp_path, capsys, ticking):
     _ruled_ph(grouped, tmp_path, capsys, 12)
     [d] = _ruling_notes(grouped)
-    assert d["note"].endswith(f"(your ruling on disagreement {d['note'].split('disagreement ')[1].split(':')[0]}: "
-                              f"{THEIRS} 'File List'!H8 = 2)")
+    # c14m MED-3: the adoption's id follows the provenance
+    assert d["note"].split(" (adopt id ")[0].endswith(
+        f"(your ruling on disagreement {d['note'].split('disagreement ')[1].split(':')[0]}: {THEIRS} 'File List'!H8 = 2)")
 
 
 def test_an_unedited_sheet_adopted_again_after_a_ruling_is_settled(grouped, tmp_path, capsys, ticking):

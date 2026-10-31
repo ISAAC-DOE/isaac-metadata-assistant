@@ -244,7 +244,7 @@ def _scan_index_misread(c: Mapping, run: Mapping) -> dict | None:
         return None
     for e in on_scans:
         lit = str(e.get("literal_value") or "").strip()
-        if not lit.isdigit() or int(lit) != idx[e["source_id"]]:
+        if not lit.isdecimal() or int(lit) != idx[e["source_id"]]:  # c14m LOW-3: "²".isdigit(), int("²") raises
             return None
     rest = sorted({x for x in (_norm_literal(e.get("literal_value")) for e in ev if e.get("source_id") not in idx) if x})
     effective = None if not rest else ({"kind": "literal", "value": rest[0]} if len(rest) == 1 else {"kind": "conflicting", "readings": rest})

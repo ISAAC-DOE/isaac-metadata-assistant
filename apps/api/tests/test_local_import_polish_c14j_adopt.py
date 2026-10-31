@@ -215,8 +215,8 @@ def _adopted_before_governing_was_kept(xlsx, out, exported_utc) -> None:
         wm.cell(r, c0).value = None
     [r1] = [c.row for row in wm.iter_rows() for c in row if c.column == 1 and c.value == "exported_utc"]
     wm.cell(r1, 2).value = exported_utc
-    for row in wm.iter_rows():  # c14l: nor the decision log's length at adopt (kept from c14l on)
-        if row[0].value == "decisions_at_adopt":
+    for row in wm.iter_rows():  # c14l: nor the decision log's length at adopt (kept from c14l on; c14m: its hash, the id)
+        if row[0].value in ("decisions_at_adopt", "decisions_fingerprint", "adopt_id"):
             row[0].value = row[1].value = None
     wb.save(out)
 
@@ -275,6 +275,6 @@ def test_a_file_list_cell_with_the_recorded_value_does_not_pre_empt_the_ruling(g
     [tied] = rep["rulings_tied_to_sheet"]
     assert tied["target"]["id"] == tid and tied["cell"].startswith("'Disagreements'!")
     assert tid not in [a["target"]["id"] for a in rep["already_decided_same_value"]]
-    assert _ruling_notes(grouped)[-1]["note"].endswith("'File List'!H8 = 3)")
+    assert _ruling_notes(grouped)[-1]["note"].split(" (adopt id ")[0].endswith("'File List'!H8 = 3)")  # c14m: then the id
     assert _settled(grouped, theirs, tmp_path / "now.xlsx", capsys, "pH", run_id="run-007")["statement"].startswith(
         "already recorded: 2 (")

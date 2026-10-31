@@ -71,16 +71,22 @@ def _value_now(grouped, tid):
     return B.final_value(cand.get("value"), B.candidate_decision(b, cand), cand.get("readings"))
 
 
+def _or_decide(tid, decision, value=None) -> str:
+    """c14m LOW-2: how every stale and clash reason ends (the `decide` command for its target)."""
+    return f", or record this value directly: {T.decide_command(tid, decision, value)}"
+
+
 def _meta(xlsx) -> dict:
     return T._marker(openpyxl.load_workbook(xlsx))["meta"]
 
 
 def _without_adopt_position(xlsx, out, exported_utc) -> None:
-    """``xlsx`` as a c14j/c14k build wrote it (``governing_decisions`` kept, but no ``decisions_at_adopt``), adopted at
-    ``exported_utc`` (the bundle's clock ticks from 2099 in these tests; the export time is the real clock's)."""
+    """``xlsx`` as a c14j/c14k build wrote it (``governing_decisions`` kept, but no ``decisions_at_adopt``, nor c14m's
+    ``decisions_fingerprint`` and ``adopt_id``), adopted at ``exported_utc`` (the bundle's clock ticks from 2099 in
+    these tests; the export time is the real clock's)."""
     wb = openpyxl.load_workbook(xlsx)
     for row in wb["_isaac"].iter_rows():
-        if row[0].value == "decisions_at_adopt":
+        if row[0].value in ("decisions_at_adopt", "decisions_fingerprint", "adopt_id"):
             row[0].value = row[1].value = None
         if row[0].value == "exported_utc":
             row[1].value = exported_utc
@@ -119,7 +125,7 @@ def test_supersede_flip_flop_converges(grouped, tmp_path, capsys, ticking):
         assert stale["reason"] == (
             f"ruled on a workbook adopted before {after_a}; this ruling was made against an earlier value, so nothing is "
             "recorded for it, even with --supersede, and the value recorded now is kept. Adopt again and rule against "
-            "what is recorded now")
+            "what is recorded now" + _or_decide(tid, "confirm"))
         rep = _imp(grouped, tmp_path / "Ar.xlsx", capsys, "--supersede")
         assert rep["recorded"] == 0 and not rep["stale_rulings"] and not rep["rulings_tied_to_sheet"], cycle
     assert len(_decisions_on(grouped, tid)) == 2 and _value_now(grouped, tid) == 2
@@ -138,7 +144,7 @@ def test_without_supersede_the_stale_clash_says_supersede_does_not_record_it(gro
     _rule(tmp_path / "B2.xlsx", tmp_path / "B2r.xlsx", {b2["id"]: 12})
     rep = _imp(grouped, tmp_path / "B2r.xlsx", capsys)
     [clash] = [c for c in rep["clashes"] if c["target"]["id"] == tid]
-    assert clash["reason"].endswith("skipped (pass --supersede to record this one)")
+    assert clash["reason"].endswith("skipped (pass --supersede to record this one" + _or_decide(tid, "confirm") + ")")
     assert len(_decisions_on(grouped, tid)) == 2
 
 
@@ -246,7 +252,8 @@ def test_without_the_adopt_position_a_decision_before_the_adopt_is_never_said_to
     rep = _imp(grouped, tmp_path / "old.xlsx", capsys)
     [stale] = rep["stale_rulings"]
     assert stale["reason"] == (f"ruled on a workbook adopted before {after['decision_id']}; the recorded value is kept "
-                               "and nothing is recorded for this ruling. Adopt again to settle this sheet")
+                               "and nothing is recorded for this ruling. Adopt again to settle this sheet"
+                               + _or_decide(tid, "confirm"))
     assert NOT_SINCE not in stale["reason"]
     assert len(_decisions_on(grouped, tid)) == 2
 
@@ -302,7 +309,7 @@ def test_a_different_value_recorded_after_the_adopt_is_still_said_since(grouped,
     [stale] = _imp(grouped, tmp_path / "Ar.xlsx", capsys)["stale_rulings"]
     assert stale["reason"] == (f"ruled on a workbook adopted before {back}, and a different value was recorded since "
                                f"({changed}); the recorded value is kept and nothing is recorded for this ruling. Adopt "
-                               "again to settle this sheet")
+                               "again to settle this sheet" + _or_decide(tid, "confirm"))
 
 
 # --- LOW-1 ----------------------------------------------------------------------------------------------------
