@@ -21,6 +21,7 @@ import {
   answerText,
   clampText,
   countsText,
+  currentAnswerText,
   deferredText,
   fieldWords,
   groupBySuggestion,
@@ -39,10 +40,12 @@ import {
   sectionQuestions,
   shownValue,
   splitAtId,
+  type ApiLocalAnsweredQuestions,
   type ApiLocalAnswerPreview,
   type ApiLocalAnswerRecorded,
   type ApiLocalQuestions,
   type LocalAnswerInput,
+  type LocalAnsweredQuestion,
   type LocalAthenaSelection,
   type LocalBeamlineReading,
   type LocalBundleCheck,
@@ -357,6 +360,8 @@ interface WriteHandlers {
   onWritten: (id: string, message: string, versions: { sentWith: string; now?: string }) => void;
   /** Read the questions again after a refusal (412, or a question answered elsewhere). */
   onReread: (id: string, message: string | null) => void;
+  /** A READ that recorded exposures moved the bundle to `now` (the answered questions): writes are sent with it. */
+  adoptVersion: (now: string) => void;
 }
 
 function BundleQuestions({ name }: { name: string }) {
@@ -399,6 +404,16 @@ function BundleQuestions({ name }: { name: string }) {
   const dataVersion = shownData?.bundle.bundle_version ?? '';
   const version =
     versions.adopted !== null && versions.superseded.includes(dataVersion) ? versions.adopted : dataVersion;
+  const versionRef = useRef(version);
+  versionRef.current = version;
+  // the answered questions are read on their own, and recording their exposures moves the bundle: that version is
+  // the one the next write names, as a write's own is (the version it replaces is remembered as superseded)
+  const adoptVersion = useCallback((now: string) => {
+    const was = versionRef.current;
+    if (now && now !== was) setVersions((cur) => ({ superseded: [...cur.superseded, was].slice(-50), adopted: now }));
+  }, []);
+  // every write (or refusal) also reads the answered questions again, when they are shown
+  const [writes, setWrites] = useState(0);
 
   const order = useMemo(() => {
     if (shownData === null) return [];
@@ -427,6 +442,7 @@ function BundleQuestions({ name }: { name: string }) {
     (message: string | null, plan: FocusPlan | null) => {
       if (message) pendingMessages.current.push(message);
       if (plan) pendingPlan.current = plan;
+      setWrites((n) => n + 1);
       const mine = ++ticket.current;
       setAnnouncement([...pendingMessages.current, COPY.refreshing].join(' '));
       void reloadSilent().then((outcome) => {
@@ -593,8 +609,10 @@ function BundleQuestions({ name }: { name: string }) {
         <QuestionsBody
           data={questions.data}
           headingRef={questionsHeading}
-          handlers={{ name, by, version, needName, onWritten, onReread }}
+          handlers={{ name, by, version, needName, onWritten, onReread, adoptVersion }}
           onPage={onPage}
+          kind={kind}
+          writes={writes}
         />
       )}
     </section>
@@ -606,11 +624,15 @@ function QuestionsBody({
   headingRef,
   handlers,
   onPage,
+  kind,
+  writes,
 }: {
   data: ApiLocalQuestions;
   headingRef: React.RefObject<HTMLHeadingElement>;
   handlers: WriteHandlers;
   onPage: (offset: number) => void;
+  kind: string;
+  writes: number;
 }) {
   const sections = useMemo(() => sectionQuestions(data.questions), [data.questions]);
   const pageQuestions = useMemo(() => new Map(data.questions.map((q) => [q.question_id, q])), [data.questions]);
@@ -679,8 +701,113 @@ function QuestionsBody({
           )}
         </p>
       )}
+      <AnsweredSection kind={kind} writes={writes} handlers={handlers} />
       <CaptureSection data={data} handlers={handlers} />
     </PageQuestions.Provider>
+  );
+}
+
+/**
+ * THE ANSWERED QUESTIONS — what `isaac bundle show question` shows as `status: answered` — read only when the person
+ * asks for them (reading them records that command's exposures), each with its current answers and a "Change answer"
+ * that goes through the same preview and write as every answer: the server answers it again with `decide --question`.
+ */
+function AnsweredSection({ kind, writes, handlers }: { kind: string; writes: number; handlers: WriteHandlers }) {
+  const [open, setOpen] = useState(false);
+  const regionId = useId();
+  return (
+    <section className="li-section" aria-labelledby="li-answered-title">
+      <h3 id="li-answered-title" className="li-h3">
+        {COPY.answeredTitle}
+      </h3>
+      <p className="li-actions">
+        <button
+          type="button"
+          className="btn btn-secondary"
+          aria-expanded={open}
+          aria-controls={regionId}
+          onClick={() => setOpen((o) => !o)}
+        >
+          {open ? COPY.hideAnswered : COPY.showAnswered}
+        </button>
+      </p>
+      <div id={regionId} className="li-answered">
+        {open && <AnsweredList key={kind} kind={kind} writes={writes} handlers={handlers} />}
+      </div>
+    </section>
+  );
+}
+
+function AnsweredList({ kind, writes, handlers }: { kind: string; writes: number; handlers: WriteHandlers }) {
+  const [offset, setOffset] = useState(0);
+  const { name, adoptVersion } = handlers;
+  const answered = useFetch<ApiLocalAnsweredQuestions>(
+    () => api.getLocalBundleAnsweredQuestions(name, { kind: kind || undefined, offset }),
+    [name, kind, offset],
+  );
+  const { reloadSilent } = answered;
+  const seenWrites = useRef(writes);
+  useEffect(() => {
+    if (seenWrites.current === writes) return;
+    seenWrites.current = writes;
+    void reloadSilent();
+  }, [writes, reloadSilent]);
+  const data = answered.status === 'data' ? answered.data : null;
+  useEffect(() => {
+    if (data && data.exposures_recorded > 0 && data.bundle.bundle_version) adoptVersion(data.bundle.bundle_version);
+  }, [data, adoptVersion]);
+  const rangeRef = useRef<HTMLParagraphElement>(null);
+  const pageFocus = useRef(false);
+  useEffect(() => {
+    if (pageFocus.current && data !== null) {
+      pageFocus.current = false;
+      rangeRef.current?.focus();
+    }
+  }, [data]);
+  const onPage = (next: number) => {
+    pageFocus.current = true;
+    setOffset(next);
+  };
+
+  if (answered.status === 'loading') return <LoadingPanel label={COPY.readingAnswered} />;
+  if (answered.status === 'error') return <LocalFailure error={answered.error} onRetry={answered.reload} />;
+  const d = answered.data;
+  return (
+    <>
+      <p className="li-note">{COPY.answeredLead}</p>
+      {d.exposures_recorded > 0 && (
+        <p className="li-meta">
+          This page noted in the bundle that these questions’ suggestions were shown to you ({d.exposures_recorded}), as
+          the command line’s `isaac bundle show question` does.
+        </p>
+      )}
+      <p className="li-meta" tabIndex={-1} ref={rangeRef} data-testid="li-answered-range">
+        {d.total === 0
+          ? COPY.noAnswered
+          : `Answered questions ${d.offset + 1}–${d.offset + d.returned} of ${d.total}.`}
+      </p>
+      {d.questions.length > 0 && (
+        <ol className="li-list" aria-label={COPY.answeredTitle}>
+          {d.questions.map((q) => (
+            <QuestionCard key={q.question_id} q={q} answered={q} handlers={handlers} />
+          ))}
+        </ol>
+      )}
+      {(d.omitted_before > 0 || d.omitted_after > 0) && (
+        <p className="li-actions">
+          {d.omitted_before > 0 && (
+            <button type="button" className="btn btn-secondary" onClick={() => onPage(Math.max(0, d.offset - d.limit))}>
+              Previous answered questions
+            </button>
+          )}
+          {d.omitted_after > 0 && (
+            <button type="button" className="btn btn-secondary" onClick={() => onPage(d.offset + d.limit)}>
+              Next answered questions
+            </button>
+          )}
+        </p>
+      )}
+    </>
   );
 }
 
@@ -1002,13 +1129,21 @@ function PreviewBox({
     ),
   ].filter((v) => v !== shownValue(preview.value));
   const byKey = new Map(scopes.map((sc) => [sc.scope, sc]));
+  // a repeat of the answer already recorded (decide records nothing for it): nothing to write, so no Write button
+  const nothingNew = preview.would_record.length === 0 && !preview.regroup_preview;
   // a few groups: every run is listed; many: each group's runs behind its own disclosure
   const inline = preview.by_scope.length <= 3;
   return (
     <div className="li-preview" role="group" tabIndex={-1} ref={boxRef} aria-labelledby={titleId}>
       <p id={titleId} className="li-preview-title">
-        {COPY.previewTitle} ({preview.by_scope.length} {preview.by_scope.length === 1 ? 'group' : 'groups'},{' '}
-        {preview.would_record.length} value(s)):
+        {nothingNew ? (
+          `${COPY.previewNothing}.`
+        ) : (
+          <>
+            {COPY.previewTitle} ({preview.by_scope.length} {preview.by_scope.length === 1 ? 'group' : 'groups'},{' '}
+            {preview.would_record.length} value(s)):
+          </>
+        )}
       </p>
       {differing.length > 0 && (
         <p className="li-warning" data-testid="li-preview-differs">
@@ -1086,9 +1221,11 @@ function PreviewBox({
         </p>
       </details>
       <p className="li-actions">
-        <button type="button" className="btn btn-primary" disabled={busy} onClick={onWrite}>
-          {COPY.previewWrite}
-        </button>
+        {!nothingNew && (
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={onWrite}>
+            {COPY.previewWrite}
+          </button>
+        )}
         <button type="button" className="btn btn-secondary" disabled={busy} onClick={onCancel}>
           {COPY.previewCancel}
         </button>
@@ -1270,9 +1407,23 @@ interface SubmitScope {
   preview?: boolean;
 }
 
-function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandlers }) {
+function QuestionCard({
+  q,
+  handlers,
+  answered,
+}: {
+  q: LocalQuestion;
+  handlers: WriteHandlers;
+  /** An ANSWERED question: its current answers are shown, and its controls only once "Change answer" is chosen. */
+  answered?: LocalAnsweredQuestion;
+}) {
   const d = q.display;
   const uid = useId();
+  // an answered card is its own card (the same question may come back as an open one, e.g. after a defer)
+  const cardKey = answered ? `answered:${q.question_id}` : q.question_id;
+  const [changing, setChanging] = useState(false);
+  const showControls = answered === undefined || changing;
+  const [kept, setKept] = useState<{ group_id: string; element: string; edge: string }[]>([]);
   const groups = perGroupScopes(q);
   const multi = groups.length > 1;
   // U1: where the groups' own files suggest different values, no scope is chosen for the person
@@ -1335,12 +1486,12 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
     if (statusOf(err) === 412) {
       // said HERE, on the card that was refused — another card's "Recorded" is not replaced
       say(COPY.staleWrite);
-      handlers.onReread(q.question_id, null);
+      handlers.onReread(cardKey, null);
       return;
     }
     if (statusOf(err) === 404 && code === 'not_found_in_bundle') {
       say(COPY.goneElsewhere);
-      handlers.onReread(q.question_id, COPY.goneElsewhere);
+      handlers.onReread(cardKey, COPY.goneElsewhere);
       return;
     }
     say(localReasonOf(err) ?? 'The answer could not be recorded. Nothing was written.');
@@ -1358,7 +1509,10 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
     const regroup = result.result.regroup_preview?.statement;
     const message = regroup ? `${base} ${regroup}` : base;
     setRecorded(message);
-    handlers.onWritten(q.question_id, message, { sentWith, now: result.bundle_version });
+    // a whole re-answer of the absorber question leaves the groups answered on their own as they are: named
+    setKept(result.result.kept_per_group_answers ?? []);
+    if (answered) setChanging(false);
+    handlers.onWritten(cardKey, message, { sentWith, now: result.bundle_version });
   }
 
   async function submit(decision: string, extra: Partial<LocalAnswerInput> = {}, how: SubmitScope = {}) {
@@ -1396,7 +1550,9 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
     // accepted value, or targets this page did not describe one by one — is previewed first, listing
     // every group and run; only an answer for exactly one run is written at once
     const oneGroup = oneScope ? groups.find((g) => g.scope === oneScope) : undefined;
+    // a CHANGED answer always is: it replaces what is recorded, and the preview says what decide would do
     const needsPreview =
+      answered !== undefined ||
       how.preview === true ||
       how.scopes !== undefined ||
       (oneScope !== undefined && (oneGroup?.target_count ?? 1) > 1) ||
@@ -1666,12 +1822,12 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
   return (
     <li
       className="li-card li-question"
-      id={questionCardId(q.question_id)}
+      id={answered ? `${questionCardId(q.question_id)}-answered` : questionCardId(q.question_id)}
       aria-labelledby={`${uid}-t`}
-      data-card-id={q.question_id}
+      data-card-id={cardKey}
     >
       <div className="li-card-head">
-        <span className="li-chip">{q.blocking ? COPY.chipBlocks : COPY.chipOptional}</span>
+        <span className="li-chip">{answered ? COPY.answeredChip : q.blocking ? COPY.chipBlocks : COPY.chipOptional}</span>
         {q.deferred && <span className="li-chip">{COPY.deferredChip}</span>}
         <span className="li-meta">{KIND_LABEL[q.kind] ?? q.kind}</span>
       </div>
@@ -1687,6 +1843,31 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
         <p className="li-recorded" tabIndex={-1} data-li-recorded>
           {COPY.answeredHere} {recorded}
         </p>
+      )}
+      {recorded && kept.length > 0 && (
+        <>
+          <p className="li-meta">{COPY.keptPerGroup}:</p>
+          <ul className="li-bullets" data-testid="li-recorded-kept">
+            {kept.map((k) => (
+              <li key={k.group_id}>
+                Group {k.group_id} keeps {k.element} {k.edge}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {answered && (
+        <div className="li-current" data-testid="li-current-answers">
+          <h5 className="li-h5">
+            {COPY.currentAnswers}
+            {answered.current_answers.length > 1 ? ` (${answered.current_answers.length} different answers)` : ''}
+          </h5>
+          <ul className="li-bullets">
+            {answered.current_answers.map((a, i) => (
+              <li key={a.decision_id ?? i}>{currentAnswerText(a, q.kind)}</li>
+            ))}
+          </ul>
+        </div>
       )}
       <dl className="li-dl">
         <dt>Record (runs)</dt>
@@ -1740,6 +1921,21 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
         </p>
       )}
 
+      {answered && d.answer_kind !== 'informational' && (
+        <p className="li-actions">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            aria-expanded={changing}
+            aria-controls={`${uid}-change`}
+            onClick={() => setChanging((c) => !c)}
+          >
+            {changing ? COPY.keepAnswer : COPY.changeAnswer}
+          </button>
+        </p>
+      )}
+
+      <div id={`${uid}-change`} className="li-change" hidden={!showControls}>
       {perGroupTable && (
         <PerGroupTable
           groups={groups}
@@ -1859,6 +2055,7 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
           )}
         </div>
       )}
+      </div>
 
       {error && (
         <p key={error.n} className="li-error" role="alert" tabIndex={-1} ref={errorRef}>

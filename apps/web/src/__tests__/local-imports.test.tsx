@@ -15,8 +15,11 @@ import {
   sectionQuestions,
   type ApiLocalBundleList,
   type ApiLocalBundleProgress,
+  type ApiLocalAnsweredQuestions,
   type ApiLocalQuestions,
+  type LocalAnsweredQuestion,
   type LocalQuestion,
+  currentAnswerText,
 } from '../lib/localImports';
 
 /**
@@ -1299,5 +1302,235 @@ describe('polish c7-w: the page says what the command line says', () => {
     expect(screen.getByTestId('li-not-counted')).toHaveTextContent(`4 ${COPY.informationalCount}`);
     expect(screen.getByTestId('li-not-counted')).toHaveTextContent(`Of the open questions, 1 ${COPY.deferredCount}.`);
     expect(screen.getByTestId('li-held')).toHaveTextContent(held);
+  });
+});
+
+describe('polish c8-web: an answered question can be seen and changed, as `decide --question` changes it', () => {
+  const AQPATH = `GET ${QPATH}/answered`;
+  const answeredEnv: LocalAnsweredQuestion = {
+    ...question({
+      question_id: 'Q-envdone001',
+      text: 'What is the environment (context.environment)?',
+      scope: 'group:g1',
+      applies_to: { groups: 1, runs: 2, targets: 2 },
+      targets: [
+        { kind: 'missing_value', id: 'miss-0201' },
+        { kind: 'missing_value', id: 'miss-0202' },
+      ],
+      per_scope_targets: { 'group:g1': ['miss-0201', 'miss-0202'] },
+      allowed_values: ['operando', 'in_situ', 'ex_situ'],
+      display: display({
+        targets_described: 2,
+        targets_total: 2,
+        scopes: [{ scope: 'group:g1', kind: 'group', group_id: 'g1', label: 'Record group g1', target_count: 2, run_names: ['SYN_run_A', 'SYN_run_B'] }],
+        value_rule: { allowed: ['operando', 'in_situ', 'ex_situ'], numeric: false, integer: false, in_schema: true, unit: null },
+      }),
+    }),
+    status: 'answered',
+    answered_targets: 2,
+    current_answers: [
+      { decision: 'correct', value: 'ex_situ', targets: 2, by: 'Synthetic Scientist', decided_utc: '2099-01-02T03:04:05Z', decision_id: 'd-00009' },
+    ],
+    statement: 'SERVER-SAID: a later answer replaces these.',
+  };
+  const answeredAbs: LocalAnsweredQuestion = {
+    ...absorberQ,
+    question_id: 'Q-absdone001',
+    text: 'Which is the absorber of these groups?',
+    targets: [{ kind: 'record_group', id: 'g1' }, { kind: 'record_group', id: 'g2' }],
+    per_scope_targets: { 'group:g1': ['g1'], 'group:g2': ['g2'] },
+    display: display({
+      answer_kind: 'absorber',
+      scopes: [
+        { scope: 'group:g1', kind: 'group', group_id: 'g1', label: 'Record group g1', target_count: 1, run_names: ['SYN_run_A'] },
+        { scope: 'group:g2', kind: 'group', group_id: 'g2', label: 'Record group g2', target_count: 1, run_names: ['SYN_run_B'] },
+      ],
+    }),
+    status: 'answered',
+    answered_targets: 2,
+    current_answers: [
+      { decision: 'set_absorber', value: null, element: 'Zz', edge: 'K', targets: 1, by: 'Synthetic Scientist', decided_utc: '2099-01-01T00:00:00Z', decision_id: 'd-1' },
+      { decision: 'set_absorber', value: null, element: 'Yy', edge: 'L3', targets: 1, by: 'Synthetic Scientist', decided_utc: '2099-01-01T00:05:00Z', decision_id: 'd-2' },
+    ],
+    statement: 'SERVER-SAID: a later answer replaces these.',
+  };
+  function answeredBody(qs: LocalAnsweredQuestion[], exposures = 3, version = VERSION_2): ApiLocalAnsweredQuestions {
+    return {
+      bundle: { ...header, bundle_version: version }, total: qs.length, offset: 0, limit: 200, returned: qs.length,
+      omitted_before: 0, omitted_after: 0, questions: qs, exposures_recorded: exposures, identity: 'local_unverified',
+      statement: 'SERVER-SAID: a later answer replaces these.',
+    };
+  }
+  function stubWith(extra: Record<string, RouteEntry>) {
+    vi.stubEnv('VITE_ISAAC_LOCAL_IMPORTS', '1');
+    return stubFetchRoutes({ 'GET /api/local-bundles': { body: listBody }, [`GET ${QPATH}`]: { body: questionsBody([tempQ]) }, ...extra });
+  }
+  async function openAnswered() {
+    const toggle = await screen.findByRole('button', { name: COPY.showAnswered });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(toggle);
+    expect(screen.getByRole('button', { name: COPY.hideAnswered })).toHaveAttribute('aria-expanded', 'true');
+    return screen.findByRole('list', { name: COPY.answeredTitle });
+  }
+  async function answeredCard(q: LocalQuestion) {
+    const list = await screen.findByRole('list', { name: COPY.answeredTitle });
+    return (await within(list).findByRole('heading', { name: q.text })).closest('li') as HTMLElement;
+  }
+
+  it('answered questions are read only when asked for, each with its current answers in plain words', async () => {
+    const calls = stubWith({ [AQPATH]: { body: answeredBody([answeredEnv, answeredAbs]) } });
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    await screen.findByRole('heading', { name: tempQ.text });
+    // reading them records exposures, so nothing is asked until the person opens the section
+    expect(calls.some((c) => c.startsWith(AQPATH))).toBe(false);
+    await openAnswered();
+    expect(calls.filter((c) => c.startsWith(AQPATH))).toHaveLength(1);
+    const env = await answeredCard(answeredEnv);
+    expect(within(env).getByText(COPY.answeredChip, { selector: '.li-chip' })).toBeInTheDocument();
+    expect(within(env).getByTestId('li-current-answers')).toHaveTextContent(
+      'ex_situ — by Synthetic Scientist, 2099-01-02 03:04 UTC, for 2 values',
+    );
+    const abs = await answeredCard(answeredAbs);
+    const answers = within(abs).getByTestId('li-current-answers');
+    expect(answers).toHaveTextContent('2 different answers');
+    expect(answers).toHaveTextContent('Element Zz, edge K — by Synthetic Scientist, 2099-01-01 00:00 UTC, for 1 group');
+    expect(answers).toHaveTextContent('Element Yy, edge L3');
+    expect(screen.getByText(/as the command line’s `isaac bundle show question` does/)).toHaveTextContent('(3)');
+    // the controls are there only once "Change answer" is chosen
+    expect(within(env).queryByRole('button', { name: COPY.answer })).toBeNull();
+    const change = within(env).getByRole('button', { name: COPY.changeAnswer });
+    expect(change).toHaveAttribute('aria-expanded', 'false');
+    expect(change).toHaveAttribute('aria-controls');
+    fireEvent.click(change);
+    expect(within(env).getByRole('button', { name: COPY.keepAnswer })).toHaveAttribute('aria-expanded', 'true');
+    expect(within(env).getByRole('button', { name: COPY.answer })).toBeVisible();
+  });
+
+  it('a change is always previewed, and written with the version the answered read moved the bundle to', async () => {
+    const posts: Record<string, unknown>[] = [];
+    const calls = stubWith({
+      [AQPATH]: { body: answeredBody([answeredEnv]) },
+      [APATH(answeredEnv.question_id)]: (init) => {
+        const b = bodyOf(init);
+        posts.push(b);
+        if (b.dry_run) {
+          return { body: {
+            dry_run: true, question_id: answeredEnv.question_id, would_record: ['miss-0201', 'miss-0202'], unchanged: [],
+            target_ids: ['miss-0201', 'miss-0202'], value: 'in_situ', bundle_version: VERSION_2, statement: 'SERVER-SAID: nothing was written.',
+            scopes_total: 1, scopes_whose_files_suggest_otherwise: 0,
+            by_scope: [{ scope: 'group:g1', label: 'Record group g1', run_names: ['SYN_run_A', 'SYN_run_B'], run_count: 2,
+              target_ids: ['miss-0201', 'miss-0202'], own_suggestions: [], compared: true, differs: false, differing_targets: [] }],
+            would_say: "Would record: SERVER-SAID 'in_situ' recorded for 2 runs. Nothing was written.",
+          } };
+        }
+        const r = recordedBody(answeredEnv.question_id, ['miss-0201', 'miss-0202'], 'sha256:' + 'c'.repeat(64));
+        return { body: { ...r, result: { ...r.result, statement: "SERVER-SAID: 'in_situ' recorded for 2 runs." } } };
+      },
+    });
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    fireEvent.change(await screen.findByLabelText(COPY.yourName), { target: { value: 'Synthetic Scientist' } });
+    await openAnswered();
+    const card = await answeredCard(answeredEnv);
+    fireEvent.click(within(card).getByRole('button', { name: COPY.changeAnswer }));
+    fireEvent.change(within(card).getByLabelText('Your answer'), { target: { value: 'in_situ' } });
+    fireEvent.click(within(card).getByRole('button', { name: COPY.answer }));
+    const preview = await within(card).findByRole('group', { name: /This will write one answer to each of these/ });
+    expect(within(preview).getByTestId('li-preview-would-say')).toHaveTextContent("Would record: SERVER-SAID 'in_situ' recorded for 2 runs.");
+    // one group of two runs, yet previewed; and named with the version the answered read returned (its exposures)
+    expect(posts).toEqual([{ decision: 'correct', value: 'in_situ', by: 'Synthetic Scientist', expected_version: VERSION_2, dry_run: true }]);
+    fireEvent.click(within(preview).getByRole('button', { name: COPY.previewWrite }));
+    expect(await within(card).findByText(/Answered: .*SERVER-SAID: 'in_situ' recorded for 2 runs\./)).toBeInTheDocument();
+    expect(posts[1]).toEqual({ decision: 'correct', value: 'in_situ', by: 'Synthetic Scientist', expected_version: VERSION_2, dry_run: false });
+    // both lists are read again from the bundle; nothing is marked on the strength of the click
+    await waitFor(() => expect(calls.filter((c) => c.startsWith(AQPATH))).toHaveLength(2));
+    await waitFor(() => expect(calls.filter((c) => c === `GET ${QPATH}`).length).toBeGreaterThanOrEqual(2));
+  });
+
+  it('a repeat of the recorded answer says nothing new would be written, and offers no write', async () => {
+    stubWith({
+      [AQPATH]: { body: answeredBody([answeredEnv]) },
+      [APATH(answeredEnv.question_id)]: { body: {
+        dry_run: true, question_id: answeredEnv.question_id, would_record: [], unchanged: ['miss-0201', 'miss-0202'],
+        target_ids: ['miss-0201', 'miss-0202'], value: 'ex_situ', bundle_version: VERSION_2, statement: 'SERVER-SAID: nothing was written.',
+        scopes_total: 0, scopes_whose_files_suggest_otherwise: 0, by_scope: [],
+        would_say: 'Nothing would be recorded: SERVER-SAID already recorded. Nothing was written.',
+      } },
+    });
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    fireEvent.change(await screen.findByLabelText(COPY.yourName), { target: { value: 'Synthetic Scientist' } });
+    await openAnswered();
+    const card = await answeredCard(answeredEnv);
+    fireEvent.click(within(card).getByRole('button', { name: COPY.changeAnswer }));
+    fireEvent.change(within(card).getByLabelText('Your answer'), { target: { value: 'ex_situ' } });
+    fireEvent.click(within(card).getByRole('button', { name: COPY.answer }));
+    const preview = await within(card).findByRole('group', { name: new RegExp(COPY.previewNothing) });
+    expect(within(preview).getByText('2 value(s) already answered the same way, so not written again.')).toBeInTheDocument();
+    expect(within(preview).getByTestId('li-preview-would-say')).toHaveTextContent('Nothing would be recorded');
+    expect(within(preview).queryByRole('button', { name: COPY.previewWrite })).toBeNull();
+    expect(within(preview).getByRole('button', { name: COPY.previewCancel })).toBeInTheDocument();
+  });
+
+  it('a whole re-answer of the absorber question names the per-group answers it leaves, before and after writing', async () => {
+    const kept = [{ group_id: 'g2', element: 'Yy', edge: 'L3' }];
+    stubWith({
+      [AQPATH]: { body: answeredBody([answeredAbs]) },
+      [APATH(answeredAbs.question_id)]: (init) =>
+        bodyOf(init).dry_run
+          ? { body: {
+              dry_run: true, question_id: answeredAbs.question_id, would_record: ['g1'], unchanged: [], target_ids: ['g1'], value: null,
+              bundle_version: VERSION_2, statement: 'SERVER-SAID: nothing was written.', scopes_total: 1, scopes_whose_files_suggest_otherwise: 0,
+              by_scope: [{ scope: 'group:g1', label: 'Record group g1', run_names: ['SYN_run_A'], run_count: 1, target_ids: ['g1'],
+                own_suggestions: [], compared: false, differs: false, differing_targets: [] }],
+              would_say: 'Would record: SERVER-SAID Ww K for 1 group. 1 group(s) answered on their own were left as they are (g2 keeps Yy L3). Nothing was written.',
+              kept_per_group_answers: kept,
+            } }
+          : { body: { ...recordedBody(answeredAbs.question_id, ['g1']), result: { recorded: ['g1'], unchanged: [], batch_id: null,
+              statement: 'SERVER-SAID Ww K for 1 group. 1 group(s) answered on their own were left as they are (g2 keeps Yy L3).',
+              kept_per_group_answers: kept } } },
+    });
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    fireEvent.change(await screen.findByLabelText(COPY.yourName), { target: { value: 'Synthetic Scientist' } });
+    await openAnswered();
+    const card = await answeredCard(answeredAbs);
+    fireEvent.click(within(card).getByRole('button', { name: COPY.changeAnswer }));
+    expect(within(card).getByRole('radio', { name: /Same for all groups/ })).toBeChecked();
+    fireEvent.change(within(card).getByLabelText('Element'), { target: { value: 'Ww' } });
+    fireEvent.change(within(card).getByLabelText('Edge'), { target: { value: 'K' } });
+    fireEvent.click(within(card).getByRole('button', { name: COPY.answer }));
+    const preview = await within(card).findByRole('group', { name: /This will write one answer to each of these/ });
+    expect(within(preview).getByTestId('li-preview-kept')).toHaveTextContent('Group g2 keeps Yy L3');
+    fireEvent.click(within(preview).getByRole('button', { name: COPY.previewWrite }));
+    expect(await within(card).findByTestId('li-recorded-kept')).toHaveTextContent('Group g2 keeps Yy L3');
+    expect(within(card).getByText(/Answered: .*g2 keeps Yy L3/)).toBeInTheDocument();
+  });
+
+  it('a stale version on a change says nothing was written and reads both lists again', async () => {
+    const calls = stubWith({
+      [AQPATH]: { body: answeredBody([answeredEnv]) },
+      [APATH(answeredEnv.question_id)]: { status: 412, body: { error: 'stale_bundle_version', message: 'SERVER-SAID: stale.', current_version: VERSION } },
+    });
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    fireEvent.change(await screen.findByLabelText(COPY.yourName), { target: { value: 'Synthetic Scientist' } });
+    await openAnswered();
+    const card = await answeredCard(answeredEnv);
+    fireEvent.click(within(card).getByRole('button', { name: COPY.changeAnswer }));
+    fireEvent.change(within(card).getByLabelText('Your answer'), { target: { value: 'in_situ' } });
+    fireEvent.click(within(card).getByRole('button', { name: COPY.answer }));
+    expect(await within(card).findByRole('alert')).toHaveTextContent(COPY.staleWrite);
+    await waitFor(() => expect(calls.filter((c) => c.startsWith(AQPATH))).toHaveLength(2));
+  });
+
+  it('an answer’s words: the absorber per group, the counter and the clock for the whole beamtime, a field named', () => {
+    const base = { value: null, targets: 1, by: null, decided_utc: null, decision_id: null };
+    expect(currentAnswerText({ ...base, decision: 'set_counter_positions', positions: [2, 3] }, 'naming_counter_positions')).toBe(
+      'Positions 2, 3 are run counters — by a name not recorded, date not recorded, for the whole beamtime',
+    );
+    expect(currentAnswerText({ ...base, decision: 'set_clock_time_zone', value: 'UTC' }, 'clock_time_zone')).toMatch(
+      /^The instrument clock was set to UTC — .*for the whole beamtime$/,
+    );
+    expect(currentAnswerText({ ...base, decision: 'correct', value: 295, field: 'context.temperature_K', targets: 3 }, 'optional_values')).toMatch(
+      /^context\.temperature_K: 295 — .*for 3 values$/,
+    );
+    expect(currentAnswerText({ ...base, decision: 'reject' }, 'confirm_value')).toMatch(/^Rejected: no value goes into the record/);
   });
 });

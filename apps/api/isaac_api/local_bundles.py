@@ -33,6 +33,9 @@ WHAT IT SERVES, AND WHAT IT NEVER DOES
   lost. Nothing is uploaded and no portal is called.
 * Reading the questions RECORDS AN EXPOSURE for every parser value it shows (the blind protocol,
   as ``isaac bundle questions`` does), so it can write ``bundle.json``; it says how many it recorded.
+  The answered questions (``…/questions/answered``) record exactly what ``isaac bundle show question``
+  records for each one shown, and an answered question is answered again as ``decide --question``
+  does it (a later decision replaces an earlier one; a repeat records nothing).
 """
 
 from __future__ import annotations
@@ -799,9 +802,14 @@ def per_target_agreement(idx: BundleIndex, target_ids: Sequence[str], kind_of: M
 
 
 def describe_question(bundle: Mapping, q: Mapping, *, folder: str,
-                      idx: BundleIndex | None = None) -> tuple[dict, list[tuple[str, str]]]:
+                      idx: BundleIndex | None = None, answered: bool = False) -> tuple[dict, list[tuple[str, str]]]:
     """``(display, shown)`` — what the screen shows beside one consolidated question, and the
-    candidates whose parser values it shows (each recorded as an exposure before it is returned)."""
+    candidates whose parser values it shows (each recorded as an exposure before it is returned).
+
+    ``answered``: an ANSWERED question (``questions.answered_question``), shown with exactly the parser values
+    ``isaac bundle show question`` prints for it — its hints and the values its text states — so the exposures
+    the page records for it are the CLI's own (:func:`answered_exposures`): no scope's own suggestions, no
+    per-run agreement, no other candidate's extracted value."""
     from .local_import import bundle as B
     from .local_import import suggestions as S
     from .local_import import template as T
@@ -844,7 +852,7 @@ def describe_question(bundle: Mapping, q: Mapping, *, folder: str,
         # what THIS scope's own evidence suggests, so a person answering one group — or all of them —
         # sees where the groups' files disagree (field questions only; a conflict's readings are its subject)
         # (not optional values: one scope's targets there are several FIELDS, whose values do not compare)
-        if q.get("kind") in ("missing_value", "confirm_value"):
+        if q.get("kind") in ("missing_value", "confirm_value") and not answered:
             own, more = scope_suggestions(idx, ids, kind_of, scope)
             shown += more
             entry["own_suggestions"] = own[:5]
@@ -878,7 +886,7 @@ def describe_question(bundle: Mapping, q: Mapping, *, folder: str,
 
     kind = q.get("kind")
     suggestions: list[dict] = []
-    if kind == "confirm_value":
+    if kind == "confirm_value" and not answered:
         for t in described:
             c = cands.get(t.get("id"))
             if c is not None:
@@ -905,11 +913,14 @@ def describe_question(bundle: Mapping, q: Mapping, *, folder: str,
 
     whole_confirm = ("confirm" in q.get("allowed_decisions", Q.ALLOWED_DECISIONS.get(kind or "", ()))
                      and not q.get("targets_without_a_value") and not q.get("targets_with_an_unfit_value"))
+    stated = set(Q.confirm_value_shown(bundle, q)) if answered else None
     if kind == "confirm_value" and whole_confirm:
         for t in targets:
             c = cands.get(t.get("id"))
             if c is None or c.get("value") is None:
                 continue
+            if stated is not None and c["candidate_id"] not in stated:
+                continue  # an answered question: only the values its text states (`bundle show question`)
             if path_q in writable and B.value_problem(path_q, c["value"]) is not None:
                 continue
             shown.append(("candidate", c["candidate_id"]))
@@ -1192,7 +1203,7 @@ _R_UNAUTHORIZED: dict = {401: {"description": (
 _R_NOT_FOUND: dict = {404: {"description": (
     "Local bundles are not configured on this server, or there is no bundle folder by that name directly "
     "inside the local bundles directory (a name that leaves the directory is refused the same way), or no "
-    "open question or target by that id.")}}
+    "open or answered question, or target, by that id.")}}
 _R_REFUSED: dict = {422: {"description": (
     "The answer was refused, with the command line's own reason (a decision that does not answer the "
     "question, a missing name, a value outside the field's allowed list). Nothing was written.")}}
@@ -1553,6 +1564,103 @@ def _typed_value(q: Mapping, body: LocalAnswerRequest) -> tuple[Any, str | None]
     return (value or None), None
 
 
+def _answered_question_to_resolve(data: Mapping, question_id: str) -> Mapping | None:
+    """The question ``decide --question`` resolves when ``question_id`` is no longer open: the one asked with its
+    answered targets back in (``consolidate(include_answered=True)``), of a kind that can be answered again
+    (``questions.RESOLVABLE_WHEN_ANSWERED``); ``None`` otherwise."""
+    from .local_import import questions as Q
+
+    q = Q.question(Q.consolidate(data, include_answered=True, explain_counter=False), question_id)
+    return q if q is not None and q["kind"] in Q.RESOLVABLE_WHEN_ANSWERED else None
+
+
+def answered_exposures(data: Mapping, seen: Mapping) -> list[tuple[str, str]]:
+    """The exposures ``isaac bundle show <dir> question <id>`` records before printing an answered question
+    (``cli._question_exposures``): its hints' candidates, a conflict question's conflict, and every candidate whose
+    extracted value its text states. The decisions in its ``current_answers`` are the scientist's, not parser
+    values."""
+    return _cli._question_exposures([seen], data)
+
+
+@router.get(
+    "/{bundle}/questions/answered",
+    summary="List One Bundle's Answered Questions",
+    description=(
+        "The consolidated questions every target of which a scientist has answered — what `isaac bundle show <dir> "
+        "question <id>` shows as `status: answered` — each under the id it was asked with, with its "
+        "`current_answers` (each distinct latest answer once: the decision, the value or element and edge, how many "
+        "targets hold it, who gave it and when), filtered by `kind` and paged with `limit` and `offset`. A later "
+        "answer to the same id replaces these (the same checks apply); repeating one records nothing new. A question "
+        "answered only as \"I don't know\" is still open and is not listed here.\n\n"
+        "Showing a question records the exposures `isaac bundle show question` records for it (its hints and the "
+        "extracted values its text states) in the bundle first, so this read can write `bundle.json`; "
+        "`exposures_recorded` says how many it added and `bundle_version` is the version after them."
+    ),
+    response_description="The answered questions page, with each question's current answers and the bundle version.",
+    responses={**_R_UNAUTHORIZED, **_R_LOCAL, **_R_NOT_FOUND, **_R_CONFLICT},
+)
+@_io_refusals
+def get_local_bundle_answered_questions(
+    bundle: str = PathParam(..., max_length=255, description="The bundle's folder name."),
+    kind: str | None = Query(None, max_length=64, description="Only questions of this kind."),
+    limit: int = Query(MAX_LIMIT, ge=1, le=MAX_LIMIT, description="Page size."),
+    offset: int = Query(0, ge=0, le=1_000_000, description="Questions to skip."),
+):
+    from .local_import import mutations as M
+    from .local_import import questions as Q
+
+    bdir, refused = _open(bundle)
+    if refused is not None:
+        return refused
+    with bundle_lock(bdir):
+        try:
+            _read_version, data = read_bundle(bdir)
+        except M.MutationRefused as exc:
+            return _refusal(exc)
+        open_payload = Q.consolidate(data)
+        open_ids = {q["question_id"] for q in open_payload["questions"]}
+        # as `bundle show question` builds it: the answered counter question words what the current groups do
+        everything = Q.consolidate(data, include_answered=True)
+        rows = []
+        for q in everything["questions"]:
+            if q["question_id"] in open_ids or q["kind"] not in Q.RESOLVABLE_WHEN_ANSWERED or (kind and q["kind"] != kind):
+                continue
+            seen = Q.answered_question(data, q["question_id"], payload=everything, open_payload=open_payload)
+            if seen is not None and seen["status"] == "answered" and seen["answered_targets"]:
+                rows.append(seen)
+        page = rows[offset: offset + limit]
+        idx = BundleIndex(data)
+        shown: list[tuple[str, str]] = []
+        out_questions = []
+        for seen in page:
+            shown += answered_exposures(data, seen)
+            display, more = describe_question(data, seen, folder=bundle, idx=idx, answered=True)
+            shown += more  # by construction among the CLI's own (answered=True)
+            out_questions.append({**seen, "display": display})
+        added = _record_shown(data, shown, "bundle show question")
+        if added:
+            try:
+                M.save_bundle(bdir, data)
+            except M.MutationRefused as exc:
+                return _refuse(409, "exposure_not_recorded",
+                               f"The exposures could not be recorded, so nothing is shown: {exc}")
+        version = M.bundle_version(bdir) if added else _read_version
+    return {
+        "bundle": bundle_header(bundle, bdir, data, version),
+        "total": len(rows),
+        "offset": offset,
+        "limit": limit,
+        "returned": len(page),
+        "omitted_before": min(offset, len(rows)),
+        "omitted_after": max(0, len(rows) - offset - len(page)),
+        "questions": out_questions,
+        "exposures_recorded": added,
+        "identity": "local_unverified",
+        "statement": ("A later answer replaces these, with the same checks as the command line's `isaac bundle decide "
+                      "--question`; repeating one records nothing new. Nothing is uploaded."),
+    }
+
+
 @router.post(
     "/{bundle}/questions/{question_id}/answer",
     summary="Answer One Consolidated Question",
@@ -1562,6 +1670,10 @@ def _typed_value(q: Mapping, body: LocalAnswerRequest) -> tuple[Any, str | None]
         "statement by `by`. `only` answers one group (or run) of the question; without it every target the "
         "question lists is answered. `dry_run` resolves and checks exactly as the write would and returns the "
         "targets it would write, with what the command line says it would record (`would_say`), writing nothing.\n\n"
+        "An ANSWERED question is answered again under the id it was asked with, as `decide --question` does it: a "
+        "later decision replaces an earlier one, repeating one records nothing new, and every check applies as to an "
+        "open question. Re-answering a whole absorber question leaves a group answered on its own as it is, and "
+        "says so (`kept_per_group_answers`).\n\n"
         "A field value is typed by the metadata template's rules: a number field takes a number and a field with a "
         "fixed list takes one of its values exactly. The question is resolved under the bundle's lock, after "
         "`expected_version` is checked against what is stored, so an answer never lands on a bundle another "
@@ -1593,7 +1705,11 @@ def post_local_bundle_answer(
         return _refusal(M.StaleBundleVersion(body.expected_version, read_version))
     asked = Q.question(Q.consolidate(data), question_id)
     if asked is None:
-        return _refuse(404, "not_found_in_bundle", f"No open question {question_id!r}.")
+        # AN ANSWERED QUESTION is answered again, as `decide --question` resolves it (a later decision replaces an
+        # earlier one, a repeat records nothing, every check applies): found under the id it was asked with
+        asked = _answered_question_to_resolve(data, question_id)
+    if asked is None:
+        return _refuse(404, "not_found_in_bundle", f"No open or answered question {question_id!r}.")
     value, why = _typed_value(asked, body)
     if why:
         return _refuse(422, "value_refused", why)
@@ -1608,6 +1724,10 @@ def post_local_bundle_answer(
         return _refusal(exc)
     if body.dry_run:
         reach = result.get("reach") or {}
+        if not reach.get("scope") and set(result.get("recorded") or ()) - {t["id"] for t in asked.get("targets") or ()}:
+            # an answered target of an open question (`only` a group already answered): its scope is listed in the
+            # question as asked with its answered targets back in
+            asked = _answered_question_to_resolve(data, question_id) or asked
         groups = (preview_group_answer(data, asked, reach, result.get("target_ids") or [], value) if reach.get("scope")
                   else preview_by_scope(data, asked, result.get("recorded", []), value))
         return {

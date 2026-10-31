@@ -237,3 +237,8 @@
   .li-table-groups td { display: block; width: 100%; min-width: 0; max-width: none; }
   .li-table-groups tr { padding: var(--space-sm) 0; border-bottom: 1px solid var(--border-faint); }
 }
+
+/* An answered question's controls: laid out as the card's own children; hidden until "Change answer". */
+.li-change { display: contents; }
+.li-change[hidden] { display: none; }
+.li-current { display: flex; flex-direction: column; gap: var(--space-xs); }

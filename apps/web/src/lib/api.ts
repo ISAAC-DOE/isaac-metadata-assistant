@@ -123,6 +123,7 @@ import type {
   SchemaProposalStatus,
 } from './schemaProposals';
 import type {
+  ApiLocalAnsweredQuestions,
   ApiLocalAnswerPreview,
   ApiLocalAnswerRecorded,
   ApiLocalBundleList,
@@ -3181,6 +3182,18 @@ export const api = {
     if (opts.offset) query.set('offset', String(opts.offset));
     const qs = query.toString();
     return localGet<ApiLocalQuestions>(`/local-bundles/${enc(name)}/questions${qs ? `?${qs}` : ''}`);
+  },
+
+  /** The answered questions (`bundle show question`'s `status: answered`); reading them records that command's exposures. */
+  getLocalBundleAnsweredQuestions(
+    name: string,
+    opts: { kind?: string; offset?: number } = {},
+  ): Promise<ApiLocalAnsweredQuestions> {
+    const query = new URLSearchParams();
+    if (opts.kind) query.set('kind', opts.kind);
+    if (opts.offset) query.set('offset', String(opts.offset));
+    const qs = query.toString();
+    return localGet<ApiLocalAnsweredQuestions>(`/local-bundles/${enc(name)}/questions/answered${qs ? `?${qs}` : ''}`);
   },
 
   previewLocalAnswer(name: string, questionId: string, input: LocalAnswerInput): Promise<ApiLocalAnswerPreview> {

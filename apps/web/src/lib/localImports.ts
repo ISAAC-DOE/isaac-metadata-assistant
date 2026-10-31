@@ -289,6 +289,45 @@ export interface LocalQuestion {
   display: LocalQuestionDisplay;
 }
 
+/** One distinct latest answer an ANSWERED question's targets hold (`questions.answered_question`): the decision, its
+ *  value (or element and edge, or counter positions), how many targets hold it, and who gave it when. */
+export interface LocalCurrentAnswer {
+  /** An optional-values question: the field this answer is for. */
+  field?: string;
+  decision: string;
+  value: unknown;
+  element?: string;
+  edge?: string;
+  positions?: number[];
+  targets: number;
+  by: string | null;
+  decided_utc: string | null;
+  decision_id: string | null;
+}
+
+/** A question every target of which has an answer — what `isaac bundle show question` shows as `status: answered`. */
+export interface LocalAnsweredQuestion extends LocalQuestion {
+  status: 'answered';
+  answered_targets: number;
+  current_answers: LocalCurrentAnswer[];
+  statement: string;
+}
+
+export interface ApiLocalAnsweredQuestions {
+  bundle: LocalBundleHeader;
+  total: number;
+  offset: number;
+  limit: number;
+  returned: number;
+  omitted_before: number;
+  omitted_after: number;
+  questions: LocalAnsweredQuestion[];
+  /** The exposures `isaac bundle show question` records for the questions shown, recorded by this read. */
+  exposures_recorded: number;
+  identity: 'local_unverified';
+  statement: string;
+}
+
 export interface LocalMergeCandidate {
   merge_candidate_id: string;
   group_ids: string[];
@@ -729,6 +768,18 @@ export const LOCAL_IMPORTS_COPY = {
   wouldSay: 'What the command line says this would record',
   regroupPreview: 'On the next regroup',
   keptPerGroup: 'Left as they are',
+  showAnswered: 'Show answered questions',
+  hideAnswered: 'Hide answered questions',
+  answeredTitle: 'Answered Questions',
+  answeredLead:
+    'Every value these questions ask has an answer. A later answer replaces it, with the same checks as the command line’s `isaac bundle decide --question`; giving the same answer again records nothing new. A change is previewed before it is written.',
+  readingAnswered: 'Reading the answered questions…',
+  noAnswered: 'No answered questions match.',
+  answeredChip: 'Answered',
+  currentAnswers: 'Current answer',
+  changeAnswer: 'Change answer',
+  keepAnswer: 'Keep this answer',
+  previewNothing: 'Nothing new would be written: every value already holds this answer',
   failedToRead: 'The server refused to read this.',
   notIsaac: 'Something other than this ISAAC server answered (a web page, not data). Check that the server on this computer is running, then try again.',
   retry: 'Retry',
@@ -944,6 +995,39 @@ export function countsText(c: Partial<LocalQuestionCounts>): string {
 export function deferredText(d: LocalDeferral): string {
   const date = d.decided_utc ? d.decided_utc.slice(0, 10) : 'date not recorded';
   return `Deferred by ${d.by ?? 'a name not recorded'}, ${date}`;
+}
+
+/** One current answer in plain words: what was answered, by whom, when, and for how many targets —
+ *  "ex_situ — by A. Scientist, 2099-01-01 00:00 UTC, for 3 values". */
+export function currentAnswerText(a: LocalCurrentAnswer, kind: string): string {
+  const what = (() => {
+    switch (a.decision) {
+      case 'confirm':
+        return a.value === null || a.value === undefined
+          ? 'Confirmed the extracted value'
+          : `Confirmed the extracted value ${shownValue(a.value)}`;
+      case 'reject':
+        return 'Rejected: no value goes into the record';
+      case 'set_absorber':
+        return `Element ${a.element ?? '—'}, edge ${a.edge ?? '—'}`;
+      case 'set_counter_positions':
+        return `Positions ${(a.positions ?? []).join(', ')} are run counters`;
+      case 'set_not_counter_positions':
+        return 'None of these positions is a run counter';
+      case 'set_clock_time_zone':
+        return `The instrument clock was set to ${shownValue(a.value)}`;
+      default:
+        return shownValue(a.value);
+    }
+  })();
+  const field = a.field ? `${a.field}: ` : '';
+  const when = a.decided_utc ? `${a.decided_utc.slice(0, 16).replace('T', ' ')} UTC` : 'date not recorded';
+  const unit = kind === 'confirm_absorber' ? 'group' : 'value';
+  const many =
+    kind === 'naming_counter_positions' || kind === 'clock_time_zone'
+      ? 'for the whole beamtime'
+      : `for ${a.targets} ${unit}${a.targets === 1 ? '' : 's'}`;
+  return `${field}${what} — by ${a.by ?? 'a name not recorded'}, ${when}, ${many}`;
 }
 
 /** The scope a minimum's answer is given at, in words: "group <id>", "run <id>", or null for the question as asked. */

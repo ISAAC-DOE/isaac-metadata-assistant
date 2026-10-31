@@ -316,9 +316,19 @@ Open `http://localhost:5173/local-imports`. What holds, and what each half refus
   choose "same for all" explicitly. Nothing is uploaded and no portal is called.
 - **Reading the questions records exposures** in the bundle (as `isaac bundle questions` does), so a
   later blind cross-check knows which parser values were shown.
+- **An answered question can be changed on the page**, as `isaac bundle decide --question` changes it.
+  "Show answered questions" (below the open ones, paged, read only when asked for) lists every question
+  each of whose values has an answer — `bundle show question`'s `status: answered` — with its current
+  answers in words (the value, or element and edge; who; when; for how many values or groups). Showing
+  them records exactly the exposures `bundle show question` records. "Change answer" opens the same
+  controls as an open question and always previews first: a later answer replaces the earlier one, the
+  same answer again says nothing new would be written (and offers no write), and a whole re-answer of
+  the absorber question names the groups answered on their own that it leaves as they are. A question
+  answered only "I don't know" stays among the open ones.
 
-The five operations are `GET /api/local-bundles`, `GET …/{bundle}/progress`, `GET …/{bundle}/questions`,
-`POST …/{bundle}/questions/{question_id}/answer`, and `POST …/{bundle}/decisions` for the merge,
+The six operations are `GET /api/local-bundles`, `GET …/{bundle}/progress`, `GET …/{bundle}/questions`,
+`GET …/{bundle}/questions/answered`, `POST …/{bundle}/questions/{question_id}/answer` (an open or an
+answered question), and `POST …/{bundle}/decisions` for the merge,
 keep-apart and Athena-version decisions; with the variable set the OpenAPI document lists them under
 *Local Import Bundles*. Contract: `docs/local-import-bundle-contract.md` §23.
 

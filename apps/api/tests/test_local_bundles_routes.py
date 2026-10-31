@@ -98,7 +98,7 @@ def test_every_route_is_absent_when_the_variable_is_unset(tmp_path, monkeypatch,
     monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
     c = TestClient(create_app())
     for method, path in (("get", "/api/local-bundles"), ("get", "/api/local-bundles/alpha/questions"),
-                         ("get", "/api/local-bundles/alpha/progress"),
+                         ("get", "/api/local-bundles/alpha/progress"), ("get", "/api/local-bundles/alpha/questions/answered"),
                          ("post", "/api/local-bundles/alpha/questions/Q-x/answer"),
                          ("post", "/api/local-bundles/alpha/decisions")):
         r = getattr(c, method)(path, **({"json": {}} if method == "post" else {}))
@@ -127,7 +127,7 @@ def test_the_boot_refuses_it_beside_a_base_path_or_naming_no_directory(root, mon
 
 def test_the_new_operations_meet_the_documentation_rules_every_operation_meets(client):
     """The pinned OpenAPI tests run with the variable unset (so the hosted count is unchanged); this
-    holds the five operations that appear only when it is set to the same rules."""
+    holds the six operations that appear only when it is set to the same rules."""
     from test_about_and_openapi import (
         _FORBIDDEN_SUBSTRINGS,
         _INTERNAL_MARKERS,
@@ -145,6 +145,7 @@ def test_the_new_operations_meet_the_documentation_rules_every_operation_meets(c
         ("/api/local-bundles/{bundle}/decisions", "post"),
         ("/api/local-bundles/{bundle}/progress", "get"),
         ("/api/local-bundles/{bundle}/questions", "get"),
+        ("/api/local-bundles/{bundle}/questions/answered", "get"),
         ("/api/local-bundles/{bundle}/questions/{question_id}/answer", "post"),
     ]
     for path, method, op in mine:
@@ -160,7 +161,7 @@ def test_the_new_operations_meet_the_documentation_rules_every_operation_meets(c
         if "local-bundles" in where:
             assert not any(p.search(text) for p in _INTERNAL_MARKERS), where
     total = sum(1 for _ in _operations(schema))
-    assert total == 102 + 5  # the hosted 102 (test_about_and_openapi) plus these five
+    assert total == 102 + 6  # the hosted 102 (test_about_and_openapi) plus these six
 
 
 # --- the directory boundary -------------------------------------------------------------------
