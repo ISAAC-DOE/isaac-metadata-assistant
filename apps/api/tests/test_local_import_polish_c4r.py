@@ -264,7 +264,7 @@ def test_cells_with_different_values_for_a_beamtime_wide_question_give_no_comman
     assert {a["value"] for a in asked} == {"XAS", "XES"} and {a["question_id"] for a in asked} == {q["question_id"]}
     for a in asked:
         # no command that records one cell's value: running each in turn would leave the last one standing
-        assert "--value XAS" not in a["command"] and "--value XES" not in a["command"]
+        assert "--value=XAS" not in a["command"] and "--value=XES" not in a["command"]
         assert a["values_differ"] == ["'XAS'", "'XES'"]
         assert "the scientist says which applies" in a["reason"]
 
@@ -273,7 +273,7 @@ def test_cells_with_different_values_for_a_beamtime_wide_question_give_no_comman
     lines = [ln for ln in text.splitlines() if ln.startswith("  Technique") and q["question_id"] in ln]
     assert len(lines) == 1, lines
     assert "2 different values ('XAS', 'XES')" in lines[0] and "the scientist must say which applies" in lines[0]
-    assert "--value XAS" not in lines[0] and "--value XES" not in lines[0]
+    assert "--value=XAS" not in lines[0] and "--value=XES" not in lines[0]
 
 
 def test_cells_that_agree_on_a_beamtime_wide_question_still_give_its_command(grouped, tmp_path, capsys):
@@ -288,6 +288,6 @@ def test_cells_that_agree_on_a_beamtime_wide_question_still_give_its_command(gro
         ("File List", f"{_col('Config ID')}{r1}"): "C1", ("File List", f"{_col('Config ID')}{r2}"): "C1"})
     code, rep, err = _import(grouped, filled, capsys)
     assert code == 0, err
-    assert len(rep["asked_beamtime_wide"]) == 2 and all("--value XAS" in a["command"] for a in rep["asked_beamtime_wide"])
+    assert len(rep["asked_beamtime_wide"]) == 2 and all("--value=XAS" in a["command"] for a in rep["asked_beamtime_wide"])
     assert all("values_differ" not in a for a in rep["asked_beamtime_wide"])
     assert TECH == rep["asked_beamtime_wide"][0]["target_field_path"]

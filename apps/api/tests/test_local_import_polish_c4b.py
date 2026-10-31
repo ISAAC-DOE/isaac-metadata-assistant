@@ -61,7 +61,7 @@ def test_a_technique_cell_answered_by_the_beamtime_question_names_that_question(
     assert asked["question_id"] == q["question_id"] and asked["target_field_path"] == TECH
     assert asked["run_id"] == "run-001" and asked["value"] == "XAS" and asked["answered"] is False
     assert asked["command"].startswith(f"isaac bundle decide <bundle_dir> --question {q['question_id']}")
-    assert "--value XAS" in asked["command"] and f"--by '{WHO}'" in asked["command"]
+    assert "--value=XAS" in asked["command"] and f"--by '{WHO}'" in asked["command"]
 
     code, text = _text(grouped, filled, capsys)
     assert code == 0

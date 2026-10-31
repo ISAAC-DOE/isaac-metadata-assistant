@@ -1930,6 +1930,13 @@ adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
   `governing`; a workbook without them, by its place in the log), its own, or nothing was recorded on the
   target since the adopt; otherwise it is listed in `stale_rulings`. A cell not adopted from their sheet (one of a
   template never adopted, or typed into an empty cell) records with `--supersede` as before.
+  (c14o) Every gated cell (a ruling, or an adopted File List, Campaign Info or Technique answer cell, a Technique cell
+  being one per File List row) is all or nothing: when any target it reaches is stale, or clashes (a different value
+  from an earlier decision without `--supersede`, or from another cell of this workbook), none is recorded and every
+  one is listed (`stale_rulings` or `clashes`), naming the target that stopped it. `--by` is compared stripped, as a
+  decision stores it. One person importing two copies of one workbook that rule differently, each with `--supersede`
+  and the same `--by`, alternates the value at each import, as intended: each import is their own correction of the
+  value their last one recorded.
   Settled, it says "already recorded: <value> (<date>); leave blank to keep" (the adopt result's `already_recorded`,
   counted apart in the summary); otherwise it awaits a ruling and says "recorded `12` (date); your sheet says `2`:
   rule which" (`recorded_note`). An Electrolyte row stating a concentration is settled only when the name and the

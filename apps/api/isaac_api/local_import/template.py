@@ -2267,7 +2267,8 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                 generic = asked["command"].replace('--by "<your name>"', f"--by {shlex.quote(by)}")
                 command = generic
                 if isinstance(value, str) and "--json" not in command:
-                    command = re.sub(r"--value <[^>]*>", lambda _m: f"--value {shlex.quote(value)}", command)
+                    # c14o LOW-3: `--value=<v>`, as every offered command says it, so `-x` is never read as an option
+                    command = re.sub(r"--value <[^>]*>", lambda _m: f"--value={shlex.quote(value)}", command)
                 report["asked_beamtime_wide"].append({
                     "cell": cell["cell"], "header": cell["header"], "value": value, "run_id": cell["run_id"],
                     "target_field_path": path, "question_id": asked["question_id"], "answered": asked["answered"],
@@ -2317,15 +2318,28 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
     adopted_at, unplaceable = _placed(cells, chains.log)
     # c14m MED-3: a decision this very adoption recorded (its note carries the id) was ruled against the value now
     # c14n MED-1: and by the same person (`--by`): a copy of the workbook shares its id
-    placing = dict(adopted_at=adopted_at, places=place_of, adopt_id=None if unplaceable else cells.get("adopt_id"), by=by)
+    # c14o LOW-2: the name compared is the stripped one, as `record_decision` stores it (`--by "Name "` is Name)
+    placing = dict(adopted_at=adopted_at, places=place_of, adopt_id=None if unplaceable else cells.get("adopt_id"),
+                   by=by.strip())
 
     def offer(tid: str, decision: str, value: Any) -> str:
         return _or_decide(tid, decision, value, slot_of.get(tid))  # c14n LOW-2
 
-    stale_said = dict(adopted_at=adopted_at, adopt_id=placing["adopt_id"], by=by)
+    stale_said = dict(adopted_at=adopted_at, adopt_id=placing["adopt_id"], by=placing["by"])
     seen_target: set[str] = set()
     # c14m MED-1: every target each Disagreements ruling cell reaches, as a `stale_rulings` entry would list it
+    # c14o MED-1: every target each GATED cell reaches (an adopted Campaign Info, File List or Technique answer cell
+    # too), keyed on that cell: a Technique cell is one per File List row ("… via 'File List'!B5"), as before
     reached: dict[str, list[dict]] = {}
+    # c14o MED-2: the first target of each gated cell that clashed, which the all-or-nothing lines below name
+    clashed: dict[str, dict] = {}
+    noun_of = {c["cell"]: "ruling" if c["sheet"] == SHEET_DISAGREE else "cell" for c, *_rest in planned}
+
+    def reach(cell: Mapping, kind: str, obj: Mapping, tid: str, decision: str, prior: Mapping | None) -> None:
+        reached.setdefault(cell["cell"], []).append({
+            "cell": cell["cell"], "target": {"kind": kind, "id": tid}, "value": cell["value"], "run_id": obj.get("run_id"),
+            "header": cell["header"], "decision_id": (prior or {}).get("decision_id"), "_decision": decision})
+
     for cell, decision, kind, obj, tid in planned:
         # c14n MED-2: an adopted File List cell is gated as a ruling is (a cell typed into the workbook, or one of a
         # template that was never adopted, is not: it records over another value with --supersede, as before)
@@ -2336,15 +2350,16 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
             report["clashes"].append({"cell": cell["cell"], "target": {"kind": kind, "id": tid}, "value": cell["value"],
                                       "reason": "another cell of this workbook gives this target a different value; neither "
                                                 "is recorded" + offer(tid, decision, cell["value"])})
+            if gated:  # c14o MED-2: a clash of a gated cell, as one with an earlier decision is
+                reach(cell, kind, obj, tid, decision, _prior(bundle, kind, obj, latest))
+                clashed.setdefault(cell["cell"], {"tid": tid, "run_id": obj.get("run_id"), "why": "split"})
             continue
         if tid in seen_target or (tid in ruled and not cell.get("ruling")):
             continue
         seen_target.add(tid)
         prior = _prior(bundle, kind, obj, latest)
-        if cell["sheet"] == SHEET_DISAGREE:
-            reached.setdefault(cell["cell"], []).append({
-                "cell": cell["cell"], "target": {"kind": kind, "id": tid}, "value": cell["value"], "run_id": obj.get("run_id"),
-                "header": cell["header"], "decision_id": (prior or {}).get("decision_id"), "_decision": decision})
+        if gated:
+            reach(cell, kind, obj, tid, decision, prior)
         if prior is not None and prior.get("decision") in (B.CONFIRMING_DECISIONS | {"reject"}):
             base = obj.get("value") if kind == "candidate" else None
             before = B.final_value(base, prior)
@@ -2400,6 +2415,9 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                                    "an earlier scientist decision gives a different value; skipped (pass --supersede to "
                                    "record this one)" + offer(tid, decision, cell["value"])),
                     })
+                    if gated:  # c14o MED-2
+                        clashed.setdefault(cell["cell"], {"tid": tid, "run_id": obj.get("run_id"),
+                                                          "why": "unseen" if unseen else "seen"})
                     continue
                 if unseen:
                     report["stale"].append({"cell": cell["cell"], "target": {"kind": kind, "id": tid}, "value": cell["value"],
@@ -2460,10 +2478,11 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
         report["stale"] = [x for x in report["stale"] if x["cell"] not in stale_cells]
         for name in (n for n in reached if n in stale_cells):
             first = next(x for x in reached[name] if (name, x["target"]["id"]) in listed)
+            noun = noun_of[name]  # c14o MED-1: an adopted answer cell is no ruling
             for x in reached[name]:
                 how = x.pop("_decision")
                 report["stale"].append(listed.get((name, x["target"]["id"])) or {**x, "reason": (
-                    f"this ruling reaches {len(reached[name])} targets and is recorded for all of them or none, and "
+                    f"this {noun} reaches {len(reached[name])} targets and is recorded for all of them or none, and "
                     f"{first['target']['id']}{' (' + first['run_id'] + ')' if first.get('run_id') else ''} was not made "
                     "against the value recorded there now (its own line says why); nothing is recorded for this one "
                     + (f"either, and {_already_there(x['value'])}" if (name, x["target"]["id"]) in holds else
@@ -2471,6 +2490,39 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
         for key in ("decisions", "tied", "already"):
             report[key] = [d for d in report[key] if d["cell"] not in stale_cells]
         calls = {k: c for k, c in calls.items() if k[0] not in stale_cells}
+
+    # c14o MED-2: AND WHEN ANY TARGET IT REACHES CLASHES. A gated cell giving one of its targets a value another
+    # scientist decision (or another cell of this workbook) contradicts records none of them: its other targets are
+    # listed with the clash, each naming the target that clashed, so a whole-beamtime answer never records on 8 runs of
+    # 9 (and a later --supersede import never keeps that split). A cell that reaches one target is unaffected
+    clash_cells = {n for n in clashed if n in reached and n not in stale_cells and len(reached[n]) > 1}
+    if clash_cells:
+        listed = {(x["cell"], x["target"]["id"]) for x in report["clashes"]}
+        holds = {(d["cell"], d["target"]["id"]) for key in ("tied", "already") for d in report[key]}
+        for name in (n for n in reached if n in clash_cells):
+            first = clashed[name]
+            noun = noun_of[name]
+            why = {"split": "gets a different value from another cell of this workbook",
+                   "seen": "holds a different value, from an earlier scientist decision",
+                   "unseen": "holds a different value this " + noun + " was not made against"}[first["why"]]
+            fix = {"split": "Give those cells one value, or adopt again and rule against what is recorded now",
+                   "seen": "Pass --supersede to record it for all of them, or adopt again and rule against what is "
+                           "recorded now",
+                   "unseen": "Adopt again and rule against what is recorded now"}[first["why"]]
+            for x in reached[name]:
+                how = x.pop("_decision")
+                if (name, x["target"]["id"]) in listed:
+                    continue
+                report["clashes"].append({
+                    "cell": name, "target": x["target"], "value": x["value"], "run_id": x["run_id"],
+                    "reason": (f"this {noun} reaches {len(reached[name])} targets and is recorded for all of them or none, "
+                               f"and {first['tid']}{' (' + first['run_id'] + ')' if first.get('run_id') else ''} {why} "
+                               "(its own line says why); nothing is recorded for this one "
+                               + (f"either, and {_already_there(x['value'])}" if (name, x["target"]["id"]) in holds else
+                                  f"either. {fix}" + offer(x["target"]["id"], how, x["value"])))})
+        for key in ("decisions", "tied", "already"):
+            report[key] = [d for d in report[key] if d["cell"] not in clash_cells]
+        calls = {k: c for k, c in calls.items() if k[0] not in clash_cells}
 
     recorded: list[str] = []
     unchanged: list[str] = []
