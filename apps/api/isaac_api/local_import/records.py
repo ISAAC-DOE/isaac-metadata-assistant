@@ -38,7 +38,7 @@ import json
 import re
 import shutil
 from pathlib import Path, PurePosixPath
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from . import bundle as B
 
@@ -1067,7 +1067,7 @@ def _on_disk_differs(bundle_dir: Path, group_id: str, draft: Mapping, comp: Mapp
     return json.dumps(disk, sort_keys=True) != json.dumps(draft, sort_keys=True)
 
 
-def build_records(bundle_dir: Path, *, test_marker: bool = False) -> dict:
+def build_records(bundle_dir: Path, *, test_marker: bool = False, full: bool = False) -> dict:
     from . import mutations as M
 
     bundle_dir = Path(bundle_dir)
@@ -1123,11 +1123,15 @@ def build_records(bundle_dir: Path, *, test_marker: bool = False) -> dict:
     ]
     result = {"drafts": index, "skipped_groups": skipped, "test_marker": bool(test_marker),
               "statement": "Drafts, not records. A draft with missing required values is incomplete and is never exported."}
-    result.update(warning_summary(warned))
+    # c11-a: the warnings of complete drafts first; index.json (and --full) holds every one
+    complete = [row["group_id"] for row in index if row["complete"]]
+    result.update(warning_summary(warned, first=complete, marked="draft_complete", where=f"{DRAFTS_DIR}/index.json lists them all"))
     if rederived_now:
         result["eligibility_rederived_now"] = rederived_now
-    _atomic_write(out_dir / "index.json", _json_bytes(result))
-    return result
+    every = {**result, **warning_summary(warned, first=complete, marked="draft_complete", full=True)}
+    every.pop("warnings_omitted", None), every.pop("warnings_full_list", None)
+    _atomic_write(out_dir / "index.json", _json_bytes(every))
+    return every if full else result
 
 
 # --- validation ----------------------------------------------------------------------------------
@@ -1506,13 +1510,37 @@ _BOILERPLATE_PREFIXES = ("Website schema (vendored", "This is NOT an official re
 WARNINGS_SHOWN = 5
 
 
-def warning_summary(warned: Sequence[Mapping]) -> dict:
-    """``{"warnings": [{group_id, code, text, command}, ...], "warnings_total": n}`` for the reply, or ``{}``."""
+def warning_summary(warned: Sequence[Mapping], *, first: Iterable[str] | None = None, full: bool = False,
+                    marked: str = "group_exportable", where: str | None = None) -> dict:
+    """``{"warnings": [{group_id, code, text, command}, ...], "warnings_total": n}`` for the reply, or ``{}``.
+
+    c11-a: a warning is never invisible. The warnings of the groups in ``first`` (exportable, or a complete draft)
+    come FIRST, each row saying so (``marked``: true or false), so a record about to be written is never the 68th of
+    73 warnings; ``full`` prints every one; when some are left out, ``warnings_full_list`` says how to see them."""
     if not warned:
         return {}
-    return {"warnings": [{k: w[k] for k in ("group_id", "code", "text", "command")} for w in warned[:WARNINGS_SHOWN]],
-            "warnings_total": len(warned),
-            **({"warnings_omitted": len(warned) - WARNINGS_SHOWN} if len(warned) > WARNINGS_SHOWN else {})}
+    lead = set(first) if first is not None else None
+    ordered = ([w for w in warned if w["group_id"] in lead] + [w for w in warned if w["group_id"] not in lead]
+               if lead is not None else list(warned))
+    shown = ordered if full else ordered[:WARNINGS_SHOWN]
+    rows = [{k: w[k] for k in ("group_id", "code", "text", "command")}
+            | ({marked: w["group_id"] in lead} if lead is not None else {}) for w in shown]
+    out: dict = {"warnings": rows, "warnings_total": len(warned)}
+    if len(shown) < len(warned):
+        out["warnings_omitted"] = len(warned) - len(shown)
+        out["warnings_full_list"] = ("Pass --full to print every warning" + (f"; {where}" if where else "") + ".")
+    return out
+
+
+#: What a warning's ``path`` is called in ``export``'s "Written without …" line (else the path itself).
+WRITTEN_WITHOUT_NAMES = {SETPOINT_PATH: "the potential set-point", B.CONTROL_MODE_PATH: "the open-circuit condition"}
+
+
+def written_without(w: Mapping) -> str:
+    """``export``'s line for a record WRITTEN while warning ``w`` still applies: "Written without the potential
+    set-point: <the warning's sentence>" (c11-a: an export is never silent about a condition the record lacks)."""
+    name = WRITTEN_WITHOUT_NAMES.get(w.get("path"), w.get("path") or "a stated condition")
+    return f"Written without {name}: {w['text']}"
 
 
 def first_official_error(report: Mapping) -> str | None:
@@ -1546,7 +1574,7 @@ def plain_reasons(summary: Sequence[str]) -> list[str]:
     return [line for line in summary if not str(line).startswith(_BOILERPLATE_PREFIXES)]
 
 
-def validate_records(bundle_dir: Path, *, run_portal=None) -> dict:
+def validate_records(bundle_dir: Path, *, run_portal=None, full: bool = False) -> dict:
     """Validate a FRESH composition of every confirmed group (review C1/I1). An on-disk
     draft that differs from it is flagged and never used."""
     from . import portal as P
@@ -1591,7 +1619,8 @@ def validate_records(bundle_dir: Path, *, run_portal=None) -> dict:
             not_exportable_omitted=max(0, len(not_exportable) - REASONS_SHOWN),
             reports=f"{VALIDATION_DIR}/<group_id>.json holds each group's full report (every gate, verbatim).",
         )
-    out.update(warning_summary(warned))
+    out.update(warning_summary(warned, first=[g for g, v in verdicts.items() if v == "exportable"], full=full,
+                               where=f"{VALIDATION_DIR}/<group_id>.json lists each group's"))
     from .propose_terms import pending_vocabulary
 
     pending = pending_vocabulary(bundle, fresh)
@@ -1725,6 +1754,8 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     fresh = fresh_compositions(bundle_dir, bundle, test_marker=_was_marked(bundle))
     confirmed = {gid for gid, _, _ in fresh}
     withdrawn: list[dict] = []
+    # c11-a: a record written while a warning still applies says so on its row ("Written without …"), never silent
+    warned = with_question_commands(bundle, [w for _, _, comp in fresh for w in comp.get("warnings") or ()])
 
     def withdraw(earlier: dict, why: str) -> dict:
         """Move an earlier export's record to WITHDRAWN_DIR and mark its index entry; the row's keys."""
@@ -1801,6 +1832,9 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         row = {"group_id": group_id, "record_id": rid, "record": record_path.name, "sidecar": sidecar_path.name,
                "artifacts": artifacts, "schemas_used": report["schemas_used"], "export": status,
                "statement": "Valid for the portal's pinned schema; NOT claimed valid for the website."}
+        still = [written_without(w) for w in warned if w["group_id"] == group_id]
+        if still:
+            row["warnings"] = still
         if status == "unchanged":
             row["export_statement"] = (f"Unchanged since its export at {at}: the same record id, rewritten byte for byte. "
                                        "No second record was made.")
@@ -1832,8 +1866,10 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     result = {
         # SAID PLAINLY FIRST (1.9.x polish): the exit code is 1 whenever any group is refused, even when records
         # were written, so a reader of the exit code alone would take "wrote 3, refused 75" for "nothing exported"
-        "outcome": export_outcome(len(exported), len(refused), len(withdrawn), out),
+        "outcome": export_outcome(len(exported), len(refused), len(withdrawn), out,
+                                  warned=sum(1 for row in exported if row.get("warnings"))),
         "records_written": len(exported),
+        **({"records_written_with_warnings": n} if (n := sum(1 for row in exported if row.get("warnings"))) else {}),
         "groups_refused": len(refused),
         "exported": exported,
         "refused": refused,
@@ -1850,8 +1886,9 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     return result
 
 
-def export_outcome(written: int, refused: int, withdrawn: int, out: Path) -> str:
-    """One sentence: what ``export`` wrote and refused, and what its exit code means for that."""
+def export_outcome(written: int, refused: int, withdrawn: int, out: Path, *, warned: int = 0) -> str:
+    """One sentence: what ``export`` wrote and refused, and what its exit code means for that (and, c11-a, how many
+    records were written with a warning that still applies: each row's ``warnings`` says what it lacks)."""
     text = f"Wrote {written} record(s), refused {refused} group(s)."
     if written and refused:
         text += (f" The exit code is 1 because some groups were refused; the {written} record(s) written are valid "
@@ -1860,6 +1897,9 @@ def export_outcome(written: int, refused: int, withdrawn: int, out: Path) -> str
         text += " Nothing was written (exit 1)."
     elif written:
         text += " Every confirmed group was exported (exit 0)."
+    if warned:
+        text += (f" {warned} record(s) were written with a warning that still applies: each says what the record is "
+                 "written without (`exported[].warnings`).")
     if withdrawn:
         text += f" {withdrawn} earlier record(s) were withdrawn (see `withdrawn`)."
     return text

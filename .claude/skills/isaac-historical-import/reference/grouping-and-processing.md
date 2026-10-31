@@ -90,7 +90,9 @@ it finds one. Show per group, in words:
   group named as a reference or standard takes transmission first, but I0 or I1 was not positive in
   every scan, so fluorescence was used): say the sentence in `qc.json` → `statements` and ask the
   scientist to confirm the channel. A scan skipped `signal_not_finite` has its points but a signal
-  that is never finite (I0 or I1 ≤ 0); never call that "too few points";
+  that is never finite (I0 or I1 ≤ 0); never call that "too few points". A scan skipped `signal_all_zero`
+  recorded a signal of zero at every point: say it in words ("scan 8's signal is zero at every point, so it
+  was left out"); the curve uses the other scans;
 - **when a scan ends early** (reason `scans_truncated`, flag `scan_range_truncated`; `scans_used` still
   counts it): say the sentence in `qc.json` → `statements` (how many scans end early, which, the
   energies each covers, and that part of the merged curve averages fewer scans) and ask whether the

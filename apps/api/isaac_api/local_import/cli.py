@@ -1789,7 +1789,7 @@ def cmd_bundle_build_records(args) -> int:
     from . import records as R
 
     def run():
-        result = R.build_records(Path(args.bundle_dir), test_marker=args.test_marker)
+        result = R.build_records(Path(args.bundle_dir), test_marker=args.test_marker, full=args.full)
         return result if args.full else compact_build(result)
 
     return _mutation(run)
@@ -1802,7 +1802,7 @@ def cmd_bundle_validate(args) -> int:
     holder: dict = {}
 
     def run():
-        holder["r"] = R.validate_records(Path(args.bundle_dir))
+        holder["r"] = R.validate_records(Path(args.bundle_dir), full=args.full)
         return holder["r"]
 
     code = _mutation(run)
@@ -2197,6 +2197,7 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
 
     q = bsub.add_parser("validate", help="validate drafts: draft, export dry-run, official, exactness, offline portal")
     q.add_argument("bundle_dir")
+    q.add_argument("--full", action="store_true", help="print every warning (default: exportable groups' first, then the first few)")
     q.set_defaults(func=cmd_bundle_validate)
 
     q = bsub.add_parser("export", help="write official records that pass every gate")

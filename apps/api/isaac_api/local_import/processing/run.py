@@ -665,11 +665,19 @@ def _scans_phrase(scans: Sequence[int]) -> str:
     return ", ".join(out)
 
 
-def _no_usable_scan_statement(inputs: Sequence[Mapping], too_few: Sequence[int]) -> str | None:
+def _no_usable_scan_statement(inputs: Sequence[Mapping], too_few: Sequence[int], *, signal: str | None = None) -> str | None:
     """c10-m: one plain sentence when NO scan could be used because scans have too few points (``None`` when none
-    did): "The only scan has 2 usable points; at least 5 are needed". Scans skipped for other reasons are counted."""
+    did): "The only scan has 2 usable points; at least 5 are needed". Scans skipped for other reasons are counted.
+    c11-a: when no scan has too few points but every one's signal is zero at every point, that is said instead."""
     if not too_few:
-        return None
+        zero = sum(1 for i in inputs if i.get("skip_reason") == C.SIGNAL_ALL_ZERO)
+        if not zero or zero != len(inputs):
+            return None
+        named = f"signal ({signal})" if signal else "signal"
+        if zero == 1:
+            return f"The only scan's {named} is zero at every point, so there is no curve to process."
+        every = "both scans" if zero == 2 else f"all {zero} scans"
+        return f"No scan could be used: the {named} is zero at every point in {every}, so there is no curve to process."
     need = f"at least {C.MIN_SCAN_POINTS} are needed, so there is no curve to process."
     if len(inputs) == 1:
         return f"The only scan has {too_few[0]} usable point{'' if too_few[0] == 1 else 's'}; {need}"
@@ -678,6 +686,29 @@ def _no_usable_scan_statement(inputs: Sequence[Mapping], too_few: Sequence[int])
     return (f"No scan could be used: {k} {'has' if k == 1 else 'have'} too few usable points ({', '.join(map(str, too_few))}); "
             + (f"{other} {'was' if other == 1 else 'were'} skipped for other reasons (see inputs); " if other else "")
             + need)
+
+
+def _raw_signal(choice) -> str | None:
+    """The column(s) whose values ``signal_all_zero`` tests (core.scan_arrays' raw signal), as a reader names them."""
+    if choice.mode == MODE_TRANSMISSION:
+        return choice.transmission_after
+    return "+".join(choice.signal_columns) or None
+
+
+def _all_zero_statement(inputs: Sequence[Mapping], signal: str | None, used: int) -> str | None:
+    """c11-a: one plain sentence when scans were left out because their signal is zero at every point (``None``
+    otherwise): how many of the listed scans were used, which were not (by file name), and that the curve merges the
+    others. In ``qc.statements``, so in ``qc.json``: only a result with such a scan has a new id."""
+    zero = [i for i in inputs if i.get("skip_reason") == C.SIGNAL_ALL_ZERO]
+    if not zero:
+        return None
+    k = len(zero)
+    names = ", ".join(PurePosixPath(str(i.get("relative_path") or i.get("source_id"))).name for i in zero[:10])
+    names += f" and {k - 10} more" if k > 10 else ""
+    named = f"signal ({signal})" if signal else "signal"
+    return (f"{used} of {len(inputs)} listed scans were used. {k} {'was' if k == 1 else 'were'} left out because "
+            f"{'its' if k == 1 else 'their'} {named} is zero at every point: {names}; the curve merges the other "
+            f"{used}. A person checks why {'that scan' if k == 1 else 'those scans'} recorded no signal.")
 
 
 def _skipped_scans_statement(inputs: Sequence[Mapping], choice, used: int) -> str | None:
@@ -729,7 +760,8 @@ def _set_scans(entry: Mapping) -> list[int] | None:
 
 
 def _athena_scans_used(entry: Mapping, stems: Sequence[str], isaac_counts: tuple[int, int] | None,
-                       coverage: Mapping | None = None, isaac_scans: Sequence[int] | None = None) -> dict:
+                       coverage: Mapping | None = None, isaac_scans: Sequence[int] | None = None, *,
+                       listed_scans: Sequence[int] | None = None, numbered_by_order: bool = False) -> dict:
     """Which scans the scientist's Athena curve used, as far as the project says: ``basis`` is ``per_scan_set``
     (the member groups name one scan each), ``label`` (the Athena group's label names a selection) or
     ``not_stated`` (an Athena project does not list the scan files it merged). In a group of several runs
@@ -755,6 +787,14 @@ def _athena_scans_used(entry: Mapping, stems: Sequence[str], isaac_counts: tuple
         # which runs it covers, above)
         if coverage is not None or not isaac_scans or set(scans) == set(isaac_scans):
             return ""
+        how = (f" (the run states no scan index: its {len(listed_scans)} scans are numbered 1-{len(listed_scans)} in the "
+               "order listed)" if numbered_by_order and listed_scans else "")
+        unlisted = sorted(set(scans) - set(listed_scans)) if listed_scans else []
+        if unlisted:
+            # c11-a: a number the run does not have is not "a scan ISAAC did not merge": which scans it means is unknown
+            return (f" It names scan{'s' if len(unlisted) > 1 else ''} {_scans_phrase(unlisted)}, which the run's "
+                    f"{len(listed_scans)} listed scans do not include{how}, so which of the scans ISAAC merged it used is "
+                    "not known: its E0 and curve describe its own scans, not necessarily ISAAC's merge.")
         extra = sorted(set(scans) - set(isaac_scans))
         if extra:
             # c10-r: a scan ISAAC did not merge (it skipped it) makes it ANOTHER set, never "only" part of the merge
@@ -762,9 +802,9 @@ def _athena_scans_used(entry: Mapping, stems: Sequence[str], isaac_counts: tuple
             return (f" It is a different set of scans from the {len(isaac_scans)} ISAAC merged: it includes "
                     f"scan{'s' if len(extra) > 1 else ''} {_scans_phrase(extra)}, which ISAAC did not merge"
                     + (f", and leaves out scan{'s' if len(left) > 1 else ''} {_scans_phrase(left)}" if left else "")
-                    + ": its E0 and curve describe its own scans, not ISAAC's merge.")
+                    + f"{how}: its E0 and curve describe its own scans, not ISAAC's merge.")
         return (f" It covers only scan{'s' if len(scans) > 1 else ''} {_scans_phrase(scans)} of the {len(isaac_scans)} "
-                "scans ISAAC merged: its E0 and curve describe those scans, not the full merge.")
+                f"scans ISAAC merged{how}: its E0 and curve describe those scans, not the full merge.")
 
     if members and members.get("scans"):
         scans = [int(n) for n in members["scans"]]
@@ -865,8 +905,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
             entry["skip_reason"] = code
             if code == "too_few_points" and sa is not None:
                 too_few.append(int(sa["energy"].size))
-            if code == C.SIGNAL_NOT_FINITE:
-                entry["diagnostics"] = sa["diagnostics"]  # points_read, nonfinite_dropped: why it is unusable
+            if code in (C.SIGNAL_NOT_FINITE, C.SIGNAL_ALL_ZERO):
+                entry["diagnostics"] = sa["diagnostics"]  # points_read, nonfinite_dropped / signal_all_zero: why
             continue
         entry.update(used=True, channel=choice.signal_name, diagnostics=sa["diagnostics"])
         scans_data.append(sa)
@@ -881,7 +921,7 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         # c10-m: said in the result and the lists, outside the failure's hash (its id does not move): how many scans
         # were listed and used, and, when scans were too short, how short
         out["qc"]["metrics"].update(scans_listed=len(res["inputs"]), scans_used=0)
-        said = _no_usable_scan_statement(res["inputs"], too_few)
+        said = _no_usable_scan_statement(res["inputs"], too_few, signal=_raw_signal(choice))
         if said:
             out["qc"]["statements"] = {"no_usable_scan": said}
         return [out]
@@ -961,6 +1001,7 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     step = nm["edge_step"]
     se = mg["stderr"][ok]
     lacking = sum(1 for e, _ in tables if e.get("skip_reason") == "scan_lacks_chosen_columns")
+    zero_skipped = sum(1 for e in res["inputs"] if e.get("skip_reason") == C.SIGNAL_ALL_ZERO)
     metrics = {
         "scans_listed": len(scans),
         "scans_used": len(scans_data),
@@ -990,6 +1031,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         "duplicate_energies_merged": sum(d["duplicate_energies_merged"] for d in diags),
         "i0_nonpositive_fraction": (sum(i0np) / read_pts) if i0np else None,
         "signal_all_zero_scans": sum(1 for d in diags if d["signal_all_zero"]),
+        # c11-a: only when a scan was skipped for a signal of zero at every point (absent otherwise, as above)
+        **({"scans_skipped_signal_all_zero": zero_skipped} if zero_skipped else {}),
     }
     verdict, reasons = C.qc_verdict(metrics, params)
     res["qc"] = {"metrics": metrics, "verdict": verdict, "reasons": reasons}
@@ -1006,6 +1049,9 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         statements[reason] = finding["statement"]
     if short:
         statements["post_edge_window_too_short"] = short["statement"]
+    zero_said = _all_zero_statement(res["inputs"], _raw_signal(choice), len(scans_data))
+    if zero_said:
+        statements["scans_skipped_signal_all_zero"] = zero_said
     if statements:  # absent when there is nothing to say, so an unaffected result is unchanged
         res["qc"]["statements"] = statements
     res["steps"].append({"step": "qc", "params": dict(params["qc"]), "outcome": {"verdict": verdict, "reasons": reasons}, "flags": []})
@@ -1020,10 +1066,15 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     athena_res = None
     # the run each used scan belongs to: in a group of several runs, scan numbers repeat across runs (c8-a)
     stem_of = {s.get("source_id"): (ctx.runs_by_key.get(s.get("run_key")) or {}).get("stem") for s in scans if s.get("run_key")}
+    # c11-a: each listed scan's number: its stated index, or 1..N in the order listed when the run states none (one file
+    # per scan). Used only to compare with the scientist's Athena selection; the inputs keep what the bundle states.
+    numbers, numbering = B.input_scan_numbers(res["inputs"], {s.get("source_id"): s.get("run_key") for s in scans})
+    number_of = {id(e): n for e, n in zip(res["inputs"], numbers)}
+    listed_scans = numbers if numbers and all(n is not None for n in numbers) else None
     coverage = None
     if athena_entry is not None:
         comparison = A.compare({"grid": g2, "norm": nm["norm"], "flat": nm["flat"], "e0_eV": nm["e0_eV"], "edge_step": step}, athena_entry, params, np)
-        coverage = _diagnose(comparison, athena_entry, stems, used_entries, grid, M, ctx, stem_of=stem_of)
+        coverage = _diagnose(comparison, athena_entry, stems, used_entries, grid, M, ctx, stem_of=stem_of, number_of=number_of)
         res["comparison"] = comparison
         if comparison["verdict"] == "differs":
             res["review_flags"].append("athena_disagrees")
@@ -1039,7 +1090,7 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         res["athena_versions"] = []
         for n, v in enumerate(athena_versions, start=1):
             cmp_ = A.compare({"grid": g2, "norm": nm["norm"], "flat": nm["flat"], "e0_eV": nm["e0_eV"], "edge_step": step}, v, params, np)
-            _diagnose(cmp_, v, stems, used_entries, grid, M, ctx, stem_of=stem_of)
+            _diagnose(cmp_, v, stems, used_entries, grid, M, ctx, stem_of=stem_of, number_of=number_of)
             listed = {"version_id": f"{group['group_id']}-v{n:02d}", "provenance": A.version_provenance(v, stems), "comparison": cmp_}
             if not A.plausible(v):
                 listed["flags"] = [A.EDGE_STEP_IMPLAUSIBLE_FLAG]
@@ -1143,7 +1194,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     out = [res]
     if athena_entry is not None:
         athena_res = _athena_result(group, athena_entry, files, params, np, ctx, stems=stems, isaac_counts=(len(scans_data), len(scans)),
-                                    coverage=coverage, isaac_scans=[e.get("scan") for e in used_entries if e.get("scan") is not None])
+                                    coverage=coverage, isaac_scans=[number_of[id(e)] for e in used_entries if number_of.get(id(e)) is not None],
+                                    listed_scans=listed_scans, numbered_by_order=numbering == B.SCAN_NUMBERS_BY_ORDER)
         athena_res["comparison"] = comparison
         # a curve whose energy frame is unknown (non-finite bkg_eshift) is never preferred by default;
         # its result carries athena_energy_frame_unknown, and a scientist can still approve it
@@ -1164,7 +1216,7 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
 
 
 def _diagnose(comparison: dict, entry: Mapping, stems: Sequence[str], used_entries: Sequence[Mapping], grid, M, ctx: _Ctx,
-              *, stem_of: Mapping[str, str] | None = None) -> dict | None:
+              *, stem_of: Mapping[str, str] | None = None, number_of: Mapping[int, int | None] | None = None) -> dict | None:
     """Separate WHY ISAAC and Athena differ (diagnostics only; the verdict is unchanged):
 
     * ``rms_norm_with_athena_params`` — ISAAC's merge of ALL its scans, normalised with the
@@ -1182,7 +1234,11 @@ def _diagnose(comparison: dict, entry: Mapping, stems: Sequence[str], used_entri
     chosen = sel or (_set_scans(entry) if coverage is None else None)
     comparison["athena_scan_selection"] = chosen
     mine = [e for e in used_entries if coverage is None or (stem_of or {}).get(e.get("source_id")) in coverage["runs"]]
-    idx = [e.get("scan") for e in mine]
+    # c11-a: a scan's number is its stated index or, in a run that states none, its place in the order listed
+    def number(e: Mapping):
+        return (number_of or {}).get(id(e), e.get("scan"))
+
+    idx = [number(e) for e in mine]
     if (chosen and set(chosen) != set(i for i in idx if i is not None)) or (coverage or {}).get("partial"):
         comparison["flags"].append("scientist_selected_subset_of_scans")
     if coverage is not None:
@@ -1225,7 +1281,7 @@ def _diagnose(comparison: dict, entry: Mapping, stems: Sequence[str], used_entri
     comparison["metrics"]["rms_norm_with_athena_params"] = _rms(list(range(M.shape[0])))
     if sel:
         keep = {id(e) for e in mine}
-        rows = [i for i, e in enumerate(used_entries) if id(e) in keep and e.get("scan") in set(sel)]
+        rows = [i for i, e in enumerate(used_entries) if id(e) in keep and number(e) in set(sel)]
         if rows and len(rows) == len(sel):
             comparison["metrics"]["rms_norm_same_scans_same_params"] = _rms(rows)
     return coverage
@@ -1233,14 +1289,16 @@ def _diagnose(comparison: dict, entry: Mapping, stems: Sequence[str], used_entri
 
 def _athena_result(group: Mapping, entry: Mapping, files: Sequence[Mapping], params: Mapping, np, ctx: _Ctx, *,
                    stems: Sequence[str] = (), isaac_counts: tuple[int, int] | None = None,
-                   coverage: Mapping | None = None, isaac_scans: Sequence[int] | None = None) -> dict:
+                   coverage: Mapping | None = None, isaac_scans: Sequence[int] | None = None,
+                   listed_scans: Sequence[int] | None = None, numbered_by_order: bool = False) -> dict:
     res = _base(group, "scientist_athena")
     members = entry.get("per_scan_set") if entry.get("_match_kind") == "per_scan_set" else None
     # A SET of the scientist's per-scan groups is ISAAC's mean of them (athena._per_scan_set), not values
     # ISAAC left unchanged: the flag and the input say so, and name every member group
     res["review_flags"] = ["scientist_processed_data",
                            "isaac_computed_mean_of_scientist_per_scan_curves" if members else "isaac_did_not_change_scientist_values"]
-    scans_used = _athena_scans_used(entry, stems, isaac_counts, coverage, isaac_scans)
+    scans_used = _athena_scans_used(entry, stems, isaac_counts, coverage, isaac_scans, listed_scans=listed_scans,
+                                    numbered_by_order=numbered_by_order)
     res["inputs"] = [
         {
             "source_id": entry["prj_source_id"],

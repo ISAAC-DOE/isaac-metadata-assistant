@@ -97,6 +97,8 @@ def scan_arrays(table: ScanTable, choice: ChannelChoice, np) -> dict:
 #: A scan with fewer usable points than this is skipped.
 MIN_SCAN_POINTS = 5
 SIGNAL_NOT_FINITE = "signal_not_finite"
+#: A scan whose chosen signal is zero at every point (c11-a): skipped, counted and named, never merged.
+SIGNAL_ALL_ZERO = "signal_all_zero"
 
 
 def unusable_reason(sa: Mapping) -> str | None:
@@ -105,9 +107,14 @@ def unusable_reason(sa: Mapping) -> str | None:
     ``signal_not_finite`` when the scan HAS the points but its chosen signal is non-finite at
     too many of them (I0 or I1 not positive): measured on a real BL4-3 dilute standard, I1 is
     negative at all 303 points, so ln(I0/I1) dropped every one — that is not ``too_few_points``.
+
+    ``signal_all_zero`` (c11-a) when the scan has the points but its chosen signal is zero at every one: measured
+    on a real BL15-2 beamtime, the last of 8 scans recorded no counts, and merging it pulled the mean down to 0 at
+    the end of the curve. Only a scan that would otherwise be used is given this reason (a scan already unusable
+    keeps its reason, so no other result moves).
     """
     if sa["energy"].size >= MIN_SCAN_POINTS:
-        return None
+        return SIGNAL_ALL_ZERO if sa["diagnostics"].get("signal_all_zero") else None
     d = sa["diagnostics"]
     if d["nonfinite_dropped"] and d["points_read"] >= MIN_SCAN_POINTS:
         return SIGNAL_NOT_FINITE
@@ -605,6 +612,10 @@ def qc_verdict(metrics: Mapping, params: Mapping) -> tuple[str, list[str]]:
         fail.append("signal_all_zero")
     if metrics.get("scans_used") is not None and metrics["scans_used"] < int(q["warn_min_scans"]):
         warn.append("single_scan")
+    if metrics.get("scans_skipped_signal_all_zero"):
+        # c11-a: a scan whose signal is zero at every point was left out of the merge: a person checks why it
+        # recorded nothing (the plain sentence is in qc.statements)
+        warn.append("scans_skipped_signal_all_zero")
     if metrics.get("scans_skipped_lacking_chosen_columns"):
         # readable scans of the group that lack the chosen columns were left out: a person
         # confirms they belong elsewhere (e.g. motor/alignment scans), so never a pass

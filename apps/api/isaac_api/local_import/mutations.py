@@ -836,16 +836,42 @@ def scan_subset_note(bundle: Mapping, result: Mapping) -> str | None:
             f" — of the {total} scan(s) ISAAC merged{over}" if total else "")
         which = f"scans {', '.join(chosen)} of {named}{of}" if chosen else f"the scans of {named}{of}"
     else:
-        merged = {i.get("scan") for i in (sibling or {}).get("inputs") or () if not i.get("skip_reason")}
-        extra = [n for n in chosen if n.isdigit() and int(n) not in merged] if sibling and merged else []
-        if extra:
-            # c10-r: it includes a scan ISAAC did not merge: a DIFFERENT set of scans, never "only" part of the merge
-            return (f"The scientist's Athena curve for group {result.get('group_id')} uses a different set of scans "
-                    f"({', '.join(chosen)}) from the {total} scan(s) ISAAC merged, including scan(s) {', '.join(extra)} "
-                    f"that ISAAC did not merge ({SCAN_SUBSET_FLAG}): its E0 and curve describe its own scans, not "
-                    "ISAAC's merge.")
+        # c11-a: a run kept as one file per scan states no scan index (its inputs hold `scan: None`): its scans are
+        # numbered 1..N in the order listed (bundle.input_scan_numbers), and said so. A scan is said NOT merged only
+        # when every number is known; before, an empty set of numbers made every chosen scan "not merged".
+        inputs = list((sibling or {}).get("inputs") or ())
+        run_of = {s.get("source_id"): r.get("run_key") for r in bundle.get("runs") or () for s in r.get("scans") or ()}
+        numbers, basis = B.input_scan_numbers(inputs, run_of)
+        known = bool(inputs) and all(n is not None for n in numbers)
+        merged = {n for n, i in zip(numbers, inputs) if not i.get("skip_reason")}
+        how = ""
+        if known and basis == B.SCAN_NUMBERS_BY_ORDER:
+            several = len({run_of.get(i.get("source_id")) for i in inputs}) > 1
+            how = (" (the runs state no scan index; each run's scans are numbered from 1 in the order listed)" if several
+                   else f" (the run states no scan index; its {len(numbers)} scans are numbered 1-{len(numbers)} in the "
+                        "order listed)")
+        gid = result.get("group_id")
+        if known and chosen:
+            unlisted = [n for n in chosen if not (n.isdigit() and int(n) in set(numbers))]
+            if unlisted:
+                # a number the run does not have is not "a scan ISAAC did not merge": which scans it means is unknown
+                return (f"The scientist's Athena curve for group {gid} names scan(s) {', '.join(unlisted)}, which the "
+                        f"run's {len(numbers)} listed scans do not include{how}, so which of the {total} scan(s) ISAAC "
+                        f"merged it used is not known ({SCAN_SUBSET_FLAG}): its E0 and curve describe its own scans, "
+                        "not necessarily ISAAC's merge.")
+            extra = [n for n in chosen if int(n) not in merged]
+            if extra:
+                # c10-r: it includes a scan ISAAC did not merge: a DIFFERENT set of scans, never "only" part of the merge
+                return (f"The scientist's Athena curve for group {gid} uses a different set of scans "
+                        f"({', '.join(chosen)}) from the {total} scan(s) ISAAC merged, including scan(s) {', '.join(extra)} "
+                        f"that ISAAC did not merge{how} ({SCAN_SUBSET_FLAG}): its E0 and curve describe its own scans, "
+                        "not ISAAC's merge.")
         of = f" of the {total} scan(s) ISAAC merged" if total else ""
-        which = f"scans {', '.join(chosen)}{of}" if chosen else f"a subset of the scans{of}"
+        if chosen and not known:
+            # the numbers are not known, so neither "only part of the merge" nor "a scan ISAAC did not merge" is said
+            return (f"The scientist's Athena curve for group {gid} uses scans {', '.join(chosen)}{of} "
+                    f"({SCAN_SUBSET_FLAG}): its E0 and curve describe those scans, which may not be ISAAC's merge.")
+        which = f"scans {', '.join(chosen)}{of}{how}" if chosen else f"a subset of the scans{of}"
     return (f"The scientist's Athena curve for group {result.get('group_id')} uses only {which} "
             f"({SCAN_SUBSET_FLAG}): its E0 and curve describe those scans, not the full merge.")
 
@@ -2451,6 +2477,27 @@ def compare_local_clock(candidate: Mapping, proposed: Any) -> dict | None:
     return {"agrees_with_parser": False, "compared_as": LOCAL_CLOCK_COMPARED_AS, "comparison_note": note}
 
 
+def _zone_less_against_instant(path: str | None, proposed: Any, base: Any) -> dict | None:
+    """c11-a: a reading of a ``*_utc`` field written as a date and time with NO zone (``2021-11-15T02:17:30``), held
+    against the parser's zoned instant (a SPEC ``#E`` epoch: ``…T10:17:30+00:00``), is NOT COMPARABLE, never
+    "contradicts": a local time with no zone is not an instant. ``None`` for anything else (compared as before)."""
+    from .records import _instant
+
+    if not (path and path.endswith("_utc") and isinstance(proposed, str) and isinstance(base, str)):
+        return None
+    held = _instant(base)
+    if held is None or _instant(proposed) is not None:
+        return None
+    iso, problem = read_local_clock_reading(proposed)
+    if iso is None:
+        return None
+    what = "UTC" if held.utcoffset().total_seconds() == 0 else f"the instant {base}"
+    return {"agrees_with_parser": None, "compared_as": "instant",
+            "comparison_note": (f"the reading names no time zone; the file's value is {what} ({base}), so the two cannot "
+                                f"be compared as the same instant. Write the UTC instant (e.g. {iso}Z if that is UTC) or "
+                                "the local time with its zone (+HH:MM).")}
+
+
 def reveal(bundle_dir: Path, target_id: str) -> dict:
     """The parser value plus a comparison with every AI reading. RECORDS AN EXPOSURE."""
     with locked(Path(bundle_dir)):
@@ -2487,6 +2534,9 @@ def reveal(bundle_dir: Path, target_id: str) -> dict:
                 return got
         if base is None:
             return {"agrees_with_parser": None, "comparison_note": NO_PARSER_VALUE_NOTE}
+        zone_less = _zone_less_against_instant(path, proposed, base)
+        if zone_less is not None:
+            return zone_less
         # A NUMBER GIVEN AS TEXT (`annotate --value "0.4"` without --json) for a numeric field, against a numeric
         # parser value: compared as the number it parses as, and said so — never "contradicts" for 0.4 vs "0.4"
         if (numeric_field and isinstance(proposed, str) and isinstance(base, (int, float)) and not isinstance(base, bool)):

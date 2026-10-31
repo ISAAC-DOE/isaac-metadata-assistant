@@ -243,7 +243,13 @@ early (`scans_truncated`, flag `scan_range_truncated`, with the overlap range), 
 transmission to fluorescence (`channel_fallback_transmission_not_positive`: transmission was chosen but
 every scan kept fewer than 20 finite points; the statement in `qc.json` says what was tried). Else pass.
 A scan whose signal is non-finite at most points is skipped as `signal_not_finite` (with `points_read`
-and `nonfinite_dropped`), never as `too_few_points`.
+and `nonfinite_dropped`), never as `too_few_points`. A scan whose signal is zero at every point is skipped
+as `signal_all_zero` (c11-a; measured on BL15-2 2021: the last of 8 scans recorded no counts and pulled the
+merged curve to 0 at its end) and the other scans are merged: warn `scans_skipped_signal_all_zero`, metric
+`scans_skipped_signal_all_zero`, and a statement naming the scan. Only a scan that would otherwise be used
+gets this reason, so only a result with such a scan has a new id. With every scan's signal zero there is no
+curve. The `signal_all_zero` fail (metric `signal_all_zero_scans`, over the scans used) stays, for a result
+an older build made.
 
 ### Known limits (for review)
 

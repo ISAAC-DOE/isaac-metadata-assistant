@@ -454,6 +454,34 @@ def _scan_numbers(run: Mapping) -> tuple[set[int], str]:
     return set(range(1, int(run.get("scan_count") or 0) + 1)), "scan_count"
 
 
+#: ``input_scan_numbers``'s basis when the run states no scan index: its scans numbered 1..N in the order listed.
+SCAN_NUMBERS_BY_ORDER = "order_listed"
+
+
+def input_scan_numbers(inputs: Sequence[Mapping], run_of: Mapping[Any, Any] | None = None) -> tuple[list[int | None], str | None]:
+    """``(the scan number of each of a processing result's inputs, basis)``, in order.
+
+    An input's own ``scan`` (the run's ``scan_index``) when ANY input states one (basis ``"stated"``; an input that
+    states none stays ``None``: its number is not known). When none does — a run kept as one file per scan
+    (``<stem>_dir/<stem>_001.txt``) — each run's scans are numbered 1..N in the order listed, the rule
+    :func:`_scan_numbers` states for a run that states no scan index (basis :data:`SCAN_NUMBERS_BY_ORDER`).
+    ``run_of`` (``source_id`` -> run) numbers each run of a several-run group from 1; without it the inputs are one
+    run's. ``(.., None)`` for no input."""
+    if not inputs:
+        return [], None
+    stated = [i.get("scan") if isinstance(i.get("scan"), int) and not isinstance(i.get("scan"), bool) else None
+              for i in inputs]
+    if any(n is not None for n in stated):
+        return stated, "stated"
+    seen: dict[Any, int] = {}
+    out: list[int | None] = []
+    for i in inputs:
+        key = (run_of or {}).get(i.get("source_id"))
+        seen[key] = seen.get(key, 0) + 1
+        out.append(seen[key])
+    return out, SCAN_NUMBERS_BY_ORDER
+
+
 def _selection_numbers(sel: str) -> set[int] | None:
     """``"7"`` -> {7}; ``"1-5"`` -> {1..5}; a reversed or oversized range -> ``None``."""
     a, _, b = sel.partition("-")

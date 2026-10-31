@@ -31,7 +31,10 @@ code error can be caught instead of echoed. It is a spot check, never a verifica
    UTC value until the clock's zone is stated, but it IS compared: write the earliest scan's line-2 time as the
    header writes it or as `YYYY-MM-DDTHH:MM:SS`, no zone; `reveal` holds it against the header's local clock
    time (`parser.local_clock_start`) in any spelling, says when it is another scan's time, and gives null for a
-   reading that names a zone or offset. Agreement, difference or not
+   reading that names a zone or offset. An EPOCH target (a SPEC `#E` line, a `*_utc` field) holds a UTC
+   value: write the UTC instant (`2021-11-15T10:17:30Z`) or the local time with its zone
+   (`2021-11-15T02:17:30-08:00`); a time with no zone is "not comparable" (`comparison_note` says so), never a
+   difference. Agreement, difference or not
    comparable — say which, in plain words. A difference is a question for the scientist, never
    something you settle.
 
