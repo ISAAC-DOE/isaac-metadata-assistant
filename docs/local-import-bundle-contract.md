@@ -1885,10 +1885,12 @@ adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
   the same workbook imported again records nothing more. Two sheets of theirs ruled the same value each tie once and
   both stay settled: a later tie extends the run, it never replaces the earlier ruling. (c14j) Only a ruling made
   against a decision of that run is tied: adopt keeps, per Disagreements row, the decisions it read (`_isaac`
-  `governing_decisions`, every target a whole-beamtime row reaches; with the column there, a damaged value is read as
-  none, so its ruling is never tied); a workbook adopted before that column existed is tied only when it was adopted
-  at or after a decision of the run (by its `exported_utc`; an unreadable time never ties). A ruling on a workbook
-  adopted before the run began records nothing and is listed apart (`stale_rulings`: "ruled on a workbook adopted
+  `governing_decisions`, every target a whole-beamtime row reaches; with the column there, a damaged value is never
+  tied). A workbook adopted with nothing recorded for the target is tied when every decision recorded on it since is
+  of that run (both sheets adopted first, then imported in either order, settle both with no extra round); never when
+  a different value, a reject or a defer came between. A workbook adopted before that column existed is tied only
+  when it was adopted at or after a decision of the run (by its `exported_utc`; an unreadable time never ties). A
+  ruling on a workbook adopted before the run began records nothing and is listed apart (`stale_rulings`: "ruled on a workbook adopted
   before d-000N, and a different value was recorded since (d-000M); … Adopt again to settle this sheet"), never as
   "already recorded". A ruling takes its target from a File List cell giving the same value.
   Settled, it says "already recorded: <value> (<date>); leave blank to keep" (the adopt result's `already_recorded`,

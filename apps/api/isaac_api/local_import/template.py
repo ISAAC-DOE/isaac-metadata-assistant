@@ -1486,21 +1486,27 @@ def _marker_their_value(entry: Mapping) -> tuple[Any, bool]:
         return None, False
 
 
+#: c14k LOW-2: what :func:`_marker_governing` reads from a damaged ``governing_decisions`` value; never a decision id,
+#: and a ruling carrying it is never tied (:func:`_rules_against_now`), unlike ``[]`` (adopted with nothing recorded)
+GOVERNING_DAMAGED = "(damaged)"
+
+
 def _marker_governing(entry: Mapping) -> list[str] | None:
     """c14j MED-1: the decision ids one ``_isaac`` disagreement row was ruled against (:func:`governing_decisions`), or
     ``None`` for a workbook adopt wrote before they were kept (no ``governing_decisions`` column): its ruling ties by
     time instead (:func:`_rules_against_now`). c14k LOW-2: with the column there, a damaged value (empty, a bare
-    string, an object, a deeply nested list) is ``[]``: such a ruling is never tied, never placed by time."""
+    string, an object, a deeply nested list) is ``[GOVERNING_DAMAGED]``: such a ruling is never tied, never placed by
+    time, and never read as adopted with nothing recorded."""
     if "governing_decisions" not in entry:
         return None
     text = entry.get("governing_decisions")
     if not isinstance(text, str):
-        return []
+        return [GOVERNING_DAMAGED]
     try:
         ids = json.loads(text)
     except (ValueError, RecursionError):  # c14k LOW-1
-        return []
-    return [i for i in ids if isinstance(i, str)] if isinstance(ids, list) else []
+        return [GOVERNING_DAMAGED]
+    return [i for i in ids if isinstance(i, str)] if isinstance(ids, list) else [GOVERNING_DAMAGED]
 
 
 def beamtime_reach(index: "_Index", path: str | None, runs: set[str]) -> list[str | None]:
@@ -1580,19 +1586,29 @@ def governing_decisions(answers: Mapping, log: Sequence[Mapping], paths: Sequenc
     return sorted(i for i in ids if isinstance(i, str))
 
 
-def _rules_against_now(cell: Mapping, prior: Mapping, exported_utc: Any, chain: Sequence[Mapping] = ()) -> bool:
+def _rules_against_now(cell: Mapping, prior: Mapping, exported_utc: Any, chain: Sequence[Mapping] = (),
+                       history: Sequence[Mapping] | None = None) -> bool:
     """c14j MED-1: whether a Disagreements ruling (``cell``) was made against the value that governs its target now.
     ``chain`` (c14k MED-1, :class:`_Chains`): the decisions of the unbroken same-value run ending at ``prior``, the
     decision that governs now (``()``: ``prior`` alone). Made against it when the decisions its row read when adopted
     (``ruled_against``, :func:`governing_decisions`) include one of ``chain``, or, for a workbook adopted before they
-    were kept, the workbook was adopted (``exported_utc``) at or after one of ``chain`` was decided. A stale workbook's
-    ruling (adopted before that run of the value began) is never tied: it is listed apart (``stale_rulings``)."""
+    were kept, the workbook was adopted (``exported_utc``) at or after one of ``chain`` was decided. ``history``: every
+    decision on the target (:meth:`_Chains.history`); a workbook adopted with NOTHING recorded for the target (none of
+    ``history`` among ``ruled_against``) is tied when every decision recorded since is of that run (both their sheets
+    adopted first, then imported in turn: no extra round), never when a different value, a reject or a defer came
+    between. A stale workbook's ruling (adopted before that run of the value began) is never tied: it is listed apart
+    (``stale_rulings``)."""
     from . import propose_terms as P
 
     run = list(chain) or [prior]
     against = cell.get("ruled_against")
+    if against is not None and GOVERNING_DAMAGED in against:
+        return False  # c14k LOW-2: what it was ruled against cannot be read
     if against is not None:
-        return any(d.get("decision_id") in against for d in run)
+        if any(d.get("decision_id") in against for d in run):
+            return True
+        seen = [d for d in history or () if d.get("decision_id") in against]
+        return history is not None and not seen and {id(d) for d in history} <= {id(d) for d in run}
     # A workbook adopted before `governing_decisions` was kept: placed by its export time. This FAILS SAFE: an unreadable
     # time, or one before every decision of the run, never ties (the row is asked again at the next adopt; nothing is
     # recorded twice).
@@ -1658,6 +1674,11 @@ class _Chains:
 
     def __call__(self, place: int) -> list[int]:
         return self._walk(place)[0]
+
+    def history(self, place: int) -> list[Mapping]:
+        """Every decision on the target of ``log[place]`` (a candidate's with its conflicts'), in decision-log order."""
+        key = self._key(self.log[place]) if 0 <= place < len(self.log) else None
+        return [self.log[p] for p in self._places[key]] if key is not None else []
 
     def before(self, place: int) -> int | None:
         return self._walk(place)[1]
@@ -1848,6 +1869,9 @@ def _stale_reason(cell: Mapping, chain: Sequence[Mapping], chains: "_Chains", ru
     ended = chains.before(run[-1]) if run else None
     changed = chains.log[ended] if ended is not None else None
     since = ""
+    if against is not None and GOVERNING_DAMAGED in against:
+        return ("ruled on a workbook whose `_isaac` governing_decisions value is damaged, so it is never tied; the "
+                "recorded value is kept and nothing is recorded for this ruling. Adopt again to settle this sheet")
     if changed is not None and against is not None and changed.get("decision_id") not in against:
         did = changed.get("decision_id")
         since = (f", and {did} {'rejected' if changed.get('decision') == 'reject' else 'deferred'} the value since"
@@ -2063,7 +2087,8 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
             run = chains(place_of.get(id(prior), -1)) or []
             chain = [chains.log[p] for p in run] or [prior]
             untied = same and cell.get("ruling") and not _ruled_in_chain(chain, range(len(chain)), cell["ruling"])
-            if untied and _rules_against_now(cell, prior, cells.get("exported_utc"), chain):
+            history = chains.history(run[0]) if run else [prior]
+            if untied and _rules_against_now(cell, prior, cells.get("exported_utc"), chain, history):
                 # c14i MED-1: a ruling that keeps the recorded value, which no ruling on their cell AS IT READS NOW
                 # recorded (they edited it since, or the value came from a file or `decide`): recorded again, tied to
                 # their sheet, or every later adopt would ask it again. c14j MED-1: only a ruling made against a

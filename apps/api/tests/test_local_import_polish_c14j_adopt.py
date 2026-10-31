@@ -252,7 +252,7 @@ def test_rules_against_now_reads_the_kept_ids_then_the_time():
     assert not T._rules_against_now({}, prior, None) and not T._rules_against_now({}, {"decision_id": "d"}, "2099-01-01T00:00:00Z")
     assert T._marker_governing({"governing_decisions": '["d-0001"]'}) == ["d-0001"]
     assert T._marker_governing({"governing_decisions": "[]"}) == []
-    assert T._marker_governing({}) is None and T._marker_governing({"governing_decisions": "damaged"}) == []  # c14k LOW-2
+    assert T._marker_governing({}) is None and T._marker_governing({"governing_decisions": "damaged"}) == [T.GOVERNING_DAMAGED]
 
 
 # --- LOW-2 ----------------------------------------------------------------------------------------------------
