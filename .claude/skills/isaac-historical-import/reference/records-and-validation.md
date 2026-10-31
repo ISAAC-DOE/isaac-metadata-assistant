@@ -20,6 +20,9 @@ run, the official schema and exactness checks, and the offline portal check. Its
 'concentration_M' is a required property`), then the `verdicts` map. The required list includes what an
 object the record carries requires (an electrolyte name makes `concentration_M` required, with
 `required_because` in the composition file), so `build-records` says it before `validate` does.
+A potentiostatic record whose set-point is confirmed but whose potential scale is not: the set-point goes in
+only beside its scale, so the scale is listed as missing (with `required_because`), never the set-point
+already answered; its question blocks that group and the minimum names it with its `command`.
 Both replies also carry `warnings` (`warnings_total`; only the first 5 are printed, the warnings of exportable
 groups first, each row marked `group_exportable`; `warnings_omitted` counts the rest and `warnings_full_list`
 says how to see them: `validate --full` (or `build-records --full`) lists every one): a group whose file names state a potential

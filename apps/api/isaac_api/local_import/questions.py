@@ -2243,8 +2243,11 @@ def _recommended(report: Mapping, usable: Sequence[tuple], gid: str) -> list[dic
     from .records import STATED_POTENTIAL_WARNING, potential_warning_text
 
     out = []
+    # c12-q: a field the composer REQUIRES (a confirmed set-point held back until its scale is answered) is asked in
+    # the minimum's blocking ``questions``, never also recommended as "not blocking"
+    required = set(_answer_missing(report))
     for w in report.get("warnings") or ():
-        if w.get("code") != STATED_POTENTIAL_WARNING:
+        if w.get("code") != STATED_POTENTIAL_WARNING or w["needs"] in required:
             continue
         # BOTH STEPS when the warning names two (no set-point read and no scale): one recommendation each, the
         # warning's text (with both commands made the questions') as the why of each
@@ -2373,8 +2376,10 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
                 entry["ai_suggestion"] = _ai_sentence(_scoped_ai(led["hints"])).strip()
             entry["fields"].append(field if q["kind"] == "optional_values" else path)
             if path in because:
-                # a CONDITIONAL requirement (an object the record carries requires this member): why, said
+                # a CONDITIONAL requirement (an object the record carries requires this member; c12-q: a confirmed
+                # set-point that goes in only beside its scale): why, said, and the command that answers it
                 entry.setdefault("required_because", {})[path] = because[path]
+                entry.setdefault("command", scoped_answer_command(q, field, gid))
         plus, hard, soft = [], [], None
         if g.get("status") != B.STATE_SCIENTIST_CONFIRMED:
             plus.append("confirm the group")

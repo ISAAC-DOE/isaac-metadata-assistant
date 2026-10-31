@@ -178,12 +178,13 @@ def test_a_confirmed_potentiostatic_mode_blocks_the_record_until_its_setpoint_co
     assert {"path": POT, "from": "a scientist's answer"} in report["missing_required"]
     assert draft["fields"][POT] == {"value": None, "status": "missing", "evidence": []}
     assert entry["complete"] is False and POT in entry["missing_required"]
-    # the set-point confirmed WITHOUT its scale is held back by the scale gate: still blocked
+    # the set-point confirmed WITHOUT its scale is held back by the scale gate: still blocked, and (c12-q) the
+    # missing item is then the SCALE, never the set-point answered already
     bd = M.load(grouped)
     M.decide(grouped, target_ids=[_cand(bd, POT, "run-001")["candidate_id"]], decision="confirm", value=None, by=BY, orcid=None)
     _, report, entry = _compose(grouped, "run-001")
     assert any(n.get("path") == POT and n["reason"] == R.SETPOINT_NEEDS_SCALE for n in report["not_composed"])
-    assert POT in entry["missing_required"]
+    assert SCALE in entry["missing_required"] and POT not in entry["missing_required"]
     # with its scale the set-point composes and the requirement is met
     M.decide(grouped, target_ids=[_miss(bd, SCALE, "run-001")["value_id"]], decision="correct", value="RHE", by=BY, orcid=None)
     draft, report, entry = _compose(grouped, "run-001")

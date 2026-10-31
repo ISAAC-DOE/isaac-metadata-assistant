@@ -25,7 +25,8 @@ The reply also has
 `asked_again`, `deferred`, `outside_live_groups`;
 quote these, not `summary.md`'s "Questions: N", which is `fine_grained_v1`) and
 `minimum_for_one_group` ("7 blocking questions plus: confirm the group, approve its processing
-result"): its `questions[]` list each question to answer with the `only` scope to use,
+result"): its `questions[]` list each question to answer with the `only` scope to use (and, for a field
+required only because of another, `required_because` and the `command` that answers it),
 `unasked_required[]` names required fields no question asks (with `reason` and `command`), and
 `plus_decisions` names only the decisions not yet made (an empty list once the group is
 confirmed and its result approved); for a group with scans but no processing result yet it says "run
@@ -127,7 +128,8 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
 - **Control mode** (`context.electrochemistry.control_mode`) is an ordinary value among a group's
   optional fields: `--field context.electrochemistry.control_mode --decision correct --value <one of
   its allowed values>`. A potentiostatic mode makes the potential set-point required; a galvanostatic
-  one, the current set-point.
+  one, the current set-point. Once the potential set-point is confirmed, the potential scale is what is
+  missing until it is answered (the set-point goes in only beside it), so the scale question blocks.
 
 ## Recording
 

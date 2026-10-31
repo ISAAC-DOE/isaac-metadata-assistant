@@ -54,6 +54,12 @@ SETPOINT_NEEDS_SCALE = ("a potential setpoint needs its confirmed potential_scal
                         "is relative to")
 SETPOINT_GROUP_NEEDS_SCALE = ("another run of this record group has this potential setpoint without its confirmed "
                               "potential_scale, so the group's setpoint is not filled")
+#: c12-q: why the COMPANION is the missing item when a required field's confirmed value is held back beside it
+#: (:data:`bundle.COMPOSES_ONLY_WITH`): the ``required_because`` of the companion's missing-required entry.
+HELD_NEEDS_COMPANION = ("the record requires {path}, whose confirmed value ({value}) goes into the record only beside a "
+                        "confirmed {companion} for every run it comes from (the number alone does not say what it is "
+                        "relative to); answer {companion} and the confirmed value goes in: answering {path} again "
+                        "changes nothing")
 #: Why a value an ANSWER SLOT holds (``bundle.is_answer_slot``: one run's answer to a field asked once for the
 #: whole beamtime) is not filled for a group some of whose runs have no answer for it (e.g. after a merge).
 SLOT_NOT_EVERY_RUN = ("this answer was given for {answered} of this record group's {total} runs only (a per-run answer "
@@ -109,6 +115,30 @@ def _object_member_requirements(fields: Mapping[str, Mapping]) -> list[dict]:
 
 def _id_key(target_id: str) -> str:
     return "value_id" if str(target_id).startswith("miss-") else "candidate_id"
+
+
+def plain_record_note(note: str, group_id: str | None) -> str:
+    """``note`` as a RECORD'S notes say it (c12-q LOW): without the import's internal group id (``for group
+    rg-…``: in a record the curve is that record's own) and without the flag code in brackets
+    (``(scientist_selected_subset_of_scans)``), which the sentence around it already says in words."""
+    from .mutations import SCAN_SUBSET_FLAG
+
+    if group_id:
+        note = note.replace(f" for group {group_id} ", " ")
+    return note.replace(f" ({SCAN_SUBSET_FLAG})", "")
+
+
+def _present(fields: Mapping[str, Mapping], path: str) -> Mapping | None:
+    """The envelope the draft CARRIES at ``path``, or ``None``: a ``missing`` placeholder carries nothing."""
+    env = fields.get(path)
+    return env if isinstance(env, Mapping) and env.get("status") != "missing" else None
+
+
+def _said(value: Any, path: str) -> str:
+    """A confirmed value as a sentence says it: a number at a volts path (``…_V``) as ``0.4 V``, else as JSON."""
+    if path.endswith("_V") and isinstance(value, (int, float)) and not isinstance(value, bool):
+        return f"{value:g} V"
+    return json.dumps(value)
 
 
 #: How a required schema object is asked for as a scalar field.
@@ -526,6 +556,9 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
     # set-points are a disagreement, never hidden by this gate), an agreed set-point is filled only
     # when EVERY run it comes from has an eligible scale filled in this draft (or the scale is
     # beamtime-wide). If any run lacks one, NONE is filled: each of its own values says why.
+    # c12-q: what was held, and by which companion: when the record REQUIRES the held field, the missing item is the
+    # companion (answering the held value again changes nothing), so the required list below names it instead.
+    held_by_companion: dict[str, tuple[str, Any]] = {}
     for path, companion in B.COMPOSES_ONLY_WITH.items():
         if path not in fields:
             continue
@@ -533,6 +566,7 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
         covered = {run_of.get(i) for _, _, i in proposals.get(companion, ())} if companion in fields else set()
         lacking = [i for i in from_ids if not (run_of.get(i) in covered or None in covered)]
         if lacking:
+            held_by_companion[path] = (companion, fields[path]["value"])
             del fields[path]
             report["filled"] = [f for f in report["filled"] if f["path"] != path]
             for i in from_ids:
@@ -737,7 +771,7 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
 
                 subset = scan_subset_note(bundle, r)
                 if subset:
-                    generated_by["notes"] += " " + subset
+                    generated_by["notes"] += " " + plain_record_note(subset, r.get("group_id"))
                     used["scan_selection"] = subset
                 if ref.get("relative_path"):
                     named = groups or ([str(ref["athena_group"])] if ref.get("athena_group") else [])
@@ -854,6 +888,18 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
                 )
             continue
         field = REQUIRED_AS_FIELD.get(req, req)
+        if field in held_by_companion and field not in fields:
+            # c12-q MED-1: A CONFIRMED VALUE HELD BACK BY ITS COMPANION (a set-point with no confirmed scale): the
+            # companion is what is missing. The held field is NOT listed (answering it again changes nothing): the
+            # companion is, with why, so validate, the questions and the minimum name the scale and its command.
+            companion, value = held_by_companion[field]
+            if not any(m["path"] == companion for m in report["missing_required"]):
+                if _present(fields, companion) is None:
+                    fields[companion] = {"value": None, "status": "missing", "evidence": []}
+                report["missing_required"].append({
+                    "path": companion, "from": FROM_AN_ANSWER,
+                    "required_because": HELD_NEEDS_COMPANION.format(path=field, value=_said(value, field), companion=companion)})
+            continue
         if not any(p == field or p.startswith(field + ".") for p in fields):
             fields[field] = {"value": None, "status": "missing", "evidence": []}
             report["missing_required"].append({"path": field, "from": "a scientist's answer",
@@ -907,14 +953,17 @@ def _stated_potential_warnings(bundle: Mapping, group: Mapping, member_ids: set,
     and the command that lets it in (``targets``: the open scale / set-point values of the member runs). When the
     scale is missing AND no set-point was read from the names or answered, BOTH steps are named (``also_needs``,
     ``also_targets``, ``also_command``: the set-point), so the scientist is not sent round twice. A record
-    that carries a set-point gets none; so does one whose file names state no potential."""
+    that carries a set-point gets none; so does one whose file names state no potential, and so does one whose
+    set-point is itself listed as missing (a required value nobody answered: the missing list already says it). A
+    confirmed set-point held back until its scale is answered is NOT listed (c12-q: the scale is), so it warns; a
+    ``missing`` placeholder for the scale carries no scale."""
     if SETPOINT_PATH in fields:
         return []
     stated = _stated_potentials(bundle, member_ids)
     if not stated:
         return []
     answered = [v for v, _, _ in proposals.get(SETPOINT_PATH, ()) if isinstance(v, (int, float)) and not isinstance(v, bool)]
-    scale_missing = SCALE_PATH not in fields
+    scale_missing = _present(fields, SCALE_PATH) is None
 
     def open_targets(path: str) -> list[str]:
         return [o.get("candidate_id") or o.get("value_id")
@@ -1313,7 +1362,10 @@ def validate_draft_file(draft: Mapping, *, run_portal, composition: Mapping | No
     # processing result's approval — never "correct the value".
     from_processing = [m["path"] for m in (composition or {}).get("missing_required") or ()
                        if m.get("from") == "an approved processing result"]
-    missing = sorted(set(missing) | set(from_processing))
+    # c12-q: and every value the composition lists as an answer's to give, even one the draft holds no placeholder
+    # for (a scale confirmed for some runs of the group, so the confirmed set-point it holds back needs it for the rest)
+    from_answers = [m["path"] for m in (composition or {}).get("missing_required") or () if m.get("from") == FROM_AN_ANSWER]
+    missing = sorted(set(missing) | set(from_processing) | set(from_answers))
     processing_fix = None if blocked or not from_processing else processing_remedy(proc)
     if missing or not dr.ok or blocked:
         verdict = "incomplete"
