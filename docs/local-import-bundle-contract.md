@@ -1781,7 +1781,12 @@ reaction, a cell type, a potential scale) were refused by `decide`, `template im
 adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
 
 - **Kept as a vocabulary request** (§9 "What 1.10.0 added"). `decide` (by target or `--question`; a
-  bulk call keeps one request for every target the same answer reached), `template import --apply` (one
+  bulk call keeps one request for every target the same answer reached) ONLY with `--as-said`, the
+  scientist's statement that the value is their own word (c10-d: without it an off-list value keeps
+  NOTHING, and the refusal adds "Nothing was kept (no vocabulary request): if this is the scientist's own
+  word, repeat with --as-said", so a value tried while working out a mapping is never put in their name;
+  `--as-said` without `--value` is refused; the Local Imports page passes no `as_said` and never keeps
+  one), `template import --apply` (one
   request per field and word, with its cells and runs; a preview keeps nothing and says "would be kept")
   and `template adopt` (their sheet's not-allowed values, ONLY with `--by`, passed once the scientist says the sheet is
   theirs, recorded before the workbook is written; without it nothing is kept and the summary says

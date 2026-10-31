@@ -1,12 +1,14 @@
 # Data flow and consent (Step 1)
 
-Source of truth: `docs/local-first-data-flows.md`. Three flows exist and are approved separately.
+Source of truth: `docs/local-first-data-flows.md`. Three flows exist and are approved separately (A–C);
+row D is the scientist's own action on the website, outside this skill, said here so they know it.
 
 | Flow | What happens | What leaves the computer |
 |---|---|---|
 | A. ISAAC's own code | reads files here, writes a bundle folder here | nothing. Only `isaac import` prints counts alone; every other command prints names or values, so what you see of it is flow B |
 | B. Claude reads | anything you open with Read, and EVERY command output you see: `summary.md`, `bundle questions`, `list`, `show`, `group`, `process`, `crosscheck-plan`, `excerpt`, `reveal`, `decide`, `check`, `extract`, `build-records`, `validate`, `export`, `template` previews | that text goes to the Claude model service |
 | C. Upload to ISAAC | not available in this build | nothing (dry run only) |
+| D. Save a term proposal | the scientist loads the `propose-terms` drafts file on the Schema Proposals page and saves a proposal (their choice, never yours) | the term, its counts and its file-name citations go to the ISAAC server that page uses (the hosted server when they use the website); nothing before they save |
 
 ## What to say (adapt, keep it short)
 

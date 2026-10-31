@@ -30,7 +30,8 @@ command and flag is in `reference/commands.md`; exit codes and what to say, in `
    `defer` only when the scientist says they don't know. Never use `build-records --test-marker` with
    a real scientist; it is for the self-test and puts a test marker in the record.
 0c. **A printed command with `<placeholders>` is a template** (`answer_command`, `next_commands`,
-   `processing_fix`): fill it only from the scientist's answer; never run it as it is.
+   `processing_fix`, `also_command`, a `warnings` item's or an `unasked_required` item's command): fill
+   it only from the scientist's answer; never run it as it is.
 1. **No guessing.** A value no file states stays *missing*. Never default a temperature, a
    reaction, an electrolyte or a name. "I don't know" is a valid answer and is recorded as such.
 2. **Four authorities, never blended.** Source evidence (what a file literally says) · extraction
@@ -63,10 +64,8 @@ environment, the command, the processing extra and the portal check, then the sk
 `~/.claude/skills` (or `--skill-dir`): `[ok]`, `[stale]` or `[skipped]` (none installed there). Use
 `<folder>/.venv/bin/isaac` as `<isaac>` and `<folder>/.venv/bin/python` as `<python>`.
 
-- `[stale]` skill → give the ONE fix, `scripts/setup_isaac_local.sh --install-skill`, then restart
-  Claude Code; do not continue on this copy. `[skipped]`, or this copy runs from elsewhere → check it:
-  `diff -rq -x checkout-path.txt -x .DS_Store <folder>/.claude/skills/isaac-historical-import <this skill's folder>`;
-  any output means stale (same fix).
+- `[stale]`, or (`[skipped]`, or this copy runs from elsewhere) it differs (`reference/troubleshooting.md`)
+  → `scripts/setup_isaac_local.sh --install-skill`, restart Claude Code; do not continue on this copy.
 - command missing → the ONE fix is `scripts/setup_isaac_local.sh` (then `--install-skill` if there
   was no `checkout-path.txt`); stop.
 - processing or portal check missing → say what it costs ("curves and quality checks need
@@ -93,11 +92,9 @@ want it. Record their answer in your next message.
 `<isaac> import <folder> --out <bundle>` (`<bundle>` outside the source folder; ask before
 overwriting; `--force` only on request). Then read **only** `<bundle>/summary.md`. Tell the
 scientist, in 4 lines, what was found: files, runs, conflicts, how many files no reader could open
-(import prints these). Do not quote `summary.md`'s "Questions: N" (fine-grained items) or its "Run
-groups" (file-name groups, not records). Brackets after "Conflicts: N" say how many of the N are real
-disagreements about a value and how many are something else (about files, or already decided): say
-that split in words. The question count comes in Step 7 (`bundle questions` → `counts`); running it
-now would show values before the spot check. Import refused (exit 3/4/5): see troubleshooting.
+(import prints these); which `summary.md` counts not to quote, and how to say its conflicts, is in
+`reference/records-and-validation.md` ("Reading summary.md"). The question count comes in Step 7;
+running it now would show values before the spot check. Import refused (exit 3/4/5): see troubleshooting.
 
 ## Step 3 · Blind cross-check (BEFORE any command that prints a value)
 
@@ -125,7 +122,7 @@ file held, and which binaries nobody could read.
 ## Step 5 · Groups
 
 If `<isaac> bundle group --help` fails, say "grouping is not in this build", skip Steps 5, 6, 8 and
-9, and stop after Step 7. Read `reference/grouping-and-processing.md` (every decision's syntax is there).
+9, and after Step 7 go to Step 10. Read `reference/grouping-and-processing.md` (every decision's syntax is there).
 
 1. `<isaac> bundle group <bundle>` proposes groups.
 2. **The counter question comes first.** `<isaac> bundle questions <bundle> --scope experiment` shows
@@ -136,12 +133,9 @@ If `<isaac> bundle group --help` fails, say "grouping is not in this build", ski
    then `<isaac> bundle group <bundle> --regroup` (replaces undecided groups only).
 3. **Apply the findings file again** (`annotate --from-readings`, preview then `--apply`) now and after
    every later regroup: absorber findings are skipped until groups exist and do not move to new groups.
-4. Page groups with `<isaac> bundle list <bundle> groups --limit 10` (`files`, `scans`, `reader`,
-   and `cannot_export_reason` when it can never export as it stands); `bundle show <bundle> group <id>`
-   only when a row is not enough; possible merges: `bundle list <bundle> merge-candidates`. Present
-   each in plain words: sample, conditions, how many scans, why runs were split ("these two differ in
-   potential"). Say when a group needs care (`merged_despite_engine_reading`, `sample_key_basis:
-   name_stem`) and say a merge candidate's `caution` before asking about it.
+4. Page groups with `<isaac> bundle list <bundle> groups --limit 10` and the merge candidates (paging,
+   and the flags that need care, are in the reference). Present each in plain words: sample,
+   conditions, how many scans, why runs were split ("these two differ in potential").
 5. Ask the scientist to **confirm, split or merge** each, in batches, with progress. A group that is
    not a result (alignment, a reference foil, a test scan) can be **left out** with `reject`; say it is
    never exported. Several accepted as shown: list each back, then one `--targets-file` confirm; never
@@ -163,16 +157,16 @@ words, glitch flags, skipped scans, agreement with the scientist's own Athena ou
 
 - **Approval is the scientist's call.** A `warn` is theirs to accept. A `fail` for
   `edge_step_implausible`, `no_edge` or `post_edge_not_at_1` is never offered for approval: offer
-  reject or `needs_changes`. When approving, ask for the QC status, their word, never mapped from the
-  verdict (`--qc-status valid|compromised|failed|pending`, with `--qc-note` when something is wrong).
+  reject or `needs_changes`. When approving, ask for the QC status: map their words to one of the four
+  (`--qc-status valid|compromised|failed|pending`), say it back, record on yes; never derive it from
+  the verdict.
 - **Two results for one group**: ISAAC's curve (`…-isaac`) and their own Athena curve (`…-athena`).
   Show both, say which scans each used, ask which is the record's, approve exactly one.
 - A `not_applicable` result is not a fail; never ask to approve it ("no ISAAC processing protocol
-  covers this data yet"). A result with **no curve** cannot be approved; offer the reference's options.
-- A calibration shift is applied only after the scientist names the reference's element and edge:
-  `<isaac> bundle decide <bundle> --target <group id> --decision approve_calibration --element <symbol> --edge <edge> --by "<name>"`,
-  then `process --source <folder> --group <group id>` again. No answer, no shift. If the result says
-  `reference_edge_not_found`, say so and ask nothing.
+  covers this data yet"). A result with **no curve** cannot be approved; offer: reject the result,
+  `needs_changes`, or leave the group out.
+- A calibration shift (`approve_calibration --element --edge`, in the reference) needs the scientist to
+  name the reference's element and edge. No answer, no shift. `reference_edge_not_found`: say so, ask nothing.
 
 Always say: **the processing protocol is a draft until the ISAAC processing reviewers (Oscar and
 Angel) review it**; an approval means "I looked at this curve and accept it for this record", not
@@ -205,18 +199,24 @@ is in the reference; in short:
 - **Not asked**: `informational` questions (mention their count once) and `covered_by` ones (answered
   by that experiment question; ask per group only if a group differs).
 - **Asked again** or **no reading fits**: give the reason, show the allowed values or `utc_readings`, ask.
-- **An answer not on the list**: record nothing; `decide` keeps it as a vocabulary request (`--note` holds only
-  the scientist's own words, or nothing). Offer `<isaac> bundle propose-terms <bundle> --out <file.json>`; they write each description.
+- **An answer not on the list**: if no allowed value fits and they keep their own word, run
+  `decide … --value "<their exact word>" --as-said` once: it records no decision but keeps their word as a
+  vocabulary request (`--note`: their own words, or nothing). Never pass a word they did not say.
+  Offer `<isaac> bundle propose-terms <bundle> --out <bundle>-notes/terms.json`. They write each
+  description themselves on the Schema Proposals page (Propose a Change → Load drafts from a local
+  import), never in the file and never by you. Say which terms come only from my readings
+  (`by_origin.ai_reading`), not from their answers; draft one only if they want it.
 - **Absorber.** Say the element and edge back; record it only on a clear yes to that pair.
 - **AI readings are not file evidence**: say "my reading of the files suggests…", never "the files say".
 
 **The template.** For who produced the data, domain, environment, cell type, reaction with its drive
 and catalysis, sample form and formula, facility: "I can give you one spreadsheet to fill in one
-sitting." `<isaac> bundle template export <bundle> --out <file.xlsx>` (answer cells empty;
-`ISAAC Suggestions` shows what each run's own files say). On its return,
-`<isaac> bundle template import <bundle> <file.xlsx> --by "<name>"` previews; read it back (every
-invalid cell and clash) and add `--apply` only on their yes. Never fill the sheet for them; never
-import ISAAC's blank template. **They already filled ISAAC's template and say to use it:**
+sitting." `<isaac> bundle template export <bundle> --out <bundle>-notes/template.xlsx` (answer cells
+empty; `ISAAC Suggestions` shows what each run's own files say; every `--out` of `template export`,
+`adopt` and `propose-terms` goes in `<bundle>-notes/`). On its return,
+`<isaac> bundle template import <bundle> <file.xlsx> --by "<name>"` previews; read back every invalid
+cell, clash, replaced or contradicted file reading, beamtime-wide cell and unread column, and add
+`--apply` only on their yes. Never fill the sheet for them; never import ISAAC's blank template. **They already filled ISAAC's template and say to use it:**
 `<isaac> bundle template adopt` (see "The scientist's own filled sheet" in the reference).
 They may also answer in the local-only *Local Imports* page (`docs/ui-local-dev.md`); run
 `bundle questions` again after.
@@ -228,9 +228,9 @@ They may also answer in the local-only *Local Imports* page (`docs/ui-local-dev.
 back to Step 5. Read `reference/records-and-validation.md`; explain the verdicts from validate's
 `by_reason`, `missing_required_by_field` and `not_exportable_first` in plain words with the exact fix
 (open `validation/<group_id>.json` only for a group those leave unexplained), then go back to the
-step that fixes it (a `processing_fix` means its curve needs approval in Step 6). Say every `warnings`
-item (a potential the file names state that the record will not carry) with its command. Never edit
-a draft; never relax a check.
+step that fixes it (a `processing_fix` means its curve needs approval in Step 6). Say each `warnings`
+item in words, and ask the scale question it names (and the set-point when `also_needs` is set); run
+its command only with their answer. Never edit a draft; never relax a check.
 
 ## Step 9 · Export and dry run
 

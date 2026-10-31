@@ -72,13 +72,13 @@ def test_decide_question_refuses_an_off_list_value_and_writes_nothing(b, capsys)
     q = _env_question(b)
     before = _bytes(b)
     code = cli.main(["bundle", "decide", str(b), "--question", q["question_id"], "--decision", "correct",
-                     "--value", "ex situ", "--by", "X"])
+                     "--value", "ex situ", "--by", "X", "--as-said"])
     err = capsys.readouterr().err
     assert code == 2
     assert "'ex situ' is not one of the schema's allowed values for context.environment" in err
     allowed = (B._schema_node(ENV) or {})["enum"]
     assert f"Allowed values for {ENV}: {', '.join(allowed)}" in err and "Nothing was recorded" in err
-    # no decision and no value: the word is kept as a vocabulary request only (1.10.0)
+    # no decision and no value: the scientist's own word (--as-said) is kept as a vocabulary request only (1.10.0)
     assert "kept as a vocabulary request" in err
     assert _all_but_requests(_bytes(b)) == _all_but_requests(before)
     assert [r["term"] for r in json.loads(_bytes(b))["vocabulary_requests"]] == ["ex situ"]
@@ -102,8 +102,8 @@ def test_a_bulk_decision_with_one_off_list_target_records_nothing(b):
     ids = [m["value_id"] for m in M.load(b)["missing_values"] if m["target_field_path"] == ENV][:3]
     before = _bytes(b)
     with pytest.raises(M.MutationRefused):
-        M.decide(b, target_ids=ids, decision="correct", value="ExSitu", **BY)
-    # nothing is decided; the word is kept once, as a vocabulary request naming every target it reached (1.10.0)
+        M.decide(b, target_ids=ids, decision="correct", value="ExSitu", as_said=True, **BY)
+    # nothing is decided; the word (the scientist's own, as_said) is kept once, as a vocabulary request naming every target it reached (1.10.0)
     assert _all_but_requests(_bytes(b)) == _all_but_requests(before)
     [req] = json.loads(_bytes(b))["vocabulary_requests"]
     assert req["term"] == "ExSitu" and [t["id"] for t in req["targets"]] == ids

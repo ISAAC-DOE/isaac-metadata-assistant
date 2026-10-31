@@ -2,9 +2,10 @@
 
 Every test runs over a bundle imported here from the committed SYNTHETIC multi-operator fixture.
 
-* ``decide`` (by target or ``--question``) refuses an answer off its field's list, records no decision and
-  no value, and keeps the word as a vocabulary request: who (``--by``), when, the field, the targets and
-  runs, and where it was said. Any other refusal (a word in a number field) keeps nothing.
+* ``decide`` (by target or ``--question``) refuses an answer off its field's list and records no decision and
+  no value. Only with ``--as-said`` (the scientist's own word) does it keep the word as a vocabulary request:
+  who (``--by``), when, the field, the targets and runs, and where it was said. Without ``--as-said`` it keeps
+  NOTHING and says how to keep it (c10-d H1). Any other refusal (a word in a number field) keeps nothing.
 * ``template import --apply`` keeps an off-list cell the same way (a preview keeps nothing).
 * ``bundle propose-terms`` drafts the requests, with the scientist's own words (``scientist_notes``),
   ``runs``/``run_ids`` and citations naming a file (no folders) and run ids. A word that names an
@@ -75,6 +76,11 @@ def _decide(bdir: Path, capsys, *args: str) -> tuple[int, str]:
     return code, capsys.readouterr().err
 
 
+def _said(bdir: Path, capsys, *args: str) -> tuple[int, str]:
+    """``decide`` with ``--as-said``: the value is the scientist's own word."""
+    return _decide(bdir, capsys, *args, "--as-said")
+
+
 def _report(bdir: Path, capsys, *extra: str) -> dict:
     capsys.readouterr()
     assert cli.main(["bundle", "propose-terms", str(bdir), *extra]) == cli.EXIT_OK
@@ -91,7 +97,7 @@ def _term(report: dict, field: str, term: str) -> dict | None:
 def test_an_off_list_answer_is_kept_as_a_vocabulary_request_never_a_decision(b, capsys):
     target = _miss(b, REACTION)
     decisions_before = len(M.load(b)["scientist_decisions"])
-    code, err = _decide(b, capsys, "--target", target["value_id"], "--decision", "correct", "--value", "cathodic corrosion",
+    code, err = _said(b, capsys, "--target", target["value_id"], "--decision", "correct", "--value", "cathodic corrosion",
                         "--note", "the Pt dissolves under cathodic bias")
     assert code == 2
     assert "not one of the schema's allowed values" in err and "Nothing was recorded" in err and KEPT in err
@@ -108,15 +114,48 @@ def test_an_off_list_answer_is_kept_as_a_vocabulary_request_never_a_decision(b, 
     assert B.check_bundle(b) == []
     # the same answer again keeps nothing new and writes nothing
     before = (b / "bundle.json").read_bytes()
-    code, err = _decide(b, capsys, "--target", target["value_id"], "--decision", "correct", "--value", "cathodic corrosion",
+    code, err = _said(b, capsys, "--target", target["value_id"], "--decision", "correct", "--value", "cathodic corrosion",
                         "--note", "the Pt dissolves under cathodic bias")
     assert code == 2 and "kept earlier" in err and KEPT in err
     assert (b / "bundle.json").read_bytes() == before
 
 
+def test_without_as_said_an_off_list_answer_keeps_nothing_and_says_how_to_keep_it(b, capsys):
+    """c10-d H1: a value tried while working out a mapping is never attributed to the scientist."""
+    before = (b / "bundle.json").read_bytes()
+    target = _miss(b, REACTION)
+    code, err = _decide(b, capsys, "--target", target["value_id"], "--decision", "correct", "--value", "cathodic corrosion")
+    assert code == 2 and "not one of the schema's allowed values" in err and "Nothing was recorded" in err
+    assert "vocabulary request" in err and KEPT not in err and "kept as a vocabulary request" not in err
+    assert "if this is the scientist's own word, repeat with --as-said" in err
+    assert (b / "bundle.json").read_bytes() == before
+    # by --question too
+    from isaac_api.local_import import questions as Q
+
+    q = next(x for x in Q.consolidate(M.load(b))["questions"] if x.get("target_field_path") == ENV)
+    code, err = _decide(b, capsys, "--question", q["question_id"], "--decision", "correct", "--value", "aqueous_electrochemistry")
+    assert code == 2 and "repeat with --as-said" in err and KEPT not in err
+    assert (b / "bundle.json").read_bytes() == before
+    # and through the library: the refusal is still an off-list one, keeping nothing
+    with pytest.raises(M.OffListRefused) as got:
+        M.decide(b, target_ids=[target["value_id"]], decision="correct", value="cathodic corrosion", by=WHO, orcid=None)
+    assert M.AS_SAID_HINT in str(got.value)
+    assert (b / "bundle.json").read_bytes() == before
+
+
+def test_as_said_needs_a_value_and_changes_nothing_for_an_allowed_one(b, capsys):
+    before = (b / "bundle.json").read_bytes()
+    code, err = _decide(b, capsys, "--target", _miss(b, ENV)["value_id"], "--decision", "defer", "--as-said")
+    assert code == 2 and "--as-said keeps the scientist's own word given with --value" in err
+    assert (b / "bundle.json").read_bytes() == before
+    # an allowed value with --as-said is recorded as ever and keeps no request
+    assert _said(b, capsys, "--target", _miss(b, ENV)["value_id"], "--decision", "correct", "--value", "ex_situ")[0] == 0
+    assert not M.load(b).get("vocabulary_requests")
+
+
 def test_any_other_refusal_keeps_nothing(b, capsys):
     before = (b / "bundle.json").read_bytes()
-    code, err = _decide(b, capsys, "--target", _miss(b, PH)["value_id"], "--decision", "correct", "--value", "acidic")
+    code, err = _said(b, capsys, "--target", _miss(b, PH)["value_id"], "--decision", "correct", "--value", "acidic")
     assert code == 2 and "must be number" in err and "vocabulary request" not in err
     assert (b / "bundle.json").read_bytes() == before
     # an allowed value is recorded as ever, and keeps no request
@@ -128,7 +167,7 @@ def test_a_question_answer_off_the_list_is_kept_with_its_question_and_every_run(
     from isaac_api.local_import import questions as Q
 
     q = next(x for x in Q.consolidate(M.load(b))["questions"] if x.get("target_field_path") == ENV)
-    code, err = _decide(b, capsys, "--question", q["question_id"], "--decision", "correct", "--value", "aqueous_electrochemistry")
+    code, err = _said(b, capsys, "--question", q["question_id"], "--decision", "correct", "--value", "aqueous_electrochemistry")
     assert code == 2 and KEPT in err
     [req] = M.load(b)["vocabulary_requests"]
     assert req["source"]["question_id"] == q["question_id"] and req["term"] == "aqueous_electrochemistry"
@@ -136,7 +175,7 @@ def test_a_question_answer_off_the_list_is_kept_with_its_question_and_every_run(
 
 
 def test_a_word_for_an_existing_term_says_use_it(b, capsys):
-    code, err = _decide(b, capsys, "--target", _miss(b, SCALE)["value_id"], "--decision", "correct",
+    code, err = _said(b, capsys, "--target", _miss(b, SCALE)["value_id"], "--decision", "correct",
                         "--value", "reversible_hydrogen_electrode")
     assert code == 2 and KEPT in err and "use `RHE` (an existing term)" in err
     entry = _term(_report(b, capsys), SCALE, "reversible_hydrogen_electrode")
@@ -151,7 +190,7 @@ def test_a_word_for_an_existing_term_says_use_it(b, capsys):
 def test_propose_terms_drafts_a_request_with_the_scientists_words_runs_and_citations(b, capsys):
     first, second = _miss(b, CELL, 0), _miss(b, CELL, 1)
     for t in (first, second):
-        assert _decide(b, capsys, "--target", t["value_id"], "--decision", "correct",
+        assert _said(b, capsys, "--target", t["value_id"], "--decision", "correct",
                        "--value", "three_electrode_static_cell", "--note", "a static cell, no flow")[0] == 2
     report = _report(b, capsys)
     entry = _term(report, CELL, "three_electrode_static_cell")
@@ -175,7 +214,7 @@ def test_propose_terms_drafts_a_request_with_the_scientists_words_runs_and_citat
 
 
 def test_the_drafts_file_has_the_keys_the_websites_loader_reads(b, capsys, tmp_path):
-    assert _decide(b, capsys, "--target", _miss(b, CELL)["value_id"], "--decision", "correct",
+    assert _said(b, capsys, "--target", _miss(b, CELL)["value_id"], "--decision", "correct",
                    "--value", "three_electrode_static_cell")[0] == 2
     out = tmp_path / "drafts.json"
     assert cli.main(["bundle", "propose-terms", str(b), "--out", str(out)]) == 0
@@ -205,7 +244,7 @@ def test_a_close_technique_term_is_drafted_with_the_existing_ones_to_check(b, ca
 
 
 def test_a_term_with_a_space_says_what_to_ask_for(b, capsys):
-    assert _decide(b, capsys, "--target", _miss(b, REACTION)["value_id"], "--decision", "correct",
+    assert _said(b, capsys, "--target", _miss(b, REACTION)["value_id"], "--decision", "correct",
                    "--value", "cathodic corrosion")[0] == 2
     report = _report(b, capsys)
     draft = _term(report, REACTION, "cathodic corrosion")["draft"]
@@ -231,7 +270,7 @@ def test_an_ai_reading_the_scientist_answered_with_an_allowed_value_is_not_count
 
 def test_merge_adds_new_terms_updates_counts_and_keeps_a_written_description(b, capsys, tmp_path):
     out = tmp_path / "drafts.json"
-    assert _decide(b, capsys, "--target", _miss(b, CELL, 0)["value_id"], "--decision", "correct",
+    assert _said(b, capsys, "--target", _miss(b, CELL, 0)["value_id"], "--decision", "correct",
                    "--value", "three_electrode_static_cell")[0] == 2
     assert cli.main(["bundle", "propose-terms", str(b), "--out", str(out)]) == 0
     doc = json.loads(out.read_text(encoding="utf-8"))
@@ -243,9 +282,9 @@ def test_merge_adds_new_terms_updates_counts_and_keeps_a_written_description(b, 
     capsys.readouterr()
     assert cli.main(["bundle", "propose-terms", str(b), "--out", str(out)]) == cli.EXIT_OUTPUT_REFUSED
     assert "--merge" in capsys.readouterr().err
-    assert _decide(b, capsys, "--target", _miss(b, CELL, 1)["value_id"], "--decision", "correct",
+    assert _said(b, capsys, "--target", _miss(b, CELL, 1)["value_id"], "--decision", "correct",
                    "--value", "three_electrode_static_cell")[0] == 2
-    assert _decide(b, capsys, "--target", _miss(b, ENV)["value_id"], "--decision", "correct",
+    assert _said(b, capsys, "--target", _miss(b, ENV)["value_id"], "--decision", "correct",
                    "--value", "aqueous_electrochemistry")[0] == 2
     capsys.readouterr()
     assert cli.main(["bundle", "propose-terms", str(b), "--out", str(out), "--merge"]) == 0
@@ -268,7 +307,7 @@ def test_merge_reads_no_words_from_the_file_and_never_says_ready_to_send(b, caps
     """The drafts file is editable: a note in it is never the scientist's, a description in it is nobody's known
     words, and a term the bundle no longer holds (with whatever the file claims for it) is carried over as not
     current, with no count, notes or citations of its own and never ready to send."""
-    assert _decide(b, capsys, "--target", _miss(b, CELL)["value_id"], "--decision", "correct",
+    assert _said(b, capsys, "--target", _miss(b, CELL)["value_id"], "--decision", "correct",
                    "--value", "three_electrode_static_cell")[0] == 2
     out = tmp_path / "d.json"
     assert cli.main(["bundle", "propose-terms", str(b), "--out", str(out)]) == 0
@@ -379,7 +418,7 @@ def test_validate_says_pending_vocabulary(grouped, capsys):
     run_key = group["member_run_keys"][0]
     run_id = next(r["run_id"] for r in b["runs"] if r["run_key"] == run_key)
     target = next(m for m in b["missing_values"] if m["target_field_path"] == CELL and m["run_id"] == run_id)
-    assert _decide(grouped, capsys, "--target", target["value_id"], "--decision", "correct",
+    assert _said(grouped, capsys, "--target", target["value_id"], "--decision", "correct",
                    "--value", "three_electrode_static_cell")[0] == 2
     out = R.validate_records(grouped, run_portal=lambda record: {"status": "ran", "result": {"valid": True, "errors": [], "warnings": []},
                                                               "outcome": "publish", "held": [], "verdict": "publish"})
@@ -397,7 +436,7 @@ def test_a_1_9_0_bundle_still_validates_and_its_first_save_says_what_1_10_0_adde
     assert B.validate_bundle(data) == []
     (b / "bundle.json").write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     assert B.validate_bundle(B.load_bundle(b)) == []  # loads and validates as stored
-    code, err = _decide(b, capsys, "--target", _miss(b, REACTION)["value_id"], "--decision", "correct",
+    code, err = _said(b, capsys, "--target", _miss(b, REACTION)["value_id"], "--decision", "correct",
                         "--value", "cathodic corrosion")
     assert code == 2 and KEPT in err
     after = M.load(b)
@@ -417,12 +456,12 @@ def test_a_bulk_answer_with_another_refusal_keeps_nothing_whatever_the_order(b):
     env, ph = _miss(b, ENV)["value_id"], _miss(b, PH)["value_id"]
     for order in ([env, ph], [ph, env]):
         with pytest.raises(M.MutationRefused) as got:
-            M.decide(b, target_ids=order, decision="correct", value="aqueous_electrochemistry", by=WHO, orcid=None)
+            M.decide(b, target_ids=order, decision="correct", value="aqueous_electrochemistry", by=WHO, orcid=None, as_said=True)
         assert not isinstance(got.value, M.OffListRefused)
         assert not M.load(b).get("vocabulary_requests")
     # the off-list target alone is kept
     with pytest.raises(M.OffListRefused):
-        M.decide(b, target_ids=[env], decision="correct", value="aqueous_electrochemistry", by=WHO, orcid=None)
+        M.decide(b, target_ids=[env], decision="correct", value="aqueous_electrochemistry", by=WHO, orcid=None, as_said=True)
     assert len(M.load(b)["vocabulary_requests"]) == 1
 
 

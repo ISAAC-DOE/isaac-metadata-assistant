@@ -1,5 +1,14 @@
 # Build, validate, export (Steps 8–9)
 
+## Reading summary.md (Step 2)
+
+Do not quote `summary.md`'s "Questions: N" (fine-grained items) or its "Run groups" (file-name groups,
+not records). Brackets after "Conflicts: N" say how many of the N are real disagreements about a value
+and how many are something else (about files, or already decided): say that split in words. The question
+count comes in Step 7 (`bundle questions` → `counts`).
+
+## Build and validate
+
 `build-records` writes one draft per confirmed group (`drafts/`), listing every required value nobody
 supplied. Its reply is counts: `drafts_total`, `complete` / `incomplete`, `by_reason`,
 `missing_required_by_field`, the first 3 drafts and `skipped_by_status`; `--full` prints every row, and
@@ -24,7 +33,7 @@ one) is named as a disagreement for the scientist to settle, while a name with n
 on RHE (`…_m600mV` with `0Vrhe`) may be one potential on two scales: the warning says "different numbers
 on possibly different scales" and to ask which applies. A name stating open
 circuit (`OCV`) warns until the control mode is confirmed. None of these is read as a value. It is not a refusal: the record can still be exportable,
-without the condition that defines it. Say each one to the scientist and ask the scale question. Explain the counts first ("all 78 lack the producing group; 70 wait for a curve
+without the condition that defines it. Say each one to the scientist in words and ask the scale question it names (and the set-point when `also_needs` is set); its command is a template: run it only with their answer. Explain the counts first ("all 78 lack the producing group; 70 wait for a curve
 approval; 5 have no protocol"), then open `validation/<group id>.json` only for a group they leave
 unexplained.
 

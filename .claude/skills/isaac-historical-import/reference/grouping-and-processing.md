@@ -132,8 +132,8 @@ it finds one. Show per group, in words:
   in those words.
 
 Ask: approve, reject, or needs changes (with a note):
-`<isaac> bundle decide <bundle> --target <result_id> --decision approve --qc-status <word> [--qc-note "<why>"] --by "<name>"`, or
-`<isaac> bundle decide <bundle> --target <result_id> --decision reject|needs_changes --note "<why>" --by "<name>"`. Rules:
+`<isaac> bundle decide <bundle> --target <result_id> --decision approve --qc-status <word> [--qc-note "<their words>"] --by "<name>"`, or
+`<isaac> bundle decide <bundle> --target <result_id> --decision reject|needs_changes --note "<their words>" --by "<name>"`. Rules:
 
 - **QC status is the scientist's.** Approving also needs `--qc-status <word>` (and `--qc-note` when the status says something is compromised or failed: `decide` refuses those without one). The processing verdict (`pass`/`warn`/`fail`) is shown to help them choose; it is never turned into a status for them, and `warn` never auto-maps. Offer the allowed words from the vocabulary and the flags that bear on the choice.
 - **One approved result per group.** A group can hold ISAAC's result (`…-isaac`) and one for the

@@ -380,7 +380,8 @@ def test_an_optional_value_of_a_run_no_live_group_holds_is_asked_in_its_own_run_
 def test_a_closed_list_says_what_to_do_when_none_of_its_values_fits(grouped):
     payload = Q.consolidate(M.load(grouped))
     [form] = [q for q in payload["questions"] if q["kind"] == "missing_value" and q["target_field_path"] == "sample.sample_form"]
-    assert form["allowed_values"] and "If none of the allowed values fits, leave it missing (--decision defer)" in form["text"]
+    assert form["allowed_values"] and "If none of the allowed values fits, never pick the nearest one" in form["text"] and "--as-said" in form["text"]
+    assert "use --decision defer only if they do not know" in form["text"]
     assert "foil" not in form["allowed_values"]  # the vocabulary is not widened
 
 

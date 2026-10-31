@@ -763,8 +763,9 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             if enum:
                 # c8-b LOW: a closed list may hold nothing that fits (a metal foil is none of the sample forms); the
                 # vocabulary is not widened here, the question says what to do then
-                text += (" If none of the allowed values fits, leave it missing (--decision defer) rather than picking "
-                         "the nearest one.")
+                text += (" If none of the allowed values fits, never pick the nearest one: if the scientist keeps "
+                         "their own word, keep it as a vocabulary request (--value \"<their exact word>\" --as-said; "
+                         "it records no decision); use --decision defer only if they do not know.")
             decision = "correct"
         else:
             decision = "confirm"

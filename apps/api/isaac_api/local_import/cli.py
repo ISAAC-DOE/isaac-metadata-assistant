@@ -1685,6 +1685,7 @@ def cmd_bundle_decide(args) -> int:
                 edge=args.edge,
                 positions=positions,
                 same_conditions=args.same_conditions,
+                as_said=args.as_said,
             )
         return M.decide(
             Path(args.bundle_dir),
@@ -1702,6 +1703,7 @@ def cmd_bundle_decide(args) -> int:
             edge=args.edge,
             positions=positions,
             same_conditions=args.same_conditions,
+            as_said=args.as_said,
         )
 
     return _mutation(run)
@@ -2095,7 +2097,8 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
                         "changes no QC status and no processed value); merge candidate (mc-...): keep_apart (the groups are "
                         "distinct; no group changes); --target experiment: set_counter_positions (with --positions), "
                         "set_not_counter_positions (with --positions, or --question on the counter question: those positions "
-                        "are not counters; grouping is unchanged) or set_clock_time_zone (with --value). "
+                        "are not counters; grouping is unchanged), set_clock_time_zone (with --value) or defer (with --question on the "
+                        "counter question or the instrument clock's time zone question: \"I don't know\"; no --value). "
                         "MERGING two groups takes three steps: (1) --target <group> --decision merge --merge-with <group...>; "
                         "(2) isaac bundle group <dir> --regroup, which proposes ONE combined group (flag "
                         "merged_by_scientist_decision) only when nothing recorded tells them apart: no confirmed run, one role, "
@@ -2110,6 +2113,11 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--value", help="the value; for set_clock_time_zone the IANA name (Area/Location, or UTC) of the time zone "
                                    "the INSTRUMENT CLOCK that wrote the scan headers was set to (no offset, no abbreviation)")
     q.add_argument("--json", action="store_true", help="parse --value as JSON")
+    q.add_argument("--as-said", action="store_true",
+                   help="with --value: the value is the scientist's OWN word, as they said it. If it is refused only for "
+                        "not being on the field's allowed list, it is kept as a vocabulary request in --by's name (still "
+                        "exit 2, no decision, no value). Without it an off-list value keeps nothing. Never for a word "
+                        "they did not say")
     q.add_argument("--by", required=True)
     q.add_argument("--orcid")
     q.add_argument("--note")

@@ -106,8 +106,8 @@ Write every finding to ONE JSON file (`isaac.reading_findings`) in a working fol
 Then:
 
 ```
-<isaac> bundle annotate <bundle> --from-readings <findings.json> --model <your model id>          # preview
-<isaac> bundle annotate <bundle> --from-readings <findings.json> --model <your model id> --apply
+<isaac> bundle annotate <bundle> --from-readings <findings.json> --model "<model name>"          # preview
+<isaac> bundle annotate <bundle> --from-readings <findings.json> --model "<model name>" --apply
 ```
 
 The preview lists, per finding, how many targets it reaches and every finding it could NOT place

@@ -51,8 +51,8 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   (a number with its unit, a name). When the question has `allowed_values` (a closed list), map
   their words to exactly one allowed value and say it back ("in situ" → `in_situ`; "a pressed
   pellet" → `pellet`); record it only on their yes. If none fits, say so and offer the list; never
-  stretch a word to fit (the question says it: leave it missing, `--decision defer`; a metal foil is none of
-  the sample forms). `decide` refuses a value the field's schema rejects (not on the list, wrong
+  stretch a word (a metal foil is none of the sample forms). If they keep their own word, see "Not on
+  the list at all" below. Use `defer` only if they say they don't know. `decide` refuses a value the field's schema rejects (not on the list, wrong
   type, a time not in UTC), lists the allowed values and records nothing; when one target of a bulk
   answer is refused, nothing is recorded for any.
 - Ask `produced_by` ("who made these measurements?") once, per beamtime; offer a folder-name hint
@@ -184,20 +184,29 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   meanwhile, often the *Local Imports* page. Run `bundle questions` again and re-check the answer still
   applies before recording it.
 - **Not on the list at all.** When the scientist's answer is a real value the closed list lacks, say so
-  and record no decision. `decide` (and `template import --apply`, and `template adopt` for their own
-  sheet, only with `--by`, passed once they say the sheet is theirs) refuses it but KEEPS it as a vocabulary
-  request, in the `--by` name, with the field, runs and where it was said. `--note` holds only the
+  and record no decision. If no allowed value fits and they keep their own word, run
+  `decide … --value "<their exact word>" --as-said` once: it records no decision but keeps their word as
+  a vocabulary request, in the `--by` name, with the field, runs and where it was said. Never pass a word
+  they did not say: without `--as-said` an off-list value keeps nothing (the reply says "if this is the
+  scientist's own word, repeat with --as-said"), so a value you try while working out a mapping is never
+  put in their name. `template import --apply` keeps their own off-list cells the same way, and `template
+  adopt` for their own sheet only with `--by`, passed once they say the sheet is theirs; the Local Imports
+  page never keeps one. `--note` holds only the
   scientist's own words about the term, word for word, or is left out: never your summary or wording; the reply says "kept as a vocabulary request; `isaac bundle propose-terms` can draft
   it". It is never a decision or a value: the field stays missing (`bundle validate` lists it under
   `pending_vocabulary`) until the vocabulary has the term or they give an allowed value. Offer to draft:
-  `<isaac> bundle propose-terms <bundle> --out <file.json>` (outside the bundle; it sends nothing).
+  `<isaac> bundle propose-terms <bundle> --out <bundle>-notes/terms.json` (outside the bundle; it sends nothing).
+  Say which terms come only from my readings (`by_origin.ai_reading`), not from their answers; draft one
+  only if they want it.
   Read each draft back: a word that NAMES an existing term (`reversible_hydrogen_electrode` is `RHE`) is
   not drafted, "use `RHE` (an existing term)": ask whether to answer `RHE`. A close term (`XANES` beside
   `XAS`, `HERFD-XAS`) is drafted with `check_existing`: its description must say why none of those fits.
   A term with a space is not drafted; its `ask` says what to ask for (one word, e.g. `cathodic_corrosion`):
-  record their one-word answer again, never rewrite it yourself. The scientist writes each description,
-  in their words; they can load the drafts file on the website's Schema Proposals page (Propose a Change →
-  Load drafts from a local import) and write it there; nothing is sent until they save a proposal. After
+  record their one-word answer again, never rewrite it yourself. They write each description themselves on
+  the Schema Proposals page (Propose a Change → Load drafts from a local import), never in the file and
+  never by you. Nothing is sent until they save a proposal; saving one sends the term, its counts and
+  its file-name citations to the ISAAC server that page uses (the hosted server when they use the
+  website): their choice (row D in `data-flow-and-consent.md`); say so before they save. After
   more answers, `--merge` updates the same file and keeps every description in it (who wrote one is not
   known: read it back to them); no draft is ever marked ready to send, and a term no longer found is
   carried over as not current, never proposed.
@@ -215,7 +224,8 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
 
 ## The template (answer everything the files never state, in one sitting)
 
-- Export: `<isaac> bundle template export <bundle> --out <file.xlsx>`. One row per run in a live
+- Export: `<isaac> bundle template export <bundle> --out <bundle>-notes/template.xlsx` (every `--out` of
+  `template export`, `adopt` and `propose-terms` goes in `<bundle>-notes/`, beside the bundle). One row per run in a live
   record group, named by its file's path; Campaign Info answers apply to every File List run.
   Electrolyte is the name only: "0.1 M KOH" goes in as Electrolyte `KOH` and Electrolyte
   Concentration (M) `0.1` (ISAAC's added columns, with pH, after Gas Feed). Take the split from the
@@ -250,7 +260,7 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
 Only when the scientist says **in this conversation** that a filled ISAAC metadata template is theirs
 and to use it (a sheet you found in the folder is not that; ask first). Never retype it for them.
 
-1. `<isaac> bundle template adopt <bundle> <their.xlsx> --out <adopted.xlsx>` (outside the bundle
+1. `<isaac> bundle template adopt <bundle> <their.xlsx> --out <bundle>-notes/adopted.xlsx` (outside the bundle
    folder). It refuses anything that is not a filled copy of ISAAC's template (the blank one too, known
    by its example values even if it ships example File List rows, and a sheet ISAAC exported: that one is
    imported). It maps their File List rows to runs by the run's OWN folder or name (`<stem>_dir` and the

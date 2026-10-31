@@ -80,13 +80,30 @@ class MutationRefused(ValueError):
 
 class OffListRefused(MutationRefused):
     """A ``confirm``/``correct`` refused ONLY because its value is not on the field's allowed list
-    (:func:`bundle.off_list_only`): a word the vocabulary lacks. No decision and no value is recorded; the
-    caller keeps it as a vocabulary request (:func:`keep_vocabulary_request`) and says so."""
+    (:func:`bundle.off_list_only`): a word the vocabulary lacks. No decision and no value is recorded. Only with
+    ``as_said`` (``decide --as-said``: the scientist says it is their own word) does the caller keep it as a
+    vocabulary request (:func:`keep_vocabulary_request`) and say so; otherwise NOTHING is kept and the refusal says
+    how to keep it (:data:`AS_SAID_HINT`). ``problem``: the refusal's own sentence, without what was or was not kept."""
 
-    def __init__(self, message: str, *, field_path: str, term: str, code: int = 2):
+    def __init__(self, message: str, *, field_path: str, term: str, code: int = 2, problem: str | None = None):
         super().__init__(message, code=code)
         self.field_path = field_path
         self.term = term
+        self.problem = problem if problem is not None else message
+
+
+#: c10-d H1: an off-list answer is kept as a vocabulary request ONLY when the scientist says it is their own word
+#: (``--as-said``); a value Claude tries while working out a mapping is never attributed to the scientist.
+AS_SAID_HINT = ("Nothing was kept (no vocabulary request): if this is the scientist's own word, repeat with --as-said "
+                "(`isaac bundle decide ... --value \"<their exact word>\" --as-said`); never for a word they did not say.")
+AS_SAID_NEEDS_VALUE = ("--as-said keeps the scientist's own word given with --value; give --value \"<their exact word>\". "
+                       "Nothing was recorded.")
+
+
+def _not_kept(exc: "OffListRefused") -> "OffListRefused":
+    """The refusal of an off-list answer given WITHOUT ``--as-said``: nothing is kept, and it says how to keep it."""
+    return OffListRefused(f"{exc.problem} {AS_SAID_HINT}", field_path=exc.field_path, term=exc.term, code=exc.code,
+                          problem=exc.problem)
 
 
 def now_utc() -> str:
@@ -943,13 +960,18 @@ def decide(
     positions: Sequence[int] | None = None,
     expected_version: str | None = None,
     same_conditions: bool = False,
+    as_said: bool = False,
 ) -> dict:
     """Record a scientist decision for each target (ALL-OR-NOTHING), idempotently.
 
     Replaying the same decision for a target whose latest decision is already identical
     records nothing new. Each target is its own entry even in a bulk call, sharing a
-    ``batch_id``. ``expected_version``: see :func:`mutate` (the CLI passes none).
+    ``batch_id``. ``expected_version``: see :func:`mutate` (the CLI passes none). ``as_said``
+    (``--as-said``): a value refused only for being off its field's list is kept as a vocabulary
+    request under ``by``; without it nothing is kept (:class:`OffListRefused`).
     """
+    if as_said and value is None:
+        raise MutationRefused(AS_SAID_NEEDS_VALUE)
     params = dict(
         target_ids=target_ids, decision=decision, value=value, by=by, orcid=orcid, note=note,
         split_into=split_into, merge_with=merge_with, qc_status=qc_status, qc_note=qc_note,
@@ -962,6 +984,8 @@ def decide(
         try:
             result = record_decision(bundle, **params)
         except OffListRefused as exc:
+            if not as_said:
+                raise _not_kept(exc) from None
             raise _keep_refused_answer(bundle_dir, bundle, exc, target_ids=target_ids, by=by, orcid=orcid, note=note,
                                        source={"kind": "decide_answer", "command": "bundle decide", "decision": decision,
                                                "question_id": None}) from None
@@ -1078,7 +1102,7 @@ def _keep_refused_answer(bundle_dir: Path, bundle: dict, exc: "OffListRefused", 
     if new:
         save_bundle(bundle_dir, bundle)
     return OffListRefused(f"{exc} {vocabulary_kept_sentence(request, new)}", field_path=exc.field_path, term=exc.term,
-                          code=exc.code)
+                          code=exc.code, problem=exc.problem)
 
 
 #: c8-a: the ``value`` a ``defer`` on the experiment carries when it answers the CLOCK question ("I don't know the
@@ -1458,8 +1482,11 @@ def decide_question(
     dry_run: bool = False,
     with_version: bool = False,
     same_conditions: bool = False,
+    as_said: bool = False,
 ) -> Any:
     """``isaac bundle decide --question`` — the CLI and the local questions screen both call this.
+
+    ``as_said``: as for :func:`decide` (the local questions screen never passes it, so it never keeps a request).
 
     The question is resolved to its targets UNDER THE SAME LOCK as the write, from the bundle that
     write changes, so an answer can never land on targets another command changed in between. With
@@ -1473,6 +1500,8 @@ def decide_question(
     # lock file) is created in it
     if not B.bundle_path(Path(bundle_dir)).is_file():
         raise MutationRefused(f"No bundle.json in {Path(bundle_dir).name!r}.", code=6)
+    if as_said and value is None:
+        raise MutationRefused(AS_SAID_NEEDS_VALUE)
     kept_overrides: list[dict] = []
     with locked(Path(bundle_dir)):
         _require_version(Path(bundle_dir), expected_version)
@@ -1543,6 +1572,8 @@ def decide_question(
         try:
             recorded = record_decision(bundle, **params)
         except OffListRefused as exc:
+            if not as_said:
+                raise _not_kept(exc) from None
             slot_runs = [m.get("run_id") for m in bundle.get("missing_values") or () if m["value_id"] in set(slots_added)]
             raise _keep_refused_answer(bundle_dir, bundle, exc, target_ids=params["target_ids"], by=by, orcid=orcid,
                                        note=note, slots=slots_added, slot_runs=[r for r in slot_runs if r],

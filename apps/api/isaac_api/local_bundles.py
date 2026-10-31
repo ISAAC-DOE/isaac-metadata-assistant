@@ -1235,6 +1235,13 @@ def _open(name: str) -> tuple[Path | None, JSONResponse | None]:
     return bdir, None
 
 
+#: c10-d H1: what the questions screen says when an answer is refused only for being off its field's list.
+PAGE_KEEPS_NO_REQUEST = ("This page never keeps a word off the list: nothing was kept (no vocabulary request). "
+                         "If it is your own word and you want it kept, keep it at the terminal: "
+                         "`isaac bundle decide <bundle> --question <id> --decision correct --value \"<your exact word>\" "
+                         "--as-said --by \"<your name>\"`.")
+
+
 def _refusal(exc: Exception) -> JSONResponse:
     from .local_import import mutations as M
 
@@ -1720,6 +1727,9 @@ def post_local_bundle_answer(
             positions=body.positions, expected_version=body.expected_version, dry_run=body.dry_run,
             with_version=not body.dry_run,
         )
+    except M.OffListRefused as exc:
+        # c10-d H1: this page never keeps a word off the list as a vocabulary request (it passes no `as_said`)
+        return _refuse(422, "refused", _scrub(f"{exc.problem} {PAGE_KEEPS_NO_REQUEST}"))
     except M.MutationRefused as exc:
         return _refusal(exc)
     if body.dry_run:

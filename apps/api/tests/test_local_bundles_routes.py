@@ -326,11 +326,16 @@ def test_a_value_off_the_list_is_refused_where_the_cli_would_store_it_ineligible
                     json={"decision": "correct", "value": "outdoors", "by": BY, "expected_version": _version(client)})
     assert r.status_code == 422 and r.json()["error"] == "value_refused" and "not an allowed value" in r.json()["message"]
     assert (root / "alpha" / "bundle.json").read_bytes() == before
-    # the CLI refuses it too (contract §25: decide refuses a value its field refuses), recording no decision; it
-    # keeps the word as a vocabulary request (1.10.0, §29), and nothing else changes
-    beta_before = json.loads((root / "beta" / "bundle.json").read_bytes())
+    # the CLI refuses it too (contract §25: decide refuses a value its field refuses), recording no decision and
+    # keeping nothing (c10-d H1); only with --as-said (the scientist's own word) does it keep the word as a
+    # vocabulary request (1.10.0, §29), and nothing else changes
+    beta_bytes = (root / "beta" / "bundle.json").read_bytes()
+    beta_before = json.loads(beta_bytes)
     assert cli.main(["bundle", "decide", str(root / "beta"), "--question", q["question_id"], "--decision", "correct",
                      "--value", "outdoors", "--by", BY]) == 2
+    assert (root / "beta" / "bundle.json").read_bytes() == beta_bytes
+    assert cli.main(["bundle", "decide", str(root / "beta"), "--question", q["question_id"], "--decision", "correct",
+                     "--value", "outdoors", "--by", BY, "--as-said"]) == 2
     beta_after = json.loads((root / "beta" / "bundle.json").read_bytes())
     assert [r["term"] for r in beta_after.pop("vocabulary_requests")] == ["outdoors"]
     assert beta_after == beta_before
@@ -338,6 +343,29 @@ def test_a_value_off_the_list_is_refused_where_the_cli_would_store_it_ineligible
     r = client.post(f"/api/local-bundles/alpha/questions/{q['question_id']}/answer",
                     json={"decision": "correct", "value": "EX_SITU", "by": BY, "expected_version": _version(client)})
     assert r.status_code == 422 and "did you mean 'ex_situ'" in r.json()["message"]
+
+
+def test_the_page_never_keeps_a_word_off_the_list_as_a_vocabulary_request(client, root, monkeypatch):
+    """c10-d H1: the answer route passes no `as_said`, and an off-list refusal says the page kept nothing."""
+    q = _env_question(root / "alpha")
+    seen: dict = {}
+    real = M.decide_question
+
+    def spy(*args, **kwargs):
+        seen.update(kwargs)
+        if kwargs.get("dry_run"):
+            return real(*args, **kwargs)
+        raise M.OffListRefused("'outdoors' is not allowed. Nothing was recorded.", field_path="context.environment",
+                               term="outdoors")
+
+    monkeypatch.setattr(M, "decide_question", spy)
+    before = (root / "alpha" / "bundle.json").read_bytes()
+    r = client.post(f"/api/local-bundles/alpha/questions/{q['question_id']}/answer",
+                    json={"decision": "correct", "value": "ex_situ", "by": BY, "expected_version": _version(client)})
+    assert "as_said" not in seen
+    assert r.status_code == 422 and LB.PAGE_KEEPS_NO_REQUEST in r.json()["message"]
+    assert "Nothing was recorded" in r.json()["message"]
+    assert (root / "alpha" / "bundle.json").read_bytes() == before
 
 
 def test_a_decision_the_question_does_not_take_is_refused_with_the_cli_sentence(client, root, capsys):

@@ -18,7 +18,7 @@ code error can be caught instead of echoed. It is a spot check, never a verifica
 3. For each target: `excerpt <bundle> <id> --source <folder>` — the raw source text at that locator. For a reading taken from a file name
    (`filename token N`) it shows the file name and which token, not the file's lines.
 4. Read it. Write down what YOU read (a short value and the quote's locator).
-5. `annotate <bundle> --target <id> --value "<your reading>" --excerpt-locator "<where>" --source-id <src> --model "<your model name>" --blind --rationale "<one line>"`.
+5. `annotate <bundle> --target <id> --value "<your reading>" --excerpt-locator "<where>" --source-id <src> --model "<model name>" --blind --rationale "<one line>"`.
    `--source-id` must be a source the excerpt showed (a target whose locators name sources refuses
    any other, exit 2); a target with no source locators takes any known source.
 6. Only after annotating: `reveal <bundle> <id>` and compare (`agrees_with_parser` and `relation`: the same number, the same
