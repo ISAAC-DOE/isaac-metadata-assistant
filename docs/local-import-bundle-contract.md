@@ -1873,7 +1873,10 @@ adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
   only when, for every run, that value equals the sheet's or was recorded by a ruling on the same disagreement in an
   earlier import of this sheet (the decision's note names "ruling on disagreement Dn: <their file> <their cells> =
   <their value>", and (c14h) their cell still holds that value: a cell edited since, or a note without the value,
-  awaits a ruling; `template import` reads their value from the `_isaac` sheet, never the editable column D).
+  awaits a ruling; `template import` reads their value from the `_isaac` sheet, never the editable column D). A
+  ruling that keeps the value already recorded, but not by a ruling on their cell as it reads now (c14i), is recorded
+  again with the same value (`rulings_tied_to_sheet`; "ruling(s) recorded (same value, now tied to your sheet)"), so
+  the next adopt reads it as ruled; the same workbook imported again records nothing more.
   Settled, it says "already recorded: <value> (<date>); leave blank to keep" (the adopt result's `already_recorded`,
   counted apart in the summary); otherwise it awaits a ruling and says "recorded `12` (date); your sheet says `2`:
   rule which" (`recorded_note`). An Electrolyte row stating a concentration is settled only when the name and the

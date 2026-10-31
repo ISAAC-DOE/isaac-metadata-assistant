@@ -1179,9 +1179,23 @@ def keep_vocabulary_request(bundle: dict, *, field_path: str, term: str, by: str
 
 
 def _same_request(requests: Sequence[Mapping], entry: Mapping) -> dict | None:
-    """The request kept earlier for the same answer as ``entry`` (:func:`_vocabulary_entry`), else ``None``."""
+    """The request kept earlier for the same answer as ``entry`` (:func:`_vocabulary_entry`), else ``None``. Its
+    source may cite MORE cells than ``entry``'s (c14i LOW-3: a build before c14h cited every cell of a sheet word kept
+    for only some of its runs); everything else is the same."""
+    def cells_of(src: Any) -> list:
+        return list((src or {}).get("cells") or ()) if isinstance(src, Mapping) else []
+
+    def same_source(theirs: Any, ours: Mapping) -> bool:
+        if theirs == ours:
+            return True
+        if not isinstance(theirs, Mapping) or not cells_of(ours):
+            return False
+        rest = {k: v for k, v in theirs.items() if k != "cells"}
+        return rest == {k: v for k, v in ours.items() if k != "cells"} and set(cells_of(ours)) <= set(cells_of(theirs))
+
     for r in requests:
-        if all(r.get(k) == entry[k] for k in ("field_path", "term", "scope", "targets", "run_ids", "source", "note")) and (
+        if all(r.get(k) == entry[k] for k in ("field_path", "term", "scope", "targets", "run_ids", "note")) and (
+                same_source(r.get("source"), entry["source"])) and (
                 (r.get("requested_by") or {}).get("name") == (entry["requested_by"] or {}).get("name")):
             return r
     return None
@@ -2097,12 +2111,16 @@ def record_decision(
     same_conditions: bool = False,
     clock_zone_defer: bool = False,
     accept_shift: float | None = None,
+    record_unchanged: bool = False,
 ) -> dict:
     """:func:`decide` applied to an ALREADY-LOADED bundle, under the caller's lock. Saves
     nothing: the caller saves through :func:`save_bundle` (or :func:`mutate`). Every target
     is checked before any entry is appended, so a refusal leaves ``bundle`` unchanged.
     ``clock_zone_defer``: set ONLY by :func:`decide_question` for the clock question's ``defer``, whose value
-    (:data:`CLOCK_ZONE_DEFER_VALUE`) it sets itself; a ``defer`` on the experiment otherwise takes no value."""
+    (:data:`CLOCK_ZONE_DEFER_VALUE`) it sets itself; a ``defer`` on the experiment otherwise takes no value.
+    ``record_unchanged`` (c14i MED-1): set ONLY by ``template import`` for a Disagreements ruling that keeps the value
+    already recorded but was not recorded by a ruling on that sheet cell as it reads now: the same value is recorded
+    again, with the ruling's note, so a later adopt of the sheet reads it as ruled (never read as "unchanged")."""
     positions = _decide_arguments(
         target_ids=target_ids, decision=decision, by=by, orcid=orcid, qc_status=qc_status,
         element=element, edge=edge, positions=positions, value=value, qc_note=qc_note, same_conditions=same_conditions,
@@ -2246,7 +2264,8 @@ def record_decision(
                 json.dumps(prior.get("clock_zone_binding"), sort_keys=True),
                 json.dumps(prior.get("athena_version_provenance"), sort_keys=True),
                 json.dumps(prior.get("same_conditions_tokens")),
-            ) == signature and not (kind == "processing_result" and decision == "approve" and approval_is_stale(prior, obj)) and not (
+            ) == signature and not record_unchanged and not (
+                    kind == "processing_result" and decision == "approve" and approval_is_stale(prior, obj)) and not (
                     restated_after_request(bundle, kind, obj, prior, request_index)):
                 # an approval restated after its result's files changed binds it to them: a new statement; so is a
                 # value restated after the scientist asked for their own word on its field (c13g M1)

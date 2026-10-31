@@ -1235,7 +1235,7 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
                 code=EXIT_INPUT_REFUSED)
 
     def take(sheet, ref, col: Column, raw: Any, *, run: Mapping | None, scope: str, via: str | None = None,
-             because: str | None = None):
+             because: str | None = None, ruling: tuple[str, str, Any] | None = None):
         rule = rules.get(col.path or "")
         value, why = _parse(raw, rule)
         if not why and col.path == ELECTROLYTE_NAME_PATH:
@@ -1262,6 +1262,8 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
         out["cells"].append({"cell": _cell_ref(sheet, ref) + (f" via {via}" if via else ""), "sheet": sheet,
                              "header": col.header, "path": col.path, "value": value, "scope": scope,
                              "run_id": run["run_id"] if run else None, "note": note,
+                             # c14i MED-1: a Disagreements ruling's (their file, their cells, their value)
+                             **({"ruling": ruling} if ruling else {}),
                              # ``template adopt`` copied it from their sheet (no file reading contradicted it then)
                              **({"adopted": {"their_file": origin.get("their_file"), "their_cell": origin.get("their_cell")}}
                                 if origin else {})})
@@ -1444,6 +1446,8 @@ def _ruled_here(log: Sequence[Mapping], place: int, provenance: tuple[str, str, 
     found = isinstance(note, str) and re.search(rf"\(your (?:concentration )?ruling on disagreement D\d+: {their} = (.+)\)$", note)
     if not found:
         return False
+    if found.group(1) == _ruled_on_text(provenance[2]):
+        return True  # c14i LOW-1: the same value as written (a yes/no or a date, which `_agrees` never equates)
     try:
         ruled_on = json.loads(found.group(1))
     except ValueError:
@@ -1597,16 +1601,18 @@ def _read_rulings(wb, marker: Mapping, runs: Mapping, known: Mapping[str, Column
         their_value, kept = _marker_their_value(e)
         if not kept:
             their_value = ws[f"D{row}"].value
-        # the note names the value the ruling was made on, so an edited cell of theirs is never settled by it
-        provenance = (f": {e.get('their_file')} {e.get('their_cells')} = {_ruled_on_text(their_value)}"
-                      if e.get("their_cells") else "")
+        # the note names the value the ruling was made on, so an edited cell of theirs is never settled by it; never
+        # column D's (c14i LOW-2: a workbook adopted before the value was kept names no value, and settles nothing)
+        tie = (str(e.get("their_file")), str(e.get("their_cells")), their_value) if e.get("their_cells") and kept else None
+        said_on = f" = {_ruled_on_text(their_value)}" if kept else ""
+        provenance = f": {e.get('their_file')} {e.get('their_cells')}{said_on}" if e.get("their_cells") else ""
         because = f"your ruling on disagreement {did}{provenance}"
         runs_named = [] if e.get("scope") == "experiment" else [t for t in str(e.get("targets") or "").split(";") if t]
 
         def record(cell_ref: str, column: Column, raw: Any, why_said: str):
             out["read"] = out.get("read", 0) + 1
             if e.get("scope") == "experiment":
-                take(SHEET_DISAGREE, cell_ref, column, raw, run=None, scope="experiment", because=why_said)
+                take(SHEET_DISAGREE, cell_ref, column, raw, run=None, scope="experiment", because=why_said, ruling=tie)
                 return
             for run_id in runs_named:
                 run = runs.get(run_id)
@@ -1614,7 +1620,7 @@ def _read_rulings(wb, marker: Mapping, runs: Mapping, known: Mapping[str, Column
                     out["nowhere"].append({"cell": _cell_ref(SHEET_DISAGREE, cell_ref), "header": column.header, "value": raw,
                                            "reason": f"the run {run_id!r} is not in this bundle"})
                     continue
-                take(SHEET_DISAGREE, cell_ref, column, raw, run=run, scope="run", because=why_said)
+                take(SHEET_DISAGREE, cell_ref, column, raw, run=run, scope="run", because=why_said, ruling=tie)
 
         # M3: the CONCENTRATION of an electrolyte row ("0.01 M HClO4"), ruled in its own column, for the same runs
         craw = None
@@ -1690,8 +1696,9 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
 
     index = _Index(bundle)
     latest = B._decisions_by_target(bundle.get("scientist_decisions") or ())
-    report: dict[str, list] = {"decisions": [], "clashes": [], "already": [], "refused": [], "nowhere": list(cells["nowhere"]),
-                               "left_alone": [], "campaign_not_filled": [], "contradictions": []}
+    report: dict[str, list] = {"decisions": [], "clashes": [], "already": [], "tied": [], "refused": [],
+                               "nowhere": list(cells["nowhere"]), "left_alone": [], "campaign_not_filled": [],
+                               "contradictions": []}
     runs_by_id = {r["run_id"]: r for r in bundle["runs"]}
     contradicted: set[tuple[str, str]] = set()
     awaiting: list[dict] = []
@@ -1855,7 +1862,8 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
     for cell, _d, _k, _o, tid in planned:
         values_of.setdefault(tid, set()).add(repr(cell["value"]))
     split = {tid for tid, vs in values_of.items() if len(vs) > 1}
-    calls: dict[tuple, list[str]] = {}
+    calls: dict[tuple, dict] = {}
+    tied: set[str] = set()  # c14i MED-1: a ruling's same value, recorded again to tie it to their sheet
     seen_target: set[str] = set()
     for cell, decision, kind, obj, tid in planned:
         if tid in split:
@@ -1869,11 +1877,20 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
         if prior is not None and prior.get("decision") in (B.CONFIRMING_DECISIONS | {"reject"}):
             base = obj.get("value") if kind == "candidate" else None
             before = B.final_value(base, prior)
-            if _same_value(before, cell["value"]) and prior.get("decision") != "reject":
+            same = _same_value(before, cell["value"]) and prior.get("decision") != "reject"
+            if same and cell.get("ruling") and not _ruled_here([prior], 0, cell["ruling"]):
+                # c14i MED-1: a ruling that keeps the recorded value, which no ruling on their cell AS IT READS NOW
+                # recorded (they edited it since, or the value came from a file or `decide`): recorded again, tied to
+                # their sheet, or every later adopt would ask it again
+                tied.add(tid)
+                report["tied"].append({"cell": cell["cell"], "target": {"kind": kind, "id": tid}, "value": cell["value"],
+                                       "run_id": obj.get("run_id"), "header": cell["header"],
+                                       "decision_id": prior.get("decision_id")})
+            elif same:
                 report["already"].append({"cell": cell["cell"], "target": {"kind": kind, "id": tid}, "value": cell["value"],
                                           "decided_by": (prior.get("decided_by") or {}).get("name"), "decision_id": prior.get("decision_id")})
                 continue
-            if not supersede:
+            elif not supersede:
                 report["clashes"].append({
                     "cell": cell["cell"], "target": {"kind": kind, "id": tid}, "value": cell["value"],
                     "existing": {"decision": prior.get("decision"), "value": before, "decision_id": prior.get("decision_id"),
@@ -1911,7 +1928,8 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                                      f"now contradicts it: {'; '.join(readings)}. Run `isaac bundle template adopt` again: "
                                      "it lists this as a disagreement to rule on")})
             continue
-        call = calls.setdefault((cell["cell"], decision), {"cell": cell, "decision": decision, "tids": []})
+        call = calls.setdefault((cell["cell"], decision, tid in tied), {"cell": cell, "decision": decision, "tids": [],
+                                                                        "tie": tid in tied})
         call["tids"].append(tid)
         report["decisions"].append({"cell": cell["cell"], "sheet": cell["sheet"], "header": cell["header"],
                                     "target": {"kind": kind, "id": tid}, "target_field_path": cell["path"],
@@ -1925,7 +1943,7 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
         cell, decision, tids = call["cell"], call["decision"], call["tids"]
         try:
             res = M.record_decision(bundle, target_ids=tids, decision=decision, value=cell["value"], by=by, orcid=orcid,
-                                    note=cell["note"])
+                                    note=cell["note"], record_unchanged=call["tie"])
         except M.MutationRefused as exc:
             report["refused"].append({"cell": cell["cell"], "targets": tids, "decision": decision, "reason": str(exc)})
             refused_targets.update(tids)
@@ -1933,9 +1951,11 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
         recorded += res["recorded"]
         unchanged += res["unchanged"]
     report["decisions"] = [d for d in report["decisions"] if d["target"]["id"] not in refused_targets]
+    report["tied"] = [t for t in report["tied"] if t["target"]["id"] not in refused_targets]
     # a per-run slot whose answer was not recorded (refused, a clash) is never left behind as an empty question
     gone = set(M.drop_unrecorded_slots(bundle, slots_added))
     report["decisions"] = [d for d in report["decisions"] if d["target"]["id"] not in gone]
+    report["tied"] = [t for t in report["tied"] if t["target"]["id"] not in gone]
     kept = {(d["cell"], d.get("run_id") or "") for d in report["decisions"]}
     kept_cells = {d["cell"] for d in report["decisions"]}
     report["contradictions"] = [c for c in report["contradictions"]
@@ -2264,6 +2284,8 @@ def import_template(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None 
         "would_record": len(report["recorded_target_ids"]),
         "unchanged": len(report["unchanged_target_ids"]),
         "already_decided_same_value": report["already"],
+        # c14i MED-1: a ruling that keeps the value already recorded, recorded again so it is tied to their sheet
+        "rulings_tied_to_sheet": report["tied"],
         "invalid_cells": cells["invalid"],
         # an invalid cell refused ONLY because its word is not on the field's list: kept as a vocabulary request
         "vocabulary_requests": requests,
@@ -2413,6 +2435,13 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
         for x in rep["awaiting_ruling"]:
             run = f" {x['run_id']}" if x.get("run_id") else ""
             add(f"  {x['id'] or '(not yet on the Disagreements sheet)'} {x['cell']}{run} {x['header']}: theirs {x['their_value']!r}; {x['why']}")
+    if rep.get("rulings_tied_to_sheet"):
+        add("")
+        add(("Rulings recorded" if rep["applied"] else "Rulings to be recorded") + " with the same value, now tied to "
+            "your sheet (the value does not change; a later adopt reads them as ruled):")
+        for x in rep["rulings_tied_to_sheet"]:
+            run = f" {x['run_id']}" if x.get("run_id") else ""
+            add(f"  {x['cell']}{run} {x['header']} = {x['value']!r} (was {x['decision_id']})")
     if rep.get("disagreements_already_recorded"):
         add("")
         add("Disagreements already recorded (left blank, so the recorded value is kept; nothing new is recorded for them):")
@@ -2504,6 +2533,8 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
            if rep.get("asked_beamtime_wide") else "")
         + (f"; {len(rep['replaces_or_contradicts_a_file_reading'])} replace or contradict a file reading"
            if rep.get("replaces_or_contradicts_a_file_reading") else "")
+        + (f"; {len(rep['rulings_tied_to_sheet'])} ruling(s) " + ("recorded" if rep["applied"] else "to be recorded")
+           + " (same value, now tied to your sheet)" if rep.get("rulings_tied_to_sheet") else "")
         + (f"; {len(rep['awaiting_ruling'])} disagreement(s) awaiting a ruling" if rep.get("awaiting_ruling") else "")
         + (f"; {len(rep['disagreements_already_recorded'])} disagreement(s) already recorded (blank: kept)"
            if rep.get("disagreements_already_recorded") else "")
