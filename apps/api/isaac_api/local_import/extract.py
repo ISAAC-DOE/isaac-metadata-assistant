@@ -1478,6 +1478,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rows-limit", type=int, help=f"with --sheet: return at most this many rows (default {DEFAULT_LIMITS.max_preview_rows}, "
                                                   f"at most {DEFAULT_LIMITS.max_page_rows})")
     p.add_argument("--show-limits", action="store_true", help="include every bound applied (the Limits block) in each manifest")
+    p.add_argument("--blocks", action="store_true",
+                   help="a Word/PowerPoint file: also print every block (paragraph, table row, slide shape) inline; "
+                        "the same text is in text_file, which is what the manifest points to by default")
     return p
 
 
@@ -1508,15 +1511,22 @@ def _trim_limits(doc: dict, show: bool) -> None:
 _SHEET_ROWS_KEYS = ("header_rows", "header_rows_note", "preview_rows")
 
 
-def _compact(doc: dict, out: str) -> None:
-    """The PRINTED manifest is compact: each sheet's rows are in the text file it names (a 100 KB manifest of
-    rows on stdout is not a way to read a workbook), and every text file is named by its path under ``--out``
-    so it opens as printed. ``extract_source`` itself still returns the rows."""
+def _compact(doc: dict, out: str, blocks: bool = False) -> None:
+    """The PRINTED manifest is compact: each sheet's rows, and a Word/PowerPoint file's blocks, are in the text
+    file the manifest names (a 100 KB manifest of rows on stdout is not a way to read a document), and every text
+    file is named by its path under ``--out`` so it opens as printed. ``blocks=True`` (``--blocks``) keeps a
+    document's blocks inline. ``extract_source`` itself still returns the rows and blocks."""
     for m in [doc, *(doc.get("extractions") or ())]:
         if not isinstance(m, dict):
             continue
         if m.get("text_file"):
             m["text_file"] = str(Path(out) / m["text_file"])
+            if not blocks and any(k in m for k in ("blocks", "slides")):
+                m.pop("blocks", None)
+                m.pop("slides", None)
+                m["read_text"] = ("Every paragraph, table row and slide is in text_file, in reading order (Read it); "
+                                  "images are listed here with their position, alt text and caption. "
+                                  "--blocks prints the blocks inline as well.")
         for sheet in m.get("sheets") or ():
             for key in _SHEET_ROWS_KEYS:
                 sheet.pop(key, None)
@@ -1597,7 +1607,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"refused: {exc}", file=sys.stderr)
         return 3
     _trim_limits(result, args.show_limits)
-    _compact(result, args.out)
+    _compact(result, args.out, args.blocks)
     json.dump(result, sys.stdout, indent=2, ensure_ascii=False)
     sys.stdout.write("\n")
     return 0

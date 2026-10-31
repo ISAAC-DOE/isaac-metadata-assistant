@@ -18,6 +18,7 @@ on the page, in `read_by_note`). Work through them in this order, and tell the s
   in `text_file`, each sheet's rows (the first 50, the bound is stated) in that sheet's own `text_file`
   (`row 3: a | b | c`), every embedded image with its position, alt text and caption, and counters for
   anything cut. Read each text file it names (the path is printed as it opens); open images with Read.
+  The blocks themselves are not printed (they are the text file); `--blocks` prints them inline too.
   An `--out` inside `--root`, inside the file's own folder, or inside a bundle is refused (exit 3).
 - **A cut sheet is not read; page it.** A sheet past the preview bound has `preview_rows_not_returned`
   and a `read_rest` with the exact command for the next page (it starts with the interpreter that ran it):
