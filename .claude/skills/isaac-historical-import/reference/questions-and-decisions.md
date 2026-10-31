@@ -26,7 +26,8 @@ quote these, not `summary.md`'s "Questions: N", which is `fine_grained_v1`) and
 result"): its `questions[]` list each question to answer with the `only` scope to use,
 `unasked_required[]` names required fields no question asks (with `reason` and `command`), and
 `plus_decisions` names only the decisions not yet made (an empty list once the group is
-confirmed and its result approved). It never names a group that cannot export while another exists: no
+confirmed and its result approved); for a group with scans but no processing result yet it says "run
+`isaac process` first", and for one whose only results were rejected, "re-process it". It never names a group that cannot export while another exists: no
 ISAAC protocol covers its data, its result has no curve, or none of its runs lists a scan (`no_scans`, the
 `cannot_export_reason` of `bundle list <bundle> groups`). When only such groups are left, `blocked` says why
 in words and `plus_decisions` never says "approve its processing result" for them. `recommended[]` (never blocking, not counted) names a question
