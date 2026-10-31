@@ -1,6 +1,6 @@
 # ISAAC Local Import Bundle — contract v1
 
-Status: **v1.9.0** (`set_counter_positions` may name the LAST file-name token, `--positions last`, and a scientist's merge has a working path, 2026-10-30, §9 "What 1.9.0 added", §27; v1.8.0 the bounds on `scientist_decisions` and `ai_interpretations` raised to 200,000, so an append-only log can no longer lock a bundle; decide refuses a value its field refuses, 2026-10-29, §9 "What 1.8.0 added", §25; v1.7.0 `context.electrochemistry.current_setpoint_mA_cm2` answerable, so a confirmed galvanostatic record can complete, 2026-10-29, §9 "What 1.7.0 added", DEC-92; v1.6.0 capture decisions — keep apart, the Athena result of record, "no counter" — a merge decision applied as one combined group, and question ids that survive answers, 2026-10-29, §9 "What 1.6.0 added"; v1.5.0 control mode answerable the same day; v1.4.0 the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
+Status: **v1.10.0** (an answer refused only because it is not on its field's list is kept as a vocabulary request, `vocabulary_requests`, and `bundle propose-terms` drafts it, 2026-10-30, §9 "What 1.10.0 added", §29; v1.9.0 (`set_counter_positions` may name the LAST file-name token, `--positions last`, and a scientist's merge has a working path, 2026-10-30, §9 "What 1.9.0 added", §27; v1.8.0 the bounds on `scientist_decisions` and `ai_interpretations` raised to 200,000, so an append-only log can no longer lock a bundle; decide refuses a value its field refuses, 2026-10-29, §9 "What 1.8.0 added", §25; v1.7.0 `context.electrochemistry.current_setpoint_mA_cm2` answerable, so a confirmed galvanostatic record can complete, 2026-10-29, §9 "What 1.7.0 added", DEC-92; v1.6.0 capture decisions — keep apart, the Athena result of record, "no counter" — a merge decision applied as one combined group, and question ids that survive answers, 2026-10-29, §9 "What 1.6.0 added"; v1.5.0 control mode answerable the same day; v1.4.0 the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
 [`apps/api/isaac_api/local_import/bundle-v1.schema.json`](../apps/api/isaac_api/local_import/bundle-v1.schema.json)
 (JSON Schema draft 2020-12) plus the checks in
 [`bundle.py`](../apps/api/isaac_api/local_import/bundle.py) `validate_bundle` that JSON
@@ -713,6 +713,24 @@ newly writable, and `processed_outputs` is required at 1.9.0 as at 1.2.0–1.8.0
   and one holding `-1`.
 - **The upgrade is disclosed**: the first write by this build of an older bundle appends one
   `format_upgrades` entry whose statement includes `bundle.CHANGES_ADDED_IN["1.9.0"]`.
+
+### What 1.10.0 added (vocabulary requests)
+
+A minor version: the schema **accepts more**. The optional top-level `vocabulary_requests` section
+(at most 20,000, `bundle.MAX_VOCABULARY_REQUESTS`) keeps each answer a scientist gave that its field
+refused ONLY because it is not on the field's allowed list (`bundle.off_list_only`: every other check
+passes). Each holds `request_id` (`vr-00001`), `field_path`, `term` (exactly as given), `requested_by`
+(the `--by`, `local_unverified`; `null` when no name was given), `requested_utc`, `scope`, `targets`,
+`run_ids`, `source` (`decide_answer` / `template_cell` / `adopted_sheet_cell`, the command, and the
+decision and question, or the file NAME and cells) and the scientist's own `note`. It is **never a
+decision and never a value**: no record, question or eligibility reads it. Nothing becomes newly
+writable, and `processed_outputs` is required at 1.10.0 as at 1.2.0–1.9.0.
+
+- **A 1.10.0 validator accepts 1.0.0–1.9.0 bundles;** a 1.9.0 validator refuses a 1.10.0 one (the label),
+  and one holding the section.
+- **The upgrade is disclosed**: the first write by this build of an older bundle appends one
+  `format_upgrades` entry whose statement includes `bundle.CHANGES_ADDED_IN["1.10.0"]`. A statement may
+  now be 1,500 characters (600 before): from 1.4.0 or older, every change since no longer fit.
 
 ## 10. Exit codes (`isaac import` / `isaac bundle`)
 
@@ -1522,7 +1540,7 @@ reader and does not upload it. It lists every term with its field, its counts (`
 `by_origin`), runs (the term's `runs` when the file has one; otherwise the distinct
 `ref.run_id` of its citations, only when every citation names one and none were left out; else
 "not stated"), the scientist's own words (a term's `scientist_notes` when the file carries them;
-format 1 carries none, and the page says so), its citations and the problems the file reports.
+a file written before §29 carries none, and the page says so), its citations and the problems the file reports.
 A term with `drafted: false`, or one the server's current vocabulary would refuse, is listed
 with its reason and has no button. **Propose This Term** opens the ordinary form on that list and
 term. The section comes from the server's `proposal_sections`, the description is **empty and
@@ -1751,3 +1769,46 @@ question ids, byte for byte, on five synthetic fixtures (also after a merge, a c
   decide and regroup give; every other group keeps its id. A stored split whose lists cannot make groups (an
   older build accepted a split with none) makes no group: `split_decisions_not_applied` names why and the
   `decide … --split-into` that fixes it (its runs, in no live group, can be split again).
+
+## 29. Vocabulary requests and the second drafts run (2026-10-30) — format 1.10.0 for the section only
+
+Walking the skill on a real beamtime: five words the scientist gave (a technique, an environment, a
+reaction, a cell type, a potential scale) were refused by `decide`, `template import` and `template
+adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
+
+- **Kept as a vocabulary request** (§9 "What 1.10.0 added"). `decide` (by target or `--question`; a
+  bulk call keeps one request for every target the same answer reached), `template import --apply` (one
+  request per field and word, with its cells and runs; a preview keeps nothing and says "would be kept")
+  and `template adopt` (their sheet's not-allowed values, in the `--by` name when given, recorded before
+  the workbook is written) keep the word when it is refused ONLY for being off the list. The refusal is
+  unchanged (exit 2, no decision, the allowed values listed) and adds: "kept as a vocabulary request;
+  `isaac bundle propose-terms` can draft it". The same answer by the same person from the same place
+  keeps nothing new and writes nothing. Any other refusal (a word in a number field, a local time with no
+  zone) keeps nothing. Per-run answer slots a refused `--only group:<id>` answer made are dropped; the
+  request names their runs.
+- **`propose-terms` reads them** (origin `scientist_request`), beside the AI readings. An AI reading whose
+  target a scientist has since confirmed or corrected with an allowed value is NOT counted
+  (`skipped.ai_readings_already_answered`). Each term carries `runs` (a count), `run_ids` and
+  `scientist_notes` (`{text, by, said_utc, request_id}`; `text` names who, when and where, then the word and
+  their note), and each citation `run_ids` and a file NAME without folders — the keys the website's loader
+  reads. The drafts file stays `format_version: "1"` (the additions are keys a version-1 reader ignores).
+- **Equivalences and near terms** (`propose_terms.EQUIVALENT_TERMS`, `NEAR_TERMS`). A word that names an
+  existing term — at `potential_scale` and `reference_electrode.type`:
+  `reversible_hydrogen_electrode`/`RHE`, `standard_hydrogen_electrode`/`SHE`,
+  `saturated_calomel_electrode`/`SCE`, `silver_chloride` and `silver_silver_chloride`/`Ag/AgCl`, matched
+  ignoring case, spaces and hyphens, only while the term is on the list — is not drafted:
+  `use_existing`, problem `equivalent_existing_term`, "Use `RHE` (an existing term)", and `decide`'s refusal
+  says it too. A close term (`XANES`, `EXAFS` beside `XAS`/`HERFD-XAS`; any existing term sharing a whole run
+  of words, `three_electrode` in `three_electrode_static_cell`) is drafted with `check_existing` and
+  `check_existing_question` (also a payload note): the description must say why none of them fits. A
+  genuinely new term is never blocked.
+- **A term the website refuses for its shape** (a space) is still not drafted; its draft adds `ask`: the
+  term as one word, e.g. `cathodic_corrosion`. ISAAC never writes that word as the term.
+- **`--merge`** updates an existing `--out` file instead of exit 4: this run's terms (new ones added, counts,
+  citations, runs and notes re-read), a description a person wrote in a draft's body kept (re-checked by the
+  website's rules: `ready_to_send` only when they pass), and a term no longer found carried over
+  (`carried_over: true`). A file that is not a drafts file, or one for another bundle, is refused (exit 4);
+  `--merge` needs `--out` and not `--force` (exit 2). The file gains `merges[]`.
+- **`bundle validate` adds `pending_vocabulary`** (`field_path`, `term`, `groups` (10 shown),
+  `groups_total`, `request_ids`, `statement`): a confirmed group whose draft lacks the field and holds one
+  of the request's runs (every group for a beamtime-wide request).

@@ -279,6 +279,23 @@ def test_not_allowed_and_name_only_values_are_listed_once_each_with_the_allowed_
     assert len(text) < 6_000
 
 
+def test_a_value_only_off_its_list_is_kept_as_a_vocabulary_request_in_the_name_given(grouped, tmp_path, capsys):
+    theirs = _their_sheet(grouped, tmp_path / THEIRS)
+    code, text, err = _adopt(grouped, theirs, tmp_path / "adopted.xlsx", capsys, "--by", WHO)
+    assert code == 0, err
+    assert "Kept as vocabulary requests" in text and "'aqueous_electrochemistry' for 8 run(s)" in text
+    [req] = M.load(grouped)["vocabulary_requests"]
+    assert req["field_path"] == "context.environment" and req["term"] == "aqueous_electrochemistry"
+    assert req["requested_by"]["name"] == WHO and len(req["run_ids"]) == 8
+    assert req["source"]["kind"] == "adopted_sheet_cell" and req["source"]["file"] == THEIRS
+    assert all(c.startswith("'File List'!") for c in req["source"]["cells"])
+    # a name-only electrolyte value is not a vocabulary word: nothing kept for it; adopting again keeps nothing new
+    before = (grouped / "bundle.json").read_bytes()
+    assert _adopt(grouped, theirs, tmp_path / "again.xlsx", capsys, "--by", WHO)[0] == 0
+    assert len(M.load(grouped)["vocabulary_requests"]) == 1
+    assert json.loads((grouped / "bundle.json").read_bytes())["vocabulary_requests"] == json.loads(before)["vocabulary_requests"]
+
+
 # --- importing the adopted file -------------------------------------------------------------------
 
 

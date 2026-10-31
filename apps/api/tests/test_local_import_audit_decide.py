@@ -47,6 +47,13 @@ def _bytes(bdir: Path) -> bytes:
     return (bdir / "bundle.json").read_bytes()
 
 
+def _all_but_requests(raw: bytes) -> dict:
+    """The bundle without its vocabulary requests (1.10.0): an off-list answer is kept there, and nowhere else."""
+    data = json.loads(raw)
+    data.pop("vocabulary_requests", None)
+    return data
+
+
 def _env_question(bdir: Path) -> dict:
     payload = Q.consolidate(M.load(bdir))
     return next(q for q in payload["questions"] if q["kind"] == "missing_value"
@@ -71,7 +78,10 @@ def test_decide_question_refuses_an_off_list_value_and_writes_nothing(b, capsys)
     assert "'ex situ' is not one of the schema's allowed values for context.environment" in err
     allowed = (B._schema_node(ENV) or {})["enum"]
     assert f"Allowed values for {ENV}: {', '.join(allowed)}" in err and "Nothing was recorded" in err
-    assert _bytes(b) == before
+    # no decision and no value: the word is kept as a vocabulary request only (1.10.0)
+    assert "kept as a vocabulary request" in err
+    assert _all_but_requests(_bytes(b)) == _all_but_requests(before)
+    assert [r["term"] for r in json.loads(_bytes(b))["vocabulary_requests"]] == ["ex situ"]
     # the allowed spelling is recorded, and is eligible
     assert cli.main(["bundle", "decide", str(b), "--question", q["question_id"], "--decision", "correct",
                      "--value", "ex_situ", "--by", "X"]) == 0
@@ -93,7 +103,10 @@ def test_a_bulk_decision_with_one_off_list_target_records_nothing(b):
     before = _bytes(b)
     with pytest.raises(M.MutationRefused):
         M.decide(b, target_ids=ids, decision="correct", value="ExSitu", **BY)
-    assert _bytes(b) == before
+    # nothing is decided; the word is kept once, as a vocabulary request naming every target it reached (1.10.0)
+    assert _all_but_requests(_bytes(b)) == _all_but_requests(before)
+    [req] = json.loads(_bytes(b))["vocabulary_requests"]
+    assert req["term"] == "ExSitu" and [t["id"] for t in req["targets"]] == ids
 
 
 def test_a_stored_confirmed_but_unfit_value_loads_and_can_be_corrected(b):

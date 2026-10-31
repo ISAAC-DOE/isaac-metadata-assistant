@@ -105,10 +105,10 @@ def test_an_ai_reading_outside_a_portal_list_is_listed_and_drafted_in_the_portal
     entry = _term(report, field, "three_electrode_static_cell")
     assert entry is not None
     assert entry["count"] == 2
-    assert entry["by_origin"] == {"scientist_confirmed": 0, "parser_reading": 0, "ai_reading": 2}
+    assert entry["by_origin"] == {"scientist_confirmed": 0, "parser_reading": 0, "ai_reading": 2, "scientist_request": 0}
     assert _term(report, field, "h_cell") is None
     # Citations are a file and a locator; no quote is copied out.
-    assert entry["citations"] and all(set(c) == {"file", "locator", "origin", "ref"} for c in entry["citations"])
+    assert entry["citations"] and all(set(c) == {"file", "locator", "run_ids", "origin", "ref"} for c in entry["citations"])
     assert entry["citations"][0]["locator"] == "page 1 (synthetic)"
     draft = entry["draft"]
     assert draft["drafted"] is True and draft["ready_to_send"] is False and draft["missing"] == ["description"]
@@ -161,9 +161,12 @@ def test_a_phrase_is_listed_but_never_drafted_or_rewritten(bundle_dir, capsys):
     assert entry is not None and entry["draft"]["drafted"] is False
     assert "invalid_term" in {p["code"] for p in entry["draft"]["problems"]}
     assert "single word" in entry["draft"]["reason"]
-    # Never transformed into a term that would pass.
+    # Never transformed into a term that would pass: the one-word form is only what to ASK for.
     assert _term(report, field, "cathodic_corrosion") is None
-    assert "cathodic_corrosion" not in json.dumps(report)
+    assert "e.g. cathodic_corrosion" in entry["draft"]["ask"]
+    assert "cathodic_corrosion" not in json.dumps({**report, "fields": [
+        {**f, "terms": [{k: v for k, v in t.items() if k != "draft"} for t in f["terms"]]} for f in report["fields"]]})
+    assert "portal_payload" not in entry["draft"]
     assert report["totals"]["drafts"] == 0
 
 
@@ -181,7 +184,7 @@ def test_a_confirmed_value_off_the_schema_enum_is_listed_and_a_near_duplicate_is
         ["bundle", "decide", str(bundle_dir), "--target", target, "--decision", "correct",
          "--value", "insitu", "--by", "Synthetic Tester"]
     )
-    assert code == 2 and "not one of the schema's allowed values" in capsys.readouterr().err
+    assert code == 2 and "not one of the schema's allowed values" in capsys.readouterr().err  # kept as a request (1.10.0)
     held = M.load(bundle_dir)
     held.setdefault("scientist_decisions", []).append({
         "decision_id": f"d-{len(held['scientist_decisions']) + 1:05d}", "target": {"kind": "missing_value", "id": target},

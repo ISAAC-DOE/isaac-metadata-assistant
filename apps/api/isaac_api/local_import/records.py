@@ -1591,6 +1591,12 @@ def validate_records(bundle_dir: Path, *, run_portal=None) -> dict:
             reports=f"{VALIDATION_DIR}/<group_id>.json holds each group's full report (every gate, verbatim).",
         )
     out.update(warning_summary(warned))
+    from .propose_terms import pending_vocabulary
+
+    pending = pending_vocabulary(bundle, fresh)
+    if pending:
+        # A MISSING VALUE WAITING ON A PROPOSAL IS SAID (1.10.0): the scientist gave a word the list lacks
+        out["pending_vocabulary"] = pending
     out.update(verdicts=verdicts, on_disk_drafts_ignored_because_they_differ=stale)
     if not verdicts:
         # an empty verdict list is "nothing checked", never "everything passed"

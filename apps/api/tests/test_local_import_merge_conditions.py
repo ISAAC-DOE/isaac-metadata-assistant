@@ -100,7 +100,7 @@ def test_same_conditions_is_stored_on_the_merge_decision_and_validates(tmp_path,
     assert "after / before" in reply["statement"]
     data = json.loads((b / "bundle.json").read_text())
     assert data["scientist_decisions"][-1]["same_conditions_tokens"] == ["after", "before"]
-    assert data["format_version"] == "1.9.0" and B.validate_bundle(data) == []
+    assert data["format_version"] == B.FORMAT_VERSION and B.validate_bundle(data) == []  # 1.9.0 or later
     bad = dict(data, scientist_decisions=[dict(x, same_conditions_tokens=[]) for x in data["scientist_decisions"]])
     assert B.validate_bundle(bad)
     # an older bundle (no such field) still validates

@@ -78,6 +78,17 @@ class MutationRefused(ValueError):
         self.code = code
 
 
+class OffListRefused(MutationRefused):
+    """A ``confirm``/``correct`` refused ONLY because its value is not on the field's allowed list
+    (:func:`bundle.off_list_only`): a word the vocabulary lacks. No decision and no value is recorded; the
+    caller keeps it as a vocabulary request (:func:`keep_vocabulary_request`) and says so."""
+
+    def __init__(self, message: str, *, field_path: str, term: str, code: int = 2):
+        super().__init__(message, code=code)
+        self.field_path = field_path
+        self.term = term
+
+
 def now_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -678,6 +689,9 @@ def _check_decision(bundle: Mapping, kind: str, obj: Mapping, decision: str, val
         raise MutationRefused(f"Deciding a {kind} needs --value: there is no single extracted value to confirm.")
     problem = _decided_value_problem(bundle, kind, obj, decision, value)
     if problem is not None:
+        path, effective, _label = _decided_value_target(bundle, kind, obj, decision, value) or (None, None, None)
+        if B.off_list_only(path, effective):
+            raise OffListRefused(problem, field_path=path, term=effective)
         raise MutationRefused(problem)
 
 
@@ -860,6 +874,23 @@ def merge_with_problem(bundle: Mapping, group_id: str, merge_with: Sequence[str]
     return None
 
 
+def _decided_value_target(bundle: Mapping, kind: str, obj: Mapping, decision: str,
+                          value: Any) -> tuple[str | None, Any, str] | None:
+    """``(field path, the value a confirm/correct would leave, the target's id)``, or ``None`` when the decision
+    states no value for a field (any other decision, any other kind)."""
+    if decision not in ("confirm", "correct"):
+        return None
+    if kind == "candidate":
+        effective = B.final_value(obj.get("value"), {"decision": decision, "value": value}, obj.get("readings"))
+        return obj.get("target_field_path"), effective, obj["candidate_id"]
+    if kind == "missing_value":
+        return obj.get("target_field_path"), value, obj["value_id"]
+    if kind == "conflict":
+        cand = next((c for c in bundle.get("candidates") or () if c["candidate_id"] == obj.get("candidate_id")), None)
+        return (cand or {}).get("target_field_path"), value, obj["conflict_id"]
+    return None
+
+
 def _decided_value_problem(bundle: Mapping, kind: str, obj: Mapping, decision: str, value: Any) -> str | None:
     """Why a ``confirm``/``correct`` would store a value its official field refuses, or ``None``.
 
@@ -871,19 +902,10 @@ def _decided_value_problem(bundle: Mapping, kind: str, obj: Mapping, decision: s
     blocked with nothing left to ask. A value on a path this build does not write stays evidence and
     is not checked (eligibility does not check it either); when the vendored schema cannot be read,
     nothing is refused here — eligibility still fails closed."""
-    if decision not in ("confirm", "correct"):
+    target = _decided_value_target(bundle, kind, obj, decision, value)
+    if target is None:
         return None
-    if kind == "candidate":
-        path = obj.get("target_field_path")
-        effective = B.final_value(obj.get("value"), {"decision": decision, "value": value}, obj.get("readings"))
-        label = obj["candidate_id"]
-    elif kind == "missing_value":
-        path, effective, label = obj.get("target_field_path"), value, obj["value_id"]
-    elif kind == "conflict":
-        cand = next((c for c in bundle.get("candidates") or () if c["candidate_id"] == obj.get("candidate_id")), None)
-        path, effective, label = (cand or {}).get("target_field_path"), value, obj["conflict_id"]
-    else:
-        return None
+    path, effective, label = target
     if not path or effective is None or path not in B._writable_paths():
         return None
     if not isinstance(B._vendored_schema(), Mapping):
@@ -934,7 +956,129 @@ def decide(
         element=element, edge=edge, positions=positions, same_conditions=same_conditions,
     )
     _decide_arguments(**params)  # refused before the lock is taken, as always
-    return mutate(bundle_dir, lambda bundle: record_decision(bundle, **params), expected_version=expected_version)
+    with locked(Path(bundle_dir)):
+        _require_version(Path(bundle_dir), expected_version)
+        bundle = load(bundle_dir)
+        try:
+            result = record_decision(bundle, **params)
+        except OffListRefused as exc:
+            raise _keep_refused_answer(bundle_dir, bundle, exc, target_ids=target_ids, by=by, orcid=orcid, note=note,
+                                       source={"kind": "decide_answer", "command": "bundle decide", "decision": decision,
+                                               "question_id": None}) from None
+        save_bundle(bundle_dir, bundle)
+        return result
+
+
+# --- vocabulary requests (1.10.0) ---------------------------------------------------------------
+
+
+def _decider(by: str | None, orcid: str | None) -> dict | None:
+    if not by or not str(by).strip():
+        return None
+    return {"name": str(by).strip(), "basis": "self_reported_local_user", "identity": "local_unverified",
+            "orcid_claimed": {"value": orcid, "basis": "claimed_for_credit_not_authentication"} if orcid else None}
+
+
+def keep_vocabulary_request(bundle: dict, *, field_path: str, term: str, by: str | None, orcid: str | None = None,
+                            targets: Sequence[tuple[str, str]] = (), run_ids: Sequence[str] = (), scope: str = "run",
+                            source: Mapping, note: str | None = None) -> tuple[dict, bool]:
+    """Keep a scientist's answer that its field refused ONLY because it is not on the field's allowed list
+    (:func:`bundle.off_list_only`) as a VOCABULARY REQUEST: who said it, when, the field, the targets and runs,
+    and where it was said. Never a decision and never a value: no record, question or eligibility reads it;
+    ``bundle propose-terms`` drafts its term. ``(request, new)``: the same answer by the same person from the
+    same place (field, term, targets, runs, source) is kept once and records nothing the second time."""
+    requests = bundle.setdefault("vocabulary_requests", [])
+    entry = {
+        "field_path": field_path,
+        "term": term,
+        "requested_by": _decider(by, orcid),
+        "scope": scope if scope in ("run", "experiment") else "run",
+        "targets": [{"kind": k, "id": i} for k, i in dict.fromkeys((k, i) for k, i in targets)],
+        "run_ids": list(dict.fromkeys(r for r in run_ids if r)),
+        "source": {"kind": source["kind"], "command": source["command"],
+                   **{k: source.get(k) for k in ("decision", "question_id", "file") if k in source},
+                   **({"cells": list(dict.fromkeys(source["cells"]))} if source.get("cells") else {})},
+        "note": note.strip() if isinstance(note, str) and note.strip() else None,
+    }
+    if entry["source"].get("file"):
+        entry["source"]["file"] = Path(str(entry["source"]["file"])).name  # a file NAME, never its folders
+
+    def same(r: Mapping) -> bool:
+        return all(r.get(k) == entry[k] for k in ("field_path", "term", "scope", "targets", "run_ids", "source", "note")) and (
+            (r.get("requested_by") or {}).get("name") == (entry["requested_by"] or {}).get("name"))
+
+    for r in requests:
+        if same(r):
+            return r, False
+    if len(requests) >= B.MAX_VOCABULARY_REQUESTS:
+        raise MutationRefused(f"This bundle already keeps {B.MAX_VOCABULARY_REQUESTS} vocabulary requests; nothing more can "
+                              "be kept. Run `isaac bundle propose-terms` for the ones it holds.", code=5)
+    numbers = [int(str(r.get("request_id", "vr-0")).split("-", 1)[1]) for r in requests
+               if re.fullmatch(r"vr-\d+", str(r.get("request_id")))]
+    request = {"request_id": f"vr-{max(numbers, default=0) + 1:05d}", **entry, "requested_utc": now_utc()}
+    order = ("request_id", "field_path", "term", "requested_by", "requested_utc", "scope", "targets", "run_ids", "source", "note")
+    request = {k: request[k] for k in order}
+    requests.append(request)
+    return request, True
+
+
+def vocabulary_kept_sentence(request: Mapping, new: bool) -> str:
+    """What a refusal says about the answer it kept (the same words for ``decide`` and the template)."""
+    from . import propose_terms as P
+
+    said = (f"{request['term']!r} is kept as a vocabulary request; `isaac bundle propose-terms` can draft it "
+            f"({request['request_id']}{'' if new else ', kept earlier'}: not a decision and not a value; the field keeps "
+            "what it has, or stays missing, until the vocabulary has the term or you answer with an allowed value).")
+    same = P.equivalent_term(request["field_path"], request["term"])
+    if same is not None:
+        said += f" It is the same as an existing term: use `{same}` (an existing term), e.g. `--value {same}`."
+    return said
+
+
+def _off_list_targets(bundle: Mapping, target_ids: Sequence[str], field_path: str, term: str,
+                      skip: Iterable[str] = ()) -> tuple[list[tuple[str, str]], list[str], str]:
+    """``(targets, run ids, scope)`` of the call's targets that the same off-list answer reaches."""
+    skipped = set(skip)
+    targets: list[tuple[str, str]] = []
+    runs: list[str] = []
+    beamtime = False
+    for tid in target_ids:
+        try:
+            kind, obj = resolve_target(bundle, tid)
+        except MutationRefused:
+            continue
+        if kind not in ("candidate", "missing_value", "conflict"):
+            continue
+        got = _decided_value_target(bundle, kind, obj, "correct", term)
+        if got is None or got[0] != field_path:
+            continue
+        if tid not in skipped:
+            targets.append((kind, tid))
+        ids = list(obj.get("run_ids") or ()) if kind == "conflict" else [obj.get("run_id")]
+        ids = [r for r in ids if r]
+        if not ids:
+            beamtime = True
+        runs += ids
+    return targets, runs, "experiment" if beamtime and not runs else "run"
+
+
+def _keep_refused_answer(bundle_dir: Path, bundle: dict, exc: "OffListRefused", *, target_ids: Sequence[str], by: str,
+                         orcid: str | None, note: str | None, source: Mapping, slots: Sequence[str] = (),
+                         slot_runs: Sequence[str] = ()) -> MutationRefused:
+    """Keep ``exc``'s answer as a vocabulary request on ``bundle`` (under the caller's lock), save it when it is new,
+    and return the refusal to raise, saying so. ``slots``: per-run answer slots this call added in memory; they are
+    dropped (never left as new questions) and their runs named instead."""
+    if slots:
+        drop_unrecorded_slots(bundle, slots)
+    targets, runs, scope = _off_list_targets(bundle, target_ids, exc.field_path, exc.term, skip=slots)
+    runs = [*runs, *slot_runs]
+    request, new = keep_vocabulary_request(bundle, field_path=exc.field_path, term=exc.term, by=by, orcid=orcid,
+                                           targets=targets, run_ids=runs, scope="run" if runs else scope,
+                                           source=source, note=note)
+    if new:
+        save_bundle(bundle_dir, bundle)
+    return OffListRefused(f"{exc} {vocabulary_kept_sentence(request, new)}", field_path=exc.field_path, term=exc.term,
+                          code=exc.code)
 
 
 #: c8-a: the ``value`` a ``defer`` on the experiment carries when it answers the CLOCK question ("I don't know the
@@ -1336,6 +1480,7 @@ def decide_question(
         bundle = load(bundle_dir)
         resolve = dict(decision=decision, only=only, field=field, positions=positions, only_scopes=only_scopes)
         override = None
+        slots_added: list[str] = []
         try:
             found, positions = question_targets(Q.consolidate(bundle), question_id, **resolve)
         except MutationRefused as exc:
@@ -1356,7 +1501,7 @@ def decide_question(
                        if again.code == 6 and only and not only_scopes else None)
                 if got is None:
                     raise (exc if again.code == 6 else again) from None
-                found, _slots, override = got
+                found, slots_added, override = got
             if asked["kind"] == "confirm_absorber" and decision == "set_absorber" and only is None:
                 found, kept_overrides = _keep_absorber_overrides(bundle, found)
         clock_defer = False
@@ -1395,7 +1540,15 @@ def decide_question(
             planned = reached(copied, record_decision(copied, **params))
             planned = {**planned, "statement": _would_say(planned.get("statement"))}
             return _with_kept(kept_overrides, {"dry_run": True, "bundle_version": version, "target_ids": params["target_ids"], **planned})
-        result = _with_kept(kept_overrides, reached(bundle, record_decision(bundle, **params)))
+        try:
+            recorded = record_decision(bundle, **params)
+        except OffListRefused as exc:
+            slot_runs = [m.get("run_id") for m in bundle.get("missing_values") or () if m["value_id"] in set(slots_added)]
+            raise _keep_refused_answer(bundle_dir, bundle, exc, target_ids=params["target_ids"], by=by, orcid=orcid,
+                                       note=note, slots=slots_added, slot_runs=[r for r in slot_runs if r],
+                                       source={"kind": "decide_answer", "command": "bundle decide", "decision": decision,
+                                               "question_id": question_id}) from None
+        result = _with_kept(kept_overrides, reached(bundle, recorded))
         save_bundle(bundle_dir, bundle)
         return (result, bundle_version(bundle_dir)) if with_version else result
 

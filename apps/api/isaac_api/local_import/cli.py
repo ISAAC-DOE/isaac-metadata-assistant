@@ -37,7 +37,7 @@ COMMANDS
 ``isaac bundle check <dir>``
     Re-validate the bundle against v1: schema, bounds, references, and the state rule.
 
-``isaac bundle propose-terms <dir> [--out FILE] [--force]``
+``isaac bundle propose-terms <dir> [--out FILE] [--force | --merge]``
     Values outside a fixed list (the vendored schema's enum or the portal vocabulary
     snapshot's list), grouped by field with counts and file/locator citations, and one
     draft per term in the website's portal-payload format. Sent nowhere; each draft needs
@@ -1874,12 +1874,24 @@ def cmd_bundle_propose_terms(args) -> int:
     if bundle is None:
         return code
     out_path = Path(args.out).expanduser() if args.out else None
+    if args.merge and (out_path is None or args.force):
+        _err("--merge updates the drafts file named by --out, and replaces nothing: give --out, and not --force.")
+        return EXIT_USAGE
+    earlier = None
     if out_path is not None:
         if out_path.is_dir():
             _err(f"--out {args.out} is a directory; name a file.")
             return EXIT_OUTPUT_REFUSED
-        if out_path.exists() and not args.force:
-            _err(f"--out {args.out} already exists; pass --force to replace it. Nothing was written.")
+        if out_path.exists() and args.merge:
+            try:
+                earlier = json.loads(out_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                _err(f"--out {args.out} cannot be read as JSON ({type(exc).__name__}), so --merge cannot update it. "
+                     "Nothing was written.")
+                return EXIT_OUTPUT_REFUSED
+        elif out_path.exists() and not args.force:
+            _err(f"--out {args.out} already exists; pass --merge to update it (new terms added, counts and citations "
+                 "updated, any description you wrote kept) or --force to replace it. Nothing was written.")
             return EXIT_OUTPUT_REFUSED
         if not out_path.parent.is_dir():
             _err(f"The folder for --out {args.out} does not exist. Nothing was written.")
@@ -1890,6 +1902,13 @@ def cmd_bundle_propose_terms(args) -> int:
         _err(f"The vocabulary could not be read ({exc}); nothing was compared and nothing was written.")
         return EXIT_INVALID
     report = P.propose_terms(bundle, sources)
+    change = None
+    if earlier is not None:
+        try:
+            report, change = P.merge_reports(earlier, report, sources)
+        except P.MergeRefused as exc:
+            _err(f"--merge: {exc}. Nothing was written.")
+            return EXIT_OUTPUT_REFUSED
     if report["exposed_candidates"]:
         # THE OUTPUT CARRIES PARSER VALUES: recorded as an exposure BEFORE anything is printed
         # or written, as `bundle list candidates` does (contract §11).
@@ -1906,9 +1925,14 @@ def cmd_bundle_propose_terms(args) -> int:
         return EXIT_OK
     _atomic_write(out_path, text.encode("utf-8"))
     totals = report["totals"]
+    merged = ""
+    if change is not None:
+        merged = (f" Updated the earlier file: {len(change['added'])} term(s) added, {change['updated']} updated, "
+                  f"{change['descriptions_kept']} description(s) you wrote kept, {change['carried_over']} carried over "
+                  "(no longer found, kept as they were).")
     print(
         f"Wrote {out_path}: {totals['terms']} term(s) outside the vocabulary in {totals['fields']} field(s), "
-        f"{totals['occurrences']} occurrence(s), {totals['drafts']} draft proposal(s). Nothing was sent; "
+        f"{totals['occurrences']} occurrence(s), {totals['drafts']} draft proposal(s).{merged} Nothing was sent; "
         "each draft needs a description in your words before it can go to the ISAAC portal."
     )
     return EXIT_OK
@@ -1958,7 +1982,7 @@ def cmd_bundle_template_adopt(args) -> int:
 
     try:
         result = T.adopt_template(Path(args.bundle_dir), Path(args.xlsx), Path(args.out), force=args.force,
-                                  suggestions=not args.no_suggestions)
+                                  suggestions=not args.no_suggestions, by=args.by, orcid=args.orcid)
     except T.TemplateRefused as exc:
         _err(str(exc))
         return exc.code
@@ -2139,6 +2163,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("bundle_dir")
     q.add_argument("--out", help="write the drafts to this JSON file instead of printing them")
     q.add_argument("--force", action="store_true", help="replace --out if it exists")
+    q.add_argument("--merge", action="store_true",
+                   help="update an existing --out file instead: add new terms, update counts and citations, keep any "
+                        "description written in it")
     q.set_defaults(func=cmd_bundle_propose_terms)
 
     q = bsub.add_parser("group", help="propose record groups (one record = one sample, technique, set of conditions)")
@@ -2184,6 +2211,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     t.add_argument("--out", required=True, help="the .xlsx file to write (a template `template import` reads)")
     t.add_argument("--force", action="store_true", help="replace an existing --out file")
     t.add_argument("--no-suggestions", action="store_true", help="leave the ISAAC Suggestions sheet empty")
+    t.add_argument("--by", help="the name of the person whose sheet it is: a value of theirs that is not on its field's "
+                                "list is kept as a vocabulary request in that name")
+    t.add_argument("--orcid")
     t.add_argument("--json", action="store_true", help="print the full result as JSON (every disagreement, row and run)")
     t.set_defaults(func=cmd_bundle_template_adopt)
     t = tsub.add_parser("import", help="read a filled template: preview by default, --apply to record decisions")

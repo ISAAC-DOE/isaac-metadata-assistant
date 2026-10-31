@@ -51,9 +51,10 @@
         "1.6.0",
         "1.7.0",
         "1.8.0",
-        "1.9.0"
+        "1.9.0",
+        "1.10.0"
       ],
-      "description": "1.1.0 adds record_groups, processing_results and exposures (all optional, so a 1.0.0 bundle still validates) and widens the decision, target and question enums. 1.2.0 adds processed_outputs (optional; absent means none were recorded) and extended_context_entry.processed_output_id. A 1.2.0 bundle REQUIRES processed_outputs (possibly empty); a bundle without it keeps its older version. 1.3.0 adds ai_interpretation.field_path and .run_ids and the optional eligibility_rederived and format_upgrades logs (all optional), and eligibility is derived under a larger writable set (context.electrochemistry.potential_setpoint_V). A 1.3.0 bundle also REQUIRES processed_outputs. 1.4.0 adds the set_clock_time_zone experiment decision (and its decision field clock_zone_binding on a confirm), the confirm_clock_time_zone question kind, the optional candidates[].local_clock block and the optional zone / zone_decision_id on a normalization step (all additive); nothing becomes newly writable. A 1.4.0 bundle also REQUIRES processed_outputs. 1.5.0 adds nothing to the bundle's shape; eligibility is derived under a larger writable set (context.electrochemistry.control_mode), as at 1.3.0. A 1.5.0 bundle also REQUIRES processed_outputs. 1.6.0 (DEC-91) adds three capture decisions — keep_apart on the new target kind merge_candidate, select_athena_version on a processing result (its value one of that result's athena_versions[].version_id; the derived athena_result_of_record / athena_result_of_record_basis), and set_not_counter_positions on the experiment (decision field not_counter_positions) — the optional superseded_merge_candidates section, the derived merge-candidate status kept_apart, and a merge decision's combined group (record_group.merged_by_decision); nothing becomes newly writable. A 1.6.0 bundle also REQUIRES processed_outputs. 1.7.0 (DEC-92) adds nothing to the bundle's shape; eligibility is derived under a larger writable set (context.electrochemistry.current_setpoint_mA_cm2), as at 1.3.0 and 1.5.0. A 1.7.0 bundle also REQUIRES processed_outputs. 1.8.0 adds nothing to the bundle's shape: the bounds on scientist_decisions and ai_interpretations are raised from 20000 to 200000 entries (both are append-only; at the old bound no further answer could be written). Nothing becomes newly writable. A 1.8.0 bundle also REQUIRES processed_outputs. 1.9.0 lets a set_counter_positions decision name -1 among its positions: the LAST filename token, whatever the name's length (`decide --positions last`), and adds a merge decision's optional same_conditions_tokens (`decide --same-conditions`); nothing else changes and nothing becomes newly writable. A 1.9.0 bundle also REQUIRES processed_outputs."
+      "description": "1.1.0 adds record_groups, processing_results and exposures (all optional, so a 1.0.0 bundle still validates) and widens the decision, target and question enums. 1.2.0 adds processed_outputs (optional; absent means none were recorded) and extended_context_entry.processed_output_id. A 1.2.0 bundle REQUIRES processed_outputs (possibly empty); a bundle without it keeps its older version. 1.3.0 adds ai_interpretation.field_path and .run_ids and the optional eligibility_rederived and format_upgrades logs (all optional), and eligibility is derived under a larger writable set (context.electrochemistry.potential_setpoint_V). A 1.3.0 bundle also REQUIRES processed_outputs. 1.4.0 adds the set_clock_time_zone experiment decision (and its decision field clock_zone_binding on a confirm), the confirm_clock_time_zone question kind, the optional candidates[].local_clock block and the optional zone / zone_decision_id on a normalization step (all additive); nothing becomes newly writable. A 1.4.0 bundle also REQUIRES processed_outputs. 1.5.0 adds nothing to the bundle's shape; eligibility is derived under a larger writable set (context.electrochemistry.control_mode), as at 1.3.0. A 1.5.0 bundle also REQUIRES processed_outputs. 1.6.0 (DEC-91) adds three capture decisions — keep_apart on the new target kind merge_candidate, select_athena_version on a processing result (its value one of that result's athena_versions[].version_id; the derived athena_result_of_record / athena_result_of_record_basis), and set_not_counter_positions on the experiment (decision field not_counter_positions) — the optional superseded_merge_candidates section, the derived merge-candidate status kept_apart, and a merge decision's combined group (record_group.merged_by_decision); nothing becomes newly writable. A 1.6.0 bundle also REQUIRES processed_outputs. 1.7.0 (DEC-92) adds nothing to the bundle's shape; eligibility is derived under a larger writable set (context.electrochemistry.current_setpoint_mA_cm2), as at 1.3.0 and 1.5.0. A 1.7.0 bundle also REQUIRES processed_outputs. 1.8.0 adds nothing to the bundle's shape: the bounds on scientist_decisions and ai_interpretations are raised from 20000 to 200000 entries (both are append-only; at the old bound no further answer could be written). Nothing becomes newly writable. A 1.8.0 bundle also REQUIRES processed_outputs. 1.9.0 lets a set_counter_positions decision name -1 among its positions: the LAST filename token, whatever the name's length (`decide --positions last`), and adds a merge decision's optional same_conditions_tokens (`decide --same-conditions`); nothing else changes and nothing becomes newly writable. A 1.9.0 bundle also REQUIRES processed_outputs. 1.10.0 adds the optional vocabulary_requests section: an answer a scientist gave (decide, a template import cell, a template adopt cell of their own sheet) that its field refused only because it is not on the field's allowed list, kept as a request for the vocabulary (who, when, the field, the targets and runs, where it was said), never as a decision or a value; nothing becomes newly writable. A 1.10.0 bundle also REQUIRES processed_outputs."
     },
     "is_official_record": {
       "const": false
@@ -796,9 +797,18 @@
           },
           "statement": {
             "type": "string",
-            "maxLength": 600
+            "maxLength": 1500,
+            "description": "1.10.0 raises maxLength from 600: the statement names every change since the stored version, and from 1.4.0 or older they no longer fit in 600 characters."
           }
         }
+      }
+    },
+    "vocabulary_requests": {
+      "type": "array",
+      "maxItems": 20000,
+      "description": "1.10.0. Each answer refused ONLY because it is not on its field's allowed list (bundle.off_list_only). Never a decision and never a value: no record reads it. `bundle propose-terms` drafts its term.",
+      "items": {
+        "$ref": "#/$defs/vocabulary_request"
       }
     }
   },
@@ -3728,6 +3738,159 @@
           "const": "source_recorded"
         }
       }
+    },
+    "vocabulary_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "field_path",
+        "term",
+        "requested_by",
+        "requested_utc",
+        "scope",
+        "targets",
+        "run_ids",
+        "source"
+      ],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "pattern": "^vr-[0-9]{5,}$"
+        },
+        "field_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "term": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Exactly as the scientist gave it; never rewritten."
+        },
+        "requested_by": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "basis"
+          ],
+          "description": "The --by of the command that refused it; null when no name was given (template adopt without --by).",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "basis": {
+              "const": "self_reported_local_user"
+            },
+            "identity": {
+              "const": "local_unverified"
+            },
+            "orcid_claimed": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": false,
+              "required": [
+                "value",
+                "basis"
+              ],
+              "properties": {
+                "value": {
+                  "type": "string"
+                },
+                "basis": {
+                  "const": "claimed_for_credit_not_authentication"
+                }
+              }
+            }
+          }
+        },
+        "requested_utc": {
+          "$ref": "#/$defs/utc"
+        },
+        "scope": {
+          "enum": [
+            "run",
+            "experiment"
+          ]
+        },
+        "targets": {
+          "type": "array",
+          "maxItems": 5000,
+          "items": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "run_ids": {
+          "type": "array",
+          "maxItems": 5000,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "command"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "decide_answer",
+                "template_cell",
+                "adopted_sheet_cell"
+              ]
+            },
+            "command": {
+              "type": "string"
+            },
+            "decision": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "question_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "file": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "A file NAME only (no folders)."
+            },
+            "cells": {
+              "type": "array",
+              "maxItems": 5000,
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 2000,
+          "description": "The scientist's own --note, verbatim."
+        }
+      }
     }
   },
   "allOf": [
@@ -3855,6 +4018,23 @@
         "properties": {
           "format_version": {
             "const": "1.9.0"
+          }
+        },
+        "required": [
+          "format_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "processed_outputs"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "format_version": {
+            "const": "1.10.0"
           }
         },
         "required": [

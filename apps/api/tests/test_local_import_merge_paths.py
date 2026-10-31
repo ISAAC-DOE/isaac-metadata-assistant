@@ -271,7 +271,7 @@ def test_a_bundle_holding_last_is_the_new_format_and_an_older_one_still_validate
     b = _xdc(tmp_path, ["SYN_03_MOFdry_015_A", "SYN_03_MOFdry_016_A"])
     M.decide(b, target_ids=["experiment"], decision="set_counter_positions", value=None, by=BY, orcid=None, positions=[-1])
     data = json.loads((b / "bundle.json").read_text())
-    assert data["format_version"] == B.FORMAT_VERSION == "1.9.0"
+    assert data["format_version"] == B.FORMAT_VERSION and B._VERSION_ORDER.index(B.FORMAT_VERSION) >= B._VERSION_ORDER.index("1.9.0")
     older = dict(data, format_version="1.8.0", scientist_decisions=[d for d in data["scientist_decisions"] if -1 not in (d.get("positions") or ())])
     assert B.validate_bundle(older) == []
     bad = dict(data, scientist_decisions=[dict(d, positions=[-3]) if d.get("positions") else d for d in data["scientist_decisions"]])

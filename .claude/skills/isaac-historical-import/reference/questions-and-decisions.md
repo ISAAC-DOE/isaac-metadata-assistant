@@ -183,11 +183,21 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
 - **"The bundle changed since it was read"** (exit 2, nothing written): something else wrote the bundle
   meanwhile, often the *Local Imports* page. Run `bundle questions` again and re-check the answer still
   applies before recording it.
-- **Not on the list at all.** When the scientist's answer is a real value the closed list lacks, say so,
-  record nothing, and offer to draft a vocabulary proposal: `<isaac> bundle propose-terms <bundle> --out
-  <file.json>` (outside the bundle; it sends nothing, and each draft needs a description the scientist
-  writes). The value stays missing until the vocabulary has it.
-  The scientist can load that drafts file on the website's Schema Proposals page (Propose a Change → Load drafts from a local import) and write each description there; nothing is sent until they save a proposal.
+- **Not on the list at all.** When the scientist's answer is a real value the closed list lacks, say so
+  and record no decision. `decide` (and `template import --apply`, and `template adopt` for their own
+  sheet) refuses it but KEEPS it as a vocabulary request, in the `--by` name, with the field, runs and
+  where it was said; the reply says "kept as a vocabulary request; `isaac bundle propose-terms` can draft
+  it". It is never a decision or a value: the field stays missing (`bundle validate` lists it under
+  `pending_vocabulary`) until the vocabulary has the term or they give an allowed value. Offer to draft:
+  `<isaac> bundle propose-terms <bundle> --out <file.json>` (outside the bundle; it sends nothing).
+  Read each draft back: a word that NAMES an existing term (`reversible_hydrogen_electrode` is `RHE`) is
+  not drafted, "use `RHE` (an existing term)": ask whether to answer `RHE`. A close term (`XANES` beside
+  `XAS`, `HERFD-XAS`) is drafted with `check_existing`: its description must say why none of those fits.
+  A term with a space is not drafted; its `ask` says what to ask for (one word, e.g. `cathodic_corrosion`):
+  record their one-word answer again, never rewrite it yourself. The scientist writes each description,
+  in their words; they can load the drafts file on the website's Schema Proposals page (Propose a Change →
+  Load drafts from a local import) and write it there; nothing is sent until they save a proposal. After
+  more answers, `--merge` updates the same file and keeps every description written in it.
 - Use `--json` with `--value` for numbers/objects. ORCID only if the scientist gives one (`--orcid`).
 - Repeating a decision is harmless (recorded once). A later decision replaces an earlier one, also
   through `--question`: `decide --question <Q>` resolves a question that is already answered (by an

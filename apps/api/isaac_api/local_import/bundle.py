@@ -65,7 +65,13 @@ FORMAT_ID = "isaac.local-import-bundle"
 #: --same-conditions``): the file-name words the scientist said are labels, not conditions. A 1.8.0
 #: validator refuses a bundle holding either, hence the version. Nothing becomes newly writable; the
 #: upgrade is disclosed (:data:`CHANGES_ADDED_IN`).
-FORMAT_VERSION = "1.9.0"
+#: 1.10.0 (additive): the optional ``vocabulary_requests`` section — an answer a scientist gave
+#: (``decide``, a ``template import`` cell, a ``template adopt`` cell of their own sheet) that its
+#: field refused ONLY because it is not on the field's allowed list (:func:`off_list_only`). It is
+#: kept as a request for the vocabulary, never as a decision or a value, and ``bundle propose-terms``
+#: drafts it. A 1.9.0 validator refuses a bundle holding the section, hence the version. Nothing
+#: becomes newly writable; the upgrade is disclosed (:data:`CHANGES_ADDED_IN`).
+FORMAT_VERSION = "1.10.0"
 #: The electrochemical control mode. Its allowed values are the official schema's enum (read at
 #: runtime by :func:`value_problem`); the schema's conditional rules key the set-point a record
 #: requires on it (:func:`required_record_paths`). Never defaulted, never derived.
@@ -91,7 +97,7 @@ VALUE_IDS_APPEND_FROM = "1.5.0"
 IMPORT_RULES_ADDED_IN: Mapping[str, tuple] = {
     "1.4.0": (("generic:ssrl_xdc_v1", "ssrl_xdc_scan_start_v1"),),
 }
-_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0")
+_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0")
 #: A change a format version made that moves no eligibility and adds no import rule, but that the
 #: first save by a newer build still DISCLOSES in its ``format_upgrades`` entry (never silently).
 CHANGES_ADDED_IN: Mapping[str, str] = {
@@ -99,6 +105,8 @@ CHANGES_ADDED_IN: Mapping[str, str] = {
               "entries (append-only logs; at 20,000 no further answer could be written)"),
     "1.9.0": ("1.9.0 lets a counter answer name the LAST token (--positions last) and a merge say its names differ only "
               "in labels (--same-conditions)"),
+    "1.10.0": ("1.10.0 keeps an answer off its field's list as a vocabulary request (never a decision or a value) for "
+               "`bundle propose-terms`"),
 }
 #: A field composed into a draft only beside another of the SAME run (interim decision for the
 #: set-point, pending domain-owner review; ``records.compose_group`` applies it). The CURRENT
@@ -149,6 +157,9 @@ MAX_STRING_CHARS = 20_000
 #: (``mutations.log_full_message``), before anything is appended.
 MAX_SCIENTIST_DECISIONS = 200_000
 MAX_AI_INTERPRETATIONS = 200_000
+#: Vocabulary requests (1.10.0): one per refused answer (a ``decide`` call, a sheet's cell). Append-only;
+#: a repeat of the same answer by the same person from the same place records nothing.
+MAX_VOCABULARY_REQUESTS = 20_000
 #: bundle.json ceiling. The 9-run fixture is ~1 MB; the real 1,192-file corpus is
 #: estimated at well under 16 MB. 64 MiB is a laptop-safe JSON load.
 MAX_BUNDLE_BYTES = 64 * 1024 * 1024
@@ -1248,6 +1259,27 @@ def value_problem(path: str, value: Any) -> str | None:
     if types and not any(_JSON_TYPES.get(t, lambda v: True)(value) for t in types):
         return f"{path} must be {' or '.join(types)}; got {type(value).__name__}"
     return None
+
+
+def off_list_only(path: str | None, value: Any) -> bool:
+    """``True`` when :func:`value_problem` refuses ``value`` at ``path`` ONLY because it is not on the field's
+    :func:`allowed_values` list: a non-empty string, the field closed by a fixed list, and every other check
+    (the ``*_utc`` rule, a finite number, the schema's ``type``, both lists readable) passes. Such an answer
+    is a word the vocabulary lacks (1.10.0 keeps it as a vocabulary request); any other refusal is not."""
+    if not path or not isinstance(value, str) or not value.strip():
+        return False
+    allowed = allowed_values(path)
+    if allowed is None or value in allowed:
+        return False
+    problem = value_problem(path, value)
+    if problem is None or problem != f"{value!r} is not one of the schema's allowed values for {path}":
+        return False
+    node = _schema_node(path)
+    declared = node.get("type") if isinstance(node, Mapping) else None
+    types = declared if isinstance(declared, list) else [declared] if isinstance(declared, str) else []
+    if types and "array" in types and isinstance(node.get("items"), Mapping):
+        types = [node["items"].get("type")] if isinstance(node["items"].get("type"), str) else []
+    return not types or "string" in types
 
 
 def final_value(base_value: Any, decision: Mapping | None, readings: Sequence | None = None) -> Any:

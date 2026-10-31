@@ -801,7 +801,7 @@ def _write_atomic(path: Path, workbook) -> None:
 
 
 def export_template(bundle_dir: Path, out: Path, *, suggestions: bool = True, force: bool = False,
-                    _fill=None, _command: str = "bundle template export") -> dict:
+                    _fill=None, _command: str = "bundle template export", _keep_off_list: Mapping | None = None) -> dict:
     """Write the template for ``bundle_dir`` to ``out``. Answer cells are left EMPTY.
 
     ``_fill`` (``template adopt`` only): called with the built workbook before anything is written;
@@ -1033,6 +1033,27 @@ def export_template(bundle_dir: Path, out: Path, *, suggestions: bool = True, fo
             M.expose_and_load(Path(bundle_dir), exposed, _command)
         except M.MutationRefused as exc:
             raise TemplateRefused(f"Nothing written: {exc}", code=exc.code) from exc
+    off_list = list((filled or {}).pop("_off_list", ()))
+    if filled is not None and _keep_off_list is not None:
+        filled["vocabulary_requests"] = []
+        if off_list:
+            # THEIR OFF-LIST WORDS ARE KEPT (template adopt), recorded before the file exists, as exposures are
+            keep = dict(_keep_off_list)
+
+            def change(b):
+                kept = keep_off_list_cells(b, off_list, by=keep.get("by"), orcid=keep.get("orcid"), file=keep["file"],
+                                           kind="adopted_sheet_cell", command=_command)
+                return kept
+
+            try:
+                with M.locked(Path(bundle_dir)):
+                    held = M.load(Path(bundle_dir))
+                    kept = change(held)
+                    if any(k["new"] for k in kept):
+                        M.save_bundle(Path(bundle_dir), held)
+            except M.MutationRefused as exc:
+                raise TemplateRefused(f"Nothing written: {exc}", code=exc.code) from exc
+            filled["vocabulary_requests"] = kept
     _write_atomic(out, wb)
     return {
         **({"adopted": filled} if filled is not None else {}),
@@ -1165,7 +1186,7 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
     by_header = {(c.get("sheet"), c.get("header")): c for c in marker["columns"]}
     known = {c.header: c for c in (*CAMPAIGN_FIELDS, *CONFIG_COLUMNS, *FILE_COLUMNS)}
     out: dict[str, Any] = {"cells": [], "invalid": [], "unmapped": {}, "nowhere": [], "rows_refused": [], "awaiting_ruling": [],
-                           "adopted_from": (marker.get("meta") or {}).get("adopted_from")}
+                           "off_list": [], "adopted_from": (marker.get("meta") or {}).get("adopted_from")}
     adopted = marker.get("adopted") or {}
     for name in (SHEET_CAMPAIGN, SHEET_CONFIG, SHEET_FILES):
         if name not in wb.sheetnames:
@@ -1208,6 +1229,11 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
         if why:
             if not any(i["cell"] == _cell_ref(sheet, ref) for i in out["invalid"]):  # a Technique cell many rows reach
                 out["invalid"].append({"cell": _cell_ref(sheet, ref), "header": col.header, "value": raw, "reason": why})
+            word = raw.strip() if isinstance(raw, str) else None
+            if col.path and B.off_list_only(col.path, word):
+                # ONLY off the field's list: a word the vocabulary lacks, kept as a vocabulary request (1.10.0)
+                out["off_list"].append({"cell": _cell_ref(sheet, ref), "header": col.header, "path": col.path, "value": word,
+                                        "run_id": run["run_id"] if run else None, "scope": scope})
             return
         if value is None:
             return
@@ -1814,6 +1840,55 @@ def _ruled_per_run_summary(bundle: Mapping, entries: Sequence[Mapping], decision
     return list(out.values())
 
 
+def off_list_requests(cells: Sequence[Mapping]) -> list[dict]:
+    """Off-list cells (``read_cells`` ``off_list``; adopt's not-allowed values) as ONE request per field and word:
+    ``{field_path, term, header, cells, run_ids, scope}``. A cell of Campaign Info is about the whole beamtime."""
+    out: dict[tuple, dict] = {}
+    for c in cells:
+        row = out.setdefault((c["path"], c["value"]), {"field_path": c["path"], "term": c["value"], "header": c.get("header"),
+                                                       "cells": [], "run_ids": [], "scope": "run"})
+        for cell in c.get("cells") or [c["cell"]]:
+            if cell not in row["cells"]:
+                row["cells"].append(cell)
+        for rid in c.get("run_ids") or ([c["run_id"]] if c.get("run_id") else []):
+            if rid not in row["run_ids"]:
+                row["run_ids"].append(rid)
+    for row in out.values():
+        row["scope"] = "run" if row["run_ids"] else "experiment"
+    return list(out.values())
+
+
+def keep_off_list_cells(bundle: dict, cells: Sequence[Mapping], *, by: str | None, orcid: str | None, file: str,
+                        kind: str, command: str) -> list[dict]:
+    """Keep each off-list word of a sheet as a vocabulary request on ``bundle`` (in memory; the caller saves):
+    the rows of :func:`off_list_requests`, each with its ``request_id`` and whether it is ``new``."""
+    from . import mutations as M
+
+    kept = []
+    for row in off_list_requests(cells):
+        request, new = M.keep_vocabulary_request(
+            bundle, field_path=row["field_path"], term=row["term"], by=by, orcid=orcid, run_ids=row["run_ids"],
+            scope=row["scope"], source={"kind": kind, "command": command, "file": file, "cells": row["cells"]})
+        kept.append({**row, "request_id": request["request_id"], "new": new})
+    return kept
+
+
+def _request_lines(items: Sequence[Mapping], applied: bool) -> list[str]:
+    """One line per kept (or, in a preview, to-be-kept) vocabulary request."""
+    from . import propose_terms as P
+
+    out = []
+    for r in items:
+        reach = f"{len(r['run_ids'])} run(s)" if r["run_ids"] else "the whole beamtime"
+        more = f" and {len(r['cells']) - _CELLS_SHOWN} more" if len(r["cells"]) > _CELLS_SHOWN else ""
+        tag = (f"{r['request_id']}{'' if r.get('new') else ', kept earlier'}" if applied and r.get("request_id") else
+               "would be kept")
+        same = P.equivalent_term(r["field_path"], r["term"])
+        out.append(f"  {r['header']} {r['term']!r} for {reach} ({', '.join(r['cells'][:_CELLS_SHOWN])}{more}) [{tag}]"
+                   + (f"; use `{same}` (an existing term)" if same else ""))
+    return out
+
+
 def import_template(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None = None,
                     apply: bool = False, supersede: bool = False) -> dict:
     """Read a filled template. Preview (default) writes nothing; ``apply`` records."""
@@ -1849,14 +1924,18 @@ def import_template(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None 
         report = plan_and_record(bundle, cells, by=by, orcid=orcid, supersede=supersede)
         return cells, report
 
+    requests: list[dict] = []
     if apply:
         with M.locked(Path(bundle_dir)):
             bundle = M.load(Path(bundle_dir))
             cells, report = run(bundle)
-            if report["recorded_target_ids"]:  # nothing recorded: the bundle is not rewritten
+            requests = keep_off_list_cells(bundle, cells["off_list"], by=by, orcid=orcid, file=xlsx.name,
+                                           kind="template_cell", command="bundle template import")
+            if report["recorded_target_ids"] or any(r["new"] for r in requests):  # nothing new: not rewritten
                 M.save_bundle(Path(bundle_dir), bundle)
     else:
         cells, report = run(current)  # in memory only; nothing is saved
+        requests = [{**r, "request_id": None, "new": None} for r in off_list_requests(cells["off_list"])]
     return _as_text_dates({  # an invalid cell is shown as read, and a date cell reads as a datetime
         "applied": apply,
         "template": xlsx.name,
@@ -1871,6 +1950,8 @@ def import_template(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None 
         "unchanged": len(report["unchanged_target_ids"]),
         "already_decided_same_value": report["already"],
         "invalid_cells": cells["invalid"],
+        # an invalid cell refused ONLY because its word is not on the field's list: kept as a vocabulary request
+        "vocabulary_requests": requests,
         "clashes": report["clashes"],
         "refused": report["refused"],
         "unmapped_columns": list(cells["unmapped"].values()),
@@ -2025,6 +2106,11 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
         add("")
         add("Invalid cells (recorded as nothing):")
         lines += _invalid_lines(rep["invalid_cells"])
+    if rep.get("vocabulary_requests"):
+        add("")
+        add(("Kept" if rep["applied"] else "With --apply, kept") + " as vocabulary requests (not decisions, not values: "
+            "each is a word its field's list lacks; `isaac bundle propose-terms` can draft it):")
+        lines += _request_lines(rep["vocabulary_requests"], rep["applied"])
     for title, key in in_full:
         if rep[key]:
             add("")
@@ -2398,9 +2484,18 @@ def _adopt_name_only_reason(value: Any) -> str | None:
             f"concentration in mol/L in '{DISAGREE_HEADERS[9]}' (column {DISAGREE_CONC_COLUMN}), both for this row's runs")
 
 
-def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool = False, suggestions: bool = True) -> dict:
+def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool = False, suggestions: bool = True,
+                   by: str | None = None, orcid: str | None = None) -> dict:
     """Write ``out``: the bundle's template with the scientist's own values where no file contradicts
-    them, and a Disagreements sheet for every one a file contradicts or the field does not take."""
+    them, and a Disagreements sheet for every one a file contradicts or the field does not take. A value
+    the field refuses ONLY because it is not on its list is also kept as a vocabulary request (in ``by``'s
+    name when given), recorded before the file is written."""
+    from . import mutations as M
+
+    if by is not None and (problem := B.decider_name_problem(by)):
+        raise TemplateRefused(f"--by must be the name of the person whose sheet it is (this one {problem}).", code=EXIT_USAGE)
+    if orcid is not None and not M.ORCID_RE.fullmatch(orcid):
+        raise TemplateRefused("--orcid must look like 0000-0000-0000-0000 (last character may be X).", code=EXIT_USAGE)
     their_xlsx = Path(their_xlsx).expanduser()
     wb_theirs = _read_workbook(their_xlsx)
     theirs = _their_sheet(wb_theirs, their_xlsx.name)
@@ -2752,10 +2847,16 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
         result["reaction_needs"] = reaction_lacking(bundle, reaction_runs, adopted_paths) if reaction_runs else None
         result["ai_readings_of_their_sheet_not_compared"] = ad.sheet_readings_skipped
         result["_exposed"] = ad.exposed
+        # a not-allowed value that is ONLY off its field's list: a word the vocabulary lacks (1.10.0)
+        result["_off_list"] = [{"path": g["path"], "value": g["their_value"].strip(), "header": g["header"],
+                                "cells": list(g["their_cells"]), "run_ids": list(g["runs"])}
+                               for g in entries if g["kind"] == "not_allowed" and isinstance(g["their_value"], str)
+                               and B.off_list_only(g["path"], g["their_value"].strip())]
         return result
 
     exported = export_template(bundle_dir, out, suggestions=suggestions, force=force, _fill=fill,
-                               _command="bundle template adopt")
+                               _command="bundle template adopt",
+                               _keep_off_list={"by": by, "orcid": orcid, "file": their_file})
     exported["adopted"] = _as_text_dates(exported["adopted"])  # their cells as read: a date cell is a datetime
     exported["statement"] = (f"Answer cells hold your sheet's value only where no file reading contradicts it; each cites "
                              f"its cell in {their_file}. Nothing that contradicts a file is in an answer cell: rule on each "
@@ -2807,6 +2908,11 @@ def render_adopt_summary(result: Mapping) -> str:
                 lines.append(f"     hint: {_unread_hint_text(h, len(d['runs']))}")
         for header, allowed in a.get("allowed_values", {}).items():
             lines.append(f"  allowed for {header}: {', '.join(map(str, allowed))}")
+    if a.get("vocabulary_requests"):
+        lines.append("")
+        lines.append("Kept as vocabulary requests (not decisions, not values: each is a word its field's list lacks; "
+                     "`isaac bundle propose-terms` can draft it):")
+        lines += _request_lines(a["vocabulary_requests"], True)
     for title, key, shown in (("Your rows that match no run", "unmatched_rows", lambda x: f"{x['row']} {x['name']}"),
                               ("Your rows that reach more than one run (each value goes to every one)", "rows_reaching_several_runs",
                                lambda x: f"{x['row']} {x['name']} -> {x['runs']} runs"),

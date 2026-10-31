@@ -70,7 +70,7 @@ def test_the_current_setpoint_is_a_run_scope_local_answer_field_new_in_1_7_0():
     assert CURRENT == "context.electrochemistry.current_setpoint_mA_cm2"
     assert B.LOCAL_ANSWER_FIELDS[CURRENT] == B.LOCAL_ANSWER_FIELDS[POT] == "run"
     assert CURRENT in B._writable_paths() and B.WRITABLE_ADDED_IN["1.7.0"] == frozenset({CURRENT})
-    assert B._VERSION_ORDER.index("1.7.0") == B._VERSION_ORDER.index(B.FORMAT_VERSION) - 2  # 1.8.0 bounds, 1.9.0 `last`: neither writable
+    assert B._VERSION_ORDER.index("1.7.0") == B._VERSION_ORDER.index(B.FORMAT_VERSION) - 3  # 1.8.0 bounds, 1.9.0 `last`, 1.10.0 vocabulary requests: none writable
     assert B._added_since("1.6.0") == frozenset({CURRENT}) and B._added_since("1.7.0") == frozenset()
     assert not Q._is_shared(CURRENT)  # never asked once for the whole beamtime
     # DEC-92: no companion gate — the schema declares no reference for a current density
