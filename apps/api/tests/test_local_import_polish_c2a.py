@@ -159,7 +159,9 @@ def test_a_truncated_scan_warns_with_the_counts(tmp_path):
     assert "scan_range_truncated" in r["review_flags"]
     said = r["qc"]["statements"]["scans_truncated"]
     sid = step(r, "merge")["outcome"]["truncated_scans"][0]
-    assert said.startswith("1 of 3 scans used ends early") and sid in said and f"{short[-1]:.3f}" in said
+    # c12-cal: the result's sentence names the scan's FILE (qc.json keeps the source id it was first written with)
+    name = next(i["relative_path"] for i in r["inputs"] if i["source_id"] == sid).rsplit("/", 1)[-1]
+    assert said.startswith("1 of 3 scans used ends early") and name in said and f"{short[-1]:.3f}" in said
 
 
 def test_a_group_with_no_truncated_scan_says_nothing_new(tmp_path):

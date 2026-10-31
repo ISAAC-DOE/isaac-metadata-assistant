@@ -91,6 +91,8 @@ DEFAULT_PARAMS: dict[str, Any] = {
         "max_listed_points": 200,
     },
     "merge": {
+        # historical name: the grid is the WIDEST scan's points (core.common_grid); kept, since params.json is hashed
+        # into every run id and a rename would move every result id
         "grid": "first_scan_points_within_common_overlap",
         "interpolation": "linear",
         "duplicate_energy_tolerance_eV": 1e-6,

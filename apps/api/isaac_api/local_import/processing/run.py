@@ -686,6 +686,11 @@ def _truncation_statement(ginfo: Mapping, scans_data: Sequence[Mapping], pos_sid
     )
 
 
+def _file_name(entry: Mapping) -> str:
+    """A used scan as a person knows it: its file name (the source id when no path is recorded)."""
+    return PurePosixPath(str(entry.get("relative_path") or entry.get("source_id"))).name
+
+
 def _scan_name(entry: Mapping) -> str:
     return f"{entry.get('source_id')} (scan {entry['scan']})" if entry.get("scan") is not None else str(entry.get("source_id"))
 
@@ -757,12 +762,36 @@ ZERO_SIGNAL_POINTS_FLAG = "merged_scan_has_zero_signal_points"
 
 def _zero_signal_points_statement(used_entries: Sequence[Mapping], scans_data: Sequence[Mapping], signal: str | None,
                                   np) -> str | None:
-    """c11-r: one plain statement naming each MERGED scan whose signal is exactly zero at points where another merged
-    scan's signal is not zero (at the other scan's nearest point within its energy range), ``None`` otherwise.
-    Threshold-free and descriptive only: nothing is skipped or changed for it (whether such a scan belongs in the
-    merge is the scientist's call, docs/xas-processing-protocol-v0.md). Said in the result, NOT in qc.json (hashed
-    into the run id), so no result id moves."""
+    """c11-r: one plain statement naming each MERGED scan whose counts STOP: its signal is exactly zero from some point
+    to the scan's last point (a run of at least two points, :func:`_zero_runs`), where another merged scan's signal is
+    not zero (at the other scan's nearest point within its energy range); ``None`` otherwise. c12-cal: zeros that do
+    not reach the end (the counts come back) are counted apart (:func:`_isolated_zero_points_statement`), never said
+    as a lost beam. Threshold-free and descriptive only: nothing is skipped or changed for it (whether such a scan
+    belongs in the merge is the scientist's call, docs/xas-processing-protocol-v0.md). Said in the result, NOT in
+    qc.json (hashed into the run id), so no result id moves."""
     parts = []
+    for entry, sa, z in _zero_scans(used_entries, scans_data, np):
+        trail, others = z["trailing"], z["n"] - z["trailing"]
+        if trail < 2:
+            continue
+        d = sa["diagnostics"]
+        name = PurePosixPath(str(entry.get("relative_path") or entry.get("source_id"))).name
+        named = f"signal ({signal})" if signal else "signal"
+        extra = f", and at {others} other point{'' if others == 1 else 's'}" if others else ""
+        parts.append(f"{name}'s {named} is zero at {d.get('signal_zero_points', z['n'])} of "
+                     f"{d.get('points_read', z['size'])} points (from {z['trailing_from_eV']:.1f} eV on{extra}); it is "
+                     "merged unchanged.")
+    if not parts:
+        return None
+    more = f" {len(parts) - 10} more merged scan(s) are the same." if len(parts) > 10 else ""
+    return " ".join(parts[:10]) + more + " A person checks whether the beam was lost."
+
+
+def _zero_scans(used_entries: Sequence[Mapping], scans_data: Sequence[Mapping], np) -> list[tuple[Mapping, Mapping, dict]]:
+    """Each merged scan whose signal is exactly zero at points where another merged scan's is not: ``(entry, scan,
+    {n, size, trailing, trailing_from_eV, longest})`` — ``trailing`` is the length of the run of zeros that ends at
+    the scan's last point (0 when the last point is not zero), ``longest`` its longest run of consecutive zeros."""
+    out = []
     for k, (entry, sa) in enumerate(zip(used_entries, scans_data)):
         zero = sa.get("signal_zero")
         if zero is None or not zero.any():
@@ -785,18 +814,71 @@ def _zero_signal_points_statement(used_entries: Sequence[Mapping], scans_data: S
         if not elsewhere:
             continue
         where = np.flatnonzero(zero)
-        start = float(sa["energy"][where[0]])
-        tail = where[-1] == zero.size - 1 and where.size == where[-1] - where[0] + 1
-        d = sa["diagnostics"]
-        name = PurePosixPath(str(entry.get("relative_path") or entry.get("source_id"))).name
-        named = f"signal ({signal})" if signal else "signal"
-        parts.append(f"{name}'s {named} is zero at {d.get('signal_zero_points', int(where.size))} of "
-                     f"{d.get('points_read', int(zero.size))} points ({'from' if tail else 'first at'} {start:.1f} eV"
-                     f"{' on' if tail else ''}); it is merged unchanged.")
+        runs = np.split(where, np.flatnonzero(np.diff(where) != 1) + 1)
+        last = runs[-1]
+        trailing = int(last.size) if last[-1] == zero.size - 1 else 0
+        out.append((entry, sa, {"n": int(where.size), "size": int(zero.size), "trailing": trailing,
+                                "trailing_from_eV": float(sa["energy"][last[0]]) if trailing else None,
+                                "longest": int(max(r.size for r in runs))}))
+    return out
+
+
+def _isolated_zero_points_statement(used_entries: Sequence[Mapping], scans_data: Sequence[Mapping], signal: str | None,
+                                    np) -> str | None:
+    """c12-cal: ONE count line for the merged scans whose signal is exactly zero at points where another's is not but
+    whose counts come back (the zeros do not run to the scan's end): single-point dropouts, said like glitches, with
+    no beam-loss wording and no review flag. Measured on a real BL15-2 beamtime: 441 merged scans of 70 groups had such
+    points, 414 at only 1-5 points, I0 positive at all of them; the one scan whose counts stopped (zero at 204 of 226
+    points to its end) was buried among them. ``None`` when there is none. Said after the run id (no id moves)."""
+    rows = [(z["n"] - (z["trailing"] if z["trailing"] >= 2 else 0), z["longest"] if z["trailing"] < 2 else None)
+            for _, _, z in _zero_scans(used_entries, scans_data, np)]
+    rows = [(n, lng) for n, lng in rows if n]
+    if not rows:
+        return None
+    named = f"signal ({signal})" if signal else "signal"
+    k, total = len(rows), sum(n for n, _ in rows)
+    longest = max((lng for _, lng in rows if lng is not None), default=None)
+    return (f"{k} merged scan{'' if k == 1 else 's'} {'has' if k == 1 else 'have'} isolated points where the {named} "
+            f"is exactly zero while another scan's is not ({total} point{'' if total == 1 else 's'} in all"
+            + (f", at most {longest} in a row" if longest else "")
+            + "); the counts come back after each, so they read as detector dropouts, like glitches. They are merged "
+            "unchanged.")
+
+
+def _one_scan_ends_statement(grid, n_per_point, used_entries: Sequence[Mapping], M, n_scans: int, np) -> str | None:
+    """c12-cal: one plain sentence when the merged curve's first or last points come from ONE scan alone, whose
+    signal is zero there, although the group merges several (``None`` otherwise): which scan and which energies. Measured on a real BL15-2 beamtime: a 7-scan group's last point (11497.1 eV) came only from the scan whose
+    counts had stopped, so the merged value there was 0 and the normalised curve dropped. The grid is unchanged
+    (trimming it would change every such curve and its id); said after the run id. ``grid``, ``n_per_point`` and
+    ``M`` (scans x grid) are the merged curve's own points."""
+    if n_scans < 2 or not n_per_point.size:
+        return None
+    parts = []
+    size = int(n_per_point.size)
+    for side, order in (("first", range(size)), ("last", range(size - 1, -1, -1))):
+        alone = []
+        for i in order:
+            if int(n_per_point[i]) != 1:
+                break
+            alone.append(i)
+        if not alone or len(alone) == size:
+            continue
+        who = {int(np.flatnonzero(np.isfinite(M[:, i]))[0]) for i in alone}
+        if len(who) != 1:
+            continue
+        p = who.pop()
+        name = PurePosixPath(str(used_entries[p].get("relative_path") or used_entries[p].get("source_id"))).name
+        lo, hi = float(grid[min(alone)]), float(grid[max(alone)])
+        n = len(alone)
+        what = f"{side} point ({lo:.1f} eV) comes" if n == 1 else f"{side} {n} points ({lo:.1f}-{hi:.1f} eV) come"
+        if not bool(np.all(M[p, alone] == 0)):
+            # measured: on 52 of 78 groups the widest scan reaches a fraction of an eV past the others; one real scan
+            # alone at one end changes nothing a person can see, so only a lone ZERO there is said
+            continue
+        parts.append(f"The merged curve's {what} from {name} alone, whose signal is zero there, so the merged value is 0.")
     if not parts:
         return None
-    more = f" {len(parts) - 10} more merged scan(s) are the same." if len(parts) > 10 else ""
-    return " ".join(parts[:10]) + more + " A person checks whether the beam was lost."
+    return " ".join(parts) + " Everywhere else at least 2 scans are averaged; read the curve's ends with that in mind."
 
 
 def _skipped_scans_statement(inputs: Sequence[Mapping], choice, used: int) -> str | None:
@@ -913,12 +995,35 @@ def _athena_scans_used(entry: Mapping, stems: Sequence[str], isaac_counts: tuple
                 f"{subset(sel)}")
         return {"basis": "label", "scans": list(sel), "statement": said}
     made_from = PurePosixPath(str(entry.get("filename") or "").replace("\\", "/")).name
+    # c12-cal: Athena writes its own null marker when a group names no source file: said in words, never printed
+    unnamed = not made_from or made_from == A.ATHENA_NULL_MARKER
     said = (f"The project does not say which scans the scientist's curve used: its Athena label '{label}' names no scan"
             + (", though Athena marks the group as a merge" if entry.get("is_merge") else "")
-            + (f", and it records the group as made from the file '{made_from}'" if made_from and made_from.casefold() != label.casefold() else "")
+            + (", and the project does not name its source file" if unnamed else
+               f", and it records the group as made from the file '{made_from}'" if made_from.casefold() != label.casefold() else "")
             + (f"; its name names run{'s' if len(coverage['runs']) > 1 else ''} {', '.join(coverage['runs'])}" if coverage else "")
             + f".{ours}{part} Ask the scientist which scans went into it.")
     return {"basis": "not_stated", "scans": None, "statement": said}
+
+
+def _versions_question_text(versions: Sequence[Mapping]) -> str:
+    """The which-version question, in words. c12-cal: versions that are the SAME raw data (one curve copied into
+    several projects) normalised differently are said as such, naming the projects and the parameters that differ
+    (measured on a real BL15-2 beamtime: one scan file in three projects read as "3 different Athena versions").
+    Byte-identical curves with the same parameters are already one version (athena.match_with_versions)."""
+    n = len(versions)
+    ask = " Which one is the result of record? None is selected until you choose."
+    hashes = {str(v.get("data_hash") or "") for v in versions}
+    sets = any(v.get("_match_kind") == "per_scan_set" or v.get("per_scan_set") for v in versions)
+    if sets or len(hashes) != 1 or "" in hashes:  # a set of per-scan groups is named by its members, not one curve
+        return f"{n} different Athena versions of this measurement exist." + ask
+    projects = sorted({PurePosixPath(str(v.get("prj_relative_path") or "")).name for v in versions})
+    params = [v.get("params") or {} for v in versions]
+    differ = sorted(k for k in set().union(*params) if len({json.dumps(p.get(k), default=str) for p in params}) > 1)
+    where = (f"in {len(projects)} Athena projects ({', '.join(projects[:5])}{', …' if len(projects) > 5 else ''})"
+             if len(projects) > 1 else f"{n} times in {projects[0]}")
+    return (f"The same data (one curve, byte for byte) is kept {where}, normalised {n} different ways"
+            + (f" (the parameters that differ: {', '.join(differ[:8])})" if differ else "") + "." + ask)
 
 
 def _post_edge_range(resolved: Mapping) -> str | None:
@@ -1207,7 +1312,7 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         res["questions"] = [
             {
                 "code": "which_athena_version_is_result_of_record",
-                "text": f"{len(athena_versions)} different Athena versions of this measurement exist. Which one is the result of record? None is selected until you choose.",
+                "text": _versions_question_text(athena_versions),
                 "version_ids": [v["version_id"] for v in res["athena_versions"]],
             }
         ]
@@ -1296,6 +1401,17 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     if zero_points_said:
         res["qc"].setdefault("statements", {})["merged_scan_zero_signal_points"] = zero_points_said
         res["review_flags"].append(ZERO_SIGNAL_POINTS_FLAG)
+    # c12-cal: zeros whose counts come back are counted in one line (no flag), never said as a lost beam
+    isolated_said = _isolated_zero_points_statement(used_entries, scans_data, _raw_signal(choice), np)
+    if isolated_said:
+        res["qc"].setdefault("statements", {})["merged_scan_isolated_zero_points"] = isolated_said
+    # c12-cal: the merged curve's ends from one scan alone (the grid is the widest scan's; nothing is trimmed)
+    ends_said = _one_scan_ends_statement(g2, mg["n"][ok], used_entries, M[:, ok], len(scans_data), np)
+    if ends_said:
+        res["qc"].setdefault("statements", {})["merged_curve_end_from_one_scan"] = ends_said
+    if truncated:
+        # c12-cal: the result names each short scan by its FILE; qc.json (hashed) keeps the sentence it was written with
+        res["qc"]["statements"]["scans_truncated"] = _truncation_statement(ginfo, scans_data, [_file_name(e) for e in used_entries])
     files = []
     for role, name in roles:
         p = gdir / name

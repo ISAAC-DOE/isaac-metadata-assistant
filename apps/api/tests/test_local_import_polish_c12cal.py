@@ -320,3 +320,104 @@ def test_a_hash_of_the_params_file_is_what_the_result_names(tmp_path):
     r = T.isaac(T.run_process(bdir, source_root=root))
     for f in r["outputs"]["files"]:
         assert hashlib.sha256((bdir / f["relative_path"]).read_bytes()).hexdigest() == f["sha256"]
+
+
+# --- c12-cal extras (BL15-2 review): zero points, a curve end from one scan, names in sentences ---------------------
+
+
+def _zsa(np, signal, start=11100.0):
+    e = start + np.arange(len(signal), dtype=float)
+    sig = np.asarray(signal, dtype=float)
+    return {"energy": e, "mu": sig / 1e4, "signal_zero": sig == 0,
+            "diagnostics": {"signal_zero_points": int(np.sum(sig == 0)), "points_read": len(signal)}}
+
+
+def _entries(*names):
+    return [{"source_id": f"src-{k}", "relative_path": f"SYN_dir/{n}"} for k, n in enumerate(names)]
+
+
+def test_isolated_zero_points_are_one_count_line_and_never_a_lost_beam():
+    np = pytest.importorskip("numpy")
+    from isaac_api.local_import.processing import run as RUN
+
+    good = [5.0] * 40
+    dropout = [5.0] * 40
+    dropout[10] = dropout[25] = dropout[26] = 0.0  # the counts come back after each
+    scans = [_zsa(np, good), _zsa(np, dropout), _zsa(np, dropout)]
+    entries = _entries("SYN_001.txt", "SYN_002.txt", "SYN_003.txt")
+    assert RUN._zero_signal_points_statement(entries, scans, "vortDT", np) is None
+    said = RUN._isolated_zero_points_statement(entries, scans, "vortDT", np)
+    assert said.startswith("2 merged scans have isolated points where the signal (vortDT) is exactly zero")
+    assert "(6 points in all, at most 2 in a row)" in said and "beam" not in said and "merged unchanged" in said
+
+
+def test_counts_that_stop_to_the_scans_end_are_the_lost_beam_sentence():
+    np = pytest.importorskip("numpy")
+    from isaac_api.local_import.processing import run as RUN
+
+    stopped = [5.0] * 18 + [0.0] * 22
+    stopped[3] = 0.0
+    scans = [_zsa(np, [5.0] * 40), _zsa(np, stopped)]
+    entries = _entries("SYN_001.txt", "SYN_007.txt")
+    said = RUN._zero_signal_points_statement(entries, scans, "vortDT", np)
+    assert said == ("SYN_007.txt's signal (vortDT) is zero at 23 of 40 points (from 11118.0 eV on, and at 1 other "
+                    "point); it is merged unchanged. A person checks whether the beam was lost.")
+    assert "1 merged scan has isolated points" in RUN._isolated_zero_points_statement(entries, scans, "vortDT", np)
+    # one zero at the very last point alone is a dropout, not a lost beam
+    last = [5.0] * 39 + [0.0]
+    assert RUN._zero_signal_points_statement(entries, [_zsa(np, [5.0] * 40), _zsa(np, last)], "vortDT", np) is None
+
+
+def test_a_merged_curve_end_from_one_scan_alone_is_said():
+    np = pytest.importorskip("numpy")
+    from isaac_api.local_import.processing import run as RUN
+
+    grid = np.arange(10.0)
+    M = np.vstack([np.r_[np.ones(9), np.nan], np.r_[np.ones(9), 0.0]])
+    n = np.sum(np.isfinite(M), axis=0)
+    said = RUN._one_scan_ends_statement(grid, n, _entries("SYN_001.txt", "SYN_007.txt"), M, 2, np)
+    assert said.startswith("The merged curve's last point (9.0 eV) comes from SYN_007.txt alone, whose signal is zero "
+                           "there, so the merged value is 0.")
+    real = np.vstack([np.r_[np.ones(9), np.nan], np.ones(10)])  # one REAL scan alone at the end: nothing to say
+    assert RUN._one_scan_ends_statement(grid, np.sum(np.isfinite(real), axis=0), _entries("a", "b"), real, 2, np) is None
+    both = np.vstack([np.ones(10), np.ones(10)])
+    assert RUN._one_scan_ends_statement(grid, np.sum(np.isfinite(both), axis=0), _entries("a", "b"), both, 2, np) is None
+    assert RUN._one_scan_ends_statement(grid, np.ones(10), _entries("a"), np.ones((1, 10)), 1, np) is None
+
+
+def test_the_truncation_sentence_in_the_result_names_files_and_qc_json_keeps_its_own(tmp_path):
+    T = _proc()
+    import numpy as np
+
+    short = T.GRID[T.GRID < 4990.0]
+    cols = T.fluo_scan(3, e=short)
+    names = [T.spec_file(T.fluo_scan(1)), T.spec_file(T.fluo_scan(2)), T.spec_file(cols)]
+    bdir, root, _ = T.make_case(tmp_path, [("01_SYN_ZZ1", names, {"sample_name": "ZZ1"})])
+    r = T.isaac(T.run_process(bdir, source_root=root))
+    said = r["qc"]["statements"]["scans_truncated"]
+    assert "01_SYN_ZZ1_003.dat covers" in said and "src-001-03" not in said
+    qc_file = next(f for f in r["outputs"]["files"] if f["role"] == "qc")
+    assert "src-001-03 covers" in (bdir / qc_file["relative_path"]).read_text()  # hashed: no id moves
+    assert np.isfinite(r["outputs"]["e0_eV"])
+
+
+def test_athenas_null_marker_is_said_in_words():
+    from isaac_api.local_import.processing import athena as A
+
+    assert A.ATHENA_NULL_MARKER == "@&^^null^^&@"
+    src = (REPO / "apps/api/isaac_api/local_import/processing/run.py").read_text()
+    assert "the project does not name its source file" in src
+    from isaac_api.local_import import cli as CLI
+
+    assert CLI.A_NULL == A.ATHENA_NULL_MARKER
+
+
+def test_one_curve_copied_into_projects_is_said_as_the_same_data():
+    from isaac_api.local_import.processing import run as RUN
+
+    v = [{"data_hash": "h1", "prj_relative_path": f"N/0{k}_SYN.prj", "params": {"e0": 11215.0 + k, "nnorm": 2.0}} for k in (1, 2, 3)]
+    text = RUN._versions_question_text(v)
+    assert text.startswith("The same data (one curve, byte for byte) is kept in 3 Athena projects (01_SYN.prj, 02_SYN.prj, "
+                           "03_SYN.prj), normalised 3 different ways (the parameters that differ: e0).")
+    other = [{**v[0]}, {**v[1], "data_hash": "h2"}]
+    assert RUN._versions_question_text(other).startswith("2 different Athena versions of this measurement exist.")

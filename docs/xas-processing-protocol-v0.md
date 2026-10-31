@@ -202,7 +202,26 @@ group whose curve does not change keeps its result id.
 Grid = energy points of the widest-range scan; every scan contributes only inside its own
 range (linear interpolation, no extrapolation); per point N, mean, std (ddof 1),
 stderr = std/√N (`merged.csv`). Scans covering < 90 % of the grid are flagged
-`scan_range_truncated` (measured: one short scan had cut a group's grid below E0).
+`scan_range_truncated` (measured: one short scan had cut a group's grid below E0); the result's
+`scans_truncated` sentence names each scan's file (`qc.json`, hashed into the run id, keeps the
+sentence it was first written with, naming source ids). The params key `merge.grid` keeps its
+historical value `first_scan_points_within_common_overlap` although the grid is the WIDEST scan's
+points: the params are hashed into every run id, so renaming it would move every result id.
+When the merged curve's first or last point comes from one scan alone whose signal is zero there
+(the merged value is 0), `qc.statements.merged_curve_end_from_one_scan` says so; the grid is not
+trimmed (that would change those curves and their ids). Measured on a real BL15-2 beamtime: a
+7-scan group's last point (11497.1 eV) came only from a scan whose counts had stopped (normalised
+−0.013); the widest scan reaching a fraction of an eV past the others (52 of 78 groups) with a real
+value is not said.
+
+**Zero signal points** (said after the run id; nothing is dropped). A merged scan whose signal is
+exactly zero from some point to its LAST point (a run of at least 2 points), where another merged
+scan's is not, is said and flagged `merged_scan_has_zero_signal_points` ("A person checks whether
+the beam was lost"). Zeros whose counts come back are one count line,
+`qc.statements.merged_scan_isolated_zero_points`, with no flag and no beam-loss wording. Measured on
+the same beamtime: 443 merged scans of 70 groups had zero points, 416 at only 1–5 points and at most
+11 in a row in any scan that recovers, I0 positive at all such points (detector dropouts); exactly 2
+scans had a run of zeros to the scan's end (204 of 226 points; 25 of 105), the beam-loss cases.
 
 ## 6. Normalize
 

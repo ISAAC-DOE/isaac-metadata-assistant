@@ -433,6 +433,10 @@ def _set_named(entry: Mapping, members: Mapping) -> dict:
     return out
 
 
+#: The value Athena (Perl, Demeter) writes for a field it has no value for, e.g. a group's source file name.
+ATHENA_NULL_MARKER = "@&^^null^^&@"
+
+
 def version_provenance(entry: Mapping, stems: Sequence[str]) -> dict:
     """What the scientist's own files STATE about one Athena version — file name, the years
     the project's path names, the group label, merge flag, scan selection and parameters.

@@ -96,11 +96,17 @@ it finds one. Show per group, in words:
   that is never finite (I0 or I1 ≤ 0); never call that "too few points". A scan skipped `signal_all_zero`
   recorded a signal of zero at every point: say it in words, naming the file as the statement does
   ("SYN_008.txt's signal is zero at every point, so it was left out"); the curve uses the other scans. A
-  merged scan flagged `merged_scan_has_zero_signal_points` is zero only at some points: say its sentence
-  ("SYN_008.txt's signal is zero at 204 of 226 points, from 7,850 eV on; it is merged unchanged") and ask the
-  scientist whether the beam was lost and the scan belongs in the merge; never leave it out yourself;
+  merged scan flagged `merged_scan_has_zero_signal_points` has counts that STOP: its signal is zero from some
+  point to the scan's end. Say its sentence ("SYN_008.txt's signal is zero at 204 of 226 points, from 7,850 eV
+  on; it is merged unchanged") and ask the scientist whether the beam was lost and the scan belongs in the
+  merge; never leave it out yourself. Zeros whose counts come back are one count line,
+  `qc.statements.merged_scan_isolated_zero_points` (no flag): say it once, like glitches (detector dropouts),
+  never as a lost beam, and ask nothing about it. `merged_curve_end_from_one_scan`: the curve's first or
+  last point comes from one scan alone whose signal is zero there (the merged value is 0, a visible drop):
+  say it when you describe the plot;
 - **when a scan ends early** (reason `scans_truncated`, flag `scan_range_truncated`; `scans_used` still
-  counts it): say the sentence in `qc.json` → `statements` (how many scans end early, which, the
+  counts it): say the sentence in `bundle show processing-result` → `qc.statements`, which names each file
+  (`qc.json` keeps the source ids it was first written with): how many scans end early, which, the
   energies each covers, and that part of the merged curve averages fewer scans) and ask whether the
   short scan belongs in the merge;
 - **an implausible edge step** (reason `edge_step_implausible`, always a `fail`: the step is more than

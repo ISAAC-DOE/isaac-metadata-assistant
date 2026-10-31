@@ -1196,6 +1196,10 @@ def _scans_line(r: Mapping) -> str | None:
     return f"{m['scans_used']} of {m['scans_listed']} scans used{left}"
 
 
+#: Athena's null marker (processing.athena.ATHENA_NULL_MARKER, repeated so this module imports no processing code)
+A_NULL = "@&^^null^^&@"
+
+
 def _calibration_view(bundle: Mapping, r: Mapping) -> dict | None:
     """c12-cal: what a result's energy reference is (usable / listed scans, proposed or not, one sentence) and, for
     each element/edge already named for the group (the approved or proposed reference, else the group's absorber),
@@ -1275,6 +1279,14 @@ def _processing_result_view(bundle: Mapping, r: Mapping) -> dict:
         note = _skipped_scans_statement(inputs, SimpleNamespace(energy=channel.get("energy"), signal_name=channel.get("signal_name")),
                                         sum(1 for i in inputs if i.get("used")))
     calibration = _calibration_view(bundle, r)
+    qc = r.get("qc")
+    said = (qc or {}).get("statements") if isinstance(qc, Mapping) else None
+    if isinstance(said, Mapping) and any(isinstance(v, str) and A_NULL in v for v in said.values()):
+        # c12-cal: a decided result is never rewritten, so one stored before Athena's null marker was said in words
+        # still carries it; said here instead
+        qc = {**qc, "statements": {k: (v.replace(f"it records the group as made from the file '{A_NULL}'",
+                                                 "the project does not name its source file") if isinstance(v, str) else v)
+                                   for k, v in said.items()}}
     return _compact({
         "result_id": B.processing_id(r),
         "group_id": r.get("group_id"),
@@ -1284,7 +1296,7 @@ def _processing_result_view(bundle: Mapping, r: Mapping) -> dict:
         "preferred_for_record": r.get("preferred_for_record"),
         "applicability": r.get("applicability"),
         "failure": r.get("failure"),
-        "qc": r.get("qc"),
+        "qc": qc,
         "review_flags": list(r.get("review_flags") or ()),
         "channel": {k: channel.get(k) for k in ("mode", "signal_name", "energy", "i0") if channel.get(k) is not None} or None,
         "inputs": {"listed": len(inputs), "used": sum(1 for i in inputs if i.get("used")), "skipped": skipped},
