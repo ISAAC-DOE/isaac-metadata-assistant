@@ -29,6 +29,7 @@ RULE_VERSIONS_SINCE_PROTOCOL_VERSION: dict[str, Any] = {
     "rule_ids": [
         "isaac.athena.already_normalized.v0",
         "isaac.athena.match_by_name.v1",
+        "isaac.xas.calibration_overrides_stricter_only.v0",
         "isaac.xas.calibration_shift_size_confirmed.v0",
         "isaac.xas.edge_above_noise.v0",
         "isaac.xas.edge_step_plausible.v0",
@@ -37,6 +38,7 @@ RULE_VERSIONS_SINCE_PROTOCOL_VERSION: dict[str, Any] = {
         "isaac.xas.reference_channel_fallback.v1",
         "isaac.xas.skip_signal_all_zero.v0",
         "isaac.xas.stored_normalized_plausible.v0",
+        "isaac.xas.zero_signal_runs.v0",
     ],
     "statement": (
         "These rules were added or changed after protocol version 0.1.0 without a version bump (the protocol "

@@ -1915,7 +1915,8 @@ def record_decision(
         split_into=split_into, clock_zone_defer=clock_zone_defer, accept_shift=accept_shift,
     )
     bulk = len(target_ids) > 1
-    accepted = round(float(accept_shift), 1) if accept_shift is not None else None
+    # 0.01 eV: a shift near the warning level is shown to 0.01 eV (reference.shown); compared to 0.1 eV
+    accepted = round(float(accept_shift), 2) if accept_shift is not None else None
     if decision == "approve_calibration":
         # c12-cal: what the approval would apply is said BEFORE anything is recorded (and refused when nothing can be)
         value = {"accepted_shift_eV": accepted} if accepted is not None else None
@@ -3956,6 +3957,22 @@ def _latest_calibration_step(bundle: Mapping, group_id: str) -> tuple[Mapping | 
     return None, None
 
 
+def _carried_shifts(bundle: Mapping, group_id: str, warn: float) -> list[tuple[str, dict]]:
+    """``[(result id, reference.carried_shift)]`` for the group's DECIDED (approved) ISAAC results whose curve carries
+    a calibration shift."""
+    from .processing import reference as REF
+
+    out = []
+    for r in bundle.get("processing_results") or ():
+        if r.get("group_id") != group_id or r.get("source") != "isaac_protocol" or r.get("state") != B.STATE_SCIENTIST_CONFIRMED:
+            continue
+        cal = next((s for s in r.get("steps") or () if isinstance(s, Mapping) and s.get("step") == "calibration"), None)
+        c = REF.carried_shift(cal, warn_eV=warn) if cal else None
+        if c is not None:
+            out.append((B.processing_id(r), c))
+    return out
+
+
 def calibration_shift_said(bundle: Mapping, group_id: str, element: str, edge: str, accepted: float | None) -> str:
     """What approving ``element`` ``edge`` as group ``group_id``'s calibration reference would apply, in one or two
     sentences, from its latest ISAAC result; RAISES :class:`MutationRefused` (nothing recorded) when no reference is
@@ -3971,10 +3988,26 @@ def calibration_shift_said(bundle: Mapping, group_id: str, element: str, edge: s
                 f"{group_id}` computes it ({element} {edge}'s tabulated edge minus the measured reference edge). A shift "
                 f"above the protocol's {warn:g} eV warning level is not applied without its size confirmed: approve "
                 "again then with --accept-shift <the shift shown>.")
-    warn = float(((qc or {}).get("params") or {}).get("warn_energy_shift_eV") or warn)
+    # c12-r (REF.STRICTER_ONLY_RULE_ID): never a params file's higher warning level
+    warn = REF.effective_warn_eV(((qc or {}).get("params") or {}).get("warn_energy_shift_eV") or warn)
     w = REF.would_apply(cal, element, edge, warn_eV=warn)
     if not REF.reading(cal)["reference_proposed"]:
-        raise MutationRefused(f"No calibration shift can be approved for {group_id}: {w['statement']} Nothing was recorded.")
+        # c12-r: a DECIDED result approved under an older build may carry a shift from this reference: confirming
+        # its exact size (--accept-shift) is the scientist keeping that curve; nothing else can be approved
+        carried = _carried_shifts(bundle, group_id, warn)
+        mine = [(pid, c) for pid, c in carried if (c["element"], c["edge"]) == (element, edge)]
+        if accepted is not None:
+            match = next(((pid, c) for pid, c in mine if REF.shift_size_confirmed(accepted, c["applied_shift_eV"])), None)
+            if match is not None:
+                pid, c = match
+                return (f"You confirmed the {c['shown']} eV that the approved result {pid} carries ({element} {edge}). "
+                        f"{REF.reading(cal)['reference_statement']} So a re-processed result does not carry it: only "
+                        f"{pid} does.")
+        kept = "".join(f" The approved result {pid} carries {c['shown']} eV from an earlier approval: to keep it, "
+                       f"approve again with --accept-shift {c['shown']} if the scientist confirms that size; or reject "
+                       f"that result (`--target {pid} --decision reject`)." for pid, c in (mine or carried)[:2])
+        raise MutationRefused(f"No calibration shift can be approved for {group_id}: {w['statement']}{kept} "
+                              "Nothing was recorded.")
     if w["implausible"]:
         raise MutationRefused(f"{w['statement']} Nothing was recorded.")
     if w["shift_eV"] is None:

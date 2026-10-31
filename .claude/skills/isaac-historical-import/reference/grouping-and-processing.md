@@ -96,12 +96,14 @@ it finds one. Show per group, in words:
   that is never finite (I0 or I1 ≤ 0); never call that "too few points". A scan skipped `signal_all_zero`
   recorded a signal of zero at every point: say it in words, naming the file as the statement does
   ("SYN_008.txt's signal is zero at every point, so it was left out"); the curve uses the other scans. A
-  merged scan flagged `merged_scan_has_zero_signal_points` has counts that STOP: its signal is zero from some
-  point to the scan's end. Say its sentence ("SYN_008.txt's signal is zero at 204 of 226 points, from 7,850 eV
-  on; it is merged unchanged") and ask the scientist whether the beam was lost and the scan belongs in the
-  merge; never leave it out yourself. Zeros whose counts come back are one count line,
-  `qc.statements.merged_scan_isolated_zero_points` (no flag): say it once, like glitches (detector dropouts),
-  never as a lost beam, and ask nothing about it. `merged_curve_end_from_one_scan`: the curve's first or
+  merged scan flagged `merged_scan_has_zero_signal_points` has counts that STOP (zero from some point to the
+  scan's end) or DROP OUT for a while (a run of zeros at least 5 % of the scan, the counts coming back). Say
+  its sentence ("SYN_008.txt's signal is zero at 204 of 226 points, from 7,850 eV on; it is merged unchanged")
+  and ask the scientist whether the beam was lost and the scan belongs in the merge;
+  never leave it out yourself. Runs of 1-2 zeros are one count line, `qc.statements.merged_scan_isolated_zero_points` (no flag):
+  say it once, like glitches (detector dropouts), never as a lost beam, and ask nothing about it. Longer runs
+  under 5 % are `qc.statements.merged_scan_short_zero_runs` (no flag): say the count, and do not call them
+  dropouts or a lost beam. `merged_curve_end_from_one_scan`: the curve's first or
   last point comes from one scan alone whose signal is zero there (the merged value is 0, a visible drop):
   say it when you describe the plot;
 - **when a scan ends early** (reason `scans_truncated`, flag `scan_range_truncated`; `scans_used` still
@@ -235,6 +237,15 @@ an element/edge already named for the group: approved, proposed, or the group's 
   `calibration_shift_size_not_confirmed` and is not shifted.
 - Then run `process --source <folder> --group <group id>` again and say the result's `applied_shift_eV`.
   A shift of 2 eV or less is approved as before, without `--accept-shift`.
+- **A curve that already carries a shift** (`calibration.carried_shift`, `confirmed: false`): a result
+  approved under an older build baked in a shift the current rules would not apply (e.g. -8.6 eV from 1 of 16
+  usable scans, or a large shift whose size nobody confirmed). It is kept on re-processing, and
+  build-records / validate block its record (`approved_result_calibration_unconfirmed`). Say its statement
+  ("This curve carries -8.6 eV that is now unconfirmed ...") and ask: keep it (`approve_calibration ...
+  --accept-shift -8.6` on their yes) or reject the result. `qc.statements.calibration_approval_not_applied`
+  on a re-processed result names an approval the current rules did not apply; say it.
+- A params file can only make these rules stricter: a higher `qc.warn_energy_shift_eV` or a lower in-scan
+  `calibration.reference_min_edge_snr` is ignored and said (`qc.statements.params_override_ignored`).
 
 ## Groups that need an explanation
 

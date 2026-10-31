@@ -431,6 +431,27 @@ def _processing_by_group(bundle: Mapping) -> dict[str, list]:
     return out
 
 
+def _unconfirmed_carried_shift(bundle: Mapping, result: Mapping, index: Mapping) -> dict | None:
+    """:func:`processing.reference.carried_shift` of an approved ISAAC result when its curve carries a calibration
+    shift the current rules would not apply and the scientist has not confirmed (``None`` otherwise)."""
+    if result.get("source") != "isaac_protocol":
+        return None
+    steps = {s.get("step"): s for s in result.get("steps") or () if isinstance(s, Mapping)}
+    cal = steps.get("calibration")
+    if cal is None or not (cal.get("outcome") or {}).get("applied"):
+        return None
+    from .mutations import calibration_approvals
+    from .processing import reference as REF
+
+    memo = index.setdefault("memo", {})
+    if "calibration_approvals" not in memo:
+        memo["calibration_approvals"] = calibration_approvals(bundle)
+    warn = ((steps.get("qc") or {}).get("params") or {}).get("warn_energy_shift_eV")
+    c = REF.carried_shift(cal, memo["calibration_approvals"].get(result.get("group_id")), warn_eV=warn,
+                          group_id=result.get("group_id"), result_id=B.processing_id(result))
+    return c if c is not None and not c["confirmed"] else None
+
+
 def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict | None = None) -> tuple[dict, dict]:
     """``(draft, composition_report)`` for ONE scientist-confirmed record group. ``index``
     (:func:`composition_index` of this same bundle) saves re-reading the whole bundle per group."""
@@ -639,6 +660,17 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
             **({"unusable_curve_said": " ".join(str(statements[x]) for x in reasons if statements.get(x))}
                if any(statements.get(x) for x in reasons) else {}),
             "reason": "the approved processing result is not a usable spectrum; nothing from it is used",
+        }
+    elif approved and (carried := _unconfirmed_carried_shift(bundle, approved[0], index)) is not None:
+        # c12-r: AN APPROVAL AN OLDER BUILD LET THROUGH for a curve that carries a calibration shift the current rules
+        # would not apply (an in-scan reference usable in one scan; a large shift whose size nobody confirmed). It is
+        # kept on re-processing (decided), so nothing from it composes until the scientist confirms the size
+        # (approve_calibration --accept-shift) or rejects the result: never exported silently.
+        r = approved[0]
+        report["processing"] = {
+            "used": None, "result": B.processing_id(r), "group_id": group["group_id"],
+            "calibration_unconfirmed": carried["statement"], "calibration_unconfirmed_shift_eV": carried["applied_shift_eV"],
+            "reason": "the approved processing result carries a calibration shift that is now unconfirmed; nothing from it is used",
         }
     elif approved:
         r = approved[0]
@@ -1164,6 +1196,9 @@ def build_records(bundle_dir: Path, *, test_marker: bool = False, full: bool = F
                if any(m.get("from") == "an approved processing result" for m in report["missing_required"])
                or (report.get("processing") or {}).get("not_applicable") else {})
             | ({"warnings": [w["text"] for w in report["warnings"]]} if report["warnings"] else {})
+            # c12-r: the approved curve carries a shift that is now unconfirmed: said here, not only as a word
+            | ({"calibration_unconfirmed": report["processing"]["calibration_unconfirmed"]}
+               if (report.get("processing") or {}).get("calibration_unconfirmed") else {})
         )
     skipped = [
         {"group_id": g["group_id"], "status": g["status"], "reason": "only a scientist-confirmed record group becomes a draft"}
@@ -1457,6 +1492,8 @@ def processing_blocker(processing: Mapping) -> str:
     if processing.get("approved_results"):
         return "more_than_one_approved_result"
     if processing.get("result"):
+        if processing.get("calibration_unconfirmed"):
+            return "approved_result_calibration_unconfirmed"
         if processing.get("no_curve"):
             return "approved_result_has_no_curve"
         return "approved_result_not_a_usable_spectrum" if processing.get("unusable_curve") else "approved_result_not_usable"
@@ -1495,6 +1532,12 @@ def processing_remedy(processing: Mapping) -> str:
                 + " / ".join(f'`isaac bundle decide <bundle_dir> --target {pid} --decision defer --by "<your name>"`'
                              for pid in several)
                 + " (or --decision reject).")
+    if processing.get("result") and processing.get("calibration_unconfirmed"):
+        # c12-r: never "re-run and approve": the approved result is kept on re-processing, and so is its shift
+        pid = processing["result"]
+        said = processing["calibration_unconfirmed"]
+        return (f"the approved result {pid} is not used: {said[0].lower() + said[1:]} Until one of these is done the "
+                "record has no series, QC status or E0 and is not exported.")
     if processing.get("result") and processing.get("no_curve"):
         # NEVER "re-run and approve the new result": the same parameters give the same no-curve result
         pid = processing["result"]

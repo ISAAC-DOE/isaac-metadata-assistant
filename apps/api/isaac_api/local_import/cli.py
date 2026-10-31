@@ -1232,9 +1232,23 @@ def _calibration_view(bundle: Mapping, r: Mapping) -> dict | None:
             w = REF.would_apply(cal, element, edge, warn_eV=float(warn))
             would.append({"element": element, "edge": edge, "basis": basis,
                           **{k: w[k] for k in ("tabulated_edge_eV", "shown", "needs_size_confirmation", "statement")}})
-    return {k: said[k] for k in ("reference_source", "reference_scans_usable", "reference_scans_listed",
-                                 "measured_reference_e0_eV", "reference_e0_spread_eV", "reference_proposed",
-                                 "reference_statement")} | {"would_apply": would}
+    # c12-r: the shift the CURVE carries (outcome.applied), said beside what an approval would do: a result approved
+    # under an older build may carry one the current rules would not apply (it is kept on re-processing: decided)
+    from . import bundle as B
+
+    o = cal.get("outcome") or {}
+    carried = REF.carried_shift(cal, approval, warn_eV=warn, group_id=r.get("group_id"), result_id=B.processing_id(r))
+    out = {k: said[k] for k in ("reference_source", "reference_scans_usable", "reference_scans_listed",
+                                "measured_reference_e0_eV", "reference_e0_spread_eV", "reference_proposed",
+                                "reference_statement")}
+    if said["reference_e0_spread_eV"] is None and said["reference_scans_usable"] == 1:
+        out["reference_e0_spread_note"] = ("The spread is null: fewer than 2 usable reference scans. The stored qc.json "
+                                           "and params.json say 0.0: they predate this rule and are hashed into the "
+                                           "result id, so they are not rewritten.")
+    out["applied_shift_eV"] = float(o.get("applied_shift_eV") or 0.0) if o.get("applied") else 0.0
+    if carried is not None:
+        out["carried_shift"] = {k: carried[k] for k in ("shown", "confirmed", "statement")}
+    return out | {"would_apply": would}
 
 
 def _processing_result_view(bundle: Mapping, r: Mapping) -> dict:

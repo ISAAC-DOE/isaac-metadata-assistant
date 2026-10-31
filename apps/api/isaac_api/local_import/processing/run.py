@@ -342,7 +342,8 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
     else:
         flags.append("no_reference_available")
         unconfirmed_reason = "no_reference"
-    min_snr = float(cp["reference_min_edge_snr"])
+    # c12-r (REF.STRICTER_ONLY_RULE_ID): a params file may raise the in-scan SNR rule, never lower it
+    min_snr = REF.effective_min_snr(cp["reference_min_edge_snr"], ref_source)
     usable = [r for r in per_scan if r and r.get("e0_eV") is not None and (r.get("snr") or 0) >= min_snr]
     if per_scan and not usable:
         flags.append("reference_edge_not_found")
@@ -372,9 +373,10 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
                 flags.append("shift_implausible_not_applied")
             elif not approved:
                 flags.append("calibration_shift_awaiting_approval")
-            elif abs(shift) > float(ctx.params["qc"]["warn_energy_shift_eV"]) and not REF.shift_size_confirmed(accepted, shift):
+            elif REF.exceeds_warn(shift, ctx.params["qc"]["warn_energy_shift_eV"]) and not REF.shift_size_confirmed(accepted, shift):
                 # c12-cal (REF.SHIFT_SIZE_RULE_ID): a shift above the warning level moves every energy of the record by
-                # that much; it is applied only when the scientist also confirmed its size (--accept-shift)
+                # that much; it is applied only when the scientist also confirmed its size (--accept-shift). c12-r: the
+                # warning level is the protocol's or lower (REF.effective_warn_eV), never a params file's higher value
                 flags.append(REF.SIZE_NOT_CONFIRMED_FLAG)
             elif cp.get("apply_shift_when_confirmed"):
                 applied = shift
@@ -758,29 +760,53 @@ def _all_zero_statement(inputs: Sequence[Mapping], signal: str | None, used: int
 #: c11-r: the review flag of a result that merged a scan whose signal is exactly zero at points where another merged
 #: scan's is not (the beam lost part-way, or a detector that stopped counting): it is merged unchanged and said.
 ZERO_SIGNAL_POINTS_FLAG = "merged_scan_has_zero_signal_points"
+#: c12-r: a run of zeros whose counts come back is said as a possible lost beam (with the flag) when it is at least
+#: this fraction of the scan's points and at least BEAM_LOSS_MIN_POINTS long; runs of 1-2 points are isolated
+#: dropouts; anything between is counted without a claim. Measured on the real BL15-2 beamtimes (docs/xas-processing-
+#: protocol-v0.md section 5): recovering runs in 2021-11 were at most 11 points of 226 (4.9 %); in 2025-04 runs of
+#: 25 of 46 and 30 of 74 points recovered.
+ZERO_RUNS_RULE_ID = "isaac.xas.zero_signal_runs.v0"
+BEAM_LOSS_MIN_FRACTION = 0.05
+BEAM_LOSS_MIN_POINTS = 3
+ISOLATED_MAX_POINTS = 2
+
+
+def _long_runs(z: Mapping) -> list[tuple[int, int]]:
+    """The ``(start, length)`` runs of zeros of one scan (:func:`_zero_scans`) that do NOT reach its end and are long
+    enough to be said as a possible lost beam (:data:`BEAM_LOSS_MIN_FRACTION`, :data:`BEAM_LOSS_MIN_POINTS`)."""
+    size = z["size"]
+    return [(st, n) for st, n in z["runs"] if st + n < size and n >= BEAM_LOSS_MIN_POINTS and n >= BEAM_LOSS_MIN_FRACTION * size]
 
 
 def _zero_signal_points_statement(used_entries: Sequence[Mapping], scans_data: Sequence[Mapping], signal: str | None,
                                   np) -> str | None:
-    """c11-r: one plain statement naming each MERGED scan whose counts STOP: its signal is exactly zero from some point
-    to the scan's last point (a run of at least two points, :func:`_zero_runs`), where another merged scan's signal is
-    not zero (at the other scan's nearest point within its energy range); ``None`` otherwise. c12-cal: zeros that do
-    not reach the end (the counts come back) are counted apart (:func:`_isolated_zero_points_statement`), never said
-    as a lost beam. Threshold-free and descriptive only: nothing is skipped or changed for it (whether such a scan
-    belongs in the merge is the scientist's call, docs/xas-processing-protocol-v0.md). Said in the result, NOT in
-    qc.json (hashed into the run id), so no result id moves."""
+    """c11-r: one plain statement naming each MERGED scan whose counts STOP (its signal is exactly zero from some point
+    to the scan's last point, a run of at least two points) or, c12-r, DROP OUT FOR A WHILE (a run of zeros at least
+    :data:`BEAM_LOSS_MIN_FRACTION` of the scan and :data:`BEAM_LOSS_MIN_POINTS` long, whose counts come back), where
+    another merged scan's signal is not zero (at the other scan's nearest point within its energy range); ``None``
+    otherwise. Shorter runs whose counts come back are counted apart (:func:`_isolated_zero_points_statement`,
+    :func:`_short_zero_runs_statement`), never said as a lost beam. Descriptive only: nothing is skipped or changed
+    for it (whether such a scan belongs in the merge is the scientist's call, docs/xas-processing-protocol-v0.md).
+    Said in the result, NOT in qc.json (hashed into the run id), so no result id moves."""
     parts = []
     for entry, sa, z in _zero_scans(used_entries, scans_data, np):
-        trail, others = z["trailing"], z["n"] - z["trailing"]
-        if trail < 2:
+        trail = z["trailing"] if z["trailing"] >= 2 else 0
+        long_runs = _long_runs(z)
+        if not trail and not long_runs:
             continue
         d = sa["diagnostics"]
         name = PurePosixPath(str(entry.get("relative_path") or entry.get("source_id"))).name
         named = f"signal ({signal})" if signal else "signal"
+        e = sa["energy"]
+        where = [f"from {z['trailing_from_eV']:.1f} eV on"] if trail else []
+        where += [f"{n} in a row from {e[st]:.1f} to {e[st + n - 1]:.1f} eV, after which the counts come back"
+                  for st, n in long_runs[:3]]
+        if len(long_runs) > 3:
+            where.append(f"{len(long_runs) - 3} more such run{'' if len(long_runs) == 4 else 's'}")
+        others = z["n"] - trail - sum(n for _, n in long_runs)
         extra = f", and at {others} other point{'' if others == 1 else 's'}" if others else ""
         parts.append(f"{name}'s {named} is zero at {d.get('signal_zero_points', z['n'])} of "
-                     f"{d.get('points_read', z['size'])} points (from {z['trailing_from_eV']:.1f} eV on{extra}); it is "
-                     "merged unchanged.")
+                     f"{d.get('points_read', z['size'])} points ({'; '.join(where)}{extra}); it is merged unchanged.")
     if not parts:
         return None
     more = f" {len(parts) - 10} more merged scan(s) are the same." if len(parts) > 10 else ""
@@ -789,8 +815,9 @@ def _zero_signal_points_statement(used_entries: Sequence[Mapping], scans_data: S
 
 def _zero_scans(used_entries: Sequence[Mapping], scans_data: Sequence[Mapping], np) -> list[tuple[Mapping, Mapping, dict]]:
     """Each merged scan whose signal is exactly zero at points where another merged scan's is not: ``(entry, scan,
-    {n, size, trailing, trailing_from_eV, longest})`` — ``trailing`` is the length of the run of zeros that ends at
-    the scan's last point (0 when the last point is not zero), ``longest`` its longest run of consecutive zeros."""
+    {n, size, trailing, trailing_from_eV, longest, runs})`` — ``trailing`` is the length of the run of zeros that ends
+    at the scan's last point (0 when the last point is not zero), ``longest`` its longest run of consecutive zeros,
+    ``runs`` every run as ``(start index, length)``."""
     out = []
     for k, (entry, sa) in enumerate(zip(used_entries, scans_data)):
         zero = sa.get("signal_zero")
@@ -819,30 +846,64 @@ def _zero_scans(used_entries: Sequence[Mapping], scans_data: Sequence[Mapping], 
         trailing = int(last.size) if last[-1] == zero.size - 1 else 0
         out.append((entry, sa, {"n": int(where.size), "size": int(zero.size), "trailing": trailing,
                                 "trailing_from_eV": float(sa["energy"][last[0]]) if trailing else None,
-                                "longest": int(max(r.size for r in runs))}))
+                                "longest": int(max(r.size for r in runs)),
+                                "runs": [(int(r[0]), int(r.size)) for r in runs]}))
     return out
+
+
+def _recovering_runs(z: Mapping) -> list[int]:
+    """The lengths of one scan's zero runs that are said in neither lost-beam form (the counts come back and the run is
+    shorter than :func:`_long_runs`; a single zero at the very last point counts here too)."""
+    size, long_ = z["size"], set(_long_runs(z))
+    trail_said = z["trailing"] >= 2
+    return [n for st, n in z["runs"] if (st, n) not in long_ and not (trail_said and st + n == size)]
 
 
 def _isolated_zero_points_statement(used_entries: Sequence[Mapping], scans_data: Sequence[Mapping], signal: str | None,
                                     np) -> str | None:
-    """c12-cal: ONE count line for the merged scans whose signal is exactly zero at points where another's is not but
-    whose counts come back (the zeros do not run to the scan's end): single-point dropouts, said like glitches, with
+    """c12-cal: ONE count line for the merged scans whose signal is exactly zero at ISOLATED points (runs of 1 or 2,
+    :data:`ISOLATED_MAX_POINTS`) where another's is not and whose counts come back: dropouts, said like glitches, with
     no beam-loss wording and no review flag. Measured on a real BL15-2 beamtime: 441 merged scans of 70 groups had such
     points, 414 at only 1-5 points, I0 positive at all of them; the one scan whose counts stopped (zero at 204 of 226
-    points to its end) was buried among them. ``None`` when there is none. Said after the run id (no id moves)."""
-    rows = [(z["n"] - (z["trailing"] if z["trailing"] >= 2 else 0), z["longest"] if z["trailing"] < 2 else None)
-            for _, _, z in _zero_scans(used_entries, scans_data, np)]
-    rows = [(n, lng) for n, lng in rows if n]
+    points to its end) was buried among them. c12-r: longer runs are never in this line (they are counted by
+    :func:`_short_zero_runs_statement` or said by :func:`_zero_signal_points_statement`). ``None`` when there is none.
+    Said after the run id (no id moves)."""
+    rows = []
+    for _, _, z in _zero_scans(used_entries, scans_data, np):
+        runs = [n for n in _recovering_runs(z) if n <= ISOLATED_MAX_POINTS]
+        if runs:
+            rows.append((sum(runs), max(runs)))
     if not rows:
         return None
     named = f"signal ({signal})" if signal else "signal"
     k, total = len(rows), sum(n for n, _ in rows)
-    longest = max((lng for _, lng in rows if lng is not None), default=None)
+    longest = max(lng for _, lng in rows)
     return (f"{k} merged scan{'' if k == 1 else 's'} {'has' if k == 1 else 'have'} isolated points where the {named} "
-            f"is exactly zero while another scan's is not ({total} point{'' if total == 1 else 's'} in all"
-            + (f", at most {longest} in a row" if longest else "")
-            + "); the counts come back after each, so they read as detector dropouts, like glitches. They are merged "
-            "unchanged.")
+            f"is exactly zero while another scan's is not ({total} point{'' if total == 1 else 's'} in all, at most "
+            f"{longest} in a row); the counts come back after each, so they read as detector dropouts, like glitches. "
+            "They are merged unchanged.")
+
+
+def _short_zero_runs_statement(used_entries: Sequence[Mapping], scans_data: Sequence[Mapping], signal: str | None,
+                               np) -> str | None:
+    """c12-r: ONE count line for the runs of zeros longer than isolated points but shorter than a possible lost beam
+    (3 points or more, under :data:`BEAM_LOSS_MIN_FRACTION` of the scan) whose counts come back: counted with no claim
+    of what they are (a dropout or a brief loss of beam cannot be told from the data) and no flag. ``None`` when there
+    is none. Said after the run id (no id moves)."""
+    rows = []
+    for _, _, z in _zero_scans(used_entries, scans_data, np):
+        runs = [n for n in _recovering_runs(z) if n > ISOLATED_MAX_POINTS]
+        if runs:
+            rows.append(runs)
+    if not rows:
+        return None
+    named = f"signal ({signal})" if signal else "signal"
+    k, n_runs = len(rows), sum(len(r) for r in rows)
+    total, longest = sum(sum(r) for r in rows), max(max(r) for r in rows)
+    return (f"{k} merged scan{'' if k == 1 else 's'} {'has' if k == 1 else 'have'} {n_runs} short run"
+            f"{'' if n_runs == 1 else 's'} of points where the {named} is exactly zero while another scan's is not "
+            f"({total} points in all, {ISOLATED_MAX_POINTS + 1} or more and at most {longest} in a row, each run "
+            f"under {BEAM_LOSS_MIN_FRACTION:.0%} of its scan); the counts come back after each. They are merged unchanged.")
 
 
 def _one_scan_ends_statement(grid, n_per_point, used_entries: Sequence[Mapping], M, n_scans: int, np) -> str | None:
@@ -1394,6 +1455,15 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     # c12-cal: with fewer scans than the cross-scan check needs, the glitch check compares each point with its
     # neighbours and flags real features too (white line, oscillations): said beside the count (after run_id: no id
     # moves; the count, the flag and the verdict are unchanged)
+    # c12-r: an approval the current rules did not apply is named (the flag alone said nothing of the approval), and a
+    # params-file value the stricter-only rule ignored is said (after run_id: no id moves)
+    cal_step = next((s_ for s_ in res["steps"] if s_.get("step") == "calibration"), None)
+    not_applied = REF.approval_not_applied(cal_step, params["qc"]["warn_energy_shift_eV"]) if cal_step else None
+    if not_applied:
+        res["qc"].setdefault("statements", {})["calibration_approval_not_applied"] = not_applied
+    ignored = REF.ignored_overrides(params)
+    if ignored:
+        res["qc"].setdefault("statements", {})["params_override_ignored"] = " ".join(ignored)
     few_said = _few_scan_glitch_statement(len(scans_data), dg["flagged_points_total"], params)
     if few_said:
         res["qc"].setdefault("statements", {})["glitch_check_few_scans"] = few_said
@@ -1405,6 +1475,10 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     isolated_said = _isolated_zero_points_statement(used_entries, scans_data, _raw_signal(choice), np)
     if isolated_said:
         res["qc"].setdefault("statements", {})["merged_scan_isolated_zero_points"] = isolated_said
+    # c12-r: runs of 3+ zeros under 5 % of the scan whose counts come back: counted, with no claim of what they are
+    short_said = _short_zero_runs_statement(used_entries, scans_data, _raw_signal(choice), np)
+    if short_said:
+        res["qc"].setdefault("statements", {})["merged_scan_short_zero_runs"] = short_said
     # c12-cal: the merged curve's ends from one scan alone (the grid is the widest scan's; nothing is trimmed)
     ends_said = _one_scan_ends_statement(g2, mg["n"][ok], used_entries, M[:, ok], len(scans_data), np)
     if ends_said:
@@ -1746,6 +1820,7 @@ def process_bundle(
     }
     if payload["athena"]["statement"]:
         payload["summary"]["lines"].append(payload["athena"]["statement"])
+    payload["summary"]["lines"].extend(REF.ignored_overrides(resolved))  # c12-r: an ignored override is said once
     _write(out_dir / RESULTS_FILE, _json_bytes(payload))
     return payload
 

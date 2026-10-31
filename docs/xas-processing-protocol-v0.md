@@ -173,6 +173,18 @@ groups). A reference group's own signal still needs one scan. The result says
 `reference_statement`; `reference_e0_spread_eV` is null with fewer than 2 usable scans (one scan
 has no spread).
 
+*Why one scan for a reference group and two for an in-scan channel.* A reference group is a scan
+of the reference itself (a foil run on its own): its signal is the reference's absorption in the
+main channel, the edge sits far above the noise (a clean foil scan has SNR in the hundreds), and one
+scan is often all a beamtime has of it, so that one scan is the measurement. An in-scan channel
+rides along SAMPLE scans: whether it saw a reference at all depends on a foil being in the beam
+behind the sample, and on a weak or absent reference its per-scan "edge" is wherever the noise
+peaks. One scan just over SNR 10 among many below it is then what a fluctuation looks like (the
+measured case above: per-scan edges spread over 21 eV); a second usable scan is the least that
+shows the edge is the channel's own, and gives a spread to judge it by. `bundle show
+processing-result` says when a result's spread is null although its hashed `qc.json` /
+`params.json` say 0.0 (`calibration.reference_e0_spread_note`: they predate this rule).
+
 **A large shift's size is confirmed** (`isaac.xas.calibration_shift_size_confirmed.v0`). Before
 anything is recorded, `approve_calibration --element --edge` says the shift it would apply
 against the tabulated edge ("the reference edge sits 8.6 eV above Ti K's tabulated 4966.0 eV;
@@ -184,6 +196,36 @@ only when the approval's confirmed size matches, else flags `calibration_shift_s
 Shifts of 2 eV or less behave as before. These sentences, counts and the null spread are in the
 result only: `params.json` and `qc.json` (hashed into the run id) keep exactly what they held, so a
 group whose curve does not change keeps its result id.
+
+A shift within 0.1 eV of the warning level is said and compared to 0.01 eV (`+2.04` needs its size
+confirmed; `+1.96` does not; `--accept-shift` still matches to 0.1 eV), so the shown value never
+reads as at or below the level while being above it.
+
+**A curve that already carries a shift the rules would not apply** (c12-r). A result approved
+under an older build may have baked in a shift these rules refuse (measured: −8.6 eV from 1 of 16
+usable in-scan scans, no size confirmed). A decided result is kept on re-processing, so its curve
+and E0 keep that shift. `bundle show processing-result` says the shift the curve carries
+(`calibration.applied_shift_eV`) and, when the current rules would not apply it,
+`calibration.carried_shift` ("This curve carries −8.6 eV that is now unconfirmed: … re-approve with
+`--accept-shift -8.6`, or reject the result"). `build-records` and `validate` block that group
+(`approved_result_calibration_unconfirmed`; nothing from the result composes, so it is never
+exported) until the scientist either confirms the size (`approve_calibration --element --edge
+--accept-shift <the carried size>`, accepted even when the reference is no longer proposed, since it
+confirms the curve that exists) or rejects the result. When a re-processed result's approval is not
+applied (`reference_edge_in_too_few_scans`, `calibration_shift_size_not_confirmed`),
+`qc.statements.calibration_approval_not_applied` names that approval (decision, element/edge,
+decider) and what would apply it.
+
+**Overrides only make the calibration rules stricter**
+(`isaac.xas.calibration_overrides_stricter_only.v0`). A params file may lower
+`qc.warn_energy_shift_eV` (more shifts need their size confirmed) and raise
+`calibration.reference_min_edge_snr` for in-scan channels, never the reverse: the confirmation
+level used is min(2 eV, the override) and the in-scan SNR max(10, the override). An ignored override
+is said in `qc.statements.params_override_ignored` and in the processing summary. (Measured on
+synthetic data: `warn_energy_shift_eV: 30` let a plain approval apply −8.0 eV, and
+`reference_min_edge_snr: 0.1` turned noise into a proposed reference with a 177 eV spread.) The
+`large_energy_shift` QC warning still uses the configured value (it is a warning, and changing it
+would move result ids); a reference group's own signal takes the configured SNR as before.
 
 ## 4. Deglitch / outliers (flag, never drop by default)
 
@@ -214,14 +256,31 @@ trimmed (that would change those curves and their ids). Measured on a real BL15-
 −0.013); the widest scan reaching a fraction of an eV past the others (52 of 78 groups) with a real
 value is not said.
 
-**Zero signal points** (said after the run id; nothing is dropped). A merged scan whose signal is
-exactly zero from some point to its LAST point (a run of at least 2 points), where another merged
-scan's is not, is said and flagged `merged_scan_has_zero_signal_points` ("A person checks whether
-the beam was lost"). Zeros whose counts come back are one count line,
-`qc.statements.merged_scan_isolated_zero_points`, with no flag and no beam-loss wording. Measured on
-the same beamtime: 443 merged scans of 70 groups had zero points, 416 at only 1–5 points and at most
-11 in a row in any scan that recovers, I0 positive at all such points (detector dropouts); exactly 2
-scans had a run of zeros to the scan's end (204 of 226 points; 25 of 105), the beam-loss cases.
+**Zero signal points** (said after the run id; nothing is dropped; `isaac.xas.zero_signal_runs.v0`).
+Each run of points where a merged scan's signal is exactly zero while another merged scan's is not
+is one of three kinds:
+
+* the counts STOP (a run of at least 2 points to the scan's LAST point), or a run whose counts come
+  back that is at least **5 % of the scan's points and at least 3 points**: said in
+  `qc.statements.merged_scan_zero_signal_points` and flagged `merged_scan_has_zero_signal_points`
+  ("A person checks whether the beam was lost");
+* runs of 1–2 points: isolated dropouts, one count line `qc.statements.merged_scan_isolated_zero_points`
+  ("they read as detector dropouts, like glitches"), no flag;
+* runs of 3 points or more under 5 % of the scan: one count line `qc.statements.merged_scan_short_zero_runs`
+  with no claim of what they are (a dropout or a brief loss of beam cannot be told from the data), no flag.
+
+Why 5 % and not a fixed number of points (measured, c12-r, every merged scan with such zeros on the
+real beamtimes): on BL15-2 2021-11 (445 scans) recovering runs were at most 11 points, in 226-point
+scans (4.9 %; 8 scans had a run of 5 or more), and I0 was positive at all of them; on BL15-2 2025-04
+(610 scans, 6–222 points) recovering runs reached 25 of 46 and 30 of 74 points; BL15-2 2019-05 and
+BL6-2c 2018-07 had runs of at most 4 points in 225. A fixed 5 points would flag 8 scans in 2021-11
+and 202 in 2025-04, most of them short dropouts in long scans; 5 % (with 3 points at least) flags 1
+and 54, the ones where a sizeable part of the scan has no counts. The counts-stop cases: 204 of 226
+and 25 of 105 (2021-11), 138 of 222 (2025-04), 80 of 225 (2018-07). Before c12-r a 30-point run in
+a 40-point scan whose counts came back was said as isolated dropouts: never again. Re-processed with
+this rule, the flag is on 3 of 83 results of 2021-11 (was 2) and 15 of 128 of 2025-04 (was 1);
+every result id is unchanged (83/83, 128/128, and 53/53 on BL4-3 2025-07), as the sentences are
+added after the run id.
 
 ## 6. Normalize
 
@@ -293,10 +352,10 @@ merged curve to 0 at its end) and the other scans are merged: warn `scans_skippe
 gets this reason, so only a result with such a scan has a new id. With every scan's signal zero there is no
 curve. The `signal_all_zero` fail (metric `signal_all_zero_scans`, over the scans used) stays, for a result
 an older build made. The rule is `isaac.xas.skip_signal_all_zero.v0` (named in each result's `rule_versions`).
-A scan whose signal is exactly zero at SOME points where another merged scan's is not (its counts stop
-part-way; per-scan diagnostic `signal_zero_points`) is merged unchanged, flagged
-`merged_scan_has_zero_signal_points` and named in `qc.statements.merged_scan_zero_signal_points` (outside
-`qc.json`, so no id moves). Whether to leave such a scan out is the scientist's call: there is no threshold.
+A scan whose signal is exactly zero at SOME points where another merged scan's is not (per-scan
+diagnostic `signal_zero_points`) is merged unchanged; section 5 says which runs of zeros are flagged
+`merged_scan_has_zero_signal_points` and which are only counted (all outside `qc.json`, so no id moves).
+Whether to leave such a scan out is the scientist's call: nothing is dropped for it.
 
 ### Known limits (for review)
 
