@@ -622,14 +622,27 @@ decision CAPTURES a statement; none takes a scientific decision, and none is def
   the projects sorted by path and group name), so adding or removing a project file renumbers them.
   The decision records `athena_version_provenance` {`prj_relative_path`, `athena_group`,
   `data_sha256_prefix`} (refused when two listed versions share it), and `athena_result_of_record` is
-  the version with that identity (`bundle.athena_resolve`). Replaying a selection is "unchanged" only
+  the version with that identity (`bundle.athena_resolve`). A SET of the scientist's per-scan Athena
+  groups (`provenance.per_scan_set`; its project file and Athena group are its first member's) has
+  `data_sha256_prefix` `set-` + 16 hex of a sha256 over each member's data hash and parameters, so a
+  selection recorded on one curve never resolves to a set that holds it, nor a set's to one curve
+  (c10-r). A project whose set is identical to another's (same curves, same parameters) is one set, named
+  in `provenance.per_scan_set.identical_in_projects` (and the Athena result's `inputs[].per_scan_set`) and in
+  the `identical_athena_set_in_several_projects` note of `isaac process`; copies in several projects are one
+  curve only when their parameters are the same too. Replaying a selection is "unchanged" only
   when it names the same identity (re-selecting an id that a renumbering gave to another curve is a new
   decision), and `changed_after_approval` compares identities, not ids. A selection alone does not freeze the
   result against `isaac process`: a fresh result of the same id replaces it when it holds a version
   with that identity — re-pointed to its new id if it moved, said in
-  `athena_result_of_record_basis.repointed` {`decision_value`, `now`, `note`} — and otherwise the OLD
-  result is kept, so a selection never points at nothing or at another curve. Only the latest
-  selection counts, and the validator refuses one that resolves to no listed version.
+  `athena_result_of_record_basis.repointed` {`decision_value`, `now`, `note`}. When it holds NO such
+  version (c10-r) the fresh result replaces it too: the choice is never carried over to another curve
+  nor left on a stale result. `athena_result_of_record` is `null`, the result carries
+  `athena_selection_not_carried_over` {`decision_id`, `value`, `decided_by`, `statement`}, its question
+  is asked again (its text says which earlier choice no longer matches), and `isaac process` replies
+  `athena_selections_not_carried_over` {`results`, `statement`} (also a summary line). The note drops
+  out once a new selection resolves. A result nothing fresh replaces is kept as it was. Only the latest
+  selection counts, and the validator refuses one that resolves to no listed version unless the
+  result's `athena_selection_not_carried_over` names that decision.
 - **`set_not_counter_positions`** (`decide --question <counter question> --decision
   set_not_counter_positions --by NAME`, which names the question's open positions; or `--target
   experiment --positions n[,m]`): those 1-based filename token positions are NOT run/acquisition

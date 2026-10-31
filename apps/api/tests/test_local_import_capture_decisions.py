@@ -688,8 +688,9 @@ def test_a_selection_changed_after_the_approval_is_noted_on_the_result(athena):
 
 @pytest.mark.parametrize("fresh_lists_it", [True, False])
 def test_a_selection_alone_does_not_freeze_a_result_against_re_processing(athena, monkeypatch, fresh_lists_it):
-    """L3: only a state decision keeps the old result; a selection keeps it only when the fresh result
-    no longer lists the selected version (so the selection never points at nothing)."""
+    """L3: only a state decision keeps the old result. c10-r: a fresh result that no longer lists the selected
+    version replaces it too (never a stale result kept silently): the choice is not carried over, it is said, and
+    the question is asked again."""
     from isaac_api.local_import.processing import cli_entry
 
     M.decide(athena, target_ids=["p1"], decision="select_athena_version", value="g1-v02", by=BY, orcid=None)
@@ -701,10 +702,17 @@ def test_a_selection_alone_does_not_freeze_a_result_against_re_processing(athena
         fresh.pop(k, None)
     fresh["state"] = "candidate_extracted"
     monkeypatch.setattr(cli_entry, "run_process", lambda *a, **k: {"processing_results": [fresh]})
-    M.process(athena)
+    out = M.process(athena)
     r = _p1(athena)
-    assert (r["steps"][0]["params"] == {"fresh": True}) is fresh_lists_it
-    assert r["athena_result_of_record"] == "g1-v02"
+    assert r["steps"][0]["params"] == {"fresh": True}
+    if fresh_lists_it:
+        assert r["athena_result_of_record"] == "g1-v02" and "athena_selections_not_carried_over" not in out
+    else:
+        assert r["athena_result_of_record"] is None and B.ATHENA_UNSELECTED_FLAG in r["review_flags"]
+        assert r[B.ATHENA_NOT_CARRIED_OVER]["value"] == "g1-v02"
+        [q] = r["questions"]
+        assert q["code"] == B.ATHENA_QUESTION_CODE and "The earlier choice g1-v02" in q["text"]
+        assert "will be asked again" in out["athena_selections_not_carried_over"]["statement"]
     assert cli.main(["bundle", "check", str(athena)]) == 0
 
 
@@ -712,7 +720,8 @@ def test_a_selection_alone_does_not_freeze_a_result_against_re_processing(athena
 def test_a_renumbering_re_processing_keeps_the_selection_on_the_same_curve(athena, monkeypatch, change):
     """Item 2 of the re-review: version ids are positional, so a project file added or removed
     renumbers them. The selection follows the version's provenance: re-pointed (and said so) when the
-    same version moved; the OLD result kept when the fresh one no longer holds it."""
+    same version moved. c10-r: when the fresh one no longer holds it, the fresh result replaces it anyway, nothing
+    is selected, and the question is asked again (never the old result kept, never another curve)."""
     from isaac_api.local_import.processing import cli_entry
 
     M.decide(athena, target_ids=["p1"], decision="select_athena_version", value="g1-v02", by=BY, orcid=None)
@@ -730,17 +739,20 @@ def test_a_renumbering_re_processing_keeps_the_selection_on_the_same_curve(athen
         provs = [_prov(1), {**_prov(2), "data_sha256_prefix": "e" * 16}]
     fresh["athena_versions"] = [{"version_id": f"g1-v{n:02d}", "provenance": p, "comparison": {}} for n, p in enumerate(provs, 1)]
     monkeypatch.setattr(cli_entry, "run_process", lambda *a, **k: {"processing_results": [fresh]})
-    M.process(athena)
+    out = M.process(athena)
     r = _p1(athena)
+    assert r["steps"][0]["params"] == {"fresh": True}  # replaced by the fresh result
     if change in ("renumbered", "inserted"):
         expect = "g1-v01" if change == "renumbered" else "g1-v03"
-        assert r["steps"][0]["params"] == {"fresh": True}  # replaced by the fresh result
         assert r["athena_result_of_record"] == expect
         assert r["athena_result_of_record_basis"]["repointed"] == {**r["athena_result_of_record_basis"]["repointed"],
                                                                    "decision_value": "g1-v02", "now": expect}
+        assert "athena_selections_not_carried_over" not in out and B.ATHENA_NOT_CARRIED_OVER not in r
     else:
-        assert r["steps"][0]["params"] == {}  # NEGATIVE CONTROL: the old result is kept, its curve unchanged
-        assert r["athena_result_of_record"] == "g1-v02" and "repointed" not in r["athena_result_of_record_basis"]
+        # NEGATIVE CONTROL: never re-pointed to the curve that now holds the id (or the same file and group)
+        assert r["athena_result_of_record"] is None and "athena_result_of_record_basis" not in r
+        assert out["athena_selections_not_carried_over"]["results"] == [
+            {"result_id": "p1", "decision_id": r[B.ATHENA_NOT_CARRIED_OVER]["decision_id"], "value": "g1-v02"}]
     assert cli.main(["bundle", "check", str(athena)]) == 0
 
 

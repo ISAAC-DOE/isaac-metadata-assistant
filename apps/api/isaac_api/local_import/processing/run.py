@@ -1245,7 +1245,7 @@ def _athena_result(group: Mapping, entry: Mapping, files: Sequence[Mapping], par
             "used": True,
             "scans_basis": scans_used["basis"],
             "scans": scans_used["scans"],
-            **({"per_scan_set": {k: list(members.get(k) or ()) for k in ("athena_groups", "labels", "scans")}} if members else {}),
+            **({"per_scan_set": A._set_named(entry, members)} if members else {}),
         }
     ]
     e = entry["energy"]

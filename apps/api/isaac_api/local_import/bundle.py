@@ -757,6 +757,36 @@ def athena_version_identity(version: Mapping) -> dict:
     return {k: prov.get(k) for k in ATHENA_IDENTITY_KEYS}
 
 
+#: c10-r: a SET of the scientist's per-scan Athena groups (``provenance.per_scan_set``) is identified by its members:
+#: its ``data_sha256_prefix`` is ``set-`` + a hash of each member's data and parameters (processing/athena.py
+#: ``set_identity``), while its project file and Athena group are its FIRST member's. A selection recorded on one
+#: curve therefore never resolves to a set that holds it (nor a set's to one curve), whatever the other two say.
+ATHENA_SET_IDENTITY_PREFIX = "set-"
+
+
+def _athena_is_set(version: Mapping) -> bool:
+    prov = version.get("provenance") if isinstance(version, Mapping) else None
+    return isinstance(prov, Mapping) and isinstance(prov.get("per_scan_set"), Mapping)
+
+
+def _athena_same_version(version: Mapping, want: Mapping) -> bool:
+    """``version`` is the curve (or set) ``want`` names: the same identity, and a set only for a set's identity."""
+    named_set = str(want.get("data_sha256_prefix") or "").startswith(ATHENA_SET_IDENTITY_PREFIX)
+    return athena_version_identity(version) == want and _athena_is_set(version) is named_set
+
+
+#: c10-r: set by ``isaac process`` on a fresh result that replaced one whose latest ``select_athena_version`` it no
+#: longer resolves (the project files, or how ISAAC reads them, changed): {decision_id, value, decided_by, statement}.
+#: The selection is not carried over to another curve; the question is asked again. Dropped once a selection resolves.
+ATHENA_NOT_CARRIED_OVER = "athena_selection_not_carried_over"
+
+
+def athena_not_carried_over(result: Mapping, decision: Mapping) -> bool:
+    """``True`` when re-processing recorded that ``decision`` no longer resolves on ``result`` (and asks again)."""
+    note = result.get(ATHENA_NOT_CARRIED_OVER) if isinstance(result, Mapping) else None
+    return isinstance(note, Mapping) and note.get("decision_id") == decision.get("decision_id")
+
+
 def latest_athena_selection(bundle: Mapping, result: Mapping) -> Mapping | None:
     """The LATEST ``select_athena_version`` decision on this result, whatever it names."""
     pid, out = processing_id(result), None
@@ -774,7 +804,7 @@ def athena_resolve(result: Mapping, decision: Mapping) -> str | None:
     if isinstance(prov, Mapping):
         want = {k: prov.get(k) for k in ATHENA_IDENTITY_KEYS}
         hits = [str(v.get("version_id")) for v in result.get("athena_versions") or ()
-                if isinstance(v, Mapping) and athena_version_identity(v) == want]
+                if isinstance(v, Mapping) and _athena_same_version(v, want)]
         return hits[0] if len(hits) == 1 else None
     return decision.get("value") if decision.get("value") in athena_version_ids(result) else None
 
@@ -861,6 +891,7 @@ def _derive_athena_selection(bundle: Mapping) -> None:
                     }
             r["review_flags"] = flags
             r["questions"] = questions
+            r.pop(ATHENA_NOT_CARRIED_OVER, None)  # answered again: the earlier, unresolved selection is history
 
 
 def kept_apart(bundle: Mapping) -> dict[str, Mapping]:
@@ -4548,7 +4579,8 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50) -> list[str]:
             errors.append(f"decision: {d['decision_id']} carries not_counter_positions, which only {NOT_COUNTER_DECISION} does")
         if d.get("decision") == ATHENA_SELECT_DECISION and d["target"]["kind"] == "processing_result":
             r = next((x for x in bundle.get("processing_results") or () if processing_id(x) == d["target"]["id"]), None)
-            if r is not None and latest_athena_selection(bundle, r) is d and athena_resolve(r, d) is None:
+            if (r is not None and latest_athena_selection(bundle, r) is d and athena_resolve(r, d) is None
+                    and not athena_not_carried_over(r, d)):  # c10-r: re-processing said so, and asks again
                 errors.append(f"decision: {d['decision_id']} selects {d.get('value')!r}, which is not one of the Athena versions "
                               f"{d['target']['id']} lists ({', '.join(athena_version_ids(r)) or 'none'}), by id or by its recorded provenance")
     for c in bundle["candidates"]:

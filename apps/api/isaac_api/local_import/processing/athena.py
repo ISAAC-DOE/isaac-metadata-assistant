@@ -357,14 +357,18 @@ def _curve_key(entry: Mapping) -> tuple:
     return (entry["data_hash"], json.dumps(entry.get("params"), sort_keys=True, default=str))
 
 
-def _per_scan_sets_by_project(cands: Sequence[Mapping], stems: Sequence[str], np) -> list[dict] | None:
+def _per_scan_sets_by_project(cands: Sequence[Mapping], stems: Sequence[str], np, *, group_id: str | None = None,
+                              notes: list | None = None) -> list[dict] | None:
     """c10-m: the per-scan groups of ONE run kept in SEVERAL projects are one set PER PROJECT, never a version per
     scan. Measured on a real BL4-3 beamtime: scans 1-22 of a 42-scan run were per-scan groups in one project and
     1-25 in another (the same raw data, another normalisation). Collapsing them by data hash alone mixed the two
     projects (each scan's first copy kept), the one-project rule of :func:`_per_scan_set` then refused the mix,
     and every scan was listed as a "version" of the measurement. Here each project's candidates are taken on their
     own (:func:`_per_scan_set`; a project that forms no set keeps its groups as they are), and versions that are the
-    same curves with the same parameters are one. ``None`` when no project forms a set: the caller's pool stands."""
+    same curves with the same parameters are one. ``None`` when no project forms a set: the caller's pool stands.
+
+    c10-r: a project whose set is IDENTICAL to another's (the same curves AND the same parameters) is collapsed into
+    the first (by path) and NAMED: on the kept set (``identical_sets_in``) and in a note appended to ``notes``."""
     by_prj: dict[str, dict[str, dict]] = {}
     for c in cands:
         by_prj.setdefault(c["prj_relative_path"], {}).setdefault(c["data_hash"], c)
@@ -383,13 +387,50 @@ def _per_scan_sets_by_project(cands: Sequence[Mapping], stems: Sequence[str], np
         return None
     same: dict[tuple, dict] = {}
     for v in out:
-        key = ("set", *v["per_scan_set"]["member_keys"]) if v.get("_match_kind") == "per_scan_set" else ("one", _curve_key(v))
-        same.setdefault(key, v)
+        is_set = v.get("_match_kind") == "per_scan_set"
+        key = ("set", *v["per_scan_set"]["member_keys"]) if is_set else ("one", _curve_key(v))
+        kept = same.setdefault(key, v)
+        if is_set and kept is not v and v["prj_relative_path"] not in kept.setdefault("identical_sets_in", []):
+            kept["identical_sets_in"].append(v["prj_relative_path"])
+    for v in same.values():
+        if v.get("identical_sets_in") and notes is not None:
+            scans = ", ".join(str(n) for n in v["per_scan_set"]["scans"])
+            notes.append({
+                "code": "identical_athena_set_in_several_projects",
+                "group_id": group_id,
+                "prj_relative_path": v["prj_relative_path"],
+                "identical_in": list(v["identical_sets_in"]),
+                "statement": (f"The scientist's per-scan Athena groups for scans {scans} in "
+                              f"{', '.join(v['identical_sets_in'])} are the same curves with the same normalisation "
+                              f"parameters as those in {v['prj_relative_path']}, so they are one set (read from "
+                              f"{v['prj_relative_path']})."),
+            })
     return list(same.values())
+
+
+#: c10-r: what a SET of per-scan groups is identified by (``version_provenance`` ``data_sha256_prefix``). A set's
+#: project file and Athena group are its first member's, so its identity names its MEMBERS too (data hash and
+#: parameters of each): a selection of one curve never resolves to a set holding it, nor a set to another set.
+SET_IDENTITY_PREFIX = "set-"
+
+
+def set_identity(members: Mapping) -> str:
+    """``set-`` + the first 16 hex of the sha256 of the set's members (data hash, parameters), in scan order."""
+    keys = json.dumps([list(k) for k in members["member_keys"]], sort_keys=True)
+    return SET_IDENTITY_PREFIX + hashlib.sha256(keys.encode("utf-8")).hexdigest()[:16]
 
 
 MAX_VERSIONS = 20
 _YEAR = re.compile(r"(?<!\d)((?:19|20)\d{2})(?!\d)")
+
+
+def _set_named(entry: Mapping, members: Mapping) -> dict:
+    """What a set's provenance names: its member groups, labels and scans, and (c10-r) the other projects that
+    hold the identical set (absent when none does)."""
+    out = {k: list(members[k]) for k in ("athena_groups", "labels", "scans")}
+    if entry.get("identical_sets_in"):
+        out["identical_in_projects"] = list(entry["identical_sets_in"])
+    return out
 
 
 def version_provenance(entry: Mapping, stems: Sequence[str]) -> dict:
@@ -407,9 +448,10 @@ def version_provenance(entry: Mapping, stems: Sequence[str]) -> dict:
         "is_merge": entry.get("is_merge"),
         "scan_selection": list(members["scans"]) if members else scan_selection(entry["label"], stems),
         "params": entry.get("params"),
-        "data_sha256_prefix": str(entry.get("data_hash") or "")[:16],
+        # c10-r: a SET's identity names its members (set_identity); one curve's is its data hash
+        "data_sha256_prefix": set_identity(members) if members else str(entry.get("data_hash") or "")[:16],
         # c10-m: a version that is a SET of the scientist's per-scan groups names them (its label is the first's)
-        **({"per_scan_set": {k: list(members[k]) for k in ("athena_groups", "labels", "scans")}} if members else {}),
+        **({"per_scan_set": _set_named(entry, members)} if members else {}),
         **({"already_normalized": True, "already_normalized_rule": ALREADY_NORMALIZED_RULE_ID} if already_normalized(entry) else {}),
         **({"edge_step_implausible": entry["edge_step_implausible"]} if not plausible(entry) else {}),
     }
@@ -453,21 +495,27 @@ def match_with_versions(groups: Sequence[Mapping], entries: Sequence[Mapping], n
     matched: dict[str, dict] = {}
     versions: dict[str, list[dict]] = {}
     for gid, cands in by_group.items():
-        uniq: dict[str, dict] = {}
+        # c10-r: copies in SEVERAL projects are one curve only when the parameters applied to them are the same too.
+        # A data hash alone kept each scan's first copy: when the first project's copies covered every scan, its set
+        # formed from it alone and another project's normalisation of the same scans disappeared without a word.
+        several = len({c["prj_relative_path"] for c in cands}) > 1
+        uniq: dict = {}
         for c in cands:
-            uniq.setdefault(c["data_hash"], c)
+            uniq.setdefault(_curve_key(c) if several else c["data_hash"], c)
         pool = list(uniq.values())
         if len(pool) > 1:
             merged = [c for c in pool if c["is_merge"] or any(_HAS_MERGE_WORD.search(n) for n in c["names"])]
             if len(merged) == 1:
                 pool = merged
         if len(pool) > 1:
-            combined = _per_scan_set(pool, raw_stems.get(gid) or (), np)
-            if combined is not None:
-                pool = [{**combined, "_match_kind": "per_scan_set"}]
+            if several:
+                # c10-m/c10-r: per-scan groups in several projects are a set PER PROJECT (split first), never a
+                # version per scan, and never one project's set standing for another's
+                pool = _per_scan_sets_by_project(cands, raw_stems.get(gid) or (), np, group_id=gid, notes=notes) or pool
             else:
-                # c10-m: per-scan groups in several projects are a set per project, never a version per scan
-                pool = _per_scan_sets_by_project(cands, raw_stems.get(gid) or (), np) or pool
+                combined = _per_scan_set(pool, raw_stems.get(gid) or (), np)
+                if combined is not None:
+                    pool = [{**combined, "_match_kind": "per_scan_set"}]
         if len(pool) == 1:
             matched[gid] = {**pool[0], "_candidates": len(cands), "_distinct": len(uniq)}
         else:

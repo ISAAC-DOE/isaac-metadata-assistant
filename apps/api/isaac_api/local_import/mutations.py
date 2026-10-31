@@ -668,7 +668,14 @@ def _check_decision(bundle: Mapping, kind: str, obj: Mapping, decision: str, val
                 "Name one of them with --value; nothing was recorded."
             )
         ident = [B.athena_version_identity(v) for v in obj.get("athena_versions") or ()]
-        mine = B.athena_version_identity(next(v for v in obj["athena_versions"] if v.get("version_id") == value))
+        listed_v = next(v for v in obj["athena_versions"] if v.get("version_id") == value)
+        mine = B.athena_version_identity(listed_v)
+        if not B._athena_same_version(listed_v, mine):
+            # c10-r: a set listed before its identity named its members; selecting it would resolve to nothing
+            raise MutationRefused(
+                f"{value!r} is a set of per-scan Athena groups listed by an older ISAAC, whose identity does not name "
+                "its members. Run `isaac process` again, then choose among the versions it lists. Nothing was recorded."
+            )
         if ident.count(mine) != 1 or not any(mine.values()):
             raise MutationRefused(
                 f"{value!r} cannot be told apart from another listed version by its own provenance (project file, "
@@ -3629,21 +3636,30 @@ def process(
         # to the fresh result of the same id as it did to the old one
         decided = {d["target"]["id"] for d in bundle.get("scientist_decisions") or ()
                    if d["target"]["kind"] == "processing_result" and d.get("decision") in B.PROCESSING_STATE_DECISIONS}
-        # ... unless the fresh result (same id) holds no version with the provenance the latest selection
-        # recorded (project file, Athena group, data hash): then the old result is kept, so the selection
-        # never points at nothing — or, after a renumbering, at a different curve
-        fresh_by_id = {B.processing_id(r): r for r in produced}
-        for r in bundle.get("processing_results") or ():
-            d = B.latest_athena_selection(bundle, r)
-            pid = B.processing_id(r)
-            if d is not None and (pid not in fresh_by_id or B.athena_resolve(fresh_by_id[pid], d) is None):
-                decided.add(pid)
         superseded = {g["group_id"] for g in bundle.get("superseded_record_groups") or ()}
         # `--group` processes ONLY those groups: every other group's results (decided or not) are kept as they are
         untouched = set() if not group_ids else {g for g in {r.get("group_id") for r in bundle.get("processing_results") or ()}
                                                      if g not in set(group_ids)}
         # a group that is no longer live was not processed: its results stay exactly as they were
         untouched |= set(skip)
+        # A fresh result of the same id holds the version with the provenance the latest selection recorded (project
+        # file, Athena group, data hash; a set's names its members): it replaces the old one, the selection re-pointed.
+        # c10-r: when it holds NO such version, the selection is never carried over to another curve and never left
+        # silently on a stale result: the fresh result replaces the old one, says which choice no longer matches,
+        # and the question is asked again. A result with nothing fresh to replace it is kept as it was.
+        fresh_by_id = {B.processing_id(r): r for r in produced}
+        not_carried: list[tuple[str, Mapping, Mapping]] = []
+        for r in bundle.get("processing_results") or ():
+            d = B.latest_athena_selection(bundle, r)
+            pid = B.processing_id(r)
+            if d is None or pid in decided or r.get("group_id") in superseded or r.get("group_id") in untouched:
+                continue
+            if pid not in fresh_by_id:
+                decided.add(pid)
+            elif B.athena_resolve(fresh_by_id[pid], d) is None:
+                not_carried.append((pid, d, fresh_by_id[pid]))
+        for pid, d, r in not_carried:
+            _say_athena_choice_not_carried_over(r, d)
         # decided results are kept, and so is every result of a SUPERSEDED group (never deleted)
         keep = [r for r in bundle.get("processing_results") or ()
                 if B.processing_id(r) in decided or r.get("group_id") in superseded or r.get("group_id") in untouched]
@@ -3667,6 +3683,14 @@ def process(
         if group_ids:
             # the groups NOT named keep their results as stored (`new` counts only the named groups')
             out["kept_other_groups"] = len(keep) - kept_decided
+        if not_carried:
+            line = _athena_choices_not_carried_over_line(not_carried)
+            out["athena_selections_not_carried_over"] = {
+                "results": [{"result_id": pid, "decision_id": d.get("decision_id"), "value": d.get("value")}
+                            for pid, d, _ in not_carried],
+                "statement": line}
+            if isinstance(out.get("summary"), Mapping):
+                out["summary"] = {**out["summary"], "lines": [*(out["summary"].get("lines") or ()), line]}
         if not_live:
             by_status: dict[str, int] = {}
             for g in not_live:
@@ -3682,6 +3706,42 @@ def process(
         return out
 
     return mutate(bundle_dir, change)
+
+
+def _say_athena_choice_not_carried_over(result: dict, decision: Mapping) -> None:
+    """c10-r: on the fresh ``result``, which the scientist's latest ``select_athena_version`` no longer resolves on,
+    record that it was not carried over (:data:`bundle.ATHENA_NOT_CARRIED_OVER`) and, when it lists versions, say so
+    in its question, which is asked again (``athena_result_of_record`` stays ``None`` until they answer)."""
+    who = (decision.get("decided_by") or {}).get("name")
+    lists = bool(B.athena_version_ids(result))
+    said = (f"The earlier choice {decision.get('value')} ({decision.get('decision_id')}, by {who}) is not one of the "
+            "Athena versions ISAAC lists now, so it is not carried over to another curve"
+            + (" and the question is asked again." if lists else "; this result lists no Athena versions to choose between now."))
+    result[B.ATHENA_NOT_CARRIED_OVER] = {"decision_id": decision.get("decision_id"), "value": decision.get("value"),
+                                         "decided_by": who, "statement": said}
+    if lists and not any(isinstance(q, Mapping) and q.get("code") == B.ATHENA_QUESTION_CODE for q in result.get("questions") or ()):
+        result["questions"] = [*(result.get("questions") or ()), B.athena_question(result)]
+    for q in result.get("questions") or ():
+        if isinstance(q, dict) and q.get("code") == B.ATHENA_QUESTION_CODE:
+            q["text"] = f"{q.get('text', '')} {said}".strip()
+
+
+def _athena_choices_not_carried_over_line(items: Sequence[tuple[str, Mapping, Mapping]]) -> str:
+    """ONE plain line naming each earlier result-of-record choice that no longer matches a listed version."""
+    parts = []
+    for pid, d, r in items:
+        who = (d.get("decided_by") or {}).get("name")
+        part = f"{pid}: {d.get('value')} ({d.get('decision_id')}, by {who})"
+        if not B.athena_version_ids(r):
+            part += ", which now lists no Athena versions to choose between"
+        parts.append(part)
+    n = len(items)
+    asked = any(B.athena_version_ids(r) for _, _, r in items)
+    return (f"{n} earlier choice(s) of the Athena result of record no longer match a version ISAAC lists after this "
+            f"re-processing ({'; '.join(parts)}): the project files, or how ISAAC reads them, changed. "
+            f"{'It is' if n == 1 else 'They are'} not carried over to another curve: no version is selected for "
+            f"{'that result' if n == 1 else 'those results'} now"
+            + (", and the question \"Which one is the result of record?\" will be asked again." if asked else "."))
 
 
 def qc_status_vocabulary() -> list[str]:

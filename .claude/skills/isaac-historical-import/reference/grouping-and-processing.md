@@ -186,7 +186,11 @@ Ask: approve, reject, or needs changes (with a note):
 - **Several Athena versions.** When a result lists more than one of the scientist's Athena versions
   (`athena_versions[]`), ask which one is their result of record and record
   `<isaac> bundle decide <bundle> --target <result_id> --decision select_athena_version --value <version_id> --by "<name>"`. It changes no QC
-  status and no processed value, and it is not an approval.
+  status and no processed value, and it is not an approval. When `isaac process` replies
+  `athena_selections_not_carried_over`, say its statement in plain words: their earlier choice no longer
+  matches a version ISAAC lists (the files, or how ISAAC reads them, changed), nothing is selected now,
+  and ask the question again. A version that is a set of per-scan groups names any project holding the
+  identical set (`per_scan_set.identical_in_projects`); say so.
 - **The record lists only what was applied.** `measurement.processing.steps` comes from the approved
   result's steps, without a calibration whose shift was not applied (`outcome.applied: false`) and
   without a "merge" of a single scan. Never tell the scientist a record was calibrated unless its
