@@ -340,6 +340,7 @@ def _parse(raw: Any, rule: Mapping | None) -> tuple[Any, str | None]:
 
 
 ELECTROLYTE_NAME_PATH = "context.electrochemistry.electrolyte.name"
+ELECTROLYTE_CONC_PATH = "context.electrochemistry.electrolyte.concentration_M"
 POTENTIAL_PATH = "context.electrochemistry.potential_setpoint_V"
 PH_PATH = "context.electrochemistry.pH"
 #: A concentration written into the electrolyte NAME ("0.01 M HClO4", "1M KOH", "KOH 100 mM").
@@ -358,6 +359,24 @@ def electrolyte_name_problem(value: Any) -> str | None:
         return (f"name only: {value!r} also states a concentration ({m.group(1)} mM); put it in "
                 "'Electrolyte Concentration (M)' in mol/L, and only the name here")
     return f"name only: put {m.group(1)} in 'Electrolyte Concentration (M)', and only the name here"
+
+
+def electrolyte_statement_parts(value: Any) -> tuple[str, float] | None:
+    """``(name, concentration in mol/L)`` of an electrolyte STATEMENT that carries exactly one concentration
+    (``"0.5 M H2SO4"`` -> ``("H2SO4", 0.5)``; ``"KOH 100 mM"`` -> ``("KOH", 0.1)``), else ``None``. The template
+    asks the two apart (name only; the concentration in its own column), so a cell that is one part of a
+    reading agrees with it; a statement with two concentrations is not split."""
+    if not isinstance(value, str):
+        return None
+    found = list(_CONCENTRATION_IN_NAME.finditer(value))
+    if len(found) != 1:
+        return None
+    m = found[0]
+    name = " ".join((value[:m.start()] + " " + value[m.end():]).split())
+    if not name:
+        return None
+    number = float(m.group(1))
+    return name, (number / 1000 if m.group(2) == "mM" else number)
 
 
 # --- file-name tokens: a READING to compare against, never a value ---------------------------------
@@ -1990,6 +2009,8 @@ class _Adopter:
                     self.sheet_readings_skipped += 1
                     continue
                 value = self._comparable(i.get("proposed_value"), path)
+                if value is None and path == ELECTROLYTE_CONC_PATH and electrolyte_statement_parts(i.get("proposed_value")):
+                    value = i["proposed_value"].strip()  # the whole statement, compared by its concentration part
                 if value is None:
                     continue
                 where = i.get("source_path") or (self.index.sources.get(((i.get("source_refs") or [{}])[0]).get("source_id") or "") or {}).get("relative_path")
@@ -1997,10 +2018,28 @@ class _Adopter:
                 out.setdefault((repr(value), source), {"value": value, "kind": "ai_reading", "source": source})
         return list(out.values())
 
+    def _contradicts(self, r: Mapping, path: str, value: Any) -> bool:
+        """Does reading ``r`` contradict ``value``? The electrolyte is one statement in the files ("0.5 M H2SO4")
+        and two cells here, so a name equal to its name part, or a concentration equal to its concentration part,
+        agrees; anything else about a name or concentration is a contradiction."""
+        parts = electrolyte_statement_parts(r["value"]) if path in (ELECTROLYTE_NAME_PATH, ELECTROLYTE_CONC_PATH) else None
+        if parts is not None:
+            if path == ELECTROLYTE_NAME_PATH:
+                return not (isinstance(value, str) and " ".join(value.split()) == parts[0])
+            return not _agrees(parts[1], value)
+        v = self._comparable(r["value"], path)
+        return v is not None and not _agrees(v, value)
+
     def against(self, value: Any, run_id: str | None, path: str) -> list[dict]:
         """The readings that CONTRADICT ``value``. A candidate shown here is an exposure."""
-        bad = [r for r in self.readings(run_id, path)
-               if (v := self._comparable(r["value"], path)) is not None and not _agrees(v, value)]
+        pool = self.readings(run_id, path)
+        if path in (ELECTROLYTE_NAME_PATH, ELECTROLYTE_CONC_PATH):
+            # the statement is one reading of both cells, whichever of the two fields it was recorded on
+            other = ELECTROLYTE_CONC_PATH if path == ELECTROLYTE_NAME_PATH else ELECTROLYTE_NAME_PATH
+            seen = {(repr(r["value"]), r["source"]) for r in pool}
+            pool += [r for r in self.readings(run_id, other)
+                     if electrolyte_statement_parts(r["value"]) and (repr(r["value"]), r["source"]) not in seen]
+        bad = [r for r in pool if self._contradicts(r, path, value)]
         for r in bad:
             if r.get("target") and r["target"] not in self.exposed:
                 self.exposed.append(r["target"])
@@ -2078,7 +2117,7 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
             if bad:
                 # one row per cell of theirs and the VALUES the files read (a scan file and its calibration
                 # file under one folder name are one disagreement); every source is kept
-                key = ("file_reading", sheet, col.header, their_ref, tuple(sorted({repr(ad._comparable(r["value"], path)) for r in bad})))
+                key = ("file_reading", sheet, col.header, their_ref, tuple(sorted({repr(ad._comparable(r["value"], path) or r["value"]) for r in bad})))
                 disagree(key, kind="file_reading", sheet=sheet, header=col.header, path=path, their_value=value,
                          reason="a file reading says otherwise", scope="experiment" if run_id is None else "run",
                          _readings=[_shown_reading(r) for r in bad], _their_cells=[their_ref], _runs=runs,
