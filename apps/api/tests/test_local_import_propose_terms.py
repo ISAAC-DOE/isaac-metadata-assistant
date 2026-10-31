@@ -88,7 +88,8 @@ def test_a_clean_bundle_lists_nothing_and_writes_nothing(bundle_dir, capsys):
     report = _report(capsys, bundle_dir)
     assert report["format"] == "isaac.term-proposal-drafts"
     assert report["sent_by_isaac"] is False
-    assert report["totals"] == {"fields": 0, "terms": 0, "occurrences": 0, "drafts": 0, "answered_since": 0}
+    assert report["totals"] == {"fields": 0, "terms": 0, "occurrences": 0, "drafts": 0, "answered_since": 0,
+                                 "partly_answered": 0, "answered_before_request": 0}
     assert report["exposed_candidates"] == []
     assert (bundle_dir / "bundle.json").read_bytes() == before
 

@@ -80,13 +80,16 @@ A TERM THE WEBSITE WOULD REFUSE FOR ITS SHAPE (a space, a sentence) is not draft
 says what to ASK for (``ask``: "one word, e.g. cathodic_corrosion"); ISAAC still never writes that
 word as the term.
 
-A REQUEST ANSWERED SINCE (computed at read time; nothing is stored): when every run a term's vocabulary
-requests name now holds a scientist's allowed value on that field (:func:`allowed_answers`, alias-aware: a
-reaction answered at ``context.reaction.name`` answers one asked at ``context.electrochemistry.reaction``), the
-term is NOT drafted: its draft says ``answered: true`` and ``answered_with`` the values, so a word the scientist
-has since replaced is never offered for the Schema Proposals page. A request kept with ``--as-said`` is answered
-only by a decision later than it (they kept their word after any earlier ruling). When only some runs are
-answered the draft stays, with ``runs_answered`` / ``runs_still_needing_it`` and a ``partly_answered`` sentence.
+A REQUEST ANSWERED SINCE (computed at read time; nothing is stored): a run a vocabulary request names is
+ANSWERED when a scientist's allowed value on that field (:func:`allowed_answers`, alias-aware: a reaction
+answered at ``context.reaction.name`` answers one asked at ``context.electrochemistry.reaction``) was given AFTER
+the request was last said (``requested_utc``, or ``reaffirmed_utc`` when the same ``--as-said`` answer was given
+again; times compared as times, the decision log's order when a decision's time is not one). When every live run
+the scientist named is answered and nothing else keeps the term, it is NOT drafted (``answered: true``,
+``answered_with``), so a word they have since replaced is never offered for the Schema Proposals page, and their
+notes on those requests move to ``answered_scientist_notes``. A run whose only allowed value came BEFORE the
+request keeps the draft (``answered_before_request``: ask whether they still want the term); a draft answered
+for some runs says so (``partly_answered``); a run in no live record group is said apart and counts for nothing.
 
 A SECOND RUN (``--merge``): :func:`merge_reports` updates an existing drafts file instead of
 replacing it: new terms are added, counts, citations, runs and notes are this run's (notes come only
@@ -285,22 +288,42 @@ def _fills(path: str) -> str:
     return _composer_path(path)
 
 
-def allowed_answers(bundle: Mapping, paths: Sequence[str]) -> dict[tuple[str, str | None], list[tuple[Any, str | None]]]:
-    """``{(filled path, run id or None): [(value, decided_utc)]}``: every value a scientist's ``confirm``/``correct``
-    (any confirming decision: a ruling, a template cell, ``decide``) now gives a candidate or missing value at one of
-    ``paths`` (alias-aware, :func:`_fills`) that its own field takes (:func:`bundle.value_problem` finds nothing)."""
+def _utc(text: Any) -> datetime | None:
+    """A bundle time (``2026-10-31T09:00:00Z``, fractions allowed) as a datetime, or ``None`` when it is not one."""
+    if not isinstance(text, str) or not text.endswith("Z"):
+        return None
+    try:
+        when = datetime.fromisoformat(text[:-1] + "+00:00")
+    except ValueError:
+        return None
+    return when if when.tzinfo is not None else None
+
+
+#: One allowed answer: its value, its decision's ``decided_utc`` and the decision's place in the decision log.
+Answer = tuple[Any, Any, int]
+
+
+def allowed_answers(bundle: Mapping, paths: Sequence[str]) -> dict[tuple[str, str | None], list[Answer]]:
+    """``{(filled path, run id or None): [(value, decided_utc, decision index)]}``: every value a scientist's
+    confirming decision (a ruling, a template cell, ``decide``) now gives a candidate or missing value at one of
+    ``paths`` (alias-aware, :func:`_fills`) that its own field takes (:func:`bundle.value_problem` finds nothing).
+    A beamtime-wide answer at a run-only path (``records.RUN_ONLY_PATHS``, DEC-69) is left out: it never fills a run."""
+    from .records import RUN_ONLY_PATHS
+
     want = {_fills(p) for p in paths if isinstance(p, str)}
-    out: dict[tuple[str, str | None], list[tuple[Any, str | None]]] = {}
+    out: dict[tuple[str, str | None], list[Answer]] = {}
     if not want:
         return out
-    decision_of = B._decisions_by_target(list(bundle.get("scientist_decisions") or ()))
+    log = list(bundle.get("scientist_decisions") or ())
+    place = {id(d): i for i, d in enumerate(log)}
+    decision_of = B._decisions_by_target(log)
     conflicts_of: dict[str, list[str]] = {}
     for cf in bundle.get("conflicts") or ():
         conflicts_of.setdefault(cf.get("candidate_id"), []).append(cf.get("conflict_id"))
     for kind, objs in (("candidate", bundle.get("candidates")), ("missing_value", bundle.get("missing_values"))):
         for o in objs or ():
             own = o.get("target_field_path")
-            if not isinstance(own, str) or _fills(own) not in want:
+            if not isinstance(own, str) or _fills(own) not in want or (o.get("run_id") is None and own in RUN_ONLY_PATHS):
                 continue
             if kind == "candidate":
                 d = B.candidate_decision(bundle, o, decision_of, conflicts_of)
@@ -310,11 +333,11 @@ def allowed_answers(bundle: Mapping, paths: Sequence[str]) -> dict[tuple[str, st
                 continue
             value = B.final_value(o.get("value") if kind == "candidate" else None, d, o.get("readings"))
             if value is not None and B.value_problem(own, value) is None:
-                out.setdefault((_fills(own), o.get("run_id")), []).append((value, d.get("decided_utc")))
+                out.setdefault((_fills(own), o.get("run_id")), []).append((value, d.get("decided_utc"), place.get(id(d), -1)))
     return out
 
 
-def _answers_for_run(answers: Mapping, path: str, run_id: str | None) -> list[tuple[Any, str | None]]:
+def _answers_for_run(answers: Mapping, path: str, run_id: str | None) -> list[Answer]:
     """The allowed answers that reach ``run_id`` at ``path``: its own, and a beamtime-wide one where the field takes
     one (never for ``records.RUN_ONLY_PATHS``, DEC-69). ``run_id`` ``None``: the beamtime-wide answers only."""
     from .records import RUN_ONLY_PATHS
@@ -326,23 +349,57 @@ def _answers_for_run(answers: Mapping, path: str, run_id: str | None) -> list[tu
     return own + list(answers.get((fills, None)) or ())
 
 
-def request_answered_runs(req: Mapping, answers: Mapping) -> tuple[dict[str | None, list[Any]], list[str | None]]:
-    """``({run: [allowed values]}, [runs still needing the term])`` for one vocabulary request (a request about the
-    whole beamtime is the one run ``None``). A request kept with ``--as-said`` is answered only by a decision LATER
-    than it (``decided_utc`` after ``requested_utc``): the scientist kept their own word after any earlier ruling, so
-    that ruling does not answer it. Any other request (a sheet's cell) is answered by any allowed answer."""
-    as_said = (req.get("source") or {}).get("as_said") is True
-    asked = str(req.get("requested_utc") or "")
-    answered: dict[str | None, list[Any]] = {}
-    needed: list[str | None] = []
+def request_time(req: Mapping) -> datetime | None:
+    """When a request was last said: the later of ``requested_utc`` and ``reaffirmed_utc`` (the same ``--as-said``
+    answer given again), or ``None`` when neither is a time."""
+    times = [t for t in (_utc(req.get("requested_utc")), _utc(req.get("reaffirmed_utc"))) if t is not None]
+    return max(times) if times else None
+
+
+def _after(answer: Answer, asked: datetime | None, log: Sequence[Mapping] | None) -> bool:
+    """Whether an answer came AFTER the request said at ``asked``: by the two times; when the decision's time is
+    missing or not a time, by its place in the decision log (after every decision timed at or before ``asked``).
+    A request with no time is never answered by order: it cannot be placed."""
+    if asked is None:
+        return False
+    when = _utc(answer[1])
+    if when is not None:
+        return when > asked
+    timed = [i for i, d in enumerate(log or ()) if isinstance(d, Mapping) and (t := _utc(d.get("decided_utc"))) and t <= asked]
+    return answer[2] > max(timed, default=-1)
+
+
+def live_run_ids(bundle: Mapping) -> set[str] | None:
+    """The runs a live record group holds, or ``None`` before any grouping (then every run counts)."""
+    groups = [g for g in bundle.get("record_groups") or () if isinstance(g, Mapping)]
+    if not groups:
+        return None
+    keys = {k for g in groups if g.get("status") in B.LIVE_GROUP_STATUSES for k in g.get("member_run_keys") or ()}
+    return {r["run_id"] for r in bundle.get("runs") or () if isinstance(r, Mapping) and r.get("run_key") in keys}
+
+
+def request_answered_runs(req: Mapping, answers: Mapping, *, live: set[str] | None = None,
+                          log: Sequence[Mapping] | None = None) -> dict:
+    """How the runs one vocabulary request names stand now (a request about the whole beamtime is the one run
+    ``None``): ``{answered: {run: [values]}, before: {run: [values]}, needed: [runs], outside: [runs]}``.
+    ``answered``: a scientist's allowed answer came AFTER the request (:func:`request_time`, :func:`_after`);
+    ``before``: the run's only allowed answers came before it (they still asked for the word, so it is not answered);
+    ``needed``: no allowed answer; ``outside``: in no live record group (``live``), so it needs nothing here."""
+    asked = request_time(req)
+    out: dict = {"answered": {}, "before": {}, "needed": [], "outside": []}
     for rid in list(dict.fromkeys(req.get("run_ids") or ())) or [None]:
-        values = [v for v, when in _answers_for_run(answers, req.get("field_path") or "", rid)
-                  if not as_said or str(when or "") > asked]
-        if values:
-            answered[rid] = _distinct(values)
+        if live is not None and rid is not None and rid not in live:
+            out["outside"].append(rid)
+            continue
+        got = _answers_for_run(answers, req.get("field_path") or "", rid)
+        later = [a[0] for a in got if _after(a, asked, log)]
+        if later:
+            out["answered"][rid] = _distinct(later)
+        elif got:
+            out["before"][rid] = _distinct([a[0] for a in got])
         else:
-            needed.append(rid)
-    return answered, needed
+            out["needed"].append(rid)
+    return out
 
 
 def _distinct(values: Sequence[Any]) -> list[Any]:
@@ -568,41 +625,91 @@ def _draft(sources: Mapping, path: str, term: str, lists: Mapping) -> dict:
     return draft
 
 
-def _answered_since(occs: Sequence[Mapping], requests: Mapping, answers: Mapping) -> dict | None:
-    """What a scientist has answered since asking for a term (:func:`request_answered_runs` over the term's
-    vocabulary requests), or ``None`` when no run they named holds an allowed value. ``answered`` only when every
-    run named holds one and the term has no other occurrence (a reading or value outside a request): then it is not
-    drafted. Otherwise the draft stays and says how many runs still need the term."""
+def _reach(runs: Sequence[str | None]) -> str:
+    """``3 run(s)``, ``the whole beamtime``, or both: a request about the beamtime is never counted as a run."""
+    n = sum(1 for r in runs if r is not None)
+    return " and ".join([*([f"{n} run(s)"] if n else []), *(["the whole beamtime"] if None in runs else [])])
+
+
+def _shown(values: Sequence[Any]) -> str:
+    return ", ".join(f"`{v}`" for v in values)
+
+
+def _answered_since(occs: Sequence[Mapping], requests: Mapping, answers: Mapping, *, live: set[str] | None = None,
+                    log: Sequence[Mapping] | None = None) -> dict | None:
+    """How a term's vocabulary requests stand now (:func:`request_answered_runs`, each run at its worst over the
+    requests: still needed, then answered before the request, then answered after it), or ``None`` when there is
+    nothing to say. ``answered`` (the term is NOT drafted) only when every live run the scientist named holds an
+    allowed value given after their request and nothing else keeps the term (no reading, no off-list value).
+    ``answered_requests``: the requests every one of whose runs is answered (their notes are set aside)."""
     asked = [requests[o["ref"]["id"]] for o in occs if o["origin"] == ORIGIN_REQUEST and o["ref"].get("id") in requests]
     if not asked:
         return None
-    given: dict[str | None, list[Any]] = {}
-    needed: set[str | None] = set()
+    rank = {"answered": 0, "before": 1, "needed": 2}
+    state: dict[str | None, str] = {}
+    after: dict[str | None, list[Any]] = {}
+    before: dict[str | None, list[Any]] = {}
+    outside: set[str] = set()
+    answered_requests: set[str] = set()
+
+    def mark(rid: str | None, how: str) -> None:
+        if rank[how] >= rank.get(state.get(rid, "answered"), 0):
+            state[rid] = how
+
     for req in asked:
-        got, still = request_answered_runs(req, answers)
-        needed |= set(still)
-        for rid, values in got.items():
-            given.setdefault(rid, []).extend(values)
-    done = [rid for rid in given if rid not in needed]
-    if not done:
+        st = request_answered_runs(req, answers, live=live, log=log)
+        outside |= set(st["outside"])
+        for rid, values in st["answered"].items():
+            mark(rid, "answered")
+            after.setdefault(rid, []).extend(values)
+        for rid, values in st["before"].items():
+            mark(rid, "before")
+            before.setdefault(rid, []).extend(values)
+        for rid in st["needed"]:
+            mark(rid, "needed")
+        if st["answered"] and not st["before"] and not st["needed"]:
+            answered_requests.add(req.get("request_id"))
+    done = [r for r, s in state.items() if s == "answered"]
+    early = [r for r, s in state.items() if s == "before"]
+    needed = [r for r, s in state.items() if s == "needed"]
+    if not done and not early and not outside:
         return None
-    others = sum(1 for o in occs if o["origin"] != ORIGIN_REQUEST)
-    values = _distinct([v for rid in done for v in given[rid]])
-    shown = ", ".join(f"`{v}`" for v in values)
-    reach = "the whole beamtime" if done == [None] else f"{len([r for r in done if r])} run(s)"
-    if not needed and not others:
-        statement = (f"Answered since it was asked for: a scientist's decision now gives {reach} an allowed value ({shown}), "
-                     "so the term is not drafted and is not to be offered as a proposal. If the scientist still wants "
-                     "their own word, `isaac bundle decide ... --value \"<their exact word>\" --as-said` keeps it again "
-                     "and it is drafted.")
-        return {"answered": True, "answered_with": values, "runs_answered": len(done), "runs_still_needing_it": 0,
-                "statement": statement}
-    statement = (f"Partly answered since it was asked for: an allowed value ({shown}) now stands for {reach}; "
-                 f"{len(needed)} run(s) named still need the term"
-                 + (f", and {others} occurrence(s) are outside the scientist's requests" if others else "")
-                 + ". Say so when offering the draft.")
-    return {"answered": False, "answered_with": values, "runs_answered": len(done), "runs_still_needing_it": len(needed),
-            "statement": statement}
+    unconfirmed = sum(1 for o in occs if o["origin"] in (ORIGIN_PARSER, ORIGIN_AI))
+    confirmed = sum(1 for o in occs if o["origin"] == ORIGIN_CONFIRMED)
+    values = _distinct([v for rid in done for v in after[rid]])
+    info: dict[str, Any] = {"answered": False, "answered_with": values,
+                            "runs_answered": sum(1 for r in done if r is not None),
+                            "runs_still_needing_it": sum(1 for r in needed if r is not None),
+                            "answered_requests": sorted(answered_requests)}
+    if None in state:
+        info["whole_beamtime"] = state[None]
+    if outside:
+        info["runs_in_no_live_group"] = len(outside)
+        info["runs_in_no_live_group_note"] = (f"{len(outside)} run(s) the scientist named are in no live record group: "
+                                              "they need nothing here and are not counted.")
+    if early:
+        early_values = _distinct([v for rid in early for v in before[rid]])
+        info.update(answered_before_request=True, answered_before_request_with=early_values,
+                    runs_answered_before_request=sum(1 for r in early if r is not None),
+                    answered_before_request_note=(f"{_reach(early)} already held {_shown(early_values)} before the word was "
+                                                  "asked for; ask the scientist whether they still want the term."))
+    if done and not early and not needed and not unconfirmed and not confirmed:
+        info["answered"] = True
+        info["reason"] = (f"Answered since it was asked for: a scientist's decision after the request now gives {_reach(done)} "
+                          f"an allowed value ({_shown(values)}), so the term is not drafted and is not to be offered as a "
+                          "proposal. If the scientist still wants their own word, `isaac bundle decide ... --value "
+                          "\"<their exact word>\" --as-said` keeps it again and it is drafted.")
+    elif done and not early and not needed:
+        kept = [*([f"{unconfirmed} reading(s) no scientist confirmed"] if unconfirmed else []),
+                *([f"{confirmed} off-list value(s) a scientist confirmed"] if confirmed else [])]
+        info["partly_answered"] = (f"Every run the scientist named now holds an allowed value ({_shown(values)}); drafted only "
+                                   f"because of {' and '.join(kept)}.")
+    elif done:
+        info["partly_answered"] = (f"Partly answered since it was asked for: an allowed value ({_shown(values)}) now stands for "
+                                   f"{_reach(done)}"
+                                   + (f"; {_reach(needed)} named still need the term" if needed else "")
+                                   + ". Say so when offering the draft.")
+    return info
 
 
 def propose_terms(bundle: Mapping, sources: Mapping) -> dict:
@@ -614,6 +721,8 @@ def propose_terms(bundle: Mapping, sources: Mapping) -> dict:
 
     requests = {r.get("request_id"): r for r in bundle.get("vocabulary_requests") or () if isinstance(r, Mapping)}
     answers = allowed_answers(bundle, [r.get("field_path") for r in requests.values()]) if requests else {}
+    live = live_run_ids(bundle) if requests else None
+    log = list(bundle.get("scientist_decisions") or ())
     fields = []
     drafts = answered_terms = 0
     for path in sorted(by_field):
@@ -628,7 +737,11 @@ def propose_terms(bundle: Mapping, sources: Mapping) -> dict:
             seen: set = set()
             total_citations = 0
             run_ids = sorted({r for o in occs for r in o.get("run_ids") or ()})
-            notes = [o["note"] for o in occs if o.get("note")]
+            since = _answered_since(occs, requests, answers, live=live, log=log)
+            # a request the scientist has since answered is not their live word for the term: its note is set aside
+            set_aside = set(since.pop("answered_requests")) if since is not None else set()
+            notes = [o["note"] for o in occs if o.get("note") and o["ref"].get("id") not in set_aside]
+            answered_notes = [o["note"] for o in occs if o.get("note") and o["ref"].get("id") in set_aside]
             for o in occs:
                 for cit in o["citations"]:
                     key = (cit.get("file"), cit.get("locator"), tuple(cit.get("run_ids") or ()))
@@ -638,17 +751,14 @@ def propose_terms(bundle: Mapping, sources: Mapping) -> dict:
                     total_citations += 1
                     if len(citations) < MAX_CITATIONS_PER_TERM:
                         citations.append({**cit, "origin": o["origin"], "ref": o["ref"]})
-            since = _answered_since(occs, requests, answers)
             if since is not None and since["answered"]:
                 # ANSWERED SINCE: never offered for the Schema Proposals page, which saves to the ISAAC server
-                draft = {"drafted": False, **{k: v for k, v in since.items() if k != "statement"},
-                         "reason": since["statement"]}
+                draft = {"drafted": False, **since}
                 answered_terms += 1
             else:
                 draft = _draft(sources, path, term, lists)
                 if since is not None:
-                    draft = {**draft, **{k: v for k, v in since.items() if k != "statement"},
-                             "partly_answered": since["statement"]}
+                    draft = {**draft, **since}
             drafts += 1 if draft["drafted"] else 0
             terms.append(
                 {
@@ -659,6 +769,7 @@ def propose_terms(bundle: Mapping, sources: Mapping) -> dict:
                     "runs": len(run_ids),
                     "run_ids": run_ids,
                     "scientist_notes": notes,
+                    "answered_scientist_notes": answered_notes,
                     "citations": citations,
                     "citations_total": total_citations,
                     "citations_truncated": total_citations > len(citations),
@@ -692,7 +803,7 @@ def propose_terms(bundle: Mapping, sources: Mapping) -> dict:
             "terms": sum(len(f["terms"]) for f in fields),
             "occurrences": sum(f["occurrences"] for f in fields),
             "drafts": drafts,
-            "answered_since": answered_terms,
+            **_answer_totals(fields),
         },
         "vocabulary_requests_read": len(bundle.get("vocabulary_requests") or ()),
         "fields": fields,
@@ -705,6 +816,15 @@ def propose_terms(bundle: Mapping, sources: Mapping) -> dict:
     }
 
 
+def _answer_totals(fields: Sequence[Mapping]) -> dict:
+    """``answered_since`` (terms not drafted because they are answered), and the drafts that say
+    ``partly_answered`` or ``answered_before_request``. A carried-over term is none of them."""
+    current = [t.get("draft") or {} for f in fields for t in f["terms"] if not t.get("carried_over")]
+    return {"answered_since": sum(1 for d in current if d.get("answered") is True),
+            "partly_answered": sum(1 for d in current if d.get("drafted") and d.get("partly_answered")),
+            "answered_before_request": sum(1 for d in current if d.get("drafted") and d.get("answered_before_request"))}
+
+
 # --- a second run: --merge ------------------------------------------------------------------------
 
 
@@ -713,8 +833,10 @@ class MergeRefused(ValueError):
 
 
 def _description(term_entry: Mapping) -> str:
-    body = (((term_entry.get("draft") or {}).get("portal_payload") or {}).get("body") or {})
-    text = body.get("description")
+    draft = term_entry.get("draft") or {}
+    text = ((draft.get("portal_payload") or {}).get("body") or {}).get("description")
+    if not (isinstance(text, str) and text.strip()):
+        text = draft.get("earlier_description")  # kept while the term was answered, not drafted
     return text.strip() if isinstance(text, str) else ""
 
 
@@ -835,8 +957,7 @@ def merge_reports(old: Any, new: Mapping, sources: Mapping) -> tuple[dict, dict]
         "drafts": sum(1 for f in merged["fields"] for t in f["terms"]
                       if (t.get("draft") or {}).get("drafted") and not t.get("carried_over")),
         "carried_over": sum(1 for f in merged["fields"] for t in f["terms"] if t.get("carried_over")),
-        "answered_since": sum(1 for f in merged["fields"] for t in f["terms"]
-                              if (t.get("draft") or {}).get("answered") is True and not t.get("carried_over")),
+        **_answer_totals(merged["fields"]),
     }
     change = {"merged_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "terms_before": len(before),
               "added": added, "updated": updated, "descriptions_kept": kept_descriptions, "carried_over": carried,

@@ -3815,6 +3815,10 @@
         "requested_utc": {
           "$ref": "#/$defs/utc"
         },
+        "reaffirmed_utc": {
+          "$ref": "#/$defs/utc",
+          "description": "Optional: the last time the same `decide --as-said` answer was given again. `bundle propose-terms` reads an allowed value given before the later of this and requested_utc as not answering the request."
+        },
         "scope": {
           "enum": [
             "run",

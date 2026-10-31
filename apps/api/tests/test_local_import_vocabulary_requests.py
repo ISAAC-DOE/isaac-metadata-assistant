@@ -113,12 +113,13 @@ def test_an_off_list_answer_is_kept_as_a_vocabulary_request_never_a_decision(b, 
                              "as_said": True}  # c10-r: kept because the scientist said it is their own word
     assert req["note"] == "the Pt dissolves under cathodic bias"
     assert B.check_bundle(b) == []
-    # the same answer again keeps nothing new and writes nothing
-    before = (b / "bundle.json").read_bytes()
+    # the same answer again keeps nothing new: the kept request is reaffirmed (c13f H2), nothing else changes
     code, err = _said(b, capsys, "--target", target["value_id"], "--decision", "correct", "--value", "cathodic corrosion",
                         "--note", "the Pt dissolves under cathodic bias")
-    assert code == 2 and "kept earlier" in err and KEPT in err
-    assert (b / "bundle.json").read_bytes() == before
+    assert code == 2 and "kept earlier and reaffirmed now" in err and KEPT in err
+    [again] = M.load(b)["vocabulary_requests"]
+    assert {k: v for k, v in again.items() if k != "reaffirmed_utc"} == req and again["reaffirmed_utc"].endswith("Z")
+    assert len(M.load(b)["scientist_decisions"]) == decisions_before and B.check_bundle(b) == []
 
 
 def test_without_as_said_an_off_list_answer_keeps_nothing_and_says_how_to_keep_it(b, capsys):
@@ -427,24 +428,44 @@ def test_validate_says_pending_vocabulary(grouped, capsys):
     assert row["field_path"] == CELL and row["term"] == "three_electrode_static_cell" and row["groups"] == [group["group_id"]]
 
 
-# --- answered since: the field now holds an allowed value (c13f M1, M2) ----------------------------------
+# --- answered since: the field now holds an allowed value (c13f) --------------------------------------------
 
 RXN_NAME = "context.reaction.name"
 
 
+@pytest.fixture()
+def ticking(monkeypatch):
+    """Every bundle time one second after the last, so "after the request" is decidable within one test."""
+    from datetime import datetime, timedelta, timezone
+
+    clock = {"t": datetime(2099, 1, 1, tzinfo=timezone.utc)}
+
+    def now() -> str:
+        clock["t"] += timedelta(seconds=1)
+        return clock["t"].strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    monkeypatch.setattr(M, "now_utc", now)
+
+
 def _answered_bundle(*, path=REACTION, field=REACTION, value="surface_oxidation", decided="2099-01-01T00:00:02Z",
-                     requested="2099-01-01T00:00:01Z", as_said=False, runs=("run-1",)):
+                     requested="2099-01-01T00:00:01Z", as_said=False, runs=("run-1",), answer_run="run-1"):
     """A minimal bundle: one vocabulary request for 'oxidation' at ``path``, and a scientist's ``correct`` with ``value``
-    on a missing value at ``field`` for run-1."""
+    on a missing value at ``field`` for ``answer_run``."""
     source = {"kind": "decide_answer", "command": "bundle decide", **({"as_said": True} if as_said else {})}
     return {
         "vocabulary_requests": [{"request_id": "vr-00001", "field_path": path, "term": "oxidation", "run_ids": list(runs),
                                  "requested_utc": requested, "source": source}],
-        "missing_values": [{"value_id": "mv-ZZ1", "run_id": "run-1", "target_field_path": field}],
+        "missing_values": [{"value_id": "mv-ZZ1", "run_id": answer_run, "target_field_path": field}],
         "candidates": [], "conflicts": [],
         "scientist_decisions": [{"decision_id": "d-00001", "target": {"kind": "missing_value", "id": "mv-ZZ1"},
                                  "decision": "correct", "value": value, "decided_utc": decided}],
     }
+
+
+def _state(bundle, **kw):
+    [req] = bundle["vocabulary_requests"]
+    answers = P.allowed_answers(bundle, [req["field_path"]])
+    return P.request_answered_runs(req, answers, log=bundle["scientist_decisions"], **kw)
 
 
 def test_pending_vocabulary_reads_the_path_the_answer_fills():
@@ -459,37 +480,53 @@ def test_pending_vocabulary_reads_the_path_the_answer_fills():
 
 
 @pytest.mark.parametrize("path, field", [(REACTION, REACTION), (REACTION, RXN_NAME), (ENV, ENV), (CELL, CELL)])
-def test_pending_vocabulary_says_nothing_where_the_runs_now_hold_an_allowed_value(path, field):
+@pytest.mark.parametrize("decided", ["2099-01-01T00:00:02Z", "2000-01-01T00:00:00Z"])
+def test_pending_vocabulary_says_nothing_where_the_runs_now_hold_an_allowed_value(path, field, decided):
+    """Whether the field is filled, not when: an allowed value given before the request still fills it."""
     value = {ENV: "in_situ", CELL: "three_electrode"}.get(field, "surface_oxidation")
-    bundle = _answered_bundle(path=path, field=field, value=value)
     group = [("rg-a", {}, {"member_run_ids": ["run-1"], "filled": []})]
-    assert P.pending_vocabulary(bundle, group) == []  # whatever the composer did, the run holds an allowed answer
+    assert P.pending_vocabulary(_answered_bundle(path=path, field=field, value=value, decided=decided), group) == []
     off = _answered_bundle(path=path, field=field, value="ZZ_not_on_any_list")
     assert len(P.pending_vocabulary(off, group)) == 1  # a value the field refuses answers nothing
 
 
-def test_a_request_is_answered_alias_aware_and_an_as_said_one_only_by_a_later_decision():
-    answered, needed = P.request_answered_runs(*_req_and_answers(_answered_bundle(field=RXN_NAME)))
-    assert answered == {"run-1": ["surface_oxidation"]} and needed == []
-    # kept with --as-said AFTER the ruling: the scientist kept their word deliberately, so the ruling does not answer it
-    later = _answered_bundle(as_said=True, decided="2099-01-01T00:00:00Z", requested="2099-01-01T00:00:01Z")
-    assert P.request_answered_runs(*_req_and_answers(later)) == ({}, ["run-1"])
-    same_second = _answered_bundle(as_said=True, decided="2099-01-01T00:00:01Z", requested="2099-01-01T00:00:01Z")
-    assert P.request_answered_runs(*_req_and_answers(same_second)) == ({}, ["run-1"])
-    # ruled after an --as-said request: answered
-    ruled = _answered_bundle(as_said=True)
-    assert P.request_answered_runs(*_req_and_answers(ruled))[1] == []
-    # a run with no answer still needs it; a beamtime-wide answer never reaches a run-only field (DEC-69)
+def test_a_request_is_answered_only_by_an_allowed_value_given_after_it():
+    assert _state(_answered_bundle(field=RXN_NAME))["answered"] == {"run-1": ["surface_oxidation"]}  # alias-aware
+    # before the request (any request, not only --as-said): it still asks for the word
+    early = _state(_answered_bundle(decided="2099-01-01T00:00:00Z"))
+    assert early["answered"] == {} and early["before"] == {"run-1": ["surface_oxidation"]} and early["needed"] == []
+    assert _state(_answered_bundle(decided="2099-01-01T00:00:01Z"))["before"]  # the same second is not after
+    # times compared as times, not as text (a fraction of a second sorts after "Z" as text)
+    assert _state(_answered_bundle(requested="2099-01-01T00:00:01.5Z", decided="2099-01-01T00:00:01Z"))["before"]
+    # reaffirmed: the later of the two times
+    again = _answered_bundle(as_said=True)
+    again["vocabulary_requests"][0]["reaffirmed_utc"] = "2099-01-01T00:00:03Z"
+    assert _state(again)["before"] and P.request_time(again["vocabulary_requests"][0]).second == 3
+
+
+def test_a_decision_with_no_time_is_placed_by_the_decision_log():
+    bundle = _answered_bundle(decided="not a time")
+    bundle["scientist_decisions"].insert(0, {"decision_id": "d-00000", "target": {"kind": "experiment", "id": "x"},
+                                            "decision": "defer", "decided_utc": "2099-01-01T00:00:00Z"})
+    assert _state(bundle)["answered"]  # logged after every decision timed before the request
+    earlier = _answered_bundle(decided="not a time")  # logged BEFORE a decision timed before the request
+    earlier["scientist_decisions"].append({"decision_id": "d-00002", "target": {"kind": "experiment", "id": "y"},
+                                           "decision": "defer", "decided_utc": "2099-01-01T00:00:00Z"})
+    assert _state(earlier)["before"]
+    bundle["vocabulary_requests"][0]["requested_utc"] = "not a time"  # a request that cannot be placed is never answered
+    assert not _state(bundle)["answered"]
+
+
+def test_run_only_fields_take_no_beamtime_answer_and_runs_outside_live_groups_count_for_nothing():
+    # a beamtime-wide reaction answered at context.electrochemistry.reaction never reaches a request at context.reaction.name
+    bundle = _answered_bundle(path=RXN_NAME, field=REACTION, answer_run=None)
+    assert _state(bundle) == {"answered": {}, "before": {}, "needed": ["run-1"], "outside": []}
+    # a field that takes a beamtime-wide value: answered, but only after the request
+    scale = _answered_bundle(path=SCALE, field=SCALE, value="RHE", answer_run=None, decided="2099-01-01T00:00:00Z")
+    assert _state(scale)["before"] == {"run-1": ["RHE"]}
     two = _answered_bundle(runs=("run-1", "run-2"))
-    two["missing_values"].append({"value_id": "mv-ZZ2", "run_id": None, "target_field_path": REACTION})
-    two["scientist_decisions"].append({"decision_id": "d-00002", "target": {"kind": "missing_value", "id": "mv-ZZ2"},
-                                       "decision": "correct", "value": "OER", "decided_utc": "2099-01-01T00:00:03Z"})
-    assert P.request_answered_runs(*_req_and_answers(two)) == ({"run-1": ["surface_oxidation"]}, ["run-2"])
-
-
-def _req_and_answers(bundle):
-    [req] = bundle["vocabulary_requests"]
-    return req, P.allowed_answers(bundle, [req["field_path"]])
+    assert _state(two, live={"run-1"}) == {"answered": {"run-1": ["surface_oxidation"]}, "before": {}, "needed": [],
+                                           "outside": ["run-2"]}
 
 
 def test_validate_does_not_say_pending_for_a_reaction_ruled_since(grouped, capsys):
@@ -512,32 +549,42 @@ def test_validate_does_not_say_pending_for_a_reaction_ruled_since(grouped, capsy
     assert _decide(grouped, capsys, "--target", target["value_id"], "--decision", "correct",
                    "--value", "surface_oxidation")[0] == 0
     assert pending() == []
+    # their word kept again after the ruling: drafted again, but the field is filled, so nothing is pending
+    assert _said(grouped, capsys, "--target", target["value_id"], "--decision", "correct", "--value", "oxidation")[0] == 2
+    assert pending() == []
 
 
-def test_propose_terms_does_not_draft_a_term_answered_since_and_says_how_many_runs_still_need_one(grouped, capsys, tmp_path):
-    """M2: a sheet's word the scientist has since replaced with an allowed value is not drafted (never offered for the
-    Schema Proposals page); a part-answered one is drafted with the count; their word kept again with --as-said is drafted."""
+def _env_sheet(grouped, tmp_path, runs=("run-001", "run-002")):
     xlsx = tmp_path / "t.xlsx"
     assert cli.main(["bundle", "template", "export", str(grouped), "--out", str(xlsx)]) == 0
     wb = openpyxl.load_workbook(xlsx)
-    for rid in ("run-001", "run-002"):
+    for rid in runs:
         wb["File List"][f"{_col('Environment')}{_row_of(xlsx, rid)}"] = "aqueous_electrochemistry"
     wb.save(xlsx)
     assert cli.main(["bundle", "template", "import", str(grouped), str(xlsx), "--by", WHO, "--apply"]) == 0
+
+
+def test_propose_terms_does_not_draft_a_term_answered_since_and_says_how_many_runs_still_need_one(grouped, capsys, tmp_path,
+                                                                                                    ticking):
+    """M2: a sheet's word the scientist has since replaced with an allowed value is not drafted (never offered for the
+    Schema Proposals page); a part-answered one is drafted with the count; their word kept again is drafted."""
+    _env_sheet(grouped, tmp_path)
     first = _term(_report(grouped, capsys), ENV, "aqueous_electrochemistry")
-    assert first["draft"]["drafted"] is True and "answered" not in first["draft"] and "partly_answered" not in first["draft"]
+    assert first["draft"]["drafted"] is True and "answered" not in first["draft"] and first["scientist_notes"]
     out = tmp_path / "terms.json"
     assert cli.main(["bundle", "propose-terms", str(grouped), "--out", str(out)]) == 0
-    doc = json.loads(out.read_text(encoding="utf-8"))  # a description written in the file is not lost once answered
+    doc = json.loads(out.read_text(encoding="utf-8"))  # a description written in the file survives being answered
     doc["fields"][0]["terms"][0]["draft"]["portal_payload"]["body"]["description"] = "ZZ synthetic description text"
     out.write_text(json.dumps(doc), encoding="utf-8")
 
     env = {rid: _miss_of(grouped, ENV, rid)["value_id"] for rid in ("run-001", "run-002")}
     assert _decide(grouped, capsys, "--target", env["run-001"], "--decision", "correct", "--value", "in_situ")[0] == 0
-    part = _term(_report(grouped, capsys), ENV, "aqueous_electrochemistry")["draft"]
+    report = _report(grouped, capsys)
+    part = _term(report, ENV, "aqueous_electrochemistry")["draft"]
     assert part["drafted"] is True and part["answered"] is False
     assert part["runs_answered"] == 1 and part["runs_still_needing_it"] == 1 and part["answered_with"] == ["in_situ"]
     assert "1 run(s) named still need the term" in part["partly_answered"]
+    assert report["totals"]["partly_answered"] == 1
 
     assert _decide(grouped, capsys, "--target", env["run-002"], "--decision", "correct", "--value", "ex_situ")[0] == 0
     report = _report(grouped, capsys)
@@ -546,19 +593,73 @@ def test_propose_terms_does_not_draft_a_term_answered_since_and_says_how_many_ru
     assert done["draft"]["answered_with"] == ["in_situ", "ex_situ"] and "portal_payload" not in done["draft"]
     assert "not to be offered as a proposal" in done["draft"]["reason"] and "--as-said" in done["draft"]["reason"]
     assert report["totals"]["answered_since"] == 1 and report["totals"]["drafts"] == 0
-    assert done["scientist_notes"] and done["count"] == 1  # their request is still shown, as theirs
+    # their request is still counted, but its note is set aside: it is not their live word for the term
+    assert done["count"] == 1 and done["scientist_notes"] == [] and len(done["answered_scientist_notes"]) == 1
     capsys.readouterr()
     assert cli.main(["bundle", "propose-terms", str(grouped), "--out", str(out), "--merge"]) == 0
     assert "1 term(s) the scientist asked for now hold an allowed value" in capsys.readouterr().out
     merged = _term(json.loads(out.read_text(encoding="utf-8")), ENV, "aqueous_electrochemistry")["draft"]
     assert merged["answered"] is True and merged["drafted"] is False
     assert merged["earlier_description"] == "ZZ synthetic description text" and merged["description_written_by"] is None
+    # merge again while still answered: the description is still kept
+    assert cli.main(["bundle", "propose-terms", str(grouped), "--out", str(out), "--merge"]) == 0
+    merged = _term(json.loads(out.read_text(encoding="utf-8")), ENV, "aqueous_electrochemistry")["draft"]
+    assert merged["earlier_description"] == "ZZ synthetic description text"
 
-    # the scientist keeps their own word again, deliberately, after the ruling: drafted again for that run
-    assert _said(grouped, capsys, "--target", env["run-001"], "--decision", "correct",
+    # the scientist keeps their own word again, deliberately, after the ruling: drafted again, and the run that already
+    # held an allowed value before they asked again is said, never hidden
+    code, err = _said(grouped, capsys, "--target", env["run-001"], "--decision", "correct", "--value", "aqueous_electrochemistry")
+    assert code == 2 and KEPT in err
+    again = _term(_report(grouped, capsys), ENV, "aqueous_electrochemistry")
+    draft = again["draft"]
+    assert draft["drafted"] is True and draft["answered"] is False and draft["answered_before_request"] is True
+    assert draft["answered_before_request_with"] == ["in_situ"] and draft["runs_answered_before_request"] == 1
+    assert ("1 run(s) already held `in_situ` before the word was asked for; ask the scientist whether they still want "
+            "the term.") == draft["answered_before_request_note"]
+    assert draft["runs_answered"] == 1 and draft["runs_still_needing_it"] == 0  # run-002 answered after the sheet's request
+    # the as-said request is their live word; the sheet's, answered for both runs, is set aside
+    assert [n["source"]["kind"] for n in again["scientist_notes"]] == ["decide_answer"]
+    assert [n["source"]["kind"] for n in again["answered_scientist_notes"]] == ["template_cell"]
+    # and the description written earlier comes back into the draft's body on a merge
+    capsys.readouterr()
+    assert cli.main(["bundle", "propose-terms", str(grouped), "--out", str(out), "--merge"]) == 0
+    assert "name runs that held an allowed value before the word was asked for" in capsys.readouterr().out
+    merged = _term(json.loads(out.read_text(encoding="utf-8")), ENV, "aqueous_electrochemistry")["draft"]
+    assert merged["drafted"] is True and merged["portal_payload"]["body"]["description"] == "ZZ synthetic description text"
+
+
+def test_the_same_as_said_answer_again_reaffirms_its_request(grouped, capsys, ticking):
+    """H2: an identical --as-said answer after a ruling stamps reaffirmed_utc, so that ruling no longer answers it."""
+    target = _miss_of(grouped, ENV, "run-001")
+    assert _said(grouped, capsys, "--target", target["value_id"], "--decision", "correct",
                  "--value", "aqueous_electrochemistry")[0] == 2
-    again = _term(_report(grouped, capsys), ENV, "aqueous_electrochemistry")["draft"]
-    assert again["drafted"] is True and again["answered"] is False and again["runs_still_needing_it"] == 1
+    assert _decide(grouped, capsys, "--target", target["value_id"], "--decision", "correct", "--value", "in_situ")[0] == 0
+    assert _term(_report(grouped, capsys), ENV, "aqueous_electrochemistry")["draft"]["answered"] is True
+    code, err = _said(grouped, capsys, "--target", target["value_id"], "--decision", "correct",
+                      "--value", "aqueous_electrochemistry")
+    assert code == 2 and "kept earlier and reaffirmed now" in err
+    [req] = M.load(grouped)["vocabulary_requests"]
+    assert req["reaffirmed_utc"] > req["requested_utc"] and B.check_bundle(grouped) == []
+    draft = _term(_report(grouped, capsys), ENV, "aqueous_electrochemistry")["draft"]
+    assert draft["drafted"] is True and draft["answered_before_request"] is True
+    assert "already held `in_situ` before the word was asked for" in draft["answered_before_request_note"]
+
+
+def test_every_run_named_answered_but_unconfirmed_readings_keep_the_term(b, capsys, ticking):
+    """M3: drafted only because of readings no scientist confirmed, said so; the answered request's note is set aside."""
+    target = _miss(b, CELL)
+    assert cli.main(["bundle", "annotate", str(b), "--target", target["value_id"], "--value", "three_electrode_static_cell",
+                     "--model", "synthetic-test-model", "--excerpt-locator", "page 1 (synthetic)",
+                     "--rationale", "synthetic test reading"]) == 0
+    other = _miss(b, CELL, 1)
+    assert _said(b, capsys, "--target", other["value_id"], "--decision", "correct", "--value", "three_electrode_static_cell",
+                 "--note", "ZZ their note")[0] == 2
+    assert _decide(b, capsys, "--target", other["value_id"], "--decision", "correct", "--value", "three_electrode")[0] == 0
+    t = _term(_report(b, capsys), CELL, "three_electrode_static_cell")
+    assert t["draft"]["drafted"] is True and t["draft"]["answered"] is False
+    assert t["draft"]["partly_answered"] == ("Every run the scientist named now holds an allowed value (`three_electrode`); "
+                                             "drafted only because of 1 reading(s) no scientist confirmed.")
+    assert t["scientist_notes"] == [] and t["answered_scientist_notes"][0]["note"] == "ZZ their note"
 
 
 def _miss_of(bdir: Path, field: str, run_id: str) -> dict:

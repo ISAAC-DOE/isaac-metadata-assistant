@@ -1373,6 +1373,12 @@ function LocalDraftItem({ draft, whyNot, onUse }: { draft: LocalTermDraft; whyNo
             'The file has none for this term.'
           )}
         </dd>
+        {draft.answerNotes.length > 0 && (
+          <>
+            <dt>Answered since</dt>
+            <dd>{draft.answerNotes.join(' ')}</dd>
+          </>
+        )}
         <dt>Where it was read</dt>
         <dd>
           {draft.citations.length === 0

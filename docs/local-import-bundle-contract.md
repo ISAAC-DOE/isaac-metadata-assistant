@@ -736,7 +736,8 @@ passes). Each holds `request_id` (`vr-00001`), `field_path`, `term` (exactly as 
 (the `--by`, `local_unverified`; `null` when no name was given), `requested_utc`, `scope`, `targets`,
 `run_ids`, `source` (`decide_answer` / `template_cell` / `adopted_sheet_cell`, the command, and the
 decision and question, or the file NAME and cells; `as_said: true` on a `decide_answer` kept with
-`--as-said`) and the scientist's own `note`. It is **never a
+`--as-said`), the scientist's own `note`, and an optional `reaffirmed_utc` (the same `--as-said` answer given
+again). It is **never a
 decision and never a value**: no record, question or eligibility reads it. Nothing becomes newly
 writable, and `processed_outputs` is required at 1.10.0 as at 1.2.0–1.9.0.
 

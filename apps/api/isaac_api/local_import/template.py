@@ -2521,6 +2521,7 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
         result: dict[str, Any] = {"their_file": their_file, "cells_adopted": 0, "disagreements": [], "not_adopted": [],
                                   "unmatched_rows": [], "unmatched_runs": [], "rows_matched": 0, "runs_matched": 0,
                                   "runs_on_several_rows": [], "rows_reaching_several_runs": [], "runs_outside_live_groups": [],
+                                  "row_buckets": {"matched": 0, "shared_runs_only": 0, "outside_live_groups_only": 0, "no_run": 0},
                                   "their_columns_not_read": [],
                                   "their_columns_mapped": []}
         adopted_cells: list[tuple[str, str]] = []  # (our cell, their cell)
@@ -2700,8 +2701,12 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
             here = [rid for rid in ids if rid in live and rid not in several]
             outside = [rid for rid in ids if rid not in live]
             if outside:
-                result["runs_outside_live_groups"].append({"row": _cell_ref(SHEET_FILES, f"A{r}"), "name": name, "run_ids": outside,
-                                                           "row_matched_no_live_run": not here})
+                result["runs_outside_live_groups"].append({"row": _cell_ref(SHEET_FILES, f"A{r}"), "name": name, "run_ids": outside})
+            # EVERY ROW IN EXACTLY ONE BUCKET, the most specific that fits: a live run of its own, else only live runs
+            # other rows also name, else only runs in no live record group, else no run
+            bucket = ("matched" if here else "shared_runs_only" if any(rid in live for rid in ids)
+                      else "outside_live_groups_only" if ids else "no_run")
+            result["row_buckets"][bucket] += 1
             if not ids:
                 result["unmatched_rows"].append({"row": _cell_ref(SHEET_FILES, f"A{r}"), "name": name})
                 continue
@@ -2878,13 +2883,15 @@ def render_adopt_summary(result: Mapping) -> str:
     """Compact: rows matched, cells adopted, EVERY disagreement named (run, field, their value, the
     file's reading), not-allowed values with each field's allowed list once, unmatched rows."""
     a = result["adopted"]
-    outside_only = sum(1 for x in a.get("runs_outside_live_groups") or () if x.get("row_matched_no_live_run"))
+    rb = a.get("row_buckets") or {}
     lines = [f"Wrote {result['written']} from {a['their_file']} (bundle {result['bundle_id']}).",
-             f"Rows: {a['rows_matched']} of your File List rows matched {a['runs_matched']} run(s); "
-             f"{len(a['unmatched_rows'])} row(s) matched no run; "
-             + (f"{outside_only} row(s) matched only runs in no live record group (a group rejected, merged or split; "
-                "--json: runs_outside_live_groups), so nothing was adopted from them; " if outside_only else "")
-             + f"{len(a['unmatched_runs'])} run(s) are on none of your rows.",
+             f"Rows: {a['rows_matched']} of your {sum(rb.values()) or a['rows_matched'] + len(a['unmatched_rows'])} File List "
+             f"rows matched {a['runs_matched']} run(s); "
+             + (f"{rb['shared_runs_only']} row(s) name only runs another of your rows also names (nothing adopted from "
+                "them); " if rb.get("shared_runs_only") else "")
+             + (f"{rb['outside_live_groups_only']} row(s) name only runs in no live record group (nothing adopted from "
+                "them; --json: runs_outside_live_groups); " if rb.get("outside_live_groups_only") else "")
+             + f"{len(a['unmatched_rows'])} row(s) matched no run; {len(a['unmatched_runs'])} run(s) are on none of your rows.",
              f"Cells adopted: {a['cells_adopted']} (each cites your cell)."]
     mapped = [f"{m['header']} -> {m['to']}" for m in a["their_columns_mapped"] if m.get("by_alias")]
     if mapped:

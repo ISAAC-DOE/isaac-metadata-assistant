@@ -374,7 +374,21 @@ def test_a_ruling_on_a_moved_disagreements_row_is_not_read(grouped, tmp_path, ca
 # --- after a ruling: what is still asked for, and what the summary counts (c13f) ------------------------
 
 
-def test_a_word_from_their_sheet_ruled_since_is_not_drafted_as_a_proposal(grouped, tmp_path, capsys):
+@pytest.fixture()
+def ticking(monkeypatch):
+    """Every bundle time one second after the last, so "after the request" is decidable within one test."""
+    from datetime import datetime, timedelta, timezone
+
+    clock = {"t": datetime(2099, 1, 1, tzinfo=timezone.utc)}
+
+    def now() -> str:
+        clock["t"] += timedelta(seconds=1)
+        return clock["t"].strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    monkeypatch.setattr(M, "now_utc", now)
+
+
+def test_a_word_from_their_sheet_ruled_since_is_not_drafted_as_a_proposal(grouped, tmp_path, capsys, ticking):
     """Their off-list Environment word is kept as their request on adopt; once they rule an allowed value for every
     run on the Disagreements sheet, `propose-terms` does not draft it (it would be offered for the portal)."""
     theirs = _their_sheet(grouped, tmp_path / THEIRS)
@@ -404,18 +418,26 @@ def test_a_word_from_their_sheet_ruled_since_is_not_drafted_as_a_proposal(groupe
     assert t["draft"]["runs_answered"] == 8 and report["totals"]["answered_since"] == 1
 
 
-def test_the_adopt_summary_counts_rows_whose_runs_are_in_no_live_group(grouped, tmp_path, capsys):
-    """A row whose run belongs to a group the scientist rejected is said in the text, so the rows add up."""
+def test_the_adopt_summary_puts_every_row_in_exactly_one_bucket(grouped, tmp_path, capsys):
+    """A row whose runs are all in a group the scientist rejected, a row that only repeats another's run, a row that names
+    no run: each is counted once, in the most specific bucket, and the text's numbers add up to the sheet's rows."""
     b = M.load(grouped)
     key = next(r["run_key"] for r in b["runs"] if r["run_id"] == "run-001")
-    gid = next(g["group_id"] for g in b["record_groups"] if g["status"] in B.LIVE_GROUP_STATUSES and key in g["member_run_keys"])
-    M.decide(grouped, target_ids=[gid], decision="reject", value=None, by=WHO, orcid=None)
-    theirs = _their_sheet(grouped, tmp_path / THEIRS)
+    group = next(g for g in b["record_groups"] if g["status"] in B.LIVE_GROUP_STATUSES and key in g["member_run_keys"])
+    M.decide(grouped, target_ids=[group["group_id"]], decision="reject", value=None, by=WHO, orcid=None)
+    rejected = {r["run_id"] for r in b["runs"] if r["run_key"] in group["member_run_keys"]}
+    rows = ["run-001", "run-002", "run-003", "run-004", "run-005", "run-006", "run-007", "run-008"]
+    shared = next(r for r in rows if r not in rejected)
+    theirs = _their_sheet(grouped, tmp_path / THEIRS, rows=[*rows, shared])  # the last row repeats a live run
     a = _adopt_json(grouped, theirs, tmp_path / "adopted.xlsx", capsys)
-    outside = [x for x in a["runs_outside_live_groups"] if x["row_matched_no_live_run"]]
-    assert outside and any("run-001" in x["run_ids"] for x in outside)
-    assert a["rows_matched"] + len(a["unmatched_rows"]) + len(outside) == 9  # their 8 run rows and one that names no run
+    rb = a["row_buckets"]
+    assert sum(rb.values()) == len(rows) + 2  # their run rows, the repeat, and the row naming no run
+    assert rb["no_run"] == 1 and rb["outside_live_groups_only"] == len(rejected & set(rows))
+    assert rb["shared_runs_only"] == 2 and rb["matched"] == a["rows_matched"]  # both rows naming the repeated run
     code, text, err = _adopt(grouped, theirs, tmp_path / "again.xlsx", capsys)
     assert code == 0, err
-    assert f"{len(outside)} row(s) matched only runs in no live record group" in text
-    assert f"{a['rows_matched']} of your File List rows matched" in text
+    line = next(x for x in text.splitlines() if x.startswith("Rows:"))
+    assert f"{rb['matched']} of your {sum(rb.values())} File List rows matched" in line
+    assert f"{rb['outside_live_groups_only']} row(s) name only runs in no live record group" in line
+    assert f"{rb['shared_runs_only']} row(s) name only runs another of your rows also names" in line
+    assert "1 row(s) matched no run" in line and "rejected" not in line

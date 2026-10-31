@@ -1088,7 +1088,9 @@ def keep_vocabulary_request(bundle: dict, *, field_path: str, term: str, by: str
     (:func:`bundle.off_list_only`) as a VOCABULARY REQUEST: who said it, when, the field, the targets and runs,
     and where it was said. Never a decision and never a value: no record, question or eligibility reads it;
     ``bundle propose-terms`` drafts its term. ``(request, new)``: the same answer by the same person from the
-    same place (field, term, targets, runs, source) is kept once and records nothing the second time."""
+    same place (field, term, targets, runs, source) is kept once and records nothing the second time, except that
+    the same ``--as-said`` answer given again stamps ``reaffirmed_utc`` on the kept request (the scientist said
+    their word again: ``propose-terms`` reads an allowed value given before that time as not answering it)."""
     requests = bundle.setdefault("vocabulary_requests", [])
     entry = {
         "field_path": field_path,
@@ -1113,6 +1115,8 @@ def keep_vocabulary_request(bundle: dict, *, field_path: str, term: str, by: str
 
     for r in requests:
         if same(r):
+            if entry["source"].get("as_said") is True:
+                r["reaffirmed_utc"] = now_utc()
             return r, False
     if len(requests) >= B.MAX_VOCABULARY_REQUESTS:
         raise MutationRefused(f"This bundle already keeps {B.MAX_VOCABULARY_REQUESTS} vocabulary requests; nothing more can "
@@ -1121,17 +1125,20 @@ def keep_vocabulary_request(bundle: dict, *, field_path: str, term: str, by: str
                if re.fullmatch(r"vr-\d+", str(r.get("request_id")))]
     request = {"request_id": f"vr-{max(numbers, default=0) + 1:05d}", **entry, "requested_utc": now_utc()}
     order = ("request_id", "field_path", "term", "requested_by", "requested_utc", "scope", "targets", "run_ids", "source", "note")
+    # ``reaffirmed_utc`` (optional) is added only to a request kept earlier, when the same --as-said answer is given again
     request = {k: request[k] for k in order}
     requests.append(request)
     return request, True
 
 
-def vocabulary_kept_sentence(request: Mapping, new: bool) -> str:
-    """What a refusal says about the answer it kept (the same words for ``decide`` and the template)."""
+def vocabulary_kept_sentence(request: Mapping, new: bool, reaffirmed: bool = False) -> str:
+    """What a refusal says about the answer it kept (the same words for ``decide`` and the template). ``reaffirmed``:
+    the same ``--as-said`` answer was given again, and the kept request's ``reaffirmed_utc`` now says so."""
     from . import propose_terms as P
 
+    kept = "" if new else ", kept earlier and reaffirmed now" if reaffirmed else ", kept earlier"
     said = (f"{request['term']!r} is kept as a vocabulary request; `isaac bundle propose-terms` can draft it "
-            f"({request['request_id']}{'' if new else ', kept earlier'}: not a decision and not a value; the field keeps "
+            f"({request['request_id']}{kept}: not a decision and not a value; the field keeps "
             "what it has, or stays missing, until the vocabulary has the term or you answer with an allowed value).")
     same = P.equivalent_term(request["field_path"], request["term"])
     if same is not None:
@@ -1179,9 +1186,10 @@ def _keep_refused_answer(bundle_dir: Path, bundle: dict, exc: "OffListRefused", 
     request, new = keep_vocabulary_request(bundle, field_path=exc.field_path, term=exc.term, by=by, orcid=orcid,
                                            targets=targets, run_ids=runs, scope="run" if runs else scope,
                                            source=source, note=note)
-    if new:
+    reaffirmed = not new and request["source"].get("as_said") is True  # keep_vocabulary_request stamped reaffirmed_utc
+    if new or reaffirmed:
         save_bundle(bundle_dir, bundle)
-    return OffListRefused(f"{exc} {vocabulary_kept_sentence(request, new)}", field_path=exc.field_path, term=exc.term,
+    return OffListRefused(f"{exc} {vocabulary_kept_sentence(request, new, reaffirmed)}", field_path=exc.field_path, term=exc.term,
                           code=exc.code, problem=exc.problem)
 
 

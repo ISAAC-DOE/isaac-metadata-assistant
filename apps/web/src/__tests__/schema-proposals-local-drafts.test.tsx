@@ -457,9 +457,45 @@ describe('Load drafts from a local import', () => {
     expect(within(item).queryByRole('button')).toBeNull();
     expect(calls.filter((c) => !c.startsWith('GET '))).toEqual([]);
   });
+
+  it("shows the file's own sentences on what was answered since, and an answered term cannot be filed", async () => {
+    const { calls } = stub();
+    const file = structuredClone(DRAFTS_FILE);
+    const xmcd = file.fields[0].terms[0] as Record<string, unknown>;
+    const partly = 'Partly answered since it was asked for: an allowed value (`XAS`) now stands for 1 run(s).';
+    const early = '1 run(s) already held `XAS` before the word was asked for; ask the scientist whether they still want the term.';
+    xmcd.draft = { ...(xmcd.draft as Record<string, unknown>), partly_answered: partly, answered_before_request: true,
+      answered_before_request_note: early };
+    (file.fields[0].terms as unknown as Record<string, unknown>[]).push({ ...structuredClone(file.fields[0].terms[0]), term: 'ZZANSWERED',
+      draft: { drafted: false, answered: true, answered_with: ['XAS'],
+        reason: 'Answered since it was asked for: SYN reason, so the term is not drafted.' } });
+    renderAt(`${ROUTE}?tab=propose`);
+    await chooseFile(JSON.stringify(file));
+    await within(loader()).findByRole('list', { name: 'Drafts in the file' });
+    const item = draftItem('XMCD');
+    expect(item).toHaveTextContent('Answered since');
+    expect(item).toHaveTextContent(partly);
+    expect(item).toHaveTextContent(early);
+    const answered = draftItem('ZZANSWERED');
+    expect(answered).toHaveTextContent('Cannot be proposed from here.');
+    expect(answered).toHaveTextContent('so the term is not drafted');
+    expect(within(answered).queryByRole('button')).toBeNull();
+    expect(calls.filter((c) => !c.startsWith('GET '))).toEqual([]);
+  });
 });
 
 describe('termDrafts', () => {
+  it("reads the draft's answered-since sentences as the file wrote them, in order, and nothing else", () => {
+    const file = structuredClone(DRAFTS_FILE);
+    const xmcd = file.fields[0].terms[0] as Record<string, unknown>;
+    xmcd.draft = { ...(xmcd.draft as Record<string, unknown>), runs_in_no_live_group_note: 'SYN outside.',
+      partly_answered: 'SYN partly.', answered_before_request_note: '  ', answered: 'yes' };
+    const parsed = parseTermDraftsFile(JSON.stringify(file));
+    if (!parsed.ok) throw new Error(parsed.message);
+    expect(parsed.file.drafts[0].answerNotes).toEqual(['SYN partly.', 'SYN outside.']);
+    expect(parsed.file.drafts[0].answered).toBe(false); // only `true` is read as answered
+  });
+
   it('counts runs only when every citation names one and none were left out', () => {
     const file = structuredClone(DRAFTS_FILE);
     const xmcd = file.fields[0].terms[0];

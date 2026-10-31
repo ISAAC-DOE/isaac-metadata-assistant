@@ -26,6 +26,10 @@
  *   - a vocabulary request (origin `scientist_request`) is counted as "asked by the scientist",
  *     never as a reading; a term `--merge` carried over (`carried_over`, no longer found in the
  *     bundle) is listed but never filed;
+ *   - what the scientist has answered since asking (`propose-terms` works it out from the bundle): a term
+ *     answered for every run they named is not drafted (`answered`, its `reason` says so); a draft's own
+ *     sentences `partly_answered`, `answered_before_request_note` and `runs_in_no_live_group_note` are
+ *     shown as the file wrote them, never composed here;
  *   - the reviewer notes (`gate0`) are built from those facts only. A note the file has no fact
  *     for is left empty and named as missing; the description is ALWAYS left empty.
  */
@@ -94,6 +98,13 @@ export interface LocalTermDraft {
   drafted: boolean;
   /** The file's own sentence for a term it did not draft. */
   reason: string | null;
+  /** The scientist answered every run they asked this term for, after asking: not drafted. */
+  answered: boolean;
+  /**
+   * The file's own sentences on what has been answered since the term was asked for (partly answered, a run
+   * that held an allowed value before the request, runs in no live record group), in that order.
+   */
+  answerNotes: string[];
   problems: DraftProblem[];
   /** The draft's portal body, for a drafted term (its description is empty by design). */
   body: { proposal_type: string; section: string; category: string; term: string } | null;
@@ -165,6 +176,9 @@ function runsOf(term: Record<string, unknown>, citations: DraftCitation[], refs:
   if (ids.some((id) => id === null)) return null;
   return new Set(ids).size;
 }
+
+/** The draft's own sentences about what was answered since the term was asked for, in the order shown. */
+const ANSWER_NOTE_KEYS = ['partly_answered', 'answered_before_request_note', 'runs_in_no_live_group_note'] as const;
 
 /** Read the text of a drafts file. Never throws; a file that is not one says why. */
 export function parseTermDraftsFile(text: string): ParseResult {
@@ -240,6 +254,8 @@ export function parseTermDraftsFile(text: string): ParseResult {
         carriedOver: t.carried_over === true || t.current === false,
         drafted: draft.drafted === true && goodBody !== null,
         reason: str(draft.reason),
+        answered: draft.answered === true,
+        answerNotes: ANSWER_NOTE_KEYS.map((k) => str(draft[k])).filter((x): x is string => !!x && !!x.trim()),
         problems: problemsOf(draft.problems),
         body: draft.drafted === true ? goodBody : null,
       });
