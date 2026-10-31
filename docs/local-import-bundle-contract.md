@@ -1605,8 +1605,8 @@ because no parser value was printed.
   `correct` cand → A, `confirm` conflict → B, a second `correct` cand → A is recorded (it changes the
   value back to A); before, it was dropped as a replay. The same in the other order. Two more replays are
   recorded: an approval restated after its result's files changed, and (`decide` only) a value restated after
-  a vocabulary request on its field that it can answer — said later than the earlier decision, reaching a
-  run it applies to, and with a readable time strictly before now (`mutations.restated_after_request`, read
+  a vocabulary request on its field that it can answer — said at or after the earlier decision, reaching what
+  it applies to (a run it names, or the whole beamtime), and with a readable time strictly before now (`mutations.restated_after_request`, read
   as `propose-terms` reads an answer), so `in_situ`, then their word `--as-said`, then `in_situ` again
   answers the request. A sheet import records nothing for a cell equal to the current value; the scientist
   answers with `decide` then. A re-recorded decision gets a new `decision_id` and time, so a record exported
