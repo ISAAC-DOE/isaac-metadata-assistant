@@ -234,7 +234,7 @@ def test_the_written_without_line_names_the_condition():
     assert line.startswith("Written without the potential set-point: ") and line.endswith("g1 warning 1")
 
 
-from test_local_import_records import BY, _cand, _decide_everything, _portal, bdir, pristine  # noqa: E402,F401  (fixtures)
+from test_local_import_records import BY, _cand, _decide_everything, _portal, bdir, fake_upstream, pristine  # noqa: E402,F401  (fixtures)
 
 
 def test_export_lists_per_record_written_the_warnings_that_still_apply(bdir, tmp_path):

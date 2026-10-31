@@ -309,7 +309,7 @@ def test_process_says_it_in_its_reply(tmp_path, monkeypatch):
 # --- LOW: export's per-row warnings are capped like every other list ------------------------------------------------
 
 
-from test_local_import_records import _decide_everything, _portal, bdir, pristine  # noqa: E402,F401  (fixtures)
+from test_local_import_records import _decide_everything, _portal, bdir, fake_upstream, pristine  # noqa: E402,F401  (fixtures)
 
 
 def test_export_caps_a_rows_warnings_and_counts_them(bdir, tmp_path, monkeypatch):
