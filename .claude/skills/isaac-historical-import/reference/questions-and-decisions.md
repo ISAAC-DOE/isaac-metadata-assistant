@@ -204,6 +204,9 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   Read each draft back: a word that NAMES an existing term (`reversible_hydrogen_electrode` is `RHE`) is
   not drafted, "use `RHE` (an existing term)": ask whether to answer `RHE`. A close term (`XANES` beside
   `XAS`, `HERFD-XAS`) is drafted with `check_existing`: its description must say why none of those fits.
+  A term whose draft says `answered: true` is not drafted: the scientist has since given an allowed value
+  (`answered_with`) for every run they asked it for, so never offer it; a draft with `partly_answered` says how
+  many runs still need it, so say that when you offer it.
   A term with a space is not drafted; its `ask` says what to ask for (one word, e.g. `cathodic_corrosion`):
   record their one-word answer again, never rewrite it yourself. They write each description themselves on
   the Schema Proposals page (Propose a Change → Load drafts from a local import), never in the file and

@@ -427,6 +427,144 @@ def test_validate_says_pending_vocabulary(grouped, capsys):
     assert row["field_path"] == CELL and row["term"] == "three_electrode_static_cell" and row["groups"] == [group["group_id"]]
 
 
+# --- answered since: the field now holds an allowed value (c13f M1, M2) ----------------------------------
+
+RXN_NAME = "context.reaction.name"
+
+
+def _answered_bundle(*, path=REACTION, field=REACTION, value="surface_oxidation", decided="2099-01-01T00:00:02Z",
+                     requested="2099-01-01T00:00:01Z", as_said=False, runs=("run-1",)):
+    """A minimal bundle: one vocabulary request for 'oxidation' at ``path``, and a scientist's ``correct`` with ``value``
+    on a missing value at ``field`` for run-1."""
+    source = {"kind": "decide_answer", "command": "bundle decide", **({"as_said": True} if as_said else {})}
+    return {
+        "vocabulary_requests": [{"request_id": "vr-00001", "field_path": path, "term": "oxidation", "run_ids": list(runs),
+                                 "requested_utc": requested, "source": source}],
+        "missing_values": [{"value_id": "mv-ZZ1", "run_id": "run-1", "target_field_path": field}],
+        "candidates": [], "conflicts": [],
+        "scientist_decisions": [{"decision_id": "d-00001", "target": {"kind": "missing_value", "id": "mv-ZZ1"},
+                                 "decision": "correct", "value": value, "decided_utc": decided}],
+    }
+
+
+def test_pending_vocabulary_reads_the_path_the_answer_fills():
+    """M1: the reaction is asked at context.electrochemistry.reaction and filled at context.reaction.name."""
+    bundle = {"vocabulary_requests": [{"request_id": "vr-00001", "field_path": REACTION, "term": "oxidation",
+                                       "run_ids": ["run-1"]}]}
+    filled = [("rg-a", {}, {"member_run_ids": ["run-1"], "filled": [{"path": RXN_NAME}]})]
+    assert P.pending_vocabulary(bundle, filled) == []
+    empty = [("rg-a", {}, {"member_run_ids": ["run-1"], "filled": []})]
+    [row] = P.pending_vocabulary(bundle, empty)
+    assert row["groups"] == ["rg-a"]
+
+
+@pytest.mark.parametrize("path, field", [(REACTION, REACTION), (REACTION, RXN_NAME), (ENV, ENV), (CELL, CELL)])
+def test_pending_vocabulary_says_nothing_where_the_runs_now_hold_an_allowed_value(path, field):
+    value = {ENV: "in_situ", CELL: "three_electrode"}.get(field, "surface_oxidation")
+    bundle = _answered_bundle(path=path, field=field, value=value)
+    group = [("rg-a", {}, {"member_run_ids": ["run-1"], "filled": []})]
+    assert P.pending_vocabulary(bundle, group) == []  # whatever the composer did, the run holds an allowed answer
+    off = _answered_bundle(path=path, field=field, value="ZZ_not_on_any_list")
+    assert len(P.pending_vocabulary(off, group)) == 1  # a value the field refuses answers nothing
+
+
+def test_a_request_is_answered_alias_aware_and_an_as_said_one_only_by_a_later_decision():
+    answered, needed = P.request_answered_runs(*_req_and_answers(_answered_bundle(field=RXN_NAME)))
+    assert answered == {"run-1": ["surface_oxidation"]} and needed == []
+    # kept with --as-said AFTER the ruling: the scientist kept their word deliberately, so the ruling does not answer it
+    later = _answered_bundle(as_said=True, decided="2099-01-01T00:00:00Z", requested="2099-01-01T00:00:01Z")
+    assert P.request_answered_runs(*_req_and_answers(later)) == ({}, ["run-1"])
+    same_second = _answered_bundle(as_said=True, decided="2099-01-01T00:00:01Z", requested="2099-01-01T00:00:01Z")
+    assert P.request_answered_runs(*_req_and_answers(same_second)) == ({}, ["run-1"])
+    # ruled after an --as-said request: answered
+    ruled = _answered_bundle(as_said=True)
+    assert P.request_answered_runs(*_req_and_answers(ruled))[1] == []
+    # a run with no answer still needs it; a beamtime-wide answer never reaches a run-only field (DEC-69)
+    two = _answered_bundle(runs=("run-1", "run-2"))
+    two["missing_values"].append({"value_id": "mv-ZZ2", "run_id": None, "target_field_path": REACTION})
+    two["scientist_decisions"].append({"decision_id": "d-00002", "target": {"kind": "missing_value", "id": "mv-ZZ2"},
+                                       "decision": "correct", "value": "OER", "decided_utc": "2099-01-01T00:00:03Z"})
+    assert P.request_answered_runs(*_req_and_answers(two)) == ({"run-1": ["surface_oxidation"]}, ["run-2"])
+
+
+def _req_and_answers(bundle):
+    [req] = bundle["vocabulary_requests"]
+    return req, P.allowed_answers(bundle, [req["field_path"]])
+
+
+def test_validate_does_not_say_pending_for_a_reaction_ruled_since(grouped, capsys):
+    """M1 end to end: an off-list reaction kept as a request, then ruled `surface_oxidation`, fills context.reaction.name."""
+    from isaac_api.local_import import records as R
+
+    b = M.load(grouped)
+    group = next(g for g in b["record_groups"] if g["status"] in B.LIVE_GROUP_STATUSES)
+    assert _decide(grouped, capsys, "--target", group["group_id"], "--decision", "confirm")[0] == 0
+    run_id = next(r["run_id"] for r in b["runs"] if r["run_key"] == group["member_run_keys"][0])
+    target = next(m for m in b["missing_values"] if m["target_field_path"] == REACTION and m["run_id"] == run_id)
+    assert _said(grouped, capsys, "--target", target["value_id"], "--decision", "correct", "--value", "oxidation")[0] == 2
+
+    def pending():
+        return R.validate_records(grouped, run_portal=lambda record: {
+            "status": "ran", "result": {"valid": True, "errors": [], "warnings": []}, "outcome": "publish", "held": [],
+            "verdict": "publish"}).get("pending_vocabulary") or []
+
+    assert [r["term"] for r in pending()] == ["oxidation"]
+    assert _decide(grouped, capsys, "--target", target["value_id"], "--decision", "correct",
+                   "--value", "surface_oxidation")[0] == 0
+    assert pending() == []
+
+
+def test_propose_terms_does_not_draft_a_term_answered_since_and_says_how_many_runs_still_need_one(grouped, capsys, tmp_path):
+    """M2: a sheet's word the scientist has since replaced with an allowed value is not drafted (never offered for the
+    Schema Proposals page); a part-answered one is drafted with the count; their word kept again with --as-said is drafted."""
+    xlsx = tmp_path / "t.xlsx"
+    assert cli.main(["bundle", "template", "export", str(grouped), "--out", str(xlsx)]) == 0
+    wb = openpyxl.load_workbook(xlsx)
+    for rid in ("run-001", "run-002"):
+        wb["File List"][f"{_col('Environment')}{_row_of(xlsx, rid)}"] = "aqueous_electrochemistry"
+    wb.save(xlsx)
+    assert cli.main(["bundle", "template", "import", str(grouped), str(xlsx), "--by", WHO, "--apply"]) == 0
+    first = _term(_report(grouped, capsys), ENV, "aqueous_electrochemistry")
+    assert first["draft"]["drafted"] is True and "answered" not in first["draft"] and "partly_answered" not in first["draft"]
+    out = tmp_path / "terms.json"
+    assert cli.main(["bundle", "propose-terms", str(grouped), "--out", str(out)]) == 0
+    doc = json.loads(out.read_text(encoding="utf-8"))  # a description written in the file is not lost once answered
+    doc["fields"][0]["terms"][0]["draft"]["portal_payload"]["body"]["description"] = "ZZ synthetic description text"
+    out.write_text(json.dumps(doc), encoding="utf-8")
+
+    env = {rid: _miss_of(grouped, ENV, rid)["value_id"] for rid in ("run-001", "run-002")}
+    assert _decide(grouped, capsys, "--target", env["run-001"], "--decision", "correct", "--value", "in_situ")[0] == 0
+    part = _term(_report(grouped, capsys), ENV, "aqueous_electrochemistry")["draft"]
+    assert part["drafted"] is True and part["answered"] is False
+    assert part["runs_answered"] == 1 and part["runs_still_needing_it"] == 1 and part["answered_with"] == ["in_situ"]
+    assert "1 run(s) named still need the term" in part["partly_answered"]
+
+    assert _decide(grouped, capsys, "--target", env["run-002"], "--decision", "correct", "--value", "ex_situ")[0] == 0
+    report = _report(grouped, capsys)
+    done = _term(report, ENV, "aqueous_electrochemistry")
+    assert done["draft"]["drafted"] is False and done["draft"]["answered"] is True
+    assert done["draft"]["answered_with"] == ["in_situ", "ex_situ"] and "portal_payload" not in done["draft"]
+    assert "not to be offered as a proposal" in done["draft"]["reason"] and "--as-said" in done["draft"]["reason"]
+    assert report["totals"]["answered_since"] == 1 and report["totals"]["drafts"] == 0
+    assert done["scientist_notes"] and done["count"] == 1  # their request is still shown, as theirs
+    capsys.readouterr()
+    assert cli.main(["bundle", "propose-terms", str(grouped), "--out", str(out), "--merge"]) == 0
+    assert "1 term(s) the scientist asked for now hold an allowed value" in capsys.readouterr().out
+    merged = _term(json.loads(out.read_text(encoding="utf-8")), ENV, "aqueous_electrochemistry")["draft"]
+    assert merged["answered"] is True and merged["drafted"] is False
+    assert merged["earlier_description"] == "ZZ synthetic description text" and merged["description_written_by"] is None
+
+    # the scientist keeps their own word again, deliberately, after the ruling: drafted again for that run
+    assert _said(grouped, capsys, "--target", env["run-001"], "--decision", "correct",
+                 "--value", "aqueous_electrochemistry")[0] == 2
+    again = _term(_report(grouped, capsys), ENV, "aqueous_electrochemistry")["draft"]
+    assert again["drafted"] is True and again["answered"] is False and again["runs_still_needing_it"] == 1
+
+
+def _miss_of(bdir: Path, field: str, run_id: str) -> dict:
+    return next(m for m in M.load(bdir)["missing_values"] if m["target_field_path"] == field and m["run_id"] == run_id)
+
+
 # --- the bundle format ------------------------------------------------------------------------------
 
 

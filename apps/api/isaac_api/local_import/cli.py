@@ -2011,7 +2011,10 @@ def cmd_bundle_propose_terms(args) -> int:
                   "No draft is marked ready to send.")
     print(
         f"Wrote {out_path}: {totals['terms']} term(s) outside the vocabulary in {totals['fields']} field(s), "
-        f"{totals['occurrences']} occurrence(s), {totals['drafts']} draft proposal(s).{merged} Nothing was sent; "
+        f"{totals['occurrences']} occurrence(s), {totals['drafts']} draft proposal(s)."
+        + (f" {totals['answered_since']} term(s) the scientist asked for now hold an allowed value for every run named: "
+           "answered since, not drafted." if totals.get("answered_since") else "")
+        + f"{merged} Nothing was sent; "
         "each draft needs a description in your words before it can go to the ISAAC portal."
     )
     return EXIT_OK

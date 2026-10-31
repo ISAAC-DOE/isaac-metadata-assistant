@@ -369,3 +369,53 @@ def test_a_ruling_on_a_moved_disagreements_row_is_not_read(grouped, tmp_path, ca
     assert code == 0, err
     assert [r for r in rep["rows_refused"] if "'Disagreements'!H2" in r["cells"]]
     assert not [c for c in rep["decisions"] if "Disagreements" in c["cell"]]
+
+
+# --- after a ruling: what is still asked for, and what the summary counts (c13f) ------------------------
+
+
+def test_a_word_from_their_sheet_ruled_since_is_not_drafted_as_a_proposal(grouped, tmp_path, capsys):
+    """Their off-list Environment word is kept as their request on adopt; once they rule an allowed value for every
+    run on the Disagreements sheet, `propose-terms` does not draft it (it would be offered for the portal)."""
+    theirs = _their_sheet(grouped, tmp_path / THEIRS)
+    out = tmp_path / "adopted.xlsx"
+    code, _text, err = _adopt(grouped, theirs, out, capsys, "--by", WHO)
+    assert code == 0, err
+    a = _adopt_json(grouped, theirs, tmp_path / "again.xlsx", capsys)
+    env = _d(a, "Environment", kind="not_allowed")
+
+    def term():
+        capsys.readouterr()
+        assert cli.main(["bundle", "propose-terms", str(grouped)]) == 0
+        report = json.loads(capsys.readouterr().out)
+        return report, next(t for f in report["fields"] if f["field_path"] == "context.environment" for t in f["terms"]
+                            if t["term"] == "aqueous_electrochemistry")
+
+    assert term()[1]["draft"]["drafted"] is True
+    wb = openpyxl.load_workbook(out)
+    wd = wb["Disagreements"]
+    rows = {wd[f"A{r}"].value: r for r in range(2, wd.max_row + 1)}
+    wd[f"H{rows[env['id']]}"] = "in_situ"
+    wb.save(tmp_path / "ruled.xlsx")
+    code, _rep, err = _import(grouped, tmp_path / "ruled.xlsx", capsys, "--apply")
+    assert code == 0, err
+    report, t = term()
+    assert t["draft"]["drafted"] is False and t["draft"]["answered"] is True and t["draft"]["answered_with"] == ["in_situ"]
+    assert t["draft"]["runs_answered"] == 8 and report["totals"]["answered_since"] == 1
+
+
+def test_the_adopt_summary_counts_rows_whose_runs_are_in_no_live_group(grouped, tmp_path, capsys):
+    """A row whose run belongs to a group the scientist rejected is said in the text, so the rows add up."""
+    b = M.load(grouped)
+    key = next(r["run_key"] for r in b["runs"] if r["run_id"] == "run-001")
+    gid = next(g["group_id"] for g in b["record_groups"] if g["status"] in B.LIVE_GROUP_STATUSES and key in g["member_run_keys"])
+    M.decide(grouped, target_ids=[gid], decision="reject", value=None, by=WHO, orcid=None)
+    theirs = _their_sheet(grouped, tmp_path / THEIRS)
+    a = _adopt_json(grouped, theirs, tmp_path / "adopted.xlsx", capsys)
+    outside = [x for x in a["runs_outside_live_groups"] if x["row_matched_no_live_run"]]
+    assert outside and any("run-001" in x["run_ids"] for x in outside)
+    assert a["rows_matched"] + len(a["unmatched_rows"]) + len(outside) == 9  # their 8 run rows and one that names no run
+    code, text, err = _adopt(grouped, theirs, tmp_path / "again.xlsx", capsys)
+    assert code == 0, err
+    assert f"{len(outside)} row(s) matched only runs in no live record group" in text
+    assert f"{a['rows_matched']} of your File List rows matched" in text

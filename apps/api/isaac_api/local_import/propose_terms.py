@@ -80,6 +80,14 @@ A TERM THE WEBSITE WOULD REFUSE FOR ITS SHAPE (a space, a sentence) is not draft
 says what to ASK for (``ask``: "one word, e.g. cathodic_corrosion"); ISAAC still never writes that
 word as the term.
 
+A REQUEST ANSWERED SINCE (computed at read time; nothing is stored): when every run a term's vocabulary
+requests name now holds a scientist's allowed value on that field (:func:`allowed_answers`, alias-aware: a
+reaction answered at ``context.reaction.name`` answers one asked at ``context.electrochemistry.reaction``), the
+term is NOT drafted: its draft says ``answered: true`` and ``answered_with`` the values, so a word the scientist
+has since replaced is never offered for the Schema Proposals page. A request kept with ``--as-said`` is answered
+only by a decision later than it (they kept their word after any earlier ruling). When only some runs are
+answered the draft stays, with ``runs_answered`` / ``runs_still_needing_it`` and a ``partly_answered`` sentence.
+
 A SECOND RUN (``--merge``): :func:`merge_reports` updates an existing drafts file instead of
 replacing it: new terms are added, counts, citations, runs and notes are this run's (notes come only
 from the bundle, never from the file), a description in a draft's body is KEPT (who wrote it is not
@@ -93,6 +101,7 @@ printed or written, exactly as ``bundle list candidates`` does.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
@@ -266,6 +275,82 @@ def _request_note(req: Mapping) -> dict:
         "source": source,
         "request_id": req.get("request_id"),
     }
+
+
+def _fills(path: str) -> str:
+    """The path the record composer writes an answer at ``path`` to (``questions._composer_path``: the reaction is
+    asked at ``context.electrochemistry.reaction`` and filled at ``context.reaction.name``, DEC-76)."""
+    from .questions import _composer_path
+
+    return _composer_path(path)
+
+
+def allowed_answers(bundle: Mapping, paths: Sequence[str]) -> dict[tuple[str, str | None], list[tuple[Any, str | None]]]:
+    """``{(filled path, run id or None): [(value, decided_utc)]}``: every value a scientist's ``confirm``/``correct``
+    (any confirming decision: a ruling, a template cell, ``decide``) now gives a candidate or missing value at one of
+    ``paths`` (alias-aware, :func:`_fills`) that its own field takes (:func:`bundle.value_problem` finds nothing)."""
+    want = {_fills(p) for p in paths if isinstance(p, str)}
+    out: dict[tuple[str, str | None], list[tuple[Any, str | None]]] = {}
+    if not want:
+        return out
+    decision_of = B._decisions_by_target(list(bundle.get("scientist_decisions") or ()))
+    conflicts_of: dict[str, list[str]] = {}
+    for cf in bundle.get("conflicts") or ():
+        conflicts_of.setdefault(cf.get("candidate_id"), []).append(cf.get("conflict_id"))
+    for kind, objs in (("candidate", bundle.get("candidates")), ("missing_value", bundle.get("missing_values"))):
+        for o in objs or ():
+            own = o.get("target_field_path")
+            if not isinstance(own, str) or _fills(own) not in want:
+                continue
+            if kind == "candidate":
+                d = B.candidate_decision(bundle, o, decision_of, conflicts_of)
+            else:
+                d = decision_of.get(("missing_value", o.get("value_id")))
+            if not isinstance(d, Mapping) or d.get("decision") not in B.CONFIRMING_DECISIONS:
+                continue
+            value = B.final_value(o.get("value") if kind == "candidate" else None, d, o.get("readings"))
+            if value is not None and B.value_problem(own, value) is None:
+                out.setdefault((_fills(own), o.get("run_id")), []).append((value, d.get("decided_utc")))
+    return out
+
+
+def _answers_for_run(answers: Mapping, path: str, run_id: str | None) -> list[tuple[Any, str | None]]:
+    """The allowed answers that reach ``run_id`` at ``path``: its own, and a beamtime-wide one where the field takes
+    one (never for ``records.RUN_ONLY_PATHS``, DEC-69). ``run_id`` ``None``: the beamtime-wide answers only."""
+    from .records import RUN_ONLY_PATHS
+
+    fills = _fills(path)
+    own = list(answers.get((fills, run_id)) or ()) if run_id is not None else []
+    if path in RUN_ONLY_PATHS or fills in RUN_ONLY_PATHS:
+        return own
+    return own + list(answers.get((fills, None)) or ())
+
+
+def request_answered_runs(req: Mapping, answers: Mapping) -> tuple[dict[str | None, list[Any]], list[str | None]]:
+    """``({run: [allowed values]}, [runs still needing the term])`` for one vocabulary request (a request about the
+    whole beamtime is the one run ``None``). A request kept with ``--as-said`` is answered only by a decision LATER
+    than it (``decided_utc`` after ``requested_utc``): the scientist kept their own word after any earlier ruling, so
+    that ruling does not answer it. Any other request (a sheet's cell) is answered by any allowed answer."""
+    as_said = (req.get("source") or {}).get("as_said") is True
+    asked = str(req.get("requested_utc") or "")
+    answered: dict[str | None, list[Any]] = {}
+    needed: list[str | None] = []
+    for rid in list(dict.fromkeys(req.get("run_ids") or ())) or [None]:
+        values = [v for v, when in _answers_for_run(answers, req.get("field_path") or "", rid)
+                  if not as_said or str(when or "") > asked]
+        if values:
+            answered[rid] = _distinct(values)
+        else:
+            needed.append(rid)
+    return answered, needed
+
+
+def _distinct(values: Sequence[Any]) -> list[Any]:
+    """``values`` once each, in order (a list value is compared by its JSON)."""
+    seen: dict[str, Any] = {}
+    for v in values:
+        seen.setdefault(json.dumps(v, sort_keys=True), v)
+    return list(seen.values())
 
 
 def _interpretation_path(bundle: Mapping, interp: Mapping, index: Mapping) -> str | None:
@@ -483,6 +568,43 @@ def _draft(sources: Mapping, path: str, term: str, lists: Mapping) -> dict:
     return draft
 
 
+def _answered_since(occs: Sequence[Mapping], requests: Mapping, answers: Mapping) -> dict | None:
+    """What a scientist has answered since asking for a term (:func:`request_answered_runs` over the term's
+    vocabulary requests), or ``None`` when no run they named holds an allowed value. ``answered`` only when every
+    run named holds one and the term has no other occurrence (a reading or value outside a request): then it is not
+    drafted. Otherwise the draft stays and says how many runs still need the term."""
+    asked = [requests[o["ref"]["id"]] for o in occs if o["origin"] == ORIGIN_REQUEST and o["ref"].get("id") in requests]
+    if not asked:
+        return None
+    given: dict[str | None, list[Any]] = {}
+    needed: set[str | None] = set()
+    for req in asked:
+        got, still = request_answered_runs(req, answers)
+        needed |= set(still)
+        for rid, values in got.items():
+            given.setdefault(rid, []).extend(values)
+    done = [rid for rid in given if rid not in needed]
+    if not done:
+        return None
+    others = sum(1 for o in occs if o["origin"] != ORIGIN_REQUEST)
+    values = _distinct([v for rid in done for v in given[rid]])
+    shown = ", ".join(f"`{v}`" for v in values)
+    reach = "the whole beamtime" if done == [None] else f"{len([r for r in done if r])} run(s)"
+    if not needed and not others:
+        statement = (f"Answered since it was asked for: a scientist's decision now gives {reach} an allowed value ({shown}), "
+                     "so the term is not drafted and is not to be offered as a proposal. If the scientist still wants "
+                     "their own word, `isaac bundle decide ... --value \"<their exact word>\" --as-said` keeps it again "
+                     "and it is drafted.")
+        return {"answered": True, "answered_with": values, "runs_answered": len(done), "runs_still_needing_it": 0,
+                "statement": statement}
+    statement = (f"Partly answered since it was asked for: an allowed value ({shown}) now stands for {reach}; "
+                 f"{len(needed)} run(s) named still need the term"
+                 + (f", and {others} occurrence(s) are outside the scientist's requests" if others else "")
+                 + ". Say so when offering the draft.")
+    return {"answered": False, "answered_with": values, "runs_answered": len(done), "runs_still_needing_it": len(needed),
+            "statement": statement}
+
+
 def propose_terms(bundle: Mapping, sources: Mapping) -> dict:
     """The full report: fields, terms, counts, citations and drafts. Pure."""
     found = collect(bundle, sources)
@@ -490,8 +612,10 @@ def propose_terms(bundle: Mapping, sources: Mapping) -> dict:
     for occ in found["occurrences"]:
         by_field.setdefault(occ["field_path"], {}).setdefault(occ["term"], []).append(occ)
 
+    requests = {r.get("request_id"): r for r in bundle.get("vocabulary_requests") or () if isinstance(r, Mapping)}
+    answers = allowed_answers(bundle, [r.get("field_path") for r in requests.values()]) if requests else {}
     fields = []
-    drafts = 0
+    drafts = answered_terms = 0
     for path in sorted(by_field):
         lists = found["lists"][path]
         terms = []
@@ -514,7 +638,17 @@ def propose_terms(bundle: Mapping, sources: Mapping) -> dict:
                     total_citations += 1
                     if len(citations) < MAX_CITATIONS_PER_TERM:
                         citations.append({**cit, "origin": o["origin"], "ref": o["ref"]})
-            draft = _draft(sources, path, term, lists)
+            since = _answered_since(occs, requests, answers)
+            if since is not None and since["answered"]:
+                # ANSWERED SINCE: never offered for the Schema Proposals page, which saves to the ISAAC server
+                draft = {"drafted": False, **{k: v for k, v in since.items() if k != "statement"},
+                         "reason": since["statement"]}
+                answered_terms += 1
+            else:
+                draft = _draft(sources, path, term, lists)
+                if since is not None:
+                    draft = {**draft, **{k: v for k, v in since.items() if k != "statement"},
+                             "partly_answered": since["statement"]}
             drafts += 1 if draft["drafted"] else 0
             terms.append(
                 {
@@ -558,6 +692,7 @@ def propose_terms(bundle: Mapping, sources: Mapping) -> dict:
             "terms": sum(len(f["terms"]) for f in fields),
             "occurrences": sum(f["occurrences"] for f in fields),
             "drafts": drafts,
+            "answered_since": answered_terms,
         },
         "vocabulary_requests_read": len(bundle.get("vocabulary_requests") or ()),
         "fields": fields,
@@ -647,6 +782,11 @@ def merge_reports(old: Any, new: Mapping, sources: Mapping) -> tuple[dict, dict]
                 if errors:
                     draft["problems"] = [{"field": e["field"], "code": e["code"], "message": e["message"]} for e in errors]
                 t["draft"] = draft
+            elif text and draft.get("answered") is True:
+                # answered since: not drafted, but a description written for it is not lost (who wrote it is not known)
+                kept_descriptions += 1
+                t["draft"] = {**draft, "description_kept_from_earlier_file": True, "description_written_by": None,
+                              "earlier_description": text, "description_note": DESCRIPTION_FROM_FILE_NOTE}
     carried = 0
     by_path = {f["field_path"]: f for f in merged["fields"]}
     for (path, term), prior in before.items():
@@ -695,6 +835,8 @@ def merge_reports(old: Any, new: Mapping, sources: Mapping) -> tuple[dict, dict]
         "drafts": sum(1 for f in merged["fields"] for t in f["terms"]
                       if (t.get("draft") or {}).get("drafted") and not t.get("carried_over")),
         "carried_over": sum(1 for f in merged["fields"] for t in f["terms"] if t.get("carried_over")),
+        "answered_since": sum(1 for f in merged["fields"] for t in f["terms"]
+                              if (t.get("draft") or {}).get("answered") is True and not t.get("carried_over")),
     }
     change = {"merged_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "terms_before": len(before),
               "added": added, "updated": updated, "descriptions_kept": kept_descriptions, "carried_over": carried,
@@ -712,16 +854,27 @@ PENDING_GROUPS_SHOWN = 10
 def pending_vocabulary(bundle: Mapping, fresh: Sequence[tuple[str, Mapping, Mapping]]) -> list[dict]:
     """``[{field_path, term, groups, groups_total, request_ids}]``: each vocabulary request whose field is still
     missing from a confirmed group's draft that it concerns (a group holding one of its runs; every group for a
-    request about the whole beamtime). ``validate`` says them, so a missing value waiting on a proposal is named."""
+    request about the whole beamtime). ``validate`` says them, so a missing value waiting on a proposal is named.
+
+    The field is the one the answer FILLS (:func:`_fills`: a reaction asked at ``context.electrochemistry.reaction``
+    is filled at ``context.reaction.name``), and a group whose runs the request names all hold an allowed answer
+    there (:func:`allowed_answers`: a ruling, a template cell, ``decide``) is not waiting, whatever the composer
+    did with it (a disagreement between runs is said elsewhere, never as a vocabulary wait)."""
     out: dict[tuple[str, str], dict] = {}
-    for req in bundle.get("vocabulary_requests") or ():
+    requests = [r for r in bundle.get("vocabulary_requests") or () if isinstance(r, Mapping)]
+    answers = allowed_answers(bundle, [r.get("field_path") for r in requests]) if requests else {}
+    for req in requests:
         path, term = req.get("field_path"), req.get("term")
+        fills = _fills(path) if isinstance(path, str) else path
         runs = set(req.get("run_ids") or ())
         for group_id, _draft, comp in fresh:
             members = set(comp.get("member_run_ids") or ())
             if runs and not runs & members:
                 continue
-            if any(f.get("path") == path for f in comp.get("filled") or ()):
+            if any(f.get("path") in (path, fills) for f in comp.get("filled") or ()):
+                continue
+            concerned = sorted((runs & members) or members)
+            if concerned and all(_answers_for_run(answers, path or "", rid) for rid in concerned):
                 continue
             row = out.setdefault((path, term), {"field_path": path, "term": term, "groups": [], "request_ids": []})
             if group_id not in row["groups"]:
