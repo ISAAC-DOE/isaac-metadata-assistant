@@ -99,7 +99,7 @@ ALLOWED_DECISIONS: Mapping[str, tuple[str, ...]] = {
     "resolve_conflict": ("confirm", "correct", "reject", "defer"),
     # `defer` records "I don't know": the question stays, marked deferred; grouping is unchanged by it
     "naming_counter_positions": ("set_counter_positions", B.NOT_COUNTER_DECISION, "defer"),
-    "clock_time_zone": (B.CLOCK_ZONE_DECISION,),
+    "clock_time_zone": (B.CLOCK_ZONE_DECISION, "defer"),  # c8-a: `defer` records "I don't know" (mutations.clock_zone_deferral)
     "confirm_absorber": ("set_absorber", "defer"),
 }
 #: A ``confirm_value`` question whose targets carry NO value (the files hold text, no value this
@@ -1071,6 +1071,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 "suggested_value": None,
                 "answer_command": (f'isaac bundle decide <bundle_dir> --question {qid} --decision {B.CLOCK_ZONE_DECISION} '
                                    '--value <IANA time-zone name> --by "<your name>"'),
+                **({"deferred": deferred} if (deferred := _clock_zone_deferral(bundle)) else {}),
             }
         )
 
@@ -1368,6 +1369,20 @@ def _counter_examples(bundle: Mapping, positions: Sequence[int]) -> dict[int, di
     return {p: out[p] for p in positions if p in out}
 
 
+def _is_clock_zone_deferral(d: Mapping) -> bool:
+    """:func:`mutations.is_clock_zone_deferral` (c8-a: a defer of the CLOCK question is not the counter question's)."""
+    from .mutations import is_clock_zone_deferral
+
+    return is_clock_zone_deferral(d)
+
+
+def _clock_zone_deferral(bundle: Mapping) -> dict | None:
+    """:func:`mutations.clock_zone_deferral`: the clock question's "I don't know", when it is the latest answer."""
+    from .mutations import clock_zone_deferral
+
+    return clock_zone_deferral(bundle)
+
+
 def counter_deferral(bundle: Mapping) -> dict | None:
     """``{by, decided_utc, decision_id}`` when the LATEST answer to the counter question is ``defer`` ("I don't
     know"), else ``None``. A later set_counter_positions / set_not_counter_positions answer supersedes it. A
@@ -1375,7 +1390,7 @@ def counter_deferral(bundle: Mapping) -> dict | None:
     last = None
     for d in bundle.get("scientist_decisions") or ():
         if (isinstance(d, Mapping) and d.get("target") == {"kind": "experiment", "id": "experiment"}
-                and d.get("decision") in COUNTER_QUESTION_DECISIONS):
+                and d.get("decision") in COUNTER_QUESTION_DECISIONS and not _is_clock_zone_deferral(d)):
             last = d
     if last is None or last.get("decision") != "defer":
         return None
@@ -1782,7 +1797,7 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_a
             partial = sum(1 for _, s in items for r in s["ai_readings"] if r.get("read_for"))
             text = (f"Element {element}, edge {edge} is suggested for {len(items)} group(s): "
                     + (f"the files state it for {len(from_files)}; " if from_files else "")
-                    + f"for {ai_only}, no file the import parsed states the absorber and only an AI reading of the files suggests it "
+                    + f"for {ai_only}, the import found no statement it counts as file evidence of the absorber (a processed-output header, or a beamtime-wide statement such as an acquisition macro's name; a scan header's region-file name, which processing reads only to propose a reference foil's edge, is not counted) and only an AI reading of the files suggests it "
                       "(needs your confirmation: an AI reading is not file evidence). "
                       "Is that the absorber? Answer once, or per group (a reference foil or blank cell may differ)."
                     + (f" {partial} AI reading(s) name only some of a group's runs (see the hints)." if partial else ""))
@@ -1938,7 +1953,8 @@ def _latest_answer_to(bundle: Mapping, kind: str, target: Mapping) -> Mapping | 
     allowed = COUNTER_QUESTION_DECISIONS if kind == "naming_counter_positions" else ALLOWED_DECISIONS.get(kind, ())
     want = {"kind": target["kind"], "id": target["id"]}
     return next((d for d in reversed(bundle.get("scientist_decisions") or ())
-                 if isinstance(d, Mapping) and d.get("target") == want and d.get("decision") in allowed), None)
+                 if isinstance(d, Mapping) and d.get("target") == want and d.get("decision") in allowed
+                 and not _is_clock_zone_deferral(d)), None)
 
 
 def targets_for(payload: Mapping, question_id: str, only: str | None = None, field: str | None = None) -> list[str]:

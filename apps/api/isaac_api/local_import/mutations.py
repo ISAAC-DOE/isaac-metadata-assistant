@@ -604,6 +604,9 @@ def _check_decision(bundle: Mapping, kind: str, obj: Mapping, decision: str, val
         )
     if kind == "processing_result" and decision == "approve" and not (obj.get("outputs") or {}).get("files"):
         raise MutationRefused(no_curve_refusal(obj))
+    if kind == "processing_result" and decision == "approve" and unusable_curve_reasons(obj):
+        # c8-a: a curve whose QC says it is NOT A USABLE SPECTRUM is never approved, whatever QC status is offered
+        raise MutationRefused(unusable_curve_refusal(obj))
     if decision == "correct" and value is None:
         raise MutationRefused("`correct` needs --value.")
     if decision == B.ATHENA_SELECT_DECISION:
@@ -688,6 +691,43 @@ def no_curve_refusal(result: Mapping) -> str:
     )
 
 
+#: The QC ``fail`` reasons (:func:`processing.core.qc_verdict`) that say the curve is NOT A USABLE SPECTRUM: the
+#: edge step does not describe the data (``edge_step_implausible``), no edge stands above the pre-edge scatter
+#: (``no_edge``), or the normalised level after the edge is far from 1 (``post_edge_not_at_1``). ``decide`` refuses
+#: to approve a result failing for one of them and ``validate`` never offers that approval; any other ``fail``
+#: (e.g. ``too_few_points``) stays the scientist's call, approved only with the QC status they state.
+UNUSABLE_CURVE_REASONS = ("edge_step_implausible", "no_edge", "post_edge_not_at_1")
+
+
+def unusable_curve_reasons(result: Mapping) -> list[str]:
+    """The reasons of :data:`UNUSABLE_CURVE_REASONS` a result's QC ``fail`` names, in its order (``[]`` when its
+    verdict is not ``fail`` or names none of them)."""
+    qc = result.get("qc") or {}
+    if qc.get("verdict") != "fail":
+        return []
+    return [r for r in qc.get("reasons") or () if r in UNUSABLE_CURVE_REASONS]
+
+
+def unusable_curve_refusal(result: Mapping) -> str:
+    """Why approving a result whose QC fails for a reason of :data:`UNUSABLE_CURVE_REASONS` is refused, in the
+    result's own QC sentences, and the real options (the same three as :func:`no_curve_refusal`)."""
+    pid, gid = B.processing_id(result), result.get("group_id")
+    reasons = unusable_curve_reasons(result)
+    statements = (result.get("qc") or {}).get("statements") or {}
+    said = " ".join(str(statements[r]) for r in reasons if statements.get(r))
+    return (
+        f"{pid} cannot be approved: its QC fails {', '.join(reasons)}, so the curve is not a usable spectrum"
+        + (f" ({said})" if said else "") + ". An approval would put a QC status into the record for a curve that "
+        "does not describe the data, whatever status is given. Re-running `isaac process` with the same parameters "
+        "gives the same result. The options: "
+        f'reject it (`isaac bundle decide <bundle_dir> --target {pid} --decision reject --by "<your name>"`); '
+        f"or mark it needs_changes (`--target {pid} --decision needs_changes`) and re-process the group with a "
+        f"setting the scientist chooses ({reprocess_command(gid)}), which adds a new result to review; "
+        "or leave the group out of the records "
+        f'(`isaac bundle decide <bundle_dir> --target {gid} --decision reject --by "<your name>"`). Nothing was recorded.'
+    )
+
+
 #: The comparison flag an Athena curve carries when the scientist used fewer scans than ISAAC merged.
 SCAN_SUBSET_FLAG = "scientist_selected_subset_of_scans"
 
@@ -699,13 +739,24 @@ def scan_subset_note(bundle: Mapping, result: Mapping) -> str | None:
     comparison = result.get("comparison") or {}
     if result.get("source") != "scientist_athena" or SCAN_SUBSET_FLAG not in (comparison.get("flags") or ()):
         return None
-    chosen = [str(n) for n in comparison.get("athena_scan_selection") or ()]
+    covers = comparison.get("athena_covers") or {}
+    chosen = [str(n) for n in comparison.get("athena_scan_selection") or covers.get("scans") or ()]
     sibling = next((r for r in bundle.get("processing_results") or ()
                     if r.get("group_id") == result.get("group_id") and r.get("source") == "isaac_protocol"
                     and r.get("run_id") == result.get("run_id")), None)
     total = len([i for i in (sibling or {}).get("inputs") or () if not i.get("skip_reason")])
-    of = f" of the {total} scan(s) ISAAC merged" if total else ""
-    which = f"scans {', '.join(chosen)}{of}" if chosen else f"a subset of the scans{of}"
+    if covers.get("runs"):
+        # c8-a: a MERGED group's scans are numbered per run, so the run is named, and how many of the merge they are
+        runs = list(covers["runs"])
+        total = total or int(covers.get("isaac_scans_merged") or 0)
+        named = f"run{'s' if len(runs) > 1 else ''} {', '.join(runs)}"
+        over = f" over runs {', '.join(covers.get('group_runs') or ())}" if covers.get("group_runs") else ""
+        of = f" — {len(chosen)} of the {total} scan(s) ISAAC merged{over}" if chosen and total else (
+            f" — of the {total} scan(s) ISAAC merged{over}" if total else "")
+        which = f"scans {', '.join(chosen)} of {named}{of}" if chosen else f"the scans of {named}{of}"
+    else:
+        of = f" of the {total} scan(s) ISAAC merged" if total else ""
+        which = f"scans {', '.join(chosen)}{of}" if chosen else f"a subset of the scans{of}"
     return (f"The scientist's Athena curve for group {result.get('group_id')} uses only {which} "
             f"({SCAN_SUBSET_FLAG}): its E0 and curve describe those scans, not the full merge.")
 
@@ -863,6 +914,31 @@ def decide(
     )
     _decide_arguments(**params)  # refused before the lock is taken, as always
     return mutate(bundle_dir, lambda bundle: record_decision(bundle, **params), expected_version=expected_version)
+
+
+#: c8-a: the ``value`` a ``defer`` on the experiment carries when it answers the CLOCK question ("I don't know the
+#: instrument clock's time zone"). The counter question and the clock question share the experiment target, and a
+#: ``defer`` with no value has always been the counter question's; the bundle format has no other field for it.
+CLOCK_ZONE_DEFER_VALUE = "clock_time_zone"
+
+
+def is_clock_zone_deferral(d: Mapping) -> bool:
+    """``True`` for a ``defer`` that answers the clock question (:data:`CLOCK_ZONE_DEFER_VALUE`), never the counter's."""
+    return (isinstance(d, Mapping) and d.get("decision") == "defer" and d.get("value") == CLOCK_ZONE_DEFER_VALUE
+            and d.get("target") == {"kind": "experiment", "id": "experiment"})
+
+
+def clock_zone_deferral(bundle: Mapping) -> dict | None:
+    """``{by, decided_utc, decision_id}`` when the LATEST answer to the clock question is ``defer`` ("I don't
+    know"), else ``None``. A later ``set_clock_time_zone`` supersedes it. A defer converts no start time."""
+    last = None
+    for d in bundle.get("scientist_decisions") or ():
+        if isinstance(d, Mapping) and (d.get("decision") == B.CLOCK_ZONE_DECISION or is_clock_zone_deferral(d)):
+            last = d
+    if last is None or not is_clock_zone_deferral(last):
+        return None
+    return {"by": (last.get("decided_by") or {}).get("name"), "decided_utc": last.get("decided_utc"),
+            "decision_id": last.get("decision_id")}
 
 
 def question_targets(payload: Mapping, question_id: str, *, decision: str, only: str | None, field: str | None,
@@ -1253,6 +1329,16 @@ def decide_question(
                 found, _slots, override = got
             if asked["kind"] == "confirm_absorber" and decision == "set_absorber" and only is None:
                 found, kept_overrides = _keep_absorber_overrides(bundle, found)
+        if decision == "defer" and (Q.question(Q.consolidate(bundle, include_answered=True, explain_counter=False),
+                                               question_id) or {}).get("kind") == "clock_time_zone":
+            # c8-a: the clock question's "I don't know", told apart from the counter question's on the same target
+            zone_d = B.clock_zone_decision(bundle)
+            if zone_d is not None:
+                raise MutationRefused(
+                    f"The instrument clock's time zone is already recorded ({zone_d.get('value')}, "
+                    f"{zone_d.get('decision_id')}); a defer would not withdraw it, and the start times stay converted "
+                    f"with it. To change it, state the zone again: {B.CLOCK_ZONE_COMMAND}. Nothing was recorded.")
+            value = CLOCK_ZONE_DEFER_VALUE
         params = dict(
             target_ids=list(extra_targets) + found, decision=decision, value=value, by=by, orcid=orcid, note=note,
             split_into=split_into, merge_with=merge_with, qc_status=qc_status, qc_note=qc_note,
@@ -1576,9 +1662,13 @@ def record_decision(
                 # several decision kinds share the one experiment target: replaying one is compared
                 # with the latest of ITS kind (a zone restated after a counter answer is unchanged); a defer
                 # is the counter question's "I don't know", compared with that question's latest answer
-                same = ("set_counter_positions", B.NOT_COUNTER_DECISION, "defer") if decision == "defer" else (decision,)
+                # (c8-a: a defer of the CLOCK question, value CLOCK_ZONE_DEFER_VALUE, with that question's latest answer)
+                clock = decision == "defer" and value == CLOCK_ZONE_DEFER_VALUE
+                same = ((B.CLOCK_ZONE_DECISION, "defer") if clock else ("set_counter_positions", B.NOT_COUNTER_DECISION, "defer")
+                        if decision == "defer" else (decision,))
                 prior = next((d for d in reversed(bundle.get("scientist_decisions") or ())
-                              if d.get("target") == {"kind": "experiment", "id": tid} and d.get("decision") in same), None)
+                              if d.get("target") == {"kind": "experiment", "id": tid} and d.get("decision") in same
+                              and (d.get("decision") != "defer" or is_clock_zone_deferral(d) == clock)), None)
             elif kind == "processing_result":
                 # an Athena-version selection (1.6.0) and the state decisions share the target: each is
                 # compared with the latest of its own class
@@ -1707,7 +1797,12 @@ def record_decision(
                 f"conditions — their file names differ only in: {words}, which you said are labels, not conditions. "
                 "Regroup (`isaac bundle group <bundle_dir> --regroup`) to apply it: the runs are combined only when the "
                 "same sample is confirmed for every run and nothing else recorded tells them apart.")
-        if decision == "defer" and recorded and all(kind == "experiment" for kind, _ in planned):
+        if decision == "defer" and recorded and value == CLOCK_ZONE_DEFER_VALUE and all(kind == "experiment" for kind, _ in planned):
+            result["statement"] = (
+                "Recorded: you do not know the time zone the instrument clock was set to (defer). No start time is "
+                "converted: the runs' local clock times stay out of the records. The clock question stays open, marked "
+                f"deferred; answer it later with set_clock_time_zone ({B.CLOCK_ZONE_COMMAND}).")
+        elif decision == "defer" and recorded and all(kind == "experiment" for kind, _ in planned):
             result["statement"] = (
                 "Recorded: you do not know which filename token positions are run/acquisition counters (defer). "
                 "Grouping is unchanged: no position is recorded as a counter or as not one, and no group moved. The "

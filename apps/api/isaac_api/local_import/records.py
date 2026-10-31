@@ -764,7 +764,17 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
                                 "awaiting_approval": [B.processing_id(r) for r in mine
                                                       if r.get("state") in B.PROCESSING_UNDECIDED_STATES
                                                       and not B.processing_not_applicable(r)
-                                                      and (r.get("outputs") or {}).get("files")],
+                                                      and (r.get("outputs") or {}).get("files")
+                                                      and not unusable_curve_reasons(r)],
+                                # c8-a: undecided, with a curve whose QC says it is not a usable spectrum
+                                # (mutations.UNUSABLE_CURVE_REASONS): `decide` refuses to approve them, so they are
+                                # never offered for approval
+                                "unusable_curve_results": {B.processing_id(r): ", ".join(unusable_curve_reasons(r))
+                                                           for r in mine
+                                                           if r.get("state") in B.PROCESSING_UNDECIDED_STATES
+                                                           and not B.processing_not_applicable(r)
+                                                           and (r.get("outputs") or {}).get("files")
+                                                           and unusable_curve_reasons(r)},
                                 # undecided but with NO CURVE: `decide` refuses to approve them, so they are
                                 # never offered for approval
                                 "no_curve_results": {B.processing_id(r): no_curve_cause(r) for r in mine
@@ -1362,6 +1372,13 @@ def no_curve_cause(result: Mapping) -> str:
     return cause(result)
 
 
+def unusable_curve_reasons(result: Mapping) -> list[str]:
+    """:func:`mutations.unusable_curve_reasons` (imported here lazily, as this module imports mutations)."""
+    from .mutations import unusable_curve_reasons as reasons
+
+    return reasons(result)
+
+
 def processing_blocker(processing: Mapping) -> str:
     """One word for why a group's processing-derived values are missing (the export's counts)."""
     if processing.get("not_applicable"):
@@ -1372,6 +1389,8 @@ def processing_blocker(processing: Mapping) -> str:
         return "approved_result_has_no_curve" if processing.get("no_curve") else "approved_result_not_usable"
     if processing.get("awaiting_approval"):
         return "processing_awaiting_approval"
+    if processing.get("unusable_curve_results"):
+        return "processing_result_not_a_usable_spectrum"
     if processing.get("no_curve_results"):
         return "processing_result_has_no_curve"
     if processing.get("rejected"):
@@ -1388,6 +1407,11 @@ def processing_remedy(processing: Mapping) -> str:
     gid = processing.get("group_id") or "<group id>"
     leave_out = f'leave the group out of the records (`isaac bundle decide <bundle_dir> --target {gid} --decision reject --by "<your name>"`)'
     no_curve = dict(processing.get("no_curve_results") or {})
+    unusable = dict(processing.get("unusable_curve_results") or {})
+    # c8-a: a result whose QC says its curve is not a usable spectrum is NEVER offered for approval (decide refuses it)
+    not_offered = ("; ".join(f"{pid} is not offered for approval: its QC fails {why}, so its curve is not a usable "
+                             "spectrum" for pid, why in list(unusable.items())[:3])
+                   + (" …" if len(unusable) > 3 else "")) if unusable else ""
     several = list(processing.get("approved_results") or ())
     if several:
         # an older build let a second approval through; `decide` now refuses it. Re-processing changes nothing
@@ -1416,7 +1440,16 @@ def processing_remedy(processing: Mapping) -> str:
                              for pid in waiting[:3])
                 + (f" (and {len(waiting) - 3} more)" if len(waiting) > 3 else "")
                 + '; a QC status of compromised or failed also needs --qc-note "<what and why>"'
-                + ". Correcting a value does not supply them.")
+                + ". Correcting a value does not supply them."
+                + (f" ({not_offered}.)" if not_offered else ""))
+    if unusable:
+        ids = list(unusable)
+        return (f"its processing result cannot be approved: {not_offered}. Re-running `isaac process` with the same "
+                f"parameters gives the same result. Reject it "
+                f'(`isaac bundle decide <bundle_dir> --target {ids[0]} --decision reject --by "<your name>"`), or mark it '
+                f"needs_changes (`--target {ids[0]} --decision needs_changes`) and re-process the group with a setting "
+                f"the scientist chooses ({reprocess_command(gid)}), then approve the new result if its curve is usable; "
+                f"or {leave_out}.")
     if no_curve:
         ids = list(no_curve)
         said = "; ".join(f"{pid} ({cause})" for pid, cause in list(no_curve.items())[:3]) + (" …" if len(ids) > 3 else "")

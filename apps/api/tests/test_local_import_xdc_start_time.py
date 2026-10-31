@@ -205,7 +205,7 @@ def test_without_a_zone_there_is_no_value_no_proposal_no_confirm_and_one_questio
     [q1] = [q for q in b["questions"] if q["kind"] == "confirm_clock_time_zone"]
     assert q1["target"] == {"kind": "experiment", "id": "experiment"} and q1["options"] == [] and q1["run_id"] is None
     [q] = [q for q in Q.consolidate(b)["questions"] if q["kind"] == "clock_time_zone"]
-    assert q["scope"] == "experiment" and q["allowed_decisions"] == ["set_clock_time_zone"]
+    assert q["scope"] == "experiment" and q["allowed_decisions"] == ["set_clock_time_zone", "defer"]  # c8-a: defer is "I don't know"
     assert q["suggested_value"] is None and q["allowed_values"] is None
     assert q["applies_to"]["runs"] == 2 and "2 run(s)" in q["text"]
     assert lit in q["text"] and "SYN_alpha_A.001" in q["text"]

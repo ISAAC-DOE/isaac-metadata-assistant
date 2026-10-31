@@ -140,6 +140,12 @@ Ask: approve, reject, or needs changes (with a note):
   `scientist_selected_subset_of_scans` (its label names e.g. scans 5-6 of 6), say so plainly when you show
   or approve it: its E0 and curve describe those scans, not ISAAC's full merge. `decide` says it on
   approval, and the record's E0 descriptor notes it.
+- **An Athena curve in a merged group.** Scan numbers restart in each run, so in a group of several runs
+  the statement (`qc.statements.scans_used`) names the run(s) the curve covers ("scans 1-2 of run
+  …_092") and `comparison.athena_covers` lists `runs`, `group_runs`, `scans` and `isaac_scans_merged`.
+  A curve of only some of the group's runs is flagged `scientist_selected_subset_of_scans` and is **not**
+  `preferred_for_record` (the statement says why: ISAAC's curve merges every run). Say which run it covers
+  and that it describes only those scans; the scientist may still approve it.
 - **Who made the E0.** An approved Athena result's E0 descriptor is attributed to the scientist's Athena
   processing (`generated_by.agent: Athena`, `source: imported`, the project's file name and Athena group in
   `notes`); an approved ISAAC result's names ISAAC's protocol (`isaac.xas.v0`, `source: auto`). When the
@@ -150,10 +156,15 @@ Ask: approve, reject, or needs changes (with a note):
   refuses. Say why in words and offer: reject the result; `needs_changes` (the protocol needs a setting
   the scientist chooses; only on their explicit choice re-process with `--params-file`); or leave the
   group out (`reject` on the group).
+- **A curve that is not a usable spectrum** (QC `fail` naming `edge_step_implausible`, `no_edge` or
+  `post_edge_not_at_1`) cannot be approved either, whatever QC status is given: `decide --decision
+  approve` exits 2 with the result's own QC sentence and the same three options. `validate` never offers
+  that approval (`processing_blocker: processing_result_not_a_usable_spectrum`, "… is not offered for
+  approval: its QC fails …"); when the group has another result that can be approved (e.g. the Athena
+  curve), it offers that one and says why not the other.
 - **Approval is the scientist's**, per group. A `warn` is shown prominently and is their call; never
-  suggest approving it. A `fail` for `edge_step_implausible`, `no_edge` or `post_edge_not_at_1` is never
-  offered for approval (offer reject or `needs_changes`); any other `fail` is approved only if the
-  scientist asks to. A rejected group yields no series and stays incomplete.
+  suggest approving it. Any other `fail` (e.g. `too_few_points`) is approved only if the scientist asks
+  to, with the QC status they state. A rejected group yields no series and stays incomplete.
 - The protocol is a **draft until the ISAAC processing reviewers (Oscar and Angel) review it**. Say so
   each time you ask.
 - If processing is unavailable, say "curves and quality checks are not available; records will stay

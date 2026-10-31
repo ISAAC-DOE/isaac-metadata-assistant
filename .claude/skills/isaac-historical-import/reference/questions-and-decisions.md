@@ -112,6 +112,10 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   A group that differs (a reference foil) is answered with `--only group:<id>`, before or after the
   answer for all. Re-running the answer for all later never undoes it: the reply names each group that
   kept its own answer (`kept_per_group_answers`); say so, and change one only with `--only`.
+  When only an AI reading suggests the pair, the text says the import counted no file statement of the
+  absorber; a scan header's region-file name (e.g. `TiK_XANES.rgn`) is not counted, though processing reads
+  it to propose a reference foil's edge (its calibration `reference.basis: stated_by_evidence`). If the
+  scientist asks, say exactly that: both read the same header; only processing used the region name.
 - **The counter question** (`naming_counter_positions`): its text shows real file names of this
   bundle with the asked token in brackets (`SYNnp_on_Au_[12]_1500mV` vs `SYNnp_on_Au_[2]_1500mV`;
   also `example_names`), and one name where that token is not a number (`SYNfilm_on_Au_[OCV]`). Show
@@ -154,6 +158,10 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   record it with `correct --value YYYY-MM-DDTHH:MM:SSZ` (`confirm` takes no `--value` here). If the
   zone is changed later to a different zone, every start confirmed under the old one stops counting
   until confirmed again: `decide` reports how many, and `bundle questions` asks them again; say so.
+  If they do not know the zone: `--question <Q> --decision defer`. That records "I don't know":
+  no start time is converted, the question stays under its id, marked `deferred`, and the counter
+  question is not touched. Once a zone is recorded, `defer` is refused (it would not withdraw the
+  zone); to change the zone, state it again.
 - **QC status** is asked when approving processing, not here (Step 6).
 - **In a browser.** The local-only *Local Imports* page (`docs/ui-local-dev.md`) shows the same
   questions and records answers through the same checks. If the scientist uses it, run `bundle
