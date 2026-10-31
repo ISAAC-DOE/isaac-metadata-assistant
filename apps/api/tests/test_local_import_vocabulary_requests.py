@@ -302,6 +302,7 @@ def test_merge_adds_new_terms_updates_counts_and_keeps_a_written_description(b, 
     assert _term(merged, ENV, "aqueous_electrochemistry")["draft"]["drafted"] is True
     gone = _term(merged, CELL, "gone_term")
     assert gone["carried_over"] is True and gone["current"] is False and gone["draft"]["ready_to_send"] is False
+    assert gone["scientist_notes"] == [] and gone["answered_scientist_notes"] == []  # the same shape as a current term
     assert merged["merges"][-1]["descriptions_kept"] == 1 and merged["format_version"] == "1"
 
 
@@ -495,7 +496,8 @@ def test_a_request_is_answered_only_by_an_allowed_value_given_after_it():
     # before the request (any request, not only --as-said): it still asks for the word
     early = _state(_answered_bundle(decided="2099-01-01T00:00:00Z"))
     assert early["answered"] == {} and early["before"] == {"run-1": ["surface_oxidation"]} and early["needed"] == []
-    assert _state(_answered_bundle(decided="2099-01-01T00:00:01Z"))["before"]  # the same second is not after
+    tie = _state(_answered_bundle(decided="2099-01-01T00:00:01Z"))  # the same second is not after, nor before
+    assert tie["answered"] == {} and tie["before"] == {} and tie["same"] == {"run-1": ["surface_oxidation"]}
     # times compared as times, not as text (a fraction of a second sorts after "Z" as text)
     assert _state(_answered_bundle(requested="2099-01-01T00:00:01.5Z", decided="2099-01-01T00:00:01Z"))["before"]
     # reaffirmed: the later of the two times
@@ -514,19 +516,19 @@ def test_a_decision_with_no_time_is_placed_by_the_decision_log():
                                            "decision": "defer", "decided_utc": "2099-01-01T00:00:00Z"})
     assert _state(earlier)["before"]
     bundle["vocabulary_requests"][0]["requested_utc"] = "not a time"  # a request that cannot be placed is never answered
-    assert not _state(bundle)["answered"]
+    assert not _state(bundle)["answered"] and _state(bundle)["unknown"]
 
 
 def test_run_only_fields_take_no_beamtime_answer_and_runs_outside_live_groups_count_for_nothing():
     # a beamtime-wide reaction answered at context.electrochemistry.reaction never reaches a request at context.reaction.name
     bundle = _answered_bundle(path=RXN_NAME, field=REACTION, answer_run=None)
-    assert _state(bundle) == {"answered": {}, "before": {}, "needed": ["run-1"], "outside": []}
+    assert _state(bundle) == {"answered": {}, "same": {}, "unknown": {}, "before": {}, "needed": ["run-1"], "outside": []}
     # a field that takes a beamtime-wide value: answered, but only after the request
     scale = _answered_bundle(path=SCALE, field=SCALE, value="RHE", answer_run=None, decided="2099-01-01T00:00:00Z")
     assert _state(scale)["before"] == {"run-1": ["RHE"]}
     two = _answered_bundle(runs=("run-1", "run-2"))
-    assert _state(two, live={"run-1"}) == {"answered": {"run-1": ["surface_oxidation"]}, "before": {}, "needed": [],
-                                           "outside": ["run-2"]}
+    assert _state(two, live={"run-1"}) == {"answered": {"run-1": ["surface_oxidation"]}, "same": {}, "unknown": {},
+                                           "before": {}, "needed": [], "outside": ["run-2"]}
 
 
 def test_validate_does_not_say_pending_for_a_reaction_ruled_since(grouped, capsys):
@@ -640,9 +642,70 @@ def test_the_same_as_said_answer_again_reaffirms_its_request(grouped, capsys, ti
     assert code == 2 and "kept earlier and reaffirmed now" in err
     [req] = M.load(grouped)["vocabulary_requests"]
     assert req["reaffirmed_utc"] > req["requested_utc"] and B.check_bundle(grouped) == []
-    draft = _term(_report(grouped, capsys), ENV, "aqueous_electrochemistry")["draft"]
+    entry = _term(_report(grouped, capsys), ENV, "aqueous_electrochemistry")
+    draft = entry["draft"]
     assert draft["drafted"] is True and draft["answered_before_request"] is True
     assert "already held `in_situ` before the word was asked for" in draft["answered_before_request_note"]
+    # L5: the note's time is when the request was last said, with the first time alongside
+    [note] = entry["scientist_notes"]
+    assert note["when"] == req["reaffirmed_utc"] and note["requested_utc"] == req["requested_utc"]
+    assert note["reaffirmed_utc"] == req["reaffirmed_utc"]
+
+
+def test_the_allowed_value_given_again_after_their_word_is_recorded_and_answers_it(grouped, capsys, ticking):
+    """c13g M1: in_situ, then their word --as-said, then in_situ again: the third is a new statement (recorded), so the
+    request is answered and not drafted. Repeating it once more records nothing, and no question id changes."""
+    from isaac_api.local_import import questions as Q
+
+    target = _miss_of(grouped, ENV, "run-001")
+    ids = lambda: sorted(q["question_id"] for q in Q.consolidate(M.load(grouped))["questions"])  # noqa: E731
+    assert _decide(grouped, capsys, "--target", target["value_id"], "--decision", "correct", "--value", "in_situ")[0] == 0
+    assert _said(grouped, capsys, "--target", target["value_id"], "--decision", "correct",
+                 "--value", "aqueous_electrochemistry")[0] == 2
+    assert _term(_report(grouped, capsys), ENV, "aqueous_electrochemistry")["draft"]["answered_before_request"] is True
+    before, questions = len(M.load(grouped)["scientist_decisions"]), ids()
+    assert _decide(grouped, capsys, "--target", target["value_id"], "--decision", "correct", "--value", "in_situ")[0] == 0
+    assert len(M.load(grouped)["scientist_decisions"]) == before + 1 and ids() == questions
+    draft = _term(_report(grouped, capsys), ENV, "aqueous_electrochemistry")["draft"]
+    assert draft["answered"] is True and draft["drafted"] is False and draft["answered_with"] == ["in_situ"]
+    assert _decide(grouped, capsys, "--target", target["value_id"], "--decision", "correct", "--value", "in_situ")[0] == 0
+    assert len(M.load(grouped)["scientist_decisions"]) == before + 1  # nothing asked since: unchanged, as ever
+
+
+def test_a_value_in_the_same_step_or_against_an_unreadable_request_time_is_said_apart_and_drafted():
+    """L3: neither a tie nor an unknown order is said as "before"; the term stays drafted."""
+    occs = [{"origin": P.ORIGIN_REQUEST, "ref": {"id": "vr-00001"}}]
+    tie = _answered_bundle(decided="2099-01-01T00:00:01Z")
+    info = P._answered_since(occs, {"vr-00001": tie["vocabulary_requests"][0]}, P.allowed_answers(tie, [REACTION]),
+                             log=tie["scientist_decisions"])
+    assert info["answered"] is False and "answered_before_request" not in info and info["answered_same_step"] is True
+    assert info["answered_same_step_note"] == ("1 run(s) hold `surface_oxidation`, given in the same step as the word "
+                                               "(e.g. one sheet import), so ISAAC cannot tell which the scientist meant "
+                                               "last; ask them.")
+    unknown = _answered_bundle(requested="not a time")
+    info = P._answered_since(occs, {"vr-00001": unknown["vocabulary_requests"][0]},
+                             P.allowed_answers(unknown, [REACTION]), log=unknown["scientist_decisions"])
+    assert info["answered"] is False and info["answered_order_unknown"] is True and "answered_before_request" not in info
+    assert "cannot tell which came first" in info["answered_order_unknown_note"]
+
+
+def test_the_same_sheet_imported_again_after_an_answer_says_so_and_stamps_nothing(grouped, capsys, tmp_path, ticking):
+    """L1: their sheet still says the word; it was answered since: said plainly, with how to keep the word."""
+    _env_sheet(grouped, tmp_path)
+    for rid in ("run-001", "run-002"):
+        assert _decide(grouped, capsys, "--target", _miss_of(grouped, ENV, rid)["value_id"], "--decision", "correct",
+                       "--value", "in_situ")[0] == 0
+    capsys.readouterr()
+    assert cli.main(["bundle", "template", "import", str(grouped), str(tmp_path / "t.xlsx"), "--by", WHO, "--apply",
+                     "--json"]) == 0
+    [kept] = json.loads(capsys.readouterr().out)["vocabulary_requests"]
+    said = ("The sheet still says 'aqueous_electrochemistry' for context.environment on 2 run(s), but it was answered "
+            "since with `in_situ`; to keep the word, `isaac bundle decide ... --value \"aqueous_electrochemistry\" --as-said`.")
+    assert kept["new"] is False and kept["answered_since"]["statement"] == said and kept["answered_since"]["runs"] == 2
+    assert cli.main(["bundle", "template", "import", str(grouped), str(tmp_path / "t.xlsx"), "--by", WHO, "--apply"]) == 0
+    assert said in capsys.readouterr().out
+    [req] = M.load(grouped)["vocabulary_requests"]
+    assert "reaffirmed_utc" not in req  # a sheet read again is not the scientist saying their word again
 
 
 def test_every_run_named_answered_but_unconfirmed_readings_keep_the_term(b, capsys, ticking):

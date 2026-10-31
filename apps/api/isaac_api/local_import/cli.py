@@ -2017,6 +2017,8 @@ def cmd_bundle_propose_terms(args) -> int:
         + (f" {totals['partly_answered']} draft(s) are partly answered (each says how)." if totals.get("partly_answered") else "")
         + (f" {totals['answered_before_request']} draft(s) name runs that held an allowed value before the word was asked "
            "for: ask the scientist whether they still want the term." if totals.get("answered_before_request") else "")
+        + (f" {totals['order_unclear']} draft(s) name runs whose allowed value cannot be placed before or after the word: "
+           "ask the scientist." if totals.get("order_unclear") else "")
         + f"{merged} Nothing was sent; "
         "each draft needs a description in your words before it can go to the ISAAC portal."
     )

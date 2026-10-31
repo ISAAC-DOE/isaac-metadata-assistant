@@ -1869,15 +1869,32 @@ def off_list_requests(cells: Sequence[Mapping]) -> list[dict]:
 def keep_off_list_cells(bundle: dict, cells: Sequence[Mapping], *, by: str | None, orcid: str | None, file: str,
                         kind: str, command: str) -> list[dict]:
     """Keep each off-list word of a sheet as a vocabulary request on ``bundle`` (in memory; the caller saves):
-    the rows of :func:`off_list_requests`, each with its ``request_id`` and whether it is ``new``."""
+    the rows of :func:`off_list_requests`, each with its ``request_id`` and whether it is ``new``. A request kept
+    earlier whose runs have since been answered with an allowed value says so (``answered_since``): the same sheet
+    imported again is not the scientist saying their word again, so nothing is stamped (only ``--as-said`` is)."""
     from . import mutations as M
+    from . import propose_terms as P
 
-    kept = []
+    kept, earlier = [], []
     for row in off_list_requests(cells):
         request, new = M.keep_vocabulary_request(
             bundle, field_path=row["field_path"], term=row["term"], by=by, orcid=orcid, run_ids=row["run_ids"],
             scope=row["scope"], source={"kind": kind, "command": command, "file": file, "cells": row["cells"]})
         kept.append({**row, "request_id": request["request_id"], "new": new})
+        if not new:
+            earlier.append((kept[-1], request))
+    if earlier:
+        answers = P.allowed_answers(bundle, [r["field_path"] for _, r in earlier])
+        live, log = P.live_run_ids(bundle), list(bundle.get("scientist_decisions") or ())
+        for row, request in earlier:
+            answered = P.request_answered_runs(request, answers, live=live, log=log)["answered"]
+            if answered:
+                values = P._distinct([v for vs in answered.values() for v in vs])
+                row["answered_since"] = {
+                    "runs": sum(1 for r in answered if r is not None), "values": values,
+                    "statement": (f"The sheet still says {row['term']!r} for {row['field_path']} on {P._reach(list(answered))}, "
+                                  f"but it was answered since with {P._shown(values)}; to keep the word, "
+                                  f"`isaac bundle decide ... --value \"{row['term']}\" --as-said`.")}
     return kept
 
 
@@ -1894,6 +1911,8 @@ def _request_lines(items: Sequence[Mapping], applied: bool) -> list[str]:
         same = P.equivalent_term(r["field_path"], r["term"])
         out.append(f"  {r['header']} {r['term']!r} for {reach} ({', '.join(r['cells'][:_CELLS_SHOWN])}{more}) [{tag}]"
                    + (f"; use `{same}` (an existing term)" if same else ""))
+        if r.get("answered_since"):
+            out.append(f"     {r['answered_since']['statement']}")
     return out
 
 

@@ -27,9 +27,10 @@
  *     never as a reading; a term `--merge` carried over (`carried_over`, no longer found in the
  *     bundle) is listed but never filed;
  *   - what the scientist has answered since asking (`propose-terms` works it out from the bundle): a term
- *     answered for every run they named is not drafted (`answered`, its `reason` says so); a draft's own
- *     sentences `partly_answered`, `answered_before_request_note` and `runs_in_no_live_group_note` are
- *     shown as the file wrote them, never composed here;
+ *     answered for every run they named is not drafted and is never filed (`answered`, its `reason` says
+ *     so); a draft's own sentences (`partly_answered`, `answered_before_request_note`,
+ *     `answered_same_step_note`, `answered_order_unknown_note`, `runs_in_no_live_group_note`) are shown
+ *     as the file wrote them, never composed here;
  *   - the reviewer notes (`gate0`) are built from those facts only. A note the file has no fact
  *     for is left empty and named as missing; the description is ALWAYS left empty.
  */
@@ -178,7 +179,13 @@ function runsOf(term: Record<string, unknown>, citations: DraftCitation[], refs:
 }
 
 /** The draft's own sentences about what was answered since the term was asked for, in the order shown. */
-const ANSWER_NOTE_KEYS = ['partly_answered', 'answered_before_request_note', 'runs_in_no_live_group_note'] as const;
+const ANSWER_NOTE_KEYS = [
+  'partly_answered',
+  'answered_before_request_note',
+  'answered_same_step_note',
+  'answered_order_unknown_note',
+  'runs_in_no_live_group_note',
+] as const;
 
 /** Read the text of a drafts file. Never throws; a file that is not one says why. */
 export function parseTermDraftsFile(text: string): ParseResult {

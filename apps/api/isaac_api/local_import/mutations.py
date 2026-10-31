@@ -984,6 +984,33 @@ def _decided_value_target(bundle: Mapping, kind: str, obj: Mapping, decision: st
     return None
 
 
+def restated_after_request(bundle: Mapping, kind: str, obj: Mapping, prior: Mapping) -> bool:
+    """c13g M1: whether a value decision identical to ``prior`` (the target's latest) is restated AFTER a vocabulary
+    request on its field (alias-aware, ``propose_terms._fills``) that reaches the runs the target applies to and is
+    newer than ``prior`` (or either time cannot be read). Then it is a new statement and is recorded: the scientist
+    asked for their own word since, and answering with the allowed value again is what answers that request. Without
+    it ``in_situ``, then ``--as-said`` their word, then ``in_situ`` again recorded nothing and the word stayed drafted."""
+    requests = bundle.get("vocabulary_requests") or ()
+    got = _decided_value_target(bundle, kind, obj, str(prior.get("decision")), prior.get("value")) if requests else None
+    if got is None or not got[0]:
+        return False
+    from . import propose_terms as P
+
+    fills = P._fills(got[0])
+    runs = set(obj.get("run_ids") or ()) if kind == "conflict" else {obj.get("run_id")} - {None}
+    said = P._utc(prior.get("decided_utc"))
+    for req in requests:
+        if not isinstance(req, Mapping) or not isinstance(req.get("field_path"), str) or P._fills(req["field_path"]) != fills:
+            continue
+        theirs = set(req.get("run_ids") or ())
+        if theirs and runs and not theirs & runs:
+            continue
+        asked = P.request_time(req)
+        if asked is None or said is None or asked >= said:
+            return True
+    return False
+
+
 def _decided_value_problem(bundle: Mapping, kind: str, obj: Mapping, decision: str, value: Any) -> str | None:
     """Why a ``confirm``/``correct`` would store a value its official field refuses, or ``None``.
 
@@ -2059,8 +2086,10 @@ def record_decision(
                 json.dumps(prior.get("clock_zone_binding"), sort_keys=True),
                 json.dumps(prior.get("athena_version_provenance"), sort_keys=True),
                 json.dumps(prior.get("same_conditions_tokens")),
-            ) == signature and not (kind == "processing_result" and decision == "approve" and approval_is_stale(prior, obj)):
-                # an approval restated after its result's files changed binds it to them: a new statement
+            ) == signature and not (kind == "processing_result" and decision == "approve" and approval_is_stale(prior, obj)) and not (
+                    restated_after_request(bundle, kind, obj, prior)):
+                # an approval restated after its result's files changed binds it to them: a new statement; so is a
+                # value restated after the scientist asked for their own word on its field (c13g M1)
                 unchanged.append(tid)
                 continue
             entry = {

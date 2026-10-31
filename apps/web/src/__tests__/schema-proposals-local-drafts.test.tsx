@@ -473,13 +473,31 @@ describe('Load drafts from a local import', () => {
     await chooseFile(JSON.stringify(file));
     await within(loader()).findByRole('list', { name: 'Drafts in the file' });
     const item = draftItem('XMCD');
-    expect(item).toHaveTextContent('Answered since');
+    expect(item).toHaveTextContent('Since it was asked for');
     expect(item).toHaveTextContent(partly);
     expect(item).toHaveTextContent(early);
     const answered = draftItem('ZZANSWERED');
     expect(answered).toHaveTextContent('Cannot be proposed from here.');
     expect(answered).toHaveTextContent('so the term is not drafted');
     expect(within(answered).queryByRole('button')).toBeNull();
+    expect(calls.filter((c) => !c.startsWith('GET '))).toEqual([]);
+  });
+});
+
+describe('an answered term', () => {
+  it('is refused with its own reason even when the file also says drafted and carries a body', async () => {
+    const { calls } = stub();
+    const file = structuredClone(DRAFTS_FILE);
+    const xmcd = file.fields[0].terms[0] as Record<string, unknown>;
+    xmcd.draft = { ...(xmcd.draft as Record<string, unknown>), drafted: true, answered: true,
+      reason: 'Answered since it was asked for: SYN reason, so the term is not drafted.' };
+    renderAt(`${ROUTE}?tab=propose`);
+    await chooseFile(JSON.stringify(file));
+    await within(loader()).findByRole('list', { name: 'Drafts in the file' });
+    const item = draftItem('XMCD');
+    expect(item).toHaveTextContent('Cannot be proposed from here.');
+    expect(item).toHaveTextContent('SYN reason, so the term is not drafted.');
+    expect(within(item).queryByRole('button', { name: 'Propose This Term' })).toBeNull();
     expect(calls.filter((c) => !c.startsWith('GET '))).toEqual([]);
   });
 });

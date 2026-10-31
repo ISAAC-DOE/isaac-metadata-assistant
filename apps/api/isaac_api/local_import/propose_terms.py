@@ -88,7 +88,9 @@ again; times compared as times, the decision log's order when a decision's time 
 the scientist named is answered and nothing else keeps the term, it is NOT drafted (``answered: true``,
 ``answered_with``), so a word they have since replaced is never offered for the Schema Proposals page, and their
 notes on those requests move to ``answered_scientist_notes``. A run whose only allowed value came BEFORE the
-request keeps the draft (``answered_before_request``: ask whether they still want the term); a draft answered
+request keeps the draft (``answered_before_request``: ask whether they still want the term; one given in the same
+second, ``answered_same_step``, or against a request whose time cannot be read, ``answered_order_unknown``, is said
+apart, never as before); a draft answered
 for some runs says so (``partly_answered``); a run in no live record group is said apart and counts for nothing.
 
 A SECOND RUN (``--merge``): :func:`merge_reports` updates an existing drafts file instead of
@@ -274,7 +276,10 @@ def _request_note(req: Mapping) -> dict:
         "term_as_said": req.get("term"),
         "note": req.get("note") if isinstance(req.get("note"), str) and req["note"].strip() else None,
         "by": (req.get("requested_by") or {}).get("name"),
-        "when": req.get("requested_utc"),
+        # when the request was last said: the later of requested_utc and reaffirmed_utc (the same --as-said answer again)
+        "when": _last_said(req),
+        "requested_utc": req.get("requested_utc"),
+        **({"reaffirmed_utc": req["reaffirmed_utc"]} if req.get("reaffirmed_utc") else {}),
         "source": source,
         "request_id": req.get("request_id"),
     }
@@ -356,17 +361,18 @@ def request_time(req: Mapping) -> datetime | None:
     return max(times) if times else None
 
 
-def _after(answer: Answer, asked: datetime | None, log: Sequence[Mapping] | None) -> bool:
-    """Whether an answer came AFTER the request said at ``asked``: by the two times; when the decision's time is
-    missing or not a time, by its place in the decision log (after every decision timed at or before ``asked``).
-    A request with no time is never answered by order: it cannot be placed."""
+def _order(answer: Answer, asked: datetime | None, log: Sequence[Mapping] | None) -> str:
+    """``after``, ``same``, ``before`` or ``unknown``: where an answer stands against the request said at ``asked``. By
+    the two times (``same``: the same second, e.g. one sheet import recorded both); when the decision's time is missing
+    or not a time, by its place in the decision log (after every decision timed at or before ``asked``). A request
+    with no time cannot be placed: ``unknown``."""
     if asked is None:
-        return False
+        return "unknown"
     when = _utc(answer[1])
     if when is not None:
-        return when > asked
+        return "after" if when > asked else "same" if when == asked else "before"
     timed = [i for i, d in enumerate(log or ()) if isinstance(d, Mapping) and (t := _utc(d.get("decided_utc"))) and t <= asked]
-    return answer[2] > max(timed, default=-1)
+    return "after" if answer[2] > max(timed, default=-1) else "before"
 
 
 def live_run_ids(bundle: Mapping) -> set[str] | None:
@@ -381,24 +387,26 @@ def live_run_ids(bundle: Mapping) -> set[str] | None:
 def request_answered_runs(req: Mapping, answers: Mapping, *, live: set[str] | None = None,
                           log: Sequence[Mapping] | None = None) -> dict:
     """How the runs one vocabulary request names stand now (a request about the whole beamtime is the one run
-    ``None``): ``{answered: {run: [values]}, before: {run: [values]}, needed: [runs], outside: [runs]}``.
-    ``answered``: a scientist's allowed answer came AFTER the request (:func:`request_time`, :func:`_after`);
-    ``before``: the run's only allowed answers came before it (they still asked for the word, so it is not answered);
-    ``needed``: no allowed answer; ``outside``: in no live record group (``live``), so it needs nothing here."""
+    ``None``): ``{answered|same|unknown|before: {run: [values]}, needed: [runs], outside: [runs]}``.
+    ``answered``: a scientist's allowed answer came AFTER the request (:func:`request_time`, :func:`_order`);
+    ``same``: given in the same second as the request, so which came last cannot be told; ``unknown``: the request's
+    time cannot be read; ``before``: the run's only allowed answers came before it (they still asked for the word, so
+    it is not answered); ``needed``: no allowed answer; ``outside``: in no live record group (``live``)."""
     asked = request_time(req)
-    out: dict = {"answered": {}, "before": {}, "needed": [], "outside": []}
+    out: dict = {"answered": {}, "same": {}, "unknown": {}, "before": {}, "needed": [], "outside": []}
     for rid in list(dict.fromkeys(req.get("run_ids") or ())) or [None]:
         if live is not None and rid is not None and rid not in live:
             out["outside"].append(rid)
             continue
         got = _answers_for_run(answers, req.get("field_path") or "", rid)
-        later = [a[0] for a in got if _after(a, asked, log)]
-        if later:
-            out["answered"][rid] = _distinct(later)
-        elif got:
-            out["before"][rid] = _distinct([a[0] for a in got])
-        else:
+        if not got:
             out["needed"].append(rid)
+            continue
+        by: dict[str, list[Any]] = {}
+        for a in got:
+            by.setdefault(_order(a, asked, log), []).append(a[0])
+        how = next(h for h in ("after", "same", "unknown", "before") if h in by)
+        out["answered" if how == "after" else how][rid] = _distinct(by[how])
     return out
 
 
@@ -408,6 +416,14 @@ def _distinct(values: Sequence[Any]) -> list[Any]:
     for v in values:
         seen.setdefault(json.dumps(v, sort_keys=True), v)
     return list(seen.values())
+
+
+def _last_said(req: Mapping) -> Any:
+    """The request's own time string that :func:`request_time` reads as last (``requested_utc`` when neither reads)."""
+    reaffirmed, asked = _utc(req.get("reaffirmed_utc")), _utc(req.get("requested_utc"))
+    if reaffirmed is not None and (asked is None or reaffirmed > asked):
+        return req["reaffirmed_utc"]
+    return req.get("requested_utc")
 
 
 def _interpretation_path(bundle: Mapping, interp: Mapping, index: Mapping) -> str | None:
@@ -645,10 +661,10 @@ def _answered_since(occs: Sequence[Mapping], requests: Mapping, answers: Mapping
     asked = [requests[o["ref"]["id"]] for o in occs if o["origin"] == ORIGIN_REQUEST and o["ref"].get("id") in requests]
     if not asked:
         return None
-    rank = {"answered": 0, "before": 1, "needed": 2}
+    rank = {"answered": 0, "before": 1, "same": 2, "unknown": 3, "needed": 4}
     state: dict[str | None, str] = {}
     after: dict[str | None, list[Any]] = {}
-    before: dict[str | None, list[Any]] = {}
+    held: dict[str, dict[str | None, list[Any]]] = {"before": {}, "same": {}, "unknown": {}}
     outside: set[str] = set()
     answered_requests: set[str] = set()
 
@@ -662,15 +678,17 @@ def _answered_since(occs: Sequence[Mapping], requests: Mapping, answers: Mapping
         for rid, values in st["answered"].items():
             mark(rid, "answered")
             after.setdefault(rid, []).extend(values)
-        for rid, values in st["before"].items():
-            mark(rid, "before")
-            before.setdefault(rid, []).extend(values)
+        for how in held:
+            for rid, values in st[how].items():
+                mark(rid, how)
+                held[how].setdefault(rid, []).extend(values)
         for rid in st["needed"]:
             mark(rid, "needed")
-        if st["answered"] and not st["before"] and not st["needed"]:
+        if st["answered"] and not any(st[h] for h in held) and not st["needed"]:
             answered_requests.add(req.get("request_id"))
     done = [r for r, s in state.items() if s == "answered"]
-    early = [r for r, s in state.items() if s == "before"]
+    unsure = {how: [r for r, s in state.items() if s == how] for how in held}
+    early = [r for runs in unsure.values() for r in runs]  # each holds an allowed value not given after the request
     needed = [r for r, s in state.items() if s == "needed"]
     if not done and not early and not outside:
         return None
@@ -687,12 +705,27 @@ def _answered_since(occs: Sequence[Mapping], requests: Mapping, answers: Mapping
         info["runs_in_no_live_group"] = len(outside)
         info["runs_in_no_live_group_note"] = (f"{len(outside)} run(s) the scientist named are in no live record group: "
                                               "they need nothing here and are not counted.")
-    if early:
-        early_values = _distinct([v for rid in early for v in before[rid]])
+    if unsure["before"]:
+        runs = unsure["before"]
+        early_values = _distinct([v for rid in runs for v in held["before"][rid]])
         info.update(answered_before_request=True, answered_before_request_with=early_values,
-                    runs_answered_before_request=sum(1 for r in early if r is not None),
-                    answered_before_request_note=(f"{_reach(early)} already held {_shown(early_values)} before the word was "
+                    runs_answered_before_request=sum(1 for r in runs if r is not None),
+                    answered_before_request_note=(f"{_reach(runs)} already held {_shown(early_values)} before the word was "
                                                   "asked for; ask the scientist whether they still want the term."))
+    if unsure["same"]:
+        runs = unsure["same"]
+        same_values = _distinct([v for rid in runs for v in held["same"][rid]])
+        info.update(answered_same_step=True, answered_same_step_with=same_values,
+                    answered_same_step_note=(f"{_reach(runs)} hold {_shown(same_values)}, given in the same step as the word "
+                                             "(e.g. one sheet import), so ISAAC cannot tell which the scientist meant last; "
+                                             "ask them."))
+    if unsure["unknown"]:
+        runs = unsure["unknown"]
+        unknown_values = _distinct([v for rid in runs for v in held["unknown"][rid]])
+        info.update(answered_order_unknown=True, answered_order_unknown_with=unknown_values,
+                    answered_order_unknown_note=(f"{_reach(runs)} hold {_shown(unknown_values)}, but ISAAC cannot tell which "
+                                                 "came first, the value or the word (the request's time cannot be read); "
+                                                 "ask the scientist."))
     if done and not early and not needed and not unconfirmed and not confirmed:
         info["answered"] = True
         info["reason"] = (f"Answered since it was asked for: a scientist's decision after the request now gives {_reach(done)} "
@@ -822,7 +855,9 @@ def _answer_totals(fields: Sequence[Mapping]) -> dict:
     current = [t.get("draft") or {} for f in fields for t in f["terms"] if not t.get("carried_over")]
     return {"answered_since": sum(1 for d in current if d.get("answered") is True),
             "partly_answered": sum(1 for d in current if d.get("drafted") and d.get("partly_answered")),
-            "answered_before_request": sum(1 for d in current if d.get("drafted") and d.get("answered_before_request"))}
+            "answered_before_request": sum(1 for d in current if d.get("drafted") and d.get("answered_before_request")),
+            "order_unclear": sum(1 for d in current if d.get("drafted")
+                                 and (d.get("answered_same_step") or d.get("answered_order_unknown")))}
 
 
 # --- a second run: --merge ------------------------------------------------------------------------
@@ -934,6 +969,7 @@ def merge_reports(old: Any, new: Mapping, sources: Mapping) -> tuple[dict, dict]
             "runs": 0,
             "run_ids": [],
             "scientist_notes": [],
+            "answered_scientist_notes": [],
             "citations": [],
             "citations_total": 0,
             "citations_truncated": False,

@@ -206,7 +206,8 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   `XAS`, `HERFD-XAS`) is drafted with `check_existing`: its description must say why none of those fits.
   A term whose draft says `answered: true` is not drafted: the scientist has since given an allowed value
   (`answered_with`) for every run they asked it for, so never offer it. Say a draft's `partly_answered` sentence
-  when you offer it; with `answered_before_request`, ask whether they still want the term.
+  when you offer it; with `answered_before_request`, `answered_same_step` or `answered_order_unknown`, ask
+  whether they still want the term.
   A term with a space is not drafted; its `ask` says what to ask for (one word, e.g. `cathodic_corrosion`):
   record their one-word answer again, never rewrite it yourself. They write each description themselves on
   the Schema Proposals page (Propose a Change → Load drafts from a local import), never in the file and

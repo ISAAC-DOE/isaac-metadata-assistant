@@ -1216,6 +1216,9 @@ function whyNotFileable(vocabulary: ApiSchemaVocabulary, d: LocalTermDraft): str
   if (d.carriedOver) {
     return 'This term is no longer found in the bundle: an earlier drafts file had it, and the latest run of `isaac bundle propose-terms` did not find it, so it is not proposed from here.';
   }
+  if (d.answered) {
+    return d.reason ?? 'The scientist has since answered every run they asked this term for, so it is not proposed.';
+  }
   if (!d.drafted || d.body === null) {
     return d.reason ?? 'The drafts file did not draft this term, and gives no reason.';
   }
@@ -1375,7 +1378,7 @@ function LocalDraftItem({ draft, whyNot, onUse }: { draft: LocalTermDraft; whyNo
         </dd>
         {draft.answerNotes.length > 0 && (
           <>
-            <dt>Answered since</dt>
+            <dt>Since it was asked for</dt>
             <dd>{draft.answerNotes.join(' ')}</dd>
           </>
         )}
