@@ -13,6 +13,7 @@ cloud model**, and **not uploading raw files is not the same as sending nothing 
 | **A: local deterministic parsing** | scientist's Mac → `isaac import` (ISAAC's own code) → local bundle folder | **Nothing.** No network call. | Permission to hold and process the files on that computer (data owner; SLAC policy for laptops: open question **H5**) | implemented (this branch), tested on synthetic fixtures only |
 | **B: Claude model interpretation** | scientist's Mac → Claude Code → Claude model service | **File contents or excerpts** the skill chooses to show the model, plus the conversation | Institutional approval that this Claude account/tenant may process this data class. The data owner's OK is necessary but may not be sufficient (see below) | planned; tested on **synthetic** data only; **awaiting approval** for real data |
 | **C: MCP transfer to ISAAC** | local bundle → remote MCP → ISAAC backend (SLAC) | Structured metadata, short source excerpts, hashes, relative file names, contributor names, scientist decisions | MCP reachability + login decisions **D1/D2** (Dean/Hao); classification of what may be stored on the server (**EXT-13**); a reviewed bundle-import tool | **design only** (`docs/mcp-staged-bundle-import-design.md`); not implemented, not deployed |
+| **D: the scientist's own website action — saving a term proposal** (not a flow of the skill) | the scientist loads the `isaac bundle propose-terms` drafts file on the Schema Proposals page and saves a proposal (their choice, never Claude's) | **The term, its counts and its file-name citations** go to the ISAAC server that page uses (the hosted server when they use the website); nothing before they save | Theirs to make, as for any proposal they write on the website; the skill says what saving sends before they save | implemented (the page and the drafts file); not a flow the skill runs |
 
 ## Flow A — local deterministic parsing
 
@@ -75,6 +76,14 @@ cloud model**, and **not uploading raw files is not the same as sending nothing 
   2. **EXT-13:** SLAC's rules for what may be stored on the server (classification, retention,
      deletion).
   3. The reviewed importer itself.
+
+## Row D — the scientist's own website action
+
+- Not a fourth flow of the skill: the skill never saves a proposal. `isaac bundle propose-terms` writes a
+  drafts file on the scientist's computer and sends nothing.
+- When the scientist loads that file on the Schema Proposals page and saves a proposal, the term, its
+  counts and its file-name citations go to the ISAAC server that page uses. The skill says so before
+  they save (`.claude/skills/isaac-historical-import/reference/data-flow-and-consent.md`, row D).
 
 ## Reporting rule
 

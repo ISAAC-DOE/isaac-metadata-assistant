@@ -133,9 +133,10 @@ If `<isaac> bundle group --help` fails, say "grouping is not in this build", ski
    then `<isaac> bundle group <bundle> --regroup` (replaces undecided groups only).
 3. **Apply the findings file again** (`annotate --from-readings`, preview then `--apply`) now and after
    every later regroup: absorber findings are skipped until groups exist and do not move to new groups.
-4. Page groups with `<isaac> bundle list <bundle> groups --limit 10` and the merge candidates (paging,
-   and the flags that need care, are in the reference). Present each in plain words: sample,
-   conditions, how many scans, why runs were split ("these two differ in potential").
+4. Page groups with `<isaac> bundle list <bundle> groups --limit 10` and the merge candidates (paging is
+   in the reference). Present each in plain words: sample, conditions, how many scans, why runs were split
+   ("these two differ in potential"). Say a merge candidate's `caution` before asking about it, and the care
+   flags in words: `merged_despite_engine_reading` (the importer read a difference), `sample_key_basis: name_stem` (no file states the sample).
 5. Ask the scientist to **confirm, split or merge** each, in batches, with progress. A group that is
    not a result (alignment, a reference foil, a test scan) can be **left out** with `reject`; say it is
    never exported. Several accepted as shown: list each back, then one `--targets-file` confirm; never
@@ -203,9 +204,9 @@ is in the reference; in short:
   `decide … --value "<their exact word>" --as-said` once: it records no decision but keeps their word as a
   vocabulary request (`--note`: their own words, or nothing). Never pass a word they did not say.
   Offer `<isaac> bundle propose-terms <bundle> --out <bundle>-notes/terms.json`. They write each
-  description themselves on the Schema Proposals page (Propose a Change → Load drafts from a local
-  import), never in the file and never by you. Say which terms come only from my readings
-  (`by_origin.ai_reading`), not from their answers; draft one only if they want it.
+  description themselves on the Schema Proposals page, never in the file and never by you. Saving a proposal
+  sends the term, counts and file-name citations to the ISAAC server the page uses; say so before they save.
+  Say which terms come only from my readings (`by_origin.ai_reading`); draft one only if they want it.
 - **Absorber.** Say the element and edge back; record it only on a clear yes to that pair.
 - **AI readings are not file evidence**: say "my reading of the files suggests…", never "the files say".
 
@@ -218,8 +219,7 @@ empty; `ISAAC Suggestions` shows what each run's own files say; every `--out` of
 cell, clash, replaced or contradicted file reading, beamtime-wide cell and unread column, and add
 `--apply` only on their yes. Never fill the sheet for them; never import ISAAC's blank template. **They already filled ISAAC's template and say to use it:**
 `<isaac> bundle template adopt` (see "The scientist's own filled sheet" in the reference).
-They may also answer in the local-only *Local Imports* page (`docs/ui-local-dev.md`); run
-`bundle questions` again after.
+They may also answer on the local-only *Local Imports* page (see the reference); run `bundle questions` again after.
 
 ## Step 8 · Build and validate
 
