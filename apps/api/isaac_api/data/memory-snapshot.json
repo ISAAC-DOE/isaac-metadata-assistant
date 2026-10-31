@@ -10504,7 +10504,7 @@
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "494516c41b5e5e8f9a1733f14d23aa85e80039c02db0f6f32ba946f1683324bc"
+        "sha256": "40070831fdb529d2b52b4b272c58d652d1cdfc0fc3c1ede37796b2a61a303738"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10772,7 +10772,7 @@
       },
       {
         "path": "docs/ui-local-dev.md",
-        "sha256": "4a87f0524884cbe94b5b5b7966eda2695459947ca5a7bd4b215a47e3ca7fd671"
+        "sha256": "f8a41ff57795e2670ec8403fc1428e74107aab27be05dcafe5741d3fc00e1512"
       },
       {
         "path": "pyproject.toml",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "11691cf86652fdf9eef3f2ca29cfbe95bb763c2af153eb82184ab15e47b28e51"
+    "served_manifest_fingerprint": "31b9e03d006ad2492eaf2adccee66502e7b83b74dd096f330715e187bea42b2a"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
