@@ -665,6 +665,21 @@ def _scans_phrase(scans: Sequence[int]) -> str:
     return ", ".join(out)
 
 
+def _no_usable_scan_statement(inputs: Sequence[Mapping], too_few: Sequence[int]) -> str | None:
+    """c10-m: one plain sentence when NO scan could be used because scans have too few points (``None`` when none
+    did): "The only scan has 2 usable points; at least 5 are needed". Scans skipped for other reasons are counted."""
+    if not too_few:
+        return None
+    need = f"at least {C.MIN_SCAN_POINTS} are needed, so there is no curve to process."
+    if len(inputs) == 1:
+        return f"The only scan has {too_few[0]} usable point{'' if too_few[0] == 1 else 's'}; {need}"
+    k = len(too_few)
+    other = len(inputs) - k
+    return (f"No scan could be used: {k} {'has' if k == 1 else 'have'} too few usable points ({', '.join(map(str, too_few))}); "
+            + (f"{other} {'was' if other == 1 else 'were'} skipped for other reasons (see inputs); " if other else "")
+            + need)
+
+
 def _skipped_scans_statement(inputs: Sequence[Mapping], choice, used: int) -> str | None:
     """One plain sentence when readable scans of the group were left out because they lack the chosen
     columns (``None`` otherwise): how many of the listed scans were used, which were not, and why. Added to
@@ -707,8 +722,14 @@ def _athena_coverage(entry: Mapping, stems: Sequence[str], used_entries: Sequenc
             "partial": len(runs) < len(group_runs)}
 
 
+def _set_scans(entry: Mapping) -> list[int] | None:
+    """The scan numbers a set of per-scan Athena groups names (one each), else ``None``."""
+    members = entry.get("per_scan_set") if entry.get("_match_kind") == "per_scan_set" else None
+    return [int(n) for n in members["scans"]] if members and members.get("scans") else None
+
+
 def _athena_scans_used(entry: Mapping, stems: Sequence[str], isaac_counts: tuple[int, int] | None,
-                       coverage: Mapping | None = None) -> dict:
+                       coverage: Mapping | None = None, isaac_scans: Sequence[int] | None = None) -> dict:
     """Which scans the scientist's Athena curve used, as far as the project says: ``basis`` is ``per_scan_set``
     (the member groups name one scan each), ``label`` (the Athena group's label names a selection) or
     ``not_stated`` (an Athena project does not list the scan files it merged). In a group of several runs
@@ -728,15 +749,25 @@ def _athena_scans_used(entry: Mapping, stems: Sequence[str], isaac_counts: tuple
                    f": at most {coverage['isaac_scans_of_these_runs']} of the {coverage['isaac_scans_merged']} scans ISAAC merged")
                 + ", so it is not preferred for the record (ISAAC's curve merges every run of the group); the scientist "
                 "can still approve it, knowing it describes only those scans.")
+
+    def subset(scans: Sequence[int]) -> str:
+        # c10-m: in a ONE-run group, a curve of only some of the scans ISAAC merged says so (a merged group's says
+        # which runs it covers, above)
+        if coverage is not None or not isaac_scans or set(scans) == set(isaac_scans):
+            return ""
+        return (f" It covers only scan{'s' if len(scans) > 1 else ''} {_scans_phrase(scans)} of the {len(isaac_scans)} "
+                "scans ISAAC merged: its E0 and curve describe those scans, not the full merge.")
+
     if members and members.get("scans"):
         scans = [int(n) for n in members["scans"]]
         said = (f"The scientist's curve is ISAAC's mean of {len(scans)} per-scan Athena groups, one each for scans "
-                f"{_scans_phrase(scans)}{of_run} (read from their labels).{ours}{part}")
+                f"{_scans_phrase(scans)}{of_run} (read from their labels).{ours}{part}{subset(scans)}")
         return {"basis": "per_scan_set", "scans": scans, "statement": said}
     sel = A.scan_selection(label, stems)
     if sel:
         said = (f"The scientist's Athena group '{label}' names scans {_scans_phrase(sel)}{of_run} in its label. An Athena "
-                f"project does not list the scan files it merged, so this is read from the label, not confirmed.{ours}{part}")
+                f"project does not list the scan files it merged, so this is read from the label, not confirmed.{ours}{part}"
+                f"{subset(sel)}")
         return {"basis": "label", "scans": list(sel), "statement": said}
     made_from = PurePosixPath(str(entry.get("filename") or "").replace("\\", "/")).name
     said = (f"The project does not say which scans the scientist's curve used: its Athena label '{label}' names no scan"
@@ -819,10 +850,13 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     res["channel_choice"] = choice.to_state()
     res["review_flags"] += choice.flags
     scans_data, used_entries, headers = [], [], []
+    too_few: list[int] = []  # the usable points of each scan skipped as too_few_points (said if no scan is left)
     for entry, table, sa, code in attempts:
         code = code or C.unusable_reason(sa)
         if code:
             entry["skip_reason"] = code
+            if code == "too_few_points" and sa is not None:
+                too_few.append(int(sa["energy"].size))
             if code == C.SIGNAL_NOT_FINITE:
                 entry["diagnostics"] = sa["diagnostics"]  # points_read, nonfinite_dropped: why it is unusable
             continue
@@ -835,7 +869,14 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         nonfinite = [e["diagnostics"] for e in res["inputs"] if e.get("skip_reason") == C.SIGNAL_NOT_FINITE]
         if nonfinite:
             res["qc"]["metrics"] = {k: sum(d[k] for d in nonfinite) for k in ("points_read", "nonfinite_dropped")}
-        return [_fail(res, "no_usable_scan", ";".join(causes))]
+        out = _fail(res, "no_usable_scan", ";".join(causes))
+        # c10-m: said in the result and the lists, outside the failure's hash (its id does not move): how many scans
+        # were listed and used, and, when scans were too short, how short
+        out["qc"]["metrics"].update(scans_listed=len(res["inputs"]), scans_used=0)
+        said = _no_usable_scan_statement(res["inputs"], too_few)
+        if said:
+            out["qc"]["statements"] = {"no_usable_scan": said}
+        return [out]
 
     cal = _calibration(group, stems, scans_data, headers, ctx)
     res["steps"].append(cal)
@@ -1094,7 +1135,7 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     out = [res]
     if athena_entry is not None:
         athena_res = _athena_result(group, athena_entry, files, params, np, ctx, stems=stems, isaac_counts=(len(scans_data), len(scans)),
-                                    coverage=coverage)
+                                    coverage=coverage, isaac_scans=[e.get("scan") for e in used_entries if e.get("scan") is not None])
         athena_res["comparison"] = comparison
         # a curve whose energy frame is unknown (non-finite bkg_eshift) is never preferred by default;
         # its result carries athena_energy_frame_unknown, and a scientist can still approve it
@@ -1125,13 +1166,16 @@ def _diagnose(comparison: dict, entry: Mapping, stems: Sequence[str], used_entri
     """
     np = ctx.np
     sel = A.scan_selection(entry["label"], stems)
-    comparison["athena_scan_selection"] = sel
     # c8-a: in a group of several runs, the scans compared are those of the run(s) the Athena curve names (scan
     # numbers restart in each run), and a curve of only some of the runs is a subset of what ISAAC merged
     coverage = _athena_coverage(entry, stems, used_entries, stem_of or {})
+    # c10-m: in a ONE-run group a set of per-scan groups selects the scans its members name, exactly as a label does
+    # (its own label is its first member's); in a group of several runs that is athena_covers.scans, per run
+    chosen = sel or (_set_scans(entry) if coverage is None else None)
+    comparison["athena_scan_selection"] = chosen
     mine = [e for e in used_entries if coverage is None or (stem_of or {}).get(e.get("source_id")) in coverage["runs"]]
     idx = [e.get("scan") for e in mine]
-    if (sel and set(sel) != set(i for i in idx if i is not None)) or (coverage or {}).get("partial"):
+    if (chosen and set(chosen) != set(i for i in idx if i is not None)) or (coverage or {}).get("partial"):
         comparison["flags"].append("scientist_selected_subset_of_scans")
     if coverage is not None:
         comparison["athena_covers"] = {k: coverage[k] for k in ("runs", "group_runs", "scans", "isaac_scans_merged")}
@@ -1181,14 +1225,14 @@ def _diagnose(comparison: dict, entry: Mapping, stems: Sequence[str], used_entri
 
 def _athena_result(group: Mapping, entry: Mapping, files: Sequence[Mapping], params: Mapping, np, ctx: _Ctx, *,
                    stems: Sequence[str] = (), isaac_counts: tuple[int, int] | None = None,
-                   coverage: Mapping | None = None) -> dict:
+                   coverage: Mapping | None = None, isaac_scans: Sequence[int] | None = None) -> dict:
     res = _base(group, "scientist_athena")
     members = entry.get("per_scan_set") if entry.get("_match_kind") == "per_scan_set" else None
     # A SET of the scientist's per-scan groups is ISAAC's mean of them (athena._per_scan_set), not values
     # ISAAC left unchanged: the flag and the input say so, and name every member group
     res["review_flags"] = ["scientist_processed_data",
                            "isaac_computed_mean_of_scientist_per_scan_curves" if members else "isaac_did_not_change_scientist_values"]
-    scans_used = _athena_scans_used(entry, stems, isaac_counts, coverage)
+    scans_used = _athena_scans_used(entry, stems, isaac_counts, coverage, isaac_scans)
     res["inputs"] = [
         {
             "source_id": entry["prj_source_id"],

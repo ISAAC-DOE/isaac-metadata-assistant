@@ -825,18 +825,11 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                           "note": "A PI or group name in a folder name is a HINT to ask about, never an answer."})
         if path.startswith("system.facility."):
             hints += S.facility_hints(bundle)
-        ai = ai_hints([t["id"] for t in q["targets"]])
+        ai = ai_hints([t["id"] for t in q["targets"]], scopes=q["per_scope_targets"])
         # the text THIS question's own targets hold comes first (a value-less question is answered from it)
         hints = own_literals + ai + hints
         if ai and not never:
-            top = ai[0]
-            cite = top.get("source_path") or top.get("source_id") or "a file"
-            # AN AI READING IS NOT FILE EVIDENCE: no parser read this value, so it is never worded as one the files state
-            text += (f" An AI reading of the files suggests {top['literal']!r}"
-                     + (f", {top['read_for']}" if top.get("read_for") else "")
-                     + " (not file evidence: it needs your "
-                     f"confirmation), citing {cite}{' @ ' + str(top['locator']) if top.get('locator') else ''}"
-                     + (f"; {len(ai) - 1} other AI suggestion(s) differ" if len(ai) > 1 else "") + ".")
+            text += _ai_sentence(ai)
         mine = {t["id"] for t in q["targets"]}
         shown_own = {h.get("candidate_id") for h in own_literals}
         for c in related.get(path, [])[:_HINTS_PER_QUESTION]:
@@ -1280,6 +1273,10 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
                     fields.add(path)
         if not groups_reached:
             q["outside_live_groups"] = True
+        elif isinstance(q.get("applies_to"), dict) and len(groups_reached) > int(q["applies_to"].get("groups") or 0):
+            # c10-m: THE REACH (what `decide` says an answer reaches): a beamtime-level target fills every live group,
+            # so a question asked once for the beamtime applies to all of them, never "0 groups"
+            q["applies_to"]["groups"] = len(groups_reached)
         if needing:
             # which groups it blocks (`--scope group:<id> --blocking-only` lists it only for those)
             q["blocks_groups"], q["blocks_group_ids"] = len(needing), sorted(needing, key=lambda g: order_of.get(g, 0))
@@ -1658,7 +1655,7 @@ def _ai_hint_index(bundle: Mapping):
     run_of = {**{c["candidate_id"]: c.get("run_id") for c in bundle.get("candidates") or ()},
               **{m["value_id"]: m.get("run_id") for m in bundle.get("missing_values") or ()}}
 
-    def hints(ids: Sequence[str]) -> list[dict]:
+    def hints(ids: Sequence[str], scopes: Mapping[str, Sequence[str]] | None = None) -> list[dict]:
         wanted = set(ids)
         rows = sorted(n for tid in wanted for n in at.get(tid, ()))
         out = S.ai_hints({"ai_interpretations": [interps[n] for n in rows]}, wanted) if rows else []
@@ -1667,6 +1664,10 @@ def _ai_hint_index(bundle: Mapping):
             # suggestion read from one file must never read as a beamtime-wide reading
             covered = {(interps[n].get("target") or {}).get("id") for n in rows
                        if repr(interps[n].get("proposed_value")) == repr(h["literal"])}
+            if scopes and len(scopes) > 1 and len(out) > 1:
+                # c10-m: SUGGESTIONS THAT DIFFER name the scopes they were read for, so a group in scope leads with
+                # its own (filter_questions, the minimum's `only`); the unscoped order and text are unchanged
+                h["scopes"] = [sc for sc, tids in scopes.items() if covered.intersection(tids)]
             runs_all = {run_of.get(t) for t in wanted}
             if None not in runs_all and len({run_of.get(t) for t in covered}) < len(runs_all):
                 h["read_for"] = f"read for {len({run_of.get(t) for t in covered})} of {len(runs_all)} runs"
@@ -1675,6 +1676,39 @@ def _ai_hint_index(bundle: Mapping):
         return out
 
     return hints
+
+
+def _ai_sentence(ai: Sequence[Mapping]) -> str:
+    """The sentence a value question adds for its AI suggestions, led by ``ai[0]``. AN AI READING IS NOT FILE
+    EVIDENCE: no parser read this value, so it is never worded as one the files state."""
+    top = ai[0]
+    cite = top.get("source_path") or top.get("source_id") or "a file"
+    return (f" An AI reading of the files suggests {top['literal']!r}"
+            + (f", {top['read_for']}" if top.get("read_for") else "")
+            + " (not file evidence: it needs your "
+            f"confirmation), citing {cite}{' @ ' + str(top['locator']) if top.get('locator') else ''}"
+            + (f"; {len(ai) - 1} other AI suggestion(s) differ" if len(ai) > 1 else "") + ".")
+
+
+def led_by_scope(q: Mapping, scope: str) -> Mapping:
+    """``q`` as a group in ``scope`` reads it (c10-m): when its AI suggestions differ and the leading one was not read
+    for this group's runs, the one(s) that were lead — in its hints and its AI sentence. Otherwise ``q`` itself. The
+    question id and the unscoped question are never changed (a copy is returned)."""
+    hints = list(q.get("hints") or ())
+    ai = _scoped_ai(hints)
+    mine = [h for h in ai if scope in h["scopes"]]
+    if len(ai) < 2 or not mine or mine[0] is ai[0]:
+        return q
+    led = mine + [h for h in ai if not any(h is m for m in mine)]
+    order = iter(led)
+    # the AI hints keep their place among the others, in the new order
+    hints = [next(order) if any(h is a for a in ai) else h for h in hints]
+    return {**q, "hints": hints, "text": q["text"].replace(_ai_sentence(ai), _ai_sentence(led), 1)}
+
+
+def _scoped_ai(hints: Sequence[Mapping]) -> list[Mapping]:
+    """The AI suggestions among ``hints`` that name the scopes they were read for (:func:`_ai_hint_index`)."""
+    return [h for h in hints if h.get("kind") == "ai_suggestion" and "scopes" in h]
 
 
 def _optional_field_hints(bundle: Mapping, fields: Mapping[str, Sequence[str]], ai_hints=None) -> dict[str, list[dict]]:
@@ -1923,6 +1957,8 @@ def filter_questions(payload: Mapping, *, scope: str | None = None, blocking_onl
                 if q["scope"] == scope
                 or (q["scope"] == "experiment" and (scope in q["per_scope_targets"] or "experiment" in q["per_scope_targets"]))
             ]
+            # c10-m: and it leads with the AI suggestion read for THIS group's runs
+            qs = [led_by_scope(q, scope) for q in qs]
         elif scope.startswith("run:") or scope == "experiment":
             qs = [q for q in qs if q["scope"] == scope]
     return qs
@@ -2183,6 +2219,12 @@ def _recommended(report: Mapping, usable: Sequence[tuple], gid: str) -> list[dic
                 out.append({"question_id": None, "fields": [need], "only": None, "blocking": False, "why": why})
                 continue
             q, field = hit
+            # c10-m: ONE entry per question (both steps of one question are its fields), its why said once
+            same = next((r for r in out if r["question_id"] == q["question_id"] and r["why"] == why), None)
+            if same is not None:
+                if field not in same["fields"]:
+                    same["fields"].append(field)
+                continue
             pst = q.get("per_scope_targets") or {}
             out.append({"question_id": q["question_id"], "fields": [field],
                         "only": f"group:{gid}" if f"group:{gid}" in pst and len(pst) > 1 else None, "blocking": False,
@@ -2281,6 +2323,10 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
                 # answer it for THIS group: an experiment-scope question's other groups need not be answered now
                 "only": f"group:{gid}" if q["scope"] == "experiment" and f"group:{gid}" in pst and "experiment" not in pst else None,
                 **({"deferred": True} if q.get("deferred") else {})})
+            if entry["only"] and "ai_suggestion" not in entry and (led := led_by_scope(q, entry["only"])) is not q:
+                # c10-m: answered for THIS group, so the AI suggestion read for its runs is named (the question's own
+                # text leads with the one read for the most runs)
+                entry["ai_suggestion"] = _ai_sentence(_scoped_ai(led["hints"])).strip()
             entry["fields"].append(field if q["kind"] == "optional_values" else path)
             if path in because:
                 # a CONDITIONAL requirement (an object the record carries requires this member): why, said
@@ -2353,7 +2399,7 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
         stated = _stated_candidate_ids(rep) if warned else []
         if not need and not plus and not hard and wanted is None:
             done.append(gid)
-            warned_done += [r["why"] for r in warned]
+            warned_done += [r["why"] for r in warned if r["why"] not in warned_done]
             stated_done += stated
             continue
         rank = (bool(hard), soft is not None, need + len(plus), n)
@@ -2379,7 +2425,7 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
         # NOT BLOCKING, NOT COUNTED in blocking_questions: the record exports without it, but without the condition
         # its file names state (records: the stated-potential warning)
         out["recommended"] = best["recommended"]
-        out["warnings"] = [r["why"] for r in best["recommended"]]
+        out["warnings"] = list(dict.fromkeys(r["why"] for r in best["recommended"]))  # each sentence once
         # the candidates whose parser values (a file-name literal, the volts it was read as) the warnings state: a
         # page or command showing them records each as an exposure first (c7-r MED-4)
         out["values_shown_from"] = sorted(set(best["stated"]))
@@ -2582,10 +2628,12 @@ def open_circuit_text(w: Mapping) -> str:
 
 
 def stated_subject(w: Mapping) -> str:
-    """Who states the potential a warning names: the file names (as before c8-b), or only the scan headers."""
+    """Who states the potential a warning names: the file names (as before c8-b), only the scan headers, or both."""
     stated = list(w.get("stated") or ())
-    return ("the scan headers state" if stated and all(s.get("stated_in") == "scan header" for s in stated)
-            else "the file names state")
+    header = [s.get("stated_in") == "scan header" for s in stated]
+    # c10-m: a potential written in a scan header is never said to be the file name's
+    return ("the scan headers state" if header and all(header) else
+            "the file names and scan headers state" if any(header) else "the file names state")
 
 
 def _move_outside_optional_targets(buckets: dict, bundle: Mapping, group_of: Mapping[str, str], add) -> None:

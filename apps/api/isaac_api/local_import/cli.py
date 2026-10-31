@@ -1629,7 +1629,8 @@ def _compact_question(q: Mapping) -> dict:
     pst = q.get("per_scope_targets") or {}
     out["targets_count"] = len(q.get("targets") or ())
     out["scopes_count"] = len(pst)
-    out["groups_count"] = sum(1 for s in pst if s.startswith("group:"))
+    # the groups it REACHES (applies_to.groups: a beamtime-wide question reaches every live group, c10-m)
+    out["groups_count"] = (q.get("applies_to") or {}).get("groups", sum(1 for s in pst if s.startswith("group:")))
     if q.get("kind") == "optional_values" and isinstance(q.get("fields"), Mapping):
         out["fields"] = {f: len(ids) for f, ids in q["fields"].items()}
     scopes = q.get("confirmable_scopes")

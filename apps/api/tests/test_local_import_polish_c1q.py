@@ -242,7 +242,8 @@ def test_the_cli_page_is_compact_by_default_and_full_with_targets(pristine_bundl
     for small, big in zip(compact["questions"], full["questions"]):
         assert "targets" not in small and "per_scope_targets" not in small
         assert small["targets_count"] == len(big["targets"]) and small["scopes_count"] == len(big["per_scope_targets"])
-        assert small["groups_count"] == sum(k.startswith("group:") for k in big["per_scope_targets"])
+        # the groups it reaches (c10-m): at least its group scopes, every live group for a beamtime-wide one
+        assert small["groups_count"] == big["applies_to"]["groups"] >= sum(k.startswith("group:") for k in big["per_scope_targets"])
         if big["kind"] == "optional_values":
             assert small["fields"] == {f: len(ids) for f, ids in big["fields"].items()}
     # the counts are the scope's; the whole bundle's are under their own key

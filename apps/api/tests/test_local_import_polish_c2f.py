@@ -84,7 +84,9 @@ def test_a_scan_with_really_few_points_still_says_too_few_points(tmp_path):
     r = isaac(run_process(bdir, source_root=root))
     assert r["failure"] == {"code": "no_usable_scan", "detail": "too_few_points"}
     assert r["inputs"][0]["skip_reason"] == "too_few_points" and "diagnostics" not in r["inputs"][0]
-    assert r["qc"]["metrics"] == {}
+    # no points_read / nonfinite_dropped (that is signal_not_finite); only the scan counts the scans line says (c10-m)
+    assert r["qc"]["metrics"] == {"scans_listed": 1, "scans_used": 0}
+    assert r["qc"]["statements"]["no_usable_scan"].startswith("The only scan has 3 usable points")
 
 
 # --- 2. fall back to fluorescence, never silently ---------------------------------------------------

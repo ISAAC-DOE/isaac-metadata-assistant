@@ -72,6 +72,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import json
 import math
 import os
 import re
@@ -334,6 +335,8 @@ def _per_scan_set(pool: Sequence[Mapping], stems: Sequence[str], np) -> dict | N
                 "e0_eV": [pool[i]["e0_eV"] for i in order],
                 "edge_step": [pool[i]["edge_step"] for i in order],
                 "params": [pool[i]["params"] for i in order],
+                # what makes two sets the same set (_per_scan_sets_by_project); internal, never written out
+                "member_keys": [_curve_key(pool[i]) for i in order],
                 "derived": "mean of the scientist's per-scan Athena normalisations (ISAAC-computed summary, not a scientist merge)",
             },
         }
@@ -349,6 +352,42 @@ def _per_scan_set(pool: Sequence[Mapping], stems: Sequence[str], np) -> dict | N
     return out
 
 
+def _curve_key(entry: Mapping) -> tuple:
+    """One Athena curve as the scientist made it: its raw data AND the normalisation parameters applied to it."""
+    return (entry["data_hash"], json.dumps(entry.get("params"), sort_keys=True, default=str))
+
+
+def _per_scan_sets_by_project(cands: Sequence[Mapping], stems: Sequence[str], np) -> list[dict] | None:
+    """c10-m: the per-scan groups of ONE run kept in SEVERAL projects are one set PER PROJECT, never a version per
+    scan. Measured on a real BL4-3 beamtime: scans 1-22 of a 42-scan run were per-scan groups in one project and
+    1-25 in another (the same raw data, another normalisation). Collapsing them by data hash alone mixed the two
+    projects (each scan's first copy kept), the one-project rule of :func:`_per_scan_set` then refused the mix,
+    and every scan was listed as a "version" of the measurement. Here each project's candidates are taken on their
+    own (:func:`_per_scan_set`; a project that forms no set keeps its groups as they are), and versions that are the
+    same curves with the same parameters are one. ``None`` when no project forms a set: the caller's pool stands."""
+    by_prj: dict[str, dict[str, dict]] = {}
+    for c in cands:
+        by_prj.setdefault(c["prj_relative_path"], {}).setdefault(c["data_hash"], c)
+    if len(by_prj) < 2:
+        return None
+    out, formed = [], False
+    for path in sorted(by_prj):
+        pool = list(by_prj[path].values())
+        combined = _per_scan_set(pool, stems, np) if len(pool) > 1 else None
+        if combined is not None:
+            out.append({**combined, "_match_kind": "per_scan_set"})
+            formed = True
+        else:
+            out.extend(pool)
+    if not formed:
+        return None
+    same: dict[tuple, dict] = {}
+    for v in out:
+        key = ("set", *v["per_scan_set"]["member_keys"]) if v.get("_match_kind") == "per_scan_set" else ("one", _curve_key(v))
+        same.setdefault(key, v)
+    return list(same.values())
+
+
 MAX_VERSIONS = 20
 _YEAR = re.compile(r"(?<!\d)((?:19|20)\d{2})(?!\d)")
 
@@ -358,6 +397,7 @@ def version_provenance(entry: Mapping, stems: Sequence[str]) -> dict:
     the project's path names, the group label, merge flag, scan selection and parameters.
     Nothing is ranked; no version is selected."""
     path = entry["prj_relative_path"]
+    members = entry.get("per_scan_set") if entry.get("_match_kind") == "per_scan_set" else None
     return {
         "prj_relative_path": path,
         "prj_file_name": PurePosixPath(path).name,
@@ -365,9 +405,11 @@ def version_provenance(entry: Mapping, stems: Sequence[str]) -> dict:
         "athena_label": entry["label"],
         "athena_group": entry["group_name"],
         "is_merge": entry.get("is_merge"),
-        "scan_selection": scan_selection(entry["label"], stems),
+        "scan_selection": list(members["scans"]) if members else scan_selection(entry["label"], stems),
         "params": entry.get("params"),
         "data_sha256_prefix": str(entry.get("data_hash") or "")[:16],
+        # c10-m: a version that is a SET of the scientist's per-scan groups names them (its label is the first's)
+        **({"per_scan_set": {k: list(members[k]) for k in ("athena_groups", "labels", "scans")}} if members else {}),
         **({"already_normalized": True, "already_normalized_rule": ALREADY_NORMALIZED_RULE_ID} if already_normalized(entry) else {}),
         **({"edge_step_implausible": entry["edge_step_implausible"]} if not plausible(entry) else {}),
     }
@@ -423,6 +465,9 @@ def match_with_versions(groups: Sequence[Mapping], entries: Sequence[Mapping], n
             combined = _per_scan_set(pool, raw_stems.get(gid) or (), np)
             if combined is not None:
                 pool = [{**combined, "_match_kind": "per_scan_set"}]
+            else:
+                # c10-m: per-scan groups in several projects are a set per project, never a version per scan
+                pool = _per_scan_sets_by_project(cands, raw_stems.get(gid) or (), np) or pool
         if len(pool) == 1:
             matched[gid] = {**pool[0], "_candidates": len(cands), "_distinct": len(uniq)}
         else:

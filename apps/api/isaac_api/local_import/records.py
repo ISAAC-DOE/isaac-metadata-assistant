@@ -956,7 +956,8 @@ def potential_warning_text(w: Mapping) -> str:
         return Q.open_circuit_text(w)
     extra = Q.stated_potential_notes(w)
     lits = "; ".join(s["literal"] + (f", read as {s['read_as_V']:g} V" if s.get("read_as_V") is not None else "")
-                     + (f" in {s['relative_path']}" if s.get("read_as_V") is None and s.get("relative_path") else "")
+                     + (f" in {'the scan header of ' if s.get('stated_in') == 'scan header' else ''}{s['relative_path']}"
+                        if s.get("read_as_V") is None and s.get("relative_path") else "")
                      for s in w["stated"][:3])
     if w.get("answered_V"):
         lits += "; the set-point answered for it: " + ", ".join(f"{v:g} V" for v in w["answered_V"][:3])
