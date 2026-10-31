@@ -1952,6 +1952,10 @@ def scanless_groups(bundle: Mapping, groups: Sequence[Mapping]) -> set[str]:
     return out
 
 
+#: ``plus_decisions`` for a group that has scans and no processing result yet: nothing can be approved before it.
+NOT_PROCESSED_YET = "run `isaac process` first: it has no processing result yet, so there is nothing to approve"
+
+
 def _curve(bundle: Mapping, gid: str) -> dict:
     """What approving this group's processing could give it: ``{"state": "approved" | "curve" | "no_curve" | "none",
     "verdict", "reasons"}``. ``no_curve``: every undecided result lists no normalised spectrum (e.g. QC
@@ -2043,7 +2047,8 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
     composer lists as missing for the group that only an answer supplies, ONE open question that fills it
     (``questions``, each with the ``--only`` scope to answer it at), or — when no question asks it — an
     ``unasked_required`` item with why and the command that settles it; plus the decisions that group still needs:
-    confirming it (unless a scientist already did) and approving its processing result (unless one is approved).
+    confirming it (unless a scientist already did) and approving its processing result (unless one is approved;
+    :data:`NOT_PROCESSED_YET` when it has none yet, so there is nothing to approve).
     A decision already made is never named again. So answering exactly ``questions`` (at their ``only`` scope) and
     ``plus_decisions`` leaves the group with nothing missing.
 
@@ -2157,6 +2162,17 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
                 from .records import processing_remedy
 
                 plus.append(f"processing: {processing_remedy(rep.get('processing') or {})}")
+        elif curve["state"] == "none" and gid not in scanless:
+            # never "approve its processing result" when there is none to approve: the group has scans but no
+            # undecided result — none was ever made (no `isaac process` yet), or every one it had is rejected
+            mine = [r for r in bundle.get("processing_results") or ()
+                    if r.get("group_id") == gid and not B.processing_not_applicable(r)]
+            if not mine:
+                plus.append(NOT_PROCESSED_YET)
+            else:
+                from .mutations import reprocess_command
+
+                plus.append(f"re-process it: every processing result it has is rejected ({reprocess_command(gid)})")
         elif gid not in scanless:
             plus.append("approve its processing result")
             if curve.get("verdict") == "fail":

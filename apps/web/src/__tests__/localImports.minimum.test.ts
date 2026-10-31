@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fieldWords, nearestRecordText, notCountedText } from '../lib/localImports';
+import { countsText, deferredText, fieldWords, nearestRecordText, notCountedText, onlyWords, splitAtId } from '../lib/localImports';
 
 // Polish cycle 1, review round 2 (L2): the nearest group names the required fields no question asks yet
 // (`unasked_required`), never only counts them as answers; and the tier-3 counts the blocking / optional split
@@ -72,5 +72,40 @@ describe('notCountedText', () => {
     expect(notCountedText({ outside_live_groups: 4 })).toBe(
       'Neither blocking nor counted as optional: 4 question(s) about runs no record group holds (no record is built from them).',
     );
+  });
+});
+
+describe('polish c7-w: counts that add up, deferred, links', () => {
+  it('names informational questions beside the other tier-3 counts, and deferred ones as overlapping', () => {
+    expect(notCountedText({ total: 10, informational: 4 })).toBe(
+      'Neither blocking nor counted as optional: 4 listed for information only (no answer can reach a record from them yet).',
+    );
+    expect(notCountedText({ total: 10, deferred: 2 })).toBe('Of the open questions, 2 deferred (“I don’t know”); they are still counted above.');
+    expect(notCountedText({ total: 10, informational: 0, deferred: 0, outside_live_groups: 0 })).toBeNull();
+  });
+
+  it('countsText names every counted tier', () => {
+    expect(countsText({ blocking: 1, conflicts_affecting_a_record: 2, optional: 3 })).toBe(
+      '1 blocking export, 2 conflicts affecting a record, 3 optional',
+    );
+  });
+
+  it('nearestRecordText says how many of its answers are deferred', () => {
+    const m = {
+      group_id: 'g1', blocking_questions: 2, plus_decisions: [],
+      questions: [{ question_id: 'Q-1', fields: ['a'], only: null, deferred: true }, { question_id: 'Q-2', fields: ['b'], only: null }],
+    };
+    expect(nearestRecordText(m)).toBe('group g1 needs 2 blocking answer(s) (1 deferred).');
+  });
+
+  it('deferredText, onlyWords and splitAtId', () => {
+    expect(deferredText({ by: 'Synthetic Scientist', decided_utc: '2099-01-02T03:04:05Z' })).toBe('Deferred by Synthetic Scientist, 2099-01-02');
+    expect(deferredText({ by: null, decided_utc: null })).toBe('Deferred by a name not recorded, date not recorded');
+    expect(onlyWords('group:g1')).toBe('group g1');
+    expect(onlyWords('run:r1')).toBe('run r1');
+    expect(onlyWords(null)).toBeNull();
+    expect(splitAtId('answer Q-1 now', 'Q-1')).toEqual(['answer ', ' now']);
+    expect(splitAtId('no id here', 'Q-1')).toBeNull();
+    expect(splitAtId('x', null)).toBeNull();
   });
 });

@@ -32,6 +32,9 @@ export interface LocalBundleCheck {
   error_count: number;
   stale_values: number;
   statement: string;
+  /** Values this read held for review IN MEMORY (an older build's beamtime-wide notes values), as `bundle check` says. */
+  held_in_memory?: number;
+  held_statement?: string;
 }
 
 export interface LocalBundleHeader {
@@ -79,6 +82,32 @@ export interface LocalQuestionCounts {
   conflicts_without_a_record_field?: number;
   /** Questions whose every target is in a run no live record group holds: no record is built from them. */
   outside_live_groups?: number;
+  /** Listed for information only: no answer can reach a record from them yet. Counted apart from the rest. */
+  informational?: number;
+  /** Questions whose every target was deferred ("I don't know"): still asked, and still counted above. */
+  deferred?: number;
+  /** Targets answered with a value the record cannot take, asked again. */
+  asked_again?: number;
+  /** The scope these counts are for (`bundle questions --scope`). */
+  scope?: string;
+}
+
+/** A question that names one needed answer for the nearest group (`minimum_for_one_group.questions[]`). */
+export interface LocalMinimumQuestion {
+  question_id: string;
+  fields: string[];
+  only: string | null;
+  deferred?: boolean;
+  required_because?: Record<string, string>;
+}
+
+/** A question worth answering for the nearest group, never blocking (`minimum_for_one_group.recommended[]`). */
+export interface LocalMinimumRecommendation {
+  question_id: string | null;
+  fields: string[];
+  only: string | null;
+  blocking: false;
+  why: string;
 }
 
 export interface LocalProgress {
@@ -99,11 +128,20 @@ export interface LocalProgress {
     blocking_questions: number;
     plus_decisions: string[];
     /** The open questions that fill the fields the record composer lists as missing (one per field). */
-    questions?: { question_id: string; fields: string[]; only: string | null; deferred?: boolean }[];
+    questions?: LocalMinimumQuestion[];
     /** Fields the composer requires that no open question asks, with why and the command that settles it. */
     unasked_required?: { path: string; answerable: boolean; reason: string; command: string; targets?: number }[];
+    /** Every field the record composer lists as missing for the group now (answers and processing alike). */
+    missing_required_now?: string[];
+    /** Not blocking and not counted: worth answering, with the warning that explains it (`warnings`). */
+    recommended?: LocalMinimumRecommendation[];
+    warnings?: string[];
+    warnings_total?: number;
+    /** The group's processing QC verdict is fail: said, never hidden. */
+    processing_qc?: string;
     blocked?: string;
     groups_with_nothing_left?: number;
+    groups_without_an_applicable_processing_protocol?: number;
     statement?: string;
   } | null;
   blocks_export: string[];
@@ -213,6 +251,17 @@ export interface LocalQuestionDisplay {
   fields: Record<string, LocalValueRule>;
   suggested_absorber: { element: string; edge: string; basis: string } | null;
   suggestion_statement: string;
+  /** The beamtime question that fills this field for every record (`covered_by`), by id and its own words; the id
+   *  is null when it is no question ("an answered beamtime value"). */
+  covered_by?: { question_id: string | null; text: string };
+}
+
+/** "I don't know" (`defer`): who said it and when; the question is still asked and still counted. */
+export interface LocalDeferral {
+  by: string | null;
+  decided_utc: string | null;
+  decision_id?: string | null;
+  targets?: number;
 }
 
 export interface LocalQuestion {
@@ -233,6 +282,10 @@ export interface LocalQuestion {
   positions?: number[];
   fields?: Record<string, string[]>;
   answer_command: string;
+  /** Every target's latest decision is `defer`. */
+  deferred?: LocalDeferral;
+  /** The beamtime question (or "an answered beamtime value") that makes this one not blocking. */
+  covered_by?: string;
   display: LocalQuestionDisplay;
 }
 
@@ -253,7 +306,9 @@ export interface LocalAthenaSelection {
 
 export interface ApiLocalQuestions {
   bundle: LocalBundleHeader;
+  /** The scope's counts when a scope was asked for (`bundle questions --scope`), else the whole bundle's. */
   counts: LocalQuestionCounts;
+  counts_whole_bundle?: LocalQuestionCounts;
   blocking_basis: { schema: string; source: string; commit: string | null };
   total: number;
   offset: number;
@@ -297,6 +352,15 @@ export interface LocalPreviewScope {
   differing_targets: { target_id: string; run_id: string | null; run_name: string | null; own_suggestions: LocalOwnSuggestion[] }[];
 }
 
+/** What a counter answer would do on the next regroup (`mutations.counter_answer_preview`). Nothing is regrouped. */
+export interface LocalRegroupPreview {
+  groups_joined: number;
+  into: number;
+  groups_split: number;
+  merge_decisions_unblocked?: { decision_id: string; group_ids: string[] }[];
+  statement: string;
+}
+
 export interface ApiLocalAnswerPreview {
   dry_run: true;
   by_scope: LocalPreviewScope[];
@@ -308,13 +372,25 @@ export interface ApiLocalAnswerPreview {
   target_ids: string[];
   value: unknown;
   bundle_version: string;
+  /** What `isaac bundle decide --dry-run` says the write would do ("Would record: …"). */
+  would_say?: string | null;
+  regroup_preview?: LocalRegroupPreview;
+  /** Per-group absorber answers a whole-question re-answer leaves as they are. */
+  kept_per_group_answers?: { group_id: string; element: string; edge: string }[];
   statement: string;
 }
 
 export interface ApiLocalAnswerRecorded {
   dry_run: false;
   question_id: string;
-  result: { recorded: string[]; unchanged: string[]; batch_id: string | null; statement?: string };
+  result: {
+    recorded: string[];
+    unchanged: string[];
+    batch_id: string | null;
+    statement?: string;
+    regroup_preview?: LocalRegroupPreview;
+    kept_per_group_answers?: { group_id: string; element: string; edge: string }[];
+  };
   value: unknown;
   bundle_version: string;
   identity: 'local_unverified';
@@ -635,7 +711,24 @@ export const LOCAL_IMPORTS_COPY = {
   unaskedRequiredMany: 'required fields no question asks yet',
   conflictsWithoutField: 'disagreement(s) about something no record field holds (settling one changes no record)',
   outsideLiveGroups: 'question(s) about runs no record group holds (no record is built from them)',
+  informationalCount: 'listed for information only (no answer can reach a record from them yet)',
+  deferredCount: 'deferred (“I don’t know”); they are still counted above',
   notCountedAbove: 'Neither blocking nor counted as optional',
+  nearestQuestions: 'The answers it needs',
+  nearestRecommended: 'Recommended for it (not blocking, not counted)',
+  nearestWarnings: 'Warnings',
+  nearestMissingNow: 'Missing from its record now',
+  notOnThisPage: 'not on this page of questions',
+  deferredChip: 'Deferred',
+  defer: 'I don’t know (defer)',
+  deferHint:
+    'Defer records that you do not know: the question stays open, marked deferred, and still counts. Answer it whenever you know.',
+  reject: 'Reject',
+  rejectHint: 'Reject records that no value goes into the record for what is asked here (an extracted value is not used).',
+  coveredBy: 'Filled for every record by',
+  wouldSay: 'What the command line says this would record',
+  regroupPreview: 'On the next regroup',
+  keptPerGroup: 'Left as they are',
   failedToRead: 'The server refused to read this.',
   notIsaac: 'Something other than this ISAAC server answered (a web page, not data). Check that the server on this computer is running, then try again.',
   retry: 'Retry',
@@ -793,13 +886,15 @@ export function ianaZones(): string[] {
 
 /** The one sentence the screen says about the nearest record group (`minimum_for_one_group`): a
  *  decision already made is not in `plus_decisions`, so none is named twice, and a null group says
- *  that nothing is left here. */
+ *  that nothing is left here. The answers already deferred ("I don't know") are said among them. */
 export function nearestRecordText(m: NonNullable<LocalProgress['minimum_for_one_group']>): string {
   if (m.group_id === null) return m.statement ?? 'No record group has anything left to answer here.';
   // the required fields no question asks are NAMED, never counted as answers to give
   const unasked = m.unasked_required ?? [];
   const answers = m.questions ? m.questions.length : m.blocking_questions;
-  const parts = answers > 0 || unasked.length === 0 ? [`${answers} blocking answer(s)`] : [];
+  const deferred = (m.questions ?? []).filter((q) => q.deferred).length;
+  const parts =
+    answers > 0 || unasked.length === 0 ? [`${answers} blocking answer(s)${deferred > 0 ? ` (${deferred} deferred)` : ''}`] : [];
   if (unasked.length > 0) {
     const words = unasked.length === 1 ? LOCAL_IMPORTS_COPY.unaskedRequiredOne : LOCAL_IMPORTS_COPY.unaskedRequiredMany;
     parts.push(`${unasked.length} ${words}: ${unasked.map((u) => fieldWords(u.path)).join(', ')}`);
@@ -820,13 +915,53 @@ export function fieldWords(path: string): string {
 }
 
 /** The short line naming the open questions the blocking / optional split leaves out (the server's tier-3 split:
- *  `questions.question_counts`), or null when both are zero or the server does not send them. */
+ *  `questions.question_counts`: informational, a conflict no record field holds, outside every live group), so the
+ *  numbers add up to the total, and the deferred ones, which overlap the others and are said as such; or null when
+ *  all are zero or the server does not send them. */
 export function notCountedText(c: LocalProgress['questions'] | LocalQuestionCounts | undefined): string | null {
   const fieldless = c?.conflicts_without_a_record_field ?? 0;
   const outside = c?.outside_live_groups ?? 0;
+  const informational = c?.informational ?? 0;
+  const deferred = c?.deferred ?? 0;
   const parts = [
     ...(fieldless > 0 ? [`${fieldless} ${LOCAL_IMPORTS_COPY.conflictsWithoutField}`] : []),
     ...(outside > 0 ? [`${outside} ${LOCAL_IMPORTS_COPY.outsideLiveGroups}`] : []),
+    ...(informational > 0 ? [`${informational} ${LOCAL_IMPORTS_COPY.informationalCount}`] : []),
   ];
-  return parts.length > 0 ? `${LOCAL_IMPORTS_COPY.notCountedAbove}: ${parts.join('; ')}.` : null;
+  const said = [
+    ...(parts.length > 0 ? [`${LOCAL_IMPORTS_COPY.notCountedAbove}: ${parts.join('; ')}.`] : []),
+    ...(deferred > 0 ? [`Of the open questions, ${deferred} ${LOCAL_IMPORTS_COPY.deferredCount}.`] : []),
+  ];
+  return said.length > 0 ? said.join(' ') : null;
+}
+
+/** The open-question counts in one line, every tier named, so they add up to the total with `notCountedText`. */
+export function countsText(c: Partial<LocalQuestionCounts>): string {
+  return `${c.blocking ?? 0} blocking export, ${c.conflicts_affecting_a_record ?? 0} conflicts affecting a record, ${c.optional ?? 0} optional`;
+}
+
+/** "Deferred by {by}, {date}" for a deferred question (the date of the latest defer, as recorded in UTC). */
+export function deferredText(d: LocalDeferral): string {
+  const date = d.decided_utc ? d.decided_utc.slice(0, 10) : 'date not recorded';
+  return `Deferred by ${d.by ?? 'a name not recorded'}, ${date}`;
+}
+
+/** The scope a minimum's answer is given at, in words: "group <id>", "run <id>", or null for the question as asked. */
+export function onlyWords(only: string | null): string | null {
+  if (!only) return null;
+  if (only.startsWith('group:')) return `group ${only.slice('group:'.length)}`;
+  if (only.startsWith('run:')) return `run ${only.slice('run:'.length)}`;
+  return only;
+}
+
+/** `why` split around a question id it names (`covered_by`), so the id can be shown as a link to that card. */
+export function splitAtId(text: string, id: string | null | undefined): [string, string] | null {
+  if (!id) return null;
+  const at = text.indexOf(id);
+  return at < 0 ? null : [text.slice(0, at), text.slice(at + id.length)];
+}
+
+/** The id a question's card carries, so a link can reach it. */
+export function questionCardId(questionId: string): string {
+  return `li-q-${questionId}`;
 }

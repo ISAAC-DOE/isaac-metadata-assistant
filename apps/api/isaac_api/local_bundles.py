@@ -404,6 +404,13 @@ def _io_refusals(route):
     return wrapped
 
 
+#: Check results by stored version, newest last; bounded so a long session cannot grow it without end.
+_check_memo: "OrderedDict[str, dict]" = OrderedDict()
+CHECK_MEMO_MAX = 64
+#: How many values :func:`read_bundle` held in memory for review, by the version it read (same bound).
+_held_memo: "OrderedDict[str, int]" = OrderedDict()
+
+
 def read_bundle(bundle_dir: Path) -> tuple[str, dict]:
     """``(bundle_version, bundle)`` from ONE read of ``bundle.json`` — the contained file
     (``records.contained_file``: no ``..``, no symlink out), opened once, size-checked on the open
@@ -436,13 +443,16 @@ def read_bundle(bundle_dir: Path) -> tuple[str, dict]:
     if isinstance(data.get("candidates"), list) and all(isinstance(c, dict) for c in data["candidates"]):
         # what `mutations.load` reads (M1, c6-r): an older build's beamtime-wide notes value is held for review IN
         # MEMORY, so this page's counts and questions are the CLI's. The version stays the stored bytes' hash.
-        B.hold_beamtime_wide_statements(data)
-    return "sha256:" + hashlib.sha256(raw).hexdigest(), data
-
-
-#: Check results by stored version, newest last; bounded so a long session cannot grow it without end.
-_check_memo: "OrderedDict[str, dict]" = OrderedDict()
-CHECK_MEMO_MAX = 64
+        held = B.hold_beamtime_wide_statements(data)
+    else:
+        held = []
+    version = "sha256:" + hashlib.sha256(raw).hexdigest()
+    # how many values THIS read held in memory, by the version read: `check_status` says so as `bundle check` does
+    _held_memo[version] = len(held)
+    _held_memo.move_to_end(version)
+    while len(_held_memo) > CHECK_MEMO_MAX:
+        _held_memo.popitem(last=False)
+    return version, data
 
 
 def check_status(version: str, bundle: Mapping) -> dict:
@@ -468,6 +478,15 @@ def check_status(version: str, bundle: Mapping) -> dict:
     else:
         out = {"status": "VALID", "errors": [], "error_count": 0, "stale_values": 0,
                "statement": f"Meets {B.FORMAT_ID} {B.FORMAT_VERSION}. A bundle is not an official record."}
+        held = _held_memo.get(version, 0)
+        if held:
+            # what `isaac bundle check` prints for the same bundle (an older build's beamtime-wide notes values,
+            # held for review in memory by `read_bundle`): said, never hidden
+            out["held_in_memory"] = held
+            out["held_statement"] = (
+                f"This build {B.held_statement(held)} (in memory: nothing is written), and the value states count them "
+                "so. An older build stored them as extracted: the next change to the bundle stores them held and logs "
+                "each in `eligibility_rederived`.")
     _check_memo[version] = out
     while len(_check_memo) > CHECK_MEMO_MAX:
         _check_memo.popitem(last=False)
@@ -1048,18 +1067,44 @@ def progress(bundle_dir: Path, bundle: Mapping, check: Mapping) -> dict:
                       "`isaac bundle decide --target <group> --decision confirm`).")
     if not bundle.get("record_groups"):
         blocks.append("No record groups yet: `isaac bundle group` proposes them.")
-    # NOT APPROVED means a live group's curve awaiting a decision: a rejected result, a not-applicable
-    # one (no curve to approve: its group is counted on the next line) and any result of a rejected,
-    # split or merged group are not blockers
-    live = {g.get("group_id") for g in Q.live_groups(bundle)}
-    pending = sum(1 for r in bundle.get("processing_results") or ()
-                  if r.get("state") not in (B.STATE_SCIENTIST_CONFIRMED, B.STATE_REJECTED)
-                  and not B.processing_not_applicable(r) and r.get("group_id") in live)
-    if pending:
-        blocks.append(f"{pending} processing result(s) are not approved.")
+    # COUNTED BY GROUP, by the minimum's own curve state (questions._curve): a live group with an undecided result
+    # and NO approved curve. A group whose ISAAC curve or Athena curve is approved needs nothing more here, however
+    # many other curves it has; a rejected result, a not-applicable one (its group is counted below) and any result
+    # of a rejected, split or merged group are not blockers
+    live_groups = Q.live_groups(bundle)
     blocked = Q.processing_blocked_groups(bundle) if bundle.get("record_groups") else {}
-    if blocked:
-        blocks.append(f"{len(blocked)} group(s) have no applicable processing protocol, so they cannot become complete records yet.")
+    scanless = Q.scanless_groups(bundle, live_groups)
+    curves = {g["group_id"]: Q._curve(bundle, g["group_id"])["state"] for g in live_groups}
+    pending = [gid for gid, state in curves.items() if state in ("curve", "no_curve") and gid not in blocked]
+    if pending:
+        blocks.append(f"{len(pending)} record group(s) have a processing result awaiting a decision and no approved curve.")
+    # NO PROTOCOL vs NO SCAN, split as `bundle list <dir> groups` states them (cannot_export_reason): a group the
+    # protocol could not be applied to (e.g. no_xas_channel), and one whose runs list no scan at all (recorded
+    # by `isaac process` as not applicable, no_scans, or not processed yet)
+    no_protocol: dict[str, int] = {}
+    for gid, code in blocked.items():
+        if code != B.NA_NO_SCANS:
+            no_protocol[code or "?"] = no_protocol.get(code or "?", 0) + 1
+    no_scans = {gid for gid, code in blocked.items() if code == B.NA_NO_SCANS} | {
+        gid for gid in scanless if curves.get(gid) == "none" and gid not in blocked}
+    if no_protocol:
+        blocks.append(f"{sum(no_protocol.values())} group(s) have no applicable processing protocol "
+                      f"({', '.join(f'{code}: {n}' for code, n in sorted(no_protocol.items()))}), so they cannot become "
+                      "complete records yet.")
+    if no_scans:
+        blocks.append(f"{len(no_scans)} group(s) list no scan (no_scans), so there is nothing to process and they cannot "
+                      "become complete records as they stand.")
+    # NOTHING TO APPROVE YET (the minimum's own wording, questions.NOT_PROCESSED_YET): a group with scans and no
+    # processing result, and one whose every result is rejected
+    processed = {r.get("group_id") for r in bundle.get("processing_results") or () if not B.processing_not_applicable(r)}
+    idle = [gid for gid, state in curves.items() if state == "none" and gid not in blocked and gid not in scanless]
+    unprocessed = [gid for gid in idle if gid not in processed]
+    if unprocessed:
+        blocks.append(f"{len(unprocessed)} record group(s) have no processing result to approve: run `isaac process` first.")
+    if len(idle) > len(unprocessed):
+        blocks.append(f"{len(idle) - len(unprocessed)} record group(s) have only rejected processing results: re-process "
+                      "them with other parameters (`isaac process <bundle_dir> --source <the beamtime folder> --group <id> "
+                      "--params-file <params.json>`).")
     out["blocks_export"] = blocks
 
     reports = []
@@ -1302,7 +1347,8 @@ def get_local_bundle_progress(bundle: str = PathParam(..., max_length=255, descr
         "a `display` block for a person: the folder, beamtime and beamline, the record groups and run names it "
         "applies to, each suggestion with who made it (ISAAC's parser, a stored rule, an AI reading), the file, the "
         "place in the file and the quoted text, and the rule for the value. A suggestion is never confirmed. "
-        "`capture` lists the open merge and Athena-version decisions.\n\n"
+        "`capture` lists the open merge and Athena-version decisions. With `scope`, `counts` are that scope's, as "
+        "`isaac bundle questions --scope` gives them, and `counts_whole_bundle` the whole bundle's.\n\n"
         "Showing a parser value is recorded as an exposure in the bundle first, as `isaac bundle questions` does, "
         "so this read can write `bundle.json`; `exposures_recorded` says how many it added and `bundle_version` is "
         "the version after them. Like every operation here it needs the header ISAAC's own pages send, so a page "
@@ -1345,9 +1391,20 @@ def get_local_bundle_questions(
         shown += [("candidate", cid) for q in page for cid in Q.confirm_value_shown(data, q)]
         out_questions = []
         idx = BundleIndex(data)
+        by_id = {x["question_id"]: x for x in payload["questions"]}
         for q in page:
             display, more = describe_question(data, q, folder=bundle, idx=idx)
             shown += more
+            cover = q.get("covered_by")
+            if cover:
+                # the beamtime question that fills this field for every record, by its id AND its own words (it may
+                # be on another page); a string that is no question id ("an answered beamtime value") says so. Its
+                # words may state extracted values (a confirm question's text): each is an exposure, as on its card
+                covering = by_id.get(cover)
+                display["covered_by"] = {"question_id": cover if covering else None,
+                                         "text": covering["text"] if covering else cover}
+                if covering:
+                    shown += [("candidate", cid) for cid in Q.confirm_value_shown(data, covering)]
             out_questions.append({**q, "display": display})
         minimum = Q.minimum_answers_for_one_group(payload, data, scope=scope, bundle_dir=bdir, reports=reports)
         capture = capture_items(data)
@@ -1372,7 +1429,9 @@ def get_local_bundle_questions(
         "format": payload["format"],
         "format_version": payload["format_version"],
         "blocking_basis": payload["blocking_basis"],
-        "counts": payload["counts"],
+        # THE SCOPE'S counts, as `isaac bundle questions --scope` gives them, and the whole bundle's beside them
+        "counts": Q.scope_counts(payload, scope) if scope else payload["counts"],
+        **({"counts_whole_bundle": payload["counts"]} if scope else {}),
         "total": len(rows),
         "offset": offset,
         "limit": limit,
@@ -1454,7 +1513,7 @@ def _typed_value(q: Mapping, body: LocalAnswerRequest) -> tuple[Any, str | None]
         "(`isaac bundle decide --question`): one decision per target, each listed, as a local, unverified "
         "statement by `by`. `only` answers one group (or run) of the question; without it every target the "
         "question lists is answered. `dry_run` resolves and checks exactly as the write would and returns the "
-        "targets it would write, writing nothing.\n\n"
+        "targets it would write, with what the command line says it would record (`would_say`), writing nothing.\n\n"
         "A field value is typed by the metadata template's rules: a number field takes a number and a field with a "
         "fixed list takes one of its values exactly. The question is resolved under the bundle's lock, after "
         "`expected_version` is checked against what is stored, so an answer never lands on a bundle another "
@@ -1512,6 +1571,12 @@ def post_local_bundle_answer(
             "target_ids": result.get("target_ids", []),
             "value": value,
             "bundle_version": result.get("bundle_version"),
+            # what `isaac bundle decide --dry-run` says the write would do ("Would record: …"), and what a counter
+            # answer would do on the next regroup, and the per-group absorber answers a whole re-answer leaves alone:
+            # said BEFORE the scientist writes, never after
+            "would_say": result.get("statement"),
+            **({"regroup_preview": result["regroup_preview"]} if result.get("regroup_preview") else {}),
+            **({"kept_per_group_answers": result["kept_per_group_answers"]} if result.get("kept_per_group_answers") else {}),
             "statement": "Nothing was written. The write re-checks all of this, and re-validates the whole bundle.",
         }
     result, version = result

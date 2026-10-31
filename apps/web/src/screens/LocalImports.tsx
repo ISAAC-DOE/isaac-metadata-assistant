@@ -1,6 +1,6 @@
 import './screens.css';
 import './local-imports.css';
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
@@ -20,6 +20,9 @@ import {
   LOCAL_LIMITS,
   answerText,
   clampText,
+  countsText,
+  deferredText,
+  fieldWords,
   groupBySuggestion,
   ianaZones,
   localImportsBuildEnabled,
@@ -27,12 +30,15 @@ import {
   localReasonOf,
   nearestRecordText,
   notCountedText,
+  onlyWords,
   perGroupScopes,
+  questionCardId,
   regroupCommand,
   rememberName,
   rememberedName,
   sectionQuestions,
   shownValue,
+  splitAtId,
   type ApiLocalAnswerPreview,
   type ApiLocalAnswerRecorded,
   type ApiLocalQuestions,
@@ -43,6 +49,7 @@ import {
   type LocalBundleSummary,
   type LocalMergeCandidate,
   type LocalOwnSuggestion,
+  type LocalProgress,
   type LocalScope,
   type LocalQuestion,
   type LocalSuggestion,
@@ -244,6 +251,11 @@ function BundleCard({ bundle }: { bundle: LocalBundleSummary }) {
         <dd>{bundle.scientist_decisions ?? 0}</dd>
       </dl>
       {bundle.check.status !== 'VALID' && <p className="li-note">{bundle.check.statement}</p>}
+      {bundle.check.held_statement && (
+        <p className="li-note" data-testid="li-held">
+          {bundle.check.held_statement}
+        </p>
+      )}
       <ProgressBlock name={bundle.name} />
       <p className="li-actions">
         <Link className="btn btn-primary" to={ROUTES.localImportBundle(bundle.name)}>
@@ -268,7 +280,7 @@ function ProgressBlock({ name }: { name: string }) {
         <dt>Questions open</dt>
         <dd>
           {p.questions && typeof p.questions.total === 'number'
-            ? `${p.questions.total} (${p.questions.blocking ?? 0} blocking export, ${p.questions.optional ?? 0} optional)`
+            ? `${p.questions.total} (${countsText(p.questions)})`
             : 'Not available for this bundle'}
           {notCountedText(p.questions) && (
             <div className="li-meta" data-testid="li-not-counted">
@@ -293,11 +305,7 @@ function ProgressBlock({ name }: { name: string }) {
             : 'None yet'}
         </dd>
       </dl>
-      {p.minimum_for_one_group && (
-        <p className="li-note">
-          {COPY.nearestRecord}: {nearestRecordText(p.minimum_for_one_group)}
-        </p>
-      )}
+      {p.minimum_for_one_group && <NearestRecord m={p.minimum_for_one_group} />}
       {p.blocks_export.length > 0 && (
         <>
           <h4 className="li-h4">{COPY.blocksExport}</h4>
@@ -605,9 +613,10 @@ function QuestionsBody({
   onPage: (offset: number) => void;
 }) {
   const sections = useMemo(() => sectionQuestions(data.questions), [data.questions]);
+  const pageQuestions = useMemo(() => new Map(data.questions.map((q) => [q.question_id, q])), [data.questions]);
   const b = data.bundle;
   return (
-    <>
+    <PageQuestions.Provider value={pageQuestions}>
       <div className="li-card li-bundle-head">
         <dl className="li-dl">
           <dt>Folder</dt>
@@ -630,8 +639,7 @@ function QuestionsBody({
       <h2 id="li-questions-title" className="li-h2" tabIndex={-1} ref={headingRef}>
         {COPY.questionsTitle}{' '}
         <span className="li-count">
-          ({data.counts.blocking} blocking export, {data.counts.conflicts_affecting_a_record} conflicts affecting a
-          record, {data.counts.optional} optional)
+          ({countsText(data.counts)})
         </span>
       </h2>
       {notCountedText(data.counts) && (
@@ -639,11 +647,7 @@ function QuestionsBody({
           {notCountedText(data.counts)}
         </p>
       )}
-      {data.minimum_for_one_group && (
-        <p className="li-note">
-          {COPY.nearestRecord}: {nearestRecordText(data.minimum_for_one_group)}
-        </p>
-      )}
+      {data.minimum_for_one_group && <NearestRecord m={data.minimum_for_one_group} />}
       {data.total === 0 && <p className="li-note">No open questions match.</p>}
       {sections.map((s) => (
         <section key={s.id} className="li-section" aria-labelledby={`li-sec-${s.id}`}>
@@ -676,6 +680,131 @@ function QuestionsBody({
         </p>
       )}
       <CaptureSection data={data} handlers={handlers} />
+    </PageQuestions.Provider>
+  );
+}
+
+/** The questions on this page by id, so a link can reach a card; null outside the questions page. */
+const PageQuestions = createContext<ReadonlyMap<string, LocalQuestion> | null>(null);
+
+/**
+ * A link to one question's card on this page, which moves focus to its text. A question not on this page (another
+ * page, a filter) is named without a link, and said to be elsewhere; outside the questions page, it is only named.
+ */
+function CardLink({ id, children }: { id: string; children: ReactNode }) {
+  const page = useContext(PageQuestions);
+  if (page === null) return <>{children}</>;
+  if (!page.has(id)) {
+    return (
+      <>
+        {children} <span className="li-meta">({COPY.notOnThisPage})</span>
+      </>
+    );
+  }
+  return (
+    <a
+      href={`#${questionCardId(id)}`}
+      onClick={(e) => {
+        const card = document.getElementById(questionCardId(id));
+        if (!card) return;
+        e.preventDefault();
+        card.scrollIntoView?.({ block: 'start' });
+        card.querySelector<HTMLElement>('[data-li-title]')?.focus();
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
+/**
+ * The nearest record group (`minimum_for_one_group`), as the command line gives it: the sentence, each answer it
+ * needs by field and group (each a link to its card), what is recommended with its warning, the processing QC
+ * verdict when it failed, and every field its record is missing now.
+ */
+function NearestRecord({ m }: { m: NonNullable<LocalProgress['minimum_for_one_group']> }) {
+  const page = useContext(PageQuestions);
+  const qs = m.questions ?? [];
+  const recommended = m.recommended ?? [];
+  // the warnings are the recommendations' own words; said alone only when no recommendation carries them
+  const warnings = recommended.length === 0 ? (m.warnings ?? []) : [];
+  const missing = m.missing_required_now ?? [];
+  const textOf = (id: string) => page?.get(id)?.text;
+  return (
+    <div className="li-progress" data-testid="li-nearest">
+      <p className="li-note">
+        {COPY.nearestRecord}: {nearestRecordText(m)}
+      </p>
+      {m.processing_qc && <p className="li-warning">Processing QC: {m.processing_qc}.</p>}
+      {qs.length > 0 && (
+        <>
+          <p className="li-meta">{COPY.nearestQuestions}:</p>
+          <ul className="li-bullets" data-testid="li-nearest-questions">
+            {qs.map((x) => (
+              <li key={x.question_id}>
+                <CardLink id={x.question_id}>{x.fields.map(fieldWords).join(', ') || x.question_id}</CardLink>
+                {onlyWords(x.only) ? ` — for ${onlyWords(x.only)}` : ''}
+                {x.deferred ? ` (${COPY.deferredChip.toLowerCase()})` : ''}
+                {textOf(x.question_id) ? <span className="li-meta"> — {textOf(x.question_id)}</span> : null}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {recommended.length > 0 && (
+        <>
+          <p className="li-meta">{COPY.nearestRecommended}:</p>
+          <ul className="li-bullets" data-testid="li-nearest-recommended">
+            {recommended.map((r, i) => (
+              <li key={`${r.question_id ?? 'none'}-${i}`}>
+                {r.question_id ? (
+                  <CardLink id={r.question_id}>{r.fields.map(fieldWords).join(', ')}</CardLink>
+                ) : (
+                  r.fields.map(fieldWords).join(', ')
+                )}
+                {onlyWords(r.only) ? ` — for ${onlyWords(r.only)}` : ''}: <span className="li-warning">{r.why}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {warnings.length > 0 && (
+        <>
+          <p className="li-meta">
+            {COPY.nearestWarnings}
+            {m.warnings_total && m.warnings_total > warnings.length ? ` (${warnings.length} of ${m.warnings_total})` : ''}:
+          </p>
+          <ul className="li-bullets" data-testid="li-nearest-warnings">
+            {warnings.map((w) => (
+              <li key={w} className="li-warning">
+                {w}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {missing.length > 0 && (
+        <details className="li-details">
+          <summary>
+            {COPY.nearestMissingNow} ({missing.length})
+          </summary>
+          <p className="li-meta">{missing.map((f) => `${fieldWords(f)} (${f})`).join(', ')}</p>
+        </details>
+      )}
+    </div>
+  );
+}
+
+/** `why`, with the beamtime question it names (`covered_by`) as a link to that card, in that question's words. */
+function WhyText({ q }: { q: LocalQuestion }) {
+  const cover = q.display.covered_by;
+  const parts = splitAtId(q.why, cover?.question_id);
+  if (!cover || !cover.question_id || !parts) return <>{q.why}</>;
+  return (
+    <>
+      {parts[0]}
+      <CardLink id={cover.question_id}>“{cover.text}”</CardLink>
+      {parts[1]}
     </>
   );
 }
@@ -923,6 +1052,28 @@ function PreviewBox({
       </ul>
       {preview.unchanged.length > 0 && (
         <p className="li-meta">{preview.unchanged.length} value(s) already answered the same way, so not written again.</p>
+      )}
+      {preview.would_say && (
+        <p className="li-note" data-testid="li-preview-would-say">
+          <span className="li-meta">{COPY.wouldSay}:</span> {preview.would_say}
+        </p>
+      )}
+      {preview.regroup_preview && (
+        <p className="li-warning" data-testid="li-preview-regroup">
+          {COPY.regroupPreview}: {preview.regroup_preview.statement}
+        </p>
+      )}
+      {preview.kept_per_group_answers && preview.kept_per_group_answers.length > 0 && (
+        <>
+          <p className="li-meta">{COPY.keptPerGroup}:</p>
+          <ul className="li-bullets" data-testid="li-preview-kept">
+            {preview.kept_per_group_answers.map((k) => (
+              <li key={k.group_id}>
+                Group {k.group_id} keeps {k.element} {k.edge}
+              </li>
+            ))}
+          </ul>
+        </>
       )}
       <p className="li-meta">
         Value: <code>{shownValue(preview.value)}</code>. {preview.statement}
@@ -1200,7 +1351,12 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
   }
 
   function written(result: ApiLocalAnswerRecorded, sentWith: string) {
-    const message = recordedMessage(result.result.recorded.length);
+    // decide's own plain statement ("Fe K recorded for 9 groups.", "Nothing new recorded: …"), as the command line
+    // prints it; the server's count only when it says none. What a counter answer would do on the regroup follows.
+    const said = result.result.statement?.trim();
+    const base = said ? `“${q.text.slice(0, 80)}”: ${said}` : recordedMessage(result.result.recorded.length);
+    const regroup = result.result.regroup_preview?.statement;
+    const message = regroup ? `${base} ${regroup}` : base;
     setRecorded(message);
     handlers.onWritten(q.question_id, message, { sentWith, now: result.bundle_version });
   }
@@ -1292,6 +1448,11 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
       else titleRef.current?.focus();
     });
   }
+
+  // "I don't know" and "reject", through the same answer path and checks as every other answer — offered exactly
+  // where the question's `allowed_decisions` lists them (never on a question listed for information only)
+  const otherDecisions =
+    d.answer_kind === 'informational' ? [] : (['defer', 'reject'] as const).filter((x) => q.allowed_decisions.includes(x));
 
   const answerButton = (primary = true) => (
     <p className="li-actions">
@@ -1503,14 +1664,25 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
   })();
 
   return (
-    <li className="li-card li-question" aria-labelledby={`${uid}-t`} data-card-id={q.question_id}>
+    <li
+      className="li-card li-question"
+      id={questionCardId(q.question_id)}
+      aria-labelledby={`${uid}-t`}
+      data-card-id={q.question_id}
+    >
       <div className="li-card-head">
         <span className="li-chip">{q.blocking ? COPY.chipBlocks : COPY.chipOptional}</span>
+        {q.deferred && <span className="li-chip">{COPY.deferredChip}</span>}
         <span className="li-meta">{KIND_LABEL[q.kind] ?? q.kind}</span>
       </div>
       <h4 id={`${uid}-t`} className="li-h4 li-question-text" tabIndex={-1} ref={titleRef} data-li-title>
         {q.text}
       </h4>
+      {q.deferred && (
+        <p className="li-meta" data-testid="li-deferred" title={q.deferred.decided_utc ?? undefined}>
+          {deferredText(q.deferred)}. It is still asked and still counted.
+        </p>
+      )}
       {recorded && (
         <p className="li-recorded" tabIndex={-1} data-li-recorded>
           {COPY.answeredHere} {recorded}
@@ -1532,7 +1704,9 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
           {q.applies_to.groups} group(s), {q.applies_to.runs} run(s); answering records {q.applies_to.targets} value(s)
         </dd>
         <dt>Why</dt>
-        <dd>{q.why}</dd>
+        <dd>
+          <WhyText q={q} />
+        </dd>
       </dl>
 
       <div className="li-suggestions">
@@ -1647,6 +1821,45 @@ function QuestionCard({ q, handlers }: { q: LocalQuestion; handlers: WriteHandle
 
       {answerControls}
 
+      {otherDecisions.length > 0 && (
+        <div className="li-form" role="group" aria-label="Or record that you do not know, or reject">
+          <p className="li-actions">
+            {otherDecisions.includes('defer') && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={busy}
+                aria-describedby={`${uid}-dh`}
+                onClick={() => submit('defer')}
+              >
+                {COPY.defer}
+              </button>
+            )}
+            {otherDecisions.includes('reject') && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={busy}
+                aria-describedby={`${uid}-rh`}
+                onClick={() => submit('reject')}
+              >
+                {COPY.reject}
+              </button>
+            )}
+          </p>
+          {otherDecisions.includes('defer') && (
+            <p id={`${uid}-dh`} className="li-hint">
+              {COPY.deferHint}
+            </p>
+          )}
+          {otherDecisions.includes('reject') && (
+            <p id={`${uid}-rh`} className="li-hint">
+              {COPY.rejectHint}
+            </p>
+          )}
+        </div>
+      )}
+
       {error && (
         <p key={error.n} className="li-error" role="alert" tabIndex={-1} ref={errorRef}>
           {error.text}
@@ -1729,8 +1942,10 @@ function useDecision(id: string, handlers: WriteHandlers) {
     const sentWith = handlers.version;
     try {
       const result = await api.recordLocalDecision(handlers.name, { ...input, by: handlers.by.trim(), expected_version: sentWith });
-      setRecorded(done);
-      handlers.onWritten(id, done, { sentWith, now: result.bundle_version });
+      // decide's own plain statement, as the command line prints it; the page's own sentence only when it says none
+      const said = result.result.statement?.trim() || done;
+      setRecorded(said);
+      handlers.onWritten(id, said, { sentWith, now: result.bundle_version });
     } catch (err) {
       if (statusOf(err) === 412) {
         say(COPY.staleWrite);

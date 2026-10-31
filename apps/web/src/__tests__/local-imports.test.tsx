@@ -1144,3 +1144,160 @@ describe('review round 2: the minimum’s unasked fields and the counts the spli
     expect(screen.queryByTestId('li-not-counted')).toBeNull();
   });
 });
+
+describe('polish c7-w: the page says what the command line says', () => {
+  function stubWith(extra: Record<string, RouteEntry>, body: ApiLocalQuestions) {
+    vi.stubEnv('VITE_ISAAC_LOCAL_IMPORTS', '1');
+    return stubFetchRoutes({ 'GET /api/local-bundles': { body: listBody }, [`GET ${QPATH}`]: { body }, ...extra });
+  }
+  async function cardOf(q: LocalQuestion) {
+    return (await screen.findByRole('heading', { name: q.text })).closest('li') as HTMLElement;
+  }
+
+  it('a deferred question says who deferred it and when, and Defer is given through the same answer path', async () => {
+    const deferredQ = { ...tempQ, deferred: { by: 'Synthetic Scientist', decided_utc: '2099-01-02T03:04:05Z', decision_id: 'd-00001', targets: 1 } };
+    const posts: Record<string, unknown>[] = [];
+    stubWith({
+      [APATH(tempQ.question_id)]: (init) => {
+        posts.push(bodyOf(init));
+        const r = recordedBody(tempQ.question_id, ['miss-0100']);
+        return { body: { ...r, result: { ...r.result, statement: 'SERVER-SAID: deferred for 1 runs: temperature.' } } };
+      },
+    }, questionsBody([deferredQ]));
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const card = await cardOf(tempQ);
+    expect(within(card).getByTestId('li-deferred')).toHaveTextContent('Deferred by Synthetic Scientist, 2099-01-02');
+    expect(within(card).getByText(COPY.deferredChip, { selector: '.li-chip' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(COPY.yourName), { target: { value: 'Synthetic Scientist' } });
+    const defer = within(card).getByRole('button', { name: COPY.defer });
+    expect(defer).toHaveAccessibleDescription(COPY.deferHint);
+    fireEvent.click(defer);
+    await waitFor(() => expect(posts).toHaveLength(1));
+    // one target: written at once, with the field, the name and the version, exactly as an answer is
+    expect(posts[0]).toEqual({ decision: 'defer', by: 'Synthetic Scientist', expected_version: VERSION, field: 'context.temperature_K', dry_run: false });
+    // decide's own statement is said, not only a count
+    expect(await within(card).findByText(/Answered: .*SERVER-SAID: deferred for 1 runs: temperature\./)).toBeInTheDocument();
+  });
+
+  it('Defer and Reject are offered exactly where allowed_decisions lists them', async () => {
+    stubWith({}, questionsBody([tempQ, absorberQ, zoneQ, counterQ]));
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const temp = await cardOf(tempQ);
+    expect(within(temp).getByRole('button', { name: COPY.defer })).toBeInTheDocument();
+    expect(within(temp).getByRole('button', { name: COPY.reject })).toBeInTheDocument();
+    const abs = await cardOf(absorberQ);
+    expect(within(abs).getByRole('button', { name: COPY.defer })).toBeInTheDocument();
+    expect(within(abs).queryByRole('button', { name: COPY.reject })).toBeNull();
+    for (const q of [zoneQ, counterQ]) {
+      const c = await cardOf(q);
+      expect(within(c).queryByRole('button', { name: COPY.defer })).toBeNull();
+      expect(within(c).queryByRole('button', { name: COPY.reject })).toBeNull();
+    }
+  });
+
+  it('a dry run shows decide’s "Would record" statement and the regroup preview before anything is written', async () => {
+    const posts: Record<string, unknown>[] = [];
+    stubWith({
+      [APATH(counterQ.question_id)]: (init) => {
+        posts.push(bodyOf(init));
+        return {
+          body: {
+            dry_run: true, question_id: counterQ.question_id, would_record: ['experiment'], unchanged: [], target_ids: ['experiment'],
+            value: null, bundle_version: VERSION, statement: 'SERVER-SAID: nothing was written.', scopes_total: 1,
+            scopes_whose_files_suggest_otherwise: 0,
+            by_scope: [{ scope: 'experiment', label: 'The whole beamtime', run_names: [], run_count: 0, target_ids: ['experiment'],
+              own_suggestions: [], compared: false, differs: false, differing_targets: [] }],
+            would_say: 'Would record: SERVER-SAID positions 2 are counters. Nothing was written.',
+            regroup_preview: { groups_joined: 2, into: 1, groups_split: 0, merge_decisions_unblocked: [],
+              statement: 'SERVER-SAID: on the next regroup this answer would join 2 of the current groups into 1.' },
+          },
+        };
+      },
+    }, questionsBody([counterQ]));
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    fireEvent.change(await screen.findByLabelText(COPY.yourName), { target: { value: 'Synthetic Scientist' } });
+    const card = await cardOf(counterQ);
+    fireEvent.click(within(card).getByRole('checkbox', { name: 'Position 2' }));
+    fireEvent.click(within(card).getByRole('button', { name: 'The checked positions are run counters' }));
+    const preview = await within(card).findByRole('group', { name: /This will write one answer to each of these/ });
+    expect(within(preview).getByTestId('li-preview-would-say')).toHaveTextContent('Would record: SERVER-SAID positions 2 are counters.');
+    expect(within(preview).getByTestId('li-preview-regroup')).toHaveTextContent('would join 2 of the current groups into 1');
+    expect(posts).toEqual([{ decision: 'set_counter_positions', by: 'Synthetic Scientist', expected_version: VERSION, positions: [2], dry_run: true }]);
+  });
+
+  it('the nearest group lists each needed question by field and group, linked to its card, with its warnings', async () => {
+    const minimum = {
+      group_id: 'g1',
+      blocking_questions: 2,
+      plus_decisions: ['confirm the group'],
+      questions: [
+        { question_id: envQ.question_id, fields: ['context.environment'], only: 'group:g1', deferred: true },
+        { question_id: 'Q-elsewhere01', fields: ['sample.sample_form'], only: null },
+      ],
+      unasked_required: [],
+      missing_required_now: ['context.environment', 'sample.sample_form', 'measurement.series'],
+      recommended: [{ question_id: tempQ.question_id, fields: ['context.temperature_K'], only: null, blocking: false as const,
+        why: 'SERVER-SAID: the file names state a temperature the record will not carry.' }],
+      warnings: ['SERVER-SAID: the file names state a temperature the record will not carry.'],
+      processing_qc: 'its processing QC verdict is fail (SERVER-SAID reason)',
+    };
+    stubWith({}, { ...questionsBody([envQ, tempQ]), minimum_for_one_group: minimum });
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const nearest = await screen.findByTestId('li-nearest');
+    expect(within(nearest).getByText(/group g1 needs 2 blocking answer\(s\) \(1 deferred\), plus: confirm the group\./)).toBeInTheDocument();
+    const listed = within(nearest).getByTestId('li-nearest-questions');
+    const link = within(listed).getByRole('link', { name: 'environment' });
+    expect(link).toHaveAttribute('href', `#li-q-${envQ.question_id}`);
+    expect(link.closest('li')).toHaveTextContent('for group g1 (deferred)');
+    // a question on another page is named, never linked to nothing
+    expect(within(listed).queryByRole('link', { name: 'sample form' })).toBeNull();
+    expect(within(listed).getByText(/sample form/).closest('li')).toHaveTextContent(COPY.notOnThisPage);
+    expect(within(nearest).getByTestId('li-nearest-recommended')).toHaveTextContent('SERVER-SAID: the file names state a temperature');
+    expect(within(nearest).getByText(/Processing QC: its processing QC verdict is fail/)).toBeInTheDocument();
+    expect(within(nearest).getByText(/measurement\.series/)).toBeInTheDocument();
+    fireEvent.click(link);
+    await waitFor(() => expect(screen.getByRole('heading', { name: envQ.text })).toHaveFocus());
+  });
+
+  it('a covered question links the beamtime question it names, in that question’s words', async () => {
+    const coveredQ = question({
+      question_id: 'Q-covered001',
+      blocking: false,
+      tier: 3,
+      scope: 'group:g1',
+      text: 'What is the environment of group g1?',
+      why: `Not blocking: answer the experiment-wide question ${envQ.question_id}. SERVER-SAID rest.`,
+      covered_by: envQ.question_id,
+      display: display({ covered_by: { question_id: envQ.question_id, text: envQ.text } }),
+    });
+    stubWith({}, questionsBody([envQ, coveredQ]));
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const card = await cardOf(coveredQ);
+    const link = within(card).getByRole('link', { name: `“${envQ.text}”` });
+    expect(link).toHaveAttribute('href', `#li-q-${envQ.question_id}`);
+    expect(link.closest('dd')).toHaveTextContent('Not blocking: answer the experiment-wide question');
+    expect(link.closest('dd')).toHaveTextContent('SERVER-SAID rest.');
+    expect(link.closest('dd')).not.toHaveTextContent(envQ.question_id);
+  });
+
+  it('the overview’s counts add up, informational and deferred named, and bundle check’s held line is said', async () => {
+    vi.stubEnv('VITE_ISAAC_LOCAL_IMPORTS', '1');
+    const held = 'SERVER-SAID: This build held 2 value(s) read only from a beamtime-wide notes sentence for review.';
+    stubFetchRoutes({
+      'GET /api/local-bundles': {
+        body: { ...listBody, bundles: [{ ...listBody.bundles[0], check: { status: 'VALID', errors: [], error_count: 0, stale_values: 0,
+          statement: 'SERVER-SAID: meets the format.', held_in_memory: 2, held_statement: held } }] },
+      },
+      'GET /api/local-bundles/synthetic-beamtime/progress': {
+        body: { ...progressBody, progress: { ...progressBody.progress,
+          questions: { total: 10, blocking: 1, conflicts_affecting_a_record: 2, optional: 3, informational: 4, conflicts_without_a_record_field: 0,
+            outside_live_groups: 0, deferred: 1 } } },
+      },
+    });
+    renderAt(ROUTES.localImports);
+    expect(await screen.findByText('10 (1 blocking export, 2 conflicts affecting a record, 3 optional)')).toBeInTheDocument();
+    expect(screen.getByTestId('li-not-counted')).toHaveTextContent(`4 ${COPY.informationalCount}`);
+    expect(screen.getByTestId('li-not-counted')).toHaveTextContent(`Of the open questions, 1 ${COPY.deferredCount}.`);
+    expect(screen.getByTestId('li-held')).toHaveTextContent(held);
+  });
+});
