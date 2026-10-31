@@ -2,8 +2,8 @@
 
 * MED-1: a Disagreements ruling whose value is already recorded, but not by a ruling on their cell as it reads now
   (they edited the cell since, or the value came from a file confirmed with ``decide``), is recorded again with the
-  ruling's note ("ruling(s) recorded (same value, now tied to your sheet)"), so the next adopt reads the row as ruled;
-  the same workbook imported again records nothing more.
+  ruling's note ("of which 1 ruling (1 target) kept the same value, now tied to your sheet"), so the next adopt reads
+  the row as ruled; the same workbook imported again records nothing more.
 * LOW-1: a yes/no or a date value ruled on settles too (the note's value text is the sheet's).
 * LOW-2: a ruling read from a workbook adopted before ``_isaac`` kept their value names no value in its note (never
   the editable column D).
@@ -25,7 +25,7 @@ from test_local_import_template_adopt import (  # noqa: F401  (fixtures)
 from test_local_import_polish_c14g_adopt import RUNS, _answered_word, _rule
 from test_local_import_polish_c14h_adopt import _edit_ph, _ruled_ph, _ruling_notes
 
-TIED = "ruling(s) recorded (same value, now tied to your sheet)"
+TIED = "now tied to your sheet"
 
 
 def _import_text(bdir, xlsx, capsys, *extra):
@@ -45,7 +45,7 @@ def _ties_then_settles(grouped, theirs, ruled, ph_id, value, capsys, tmp_path):
     code, text, err = _import_text(grouped, ruled, capsys)
     assert code == 0, err
     assert "Rulings to be recorded with the same value, now tied to your sheet" in text
-    assert "1 ruling(s) to be recorded (same value, now tied to your sheet)" in text
+    assert " decision(s) would record, of which 1 ruling (1 target) keeps the same value, to be tied to your sheet;" in text
     before = len(_ph_decisions(grouped))
     code, rep, err = _import(grouped, ruled, capsys, "--apply")
     assert code == 0, err

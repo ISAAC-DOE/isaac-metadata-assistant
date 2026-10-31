@@ -1875,8 +1875,14 @@ adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
   <their value>", and (c14h) their cell still holds that value: a cell edited since, or a note without the value,
   awaits a ruling; `template import` reads their value from the `_isaac` sheet, never the editable column D). A
   ruling that keeps the value already recorded, but not by a ruling on their cell as it reads now (c14i), is recorded
-  again with the same value (`rulings_tied_to_sheet`; "ruling(s) recorded (same value, now tied to your sheet)"), so
-  the next adopt reads it as ruled; the same workbook imported again records nothing more.
+  again with the same value (`rulings_tied_to_sheet`; the summary says them among the decisions recorded: "N
+  decision(s) recorded, of which 1 ruling (9 targets) kept the same value, now tied to your sheet", and never lists
+  them as replacing or contradicting a file reading), so the next adopt reads it as ruled; the same workbook imported
+  again records nothing more. (c14j) Only a ruling made against the decision that governs now is tied: adopt keeps,
+  per Disagreements row, the decisions it read (`_isaac` `governing_decisions`, every target a whole-beamtime row
+  reaches); a workbook adopted before them is tied only when it was adopted at or after that decision. A stale
+  workbook's ruling is "already recorded", so two workbooks imported in turn never flip-flop. A ruling takes its
+  target from a File List cell giving the same value.
   Settled, it says "already recorded: <value> (<date>); leave blank to keep" (the adopt result's `already_recorded`,
   counted apart in the summary); otherwise it awaits a ruling and says "recorded `12` (date); your sheet says `2`:
   rule which" (`recorded_note`). An Electrolyte row stating a concentration is settled only when the name and the
