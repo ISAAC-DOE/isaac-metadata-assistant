@@ -21,7 +21,8 @@ COMMANDS
     A bounded page as JSON, with ``total`` and how many were omitted before and after.
     Never truncates silently. ``processing-results``: one compact row per result (id, group, verdict,
     applicability, key QC flags and metrics, a ``scans`` line saying which scans were used, plot path, Athena
-    agreement, state); ``unread`` rows carry a short ``read_by`` marker with its meaning once in ``read_by_note``;
+    agreement, state); ``unread`` rows carry a short ``read_by`` marker with its meaning once in ``read_by_note``,
+    and the files a run reader kept unopened (companions) are counted in ``not_listed`` and listed with ``--all``;
     ``--state`` filters it
     by state as it filters ``candidates`` by value_state. ``groups`` and ``runs`` print one row per line: a
     ``groups`` row carries up to three member file stems (``files``, ``files_more``), ``scans``, ``reader`` and,
@@ -288,6 +289,8 @@ def render_summary(bundle: Mapping) -> str:
     )
     if athena:
         add(f"  - {_athena_read_by_process(len(athena))} (the import has no reader for them, so they stay in the unread count)")
+    if n_kept := len(B.files_not_opened(bundle)):
+        add(f"  - {_not_opened_text(n_kept)}, not counted as unread: `isaac bundle list <dir> unread --all` lists them")
     add(
         f"- Runs: {counts['runs']} ({counts['runs_sharing_a_legacy_number']} share a legacy "
         f"number with another run; all are kept)"
@@ -298,7 +301,7 @@ def render_summary(bundle: Mapping) -> str:
         linked = sum(1 for p in pos if p["proposed_links"])
         assumed = sum(1 for p in pos for link in p["proposed_links"] if link.get("assumption"))
         add(
-            f"- {n_files} processed files from the scientists (Athena/Demeter), kept as reference "
+            f"- {_processed_files_text(n_files)} from the scientists (Athena/Demeter), kept as reference "
             f"results, not records ({len(pos)} output(s) by name; {linked} with a proposed link to a run "
             f"by the name rule (same name, or same name plus a selection of that run's own scans), "
             f"{len(pos) - linked} unlinked"
@@ -403,6 +406,9 @@ def render_summary(bundle: Mapping) -> str:
     add("")
     if not unread:
         add("Every inventoried file had a reader.")
+    if n_kept:
+        add(f"- Not counted here: {_not_opened_text(n_kept)}; a run reader claimed them, so they are not unread "
+            "(`isaac bundle list <dir> unread --all` lists them).")
     if athena:
         # an Athena project is not unread: `isaac process` reads it (the import has no reader for it)
         add(f"- {_athena_read_by_process(len(athena))} (`isaac bundle list <dir> unread` shows each with its `read_by`).")
@@ -627,13 +633,15 @@ def cmd_import(args) -> int:
     print(
         f"  {c['sources']} files, {c['runs']} runs, {c['candidates']} values "
         f"({c['conflicts']} conflicts{_conflict_breakdown(bundle)}, {c['needs_review']} need review, "
-        f"{c['missing_values']} missing, {c['unread_files']} unread files)"
+        f"{c['missing_values']} missing, {c['unread_files']} unread file{'s' if c['unread_files'] != 1 else ''})"
     )
     if n_athena := sum(1 for u in bundle["unread_files"] if _is_athena_project(u)):
         print(f"  {_athena_read_by_process(n_athena)}")
+    if n_kept := len(B.files_not_opened(bundle)):
+        print(f"  {_not_opened_text(n_kept)}, not counted as unread: `isaac bundle list {out} unread --all` lists them")
     if c.get("processed_output_files"):
         print(
-            f"  {c['processed_output_files']} processed files from the scientists (Athena/Demeter), "
+            f"  {_processed_files_text(c['processed_output_files'])} from the scientists (Athena/Demeter), "
             "kept as reference results, not records"
         )
     print("  This is NOT a validated official ISAAC record. Start with summary.md.")
@@ -784,6 +792,9 @@ def _row(kind: str, obj: Mapping, group_status: Mapping | None = None) -> dict:
                   if str(obj.get("relative_path") or "").lower().endswith(suffix)), None)
     if later:
         row["read_by"] = later  # a short marker; the sentence that explains it is said once, on the page (read_by_note)
+    if obj.get("kept_by"):
+        # `unread --all`: a companion a run reader kept unopened (bundle.files_not_opened), with its run and role
+        row.update(run_id=obj.get("run_id"), role=obj.get("role"), kept_by=obj.get("kept_by"))
     return row
 
 
@@ -833,6 +844,16 @@ def _is_athena_project(unread_row: Mapping) -> bool:
     return str(unread_row.get("relative_path") or "").lower().endswith(tuple(READ_LATER_BY_SUFFIX))
 
 
+def _not_opened_text(n: int) -> str:
+    """What the summary and the import output say about the files a run reader kept unopened (c8-b), apart from unread."""
+    return (f"{n} file{'s' if n != 1 else ''} kept beside a run without any reader opening "
+            f"{'them' if n != 1 else 'it'} (companion and binary files)")
+
+
+def _processed_files_text(n: int) -> str:
+    return f"{n} processed file{'s' if n != 1 else ''}"
+
+
 def _athena_read_by_process(n: int) -> str:
     """What the summary and the import output say about Athena projects (the stored unread_files keep them)."""
     return f"{n} Athena project{'s are' if n != 1 else ' is'} read by `isaac process`, not at import"
@@ -843,6 +864,19 @@ def _mc_reason_code(obj: Mapping) -> str | None:
     from . import grouping as G
 
     return obj.get("reason_code") or G.merge_reason_code(obj.get("reasons") or ())
+
+
+def _source_view(bundle: Mapping, obj: Mapping) -> Mapping:
+    """``bundle show source``: the stored source with a reader block that says what a generic run reader did with
+    it (c8-b: a scan the SSRL XDC reader read said "no reader for this kind of source"), and ``read_as``: which
+    reader, the run or processed output, and what it gave (ids and fields, no value)."""
+    from . import bundle as B
+
+    uses = B.generic_source_uses(bundle)
+    read_as = B.source_read_as(bundle, obj, uses)
+    if read_as is None:
+        return obj
+    return {**obj, "reader": B.source_reader_block(bundle, obj, uses), "read_as": read_as}
 
 
 def _group_view(bundle: Mapping, obj: Mapping) -> Mapping:
@@ -904,6 +938,10 @@ READ_LATER_BY_SUFFIX = {
     ".prj": ("isaac process", "Athena project: its groups are read and matched by name to record groups, as the "
                               "scientist's own processing to compare with; the import itself has no reader for it"),
 }
+#: ``bundle list <dir> unread``: what the files counted under ``not_listed.companion_not_opened`` are (c8-b).
+NOT_OPENED_NOTE = ("files a run reader kept beside a run without any reader opening them (its companion files: "
+                   ".rgn/.det/.exp, a same-named folder's files, the binary/ originals): not unread, since a reader "
+                   "claimed them, and not read either. Pass --all to list them, each with its run and role")
 #: Metrics a ``processing-results`` row carries (the rest are in ``processing/processing_results.json``).
 _RESULT_METRICS = ("scans_listed", "scans_used", "points", "e0_eV", "edge_step", "pre_edge_noise", "scan_spread",
                    "glitch_points", "outlier_scans", "nonfinite_dropped")
@@ -984,8 +1022,18 @@ def cmd_bundle_list(args) -> int:
         if inert:
             not_listed[G.INERT_CANDIDATE] = len(inert)
             rows = [r for r in rows if not G.merge_candidate_inert(bundle, r)]
+    elif args.kind == "unread":
+        # c8-b: `unread` keeps its meaning (no reader claimed the file). The files a run reader kept beside a run
+        # WITHOUT opening them (companions, binary originals) are counted here and listed with --all.
+        from . import bundle as B
+
+        kept = B.files_not_opened(bundle)
+        if args.all:
+            rows += kept
+        elif kept:
+            not_listed[B.NOT_OPENED_REASON_CODE] = len(kept)
     elif args.all and args.kind not in ("groups", "merge-candidates"):
-        _err("--all applies only to `groups` and `merge-candidates`.")
+        _err("--all applies only to `groups`, `merge-candidates` and `unread`.")
         return EXIT_USAGE
     if args.state:
         if args.kind not in ("candidates", "processing-results"):
@@ -1047,6 +1095,7 @@ def cmd_bundle_list(args) -> int:
         **({"not_listed": dict(sorted(not_listed.items())),
             "not_listed_note": ("groups that are decision history (merged, rejected, split), not records: pass --all to list them"
                                 if args.kind == "groups" else
+                                NOT_OPENED_NOTE if args.kind == "unread" else
                                 "merge candidates with fewer than two live groups left (the others were rejected, split or "
                                 "merged): they propose nothing and are not asked; pass --all to list them")}
            if not_listed else {}),
@@ -1258,6 +1307,8 @@ def cmd_bundle_show(args) -> int:
                 obj = _merge_candidate_view(bundle, obj)
             elif args.kind == "group":
                 obj = _group_view(bundle, obj)
+            elif args.kind == "source":
+                obj = _source_view(bundle, obj)
             print(json.dumps(obj, indent=1, ensure_ascii=False))
             return EXIT_OK
     if args.kind == "question":
@@ -1976,7 +2027,8 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--state", help="candidates: filter by value_state; processing-results: filter by state")
     q.add_argument("--no-values", action="store_true", help="candidates only: omit parser values (records no exposure)")
     q.add_argument("--all", action="store_true", help="groups: also list merged, rejected and split groups (decision history); "
-                   "merge-candidates: also list those with fewer than two live groups (they propose nothing)")
+                   "merge-candidates: also list those with fewer than two live groups (they propose nothing); "
+                   "unread: also list the files a run reader kept without opening them (companions, binaries)")
     q.set_defaults(func=cmd_bundle_list)
     q = bsub.add_parser("show", help="one object by id")
     q.add_argument("bundle_dir")

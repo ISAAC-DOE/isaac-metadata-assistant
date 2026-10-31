@@ -840,7 +840,10 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
     for need in _object_member_requirements(fields):
         fields[need["path"]] = {"value": None, "status": "missing", "evidence": []}
         report["missing_required"].append(need)
-    report["warnings"] = _stated_potential_warnings(bundle, group, member_ids, fields, proposals)
+    from . import questions as Q  # c8-b: the conditions generic runs' names and headers state (questions.py)
+
+    report["warnings"] = (_stated_potential_warnings(bundle, group, member_ids, fields, proposals)
+                          + Q.open_circuit_warnings(bundle, group, member_ids, fields))
     return draft, report
 
 
@@ -867,7 +870,9 @@ def _stated_potentials(bundle: Mapping, member_ids: set) -> list[dict]:
                 seen.add(key)
                 out.append({"literal": lit, "relative_path": e.get("relative_path"), "candidate_id": c["candidate_id"],
                             "read_as_V": value, "value_state": c.get("value_state")})
-    return out
+    from . import questions as Q  # c8-b: a generic run's file names and scan headers (no candidate holds them)
+
+    return out + Q.stated_potentials_beyond_candidates(bundle, member_ids)
 
 
 def _stated_potential_warnings(bundle: Mapping, group: Mapping, member_ids: set, fields: Mapping,
@@ -921,6 +926,11 @@ def _stated_potential_warnings(bundle: Mapping, group: Mapping, member_ids: set,
 
 def potential_warning_text(w: Mapping) -> str:
     """The plain sentence for a :data:`STATED_POTENTIAL_WARNING` warning, ending with its command."""
+    from . import questions as Q  # c8-b: open circuit, and what scan headers state (questions.py)
+
+    if w.get("open_circuit"):
+        return Q.open_circuit_text(w)
+    extra = Q.stated_potential_notes(w)
     lits = "; ".join(s["literal"] + (f", read as {s['read_as_V']:g} V" if s.get("read_as_V") is not None else "")
                      + (f" in {s['relative_path']}" if s.get("read_as_V") is None and s.get("relative_path") else "")
                      for s in w["stated"][:3])
@@ -928,11 +938,13 @@ def potential_warning_text(w: Mapping) -> str:
         lits += "; the set-point answered for it: " + ", ".join(f"{v:g} V" for v in w["answered_V"][:3])
     if w.get("also_needs"):
         # no value was read for the set-point: the scientist gives the volts AND the scale, both commands now
-        return (f"the file names state a potential ({lits}) but the record will not carry it until the potential scale is "
-                "confirmed AND a set-point is given (no set-point value was read from the file names: give it in volts). "
+        return (f"{Q.stated_subject(w)} a potential ({lits}) but the record will not carry it until the potential scale is "
+                f"confirmed AND a set-point is given (no set-point value was read from the file names: give it in volts).{extra} "
                 f"Both: {w['also_command']}  ;  {w['command']}")
     until = "the potential scale is confirmed" if w["needs"] == SCALE_PATH else "the potential set-point is confirmed"
-    return (f"the file names state a potential ({lits}) but the record will not carry it until {until}: "
+    return (f"{Q.stated_subject(w)} a potential ({lits}) but the record will not carry it until {until}.{extra} "
+            f"Do it: {w['command']}" if extra else
+            f"{Q.stated_subject(w)} a potential ({lits}) but the record will not carry it until {until}: "
             f"{w['command']}")
 
 

@@ -673,6 +673,9 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             target={"kind": "candidate", "id": c["candidate_id"]}, run_id=c["run_id"], scope=scope, blocking=blocking,
             again=again)
 
+    if has_groups:
+        _move_outside_optional_targets(buckets, bundle, group_of, add)
+
     conflicts_out = []
     for cf in bundle["conflicts"]:
         if (cf["value_state"] not in (B.STATE_CONFLICTING, B.STATE_NEEDS_REVIEW) and cf["conflict_id"] not in conflict_again
@@ -757,6 +760,11 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 text += (f" Answers already given for this field elsewhere differ ({len(given)} distinct value(s) answered"
                          + (", besides what the files record" if recorded.get(path) else "")
                          + "): answer per group (--only group:<id>) unless they truly are all the same.")
+            if enum:
+                # c8-b LOW: a closed list may hold nothing that fits (a metal foil is none of the sample forms); the
+                # vocabulary is not widened here, the question says what to do then
+                text += (" If none of the allowed values fits, leave it missing (--decision defer) rather than picking "
+                         "the nearest one.")
             decision = "correct"
         else:
             decision = "confirm"
@@ -2296,3 +2304,190 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
     if wanted is not None:
         out["scope"] = scope
     return out
+
+
+# --- a condition a run's file names or scan headers state that no candidate holds (c8-b) ----------------------------
+#: A SCAN HEADER comment token that states a potential, with the scale written onto it (``0.5Vrhe``, ``-0.6V_RHE``,
+#: ``500mV``). Only RECOGNISES the statement, to warn that the record will not carry it: nothing is read as a value.
+_HEADER_POTENTIAL_TOKEN = re.compile(
+    r"^(?P<v>(?:m|n|neg|minus|-|\+)?\d+(?:[p.]\d+)?m?V)(?:_?(?:vs)?_?(?P<scale>RHE|SHE|NHE|SCE|Ag/?AgCl|Hg/?HgO|MSE))?$",
+    re.IGNORECASE)
+#: A file-name token that states open circuit (no set-point is applied): ``OCV``, ``OCP``.
+_OPEN_CIRCUIT_TOKEN = re.compile(r"^OC[VP]$", re.IGNORECASE)
+CONTROL_MODE_PATH = "context.electrochemistry.control_mode"
+
+
+def _token_volts(literal: str) -> float | None:
+    """The volts a potential token's own spelling writes (``m600mV`` -0.6, ``0p5V`` 0.5, ``0.5Vrhe`` 0.5), used ONLY
+    to say whether a file name and a scan header state the same potential. Never stored, never a value."""
+    m = re.match(r"^(?P<sign>m|n|neg|minus|-|\+)?(?P<num>\d+(?:[p.]\d+)?)(?P<unit>m?V)", literal, re.IGNORECASE)
+    if m is None:
+        return None
+    number = float(m.group("num").replace("p", ".").replace("P", "."))
+    if m.group("unit").lower() == "mv":
+        number /= 1000.0
+    return -number if (m.group("sign") or "").lower() in ("m", "n", "neg", "minus", "-") else number
+
+
+def _generic_member_runs(bundle: Mapping, member_ids: set) -> list[Mapping]:
+    """The member runs a GENERIC run reader found (an SSRL XDC scan set, ...): the engine's own runs carry their
+    file-name potentials as candidates already (``records._stated_potentials``)."""
+    return [r for r in bundle.get("runs") or () if r.get("run_id") in member_ids and (r.get("reader") or {}).get("reader_id")]
+
+
+def _name_tokens(run: Mapping) -> list[str]:
+    return [t for t in re.split(r"[_\s]+", str(run.get("stem") or run.get("label") or "")) if t]
+
+
+def stated_potentials_beyond_candidates(bundle: Mapping, member_ids: set) -> list[dict]:
+    """Each potential a member run's FILE NAME or SCAN HEADER comment states where no candidate holds it (a run a
+    generic reader found, e.g. ``…_m600mV_096`` and header line ``… 0Vrhe``), shaped like
+    ``records._stated_potentials``' items (``read_as_V`` None: nothing is read from it) plus ``stated_in`` (``file
+    name`` or ``scan header``), ``locator``, ``run_id`` and the ``scale`` the header writes onto it. Each literal
+    once per place, in run order. Warnings and counts only: no candidate, no value."""
+    from .records import _POTENTIAL_TOKEN
+
+    out: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    runs = _generic_member_runs(bundle, member_ids)
+    run_ids = {r["run_id"] for r in runs}
+    headers: dict[str, list[Mapping]] = {}
+    for e in bundle.get("extended_context") or ():
+        if e.get("run_id") in run_ids and e.get("concept") == "free_text" and isinstance(e.get("raw_literal"), str):
+            headers.setdefault(e["run_id"], []).append(e)
+    for r in runs:
+        first = next((sc.get("relative_path") for sc in r.get("scans") or () if sc.get("relative_path")), None)
+        found = [("file name", tok, first, "file name", None) for tok in _name_tokens(r) if _POTENTIAL_TOKEN.match(tok)]
+        for e in headers.get(r["run_id"], ()):
+            for tok in e["raw_literal"].split():
+                m = _HEADER_POTENTIAL_TOKEN.match(tok.strip(",;()"))
+                if m:
+                    found.append(("scan header", tok.strip(",;()"), e.get("relative_path"), e.get("locator"),
+                                  (m.group("scale") or "").upper().replace("AG/AGCL", "Ag/AgCl").replace("AGAGCL", "Ag/AgCl") or None))
+        for where, lit, rel, locator, scale in found:
+            if (r["run_id"], where + lit) in seen:
+                continue
+            seen.add((r["run_id"], where + lit))
+            out.append({"literal": lit, "relative_path": rel, "candidate_id": None, "read_as_V": None, "value_state": None,
+                        "stated_in": where, "locator": locator, "run_id": r["run_id"], **({"scale": scale} if scale else {})})
+    # one item per literal and place across the group's runs (the text names a few; a group of 16 scans is one run)
+    first_of: dict[tuple[str, str], dict] = {}
+    for s in out:
+        first_of.setdefault((s["stated_in"], s["literal"]), s)
+    runs_of: dict[tuple[str, str], list[str]] = {}
+    for x in out:
+        runs_of.setdefault((x["stated_in"], x["literal"]), []).append(x["run_id"])
+    return [{**s, "runs": runs_of[key]} for key, s in first_of.items()]
+
+
+def stated_potential_notes(w: Mapping) -> str:
+    """What a stated-potential warning adds about the potentials scan HEADERS state (c8-b): that a header states
+    one, the scale written onto it (not read as a value), and every run whose file name and scan header state
+    DIFFERENT potentials (``…_m600mV`` with ``0Vrhe``), named so the scientist decides which is right. ``""`` when
+    the warning has no header statement."""
+    stated = list(w.get("stated") or ())
+    header = [s for s in stated if s.get("stated_in") == "scan header"]
+    if not header:
+        return ""
+    scales = sorted({s["scale"] for s in header if s.get("scale")})
+    lits = list(dict.fromkeys(s["literal"] for s in header))
+    text = (f" {', '.join(lits[:3])}{', …' if len(lits) > 3 else ''} {'is' if len(lits) == 1 else 'are'} written in the "
+            "scan header (a comment line), not the file name"
+            + (f", with the scale ({', '.join(scales)}); no reader reads the set-point or the scale from it, so both "
+               "are asked" if scales else "") + ".")
+    by_run: dict[str, dict[str, list[str]]] = {}
+    for s in stated:
+        for rid in s.get("runs") or ([s["run_id"]] if s.get("run_id") else []):
+            by_run.setdefault(rid, {}).setdefault(s.get("stated_in") or "", []).append(s["literal"])
+    differ = []
+    for rid, places in by_run.items():
+        names, heads = places.get("file name") or [], places.get("scan header") or []
+        nv = {v for v in map(_token_volts, names) if v is not None}
+        hv = {v for v in map(_token_volts, heads) if v is not None}
+        if nv and hv and not (nv & hv):
+            differ.append(f"{rid}: file name {'/'.join(dict.fromkeys(names))}, scan header {'/'.join(dict.fromkeys(heads))}")
+    if differ:
+        text += (f" The file name and the scan header DISAGREE for {len(differ)} run(s) ({'; '.join(differ[:3])}"
+                 + ("; …" if len(differ) > 3 else "") + "): ask the scientist which is right; neither is used.")
+    return text
+
+
+def open_circuit_warnings(bundle: Mapping, group: Mapping, member_ids: set, fields: Mapping) -> list[dict]:
+    """A WARNING (never a refusal) for a group whose generic runs' FILE NAMES state open circuit (``OCV``) while its
+    record carries no control mode: the condition that defines the record would be silently absent, and nothing
+    tells it apart from a group measured under a set-point. The command is the control mode's open question's
+    (``records.with_question_commands``). Warnings only: no value is read from the name."""
+    from .records import STATED_POTENTIAL_WARNING
+
+    if CONTROL_MODE_PATH in fields:
+        return []
+    stated, seen = [], set()
+    for r in _generic_member_runs(bundle, member_ids):
+        first = next((sc.get("relative_path") for sc in r.get("scans") or () if sc.get("relative_path")), None)
+        for tok in _name_tokens(r):
+            if _OPEN_CIRCUIT_TOKEN.match(tok) and tok not in seen:
+                seen.add(tok)
+                stated.append({"literal": tok, "relative_path": first, "candidate_id": None, "read_as_V": None,
+                               "value_state": None, "stated_in": "file name", "run_id": r["run_id"]})
+    if not stated:
+        return []
+    targets = [o.get("candidate_id") or o.get("value_id") for o in list(bundle["candidates"]) + list(bundle["missing_values"])
+               if o.get("target_field_path") == CONTROL_MODE_PATH and o.get("run_id") in member_ids
+               and o.get("value_state") in (B.STATE_MISSING, B.STATE_NEEDS_REVIEW, B.STATE_CANDIDATE_EXTRACTED)]
+    command = (f'isaac bundle decide <bundle_dir> --target {targets[0]} --decision correct --value open_circuit --by "<your name>"'
+               if targets else f"isaac bundle questions <bundle_dir> --scope group:{group['group_id']}   # answer {CONTROL_MODE_PATH} there")
+    w = {"code": STATED_POTENTIAL_WARNING, "group_id": group["group_id"], "path": CONTROL_MODE_PATH,
+         "needs": CONTROL_MODE_PATH, "stated": stated, "answered_V": [], "targets": targets, "command": command,
+         "open_circuit": True}
+    return [{**w, "text": open_circuit_text(w)}]
+
+
+def open_circuit_text(w: Mapping) -> str:
+    lits = "; ".join(s["literal"] + (f" in {s['relative_path']}" if s.get("relative_path") else "") for s in w["stated"][:3])
+    return (f"the file names state open circuit ({lits}) but the record will not carry it until the control mode is "
+            f"confirmed (open_circuit, if that is what was done; no set-point applies then): {w['command']}")
+
+
+def stated_subject(w: Mapping) -> str:
+    """Who states the potential a warning names: the file names (as before c8-b), or only the scan headers."""
+    stated = list(w.get("stated") or ())
+    return ("the scan headers state" if stated and all(s.get("stated_in") == "scan header" for s in stated)
+            else "the file names state")
+
+
+def _move_outside_optional_targets(buckets: dict, bundle: Mapping, group_of: Mapping[str, str], add) -> None:
+    """c8-b: an OPTIONAL value of a run no live record group holds (its group rejected, merged or split, or never
+    grouped) is asked in THAT RUN's own optional question, never inside an experiment- or group-scope question a
+    live group answers (a template's Campaign Info answer filled the live runs, and the question went on listing
+    facility_name for 19 rejected alignment runs). That run question is counted under ``outside_live_groups``.
+    IDS DO NOT CHANGE OR DISAPPEAR: a question whose targets are ALL outside keeps them (and its id); only a
+    question that keeps at least one target gives the others up. A run's question it moves to may be new."""
+    run_of_value = {m["value_id"]: m["run_id"] for m in bundle["missing_values"]}
+    for key, q in list(buckets.items()):
+        scope, kind, _path, _partition = key
+        if kind != "optional_values" or scope.startswith("run:"):
+            continue
+        out_ids = [t["id"] for t in q["targets"]
+                   if t["kind"] == "missing_value" and run_of_value.get(t["id"]) is not None
+                   and run_of_value[t["id"]] not in group_of]
+        if not out_ids or len(out_ids) == len(q["targets"]):
+            continue
+        moving = set(out_ids)
+        field_of = {tid: f for f, ids in q["fields"].items() for tid in ids}
+        again_of = {a["target"]["id"]: a for a in q["asked_again"] if (a.get("target") or {}).get("id") in moving}
+        q["targets"] = [t for t in q["targets"] if t["id"] not in moving]
+        q["target_keys"] = {(t["kind"], t["id"]) for t in q["targets"]}
+        q["asked_again"] = [a for a in q["asked_again"] if (a.get("target") or {}).get("id") not in moving]
+        q["fields"] = {f: kept for f, ids in q["fields"].items() if (kept := [i for i in ids if i not in moving])}
+        q["per_scope_targets"] = {s: kept for s, ids in q["per_scope_targets"].items()
+                                  if (kept := [i for i in ids if i not in moving])}
+        still = {run_of_value.get(t["id"]) for t in q["targets"] if t["kind"] == "missing_value"}
+        q["runs"] = {r for r in q["runs"] if r in still}
+        for tid in out_ids:
+            rid = run_of_value[tid]
+            again = again_of.get(tid)
+            if again is not None:
+                again = {k: v for k, v in again.items() if k != "field"}
+            add((f"run:{rid}", "optional_values", None, None), kind="optional_values", path=None, partition=None,
+                target={"kind": "missing_value", "id": tid}, run_id=rid, scope=f"run:{rid}", blocking=None,
+                field=field_of.get(tid), again=again)

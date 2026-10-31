@@ -27,7 +27,11 @@ code error can be caught instead of echoed. It is a spot check, never a verifica
    says so (`compared_as: number`, `comparison_note`); prefer `--value 0.4 --json` for numbers. When the
    parser holds no value for the target (a missing value, a value-less candidate), `agrees_with_parser` and
    `relation` are null and `comparison_note` says there is nothing to compare: say "not comparable", never
-   "agrees". Agreement, difference or not
+   "agrees". A SCAN START TIME (the plan marks it `compared_as: local clock time` with a `read_note`) has no
+   UTC value until the clock's zone is stated, but it IS compared: write the earliest scan's line-2 time as the
+   header writes it or as `YYYY-MM-DDTHH:MM:SS`, no zone; `reveal` holds it against the header's local clock
+   time (`parser.local_clock_start`) in any spelling, says when it is another scan's time, and gives null for a
+   reading that names a zone or offset. Agreement, difference or not
    comparable — say which, in plain words. A difference is a question for the scientist, never
    something you settle.
 

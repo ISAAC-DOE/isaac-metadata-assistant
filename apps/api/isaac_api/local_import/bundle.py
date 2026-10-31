@@ -2357,6 +2357,151 @@ def _analysis_file_context(
     return entries
 
 
+# --- what a reader did with each source (c8-b) -----------------------------------------------------------
+#: ``unread_files`` keeps its meaning (a file NO reader claimed). A file a run reader CLAIMED but never opened — a
+#: scan's companion (``.rgn``/``.det``/``.exp``, a same-named folder's files, the ``binary/`` original) — is
+#: listed apart with this reason code (``bundle list <dir> unread --all``), never counted as unread.
+NOT_OPENED_REASON_CODE = "companion_not_opened"
+#: A companion's role by suffix, as the SSRL XDC reader names it (``readers.ssrl_xdc.COMPANION_ROLES``).
+_COMPANION_ROLES = {".rgn": "region", ".det": "detector", ".exp": "experiment"}
+_COMPANION_ROLE_WORDS = {"region": "region file", "detector": "detector file", "experiment": "experiment file",
+                         "binary_original": "binary original of a scan", "other_context": "context file"}
+
+
+def _companion_role(rel: str) -> str:
+    p = PurePosixPath(rel)
+    if p.parent.name == "binary":
+        return "binary_original"
+    return _COMPANION_ROLES.get(p.suffix.lower(), "other_context")
+
+
+def generic_source_uses(bundle: Mapping) -> dict[str, dict]:
+    """``source_id -> how a generic run reader used it``, derived from the runs and processed outputs alone (so an
+    older bundle, whose stored reader block says "no reader", is described correctly too): ``{"as": "scan" |
+    "companion" | "processed_output", "reader_id", "run_id" | "processed_output_id", "role"}``. The first use wins."""
+    sid_of = {s.get("relative_path"): s.get("source_id") for s in bundle.get("sources") or ()}
+    out: dict[str, dict] = {}
+    for r in bundle.get("runs") or ():
+        reader = (r.get("reader") or {}).get("reader_id")
+        if not reader:
+            continue  # an engine run: its sources' own reader blocks already say what read them
+        for sc in r.get("scans") or ():
+            sid = sc.get("source_id") or sid_of.get(sc.get("relative_path"))
+            if sid:
+                out.setdefault(sid, {"as": "scan", "reader_id": reader, "run_id": r["run_id"],
+                                     "scan_index": sc.get("scan_index")})
+        for rel in (r.get("other_relationships") or {}).get("companions") or ():
+            sid = sid_of.get(rel)
+            if sid:
+                out.setdefault(sid, {"as": "companion", "reader_id": reader, "run_id": r["run_id"],
+                                     "role": _companion_role(str(rel))})
+    for po in bundle.get("processed_outputs") or ():
+        reader = (po.get("reader") or {}).get("reader_id")
+        for f in po.get("files") or ():
+            sid = f.get("source_id") or sid_of.get(f.get("relative_path"))
+            if sid and reader:
+                out.setdefault(sid, {"as": "processed_output", "reader_id": reader,
+                                     "processed_output_id": po.get("processed_output_id")})
+    return out
+
+
+def _says_no_reader(block: Mapping) -> bool:
+    return not block.get("reader_id") and not block.get("content_read")
+
+
+def source_reader_block(bundle: Mapping, src: Mapping, uses: Mapping[str, dict] | None = None,
+                        statements: Mapping[str, int] | None = None) -> dict:
+    """The source's ``reader`` block, corrected when a generic run reader READ it (a scan, a processed output) or
+    claimed it without opening it (a companion) but the stored block still says no reader read anything (every
+    bundle before c8-b). Same keys as the stored block (``bundle-v1``); a block that names a reader is returned as
+    stored. ``statements``: the evidence statements kept per source id from that reader (counted when omitted)."""
+    block = dict(src.get("reader") or {})
+    use = (uses if uses is not None else generic_source_uses(bundle)).get(src.get("source_id"))
+    if use is None or not _says_no_reader(block):
+        return block
+    if use["as"] == "companion":
+        return {**block, "reader_id": None, "content_read": False,
+                "refused_reason": (f"No reader opened this file: {use['reader_id']} kept it beside run {use['run_id']} as its "
+                                   f"{_COMPANION_ROLE_WORDS.get(use.get('role'), 'context file')} (its name, size and digest "
+                                   "are recorded; its contents are not read).")}
+    if statements is None:
+        statements = _kept_statements(bundle, use["reader_id"], {src.get("source_id")})
+    kept = int(statements.get(src.get("source_id"), 0))
+    return {**block, "reader_id": use["reader_id"], "content_read": True,
+            "statements_read": int(block.get("statements_read") or 0) + kept, "refused_reason": None}
+
+
+def _kept_statements(bundle: Mapping, reader_id: str | None, sids: set | None = None) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for e in bundle.get("extended_context") or ():
+        sid = e.get("source_id")
+        if (reader_id is None or e.get("parser_id") == reader_id) and (sids is None or sid in sids):
+            out[sid] = out.get(sid, 0) + 1
+    return out
+
+
+def source_read_as(bundle: Mapping, src: Mapping, uses: Mapping[str, dict] | None = None) -> dict | None:
+    """For ``bundle show source``: which reader read this file and what it gave, in plain words — the run it is a
+    scan of (and the candidates its statements back, by id and field: no value), the processed output it is part
+    of, or the run it was kept beside unopened. ``None`` for a file no generic run reader touched."""
+    sid = src.get("source_id")
+    use = (uses if uses is not None else generic_source_uses(bundle)).get(sid)
+    if use is None:
+        return None
+    if use["as"] == "companion":
+        return {"reader_id": None, "kept_by": use["reader_id"], "as": "companion", "role": use.get("role"),
+                "run_id": use["run_id"], "opened": False,
+                "statement": (f"Kept beside run {use['run_id']} as its "
+                              f"{_COMPANION_ROLE_WORDS.get(use.get('role'), 'context file')}; no reader opened it. "
+                              f"Not counted as unread: `isaac bundle list <dir> unread --all` lists these files.")}
+    kept = _kept_statements(bundle, use["reader_id"], {sid}).get(sid, 0)
+    backs = sorted({(c["candidate_id"], c.get("target_field_path")) for c in bundle.get("candidates") or ()
+                    for e in c.get("evidence") or () if e.get("source_id") == sid and e.get("method") == "deterministic_parser"})
+    gave = [f"{kept} statement(s) from its header kept as evidence (extended context)"]
+    if use["as"] == "scan":
+        gave.insert(0, f"scan {use.get('scan_index')} of run {use['run_id']}" if use.get("scan_index") is not None
+                    else f"a scan of run {use['run_id']}")
+    else:
+        gave.insert(0, f"a file of processed output {use['processed_output_id']} (a reference result, not a run)")
+    gave += [f"evidence for {cid} ({path})" for cid, path in backs[:10]]
+    out = {"reader_id": use["reader_id"], "as": use["as"], "opened": True, "gave": gave,
+           **({"run_id": use["run_id"]} if use.get("run_id") else {}),
+           **({"processed_output_id": use["processed_output_id"]} if use.get("processed_output_id") else {})}
+    if len(backs) > 10:
+        out["candidates_more"] = len(backs) - 10
+    return out
+
+
+def files_not_opened(bundle: Mapping) -> list[dict]:
+    """The files a run reader claimed but no reader opened (companions and binary originals), as ``unread_files``-
+    shaped rows with :data:`NOT_OPENED_REASON_CODE`, in source order. Never part of ``unread_files``."""
+    uses = generic_source_uses(bundle)
+    unread = {u.get("source_id") for u in bundle.get("unread_files") or ()}
+    rows = []
+    for s in bundle.get("sources") or ():
+        use = uses.get(s.get("source_id"))
+        if use is None or use["as"] != "companion" or s.get("source_id") in unread or (s.get("reader") or {}).get("content_read"):
+            continue
+        rows.append({"relative_path": s.get("relative_path"), "source_id": s.get("source_id"),
+                     "source_type": (s.get("classification") or {}).get("source_type"),
+                     "reason_code": NOT_OPENED_REASON_CODE,
+                     "reason": source_reader_block(bundle, s, uses)["refused_reason"],
+                     "run_id": use["run_id"], "role": use.get("role"), "kept_by": use["reader_id"], "local_only": True})
+    return rows
+
+
+def _mark_generic_reads(bundle: dict, statements_by_path: Mapping[str, int]) -> None:
+    """At build: every source a generic run reader read or kept gets the reader block that says so
+    (:func:`source_reader_block`), its statement count from everything that reader read in it."""
+    uses = generic_source_uses(bundle)
+    by_sid = {s["source_id"]: s for s in bundle["sources"]}
+    counts = {sid: int(statements_by_path.get(by_sid[sid]["relative_path"], 0)) for sid in uses if sid in by_sid}
+    for sid, use in uses.items():
+        src = by_sid.get(sid)
+        if src is not None:
+            src["reader"] = source_reader_block(bundle, src, uses, counts)
+
+
 def _split_locator(locator: str, archive_paths: Sequence[str]):
     from ..bl15 import reconstruct as rc  # local: bl15 imports historical_import
 
@@ -2938,9 +3083,14 @@ def build_bundle(
             "statements_kept": min(n_statements, MAX_GENERIC_STATEMENTS_PER_RUN),
         }
 
+    generic_read: dict[str, int] = {}  # statements each generic run reader read per file (c8-b: the source's reader block)
     if generic is not None:
         for claim in getattr(generic, "claims", None) or ():
             generic_claimed.add(claim["relative_path"])
+        for g in getattr(generic, "runs", None) or ():
+            for st in g.statements:
+                rel = st.get("source_relative_path")
+                generic_read[rel] = generic_read.get(rel, 0) + 1
         for g in getattr(generic, "runs", None) or ():
             all_scans = [sc for sc in g.scans if _safe_relative(sc.get("relative_path"))]
             line1 = {st.get("source_relative_path"): st.get("literal") for st in g.statements if st.get("key") == "xdi_version"}
@@ -3506,6 +3656,7 @@ def build_bundle(
         },
         "authorities": dict(AUTHORITIES),
     }
+    _mark_generic_reads(bundle, generic_read)
     refresh_questions(bundle)
     apply_derivations(bundle)
     counter = [0]

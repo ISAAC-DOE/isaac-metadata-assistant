@@ -2,7 +2,11 @@
 
 `<isaac> bundle list <bundle> unread --limit 50 --offset 0` — each entry has `relative_path`, `source_id`,
 `source_type`, `reason_code` and, for an Athena project, a short `read_by` marker (what it means is said once
-on the page, in `read_by_note`). Work through them in this order, and tell the scientist which you are on.
+on the page, in `read_by_note`). The page's `not_listed.companion_not_opened` counts the files a run reader
+kept beside a run without opening them (`.rgn/.det/.exp`, `profile.txt`, `binary/` originals): not unread,
+and not read; `unread --all` lists them with `run_id` and `role`, and `bundle show <bundle> source <id>`
+says the same (`read_as.opened: false`). Read them only if the scientist asks. Work through the unread
+files in this order, and tell the scientist which you are on.
 
 1. **Logbooks, beamtime notes, proposals, spreadsheets that look like a sample list** (docx, xlsx,
    pdf, txt with prose). These hold sample names, conditions and who did what.

@@ -1861,6 +1861,11 @@ def crosscheck_plan(bundle: Mapping) -> dict:
             category = "required_by_record"
         if category:
             add("candidate", c["candidate_id"], category, c["run_id"], _locators(c), field_path=c["target_field_path"])
+            if B.is_local_clock_start(c):
+                # c8-b: no UTC value until the clock's zone is stated; `reveal` compares a reading with the header's
+                # local clock time, so say what to read (no value)
+                items[-1]["compared_as"] = LOCAL_CLOCK_COMPARED_AS
+                items[-1]["read_note"] = LOCAL_CLOCK_READ_NOTE
     for m in bundle["missing_values"]:
         if B._required_for(m["target_field_path"], required):
             add("missing_value", m["value_id"], "required_by_record", m["run_id"], [],
@@ -2012,6 +2017,70 @@ def excerpt(bundle: Mapping, target_id: str, *, source: str | None) -> dict:
 
 #: Why ``reveal`` gives no ``agrees_with_parser`` for a reading: there is no parser value to hold it against.
 NO_PARSER_VALUE_NOTE = "the parser holds no value for this target, so there is nothing to compare"
+#: ``compared_as`` for a reading of a scan start time held against the header's local clock time (c8-b).
+LOCAL_CLOCK_COMPARED_AS = "local clock time"
+#: What a ``crosscheck-plan`` item of a scan start time tells the reader to write down (c8-b).
+LOCAL_CLOCK_READ_NOTE = ("a scan start time: read the EARLIEST scan's line-2 time and annotate it as the header writes it "
+                         "or as YYYY-MM-DDTHH:MM:SS, with no zone (the header names none); `reveal` compares it with the "
+                         "header's local clock time")
+#: Date-time spellings a reading of a local clock time is read in (besides ISO 8601, with ``T`` or a space): the XDC
+#: header's own (with or without its weekday) and month-name forms. A numeric day/month order is never guessed.
+_LOCAL_CLOCK_FORMATS = ("%a %b %d %H:%M:%S %Y", "%b %d %H:%M:%S %Y", "%Y/%m/%d %H:%M:%S", "%d %b %Y %H:%M:%S",
+                        "%b %d %Y %H:%M:%S", "%d %B %Y %H:%M:%S", "%B %d %Y %H:%M:%S", "%Y-%m-%d %H:%M")
+_ZONE_SUFFIX = re.compile(r"(?:[zZ]|[+-]\d{2}:?\d{2}|\s+(?:UTC|GMT|[A-Z]{3,4}))$")
+
+
+def read_local_clock_reading(value: Any) -> tuple[str | None, str | None]:
+    """``(naive ISO to the second, problem)`` for an AI reading of a local clock time. ``problem`` says why it is not
+    one: it names a zone or offset (then it is an instant, not a clock reading), or no known spelling reads it."""
+    if not isinstance(value, str) or not value.strip():
+        return None, "the reading is not a date and time written as text"
+    text = " ".join(value.strip().replace(",", " ").split())
+    if _ZONE_SUFFIX.search(text):
+        return None, "the reading names a time zone or UTC offset, so it is an instant, not a local clock time"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        parsed = None
+        for fmt in _LOCAL_CLOCK_FORMATS:
+            try:
+                parsed = datetime.strptime(text, fmt)
+                break
+            except ValueError:
+                continue
+    if parsed is None:
+        return None, "the reading could not be read as a date and time (ISO 8601, or the header's own spelling)"
+    if parsed.tzinfo is not None:
+        return None, "the reading names a time zone or UTC offset, so it is an instant, not a local clock time"
+    return parsed.replace(microsecond=0).isoformat(), None
+
+
+def compare_local_clock(candidate: Mapping, proposed: Any) -> dict | None:
+    """A blind reading of a scan start time (``bundle.is_local_clock_start``) held against the header's LOCAL CLOCK
+    time, as the same clock time in any spelling (``compared_as: local clock time``): the earliest scan's, which the
+    rule takes as the start. ``None`` when the reading names a zone and the candidate has a UTC value (compared as
+    an instant, the ordinary way)."""
+    start = B.local_clock_start(candidate, None)
+    local, literal = start["local_time"], start["literal"]
+    if local is None:
+        return None
+    iso, problem = read_local_clock_reading(proposed)
+    if problem is not None:
+        if candidate.get("value") is not None and "instant" in problem:
+            return None
+        return {"agrees_with_parser": None, "compared_as": LOCAL_CLOCK_COMPARED_AS,
+                "comparison_note": (f"{problem}; the scan header writes the local clock time {literal!r} ({local}) and "
+                                    "names no zone, so they cannot be compared as the same time")}
+    note = (f"compared as the same local clock time: the reading {proposed!r} is {iso}, the scan header writes {literal!r} "
+            f"({local}, no zone named), the earliest scan's time, which the rule takes as the start")
+    if iso == local:
+        return {"agrees_with_parser": True, "compared_as": LOCAL_CLOCK_COMPARED_AS, "comparison_note": note}
+    later = next((e for e in candidate.get("evidence") or () if e.get("method") == "deterministic_parser"
+                  and B.read_xdc_literal(e.get("literal_value")) == iso), None)
+    if later is not None:
+        note += (f"; the reading is the time another scan of the run writes ({later.get('relative_path')}, "
+                 f"{later.get('literal_value')!r}), not the earliest")
+    return {"agrees_with_parser": False, "compared_as": LOCAL_CLOCK_COMPARED_AS, "comparison_note": note}
 
 
 def reveal(bundle_dir: Path, target_id: str) -> dict:
@@ -2022,9 +2091,14 @@ def reveal(bundle_dir: Path, target_id: str) -> dict:
         record_exposure(bundle, kind, target_id, "bundle reveal")
         save_bundle(bundle_dir, bundle)
     readings = [i for i in bundle.get("ai_interpretations") or () if i["target"] == {"kind": kind, "id": target_id}]
+    clock = kind == "candidate" and B.is_local_clock_start(obj)
     if kind == "candidate":
         parser = {"value": obj["value"], "observed_literals": obj["observed_literals"], "value_state": obj["value_state"]}
         base, path = obj["value"], obj["target_field_path"]
+        if clock:
+            # c8-b: a scan start time is a LOCAL CLOCK time until the clock's zone is stated (`value` is null until
+            # then); the parser's local reading of it is shown, and a reading is compared with that
+            parser["local_clock_start"] = B.local_clock_start(obj, None)["local_time"]
     elif kind == "run":
         parser = {"signal_selection": obj["signal_selection"], "label": obj["label"]}
         base, path = (obj["signal_selection"] or {}).get("primary_channel"), None
@@ -2039,6 +2113,10 @@ def reveal(bundle_dir: Path, target_id: str) -> dict:
 
     def compare(r) -> dict:
         proposed = r["proposed_value"]
+        if clock:
+            got = compare_local_clock(obj, proposed)
+            if got is not None:
+                return got
         if base is None:
             return {"agrees_with_parser": None, "comparison_note": NO_PARSER_VALUE_NOTE}
         # A NUMBER GIVEN AS TEXT (`annotate --value "0.4"` without --json) for a numeric field, against a numeric

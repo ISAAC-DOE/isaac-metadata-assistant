@@ -15,7 +15,8 @@ hint notes in `hint_notes`. A question blocks only when a live group's record ne
 fields (`blocks_groups`, `required_fields`; reaction drive and catalysis only once a reaction is in
 the record, `required_when`; a member an object the record carries requires, e.g. the electrolyte's
 `concentration_M` once its name is answered, with `required_because`); questions only about runs in no
-live group say `outside_live_groups`. A beamtime-wide conflict (no run named) counts every live group
+live group say `outside_live_groups`; an optional value of such a run is asked in that run's own question,
+never inside the beamtime's or a live group's. A beamtime-wide conflict (no run named) counts every live group
 it reaches (`applies_to.beamtime_wide: true`, `groups` = `blocks_groups`).
 The reply also has
 `counts` (for the scope asked; `counts_whole_bundle` beside it when `--scope` is given: `blocking`,
@@ -50,7 +51,8 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   (a number with its unit, a name). When the question has `allowed_values` (a closed list), map
   their words to exactly one allowed value and say it back ("in situ" → `in_situ`; "a pressed
   pellet" → `pellet`); record it only on their yes. If none fits, say so and offer the list; never
-  stretch a word to fit. `decide` refuses a value the field's schema rejects (not on the list, wrong
+  stretch a word to fit (the question says it: leave it missing, `--decision defer`; a metal foil is none of
+  the sample forms). `decide` refuses a value the field's schema rejects (not on the list, wrong
   type, a time not in UTC), lists the allowed values and records nothing; when one target of a bulk
   answer is refused, nothing is recorded for any.
 - Ask `produced_by` ("who made these measurements?") once, per beamtime; offer a folder-name hint
