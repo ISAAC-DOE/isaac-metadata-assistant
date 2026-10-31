@@ -1412,40 +1412,117 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
                                    "reason": f"no File List row chose Config ID {cid!r}, so it reaches no run"})
     answers_box: list[Mapping] = []
 
-    def recorded(path: str | None, run_ids: Sequence[str], scope: str) -> dict | None:
+    def recorded(e: Mapping, run_ids: Sequence[str], their_value: Any) -> dict:
+        """:func:`ruling_state` of one ``_isaac`` disagreement row, against the bundle as it is before this import."""
         from . import propose_terms as P
 
-        if not answers_box:  # read once, only when a blank ruling is found
-            answers_box.append(P.allowed_answers(bundle, [str(e.get("target_field_path")) for e in marker.get("disagreements") or ()]))
-        return recorded_ruling(answers_box[0], path, run_ids, scope)
+        if not answers_box:  # read once, only when a ruling cell needs it
+            paths = [str(x.get("target_field_path")) for x in marker.get("disagreements") or ()] + [ELECTROLYTE_CONC_PATH]
+            answers_box.append(P.allowed_answers(bundle, paths))
+        path = e.get("target_field_path")
+        return ruling_state(answers_box[0], list(bundle.get("scientist_decisions") or ()), kind=e.get("kind"),
+                            path=path, run_ids=run_ids, scope=str(e.get("scope")),
+                            their_value=their_value, their_file=e.get("their_file"), their_cells=e.get("their_cells"),
+                            beamtime=beamtime_reach(index, path, out["file_list_run_ids"]))
 
     _read_rulings(wb, marker, runs, known, take, out, recorded)
     return out
 
 
-def recorded_ruling(answers: Mapping, path: str | None, run_ids: Sequence[str], scope: str) -> dict | None:
-    """c14 MED-1: what a Disagreements row's field ALREADY holds, when a scientist's confirming decision gives it an
-    allowed value for every run the row names (``scope`` ``experiment``: the beamtime-wide answer), else ``None``.
-    ``answers``: ``propose_terms.allowed_answers`` for the rows' fields (alias-aware; the only values a record takes).
-    ``{values, decided_utc, runs, statement}``: "already recorded: 'in_situ' (2099-01-01); leave blank to keep" — a
-    sheet adopted again after the scientist ruled is never read back as awaiting their ruling."""
+def _ruled_here(log: Sequence[Mapping], place: int, provenance: tuple[str, str] | None) -> bool:
+    """Whether decision ``log[place]`` is a ruling on THIS disagreement in an earlier import of this sheet: its note,
+    which ``template import`` writes from the ruling cell (:func:`_read_rulings`), names "ruling on disagreement Dn: <their
+    file> <their cells>" for the same file and cells (the Dn number may change between adopts; the cells do not)."""
+    if provenance is None or not (0 <= place < len(log)):
+        return False
+    note = (log[place] or {}).get("note") if isinstance(log[place], Mapping) else None
+    their = re.escape(f"{provenance[0]} {provenance[1]}")
+    return isinstance(note, str) and re.search(rf"\(your (?:concentration )?ruling on disagreement D\d+: {their}\)", note) is not None
+
+
+def beamtime_reach(index: "_Index", path: str | None, runs: set[str]) -> list[str | None]:
+    """The targets a Campaign Info answer for ``path`` reaches (:func:`plan_and_record`): a record-scope missing value
+    (``None``) and each of ``runs`` (the File List's live runs) with a missing value of its own. Extracted values are
+    left alone by such an answer, so they are not among them."""
+    if not path:
+        return []
+    found = {m["run_id"] for m in index.missing_by_path.get(path, []) if m["run_id"] is None or m["run_id"] in runs}
+    return ([None] if None in found else []) + sorted(r for r in found if r is not None)
+
+
+def recorded_ruling(answers: Mapping, path: str | None, run_ids: Sequence[str], scope: str, *, their_value: Any = None,
+                    provenance: tuple[str, str] | None = None, log: Sequence[Mapping] = (),
+                    beamtime: Sequence[str | None] | None = None) -> dict | None:
+    """What a Disagreements row's field already holds, when a scientist's confirming decision gives it an allowed value
+    for every run the row names (``scope`` ``experiment``: the beamtime-wide answer), else ``None``. ``answers``:
+    ``propose_terms.allowed_answers`` for the rows' fields (alias-aware; the only values a record takes).
+
+    ``settled`` (c14 MED-1, c14g MED-1): only when, for every run, the value recorded EQUALS the sheet's
+    (``their_value``) or was recorded by a ruling on this same disagreement in an earlier import of this sheet
+    (:func:`_ruled_here`, ``provenance`` = (their file, their cells)). Then "already recorded: 'in_situ' (2099-01-01);
+    leave blank to keep". A decision that only predates the sheet (a file's pH 12 confirmed, then the sheet says pH 2
+    for the first time) settles nothing: "recorded `12` (2099-01-01); your sheet says `2`: rule which", and the row
+    awaits the scientist's ruling. ``run_own``: every value is the run's own answer, never a beamtime-wide one.
+    ``beamtime``: for a whole-beamtime row (``scope`` ``experiment``), the targets its answer reaches
+    (:func:`beamtime_reach`; a Campaign Info ruling is recorded on each File List run's own target)."""
     from . import propose_terms as P
 
     if not path:
         return None
-    reach = [None] if scope == "experiment" or not run_ids else list(dict.fromkeys(run_ids))
-    got = []
+    if scope == "experiment" or not run_ids:
+        reach = list(beamtime) if beamtime else [None]
+    else:
+        reach = list(dict.fromkeys(run_ids))
+    got, run_own = [], True
     for rid in reach:
         here = P._answers_for_run(answers, path, rid)
         if not here:
             return None
+        run_own = run_own and (rid is None or scope == "experiment"
+                               or len(answers.get((P._fills(path), rid)) or ()) == len(here))
         got += here
     values = P._distinct([a[0] for a in got])
     timed = sorted((t, a[1]) for a in got if (t := P._utc(a[1])) is not None)
     when = timed[-1][1] if timed else None
-    return {"values": values, "decided_utc": when, "runs": sum(1 for r in reach if r is not None),
-            "statement": f"already recorded: {', '.join(_shown(v) for v in values)}" + (f" ({when[:10]})" if when else "")
-                         + "; leave blank to keep"}
+    settled = all((their_value is not None and _agrees(a[0], their_value)) or _ruled_here(log, a[2], provenance)
+                  for a in got)
+    date = f" ({when[:10]})" if when else ""
+    statement = (f"already recorded: {', '.join(_shown(v) for v in values)}{date}; leave blank to keep" if settled else
+                 f"recorded {P._shown(values)}{date}; your sheet says {P._shown([their_value])}: rule which")
+    return {"values": values, "decided_utc": when, "runs": sum(1 for r in reach if r is not None), "settled": settled,
+            "run_own": run_own, "statement": statement}
+
+
+def ruling_state(answers: Mapping, log: Sequence[Mapping], *, kind: str | None, path: str | None, run_ids: Sequence[str],
+                 scope: str, their_value: Any, their_file: str | None, their_cells: str | None,
+                 beamtime: Sequence[str | None] | None = None) -> dict:
+    """How one Disagreements row stands against what is recorded (:func:`recorded_ruling`): ``already_recorded`` (the
+    row is settled; a blank ruling keeps it), else ``recorded_note`` (said beside the row, which still awaits a ruling).
+    An Electrolyte row whose value also states a concentration (kind ``name_only``, c14g MED-2) is settled only when the
+    name AND the concentration are; with the name alone, ``name_recorded`` holds it and the concentration still awaits a
+    ruling ("name recorded: 'KOH'; concentration awaits your ruling"). ``conc``: the concentration's own state."""
+    provenance = (str(their_file), str(their_cells)) if their_file and their_cells else None
+    common = dict(scope=scope, provenance=provenance, log=log, beamtime=beamtime)
+    parts = electrolyte_statement_parts(their_value) if kind == "name_only" else None
+    if parts is None:
+        rec = recorded_ruling(answers, path, run_ids, their_value=their_value, **common)
+        return {"already_recorded": rec if rec and rec["settled"] else None,
+                "recorded_note": rec["statement"] if rec and not rec["settled"] else None}
+    name = recorded_ruling(answers, path, run_ids, their_value=parts[0], **common)
+    conc = recorded_ruling(answers, ELECTROLYTE_CONC_PATH, run_ids, their_value=parts[1], **common)
+    if name and name["settled"] and conc and conc["settled"]:
+        when = max([w for w in (name["decided_utc"], conc["decided_utc"]) if w], default=None)
+        both = {**name, "values": name["values"], "concentration_values": conc["values"], "decided_utc": when,
+                "run_own": name["run_own"] and conc["run_own"],
+                "statement": (f"already recorded: name {', '.join(_shown(v) for v in name['values'])}, concentration "
+                              f"{', '.join(_shown(v) for v in conc['values'])} M" + (f" ({when[:10]})" if when else "")
+                              + "; leave blank to keep")}
+        return {"already_recorded": both, "recorded_note": None, "conc": conc}
+    if name and name["settled"]:
+        said = "awaits your ruling" if conc is None else conc["statement"]
+        return {"already_recorded": None, "name_recorded": name, "conc": conc,
+                "recorded_note": f"name recorded: {', '.join(_shown(v) for v in name['values'])}; concentration {said}"}
+    return {"already_recorded": None, "conc": conc, "recorded_note": name["statement"] if name else None}
 
 
 def _read_rulings(wb, marker: Mapping, runs: Mapping, known: Mapping[str, Column], take, out: dict,
@@ -1502,6 +1579,7 @@ def _read_rulings(wb, marker: Mapping, runs: Mapping, known: Mapping[str, Column
                 take(SHEET_DISAGREE, cell_ref, column, raw, run=run, scope="run", because=why_said)
 
         # M3: the CONCENTRATION of an electrolyte row ("0.01 M HClO4"), ruled in its own column, for the same runs
+        craw = None
         if conc_column:
             craw, cwhy = _raw(ws[conc_ref])
             if cwhy:
@@ -1518,19 +1596,35 @@ def _read_rulings(wb, marker: Mapping, runs: Mapping, known: Mapping[str, Column
         if why:
             out["invalid"].append({"cell": _cell_ref(SHEET_DISAGREE, ref), "header": col.header, "value": ws[ref].value, "reason": why})
             continue
+        their_value = ws[f"D{row}"].value
+        state = recorded(e, runs_named, their_value) if recorded is not None and (
+            raw is None or (e.get("kind") == "name_only" and conc_column and craw is None)) else {}
+
+        def conc_awaits(why_said: str) -> None:
+            # c14g MED-2: the concentration their sheet states is never dropped from every list
+            out["awaiting_ruling"].append({"id": did, "cell": _cell_ref(SHEET_DISAGREE, conc_ref), "header": conc_col.header,
+                                           "target_field_path": ELECTROLYTE_CONC_PATH, "their_value": their_value,
+                                           "why": why_said})
+
         if raw is None:
             reading = ws[f"F{row}"].value
-            held = recorded(col.path, runs_named, str(e.get("scope"))) if recorded is not None else None
-            if held is not None:
+            settled = state.get("already_recorded") or state.get("name_recorded")
+            if settled is not None:
                 # a blank ruling on a row already settled keeps what is recorded: never read back as awaiting a ruling
                 out["already_recorded"].append({"id": did, "cell": _cell_ref(SHEET_DISAGREE, ref), "header": col.header,
-                                                "target_field_path": col.path, "their_value": ws[f"D{row}"].value,
-                                                "recorded": held})
+                                                "target_field_path": col.path, "their_value": their_value,
+                                                "recorded": settled})
+                if state.get("name_recorded") and craw is None:
+                    conc_awaits(state["recorded_note"])
                 continue
+            said = ("readings: " + "; ".join(str(reading).splitlines())) if reading else ws[f"B{row}"].value
             out["awaiting_ruling"].append({"id": did, "cell": _cell_ref(SHEET_DISAGREE, ref), "header": col.header,
-                                           "target_field_path": col.path, "their_value": ws[f"D{row}"].value,
-                                           "why": ("readings: " + "; ".join(str(reading).splitlines())) if reading else ws[f"B{row}"].value})
+                                           "target_field_path": col.path, "their_value": their_value,
+                                           "why": f"{state['recorded_note']}; {said}" if state.get("recorded_note") else said})
             continue
+        if state and not ((state.get("conc") or {}).get("settled")):
+            conc_awaits("the name is ruled here; the concentration your sheet states awaits your ruling in column "
+                        f"{DISAGREE_CONC_COLUMN}")
         record(ref, col, raw, because)
 
 
@@ -1919,18 +2013,43 @@ def keep_off_list_cells(bundle: dict, cells: Sequence[Mapping], *, by: str | Non
     """Keep each off-list word of a sheet as a vocabulary request on ``bundle`` (in memory; the caller saves):
     the rows of :func:`off_list_requests`, each with its ``request_id`` and whether it is ``new``. A request kept
     earlier whose runs have since been answered with an allowed value says so (``answered_since``): the same sheet
-    imported again is not the scientist saying their word again, so nothing is stamped (only ``--as-said`` is)."""
+    imported again is not the scientist saying their word again, so nothing is stamped (only ``--as-said`` is).
+
+    c14g LOW-6: a sheet word that is NOT the same request as before (its cells or runs changed) is read against every
+    request kept for the same field and word (:func:`same_word_requests`, as with no name given): runs answered since
+    are not asked again (a fresh request time would read those answers as "before" and draft the word again), so the
+    new request names only the runs still unanswered, and none is kept when every run is answered."""
     from . import mutations as M
-    from . import propose_terms as P
 
     kept, earlier = [], []
     for row in off_list_requests(cells):
-        request, new = M.keep_vocabulary_request(
-            bundle, field_path=row["field_path"], term=row["term"], by=by, orcid=orcid, run_ids=row["run_ids"],
-            scope=row["scope"], source={"kind": kind, "command": command, "file": file, "cells": row["cells"]})
-        kept.append({**row, "request_id": request["request_id"], "new": new})
+        before = same_word_requests(bundle, row)
+
+        def keep(run_ids: Sequence[str]):
+            return M.keep_vocabulary_request(
+                bundle, field_path=row["field_path"], term=row["term"], by=by, orcid=orcid, run_ids=run_ids,
+                scope=row["scope"], source={"kind": kind, "command": command, "file": file, "cells": row["cells"]})
+
+        request, new = keep(row["run_ids"])
         if not new:
+            kept.append({**row, "request_id": request["request_id"], "new": new})
             earlier.append((kept[-1], request))
+            continue
+        probe = dict(row)
+        say_answered_since(bundle, [(probe, before)])
+        since = probe.get("answered_since")
+        if since is None:
+            kept.append({**row, "request_id": request["request_id"], "new": new})
+            continue
+        held = bundle["vocabulary_requests"]
+        if held and held[-1] is request:
+            held.pop()  # kept again below for the runs still unanswered, or not at all
+        rest = [r for r in row["run_ids"] if r not in set(since["run_ids"])]
+        if since["every_run"] or not rest:
+            kept.append({**row, "request_id": before[-1]["request_id"], "new": False, "answered_since": since})
+            continue
+        request, new = keep(rest)
+        kept.append({**row, "run_ids": rest, "request_id": request["request_id"], "new": new, "answered_since": since})
     say_answered_since(bundle, [(row, [request]) for row, request in earlier])
     return kept
 
@@ -1965,7 +2084,8 @@ def say_answered_since(bundle: Mapping, pairs: Sequence[tuple[dict, Sequence[Map
             continue
         values = P._distinct([v for vs in answered.values() for v in vs])
         row["answered_since"] = {
-            "runs": sum(1 for r in answered if r is not None), "values": values,
+            "runs": sum(1 for r in answered if r is not None), "run_ids": [r for r in answered if r is not None],
+            "values": values,
             **({"whole_beamtime": True} if None in answered else {}),
             "every_run": bool(wanted) and all(r in answered for r in wanted),
             "statement": (f"The sheet still says {row['term']!r} for {row['field_path']} on {P._reach(list(answered))}, "
@@ -2909,9 +3029,13 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
         # after a new reading must not ask for rulings already given); a blank ruling there keeps the recorded value
         from . import propose_terms as P
 
-        answers = P.allowed_answers(bundle, [g["path"] for g in entries if g["path"]]) if entries else {}
+        answers = P.allowed_answers(bundle, [g["path"] for g in entries if g["path"]] + [ELECTROLYTE_CONC_PATH]) if entries else {}
+        log = list(bundle.get("scientist_decisions") or ())
         for g in entries:
-            g["already_recorded"] = recorded_ruling(answers, g["path"], g["runs"], g["scope"])
+            st = ruling_state(answers, log, kind=g["kind"], path=g["path"], run_ids=g["runs"], scope=g["scope"],
+                              their_value=g["their_value"], their_file=their_file, their_cells=", ".join(g["their_cells"]),
+                              beamtime=beamtime_reach(index, g["path"], live))
+            g["already_recorded"], g["recorded_note"] = st["already_recorded"], st["recorded_note"]
         wd = wb.create_sheet(SHEET_DISAGREE, index=wb.sheetnames.index(SHEET_SUGGEST))
         from openpyxl.styles import Alignment, Font
 
@@ -2940,8 +3064,8 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
                 " (each field's allowed values are listed once, below)" if g["kind"] == "not_allowed" else "")
             if g["unread_hints"]:
                 said += ". " + "; ".join(_unread_hint_text(h, len(g["runs"])) for h in g["unread_hints"])
-            if g["already_recorded"]:
-                said = f"{g['already_recorded']['statement']}. {said}"
+            if g["already_recorded"] or g["recorded_note"]:
+                said = f"{(g['already_recorded'] or {}).get('statement') or g['recorded_note']}. {said}"
             values = (g["id"], said, g["header"], g["their_value"], _refs_shown(g["their_cells"]), "\n".join(g["readings"]) or None,
                       _refs_shown(g["runs"], noun="runs") if g["runs"] else "every File List run", None,
                       _refs_shown(g["answer_cells"]), None)
@@ -2950,10 +3074,14 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
                 c.alignment = Alignment(wrap_text=True, vertical="top")
             wd[f"{DISAGREE_RULING_COLUMN}{row}"].number_format = "@" if not (rules.get(g["path"] or "") or {}).get("numeric") else "General"
             if g["already_recorded"]:
+                rec = g["already_recorded"]
+                # c14g LOW-4: a value that is the runs' own answer clashes with a different ruling; a beamtime-wide one
+                # does not (the ruling is recorded for this row's runs, beside it)
                 wd[f"{DISAGREE_RULING_COLUMN}{row}"].comment = Comment(
-                    f"{g['already_recorded']['statement'][0].upper()}{g['already_recorded']['statement'][1:]}: a blank "
-                    "ruling records nothing new. A different value here is recorded only with `template import "
-                    "--supersede`.", "ISAAC")
+                    f"{rec['statement'][0].upper()}{rec['statement'][1:]}: a blank ruling records nothing new. "
+                    + ("A different value here is recorded over it only with `template import --supersede`." if rec["run_own"]
+                       else "It is a beamtime-wide answer: a different value here is recorded for this row's runs alone, "
+                            "beside it (the import preview says what it records)."), "ISAAC")
             if g.get("allowed"):
                 allowed_once.setdefault(g["header"], list(g["allowed"]))
             for ref in g["answer_cells"]:
@@ -3003,7 +3131,7 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
 
         result["disagreements"] = [{k: g[k] for k in ("id", "kind", "header", "path", "their_value", "their_cells", "readings",
                                                       "runs", "answer_cells", "reason", "scope", "unread_hints",
-                                                      "already_recorded")}
+                                                      "already_recorded", "recorded_note")}
                                    | {"ruling_cell": _cell_ref(SHEET_DISAGREE, f"{DISAGREE_RULING_COLUMN}{g['row']}")}
                                    | ({"concentration_ruling_cell": _cell_ref(SHEET_DISAGREE, f"{DISAGREE_CONC_COLUMN}{g['row']}")}
                                       if g["kind"] == "name_only" else {})
@@ -3067,7 +3195,8 @@ def render_adopt_summary(result: Mapping) -> str:
                 f"{len(ds) - done} await your ruling, {done} already recorded (a blank ruling keeps it)")
 
     def recorded(d: Mapping) -> str:
-        return f" [{d['already_recorded']['statement']}]" if d.get("already_recorded") else ""
+        said = (d.get("already_recorded") or {}).get("statement") or d.get("recorded_note")
+        return f" [{said}]" if said else ""
 
     lines.append("")
     lines.append(f"Disagreements with a file reading ({len(file_ds)}; not adopted, {waiting(file_ds)}; every reading "

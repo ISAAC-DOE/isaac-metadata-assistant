@@ -624,8 +624,8 @@ def test_propose_terms_does_not_draft_a_term_answered_since_and_says_how_many_ru
     assert again["answered_requests_apart"] == 1 and draft["earlier_requests_answered"] == ["vr-00001"]
     assert {c["ref"]["id"] for c in again["citations"]} == {"vr-00002"}
     assert draft["earlier_requests_answered_note"] == (
-        "The new request is for 1 run(s) (which hold `in_situ` from before it); the earlier request (vr-00001, from a "
-        "cell of the filled template, 2 run(s)) was answered since and is not part of this draft.")
+        "The open request (vr-00002) is for 1 run(s) (which hold `in_situ` from before it); the request answered since "
+        "(vr-00001, from a cell of the filled template, 2 run(s)) is not part of this draft.")
     # the as-said request is their live word; the sheet's, answered for both runs, is set aside
     assert [n["source"]["kind"] for n in again["scientist_notes"]] == ["decide_answer"]
     assert [n["source"]["kind"] for n in again["answered_scientist_notes"]] == ["template_cell"]

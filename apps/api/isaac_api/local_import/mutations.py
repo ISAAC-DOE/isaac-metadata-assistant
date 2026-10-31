@@ -1249,7 +1249,8 @@ def requests_answered_sentence(bundle: Mapping, before: set[str]) -> tuple[str |
     """c14 LOW-4: ``(sentence, request ids)`` for each request the decision just recorded on ``bundle`` answers: open
     before it (``before``, :func:`open_requests_before`) and no longer open now, read exactly as ``propose-terms`` reads
     it. Said per word: "This answers your request for 'oxidation' (vr-00002); it is no longer drafted", or what still
-    drafts it (another request of theirs that is still open, or readings no scientist confirmed)."""
+    drafts it (another request of theirs that is still open, or readings no scientist confirmed), read from
+    ``propose-terms``' own report for the term (a term it never drafts, e.g. one with a space, is "not drafted")."""
     from . import propose_terms as P
 
     if not before:
@@ -1261,17 +1262,43 @@ def requests_answered_sentence(bundle: Mapping, before: set[str]) -> tuple[str |
     for r in done:
         by_term.setdefault((r.get("field_path"), r.get("term")), []).append(r)
     said = []
+    entries = _propose_terms_entries(bundle) if by_term else None
     for (path, term), reqs in by_term.items():
         others = [r["request_id"] for r in requests if (r.get("field_path"), r.get("term")) == (path, term)
                   and r.get("request_id") in now]
-        if others:
+        entry = (entries or {}).get((path, term))
+        draft = (entry or {}).get("draft") or {}
+        if entries is None:
+            tail = "`isaac bundle propose-terms` says whether anything still drafts it"
+        elif not draft.get("drafted"):
+            tail = "it is no longer drafted" if draft.get("answered") or entry is None else "it is not drafted"
+        elif others:
             tail = f"your other request(s) for it ({', '.join(others)}) are still drafted"
-        elif n := P.readings_keeping(bundle, path, term):
-            tail = f"it is drafted now only for {n} reading(s) no scientist confirmed"
         else:
-            tail = "it is no longer drafted"
+            # c14g LOW-2: propose-terms' own counts for the term, never a count of our own
+            by = entry.get("by_origin") or {}
+            kept = [*([f"{by.get('parser_reading', 0) + by.get('ai_reading', 0)} reading(s) no scientist confirmed"]
+                      if by.get("parser_reading", 0) + by.get("ai_reading", 0) else []),
+                    *([f"{by['scientist_confirmed']} off-list value(s) a scientist confirmed"]
+                      if by.get("scientist_confirmed") else [])]
+            tail = f"it is still drafted for {' and '.join(kept) or 'what else holds it'}"
         said.append(f"This answers your request for {term!r} ({', '.join(r['request_id'] for r in reqs)}); {tail}.")
     return (" ".join(said) or None), [r["request_id"] for r in done]
+
+
+def _propose_terms_entries(bundle: Mapping) -> dict | None:
+    """``{(field path, term): term entry}`` of ``propose_terms.propose_terms`` for ``bundle`` (pure; nothing is printed or
+    exposed), or ``None`` when the vocabulary cannot be read."""
+    from .. import schema_locator
+    from .. import schema_proposal_rules as SR
+    from . import propose_terms as P
+
+    try:
+        sources = SR.load_sources_at(schema_locator.resolve_schema_path())
+    except (OSError, ValueError):
+        return None
+    report = P.propose_terms(bundle, sources)
+    return {(f["field_path"], t["term"]): t for f in report["fields"] for t in f["terms"]}
 
 
 def _with_answered(result: Mapping, bundle: Mapping, before: set[str]) -> Mapping:

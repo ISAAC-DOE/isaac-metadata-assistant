@@ -215,9 +215,9 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   `answered_before_request` or `answered_same_step` it is recorded again and answers the request; for
   `answered_order_unknown` first record their word again with `--as-said`, then `decide`. A sheet cell equal
   to the current value records nothing. A draft counts only the requests still open: an earlier one answered since
-  is set apart (`answered_scientist_notes`; `earlier_requests_answered_note`: "The new request is for 1 run(s) (which
-  hold `surface_oxidation` from before it); the earlier request (vr-…, from their own sheet, 139 run(s)) was answered
-  since and is not part of this draft"). Say that sentence; never the earlier request's runs as the draft's.
+  is set apart (`answered_scientist_notes`; `earlier_requests_answered_note`: "The open request (vr-…) is for 1 run(s)
+  (which hold `surface_oxidation` from before it); the request answered since (vr-…, from their own sheet, 139
+  run(s)) is not part of this draft"). Say that sentence; never the answered request's runs as the draft's.
   A term with a space is not drafted (the `--out` summary counts them: "N term(s) need a one-word form (ask)"); its `ask` says what to ask for (one word, e.g. `cathodic_corrosion`):
   record their one-word answer again, never rewrite it yourself. They write each description themselves on
   the Schema Proposals page (Propose a Change → Load drafts from a local import), never in the file and
@@ -305,9 +305,13 @@ and to use it (a sheet you found in the folder is not that; ask first). Never re
    summary says it makes Reaction Drive and Reaction Catalysis required for N groups: ask those too. Never
    pick a side, and never suggest a ruling. "N row(s) name only runs in no live record group": those rows give
    nothing (their runs are in a rejected group or none); say so, never as unmatched.
-   **Adopting again** (after a new reading): a row whose field their decision already answers for every run
-   it names says "already recorded: 'in_situ' (2026-10-30); leave blank to keep", counted apart ("Disagreements
-   already recorded: 14 of 16"). Do not ask for that ruling again; say it is settled, and read back only the rest.
+   **Adopting again** (after a new reading): a row is settled only when what is recorded equals their sheet's
+   value, or came from their ruling on that same row in an earlier import of this sheet. It says
+   "already recorded: 'in_situ' (2026-10-30); leave blank to keep", counted apart ("Disagreements already recorded: 14 of 16"): do not
+   ask for that ruling again; say it is settled, and read back only the rest. A row whose recorded value is older
+   than the sheet and differs says "recorded `12` (date); your sheet says `2`: rule which": it still awaits their
+   ruling, so read both values back. An electrolyte row with only the name ruled says "name recorded: 'KOH';
+   concentration awaits your ruling": ask the concentration (column J).
    A word "The sheet still says 'oxidation' … answered since with `surface_oxidation`" (with or without `--by`,
    under "Answered since") is said as: "your sheet's 'oxidation' was already replaced by surface_oxidation;
    nothing to do unless you want your own word kept".

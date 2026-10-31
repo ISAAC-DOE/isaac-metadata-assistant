@@ -1858,8 +1858,8 @@ adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
   (`propose_terms.request_fully_answered`) is set apart when another request for the term is still open: the draft's
   `runs`, `run_ids`, `count`, `by_origin` and citations are the open requests' and readings' only
   (`answered_requests_apart` counts what was set apart), `partly_answered` is read over the open requests, and
-  `earlier_requests_answered` / `earlier_requests_answered_note` name the earlier request ("… was answered since and is
-  not part of this draft"). A term answered throughout keeps all its counts, as before. `--merge` keeps an answered
+  `earlier_requests_answered` / `earlier_requests_answered_note` name the open request(s) and the request(s) answered
+  since ("… is not part of this draft"); a request whose runs are all in no live record group never counts as open. A term answered throughout keeps all its counts, as before. `--merge` keeps an answered
   term's `earlier_description` "only in case the scientist asks for the word again; … not to be filed", counted in
   `merges[].descriptions_kept_for_answered_terms`, not `descriptions_kept`. `totals.need_one_word` counts the terms
   not drafted until given as one word (`ask`).
@@ -1869,8 +1869,15 @@ adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
   answered (read as `propose-terms` reads it) adds "This answers your request for 'oxidation' (vr-…); it is no longer
   drafted" (or what still drafts it) and `answers_requests`.
 - **(c14) Adopting a sheet again.** A Disagreements row whose field a scientist's confirming decision already gives
-  an allowed value for every run it names says "already recorded: <value> (<date>); leave blank to keep" (the adopt
-  result's `already_recorded`, counted apart in the summary); `template import` lists such a row left blank under
+  an allowed value for every run it names (a whole-beamtime row: every target its answer reaches) is SETTLED (c14g)
+  only when, for every run, that value equals the sheet's or was recorded by a ruling on the same disagreement in an
+  earlier import of this sheet (the decision's note names "ruling on disagreement Dn: <their file> <their cells>").
+  Settled, it says "already recorded: <value> (<date>); leave blank to keep" (the adopt result's `already_recorded`,
+  counted apart in the summary); otherwise it awaits a ruling and says "recorded `12` (date); your sheet says `2`:
+  rule which" (`recorded_note`). An Electrolyte row stating a concentration is settled only when the name and the
+  concentration are; with the name alone, the name is listed as recorded and the concentration awaits a ruling
+  (`awaiting_ruling`, column J). With `--by`, a sheet word whose cells or runs changed is kept again only for the runs
+  no request for the same word answered since; `template import` lists such a row left blank under
   `disagreements_already_recorded`, never `awaiting_ruling`, and records nothing for it. A sheet word whose request
   (the one kept earlier, or with no `--by` any request for the same field and word) was answered since says "The sheet
   still says … answered since with …" with or without `--by`; one answered for every run (`every_run`) is listed

@@ -451,27 +451,6 @@ def open_request_ids(bundle: Mapping) -> set[str]:
     return {r.get("request_id") for r in requests if request_still_open(request_answered_runs(r, answers, live=live, log=log))}
 
 
-def readings_keeping(bundle: Mapping, path: str, term: str) -> int:
-    """How many values other than a vocabulary request hold ``term`` at ``path`` (an AI reading whose target no
-    scientist answered with an allowed value, a parser value, an off-list value a scientist confirmed): what keeps a
-    term drafted once every request for it is answered, counted as :func:`collect` counts them."""
-    decision_of = B._decisions_by_target(list(bundle.get("scientist_decisions") or ()))
-    n = 0
-    for c in bundle.get("candidates") or ():
-        if c.get("target_field_path") == path:
-            value = B.final_value(c.get("value"), B.candidate_decision(bundle, c, decision_of), c.get("readings"))
-            n += term in _strings(value)
-    index = {("candidate", c["candidate_id"]): c for c in bundle.get("candidates") or ()}
-    index.update({("missing_value", m["value_id"]): m for m in bundle.get("missing_values") or ()})
-    for interp in bundle.get("ai_interpretations") or ():
-        target = interp.get("target") or {}
-        obj = index.get((target.get("kind"), target.get("id")))
-        if (_interpretation_path(bundle, interp, index) == path and term in _strings(interp.get("proposed_value"))
-                and not _answered_with_allowed_value(bundle, target, obj, path, decision_of)):
-            n += 1
-    return n
-
-
 def _distinct(values: Sequence[Any]) -> list[Any]:
     """``values`` once each, in order (a list value is compared by its JSON)."""
     seen: dict[str, Any] = {}
@@ -767,7 +746,10 @@ def _answered_since(occs: Sequence[Mapping], requests: Mapping, answers: Mapping
     info: dict[str, Any] = {"answered": False, "answered_with": values,
                             "runs_answered": sum(1 for r in done if r is not None),
                             "runs_still_needing_it": sum(1 for r in needed if r is not None),
-                            "answered_requests": sorted(answered_requests)}
+                            "answered_requests": sorted(answered_requests),
+                            # c14g LOW-3: every run in no live record group: neither open nor answered
+                            "elsewhere_requests": sorted(req.get("request_id") for req, st in per
+                                                         if not request_still_open(st) and not st["answered"])}
     if None in state:
         info["whole_beamtime"] = state[None]
     if set_apart:
@@ -777,14 +759,17 @@ def _answered_since(occs: Sequence[Mapping], requests: Mapping, answers: Mapping
         earlier = [req for req, _st in per if req.get("request_id") in answered_requests]
         their_runs = {r for req in earlier for r in req.get("run_ids") or ()}
         where = _distinct([_SAID_IN.get((req.get("source") or {}).get("kind"), "an answer") for req in earlier])
-        one = len(earlier) == 1
+        one, open_one = len(earlier) == 1, len(still_open) == 1
+        open_ids = sorted({req.get("request_id") for req, _st in still_open})
         info["earlier_requests_answered"] = set_apart
+        # c14g LOW-1: named by what they are (open, answered since), never "new"/"earlier": an open request may be the older
         info["earlier_requests_answered_note"] = (
-            f"The new request is for {_reach(named) or 'no live run'}"
+            f"The open request{'' if open_one else 's'} ({', '.join(open_ids)}) {'is' if open_one else 'are'} for "
+            f"{_reach(named) or 'no live run'}"
             + (f" (which hold {_shown(early_values)} from before it)" if early_values else "")
-            + f"; the earlier request{'' if one else 's'} ({', '.join(set_apart)}, from {' and '.join(where)}"
+            + f"; the request{'' if one else 's'} answered since ({', '.join(set_apart)}, from {' and '.join(where)}"
             + (f", {len(their_runs)} run(s)" if their_runs else ", the whole beamtime")
-            + f") {'was' if one else 'were'} answered since and {'is' if one else 'are'} not part of this draft.")
+            + f") {'is' if one else 'are'} not part of this draft.")
     if outside:
         info["runs_in_no_live_group"] = len(outside)
         info["runs_in_no_live_group_note"] = (f"{len(outside)} run(s) the scientist named are in no live record group: "
@@ -850,12 +835,15 @@ def propose_terms(bundle: Mapping, sources: Mapping) -> dict:
             since = _answered_since(occs, requests, answers, live=live, log=log)
             # a request the scientist has since answered is not their live word for the term: its note is set aside
             set_aside = set(since.pop("answered_requests")) if since is not None else set()
+            elsewhere = set(since.pop("elsewhere_requests")) if since is not None else set()
             notes = [o["note"] for o in occs if o.get("note") and o["ref"].get("id") not in set_aside]
             answered_notes = [o["note"] for o in occs if o.get("note") and o["ref"].get("id") in set_aside]
             # c14 MED-3: what a draft counts (runs, count, citations: what the Schema Proposals page files) is only what
             # still asks for the term; an answered request is listed apart. A term answered throughout keeps them all.
             still = [o for o in occs if not (o["origin"] == ORIGIN_REQUEST and o["ref"].get("id") in set_aside)]
-            counted = still or occs
+            # a request whose runs are all in no live record group asks nothing here: it never makes the term "open"
+            counted = still if any(not (o["origin"] == ORIGIN_REQUEST and o["ref"].get("id") in elsewhere)
+                                   for o in still) else occs
             counts = {origin: 0 for origin in ORIGINS}
             for o in counted:
                 counts[o["origin"]] += 1
@@ -886,7 +874,7 @@ def propose_terms(bundle: Mapping, sources: Mapping) -> dict:
                     "term": term,
                     "count": len(counted),
                     "by_origin": counts,
-                    **({"answered_requests_apart": len(occs) - len(still)} if still and len(still) < len(occs) else {}),
+                    **({"answered_requests_apart": len(occs) - len(counted)} if len(counted) < len(occs) else {}),
                     "missing_from": sorted({m for o in occs for m in o["missing_from"]}),
                     "runs": len(run_ids),
                     "run_ids": run_ids,
@@ -1155,6 +1143,6 @@ def pending_vocabulary(bundle: Mapping, fresh: Sequence[tuple[str, Mapping, Mapp
                 row["statement"] += " This does not block export; the record is written without it."
             elif exportable:
                 row["statement"] += (f" For {exportable} of these group(s) this does not block export; the record is "
-                                     "written without it.")
+                                     "written without it (the others are not exportable for other reasons).")
         rows.append(row)
     return sorted(rows, key=lambda r: (r["field_path"], r["term"]))

@@ -65,8 +65,8 @@ def test_a_word_asked_again_is_a_draft_for_the_new_request_only(grouped, capsys,
     # partly_answered is read over the open request only: nothing of it was answered after it was asked
     assert "partly_answered" not in d and d["runs_answered"] == 0 and report["totals"]["partly_answered"] == 0
     assert d["earlier_requests_answered_note"] == (
-        "The new request is for 1 run(s) (which hold `in_situ` from before it); the earlier request (vr-00001, from a "
-        "cell of the filled template, 2 run(s)) was answered since and is not part of this draft.")
+        "The open request (vr-00002) is for 1 run(s) (which hold `in_situ` from before it); the request answered since "
+        "(vr-00001, from a cell of the filled template, 2 run(s)) is not part of this draft.")
     assert [n["request_id"] for n in t["answered_scientist_notes"]] == ["vr-00001"]
     assert [n["request_id"] for n in t["scientist_notes"]] == ["vr-00002"]
 
@@ -84,7 +84,7 @@ def test_partly_answered_counts_the_open_requests_runs_only(grouped, capsys, tmp
     assert d["runs_answered"] == 1 and d["answered_with"] == ["ex_situ"]
     assert d["partly_answered"].startswith("Partly answered since it was asked for: an allowed value (`ex_situ`) now "
                                            "stands for 1 run(s)")
-    assert "The new request is for 2 run(s) (which hold `in_situ` from before it)" in d["earlier_requests_answered_note"]
+    assert "The open request (vr-00002) is for 2 run(s) (which hold `in_situ` from before it)" in d["earlier_requests_answered_note"]
 
 
 def test_a_term_answered_throughout_keeps_its_counts(grouped, capsys, tmp_path, ticking):
@@ -199,16 +199,21 @@ def test_pending_vocabulary_says_when_the_group_still_exports():
     assert row["groups_exportable"] == 2
     assert row["statement"].endswith("or an allowed value. This does not block export; the record is written without it.")
     [row] = P.pending_vocabulary(bundle, fresh, {"rg-a": "exportable", "rg-b": "incomplete"})
-    assert row["statement"].endswith(" For 1 of these group(s) this does not block export; the record is written without it.")
+    assert row["statement"].endswith(" For 1 of these group(s) this does not block export; the record is written without it (the others "
+                                     "are not exportable for other reasons).")
     [row] = P.pending_vocabulary(bundle, fresh, {"rg-a": "incomplete", "rg-b": "incomplete"})
     assert row["groups_exportable"] == 0 and "block" not in row["statement"]
     [row] = P.pending_vocabulary(bundle, fresh)  # called without verdicts: as before
     assert "groups_exportable" not in row and "block" not in row["statement"]
 
 
-def test_validate_passes_its_verdicts_to_pending_vocabulary(grouped, capsys):
+def test_validate_passes_its_verdicts_to_pending_vocabulary(grouped, capsys, monkeypatch):
     from isaac_api.local_import import bundle as B
     from isaac_api.local_import import records as R
+
+    # c14g LOW-7: the verdict is pinned, so the exportable wording is reached whatever this corpus still lacks
+    checked = R.validate_draft_file
+    monkeypatch.setattr(R, "validate_draft_file", lambda draft, **kw: {**checked(draft, **kw), "verdict": "exportable"})
 
     held = M.load(grouped)
     group = next(g for g in held["record_groups"] if g["status"] in B.LIVE_GROUP_STATUSES)
@@ -220,9 +225,8 @@ def test_validate_passes_its_verdicts_to_pending_vocabulary(grouped, capsys):
         "status": "ran", "result": {"valid": True, "errors": [], "warnings": []}, "outcome": "publish", "held": [],
         "verdict": "publish"})
     [row] = out["pending_vocabulary"]
-    exportable = out["verdicts"][group["group_id"]] == "exportable"
-    assert row["groups_exportable"] == int(exportable)
-    assert ("This does not block export" in row["statement"]) is exportable
+    assert out["verdicts"][group["group_id"]] == "exportable" and row["groups_exportable"] == 1
+    assert row["statement"].endswith("This does not block export; the record is written without it.")
 
 
 # --- the skill says it ------------------------------------------------------------------------------------------
