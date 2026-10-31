@@ -2034,7 +2034,8 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--by", required=True)
     q.add_argument("--orcid")
     q.add_argument("--note")
-    q.add_argument("--split-into", help="record groups: JSON list of lists of run keys")
+    q.add_argument("--split-into", help="record groups: JSON list of lists of run keys, one list per group to make, "
+                   "naming every run of the group once")
     q.add_argument("--merge-with", nargs="*", help="record groups: group ids to merge with")
     q.add_argument("--same-conditions", action="store_true",
                    help="with --decision merge: the scientist states the runs measured the same sample under the SAME "

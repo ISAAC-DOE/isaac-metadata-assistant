@@ -359,15 +359,23 @@ def test_a_mutation_regenerates_the_section_files(bdir):
 
 def test_group_and_processing_decisions(bdir):
     _add_group(bdir)
+    b = M.load(bdir)
+    b["record_groups"][0]["member_run_keys"].append(b["runs"][1]["run_key"])  # two runs, so it can be split
+    M.save_bundle(bdir, b)
     assert M.load(bdir)["record_groups"][0]["status"] == "proposed"
-    M.decide(bdir, target_ids=["g1"], decision="split", value=None, split_into=[["a"], ["b"]], **BY)
+    keys = M.load(bdir)["record_groups"][0]["member_run_keys"]
+    with pytest.raises(M.MutationRefused, match="no run of this bundle"):
+        M.decide(bdir, target_ids=["g1"], decision="split", value=None, split_into=[["a"], ["b"]], **BY)
+    out = M.decide(bdir, target_ids=["g1"], decision="split", value=None, split_into=[keys[:1], keys[1:]], **BY)
     assert M.load(bdir)["record_groups"][0]["status"] == "split"
+    assert [g["member_run_keys"] for g in out["split_into_groups"]] == [keys[:1], keys[1:]]
     M.decide(bdir, target_ids=["p1"], decision="needs_changes", value=None, **BY)
     assert M.load(bdir)["processing_results"][0]["state"] == "needs_review"
     with pytest.raises(M.MutationRefused):
         M.decide(bdir, target_ids=["p1"], decision="confirm", value=None, **BY)
     b = M.load(bdir)
     b["record_groups"][0]["status"] = "scientist_confirmed"  # a hand edit, no decision
+    b["record_groups"] = [g for g in b["record_groups"] if not g.get("split_by_decision")]  # (and its parts gone)
     b["scientist_decisions"] = [d for d in b["scientist_decisions"] if d["target"]["id"] != "g1"]
     assert any("record group g1" in e for e in B.validate_bundle(b))
 

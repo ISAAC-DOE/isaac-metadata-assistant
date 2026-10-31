@@ -22,7 +22,16 @@ Get the groups with `bundle list <bundle> groups` and one in full with `bundle s
 - split → ask which runs go where, then
   `<isaac> bundle decide <bundle> --target <group id> --decision split --split-into '[["<run key>","<run key>"],["<run key>"]]' --by "<name>"`.
   A run key is an entry of the group's `member_run_keys` (`bundle show <bundle> group <id>`); it is not
-  the `run_id` or `stem`. Ask the scientist in file names, then use the matching keys.
+  the `run_id` or `stem`. Ask the scientist in file names, then use the matching keys. One list per
+  group to make, together naming every run of the group exactly once (at least two lists); anything else
+  is refused and nothing is recorded. The reply's `split_into_groups` names the new groups, one per
+  list, each `proposed`: read them back to the scientist in file names and ask them to confirm each (a
+  part can also be merged, rejected or split again). The split group is kept as history. A regroup keeps
+  the parts exactly as named, under the same ids: a later counter answer does not join them and no merge
+  candidate asks about them. To join a part with another group, merge it like any group. If a regroup
+  reply lists `split_decisions_not_applied` (an older bundle's split with no usable lists), say why and
+  record the split again with `--split-into`; `splits_applied[].applied_now` means an older split's groups
+  were only made now: present them like a fresh split.
 - merge → three steps: `<isaac> bundle decide <bundle> --target <group id> --decision merge --merge-with <other group ids> --by "<name>"`
   (refused unless `--merge-with` names another live record group of this bundle), then
   `bundle group <bundle> --regroup`, then confirm the ONE combined group it proposes. The regroup

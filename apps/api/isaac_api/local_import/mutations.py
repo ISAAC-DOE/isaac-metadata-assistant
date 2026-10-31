@@ -572,7 +572,7 @@ def _has_source_evidence(candidate: Mapping) -> bool:
 
 
 def _check_decision(bundle: Mapping, kind: str, obj: Mapping, decision: str, value: Any, *, bulk: bool,
-                    merge_with: Sequence[str] | None = None) -> None:
+                    merge_with: Sequence[str] | None = None, split_into: Any = None) -> None:
     allowed = B.DECISIONS_BY_KIND.get(kind)
     if allowed is None:
         raise MutationRefused(f"A {kind} cannot be decided.")
@@ -582,6 +582,20 @@ def _check_decision(bundle: Mapping, kind: str, obj: Mapping, decision: str, val
         problem = merge_with_problem(bundle, obj["group_id"], merge_with)
         if problem is not None:
             raise MutationRefused(f"{problem} Nothing was recorded.")
+    if kind == "record_group" and decision == "split":
+        # c8-s: a split makes ONE group per list, so its lists name each of the group's runs exactly once; and a
+        # group whose runs another live group now holds (its parts, after an earlier split) is not split again
+        problem = split_into_problem(bundle, obj, split_into)
+        if problem is not None:
+            raise MutationRefused(f"{problem} Nothing was recorded.")
+        mine = set(obj.get("member_run_keys") or ())
+        holders = [g["group_id"] for g in bundle.get("record_groups") or ()
+                   if g["group_id"] != obj["group_id"] and g.get("status") in B.LIVE_GROUP_STATUSES
+                   and mine & set(g.get("member_run_keys") or ())]
+        if holders:
+            raise MutationRefused(
+                f"The runs of {obj['group_id']} are now in {', '.join(holders[:5])}; split (or decide) that group "
+                "instead. Nothing was recorded.")
     if kind == "processing_result" and B.processing_not_applicable(obj):
         app = obj.get("applicability") or {}
         raise MutationRefused(
@@ -1321,7 +1335,7 @@ def qc_note_problem(qc_status: str | None, qc_note: str | None) -> str | None:
 
 
 def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, edge, positions, value=None,
-                      qc_note=None, same_conditions=False, **_rest):
+                      qc_note=None, same_conditions=False, split_into=None, **_rest):
     """The checks of :func:`decide` that need no bundle. Returns ``positions`` normalised."""
     problem = B.decider_name_problem(by)
     if problem:
@@ -1364,6 +1378,9 @@ def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, ed
         positions = sorted(set(positions)) if decision == B.NOT_COUNTER_DECISION else list(positions)
     elif positions:
         raise MutationRefused("--positions goes with --target experiment --decision set_counter_positions or set_not_counter_positions.")
+    if split_into and decision != "split":
+        raise MutationRefused("--split-into goes with --decision split on a record group: one list of run keys per "
+                              "group to make.")
     if same_conditions and decision != "merge":
         raise MutationRefused("--same-conditions goes with --decision merge on a record group: it says the words the "
                               "groups' file names differ in are labels, not conditions.")
@@ -1492,6 +1509,7 @@ def record_decision(
     positions = _decide_arguments(
         target_ids=target_ids, decision=decision, by=by, orcid=orcid, qc_status=qc_status,
         element=element, edge=edge, positions=positions, value=value, qc_note=qc_note, same_conditions=same_conditions,
+        split_into=split_into,
     )
     bulk = len(target_ids) > 1
 
@@ -1501,7 +1519,7 @@ def record_decision(
         acknowledged: dict[str, list[str]] = {}
         for tid in target_ids:
             kind, obj = resolve_target(bundle, tid)
-            _check_decision(bundle, kind, obj, decision, value, bulk=bulk, merge_with=merge_with)
+            _check_decision(bundle, kind, obj, decision, value, bulk=bulk, merge_with=merge_with, split_into=split_into)
             if kind == "processing_result" and decision == "approve":
                 problem = approved_sibling_problem(bundle, obj, [o for k, o in planned if k == "processing_result"])
                 if problem is not None:
@@ -1549,6 +1567,7 @@ def record_decision(
             # what the zone answer is about to undo is SAID, never left for a later check to find
             counting_before = {x["candidate_id"] for x in B.local_clock_reconfirm(B.apply_derivations(json.loads(json.dumps(bundle))))}
         recorded, unchanged = [], []
+        split_made: list[tuple[dict, dict]] = []
         held_before = len(decisions)
         zone_d = B.clock_zone_decision(bundle)
         for tid, (kind, obj) in zip(target_ids, planned):
@@ -1656,11 +1675,28 @@ def record_decision(
                 entry["qc_evidence"] = {"verdict": qc.get("verdict"), "metrics": qc.get("metrics") or {}}
             decisions.append(entry)
             recorded.append(tid)
+            if kind == "record_group" and decision == "split":
+                split_made.append((obj, entry))
         if len(decisions) > B.MAX_SCIENTIST_DECISIONS:
             added = len(decisions) - held_before
             del decisions[held_before:]  # the refusal leaves the bundle as it was
             raise MutationRefused(log_full_message("scientist_decisions", held_before, added, B.MAX_SCIENTIST_DECISIONS))
         result = {"recorded": recorded, "unchanged": unchanged, "batch_id": batch_id}
+        if split_made:
+            # A SPLIT MAKES EXACTLY THE GROUPS NAMED, now (c8-s; before, the lists were stored and nothing read them)
+            made, said = [], []
+            for obj, entry in split_made:
+                parts = split_parts(bundle, obj, entry)
+                bundle["record_groups"].extend(parts)
+                made += [{"group_id": p["group_id"], "member_run_keys": p["member_run_keys"]} for p in parts]
+                said.append(f"group {obj['group_id']} is now {len(parts)} proposed groups, one per list you named — "
+                            + "; ".join(_part_said(bundle, p) for p in parts))
+            result["split_into_groups"] = made
+            result["statement"] = (
+                "Split recorded: " + ". ".join(said) + ". Each is a proposal: confirm each "
+                '(`isaac bundle decide <bundle_dir> --target <group id> --decision confirm --by "<your name>"`), or merge, '
+                "reject or split it. A regroup keeps them as you named them; the split group is kept as the record of "
+                "the split.")
         statement = CAPTURE_STATEMENTS.get(decision)
         if statement:
             result["statement"] = statement.format(value=value, positions=", ".join(map(str, positions or ())))
@@ -2104,11 +2140,14 @@ def _regroup(bundle: dict, *, regroup: bool = True) -> dict:
     decisions = bundle.get("scientist_decisions") or ()
     # the merge decisions in force: a group's LATEST status decision is a merge (a later confirm,
     # reject, split or defer supersedes it), applied in the order the scientist made them
+    latest_status = B._decisions_by_target([d for d in decisions if d.get("decision") in B.GROUP_STATUS_DECISIONS])
     merge_decision = {
-        tid: d for (kind, tid), d in B._decisions_by_target(
-            [d for d in decisions if d.get("decision") in B.GROUP_STATUS_DECISIONS]).items()
+        tid: d for (kind, tid), d in latest_status.items()
         if kind == "record_group" and d.get("decision") == "merge"
     }
+    # c8-s: the split decisions in force (a later confirm, reject, merge or defer supersedes one)
+    split_decision = {tid: d for (kind, tid), d in latest_status.items()
+                      if kind == "record_group" and d.get("decision") == "split"}
     binding = [g for g in existing if g.get("status") in B.BINDING_GROUP_STATUSES]
     # a merge-decided group is not history until its merge is applied again below
     history = [g for g in existing if g.get("status") in B.HISTORY_GROUP_STATUSES and g["group_id"] not in merge_decision]
@@ -2124,24 +2163,49 @@ def _regroup(bundle: dict, *, regroup: bool = True) -> dict:
         if rk not in bind_of and i.get("code") == "exported_file_read_as_acquisition" and i.get("related_run_key") in bind_of
     }
     excluded = set(bind_of) | set(exports_of_binding)
-    if excluded:
-        view = {**bundle, "runs": [r for r in bundle.get("runs") or () if r.get("run_key") not in excluded]}
+    # A SPLIT IS KEPT AS NAMED (c8-s), the way a confirmed group is: its parts are proposed again under their own
+    # ids, and their runs are kept out of the fresh proposal, so no counter answer or rule joins them again (before,
+    # the split group's runs were proposed afresh and skipped as identical to it: they were in no group at all)
+    split_made, splits_applied, splits_not_applied, side_of = ([], [], [], {}) if not split_decision else _splits_in_force(
+        bundle, split_decision, {g["group_id"]: g for g in [*(bundle.get("superseded_record_groups") or ()), *existing]},
+        kept_by_id, excluded)
+    split_runs = {k for p in split_made for k in p["member_run_keys"]}
+    if excluded or split_runs:
+        view = {**bundle, "runs": [r for r in bundle.get("runs") or () if r.get("run_key") not in excluded | split_runs]}
         payload = cli_entry.build_groups_payload(view, context=bundle)
     else:
         payload = full
+    # a part a decision kept as history (rejected): a fresh proposal of exactly its runs is that ruling's group
+    history_parts = {frozenset(g.get("member_run_keys") or ()) for g in history if g.get("split_by_decision")}
     fresh, renamed = [], {}
     for g0 in payload["record_groups"]:
         g = dict(g0)
-        if g["group_id"] in kept_by_id:
+        if g["group_id"] in kept_by_id or (history_parts and frozenset(g.get("member_run_keys") or ()) in history_parts):
             continue  # identical to a rejected/split group (or the bound group itself)
         g["status"] = "proposed"  # only a decision moves it
         g.setdefault("condition_violations", [])  # carried; a proposed group must have none
         fresh.append(g)
+    fresh += split_made
+    merge_payload = payload
+    if split_runs:
+        # the merge check reads each run's engine-reading issues; a part's runs are outside the fresh proposal
+        issues = dict(payload.get("engine_reading_issues") or {})
+        per_run = dict(issues.get("per_run") or {})
+        for k, v in ((full.get("engine_reading_issues") or {}).get("per_run") or {}).items():
+            if k in split_runs:
+                per_run.setdefault(k, v)
+        merge_payload = {**payload, "engine_reading_issues": {**issues, "per_run": per_run}}
     fresh_of = {k: g["group_id"] for g in fresh for k in g.get("member_run_keys") or ()}
     merge_candidates = [dict(mc) for mc in payload.get("merge_candidates") or ()]
-    merge_candidates += G.binding_merge_candidates(
+    bound_candidates = G.binding_merge_candidates(
         full["record_groups"], fresh, bind_of, exports_of_binding, experiment_key=exp_key
     )
+    if side_of:
+        # never re-asked: runs a scientist split apart (a confirmed part and its sibling)
+        runs_of = {g["group_id"]: g.get("member_run_keys") or () for g in [*binding, *fresh]}
+        bound_candidates = [mc for mc in bound_candidates if mc.get("run_keys") or len(mc["group_ids"]) != 2
+                            or not _split_apart(side_of, *(runs_of.get(x, ()) for x in mc["group_ids"]))]
+    merge_candidates += bound_candidates
     # A MERGE DECISION IS APPLIED (DEC-91; before 1.6.0 it was only carried as a candidate, which no
     # decision could turn into one group — a dead end). The runs of the merged group and of every
     # group it names in merge_with are proposed as ONE combined group, for the scientist to confirm,
@@ -2196,7 +2260,7 @@ def _regroup(bundle: dict, *, regroup: bool = True) -> dict:
                 not_combined.append({"decision_id": d["decision_id"],
                                      "reason": f"the combined group {combined['group_id']} was already decided ({prior.get('status')})"})
                 continue
-            blockers = _merge_blocker_details(bundle, payload, holders, combined, d)
+            blockers = _merge_blocker_details(bundle, merge_payload, holders, combined, d)
             if blockers:
                 why = "; ".join(r for r, _ in blockers)
                 steps = list(dict.fromkeys(c for _, cs in blockers for c in cs))
@@ -2322,7 +2386,7 @@ def _regroup(bundle: dict, *, regroup: bool = True) -> dict:
         dict(q) for q in (full.get("experiment_questions") or full.get("questions") or ())
         if isinstance(q, Mapping)
     ]
-    if excluded:
+    if excluded or split_runs:
         # N-3: the counter question is the beamtime's (full bundle), but an answer cannot
         # merge a CONFIRMED group's runs; say so where that changes what it resolves.
         view_q = next((q for q in payload.get("experiment_questions") or () if q.get("kind") == "naming_counter_positions"), None)
@@ -2334,9 +2398,10 @@ def _regroup(bundle: dict, *, regroup: bool = True) -> dict:
                 q["candidates_resolved_by_position_excluding_confirmed"] = left
                 q["text"] = str(q.get("text") or "") + (
                     " Runs of a confirmed group are not merged by the answer; they are offered as a merge candidate instead."
-                )
+                    if excluded else "") + (
+                    " Runs of a group a scientist split are not joined by the answer: the split stands." if split_runs else "")
     bundle["grouping_questions"] = questions
-    return {
+    out = {
         "record_groups": len(bundle["record_groups"]),
         # the groups that are (or may become) records; the rest is decision history (merged, rejected, split)
         "live_record_groups": sum(1 for g in bundle["record_groups"] if g.get("status") in B.LIVE_GROUP_STATUSES),
@@ -2356,6 +2421,14 @@ def _regroup(bundle: dict, *, regroup: bool = True) -> dict:
             "isaac bundle list <bundle_dir> merge-candidates",
         ],
     }
+    if split_decision:
+        # each split in force: the groups it holds (kept as named), and, said plainly, one applied only now (an older
+        # build recorded the split without making them) or one whose lists cannot make groups
+        out["splits_applied"] = splits_applied
+        out["split_decisions_not_applied"] = splits_not_applied
+        out["statement"] = " ".join([out["statement"], *(a["statement"] for a in splits_applied if a["applied_now"]),
+                                     *(n["reason"] for n in splits_not_applied)])
+    return out
 
 
 def _merge_not_applicable(d: Mapping, gid: str, by_id_all: Mapping, gids: Sequence[str]) -> str:
@@ -2834,6 +2907,25 @@ def _combine_for_merge(holders: Sequence[Mapping], decision: Mapping, merged_gro
     from . import grouping as G
 
     members = [k for h in holders for k in h.get("member_run_keys") or ()]
+    combined, dropped = _combine_groups(holders, G.group_id_for(exp_key, members + [f"merged-by:{decision['decision_id']}"]),
+                                        "merged_by_scientist_decision")
+    combined["merged_by_decision"] = {
+        "decision_id": decision["decision_id"],
+        "merged_group_id": merged_group_id,
+        "merge_with": list(decision.get("merge_with") or []),
+        "decided_by": (decision.get("decided_by") or {}).get("name"),
+        "from_groups": [h["group_id"] for h in holders],
+        "basis_keys_dropped": dropped,
+        "statement": "proposed as one group because a scientist decided to merge these runs' groups; "
+                     "only a confirm decision makes it a record",
+    }
+    return combined
+
+
+def _combine_groups(holders: Sequence[Mapping], group_id: str, flag: str) -> tuple[dict, list[str]]:
+    """``(group, basis keys dropped)``: ONE proposed group ``group_id`` holding every run of ``holders``, in their
+    order, flagged ``flag``. What the holders agree on is kept in its basis; a key they differ on is left out."""
+    members = [k for h in holders for k in h.get("member_run_keys") or ()]
     combined = {k: v for k, v in holders[0].items() if k not in ("reproposed_after_group_id",)}
     basis: dict = {}
     dropped: list[str] = []
@@ -2862,7 +2954,7 @@ def _combine_for_merge(holders: Sequence[Mapping], decision: Mapping, merged_gro
             else:
                 dropped.append(f"{part}.{k}")
     combined.update({
-        "group_id": G.group_id_for(exp_key, members + [f"merged-by:{decision['decision_id']}"]),
+        "group_id": group_id,
         "member_run_keys": members,
         "member_run_ids": [r for h in holders for r in h.get("member_run_ids") or ()],
         "context_run_keys": [r for h in holders for r in h.get("context_run_keys") or ()],
@@ -2873,21 +2965,192 @@ def _combine_for_merge(holders: Sequence[Mapping], decision: Mapping, merged_gro
         "questions": [],
         "merge_candidate_ids": [],
         "flags": sorted({f for h in holders for f in h.get("flags") or () if f != "reproposed_after_merge_decision"})
-        + ["merged_by_scientist_decision"],
+        + [flag],
         "status": "proposed",
         "condition_violations": [],
-        "merged_by_decision": {
-            "decision_id": decision["decision_id"],
-            "merged_group_id": merged_group_id,
-            "merge_with": list(decision.get("merge_with") or []),
-            "decided_by": (decision.get("decided_by") or {}).get("name"),
-            "from_groups": [h["group_id"] for h in holders],
-            "basis_keys_dropped": dropped,
-            "statement": "proposed as one group because a scientist decided to merge these runs' groups; "
-                         "only a confirm decision makes it a record",
-        },
     })
-    return combined
+    return combined, dropped
+
+
+# --- a split decision makes exactly the groups the scientist named (polish c8-s) --------------------------------
+
+
+#: The flag every group a split decision made carries (beside its ``split_by_decision``).
+SPLIT_PART_FLAG = "split_by_scientist_decision"
+
+
+def split_command(group_id: str) -> str:
+    """The split of ``group_id``, as the scientist types it (run keys from ``bundle show <bundle_dir> group <id>``)."""
+    return (f"isaac bundle decide <bundle_dir> --target {group_id} --decision split --split-into "
+            "'[[\"<run key>\",\"<run key>\"],[\"<run key>\"]]' --by \"<your name>\"")
+
+
+def split_into_problem(bundle: Mapping, group: Mapping, split_into: Any) -> str | None:
+    """Why ``split_into`` does not name groups a split of ``group`` can make, or ``None``.
+
+    A split makes ONE group per list, so the lists must name each of the group's runs exactly once: at least
+    two lists, none empty, no run key the bundle does not hold or the group does not hold, none in two lists,
+    none left out. Before c8-s the lists were stored and never read: nothing checked them, and nothing used them."""
+    gid = group["group_id"]
+    mine = list(group.get("member_run_keys") or ())
+    show = f"`isaac bundle show <bundle_dir> group {gid}` lists its {len(mine)} run key(s)"
+    if not split_into:
+        return (f"A split of {gid} needs --split-into: one JSON list of run keys per group to make, together naming "
+                f"each of its runs once ({show}): `{split_command(gid)}`.")
+    if not isinstance(split_into, (list, tuple)) or any(
+            not isinstance(part, (list, tuple)) or any(not isinstance(k, str) for k in part) for part in split_into):
+        return f"--split-into must be a JSON list of lists of run keys, e.g. `{split_command(gid)}`."
+    if len(split_into) < 2:
+        return (f"--split-into names one group; a split makes at least two (to keep {gid}'s runs together, confirm "
+                "it instead).")
+    if any(not part for part in split_into):
+        return "--split-into holds an empty list; every group a split makes holds at least one run."
+    named = [k for part in split_into for k in part]
+    known = {r.get("run_key") for r in bundle.get("runs") or ()}
+    unknown = list(dict.fromkeys(k for k in named if k not in known))
+    if unknown:
+        return (f"--split-into names no run of this bundle: {', '.join(unknown[:5])}. A run key is an entry of the "
+                f"group's member_run_keys, not a run_id or a stem ({show}).")
+    foreign = list(dict.fromkeys(k for k in named if k not in set(mine)))
+    if foreign:
+        return f"--split-into names {', '.join(foreign[:5])}, which is not a run of group {gid} ({show})."
+    twice = list(dict.fromkeys(k for k in named if named.count(k) > 1))
+    if twice:
+        return (f"--split-into names {', '.join(twice[:5])} in more than one list; each run goes into exactly one of "
+                "the groups.")
+    missing = [k for k in mine if k not in set(named)]
+    if missing:
+        return (f"--split-into would leave out {len(missing)} run(s) of {gid}: {', '.join(missing[:5])}. Every run of "
+                f"the group goes into exactly one of the lists ({show}).")
+    return None
+
+
+def split_parts(bundle: Mapping, parent: Mapping, decision: Mapping) -> list[dict]:
+    """The groups a split ``decision`` of ``parent`` makes: ONE proposed group per list of ``split_into``, in its
+    order, each holding exactly the runs that list names.
+
+    Each part is what the grouping rule proposes over its runs alone (its basis, flags, questions, issues), its id
+    derived like every other group id — :func:`grouping.group_id_for` over its runs and ``split-from:<parent id>`` —
+    so it is the same on every regroup and never mistaken for a group the rule proposed. A part whose runs the
+    rule would keep apart (a split of a group a merge decision combined) is combined as a merge is, its basis what
+    they agree on. Proposed only: a confirm decision makes a part a record."""
+    from . import grouping as G
+
+    exp_key = G.experiment_key_of(bundle)
+    lists = [list(dict.fromkeys(part)) for part in decision.get("split_into") or ()]
+    runs = list(bundle.get("runs") or ())
+    run_id_of = {r.get("run_key"): r.get("run_id") for r in runs}
+    order = list(parent.get("member_run_keys") or ())
+    out = []
+    for i, named in enumerate(lists, 1):
+        want = set(named)
+        members = [k for k in order if k in want] + [k for k in named if k not in set(order)]
+        gid = G.group_id_for(exp_key, members + [f"split-from:{parent['group_id']}"])
+        view = {**bundle, "runs": [r for r in runs if r.get("run_key") in want]}
+        holders = [g for g in G.propose(view, context=bundle)["record_groups"] if want & set(g.get("member_run_keys") or ())]
+        if len(holders) == 1 and set(holders[0].get("member_run_keys") or ()) == want:
+            part = {k: v for k, v in holders[0].items() if k != "reproposed_after_group_id"}
+            # a reason naming another group names one of the rule's proposals over these runs alone: not a group here
+            part["split_reasons"] = [r for r in part.get("split_reasons") or () if "other_group_id" not in r]
+        else:
+            part, _dropped = _combine_groups(holders, gid, SPLIT_PART_FLAG) if holders else ({}, [])
+            part["member_run_keys"] = members
+            part["member_run_ids"] = [run_id_of[k] for k in members]
+            part["context_run_keys"] = [k for k in part.get("context_run_keys") or () if k not in want]
+        part.update({
+            "group_id": gid,
+            "experiment_key": part.get("experiment_key") or exp_key,
+            "basis": part.get("basis") or {},
+            "split_reasons": part.get("split_reasons") or [],
+            "questions": part.get("questions") or [],
+            "status": "proposed",
+            "merge_candidate_ids": [],
+            "flags": [f for f in part.get("flags") or () if f not in ("reproposed_after_merge_decision", SPLIT_PART_FLAG)]
+            + [SPLIT_PART_FLAG],
+            "condition_violations": [],
+            "split_by_decision": {
+                "decision_id": decision.get("decision_id"),
+                "split_group_id": parent["group_id"],
+                "part": i,
+                "of": len(lists),
+                "decided_by": (decision.get("decided_by") or {}).get("name"),
+                "statement": (f"proposed as one group because a scientist split group {parent['group_id']} into these "
+                              "runs; only a confirm decision makes it a record"),
+            },
+        })
+        out.append(part)
+    return out
+
+
+def _part_said(bundle: Mapping, part: Mapping) -> str:
+    """``rg-… (2 runs: stem, stem)`` — a part as the scientist named it."""
+    stem_of = {r.get("run_key"): r.get("stem") for r in bundle.get("runs") or ()}
+    keys = list(part.get("member_run_keys") or ())
+    stems = [str(stem_of.get(k) or k) for k in keys[:3]] + (["…"] if len(keys) > 3 else [])
+    return f"{part['group_id']} ({len(keys)} run{'' if len(keys) == 1 else 's'}: {', '.join(stems)})"
+
+
+def _splits_in_force(bundle: Mapping, split_decision: Mapping, groups_by_id: Mapping, kept_by_id: Mapping,
+                     claimed: set) -> tuple[list[dict], list[dict], list[dict], dict]:
+    """A regroup's view of every split decision in force (a group's LATEST status decision is ``split``), in the order
+    the scientist made them: ``(parts to propose, splits_applied, split_decisions_not_applied, side_of)``.
+
+    A part a decision already decided (confirmed, rejected, split again) is kept as it is by the regroup, and so is
+    not proposed here; one holding a run a confirmed group holds (``claimed``) is not proposed either (that run is
+    bound). ``side_of``: run key -> {split decision id: the index of the list naming it}, for every split in force,
+    so no merge candidate re-asks runs a scientist split apart."""
+    made = {id(d): i for i, d in enumerate(bundle.get("scientist_decisions") or ())}
+    existing_ids = {g["group_id"] for g in bundle.get("record_groups") or ()}
+    proposed, applied, not_applied = [], [], []
+    side_of: dict[str, dict[str, int]] = {}
+    claimed = set(claimed)
+    for gid, d in sorted(split_decision.items(), key=lambda kv: made.get(id(kv[1]), 0)):
+        parent = groups_by_id.get(gid)
+        problem = (split_into_problem(bundle, parent, d.get("split_into")) if parent is not None
+                   else f"group {gid} is not a group of this bundle")
+        if problem is not None:
+            not_applied.append({
+                "decision_id": d.get("decision_id"), "group_id": gid,
+                "reason": (f"the split decision {d.get('decision_id')} of group {gid} made no group: {problem} Its runs "
+                           "are proposed afresh, and a proposal identical to the split group is not proposed again. "
+                           "Decide the split again, naming each of its runs once."),
+                "next_commands": [split_command(gid)],
+            })
+            continue
+        parts = split_parts(bundle, parent, d)
+        for i, part in enumerate(parts):
+            for k in part["member_run_keys"]:
+                side_of.setdefault(k, {})[d["decision_id"]] = i
+        now = not any(p["group_id"] in existing_ids for p in parts)
+        listed = []
+        for part in parts:
+            kept = kept_by_id.get(part["group_id"])
+            if kept is None and not claimed & set(part["member_run_keys"]):
+                claimed |= set(part["member_run_keys"])
+                proposed.append(part)
+            listed.append({"group_id": part["group_id"], "member_run_keys": part["member_run_keys"],
+                           "status": kept.get("status") if kept is not None else "proposed"})
+        said = "; ".join(_part_said(bundle, p) for p in parts)
+        applied.append({
+            "decision_id": d.get("decision_id"), "group_id": gid, "applied_now": now, "groups": listed,
+            "statement": (f"Split {d.get('decision_id')} of group {gid} applied now (an earlier build recorded it without "
+                          f"making its groups): {len(parts)} proposed groups, one per list — {said}. Confirm each."
+                          if now else f"Split {d.get('decision_id')} of group {gid} kept as named: {said}."),
+        })
+    return proposed, applied, not_applied, side_of
+
+
+def _split_apart(side_of: Mapping, *run_sets: Iterable[str]) -> bool:
+    """``True`` when the runs of two groups lie in different lists of one split in force."""
+    sides = []
+    for runs in run_sets:
+        got: dict[str, set] = {}
+        for k in runs:
+            for did, i in (side_of.get(k) or {}).items():
+                got.setdefault(did, set()).add(i)
+        sides.append(got)
+    a, b = sides
+    return any(did in b and len(a[did] | b[did]) > 1 for did in a)
 
 
 def process(

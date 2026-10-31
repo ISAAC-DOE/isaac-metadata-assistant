@@ -205,7 +205,9 @@ Enforced by the builder (refuse, or clamp visibly and count) and by the validato
   LOCAL-P): `{group_id, experiment_key, member_run_keys[], basis{sample, technique,
   environment, conditions{<name>:{value, candidate_ids[]}}}, split_reasons[], status,
   questions[]}`. `status` is `proposed` unless a decision says `confirm` →
-  `scientist_confirmed`, `split` → `split`, `merge` → `merged`, `reject` → `rejected`.
+  `scientist_confirmed`, `split` → `split`, `merge` → `merged`, `reject` → `rejected`. A `split`
+  also makes ONE proposed group per `split_into` list (§28; before 2026-10-30 the lists were stored and
+  never read).
 - `processing_results[]` (LOCAL-P): `{group_id, protocol_id, protocol_version,
   protocol_status, source, inputs[], steps[], outputs{files[{role, relative_path, sha256}],
   e0_eV, edge_step, points}, qc{metrics, verdict}, comparison, state}`. Named by
@@ -313,7 +315,8 @@ processed files, double-counting measurements (94 of 274 runs in one beamtime, 2
   each existing group's STATUS:
   - `scientist_confirmed` is BINDING: kept, and its runs are never re-proposed.
   - `rejected`, `split` and `merged` are HISTORY: kept as the record of that decision, and they
-    do not hold their runs. `merged` is history, not binding: only a confirmed group becomes a
+    do not hold their runs. A `split` group's runs are held by the groups its decision made (§28): the
+    regroup proposes them again under their own ids and keeps their runs out of the fresh proposal. `merged` is history, not binding: only a confirmed group becomes a
     record, so a merged group's runs must stay proposable. A fresh proposal identical to a
     rejected or split group is not re-proposed; one identical to a merged group is re-proposed
     under a distinct id (`reproposed_after_group_id`). **Since 1.6.0 the regroup APPLIES the merge
@@ -1686,3 +1689,40 @@ on the synthetic fixtures).
 - **`decide … set_counter_positions` says what it would do:** `regroup_preview` (`groups_joined`, `into`,
   `groups_split`, `statement`) counts the current proposed groups the next regroup would join, computed
   as the regroup computes it; nothing is regrouped.
+
+## 28. A split makes exactly the groups the scientist named (2026-10-30) — no format bump
+
+Found by a docs review, then measured (`tests/test_local_import_polish_c8s.py`, synthetic): `decide
+--decision split --split-into '[[…],[…]]'` stored the lists on the decision and no code read them. The
+split group became history, its runs were proposed afresh on the next regroup, and that proposal —
+identical to the split group — was skipped as already ruled on: a 3-run group split 2+1 left its three runs
+in NO live group. Undecided bundles are unchanged: the same groups, merge candidates, grouping questions and
+question ids, byte for byte, on five synthetic fixtures (also after a merge, a counter answer and a confirm).
+
+- **`decide` refuses a split that cannot make groups**, plainly, recording nothing: no `--split-into`; fewer
+  than two lists; an empty list; a run key the bundle does not hold, or one the group does not hold; a run in
+  two lists; a run of the group left out. A group whose runs another live group now holds (an earlier split's
+  parts) is not split again: split or decide that group. `--split-into` goes with `split` only.
+- **The split makes ONE proposed group per list, at once.** Each part is what the grouping rule proposes over
+  its runs alone (a part the rule would keep apart, from a group a merge combined, is combined as a merge is);
+  its id is `grouping.group_id_for(experiment_key, its run keys + ["split-from:<split group id>"])`, stable on
+  every regroup and never an id the rule gives. It carries `split_by_decision` (`decision_id`,
+  `split_group_id`, `part`, `of`, `decided_by`, `statement`) and the flag `split_by_scientist_decision`. It is
+  `proposed`: the scientist confirms (or merges, rejects, splits) each. The reply lists them in
+  `split_into_groups` and says them in its `statement`. (`record_group` allows additional properties, so a
+  1.9.0 validator accepts the field: no format bump.)
+- **A regroup keeps a split as named** while it is the group's latest status decision (a later confirm,
+  reject, merge or defer supersedes it, as for a merge). Its parts are proposed again under the same ids and
+  their runs kept out of the fresh proposal, as a confirmed group's are: a counter answer cannot join them, no
+  rule merge candidate names them, and `matches_binding_group` does not offer a confirmed part to its sibling.
+  A part a decision moved is kept as that decision left it (confirmed; rejected — a fresh proposal of exactly
+  its runs is not made again; split again — its own parts; merged — the merge is applied as §27). The counter
+  question's text says the split stands where it would otherwise have joined them.
+- **The regroup reply** adds `splits_applied[]` (`decision_id`, `group_id`, `groups[{group_id,
+  member_run_keys, status}]`, `applied_now`, `statement`) and `split_decisions_not_applied[]` (`decision_id`,
+  `group_id`, `reason`, `next_commands`) when a split is in force; neither appears otherwise.
+- **An older bundle** that holds a split decision with no parts gets them on the next regroup (`applied_now`,
+  and the statement says so): the same ids and the same groups, merge candidates and question ids this build's
+  decide and regroup give; every other group keeps its id. A stored split whose lists cannot make groups (an
+  older build accepted a split with none) makes no group: `split_decisions_not_applied` names why and the
+  `decide … --split-into` that fixes it (its runs, in no live group, can be split again).
