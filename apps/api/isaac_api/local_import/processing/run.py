@@ -647,6 +647,68 @@ def _truncation_statement(ginfo: Mapping, scans_data: Sequence[Mapping], pos_sid
     )
 
 
+def _scan_name(entry: Mapping) -> str:
+    return f"{entry.get('source_id')} (scan {entry['scan']})" if entry.get("scan") is not None else str(entry.get("source_id"))
+
+
+def _scans_phrase(scans: Sequence[int]) -> str:
+    """[1, 3, 4, 5, 8] -> "1, 3-5, 8"."""
+    nums = sorted({int(n) for n in scans})
+    out: list[str] = []
+    i = 0
+    while i < len(nums):
+        j = i
+        while j + 1 < len(nums) and nums[j + 1] == nums[j] + 1:
+            j += 1
+        out.append(str(nums[i]) if i == j else f"{nums[i]}-{nums[j]}")
+        i = j + 1
+    return ", ".join(out)
+
+
+def _skipped_scans_statement(inputs: Sequence[Mapping], choice, used: int) -> str | None:
+    """One plain sentence when readable scans of the group were left out because they lack the chosen
+    columns (``None`` otherwise): how many of the listed scans were used, which were not, and why. Added to
+    ``qc.statements`` AFTER the run id is fixed (``qc.json`` is hashed into it), so no result id moves."""
+    lacking = [i for i in inputs if i.get("skip_reason") == "scan_lacks_chosen_columns"]
+    if not lacking:
+        return None
+    k = len(lacking)
+    names = ", ".join(_scan_name(i) for i in lacking[:10]) + (f" and {k - 10} more" if k > 10 else "")
+    other = len(inputs) - used - k
+    return (
+        f"{used} of {len(inputs)} listed scans were used. {k} {'was' if k == 1 else 'were'} left out because "
+        f"{'it lacks' if k == 1 else 'they lack'} the columns chosen for this group (energy {choice.energy}, signal "
+        f"{choice.signal_name}): {names}. {'It may be a motor or alignment scan' if k == 1 else 'They may be motor or alignment scans'} or another "
+        f"kind of measurement; a person confirms {'it does' if k == 1 else 'they do'} not belong in this record."
+        + (f" {other} more {'scan was' if other == 1 else 'scans were'} skipped for other reasons (see inputs)." if other > 0 else "")
+    )
+
+
+def _athena_scans_used(entry: Mapping, stems: Sequence[str], isaac_counts: tuple[int, int] | None) -> dict:
+    """Which scans the scientist's Athena curve used, as far as the project says: ``basis`` is ``per_scan_set``
+    (the member groups name one scan each), ``label`` (the Athena group's label names a selection) or
+    ``not_stated`` (an Athena project does not list the scan files it merged)."""
+    members = entry.get("per_scan_set") if entry.get("_match_kind") == "per_scan_set" else None
+    label = str(entry.get("label") or "")
+    ours = f" ISAAC's own curve for this group merges {isaac_counts[0]} of {isaac_counts[1]} listed scans." if isaac_counts else ""
+    if members and members.get("scans"):
+        scans = [int(n) for n in members["scans"]]
+        said = (f"The scientist's curve is ISAAC's mean of {len(scans)} per-scan Athena groups, one each for scans "
+                f"{_scans_phrase(scans)} (read from their labels).{ours}")
+        return {"basis": "per_scan_set", "scans": scans, "statement": said}
+    sel = A.scan_selection(label, stems)
+    if sel:
+        said = (f"The scientist's Athena group '{label}' names scans {_scans_phrase(sel)} in its label. An Athena project does "
+                f"not list the scan files it merged, so this is read from the label, not confirmed.{ours}")
+        return {"basis": "label", "scans": list(sel), "statement": said}
+    made_from = PurePosixPath(str(entry.get("filename") or "").replace("\\", "/")).name
+    said = (f"The project does not say which scans the scientist's curve used: its Athena label '{label}' names no scan"
+            + (", though Athena marks the group as a merge" if entry.get("is_merge") else "")
+            + (f", and it records the group as made from the file '{made_from}'" if made_from and made_from.casefold() != label.casefold() else "")
+            + f".{ours} Ask the scientist which scans went into it.")
+    return {"basis": "not_stated", "scans": None, "statement": said}
+
+
 def _post_edge_range(resolved: Mapping) -> str | None:
     lo, hi = resolved.get("norm1"), resolved.get("norm2")
     return f"norm1 {lo:g} to norm2 {hi:g} eV above E0" if lo is not None and hi is not None else None
@@ -976,6 +1038,11 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     res["run_id"] = run_id
     res["result_id"] = f"proc-{group['group_id']}-{run_id}-isaac"
     res["prior_run_ids"] = sorted(p.name for p in group_dir.iterdir() if p.is_dir() and _RUN_DIR.match(p.name) and p.name != run_id)
+    # said in the result and the lists, NOT in qc.json: qc.json is hashed into run_id, so a sentence written there
+    # would give every group with skipped scans a new result id (and orphan a decision made on the old one)
+    skipped_said = _skipped_scans_statement(res["inputs"], choice, len(scans_data))
+    if skipped_said:
+        res["qc"].setdefault("statements", {})["scans_skipped_lacking_chosen_columns"] = skipped_said
     files = []
     for role, name in roles:
         p = gdir / name
@@ -985,7 +1052,7 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
 
     out = [res]
     if athena_entry is not None:
-        athena_res = _athena_result(group, athena_entry, files, params, np, ctx)
+        athena_res = _athena_result(group, athena_entry, files, params, np, ctx, stems=stems, isaac_counts=(len(scans_data), len(scans)))
         athena_res["comparison"] = comparison
         # a curve whose energy frame is unknown (non-finite bkg_eshift) is never preferred by default;
         # its result carries athena_energy_frame_unknown, and a scientist can still approve it
@@ -1056,13 +1123,15 @@ def _diagnose(comparison: dict, entry: Mapping, stems: Sequence[str], used_entri
             comparison["metrics"]["rms_norm_same_scans_same_params"] = _rms(rows)
 
 
-def _athena_result(group: Mapping, entry: Mapping, files: Sequence[Mapping], params: Mapping, np, ctx: _Ctx) -> dict:
+def _athena_result(group: Mapping, entry: Mapping, files: Sequence[Mapping], params: Mapping, np, ctx: _Ctx, *,
+                   stems: Sequence[str] = (), isaac_counts: tuple[int, int] | None = None) -> dict:
     res = _base(group, "scientist_athena")
     members = entry.get("per_scan_set") if entry.get("_match_kind") == "per_scan_set" else None
     # A SET of the scientist's per-scan groups is ISAAC's mean of them (athena._per_scan_set), not values
     # ISAAC left unchanged: the flag and the input say so, and name every member group
     res["review_flags"] = ["scientist_processed_data",
                            "isaac_computed_mean_of_scientist_per_scan_curves" if members else "isaac_did_not_change_scientist_values"]
+    scans_used = _athena_scans_used(entry, stems, isaac_counts)
     res["inputs"] = [
         {
             "source_id": entry["prj_source_id"],
@@ -1071,6 +1140,10 @@ def _athena_result(group: Mapping, entry: Mapping, files: Sequence[Mapping], par
             "relative_path": entry["prj_relative_path"],
             "athena_group": entry["group_name"],
             "match_kind": entry.get("_match_kind"),
+            # the Athena group IS the input and it is what was used; which SCANS went into it is scans_basis/scans
+            "used": True,
+            "scans_basis": scans_used["basis"],
+            "scans": scans_used["scans"],
             **({"per_scan_set": {k: list(members.get(k) or ()) for k in ("athena_groups", "labels", "scans")}} if members else {}),
         }
     ]
@@ -1124,8 +1197,9 @@ def _athena_result(group: Mapping, entry: Mapping, files: Sequence[Mapping], par
         metrics["edge_step_implausible"] = bad["ratio"] if "ratio" in bad else bad.get("post_edge_mean")
     verdict, reasons = C.qc_verdict(metrics, params)
     res["qc"] = {"metrics": metrics, "verdict": verdict, "reasons": reasons}
+    res["qc"]["statements"] = {"scans_used": scans_used["statement"]}
     if bad:
-        res["qc"]["statements"] = {"edge_step_implausible": bad["statement"]}
+        res["qc"]["statements"]["edge_step_implausible"] = bad["statement"]
         res["review_flags"].append("edge_step_implausible")
     res["steps"].append({"step": "qc", "params": dict(params["qc"]), "outcome": {"verdict": verdict, "reasons": reasons}, "flags": []})
     ath = [f for f in files if f["role"] in ("athena_normalized", "plot")]

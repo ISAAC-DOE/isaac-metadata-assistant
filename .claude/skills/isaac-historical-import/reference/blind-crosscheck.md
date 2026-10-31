@@ -7,7 +7,11 @@ code error can be caught instead of echoed. It is a spot check, never a verifica
 
 1. `crosscheck-plan <bundle> --limit 30` — ids, categories and file locators. No values.
 2. Choose targets: sample identity, potential/reference basis, reaction, environment, cell type,
-   acquisition time. Prefer ones with several sources. Tell the scientist how many you will check.
+   acquisition time (these six are the **high-value categories**; the plan lists them as
+   `high_value_categories`). Prefer ones with several sources. Tell the scientist how many you will check.
+   The plan's `high_value_total` is the denominator M: the items in those six categories that can be read
+   blind (`excerptable: true`). `total` is larger (it also counts run-association, HERFD signal-choice and
+   required-but-missing items), so never report `total` as the number of high-value items.
    Items carry `field_path`, `excerptable`, `locators` (at most 5) and `locators_total`, high-value
    items first. Only `excerptable: true` items can be read blind; a missing value (`excerptable: false`)
    has no source text, so it goes to the scientist as a question, never into the cross-check count.
@@ -34,5 +38,7 @@ code error can be caught instead of echoed. It is a spot check, never a verifica
 - Do not open `bundle.json`, `runs.json` or `reading.full.json` before step 5; the tool cannot see
   that, and a blind claim is only as good as your discipline.
 - `summary.md` shows no parser value except in conflicts. Conflicts are therefore never blind.
-- Report: "checked N of M high-value items (K blind); the rest were not examined."
+- Report: "checked N of M high-value items (K blind); the rest were not examined." M is `high_value_total`;
+  N and K are `coverage.high_value_checked` and `coverage.high_value_blind_checked` (a reading of an item outside
+  the six categories is real, but is in neither number); `coverage.high_value_statement` words it.
 - An AI reading never lifts a value above "needs review".

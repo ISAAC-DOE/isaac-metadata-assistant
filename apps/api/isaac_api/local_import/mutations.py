@@ -52,6 +52,10 @@ CROSSCHECK_CATEGORIES: Sequence[tuple[str, tuple[str, ...], tuple[str, ...]]] = 
     ("cell_type", ("context.electrochemistry.cell_type",), ()),
     ("acquisition_time", ("timestamps.acquired_start_utc",), ()),
 )
+#: The categories that count as HIGH-VALUE for the skill's "I independently read N of M high-value items":
+#: the six named ones (``required_by_record``, ``run_association`` and ``herfd_signal_choice`` are listed too
+#: but are not high-value). ``crosscheck-plan`` reports ``high_value_total`` over them.
+HIGH_VALUE_CATEGORIES: tuple[str, ...] = tuple(name for name, _, _ in CROSSCHECK_CATEGORIES)
 #: The order ``crosscheck-plan`` lists its items in: the high-value categories first, then values the
 #: record requires, then the run-level checks. Within the order every item that can be EXCERPTED comes
 #: before every one that cannot (a missing value has no source text to read).
@@ -1385,8 +1389,15 @@ def crosscheck_plan(bundle: Mapping) -> dict:
         by_category[i["category"]] = by_category.get(i["category"], 0) + 1
     checked_n = sum(1 for i in items if i["checked"])
     blind_n = sum(1 for i in items if i["blind_checks"])
+    # THE DENOMINATOR for "I independently read N of M high-value items (K blind)": only the six named
+    # high-value categories (the skill's list), and only items that can be read blind (excerptable)
+    hv = [i for i in items if i["category"] in HIGH_VALUE_CATEGORIES and i["excerptable"]]
+    hv_checked = sum(1 for i in hv if i["checked"])
+    hv_blind = sum(1 for i in hv if i["blind_checks"])
     return {
         "total": total,
+        "high_value_total": len(hv),
+        "high_value_categories": list(HIGH_VALUE_CATEGORIES),
         "excerptable": excerptable_n,
         "not_excerptable": total - excerptable_n,
         "by_category": {name: by_category[name] for name in CROSSCHECK_ORDER if name in by_category},
@@ -1400,6 +1411,13 @@ def crosscheck_plan(bundle: Mapping) -> dict:
             "checked": checked_n,
             "blind_checked": blind_n,
             "unchecked": total - checked_n,
+            "high_value_checked": hv_checked,
+            "high_value_blind_checked": hv_blind,
+            "high_value_statement": (
+                f"High-value items (the {len(HIGH_VALUE_CATEGORIES)} categories in `high_value_categories`, only those that "
+                f"can be excerpted): {len(hv)}. Say \"I independently read {hv_checked} of {len(hv)} high-value items "
+                f"({hv_blind} blind)\"; targets outside those categories are not in either number."
+            ),
             "statement": (
                 "Spot checks only. A checked target has at least one AI reading recorded; "
                 "nothing here claims the bundle is verified, and unchecked targets were not "

@@ -20,7 +20,9 @@ COMMANDS
 ``isaac bundle list <dir> runs|conflicts|candidates|questions|unread|groups|merge-candidates|processed-outputs|processing-results [--limit N] [--offset M] [--state S]``
     A bounded page as JSON, with ``total`` and how many were omitted before and after.
     Never truncates silently. ``processing-results``: one compact row per result (id, group, verdict,
-    applicability, key QC flags and metrics, plot path, Athena agreement, state); ``--state`` filters it
+    applicability, key QC flags and metrics, a ``scans`` line saying which scans were used, plot path, Athena
+    agreement, state); ``unread`` rows carry a short ``read_by`` marker with its meaning once in ``read_by_note``;
+    ``--state`` filters it
     by state as it filters ``candidates`` by value_state. ``groups`` and ``runs`` print one row per line: a
     ``groups`` row carries up to three member file stems (``files``, ``files_more``), ``scans``, ``reader`` and,
     when the group can never export as it stands, ``cannot_export_reason`` (``no_scans`` or
@@ -108,6 +110,8 @@ MAX_LIMIT = 200
 SUMMARY_TARGET_BYTES = 6_000
 _SUMMARY_RUN_ROWS = 25
 _SUMMARY_LIST_ROWS = 10
+#: Files of one folder with one reason that summary.md's "Unread files" prints as ONE line with a count.
+_SUMMARY_COLLAPSE_FILES = 3
 _LOCAL_SOURCE_ID = "local-source"
 
 
@@ -240,10 +244,17 @@ def render_summary(bundle: Mapping) -> str:
     add = lines.append
     add(f"# ISAAC import summary: {_clip(root['label'], 60)}")
     add("")
+    decisions = list(bundle.get("scientist_decisions") or ())
     add("> **This is not a validated official ISAAC record.** It is what the deterministic")
-    add("> readers extracted from your files, with the evidence for each value. Nothing")
-    add("> here is confirmed by a scientist, and nothing has been checked against the")
-    add("> official ISAAC schema.")
+    if decisions:
+        add("> readers extracted from your files, with the evidence for each value, and the")
+        add(f"> {len(decisions)} decision(s) a scientist has recorded since (see Counts). A value is confirmed only")
+        add("> where one of those decisions says so, and nothing here has been checked against the")
+        add("> official ISAAC schema (`isaac bundle validate` does that).")
+    else:
+        add("> readers extracted from your files, with the evidence for each value. Nothing")
+        add("> here is confirmed by a scientist, and nothing has been checked against the")
+        add("> official ISAAC schema.")
     add("")
     add(
         f"Bundle `{bundle['bundle_id']}` · {bundle['created_utc']} · "
@@ -326,6 +337,8 @@ def render_summary(bundle: Mapping) -> str:
 
         for line in summarize(bundle["processing_results"])["lines"]:
             add(f"- Processing: {line}")
+    if decisions:
+        add(f"- Scientist decisions recorded: {len(decisions)} ({_decision_breakdown(decisions)})")
     add(
         "- This summary shows no parser value except in conflicts, so a blind cross-check "
         "(`isaac bundle crosscheck-plan`) is still possible after reading it."
@@ -394,10 +407,31 @@ def render_summary(bundle: Mapping) -> str:
         # an Athena project is not unread: `isaac process` reads it (the import has no reader for it)
         add(f"- {_athena_read_by_process(len(athena))} (`isaac bundle list <dir> unread` shows each with its `read_by`).")
     others = [u for u in unread if not _is_athena_project(u)]
-    for u in others[:_SUMMARY_LIST_ROWS]:
-        add(f"- {_clip(u['relative_path'] or '(name withheld)', 60)} — {u['reason_code']}")
-    if len(others) > _SUMMARY_LIST_ROWS:
-        add(f"- … {len(others) - _SUMMARY_LIST_ROWS} more: `isaac bundle list <dir> unread`")
+    # one line per FOLDER and reason, with the number of files: ten files of one folder that no reader reads
+    # are one finding, not ten identical lines
+    by_folder: dict[tuple[str, str], list[str]] = {}
+    for u in others:
+        path = str(u["relative_path"] or "")
+        folder, _, name = path.rpartition("/")
+        by_folder.setdefault((folder, str(u["reason_code"])), []).append(name or "(name withheld)")
+    # (one or two files stay as lines of their own: a name is more use than a count)
+    lines_for: list[tuple[str, list[str]]] = []
+    for (folder, reason), names in by_folder.items():
+        if len(names) < _SUMMARY_COLLAPSE_FILES:
+            lines_for += [((folder, reason), [n]) for n in names]
+        else:
+            lines_for.append(((folder, reason), names))
+    shown = lines_for[:_SUMMARY_LIST_ROWS]
+    for (folder, reason), names in shown:
+        if len(names) == 1:
+            add(f"- {_clip((folder + '/' if folder else '') + names[0], 60)} — {reason}")
+        else:
+            # the END of the folder name (the start is the same for every folder of a tree)
+            where = (folder if len(folder) <= 70 else "…" + folder[-69:]) + "/" if folder else "(top level)"
+            add(f"- {where.replace('|', '/')}: {len(names)} files — {reason}")
+    left = len(others) - sum(len(n) for _, n in shown)
+    if left > 0:
+        add(f"- … {left} more: `isaac bundle list <dir> unread`")
     add("")
 
     add("## Readiness")
@@ -408,9 +442,26 @@ def render_summary(bundle: Mapping) -> str:
         "Official record ready: no."
     )
     add("")
-    add(readiness["next_step"])
+    if decisions or readiness["eligible_value_count"]:
+        # the stored next step says no value is confirmed: untrue once a scientist has decided some
+        add(f"{readiness['eligible_value_count']} value(s) are eligible for an official record because a scientist decided them; "
+            f"{counts['needs_review']} still need review and {counts['conflicts']} conflict(s) are listed. This summary describes "
+            "the import and the decisions recorded in the bundle. It does not know whether a record has been exported (that is "
+            "kept in the folder you exported to, as `isaac-export/index.json`): `isaac bundle build-records` shows each "
+            "group's draft, `isaac bundle validate` whether it can export, and `isaac bundle export <dir> --out <folder>` writes the records.")
+    else:
+        add(readiness["next_step"])
     add("")
     return "\n".join(lines)
+
+
+def _decision_breakdown(decisions: Sequence[Mapping]) -> str:
+    """``2 confirm on record group, 1 approve on processing result`` — what the recorded decisions are, counted."""
+    n: dict[tuple[str, str], int] = {}
+    for d in decisions:
+        key = (str(d.get("decision")), str((d.get("target") or {}).get("kind")).replace("_", " "))
+        n[key] = n.get(key, 0) + 1
+    return ", ".join(f"{c} {dec} on {kind}" for (dec, kind), c in sorted(n.items(), key=lambda kv: (-kv[1], kv[0])))
 
 
 def _conflict_breakdown(bundle: Mapping) -> str:
@@ -703,6 +754,7 @@ def _row(kind: str, obj: Mapping, group_status: Mapping | None = None) -> dict:
             "channel": _short(channel.get("signal_name") or channel.get("mode"), 120) if channel else None,
             "flags": [f for f in obj.get("review_flags") or () if f not in _EVERY_RESULT_FLAGS][:20],
             "metrics": {k: (qc.get("metrics") or {}).get(k) for k in _RESULT_METRICS if k in (qc.get("metrics") or {})},
+            "scans": _scans_line(obj),
             "output_files": len(files),
             "plot": next((f.get("relative_path") for f in files if f.get("role") == "plot"), None),
             "athena_agreement": comparison.get("verdict"),
@@ -724,10 +776,10 @@ def _row(kind: str, obj: Mapping, group_status: Mapping | None = None) -> dict:
         "source_type": obj["source_type"],
         "reason_code": obj["reason_code"],
     }
-    later = next((how for suffix, how in READ_LATER_BY_SUFFIX.items()
+    later = next((marker for suffix, (marker, _note) in READ_LATER_BY_SUFFIX.items()
                   if str(obj.get("relative_path") or "").lower().endswith(suffix)), None)
     if later:
-        row["read_by"] = later
+        row["read_by"] = later  # a short marker; the sentence that explains it is said once, on the page (read_by_note)
     return row
 
 
@@ -845,8 +897,8 @@ _LIST_SECTION = {
 #: ``bundle list <dir> unread``: files the IMPORT has no reader for but a later command reads (by suffix),
 #: said on the row so an Athena project is never taken for a file nobody reads.
 READ_LATER_BY_SUFFIX = {
-    ".prj": ("isaac process (Athena project: its groups are read and matched by name to record groups, as the "
-             "scientist's own processing to compare with; the import itself has no reader for it)"),
+    ".prj": ("isaac process", "Athena project: its groups are read and matched by name to record groups, as the "
+                              "scientist's own processing to compare with; the import itself has no reader for it"),
 }
 #: Metrics a ``processing-results`` row carries (the rest are in ``processing/processing_results.json``).
 _RESULT_METRICS = ("scans_listed", "scans_used", "points", "e0_eV", "edge_step", "pre_edge_noise", "scan_spread",
@@ -996,12 +1048,20 @@ def cmd_bundle_list(args) -> int:
            if not_listed else {}),
         **({"cannot_export": dict(sorted(cannot_export.items(), key=lambda kv: (-kv[1], kv[0]))),
             "cannot_export_note": CANNOT_EXPORT_NOTE} if cannot_export else {}),
+        **({"read_by_note": _read_by_note(items)} if args.kind == "unread" and _read_by_note(items) else {}),
         "items": items,
     }
     # ONE LINE PER ROW for groups and runs (1.9.x polish): a 10-group page with file names, scans and reader
     # stays near 4 KB, and a row reads as a table row. Still one JSON document.
     print(_dumps_rows_inline(payload) if args.kind in INLINE_ROW_KINDS else json.dumps(payload, indent=1, ensure_ascii=False))
     return EXIT_OK
+
+
+def _read_by_note(items: Sequence[Mapping]) -> str | None:
+    """What a ``read_by`` marker on an ``unread`` row means, said ONCE for the page (not on every row)."""
+    seen = {i.get("read_by") for i in items if i.get("read_by")}
+    notes = [f"{marker}: {note}" for marker, note in READ_LATER_BY_SUFFIX.values() if marker in seen]
+    return ("`read_by` names the later command that reads this file, so it is not a file nobody reads. " + "; ".join(notes)) if notes else None
 
 
 def _athena_version_brief(v: Mapping) -> dict:
@@ -1050,6 +1110,39 @@ def _scan_ranges(scans: Sequence[int]) -> str:
     return ",".join(out)
 
 
+def _scans_line(r: Mapping) -> str | None:
+    """Which scans a processing result used, in a few words (the full sentence is ``qc.statements``).
+
+    ISAAC's curve: ``5 of 11 scans used; 6 skipped (scan_lacks_chosen_columns)``. The scientist's Athena curve:
+    the scans its label or its per-scan groups name, or that the project does not say."""
+    inputs = list(r.get("inputs") or ())
+    if r.get("source") == "scientist_athena":
+        ref = inputs[0] if inputs else {}
+        basis, scans = ref.get("scans_basis"), ref.get("scans")
+        comparison = r.get("comparison") or {}
+        if basis is None and "athena_scan_selection" in comparison:
+            # a result stored before ``scans_basis`` existed (a decided result is never rewritten): the same
+            # facts from its comparison, which has always carried the label's selection
+            scans = comparison["athena_scan_selection"]
+            basis = "label" if scans else "not_stated"
+        if basis == "per_scan_set" and scans:
+            return f"scans {_scan_ranges(scans)} (the scientist's per-scan groups, averaged by ISAAC)"
+        if basis == "label" and scans:
+            return f"scans {_scan_ranges(scans)} (named by the Athena label; the project does not list scan files)"
+        if basis == "not_stated":
+            return "the project does not say which scans"
+        return None
+    m = (r.get("qc") or {}).get("metrics") or {}
+    if m.get("scans_listed") is None or m.get("scans_used") is None:
+        return None
+    why: dict[str, int] = {}
+    for i in inputs:
+        if i.get("skip_reason"):
+            why[str(i["skip_reason"]).split(":")[0]] = why.get(str(i["skip_reason"]).split(":")[0], 0) + 1
+    left = ("; " + ", ".join(f"{n} skipped ({code})" for code, n in sorted(why.items()))) if why else ""
+    return f"{m['scans_used']} of {m['scans_listed']} scans used{left}"
+
+
 def _processing_result_view(bundle: Mapping, r: Mapping) -> dict:
     """One processing result, compact: what a reviewer needs to decide it and to pick an Athena version.
     Arrays (per-scan lists, flagged points) are counted, not printed; the full result is in ``result_file``."""
@@ -1081,6 +1174,15 @@ def _processing_result_view(bundle: Mapping, r: Mapping) -> dict:
                            "metrics": _compact({k: x for k, x in (cmp_.get("metrics") or {}).items() if not isinstance(x, (list, dict))})},
         })
     cmp_ = r.get("comparison") or None
+    note = None
+    if r.get("source") != "scientist_athena" and "scans_skipped_lacking_chosen_columns" not in ((r.get("qc") or {}).get("statements") or {}):
+        # a decided result is never rewritten, so one stored before the sentence existed has none: said here instead
+        from types import SimpleNamespace
+
+        from .processing.run import _skipped_scans_statement
+
+        note = _skipped_scans_statement(inputs, SimpleNamespace(energy=channel.get("energy"), signal_name=channel.get("signal_name")),
+                                        sum(1 for i in inputs if i.get("used")))
     return _compact({
         "result_id": B.processing_id(r),
         "group_id": r.get("group_id"),
@@ -1094,6 +1196,8 @@ def _processing_result_view(bundle: Mapping, r: Mapping) -> dict:
         "review_flags": list(r.get("review_flags") or ()),
         "channel": {k: channel.get(k) for k in ("mode", "signal_name", "energy", "i0") if channel.get(k) is not None} or None,
         "inputs": {"listed": len(inputs), "used": sum(1 for i in inputs if i.get("used")), "skipped": skipped},
+        "scans": _scans_line(r),
+        **({"scans_note": note} if note else {}),
         "steps": [{"step": s.get("step"), "flags": list(s.get("flags") or ()), "outcome": s.get("outcome")} for s in r.get("steps") or ()],
         "outputs": {"e0_eV": (r.get("outputs") or {}).get("e0_eV"), "edge_step": (r.get("outputs") or {}).get("edge_step"),
                     "points": (r.get("outputs") or {}).get("points"),

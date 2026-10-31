@@ -52,7 +52,14 @@ it finds one. Show per group, in words:
 - **when scans were skipped** (reason `scans_skipped_lacking_chosen_columns`; flag
   `channel_from_a_later_scan` when the first scan was one of them): the used / readable / skipped
   counts in plain words — "14 of 165 scans were used; 150 had different columns (they may be motor
-  or alignment scans); please confirm these belong in one record";
+  or alignment scans); please confirm these belong in one record". The result's `qc.statements` has the
+  sentence (`bundle show processing-result`; it is not in `qc.json`), and every `list processing-results`
+  row has a `scans` line ("5 of 11 scans used; 6 skipped (scan_lacks_chosen_columns)");
+- **which scans the scientist's Athena curve used** (the `…-athena` result's `scans` line and its
+  `qc.statements.scans_used`): either the scans its Athena label names, the per-scan groups of a set, or
+  "the project does not say which scans". An Athena project does not list the scan files it merged, so
+  say which of the three it is and, when it is the last, ask the scientist; never infer scans from the
+  curve. `scans_used: null` in its metrics means exactly that, not zero scans;
 - **when the channel fell back** (reason and flag `channel_fallback_transmission_not_positive`: a
   group named as a reference or standard takes transmission first, but I0 or I1 was not positive in
   every scan, so fluorescence was used): say the sentence in `qc.json` → `statements` and ask the
