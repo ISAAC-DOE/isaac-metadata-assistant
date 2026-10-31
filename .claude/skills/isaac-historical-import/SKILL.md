@@ -111,7 +111,8 @@ verification. Skip this step if the scientist says it is not wanted; say that it
 ## Step 4 · Read what code could not
 
 `<isaac> bundle list <bundle> unread --limit 50` (page). Read `reference/reading-unread-files.md`.
-Prioritise logbooks, beamtime notes and proposals. For `.docx/.pptx/.xlsx` run
+Prioritise logbooks, beamtime notes and proposals. A filled ISAAC metadata sheet in the folder: ask
+now whether it is theirs and to use it; if yes, it goes through `template adopt` (Step 7), not a reading. For `.docx/.pptx/.xlsx` run
 `<python> -m isaac_api.local_import.extract <file> --root <folder> --out <bundle>-notes/extracted`, read
 the text it returns, and open embedded images and PDFs with the Read tool. Plain-text files of
 other kinds: Read them directly. Then read what code DID read for statements no parser maps
