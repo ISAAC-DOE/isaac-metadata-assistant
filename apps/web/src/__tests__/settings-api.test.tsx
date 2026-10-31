@@ -2531,7 +2531,11 @@ describe('the Full Description rule over the REAL generated contract', () => {
     // portal-payload) to state the third type and that it never has a portal payload. Read from
     // this assertion's own failure output over the transcribed array, which
     // `test_contract_description_parity.py` pins to `create_app().openapi()`.
-    expect(total).toBe(187214);
+    // 187,214 -> 187,847 (+633), 2026-10-31: the Schema Proposals create description now states the
+    // optional `source` block a proposal drafted from a local import may carry. Read from this
+    // assertion's own failure output over the transcribed array, which
+    // `test_contract_description_parity.py` pins to `create_app().openapi()`.
+    expect(total).toBe(187847);
     // 104,045 -> 114,959 (+10,914): the four new operations, and NO existing
     // description changed — `test_contract_description_parity.py` proves that rather
     // than leaving it asserted here. RE-DERIVED from the served document and never
@@ -2866,7 +2870,9 @@ describe('the Full Description rule over the REAL generated contract', () => {
       // 356 -> 357 (+1) after the review rewrite: one Schema Proposals description gained a paragraph. Measured.
       // 357 -> 361 (+4), 2026-10-29: the new `.../change-request` operation carries one post-lead
       // paragraph, and create, vocabulary and portal-payload each gained one. Measured by the assertion.
-      361,
+      // 361 -> 362 (+1), 2026-10-31: create gained a paragraph on the optional local-import `source`
+      // block. Measured (`expected 362 to be 361`), with the characters.
+      362,
     );
     // 211 -> 235 (+24): the four new operations carry a lead plus 24 post-lead
     // paragraphs between them. It is asserted separately from the character total
