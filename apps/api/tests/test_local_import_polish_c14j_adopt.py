@@ -114,8 +114,8 @@ def test_a_whole_beamtime_ruling_ties_every_target_it_reaches(grouped, tmp_path,
     assert code == 0, err
     # LOW-1: one ruling, said as part of the decisions recorded; never as replacing a file reading
     summary = next(line for line in text.splitlines() if line.startswith("Summary:"))
-    assert (f"; {len(reached)} decision(s) recorded; 1 ruling cell kept the same value and is now tied to your sheet "
-            f"({len(reached)} targets); ") in summary
+    assert (f"; {len(reached)} decision(s) recorded, including 1 ruling cell that kept the same value and is now tied "
+            f"to your sheet ({len(reached)} targets); ") in summary
     assert "replace or contradict a file reading" not in summary
     for tid in reached:
         assert len(_decisions_on(grouped, tid)) == 2
@@ -215,6 +215,9 @@ def _adopted_before_governing_was_kept(xlsx, out, exported_utc) -> None:
         wm.cell(r, c0).value = None
     [r1] = [c.row for row in wm.iter_rows() for c in row if c.column == 1 and c.value == "exported_utc"]
     wm.cell(r1, 2).value = exported_utc
+    for row in wm.iter_rows():  # c14l: nor the decision log's length at adopt (kept from c14l on)
+        if row[0].value == "decisions_at_adopt":
+            row[0].value = row[1].value = None
     wb.save(out)
 
 

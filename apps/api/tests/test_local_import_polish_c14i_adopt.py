@@ -45,7 +45,8 @@ def _ties_then_settles(grouped, theirs, ruled, ph_id, value, capsys, tmp_path):
     code, text, err = _import_text(grouped, ruled, capsys)
     assert code == 0, err
     assert "Rulings to be recorded with the same value, now tied to your sheet" in text
-    assert " decision(s) would record; 1 ruling cell keeps the same value and is to be tied to your sheet (1 target);" in text
+    assert (" decision(s) would record, including 1 ruling cell that keeps the same value and is to be tied to your "
+            "sheet (1 target);") in text
     before = len(_ph_decisions(grouped))
     code, rep, err = _import(grouped, ruled, capsys, "--apply")
     assert code == 0, err

@@ -1201,7 +1201,9 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
     known = {c.header: c for c in (*CAMPAIGN_FIELDS, *CONFIG_COLUMNS, *FILE_COLUMNS)}
     out: dict[str, Any] = {"cells": [], "invalid": [], "unmapped": {}, "nowhere": [], "rows_refused": [], "awaiting_ruling": [],
                            "already_recorded": [], "off_list": [], "adopted_from": (marker.get("meta") or {}).get("adopted_from"),
-                           "exported_utc": (marker.get("meta") or {}).get("exported_utc")}
+                           "exported_utc": (marker.get("meta") or {}).get("exported_utc"),
+                           # c14l MED-2: how many decisions the log held when `template adopt` wrote it
+                           "decisions_at_adopt": (marker.get("meta") or {}).get("decisions_at_adopt")}
     adopted = marker.get("adopted") or {}
     for name in (SHEET_CAMPAIGN, SHEET_CONFIG, SHEET_FILES):
         if name not in wb.sheetnames:
@@ -1495,7 +1497,8 @@ def _marker_governing(entry: Mapping) -> list[str] | None:
     """c14j MED-1: the decision ids one ``_isaac`` disagreement row was ruled against (:func:`governing_decisions`), or
     ``None`` for a workbook adopt wrote before they were kept (no ``governing_decisions`` column): its ruling ties by
     time instead (:func:`_rules_against_now`). c14k LOW-2: with the column there, a damaged value (empty, a bare
-    string, an object, a deeply nested list) is ``[GOVERNING_DAMAGED]``: such a ruling is never tied, never placed by
+    string, an object, a deeply nested list, c14l LOW-1: a list with any element that is not a string) is
+    ``[GOVERNING_DAMAGED]``: such a ruling is never tied, never placed by
     time, and never read as adopted with nothing recorded."""
     if "governing_decisions" not in entry:
         return None
@@ -1506,7 +1509,8 @@ def _marker_governing(entry: Mapping) -> list[str] | None:
         ids = json.loads(text)
     except (ValueError, RecursionError):  # c14k LOW-1
         return [GOVERNING_DAMAGED]
-    return [i for i in ids if isinstance(i, str)] if isinstance(ids, list) else [GOVERNING_DAMAGED]
+    # c14l LOW-1: a list holding anything but decision ids ([1], [null], [["d-1"]], ["d-1", 5]) is damaged too
+    return ids if isinstance(ids, list) and all(isinstance(i, str) for i in ids) else [GOVERNING_DAMAGED]
 
 
 def beamtime_reach(index: "_Index", path: str | None, runs: set[str]) -> list[str | None]:
@@ -1586,8 +1590,34 @@ def governing_decisions(answers: Mapping, log: Sequence[Mapping], paths: Sequenc
     return sorted(i for i in ids if isinstance(i, str))
 
 
+def _adopt_position(value: Any, log_length: int) -> int | None:
+    """c14l MED-2: the ``_isaac`` ``decisions_at_adopt`` value (how many decisions the log held when ``template adopt``
+    wrote the workbook), or ``None`` for a workbook adopted before it was kept, or a damaged value (not a whole number,
+    or more decisions than the log holds now): such a workbook is read as before (:func:`_rules_against_now`)."""
+    if isinstance(value, str) and value.strip().isdigit():
+        value = int(value.strip())
+    if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= log_length:
+        return None
+    return value
+
+
+def _since_adopt(place: int | None, decision: Mapping | None, adopted_at: int | None, exported_utc: Any) -> bool:
+    """c14l MED-2: whether ``decision`` (``log[place]``) is KNOWN to have been recorded after the workbook was adopted:
+    by its place in the decision log (``adopted_at``, :func:`_adopt_position`), or, for a workbook adopted before that
+    was kept, only when its time is readable and strictly after the workbook's (``exported_utc``). Never by default."""
+    from . import propose_terms as P
+
+    if decision is None:
+        return False
+    if adopted_at is not None:
+        return place is not None and place >= adopted_at
+    made, decided = P._utc(exported_utc), P._utc(decision.get("decided_utc"))
+    return made is not None and decided is not None and decided > made
+
+
 def _rules_against_now(cell: Mapping, prior: Mapping, exported_utc: Any, chain: Sequence[Mapping] = (),
-                       history: Sequence[Mapping] | None = None) -> bool:
+                       history: Sequence[Mapping] | None = None, *, adopted_at: int | None = None,
+                       places: Mapping[int, int] | None = None, keeps: bool = True) -> bool:
     """c14j MED-1: whether a Disagreements ruling (``cell``) was made against the value that governs its target now.
     ``chain`` (c14k MED-1, :class:`_Chains`): the decisions of the unbroken same-value run ending at ``prior``, the
     decision that governs now (``()``: ``prior`` alone). Made against it when the decisions its row read when adopted
@@ -1597,7 +1627,15 @@ def _rules_against_now(cell: Mapping, prior: Mapping, exported_utc: Any, chain: 
     ``history`` among ``ruled_against``) is tied when every decision recorded since is of that run (both their sheets
     adopted first, then imported in turn: no extra round), never when a different value, a reject or a defer came
     between. A stale workbook's ruling (adopted before that run of the value began) is never tied: it is listed apart
-    (``stale_rulings``)."""
+    (``stale_rulings``).
+
+    c14l MED-2: ``adopted_at`` (:func:`_adopt_position`) places "recorded since" exactly: the decisions of ``history``
+    at or after that place in the decision log (``places``: ``id(decision) -> place``), so a reject, a defer or an
+    off-list value recorded BEFORE the workbook was adopted never stops a tie. Without it, every decision of
+    ``history`` counts, as before. c14l MED-1: ``keeps`` ``False`` is a ruling that gives a DIFFERENT value, read
+    before ``--supersede`` records it over ``prior``: made against ``prior`` only when one of ``chain`` was among the
+    decisions it was ruled against, or (``adopted_at``) nothing was recorded on the target since the workbook was
+    adopted (``prior`` was there to see); never by a run that only began since (it never saw that value)."""
     from . import propose_terms as P
 
     run = list(chain) or [prior]
@@ -1607,8 +1645,18 @@ def _rules_against_now(cell: Mapping, prior: Mapping, exported_utc: Any, chain: 
     if against is not None:
         if any(d.get("decision_id") in against for d in run):
             return True
-        seen = [d for d in history or () if d.get("decision_id") in against]
-        return history is not None and not seen and {id(d) for d in history} <= {id(d) for d in run}
+        if history is None:
+            return False
+        if adopted_at is not None and places is not None:
+            since = [d for d in history if (p := places.get(id(d))) is None or p >= adopted_at]
+        elif not keeps:
+            return False  # nothing places the workbook against the run that governs now
+        else:
+            since = list(history)
+        if not keeps:
+            return not since
+        seen = [d for d in history if d.get("decision_id") in against]
+        return not seen and {id(d) for d in since} <= {id(d) for d in run}
     # A workbook adopted before `governing_decisions` was kept: placed by its export time. This FAILS SAFE: an unreadable
     # time, or one before every decision of the run, never ties (the row is asked again at the next adopt; nothing is
     # recorded twice).
@@ -1857,11 +1905,15 @@ def _same_value(a: Any, b: Any) -> bool:
 
 
 def _stale_reason(cell: Mapping, chain: Sequence[Mapping], chains: "_Chains", run: Sequence[int],
-                  exported_utc: Any) -> str:
+                  exported_utc: Any, *, adopted_at: int | None = None, keeps: bool = True) -> str:
     """c14k MED-1: why a ruling that keeps the recorded value is not tied (:func:`plan_and_record`): its workbook was
     adopted before the run of that value began (``chain``, latest first; :class:`_Chains`). The decision that ended the
     previous run is named only when it is known to come after the workbook (not among the decisions it was ruled
-    against; a workbook placed by time alone names none)."""
+    against; a workbook placed by time alone names none). c14l MED-2: "since" is said only when the decision log's
+    place (``adopted_at``) or, without it, a readable time strictly after the workbook's proves it
+    (:func:`_since_adopt`); a reject, a defer or a value recorded before the adopt is never said to have come since.
+    c14l MED-1: ``keeps`` ``False``: a ruling giving a different value that ``--supersede`` does not record, because it
+    was not made against the value recorded now (:func:`_rules_against_now`)."""
     from . import propose_terms as P
 
     first = chain[-1].get("decision_id") or "the decision that governs now"
@@ -1870,16 +1922,29 @@ def _stale_reason(cell: Mapping, chain: Sequence[Mapping], chains: "_Chains", ru
     changed = chains.log[ended] if ended is not None else None
     since = ""
     if against is not None and GOVERNING_DAMAGED in against:
-        return ("ruled on a workbook whose `_isaac` governing_decisions value is damaged, so it is never tied; the "
-                "recorded value is kept and nothing is recorded for this ruling. Adopt again to settle this sheet")
-    if changed is not None and against is not None and changed.get("decision_id") not in against:
+        if keeps:
+            return ("ruled on a workbook whose `_isaac` governing_decisions value is damaged, so it is never tied; the "
+                    "recorded value is kept and nothing is recorded for this ruling. Adopt again to settle this sheet")
+        return ("ruled on a workbook whose `_isaac` governing_decisions value is damaged, so it is never recorded over "
+                "another value, even with --supersede; the value recorded now is kept and nothing is recorded for this "
+                "ruling. Adopt again and rule against what is recorded now")
+    if (changed is not None and against is not None and changed.get("decision_id") not in against
+            and _since_adopt(ended, changed, adopted_at, exported_utc)):
         did = changed.get("decision_id")
         since = (f", and {did} {'rejected' if changed.get('decision') == 'reject' else 'deferred'} the value since"
                  if changed.get("decision") in ("reject", "defer") else f", and a different value was recorded since ({did})")
-    placed = against is not None or P._utc(exported_utc) is not None
-    lead = (f"ruled on a workbook adopted before {first}" if placed
-            else f"ruled on a workbook whose adoption time cannot be placed after {first}")
-    return f"{lead}{since}; the recorded value is kept and nothing is recorded for this ruling. Adopt again to settle this sheet"
+    if keeps:
+        placed = against is not None or P._utc(exported_utc) is not None
+        lead = (f"ruled on a workbook adopted before {first}" if placed
+                else f"ruled on a workbook whose adoption time cannot be placed after {first}")
+        return (f"{lead}{since}; the recorded value is kept and nothing is recorded for this ruling. Adopt again to settle "
+                "this sheet")
+    # a ruling read before --supersede: "adopted before" only when the log's place or the time proves it
+    placed = bool(run) and _since_adopt(run[-1], chain[-1], adopted_at, exported_utc)
+    lead = (f"ruled on a workbook adopted before {first}{since}; this ruling was made against an earlier value, so"
+            if placed else f"ruled on a workbook not shown to have been adopted against {first}, so")
+    return (f"{lead} nothing is recorded for it, even with --supersede, and the value recorded now is kept. Adopt again and "
+            "rule against what is recorded now")
 
 
 def _prior(bundle: Mapping, kind: str, obj: Mapping, latest: Mapping) -> Mapping | None:
@@ -2068,6 +2133,9 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
     tied: set[str] = set()  # c14i MED-1: a ruling's same value, recorded again to tie it to their sheet
     chains = _Chains(bundle)  # c14k MED-1: the same-value run that ends at each target's governing decision
     place_of = {id(d): i for i, d in enumerate(chains.log)}
+    # c14l MED-2: the decision log's length when the workbook was adopted ("recorded since" is a place, not a time)
+    adopted_at = _adopt_position(cells.get("decisions_at_adopt"), len(chains.log))
+    placing = dict(adopted_at=adopted_at, places=place_of)
     seen_target: set[str] = set()
     for cell, decision, kind, obj, tid in planned:
         if tid in split:
@@ -2088,7 +2156,7 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
             chain = [chains.log[p] for p in run] or [prior]
             untied = same and cell.get("ruling") and not _ruled_in_chain(chain, range(len(chain)), cell["ruling"])
             history = chains.history(run[0]) if run else [prior]
-            if untied and _rules_against_now(cell, prior, cells.get("exported_utc"), chain, history):
+            if untied and _rules_against_now(cell, prior, cells.get("exported_utc"), chain, history, **placing):
                 # c14i MED-1: a ruling that keeps the recorded value, which no ruling on their cell AS IT READS NOW
                 # recorded (they edited it since, or the value came from a file or `decide`): recorded again, tied to
                 # their sheet, or every later adopt would ask it again. c14j MED-1: only a ruling made against a
@@ -2103,20 +2171,38 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                 report["stale"].append({"cell": cell["cell"], "target": {"kind": kind, "id": tid}, "value": cell["value"],
                                         "run_id": obj.get("run_id"), "header": cell["header"],
                                         "decision_id": prior.get("decision_id"),
-                                        "reason": _stale_reason(cell, chain, chains, run, cells.get("exported_utc"))})
+                                        "reason": _stale_reason(cell, chain, chains, run, cells.get("exported_utc"),
+                                                                adopted_at=adopted_at)})
                 continue
             elif same:
                 report["already"].append({"cell": cell["cell"], "target": {"kind": kind, "id": tid}, "value": cell["value"],
                                           "decided_by": (prior.get("decided_by") or {}).get("name"), "decision_id": prior.get("decision_id")})
                 continue
-            elif not supersede:
-                report["clashes"].append({
-                    "cell": cell["cell"], "target": {"kind": kind, "id": tid}, "value": cell["value"],
-                    "existing": {"decision": prior.get("decision"), "value": before, "decision_id": prior.get("decision_id"),
-                                 "decided_by": (prior.get("decided_by") or {}).get("name")},
-                    "reason": "an earlier scientist decision gives a different value; skipped (pass --supersede to record this one)",
-                })
-                continue
+            else:
+                # c14l MED-1: --supersede records a ruling over the value that governs only when the ruling was made
+                # against it. A ruling on a workbook adopted before that value was recorded never saw it: recorded,
+                # two such workbooks (one ruling each value) would flip the value at every import, forever
+                unseen = cell["sheet"] == SHEET_DISAGREE and not _rules_against_now(
+                    cell, prior, cells.get("exported_utc"), chain, history, **placing, keeps=False)
+                if not supersede:
+                    report["clashes"].append({
+                        "cell": cell["cell"], "target": {"kind": kind, "id": tid}, "value": cell["value"],
+                        "existing": {"decision": prior.get("decision"), "value": before, "decision_id": prior.get("decision_id"),
+                                     "decided_by": (prior.get("decided_by") or {}).get("name")},
+                        "reason": ("an earlier scientist decision gives a different value; skipped, and --supersede does not "
+                                   "record it either: this ruling was not made against the value recorded now. Adopt again "
+                                   "and rule against what is recorded now" if unseen else
+                                   "an earlier scientist decision gives a different value; skipped (pass --supersede to "
+                                   "record this one)"),
+                    })
+                    continue
+                if unseen:
+                    report["stale"].append({"cell": cell["cell"], "target": {"kind": kind, "id": tid}, "value": cell["value"],
+                                            "run_id": obj.get("run_id"), "header": cell["header"],
+                                            "decision_id": prior.get("decision_id"),
+                                            "reason": _stale_reason(cell, chain, chains, run, cells.get("exported_utc"),
+                                                                    adopted_at=adopted_at, keeps=False)})
+                    continue
         if cell["cell"] in hinted and tid not in tied:  # c14j LOW-1: a tied ruling changes no value
             # once per cell: a Campaign Info answer fills every run's target, and one hint line covers them all
             key = (cell["cell"], "")
@@ -2626,7 +2712,8 @@ def _invalid_lines(items: Sequence[Mapping]) -> list[str]:
 def _tied_summary(rep: Mapping) -> str:
     """c14j LOW-1: the rulings tied to their sheet (their decisions are among those recorded), counted by ruling cell,
     however many targets it reaches (a Campaign Info ruling reaches every File List run). c14k LOW-5: two counts, each
-    with its own unit: "; 1 ruling cell kept the same value and is now tied to your sheet (9 targets)"."""
+    with its own unit; c14l LOW-3: said as part of the decisions recorded: "N decision(s) recorded, including 1 ruling
+    cell that kept the same value and is now tied to your sheet (9 targets)"."""
     tied = rep.get("rulings_tied_to_sheet") or ()
     if not tied:
         return ""
@@ -2636,7 +2723,8 @@ def _tied_summary(rep: Mapping) -> str:
         said = f"kept the same value and {'is' if one else 'are'} now tied to your sheet"
     else:
         said = f"{'keeps' if one else 'keep'} the same value and {'is' if one else 'are'} to be tied to your sheet"
-    return (f"; {rulings} ruling cell{'' if one else 's'} {said} ({len(tied)} target{'s' if len(tied) != 1 else ''})")
+    return (f", including {rulings} ruling cell{'' if one else 's'} that {said} "
+            f"({len(tied)} target{'s' if len(tied) != 1 else ''})")
 
 
 def render_report(rep: Mapping, *, full: bool = False) -> str:
@@ -2686,8 +2774,10 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
             add(f"  {x['cell']}{run} {x['header']} = {x['value']!r} (was {x['decision_id']})")
     if rep.get("stale_rulings"):
         add("")
-        add("Rulings on a workbook adopted before the value recorded now (the value is kept; nothing is recorded for "
-            "them, and this sheet's row is asked again until you adopt it again and rule):")
+        # c14l LOW-2: neutral; each line's reason says why (adopted before the value recorded now, a damaged hidden
+        # sheet, a ruling --supersede does not record over a value it never saw)
+        add("Rulings not tied to your sheet (nothing is recorded for them and the value recorded now is kept; each line "
+            "says why):")
         for x in rep["stale_rulings"]:
             run = f" {x['run_id']}" if x.get("run_id") else ""
             add(f"  {x['cell']}{run} {x['header']} = {x['value']!r}: {x['reason']}")
@@ -2783,8 +2873,8 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
         + (f"; {len(rep['replaces_or_contradicts_a_file_reading'])} replace or contradict a file reading"
            if rep.get("replaces_or_contradicts_a_file_reading") else "")
         + (f"; {len(rep['awaiting_ruling'])} disagreement(s) awaiting a ruling" if rep.get("awaiting_ruling") else "")
-        + (f"; {len({str(x['cell']).split(' via ', 1)[0] for x in rep['stale_rulings']})} ruling cell(s) on a workbook "
-           "adopted before the value recorded now (nothing recorded; adopt again)" if rep.get("stale_rulings") else "")
+        + (f"; {len({str(x['cell']).split(' via ', 1)[0] for x in rep['stale_rulings']})} ruling cell(s) not tied to "
+           "your sheet (nothing recorded)" if rep.get("stale_rulings") else "")
         + (f"; {len(rep['disagreements_already_recorded'])} disagreement(s) already recorded (blank: kept)"
            if rep.get("disagreements_already_recorded") else "")
         + (f"; {len({x['group_id'] for x in rep['not_reached']})} group(s) not reached by a beamtime-wide answer"
@@ -3473,6 +3563,9 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
         marker.cell(row=r, column=1, value="[meta]")  # read into the same meta as the first block
         marker.cell(row=r + 1, column=1, value="adopted_from")
         marker.cell(row=r + 1, column=2, value=their_file)
+        # c14l MED-2: the decision log's length at adopt; a decision at or after this place was recorded since
+        marker.cell(row=r + 2, column=1, value="decisions_at_adopt")
+        marker.cell(row=r + 2, column=2, value=len(chains.log))
 
         result["disagreements"] = [{k: g[k] for k in ("id", "kind", "header", "path", "their_value", "their_cells", "readings",
                                                       "runs", "answer_cells", "reason", "scope", "unread_hints",

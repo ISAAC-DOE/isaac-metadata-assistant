@@ -281,9 +281,9 @@ def test_marker_governing_is_damaged_for_a_damaged_value_with_the_column(damaged
 def test_the_tied_summary_says_two_counts():
     two = [{"cell": "'Disagreements'!H2"}, {"cell": "'Disagreements'!H3"}, {"cell": "'Disagreements'!H3"}]
     assert T._tied_summary({"rulings_tied_to_sheet": two, "applied": False}) == (
-        "; 2 ruling cells keep the same value and are to be tied to your sheet (3 targets)")
+        ", including 2 ruling cells that keep the same value and are to be tied to your sheet (3 targets)")
     assert T._tied_summary({"rulings_tied_to_sheet": two, "applied": True}) == (
-        "; 2 ruling cells kept the same value and are now tied to your sheet (3 targets)")
+        ", including 2 ruling cells that kept the same value and are now tied to your sheet (3 targets)")
     assert T._tied_summary({"rulings_tied_to_sheet": two[:1], "applied": False}) == (
-        "; 1 ruling cell keeps the same value and is to be tied to your sheet (1 target)")
+        ", including 1 ruling cell that keeps the same value and is to be tied to your sheet (1 target)")
     assert T._tied_summary({"rulings_tied_to_sheet": [], "applied": True}) == ""

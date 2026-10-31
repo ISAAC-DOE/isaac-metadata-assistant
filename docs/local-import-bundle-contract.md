@@ -1879,8 +1879,8 @@ adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
   the governing decision is chosen) while each confirms the same value; a different value, a reject or a defer ends
   the run, and the row awaits a ruling again. A ruling that keeps the value already recorded, but is not in that run
   as a ruling on their cell as it reads now (c14i), is recorded again with the same value (`rulings_tied_to_sheet`;
-  the summary counts them apart from the decisions recorded: "N decision(s) recorded; 1 ruling cell kept the same
-  value and is now tied to your sheet (9 targets)", and never lists them as replacing or contradicting a file
+  the summary counts them among the decisions recorded: "N decision(s) recorded, including 1 ruling cell that kept
+  the same value and is now tied to your sheet (9 targets)", and never lists them as replacing or contradicting a file
   reading), so adopting this sheet again reads it as ruled until a different value, a reject or a defer is recorded;
   the same workbook imported again records nothing more. Two sheets of theirs ruled the same value each tie once and
   both stay settled: a later tie extends the run, it never replaces the earlier ruling. (c14j) Only a ruling made
@@ -1892,7 +1892,17 @@ adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
   when it was adopted at or after a decision of the run (by its `exported_utc`; an unreadable time never ties). A
   ruling on a workbook adopted before the run began records nothing and is listed apart (`stale_rulings`: "ruled on a workbook adopted
   before d-000N, and a different value was recorded since (d-000M); … Adopt again to settle this sheet"), never as
-  "already recorded". A ruling takes its target from a File List cell giving the same value.
+  "already recorded". (c14l) Adopt also keeps the decision log's length (`_isaac` `decisions_at_adopt`), so
+  "recorded since" is a place in the log: a reject, a defer or an off-list value recorded before the adopt never stops
+  a tie, and a reason says "since" only when that place (or, for a workbook without it, a readable time strictly after
+  the workbook's) proves it. With `--supersede`, a ruling giving a different value is recorded over the value that
+  governs only when it was made against it (a decision of that run was among those its row read, or nothing was
+  recorded on the target since the adopt); otherwise it is listed in `stale_rulings` ("… this ruling was made against
+  an earlier value, so nothing is recorded for it, even with --supersede …"), so two workbooks ruling different values
+  never flip the value at each import. The report lists them under "Rulings not tied to your sheet" and the summary
+  says "N ruling cell(s) not tied to your sheet (nothing recorded)"; each reason says why. A damaged
+  `governing_decisions` list (any element that is not a decision id) is never tied. A ruling takes its target from a
+  File List cell giving the same value.
   Settled, it says "already recorded: <value> (<date>); leave blank to keep" (the adopt result's `already_recorded`,
   counted apart in the summary); otherwise it awaits a ruling and says "recorded `12` (date); your sheet says `2`:
   rule which" (`recorded_note`). An Electrolyte row stating a concentration is settled only when the name and the
