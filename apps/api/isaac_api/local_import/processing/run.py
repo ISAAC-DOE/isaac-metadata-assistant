@@ -1061,6 +1061,9 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         athena_res["run_id"] = run_id
         athena_res["result_id"] = f"proc-{group['group_id']}-{run_id}-athena"
         out.append(athena_res)
+    # result.json is a SNAPSHOT, written once with the run folder: a re-run into an existing folder leaves it as it is
+    # (the folder is content-addressed and never rewritten), so a sentence added to the result later (the non-hashed
+    # `qc.statements`) is in bundle.json and the list/show output, not necessarily in an older result.json
     record = gdir / "result.json"
     if not record.exists():
         _write(record, _json_bytes({"results": out}))

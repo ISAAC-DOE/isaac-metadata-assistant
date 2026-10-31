@@ -666,7 +666,8 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
                     generated_by = {"agent": r["protocol_id"], "version": str(r["protocol_version"]), "notes": (
                         f"The mean of {of} per-scan Athena normalisations{which}, {by}: the scientist kept one "
                         "Athena group per scan, and ISAAC averaged their curves and E0s. It is not a merge the "
-                        "scientist made; a scientist approved it.")}
+                        "scientist made; a scientist approved it. generated_utc is when a scientist approved "
+                        "ISAAC's mean of them, not when the Athena processing was done.")}
                     definition = (f"Mean E0 of {of} per-scan Athena normalisations, {by}; approved by a "
                                   "scientist. Not a merge the scientist made.")
                 else:

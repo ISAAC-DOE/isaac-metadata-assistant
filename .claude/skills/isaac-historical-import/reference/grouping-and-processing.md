@@ -100,7 +100,8 @@ it finds one. Show per group, in words:
   when there are several Athena versions, `athena_version_choices` (each `version_id` with its project
   file, Athena group and label). `<isaac> bundle show <bundle> processing-result <result_id>` prints one
   result compactly (QC with its `statements`, each step's outcome, the Athena comparison and every
-  version's comparison; long lists are counted, not printed); its `result_file` is the full result.
+  version's comparison; long lists are counted, not printed); its `result_file` (`result.json`) is the result as the run first wrote it and is never rewritten, so
+  the current sentences are in this output, not necessarily in that file.
 - when `process` says why none of the scientist's Athena groups matched (`athena.statement`), say it
   in those words.
 

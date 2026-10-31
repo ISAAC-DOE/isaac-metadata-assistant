@@ -812,12 +812,22 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     counter_gqs = [gq for gq in bundle.get("grouping_questions") or ()
                    if isinstance(gq, Mapping) and gq.get("kind") == "naming_counter_positions"]
     if include_answered and not counter_gqs and (said_counter or said_not):
-        # ANSWERED, AND APPLIED: the regroup that applied a counter answer no longer asks the question (no merge is
-        # blocked by those positions now), but its id is the one it was asked with, so it is still found
+        # ANSWERED: the grouping step no longer lists the question (a regroup applied the answer, or it never asked it
+        # and the answer was given straight to `decide`), but its id is the one it would be asked with, so it is still
+        # found. Worded from what the bundle shows: while a regroup would still change a group or free a merge, the
+        # answer is NOT applied yet (a question the grouping step asked is listed above until a regroup removes it, so
+        # reaching here with an effect still pending means it was never asked)
+        from .mutations import counter_answer_preview
+
+        pending = counter_answer_preview(bundle) if said_counter else {}
+        applied_now = not (pending.get("groups_joined") or pending.get("groups_split") or pending.get("merge_decisions_unblocked"))
         counter_gqs = [{"id": _COUNTER_GQ_ID, "kind": "naming_counter_positions",
                         "positions": sorted(p for p in said_counter | set(said_not) if p > 0),
-                        "text": "Which filename token positions are run or acquisition counters? (Answered, and the "
-                                "regroup applied it: the grouping step no longer asks it.)"}]
+                        "text": "Which filename token positions are run or acquisition counters? ("
+                                + ("Answered; the current groups already follow it, so the grouping step has nothing left "
+                                   "to ask." if applied_now else
+                                   "Answered directly, and not applied yet: the grouping step did not ask this, and no "
+                                   "regroup has run since. " + str(pending.get("statement") or "")) + ")"}]
     for gq in counter_gqs:
         asked_positions = [int(p) for p in gq.get("positions") or () if isinstance(p, int)]
         open_positions = [p for p in asked_positions if p not in said_counter and p not in said_not]

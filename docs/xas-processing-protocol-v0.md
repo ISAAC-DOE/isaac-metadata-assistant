@@ -315,7 +315,11 @@ digests and every data output; the plot is excluded). Earlier runs are never ove
 deleted: an identical re-run reuses the same directory and ids without rewriting a byte, and
 any changed parameter yields a NEW `run_id` and NEW, undecided `result_id`s
 (`proc-<group>-<run_id>-isaac|athena`), with `prior_run_ids` listed. Each run directory also
-holds `result.json`. Paths are relative to the bundle directory and never contain `..`.
+holds `result.json`: the result as the run first produced it. `result.json` is written once, with the run, and a re-run
+into an existing run folder never rewrites it, so a plain sentence added to `qc.statements` by a later build (the
+statements are not hashed into `run_id`) is in `bundle.json`, `isaac bundle list <bundle_dir> processing-results` and
+`isaac bundle show <bundle_dir> processing-result <result_id>`, which are the current result. Paths are relative to the
+bundle directory and never contain `..`.
 
 `<bundle_dir>/record_groups.json`; `<bundle_dir>/processing/processing_results.json`
 (`processing_results[]` in the bundle-v1.1 shape, `unread_acquisition_results[]`);

@@ -1145,7 +1145,8 @@ def _scans_line(r: Mapping) -> str | None:
 
 def _processing_result_view(bundle: Mapping, r: Mapping) -> dict:
     """One processing result, compact: what a reviewer needs to decide it and to pick an Athena version.
-    Arrays (per-scan lists, flagged points) are counted, not printed; the full result is in ``result_file``."""
+    Arrays (per-scan lists, flagged points) are counted, not printed; the result as the run first wrote it is in ``result_file`` (written once, never rewritten: the current
+    sentences are in this output)."""
     from pathlib import PurePosixPath
 
     from . import bundle as B

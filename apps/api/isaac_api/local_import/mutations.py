@@ -936,10 +936,22 @@ def decide_question(
         )
         if dry_run:
             planned = record_decision(copy.deepcopy(bundle), **params)
+            planned = {**planned, "statement": _would_say(planned.get("statement"))}
             return _with_kept(kept_overrides, {"dry_run": True, "bundle_version": version, "target_ids": params["target_ids"], **planned})
         result = _with_kept(kept_overrides, record_decision(bundle, **params))
         save_bundle(bundle_dir, bundle)
         return (result, bundle_version(bundle_dir)) if with_version else result
+
+
+def _would_say(statement: str | None) -> str | None:
+    """A decide statement said for a DRY RUN, which writes nothing: "Fe K recorded for 9 groups." becomes "Would
+    record: Fe K recorded for 9 groups. Nothing was written."; "Nothing new recorded: …" becomes "Nothing would be
+    recorded: …"."""
+    if not statement:
+        return statement
+    if statement.startswith("Nothing new recorded"):
+        return "Nothing would be recorded" + statement[len("Nothing new recorded"):] + " Nothing was written."
+    return f"Would record: {statement} Nothing was written."
 
 
 def _keep_absorber_overrides(bundle: Mapping, group_ids: Sequence[str]) -> tuple[list[str], list[dict]]:
