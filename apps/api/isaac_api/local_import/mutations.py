@@ -200,6 +200,7 @@ def save_bundle(bundle_dir: Path, bundle: dict) -> None:
             decisions_before=len((stored if stored is not None else bundle).get("scientist_decisions") or ()))
         print(f"isaac: {entry['statement']} (bundle format {stored_version} -> {to_version}; "
               "logged in bundle.json format_upgrades)", file=sys.stderr)
+    drop_dead_slots(bundle)  # an answer slot no decision names is never left behind as an empty question
     B.refresh_local_write_summaries(bundle)
     B.hold_beamtime_wide_statements(bundle)  # what the import now gives (bundle.BEAMTIME_WIDE_REASON); no format change
     bundle["format_version"] = to_version
@@ -888,13 +889,8 @@ def question_targets(payload: Mapping, question_id: str, *, decision: str, only:
     return list(found), (list(positions) if positions is not None else None)
 
 
-#: The reason a per-run answer slot says it exists (:func:`run_answer_targets`): the import asked the field once
-#: for the whole beamtime, and the scientist answered it for some runs only.
-ANSWER_SLOT_REASON = (
-    "The files state this field only once for the whole beamtime (question {question}), not for this run. A "
-    "scientist answered it for this run's group alone ({how}), so this slot holds that answer. The beamtime-wide "
-    "reading is never copied onto the run (DEC-69)."
-)
+#: The reason a per-run answer slot says it exists (:func:`run_answer_targets`; :func:`bundle.is_answer_slot`).
+ANSWER_SLOT_REASON = B.ANSWER_SLOT_REASON
 
 
 def run_answer_targets(bundle: dict, path: str, run_ids: Sequence[str], *, question_id: str,
@@ -940,6 +936,18 @@ def drop_unrecorded_slots(bundle: dict, added: Sequence[str]) -> list[str]:
     decided = {(d.get("target") or {}).get("id") for d in bundle.get("scientist_decisions") or ()
                if (d.get("target") or {}).get("kind") == "missing_value"}
     gone = [v for v in added if v not in decided]
+    if gone:
+        bundle["missing_values"] = [m for m in bundle["missing_values"] if m["value_id"] not in set(gone)]
+    return gone
+
+
+def drop_dead_slots(bundle: dict) -> list[str]:
+    """c7-r LOW-8: remove every answer slot (:func:`bundle.is_answer_slot`) that nothing names — no decision, exposure,
+    question or AI reading — on any save, as :func:`drop_unrecorded_slots` does for one call's own: a slot exists only
+    to hold an answer. A slot any decision names (a deferred one too) is never dropped: the log refers to it."""
+    named = {(e.get("target") or {}).get("id") for key in ("scientist_decisions", "exposures", "questions", "ai_interpretations")
+             for e in bundle.get(key) or () if (e.get("target") or {}).get("kind") == "missing_value"}
+    gone = [m["value_id"] for m in bundle.get("missing_values") or () if B.is_answer_slot(m) and m["value_id"] not in named]
     if gone:
         bundle["missing_values"] = [m for m in bundle["missing_values"] if m["value_id"] not in set(gone)]
     return gone
@@ -1014,22 +1022,152 @@ def group_answer_targets(bundle: dict, asked: Mapping, only: str, field: str | N
                         "slots_added": len(added), "other_groups": max(groups - 1, 0)}
 
 
-def _reach_statement(bundle: Mapping, recorded_ids: Sequence[str], override: Mapping | None) -> str | None:
-    """What a decide reply on a BEAMTIME-WIDE question adds to its plain sentence: how many groups and runs the
-    answer reaches (``'HERFD-XAS' recorded for 1 conflict`` alone does not say it is every record of the beamtime),
-    or, for ``--only group:<id>``, that it reaches that group only and what still asks the rest."""
+def _options_for(bundle: Mapping, path: str) -> list[tuple[str | None, str, Any, bool]]:
+    """``[(run_id, target id, value, answered)]``: every value the record composer would take for ``path``
+    (``records.compose_group``: an eligible candidate or missing value, under its decision), ``answered`` when a
+    scientist's decision gives it."""
+    from .records import FIELD_REMAP
+
+    want = FIELD_REMAP.get(path, path)
+    decisions = B._decisions_by_target(bundle.get("scientist_decisions") or ())
+    out = []
+    for c in bundle.get("candidates") or ():
+        if FIELD_REMAP.get(c.get("target_field_path"), c.get("target_field_path")) != want or not (
+                c.get("eligibility_for_official_record") or {}).get("eligible"):
+            continue
+        d = B.candidate_decision(bundle, c, decisions)
+        out.append((c.get("run_id"), c["candidate_id"], B.final_value(c["value"], d, c.get("readings")),
+                    bool(d) and d.get("decision") in B.CONFIRMING_DECISIONS))
+    for m in bundle.get("missing_values") or ():
+        if FIELD_REMAP.get(m.get("target_field_path"), m.get("target_field_path")) != want or not (
+                m.get("eligibility_for_official_record") or {}).get("eligible"):
+            continue
+        d = decisions.get(("missing_value", m["value_id"]))
+        out.append((m.get("run_id"), m["value_id"], B.final_value(None, d), True))
+    return out
+
+
+def _same(a: Any, b: Any) -> bool:
+    return json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
+
+
+def groups_keeping_their_own_answer(bundle: Mapping, path: str, value: Any, *, question_id: str | None = None) -> list[dict]:
+    """The live record groups a beamtime-wide ``value`` for ``path`` does NOT fill (c7-r HIGH-1): a member run holds a
+    value of its own for it (a scientist's run-scoped answer — its own target, or an answer slot from
+    ``--only group:<id>`` — or an eligible value its files state) that differs, so the record composer meets two
+    values and fills nothing for ``path`` until they agree. ``[{group_id, runs, own_answers, files_state,
+    target_ids, command}]``; ``own_answers`` lists only what a SCIENTIST answered (a file's value is never
+    printed here: it would be a parser value shown)."""
+    from . import questions as Q
+
+    differing: dict[str, list[tuple[str, Any, bool]]] = {}
+    for rid, tid, v, answered in _options_for(bundle, path):
+        if rid is not None and not _same(v, value):
+            differing.setdefault(rid, []).append((tid, v, answered))
+    if not differing:
+        return []
+    run_of_key = {r["run_key"]: r["run_id"] for r in bundle["runs"]}
+    out = []
+    for g in Q.live_groups(bundle):
+        members = [run_of_key[k] for k in g.get("member_run_keys") or () if k in run_of_key]
+        mine = [x for r in members for x in differing.get(r, ())]
+        if not mine:
+            continue
+        own, seen = [], set()
+        for _tid, v, answered in mine:
+            if answered and json.dumps(v, sort_keys=True) not in seen:
+                seen.add(json.dumps(v, sort_keys=True))
+                own.append(v)
+        command = (f"isaac bundle decide <bundle_dir> --question {question_id} --only group:{g['group_id']} --decision "
+                   'correct --value <value> --by "<your name>"' if question_id else None)
+        out.append({"group_id": g["group_id"], "runs": len({r for r in members if r in differing}),
+                    "own_answers": own, "files_state": any(not a for _t, _v, a in mine),
+                    "target_ids": [t for t, _v, _a in mine], **({"command": command} if command else {})})
+    return out
+
+
+def not_reached_sentence(path: str, kept: Sequence[Mapping], *, lead: str = "NOT reached: ") -> str:
+    """The plain sentence for :func:`groups_keeping_their_own_answer`: each group NOT reached, what it keeps, and
+    how to change it."""
+    label = path
+    parts = []
+    for k in kept[:5]:
+        own = " / ".join(repr(v) for v in k["own_answers"])
+        what = (f"keeps its own answer {own}" if own else "keeps the value its own files state")
+        if own and k["files_state"]:
+            what += " (and a value its own files state)"
+        parts.append(f"group:{k['group_id']} {what}, so it fills nothing for {label} until the two agree"
+                     + (f"; answer `--only group:{k['group_id']}` to change it (`{k['command']}`)" if k.get("command") else ""))
+    more = f"; and {_count(len(kept) - 5, 'more group')}" if len(kept) > 5 else ""
+    return lead + "; ".join(parts) + more + "."
+
+
+def _beamtime_value(bundle: Mapping, path: str) -> tuple[bool, Any]:
+    """``(found, value)``: the value the beamtime-wide target of ``path`` gives every record, when one is eligible."""
+    found = [v for rid, _tid, v, _a in _options_for(bundle, path) if rid is None]
+    return (bool(found), found[0] if found else None)
+
+
+def _reach_statement(bundle: Mapping, recorded_ids: Sequence[str], override: Mapping | None,
+                     question_id: str | None = None) -> tuple[str | None, dict]:
+    """What a decide reply on a BEAMTIME-WIDE question adds to its plain sentence, and its ``reach``: how many groups
+    and runs the answer reaches (``'HERFD-XAS' recorded for 1 conflict`` alone does not say it is every record of the
+    beamtime) and, c7-r HIGH-1, each group it does NOT reach because a run of it keeps its own, differing answer; or,
+    for ``--only group:<id>``, that it reaches that group only and what still asks the rest. ``bundle``: the bundle
+    the decision was recorded on (a dry run's copy too)."""
     if override is not None:
         label = override["path"].rsplit(".", 1)[-1].replace("_", " ")
+        found, beamtime = _beamtime_value(bundle, override["path"])
+        mine = [v for rid, tid, v, _a in _options_for(bundle, override["path"])
+                if tid in set(recorded_ids) and rid is not None]
+        if found and mine and not _same(mine[0], beamtime):
+            tail = (f"The beamtime-wide answer to question {override['question_id']} differs from this one, so this "
+                    f"group's record has two values for {label} and fills nothing for it until the two agree.")
+        elif found and mine:
+            tail = f"It agrees with the beamtime-wide answer to question {override['question_id']}."
+        else:
+            tail = (f"if its answer differs from this one, this group's record gets two values for {label} and fills "
+                    "nothing for it.")
         return (f"It reaches {override['scope']} only ({_count(override['runs'], 'run')}"
                 + (f"; {_count(override['slots_added'], 'answer slot')} added for runs the files give no target of "
                    "their own" if override["slots_added"] else "")
                 + f"). The beamtime-wide question {override['question_id']} covers the other "
-                f"{_count(override['other_groups'], 'group')}; if its answer differs from this one, this group's record gets "
-                f"two values for {label} and fills nothing for it.")
-    if not _beamtime_level(bundle, recorded_ids):
-        return None
+                f"{_count(override['other_groups'], 'group')}"
+                + (f". {tail}" if tail[0].isupper() else f"; {tail}")), dict(override)
+    level = _beamtime_level(bundle, recorded_ids)
+    if not level:
+        return None, {}
     groups, runs = _live_reach(bundle)
-    return f"It reaches every record group of the beamtime: {_count(groups, 'group')}, {_count(runs, 'run')}."
+    paths = []
+    for tid in level:
+        try:
+            kind, obj = resolve_target(bundle, tid)
+        except MutationRefused:
+            continue
+        if kind == "conflict":
+            obj = next((c for c in bundle.get("candidates") or () if c.get("candidate_id") == obj.get("candidate_id")), {})
+        if obj.get("target_field_path") and obj["target_field_path"] not in paths:
+            paths.append(obj["target_field_path"])
+    kept: list[dict] = []
+    for path in paths:
+        found, value = _beamtime_value(bundle, path)
+        if found:
+            kept += [{**k, "path": path} for k in groups_keeping_their_own_answer(bundle, path, value, question_id=question_id)]
+    reach = {"beamtime_wide": True, "groups": groups, "runs": runs}
+    if not kept:
+        return f"It reaches every record group of the beamtime: {_count(groups, 'group')}, {_count(runs, 'run')}.", reach
+    apart = {k["group_id"] for k in kept}
+    run_of_key = {r["run_key"]: r["run_id"] for r in bundle["runs"]}
+    from . import questions as Q
+
+    runs_apart = {run_of_key[k] for g in Q.live_groups(bundle) if g["group_id"] in apart
+                  for k in g.get("member_run_keys") or () if k in run_of_key}
+    reached_groups = groups - len(apart)
+    text = (f"It reaches {reached_groups} of the beamtime's {_count(groups, 'record group')} "
+            f"({_count(runs - len(runs_apart), 'run')}). "
+            + " ".join(not_reached_sentence(path, [k for k in kept if k["path"] == path]) for path in paths
+                       if any(k["path"] == path for k in kept)))
+    return text, {**reach, "groups_reached": reached_groups, "not_reached": kept}
 
 
 def decide_question(
@@ -1106,19 +1244,24 @@ def decide_question(
             split_into=split_into, merge_with=merge_with, qc_status=qc_status, qc_note=qc_note,
             element=element, edge=edge, positions=positions, same_conditions=same_conditions,
         )
-        def reached(result: dict) -> dict:
-            reach = _reach_statement(bundle, found, override)
+        def reached(on: dict, result: dict) -> dict:
+            # read from the bundle the decision was recorded on (a dry run's copy too), its states derived as the
+            # save will derive them: what each group's record now takes
+            if override is None and not _beamtime_level(on, found):
+                return result
+            view = B.apply_derivations(copy.deepcopy(on))
+            reach, detail = _reach_statement(view, found, override, question_id)
             if not reach:
                 return result
-            out = {"statement": " ".join(x for x in (result.get("statement"), reach) if x), "reach": override or {
-                "beamtime_wide": True, **dict(zip(("groups", "runs"), _live_reach(bundle)))}}
+            out = {"statement": " ".join(x for x in (result.get("statement"), reach) if x), "reach": detail}
             return {**out, **{k: v for k, v in result.items() if k != "statement"}}
 
         if dry_run:
-            planned = reached(record_decision(copy.deepcopy(bundle), **params))
+            copied = copy.deepcopy(bundle)
+            planned = reached(copied, record_decision(copied, **params))
             planned = {**planned, "statement": _would_say(planned.get("statement"))}
             return _with_kept(kept_overrides, {"dry_run": True, "bundle_version": version, "target_ids": params["target_ids"], **planned})
-        result = _with_kept(kept_overrides, reached(record_decision(bundle, **params)))
+        result = _with_kept(kept_overrides, reached(bundle, record_decision(bundle, **params)))
         save_bundle(bundle_dir, bundle)
         return (result, bundle_version(bundle_dir)) if with_version else result
 

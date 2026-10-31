@@ -39,6 +39,7 @@ asks once for the whole beamtime is recorded per run (``mutations.run_answer_tar
 
 from __future__ import annotations
 
+import copy
 import math
 import os
 import re
@@ -439,7 +440,7 @@ def run_names(bundle: Mapping, run: Mapping) -> list[str]:
 # what ``ISAAC Suggestions`` shows beside the facility cells: hints, never answers. A Campaign Info beamline (or a
 # facility acronym) that names ANOTHER beamline than such a hint is not adopted (``template adopt``) and is named in
 # the import preview: ``62b`` beside ``BL152`` is a different beamline in any spelling, ``BL15-2`` / ``BL152`` /
-# ``15-2`` are one. The organization that runs a facility is in no hint, so it is not compared.
+# ``15-2`` / ``SSRL BL15–2`` are one, ``BL11-2`` and ``BL1-12`` two (:func:`same_beamline`). The organization that runs a facility is in no hint, so it is not compared.
 BEAMLINE_PATH = "system.facility.beamline"
 FACILITY_NAME_PATH = "system.facility.facility_name"
 HINTED_PATHS = (BEAMLINE_PATH, FACILITY_NAME_PATH)
@@ -451,13 +452,49 @@ _HINT_WHERE = {"folder_name": "the imported folder's name",
                "acquisition_system": "the acquisition system the scan headers' column names match"}
 
 
-def beamline_form(value: Any) -> str | None:
-    """A beamline as it is compared: case-folded, a leading ``BL`` / ``beamline`` and every separator dropped
-    (``BL15-2``, ``BL152``, ``bl 15.2`` and ``15-2`` are all ``152``; ``62b`` is ``62b``)."""
+#: Every Unicode dash a scientist's sheet may hold (en and em dash, minus sign, hyphen variants): read as ``-``.
+_DASHES = re.compile("[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\ufe58\ufe63\uff0d]")
+#: The FIRST beamline-shaped token of a value (``BL15-2``, ``bl 15.2``, ``15-2``, ``62b``), a facility word around it
+#: (``SSRL BL15-2``, ``BL15-2 (SSRL)``) ignored: its number, the number after a separator, and a trailing letter.
+_BEAMLINE_SHAPE = re.compile(r"(?<![a-z0-9])(?:beamline|bl)?[\s_]*(\d+)(?:\s*[-.]\s*(\d+))?([a-z]?)(?![a-z0-9])")
+
+
+def _beamline_parts(value: Any) -> tuple[str, int | None] | None:
+    """``(digits and letter, separator position or None)`` of the first beamline-shaped token of ``value``
+    (``SSRL BL15-2`` -> ``("152", 2)``, ``BL152`` -> ``("152", None)``, ``62b`` -> ``("62b", None)``), or ``None``
+    when it holds none."""
     if not isinstance(value, str):
         return None
-    text = re.sub(r"^\s*(?:beamline|bl)(?=[\s\-_.]*\d)", "", value.strip().casefold())
-    return re.sub(r"[\s\-_.]", "", text) or None
+    m = _BEAMLINE_SHAPE.search(_DASHES.sub("-", value).casefold())
+    if m is None:
+        return None
+    first, second, letter = m.group(1), m.group(2) or "", m.group(3) or ""
+    return first + second + letter, (len(first) if second else None)
+
+
+def beamline_form(value: Any) -> str | None:
+    """A beamline as it is compared: the first beamline-shaped token, case-folded, a leading ``BL`` / ``beamline``
+    and a facility word around it dropped, its separator kept as ``-`` (``BL15-2``, ``SSRL BL15–2``, ``bl 15.2`` and
+    ``15-2`` are ``15-2``; ``BL152`` is ``152``; ``62b`` is ``62b``). A value with no such token: the whole value,
+    separators dropped (it is then compared as written)."""
+    parts = _beamline_parts(value)
+    if parts is None:
+        if not isinstance(value, str):
+            return None
+        return re.sub(r"[\s\-_.]", "", _DASHES.sub("-", value.strip().casefold())) or None
+    digits, sep = parts
+    return digits if sep is None else f"{digits[:sep]}-{digits[sep:]}"
+
+
+def same_beamline(a: Any, b: Any) -> bool:
+    """One beamline: the same digits and letter, split at the same place — or one of them written with no
+    separator, which says nothing about where it splits (``BL152`` is ``BL15-2``; ``BL11-2`` is never ``BL1-12``,
+    nor ``15-2`` ``1-52``)."""
+    pa, pb = _beamline_parts(a), _beamline_parts(b)
+    if pa is None or pb is None:
+        fa, fb = beamline_form(a), beamline_form(b)
+        return fa is not None and fa == fb
+    return pa[0] == pb[0] and (pa[1] is None or pb[1] is None or pa[1] == pb[1])
 
 
 def facility_hint_readings(bundle: Mapping, path: str) -> list[dict]:
@@ -471,7 +508,7 @@ def facility_hint_readings(bundle: Mapping, path: str) -> list[dict]:
     out: dict[tuple, dict] = {}
     for h in S.facility_hints(bundle):
         literal = str(h.get("literal") or "")
-        tokens = [t for t in re.split(r"[_\s/,;()]+", literal) if t]
+        tokens = [t for t in re.split(r"[_\s/,;()]+", _DASHES.sub("-", literal)) if t]
         for i, tok in enumerate(tokens):
             if not _BEAMLINE_TOKEN.fullmatch(tok):
                 continue
@@ -500,8 +537,9 @@ def facility_hint_lines(bundle: Mapping, path: str, value: Any) -> list[str]:
         return []
     what = "beamline" if path == BEAMLINE_PATH else "facility"
     return [f"differs from a hint: {r['source']} names {what} {r['value']!r}"
-            + (f" (compared without 'BL' and separators: {r['form']!r}, yours {mine!r})" if path == BEAMLINE_PATH else "")
-            + "; a hint, never an answer" for r in readings if r["form"] != mine]
+            + (f" (compared as {r['form']!r}, yours {mine!r})" if path == BEAMLINE_PATH else "")
+            + "; a hint, never an answer" for r in readings
+            if (not same_beamline(r["value"], value) if path == BEAMLINE_PATH else r["form"] != mine)]
 
 
 def _agrees(a: Any, b: Any) -> bool:
@@ -1690,6 +1728,20 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                                 if c["outcome"] == "awaiting_ruling" or (c["cell"], c.get("run_id") or "") in kept
                                 or (c.get("hint") and c["cell"] in kept_cells)]
     report["ruled_per_run"] = _ruled_per_run_summary(bundle, report["ruled_per_run"], report["decisions"])
+    # c7-r HIGH-1: A BEAMTIME-WIDE ANSWER DOES NOT REACH A GROUP THAT KEEPS ITS OWN. A Campaign Info value recorded on
+    # a beamtime-wide target fills every group but one whose run holds a differing answer of its own (an answer slot
+    # from `--only group:<id>` or a ruling, or its own target): that group's record would hold two values and fill
+    # nothing. It is NAMED, with the command that changes it — never counted as reached, nor only listed as a clash.
+    report["not_reached"] = []
+    recorded_once = {(d["cell"], d["target_field_path"]): d["value"] for d in report["decisions"] if d.get("run_id") is None}
+    if recorded_once:
+        view = B.apply_derivations(copy.deepcopy(bundle))  # the states the save derives
+        for (cell_name, path), value in recorded_once.items():
+            asked = beamtime_question(path)
+            for k in M.groups_keeping_their_own_answer(view, path, value,
+                                                       question_id=asked["question_id"] if asked else None):
+                report["not_reached"].append({"cell": cell_name, "target_field_path": path, "value": value, **k,
+                                              "reason": M.not_reached_sentence(path, [k], lead="")})
     report["reaction_needs"] = reaction_followups(bundle, report["decisions"])
     report["awaiting_ruling"] = awaiting
     report["recorded_target_ids"] = recorded
@@ -1832,6 +1884,8 @@ def import_template(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None 
         "rows_refused": cells["rows_refused"],
         "extracted_values_left_alone": report["left_alone"],
         "campaign_not_filled": report["campaign_not_filled"],
+        # a beamtime-wide answer recorded here that a group's own, differing answer keeps from its record
+        "not_reached": report["not_reached"],
         "statement": ("Recorded as scientist decisions (identity: self_reported_local_user, unverified)."
                       if apply else "PREVIEW: nothing was written. Add --apply to record these decisions."),
     })
@@ -2000,6 +2054,12 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
                 + ("(answered) " if x["answered"] else "") + f"still covers {x['groups_left_to_the_question']} group(s) this "
                 "import records nothing for; if its beamtime-wide answer differs from this ruling, these runs' groups get two "
                 "values and fill nothing for it.")
+    if rep.get("not_reached"):
+        add("")
+        add("Not reached by a beamtime-wide answer (the group keeps its own answer, so its record fills nothing for the "
+            "field until the two agree):")
+        for x in rep["not_reached"]:
+            add(f"  {x['cell']} {x['target_field_path']} = {x['value']!r}: {x['reason']}")
     if rep.get("reaction_needs"):
         add("")
         add("Then required: " + _reaction_needs_line(rep["reaction_needs"], "recorded by this import"))
@@ -2038,6 +2098,8 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
         + (f"; {len(rep['replaces_or_contradicts_a_file_reading'])} replace or contradict a file reading"
            if rep.get("replaces_or_contradicts_a_file_reading") else "")
         + (f"; {len(rep['awaiting_ruling'])} disagreement(s) awaiting a ruling" if rep.get("awaiting_ruling") else "")
+        + (f"; {len({x['group_id'] for x in rep['not_reached']})} group(s) not reached by a beamtime-wide answer"
+           if rep.get("not_reached") else "")
         + "."
     )
     add(rep["statement"])

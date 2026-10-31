@@ -54,6 +54,12 @@ SETPOINT_NEEDS_SCALE = ("a potential setpoint needs its confirmed potential_scal
                         "is relative to")
 SETPOINT_GROUP_NEEDS_SCALE = ("another run of this record group has this potential setpoint without its confirmed "
                               "potential_scale, so the group's setpoint is not filled")
+#: Why a value an ANSWER SLOT holds (``bundle.is_answer_slot``: one run's answer to a field asked once for the
+#: whole beamtime) is not filled for a group some of whose runs have no answer for it (e.g. after a merge).
+SLOT_NOT_EVERY_RUN = ("this answer was given for {answered} of this record group's {total} runs only (a per-run answer "
+                      "to a field the import asks once for the whole beamtime: it belongs to those runs); {lacking} "
+                      "{have} no answer for {path}, so the group fills nothing for it until every run has the same "
+                      "answer: {how}")
 #: The composer's ``from`` for a required value only an answer supplies (``questions.FROM_AN_ANSWER``).
 FROM_AN_ANSWER = "a scientist's answer"
 #: A file-name token that states a potential: a number with ``V`` / ``mV`` (``400mV``, ``m800mV``, ``1p2V``,
@@ -488,6 +494,33 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
         evidence = [e for _, ev, _ in options for e in ev]
         fields[path] = {"value": value, "status": "verified", "evidence": evidence}
         report["filled"].append({"path": path, "from": [i for _, _, i in options]})
+    # AN ANSWER SLOT BELONGS TO ITS RUN (c7-r MED-3): a slot holds one run's answer to a field the import asks once for
+    # the whole beamtime. A group (a merged one, say) fills the field from slots only when EVERY member run is covered
+    # — by a slot or an answer of its own (the same value, or the check above already said they differ), or by the
+    # beamtime-wide answer — never one run's answer stretched over runs no one answered.
+    obj_of_any = index["obj_of"]
+    held_by_slots: dict[str, str] = {}
+    for f in list(report["filled"]):
+        slots = [i for i in f["from"] if obj_of_any.get(i, (None, None))[0] == "missing_value"
+                 and B.is_answer_slot(obj_of_any[i][1])]
+        covered = {run_of.get(i) for i in f["from"]}
+        if not slots or None in covered or not (member_ids - covered):
+            continue
+        path = f["path"]
+        lacking = sorted(member_ids - covered)
+        qid = next((q for i in slots if (q := B.answer_slot_question(obj_of_any[i][1]))), None)
+        how = (f"`isaac bundle decide <bundle_dir> --question {qid} --only group:{group['group_id']} --decision correct "
+               '--value <value> --by "<your name>"` (it records every run of this group), or answer that question for '
+               "the whole beamtime" if qid else
+               f"answer it for this group (`isaac bundle questions <bundle_dir> --scope group:{group['group_id']}`)")
+        reason = SLOT_NOT_EVERY_RUN.format(answered=len(member_ids & covered), total=len(member_ids),
+                                           lacking=", ".join(lacking[:5]) + ("…" if len(lacking) > 5 else ""),
+                                           have="has" if len(lacking) == 1 else "have", path=path, how=how)
+        del fields[path]
+        report["filled"].remove(f)
+        held_by_slots[path] = reason
+        for i in f["from"]:
+            report["not_composed"].append({_id_key(i): i, "path": path, "reason": reason})
     # A SET-POINT NEEDS ITS SCALE (interim decision, pending domain-owner review): the number alone
     # does not say what it is relative to. AFTER the disagreement check above (so differing
     # set-points are a disagreement, never hidden by this gate), an agreed set-point is filled only
@@ -799,7 +832,8 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
         field = REQUIRED_AS_FIELD.get(req, req)
         if not any(p == field or p.startswith(field + ".") for p in fields):
             fields[field] = {"value": None, "status": "missing", "evidence": []}
-            report["missing_required"].append({"path": field, "from": "a scientist's answer"})
+            report["missing_required"].append({"path": field, "from": "a scientist's answer",
+                                               **({"reason": held_by_slots[field]} if field in held_by_slots else {})})
     # WHAT AN OBJECT THE RECORD CARRIES REQUIRES (the schema's own rule, known before validation): an electrolyte
     # name makes concentration_M required. Listed like any other required value, so build-records, the questions
     # and the minimum say it, never only `validate`'s official-schema error.

@@ -3760,6 +3760,31 @@ def _value_id_order(path: str) -> tuple[int, str]:
     return (0, path)
 
 
+#: The reason a per-run ANSWER SLOT says it exists (``mutations.run_answer_targets``): the import asked the field
+#: once for the whole beamtime, and the scientist answered it for some runs only. :func:`is_answer_slot` reads it.
+ANSWER_SLOT_REASON = (
+    "The files state this field only once for the whole beamtime (question {question}), not for this run. A "
+    "scientist answered it for this run's group alone ({how}), so this slot holds that answer. The beamtime-wide "
+    "reading is never copied onto the run (DEC-69)."
+)
+_ANSWER_SLOT_LEAD = ANSWER_SLOT_REASON.split("{question}", 1)[0]
+_ANSWER_SLOT_QUESTION = re.compile(re.escape(_ANSWER_SLOT_LEAD) + r"(Q-[0-9a-f]{10})\)")
+
+
+def is_answer_slot(m: Mapping) -> bool:
+    """A missing value ``mutations.run_answer_targets`` added: one run's answer to a field the import asks once for
+    the whole beamtime. It belongs to THAT run only (``records.compose_group`` fills a group from slots only when
+    every member run is covered)."""
+    return (m.get("run_id") is not None and m.get("target_write_scope") == "run"
+            and str(m.get("reason") or "").startswith(_ANSWER_SLOT_LEAD))
+
+
+def answer_slot_question(m: Mapping) -> str | None:
+    """The id of the beamtime-wide question an answer slot answers for its run (its reason names it), or ``None``."""
+    hit = _ANSWER_SLOT_QUESTION.match(str(m.get("reason") or "")) if is_answer_slot(m) else None
+    return hit.group(1) if hit else None
+
+
 def _missing(n, run_id, path, scope, reason, beamtime_targets, writable) -> dict:
     return {
         "value_id": f"miss-{n + 1:04d}",

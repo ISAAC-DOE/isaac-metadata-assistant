@@ -1317,10 +1317,13 @@ def list_local_bundles():
         "Where one import stands: runs, record groups by status, processing results by state, the consolidated "
         "question counts (blocking, conflicts, optional), the fewest answers between one group and export, what "
         "still blocks export, and the verdicts the last `isaac bundle validate` wrote, each marked when it is older "
-        "than the bundle. No share of missing values is given, because no command computes one. Read-only."
+        "than the bundle. No share of missing values is given, because no command computes one.\n\n"
+        "A parser value the nearest record's warnings state is recorded as an exposure in the bundle first, as "
+        "`isaac bundle questions` does, so this read can write `bundle.json`; `exposures_recorded` says how many it "
+        "added and the header's `bundle_version` is the version after them."
     ),
     response_description="The bundle's header and its progress.",
-    responses={**_R_UNAUTHORIZED, **_R_LOCAL, **_R_NOT_FOUND},
+    responses={**_R_UNAUTHORIZED, **_R_LOCAL, **_R_NOT_FOUND, **_R_CONFLICT},
 )
 @_io_refusals
 def get_local_bundle_progress(bundle: str = PathParam(..., max_length=255, description="The bundle's folder name.")):
@@ -1329,13 +1332,42 @@ def get_local_bundle_progress(bundle: str = PathParam(..., max_length=255, descr
     bdir, refused = _open(bundle)
     if refused is not None:
         return refused
+    from .local_import import questions as Q
+
     with bundle_lock(bdir):
         try:
             version, data = read_bundle(bdir)
         except M.MutationRefused as exc:
             return _refusal(exc)
-    check = check_status(version, data)
-    return {"bundle": bundle_header(bundle, bdir, data, version), "progress": progress(bdir, data, check)}
+        check = check_status(version, data)
+        out = progress(bdir, data, check)
+        # c7-r MED-4: the nearest record's warnings state parser values (a file-name potential and the volts it was read
+        # as): each is an exposure, recorded before the page shows it, as the questions route records its own
+        added = _record_shown(data, Q.minimum_exposures(out.get("minimum_for_one_group")), "bundle progress")
+        if added:
+            try:
+                M.save_bundle(bdir, data)
+            except M.MutationRefused as exc:
+                return _refuse(409, "exposure_not_recorded",
+                               f"The exposures could not be recorded, so nothing is shown: {exc}")
+            version = M.bundle_version(bdir)
+    out["exposures_recorded"] = added
+    return {"bundle": bundle_header(bundle, bdir, data, version), "progress": out}
+
+
+def _record_shown(data: dict, shown: Sequence[tuple[str, str]], command: str) -> int:
+    """Record an exposure for each ``(kind, id)`` the page is about to show (a conflict's candidate too); how many
+    were added."""
+    from .local_import import mutations as M
+
+    before = len(data.get("exposures") or ())
+    for k, tid in shown:
+        M.record_exposure(data, k, tid, command)
+        if k == "conflict":
+            cid = next((c.get("candidate_id") for c in data.get("conflicts") or () if c.get("conflict_id") == tid), None)
+            if cid:
+                M.record_exposure(data, "candidate", cid, command)
+    return len(data.get("exposures") or ()) - before
 
 
 @router.get(
@@ -1407,15 +1439,10 @@ def get_local_bundle_questions(
                     shown += [("candidate", cid) for cid in Q.confirm_value_shown(data, covering)]
             out_questions.append({**q, "display": display})
         minimum = Q.minimum_answers_for_one_group(payload, data, scope=scope, bundle_dir=bdir, reports=reports)
+        # ...and every candidate whose value the nearest record's warnings state (c7-r MED-4)
+        shown += Q.minimum_exposures(minimum)
         capture = capture_items(data)
-        before = len(data.get("exposures") or ())
-        for k, tid in shown:
-            M.record_exposure(data, k, tid, "bundle questions")
-            if k == "conflict":
-                cid = next((c.get("candidate_id") for c in data.get("conflicts") or () if c.get("conflict_id") == tid), None)
-                if cid:
-                    M.record_exposure(data, "candidate", cid, "bundle questions")
-        added = len(data.get("exposures") or ()) - before
+        added = _record_shown(data, shown, "bundle questions")
         if added:
             try:
                 M.save_bundle(bdir, data)
@@ -1486,6 +1513,27 @@ def preview_by_scope(bundle: Mapping, q: Mapping, target_ids: Sequence[str], val
             "differing_targets": differing,
         })
     return out
+
+
+def preview_group_answer(bundle: Mapping, q: Mapping, reach: Mapping, target_ids: Sequence[str], value: Any) -> list[dict]:
+    """c7-r LOW-6: the dry-run preview of ``only=group:<id>`` on a question asked once for the whole beamtime. The
+    answer goes to that group's runs (their own targets, or per-run answer slots ``decide`` adds only in its own
+    copy), none of which the question lists, so the preview is built from decide's result: ONE scope, the group,
+    with every target it would write (``answer_slots``: how many are new slots) and what the group's own targets'
+    files suggest."""
+    existing = {**{c["candidate_id"]: "candidate" for c in bundle.get("candidates") or ()},
+                **{m["value_id"]: "missing_value" for m in bundle.get("missing_values") or ()}}
+    own = [t for t in target_ids if t in existing]
+    scope = reach["scope"]
+    view = {**q, "targets": [{"kind": existing[t], "id": t} for t in own], "per_scope_targets": {scope: own}}
+    rows = preview_by_scope(bundle, view, own, value) if own else []
+    if not rows:
+        label, names = _scope_label(BundleIndex(bundle), scope)
+        rows = [{"scope": scope, "label": label, "run_names": names[:20], "run_count": len(names), "target_ids": [],
+                 "own_suggestions": [], "compared": False, "differs": False, "differing_targets": []}]
+    rows[0]["target_ids"] = list(target_ids)
+    rows[0]["answer_slots"] = len([t for t in target_ids if t not in existing])
+    return rows
 
 
 def _typed_value(q: Mapping, body: LocalAnswerRequest) -> tuple[Any, str | None]:
@@ -1559,7 +1607,9 @@ def post_local_bundle_answer(
     except M.MutationRefused as exc:
         return _refusal(exc)
     if body.dry_run:
-        groups = preview_by_scope(data, asked, result.get("recorded", []), value)
+        reach = result.get("reach") or {}
+        groups = (preview_group_answer(data, asked, reach, result.get("target_ids") or [], value) if reach.get("scope")
+                  else preview_by_scope(data, asked, result.get("recorded", []), value))
         return {
             "by_scope": groups,
             "scopes_total": len(groups),

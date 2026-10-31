@@ -594,8 +594,22 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         if blocking and not q["required_by"]:
             q["required_by"] = blocking
 
+    # c7-r LOW-8: AN ANSWER SLOT THAT HOLDS NO ANSWER (deferred, its answer replaced by a defer) is not asked once the
+    # beamtime-wide target of its field is answered with a value: that answer fills its run, so the slot is dead. It
+    # stays in the bundle (the decision log names it), and `decide --question` still finds it among the answered.
+    beamtime_answered = {o.get("target_field_path") for o in [*bundle["candidates"], *bundle["missing_values"]]
+                         if o.get("run_id") is None and o.get("value_state") == B.STATE_SCIENTIST_CONFIRMED}
+
+    def dead_slot(m: Mapping) -> bool:
+        if m["target_field_path"] not in beamtime_answered or not B.is_answer_slot(m):
+            return False
+        d = decisions.get(("missing_value", m["value_id"]))
+        return d is None or d.get("decision") in B.NEUTRAL_DECISIONS
+
     for m in bundle["missing_values"]:
         again = None
+        if not include_answered and dead_slot(m):
+            continue
         if m["value_state"] not in _UNANSWERED:
             again = not_eligible_answer(m, "missing_value")
             if again is None and not (include_answered and m.get("extracted_state", B.STATE_MISSING) in _UNANSWERED
@@ -608,7 +622,12 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 continue
         blocking = required_for(path, rid)
         partition = None
-        if _is_shared(path) and len(recorded.get(path, ())) <= 1:
+        if B.is_answer_slot(m):
+            # c7-r: AN ANSWER SLOT IS ITS RUN'S OWN (a deferred one is asked for its group), never a target inside the
+            # beamtime question: `--only group:<id>` on that question then always answers EVERY run of the group
+            # (mutations.group_answer_targets), a merged group's too, not only the run that holds a slot
+            scope = scope_of_run(rid)
+        elif _is_shared(path) and len(recorded.get(path, ())) <= 1:
             scope = "experiment"
         elif path.startswith("sample.") and sample_key_of_group.get(group_of.get(rid)):
             scope, partition = "experiment", f"sample={sample_key_of_group[group_of[rid]]}"
@@ -1984,9 +2003,27 @@ def _unasked(bundle: Mapping, group: Mapping, path: str, report: Mapping) -> dic
     gid = group["group_id"]
     runs = [r for r in bundle["runs"] if r["run_key"] in set(group.get("member_run_keys") or ())]
     rids = {r["run_id"] for r in runs}
-    held = [o.get("candidate_id") or o.get("value_id") for o in list(bundle["candidates"]) + list(bundle["missing_values"])
+    objs = [o for o in list(bundle["candidates"]) + list(bundle["missing_values"])
             if _fills(o.get("target_field_path"), path) and (o.get("run_id") in rids or o.get("run_id") is None)]
+    held = [o.get("candidate_id") or o.get("value_id") for o in objs]
     reject = f'isaac bundle decide <bundle_dir> --target {gid} --decision reject --by "<your name>"'
+    beamtime = [o for o in objs if o.get("run_id") is None]
+    own = [o for o in objs if o.get("run_id") is not None
+           and (B.is_answer_slot(o) or o.get("value_state") == B.STATE_SCIENTIST_CONFIRMED)]
+    if beamtime and own:
+        # c7-r MED-2: A BEAMTIME TARGET AND A RUN'S OWN ANSWER (an answer slot, or the run's own target). `--target` on
+        # the beamtime one would rewrite every group of the beamtime; the group's own answer is changed through the
+        # beamtime question for THIS group, or the beamtime question is answered again (for every group)
+        qid = _beamtime_question_id(bundle, path, objs)
+        if qid:
+            differ = any(d.get("path") == path for d in report.get("disagreements") or ())
+            why = (("the confirmed values for it differ inside this group: " if differ else "")
+                   + "this group's own answer and the beamtime-wide answer both reach it, so the composer fills it only "
+                   "when they agree")
+            return {"path": path, "answerable": True, "reason": why, "targets": len(held), "question_id": qid,
+                    "command": (f"isaac bundle decide <bundle_dir> --question {qid} --only group:{gid} --decision correct "
+                                f'--value <value> --by "<your name>"   # this group only; or answer question {qid} '
+                                "again without --only, which reaches every group of the beamtime")}
     if held:
         why = ("the confirmed values for it differ inside this group, so the composer fills nothing"
                if any(d.get("path") == path for d in report.get("disagreements") or ()) else
@@ -2004,6 +2041,38 @@ def _unasked(bundle: Mapping, group: Mapping, path: str, report: Mapping) -> dic
         why = f"the import holds no value for {path} and asks no question about it here, so no answer can fill it"
     return {"path": path, "answerable": False, "reason": why,
             "command": reject + "   # if it should not become a record; this build cannot fill this field for it"}
+
+
+def _beamtime_question_id(bundle: Mapping, path: str, objs: Sequence[Mapping]) -> str | None:
+    """The id of the question that asks ``path`` once for the whole beamtime: the one an answer slot among ``objs``
+    names, else the (answered or open) question whose experiment scope lists a beamtime-level one of them."""
+    for o in objs:
+        qid = B.answer_slot_question(o) if "value_id" in o else None
+        if qid:
+            return qid
+    ids = {o.get("candidate_id") or o.get("value_id") for o in objs if o.get("run_id") is None}
+    ids |= {cf["conflict_id"] for cf in bundle.get("conflicts") or () if cf.get("candidate_id") in ids}
+    for q in consolidate(bundle, include_answered=True, explain_counter=False)["questions"]:
+        if q["kind"] not in VALUE_KINDS or q.get("informational"):
+            continue
+        experiment = set((q.get("per_scope_targets") or {}).get("experiment") or ())
+        if any(_fills(field, path) and experiment.intersection(tids) & ids for field, tids in _value_paths(q)):
+            return q["question_id"]
+    return None
+
+
+def _stated_candidate_ids(report: Mapping) -> list[str]:
+    """The candidates whose values a group's stated-potential warnings print (``records.potential_warning_text``:
+    the first three ``stated`` potentials, each a file-name literal and the volts it was read as)."""
+    from .records import STATED_POTENTIAL_WARNING
+
+    return [x["candidate_id"] for w in report.get("warnings") or () if w.get("code") == STATED_POTENTIAL_WARNING
+            for x in (w.get("stated") or ())[:3] if x.get("candidate_id")]
+
+
+def minimum_exposures(minimum: Mapping | None) -> list[tuple[str, str]]:
+    """``[("candidate", id)]`` for every candidate whose value the minimum's texts state (``values_shown_from``)."""
+    return [("candidate", cid) for cid in (minimum or {}).get("values_shown_from") or ()]
 
 
 def _recommended(report: Mapping, usable: Sequence[tuple], gid: str) -> list[dict]:
@@ -2106,6 +2175,7 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
     best = None
     done: list[str] = []
     warned_done: list[str] = []
+    stated_done: list[str] = []
     for n, g in enumerate(live):
         gid = g["group_id"]
         rep = reports[gid]
@@ -2182,22 +2252,27 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
             hard.append(f"{', '.join(u['path'] for u in cannot)}: {cannot[0]['reason']}")
         need = len(chosen) + sum(1 for u in unasked if u["answerable"])
         warned = _recommended(rep, usable, gid)
+        stated = _stated_candidate_ids(rep) if warned else []
         if not need and not plus and not hard and wanted is None:
             done.append(gid)
             warned_done += [r["why"] for r in warned]
+            stated_done += stated
             continue
         rank = (bool(hard), soft is not None, need + len(plus), n)
         if best is None or rank < best["rank"]:
             best = {"rank": rank, "group_id": gid, "need": need, "plus": plus, "questions": list(chosen.values()),
                     "unasked": unasked, "hard": hard, "soft": soft, "missing": [m["path"] for m in rep.get("missing_required") or ()],
-                    "recommended": warned}
+                    "recommended": warned, "stated": stated}
     if best is None:
         if not done:
             return None
         return {"group_id": None, "blocking_questions": 0, "plus_decisions": [], "groups_with_nothing_left": len(done),
                 "statement": (f"{len(done)} record group(s) have no blocking question and no decision left here (confirmed, "
                               "processing approved): run `isaac bundle build-records`, `validate` and `export`."),
-                **({"warnings": warned_done[:_HINTS_PER_QUESTION], "warnings_total": len(warned_done)} if warned_done else {})}
+                **({"warnings": warned_done[:_HINTS_PER_QUESTION], "warnings_total": len(warned_done),
+                    # the candidates whose parser values these warnings state: a page showing them records each
+                    # as an exposure first (c7-r MED-4)
+                    "values_shown_from": sorted(set(stated_done))} if warned_done else {})}
     out = {"group_id": best["group_id"], "blocking_questions": best["need"], "plus_decisions": best["plus"],
            "questions": best["questions"], "unasked_required": best["unasked"],
            "missing_required_now": best["missing"],
@@ -2207,6 +2282,9 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
         # its file names state (records: the stated-potential warning)
         out["recommended"] = best["recommended"]
         out["warnings"] = [r["why"] for r in best["recommended"]]
+        # the candidates whose parser values (a file-name literal, the volts it was read as) the warnings state: a
+        # page or command showing them records each as an exposure first (c7-r MED-4)
+        out["values_shown_from"] = sorted(set(best["stated"]))
     if best["hard"]:
         out["blocked"] = "; ".join(best["hard"])
     if best["soft"]:

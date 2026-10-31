@@ -1489,8 +1489,11 @@ def cmd_bundle_questions(args) -> int:
         rows = Q.filter_questions(payload, scope=args.scope, blocking_only=args.blocking_only)
         kept = [q for q in rows if not (args.skip_deferred and q.get("deferred"))]
         page = kept[args.offset : args.offset + args.limit]
-        # HINTS SHOW PARSER LITERALS: that is an exposure, recorded before printing.
-        shown = _question_exposures(page, bundle)
+        minimum = Q.minimum_answers_for_one_group(payload, bundle, scope=args.scope, bundle_dir=Path(args.bundle_dir),
+                                                  reports=reports)
+        # HINTS SHOW PARSER LITERALS: that is an exposure, recorded before printing — and so do the values the
+        # nearest record's warnings state (c7-r MED-4)
+        shown = list(_question_exposures(page, bundle)) + Q.minimum_exposures(minimum)
         if shown:
             M.expose_and_load(Path(args.bundle_dir), shown, "bundle questions")
         return {
@@ -1505,8 +1508,7 @@ def cmd_bundle_questions(args) -> int:
             "omitted_after": max(0, len(kept) - args.offset - len(page)),
             **_more(len(kept) - args.offset - len(page), args.offset + len(page)),
             **({"skipped_deferred": len(rows) - len(kept)} if args.skip_deferred else {}),
-            "minimum_for_one_group": Q.minimum_answers_for_one_group(payload, bundle, scope=args.scope,
-                                                                     bundle_dir=Path(args.bundle_dir), reports=reports),
+            "minimum_for_one_group": minimum,
             **({"questions": page} if args.with_targets else _compact_page(page)),
         }
 

@@ -121,8 +121,18 @@ Order: blocking (export cannot happen without them) → conflicts that affect a 
   macro; its reply says "It reaches every record group of the beamtime: N groups, M runs") also takes
   `--only group:<id>` with `correct` (or `confirm --value`): the answer is recorded for that group's runs only,
   on their own targets or on a per-run answer slot, never on the beamtime-wide target. The reply says so. If the
-  beamtime-wide question is later answered with a different value, that group gets two values and fills
-  nothing for the field: say it before recording either.
+  beamtime-wide question is answered with a different value (before or after), that group gets two values and fills
+  nothing for the field: say it before recording either. The beamtime-wide reply then says "It reaches 8 of the
+  beamtime's 9 record groups" and names each group NOT reached ("group:<id> keeps its own answer 'XAS' … answer
+  `--only group:<id>` to change it"; `reach.not_reached`); a template import's preview lists the same under "Not
+  reached by a beamtime-wide answer" (`not_reached`). Read it back; the two agree only when the group is
+  re-answered with `--only group:<id>` (its reply: "It agrees with the beamtime-wide answer") or the beamtime
+  question is answered with the group's value. For such a group the minimum's `unasked_required` command is that
+  `--question <Q> --only group:<id>` one, never `--target` on the beamtime target (that rewrites every group).
+  A slot belongs to its run: a group (e.g. after a merge) fills the field from slots only when every run of it
+  has the same answer (a slot, its own, or the beamtime-wide one); otherwise it is missing and the composer says
+  why. A slot no decision names is dropped on save; a deferred slot is no longer asked once the beamtime-wide
+  question has a value (it stays in the bundle: the log names it).
 - **Experiment-scope question:** say "This applies to N groups. One answer for all, or do some differ?" Only split when the scientist says so. A question built at experiment scope whose targets all sit in ONE group (a sample field asked per sample reading) is shown with that group's `scope: group:<id>` and carries `id_scope: experiment`: the scope its id was made from, kept so the id never changes. Ask it for that group only.
 - **The instrument clock's time zone** (`clock_time_zone`, experiment scope, optional): SSRL XDC
   (beamline 4-3 style) scan headers write the start as a local clock time with no zone, so those

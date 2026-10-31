@@ -60,12 +60,15 @@ listed in `reference/commands.md`.
 Find the ISAAC folder: the path in `checkout-path.txt` beside this file. If there is no such file, ask
 the scientist where their ISAAC folder is (the one with `scripts/setup_isaac_local.sh`); if they have
 none, point them to `docs/local-skill-quickstart.md` and stop. Then run, from that folder,
-`scripts/setup_isaac_local.sh --check` (changes nothing): it reports the command, the processing extra,
-the portal check and whether this skill copy is current, one line each. Use `<folder>/.venv/bin/isaac`
-as `<isaac>` and `<folder>/.venv/bin/python` as `<python>`.
+`scripts/setup_isaac_local.sh --check` (changes nothing): one `[ok]`/`[missing]` line each for the Python
+environment, the command, the processing extra and the portal check, then the skill copy in
+`~/.claude/skills` (or `--skill-dir`): `[ok]`, `[stale]` or `[skipped]` (none installed there). Use
+`<folder>/.venv/bin/isaac` as `<isaac>` and `<folder>/.venv/bin/python` as `<python>`.
 
 - `[stale]` skill → give the ONE fix, `scripts/setup_isaac_local.sh --install-skill`, then restart
-  Claude Code; do not continue on this copy.
+  Claude Code; do not continue on this copy. `[skipped]`, or this copy runs from elsewhere → check it:
+  `diff -rq -x checkout-path.txt -x .DS_Store <folder>/.claude/skills/isaac-historical-import <this skill's folder>`;
+  any output means stale (same fix).
 - command missing → the ONE fix is `scripts/setup_isaac_local.sh` (then `--install-skill` if there
   was no `checkout-path.txt`); stop.
 - processing missing → "curves and quality checks need `scripts/setup_isaac_local.sh --with-processing`";

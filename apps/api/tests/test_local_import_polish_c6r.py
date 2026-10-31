@@ -198,7 +198,11 @@ def test_the_cli_and_the_web_page_agree_on_an_older_bundle(older, tmp_path, monk
     cli_extracted = _listed(capsys, older, "candidate_extracted")
     client = _client(older.parent, monkeypatch, tmp_path)
     prog = client.get("/api/local-bundles/older/progress").json()
-    assert prog["bundle"]["bundle_version"] == v0 and prog["progress"]["check"]["status"] == "VALID"
+    assert prog["progress"]["check"]["status"] == "VALID"
+    # c7-r MED-4: the one write a progress read makes is the exposures of the values its minimum's warnings state
+    shown = prog["progress"]["exposures_recorded"]
+    assert prog["bundle"]["bundle_version"] == (M.bundle_version(older) if shown else v0)
+    v0 = prog["bundle"]["bundle_version"]
     values = prog["progress"]["values"]
     assert values["candidate_extracted"] == len(cli_extracted) == loaded["counts"]["candidate_extracted"]
     assert values["needs_review"] == loaded["counts"]["needs_review"]
@@ -206,7 +210,7 @@ def test_the_cli_and_the_web_page_agree_on_an_older_bundle(older, tmp_path, monk
     listing = next(b for b in client.get("/api/local-bundles").json()["bundles"] if b["name"] == "older")
     assert listing["counts"]["needs_review"] == loaded["counts"]["needs_review"]
     assert listing["readiness"]["blocking"]["needs_review"] == loaded["readiness"]["blocking"]["needs_review"]
-    assert M.bundle_version(older) == v0  # the reads wrote nothing
+    assert M.bundle_version(older) == v0  # the reads wrote nothing more
     page = client.get("/api/local-bundles/older/questions").json()
     assert {q["question_id"] for q in page["questions"]} == {q["question_id"] for q in Q.consolidate(loaded)["questions"]}
     assert held  # the held candidates are asked about on both

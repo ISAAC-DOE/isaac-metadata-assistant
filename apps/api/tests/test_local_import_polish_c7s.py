@@ -151,8 +151,8 @@ def test_a_facility_acronym_naming_another_facility_than_the_folder_is_a_disagre
     a = _adopt_json(plain, _sheet(plain, tmp_path / THEIRS, beamline="BL15-2", facility="ZZLS"), tmp_path / "a.xlsx", capsys)
     fac = _d(a, "Facility Name", kind="hint")
     assert fac["their_value"] == "ZZLS" and any("names facility 'SYN'" in r for r in fac["readings"])
-    assert T.beamline_form("BL15-2") == T.beamline_form("BL152") == T.beamline_form("15-2") == "152"
-    assert T.beamline_form("62b") == "62b"
+    assert T.same_beamline("BL15-2", "BL152") and T.same_beamline("15-2", "BL152") and T.same_beamline("BL15-2", "15-2")
+    assert T.beamline_form("62b") == "62b" and not T.same_beamline("62b", "BL152")
 
 
 def test_a_typed_beamline_naming_another_one_is_named_once_in_the_preview_and_recorded(plain, tmp_path, capsys):
