@@ -51,6 +51,7 @@ from . import athena as A
 from . import core as C
 from . import protocol as P
 from .channels import MODE_TRANSMISSION, ChannelChoice, choose_channels, dead_candidates
+from . import reference as REF
 from .edges import edge_energy
 from .readers import read_scan_file
 
@@ -345,6 +346,11 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
     usable = [r for r in per_scan if r and r.get("e0_eV") is not None and (r.get("snr") or 0) >= min_snr]
     if per_scan and not usable:
         flags.append("reference_edge_not_found")
+    # c12-cal (REF.IN_SCAN_MIN_RULE_ID): an in-scan reference whose edge is usable in fewer than
+    # MIN_IN_SCAN_REFERENCE_SCANS scans is no reference: no shift is computed or applied, even under an approval
+    too_few = ref_source == REF.IN_SCAN and 0 < len(usable) < REF.MIN_IN_SCAN_REFERENCE_SCANS
+    if too_few:
+        flags.append(REF.TOO_FEW_FLAG)
     measured = spread = None
     if usable:
         e0s = [r["e0_eV"] for r in usable]
@@ -355,7 +361,8 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
     applied = 0.0
     if not approved:
         flags.append("calibration_reference_unconfirmed")
-    if ref and measured is not None:
+    accepted = approval.get("accepted_shift_eV") if approved and approval else None
+    if ref and measured is not None and not too_few:
         tab, tab_src = edge_energy(ref["element"], ref["edge"])
         if tab is None:
             flags.append("edge_energy_unknown")
@@ -365,6 +372,10 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
                 flags.append("shift_implausible_not_applied")
             elif not approved:
                 flags.append("calibration_shift_awaiting_approval")
+            elif abs(shift) > float(ctx.params["qc"]["warn_energy_shift_eV"]) and not REF.shift_size_confirmed(accepted, shift):
+                # c12-cal (REF.SHIFT_SIZE_RULE_ID): a shift above the warning level moves every energy of the record by
+                # that much; it is applied only when the scientist also confirmed its size (--accept-shift)
+                flags.append(REF.SIZE_NOT_CONFIRMED_FLAG)
             elif cp.get("apply_shift_when_confirmed"):
                 applied = shift
     if approved:
@@ -397,9 +408,37 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
             "applied": bool(applied),
             "per_scan_alignment_shifts_eV": per_scan_shifts,
             "method": "larch find_e0 (maximum of the first derivative)",
+            # only when the scientist confirmed a shift's size (absent otherwise, so an unaffected result is unchanged)
+            **({"accepted_shift_eV": float(accepted)} if accepted is not None else {}),
         },
         "flags": flags,
     }
+
+
+def _said_reference(cal: dict) -> dict:
+    """``cal`` with what its reference reading says (:func:`reference.reading`: the usable / listed scan counts,
+    whether a reference is proposed, a plain sentence, and a spread that is null with fewer than two usable scans)
+    added to its outcome. Returns the outcome AS IT IS HASHED (params.json, qc.json): exactly the keys and values
+    the step had before these sentences existed, so a group whose curve does not change keeps its result id."""
+    hashed = copy.deepcopy(cal["outcome"])
+    said = REF.reading(cal)
+    cal["outcome"].update({k: said[k] for k in ("reference_scans_usable", "reference_scans_listed", "reference_min_scans",
+                                                "reference_proposed", "reference_statement")})
+    if said["reference_e0_spread_eV"] is None:
+        cal["outcome"]["reference_e0_spread_eV"] = None
+    return hashed
+
+
+def _few_scan_glitch_statement(n_scans: int, flagged: int, params: Mapping) -> str | None:
+    """The sentence for a result whose glitch points were judged against their neighbours (fewer than
+    ``deglitch.min_scans_for_cross_scan`` scans), or ``None`` (nothing flagged, or enough scans for the cross-scan
+    check). Measured on a real beamtime: a clean Ti foil (one scan) had 21 points flagged at z up to 37.7, all on the
+    white line and the oscillations; 30 of 34 results carried ``glitches_flagged``."""
+    if not flagged or n_scans >= int(params["deglitch"]["min_scans_for_cross_scan"]):
+        return None
+    return (f"With {n_scans} scan{'' if n_scans == 1 else 's'}, the glitch check compares neighbouring points and also "
+            "flags real features such as the white line and oscillations; these "
+            f"{flagged} flag{'' if flagged == 1 else 's'} are not by themselves evidence of glitches.")
 
 
 def _csv(path: Path, header: Sequence[str], cols: Sequence, np) -> None:
@@ -983,6 +1022,7 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         return [out]
 
     cal = _calibration(group, stems, scans_data, headers, ctx)
+    hashed_cal = _said_reference(cal)  # c12-cal: said in the result, not in the hashed files (no id moves)
     res["steps"].append(cal)
     res["review_flags"] += cal["flags"]
     shifts = cal["outcome"]["per_scan_alignment_shifts_eV"] or [0.0] * len(scans_data)
@@ -1194,7 +1234,10 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         plotted = False
     if not plotted:
         res["review_flags"].append("plot_unavailable")
-    _write(gdir / "qc.json", _json_bytes({"group_id": group["group_id"], **res["qc"], "thresholds": params["qc"], "protocol_status": P.PROTOCOL_STATUS}))
+    # qc.json is hashed: it keeps the reference spread as first written (0.0 for one usable scan), so no id moves; the
+    # result's metrics say null (one scan has no spread)
+    hashed_qc = {**res["qc"], "metrics": {**res["qc"]["metrics"], "reference_e0_spread_eV": hashed_cal["reference_e0_spread_eV"]}}
+    _write(gdir / "qc.json", _json_bytes({"group_id": group["group_id"], **hashed_qc, "thresholds": params["qc"], "protocol_status": P.PROTOCOL_STATUS}))
     _write(
         gdir / "params.json",
         _json_bytes(
@@ -1208,7 +1251,7 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
                 "needs_scientist_approval": P.needs_approval(),
                 "protocol_questions": P.PROTOCOL_QUESTIONS,
                 "channel_choice": res["channel_choice"],
-                "calibration": cal["outcome"],
+                "calibration": hashed_cal,
                 "normalize_resolved": nm["resolved_params"],
             }
         ),
@@ -1243,6 +1286,12 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         res["qc"].setdefault("statements", {})["scans_skipped_lacking_chosen_columns"] = skipped_said
     # c11-r: a merged scan whose signal is exactly zero where another's is not: merged unchanged, said and flagged
     # (after run_id: qc.json is hashed, so no result id moves)
+    # c12-cal: with fewer scans than the cross-scan check needs, the glitch check compares each point with its
+    # neighbours and flags real features too (white line, oscillations): said beside the count (after run_id: no id
+    # moves; the count, the flag and the verdict are unchanged)
+    few_said = _few_scan_glitch_statement(len(scans_data), dg["flagged_points_total"], params)
+    if few_said:
+        res["qc"].setdefault("statements", {})["glitch_check_few_scans"] = few_said
     zero_points_said = _zero_signal_points_statement(used_entries, scans_data, _raw_signal(choice), np)
     if zero_points_said:
         res["qc"].setdefault("statements", {})["merged_scan_zero_signal_points"] = zero_points_said

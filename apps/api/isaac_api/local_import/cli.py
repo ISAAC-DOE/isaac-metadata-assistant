@@ -1196,6 +1196,43 @@ def _scans_line(r: Mapping) -> str | None:
     return f"{m['scans_used']} of {m['scans_listed']} scans used{left}"
 
 
+def _calibration_view(bundle: Mapping, r: Mapping) -> dict | None:
+    """c12-cal: what a result's energy reference is (usable / listed scans, proposed or not, one sentence) and, for
+    each element/edge already named for the group (the approved or proposed reference, else the group's absorber),
+    the shift approving it would apply. Read from the stored step, so an older result is said the same way."""
+    from .processing import protocol as PP
+    from .processing import reference as REF
+    from .suggestions import absorber_decisions
+
+    steps = {s.get("step"): s for s in r.get("steps") or () if isinstance(s, Mapping)}
+    cal = steps.get("calibration")
+    if r.get("source") != "isaac_protocol" or cal is None:
+        return None
+    said = REF.reading(cal)
+    warn = ((steps.get("qc") or {}).get("params") or {}).get("warn_energy_shift_eV") or PP.DEFAULT_PARAMS["qc"]["warn_energy_shift_eV"]
+    from .mutations import calibration_approvals
+
+    named = []
+    ref = (cal.get("outcome") or {}).get("reference") or {}
+    approval = calibration_approvals(bundle).get(r.get("group_id"))
+    if approval is not None:  # the latest approval, even when it was recorded after this result was processed
+        named.append((approval["element"], approval["edge"], "approved"))
+    elif ref.get("element") and ref.get("edge"):
+        named.append((ref["element"], ref["edge"], "approved" if ref.get("basis") == "scientist_decision" else "proposed"))
+    absorber = absorber_decisions(bundle).get(r.get("group_id"))
+    if not named and absorber is not None:
+        named.append((absorber["element"], absorber["edge"], "group_absorber"))
+    would = []
+    if said["reference_proposed"]:
+        for element, edge, basis in named:
+            w = REF.would_apply(cal, element, edge, warn_eV=float(warn))
+            would.append({"element": element, "edge": edge, "basis": basis,
+                          **{k: w[k] for k in ("tabulated_edge_eV", "shown", "needs_size_confirmation", "statement")}})
+    return {k: said[k] for k in ("reference_source", "reference_scans_usable", "reference_scans_listed",
+                                 "measured_reference_e0_eV", "reference_e0_spread_eV", "reference_proposed",
+                                 "reference_statement")} | {"would_apply": would}
+
+
 def _processing_result_view(bundle: Mapping, r: Mapping) -> dict:
     """One processing result, compact: what a reviewer needs to decide it and to pick an Athena version.
     Arrays (per-scan lists, flagged points) are counted, not printed; the result as the run first wrote it is in ``result_file`` (written once, never rewritten: the current
@@ -1237,6 +1274,7 @@ def _processing_result_view(bundle: Mapping, r: Mapping) -> dict:
 
         note = _skipped_scans_statement(inputs, SimpleNamespace(energy=channel.get("energy"), signal_name=channel.get("signal_name")),
                                         sum(1 for i in inputs if i.get("used")))
+    calibration = _calibration_view(bundle, r)
     return _compact({
         "result_id": B.processing_id(r),
         "group_id": r.get("group_id"),
@@ -1252,6 +1290,7 @@ def _processing_result_view(bundle: Mapping, r: Mapping) -> dict:
         "inputs": {"listed": len(inputs), "used": sum(1 for i in inputs if i.get("used")), "skipped": skipped},
         "scans": _scans_line(r),
         **({"scans_note": note} if note else {}),
+        **({"calibration": calibration} if calibration else {}),
         "steps": [{"step": s.get("step"), "flags": list(s.get("flags") or ()), "outcome": s.get("outcome")} for s in r.get("steps") or ()],
         "outputs": {"e0_eV": (r.get("outputs") or {}).get("e0_eV"), "edge_step": (r.get("outputs") or {}).get("edge_step"),
                     "points": (r.get("outputs") or {}).get("points"),
@@ -1668,6 +1707,9 @@ def cmd_bundle_decide(args) -> int:
             raise M.MutationRefused(f"--split-into is not valid JSON: {exc}") from exc
         targets = _targets_from(args)
         positions = _positions(args.positions)
+        if args.question and getattr(args, "accept_shift", None) is not None:
+            raise M.MutationRefused("--accept-shift goes with --target <group id> --decision approve_calibration. "
+                                    "Nothing was recorded.")
         if args.question:
             # the question is resolved to its targets under the write's own lock (mutations.decide_question,
             # shared with the local questions screen)
@@ -1709,6 +1751,7 @@ def cmd_bundle_decide(args) -> int:
             positions=positions,
             same_conditions=args.same_conditions,
             as_said=args.as_said,
+            accept_shift=getattr(args, "accept_shift", None),
         )
 
     return _mutation(run)
@@ -2137,6 +2180,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--qc-note", help="with --qc-status: what is compromised or failed, and why")
     q.add_argument("--element", help="record group + approve_calibration (the calibration reference) or set_absorber (the absorber): an element, e.g. Ir")
     q.add_argument("--edge", help="with --element: the edge (K, L1-L3, M1-M5)")
+    q.add_argument("--accept-shift", type=float, dest="accept_shift",
+                   help="with approve_calibration: the shift in eV the scientist accepts, exactly as the reply showed it "
+                        "(e.g. -8.6); needed when the shift is above the protocol's warning level")
     q.add_argument("--positions", help="--target experiment + set_counter_positions or set_not_counter_positions: "
                                        "1-based filename token positions, e.g. 2 or 2,3; set_counter_positions also takes "
                                        "last (the last token, whatever the name's length), e.g. last or 3,last")

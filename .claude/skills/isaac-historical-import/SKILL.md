@@ -152,22 +152,22 @@ folder that was imported (the bundle records it only with `import --record-local
 readable one `process` refuses and writes nothing. After a ZIP import, ask the scientist to unzip it
 outside the bundle, and confirm the unzipped folder is the data they approved. Read the Processing
 section of `reference/grouping-and-processing.md`. Page results with
-`<isaac> bundle list <bundle> processing-results --limit 20`. For each group show the verdict in
-words, glitch flags, skipped scans, agreement with the scientist's own Athena output, and the plot
-(open the PNG with Read and describe it). Ask approve / reject / needs changes.
+`<isaac> bundle list <bundle> processing-results --limit 20`. For each group show the verdict in words,
+glitch flags (with `glitch_check_few_scans`, say its sentence instead), skipped scans, agreement with
+their own Athena output, and the plot (open the PNG with Read and describe it). Ask approve / reject / needs changes.
 
-- **Approval is the scientist's call.** A `warn` is theirs to accept. A `fail` for
-  `edge_step_implausible`, `no_edge` or `post_edge_not_at_1` is never offered for approval: offer
-  reject or `needs_changes`. When approving, ask for the QC status: map their words to one of the four
-  (`--qc-status valid|compromised|failed|pending`), say it back, record on yes; never derive it from
-  the verdict.
+- **Approval is the scientist's call.** A `warn` is theirs to accept. A `fail` for `edge_step_implausible`,
+  `no_edge` or `post_edge_not_at_1` is never offered for approval: offer reject or `needs_changes`. When
+  approving, ask for the QC status: map their words to one of the four
+  (`--qc-status valid|compromised|failed|pending`), say it back, record on yes; never derive it from the verdict.
 - **Two results for one group**: ISAAC's curve (`…-isaac`) and their own Athena curve (`…-athena`).
   Show both, say which scans each used, ask which is the record's, approve exactly one.
 - A `not_applicable` result is not a fail; never ask to approve it ("no ISAAC processing protocol
   covers this data yet"). A result with **no curve** cannot be approved; offer: reject the result,
   `needs_changes`, or leave the group out.
-- A calibration shift (`approve_calibration --element --edge`, in the reference) needs the scientist to
-  name the reference's element and edge. No answer, no shift. `reference_edge_not_found`: say so, ask nothing.
+- A calibration shift (`approve_calibration --element --edge`, in the reference): before asking the element
+  and edge, say how many scans show a reference edge and the shift it would apply; never ask when no
+  reference is proposed. No answer, no shift. Above 2 eV it needs `--accept-shift` on their yes.
 
 Always say: **the processing protocol is a draft until the ISAAC processing reviewers (Oscar and
 Angel) review it**; an approval means "I looked at this curve and accept it for this record", not

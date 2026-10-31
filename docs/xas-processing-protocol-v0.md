@@ -161,6 +161,30 @@ Without any reference: no shift, `calibration_reference_unconfirmed`. A foil gro
 never propagated to sample groups. `max_plausible_shift_eV` 25; `align_scans_by_reference`
 false. **All calibration params need approval.**
 
+**An in-scan reference needs two usable scans** (`isaac.xas.in_scan_reference_min_scans.v0`). An
+in-scan reference channel is proposed only when its edge is usable (SNR ≥ 10) in at least 2 scans;
+otherwise no reference is proposed, flag `reference_edge_in_too_few_scans`, no shift is computed or
+applied even under an approval, and `approve_calibration` is refused. Measured on a real BL4-3
+beamtime: a 16-scan sample group had ONE scan at SNR 10.46, the others 0.6–3.5, per-scan reference
+"edges" 4964.6–4985.5 eV; an approval as Ti K applied −8.6 eV (E0 4978.0 → 4969.4) from that one
+scan, erasing the chemical shift the study measures (also 1 of 4 and 1 of 6 scans in two other
+groups). A reference group's own signal still needs one scan. The result says
+`reference_scans_usable` of `reference_scans_listed`, `reference_proposed` and
+`reference_statement`; `reference_e0_spread_eV` is null with fewer than 2 usable scans (one scan
+has no spread).
+
+**A large shift's size is confirmed** (`isaac.xas.calibration_shift_size_confirmed.v0`). Before
+anything is recorded, `approve_calibration --element --edge` says the shift it would apply
+against the tabulated edge ("the reference edge sits 8.6 eV above Ti K's tabulated 4966.0 eV;
+approving applies -8.6 eV"); `bundle show processing-result` says it too (`calibration.would_apply`,
+for an approved, proposed or absorber element/edge). A shift above `qc.warn_energy_shift_eV` (2 eV)
+is recorded only with `--accept-shift <the value shown>` (to 0.1 eV; stored as the decision's
+`value.accepted_shift_eV`), else refused with nothing recorded; processing applies such a shift
+only when the approval's confirmed size matches, else flags `calibration_shift_size_not_confirmed`.
+Shifts of 2 eV or less behave as before. These sentences, counts and the null spread are in the
+result only: `params.json` and `qc.json` (hashed into the run id) keep exactly what they held, so a
+group whose curve does not change keeps its result id.
+
 ## 4. Deglitch / outliers (flag, never drop by default)
 
 * ≥ `min_scans_for_cross_scan` (3) scans: each scan fitted as `a + b·median`; a point is
@@ -264,7 +288,12 @@ part-way; per-scan diagnostic `signal_zero_points`) is merged unchanged, flagged
   spike. Measured on real BL4-3 standards: a CoSO4 standard in sucrose, 32 of 303 points flagged; a
   0.8 wt% TiO2 anatase, 31 of 173. `glitches_flagged` therefore warns on most curves of those
   beamtimes. The detector is unchanged (flags never drop points; `exclude_flagged` is false); its
-  thresholds are for the scientist to approve.
+  thresholds are for the scientist to approve. With fewer than `min_scans_for_cross_scan` (3) scans
+  a result with flagged points carries `qc.statements.glitch_check_few_scans` ("with N scan(s), the
+  glitch check compares neighbouring points and also flags real features such as the white line and
+  oscillations; these N flags are not by themselves evidence of glitches"); measured on a real BL4-3
+  beamtime: a clean Ti foil had 21 points flagged (z up to 37.7), two-scan groups 30–31, and 30 of
+  34 results carried `glitches_flagged`. No count, flag, verdict or id changes (said after the run id).
 * The §7 post-edge level cannot judge a scan ending < 50 eV above E0 (`post_edge_window_too_short`
   warns; its normalised curve is unchecked, its E0 usable).
 

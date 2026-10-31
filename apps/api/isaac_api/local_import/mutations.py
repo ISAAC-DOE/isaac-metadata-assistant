@@ -1037,6 +1037,7 @@ def decide(
     expected_version: str | None = None,
     same_conditions: bool = False,
     as_said: bool = False,
+    accept_shift: float | None = None,
 ) -> dict:
     """Record a scientist decision for each target (ALL-OR-NOTHING), idempotently.
 
@@ -1052,6 +1053,7 @@ def decide(
         target_ids=target_ids, decision=decision, value=value, by=by, orcid=orcid, note=note,
         split_into=split_into, merge_with=merge_with, qc_status=qc_status, qc_note=qc_note,
         element=element, edge=edge, positions=positions, same_conditions=same_conditions,
+        **({"accept_shift": accept_shift} if accept_shift is not None else {}),
     )
     _decide_arguments(**params)  # refused before the lock is taken, as always
     with locked(Path(bundle_dir)):
@@ -1719,7 +1721,8 @@ def qc_note_problem(qc_status: str | None, qc_note: str | None) -> str | None:
 
 
 def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, edge, positions, value=None,
-                      qc_note=None, same_conditions=False, split_into=None, clock_zone_defer=False, **_rest):
+                      qc_note=None, same_conditions=False, split_into=None, clock_zone_defer=False, accept_shift=None,
+                      **_rest):
     """The checks of :func:`decide` that need no bundle. Returns ``positions`` normalised."""
     problem = B.decider_name_problem(by)
     if problem:
@@ -1745,6 +1748,15 @@ def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, ed
             raise MutationRefused(f"{decision} needs --element (e.g. Ir) and --edge (K, L1-L3, M1-M5).")
     elif element or edge:
         raise MutationRefused("--element/--edge go with --decision approve_calibration or set_absorber on a record group.")
+    if accept_shift is not None:
+        if decision != "approve_calibration":
+            raise MutationRefused("--accept-shift goes with --decision approve_calibration on a record group: the shift "
+                                  "(in eV) the reply said approving applies. Nothing was recorded.")
+        try:
+            if not math.isfinite(float(accept_shift)):
+                raise ValueError
+        except (TypeError, ValueError):
+            raise MutationRefused("--accept-shift must be a number in eV, e.g. -8.6. Nothing was recorded.") from None
     if decision in ("set_counter_positions", B.NOT_COUNTER_DECISION):
         from .grouping import LAST_POSITION
 
@@ -1890,6 +1902,7 @@ def record_decision(
     positions: Sequence[int] | None = None,
     same_conditions: bool = False,
     clock_zone_defer: bool = False,
+    accept_shift: float | None = None,
 ) -> dict:
     """:func:`decide` applied to an ALREADY-LOADED bundle, under the caller's lock. Saves
     nothing: the caller saves through :func:`save_bundle` (or :func:`mutate`). Every target
@@ -1899,14 +1912,19 @@ def record_decision(
     positions = _decide_arguments(
         target_ids=target_ids, decision=decision, by=by, orcid=orcid, qc_status=qc_status,
         element=element, edge=edge, positions=positions, value=value, qc_note=qc_note, same_conditions=same_conditions,
-        split_into=split_into, clock_zone_defer=clock_zone_defer,
+        split_into=split_into, clock_zone_defer=clock_zone_defer, accept_shift=accept_shift,
     )
     bulk = len(target_ids) > 1
+    accepted = round(float(accept_shift), 1) if accept_shift is not None else None
+    if decision == "approve_calibration":
+        # c12-cal: what the approval would apply is said BEFORE anything is recorded (and refused when nothing can be)
+        value = {"accepted_shift_eV": accepted} if accepted is not None else None
 
     def change(bundle):
         latest = B._decisions_by_target(bundle.get("scientist_decisions") or ())
         planned: list[tuple[str, dict]] = []
         acknowledged: dict[str, list[str]] = {}
+        calibration_said: dict[str, str] = {}
         off_list: OffListRefused | None = None
         for tid in target_ids:
             kind, obj = resolve_target(bundle, tid)
@@ -1930,6 +1948,8 @@ def record_decision(
                     "Approving a processing result needs --qc-status (one of "
                     + ", ".join(qc_status_vocabulary()) + "): the QC status is a person's statement."
                 )
+            if kind == "record_group" and decision == "approve_calibration":
+                calibration_said[tid] = calibration_shift_said(bundle, tid, element, edge, accepted)
             if kind == "record_group" and decision == "confirm":
                 # R-4: a group whose runs now sit in ANOTHER live group cannot be confirmed
                 # (e.g. a rejected group after a regroup re-proposed its runs)
@@ -2178,6 +2198,9 @@ def record_decision(
         statement = result.pop("statement", None) or plain_statement(
             bundle, planned, target_ids, recorded, decision=decision, value=value, element=element, edge=edge,
             positions=positions, qc_status=qc_status)
+        if calibration_said:
+            said = list(dict.fromkeys(calibration_said.values()))
+            statement = " ".join([statement, *said[:3]] + ([f"(and {len(said) - 3} more)"] if len(said) > 3 else []))
         return {"statement": statement, **result}
 
     return change(bundle)
@@ -3916,8 +3939,53 @@ def calibration_approvals(bundle: Mapping) -> dict:
                 "edge": d["edge"],
                 "decided_by": (d.get("decided_by") or {}).get("name"),
                 "decision_id": d["decision_id"],
+                # c12-cal: the shift size the scientist confirmed (--accept-shift), only when they did
+                **({"accepted_shift_eV": d["value"]["accepted_shift_eV"]}
+                   if isinstance(d.get("value"), Mapping) and d["value"].get("accepted_shift_eV") is not None else {}),
             }
     return out
+
+
+def _latest_calibration_step(bundle: Mapping, group_id: str) -> tuple[Mapping | None, Mapping | None]:
+    """(the calibration step, the qc step) of the group's latest ISAAC processing result that has one."""
+    for r in reversed(bundle.get("processing_results") or ()):
+        if r.get("group_id") == group_id and r.get("source") == "isaac_protocol":
+            steps = {s.get("step"): s for s in r.get("steps") or () if isinstance(s, Mapping)}
+            if "calibration" in steps:
+                return steps["calibration"], steps.get("qc")
+    return None, None
+
+
+def calibration_shift_said(bundle: Mapping, group_id: str, element: str, edge: str, accepted: float | None) -> str:
+    """What approving ``element`` ``edge`` as group ``group_id``'s calibration reference would apply, in one or two
+    sentences, from its latest ISAAC result; RAISES :class:`MutationRefused` (nothing recorded) when no reference is
+    proposed, when the shift would never be applied (implausible), or when a shift above the protocol's warning
+    level is not confirmed by ``accepted`` (``--accept-shift``) matching the shift said."""
+    from .processing import protocol as PP
+    from .processing import reference as REF
+
+    warn = float(PP.DEFAULT_PARAMS["qc"]["warn_energy_shift_eV"])
+    cal, qc = _latest_calibration_step(bundle, group_id)
+    if cal is None:
+        return (f"{group_id} has no processing result yet, so the shift is not known: the next `process --group "
+                f"{group_id}` computes it ({element} {edge}'s tabulated edge minus the measured reference edge). A shift "
+                f"above the protocol's {warn:g} eV warning level is not applied without its size confirmed: approve "
+                "again then with --accept-shift <the shift shown>.")
+    warn = float(((qc or {}).get("params") or {}).get("warn_energy_shift_eV") or warn)
+    w = REF.would_apply(cal, element, edge, warn_eV=warn)
+    if not REF.reading(cal)["reference_proposed"]:
+        raise MutationRefused(f"No calibration shift can be approved for {group_id}: {w['statement']} Nothing was recorded.")
+    if w["implausible"]:
+        raise MutationRefused(f"{w['statement']} Nothing was recorded.")
+    if w["shift_eV"] is None:
+        return w["statement"]
+    if accepted is not None and not REF.shift_size_confirmed(accepted, w["shift_eV"]):
+        raise MutationRefused(f"--accept-shift {REF.shown(accepted)} is not the shift approving applies: {w['statement']} "
+                              f"Pass --accept-shift {w['shown']} if that is the size you accept. Nothing was recorded.")
+    if w["needs_size_confirmation"] and accepted is None:
+        raise MutationRefused(f"{w['statement']} Say the size to the scientist; if they accept it, record it with "
+                              f"--accept-shift {w['shown']}. Nothing was recorded.")
+    return w["statement"].split(" That is more than")[0] + (" You confirmed that size." if accepted is not None else "")
 
 
 def counter_positions(bundle: Mapping) -> list[int] | None:

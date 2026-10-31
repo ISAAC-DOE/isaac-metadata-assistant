@@ -74,7 +74,10 @@ approved; `--group <id>` redoes only that group and keeps every other group's re
 verdict (pass / warn / fail), glitch flags, and compares with the scientist's own Athena output when
 it finds one. Show per group, in words:
 
-- the verdict and the reasons (counts, noise, glitches, energy range);
+- the verdict and the reasons (counts, noise, glitches, energy range). **Glitch counts with fewer than 3
+  scans**: when `qc.statements.glitch_check_few_scans` is present, say that sentence instead of reading
+  the count as glitches (with one or two scans the check compares neighbouring points and also flags the
+  white line and the oscillations); never call those points glitches yourself;
 - **when scans were skipped** (reason `scans_skipped_lacking_chosen_columns`; flag
   `channel_from_a_later_scan` when the first scan was one of them): the used / readable / skipped
   counts in plain words — "14 of 165 scans were used; 150 had different columns (they may be motor
@@ -203,15 +206,29 @@ Ask: approve, reject, or needs changes (with a note):
 
 ## Calibration shift (only when processing proposes one)
 
-Processing never shifts the energy axis on its own. When a result's flags say the calibration reference
-is unconfirmed, explain it plainly and ask the scientist which element and edge the reference foil
-measures (`--element Ir`, `--edge L3` style). Record
-`<isaac> bundle decide <bundle> --target <group id> --decision approve_calibration --element <symbol> --edge <K|L1-L3|M1-M5> --by "<name>"`,
-then run `process --source <folder> --group <group id>` again. Without that decision the shift is not applied; do not guess the
-element or edge from a file name.
-When a result carries `reference_edge_not_found` (the reference's edge is not in the scan range, e.g. the
-monochromator was calibrated on a foil outside the grid), say so and do NOT ask for the reference's element and edge:
-an `approve_calibration` would be meaningless, and no shift is proposed.
+Processing never shifts the energy axis on its own. Before any calibration question, read the result's
+`calibration` block (`bundle show <bundle> processing-result <id>`): `reference_scans_usable` of
+`reference_scans_listed`, `reference_proposed`, `reference_statement`, and `would_apply` (the shift for
+an element/edge already named for the group: approved, proposed, or the group's absorber).
+
+- **No reference proposed** (`reference_proposed: false`; flags `reference_edge_not_found`,
+  `reference_edge_in_too_few_scans` or `no_reference_available`): say the `reference_statement` ("only 1 of
+  16 scans shows a usable reference edge; an in-scan reference needs one in at least 2 scans") and do NOT
+  ask for an element or edge: no shift can be approved, and `approve_calibration` is refused.
+- **A reference is proposed** (flag `calibration_reference_unconfirmed`): say how many scans show a
+  reference edge and where ("2 of 2 scans show a reference edge at 4974.6 eV"), then ask which element and
+  edge the reference measures (`--element Ir`, `--edge L3` style). Never guess it from a file name. Record
+  `<isaac> bundle decide <bundle> --target <group id> --decision approve_calibration --element <symbol> --edge <K|L1-L3|M1-M5> --by "<name>"`.
+  The reply (or the refusal) says the shift it applies: "the reference edge sits 8.6 eV above Ti K's
+  tabulated 4966.0 eV; approving applies -8.6 eV". Say it to the scientist in those words.
+- **A shift above the protocol's 2 eV warning level** (`qc.warn_energy_shift_eV`) is refused until the
+  scientist also accepts its size: it moves every energy of the record, E0 included, by that much, and can
+  erase a chemical shift the study measures. Say the size, ask "apply -8.6 eV to this group?", and only on
+  their yes add `--accept-shift -8.6` (the value shown, to 0.1 eV; another value is refused). Nothing is
+  recorded by a refusal. A result whose approval lacks the confirmed size carries
+  `calibration_shift_size_not_confirmed` and is not shifted.
+- Then run `process --source <folder> --group <group id>` again and say the result's `applied_shift_eV`.
+  A shift of 2 eV or less is approved as before, without `--accept-shift`.
 
 ## Groups that need an explanation
 

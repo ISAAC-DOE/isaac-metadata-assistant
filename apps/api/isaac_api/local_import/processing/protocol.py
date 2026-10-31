@@ -29,8 +29,10 @@ RULE_VERSIONS_SINCE_PROTOCOL_VERSION: dict[str, Any] = {
     "rule_ids": [
         "isaac.athena.already_normalized.v0",
         "isaac.athena.match_by_name.v1",
+        "isaac.xas.calibration_shift_size_confirmed.v0",
         "isaac.xas.edge_above_noise.v0",
         "isaac.xas.edge_step_plausible.v0",
+        "isaac.xas.in_scan_reference_min_scans.v0",
         "isaac.xas.post_edge_level.v1",
         "isaac.xas.reference_channel_fallback.v1",
         "isaac.xas.skip_signal_all_zero.v0",

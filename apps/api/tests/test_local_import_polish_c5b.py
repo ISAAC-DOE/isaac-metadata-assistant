@@ -93,7 +93,7 @@ def test_a_skipped_scan_gets_a_sentence_and_no_result_id_moves(tmp_path):
 def test_a_group_with_no_skipped_scan_has_no_skip_sentence(tmp_path):
     P, NA = _processing_helpers()
     r = NA._one(tmp_path, [P.spec_file(P.fluo_scan(2)), P.spec_file(P.fluo_scan(3))])
-    assert "statements" not in r["qc"]
+    assert set(r["qc"].get("statements") or ()) <= {"glitch_check_few_scans"}  # c12-cal: the few-scan glitch sentence only
 
 
 def test_list_row_and_show_carry_a_scans_line(bdir, capsys):

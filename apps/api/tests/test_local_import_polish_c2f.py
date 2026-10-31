@@ -127,14 +127,14 @@ def test_transmission_that_works_in_one_scan_is_kept_no_fallback(tmp_path):
     assert cc["signal_name"] == "ln(I0/I1)" and "fallback_from" not in cc["basis"]
     assert FALLBACK not in r["review_flags"] and FALLBACK not in r["qc"]["reasons"]
     assert [i.get("skip_reason") for i in r["inputs"]] == ["signal_not_finite", None]
-    assert "channel_fallback" not in r["qc"]["metrics"] and "statements" not in r["qc"]
+    assert "channel_fallback" not in r["qc"]["metrics"] and set(r["qc"].get("statements") or ()) <= {"glitch_check_few_scans"}  # c12-cal: the few-scan glitch sentence only
 
 
 def test_transmission_that_works_everywhere_is_unchanged(tmp_path):
     bdir, root = _case(tmp_path, [std_scan(1, i1_positive=True), std_scan(2, i1_positive=True)])
     r = isaac(run_process(bdir, source_root=root))
     assert r["channel_choice"]["signal_name"] == "ln(I0/I1)" and r["channel_choice"]["basis"]["rule"] == "reference: transmission first"
-    assert FALLBACK not in r["review_flags"] and "statements" not in r["qc"]
+    assert FALLBACK not in r["review_flags"] and set(r["qc"].get("statements") or ()) <= {"glitch_check_few_scans"}  # c12-cal: the few-scan glitch sentence only
     assert all(i["used"] and "skip_reason" not in i for i in r["inputs"])
 
 
