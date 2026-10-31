@@ -296,6 +296,17 @@ def test_a_value_only_off_its_list_is_kept_as_a_vocabulary_request_in_the_name_g
     assert json.loads((grouped / "bundle.json").read_bytes())["vocabulary_requests"] == json.loads(before)["vocabulary_requests"]
 
 
+def test_without_a_name_adopt_keeps_no_vocabulary_request_and_says_so(grouped, tmp_path, capsys):
+    """A word is kept as someone's request only in a name (`--by`, passed once the scientist says the sheet is theirs)."""
+    theirs = _their_sheet(grouped, tmp_path / THEIRS)
+    code, text, err = _adopt(grouped, theirs, tmp_path / "adopted.xlsx", capsys)
+    assert code == 0, err
+    assert not M.load(grouped).get("vocabulary_requests")
+    assert "Off-list values were not kept as requests: no name given" in text
+    assert "'aqueous_electrochemistry'" in text and "Kept as vocabulary requests" not in text
+    assert "Pass --by only after the scientist says the sheet is theirs" in text
+
+
 # --- importing the adopted file -------------------------------------------------------------------
 
 

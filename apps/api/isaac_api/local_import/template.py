@@ -1036,7 +1036,15 @@ def export_template(bundle_dir: Path, out: Path, *, suggestions: bool = True, fo
     off_list = list((filled or {}).pop("_off_list", ()))
     if filled is not None and _keep_off_list is not None:
         filled["vocabulary_requests"] = []
-        if off_list:
+        if off_list and not str(_keep_off_list.get("by") or "").strip():
+            # NO NAME, NO REQUEST: a word is kept as someone's request only when they are named (`--by`, passed once
+            # the scientist says the sheet is theirs); without one nothing is kept, and the summary says so
+            filled["vocabulary_requests_not_kept"] = {
+                "reason": "no name given",
+                "words": [{k: r[k] for k in ("field_path", "term", "header", "cells", "run_ids")}
+                          for r in off_list_requests(off_list)],
+            }
+        elif off_list:
             # THEIR OFF-LIST WORDS ARE KEPT (template adopt), recorded before the file exists, as exposures are
             keep = dict(_keep_off_list)
 
@@ -2488,8 +2496,9 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
                    by: str | None = None, orcid: str | None = None) -> dict:
     """Write ``out``: the bundle's template with the scientist's own values where no file contradicts
     them, and a Disagreements sheet for every one a file contradicts or the field does not take. A value
-    the field refuses ONLY because it is not on its list is also kept as a vocabulary request (in ``by``'s
-    name when given), recorded before the file is written."""
+    the field refuses ONLY because it is not on its list is also kept as a vocabulary request in ``by``'s
+    name, recorded before the file is written; without ``by`` nothing is kept, and the result says so
+    (``vocabulary_requests_not_kept``: "no name given")."""
     from . import mutations as M
 
     if by is not None and (problem := B.decider_name_problem(by)):
@@ -2913,6 +2922,13 @@ def render_adopt_summary(result: Mapping) -> str:
         lines.append("Kept as vocabulary requests (not decisions, not values: each is a word its field's list lacks; "
                      "`isaac bundle propose-terms` can draft it):")
         lines += _request_lines(a["vocabulary_requests"], True)
+    if a.get("vocabulary_requests_not_kept"):
+        words = a["vocabulary_requests_not_kept"]["words"]
+        lines.append("")
+        lines.append(f"Off-list values were not kept as requests: no name given ({len(words)} word(s): "
+                     + "; ".join(f"{w['header']} {w['term']!r}" for w in words[:10])
+                     + (f" and {len(words) - 10} more" if len(words) > 10 else "")
+                     + "). Pass --by only after the scientist says the sheet is theirs.")
     for title, key, shown in (("Your rows that match no run", "unmatched_rows", lambda x: f"{x['row']} {x['name']}"),
                               ("Your rows that reach more than one run (each value goes to every one)", "rows_reaching_several_runs",
                                lambda x: f"{x['row']} {x['name']} -> {x['runs']} runs"),

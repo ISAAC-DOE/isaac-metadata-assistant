@@ -17,9 +17,15 @@
  *   - runs: the file's own `runs` when it has one; otherwise the distinct `ref.run_id` of the
  *     citations, but only when EVERY citation names its run and none were left out. Anything
  *     else is "not stated" — an AI reading's citation points at a question, not a run;
- *   - the scientist's own words: a term's `scientist_notes` (strings, or objects with a `note`
- *     or `text`) when the file has them. The format at version 1 carries none, and then the
- *     page says the file has none rather than offering a sentence in their place;
+ *   - the scientist's own words: a term's `scientist_notes`, each a structured note
+ *     `{term_as_said, note, by, when, source}` that `propose-terms` takes from the bundle's
+ *     vocabulary requests. Only `term_as_said` and `note` are their words (shown in quotation
+ *     marks); `by`, `when` and `source` are the attribution, shown outside them. A plain string or
+ *     a note without `term_as_said` is not shown (who said it cannot be told). A file written
+ *     before vocabulary requests carries none, and then the page says the file has none;
+ *   - a vocabulary request (origin `scientist_request`) is counted as "asked by the scientist",
+ *     never as a reading; a term `--merge` carried over (`carried_over`, no longer found in the
+ *     bundle) is listed but never filed;
  *   - the reviewer notes (`gate0`) are built from those facts only. A note the file has no fact
  *     for is left empty and named as missing; the description is ALWAYS left empty.
  */
@@ -31,13 +37,30 @@ export const TERM_DRAFTS_FORMAT_VERSION = '1';
 /** A drafts file is a short JSON report; anything far larger is not one. */
 export const TERM_DRAFTS_MAX_BYTES = 5 * 1024 * 1024;
 
-export type DraftOrigin = 'scientist_confirmed' | 'parser_reading' | 'ai_reading';
+export type DraftOrigin = 'scientist_confirmed' | 'parser_reading' | 'ai_reading' | 'scientist_request';
 
 export const ORIGIN_LABEL: Record<DraftOrigin, string> = {
   scientist_confirmed: 'confirmed by you',
   parser_reading: 'parser reading',
   ai_reading: 'AI reading',
+  scientist_request: 'asked by the scientist',
 };
+
+/** The origins that are a READING of a value (a vocabulary request is not one). */
+const READING_ORIGINS: DraftOrigin[] = ['scientist_confirmed', 'parser_reading', 'ai_reading'];
+
+/**
+ * One of the scientist's notes. `termAsSaid` and `note` are their own words; `by`, `when` and
+ * `saidIn` are ISAAC's attribution, never shown as a quotation.
+ */
+export interface ScientistNote {
+  termAsSaid: string;
+  note: string | null;
+  by: string | null;
+  when: string | null;
+  saidIn: string | null;
+  file: string | null;
+}
 
 export interface DraftCitation {
   file: string | null;
@@ -65,7 +88,9 @@ export interface LocalTermDraft {
   citations: DraftCitation[];
   citationsTotal: number | null;
   citationsTruncated: boolean;
-  scientistNotes: string[];
+  scientistNotes: ScientistNote[];
+  /** `--merge` kept this term from an earlier file: no longer found in the bundle, never filed. */
+  carriedOver: boolean;
   drafted: boolean;
   /** The file's own sentence for a term it did not draft. */
   reason: string | null;
@@ -88,17 +113,37 @@ const count = (v: unknown): number | null =>
   typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null;
 
 function origin(v: unknown): DraftOrigin | null {
-  return v === 'scientist_confirmed' || v === 'parser_reading' || v === 'ai_reading' ? v : null;
+  return v === 'scientist_confirmed' || v === 'parser_reading' || v === 'ai_reading' || v === 'scientist_request'
+    ? v
+    : null;
 }
 
-function notesOf(raw: unknown): string[] {
+/** Structured notes only: a sentence ISAAC composed (`text`) or a bare string is never shown as their words. */
+function notesOf(raw: unknown): ScientistNote[] {
   if (!Array.isArray(raw)) return [];
-  const out: string[] = [];
+  const out: ScientistNote[] = [];
   for (const n of raw) {
-    const text = typeof n === 'string' ? n : isObj(n) ? str(n.note) ?? str(n.text) : null;
-    if (text && text.trim()) out.push(text.trim());
+    if (!isObj(n)) continue;
+    const termAsSaid = str(n.term_as_said);
+    if (!termAsSaid || !termAsSaid.trim()) continue;
+    const note = str(n.note);
+    const source = isObj(n.source) ? n.source : {};
+    out.push({
+      termAsSaid,
+      note: note && note.trim() ? note.trim() : null,
+      by: str(n.by),
+      when: str(n.when),
+      saidIn: str(source.said_in),
+      file: str(source.file),
+    });
   }
   return out;
+}
+
+/** "Synthetic Scientist, 2026-10-30, in an answer to `isaac bundle decide`" — the attribution, outside quotes. */
+export function noteAttribution(n: ScientistNote): string {
+  const where = n.saidIn ? `in ${n.saidIn}${n.file ? ` (${n.file})` : ''}` : n.file ? `in ${n.file}` : null;
+  return [n.by ?? 'no name given', n.when ? n.when.slice(0, 10) : null, where].filter((x): x is string => !!x).join(', ');
 }
 
 function problemsOf(raw: unknown): DraftProblem[] {
@@ -184,6 +229,7 @@ export function parseTermDraftsFile(text: string): ParseResult {
           scientist_confirmed: count(by.scientist_confirmed) ?? 0,
           parser_reading: count(by.parser_reading) ?? 0,
           ai_reading: count(by.ai_reading) ?? 0,
+          scientist_request: count(by.scientist_request) ?? 0,
         },
         runs: runsOf(t, citations, rawCitations.map((c) => c.ref), truncated),
         missingFrom: Array.isArray(t.missing_from) ? t.missing_from.filter((m): m is string => typeof m === 'string') : [],
@@ -191,6 +237,7 @@ export function parseTermDraftsFile(text: string): ParseResult {
         citationsTotal: count(t.citations_total),
         citationsTruncated: truncated,
         scientistNotes: notesOf(t.scientist_notes),
+        carriedOver: t.carried_over === true || t.current === false,
         drafted: draft.drafted === true && goodBody !== null,
         reason: str(draft.reason),
         problems: problemsOf(draft.problems),
@@ -207,14 +254,28 @@ function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-/** "2 readings (2 AI readings) in 2 runs" — the file's counts, and nothing else. */
+/** How many of a term's occurrences are a reading (a vocabulary request is the scientist asking, not a reading). */
+function readingsOf(d: LocalTermDraft): number {
+  return Math.max(0, (d.count ?? 0) - d.byOrigin.scientist_request);
+}
+
+/**
+ * "2 readings (2 AI readings); asked by the scientist (1) in 2 runs" — the file's counts, and
+ * nothing else. A carried-over term has none of its own.
+ */
 export function countsSentence(d: LocalTermDraft): string | null {
+  if (d.carriedOver) return 'No longer found in the bundle (carried over from an earlier drafts file).';
   if (d.count === null) return null;
-  const parts = (Object.keys(ORIGIN_LABEL) as DraftOrigin[])
-    .filter((o) => d.byOrigin[o] > 0)
-    .map((o) => `${d.byOrigin[o]} ${ORIGIN_LABEL[o]}${o === 'scientist_confirmed' ? '' : d.byOrigin[o] === 1 ? '' : 's'}`);
+  const reads = readingsOf(d);
+  const asked = d.byOrigin.scientist_request;
+  const parts = READING_ORIGINS.filter((o) => d.byOrigin[o] > 0).map(
+    (o) => `${d.byOrigin[o]} ${ORIGIN_LABEL[o]}${o === 'scientist_confirmed' ? '' : d.byOrigin[o] === 1 ? '' : 's'}`,
+  );
+  const said: string[] = [];
+  if (reads > 0 || asked === 0) said.push(`${plural(reads, 'reading', 'readings')}${parts.length ? ` (${parts.join(', ')})` : ''}`);
+  if (asked > 0) said.push(`${ORIGIN_LABEL.scientist_request} (${asked})`);
   const runs = d.runs === null ? '' : ` in ${plural(d.runs, 'run', 'runs')}`;
-  return `${plural(d.count, 'reading', 'readings')}${parts.length ? ` (${parts.join(', ')})` : ''}${runs}`;
+  return `${said.join('; ')}${runs}`;
 }
 
 export function citationLine(c: DraftCitation): string {
@@ -235,10 +296,16 @@ export function gate0FromDraft(
   const gate0: ApiSchemaProposalGate0 = {};
   const missing: (keyof ApiSchemaProposalGate0)[] = [];
   const lists = d.missingFrom.map((m) => LIST_WORDS[m] ?? m);
-  if (d.count !== null) {
+  if (d.count !== null && !d.carriedOver) {
     const where = bundleId ? `the local import ${bundleId}` : 'a local import';
+    const reads = readingsOf(d);
+    const asked = d.byOrigin.scientist_request;
+    const said = [
+      ...(reads > 0 || asked === 0 ? [`was read ${plural(reads, 'time', 'times')}`] : []),
+      ...(asked > 0 ? [`was asked for by the scientist ${plural(asked, 'time', 'times')}`] : []),
+    ].join(' and ');
     const problem =
-      `"${d.term}" was read ${plural(d.count, 'time', 'times')} for ${d.fieldPath} in ${where}` +
+      `"${d.term}" ${said} for ${d.fieldPath} in ${where}` +
       (lists.length ? `, and it is not on ${lists.join(' or ')}.` : '.');
     if (problem.length <= limits.problem_max) gate0.problem = problem;
   }
@@ -264,7 +331,7 @@ export function gate0FromDraft(
 
 /** The `source` block the server takes for a proposal filed from this draft. */
 export function sourceFromDraft(d: LocalTermDraft, bundleId: string | null): ApiSchemaProposalSourceInput | null {
-  if (d.count === null || d.count < 1) return null;
+  if (d.carriedOver || d.count === null || d.count < 1) return null;
   return {
     kind: 'local_import',
     format: TERM_DRAFTS_FORMAT,

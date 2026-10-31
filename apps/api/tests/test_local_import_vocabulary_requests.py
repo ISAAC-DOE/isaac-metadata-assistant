@@ -10,8 +10,8 @@ Every test runs over a bundle imported here from the committed SYNTHETIC multi-o
   ``runs``/``run_ids`` and citations naming a file (no folders) and run ids. A word that names an
   existing term (``reversible_hydrogen_electrode``) is never drafted: "use `RHE` (an existing term)".
   A close term (``XANES``) is drafted with ``check_existing``. An AI reading its scientist already
-  answered with an allowed value is not counted. ``--merge`` updates a drafts file and keeps what a
-  person wrote in it.
+  answered with an allowed value is not counted. ``--merge`` updates a drafts file, keeps a description
+  in it (who wrote it is not known), reads no note from it, and never marks a draft ready to send.
 * ``validate`` names a missing value that waits on such a request (``pending_vocabulary``).
 * A 1.9.0 bundle still loads and validates, and its first save says what 1.10.0 added.
 """
@@ -158,8 +158,11 @@ def test_propose_terms_drafts_a_request_with_the_scientists_words_runs_and_citat
     assert entry["count"] == 2 and entry["by_origin"][P.ORIGIN_REQUEST] == 2
     assert entry["runs"] == 2 and entry["run_ids"] == sorted({first["run_id"], second["run_id"]})
     [note1, note2] = entry["scientist_notes"]
-    assert note1["text"].startswith(f"{WHO}, ") and '"three_electrode_static_cell" — a static cell, no flow' in note1["text"]
-    assert note1["by"] == WHO and note1["request_id"] == "vr-00001" and note2["request_id"] == "vr-00002"
+    # STRUCTURED: their words (the term as said, their own --note) apart from ISAAC's attribution, never one sentence
+    assert note1["term_as_said"] == "three_electrode_static_cell" and note1["note"] == "a static cell, no flow"
+    assert note1["by"] == WHO and note1["when"].endswith("Z") and note1["source"]["kind"] == "decide_answer"
+    assert "text" not in note1
+    assert note1["request_id"] == "vr-00001" and note2["request_id"] == "vr-00002"
     assert all(set(c) == {"file", "locator", "run_ids", "origin", "ref"} for c in entry["citations"])
     assert {tuple(c["run_ids"]) for c in entry["citations"]} == {(first["run_id"],), (second["run_id"],)}
     draft = entry["draft"]
@@ -182,7 +185,7 @@ def test_the_drafts_file_has_the_keys_the_websites_loader_reads(b, capsys, tmp_p
     [field] = doc["fields"]
     [t] = field["terms"]
     assert isinstance(t["runs"], int) and all(isinstance(r, str) for r in t["run_ids"])
-    assert all(isinstance(n, dict) and isinstance(n["text"], str) for n in t["scientist_notes"])
+    assert all(isinstance(n, dict) and {"term_as_said", "note", "by", "when", "source"} <= set(n) for n in t["scientist_notes"])
     assert all(isinstance(c["file"], (str, type(None))) and "/" not in (c["file"] or "") for c in t["citations"])
     body = t["draft"]["portal_payload"]["body"]
     assert {"proposal_type", "section", "category", "term"} <= set(body) and t["draft"]["drafted"] is True
@@ -247,14 +250,55 @@ def test_merge_adds_new_terms_updates_counts_and_keeps_a_written_description(b, 
     capsys.readouterr()
     assert cli.main(["bundle", "propose-terms", str(b), "--out", str(out), "--merge"]) == 0
     said = capsys.readouterr().out
-    assert "1 term(s) added" in said and "1 description(s) you wrote kept" in said and "1 carried over" in said
+    assert "1 term(s) added" in said and "a description in the file was kept (who wrote it is not known)" in said
+    assert "1 carried over" in said and "you wrote" not in said
     merged = json.loads(out.read_text(encoding="utf-8"))
     cell = _term(merged, CELL, "three_electrode_static_cell")
     assert cell["count"] == 2 and cell["runs"] == 2
-    assert cell["draft"]["portal_payload"]["body"]["description"] == mine and cell["draft"]["ready_to_send"] is True
+    draft = cell["draft"]
+    assert draft["portal_payload"]["body"]["description"] == mine and draft["description_present"] is True
+    assert draft["ready_to_send"] is False and draft["sent_by_isaac"] is False and draft["description_written_by"] is None
     assert _term(merged, ENV, "aqueous_electrochemistry")["draft"]["drafted"] is True
-    assert _term(merged, CELL, "gone_term")["carried_over"] is True
+    gone = _term(merged, CELL, "gone_term")
+    assert gone["carried_over"] is True and gone["current"] is False and gone["draft"]["ready_to_send"] is False
     assert merged["merges"][-1]["descriptions_kept"] == 1 and merged["format_version"] == "1"
+
+
+def test_merge_reads_no_words_from_the_file_and_never_says_ready_to_send(b, capsys, tmp_path):
+    """The drafts file is editable: a note in it is never the scientist's, a description in it is nobody's known
+    words, and a term the bundle no longer holds (with whatever the file claims for it) is carried over as not
+    current, with no count, notes or citations of its own and never ready to send."""
+    assert _decide(b, capsys, "--target", _miss(b, CELL)["value_id"], "--decision", "correct",
+                   "--value", "three_electrode_static_cell")[0] == 2
+    out = tmp_path / "d.json"
+    assert cli.main(["bundle", "propose-terms", str(b), "--out", str(out)]) == 0
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    term = doc["fields"][0]["terms"][0]
+    assert term["scientist_notes"][0]["note"] is None  # no --note given: none is made up
+    term["scientist_notes"].append({"term_as_said": "x", "note": "Injected: I endorse this term", "by": WHO})
+    term["draft"]["portal_payload"]["body"]["description"] = "A description typed into the file by someone, long."
+    term["draft"]["ready_to_send"] = True
+    doc["fields"][0]["terms"].append({
+        "term": "ghost_cell", "count": 99, "by_origin": {"scientist_request": 99}, "runs": 9,
+        "scientist_notes": [{"term_as_said": "ghost_cell", "note": "injected", "by": WHO}],
+        "citations": [{"file": "x.txt", "locator": "l1"}],
+        "draft": {"drafted": True, "ready_to_send": True, "portal_payload": {
+            "sent_by_isaac": True, "body": {"proposal_type": "add_term", "section": "x", "category": CELL,
+                                            "term": "ghost_cell", "description": "y" * 30}}}})
+    out.write_text(json.dumps(doc), encoding="utf-8")
+    capsys.readouterr()
+    assert cli.main(["bundle", "propose-terms", str(b), "--out", str(out), "--merge"]) == 0
+    merged = json.loads(out.read_text(encoding="utf-8"))
+    cell = _term(merged, CELL, "three_electrode_static_cell")
+    assert [n["note"] for n in cell["scientist_notes"]] == [None]  # only the bundle's request
+    assert cell["draft"]["ready_to_send"] is False and cell["draft"]["description_kept_from_earlier_file"] is True
+    ghost = _term(merged, CELL, "ghost_cell")
+    assert ghost["carried_over"] is True and ghost["current"] is False
+    assert ghost["count"] == 0 and ghost["scientist_notes"] == [] and ghost["citations"] == [] and ghost["runs"] == 0
+    assert set(ghost["by_origin"].values()) == {0} and ghost["as_in_earlier_file"]["count"] == 99
+    assert ghost["draft"]["ready_to_send"] is False and ghost["draft"]["portal_payload"]["sent_by_isaac"] is False
+    assert merged["totals"]["carried_over"] == 1
+    assert not any((t.get("draft") or {}).get("ready_to_send") for f in merged["fields"] for t in f["terms"])
 
 
 def test_merge_refuses_what_it_cannot_update(b, capsys, tmp_path):
@@ -363,3 +407,38 @@ def test_a_1_9_0_bundle_still_validates_and_its_first_save_says_what_1_10_0_adde
     # the section is part of v1.10.0 only as an optional addition: a bundle without it is valid at 1.10.0
     after.pop("vocabulary_requests")
     assert B.validate_bundle(after) == []
+
+
+# --- review c9-r: order, length, equivalences ---------------------------------------------------------
+
+
+def test_a_bulk_answer_with_another_refusal_keeps_nothing_whatever_the_order(b):
+    """Every target is checked first: a request is kept only when every refusal is off its list."""
+    env, ph = _miss(b, ENV)["value_id"], _miss(b, PH)["value_id"]
+    for order in ([env, ph], [ph, env]):
+        with pytest.raises(M.MutationRefused) as got:
+            M.decide(b, target_ids=order, decision="correct", value="aqueous_electrochemistry", by=WHO, orcid=None)
+        assert not isinstance(got.value, M.OffListRefused)
+        assert not M.load(b).get("vocabulary_requests")
+    # the off-list target alone is kept
+    with pytest.raises(M.OffListRefused):
+        M.decide(b, target_ids=[env], decision="correct", value="aqueous_electrochemistry", by=WHO, orcid=None)
+    assert len(M.load(b)["vocabulary_requests"]) == 1
+
+
+def test_the_longest_upgrade_statement_fits_the_bundle_schema():
+    """Every older version (and an unknown one), every newly writable field and every missing import rule."""
+    limit = (json.loads((Path(B.__file__).parent / "bundle-v1.schema.json").read_text(encoding="utf-8"))
+             ["properties"]["format_upgrades"]["items"]["properties"]["statement"]["maxLength"])
+    assert limit == 1500
+    rules = [(st, rid) for _v, listed in B.IMPORT_RULES_ADDED_IN.items() for st, rid in listed]
+    for version in (None, "0.0.1", *B._VERSION_ORDER[:-1]):
+        statement = B.upgrade_statement(version, sorted(B._writable_paths()), rules)
+        assert len(statement) <= limit, (version, len(statement))
+
+
+def test_only_the_electrode_written_out_names_ag_agcl():
+    for path in (SCALE, "context.electrochemistry.reference_electrode.type"):
+        assert P.equivalent_term(path, "silver silver chloride", ["Ag/AgCl"]) == "Ag/AgCl"
+        assert P.equivalent_term(path, "silver_chloride", ["Ag/AgCl"]) is None
+        assert P.equivalent_term(path, "silver chloride", ["Ag/AgCl"]) is None

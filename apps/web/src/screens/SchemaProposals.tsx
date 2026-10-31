@@ -58,6 +58,7 @@ import {
   countsSentence,
   citationLine,
   gate0FromDraft,
+  noteAttribution,
   parseTermDraftsFile,
   sourceFromDraft,
   type LocalTermDraft,
@@ -1212,6 +1213,9 @@ function readFileText(file: File): Promise<string> {
 
 /** Why a draft cannot be filed here, or null when it can. The file's own reason comes first. */
 function whyNotFileable(vocabulary: ApiSchemaVocabulary, d: LocalTermDraft): string | null {
+  if (d.carriedOver) {
+    return 'This term is no longer found in the bundle: an earlier drafts file had it, and the latest run of `isaac bundle propose-terms` did not find it, so it is not proposed from here.';
+  }
   if (!d.drafted || d.body === null) {
     return d.reason ?? 'The drafts file did not draft this term, and gives no reason.';
   }
@@ -1350,9 +1354,24 @@ function LocalDraftItem({ draft, whyNot, onUse }: { draft: LocalTermDraft; whyNo
         )}
         <dt>Your words</dt>
         <dd>
-          {draft.scientistNotes.length > 0
-            ? draft.scientistNotes.map((n) => `“${n}”`).join(' ')
-            : 'The file has none for this term.'}
+          {draft.scientistNotes.length > 0 ? (
+            <ul className="sp-notes">
+              {draft.scientistNotes.map((n, i) => (
+                <li key={i}>
+                  <span className="sp-quote">“{n.termAsSaid}”</span>
+                  {n.note !== null && (
+                    <>
+                      {', with the note '}
+                      <span className="sp-quote">“{n.note}”</span>
+                    </>
+                  )}
+                  {` (${noteAttribution(n)})`}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            'The file has none for this term.'
+          )}
         </dd>
         <dt>Where it was read</dt>
         <dd>

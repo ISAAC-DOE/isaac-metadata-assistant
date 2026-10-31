@@ -205,8 +205,8 @@ is in the reference; in short:
 - **Not asked**: `informational` questions (mention their count once) and `covered_by` ones (answered
   by that experiment question; ask per group only if a group differs).
 - **Asked again** or **no reading fits**: give the reason, show the allowed values or `utc_readings`, ask.
-- **An answer not on the list**: record nothing; `decide` keeps it as a vocabulary request. Offer
-  `<isaac> bundle propose-terms <bundle> --out <file.json>`; the scientist writes each description, on the Schema Proposals page if they like.
+- **An answer not on the list**: record nothing; `decide` keeps it as a vocabulary request (`--note` holds only
+  the scientist's own words, or nothing). Offer `<isaac> bundle propose-terms <bundle> --out <file.json>`; they write each description.
 - **Absorber.** Say the element and edge back; record it only on a clear yes to that pair.
 - **AI readings are not file evidence**: say "my reading of the files suggests…", never "the files say".
 

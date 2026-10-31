@@ -6,7 +6,7 @@ import { AppRoutes } from '../App';
 import { ROUTES } from '../lib/routes';
 import { stubFetchRoutes } from '../test/apiFixtures';
 import type { ApiSchemaProposal, ApiSchemaVocabulary } from '../lib/schemaProposals';
-import { gate0FromDraft, parseTermDraftsFile } from '../lib/termDrafts';
+import { countsSentence, gate0FromDraft, parseTermDraftsFile } from '../lib/termDrafts';
 
 /**
  * Schema Proposals: load the drafts file `isaac bundle propose-terms --out` writes, in the
@@ -126,7 +126,19 @@ const DRAFTS_FILE = {
           ],
           citations_total: 2,
           citations_truncated: false,
-          scientist_notes: ['We logged it as XMCD on the synthetic beamline sheet.'],
+          scientist_notes: [
+            {
+              term_as_said: 'XMCD',
+              note: 'We logged it as XMCD on the synthetic beamline sheet.',
+              by: 'Synthetic Scientist',
+              when: '2026-10-30T12:00:00Z',
+              source: { kind: 'decide_answer', said_in: 'an answer to isaac bundle decide', file: null },
+              request_id: 'vr-00001',
+            },
+            // neither is shown as their words: a bare string, and a sentence ISAAC composed
+            'A bare string nobody is named for.',
+            { text: 'Synthetic Scientist, 2026-10-30, in an answer: "XMCD"' },
+          ],
           draft: drafted('System', 'system.technique', 'XMCD'),
         },
         {
@@ -261,7 +273,12 @@ describe('Load drafts from a local import', () => {
     expect(xmcd).toHaveTextContent('3 readings (1 confirmed by you, 2 AI readings)');
     // One citation names no run (an AI reading points at a question), so runs are not counted.
     expect(xmcd).toHaveTextContent('Runs: not stated in the file.');
-    expect(xmcd).toHaveTextContent('“We logged it as XMCD on the synthetic beamline sheet.”');
+    // Only their words are in quotation marks; who, when and where are outside them.
+    expect(xmcd).toHaveTextContent(
+      '“XMCD”, with the note “We logged it as XMCD on the synthetic beamline sheet.” (Synthetic Scientist, 2026-10-30, in an answer to isaac bundle decide)',
+    );
+    expect(xmcd).not.toHaveTextContent('A bare string nobody is named for.');
+    expect(xmcd).not.toHaveTextContent('in an answer: "XMCD"');
     expect(xmcd).toHaveTextContent('logs/synthetic_run_01.txt · line 4 (confirmed by you)');
     expect(within(xmcd).getByRole('button', { name: 'Propose This Term' })).toBeInTheDocument();
 
@@ -418,6 +435,28 @@ describe('Load drafts from a local import', () => {
     expect(item).toHaveTextContent('Cannot be proposed from here.');
     expect(within(item).queryByRole('button')).toBeNull();
   });
+
+  it('a term carried over from an earlier file is no longer found in the bundle and cannot be filed', async () => {
+    const { calls } = stub();
+    const file = structuredClone(DRAFTS_FILE);
+    Object.assign(file.fields[0].terms[0] as Record<string, unknown>, {
+      carried_over: true,
+      current: false,
+      count: 0,
+      by_origin: { scientist_confirmed: 0, parser_reading: 0, ai_reading: 0, scientist_request: 0 },
+      runs: 0,
+      scientist_notes: [],
+      citations: [],
+    });
+    renderAt(`${ROUTE}?tab=propose`);
+    await chooseFile(JSON.stringify(file));
+    await within(loader()).findByRole('list', { name: 'Drafts in the file' });
+    const item = draftItem('XMCD');
+    expect(item).toHaveTextContent('Cannot be proposed from here.');
+    expect(item).toHaveTextContent('no longer found in the bundle');
+    expect(within(item).queryByRole('button')).toBeNull();
+    expect(calls.filter((c) => !c.startsWith('GET '))).toEqual([]);
+  });
 });
 
 describe('termDrafts', () => {
@@ -443,6 +482,27 @@ describe('termDrafts', () => {
     const { gate0 } = gate0FromDraft(d, null, { ...limits, examples_max: 120 });
     expect(gate0.examples!.length).toBeLessThanOrEqual(120);
     expect(gate0.examples).toMatch(/and \d+ more in the drafts file$/);
+  });
+
+  it('counts a vocabulary request as asked by the scientist, never as a reading', () => {
+    const file = structuredClone(DRAFTS_FILE);
+    const xmcd = file.fields[0].terms[0] as Record<string, unknown>;
+    xmcd.count = 2;
+    xmcd.by_origin = { scientist_confirmed: 0, parser_reading: 0, ai_reading: 0, scientist_request: 2 };
+    xmcd.runs = 2;
+    const parsed = parseTermDraftsFile(JSON.stringify(file));
+    if (!parsed.ok) throw new Error(parsed.message);
+    const d = parsed.file.drafts[0];
+    expect(countsSentence(d)).toBe('asked by the scientist (2) in 2 runs');
+    const { gate0 } = gate0FromDraft(d, null, limits);
+    expect(gate0.problem).toContain('"XMCD" was asked for by the scientist 2 times for system.technique');
+    expect(gate0.problem).not.toContain('was read');
+    // beside readings, both are said apart
+    xmcd.count = 3;
+    xmcd.by_origin = { scientist_confirmed: 0, parser_reading: 0, ai_reading: 1, scientist_request: 2 };
+    const both = parseTermDraftsFile(JSON.stringify(file));
+    if (!both.ok) throw new Error(both.message);
+    expect(countsSentence(both.file.drafts[0])).toBe('1 reading (1 AI reading); asked by the scientist (2) in 2 runs');
   });
 
   it('refuses another format version rather than guessing at it', () => {

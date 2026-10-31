@@ -25,7 +25,7 @@ Four kinds of value are read, and each occurrence says which it is:
 * ``scientist_request`` (bundle 1.10.0) — a VOCABULARY REQUEST: a scientist's answer that
   ``decide``, ``template import`` or ``template adopt`` refused only because it is not on the
   field's list (``bundle.off_list_only``), kept in ``vocabulary_requests``. Never a decision or a
-  value; its person, time and own note are the term's ``scientist_notes``.
+  value; its words as said, own note, person and time are the term's ``scientist_notes``.
 
 KNOWN EQUIVALENCES AND NEAR TERMS
 =================================
@@ -58,7 +58,8 @@ in exactly the shape ``GET /api/schema-proposals/{id}/portal-payload`` hands out
 (``schema_proposal_rules.portal_payload``: ``portal``, ``body``, ``sent_by_isaac``,
 ``notes``). Its ``description`` is EMPTY: what a term means is the proposer's statement, not
 something a count of occurrences can supply, and the portal refuses a description under 20
-characters. So every draft is ``ready_to_send: false`` until a person writes one. The
+characters. So every draft is ``ready_to_send: false``, and stays so: ISAAC never says a draft is
+ready to send and never sends one (``description_present`` says whether a description passes). The
 website's own check (``schema_proposal_rules._validate`` and its duplicate-term check) is run
 on each term with the description set aside; a term it would refuse for any OTHER reason (a
 space, a sentence, a near-duplicate of an allowed term) is NOT drafted, and the report gives
@@ -71,17 +72,19 @@ Citations are a file NAME (no folders), a locator and the run ids (``relative_pa
 ``locator`` of an evidence entry; ``source_path`` / ``excerpt_locator`` of an AI reading; the
 sheet's cells or the ``decide`` answer of a vocabulary request). No quote is copied out. Each
 term also carries ``runs`` / ``run_ids`` (the distinct runs its occurrences name) and
-``scientist_notes`` (the scientist's own words from vocabulary requests, attributed), the keys
-the website's drafts loader reads (``apps/web/src/lib/termDrafts.ts``).
+``scientist_notes`` (from vocabulary requests only: ``term_as_said`` and ``note`` are the scientist's
+words, ``by``/``when``/``source`` the attribution, kept apart so nothing ISAAC wrote reads as theirs),
+the keys the website's drafts loader reads (``apps/web/src/lib/termDrafts.ts``).
 
 A TERM THE WEBSITE WOULD REFUSE FOR ITS SHAPE (a space, a sentence) is not drafted, and its draft
 says what to ASK for (``ask``: "one word, e.g. cathodic_corrosion"); ISAAC still never writes that
 word as the term.
 
 A SECOND RUN (``--merge``): :func:`merge_reports` updates an existing drafts file instead of
-replacing it: new terms are added, counts, citations, runs and notes are this run's, a description
-a person wrote into a draft's body is KEPT, and a term this run no longer finds is carried over
-(``carried_over: true``) rather than dropped.
+replacing it: new terms are added, counts, citations, runs and notes are this run's (notes come only
+from the bundle, never from the file), a description in a draft's body is KEPT (who wrote it is not
+known; ``ready_to_send`` stays false), and a term this run no longer finds is carried over
+(``carried_over: true``, ``current: false``, never proposed) rather than dropped.
 
 PRINTING A PARSER VALUE IS AN EXPOSURE (contract §11, §24): every candidate whose value this
 command writes out is recorded as exposed to ``bundle propose-terms`` before anything is
@@ -116,7 +119,7 @@ _REFERENCE_SCALES = {
     "reversible_hydrogen_electrode": "RHE",
     "standard_hydrogen_electrode": "SHE",
     "saturated_calomel_electrode": "SCE",
-    "silver_chloride": "Ag/AgCl",
+    # silver chloride alone is the salt, not the electrode: only the electrode written out names Ag/AgCl
     "silver_silver_chloride": "Ag/AgCl",
 }
 #: Words that NAME an existing term of the field (``field path -> {word: existing term}``), matched by
@@ -238,17 +241,31 @@ def _request_citation(req: Mapping) -> dict:
     return {"file": _file_name(src.get("file")), "locator": locator, "run_ids": list(req.get("run_ids") or ())}
 
 
+#: Where a vocabulary request was said, as ISAAC words it OUTSIDE the scientist's quoted words.
+_SAID_IN = {"decide_answer": "an answer to isaac bundle decide", "template_cell": "a cell of the filled template",
+            "adopted_sheet_cell": "their own sheet"}
+
+
 def _request_note(req: Mapping) -> dict:
-    """The scientist's own words from one vocabulary request, attributed (the website reads ``text``)."""
+    """The scientist's own words from one vocabulary request, STRUCTURED so nothing ISAAC wrote reads as theirs:
+    ``term_as_said`` (the answer exactly as given) and ``note`` (their ``--note``, or ``None``) are their words;
+    ``by``, ``when`` and ``source`` are the attribution, said outside any quotation. Read only from the bundle's
+    ``vocabulary_requests``, never from a drafts file."""
     src = req.get("source") or {}
-    by = (req.get("requested_by") or {}).get("name")
-    day = str(req.get("requested_utc") or "")[:10]
-    where = {"decide_answer": "an answer to `decide`", "template_cell": f"a cell of {_file_name(src.get('file'))}",
-             "adopted_sheet_cell": f"their own sheet {_file_name(src.get('file'))}"}.get(src.get("kind"), "an answer")
-    text = f'{by or "No name given"}, {day}, in {where}: "{req.get("term")}"'
-    if req.get("note"):
-        text += f" — {req['note']}"
-    return {"text": text, "by": by, "said_utc": req.get("requested_utc"), "request_id": req.get("request_id")}
+    kind = src.get("kind")
+    source = {"kind": kind, "said_in": _SAID_IN.get(kind, "an answer"), "file": _file_name(src.get("file"))}
+    if src.get("cells"):
+        source["cells"] = list(src["cells"])
+    if src.get("question_id"):
+        source["question_id"] = src["question_id"]
+    return {
+        "term_as_said": req.get("term"),
+        "note": req.get("note") if isinstance(req.get("note"), str) and req["note"].strip() else None,
+        "by": (req.get("requested_by") or {}).get("name"),
+        "when": req.get("requested_utc"),
+        "source": source,
+        "request_id": req.get("request_id"),
+    }
 
 
 def _interpretation_path(bundle: Mapping, interp: Mapping, index: Mapping) -> str | None:
@@ -448,7 +465,10 @@ def _draft(sources: Mapping, path: str, term: str, lists: Mapping) -> dict:
         return refused
     draft = {
         "drafted": True,
+        # ISAAC never sends a proposal and never says one is ready to send: a person files it, or does not
         "ready_to_send": False,
+        "sent_by_isaac": False,
+        "description_present": False,
         "missing": ["description"],
         "problems": [],
         "portal_payload": payload,
@@ -563,15 +583,27 @@ def _description(term_entry: Mapping) -> str:
     return text.strip() if isinstance(text, str) else ""
 
 
+#: Said on a draft whose description came from the drafts file: the file is editable, so who wrote it is not known.
+DESCRIPTION_FROM_FILE_NOTE = ("The description was kept from the drafts file. Who wrote it is not known: the file can be "
+                              "edited by anyone, so read it with the scientist before it is filed. ISAAC sends nothing.")
+#: Said on a term this run no longer finds.
+CARRIED_OVER_NOTE = ("No longer found in the bundle: this run of `bundle propose-terms` does not find this term, so it is "
+                     "not current and is not proposed. It is kept from the earlier file only so a written description "
+                     "is not lost; its earlier counts are under as_in_earlier_file.")
+
+
 def merge_reports(old: Any, new: Mapping, sources: Mapping) -> tuple[dict, dict]:
     """``(merged report, what changed)``: ``new`` (this run) laid over ``old`` (the file a first run wrote).
 
-    Terms are this run's: counts, citations, runs and notes are re-read from the bundle, and a term new
-    since the earlier file is added. A description a person wrote into an earlier draft's body is KEPT
-    (and the draft re-checked with it by the website's own rules: ``ready_to_send`` only when they pass).
-    A term the earlier file had and this run no longer finds is CARRIED OVER as it was, marked
-    ``carried_over``, never dropped (it may carry a written description). Refuses a file that is not a
-    drafts file, or one written for another bundle."""
+    Terms are this run's: counts, citations, runs and ``scientist_notes`` are re-read from the bundle (a note
+    is ONLY ever one of the bundle's ``vocabulary_requests``; nothing in the file is read as the scientist's
+    words), and a term new since the earlier file is added. A description in an earlier draft's body is KEPT
+    (``description_kept_from_earlier_file``, ``description_present`` when the website's own rules pass it), and
+    who wrote it is not known: the file is editable. ``ready_to_send`` stays ``false`` and ``sent_by_isaac``
+    ``false`` (ISAAC never says a proposal is ready to send, and never sends one). A term the earlier file had
+    and this run no longer finds is CARRIED OVER, marked ``carried_over`` and ``current: false``, with no counts,
+    notes or citations of its own (the file's are under ``as_in_earlier_file``): it is never proposed. Refuses a
+    file that is not a drafts file, or one written for another bundle."""
     if not isinstance(old, Mapping) or old.get("format") != FORMAT_ID or not isinstance(old.get("fields"), list):
         raise MergeRefused(f"the existing file is not a drafts file ({FORMAT_ID}); --merge updates only one "
                            "`bundle propose-terms` wrote")
@@ -597,11 +629,7 @@ def merge_reports(old: Any, new: Mapping, sources: Mapping) -> tuple[dict, dict]
                 added.append({"field_path": key[0], "term": key[1]})
                 continue
             updated += 1
-            notes = list(t.get("scientist_notes") or ())
-            for n in prior.get("scientist_notes") or ():
-                if n not in notes:
-                    notes.append(n)
-            t["scientist_notes"] = notes
+            # t["scientist_notes"] is this run's, from the bundle; the file's are never read
             text = _description(prior)
             draft = t.get("draft") or {}
             if text and draft.get("drafted"):
@@ -610,8 +638,12 @@ def merge_reports(old: Any, new: Mapping, sources: Mapping) -> tuple[dict, dict]
                                                      "body": {**draft["portal_payload"]["body"], "description": text}}}
                 _, errors, _ = R._validate(dict(draft["portal_payload"]["body"]), sources)
                 draft["missing"] = [] if not errors else ["description"]
-                draft["ready_to_send"] = False if errors else True
+                draft["description_present"] = not errors
+                draft["ready_to_send"] = False
+                draft["sent_by_isaac"] = False
                 draft["description_kept_from_earlier_file"] = True
+                draft["description_written_by"] = None
+                draft["description_note"] = DESCRIPTION_FROM_FILE_NOTE
                 if errors:
                     draft["problems"] = [{"field": e["field"], "code": e["code"], "message": e["message"]} for e in errors]
                 t["draft"] = draft
@@ -621,9 +653,31 @@ def merge_reports(old: Any, new: Mapping, sources: Mapping) -> tuple[dict, dict]
         if (path, term) in seen:
             continue
         carried += 1
-        entry = {**prior, "carried_over": True,
-                 "carried_over_note": ("This run of `bundle propose-terms` no longer finds this term in the bundle; it is "
-                                       "kept from the earlier file, with its counts and description as they were.")}
+        draft = dict(prior.get("draft") or {}) if isinstance(prior.get("draft"), Mapping) else {}
+        draft.update({"ready_to_send": False, "sent_by_isaac": False, "current": False})
+        if isinstance(draft.get("portal_payload"), Mapping):
+            draft["portal_payload"] = {**draft["portal_payload"], "sent_by_isaac": False}
+        if _description(prior):
+            draft.update({"description_kept_from_earlier_file": True, "description_written_by": None,
+                          "description_note": DESCRIPTION_FROM_FILE_NOTE})
+        entry = {
+            "term": term,
+            "carried_over": True,
+            "current": False,
+            "carried_over_note": CARRIED_OVER_NOTE,
+            # nothing of the earlier file's is said as this bundle's: no count, no notes, no citations, no runs
+            "count": 0,
+            "by_origin": {origin: 0 for origin in ORIGINS},
+            "missing_from": [m for m in prior.get("missing_from") or () if isinstance(m, str)],
+            "runs": 0,
+            "run_ids": [],
+            "scientist_notes": [],
+            "citations": [],
+            "citations_total": 0,
+            "citations_truncated": False,
+            "as_in_earlier_file": {k: prior.get(k) for k in ("count", "by_origin", "runs") if k in prior},
+            "draft": draft,
+        }
         field = by_path.get(path)
         if field is None:
             old_field = next((f for f in old["fields"] if isinstance(f, Mapping) and f.get("field_path") == path), {})
@@ -638,10 +692,13 @@ def merge_reports(old: Any, new: Mapping, sources: Mapping) -> tuple[dict, dict]
         "fields": len(merged["fields"]),
         "terms": sum(len(f["terms"]) for f in merged["fields"]),
         "occurrences": sum(f["occurrences"] for f in merged["fields"]),
-        "drafts": sum(1 for f in merged["fields"] for t in f["terms"] if (t.get("draft") or {}).get("drafted")),
+        "drafts": sum(1 for f in merged["fields"] for t in f["terms"]
+                      if (t.get("draft") or {}).get("drafted") and not t.get("carried_over")),
+        "carried_over": sum(1 for f in merged["fields"] for t in f["terms"] if t.get("carried_over")),
     }
     change = {"merged_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "terms_before": len(before),
-              "added": added, "updated": updated, "descriptions_kept": kept_descriptions, "carried_over": carried}
+              "added": added, "updated": updated, "descriptions_kept": kept_descriptions, "carried_over": carried,
+              "descriptions_kept_written_by": "not known"}
     merged["merges"] = [*(old.get("merges") or ()), change] if isinstance(old.get("merges"), list) else [change]
     return merged, change
 

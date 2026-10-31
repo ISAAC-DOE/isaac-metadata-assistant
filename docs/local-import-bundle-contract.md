@@ -1511,7 +1511,8 @@ term; `citations_total` and `citations_truncated` say how many there were.
 **Drafts.** A draft is made only for a term at a field the portal has a term list for. It is the
 body and notes of `GET /api/schema-proposals/{id}/portal-payload`, built by the same function
 (`schema_proposal_rules.portal_payload`). `description` is **empty**: what a term means is the
-proposer's statement, so every draft is `ready_to_send: false` with `missing: ["description"]`
+proposer's statement, so every draft is `ready_to_send: false`, `sent_by_isaac: false`,
+`description_present: false` with `missing: ["description"]` (ISAAC never marks a draft ready to send)
 (the portal refuses a description under 20 characters). Before drafting, the website's own
 checks run on the term: shape (one word), case convention, and near-duplicates of an allowed
 term (`in situ`, `insitu` against `in_situ`). A term they refuse is listed with
@@ -1539,8 +1540,11 @@ unless `--force`, and so is a directory. A missing bundle exits 6.
 reader and does not upload it. It lists every term with its field, its counts (`count`,
 `by_origin`), runs (the term's `runs` when the file has one; otherwise the distinct
 `ref.run_id` of its citations, only when every citation names one and none were left out; else
-"not stated"), the scientist's own words (a term's `scientist_notes` when the file carries them;
-a file written before §29 carries none, and the page says so), its citations and the problems the file reports.
+"not stated"; a vocabulary request is counted as "asked by the scientist (N)", never as a reading),
+the scientist's own words (a term's structured `scientist_notes`: only `term_as_said` and `note` are
+shown in quotation marks, with who, when and where outside them; a note without that structure is not
+shown; a file written before §29 carries none, and the page says so), its citations and the problems the
+file reports. A `carried_over` term is listed as "no longer found in the bundle" and has no button.
 A term with `drafted: false`, or one the server's current vocabulary would refuse, is listed
 with its reason and has no button. **Propose This Term** opens the ordinary form on that list and
 term. The section comes from the server's `proposal_sections`, the description is **empty and
@@ -1779,8 +1783,9 @@ adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
 - **Kept as a vocabulary request** (§9 "What 1.10.0 added"). `decide` (by target or `--question`; a
   bulk call keeps one request for every target the same answer reached), `template import --apply` (one
   request per field and word, with its cells and runs; a preview keeps nothing and says "would be kept")
-  and `template adopt` (their sheet's not-allowed values, in the `--by` name when given, recorded before
-  the workbook is written) keep the word when it is refused ONLY for being off the list. The refusal is
+  and `template adopt` (their sheet's not-allowed values, ONLY with `--by`, passed once the scientist says the sheet is
+  theirs, recorded before the workbook is written; without it nothing is kept and the summary says
+  "Off-list values were not kept as requests: no name given") keep the word when it is refused ONLY for being off the list. The refusal is
   unchanged (exit 2, no decision, the allowed values listed) and adds: "kept as a vocabulary request;
   `isaac bundle propose-terms` can draft it". The same answer by the same person from the same place
   keeps nothing new and writes nothing. Any other refusal (a word in a number field, a local time with no
@@ -1789,13 +1794,15 @@ adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
 - **`propose-terms` reads them** (origin `scientist_request`), beside the AI readings. An AI reading whose
   target a scientist has since confirmed or corrected with an allowed value is NOT counted
   (`skipped.ai_readings_already_answered`). Each term carries `runs` (a count), `run_ids` and
-  `scientist_notes` (`{text, by, said_utc, request_id}`; `text` names who, when and where, then the word and
-  their note), and each citation `run_ids` and a file NAME without folders — the keys the website's loader
+  `scientist_notes` (`{term_as_said, note, by, when, source, request_id}`: `term_as_said` is the answer as
+  given and `note` the scientist's own `--note` (or `null`) — their words, and nothing else is; `by`, `when`
+  and `source` (`kind`, `said_in`, `file`, `cells`, `question_id`) are the attribution, said outside any
+  quotation), and each citation `run_ids` and a file NAME without folders — the keys the website's loader
   reads. The drafts file stays `format_version: "1"` (the additions are keys a version-1 reader ignores).
 - **Equivalences and near terms** (`propose_terms.EQUIVALENT_TERMS`, `NEAR_TERMS`). A word that names an
   existing term — at `potential_scale` and `reference_electrode.type`:
   `reversible_hydrogen_electrode`/`RHE`, `standard_hydrogen_electrode`/`SHE`,
-  `saturated_calomel_electrode`/`SCE`, `silver_chloride` and `silver_silver_chloride`/`Ag/AgCl`, matched
+  `saturated_calomel_electrode`/`SCE`, `silver_silver_chloride`/`Ag/AgCl` (never bare `silver_chloride`, the salt), matched
   ignoring case, spaces and hyphens, only while the term is on the list — is not drafted:
   `use_existing`, problem `equivalent_existing_term`, "Use `RHE` (an existing term)", and `decide`'s refusal
   says it too. A close term (`XANES`, `EXAFS` beside `XAS`/`HERFD-XAS`; any existing term sharing a whole run
@@ -1805,9 +1812,13 @@ adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
 - **A term the website refuses for its shape** (a space) is still not drafted; its draft adds `ask`: the
   term as one word, e.g. `cathodic_corrosion`. ISAAC never writes that word as the term.
 - **`--merge`** updates an existing `--out` file instead of exit 4: this run's terms (new ones added, counts,
-  citations, runs and notes re-read), a description a person wrote in a draft's body kept (re-checked by the
-  website's rules: `ready_to_send` only when they pass), and a term no longer found carried over
-  (`carried_over: true`). A file that is not a drafts file, or one for another bundle, is refused (exit 4);
+  citations, runs and notes re-read; `scientist_notes` come ONLY from the bundle's `vocabulary_requests`,
+  never from the file), a description in a draft's body kept (`description_kept_from_earlier_file`,
+  `description_written_by: null`: the file is editable, so who wrote it is not known; `description_present`
+  when the website's rules pass it; `ready_to_send` stays false), and a term no longer found carried over
+  (`carried_over: true`, `current: false`, count 0, no notes or citations, the file's counts under
+  `as_in_earlier_file`; never proposed, and the website will not file it). The CLI says "a description in the
+  file was kept (who wrote it is not known)". A file that is not a drafts file, or one for another bundle, is refused (exit 4);
   `--merge` needs `--out` and not `--force` (exit 2). The file gains `merges[]`.
 - **`bundle validate` adds `pending_vocabulary`** (`field_path`, `term`, `groups` (10 shown),
   `groups_total`, `request_ids`, `statement`): a confirmed group whose draft lacks the field and holds one

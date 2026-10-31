@@ -185,8 +185,9 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   applies before recording it.
 - **Not on the list at all.** When the scientist's answer is a real value the closed list lacks, say so
   and record no decision. `decide` (and `template import --apply`, and `template adopt` for their own
-  sheet) refuses it but KEEPS it as a vocabulary request, in the `--by` name, with the field, runs and
-  where it was said; the reply says "kept as a vocabulary request; `isaac bundle propose-terms` can draft
+  sheet, only with `--by`, passed once they say the sheet is theirs) refuses it but KEEPS it as a vocabulary
+  request, in the `--by` name, with the field, runs and where it was said. `--note` holds only the
+  scientist's own words about the term, word for word, or is left out: never your summary or wording; the reply says "kept as a vocabulary request; `isaac bundle propose-terms` can draft
   it". It is never a decision or a value: the field stays missing (`bundle validate` lists it under
   `pending_vocabulary`) until the vocabulary has the term or they give an allowed value. Offer to draft:
   `<isaac> bundle propose-terms <bundle> --out <file.json>` (outside the bundle; it sends nothing).
@@ -197,7 +198,9 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   record their one-word answer again, never rewrite it yourself. The scientist writes each description,
   in their words; they can load the drafts file on the website's Schema Proposals page (Propose a Change →
   Load drafts from a local import) and write it there; nothing is sent until they save a proposal. After
-  more answers, `--merge` updates the same file and keeps every description written in it.
+  more answers, `--merge` updates the same file and keeps every description in it (who wrote one is not
+  known: read it back to them); no draft is ever marked ready to send, and a term no longer found is
+  carried over as not current, never proposed.
 - Use `--json` with `--value` for numbers/objects. ORCID only if the scientist gives one (`--orcid`).
 - Repeating a decision is harmless (recorded once). A later decision replaces an earlier one, also
   through `--question`: `decide --question <Q>` resolves a question that is already answered (by an

@@ -1796,9 +1796,15 @@ def record_decision(
         latest = B._decisions_by_target(bundle.get("scientist_decisions") or ())
         planned: list[tuple[str, dict]] = []
         acknowledged: dict[str, list[str]] = {}
+        off_list: OffListRefused | None = None
         for tid in target_ids:
             kind, obj = resolve_target(bundle, tid)
-            _check_decision(bundle, kind, obj, decision, value, bulk=bulk, merge_with=merge_with, split_into=split_into)
+            try:
+                _check_decision(bundle, kind, obj, decision, value, bulk=bulk, merge_with=merge_with, split_into=split_into)
+            except OffListRefused as exc:
+                # EVERY TARGET IS CHECKED FIRST: an off-list refusal is raised (and kept as a vocabulary request) only
+                # when no target is refused for any other reason, whatever order the targets came in
+                off_list = off_list or exc
             if kind == "processing_result" and decision == "approve":
                 problem = approved_sibling_problem(bundle, obj, [o for k, o in planned if k == "processing_result"])
                 if problem is not None:
@@ -1832,6 +1838,8 @@ def record_decision(
                         "nothing was recorded."
                     )
             planned.append((kind, obj))
+        if off_list is not None:
+            raise off_list
         decided_by = {
             "name": by.strip(),
             "basis": "self_reported_local_user",

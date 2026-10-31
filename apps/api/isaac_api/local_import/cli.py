@@ -1891,7 +1891,7 @@ def cmd_bundle_propose_terms(args) -> int:
                 return EXIT_OUTPUT_REFUSED
         elif out_path.exists() and not args.force:
             _err(f"--out {args.out} already exists; pass --merge to update it (new terms added, counts and citations "
-                 "updated, any description you wrote kept) or --force to replace it. Nothing was written.")
+                 "updated, a description in the file kept) or --force to replace it. Nothing was written.")
             return EXIT_OUTPUT_REFUSED
         if not out_path.parent.is_dir():
             _err(f"The folder for --out {args.out} does not exist. Nothing was written.")
@@ -1927,9 +1927,12 @@ def cmd_bundle_propose_terms(args) -> int:
     totals = report["totals"]
     merged = ""
     if change is not None:
+        kept = change["descriptions_kept"]
         merged = (f" Updated the earlier file: {len(change['added'])} term(s) added, {change['updated']} updated, "
-                  f"{change['descriptions_kept']} description(s) you wrote kept, {change['carried_over']} carried over "
-                  "(no longer found, kept as they were).")
+                  + ("a description in the file was kept (who wrote it is not known), " if kept == 1 else
+                     f"{kept} descriptions in the file were kept (who wrote them is not known), " if kept else "")
+                  + f"{change['carried_over']} carried over (no longer found in the bundle: not current, never proposed). "
+                  "No draft is marked ready to send.")
     print(
         f"Wrote {out_path}: {totals['terms']} term(s) outside the vocabulary in {totals['fields']} field(s), "
         f"{totals['occurrences']} occurrence(s), {totals['drafts']} draft proposal(s).{merged} Nothing was sent; "
@@ -2212,7 +2215,8 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     t.add_argument("--force", action="store_true", help="replace an existing --out file")
     t.add_argument("--no-suggestions", action="store_true", help="leave the ISAAC Suggestions sheet empty")
     t.add_argument("--by", help="the name of the person whose sheet it is: a value of theirs that is not on its field's "
-                                "list is kept as a vocabulary request in that name")
+                                "list is kept as a vocabulary request in that name; pass it only after they say the sheet is theirs. "
+                                "Without it, nothing is kept")
     t.add_argument("--orcid")
     t.add_argument("--json", action="store_true", help="print the full result as JSON (every disagreement, row and run)")
     t.set_defaults(func=cmd_bundle_template_adopt)
