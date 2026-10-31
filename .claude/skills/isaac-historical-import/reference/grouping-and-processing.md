@@ -153,6 +153,9 @@ measures (`--element Ir`, `--edge L3` style). Record `decide --target <group id>
 approve_calibration --element <symbol> --edge <K|L1-L3|M1-M5> --by "<name>"`, then run
 `process --source <folder> --group <group id>` again. Without that decision the shift is not applied; do not guess the
 element or edge from a file name.
+When a result carries `reference_edge_not_found` (the reference's edge is not in the scan range, e.g. the
+monochromator was calibrated on a foil outside the grid), say so and do NOT ask for the reference's element and edge:
+an `approve_calibration` would be meaningless, and no shift is proposed.
 
 ## Groups that need an explanation
 
