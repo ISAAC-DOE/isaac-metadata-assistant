@@ -1158,6 +1158,48 @@ def keep_vocabulary_request(bundle: dict, *, field_path: str, term: str, by: str
     the same ``--as-said`` answer given again stamps ``reaffirmed_utc`` on the kept request (the scientist said
     their word again: ``propose-terms`` reads an allowed value given before that time as not answering it)."""
     requests = bundle.setdefault("vocabulary_requests", [])
+    entry = _vocabulary_entry(field_path=field_path, term=term, by=by, orcid=orcid, targets=targets, run_ids=run_ids,
+                              scope=scope, source=source, note=note)
+    found = _same_request(requests, entry)
+    if found is not None:
+        if entry["source"].get("as_said") is True:
+            found["reaffirmed_utc"] = now_utc()
+        return found, False
+    if len(requests) >= B.MAX_VOCABULARY_REQUESTS:
+        raise MutationRefused(f"This bundle already keeps {B.MAX_VOCABULARY_REQUESTS} vocabulary requests; nothing more can "
+                              "be kept. Run `isaac bundle propose-terms` for the ones it holds.", code=5)
+    numbers = [int(str(r.get("request_id", "vr-0")).split("-", 1)[1]) for r in requests
+               if re.fullmatch(r"vr-\d+", str(r.get("request_id")))]
+    request = {"request_id": f"vr-{max(numbers, default=0) + 1:05d}", **entry, "requested_utc": now_utc()}
+    order = ("request_id", "field_path", "term", "requested_by", "requested_utc", "scope", "targets", "run_ids", "source", "note")
+    # ``reaffirmed_utc`` (optional) is added only to a request kept earlier, when the same --as-said answer is given again
+    request = {k: request[k] for k in order}
+    requests.append(request)
+    return request, True
+
+
+def _same_request(requests: Sequence[Mapping], entry: Mapping) -> dict | None:
+    """The request kept earlier for the same answer as ``entry`` (:func:`_vocabulary_entry`), else ``None``."""
+    for r in requests:
+        if all(r.get(k) == entry[k] for k in ("field_path", "term", "scope", "targets", "run_ids", "source", "note")) and (
+                (r.get("requested_by") or {}).get("name") == (entry["requested_by"] or {}).get("name")):
+            return r
+    return None
+
+
+def vocabulary_request_kept(bundle: Mapping, *, field_path: str, term: str, by: str | None, orcid: str | None = None,
+                            targets: Sequence[tuple[str, str]] = (), run_ids: Sequence[str] = (), scope: str = "run",
+                            source: Mapping, note: str | None = None) -> dict | None:
+    """Read only: the request :func:`keep_vocabulary_request` would find already kept for this answer (and so record
+    nothing new), else ``None``. Nothing is kept or stamped."""
+    entry = _vocabulary_entry(field_path=field_path, term=term, by=by, orcid=orcid, targets=targets, run_ids=run_ids,
+                              scope=scope, source=source, note=note)
+    return _same_request(list(bundle.get("vocabulary_requests") or ()), entry)
+
+
+def _vocabulary_entry(*, field_path: str, term: str, by: str | None, orcid: str | None, targets: Sequence[tuple[str, str]],
+                      run_ids: Sequence[str], scope: str, source: Mapping, note: str | None) -> dict:
+    """One vocabulary request as :func:`keep_vocabulary_request` keeps it, before its id and time."""
     entry = {
         "field_path": field_path,
         "term": term,
@@ -1174,27 +1216,7 @@ def keep_vocabulary_request(bundle: dict, *, field_path: str, term: str, by: str
     }
     if entry["source"].get("file"):
         entry["source"]["file"] = Path(str(entry["source"]["file"])).name  # a file NAME, never its folders
-
-    def same(r: Mapping) -> bool:
-        return all(r.get(k) == entry[k] for k in ("field_path", "term", "scope", "targets", "run_ids", "source", "note")) and (
-            (r.get("requested_by") or {}).get("name") == (entry["requested_by"] or {}).get("name"))
-
-    for r in requests:
-        if same(r):
-            if entry["source"].get("as_said") is True:
-                r["reaffirmed_utc"] = now_utc()
-            return r, False
-    if len(requests) >= B.MAX_VOCABULARY_REQUESTS:
-        raise MutationRefused(f"This bundle already keeps {B.MAX_VOCABULARY_REQUESTS} vocabulary requests; nothing more can "
-                              "be kept. Run `isaac bundle propose-terms` for the ones it holds.", code=5)
-    numbers = [int(str(r.get("request_id", "vr-0")).split("-", 1)[1]) for r in requests
-               if re.fullmatch(r"vr-\d+", str(r.get("request_id")))]
-    request = {"request_id": f"vr-{max(numbers, default=0) + 1:05d}", **entry, "requested_utc": now_utc()}
-    order = ("request_id", "field_path", "term", "requested_by", "requested_utc", "scope", "targets", "run_ids", "source", "note")
-    # ``reaffirmed_utc`` (optional) is added only to a request kept earlier, when the same --as-said answer is given again
-    request = {k: request[k] for k in order}
-    requests.append(request)
-    return request, True
+    return entry
 
 
 #: What the record holds meanwhile for a run with no allowed value (c14 MED-2).

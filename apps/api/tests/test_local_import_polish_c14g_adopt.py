@@ -88,12 +88,12 @@ def test_a_recorded_value_equal_to_the_sheets_settles_the_row(grouped, tmp_path,
 
 def test_a_ruling_on_other_cells_does_not_settle_the_row(grouped, tmp_path, capsys, ticking):
     """The provenance is the same file AND cells: a ruling made for another sheet's cells is not this disagreement."""
-    log = [{"note": "template x.xlsx 'Disagreements'!H4 (your ruling on disagreement D3: SYN_other.xlsx 'File List'!H8)"},
-           {"note": "template x.xlsx 'Disagreements'!H4 (your ruling on disagreement D7: SYN_their.xlsx 'File List'!H8)"}]
-    assert not T._ruled_here(log, 0, ("SYN_their.xlsx", "'File List'!H8"))
-    assert T._ruled_here(log, 1, ("SYN_their.xlsx", "'File List'!H8"))  # the D number may change between adopts
-    assert not T._ruled_here(log, 1, ("SYN_their.xlsx", "'File List'!H8, 'File List'!H9"))
-    assert not T._ruled_here(log, 5, ("SYN_their.xlsx", "'File List'!H8"))
+    log = [{"note": "template x.xlsx 'Disagreements'!H4 (your ruling on disagreement D3: SYN_other.xlsx 'File List'!H8 = 2)"},
+           {"note": "template x.xlsx 'Disagreements'!H4 (your ruling on disagreement D7: SYN_their.xlsx 'File List'!H8 = 2)"}]
+    assert not T._ruled_here(log, 0, ("SYN_their.xlsx", "'File List'!H8", 2))
+    assert T._ruled_here(log, 1, ("SYN_their.xlsx", "'File List'!H8", 2))  # the D number may change between adopts
+    assert not T._ruled_here(log, 1, ("SYN_their.xlsx", "'File List'!H8, 'File List'!H9", 2))
+    assert not T._ruled_here(log, 5, ("SYN_their.xlsx", "'File List'!H8", 2))
 
 
 # --- MED-2 ----------------------------------------------------------------------------------------------------
@@ -199,6 +199,7 @@ def test_a_sheet_word_on_a_new_run_is_kept_for_that_run_only(grouped, tmp_path, 
     assert code == 0, err
     reqs = M.load(grouped)["vocabulary_requests"]
     assert [r["request_id"] for r in reqs] == ["vr-00001", "vr-00002"] and reqs[1]["run_ids"] == ["run-009"]
+    assert reqs[1]["source"]["cells"] == ["'File List'!F10"]  # c14h LOW-1: run-009's own cell, not every cell
     assert "Kept as vocabulary requests" in text and "answered since with `in_situ`" in text
     t = _term_draft(grouped, capsys)
     assert t["draft"]["drafted"] is True and t["run_ids"] == ["run-009"]

@@ -1871,15 +1871,17 @@ adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
 - **(c14) Adopting a sheet again.** A Disagreements row whose field a scientist's confirming decision already gives
   an allowed value for every run it names (a whole-beamtime row: every target its answer reaches) is SETTLED (c14g)
   only when, for every run, that value equals the sheet's or was recorded by a ruling on the same disagreement in an
-  earlier import of this sheet (the decision's note names "ruling on disagreement Dn: <their file> <their cells>").
+  earlier import of this sheet (the decision's note names "ruling on disagreement Dn: <their file> <their cells> =
+  <their value>", and (c14h) their cell still holds that value: a cell edited since, or a note without the value,
+  awaits a ruling; `template import` reads their value from the `_isaac` sheet, never the editable column D).
   Settled, it says "already recorded: <value> (<date>); leave blank to keep" (the adopt result's `already_recorded`,
   counted apart in the summary); otherwise it awaits a ruling and says "recorded `12` (date); your sheet says `2`:
   rule which" (`recorded_note`). An Electrolyte row stating a concentration is settled only when the name and the
   concentration are; with the name alone, the name is listed as recorded and the concentration awaits a ruling
   (`awaiting_ruling`, column J). With `--by`, a sheet word whose cells or runs changed is kept again only for the runs
-  no request for the same word answered since; `template import` lists such a row left blank under
-  `disagreements_already_recorded`, never `awaiting_ruling`, and records nothing for it. A sheet word whose request
-  (the one kept earlier, or with no `--by` any request for the same field and word) was answered since says "The sheet
-  still says … answered since with …" with or without `--by`; one answered for every run (`every_run`) is listed
-  apart (`vocabulary_requests_not_kept.answered_since`), never as a word to keep or draft. The import summary says
-  "N decision(s) (from M cell(s)) already recorded".
+  no request for the same word answered since, citing only their cells (c14h); `template import` lists such a row
+  left blank under `disagreements_already_recorded`, never `awaiting_ruling`, and records nothing for it. A sheet word
+  whose request (the one kept earlier, or with no `--by` any request for the same field and word) was answered since
+  says "The sheet still says … answered since with …" with or without `--by`; one answered for every run
+  (`every_run`) is listed apart (`vocabulary_requests_not_kept.answered_since`), never as a word to keep or draft. The
+  import summary says "N decision(s) (from M cell(s)) already recorded".
