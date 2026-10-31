@@ -57,21 +57,19 @@ listed in `reference/commands.md`.
 
 ## Step 0 · Check the setup
 
-Find the command: read `checkout-path.txt` beside this file (if present) and use
-`<that path>/.venv/bin/isaac` (call it `<isaac>`; the `python` in the same folder is `<python>`);
-otherwise use `isaac` from PATH. Run `<isaac> import --help`.
-If `checkout-path.txt` exists, check this installed copy of the skill is current:
-`diff -rq -x checkout-path.txt -x .DS_Store <that path>/.claude/skills/isaac-historical-import <this skill's folder>`.
-Any difference means this copy is out of date: give the ONE fix, `scripts/setup_isaac_local.sh
---install-skill` (from the ISAAC folder), then restart Claude Code. Do not continue on an old copy.
-If it says the import package is missing, or the command is not found, stop and give the ONE fix:
-`scripts/setup_isaac_local.sh` (from the ISAAC folder). Then check the optional parts and
-report each in one line:
+Find the ISAAC folder: the path in `checkout-path.txt` beside this file. If there is no such file, ask
+the scientist where their ISAAC folder is (the one with `scripts/setup_isaac_local.sh`); if they have
+none, point them to `docs/local-skill-quickstart.md` and stop. Then run, from that folder,
+`scripts/setup_isaac_local.sh --check` (changes nothing): it reports the command, the processing extra,
+the portal check and whether this skill copy is current, one line each. Use `<folder>/.venv/bin/isaac`
+as `<isaac>` and `<folder>/.venv/bin/python` as `<python>`.
 
-- processing: `<isaac> process --help` works and `python -c "import larch"` succeeds in the same
-  environment → else "curves and quality checks need `scripts/setup_isaac_local.sh --with-processing`";
-- portal check: `ls ~/.cache/isaac/portal-validator/*/venv/bin/python` → else "records cannot reach
-  *exportable* without the portal check: `scripts/install_portal_validator.sh`".
+- `[stale]` skill → give the ONE fix, `scripts/setup_isaac_local.sh --install-skill`, then restart
+  Claude Code; do not continue on this copy.
+- command missing → the ONE fix is `scripts/setup_isaac_local.sh` (then `--install-skill` if there
+  was no `checkout-path.txt`); stop.
+- processing missing → "curves and quality checks need `scripts/setup_isaac_local.sh --with-processing`";
+- portal check missing → "records cannot reach *exportable* without `scripts/install_portal_validator.sh`".
 
 Continue with whatever is available; say what each missing part will cost.
 

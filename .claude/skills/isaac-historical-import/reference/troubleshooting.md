@@ -2,7 +2,7 @@
 
 | What happened | Say | Do |
 |---|---|---|
-| `isaac` not found / "need the ISAAC local import package" | "ISAAC isn't set up on this computer yet." | give: `scripts/setup_isaac_local.sh` from the ISAAC folder |
+| `isaac` not found / "need the ISAAC local import package" | "ISAAC isn't set up on this computer yet." | ask where their ISAAC folder is if `checkout-path.txt` is missing; give: `scripts/setup_isaac_local.sh` from that folder, then `--install-skill` and restart Claude Code; `scripts/setup_isaac_local.sh --check` shows what is there without changing anything |
 | import exit 3 | "I can't read that folder (not found, a shortcut, or no permission)." | ask for the real folder path; never follow shortcuts |
 | import exit 4 | "The output folder isn't empty or is inside your data." | choose a new, empty folder outside the data; `--force` only if they ask |
 | import exit 5 | "ISAAC read the files but could not make a valid summary of them." | run `<isaac> import` again for the message; report the exact message to the ISAAC team; do not retry blindly |

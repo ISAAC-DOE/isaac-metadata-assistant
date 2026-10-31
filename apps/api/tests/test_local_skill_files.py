@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+import isaac_api.workspace as ws
 from isaac_api.local_import import extract as extract_module
 from isaac_api.local_import.cli import build_parser, main as cli_main
 
@@ -151,11 +152,15 @@ def test_every_flag_named_anywhere_in_the_skill_exists_in_some_command():
     walk(build_parser())
     skill_flags = {"--test-marker", "--qc-status", "--blocking-only", "--question", "--only", "--field"}
     assert skill_flags <= known, "the live CLI lacks a flag the skill relies on"
+    # scripts/setup_isaac_local.sh options, not isaac options: read from the script's own `case` labels
+    setup = (ws.REPO_ROOT / "scripts" / "setup_isaac_local.sh").read_text(encoding="utf-8")
+    setup_flags = set(re.findall(r"^\s*(--[a-z][a-z-]+)\)", setup, flags=re.M))
+    assert {"--install-skill", "--with-processing", "--check"} <= setup_flags
     for path in FILES:
         text = path.read_text(encoding="utf-8")
         for flag in set(re.findall(r"(?<![\w-])(--[a-z][a-z-]+)", text)):
-            if flag in {"--install-skill", "--with-processing", "--skip-processing", "--skip-portal"}:
-                continue  # scripts/setup_isaac_local.sh options, not isaac options
+            if flag in setup_flags:
+                continue
             assert flag in known, f"{path.name} names {flag}, which no command takes"
 
 

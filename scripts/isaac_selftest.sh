@@ -120,7 +120,7 @@ if has process; then
   if [[ "$GROUPS_N" -gt 0 ]]; then
     run "$ISAAC" process "$BUNDLE" --source "$CORPUS"
     if [[ "$RC" -eq 0 ]]; then report PASS "process" "ran (draft protocol)"; PROCESSED=1
-    elif grep -q "processing_unavailable" "$OUT"; then report SKIP "process" "the processing extra is not installed (scripts/setup_isaac_local.sh --with-processing)"
+    elif grep -q "processing_unavailable" "$OUT"; then report SKIP "process" "the processing extra is not installed (scripts/setup_isaac_local.sh --with-processing)"; MISSING_PROCESSING=1
     else report FAIL "process" "exit $RC: $(head -c 300 "$OUT" | tr '\n' ' ')"; fi
   else report SKIP "process" "no groups to process"; fi
 else report SKIP "process" "this build has no 'isaac process' yet"; fi
@@ -358,6 +358,12 @@ run "$ISAAC" bundle check "$BUNDLE"; expect "bundle check (after all changes)" 0
 echo
 echo "SELF-TEST RESULT: $PASSED passed, $FAILED failed, $SKIPPED skipped (synthetic data; nothing was sent)"
 if [[ $SKIPPED -gt 0 ]]; then echo "Skipped steps are not failures: they need a part this build or computer does not have yet, or a known blocker (see the notices above)."; fi
+MISSING=()
+[[ "${MISSING_PROCESSING:-0}" -eq 1 ]] && MISSING+=("processing (curves and quality checks): scripts/setup_isaac_local.sh --with-processing")
+compgen -G "$HOME/.cache/isaac/portal-validator/*/venv/bin/python" >/dev/null || MISSING+=("the offline portal check (no record can become exportable without it): scripts/install_portal_validator.sh")
+if [[ ${#MISSING[@]} -gt 0 ]]; then
+  echo "Missing on this computer:"; for m in "${MISSING[@]}"; do echo "  - $m"; done
+fi
 if [[ $FAILED -gt 0 ]]; then
   echo "IN SHORT: FAIL. $FAILED step(s) did not behave as designed (see FAIL lines above). Do not use this installation until they are fixed."
 elif [[ "${FULLPATH:-0}" -eq 1 ]]; then
