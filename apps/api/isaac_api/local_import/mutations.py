@@ -31,7 +31,7 @@ import re
 import sys
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Mapping, Sequence
 
 from . import bundle as B
@@ -816,17 +816,26 @@ SCAN_SUBSET_FLAG = "scientist_selected_subset_of_scans"
 def scan_subset_note(bundle: Mapping, result: Mapping) -> str | None:
     """One plain line when ``result`` is the scientist's Athena curve and it used only some of the group's
     scans (``scientist_selected_subset_of_scans``), else ``None``. The scan numbers come from the Athena label
-    (``comparison.athena_scan_selection``); the total is what ISAAC's result of the same run merged."""
+    (``comparison.athena_scan_selection``); the total is what ISAAC's result of the same run merged.
+
+    c11-r: in a one-run group the sentence is worked out from the scan numbers NOW, never from the stored flag alone
+    (an older build stored it from scans counted by position): when every number is known and the label names
+    exactly the scans ISAAC merged, there is nothing to say (``None``); when the numbers are not known, a neutral
+    sentence that claims neither "only part of the merge" nor "a scan ISAAC did not merge"."""
     comparison = result.get("comparison") or {}
-    if result.get("source") != "scientist_athena" or SCAN_SUBSET_FLAG not in (comparison.get("flags") or ()):
+    if result.get("source") != "scientist_athena":
         return None
+    flagged = SCAN_SUBSET_FLAG in (comparison.get("flags") or ())
     covers = comparison.get("athena_covers") or {}
     chosen = [str(n) for n in comparison.get("athena_scan_selection") or covers.get("scans") or ()]
     sibling = next((r for r in bundle.get("processing_results") or ()
                     if r.get("group_id") == result.get("group_id") and r.get("source") == "isaac_protocol"
                     and r.get("run_id") == result.get("run_id")), None)
     total = len([i for i in (sibling or {}).get("inputs") or () if not i.get("skip_reason")])
+    gid = result.get("group_id")
     if covers.get("runs"):
+        if not flagged:
+            return None
         # c8-a: a MERGED group's scans are numbered per run, so the run is named, and how many of the merge they are
         runs = list(covers["runs"])
         total = total or int(covers.get("isaac_scans_merged") or 0)
@@ -835,44 +844,48 @@ def scan_subset_note(bundle: Mapping, result: Mapping) -> str | None:
         of = f" — {len(chosen)} of the {total} scan(s) ISAAC merged{over}" if chosen and total else (
             f" — of the {total} scan(s) ISAAC merged{over}" if total else "")
         which = f"scans {', '.join(chosen)} of {named}{of}" if chosen else f"the scans of {named}{of}"
-    else:
-        # c11-a: a run kept as one file per scan states no scan index (its inputs hold `scan: None`): its scans are
-        # numbered 1..N in the order listed (bundle.input_scan_numbers), and said so. A scan is said NOT merged only
-        # when every number is known; before, an empty set of numbers made every chosen scan "not merged".
-        inputs = list((sibling or {}).get("inputs") or ())
-        run_of = {s.get("source_id"): r.get("run_key") for r in bundle.get("runs") or () for s in r.get("scans") or ()}
-        numbers, basis = B.input_scan_numbers(inputs, run_of)
-        known = bool(inputs) and all(n is not None for n in numbers)
-        merged = {n for n, i in zip(numbers, inputs) if not i.get("skip_reason")}
-        how = ""
-        if known and basis == B.SCAN_NUMBERS_BY_ORDER:
-            several = len({run_of.get(i.get("source_id")) for i in inputs}) > 1
-            how = (" (the runs state no scan index; each run's scans are numbered from 1 in the order listed)" if several
-                   else f" (the run states no scan index; its {len(numbers)} scans are numbered 1-{len(numbers)} in the "
-                        "order listed)")
-        gid = result.get("group_id")
-        if known and chosen:
-            unlisted = [n for n in chosen if not (n.isdigit() and int(n) in set(numbers))]
-            if unlisted:
-                # a number the run does not have is not "a scan ISAAC did not merge": which scans it means is unknown
-                return (f"The scientist's Athena curve for group {gid} names scan(s) {', '.join(unlisted)}, which the "
-                        f"run's {len(numbers)} listed scans do not include{how}, so which of the {total} scan(s) ISAAC "
-                        f"merged it used is not known ({SCAN_SUBSET_FLAG}): its E0 and curve describe its own scans, "
-                        "not necessarily ISAAC's merge.")
-            extra = [n for n in chosen if int(n) not in merged]
-            if extra:
-                # c10-r: it includes a scan ISAAC did not merge: a DIFFERENT set of scans, never "only" part of the merge
-                return (f"The scientist's Athena curve for group {gid} uses a different set of scans "
-                        f"({', '.join(chosen)}) from the {total} scan(s) ISAAC merged, including scan(s) {', '.join(extra)} "
-                        f"that ISAAC did not merge{how} ({SCAN_SUBSET_FLAG}): its E0 and curve describe its own scans, "
-                        "not ISAAC's merge.")
-        of = f" of the {total} scan(s) ISAAC merged" if total else ""
-        if chosen and not known:
-            # the numbers are not known, so neither "only part of the merge" nor "a scan ISAAC did not merge" is said
-            return (f"The scientist's Athena curve for group {gid} uses scans {', '.join(chosen)}{of} "
-                    f"({SCAN_SUBSET_FLAG}): its E0 and curve describe those scans, which may not be ISAAC's merge.")
-        which = f"scans {', '.join(chosen)}{of}{how}" if chosen else f"a subset of the scans{of}"
-    return (f"The scientist's Athena curve for group {result.get('group_id')} uses only {which} "
+        return (f"The scientist's Athena curve for group {gid} uses only {which} "
+                f"({SCAN_SUBSET_FLAG}): its E0 and curve describe those scans, not the full merge.")
+    inputs = list((sibling or {}).get("inputs") or ())
+    if not inputs and not flagged:
+        return None  # no ISAAC result of the same run to compare with, and nothing stored to say
+    # c11-a/c11-r: a run kept as one file per scan states no scan index (its inputs hold `scan: None`): each scan's
+    # number is read from its file name (bundle.input_scan_numbers), never counted by position. A scan is said merged,
+    # not merged or absent ONLY when every number is known.
+    run_of = {s.get("source_id"): r.get("run_key") for r in bundle.get("runs") or () for s in r.get("scans") or ()}
+    numbers, basis = B.input_scan_numbers(inputs, run_of)
+    known = B.all_scan_numbers_known(numbers)
+    of = f" of the {total} scan(s) ISAAC merged" if total else ""
+    if chosen and not known:
+        # the numbers are not known, so neither "only part of the merge" nor "a scan ISAAC did not merge" is said
+        return (f"The scientist's Athena curve for group {gid} uses scans {', '.join(chosen)}{of} "
+                f"({SCAN_SUBSET_FLAG}): its E0 and curve describe those scans, which may not be ISAAC's merge.")
+    if not chosen:
+        return (f"The scientist's Athena curve for group {gid} uses only a subset of the scans{of} ({SCAN_SUBSET_FLAG}): "
+                "its E0 and curve describe those scans, not the full merge.") if flagged else None
+    merged = {n for n, i in zip(numbers, inputs) if not i.get("skip_reason")}
+    how = ""
+    if basis == B.SCAN_NUMBERS_FROM_FILE_NAME:
+        several = len({run_of.get(i.get("source_id")) for i in inputs}) > 1
+        how = (f" (the run{'s state' if several else ' states'} no scan index; each scan's number is read from its file "
+               "name)")
+    unlisted = [n for n in chosen if not (n.isdigit() and int(n) in set(numbers))]
+    if unlisted:
+        # a number the run does not have is not "a scan ISAAC did not merge": which scans it means is unknown
+        return (f"The scientist's Athena curve for group {gid} names scan(s) {', '.join(unlisted)}, which the "
+                f"run's {len(numbers)} listed scans do not include{how}, so which of the {total} scan(s) ISAAC "
+                f"merged it used is not known ({SCAN_SUBSET_FLAG}): its E0 and curve describe its own scans, "
+                "not necessarily ISAAC's merge.")
+    extra = [n for n in chosen if int(n) not in merged]
+    if extra:
+        # c10-r: it includes a scan ISAAC did not merge: a DIFFERENT set of scans, never "only" part of the merge
+        return (f"The scientist's Athena curve for group {gid} uses a different set of scans "
+                f"({', '.join(chosen)}) from the {total} scan(s) ISAAC merged, including scan(s) {', '.join(extra)} "
+                f"that ISAAC did not merge{how} ({SCAN_SUBSET_FLAG}): its E0 and curve describe its own scans, "
+                "not ISAAC's merge.")
+    if {int(n) for n in chosen} == merged:
+        return None  # exactly the scans ISAAC merged: not a subset, whatever an older build stored
+    return (f"The scientist's Athena curve for group {gid} uses only scans {', '.join(chosen)}{of}{how} "
             f"({SCAN_SUBSET_FLAG}): its E0 and curve describe those scans, not the full merge.")
 
 
@@ -3775,6 +3788,12 @@ def process(
                 "statement": line}
             if isinstance(out.get("summary"), Mapping):
                 out["summary"] = {**out["summary"], "lines": [*(out["summary"].get("lines") or ()), line]}
+        new_curve = decided_results_with_a_new_all_zero_skip(bundle, keep, fresh)
+        if new_curve:
+            out["decided_results_with_a_scan_now_left_out"] = new_curve
+            if isinstance(out.get("summary"), Mapping):
+                out["summary"] = {**out["summary"],
+                                  "lines": [*(out["summary"].get("lines") or ()), *(x["statement"] for x in new_curve)]}
         if not_live:
             by_status: dict[str, int] = {}
             for g in not_live:
@@ -3790,6 +3809,45 @@ def process(
         return out
 
     return mutate(bundle_dir, change)
+
+
+def decided_results_with_a_new_all_zero_skip(bundle: Mapping, keep: Sequence[Mapping], fresh: Sequence[Mapping]) -> list[dict]:
+    """c11-r: one line per DECIDED ISAAC result kept as it was whose group's fresh result (this build) now leaves out a
+    scan the decided one merged, because its signal is zero at every point (``signal_all_zero``). The fresh curve has
+    a new id; the decision still stands on the old id until the scientist changes it. ``[]`` when there is none."""
+    decisions = B.processing_state_decisions(bundle)
+    out = []
+    for old in keep:
+        if old.get("source") != "isaac_protocol":
+            continue
+        pid = B.processing_id(old)
+        d = decisions.get(("processing_result", pid))
+        if d is None:
+            continue
+        merged = {i.get("source_id") for i in old.get("inputs") or () if not i.get("skip_reason")}
+        for new in fresh:
+            if new.get("group_id") != old.get("group_id") or new.get("source") != "isaac_protocol":
+                continue
+            left = [i for i in new.get("inputs") or ()
+                    if i.get("skip_reason") == C_SIGNAL_ALL_ZERO and i.get("source_id") in merged]
+            if not left:
+                continue
+            nid = B.processing_id(new)
+            names = ", ".join(PurePosixPath(str(i.get("relative_path") or i.get("source_id"))).name for i in left)
+            what = d.get("decision")
+            stands = "The old approval still stands" if what == "approve" else f"The earlier decision ({what}) still stands"
+            said = (f"Group {old.get('group_id')}: {pid} ({what} by {(d.get('decided_by') or {}).get('name')}) merged "
+                    f"{names}, whose signal is zero at every point; this build leaves {'it' if len(left) == 1 else 'them'} "
+                    f"out, so the fresh curve is a new result, {nid}. The scientist can approve the new curve "
+                    f'(`isaac bundle decide <bundle_dir> --target {nid} --decision approve --qc-status <value> --by '
+                    f'"<your name>"`). {stands} on {pid} until they change it.')
+            out.append({"group_id": old.get("group_id"), "decided_result_id": pid, "new_result_id": nid,
+                        "left_out": [i.get("relative_path") or i.get("source_id") for i in left], "statement": said})
+    return out
+
+
+#: ``processing.core.SIGNAL_ALL_ZERO`` (not imported: processing is an optional extra).
+C_SIGNAL_ALL_ZERO = "signal_all_zero"
 
 
 def _say_athena_choice_not_carried_over(result: dict, decision: Mapping) -> None:

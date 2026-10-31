@@ -69,20 +69,28 @@ def scan_arrays(table: ScanTable, choice: ChannelChoice, np) -> dict:
             best = max(best, run)
     diag["signal_max_run"] = int(best)
     diag["signal_all_zero"] = bool(raw_signal.size and not np.any(raw_signal != 0))
+    # c11-r: how many points of the chosen signal are EXACTLY zero (threshold-free; no point is changed or dropped
+    # for it): a scan whose counts stop part-way (the beam lost) is merged as it is, and said (run.py)
+    diag["signal_zero_points"] = int(np.sum(raw_signal == 0))
 
     steps = np.diff(E)
     diag["nonmonotonic_steps"] = int(np.sum(steps <= 0))
     order = np.argsort(E, kind="stable")
     E, mu = E[order], mu[order]
+    raw_kept = raw_signal[order]
     mu_ref = mu_ref[order] if mu_ref is not None else None
     finite = np.isfinite(E) & np.isfinite(mu)
     diag["nonfinite_dropped"] = int(np.sum(~finite))
     E, mu = E[finite], mu[finite]
+    raw_kept = raw_kept[finite]
     mu_ref = mu_ref[finite] if mu_ref is not None else None
     key = np.round(E, 6)
     uniq, inverse, counts = np.unique(key, return_inverse=True, return_counts=True)
     diag["duplicate_energies_merged"] = int(np.sum(counts > 1))
+    # per kept point: the signal is exactly zero there (a merged duplicate energy only when every reading is)
+    signal_zero = raw_kept == 0
     if uniq.size != E.size:
+        signal_zero = np.bincount(inverse, weights=(raw_kept != 0).astype(float), minlength=uniq.size) == 0
         mu = np.bincount(inverse, weights=mu) / counts
         if mu_ref is not None:
             ok = np.isfinite(mu_ref)
@@ -91,7 +99,7 @@ def scan_arrays(table: ScanTable, choice: ChannelChoice, np) -> dict:
             mu_ref = np.where(den > 0, num / np.maximum(den, 1), np.nan)
         E = uniq
     diag["points_used"] = int(E.size)
-    return {"energy": E, "mu": mu, "mu_ref": mu_ref, "diagnostics": diag}
+    return {"energy": E, "mu": mu, "mu_ref": mu_ref, "signal_zero": signal_zero, "diagnostics": diag}
 
 
 #: A scan with fewer usable points than this is skipped.
@@ -99,6 +107,8 @@ MIN_SCAN_POINTS = 5
 SIGNAL_NOT_FINITE = "signal_not_finite"
 #: A scan whose chosen signal is zero at every point (c11-a): skipped, counted and named, never merged.
 SIGNAL_ALL_ZERO = "signal_all_zero"
+#: The rule that skips such a scan (``protocol.RULE_VERSIONS_SINCE_PROTOCOL_VERSION`` names it).
+SIGNAL_ALL_ZERO_RULE_ID = "isaac.xas.skip_signal_all_zero.v0"
 
 
 def unusable_reason(sa: Mapping) -> str | None:

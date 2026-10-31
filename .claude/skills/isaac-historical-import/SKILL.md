@@ -229,8 +229,8 @@ back to Step 5. Read `reference/records-and-validation.md`; explain the verdicts
 `by_reason`, `missing_required_by_field` and `not_exportable_first` in plain words with the exact fix
 (open `validation/<group_id>.json` only for a group those leave unexplained), then go back to the
 step that fixes it (a `processing_fix` means its curve needs approval in Step 6). Say each `warnings`
-item in words, and ask the scale question it names (and the set-point when `also_needs` is set); run
-its command only with their answer. Never edit a draft; never relax a check.
+item in words (only 5 warnings show by default; `validate --full` lists all), and ask the scale question it
+names (and the set-point if `also_needs`); run its command only with their answer. Never edit a draft or relax a check.
 
 ## Step 9 · Export and dry run
 

@@ -20,7 +20,9 @@ run, the official schema and exactness checks, and the offline portal check. Its
 'concentration_M' is a required property`), then the `verdicts` map. The required list includes what an
 object the record carries requires (an electrolyte name makes `concentration_M` required, with
 `required_because` in the composition file), so `build-records` says it before `validate` does.
-Both replies also carry `warnings` (`warnings_total`): a group whose file names state a potential
+Both replies also carry `warnings` (`warnings_total`; only the first 5 are printed, the warnings of exportable
+groups first, each row marked `group_exportable`; `warnings_omitted` counts the rest and `warnings_full_list`
+says how to see them: `validate --full` (or `build-records --full`) lists every one): a group whose file names state a potential
 (`400mV`, `m800mV`) that its record will not carry until the potential scale (or the set-point) is
 confirmed, with the command that lets it in. When no set-point was read from the names (an unread token
 such as `-500mV`) and no scale is confirmed, the warning names BOTH (`also_needs`, `also_command`): ask the
@@ -71,7 +73,9 @@ After fixing, run `build-records` then `validate` again. Never hand-edit a draft
 (the processing files) for exportable drafts only and lists the rest with their verdicts. Its reply
 opens with `outcome` ("Wrote N record(s), refused M group(s)") and `records_written` / `groups_refused`.
 It exits 1 whenever any group is refused, **even when it wrote records**: read `outcome`, never the exit
-code alone, before telling the scientist what is ready. Its index is
+code alone, before telling the scientist what is ready. A record written while a warning still applies lists it
+in `exported[].warnings` ("Written without the potential set-point: …"; the first 5, with `warnings_total`), and
+`records_written_with_warnings` counts those records: say each one, since the record lacks that condition. Its index is
 `<records>/isaac-export/index.json`. Exporting again into the same `--out` reuses each unchanged record's id (`export: unchanged`); a changed record gets a new id and the old one is moved to `isaac-export/superseded/` (`export: replaced`); a record whose group is now refused or no longer confirmed is moved to `isaac-export/withdrawn/` (listed under `withdrawn`; if it was uploaded already, the portal still holds it) — say which. Then `upload <records> --dry-run`: summarise records, target
 endpoints and body sizes. State plainly: nothing was sent, this build cannot send, the key was not
 read. Never ask for or print a portal key. Tell the scientist the records are in `<records>` and

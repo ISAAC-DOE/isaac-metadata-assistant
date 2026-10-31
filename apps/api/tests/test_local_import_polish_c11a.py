@@ -7,7 +7,8 @@ SYNTHETIC files only: every scan, Athena project and value below is invented and
   merged all 8; the sentence reached the exported record's notes. Such a run's scans are numbered 1..N in the
   order listed, the rule the import already states for a run that states no scan index
   (``bundle._scan_numbers``); a scan is said not merged only when the numbers are known, and a number the run
-  does not list is said to be one.
+  does not list is said to be one. (c11-r: the number is read from each file name, never counted by position;
+  see test_local_import_polish_c11r.py.)
 * (MED-2) A warning that a record will not carry a stated condition is never invisible: ``validate`` lists the
   warnings of exportable groups first and ``--full`` prints every one; ``export`` lists, per record written, the
   warnings that still apply.
@@ -49,21 +50,22 @@ def test_one_file_per_scan_inputs_are_numbered_in_order_and_a_subset_is_only_par
     assert "did not merge" not in note and "different set" not in note
     assert note.startswith("The scientist's Athena curve for group g1 uses only scans 1, 3, 4, 5, 6, 8 of the 8 scan(s) "
                            "ISAAC merged")
-    # the numbering is said, never hidden
-    assert "the run states no scan index; its 8 scans are numbered 1-8 in the order listed" in note
+    # the numbering is said, never hidden (c11-r: read from each file name, never counted by position)
+    assert "the run states no scan index; each scan's number is read from its file name" in note
 
 
 def test_one_file_per_scan_a_skipped_scan_is_known_and_said_not_merged():
-    inputs = [{"scan": None}, {"scan": None, "skip_reason": "too_few_points"}, {"scan": None}]
+    inputs = [{"scan": None, "relative_path": f"SYN_dir/SYN_{n:03d}.txt"} for n in (1, 2, 3)]
+    inputs[1]["skip_reason"] = "too_few_points"
     bundle, ath = _pair(inputs, [1, 2])
     note = M.scan_subset_note(bundle, ath)
     assert "uses a different set of scans (1, 2) from the 2 scan(s) ISAAC merged, including scan(s) 2 that ISAAC did " \
            "not merge" in note
-    assert "numbered 1-3 in the order listed" in note
+    assert "each scan's number is read from its file name" in note
 
 
 def test_a_label_number_the_run_does_not_list_is_said_to_be_one_never_not_merged():
-    bundle, ath = _pair([{"scan": None} for _ in range(9)], [2468])
+    bundle, ath = _pair([{"scan": None, "relative_path": f"SYN_dir/SYN_{n:03d}.txt"} for n in range(1, 10)], [2468])
     note = M.scan_subset_note(bundle, ath)
     assert "did not merge" not in note
     assert "names scan(s) 2468, which the run's 9 listed scans do not include" in note
@@ -136,7 +138,7 @@ def test_processing_numbers_the_scans_the_same_in_both_layouts(tmp_path, per_fil
     assert isa["comparison"]["metrics"].get("rms_norm_same_scans_same_params") is not None
     note = M.scan_subset_note({"processing_results": [isa, ath]}, ath)
     assert "uses only scans 1, 2 of the 3 scan(s) ISAAC merged" in note and "did not merge" not in note
-    assert ("numbered 1-3 in the order listed" in note) is per_file
+    assert ("each scan's number is read from its file name" in note) is per_file
     # a label naming every scan is not a subset in either layout (before: always one for one file per scan)
     bdir, root = _label_case(tmp_path / "all", "01_SYN_ZZ1_1-3", per_file=per_file)
     _, isa, ath = _process(bdir, root)

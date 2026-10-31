@@ -249,7 +249,11 @@ merged curve to 0 at its end) and the other scans are merged: warn `scans_skippe
 `scans_skipped_signal_all_zero`, and a statement naming the scan. Only a scan that would otherwise be used
 gets this reason, so only a result with such a scan has a new id. With every scan's signal zero there is no
 curve. The `signal_all_zero` fail (metric `signal_all_zero_scans`, over the scans used) stays, for a result
-an older build made.
+an older build made. The rule is `isaac.xas.skip_signal_all_zero.v0` (named in each result's `rule_versions`).
+A scan whose signal is exactly zero at SOME points where another merged scan's is not (its counts stop
+part-way; per-scan diagnostic `signal_zero_points`) is merged unchanged, flagged
+`merged_scan_has_zero_signal_points` and named in `qc.statements.merged_scan_zero_signal_points` (outside
+`qc.json`, so no id moves). Whether to leave such a scan out is the scientist's call: there is no threshold.
 
 ### Known limits (for review)
 

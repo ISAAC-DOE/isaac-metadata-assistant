@@ -91,8 +91,11 @@ it finds one. Show per group, in words:
   every scan, so fluorescence was used): say the sentence in `qc.json` → `statements` and ask the
   scientist to confirm the channel. A scan skipped `signal_not_finite` has its points but a signal
   that is never finite (I0 or I1 ≤ 0); never call that "too few points". A scan skipped `signal_all_zero`
-  recorded a signal of zero at every point: say it in words ("scan 8's signal is zero at every point, so it
-  was left out"); the curve uses the other scans;
+  recorded a signal of zero at every point: say it in words, naming the file as the statement does
+  ("SYN_008.txt's signal is zero at every point, so it was left out"); the curve uses the other scans. A
+  merged scan flagged `merged_scan_has_zero_signal_points` is zero only at some points: say its sentence
+  ("SYN_008.txt's signal is zero at 204 of 226 points, from 7,850 eV on; it is merged unchanged") and ask the
+  scientist whether the beam was lost and the scan belongs in the merge; never leave it out yourself;
 - **when a scan ends early** (reason `scans_truncated`, flag `scan_range_truncated`; `scans_used` still
   counts it): say the sentence in `qc.json` → `statements` (how many scans end early, which, the
   energies each covers, and that part of the merged curve averages fewer scans) and ask whether the

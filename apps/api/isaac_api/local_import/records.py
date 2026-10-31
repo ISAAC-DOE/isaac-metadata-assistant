@@ -1834,7 +1834,12 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
                "statement": "Valid for the portal's pinned schema; NOT claimed valid for the website."}
         still = [written_without(w) for w in warned if w["group_id"] == group_id]
         if still:
-            row["warnings"] = still
+            # c11-r: capped like every other list (count + the first few); `validate --full` lists every one
+            row["warnings"] = still[:WARNINGS_SHOWN]
+            row["warnings_total"] = len(still)
+            if len(still) > WARNINGS_SHOWN:
+                row["warnings_omitted"] = len(still) - WARNINGS_SHOWN
+                row["warnings_full_list"] = "`isaac bundle validate <bundle_dir> --full` lists every warning."
         if status == "unchanged":
             row["export_statement"] = (f"Unchanged since its export at {at}: the same record id, rewritten byte for byte. "
                                        "No second record was made.")
@@ -1867,9 +1872,9 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         # SAID PLAINLY FIRST (1.9.x polish): the exit code is 1 whenever any group is refused, even when records
         # were written, so a reader of the exit code alone would take "wrote 3, refused 75" for "nothing exported"
         "outcome": export_outcome(len(exported), len(refused), len(withdrawn), out,
-                                  warned=sum(1 for row in exported if row.get("warnings"))),
+                                  warned=sum(1 for row in exported if row.get("warnings_total"))),
         "records_written": len(exported),
-        **({"records_written_with_warnings": n} if (n := sum(1 for row in exported if row.get("warnings"))) else {}),
+        **({"records_written_with_warnings": n} if (n := sum(1 for row in exported if row.get("warnings_total"))) else {}),
         "groups_refused": len(refused),
         "exported": exported,
         "refused": refused,

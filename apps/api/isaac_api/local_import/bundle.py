@@ -454,8 +454,18 @@ def _scan_numbers(run: Mapping) -> tuple[set[int], str]:
     return set(range(1, int(run.get("scan_count") or 0) + 1)), "scan_count"
 
 
-#: ``input_scan_numbers``'s basis when the run states no scan index: its scans numbered 1..N in the order listed.
-SCAN_NUMBERS_BY_ORDER = "order_listed"
+#: ``input_scan_numbers``'s basis when the run states no scan index: each scan's number is read from its file name
+#: (``<stem>_004.txt`` is scan 4), never counted from its place in the list (c11-r).
+SCAN_NUMBERS_FROM_FILE_NAME = "file_name"
+#: ``SYN_004.txt`` -> 4: the number before a file name's extension (``bl15.relate``'s rule: read, never by position).
+_FILE_SCAN_NUMBER = re.compile(r"_(\d+)\.[^./]+\Z")
+
+
+def file_scan_number(relative_path: Any) -> int | None:
+    """The scan number a scan file's name states (``.../SYN_dir/SYN_004.txt`` -> 4), else ``None``."""
+    name = PurePosixPath(str(relative_path or "").replace("\\", "/")).name
+    m = _FILE_SCAN_NUMBER.search(name)
+    return int(m.group(1)) if m else None
 
 
 def input_scan_numbers(inputs: Sequence[Mapping], run_of: Mapping[Any, Any] | None = None) -> tuple[list[int | None], str | None]:
@@ -463,23 +473,34 @@ def input_scan_numbers(inputs: Sequence[Mapping], run_of: Mapping[Any, Any] | No
 
     An input's own ``scan`` (the run's ``scan_index``) when ANY input states one (basis ``"stated"``; an input that
     states none stays ``None``: its number is not known). When none does — a run kept as one file per scan
-    (``<stem>_dir/<stem>_001.txt``) — each run's scans are numbered 1..N in the order listed, the rule
-    :func:`_scan_numbers` states for a run that states no scan index (basis :data:`SCAN_NUMBERS_BY_ORDER`).
-    ``run_of`` (``source_id`` -> run) numbers each run of a several-run group from 1; without it the inputs are one
-    run's. ``(.., None)`` for no input."""
+    (``<stem>_dir/<stem>_004.txt``) — each scan's number is READ FROM ITS FILE NAME (basis
+    :data:`SCAN_NUMBERS_FROM_FILE_NAME`), never counted from its place in the list: files 001, 002, 004 are scans
+    1, 2, 4, and an unpadded ``S_10`` sorted before ``S_2`` is still scan 10. When any input's name states no
+    number, or two inputs of one run (``run_of``: ``source_id`` -> run) state the same one, NO number is known
+    (every entry ``None``, basis ``None``): a caller then says nothing about which scans were merged.
+    ``(.., None)`` for no input."""
     if not inputs:
         return [], None
     stated = [i.get("scan") if isinstance(i.get("scan"), int) and not isinstance(i.get("scan"), bool) else None
               for i in inputs]
     if any(n is not None for n in stated):
         return stated, "stated"
-    seen: dict[Any, int] = {}
+    seen: set[tuple[Any, int]] = set()
     out: list[int | None] = []
     for i in inputs:
-        key = (run_of or {}).get(i.get("source_id"))
-        seen[key] = seen.get(key, 0) + 1
-        out.append(seen[key])
-    return out, SCAN_NUMBERS_BY_ORDER
+        n = file_scan_number(i.get("relative_path"))
+        key = ((run_of or {}).get(i.get("source_id")), n)
+        if n is None or key in seen:
+            return [None] * len(inputs), None
+        seen.add(key)
+        out.append(n)
+    return out, SCAN_NUMBERS_FROM_FILE_NAME
+
+
+def all_scan_numbers_known(numbers: Sequence[int | None]) -> bool:
+    """True only when every input's scan number is known (:func:`input_scan_numbers`): the one rule under which a
+    scan may be said merged, not merged, or absent."""
+    return bool(numbers) and all(n is not None for n in numbers)
 
 
 def _selection_numbers(sel: str) -> set[int] | None:

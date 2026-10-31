@@ -33,6 +33,7 @@ RULE_VERSIONS_SINCE_PROTOCOL_VERSION: dict[str, Any] = {
         "isaac.xas.edge_step_plausible.v0",
         "isaac.xas.post_edge_level.v1",
         "isaac.xas.reference_channel_fallback.v1",
+        "isaac.xas.skip_signal_all_zero.v0",
         "isaac.xas.stored_normalized_plausible.v0",
     ],
     "statement": (
