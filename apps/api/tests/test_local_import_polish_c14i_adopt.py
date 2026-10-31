@@ -2,7 +2,7 @@
 
 * MED-1: a Disagreements ruling whose value is already recorded, but not by a ruling on their cell as it reads now
   (they edited the cell since, or the value came from a file confirmed with ``decide``), is recorded again with the
-  ruling's note ("of which 1 ruling (1 target) kept the same value, now tied to your sheet"), so the next adopt reads
+  ruling's note ("1 ruling cell kept the same value and is now tied to your sheet (1 target)"), so the next adopt reads
   the row as ruled; the same workbook imported again records nothing more.
 * LOW-1: a yes/no or a date value ruled on settles too (the note's value text is the sheet's).
 * LOW-2: a ruling read from a workbook adopted before ``_isaac`` kept their value names no value in its note (never
@@ -45,7 +45,7 @@ def _ties_then_settles(grouped, theirs, ruled, ph_id, value, capsys, tmp_path):
     code, text, err = _import_text(grouped, ruled, capsys)
     assert code == 0, err
     assert "Rulings to be recorded with the same value, now tied to your sheet" in text
-    assert " decision(s) would record, of which 1 ruling (1 target) keeps the same value, to be tied to your sheet;" in text
+    assert " decision(s) would record; 1 ruling cell keeps the same value and is to be tied to your sheet (1 target);" in text
     before = len(_ph_decisions(grouped))
     code, rep, err = _import(grouped, ruled, capsys, "--apply")
     assert code == 0, err

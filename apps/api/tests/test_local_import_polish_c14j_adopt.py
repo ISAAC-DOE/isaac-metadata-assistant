@@ -4,8 +4,9 @@
   a ruling that keeps the recorded value is tied to the sheet only when it was made against the decision that governs
   now (for a workbook adopted before they were kept: when it was adopted at or after that decision). A stale
   workbook's ruling is "already recorded", so two workbooks imported in turn never flip-flop.
-* LOW-1: the summary says tied rulings among the decisions recorded, counted by ruling cell ("of which 1 ruling (9
-  targets) kept the same value, now tied to your sheet"), and never lists them as replacing a file reading.
+* LOW-1: the summary says tied rulings beside the decisions recorded, counted by ruling cell ("1 ruling cell kept
+  the same value and is now tied to your sheet (9 targets)", c14k LOW-5), and never lists them as replacing a file
+  reading.
 * LOW-2: a ruling takes its target from a File List cell typed with the same (recorded) value.
 """
 
@@ -113,8 +114,8 @@ def test_a_whole_beamtime_ruling_ties_every_target_it_reaches(grouped, tmp_path,
     assert code == 0, err
     # LOW-1: one ruling, said as part of the decisions recorded; never as replacing a file reading
     summary = next(line for line in text.splitlines() if line.startswith("Summary:"))
-    assert (f"; {len(reached)} decision(s) recorded, of which 1 ruling ({len(reached)} targets) kept the same value, "
-            "now tied to your sheet; ") in summary
+    assert (f"; {len(reached)} decision(s) recorded; 1 ruling cell kept the same value and is now tied to your sheet "
+            f"({len(reached)} targets); ") in summary
     assert "replace or contradict a file reading" not in summary
     for tid in reached:
         assert len(_decisions_on(grouped, tid)) == 2
@@ -228,7 +229,9 @@ def test_a_workbook_adopted_before_the_governing_decisions_were_kept_ties_by_tim
     code, rep, err = _import(grouped, older, capsys, "--apply")
     assert code == 0, err
     assert rep["recorded"] == 0 and not rep["rulings_tied_to_sheet"]
-    assert [a["target"]["id"] for a in rep["already_decided_same_value"]].count(tid) == 1
+    # c14k MED-1: a stale ruling is listed apart, never folded into "already recorded"
+    assert tid not in [a["target"]["id"] for a in rep["already_decided_same_value"]]
+    assert [s["target"]["id"] for s in rep["stale_rulings"]] == [tid]
     code, rep, err = _import(grouped, newer, capsys, "--apply")
     assert code == 0, err
     [tied] = rep["rulings_tied_to_sheet"]
@@ -249,7 +252,7 @@ def test_rules_against_now_reads_the_kept_ids_then_the_time():
     assert not T._rules_against_now({}, prior, None) and not T._rules_against_now({}, {"decision_id": "d"}, "2099-01-01T00:00:00Z")
     assert T._marker_governing({"governing_decisions": '["d-0001"]'}) == ["d-0001"]
     assert T._marker_governing({"governing_decisions": "[]"}) == []
-    assert T._marker_governing({}) is None and T._marker_governing({"governing_decisions": "damaged"}) is None
+    assert T._marker_governing({}) is None and T._marker_governing({"governing_decisions": "damaged"}) == []  # c14k LOW-2
 
 
 # --- LOW-2 ----------------------------------------------------------------------------------------------------
