@@ -144,7 +144,7 @@ def test_without_supersede_the_stale_clash_says_supersede_does_not_record_it(gro
     _rule(tmp_path / "B2.xlsx", tmp_path / "B2r.xlsx", {b2["id"]: 12})
     rep = _imp(grouped, tmp_path / "B2r.xlsx", capsys)
     [clash] = [c for c in rep["clashes"] if c["target"]["id"] == tid]
-    assert clash["reason"].endswith("skipped (pass --supersede to record this one" + _or_decide(tid, "confirm") + ")")
+    assert clash["reason"].endswith("skipped (pass --supersede to record this one)" + _or_decide(tid, "confirm"))
     assert len(_decisions_on(grouped, tid)) == 2
 
 
@@ -251,9 +251,8 @@ def test_without_the_adopt_position_a_decision_before_the_adopt_is_never_said_to
     _without_adopt_position(tmp_path / "Ar.xlsx", tmp_path / "old.xlsx", before["decided_utc"])  # adopted after it
     rep = _imp(grouped, tmp_path / "old.xlsx", capsys)
     [stale] = rep["stale_rulings"]
-    assert stale["reason"] == (f"ruled on a workbook adopted before {after['decision_id']}; the recorded value is kept "
-                               "and nothing is recorded for this ruling. Adopt again to settle this sheet"
-                               + _or_decide(tid, "confirm"))
+    assert stale["reason"] == (f"ruled on a workbook adopted before {after['decision_id']}; nothing is recorded for "
+                               "this ruling: the value is already 12; adopt again to settle this row")  # c14n LOW-3
     assert NOT_SINCE not in stale["reason"]
     assert len(_decisions_on(grouped, tid)) == 2
 
@@ -308,8 +307,8 @@ def test_a_different_value_recorded_after_the_adopt_is_still_said_since(grouped,
     back = _decisions_on(grouped, tid)[-1]["decision_id"]
     [stale] = _imp(grouped, tmp_path / "Ar.xlsx", capsys)["stale_rulings"]
     assert stale["reason"] == (f"ruled on a workbook adopted before {back}, and a different value was recorded since "
-                               f"({changed}); the recorded value is kept and nothing is recorded for this ruling. Adopt "
-                               "again to settle this sheet" + _or_decide(tid, "confirm"))
+                               f"({changed}); nothing is recorded for this ruling: the value is already 12; adopt again "
+                               "to settle this row")  # c14n LOW-3
 
 
 # --- LOW-1 ----------------------------------------------------------------------------------------------------

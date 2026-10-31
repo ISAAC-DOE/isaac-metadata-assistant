@@ -114,7 +114,7 @@ def test_a_position_from_another_copy_never_supersedes(grouped, tmp_path, capsys
     [stale] = [x for x in rep["stale_rulings"] if x["target"]["id"] == tid]
     assert stale["reason"].startswith(UNPLACEABLE + " and rule against what is recorded now; nothing is recorded for "
                                       "this ruling, even with --supersede,")
-    assert stale["reason"].endswith(f"--target {tid} --decision correct --value 2 --json --by \"<your name>\"")
+    assert stale["reason"].endswith(f"--target {tid} --decision correct --value=2 --json --by \"<your name>\"")
     assert _value_now(grouped, tid) == 12 and len(_decisions_on(grouped, tid)) == 1
     rep = _imp(grouped, tmp_path / "Ar.xlsx", capsys)  # without --supersede: a clash that says so
     [clash] = [c for c in rep["clashes"] if c["target"]["id"] == tid]
@@ -327,7 +327,7 @@ def test_a_whole_beamtime_ruling_is_recorded_for_every_run_or_none(grouped, tmp_
     for tid in tids[1:]:
         assert stale[tid]["reason"].startswith(
             f"this ruling reaches 9 targets and is recorded for all of them or none, and {tids[0]}"), tid
-        assert stale[tid]["reason"].endswith(f"--target {tid} --decision correct --value BL99 --by \"<your name>\"")
+        assert stale[tid]["reason"].endswith(f"--target {tid} --decision correct --value=BL99 --by \"<your name>\"")
     code, text, err = _import_text(grouped, tmp_path / "Ar.xlsx", capsys, "--apply", "--supersede")
     assert code == 0, err
     summary = next(x for x in text.splitlines() if x.startswith("Summary:"))
@@ -363,7 +363,7 @@ def _nothing_then_a_value(grouped, tmp_path, capsys):
 NEVER_SAW = "ruled on a workbook adopted with nothing recorded here; this ruling was made before {} recorded the value " \
             "now, so it never saw it: nothing is recorded for it, even with --supersede, and the value recorded now is " \
             "kept. Adopt again and rule against what is recorded now, or record this value directly: isaac bundle " \
-            "decide <bundle_dir> --target {} --decision correct --value 2 --json --by \"<your name>\""
+            "decide <bundle_dir> --target {} --decision correct --value=2 --json --by \"<your name>\""
 
 
 def test_a_workbook_adopted_with_nothing_recorded_never_says_an_earlier_value(grouped, tmp_path, capsys, ticking):
@@ -396,7 +396,7 @@ def _mini(decisions):
 
 TAIL = (" nothing is recorded for it, even with --supersede, and the value recorded now is kept. Adopt again and rule "
         "against what is recorded now, or record this value directly: isaac bundle decide <bundle_dir> --target c1 "
-        "--decision correct --value 2 --json --by \"<your name>\"")
+        "--decision correct --value=2 --json --by \"<your name>\"")
 OWN_NOTE = ("template B.xlsx 'Disagreements'!H2 (your ruling on disagreement D1: SYN_sheet.xlsx 'File List'!H8 = 2)"
             + T._adopt_note("ab" * 16))
 
@@ -420,12 +420,12 @@ OWN_NOTE = ("template B.xlsx 'Disagreements'!H2 (your ruling on disagreement D1:
      "ruled on a workbook whose `_isaac` governing_decisions value is damaged, so it is never recorded over another "
      "value, even with --supersede; the value recorded now is kept and nothing is recorded for this ruling. Adopt "
      "again and rule against what is recorded now, or record this value directly: isaac bundle decide <bundle_dir> "
-     "--target c1 --decision correct --value 2 --json --by \"<your name>\""),
+     "--target c1 --decision correct --value=2 --json --by \"<your name>\""),
     # MED-2: unplaceable
     ([{"decision": "confirm"}], [T.GOVERNING_UNPLACEABLE], None, None, None,
      UNPLACEABLE + " and rule against what is recorded now; nothing is recorded for this ruling, even with --supersede, "
      "and the value recorded now is kept, or record this value directly: isaac bundle decide <bundle_dir> --target c1 "
-     "--decision correct --value 2 --json --by \"<your name>\""),
+     "--decision correct --value=2 --json --by \"<your name>\""),
 ])
 def test_the_keeps_false_wordings(decisions, against, adopted_at, exported, ruling, expected):
     chains = _mini(decisions)
@@ -433,7 +433,7 @@ def test_the_keeps_false_wordings(decisions, against, adopted_at, exported, ruli
     run = chains(place)
     cell = {"value": 2, "ruled_against": against, **({"ruling": ruling} if ruling else {})}
     got = T._stale_reason(cell, [chains.log[p] for p in run], chains, run, exported, adopted_at=adopted_at, keeps=False,
-                          target="c1", decision="correct")
+                          target="c1", decision="correct", adopt_id="cd" * 16)  # c14n LOW-4: this workbook's own id
     assert got == expected
 
 
@@ -459,8 +459,8 @@ def test_every_clash_reason_offers_the_command(grouped, tmp_path, capsys, tickin
     rep = _imp(grouped, tmp_path / "Ar.xlsx", capsys)
     [clash] = [c for c in rep["clashes"] if c["target"]["id"] == tid]
     assert clash["reason"] == ("an earlier scientist decision gives a different value; skipped (pass --supersede to "
-                               "record this one, or record this value directly: isaac bundle decide <bundle_dir> "
-                               f"--target {tid} --decision correct --value 2 --json --by \"<your name>\")")
+                               "record this one), or record this value directly: isaac bundle decide <bundle_dir> "
+                               f"--target {tid} --decision correct --value=2 --json --by \"<your name>\"")  # c14n LOW-6
     argv = _command_in(clash["reason"])
     capsys.readouterr()
     assert _run_command(argv, grouped) == 0, capsys.readouterr().err
@@ -469,8 +469,8 @@ def test_every_clash_reason_offers_the_command(grouped, tmp_path, capsys, tickin
 
 def test_decide_command_quotes_text_and_passes_other_values_as_json():
     assert T.decide_command("mv-1", "correct", "BL 11") == (
-        "isaac bundle decide <bundle_dir> --target mv-1 --decision correct --value 'BL 11' --by \"<your name>\"")
-    assert T.decide_command("c-1", "correct", 0.1).endswith("--value 0.1 --json --by \"<your name>\"")
+        "isaac bundle decide <bundle_dir> --target mv-1 --decision correct --value='BL 11' --by \"<your name>\"")
+    assert T.decide_command("c-1", "correct", 0.1).endswith("--value=0.1 --json --by \"<your name>\"")  # c14n LOW-1
     assert T.decide_command("c-1", "confirm", 12) == (
         "isaac bundle decide <bundle_dir> --target c-1 --decision confirm --by \"<your name>\"")
 

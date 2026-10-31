@@ -189,7 +189,9 @@ def test_a_real_value_change_in_between_asks_the_row_again(grouped, tmp_path, ca
     assert rep["recorded"] == 0 and not rep["rulings_tied_to_sheet"]
     assert stale["reason"].startswith(f"ruled on a workbook adopted before {back}, and a different value was recorded "
                                       f"since ({changed}); ")
-    assert stale["reason"].split(", or record this value directly: ")[0].endswith("Adopt again to settle this sheet")
+    # c14n LOW-3: it keeps the value recorded now, so it offers no command to record it
+    assert stale["reason"].endswith("; nothing is recorded for this ruling: the value is already 12; adopt again to "
+                                    "settle this row") and "record this value directly" not in stale["reason"]
 
 
 def test_a_reject_or_defer_ends_the_run(grouped, tmp_path, capsys, ticking):

@@ -1561,10 +1561,11 @@ def group_answer_targets(bundle: dict, asked: Mapping, only: str, field: str | N
     (its targets are a beamtime-level candidate, conflict or missing value, so ``group:<id>`` is none of its
     scopes): the answer is recorded for exactly that group's runs (:func:`run_answer_targets`), never on the
     beamtime-wide target. ``(target ids, slots added, reach)``, or ``None`` when the question is not such a
-    question (the caller then refuses as before)."""
+    question (the caller then refuses as before). c14n LOW-2: ``--only run:<id>`` records it for that one run of a
+    live record group the same way (what ``template import`` offers for a ruling's per-run answer slot)."""
     from . import questions as Q
 
-    if not only.startswith("group:") or asked.get("kind") not in Q.VALUE_KINDS:
+    if not only.startswith(("group:", "run:")) or asked.get("kind") not in Q.VALUE_KINDS:
         return None
     pst = asked.get("per_scope_targets") or {}
     if only in pst or "experiment" not in pst:
@@ -1577,19 +1578,27 @@ def group_answer_targets(bundle: dict, asked: Mapping, only: str, field: str | N
         asked_ids &= set((asked.get("fields") or {}).get(path) or ())
     if not _beamtime_level(bundle, sorted(asked_ids)):
         return None
+    one_run = only.startswith("run:")
     if decision not in ("confirm", "correct"):
+        reach = "that run" if one_run else "that group's runs"
         raise MutationRefused(
             f"Question {asked['question_id']} asks {path} once for the whole beamtime. `--only {only}` records an answer "
-            f"for that group's runs only (`--decision correct --value <v>`, or `confirm --value <v>`); to {decision} "
+            f"for {reach} only (`--decision correct --value <v>`, or `confirm --value <v>`); to {decision} "
             "it, answer the question for the whole beamtime (without --only). Nothing was recorded.")
     gid = only.split(":", 1)[1]
-    group = next((g for g in Q.live_groups(bundle) if g["group_id"] == gid), None)
-    if group is None:
-        raise MutationRefused(f"No live record group {gid!r} in this bundle; nothing was recorded.", code=6)
     run_of_key = {r["run_key"]: r["run_id"] for r in bundle["runs"]}
-    runs = [run_of_key[k] for k in group.get("member_run_keys") or () if k in run_of_key]
-    if not runs:
-        raise MutationRefused(f"Record group {gid} holds no run; nothing was recorded.", code=6)
+    if one_run:
+        live = {run_of_key[k] for g in Q.live_groups(bundle) for k in g.get("member_run_keys") or () if k in run_of_key}
+        if gid not in live:
+            raise MutationRefused(f"No run {gid!r} in a live record group of this bundle; nothing was recorded.", code=6)
+        runs = [gid]
+    else:
+        group = next((g for g in Q.live_groups(bundle) if g["group_id"] == gid), None)
+        if group is None:
+            raise MutationRefused(f"No live record group {gid!r} in this bundle; nothing was recorded.", code=6)
+        runs = [run_of_key[k] for k in group.get("member_run_keys") or () if k in run_of_key]
+        if not runs:
+            raise MutationRefused(f"Record group {gid} holds no run; nothing was recorded.", code=6)
     ids, added = run_answer_targets(bundle, path, runs, question_id=asked["question_id"],
                                     how=f"decide --question {asked['question_id']} --only {only}")
     groups, _runs = _live_reach(bundle)
@@ -1697,19 +1706,21 @@ def _reach_statement(bundle: Mapping, recorded_ids: Sequence[str], override: Map
         found, beamtime = _beamtime_value(bundle, override["path"])
         mine = [v for rid, tid, v, _a in _options_for(bundle, override["path"])
                 if tid in set(recorded_ids) and rid is not None]
+        group = "this run's group" if str(override["scope"]).startswith("run:") else "this group"  # c14n LOW-2
         if found and mine and not _same(mine[0], beamtime):
-            tail = (f"The beamtime-wide answer to question {override['question_id']} differs from this one, so this "
-                    f"group's record has two values for {label} and fills nothing for it until the two agree.")
+            tail = (f"The beamtime-wide answer to question {override['question_id']} differs from this one, so "
+                    f"{group}'s record has two values for {label} and fills nothing for it until the two agree.")
         elif found and mine:
             tail = f"It agrees with the beamtime-wide answer to question {override['question_id']}."
         else:
-            tail = (f"if its answer differs from this one, this group's record gets two values for {label} and fills "
+            tail = (f"if its answer differs from this one, {group}'s record gets two values for {label} and fills "
                     "nothing for it.")
+        rest = ("the rest of the beamtime" if str(override["scope"]).startswith("run:")
+                else f"the other {_count(override['other_groups'], 'group')}")
         return (f"It reaches {override['scope']} only ({_count(override['runs'], 'run')}"
                 + (f"; {_count(override['slots_added'], 'answer slot')} added for runs the files give no target of "
                    "their own" if override["slots_added"] else "")
-                + f"). The beamtime-wide question {override['question_id']} covers the other "
-                f"{_count(override['other_groups'], 'group')}"
+                + f"). The beamtime-wide question {override['question_id']} covers {rest}"
                 + (f". {tail}" if tail[0].isupper() else f"; {tail}")), dict(override)
     level = _beamtime_level(bundle, recorded_ids)
     if not level:

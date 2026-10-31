@@ -1891,7 +1891,8 @@ adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
   a different value, a reject or a defer came between. A workbook adopted before that column existed is tied only
   when it was adopted at or after a decision of the run (by its `exported_utc`; an unreadable time never ties). A
   ruling on a workbook adopted before the run began records nothing and is listed apart (`stale_rulings`: "ruled on a workbook adopted
-  before d-000N, and a different value was recorded since (d-000M); … Adopt again to settle this sheet"), never as
+  before d-000N, and a different value was recorded since (d-000M); nothing is recorded for this ruling: the value
+  is already 12; adopt again to settle this row", with no command to record a value already there), never as
   "already recorded". (c14l) Adopt also keeps the decision log's length (`_isaac` `decisions_at_adopt`), so
   "recorded since" is a place in the log: a reject, a defer or an off-list value recorded before the adopt never stops
   a tie, and a reason says "since" only when that place (or, for a workbook without it, a readable time strictly after
@@ -1911,14 +1912,24 @@ adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
   is a same-value ruling tied, or a different value recorded with `--supersede`; otherwise the ruling is listed in
   `stale_rulings` with its reason ("your earlier ruling on this row (d-N) is what is recorded now"; "made before d-N
   recorded the value now, so it never saw it" for a workbook adopted with nothing recorded), which ends with the
-  command that records it directly (`isaac bundle decide <bundle_dir> --target <id> --decision correct --value <v>
-  --by "<your name>"`; adopting again also works), as every clash reason does. "Since" is a place in the log, trusted
+  command that records it directly (`isaac bundle decide <bundle_dir> --target <id> --decision correct --value=<v>
+  --by "<your name>"`, so a value starting with "-" is never read as an option; for a per-run answer slot the import
+  added, `--question <id> --only run:<run id>`, which `decide` takes for a question asked once for the beamtime;
+  adopting again also works), as every clash reason does. "Since" is a place in the log, trusted
   only while the log's first `decisions_at_adopt` decisions hash to the `_isaac` `decisions_fingerprint` (sha256 of
   each one's `decision_id`, `decided_utc`, `target`, `decision` and `value` as canonical JSON); a copied, restored or
   forked bundle (same `bundle_id`, decision ids that repeat) fails it, and the workbook is unplaceable: nothing of it
   is tied or recorded over another value ("this bundle's decisions changed since the workbook was adopted (copied or
   restored?); adopt again"). A ruling cell is all or nothing: when any target it reaches is stale, none is recorded
-  and every one is listed. A workbook without the fingerprint or the adopt id is read as before.
+  and every one is listed. A workbook without the fingerprint or the adopt id is read as before (a fingerprint row
+  kept with a blank value is unplaceable). (c14n) A decision carrying this workbook's adopt id counts only when the
+  same person (`--by`) recorded it: a copy of the workbook shares its id, so a colleague's ruling on a copy is listed
+  in `stale_rulings` ("Name's ruling on this row (d-N), from another copy of this workbook, is what is recorded now").
+  An adopted File List answer cell is held to the same rule: with `--supersede` it records over a different value
+  only when its workbook is placeable and the decision governing now is one it saw at adopt (`_isaac` `[adopted]`
+  `governing`; a workbook without them, by its place in the log), its own, or nothing was recorded on the
+  target since the adopt; otherwise it is listed in `stale_rulings`. A cell not adopted from their sheet (one of a
+  template never adopted, or typed into an empty cell) records with `--supersede` as before.
   Settled, it says "already recorded: <value> (<date>); leave blank to keep" (the adopt result's `already_recorded`,
   counted apart in the summary); otherwise it awaits a ruling and says "recorded `12` (date); your sheet says `2`:
   rule which" (`recorded_note`). An Electrolyte row stating a concentration is settled only when the name and the
