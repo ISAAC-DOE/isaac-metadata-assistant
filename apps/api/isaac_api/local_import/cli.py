@@ -1629,8 +1629,12 @@ def _compact_question(q: Mapping) -> dict:
     pst = q.get("per_scope_targets") or {}
     out["targets_count"] = len(q.get("targets") or ())
     out["scopes_count"] = len(pst)
-    # the groups it REACHES (applies_to.groups: a beamtime-wide question reaches every live group, c10-m)
-    out["groups_count"] = (q.get("applies_to") or {}).get("groups", sum(1 for s in pst if s.startswith("group:")))
+    # the groups it REACHES (applies_to.groups: a beamtime-wide question reaches every live group, c10-m), less those
+    # that keep their own, differing answer (c10-r: as `decide` says it, "N of M"; groups_total is M)
+    applies = q.get("applies_to") or {}
+    out["groups_count"] = applies.get("groups_reached", applies.get("groups", sum(1 for s in pst if s.startswith("group:"))))
+    if "groups_reached" in applies:
+        out["groups_total"] = applies.get("groups")
     if q.get("kind") == "optional_values" and isinstance(q.get("fields"), Mapping):
         out["fields"] = {f: len(ids) for f, ids in q["fields"].items()}
     scopes = q.get("confirmable_scopes")
@@ -2115,7 +2119,7 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
                                    "the INSTRUMENT CLOCK that wrote the scan headers was set to (no offset, no abbreviation)")
     q.add_argument("--json", action="store_true", help="parse --value as JSON")
     q.add_argument("--as-said", action="store_true",
-                   help="with --value: the value is the scientist's OWN word, as they said it. If it is refused only for "
+                   help="with --decision confirm or correct and --value: the value is the scientist's OWN word, as they said it. If it is refused only for "
                         "not being on the field's allowed list, it is kept as a vocabulary request in --by's name (still "
                         "exit 2, no decision, no value). Without it an off-list value keeps nothing. Never for a word "
                         "they did not say")

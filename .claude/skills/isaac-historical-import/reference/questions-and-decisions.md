@@ -9,7 +9,8 @@ runs", and the question's text says it — say that count with the suggestion, n
 of the whole beamtime),
 `answer_command`. The reply is compact by default: each question has `targets_count`,
 `scopes_count` and `groups_count` instead of its target lists (`decide --question` resolves them;
-`--with-targets` prints them), allowed values sit once in `allowed_values_by_field`, default decisions
+`--with-targets` prints them; a beamtime-wide question's `groups_count` is the groups its answer reaches,
+with `groups_total` beside it when some keep their own, differing answer: say "N of M"), allowed values sit once in `allowed_values_by_field`, default decisions
 in `allowed_decisions_by_kind` (a question lists `allowed_decisions` only when it differs), standard
 hint notes in `hint_notes`. A question blocks only when a live group's record needs one of its
 fields (`blocks_groups`, `required_fields`; reaction drive and catalysis only once a reaction is in

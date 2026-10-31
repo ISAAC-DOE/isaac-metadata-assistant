@@ -1153,7 +1153,8 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         reports = compositions(bundle, decision_of=decisions)
         if compositions_out is not None:
             compositions_out.update(reports)
-        basis = {**basis, "record_composer": _agree_with_composer(questions, bundle, group_of, cand_by_id, reports)}
+        basis = {**basis, "record_composer": _agree_with_composer(questions, bundle, group_of, cand_by_id, reports,
+                                                                       decision_of=decisions)}
     _note_shared_evidence(questions, cand_by_id, bundle)
     _mark_deferred(questions, decisions)
     _say_the_one_group(questions)
@@ -1211,8 +1212,25 @@ def scope_counts(payload: Mapping, scope: str | None) -> dict:
     return {**question_counts(rows), **({"scope": scope} if scope else {})}
 
 
+def _groups_keeping_own(bundle: Mapping, q: Mapping, groups: set[str], decision_of: Mapping | None = None) -> int:
+    """How many of ``groups`` a beamtime-wide answer to ``q`` would NOT reach, as ``decide`` counts them
+    (``mutations.groups_keeping_their_own_answer``): a member run keeps its own value for the field that differs from
+    the value the beamtime target gives now (none yet: every group holding a value of its own)."""
+    from . import mutations as M
+
+    path = q.get("target_field_path")
+    if not path or q.get("kind") == "optional_values" or "[]" in path:
+        return 0
+    # the decision log is read ONCE per consolidate (``decision_of``), never per question
+    options = M._options_for(bundle, path, decision_of)
+    found = [v for rid, _tid, v, _a in options if rid is None]
+    kept = M.groups_keeping_their_own_answer(bundle, path, found[0] if found else None, options=options)
+    return len({k["group_id"] for k in kept} & groups)
+
+
 def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mapping[str, str],
-                         cand_by_id: Mapping[str, Mapping], reports: Mapping[str, Mapping]) -> dict:
+                         cand_by_id: Mapping[str, Mapping], reports: Mapping[str, Mapping],
+                         decision_of: Mapping | None = None) -> dict:
     """BLOCKING IS WHAT THE RECORD COMPOSER REQUIRES (records.compose_group, the list ``build-records`` and
     ``validate`` report): a value question blocks exactly when, for at least one LIVE record group it reaches,
     the composer lists one of its fields as missing and only an answer can supply it. So a conditionally
@@ -1247,6 +1265,14 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
             return every
         return {group_of[rid]} if rid in group_of else set()
 
+    def _at_beamtime(kind: str, tid: str) -> bool:
+        """A target about the WHOLE beamtime (as ``mutations._beamtime_level``): no run, or a conflict naming none."""
+        if kind == "conflict":
+            return not conflict_runs.get(tid)
+        if kind == "candidate":
+            return tid in cand_by_id and (cand_by_id.get(tid) or {}).get("run_id") is None
+        return kind == "missing_value" and tid in run_of and run_of.get(tid) is None
+
     needed_by: dict[str, set[str]] = {}
 
     def needs(path: str) -> set[str]:
@@ -1277,6 +1303,13 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
             # c10-m: THE REACH (what `decide` says an answer reaches): a beamtime-level target fills every live group,
             # so a question asked once for the beamtime applies to all of them, never "0 groups"
             q["applies_to"]["groups"] = len(groups_reached)
+        if groups_reached and isinstance(q.get("applies_to"), dict) and any(
+                _at_beamtime(kinds.get(t["id"], ""), t["id"]) for t in q["targets"]):
+            # c10-r: ... except the groups that keep their own, differing answer for it (`decide` says "It reaches N of
+            # the beamtime's M record groups"): `groups_reached` is N, beside the total M (absent when N is M)
+            apart = _groups_keeping_own(bundle, q, groups_reached, decision_of)
+            if apart:
+                q["applies_to"]["groups_reached"] = len(groups_reached) - apart
         if needing:
             # which groups it blocks (`--scope group:<id> --blocking-only` lists it only for those)
             q["blocks_groups"], q["blocks_group_ids"] = len(needing), sorted(needing, key=lambda g: order_of.get(g, 0))
@@ -1659,15 +1692,16 @@ def _ai_hint_index(bundle: Mapping):
         wanted = set(ids)
         rows = sorted(n for tid in wanted for n in at.get(tid, ()))
         out = S.ai_hints({"ai_interpretations": [interps[n] for n in rows]}, wanted) if rows else []
-        for h in out:
+        for i, h in enumerate(out):
             # A READING OF FEWER RUNS THAN THE QUESTION ASKS ABOUT says so: "applies to 82 groups" beside an AI
             # suggestion read from one file must never read as a beamtime-wide reading
             covered = {(interps[n].get("target") or {}).get("id") for n in rows
                        if repr(interps[n].get("proposed_value")) == repr(h["literal"])}
             if scopes and len(scopes) > 1 and len(out) > 1:
                 # c10-m: SUGGESTIONS THAT DIFFER name the scopes they were read for, so a group in scope leads with
-                # its own (filter_questions, the minimum's `only`); the unscoped order and text are unchanged
-                h["scopes"] = [sc for sc, tids in scopes.items() if covered.intersection(tids)]
+                # its own (filter_questions, the minimum's `only`); the unscoped order and text are unchanged.
+                # c10-r: held OFF the hint's keys (_ScopedHint), so no output gains a key
+                h = out[i] = _ScopedHint(h, [sc for sc, tids in scopes.items() if covered.intersection(tids)])
             runs_all = {run_of.get(t) for t in wanted}
             if None not in runs_all and len({run_of.get(t) for t in covered}) < len(runs_all):
                 h["read_for"] = f"read for {len({run_of.get(t) for t in covered})} of {len(runs_all)} runs"
@@ -1676,6 +1710,16 @@ def _ai_hint_index(bundle: Mapping):
         return out
 
     return hints
+
+
+class _ScopedHint(dict):
+    """An AI suggestion hint that knows the scopes (``group:<id>``, ``experiment``) it was read for (c10-m), held as an
+    ATTRIBUTE, never a key (c10-r): every output of the hint (``bundle questions``, the Local Imports page) is the
+    plain hint as before; only :func:`led_by_scope` reads ``read_in_scopes``. A copy (``copy.deepcopy``) keeps it."""
+
+    def __init__(self, hint: Mapping, scopes: Sequence[str]):
+        super().__init__(hint)
+        self.read_in_scopes = list(scopes)
 
 
 def _ai_sentence(ai: Sequence[Mapping]) -> str:
@@ -1696,7 +1740,7 @@ def led_by_scope(q: Mapping, scope: str) -> Mapping:
     question id and the unscoped question are never changed (a copy is returned)."""
     hints = list(q.get("hints") or ())
     ai = _scoped_ai(hints)
-    mine = [h for h in ai if scope in h["scopes"]]
+    mine = [h for h in ai if scope in h.read_in_scopes]
     if len(ai) < 2 or not mine or mine[0] is ai[0]:
         return q
     led = mine + [h for h in ai if not any(h is m for m in mine)]
@@ -1708,7 +1752,7 @@ def led_by_scope(q: Mapping, scope: str) -> Mapping:
 
 def _scoped_ai(hints: Sequence[Mapping]) -> list[Mapping]:
     """The AI suggestions among ``hints`` that name the scopes they were read for (:func:`_ai_hint_index`)."""
-    return [h for h in hints if h.get("kind") == "ai_suggestion" and "scopes" in h]
+    return [h for h in hints if h.get("kind") == "ai_suggestion" and isinstance(h, _ScopedHint)]
 
 
 def _optional_field_hints(bundle: Mapping, fields: Mapping[str, Sequence[str]], ai_hints=None) -> dict[str, list[dict]]:

@@ -3879,6 +3879,10 @@
               "items": {
                 "type": "string"
               }
+            },
+            "as_said": {
+              "const": true,
+              "description": "decide_answer only: kept because the scientist said it is their own word (`decide --as-said`). Absent on a template cell, whose sheet is the scientist's own writing."
             }
           }
         },

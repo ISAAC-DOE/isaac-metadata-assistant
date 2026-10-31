@@ -15,6 +15,7 @@ SYNTHETIC files only: every scan and Athena project below is invented and named 
 from __future__ import annotations
 
 import copy
+import json
 import shutil
 
 import pytest
@@ -22,6 +23,7 @@ import pytest
 from isaac_api.local_import import bundle as B
 from isaac_api.local_import import cli
 from isaac_api.local_import import mutations as M
+from isaac_api.local_import import questions as Q
 from isaac_api.local_import.processing import athena as A
 
 from test_local_import_capture_decisions import BY, _p1, _prov, _with_athena_result
@@ -251,3 +253,156 @@ def test_a_result_that_now_lists_no_versions_says_there_is_nothing_to_select(ath
         ", which now lists no Athena versions to choose between): the project files, or how ISAAC reads them, changed. "
         "It is not carried over to another curve: no version is selected for that result now.")
     assert cli.main(["bundle", "check", str(athena)]) == 0
+
+
+# --- LOW-1/2: --as-said is the scientist's answer, and a request kept with it says so ----------------------------
+
+from test_local_import_vocabulary_requests import ENV, REACTION, WHO as SAYER, _miss as _vr_miss  # noqa: E402
+
+
+@pytest.fixture()
+def vb(pristine_bundle, tmp_path):  # noqa: F811
+    bdir = tmp_path / "vb"
+    shutil.copytree(pristine_bundle, bdir)
+    return bdir
+
+
+def _cli_decide(bdir, capsys, *args):
+    capsys.readouterr()
+    code = cli.main(["bundle", "decide", str(bdir), *args, "--by", SAYER])
+    got = capsys.readouterr()
+    return code, got.out, got.err
+
+
+@pytest.mark.parametrize("decision", ["defer", "reject"])
+def test_as_said_with_any_decision_but_confirm_or_correct_is_refused(vb, capsys, decision):
+    before = (vb / "bundle.json").read_bytes()
+    code, _, err = _cli_decide(vb, capsys, "--target", _vr_miss(vb, ENV)["value_id"], "--decision", decision,
+                               "--value", "outdoors", "--as-said")
+    assert code == 2 and M.AS_SAID_ONLY_AN_ANSWER in err
+    assert (vb / "bundle.json").read_bytes() == before
+    with pytest.raises(M.MutationRefused, match="--as-said goes only with --decision confirm or correct"):
+        M.decide(vb, target_ids=[_vr_miss(vb, ENV)["value_id"]], decision=decision, value="outdoors", by=SAYER, orcid=None,
+                 as_said=True)
+
+
+def test_as_said_on_a_value_the_field_accepts_is_recorded_and_says_nothing_was_kept(vb, capsys):
+    code, out, err = _cli_decide(vb, capsys, "--target", _vr_miss(vb, ENV)["value_id"], "--decision", "correct",
+                                 "--value", "ex_situ", "--as-said")
+    assert code == 0, err
+    assert json.loads(out)["statement"].endswith(M.AS_SAID_ON_LIST)
+    assert not M.load(vb).get("vocabulary_requests")
+
+
+def test_a_request_kept_with_as_said_records_it(vb, capsys):
+    code, _, err = _cli_decide(vb, capsys, "--target", _vr_miss(vb, REACTION)["value_id"], "--decision", "correct",
+                               "--value", "cathodic corrosion", "--as-said")
+    assert code == 2 and "kept as a vocabulary request" in err
+    [req] = M.load(vb)["vocabulary_requests"]
+    assert req["source"]["as_said"] is True
+    assert B.check_bundle(vb) == []
+
+
+# --- LOW-3: no `scopes` key on a hint ----------------------------------------------------------------------------
+
+from test_local_import_polish_c10m import ENV as C10M_ENV, _annotated, _env_question  # noqa: E402
+from test_local_import_records import bdir, pristine  # noqa: E402,F401  (fixtures)
+
+
+def test_differing_ai_suggestions_add_no_key_to_any_hint_and_a_group_still_leads_with_its_own(bdir, capsys):  # noqa: F811
+    _annotated(bdir, ["ex_situ", "in_situ", "in_situ"])
+    capsys.readouterr()
+    assert cli.main(["bundle", "questions", str(bdir), "--limit", "200", "--with-targets"]) == 0
+    page = json.loads(capsys.readouterr().out)["questions"]
+    ai = [h for q in page for h in q.get("hints") or () if h.get("kind") == "ai_suggestion"]
+    assert ai and not any("scopes" in h or "read_in_scopes" in h for h in ai)
+    payload = Q.consolidate(M.load(bdir))
+    assert not any("scopes" in h for q in payload["questions"] for h in q.get("hints") or ())
+    # the scoped lead (c10-m) is unchanged
+    mine = _env_question(Q.filter_questions(payload, scope="group:g0"))
+    assert [h["literal"] for h in mine["hints"] if h["kind"] == "ai_suggestion"] == ["ex_situ", "in_situ"]
+    assert C10M_ENV == "context.environment"
+
+
+# --- LOW-4: a group page shows the covering question in that group's words ---------------------------------------
+
+from test_local_bundles_parity import _client, grouped  # noqa: E402,F401  (fixture)
+
+
+def test_a_group_page_shows_the_covering_question_led_by_the_suggestion_read_for_the_group(grouped, monkeypatch, tmp_path):  # noqa: F811
+    real = Q.consolidate
+    first = real(M.load(grouped))
+    covered = next(q for q in first["questions"] if str(q.get("covered_by", "")).startswith("Q-"))
+    scope, cover = covered["scope"], covered["covered_by"]
+    a = {"kind": "ai_suggestion", "literal": "SYN-A", "source_path": "SYN_a.txt", "locator": "line 1", "targets": 2}
+    b = {"kind": "ai_suggestion", "literal": "SYN-B", "source_path": "SYN_b.txt", "locator": "line 2", "targets": 1}
+
+    def consolidate(bundle, **kw):
+        payload = real(bundle, **kw)
+        q = Q.question(payload, cover)
+        ai = [Q._ScopedHint(a, ["experiment"]), Q._ScopedHint(b, [scope])]
+        q["hints"] = ai + list(q.get("hints") or ())
+        q["text"] += Q._ai_sentence(ai)
+        return payload
+
+    monkeypatch.setattr(Q, "consolidate", consolidate)
+    client = _client(grouped.parent, monkeypatch, tmp_path)
+    shown = {q["question_id"]: q for q in client.get("/api/local-bundles/alpha/questions", params={"scope": scope}).json()["questions"]}
+    said = shown[covered["question_id"]]["display"]["covered_by"]
+    assert said["question_id"] == cover
+    assert "An AI reading of the files suggests 'SYN-B'" in said["text"] and "suggests 'SYN-A'" not in said["text"]
+    # NEGATIVE CONTROL: unscoped, the covering question's own words
+    whole = {q["question_id"]: q for q in client.get("/api/local-bundles/alpha/questions").json()["questions"]}
+    assert "An AI reading of the files suggests 'SYN-A'" in whole[covered["question_id"]]["display"]["covered_by"]["text"]
+
+
+# --- LOW-5: groups_count is decide's reach, "N of M" -------------------------------------------------------------
+
+from test_local_import_polish_c7r import _groups, _only  # noqa: E402
+from test_local_import_polish_c7s import _technique_question, plain, plain_base  # noqa: E402,F401  (fixtures)
+from test_local_import_template_adopt import WHO as ADOPTER  # noqa: E402
+
+
+def _listed(capsys, bdir, qid):
+    capsys.readouterr()
+    assert cli.main(["bundle", "questions", str(bdir), "--limit", "200"]) == 0
+    return next(q for q in json.loads(capsys.readouterr().out)["questions"] if q["question_id"] == qid)
+
+
+def test_a_beamtime_questions_groups_count_is_the_reach_decide_states(plain, capsys):  # noqa: F811
+    qid, groups = _technique_question(plain), _groups(plain)
+    before = _listed(capsys, plain, qid)
+    assert before["groups_count"] == len(groups) and "groups_total" not in before
+    _only(capsys, plain, qid, groups[0], "XAS")
+    q = _listed(capsys, plain, qid)
+    planned = M.decide_question(plain, question_id=qid, decision="correct", value="HERFD-XAS", by=ADOPTER, orcid=None,
+                                dry_run=True)
+    n, m = planned["reach"]["groups_reached"], planned["reach"]["groups"]
+    assert f"It reaches {n} of the beamtime's {m} record groups" in planned["statement"]
+    assert (q["groups_count"], q["groups_total"]) == (n, m) == (len(groups) - 1, len(groups))
+    assert q["applies_to"]["groups"] == m and q["applies_to"]["groups_reached"] == n
+
+
+# --- LOW-6: an Athena set that includes a scan ISAAC skipped is a different set -----------------------------------
+
+
+def test_a_curve_with_a_scan_isaac_did_not_merge_is_a_different_set_not_only_part():
+    from isaac_api.local_import.processing import run as RUN
+
+    said = RUN._athena_scans_used({"label": "SYN_x_1-3", "params": {}}, ["SYN_x"], (2, 3), None, [1, 2])["statement"]
+    assert "It is a different set of scans from the 2 ISAAC merged: it includes scan 3, which ISAAC did not merge" in said
+    assert "covers only" not in said
+    left = RUN._athena_scans_used({"label": "SYN_x_2-3", "params": {}}, ["SYN_x"], (2, 3), None, [1, 2])["statement"]
+    assert "it includes scan 3, which ISAAC did not merge, and leaves out scan 1:" in left
+    # NEGATIVE CONTROL: a true subset still says "covers only"
+    part = RUN._athena_scans_used({"label": "SYN_x_1", "params": {}}, ["SYN_x"], (2, 2), None, [1, 2])["statement"]
+    assert "It covers only scan 1 of the 2 scans ISAAC merged" in part
+    isa = {"group_id": "g1", "source": "isaac_protocol", "run_id": None,
+           "inputs": [{"scan": 1}, {"scan": 2}, {"scan": 3, "skip_reason": "too_few_points"}]}
+    ath = {"group_id": "g1", "source": "scientist_athena", "run_id": None,
+           "comparison": {"flags": ["scientist_selected_subset_of_scans"], "athena_scan_selection": [1, 2, 3]}}
+    note = M.scan_subset_note({"processing_results": [isa, ath]}, ath)
+    assert note.startswith("The scientist's Athena curve for group g1 uses a different set of scans (1, 2, 3) from the 2 "
+                           "scan(s) ISAAC merged, including scan(s) 3 that ISAAC did not merge")
+    ath["comparison"]["athena_scan_selection"] = [1]
+    assert "uses only scans 1 of the 2 scan(s) ISAAC merged" in M.scan_subset_note({"processing_results": [isa, ath]}, ath)

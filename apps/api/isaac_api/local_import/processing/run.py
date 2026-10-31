@@ -755,6 +755,14 @@ def _athena_scans_used(entry: Mapping, stems: Sequence[str], isaac_counts: tuple
         # which runs it covers, above)
         if coverage is not None or not isaac_scans or set(scans) == set(isaac_scans):
             return ""
+        extra = sorted(set(scans) - set(isaac_scans))
+        if extra:
+            # c10-r: a scan ISAAC did not merge (it skipped it) makes it ANOTHER set, never "only" part of the merge
+            left = sorted(set(isaac_scans) - set(scans))
+            return (f" It is a different set of scans from the {len(isaac_scans)} ISAAC merged: it includes "
+                    f"scan{'s' if len(extra) > 1 else ''} {_scans_phrase(extra)}, which ISAAC did not merge"
+                    + (f", and leaves out scan{'s' if len(left) > 1 else ''} {_scans_phrase(left)}" if left else "")
+                    + ": its E0 and curve describe its own scans, not ISAAC's merge.")
         return (f" It covers only scan{'s' if len(scans) > 1 else ''} {_scans_phrase(scans)} of the {len(isaac_scans)} "
                 "scans ISAAC merged: its E0 and curve describe those scans, not the full merge.")
 

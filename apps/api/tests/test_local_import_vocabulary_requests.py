@@ -109,7 +109,8 @@ def test_an_off_list_answer_is_kept_as_a_vocabulary_request_never_a_decision(b, 
     assert req["requested_by"]["name"] == WHO and req["requested_by"]["identity"] == "local_unverified"
     assert req["targets"] == [{"kind": "missing_value", "id": target["value_id"]}]
     assert req["run_ids"] == [target["run_id"]] and req["scope"] == "run"
-    assert req["source"] == {"kind": "decide_answer", "command": "bundle decide", "decision": "correct", "question_id": None}
+    assert req["source"] == {"kind": "decide_answer", "command": "bundle decide", "decision": "correct", "question_id": None,
+                             "as_said": True}  # c10-r: kept because the scientist said it is their own word
     assert req["note"] == "the Pt dissolves under cathodic bias"
     assert B.check_bundle(b) == []
     # the same answer again keeps nothing new and writes nothing

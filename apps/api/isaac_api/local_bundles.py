@@ -1451,6 +1451,10 @@ def get_local_bundle_questions(
                 # be on another page); a string that is no question id ("an answered beamtime value") says so. Its
                 # words may state extracted values (a confirm question's text): each is an exposure, as on its card
                 covering = by_id.get(cover)
+                if covering is not None and scope and scope.startswith("group:"):
+                    # c10-r: in this group's words, as its own card would show it (led by the AI suggestion read for
+                    # its runs, questions.led_by_scope); its id is unchanged
+                    covering = Q.led_by_scope(covering, scope)
                 display["covered_by"] = {"question_id": cover if covering else None,
                                          "text": covering["text"] if covering else cover}
                 if covering:

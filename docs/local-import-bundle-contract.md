@@ -735,7 +735,8 @@ refused ONLY because it is not on the field's allowed list (`bundle.off_list_onl
 passes). Each holds `request_id` (`vr-00001`), `field_path`, `term` (exactly as given), `requested_by`
 (the `--by`, `local_unverified`; `null` when no name was given), `requested_utc`, `scope`, `targets`,
 `run_ids`, `source` (`decide_answer` / `template_cell` / `adopted_sheet_cell`, the command, and the
-decision and question, or the file NAME and cells) and the scientist's own `note`. It is **never a
+decision and question, or the file NAME and cells; `as_said: true` on a `decide_answer` kept with
+`--as-said`) and the scientist's own `note`. It is **never a
 decision and never a value**: no record, question or eligibility reads it. Nothing becomes newly
 writable, and `processed_outputs` is required at 1.10.0 as at 1.2.0–1.9.0.
 
@@ -1798,7 +1799,9 @@ adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
   scientist's statement that the value is their own word (c10-d: without it an off-list value keeps
   NOTHING, and the refusal adds "Nothing was kept (no vocabulary request): if this is the scientist's own
   word, repeat with --as-said", so a value tried while working out a mapping is never put in their name;
-  `--as-said` without `--value` is refused; the Local Imports page passes no `as_said` and never keeps
+  `--as-said` without `--value` is refused, and (c10-r) so is `--as-said` with any decision but `confirm` or
+  `correct`; on a value the field accepts it is recorded as ever and the reply says "--as-said kept nothing";
+  a request it keeps records `source.as_said: true`; the Local Imports page passes no `as_said` and never keeps
   one), `template import --apply` (one
   request per field and word, with its cells and runs; a preview keeps nothing and says "would be kept")
   and `template adopt` (their sheet's not-allowed values, ONLY with `--by`, passed once the scientist says the sheet is

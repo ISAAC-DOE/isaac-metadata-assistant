@@ -98,6 +98,28 @@ AS_SAID_HINT = ("Nothing was kept (no vocabulary request): if this is the scient
                 "(`isaac bundle decide ... --value \"<their exact word>\" --as-said`); never for a word they did not say.")
 AS_SAID_NEEDS_VALUE = ("--as-said keeps the scientist's own word given with --value; give --value \"<their exact word>\". "
                        "Nothing was recorded.")
+#: c10-r: --as-said says what a scientist's ANSWER to a value is; it goes with nothing else.
+AS_SAID_ONLY_AN_ANSWER = ("--as-said goes only with --decision confirm or correct and --value \"<their exact word>\" (it keeps "
+                          "the scientist's own word when the field's list lacks it). Nothing was recorded.")
+#: c10-r: --as-said on a value the field's list holds keeps nothing: the value is recorded as the answer, as ever.
+AS_SAID_ON_LIST = ("--as-said kept nothing: the field accepts this value (it is on the field's list, or the field has "
+                   "none), so it is recorded as the answer and no vocabulary request is kept.")
+
+
+def _as_said_refusal(as_said: bool, decision: str, value: Any) -> str | None:
+    """Why ``--as-said`` cannot go with this answer (``None`` when it can, or is not given)."""
+    if not as_said:
+        return None
+    if value is None:
+        return AS_SAID_NEEDS_VALUE
+    return None if decision in ("confirm", "correct") else AS_SAID_ONLY_AN_ANSWER
+
+
+def _said_on_list(result: Mapping, as_said: bool) -> Mapping:
+    """``result`` with :data:`AS_SAID_ON_LIST` said when ``--as-said`` was given and the value was recorded."""
+    if not as_said:
+        return result
+    return {**result, "statement": " ".join(x for x in (result.get("statement"), AS_SAID_ON_LIST) if x)}
 
 
 def _not_kept(exc: "OffListRefused") -> "OffListRefused":
@@ -814,6 +836,14 @@ def scan_subset_note(bundle: Mapping, result: Mapping) -> str | None:
             f" — of the {total} scan(s) ISAAC merged{over}" if total else "")
         which = f"scans {', '.join(chosen)} of {named}{of}" if chosen else f"the scans of {named}{of}"
     else:
+        merged = {i.get("scan") for i in (sibling or {}).get("inputs") or () if not i.get("skip_reason")}
+        extra = [n for n in chosen if n.isdigit() and int(n) not in merged] if sibling and merged else []
+        if extra:
+            # c10-r: it includes a scan ISAAC did not merge: a DIFFERENT set of scans, never "only" part of the merge
+            return (f"The scientist's Athena curve for group {result.get('group_id')} uses a different set of scans "
+                    f"({', '.join(chosen)}) from the {total} scan(s) ISAAC merged, including scan(s) {', '.join(extra)} "
+                    f"that ISAAC did not merge ({SCAN_SUBSET_FLAG}): its E0 and curve describe its own scans, not "
+                    "ISAAC's merge.")
         of = f" of the {total} scan(s) ISAAC merged" if total else ""
         which = f"scans {', '.join(chosen)}{of}" if chosen else f"a subset of the scans{of}"
     return (f"The scientist's Athena curve for group {result.get('group_id')} uses only {which} "
@@ -977,8 +1007,8 @@ def decide(
     (``--as-said``): a value refused only for being off its field's list is kept as a vocabulary
     request under ``by``; without it nothing is kept (:class:`OffListRefused`).
     """
-    if as_said and value is None:
-        raise MutationRefused(AS_SAID_NEEDS_VALUE)
+    if (refusal := _as_said_refusal(as_said, decision, value)) is not None:
+        raise MutationRefused(refusal)
     params = dict(
         target_ids=target_ids, decision=decision, value=value, by=by, orcid=orcid, note=note,
         split_into=split_into, merge_with=merge_with, qc_status=qc_status, qc_note=qc_note,
@@ -995,9 +1025,9 @@ def decide(
                 raise _not_kept(exc) from None
             raise _keep_refused_answer(bundle_dir, bundle, exc, target_ids=target_ids, by=by, orcid=orcid, note=note,
                                        source={"kind": "decide_answer", "command": "bundle decide", "decision": decision,
-                                               "question_id": None}) from None
+                                               "question_id": None, "as_said": True}) from None
         save_bundle(bundle_dir, bundle)
-        return result
+        return _said_on_list(result, as_said)
 
 
 # --- vocabulary requests (1.10.0) ---------------------------------------------------------------
@@ -1028,6 +1058,8 @@ def keep_vocabulary_request(bundle: dict, *, field_path: str, term: str, by: str
         "run_ids": list(dict.fromkeys(r for r in run_ids if r)),
         "source": {"kind": source["kind"], "command": source["command"],
                    **{k: source.get(k) for k in ("decision", "question_id", "file") if k in source},
+                   # c10-r: kept because the scientist said it is their own word (`decide --as-said`)
+                   **({"as_said": True} if source.get("as_said") is True else {}),
                    **({"cells": list(dict.fromkeys(source["cells"]))} if source.get("cells") else {})},
         "note": note.strip() if isinstance(note, str) and note.strip() else None,
     }
@@ -1317,14 +1349,15 @@ def group_answer_targets(bundle: dict, asked: Mapping, only: str, field: str | N
                         "slots_added": len(added), "other_groups": max(groups - 1, 0)}
 
 
-def _options_for(bundle: Mapping, path: str) -> list[tuple[str | None, str, Any, bool]]:
+def _options_for(bundle: Mapping, path: str, decisions: Mapping | None = None) -> list[tuple[str | None, str, Any, bool]]:
     """``[(run_id, target id, value, answered)]``: every value the record composer would take for ``path``
     (``records.compose_group``: an eligible candidate or missing value, under its decision), ``answered`` when a
     scientist's decision gives it."""
     from .records import FIELD_REMAP
 
     want = FIELD_REMAP.get(path, path)
-    decisions = B._decisions_by_target(bundle.get("scientist_decisions") or ())
+    if decisions is None:  # ``decisions``: the caller's ``bundle._decisions_by_target`` of this bundle, when it has one
+        decisions = B._decisions_by_target(bundle.get("scientist_decisions") or ())
     out = []
     for c in bundle.get("candidates") or ():
         if FIELD_REMAP.get(c.get("target_field_path"), c.get("target_field_path")) != want or not (
@@ -1346,7 +1379,8 @@ def _same(a: Any, b: Any) -> bool:
     return json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
 
 
-def groups_keeping_their_own_answer(bundle: Mapping, path: str, value: Any, *, question_id: str | None = None) -> list[dict]:
+def groups_keeping_their_own_answer(bundle: Mapping, path: str, value: Any, *, question_id: str | None = None,
+                                    options: Sequence[tuple] | None = None) -> list[dict]:
     """The live record groups a beamtime-wide ``value`` for ``path`` does NOT fill (c7-r HIGH-1): a member run holds a
     value of its own for it (a scientist's run-scoped answer — its own target, or an answer slot from
     ``--only group:<id>`` — or an eligible value its files state) that differs, so the record composer meets two
@@ -1356,7 +1390,7 @@ def groups_keeping_their_own_answer(bundle: Mapping, path: str, value: Any, *, q
     from . import questions as Q
 
     differing: dict[str, list[tuple[str, Any, bool]]] = {}
-    for rid, tid, v, answered in _options_for(bundle, path):
+    for rid, tid, v, answered in (options if options is not None else _options_for(bundle, path)):
         if rid is not None and not _same(v, value):
             differing.setdefault(rid, []).append((tid, v, answered))
     if not differing:
@@ -1507,8 +1541,8 @@ def decide_question(
     # lock file) is created in it
     if not B.bundle_path(Path(bundle_dir)).is_file():
         raise MutationRefused(f"No bundle.json in {Path(bundle_dir).name!r}.", code=6)
-    if as_said and value is None:
-        raise MutationRefused(AS_SAID_NEEDS_VALUE)
+    if (refusal := _as_said_refusal(as_said, decision, value)) is not None:
+        raise MutationRefused(refusal)
     kept_overrides: list[dict] = []
     with locked(Path(bundle_dir)):
         _require_version(Path(bundle_dir), expected_version)
@@ -1585,8 +1619,8 @@ def decide_question(
             raise _keep_refused_answer(bundle_dir, bundle, exc, target_ids=params["target_ids"], by=by, orcid=orcid,
                                        note=note, slots=slots_added, slot_runs=[r for r in slot_runs if r],
                                        source={"kind": "decide_answer", "command": "bundle decide", "decision": decision,
-                                               "question_id": question_id}) from None
-        result = _with_kept(kept_overrides, reached(bundle, recorded))
+                                               "question_id": question_id, "as_said": True}) from None
+        result = _said_on_list(_with_kept(kept_overrides, reached(bundle, recorded)), as_said)
         save_bundle(bundle_dir, bundle)
         return (result, bundle_version(bundle_dir)) if with_version else result
 
