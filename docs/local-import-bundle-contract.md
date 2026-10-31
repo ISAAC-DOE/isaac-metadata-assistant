@@ -1852,4 +1852,27 @@ adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
   `--merge` needs `--out` and not `--force` (exit 2). The file gains `merges[]`.
 - **`bundle validate` adds `pending_vocabulary`** (`field_path`, `term`, `groups` (10 shown),
   `groups_total`, `request_ids`, `statement`): a confirmed group whose draft lacks the field and holds one
-  of the request's runs (every group for a beamtime-wide request).
+  of the request's runs (every group for a beamtime-wide request). (c14) `groups_exportable` counts those groups
+  whose verdict is `exportable`; then the statement adds "This does not block export; the record is written without it".
+- **(c14) A draft counts only what still asks for the term.** A request answered since for every run it names
+  (`propose_terms.request_fully_answered`) is set apart when another request for the term is still open: the draft's
+  `runs`, `run_ids`, `count`, `by_origin` and citations are the open requests' and readings' only
+  (`answered_requests_apart` counts what was set apart), `partly_answered` is read over the open requests, and
+  `earlier_requests_answered` / `earlier_requests_answered_note` name the earlier request ("… was answered since and is
+  not part of this draft"). A term answered throughout keeps all its counts, as before. `--merge` keeps an answered
+  term's `earlier_description` "only in case the scientist asks for the word again; … not to be filed", counted in
+  `merges[].descriptions_kept_for_answered_terms`, not `descriptions_kept`. `totals.need_one_word` counts the terms
+  not drafted until given as one word (`ask`).
+- **(c14) `decide` says what the record holds and what it answers.** The kept-request reply names the allowed value
+  a scientist's decision already gives the field ("the record keeps `surface_oxidation` meanwhile; ask whether that is
+  acceptable until the term exists"), or says the field stays missing. A value decision that leaves an open request
+  answered (read as `propose-terms` reads it) adds "This answers your request for 'oxidation' (vr-…); it is no longer
+  drafted" (or what still drafts it) and `answers_requests`.
+- **(c14) Adopting a sheet again.** A Disagreements row whose field a scientist's confirming decision already gives
+  an allowed value for every run it names says "already recorded: <value> (<date>); leave blank to keep" (the adopt
+  result's `already_recorded`, counted apart in the summary); `template import` lists such a row left blank under
+  `disagreements_already_recorded`, never `awaiting_ruling`, and records nothing for it. A sheet word whose request
+  (the one kept earlier, or with no `--by` any request for the same field and word) was answered since says "The sheet
+  still says … answered since with …" with or without `--by`; one answered for every run (`every_run`) is listed
+  apart (`vocabulary_requests_not_kept.answered_since`), never as a word to keep or draft. The import summary says
+  "N decision(s) (from M cell(s)) already recorded".

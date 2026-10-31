@@ -196,8 +196,12 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   adopt` for their own sheet only with `--by`, passed once they say the sheet is theirs; the Local Imports
   page never keeps one. `--note` holds only the
   scientist's own words about the term, word for word, or is left out: never your summary or wording; the reply says "kept as a vocabulary request; `isaac bundle propose-terms` can draft
-  it". It is never a decision or a value: the field stays missing (`bundle validate` lists it under
-  `pending_vocabulary`) until the vocabulary has the term or they give an allowed value. Offer to draft:
+  it". It is never a decision or a value. Where a decision already gives the field an allowed value, the record
+  keeps exporting it and the reply names it ("the record keeps `surface_oxidation` meanwhile"): ask whether that
+  is acceptable until the term exists. Where none is held, the field stays missing (`bundle validate` lists it under
+  `pending_vocabulary`) until the vocabulary has the term or they give an allowed value. A later `decide` that
+  answers an open request says "This answers your request for 'oxidation' (vr-…); it is no longer drafted" (or what
+  still drafts it): say that too. Offer to draft:
   `<isaac> bundle propose-terms <bundle> --out <bundle>-notes/terms.json` (outside the bundle; it sends nothing).
   Say which terms come only from my readings (`by_origin.ai_reading`), not from their answers; draft one
   only if they want it.
@@ -210,8 +214,11 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   whether they still want the term. If they now choose the allowed value, record it with `decide`: for
   `answered_before_request` or `answered_same_step` it is recorded again and answers the request; for
   `answered_order_unknown` first record their word again with `--as-said`, then `decide`. A sheet cell equal
-  to the current value records nothing.
-  A term with a space is not drafted; its `ask` says what to ask for (one word, e.g. `cathodic_corrosion`):
+  to the current value records nothing. A draft counts only the requests still open: an earlier one answered since
+  is set apart (`answered_scientist_notes`; `earlier_requests_answered_note`: "The new request is for 1 run(s) (which
+  hold `surface_oxidation` from before it); the earlier request (vr-…, from their own sheet, 139 run(s)) was answered
+  since and is not part of this draft"). Say that sentence; never the earlier request's runs as the draft's.
+  A term with a space is not drafted (the `--out` summary counts them: "N term(s) need a one-word form (ask)"); its `ask` says what to ask for (one word, e.g. `cathodic_corrosion`):
   record their one-word answer again, never rewrite it yourself. They write each description themselves on
   the Schema Proposals page (Propose a Change → Load drafts from a local import), never in the file and
   never by you. Nothing is sent until they save a proposal; saving one sends the term, its counts and
@@ -219,7 +226,8 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   website): their choice (row D in `data-flow-and-consent.md`); say so before they save. After
   more answers, `--merge` updates the same file and keeps every description in it (who wrote one is not
   known: read it back to them); no draft is ever marked ready to send, and a term no longer found is
-  carried over as not current, never proposed.
+  carried over as not current, never proposed. A description of a term answered since (`earlier_description`,
+  counted apart in the summary) is kept only in case they ask for the word again: it is not to be filed.
 - Use `--json` with `--value` for numbers/objects. ORCID only if the scientist gives one (`--orcid`).
 - Repeating a decision is harmless (recorded once). A later decision replaces an earlier one, also
   through `--question`: `decide --question <Q>` resolves a question that is already answered (by an
@@ -295,7 +303,14 @@ and to use it (a sheet you found in the folder is not that; ask first). Never re
    'Environment mode' says 'insitu' (= `in_situ`)"): say it as their own sheet's words, never as the answer.
    Rows count runs ("for 77 run(s), from 38 of your cell(s)"). When a reaction is adopted or on a row, the
    summary says it makes Reaction Drive and Reaction Catalysis required for N groups: ask those too. Never
-   pick a side, and never suggest a ruling.
+   pick a side, and never suggest a ruling. "N row(s) name only runs in no live record group": those rows give
+   nothing (their runs are in a rejected group or none); say so, never as unmatched.
+   **Adopting again** (after a new reading): a row whose field their decision already answers for every run
+   it names says "already recorded: 'in_situ' (2026-10-30); leave blank to keep", counted apart ("Disagreements
+   already recorded: 14 of 16"). Do not ask for that ruling again; say it is settled, and read back only the rest.
+   A word "The sheet still says 'oxidation' … answered since with `surface_oxidation`" (with or without `--by`,
+   under "Answered since") is said as: "your sheet's 'oxidation' was already replaced by surface_oxidation;
+   nothing to do unless you want your own word kept".
 3. **Their rulings go in the sheet, by them**: they type each ruling in the "Your ruling" column of
    `Disagreements` (the value to record, exactly as the field takes it; blank records nothing). Do not
    type it for them. A ruling reaches exactly the runs that row names, and its decision cites the
@@ -307,7 +322,9 @@ and to use it (a sheet you found in the folder is not that; ask first). Never re
    slot where a run has none), never on the beamtime-wide question; the preview names it and how many groups
    that question still covers.
 4. `<isaac> bundle template import <bundle> <adopted.xlsx> --by "<name>"` previews: say the decisions,
-   the rulings it read, and each "awaiting your ruling" row (nothing is recorded for those). Add
+   the rulings it read, and each "awaiting your ruling" row (nothing is recorded for those); rows under
+   "Disagreements already recorded" keep their value when left blank, and "N decision(s) (from M cell(s)) already
+   recorded" are answers given before: neither is asked again. Add
    `--apply` only on their yes. Re-importing the same file after more rulings is harmless.
    A file reading added AFTER the adopt (an AI reading of a scan file, say) that contradicts an adopted
    cell is named under "Replaces or contradicts a file reading" as *not recorded* and listed as awaiting

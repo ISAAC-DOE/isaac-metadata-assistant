@@ -67,6 +67,11 @@ then says so, and that this does not block the local export; `blocked_by_schema_
 the website schema only: the record can still be `exportable`. Tell the scientist so in plain words. The temperature stays an optional question if
 they know it; never press for one to clear this note, and never default one.
 
+`pending_vocabulary` names a field still missing because the scientist's word waits on a vocabulary proposal
+(`propose-terms`). When the group is exportable, its statement adds "this does not block export; the record is
+written without it" (`groups_exportable` counts those groups): say that, never as a block; ask for the term or
+an allowed value only if they want the field in this record.
+
 Exit 1 from `validate` means at least one draft is not exportable; that is information, not an error.
 After fixing, run `build-records` then `validate` again. Never hand-edit a draft or an evidence file.
 
