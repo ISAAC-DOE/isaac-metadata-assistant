@@ -288,3 +288,122 @@ def test_processing_a_reference_edge_at_the_samples_e0_is_applied_only_with_its_
     ok = T.isaac(T.run_process(bdir, source_root=root,
                                calibration_approvals=_approval(r["group_id"], accepted_shift_eV=float(shift))))
     assert _cal(ok)["outcome"]["applied"]
+
+
+# --- H2: one scan's spike is never the record's white line, and the on-edge rule never shields it --------------------
+
+SYN_IR_E0 = 11216.0  # an invented edge position near an Ir L3 edge (eV)
+
+
+def _herfd_grid(np):
+    return np.concatenate([np.arange(11150.0, 11200.0, 2.0), np.arange(11200.0, 11240.0, 0.25),
+                           np.arange(11240.0, 11350.0, 1.0)])
+
+
+def _herfd(np, e, *, shift=0.0, white_line=1.0):
+    """A HERFD-like curve: a sharp arctan edge with a tall, narrow white line just above it (invented shape)."""
+    x = e - shift
+    return (0.05 + (0.5 + np.arctan((x - SYN_IR_E0) / 0.7) / np.pi)
+            + white_line * 1.8 * np.exp(-0.5 * ((x - SYN_IR_E0 - 1.6) / 1.1) ** 2))
+
+
+def _five_scans(np, e, *, spike=1000.0):
+    """Five scans (the third 0.2 eV off the others, heights 2 % apart); the fourth (position 3) carries a spike
+    ``spike`` times its own value over the white line (11217-11219 eV)."""
+    M = np.vstack([_herfd(np, e, shift=(0.2 if s == 2 else 0.0), white_line=1 + 0.02 * (s - 2))
+                   + np.random.default_rng(s).normal(0, 0.003, e.size) for s in range(5)])
+    if spike:
+        wl = (e >= SYN_IR_E0 + 1.0) & (e <= SYN_IR_E0 + 3.0)
+        M[3, wl] *= spike
+    return M
+
+
+def test_one_scans_spike_at_the_white_line_sets_the_merge_and_is_found():
+    T = _proc()
+    np = T.np
+    from isaac_api.local_import.processing import core as C
+
+    e = _herfd_grid(np)
+    M = _five_scans(np, e)
+    dom = C.single_scan_dominance(M, e, np)
+    assert dom is not None and dom["scan_position"] == 3 and dom["ratio"] > 100
+    assert SYN_IR_E0 + 1.0 <= dom["departs_eV"][0] <= dom["departs_eV"][1] <= SYN_IR_E0 + 3.0
+    dg = C.deglitch(M, e, T.P.resolve_params(), np)
+    one = C.glitch_points_from_one_scan(dg["point_flags"], e, M, np)
+    assert one and {s for s, _ in one} == {3}
+    mean = C.merge(M, dg["point_flags"], None, np)["mean"]
+    ok = np.isfinite(mean)
+    shielded = C.glitch_points_on_edge(dg["point_flags"], e, e[ok], mean[ok], SYN_IR_E0, np)
+    judged = C.glitch_points_on_edge(dg["point_flags"], e, e[ok], mean[ok], SYN_IR_E0, np, M=M)
+    assert any(at and s == 3 for s, _, at in shielded)  # v0: the spike on the white line was "on the edge"
+    assert not any(at and (s, en) in one for s, en, at in judged)  # v1: one scan's glitch, never the edge
+    # the same five scans without the spike: no scan sets the merge, and the jittered scan stays on the edge
+    clean = _five_scans(np, e, spike=0.0)
+    assert C.single_scan_dominance(clean, e, np) is None
+    dg0 = C.deglitch(clean, e, T.P.resolve_params(), np)
+    assert C.glitch_points_from_one_scan(dg0["point_flags"], e, clean, np) == set()
+
+
+def test_a_scan_that_is_larger_everywhere_or_dead_does_not_set_the_merge():
+    T = _proc()
+    np = T.np
+    from isaac_api.local_import.processing import core as C
+
+    e = _herfd_grid(np)
+    M = _five_scans(np, e, spike=0.0)
+    gain = M.copy()
+    gain[1] *= 30.0  # a gain step: larger everywhere, left to the outlier check
+    assert C.single_scan_dominance(gain, e, np) is None
+    two = np.vstack([M[0], np.where(e > 11230.0, 0.0, M[1] * 0.01)])  # two scans, one of them dead
+    assert C.single_scan_dominance(two, e, np) is None
+    assert C.single_scan_dominance(M[:1], e, np) is None
+
+
+def _herfd_case(T, tmp_path, M, e, stem="01_SYN_ZZ1"):
+    np = T.np
+    i0 = np.full(e.size, 1.0e5)
+    scans = [T.spec_file({"energy": e, "I0": i0, "vortDT": M[s] * i0 * 0.01}) for s in range(M.shape[0])]
+    return T.make_case(tmp_path, [(stem, scans, {"sample_name": "ZZ1"})])
+
+
+def test_processing_fails_a_curve_one_scan_sets_and_counts_its_points_on_the_edge_as_glitches(tmp_path):
+    T = _proc()
+    np = T.np
+    e = _herfd_grid(np)
+    bdir_, root, _ = _herfd_case(T, tmp_path, _five_scans(np, e), e)
+    r = T.isaac(T.run_process(bdir_, source_root=root))
+    q = r["qc"]
+    assert q["verdict"] == "fail" and "edge_from_single_scan" in q["reasons"] and q["metrics"]["single_scan_span_ratio"] > 100
+    assert "edge_from_single_scan" in r["review_flags"]
+    said = q["statements"]["edge_from_single_scan"]
+    assert said.startswith("One scan sets this merged curve: with 01_SYN_ZZ1_004.dat left out")
+    assert "not usable as it is" in said and "belongs in the merge" in said
+    # the spike's points on the white line are one scan's glitches: said apart, never "the check cannot judge them"
+    one = q["statements"]["glitch_points_from_one_scan"]
+    assert "come from one scan alone: 01_SYN_ZZ1_004.dat" in one and "counted as glitches" in one
+    n_one = q["metrics"]["glitch_points_from_one_scan_on_edge"]
+    assert n_one >= 3
+    step = T.step(r, "deglitch")["outcome"]
+    assert len(step["flagged_points_from_one_scan_on_edge"]) == n_one
+    spikes = {(p["source_id"], p["energy_eV"]) for p in step["flagged_points_from_one_scan_on_edge"]}
+    assert all(SYN_IR_E0 + 1.0 <= en <= SYN_IR_E0 + 3.0 for _, en in spikes)
+    assert not spikes & {(p["source_id"], p["energy_eV"]) for p in step.get("flagged_points_on_edge") or ()}
+    if "glitch_points_on_edge" in q["statements"]:
+        assert f"{n_one} more on the edge are from one scan alone" in q["statements"]["glitch_points_on_edge"]
+    assert step["glitch_edge_rule_id"].endswith(".v1")
+    # the verdict is in the hashed qc.json (the curve fails): this result has a new id; the new sentences are not
+    qc_file = next(f for f in r["outputs"]["files"] if f["role"] == "qc")
+    text = (bdir_ / qc_file["relative_path"]).read_text()
+    assert "edge_from_single_scan" in text and "glitch_points_from_one_scan" not in text
+
+
+def test_processing_the_same_scans_without_the_spike_are_unchanged(tmp_path):
+    T = _proc()
+    np = T.np
+    e = _herfd_grid(np)
+    bdir_, root, _ = _herfd_case(T, tmp_path, _five_scans(np, e, spike=0.0), e)
+    r = T.isaac(T.run_process(bdir_, source_root=root))
+    q = r["qc"]
+    assert "single_scan_span_ratio" not in q["metrics"] and "edge_from_single_scan" not in q["reasons"]
+    assert "glitch_points_from_one_scan" not in (q.get("statements") or {})
+    assert "flagged_points_from_one_scan_on_edge" not in T.step(r, "deglitch")["outcome"]

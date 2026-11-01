@@ -81,7 +81,12 @@ it finds one. Show per group, in words:
   when `qc.statements.glitch_points_on_edge` is present (metrics `glitch_points_on_edge` /
   `glitch_points_off_edge`), say that sentence; only the off-edge count is glitches (flagged points within
   5 eV of E0 or in the steep stretch of the edge are unjudged, not cleared: say to look at the plot near E0;
-  the stored verdict is unchanged);
+  the stored verdict is unchanged). A point from ONE scan alone, far beyond the other scans there, is never
+  "unjudged": `qc.statements.glitch_points_from_one_scan` names the scan and counts those points as glitches.
+  **One scan sets the curve** (QC `fail` `edge_from_single_scan`, `qc.statements.edge_from_single_scan`): with
+  that scan left out the merged curve's range shrinks more than 5 times, so its white line, edge step and E0 are
+  that scan's stretch. Say the sentence, never offer to approve the curve, and ask whether the scan belongs in
+  the merge;
 - **when scans were skipped** (reason `scans_skipped_lacking_chosen_columns`; flag
   `channel_from_a_later_scan` when the first scan was one of them): the used / readable / skipped
   counts in plain words — "14 of 165 scans were used; 150 had different columns (they may be motor

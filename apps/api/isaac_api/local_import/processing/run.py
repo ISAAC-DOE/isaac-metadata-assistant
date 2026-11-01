@@ -548,18 +548,24 @@ def _few_scan_glitch_statement(n_scans: int, flagged: int, params: Mapping) -> s
             f"{flagged} flag{'' if flagged == 1 else 's'} are not by themselves evidence of glitches.")
 
 
-def _glitch_points_on_edge(points: Sequence[tuple[int, float, bool]], e0, names: Sequence[str]) -> dict | None:
+def _glitch_points_on_edge(points: Sequence[tuple[int, float, bool]], e0, names: Sequence[str], *,
+                           one_scan: int = 0) -> dict | None:
     """r2-a: the flagged points on the edge (:func:`core.glitch_points_on_edge`), listed apart and said, or ``None``
     when no flagged point is on the edge (an unaffected result is unchanged). ``names`` are the used scans' file
-    names by scan position. The stored count, flag and verdict are not changed (qc.json is hashed)."""
+    names by scan position. The stored count, flag and verdict are not changed (qc.json is hashed). r4-a:
+    ``one_scan`` of the points given as off the edge lie on it but are one scan's glitches
+    (:func:`core.glitch_points_from_one_scan`): said as counted glitches, never as off the edge."""
     edge = [(s, e) for s, e, on in points if on]
     if not edge:
         return None
-    off = len(points) - len(edge)
+    off = len(points) - len(edge) - one_scan
     shown = ", ".join(f"{e:.3f} eV ({names[s]})" for s, e in edge[:10]) + (f" and {len(edge) - 10} more" if len(edge) > 10 else "")
     e0_said = f" {float(e0):.3f} eV" if e0 is not None else ""
     off_said = (f"The other {off} flagged point{'' if off == 1 else 's'} {'is' if off == 1 else 'are'} off the edge and "
                 "counted as glitches." if off else "No point off the edge is flagged.")
+    if one_scan:
+        off_said += (f" {one_scan} more on the edge {'is' if one_scan == 1 else 'are'} from one scan alone, far beyond "
+                     "the other scans there, and counted as glitches (glitch_points_from_one_scan).")
     return {
         "on_edge": len(edge), "off_edge": off,
         "listed": [{"scan_position": s, "energy_eV": e} for s, e in edge[:200]],
@@ -570,6 +576,45 @@ def _glitch_points_on_edge(points: Sequence[tuple[int, float, bool]], e0, names:
                       f"the steep edge there: {shown}. They are neither counted as glitches nor cleared. {off_said} "
                       "The stored verdict keeps glitches_flagged as it was first written; look at the plot near E0."),
     }
+
+
+def _one_scan_glitch_statement(points: Sequence[tuple[int, float]], names: Sequence[str], e0) -> str:
+    """r4-a: the flagged points on the edge that are one scan's glitches, not the edge
+    (:func:`core.glitch_points_from_one_scan`), by file, said apart from the points the check cannot judge."""
+    by_scan: dict[int, list[float]] = {}
+    for s, e in points:
+        by_scan.setdefault(s, []).append(e)
+    parts = [f"{names[s]} ({_n_points(len(es))}, {min(es):.1f} to {max(es):.1f} eV)" for s, es in sorted(by_scan.items())]
+    e0_said = f" {float(e0):.3f} eV" if e0 is not None else ""
+    n = len(points)
+    return (f"{n} flagged point{'' if n == 1 else 's'} on the edge (near E0{e0_said} or in its steep stretch) "
+            f"{'comes' if n == 1 else 'come'} from one scan alone: {'; '.join(parts[:10])}. There that scan departs from "
+            f"the median of the scans more than {C.GLITCH_ONE_SCAN_FACTOR:g} times as far as any other scan does, and by "
+            f"more than {C.GLITCH_ONE_SCAN_SPAN_FRACTION:.0%} of the median curve's whole range: a glitch in that scan, not "
+            "the edge, so these points are counted as glitches. Look at that scan in the plot and ask the scientist "
+            "whether it belongs in the merge.")
+
+
+def _n_points(n: int) -> str:
+    return f"{n} point{'' if n == 1 else 's'}"
+
+
+#: r4-a: the review flag (and the QC fail reason) of a merged curve one scan's stretch sets (core.SINGLE_SCAN_RULE_ID)
+SINGLE_SCAN_FLAG = "edge_from_single_scan"
+
+
+def _single_scan_statement(dominant: Mapping, names: Sequence[str], group_id: str) -> str:
+    """r4-a: the plain sentence for a merged curve whose range one scan's stretch sets (:func:`core.single_scan_dominance`),
+    naming the scan by its file."""
+    name = names[dominant["scan_position"]]
+    lo, hi = dominant["departs_eV"]
+    return (f"One scan sets this merged curve: with {name} left out, the merged curve's range (max - min: its edge step "
+            f"and white line) is {dominant['span_without_scan']:.4g}; with it, {dominant['span_merged']:.4g}, "
+            f"{dominant['ratio']:.3g} times as large (more than {dominant['factor']:g} times is one scan, not a merge). "
+            f"{name} departs from the other scans only from {lo:.1f} to {hi:.1f} eV "
+            f"({_n_points(dominant['departs_points'])} of {dominant['points']}), so the merged white line, edge step and "
+            "E0 come from that scan's stretch, not from the measurement: this curve is not usable as it is. Ask the "
+            "scientist whether that scan belongs in the merge.")
 
 
 def _csv(path: Path, header: Sequence[str], cols: Sequence, np) -> None:
@@ -1519,6 +1564,9 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         }
     )
     mg = C.merge(M, dg["point_flags"] if excl else None, dg["scan_flags"] if excl else None, np)
+    # r4-a (C.SINGLE_SCAN_RULE_ID): one scan's stretch that sets the merged curve's range fails the curve
+    dominant = C.single_scan_dominance(M, grid, np, exclude_points=dg["point_flags"] if excl else None,
+                                       exclude_scans=dg["scan_flags"] if excl else None)
     ok = np.isfinite(mg["mean"])
     g2, mean = grid[ok], mg["mean"][ok]
     if g2.size < int(params["merge"]["min_points"]):
@@ -1574,6 +1622,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         # only when the check failed (core.edge_checks; absent otherwise, as above)
         **({"post_edge_level": checks["post_edge_not_at_1"]["level"]} if "post_edge_not_at_1" in checks else {}),
         **({"edge_to_pre_edge_noise": checks["no_edge"]["edge_to_noise"]} if "no_edge" in checks else {}),
+        # r4-a: only when one scan sets the merged curve (absent otherwise, as above): the curve fails
+        **({"single_scan_span_ratio": dominant["ratio"]} if dominant else {}),
         **({"post_edge_span_eV": short["post_e0_span_eV"]} if short else {}),
         "pre_edge_noise": nm["pre_edge_noise"],
         "scan_spread": float(np.nanmedian(se) / abs(step)) if (len(scans_data) > 1 and step and np.isfinite(se).any()) else None,
@@ -1767,9 +1817,25 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     # counted and said (after run_id: qc.json is hashed, so no id moves; the stored count, flag and verdict stay)
     clean = C.merge(M, dg["point_flags"], None, np)["mean"]  # review: steepness read without the flagged points
     okc = np.isfinite(clean)
-    on_edge = _glitch_points_on_edge(C.glitch_points_on_edge(dg["point_flags"], grid, grid[okc], clean[okc],
-                                                             nm["e0_eV"], np),
-                                     nm["e0_eV"], [_file_name(e) for e in used_entries])
+    names = [_file_name(e) for e in used_entries]
+    where = C.glitch_points_on_edge(dg["point_flags"], grid, grid[okc], clean[okc], nm["e0_eV"], np)
+    # r4-a (GLITCH_EDGE_RULE_ID v1): a point from one scan alone, far beyond the other scans there, is a glitch even on
+    # the edge: never shielded as "unjudged" (said apart; the stored count, flag and verdict are unchanged)
+    one = C.glitch_points_from_one_scan(dg["point_flags"], grid, M, np)
+    one_on_edge = [(sp, en) for sp, en, at in where if at and (sp, en) in one]
+    on_edge = _glitch_points_on_edge([(sp, en, at and (sp, en) not in one) for sp, en, at in where], nm["e0_eV"], names,
+                                     one_scan=len(one_on_edge))
+    if one_on_edge:
+        res["qc"]["metrics"]["glitch_points_from_one_scan_on_edge"] = len(one_on_edge)
+        res["qc"].setdefault("statements", {})["glitch_points_from_one_scan"] = _one_scan_glitch_statement(
+            one_on_edge, names, nm["e0_eV"])
+        dg_step = next(s_ for s_ in res["steps"] if s_.get("step") == "deglitch")
+        dg_step["outcome"]["flagged_points_from_one_scan_on_edge"] = [{"source_id": pos_sid[sp], "energy_eV": en}
+                                                                      for sp, en in one_on_edge[:200]]
+        dg_step["outcome"]["glitch_edge_rule_id"] = C.GLITCH_EDGE_RULE_ID
+    if dominant:
+        res["review_flags"].append(SINGLE_SCAN_FLAG)
+        res["qc"].setdefault("statements", {})[SINGLE_SCAN_FLAG] = _single_scan_statement(dominant, names, group["group_id"])
     if on_edge:
         res["qc"]["metrics"].update(glitch_points_on_edge=on_edge["on_edge"], glitch_points_off_edge=on_edge["off_edge"])
         res["qc"].setdefault("statements", {})["glitch_points_on_edge"] = on_edge["statement"]
