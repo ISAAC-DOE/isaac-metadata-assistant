@@ -122,8 +122,10 @@ def test_adopted_with_nothing_recorded_then_a_different_value_never_ties(grouped
     rep = _imp(grouped, tmp_path / "Ar.xlsx", capsys)
     [stale] = rep["stale_rulings"]
     assert rep["recorded"] == 0 and not rep["rulings_tied_to_sheet"]
-    assert stale["reason"].startswith(f"ruled on a workbook adopted before {back}, and a different value was recorded "
-                                      f"since ({changed}); ")
+    # c15b L3: decisions named by who and when, never by id (the entry keeps the governing one's)
+    assert stale["reason"].startswith(f"ruled on a workbook adopted before {OTHER} recorded the "
+                                      f"value now (2099-01-01), and a different value was recorded since (by {OTHER}, 2099-01-01); ")
+    assert stale["decision_id"] == back and changed != back
     assert _state(grouped, theirs, tmp_path / "A2.xlsx", capsys)[1] == "awaiting"
     assert len(_decisions_on(grouped, tid)) == 2
 
@@ -187,8 +189,10 @@ def test_a_real_value_change_in_between_asks_the_row_again(grouped, tmp_path, ca
     rep = _imp(grouped, tmp_path / "Ar.xlsx", capsys)
     [stale] = rep["stale_rulings"]
     assert rep["recorded"] == 0 and not rep["rulings_tied_to_sheet"]
-    assert stale["reason"].startswith(f"ruled on a workbook adopted before {back}, and a different value was recorded "
-                                      f"since ({changed}); ")
+    # c15b L3: decisions named by who and when, never by id (the entry keeps the governing one's)
+    assert stale["reason"].startswith(f"ruled on a workbook adopted before {OTHER} recorded the "
+                                      f"value now (2099-01-01), and a different value was recorded since (by {OTHER}, 2099-01-01); ")
+    assert stale["decision_id"] == back and changed != back
     # c14n LOW-3: it keeps the value recorded now, so it offers no command to record it
     assert stale["reason"].endswith("; nothing is recorded for this ruling: the value is already 12; adopt again to "
                                     "settle this row") and "record this value directly" not in stale["reason"]

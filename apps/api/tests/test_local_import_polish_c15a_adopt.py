@@ -42,10 +42,13 @@ def test_a_seen_clash_does_not_offer_supersede_when_another_target_is_unseen(gro
     rep = _imp(grouped, ruled, capsys)
     own = next(c for c in rep["clashes"] if c["target"]["id"] == tids[0])
     assert OLD_LINE not in own["reason"] and "Pass --supersede" not in own["reason"]
-    assert own["reason"].startswith(
-        "an earlier scientist decision gives a different value; skipped, and --supersede records none of this ruling's "
+    # c15b M3: what is recorded now, by whom and from where; M2: the cell's one command, never this target's own
+    assert own["reason"] == (
+        f"an earlier scientist decision gives a different value (recorded now: 'BL12' by {OTHER} (2099-01-01), from a "
+        "decide); skipped, and --supersede records none of this ruling's "
         f"targets, because {tids[1]} (run-002) holds a different value this ruling was not made against. Adopt again and "
-        "rule against what is recorded now, or record this value directly: ")
+        "rule against what is recorded now, or record this value for all 9 targets of this cell with one command "
+        "(clashes_by_cell: command)")
     assert "blocked_by" not in own  # still its own clash, not a held-back target
     assert all(OLD_LINE not in c["reason"] and "Pass --supersede" not in c["reason"] for c in rep["clashes"])
     # and the line is true: --supersede records 0 of 9
@@ -67,15 +70,18 @@ def test_the_seen_line_of_an_adopted_cell_says_this_cell(grouped, tmp_path, caps
 
 
 def test_a_seen_clash_keeps_its_line_when_every_clash_of_the_cell_is_seen(grouped, tmp_path, capsys, ticking):
-    """Unchanged: run-001 held BL12 and run-002 BL13 before the adopt: --supersede records it for all nine."""
+    """Unchanged: run-001 held BL12 and run-002 BL13 before the adopt (the row named neither: seven runs held nothing):
+    --supersede records it for all nine."""
     tids = _beamline_tids(grouped, tmp_path, capsys)
     M.decide(grouped, target_ids=tids[:1], decision="correct", value="BL12", by=OTHER, orcid=None)
     M.decide(grouped, target_ids=tids[1:2], decision="correct", value="BL13", by=OTHER, orcid=None)
     ruled, _ = _beamline_ruling(grouped, tmp_path, capsys, "BL11")
     rep = _imp(grouped, ruled, capsys)
     own = {c["target"]["id"]: c for c in rep["clashes"]}
-    assert own[tids[0]]["reason"].startswith("an earlier scientist decision gives a different value; " + OLD_LINE)
-    assert own[tids[1]]["reason"].startswith("an earlier scientist decision gives a different value; " + OLD_LINE)
+    assert own[tids[0]]["reason"].startswith("an earlier scientist decision gives a different value (recorded now: "
+                                             f"'BL12' by {OTHER} (2099-01-01), from a decide); " + OLD_LINE)
+    assert own[tids[1]]["reason"].startswith("an earlier scientist decision gives a different value (recorded now: "
+                                             f"'BL13' by {OTHER} (2099-01-01), from a decide); " + OLD_LINE)
     rep = _imp(grouped, ruled, capsys, "--supersede")
     assert {d["target"]["id"] for d in _to(rep, tids)} == set(tids)
 
@@ -147,9 +153,13 @@ def test_a_target_already_holding_the_value_is_not_counted_as_held_back(grouped,
     rep = _imp(grouped, ruled, capsys)
     by_id = {c["target"]["id"]: c for c in rep["clashes"]}
     assert set(by_id) == set(tids), sorted(by_id)
+    # c15b M4: run-001 still holds BL12, so adopting again would not settle the row
     assert by_id[tids[1]].get("holds_value") and by_id[tids[1]]["reason"].endswith(
-        "nothing is recorded for this one either, and the value is already 'BL11'; adopt again to settle this row")
+        "nothing is recorded for this one either, and the value is already 'BL11'; another target of this row still "
+        "holds a different value, so adopting again would ask it again: adopt again and rule the row, or record the "
+        "value for all of them with the cell's one command")
     assert not any(by_id[t].get("holds_value") for t in set(tids) - {tids[1]})
     _out, summary = _summary(grouped, ruled, capsys)
-    assert ("1 clash(es) (7 more target(s) of the same cell(s) held back with them: all or nothing; "
+    # c15b M1: counted by cell, the targets in brackets
+    assert ("1 cell(s) clash (9 target(s): 1 clash; 7 held back with them: all or nothing; "
             "1 already hold the value)") in summary

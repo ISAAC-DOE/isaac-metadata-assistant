@@ -1125,6 +1125,7 @@ def decide(
         _require_version(Path(bundle_dir), expected_version)
         bundle = load(bundle_dir)
         before = open_requests_before(bundle, decision)
+        peers = _same_ruling_peers(bundle, target_ids)  # c15b M2: read before this decision is recorded
         try:
             result = record_decision(bundle, **params)
         except OffListRefused as exc:
@@ -1134,7 +1135,98 @@ def decide(
                                        source={"kind": "decide_answer", "command": "bundle decide", "decision": decision,
                                                "question_id": None, "as_said": True}) from None
         save_bundle(bundle_dir, bundle)
-        return _said_on_list(_with_answered(result, bundle, before), as_said)
+        return _with_same_ruling_left(_said_on_list(_with_answered(result, bundle, before), as_said), bundle, peers)
+
+
+#: c15b M2: a decision a template import recorded from a Disagreements ruling (its note, :func:`template._read_rulings`)
+_RULING_NOTE_RE = re.compile(r"\((?:your (?:concentration )?ruling on disagreement D\d+: [^)]*)")
+
+
+def _governing(bundle: Mapping, kind: str, obj: Mapping, latest: Mapping) -> Mapping | None:
+    if kind == "candidate":
+        return B.candidate_decision(bundle, obj, latest)
+    return latest.get((kind, obj.get("value_id"))) if kind == "missing_value" else None
+
+
+def _same_ruling_peers(bundle: Mapping, target_ids: Sequence[str]) -> list[dict]:
+    """c15b M2: for each of ``target_ids`` (a candidate or a missing value) whose governing decision was recorded by a
+    template import from a Disagreements ruling that reached several targets (the same note and ``batch_id``), the
+    OTHER targets that ruling recorded and that still hold it: ``[{ruling, value, target_ids, run_ids}]``. Read
+    before the decision is recorded. Only a ruling is read this way: the bundle keeps no other trace of which targets
+    one row of a sheet named (a value from a file, or from another decide, is not tied to a row), so nothing is said
+    for them."""
+    log = list(bundle.get("scientist_decisions") or ())
+    latest = B._decisions_by_target(log)
+    named = set(target_ids)
+    out: dict[tuple, dict] = {}
+    for tid in target_ids:
+        try:
+            kind, obj = resolve_target(bundle, tid)
+        except MutationRefused:
+            continue
+        prior = _governing(bundle, kind, obj, latest)
+        note = (prior or {}).get("note")
+        found = _RULING_NOTE_RE.search(note) if isinstance(note, str) else None
+        if prior is None or not found or not prior.get("batch_id"):
+            continue
+        key = (prior["batch_id"], note)
+        if key in out:
+            continue
+        held: list[str] = []
+        runs: list[str] = []
+        for d in log:
+            target = d.get("target") if isinstance(d, Mapping) else None
+            if not isinstance(target, Mapping) or (d.get("batch_id"), d.get("note")) != key or target.get("id") in named:
+                continue
+            try:
+                pkind, pobj = resolve_target(bundle, str(target.get("id")))
+            except MutationRefused:
+                continue
+            if _governing(bundle, pkind, pobj, latest) is d and target["id"] not in held:
+                held.append(target["id"])
+                if pobj.get("run_id"):
+                    runs.append(pobj["run_id"])
+        if held:
+            out[key] = {"ruling": found.group(0).lstrip("(").removeprefix("your "), "value": prior.get("value"),
+                        "decision": prior.get("decision"), "target_ids": held, "run_ids": runs}
+    return list(out.values())
+
+
+def _with_same_ruling_left(result: Mapping, bundle: Mapping, peers: Sequence[Mapping]) -> Mapping:
+    """c15b M2: ``result`` with a warning when the decision just recorded gave a target another value than the ruling
+    it replaced still gives that ruling's other targets: the row now holds two values (``same_ruling_left``)."""
+    if not peers or not result.get("recorded"):
+        return result
+    log = list(bundle.get("scientist_decisions") or ())
+    latest = B._decisions_by_target(log)
+    now = []
+    for tid in result["recorded"]:
+        try:
+            kind, obj = resolve_target(bundle, tid)
+        except MutationRefused:
+            continue
+        d = _governing(bundle, kind, obj, latest)
+        if d is not None:
+            now.append(B.final_value(obj.get("value") if kind == "candidate" else None, d, obj.get("readings")))
+    left = []
+    for p in peers:
+        if all(json.dumps(v, sort_keys=True, default=str) == json.dumps(p["value"], sort_keys=True, default=str) for v in now):
+            continue
+        left.append(p)
+    if not left:
+        return result
+    said = []
+    for p in left:
+        n = len(p["target_ids"])
+        shown = " ".join(f"--target {t}" for t in p["target_ids"][:10])
+        said.append(f"Warning: {n} other target(s) of the same {p['ruling']} still hold {p['value']!r}"
+                    + (f" ({len(set(p['run_ids']))} run(s))" if p["run_ids"] else "")
+                    + "; this decision changed only the target(s) named, so that row now holds two values. To change "
+                    f"the whole row, decide again naming every target ({shown}"
+                    + (f" and {n - 10} more: same_ruling_left lists them" if n > 10 else "") + "), or rule the row on "
+                    "the Disagreements sheet of a fresh `template adopt` and import it.")
+    return {**result, "same_ruling_left": left,
+            "statement": " ".join(x for x in (result.get("statement"), *said) if x)}
 
 
 # --- vocabulary requests (1.10.0) ---------------------------------------------------------------
@@ -1178,7 +1270,7 @@ def keep_vocabulary_request(bundle: dict, *, field_path: str, term: str, by: str
     return request, True
 
 
-def _same_request(requests: Sequence[Mapping], entry: Mapping) -> dict | None:
+def _same_request(requests: Sequence[Mapping], entry: Mapping, *, anyone: bool = False) -> dict | None:
     """The request kept earlier for the same answer as ``entry`` (:func:`_vocabulary_entry`), else ``None``. Its
     source may cite MORE cells than ``entry``'s (c14i LOW-3: a build before c14h cited every cell of a sheet word kept
     for only some of its runs); everything else is the same."""
@@ -1195,20 +1287,21 @@ def _same_request(requests: Sequence[Mapping], entry: Mapping) -> dict | None:
 
     for r in requests:
         if all(r.get(k) == entry[k] for k in ("field_path", "term", "scope", "targets", "run_ids", "note")) and (
-                same_source(r.get("source"), entry["source"])) and (
-                (r.get("requested_by") or {}).get("name") == (entry["requested_by"] or {}).get("name")):
+                same_source(r.get("source"), entry["source"])) and (anyone or (
+                (r.get("requested_by") or {}).get("name") == (entry["requested_by"] or {}).get("name"))):
             return r
     return None
 
 
 def vocabulary_request_kept(bundle: Mapping, *, field_path: str, term: str, by: str | None, orcid: str | None = None,
                             targets: Sequence[tuple[str, str]] = (), run_ids: Sequence[str] = (), scope: str = "run",
-                            source: Mapping, note: str | None = None) -> dict | None:
+                            source: Mapping, note: str | None = None, anyone: bool = False) -> dict | None:
     """Read only: the request :func:`keep_vocabulary_request` would find already kept for this answer (and so record
-    nothing new), else ``None``. Nothing is kept or stamped."""
+    nothing new), else ``None``. Nothing is kept or stamped. ``anyone`` (c15b L4): kept by whoever asked, not only
+    ``by`` (the same sheet's cells adopted again under another name are the same request)."""
     entry = _vocabulary_entry(field_path=field_path, term=term, by=by, orcid=orcid, targets=targets, run_ids=run_ids,
                               scope=scope, source=source, note=note)
-    return _same_request(list(bundle.get("vocabulary_requests") or ()), entry)
+    return _same_request(list(bundle.get("vocabulary_requests") or ()), entry, anyone=anyone)
 
 
 def _vocabulary_entry(*, field_path: str, term: str, by: str | None, orcid: str | None, targets: Sequence[tuple[str, str]],

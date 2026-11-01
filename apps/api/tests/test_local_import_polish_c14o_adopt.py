@@ -45,6 +45,10 @@ FAC_CELL = "'Campaign Info'!B3"
 NAME = "sample.material.name"
 
 
+#: c15b M2: how a per-target reason of a cell reaching several targets ends
+CELL_TAIL = ", or record this value for all {n} targets of this cell with one command ({key}: command)"
+
+
 def _latest_value(bdir, tid):
     d = [x for x in M.load(bdir)["scientist_decisions"] if x["target"]["id"] == tid]
     return d[-1].get("value") if d else None
@@ -103,7 +107,8 @@ def test_an_adopted_campaign_info_answer_is_all_or_nothing_under_supersede(group
                 f"this cell reaches 9 targets and is recorded for all of them or none, and {tids[0]} (run-001) was not "
                 "made against the value recorded there now (its own line says why); nothing is recorded for this one "
                 "either. Adopt again, then import with --supersede"), stale[tid]["reason"]
-            assert stale[tid]["reason"].endswith(T.decide_command(tid, "correct", "Synthetic Light Source"))
+            # c15b M2: the cell's one command for all nine, never this target's own
+            assert stale[tid]["reason"].endswith(CELL_TAIL.format(n=9, key="stale_by_cell"))
     assert _on(grouped, tids) == n  # nothing recorded
     assert {t: _latest_value(grouped, t) for t in tids} == {tids[0]: "ZZ Since Source",
                                                              **{t: "ZZ Old Source" for t in tids[1:]}}
@@ -156,14 +161,14 @@ def test_a_clash_on_a_whole_beamtime_ruling_records_none_of_its_targets(grouped,
     assert not [d for d in rep["decisions"] if d["target"]["id"] in tids]
     clashes = {c["target"]["id"]: c for c in rep["clashes"]}
     assert set(clashes) == set(tids)
-    assert clashes[tids[0]]["reason"].startswith("an earlier scientist decision gives a different value; skipped, and "
+    assert clashes[tids[0]]["reason"].startswith("an earlier scientist decision gives a different value (recorded now: "
+                                                 f"'BL12' by {OTHER} (2099-01-01), from a decide); skipped, and "
                                                  "--supersede does not record it either")
     for tid in tids[1:]:
         assert clashes[tid]["reason"] == (
             f"this ruling reaches 9 targets and is recorded for all of them or none, and {tids[0]} (run-001) holds a "
             "different value this ruling was not made against (its own line says why); nothing is recorded for this "
-            "one either. Adopt again and rule against what is recorded now, or record this value directly: "
-            + T.decide_command(tid, "correct", "BL11"))
+            "one either. Adopt again and rule against what is recorded now" + CELL_TAIL.format(n=9, key="clashes_by_cell"))
     # a later --supersede import keeps nothing split: the ruling never saw BL12, so it is stale for all nine
     rep = _imp(grouped, ruled, capsys, "--supersede")
     assert not [d for d in rep["decisions"] if d["target"]["id"] in tids]
@@ -186,13 +191,14 @@ def test_a_clash_on_a_ruling_made_against_the_value_now_says_supersede_records_i
     assert not [d for d in rep["decisions"] if d["target"]["id"] in tids]
     clashes = {c["target"]["id"]: c for c in rep["clashes"]}
     assert set(clashes) == set(tids)
-    assert clashes[tids[0]]["reason"].startswith("an earlier scientist decision gives a different value; skipped (pass "
+    assert clashes[tids[0]]["reason"].startswith("an earlier scientist decision gives a different value (recorded now: "
+                                                 f"'BL12' by {OTHER} (2099-01-01), from a decide); skipped (pass "
                                                  "--supersede to record this one)")
     assert clashes[tids[1]]["reason"] == (
         f"this ruling reaches 9 targets and is recorded for all of them or none, and {tids[0]} (run-001) holds a "
         "different value, from an earlier scientist decision (its own line says why); nothing is recorded for this one "
-        "either. Pass --supersede to record it for all of them, or adopt again and rule against what is recorded now, "
-        "or record this value directly: " + T.decide_command(tids[1], "correct", "BL11"))
+        "either. Pass --supersede to record it for all of them, or adopt again and rule against what is recorded now"
+        + CELL_TAIL.format(n=9, key="clashes_by_cell"))
     rep = _imp(grouped, ruled, capsys, "--supersede")
     assert {d["target"]["id"] for d in rep["decisions"]} >= set(tids) and not rep["stale_rulings"]
     assert {_latest_value(grouped, t) for t in tids} == {"BL11"}
@@ -223,8 +229,9 @@ def test_a_template_never_adopted_records_as_before(grouped, tmp_path, capsys, t
     rep = _imp(grouped, filled, capsys)
     assert {d["target"]["id"] for d in _from_cell(rep, FAC_CELL)} == set(tids[1:])
     assert [c["target"]["id"] for c in rep["clashes"]] == [tids[0]]
-    assert rep["clashes"][0]["reason"].startswith("an earlier scientist decision gives a different value; skipped (pass "
-                                                  "--supersede to record this one)")
+    assert rep["clashes"][0]["reason"].startswith("an earlier scientist decision gives a different value (recorded now: "
+                                                  f"'ZZ Since Source' by {OTHER} (2099-01-01), from a decide); skipped "
+                                                  "(pass --supersede to record this one)")
     rep = _imp(grouped, filled, capsys, "--supersede")
     assert [d["target"]["id"] for d in _from_cell(rep, FAC_CELL)] == [tids[0]]
     assert not rep["clashes"] and not rep["stale_rulings"]

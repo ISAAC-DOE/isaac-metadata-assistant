@@ -1573,7 +1573,8 @@ def cmd_bundle_annotate(args) -> int:
 def _targets_from(args) -> list[str]:
     from . import mutations as M
 
-    targets = [args.target] if args.target else []
+    # c15b M2: --target may be given once per target (a template import offers one command for a whole cell)
+    targets = list(args.target) if isinstance(args.target, list) else [args.target] if args.target else []
     if args.targets_file:
         try:
             text = Path(args.targets_file).read_text(encoding="utf-8")
@@ -2170,7 +2171,8 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
 
     q = bsub.add_parser("decide", help="record a scientist decision (identity: local_unverified)")
     q.add_argument("bundle_dir")
-    q.add_argument("--target")
+    q.add_argument("--target", action="append",
+                   help="a target id; give it once per target to decide several at once (all or nothing)")
     q.add_argument("--targets-file")
     q.add_argument("--question", help="answer a consolidated question: one decision per target, each listed")
     q.add_argument("--only", help="with --question: only this scope (group:<id> or run:<id>) — a per-group override")

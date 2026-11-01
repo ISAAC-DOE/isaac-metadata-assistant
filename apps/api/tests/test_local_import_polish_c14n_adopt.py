@@ -38,7 +38,7 @@ from test_local_import_polish_c7s import _rule as _rule_by_value
 from test_local_import_polish_c14g_adopt import _rule
 from test_local_import_polish_c14j_adopt import _decisions_on, _edit_column
 from test_local_import_polish_c14l_adopt import OTHER, _imp, _meta, _sheets, _state, _tid, _value_now
-from test_local_import_polish_c14m_adopt import UNPLACEABLE, _mini
+from test_local_import_polish_c14m_adopt import UNPLACEABLE, _mini, _without_recorded_shown
 
 COLLEAGUE = "Colleague Synthetic Scientist"
 NAME = "sample.material.name"
@@ -109,9 +109,9 @@ def test_copies_of_one_workbook_never_flip_flop_with_supersede(grouped, tmp_path
         rep = _imp_by(grouped, tmp_path / "Wb.xlsx", capsys, COLLEAGUE, "--supersede")
         assert rep["recorded"] == 0 and not rep["rulings_tied_to_sheet"], cycle
         [stale] = rep["stale_rulings"]
-        assert stale["target"]["id"] == tid and stale["value"] == 12
+        assert stale["target"]["id"] == tid and stale["value"] == 12 and stale["decision_id"] == his
         assert stale["reason"] == (
-            f"{WHO}'s ruling on this row ({his}), from another copy of this workbook, is what is recorded now; this "
+            f"{WHO}'s ruling on this row (2099-01-01), from another copy of this workbook, is what is recorded now; this "
             "ruling was not made against it, so nothing is recorded for it, even with --supersede, and the value "
             "recorded now is kept. Adopt again and rule against what is recorded now, or record this value directly: "
             f"isaac bundle decide <bundle_dir> --target {tid} --decision confirm --by \"<your name>\"")
@@ -141,7 +141,8 @@ def test_a_ruling_by_another_person_on_another_adoption_names_them(grouped, tmp_
     _imp_by(grouped, tmp_path / "Ar.xlsx", capsys, COLLEAGUE, "--supersede")
     theirs = _decisions_on(grouped, tid)[-1]["decision_id"]
     [stale] = _imp_by(grouped, tmp_path / "Br.xlsx", capsys, WHO, "--supersede")["stale_rulings"]
-    assert stale["reason"].startswith(f"{COLLEAGUE}'s ruling on this row ({theirs}) is what is recorded now; this "
+    assert stale["decision_id"] == theirs  # c15b L3: the reason names the day, never the id
+    assert stale["reason"].startswith(f"{COLLEAGUE}'s ruling on this row (2099-01-01) is what is recorded now; this "
                                       "ruling, on another adoption of the same sheet, was not made against it, so ")
     assert _value_now(grouped, tid) == 2
 
@@ -171,9 +172,10 @@ def test_adopted_file_list_cells_of_two_sheets_never_flip_flop_with_supersede(gr
         stale = {x["target"]["id"]: x for x in rep["stale_rulings"]}
         assert set(stale) == set(names.values()), cycle
         tid = names["run-001"]
+        assert stale[tid]["decision_id"] == first[tid]
         assert stale[tid]["reason"] == (
-            f"this cell was adopted with nothing recorded here, before {first[tid]} recorded the value now, so it never "
-            "saw it: nothing is recorded for it, even with --supersede, and the value recorded now is kept. Adopt "
+            f"this cell was adopted with nothing recorded here, before {WHO} recorded the value now (2099-01-01), so "
+            "it never saw it: nothing is recorded for it, even with --supersede, and the value recorded now is kept. Adopt "
             "again, then import with --supersede, or record this value directly: "
             f"isaac bundle decide <bundle_dir> --target {tid} --decision correct --value='ZZ other catalyst' "
             "--by \"<your name>\"")
@@ -183,7 +185,8 @@ def test_adopted_file_list_cells_of_two_sheets_never_flip_flop_with_supersede(gr
     assert {_name_now(grouped, tid) for tid in names.values()} == {"ZZ synthetic catalyst"}
     rep = _imp(grouped, tmp_path / "B.xlsx", capsys)  # without --supersede: it says --supersede will not help
     [clash] = [c for c in rep["clashes"] if c["target"]["id"] == names["run-001"]]
-    assert clash["reason"].startswith("an earlier scientist decision gives a different value; skipped, and --supersede "
+    assert clash["reason"].startswith("an earlier scientist decision gives a different value (recorded now: 'ZZ synthetic "
+                                      f"catalyst' by {WHO} (2099-01-01), from another adoption); skipped, and --supersede "
                                       "does not record it either: this cell was not made against the value recorded now. "
                                       "Adopt again, then import with --supersede")
 
@@ -216,7 +219,8 @@ def test_a_sheet_value_against_a_value_the_workbook_saw_still_supersedes(grouped
     _adopt_json(grouped, s, tmp_path / "A.xlsx", capsys)
     rep = _imp(grouped, tmp_path / "A.xlsx", capsys)  # without --supersede: the ordinary advice (c14n LOW-6)
     [clash] = [c for c in rep["clashes"] if c["target"]["id"] == tid]
-    assert clash["reason"].startswith("an earlier scientist decision gives a different value; skipped (pass --supersede "
+    assert clash["reason"].startswith(f"an earlier scientist decision gives a different value (recorded now: 'ZZ old name' "
+                                      f"by {OTHER} (2099-01-01), from a decide); skipped (pass --supersede "
                                       "to record this one), or record this value directly: ")
     rep = _imp(grouped, tmp_path / "A.xlsx", capsys, "--supersede")
     assert tid in {d["target"]["id"] for d in rep["decisions"]} and not rep["stale_rulings"]
@@ -317,6 +321,7 @@ def test_the_offered_command_runs_with_a_negative_number(grouped, tmp_path, caps
     [s] = _sheets(grouped, tmp_path, 1)
     p, _ = _state(grouped, s, tmp_path / "A.xlsx", capsys)
     _rule(tmp_path / "A.xlsx", tmp_path / "Ar.xlsx", {p["id"]: -0.5})
+    _without_recorded_shown(tmp_path / "Ar.xlsx")  # c15b H2: else the row's ruling records without --supersede
     [clash] = [c for c in _imp(grouped, tmp_path / "Ar.xlsx", capsys)["clashes"] if c["target"]["id"] == tid]
     assert clash["reason"].endswith("(pass --supersede to record this one), or record this value directly: isaac bundle "
                                     f"decide <bundle_dir> --target {tid} --decision correct --value=-0.5 --json --by "
@@ -395,8 +400,10 @@ def _decide(bdir, capsys, *args):
 
 
 @pytest.mark.parametrize("against, adopted_at, expected", [
-    (["d-00001"], 1, "ruled on a workbook adopted before d-00003, and a different value was recorded since (d-00002); "
-                     "nothing is recorded for this ruling: the value is already 12; adopt again to settle this row"),
+    # c15b L3: named by who and when, never by decision id
+    (["d-00001"], 1, "ruled on a workbook adopted before someone recorded the value now (2099-01-01), and a "
+                     "different value was recorded since (by someone unnamed, 2099-01-01); nothing is recorded for this "
+                     "ruling: the value is already 12; adopt again to settle this row"),
     ([T.GOVERNING_DAMAGED], 1, "ruled on a workbook whose `_isaac` governing_decisions value is damaged, so it is never "
                                "tied; nothing is recorded for this ruling: the value is already 12; adopt again to "
                                "settle this row"),
@@ -426,8 +433,11 @@ def test_a_whole_beamtime_ruling_names_the_targets_already_holding_its_value(gro
     assert set(stale) == set(tids) and not rep["rulings_tied_to_sheet"]
     assert "record this value directly: " in stale[tids[0]]["reason"]
     for tid in tids[1:]:
+        # c15b M4: run-001 still holds BL12, so adopting again alone would not settle the row
         assert stale[tid]["reason"].endswith("nothing is recorded for this one either, and the value is already "
-                                             "'BL11'; adopt again to settle this row"), tid
+                                             "'BL11'; another target of this row still holds a different value, so "
+                                             "adopting again would ask it again: adopt again and rule the row, or record "
+                                             "the value for all of them with the cell's one command"), tid
 
 
 OWN_NOTE = ("template B.xlsx 'Disagreements'!H2 (your ruling on disagreement D1: SYN_sheet.xlsx 'File List'!H8 = 2)"
@@ -439,17 +449,18 @@ TAIL = (" nothing is recorded for it, even with --supersede, and the value recor
 
 @pytest.mark.parametrize("note, adopt_id, by, expected", [
     # LOW-4: no readable adopt id on this workbook: which adoption the ruling recorded now came from is not known
-    (OWN_NOTE, None, WHO, "a ruling on this row (d-00001), from this sheet, is what is recorded now; this ruling was not "
-                          "made against it, so" + TAIL),
-    (OWN_NOTE.split(" (adopt id ")[0], None, WHO, "a ruling on this row (d-00001), from this sheet, is what is recorded "
-                                                  "now; this ruling was not made against it, so" + TAIL),
+    # c15b L3: named by who and when, never by decision id
+    (OWN_NOTE, None, WHO, f"a ruling on this row (by {WHO}, 2099-01-01), from this sheet, is what is recorded now; this "
+                          "ruling was not made against it, so" + TAIL),
+    (OWN_NOTE.split(" (adopt id ")[0], None, WHO, f"a ruling on this row (by {WHO}, 2099-01-01), from this sheet, is what "
+                                                  "is recorded now; this ruling was not made against it, so" + TAIL),
     # another adoption (another id), by them or by someone else
-    (OWN_NOTE, "cd" * 16, WHO, "your earlier ruling on this row (d-00001) is what is recorded now; this ruling, on "
+    (OWN_NOTE, "cd" * 16, WHO, "your earlier ruling on this row (2099-01-01) is what is recorded now; this ruling, on "
                                "another adoption of the same sheet, was not made against it, so" + TAIL),
-    (OWN_NOTE, "cd" * 16, COLLEAGUE, f"{WHO}'s ruling on this row (d-00001) is what is recorded now; this ruling, on "
+    (OWN_NOTE, "cd" * 16, COLLEAGUE, f"{WHO}'s ruling on this row (2099-01-01) is what is recorded now; this ruling, on "
                                      "another adoption of the same sheet, was not made against it, so" + TAIL),
     # MED-1: a copy of this very workbook (the same id), imported by someone else
-    (OWN_NOTE, "ab" * 16, COLLEAGUE, f"{WHO}'s ruling on this row (d-00001), from another copy of this workbook, is what "
+    (OWN_NOTE, "ab" * 16, COLLEAGUE, f"{WHO}'s ruling on this row (2099-01-01), from another copy of this workbook, is what "
                                      "is recorded now; this ruling was not made against it, so" + TAIL),
 ])
 def test_the_ruling_recorded_now_is_named_honestly(note, adopt_id, by, expected):

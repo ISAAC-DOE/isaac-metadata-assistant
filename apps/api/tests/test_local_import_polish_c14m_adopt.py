@@ -118,8 +118,10 @@ def test_a_position_from_another_copy_never_supersedes(grouped, tmp_path, capsys
     assert _value_now(grouped, tid) == 12 and len(_decisions_on(grouped, tid)) == 1
     rep = _imp(grouped, tmp_path / "Ar.xlsx", capsys)  # without --supersede: a clash that says so
     [clash] = [c for c in rep["clashes"] if c["target"]["id"] == tid]
-    assert clash["reason"].startswith("an earlier scientist decision gives a different value; skipped, and --supersede "
-                                      "does not record it either: " + UNPLACEABLE)
+    # c15b M3: what is recorded now, by whom and from where
+    assert clash["reason"].startswith(f"an earlier scientist decision gives a different value (recorded now: 12 by {OTHER} "
+                                      "(2099-01-01), from a decide); skipped, and --supersede does not record it either: "
+                                      + UNPLACEABLE)
 
 
 def test_a_position_from_another_copy_never_ties(grouped, tmp_path, capsys, ticking):
@@ -217,7 +219,10 @@ def test_a_scientist_correcting_their_own_ruling_on_the_same_workbook_supersedes
     _rule(tmp_path / "Ar.xlsx", tmp_path / "Ar12.xlsx", {p["id"]: 12})
     rep = _imp(grouped, tmp_path / "Ar12.xlsx", capsys)  # without --supersede: the ordinary advice
     [clash] = [c for c in rep["clashes"] if c["target"]["id"] == tid]
-    assert clash["reason"].startswith("an earlier scientist decision gives a different value; skipped (pass --supersede")
+    # their own correction on the same workbook still needs --supersede (c15b H2 is only a ruling against what the
+    # row named); the reason says where the value recorded now came from (c15b M3)
+    assert clash["reason"].startswith(f"an earlier scientist decision gives a different value (recorded now: 2 by {WHO} "
+                                      "(2099-01-01), from an earlier import of this workbook); skipped (pass --supersede")
     rep = _imp(grouped, tmp_path / "Ar12.xlsx", capsys, "--supersede")
     assert rep["recorded"] == 1 and not rep["stale_rulings"] and not rep["clashes"]
     assert _value_now(grouped, tid) == 12 and len(_decisions_on(grouped, tid)) == 2
@@ -259,7 +264,9 @@ def test_two_adoptions_of_the_same_sheet_still_converge(grouped, tmp_path, capsy
         rep = _imp(grouped, tmp_path / "Br.xlsx", capsys, "--supersede")
         assert rep["recorded"] == 0 and not rep["rulings_tied_to_sheet"], cycle
         [stale] = rep["stale_rulings"]
-        assert stale["reason"].startswith(f"your earlier ruling on this row ({ruled}) is what is recorded now; this "
+        # c15b L3: named by its day, never its decision id (the entry's decision_id keeps it)
+        assert stale["decision_id"] == ruled
+        assert stale["reason"].startswith("your earlier ruling on this row (2099-01-01) is what is recorded now; this "
                                           "ruling, on another adoption of the same sheet, was not made against it, so "
                                           "nothing is recorded for it, even with --supersede"), cycle
         rep = _imp(grouped, tmp_path / "Ar.xlsx", capsys, "--supersede")
@@ -283,7 +290,8 @@ def test_adopting_again_into_a_settled_row_then_ruling_differently_supersedes(gr
     rep = _imp(grouped, tmp_path / "Ar.xlsx", capsys, "--supersede")
     assert rep["recorded"] == 0
     [stale] = rep["stale_rulings"]
-    assert stale["reason"].startswith(f"your earlier ruling on this row ({later}) is what is recorded now")
+    assert stale["reason"].startswith("your earlier ruling on this row (2099-01-01) is what is recorded now")
+    assert stale["decision_id"] == later
     assert _value_now(grouped, tid) == 12
 
 
@@ -327,7 +335,11 @@ def test_a_whole_beamtime_ruling_is_recorded_for_every_run_or_none(grouped, tmp_
     for tid in tids[1:]:
         assert stale[tid]["reason"].startswith(
             f"this ruling reaches 9 targets and is recorded for all of them or none, and {tids[0]}"), tid
-        assert stale[tid]["reason"].endswith(f"--target {tid} --decision correct --value=BL99 --by \"<your name>\"")
+        # c15b M2: the cell's one command for all nine (stale_by_cell), never this target's own
+        assert stale[tid]["reason"].endswith(", or record this value for all 9 targets of this cell with one command "
+                                             "(stale_by_cell: command)")
+    [cell] = rep["stale_by_cell"]
+    assert cell["command"].count("--target ") == 9 and cell["command"].endswith("--value=BL99 --by \"<your name>\"")
     code, text, err = _import_text(grouped, tmp_path / "Ar.xlsx", capsys, "--apply", "--supersede")
     assert code == 0, err
     summary = next(x for x in text.splitlines() if x.startswith("Summary:"))
@@ -360,16 +372,18 @@ def _nothing_then_a_value(grouped, tmp_path, capsys):
     return tid, _decisions_on(grouped, tid)[-1]["decision_id"]
 
 
-NEVER_SAW = "ruled on a workbook adopted with nothing recorded here; this ruling was made before {} recorded the value " \
-            "now, so it never saw it: nothing is recorded for it, even with --supersede, and the value recorded now is " \
-            "kept. Adopt again and rule against what is recorded now, or record this value directly: isaac bundle " \
-            "decide <bundle_dir> --target {} --decision correct --value=2 --json --by \"<your name>\""
+NEVER_SAW = ("ruled on a workbook adopted with nothing recorded here; this ruling was made before " + OTHER + " recorded "
+             "the value now (2099-01-01), so it never saw it: nothing is recorded for it, even with --supersede, and the "
+             "value recorded now is kept. Adopt again and rule against what is recorded now, or record this value "
+             "directly: isaac bundle decide <bundle_dir> --target {} --decision correct --value=2 --json --by "
+             "\"<your name>\"")
 
 
 def test_a_workbook_adopted_with_nothing_recorded_never_says_an_earlier_value(grouped, tmp_path, capsys, ticking):
     tid, did = _nothing_then_a_value(grouped, tmp_path, capsys)
     [stale] = _imp(grouped, tmp_path / "Ar.xlsx", capsys, "--supersede")["stale_rulings"]
-    assert stale["reason"] == NEVER_SAW.format(did, tid) and "earlier value" not in stale["reason"]
+    assert stale["reason"] == NEVER_SAW.format(tid) and "earlier value" not in stale["reason"]
+    assert stale["decision_id"] == did
     assert _value_now(grouped, tid) == 12
 
 
@@ -380,7 +394,7 @@ def test_a_c14k_workbook_adopted_with_nothing_recorded_then_a_value(grouped, tmp
     rep = _imp(grouped, tmp_path / "old.xlsx", capsys, "--supersede")
     assert tid not in _targets(rep)
     [stale] = rep["stale_rulings"]
-    assert stale["reason"] == NEVER_SAW.format(did, tid)
+    assert stale["reason"] == NEVER_SAW.format(tid)
     rep = _imp(grouped, tmp_path / "old.xlsx", capsys)
     [clash] = [c for c in rep["clashes"] if c["target"]["id"] == tid]
     assert "--supersede does not record it either" in clash["reason"] and f"--target {tid} --decision correct" in clash["reason"]
@@ -404,17 +418,18 @@ OWN_NOTE = ("template B.xlsx 'Disagreements'!H2 (your ruling on disagreement D1:
 @pytest.mark.parametrize("decisions, against, adopted_at, exported, ruling, expected", [
     # made against an earlier value: it read d-00001 (12), and d-00002 recorded 7 since
     ([{"decision": "confirm"}, {"decision": "correct", "value": 7}], ["d-00001"], 1, None, None,
-     "ruled on a workbook adopted before d-00002; this ruling was made against an earlier value, so" + TAIL),
+     "ruled on a workbook adopted before someone recorded the value now (2099-01-01); this ruling was made against an "
+     "earlier value, so" + TAIL),
     # LOW-1: nothing recorded at the adopt
     ([{"decision": "confirm"}], [], 0, None, None,
-     "ruled on a workbook adopted with nothing recorded here; this ruling was made before d-00001 recorded the value "
-     "now, so it never saw it:" + TAIL),
+     "ruled on a workbook adopted with nothing recorded here; this ruling was made before someone recorded the value "
+     "now (2099-01-01), so it never saw it:" + TAIL),
     # not placed: no position, and a time that cannot be read
     ([{"decision": "confirm"}], [], None, "not a time", None,
-     "ruled on a workbook not shown to have been adopted against d-00001, so" + TAIL),
+     "ruled on a workbook not shown to have been adopted against the value someone recorded (2099-01-01), so" + TAIL),
     # MED-3: their own earlier ruling on this row, from another adoption of the same sheet
     ([{"decision": "confirm", "note": OWN_NOTE}], [], 0, None, ("SYN_sheet.xlsx", "'File List'!H8", 2),
-     "your earlier ruling on this row (d-00001) is what is recorded now; this ruling, on another adoption of the same "
+     "your earlier ruling on this row (2099-01-01) is what is recorded now; this ruling, on another adoption of the same "
      "sheet, was not made against it, so" + TAIL),
     ([{"decision": "confirm"}], [T.GOVERNING_DAMAGED], 0, None, None,
      "ruled on a workbook whose `_isaac` governing_decisions value is damaged, so it is never recorded over another "
@@ -450,15 +465,31 @@ def test_the_command_a_stale_reason_offers_records_the_value(grouped, tmp_path, 
     assert _value_now(grouped, tid) == 2
 
 
+def _without_recorded_shown(xlsx) -> None:
+    """``xlsx`` as a build before c15b wrote it: no ``recorded_shown`` column, so a ruling over another value needs
+    --supersede (c15b H2)."""
+    wb = openpyxl.load_workbook(xlsx)
+    ws = wb["_isaac"]
+    for row in ws.iter_rows():
+        for c in row:
+            if c.value == T.RECORDED_SHOWN:
+                for r in range(c.row, ws.max_row + 1):
+                    ws.cell(r, c.column).value = None
+    wb.save(xlsx)
+
+
 def test_every_clash_reason_offers_the_command(grouped, tmp_path, capsys, ticking):
     tid = _tid(grouped)
     M.decide(grouped, target_ids=[tid], decision="confirm", value=None, by=OTHER, orcid=None)
     [s] = _sheets(grouped, tmp_path, 1)
     p, _ = _state(grouped, s, tmp_path / "A.xlsx", capsys)
     _rule(tmp_path / "A.xlsx", tmp_path / "Ar.xlsx", {p["id"]: 2})
+    _without_recorded_shown(tmp_path / "Ar.xlsx")  # c15b H2: else the row's ruling records without --supersede
     rep = _imp(grouped, tmp_path / "Ar.xlsx", capsys)
     [clash] = [c for c in rep["clashes"] if c["target"]["id"] == tid]
-    assert clash["reason"] == ("an earlier scientist decision gives a different value; skipped (pass --supersede to "
+    # c15b M3: what is recorded now, by whom and from where (the row did not name it: its workbook predates c15b)
+    assert clash["reason"] == (f"an earlier scientist decision gives a different value (recorded now: 12 by {OTHER} "
+                               "(2099-01-01), from a decide); skipped (pass --supersede to "
                                "record this one), or record this value directly: isaac bundle decide <bundle_dir> "
                                f"--target {tid} --decision correct --value=2 --json --by \"<your name>\"")  # c14n LOW-6
     argv = _command_in(clash["reason"])

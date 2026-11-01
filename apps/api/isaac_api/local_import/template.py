@@ -1248,7 +1248,7 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
 
     def take(sheet, ref, col: Column, raw: Any, *, run: Mapping | None, scope: str, via: str | None = None,
              because: str | None = None, ruling: tuple[str, str, Any] | None = None,
-             against: Sequence[str] | None = None, adopt_id: str | None = None):
+             against: Sequence[str] | None = None, adopt_id: str | None = None, shown: bool = False):
         rule = rules.get(col.path or "")
         value, why = _parse(raw, rule)
         if not why and col.path == ELECTROLYTE_NAME_PATH:
@@ -1283,6 +1283,8 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
                              **({"ruling": ruling} if ruling else {}),
                              # c14j MED-1: the decisions its row was ruled against (absent: adopted before they were kept)
                              **({"ruled_against": list(against)} if ruling and against is not None else {}),
+                             # c15b H2: its row named the value recorded for this field when it was adopted
+                             **({"shown": True} if ruling and shown else {}),
                              # ``template adopt`` copied it from their sheet (no file reading contradicted it then)
                              **({"adopted": {"their_file": origin.get("their_file"), "their_cell": origin.get("their_cell")}}
                                 if origin else {}),
@@ -1480,6 +1482,18 @@ def _ruled_here(log: Sequence[Mapping], place: int, provenance: tuple[str, str, 
     return _agrees(ruled_on, provenance[2])
 
 
+def _ruled_here_old_form(log: Sequence[Mapping], place: int, provenance: tuple[str, str, Any] | None) -> bool:
+    """c15b M7: whether ``log[place]`` is a ruling on THIS disagreement as a build before c14h wrote its note: "ruling on
+    disagreement Dn: <their file> <their cells>", naming no value and no adoption. Read ONLY for settling a re-adopted row
+    (:func:`recorded_ruling`, which says the cell's value then is not known); tying and superseding still read
+    :func:`_ruled_here`, which never takes such a note."""
+    if provenance is None or not (0 <= place < len(log)):
+        return False
+    note = (log[place] or {}).get("note") if isinstance(log[place], Mapping) else None
+    their = re.escape(f"{provenance[0]} {provenance[1]}")
+    return isinstance(note, str) and re.search(rf"\(your (?:concentration )?ruling on disagreement D\d+: {their}\)$", note) is not None
+
+
 def _ruled_in_chain(log: Sequence[Mapping], chain: Sequence[int], provenance: tuple[str, str, Any] | None) -> bool:
     """c14k MED-1: whether any decision of ``chain`` (:class:`_Chains`: the unbroken same-value run ending at the
     decision that governs now, as places in ``log``) is a ruling on THIS disagreement as their cell reads now
@@ -1518,10 +1532,50 @@ def _decider(decision: Any) -> str | None:
     return name if isinstance(name, str) else None
 
 
+def _on_day(decision: Any) -> str:
+    """c15b L3: " (2099-01-01)", the day a decision was recorded, where prose once named its id; "" when unknown."""
+    when = decision.get("decided_utc") if isinstance(decision, Mapping) else None
+    return f" ({when[:10]})" if isinstance(when, str) and when else ""
+
+
 def _whose(decision: Any) -> str:
     """c14n MED-1: "Name's" for the person who recorded ``decision``, or "another" when it names nobody."""
     name = _decider(decision)
     return f"{name}'s" if name else "another"
+
+
+def _by_when(decision: Any) -> str:
+    """c15b L3: a decision as prose names it, never by its id: "by Name, 2099-01-01" (who and the day, as known)."""
+    name = _decider(decision)
+    when = decision.get("decided_utc") if isinstance(decision, Mapping) else None
+    day = when[:10] if isinstance(when, str) and when else None
+    return ", ".join([f"by {name}" if name else "by someone unnamed", *([day] if day else [])])
+
+
+def _source_of(decision: Any, adopt_id: str | None, by: str | None) -> str:
+    """c15b M3: where the decision recorded now came from, from its note: this workbook (an earlier import of it, or
+    another copy imported by someone else: the same ``adopt_id``), another adoption of a sheet (a ruling or an adopted
+    cell with another id or none), a template import, or a decide."""
+    note = decision.get("note") if isinstance(decision, Mapping) else None
+    if adopt_id is not None and _note_adopt_id(decision) == adopt_id:
+        return ("an earlier import of this workbook" if by is None or _decider(decision) == by
+                else "another copy of this workbook")
+    if isinstance(note, str) and ("ruling on disagreement D" in note or " (adopted from " in note):
+        return "another adoption"
+    if isinstance(note, str) and note.startswith("template "):
+        return "a template import"
+    return "a decide"
+
+
+def _recorded_now(prior: Mapping, value: Any, adopt_id: str | None, by: str | None) -> str:
+    """c15b M3: "recorded now: 'BL12' by Name (2099-01-01), from a decide": what a clash's target holds, who recorded it
+    and where from, in every clash reason (no decision id: the skill never reads ids out; ``--json`` keeps them)."""
+    name = _decider(prior)
+    when = prior.get("decided_utc")
+    day = f" ({when[:10]})" if isinstance(when, str) and when else ""
+    what = "rejected" if prior.get("decision") == "reject" else _shown(value)
+    return (f"recorded now: {what} by {name or 'someone unnamed'}{day}, from "
+            f"{_source_of(prior, adopt_id, by)}")
 
 
 def _ruled_on_text(value: Any) -> str:
@@ -1555,6 +1609,11 @@ GOVERNING_UNPLACEABLE = "(unplaceable)"
 #: adopt (:func:`governing_decisions`, a JSON list): with --supersede it records over another value only when made
 #: against the one recorded now (:func:`_rules_against_now`); read by :func:`_marker_governing` like a row's
 ADOPTED_GOVERNING = "governing"
+#: c15b H2: the ``_isaac`` ``[disagreements]`` column holding, per row, the fields whose recorded values its statement named
+#: (a JSON list: "recorded `12`; your sheet says `2`: rule which" or "already recorded: …"). A ruling of a different value on
+#: such a field, made against the value recorded now, is recorded without --supersede: the row asked for exactly it. A
+#: workbook without the column (adopted before it was kept) still needs --supersede
+RECORDED_SHOWN = "recorded_shown"
 
 
 def _marker_governing(entry: Mapping, key: str = "governing_decisions") -> list[str] | None:
@@ -1576,6 +1635,17 @@ def _marker_governing(entry: Mapping, key: str = "governing_decisions") -> list[
         return [GOVERNING_DAMAGED]
     # c14l LOW-1: a list holding anything but decision ids ([1], [null], [["d-1"]], ["d-1", 5]) is damaged too
     return ids if isinstance(ids, list) and all(isinstance(i, str) for i in ids) else [GOVERNING_DAMAGED]
+
+
+def _marker_shown(entry: Mapping) -> list[str]:
+    """c15b H2: the ``_isaac`` ``recorded_shown`` fields of one disagreement row (:data:`RECORDED_SHOWN`), or ``[]`` for a
+    workbook adopted before it was kept or a damaged value: then no ruling of it is recorded over another value without
+    ``--supersede``."""
+    try:
+        paths = json.loads(entry.get(RECORDED_SHOWN)) if isinstance(entry.get(RECORDED_SHOWN), str) else []
+    except (ValueError, RecursionError):
+        return []
+    return [p for p in paths if isinstance(p, str)] if isinstance(paths, list) else []
 
 
 def beamtime_reach(index: "_Index", path: str | None, runs: set[str]) -> list[str | None]:
@@ -1614,22 +1684,52 @@ def recorded_ruling(answers: Mapping, path: str | None, run_ids: Sequence[str], 
     chain = chain_of if chain_of is not None else (lambda place: [place])
     reach = _ruling_reach(run_ids, scope, beamtime)
     got = []
+    per_run = []  # c15b M2: (target, its answers), for the runs each value is held by
     for rid in reach:
         here = P._answers_for_run(answers, path, rid)
         if not here:
             return None
         got += here
+        per_run.append((rid, here))
     run_own = scope == "experiment" or None in reach or any(answers.get((P._fills(path), rid)) for rid in reach if rid)
     values = P._distinct([a[0] for a in got])
     timed = sorted((t, a[1]) for a in got if (t := P._utc(a[1])) is not None)
     when = timed[-1][1] if timed else None
-    settled = all((their_value is not None and _agrees(a[0], their_value)) or _ruled_in_chain(log, chain(a[2]), provenance)
-                  for a in got)
+    # c15b M7: a ruling an older build recorded on this row (its note names the cells but not the value they held then)
+    # settles it too; the strict reading (:func:`_ruled_here`) still decides tying and superseding
+    old_form = False
+    settled = True
+    for a in got:
+        if (their_value is not None and _agrees(a[0], their_value)) or _ruled_in_chain(log, chain(a[2]), provenance):
+            continue
+        if any(_ruled_here_old_form(log, p, provenance) for p in chain(a[2])):
+            old_form = True
+            continue
+        settled = False
     date = f" ({when[:10]})" if when else ""
-    statement = (f"already recorded: {', '.join(_shown(v) for v in values)}{date}; leave blank to keep" if settled else
-                 f"recorded {P._shown(values)}{date}; your sheet says {P._shown([their_value])}: rule which")
+    older = (", by your ruling on this row from an earlier build (it kept no copy of your cell's value then: if you "
+             "changed that cell since, rule it again)") if old_form else ""
+    statement = (f"already recorded: {', '.join(_shown(v) for v in values)}{date}{older}; leave blank to keep" if settled else
+                 f"recorded {_values_by_runs(values, per_run)}{date}; your sheet says {P._shown([their_value])}: rule which")
     return {"values": values, "decided_utc": when, "runs": sum(1 for r in reach if r is not None), "settled": settled,
-            "run_own": run_own, "statement": statement}
+            "run_own": run_own, "statement": statement, **({"settled_by_older_ruling": True} if settled and old_form else {})}
+
+
+def _values_by_runs(values: Sequence[Any], per_run: Sequence[tuple[str | None, Sequence[Any]]]) -> str:
+    """c15b M2: the values a row's runs hold, as ``P._shown`` says them; when they differ, each with how many runs hold
+    it ("`-0.8` (8 runs), `-0.6` (1 run)"), so a row half changed by a per-run command says which runs hold which.
+    ``per_run``: each target the row reaches with its answers (:func:`recorded_ruling`; ``None``: the beamtime)."""
+    from . import propose_terms as P
+
+    if len(values) < 2 or not any(rid is not None for rid, _a in per_run):
+        return P._shown(values)
+    held: dict[str, set[str]] = {}
+    for rid, here in per_run:
+        if rid is not None:
+            for a in here:
+                held.setdefault(json.dumps(a[0], sort_keys=True, default=str), set()).add(rid)
+    return ", ".join(f"`{v}`" + (f" ({n} run{'' if n == 1 else 's'})" if (n := len(held.get(
+        json.dumps(v, sort_keys=True, default=str), ()))) else "") for v in values)
 
 
 def _ruling_reach(run_ids: Sequence[str], scope: str, beamtime: Sequence[str | None] | None) -> list[str | None]:
@@ -1850,7 +1950,9 @@ def ruling_state(answers: Mapping, log: Sequence[Mapping], *, kind: str | None, 
     name AND the concentration are; with the name alone, ``name_recorded`` holds it and the concentration still awaits a
     ruling ("name recorded: 'KOH'; concentration awaits your ruling"). ``conc``: the concentration's own state.
     ``governing`` (c14j MED-1): :func:`governing_decisions` of the row (for a ``name_only`` row, its name's and its
-    concentration's). ``chain_of``: :class:`_Chains` of the bundle (:func:`recorded_ruling`)."""
+    concentration's). ``chain_of``: :class:`_Chains` of the bundle (:func:`recorded_ruling`). ``shown`` (c15b H2): the
+    fields whose recorded values the row's statement names (``_isaac`` ``recorded_shown``): a ruling of a different value
+    on one of them, made against the value recorded now, is recorded without ``--supersede``."""
     paths = [path, ELECTROLYTE_CONC_PATH] if kind == "name_only" else [path]
     governing = governing_decisions(answers, log, [p for p in paths if p], run_ids, scope, beamtime)
     return {**_ruling_state(answers, log, kind=kind, path=path, run_ids=run_ids, scope=scope, their_value=their_value,
@@ -1868,7 +1970,8 @@ def _ruling_state(answers: Mapping, log: Sequence[Mapping], *, kind: str | None,
     if parts is None:
         rec = recorded_ruling(answers, path, run_ids, their_value=their_value, **common)
         return {"already_recorded": rec if rec and rec["settled"] else None,
-                "recorded_note": rec["statement"] if rec and not rec["settled"] else None}
+                "recorded_note": rec["statement"] if rec and not rec["settled"] else None,
+                "shown": [path] if rec else []}
     name = recorded_ruling(answers, path, run_ids, their_value=parts[0], **common)
     conc = recorded_ruling(answers, ELECTROLYTE_CONC_PATH, run_ids, their_value=parts[1], **common)
     if name and name["settled"] and conc and conc["settled"]:
@@ -1878,12 +1981,14 @@ def _ruling_state(answers: Mapping, log: Sequence[Mapping], *, kind: str | None,
                 "statement": (f"already recorded: name {', '.join(_shown(v) for v in name['values'])}, concentration "
                               f"{', '.join(_shown(v) for v in conc['values'])} M" + (f" ({when[:10]})" if when else "")
                               + "; leave blank to keep")}
-        return {"already_recorded": both, "recorded_note": None, "conc": conc}
+        return {"already_recorded": both, "recorded_note": None, "conc": conc, "shown": [path, ELECTROLYTE_CONC_PATH]}
     if name and name["settled"]:
         said = "awaits your ruling" if conc is None else conc["statement"]
         return {"already_recorded": None, "name_recorded": name, "conc": conc,
-                "recorded_note": f"name recorded: {', '.join(_shown(v) for v in name['values'])}; concentration {said}"}
-    return {"already_recorded": None, "conc": conc, "recorded_note": name["statement"] if name else None}
+                "recorded_note": f"name recorded: {', '.join(_shown(v) for v in name['values'])}; concentration {said}",
+                "shown": [path] + ([ELECTROLYTE_CONC_PATH] if conc else [])}
+    return {"already_recorded": None, "conc": conc, "recorded_note": name["statement"] if name else None,
+            "shown": [path] if name else []}
 
 
 def _read_rulings(wb, marker: Mapping, runs: Mapping, known: Mapping[str, Column], take, out: dict,
@@ -1933,6 +2038,7 @@ def _read_rulings(wb, marker: Mapping, runs: Mapping, known: Mapping[str, Column
         # column D's (c14i LOW-2: a workbook adopted before the value was kept names no value, and settles nothing)
         tie = (str(e.get("their_file")), str(e.get("their_cells")), their_value) if e.get("their_cells") and kept else None
         against = _marker_governing(e)
+        shown_paths = _marker_shown(e)  # c15b H2
         said_on = f" = {_ruled_on_text(their_value)}" if kept else ""
         provenance = f": {e.get('their_file')} {e.get('their_cells')}{said_on}" if e.get("their_cells") else ""
         because = f"your ruling on disagreement {did}{provenance}"
@@ -1942,7 +2048,7 @@ def _read_rulings(wb, marker: Mapping, runs: Mapping, known: Mapping[str, Column
             out["read"] = out.get("read", 0) + 1
             if e.get("scope") == "experiment":
                 take(SHEET_DISAGREE, cell_ref, column, raw, run=None, scope="experiment", because=why_said, ruling=tie,
-                     against=against, adopt_id=adopt_id)
+                     against=against, adopt_id=adopt_id, shown=column.path in shown_paths)
                 return
             for run_id in runs_named:
                 run = runs.get(run_id)
@@ -1951,7 +2057,7 @@ def _read_rulings(wb, marker: Mapping, runs: Mapping, known: Mapping[str, Column
                                            "reason": f"the run {run_id!r} is not in this bundle"})
                     continue
                 take(SHEET_DISAGREE, cell_ref, column, raw, run=run, scope="run", because=why_said, ruling=tie,
-                     against=against, adopt_id=adopt_id)
+                     against=against, adopt_id=adopt_id, shown=column.path in shown_paths)
 
         # M3: the CONCENTRATION of an electrolyte row ("0.01 M HClO4"), ruled in its own column, for the same runs
         craw = None
@@ -2018,7 +2124,8 @@ def _same_value(a: Any, b: Any) -> bool:
 UNPLACEABLE_REASON = "this bundle's decisions changed since the workbook was adopted (copied or restored?); adopt again"
 
 
-def decide_command(target: str | None, decision: str, value: Any, slot: tuple[str, str] | None = None) -> str:
+def decide_command(target: str | Sequence[str] | None, decision: str, value: Any,
+                   slot: tuple[str, str] | None = None) -> str:
     """c14m LOW-2: the ``isaac bundle decide`` command that records ``value`` on ``target`` now, outside the workbook
     (text as typed; any other value as JSON with ``--json``). ``confirm`` (a candidate whose extracted value it is)
     takes no value. c14n LOW-1: ``--value=<v>``, so a value that starts with "-" (``-0.5``, ``-x``) is never read as
@@ -2026,7 +2133,12 @@ def decide_command(target: str | None, decision: str, value: Any, slot: tuple[st
     is dropped unless recorded, so the command answers that question for the run instead (``--only run:<id>``)."""
     shown = ("" if decision == "confirm" else f" --value={shlex.quote(value)}" if isinstance(value, str)
              else f" --value={shlex.quote(_ruled_on_text(value))} --json")
-    where = f"--question {slot[0]} --only run:{slot[1]}" if slot else f"--target {target or '<target id>'}"
+    if slot:
+        where = f"--question {slot[0]} --only run:{slot[1]}"
+    elif isinstance(target, (list, tuple)):  # c15b M2: one command for every target of a cell (--target per target)
+        where = " ".join(f"--target {t}" for t in target) or "--target <target id>"
+    else:
+        where = f"--target {target or '<target id>'}"
     return f'isaac bundle decide <bundle_dir> {where} --decision {decision}{shown} --by "<your name>"'
 
 
@@ -2039,18 +2151,28 @@ def _already_there(value: Any, ruling: bool = True) -> str:
     """c14n LOW-3: how a stale reason ends when its ruling keeps the value recorded now: no command to record it.
     c15a LOW-3: only a Disagreements ruling has a row to settle by adopting again; an adopted cell has none, so the
     advice is dropped for it."""
-    return f"the value is already {_shown(value)}" + ("; adopt again to settle this row" if ruling else "")
+    return f"the value is already {_shown(value)}" + (_ALREADY_TAIL if ruling else "")
+
+
+#: c14n LOW-3: how a ruling's line ends when its target already holds the value (c15b M4 replaces it when another
+#: target of the row still holds a different value)
+_ALREADY_TAIL = "; adopt again to settle this row"
 
 
 def _clash_count(clashes: Sequence[Mapping]) -> str:
-    """c14p LOW-2: the summary's clashes, the targets held back with one (all or nothing, ``blocked_by``) apart."""
+    """c14p LOW-2: the summary's clashes, the targets held back with one (all or nothing, ``blocked_by``) apart.
+    c15b M1: counted by cell, the targets in brackets: "2 cell(s) clash (286 target(s): 3 clash, 282 held back with them:
+    all or nothing; 1 already hold the value)"."""
+    if not clashes:
+        return "0 clash(es)"
     # c15a LOW-3: a target that already holds the value (``holds_value``) is neither a clash nor held back
     holds = sum(1 for c in clashes if c.get("holds_value"))
     held = sum(1 for c in clashes if c.get("blocked_by") and not c.get("holds_value"))
-    return (f"{len(clashes) - held - holds} clash(es)"
-            + (f" ({held} more target(s) of the same cell(s) held back with them: all or nothing"
-               + (f"; {holds} already hold the value" if holds else "") + ")" if held else
-               f" ({holds} target(s) of the same cell(s) already hold the value)" if holds else ""))
+    cells = len({c["cell"] for c in clashes})
+    own = len(clashes) - held - holds
+    parts = [f"{own} clash{'' if own == 1 else 'es'}"] + ([f"{held} held back with them: all or nothing"] if held else []) + (
+        [f"{holds} already hold the value"] if holds else [])
+    return f"{cells} cell(s) clash ({len(clashes)} target(s): {'; '.join(parts)})"
 
 
 def _again(ruling: bool) -> str:
@@ -2085,7 +2207,9 @@ def _stale_reason(cell: Mapping, chain: Sequence[Mapping], chains: "_Chains", ru
     from . import propose_terms as P
 
     alternative = _or_decide(target, decision, cell.get("value"), slot)
-    first = chain[-1].get("decision_id") or "the decision that governs now"
+    # c15b L3: decisions are named by who recorded them and when, never by id (the entry's decision_id keeps it)
+    first = f"{_decider(chain[-1]) or 'someone'} recorded the value now{_on_day(chain[-1])}"
+    first_value = f"the value {_decider(chain[-1]) or 'someone'} recorded{_on_day(chain[-1])}"
     against = cell.get("ruled_against")
     adopted = bool(cell.get("adopted"))  # c14p LOW-3: an adopted answer cell, with no Disagreements row to rule on
     noun = "cell" if adopted else "ruling"
@@ -2106,9 +2230,9 @@ def _stale_reason(cell: Mapping, chain: Sequence[Mapping], chains: "_Chains", ru
                 f"kept and nothing is recorded for this {noun}. {_again(not adopted)}" + alternative)
     if (changed is not None and against is not None and changed.get("decision_id") not in against
             and _since_adopt(ended, changed, adopted_at, exported_utc)):
-        did = changed.get("decision_id")
-        since = (f", and {did} {'rejected' if changed.get('decision') == 'reject' else 'deferred'} the value since"
-                 if changed.get("decision") in ("reject", "defer") else f", and a different value was recorded since ({did})")
+        since = (f", and the value was {'rejected' if changed.get('decision') == 'reject' else 'deferred'} since "
+                 f"({_by_when(changed)})" if changed.get("decision") in ("reject", "defer")
+                 else f", and a different value was recorded since ({_by_when(changed)})")
     if keeps:
         placed = against is not None or P._utc(exported_utc) is not None
         lead = (f"ruled on a workbook adopted before {first}" if placed
@@ -2121,17 +2245,17 @@ def _stale_reason(cell: Mapping, chain: Sequence[Mapping], chains: "_Chains", ru
     copy = next((chains.log[p] for p in run if adopt_id is not None and by is not None
                  and _note_adopt_id(chains.log[p]) == adopt_id and _decider(chains.log[p]) != by), None)
     if copy is not None:
-        return (f"{_whose(copy)} {'import of' if adopted else 'ruling on'} {here} ({copy.get('decision_id')}), from "
+        return (f"{_whose(copy)} {'import of' if adopted else 'ruling on'} {here}{_on_day(copy)}, from "
                 f"another copy of this workbook, is what is recorded now; this {noun} was not made against it, so{tail}")
     # c14m MED-3: their own earlier ruling on this row, from another adoption of this sheet, governs now
     own = next((chains.log[p] for p in run if _ruled_here(chains.log, p, cell.get("ruling"))), None)
     if own is not None:
         if adopt_id is None:  # c14n LOW-4: no readable adopt id: which adoption it came from is not known
-            return (f"a ruling on this row ({own.get('decision_id')}), from this sheet, is what is recorded now; this "
+            return (f"a ruling on this row ({_by_when(own)}), from this sheet, is what is recorded now; this "
                     f"ruling was not made against it, so{tail}")
         mine = by is None or _decider(own) == by
-        return (f"{'your earlier' if mine else _whose(own)} ruling on this row "
-                f"({own.get('decision_id')}) is what is recorded now; this ruling, on another adoption of the same "
+        return (f"{'your earlier' if mine else _whose(own)} ruling on this row"
+                f"{_on_day(own)} is what is recorded now; this ruling, on another adoption of the same "
                 f"sheet, was not made against it, so{tail}")
     # a ruling read before --supersede: "adopted before" only when the log's place or the time proves it
     placed = bool(run) and _since_adopt(run[-1], chain[-1], adopted_at, exported_utc)
@@ -2139,17 +2263,89 @@ def _stale_reason(cell: Mapping, chain: Sequence[Mapping], chains: "_Chains", ru
     if placed and against is not None and not any(d.get("decision_id") in against for d in history):
         # c14m LOW-1: adopted with nothing recorded on the target: there was no earlier value to rule against
         if adopted:
-            return (f"this cell was adopted with nothing recorded here, before {first} recorded the value now, so it "
+            return (f"this cell was adopted with nothing recorded here, before {first}, so it "
                     f"never saw it{since}:{tail}")
-        return (f"ruled on a workbook adopted with nothing recorded here; this ruling was made before {first} recorded "
-                f"the value now, so it never saw it{since}:{tail}")
+        return (f"ruled on a workbook adopted with nothing recorded here; this ruling was made before {first}, "
+                f"so it never saw it{since}:{tail}")
     if adopted:
         lead = (f"this cell was adopted before {first}{since}, against an earlier value, so" if placed
-                else f"this cell is not shown to have been adopted against {first}, so")
+                else f"this cell is not shown to have been adopted against {first_value}, so")
         return f"{lead}{tail}"
     lead = (f"ruled on a workbook adopted before {first}{since}; this ruling was made against an earlier value, so"
-            if placed else f"ruled on a workbook not shown to have been adopted against {first}, so")
+            if placed else f"ruled on a workbook not shown to have been adopted against {first_value}, so")
     return f"{lead}{tail}"
+
+
+#: c15b M2: how a reason ends for a target of a cell that reaches several: never a per-target command, which would
+#: record the value on that target alone and leave the row split; the cell's one command covers them all
+_CELL_COMMAND_TAIL = ", or record this value for all {n} targets of this cell with one command ({key}: command)"
+_OFFER = ", or record this value directly: "
+
+
+def _by_cell_and_commands(report: dict, how_of: Mapping[tuple[str, str], str],
+                          slot_of: Mapping[str, tuple[str, str]]) -> None:
+    """c15b M1, M2, M4 (:func:`plan_and_record`): ``clashes_by_cell`` and ``stale_by_cell``, one entry per cell of the
+    per-target ``clashes`` and ``stale`` lists (kept, per target, in ``--json``): how many targets and runs, how many
+    clash, are held back with them, or already hold the value, the cell's own reason, and ONE command that records the
+    value for every target of the cell that does not hold it (:func:`decide_command`; ``isaac bundle decide`` takes
+    ``--target`` once per target). A per-target reason of a cell that reaches several targets ends by naming that
+    command instead of its own. c15b M4: a target that already holds the value, in a cell another of whose targets
+    still holds a different one, is never told adopting again settles the row: adopting again would still ask it."""
+    def holding(x: Mapping) -> bool:
+        reason = str(x.get("reason") or "")
+        return bool(x.get("holds_value")) or _ALREADY_TAIL in reason or reason.endswith(
+            f"the value is already {_shown(x['value'])}")
+
+    # M4: a cell another of whose targets keeps a DIFFERENT recorded value after this import (its own clash, a stale
+    # ruling over it, or a target held back that holds one)
+    differs = {x["cell"] for key in ("clashes", "stale") for x in report[key]
+               if not holding(x) and (x.get("existing") or x.get("decision_id"))}
+    for key, out in (("clashes", "clashes_by_cell"), ("stale", "stale_by_cell")):
+        groups: dict[str, list[dict]] = {}
+        for x in report[key]:
+            groups.setdefault(x["cell"], []).append(x)
+        report[out] = []
+        for name, xs in groups.items():
+            holds = [x for x in xs if holding(x)]
+            needs = [x for x in xs if x not in holds]
+            own = next((x for x in needs if not x.get("blocked_by")), needs[0] if needs else xs[0])
+            pairs = [(x["target"]["id"], how_of.get((name, x["target"]["id"]), "correct")) for x in needs]
+            command = _cell_command(pairs, xs[0]["value"], slot_of) if pairs else None
+            if name in differs:
+                for x in holds:  # M4: adopting again would still find another target holding a different value
+                    x["reason"] = str(x["reason"]).replace(_ALREADY_TAIL, (
+                        "; another target of this row still holds a different value, so adopting again would ask it "
+                        "again: adopt again and rule the row, or record the value for all of them with the cell's one "
+                        "command"))
+            if len(pairs) > 1 and command:  # one target to record: its own command is the cell's
+                # a per-run answer slot is answered through its question one run at a time: its own command stays
+                for x in (x for x in needs if x["target"]["id"] not in slot_of):
+                    head, sep, _tail = str(x["reason"]).rpartition(_OFFER)
+                    if sep:
+                        x["reason"] = head + _CELL_COMMAND_TAIL.format(n=len(pairs), key=out)
+            reason = str(own.get("reason") or "")
+            report[out].append({
+                "cell": name, "header": xs[0].get("header"), "value": xs[0]["value"], "targets": len(xs),
+                "runs": len({x.get("run_id") for x in xs if x.get("run_id")}),
+                "clashes": sum(1 for x in needs if not x.get("blocked_by")),
+                "held_back": sum(1 for x in needs if x.get("blocked_by")), "hold_value": len(holds),
+                "target_ids": [x["target"]["id"] for x in needs],
+                "reason": reason.split(_OFFER, 1)[0].split(_CELL_COMMAND_TAIL.split("{", 1)[0], 1)[0],
+                "command": command})
+
+
+def _cell_command(pairs: Sequence[tuple[str, str]], value: Any, slot_of: Mapping[str, tuple[str, str]]) -> str:
+    """c15b M2: the ``decide`` command(s) recording ``value`` for every target of ``pairs`` ((target, decision)) at once:
+    one per decision, naming every target (a per-run answer slot the import added is answered through its question,
+    one run at a time: ``--question <id> --only run:<id>``), joined by ``&&``."""
+    by_how: dict[str, list[str]] = {}
+    slots = []
+    for tid, how in pairs:
+        if tid in slot_of:
+            slots.append(decide_command(tid, how, value, slot_of[tid]))
+        else:
+            by_how.setdefault(how, []).append(tid)
+    return " && ".join([decide_command(tids, how, value) for how, tids in by_how.items()] + slots)
 
 
 def _prior(bundle: Mapping, kind: str, obj: Mapping, latest: Mapping) -> Mapping | None:
@@ -2166,6 +2362,7 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
     index = _Index(bundle)
     latest = B._decisions_by_target(bundle.get("scientist_decisions") or ())
     report: dict[str, list] = {"decisions": [], "clashes": [], "already": [], "tied": [], "stale": [], "refused": [],
+                               "over_recorded": [],  # c15b H2: rulings the row asked for, recorded over the value now
                                "nowhere": list(cells["nowhere"]), "left_alone": [], "campaign_not_filled": [],
                                "contradictions": []}
     runs_by_id = {r["run_id"]: r for r in bundle["runs"]}
@@ -2365,7 +2562,7 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
     # c14p MED-1: a stale ruling whose target already holds its value: listed, never a reason to hold back the rest
     keeps_value: set[tuple[str, str]] = set()
     # c15a LOW-1: the "seen" clash lines of each gated cell, rewritten when another target of the cell stops --supersede
-    seen_lines: dict[str, list[tuple[dict, str, str, Any]]] = {}
+    seen_lines: dict[str, list[tuple[dict, str, str, Any, str]]] = {}
 
     def clash(cell: Mapping, tid: str, run_id: str | None, why: str) -> None:
         """c14p LOW-1: the clash the all-or-nothing lines name; one --supersede would record ("seen") gives way to one
@@ -2387,6 +2584,7 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
             cell = {**cell, "ruled_against": [GOVERNING_UNPLACEABLE]}  # c14m MED-2: its governing ids name nothing sure
         if tid in split:
             report["clashes"].append({"cell": cell["cell"], "target": {"kind": kind, "id": tid}, "value": cell["value"],
+                                      "run_id": obj.get("run_id"), "header": cell["header"],
                                       "reason": "another cell of this workbook gives this target a different value; neither "
                                                 "is recorded" + offer(tid, decision, cell["value"])})
             if gated:  # c14o MED-2: a clash of a gated cell, as one with an earlier decision is
@@ -2417,7 +2615,9 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                 tied.add(tid)
                 report["tied"].append({"cell": cell["cell"], "target": {"kind": kind, "id": tid}, "value": cell["value"],
                                        "run_id": obj.get("run_id"), "header": cell["header"],
-                                       "decision_id": prior.get("decision_id")})
+                                       "decision_id": prior.get("decision_id"),
+                                       "decided_by": (prior.get("decided_by") or {}).get("name"),
+                                       "decided_utc": prior.get("decided_utc")})
             elif untied:
                 # c14k MED-1: a ruling on a workbook adopted before this run of the value began: nothing is recorded,
                 # and it is said apart (never "already recorded": the next adopt of this sheet still asks it)
@@ -2441,28 +2641,44 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                 # otherwise flip it at every import
                 unseen = gated and not _rules_against_now(
                     cell, prior, cells.get("exported_utc"), chain, history, **placing, keeps=False)
-                if not supersede:
+                # c15b H2: A RULING THE ROW ASKED FOR. A Disagreements row that named the value recorded for this field
+                # ("recorded `-0.8`; your sheet says `0.9`: rule which") asked for exactly this ruling: made against that
+                # value (one of the same-value run that governs now is among the decisions the row read at adopt, and
+                # the workbook is placeable), it is recorded over it without --supersede. A decision recorded since
+                # the adopt (unseen), a copy, or another adoption's ruling still never flips it (c14l-c14p)
+                asked = (cell["sheet"] == SHEET_DISAGREE and bool(cell.get("shown")) and not unplaceable and not unseen
+                         and any(d.get("decision_id") in (cell.get("ruled_against") or ()) for d in chain))
+                said_now = _recorded_now(prior, before, cells.get("adopt_id"), placing["by"])  # c15b M3
+                if not supersede and not asked:
                     report["clashes"].append(entry := {
                         "cell": cell["cell"], "target": {"kind": kind, "id": tid}, "value": cell["value"],
+                        "run_id": obj.get("run_id"), "header": cell["header"],
                         "existing": {"decision": prior.get("decision"), "value": before, "decision_id": prior.get("decision_id"),
-                                     "decided_by": (prior.get("decided_by") or {}).get("name")},
+                                     "decided_by": (prior.get("decided_by") or {}).get("name"),
+                                     "decided_utc": prior.get("decided_utc"),
+                                     "source": _source_of(prior, cells.get("adopt_id"), placing["by"])},
                         # c14p LOW-3: an adopted answer cell is "this cell", settled by adopting again then --supersede
-                        "reason": ("an earlier scientist decision gives a different value; skipped, and --supersede does not "
-                                   "record it either: " + (UNPLACEABLE_REASON + (
+                        "reason": (f"an earlier scientist decision gives a different value ({said_now}); skipped, and "
+                                   "--supersede does not record it either: " + (UNPLACEABLE_REASON + (
                                        " and rule against what is recorded now" if noun_of[cell["cell"]] == "ruling"
                                        else ", then import with --supersede") if unplaceable else
                                        f"this {noun_of[cell['cell']]} was not made against the value recorded now. "
                                        + _again(noun_of[cell["cell"]] == "ruling"))
                                    + offer(tid, decision, cell["value"]) if unseen else
                                    # c14n LOW-6: the parenthesis closes before the command, so a pasted one ends cleanly
-                                   "an earlier scientist decision gives a different value; skipped (pass --supersede to "
-                                   "record this one)" + offer(tid, decision, cell["value"])),
+                                   f"an earlier scientist decision gives a different value ({said_now}); skipped (pass "
+                                   "--supersede to record this one)" + offer(tid, decision, cell["value"])),
                     })
                     if gated:  # c14o MED-2
                         clash(cell, tid, obj.get("run_id"), "unseen" if unseen else "seen")
                         if not unseen:
-                            seen_lines.setdefault(cell["cell"], []).append((entry, tid, decision, cell["value"]))
+                            seen_lines.setdefault(cell["cell"], []).append((entry, tid, decision, cell["value"], said_now))
                     continue
+                if asked and not supersede:
+                    report["over_recorded"].append({"cell": cell["cell"], "target": {"kind": kind, "id": tid},
+                                                    "value": cell["value"], "run_id": obj.get("run_id"),
+                                                    "header": cell["header"], "recorded_now": before,
+                                                    "decision_id": prior.get("decision_id"), "said": said_now})
                 if unseen:
                     report["stale"].append({"cell": cell["cell"], "target": {"kind": kind, "id": tid}, "value": cell["value"],
                                             "run_id": obj.get("run_id"), "header": cell["header"],
@@ -2567,9 +2783,10 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
             if first["why"] != "seen":
                 # c15a LOW-1: --supersede records none of this cell's targets while another is unseen or split, so a
                 # "seen" line never says to pass it: it says what stops it, and offers adopting again
-                for entry, tid, how, value in seen_lines.get(name, ()):
+                for entry, tid, how, value, said in seen_lines.get(name, ()):
                     entry["reason"] = (
-                        f"an earlier scientist decision gives a different value; skipped, and --supersede records none of "
+                        f"an earlier scientist decision gives a different value ({said}); skipped, and "
+                        f"--supersede records none of "
                         f"this {noun}'s targets, because {first['tid']}{' (' + first['run_id'] + ')' if first.get('run_id') else ''} "
                         f"{why}. {fix}" + offer(tid, how, value))
             for x in reached[name]:
@@ -2578,6 +2795,7 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                     continue
                 report["clashes"].append({
                     "cell": name, "target": x["target"], "value": x["value"], "run_id": x["run_id"],
+                    "header": x.get("header"), "decision_id": x.get("decision_id"),  # c15b M4: what it holds now
                     "blocked_by": first["tid"],  # c14p LOW-2: held back with that clash, not a clash of its own
                     **({"holds_value": True} if (name, x["target"]["id"]) in holds else {}),  # c15a LOW-3
                     "reason": (f"this {noun} reaches {len(reached[name])} targets and is recorded for all of them or none, "
@@ -2610,6 +2828,11 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
     gone = set(M.drop_unrecorded_slots(bundle, slots_added))
     report["decisions"] = [d for d in report["decisions"] if d["target"]["id"] not in gone]
     report["tied"] = [t for t in report["tied"] if t["target"]["id"] not in gone]
+    report["over_recorded"] = [x for x in report["over_recorded"]
+                               if (x["cell"], x["target"]["id"]) in {(d["cell"], d["target"]["id"]) for d in report["decisions"]}]
+    # c15b M1, M2, M4: each cell's clashes and stale targets, ONE entry per cell, with one command for all its targets
+    how_of = {(c["cell"], tid): d for c, d, _k, _o, tid in planned}
+    _by_cell_and_commands(report, how_of, slot_of)
     kept = {(d["cell"], d.get("run_id") or "") for d in report["decisions"]}
     kept_cells = {d["cell"] for d in report["decisions"]}
     report["contradictions"] = [c for c in report["contradictions"]
@@ -2763,9 +2986,14 @@ def keep_off_list_cells(bundle: dict, cells: Sequence[Mapping], *, by: str | Non
                                                     "cells": cells_for_runs(full, run_ids)})
 
         same = M.vocabulary_request_kept(bundle, **ask(row["run_ids"]))  # read only: nothing kept to be taken back
-        if same is not None:
-            kept.append({**row, "request_id": same["request_id"], "new": False})
-            earlier.append((kept[-1], same))
+        # c15b L4: the same request (field, word, runs, file and cells) kept under another name is not kept twice; a
+        # request keeps one name (the bundle schema has no place for a second), so the second is said, not stored
+        other = M.vocabulary_request_kept(bundle, **ask(row["run_ids"]), anyone=True) if same is None and by else None
+        if same is not None or other is not None:
+            found = same if same is not None else other
+            kept.append({**row, "request_id": found["request_id"], "new": False,
+                         **({"kept_by": (other.get("requested_by") or {}).get("name")} if other is not None else {})})
+            earlier.append((kept[-1], found))
             continue
         probe = dict(row)
         say_answered_since(bundle, [(probe, before)])
@@ -2859,6 +3087,8 @@ def _request_lines(items: Sequence[Mapping], applied: bool) -> list[str]:
         more = f" and {len(r['cells']) - _CELLS_SHOWN} more" if len(r["cells"]) > _CELLS_SHOWN else ""
         tag = (f"{r['request_id']}{'' if r.get('new') else ', kept earlier'}" if applied and r.get("request_id") else
                "would be kept")
+        if r.get("kept_by") and applied:  # c15b L4: kept once, under the name that asked first
+            tag += f" by {r['kept_by']}; the same cells, so not kept again (a request keeps one name)"
         same = P.equivalent_term(r["field_path"], r["term"])
         out.append(f"  {r['header']} {r['term']!r} for {reach} ({', '.join(r['cells'][:_CELLS_SHOWN])}{more}) [{tag}]"
                    + (f"; use `{same}` (an existing term)" if same else ""))
@@ -2943,10 +3173,15 @@ def import_template(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None 
         # c14k MED-1: a ruling that keeps the recorded value, on a workbook adopted before that value's run began: not
         # tied, nothing recorded; adopting the sheet again settles it
         "stale_rulings": report["stale"],
+        # c15b M1, M2: the same, one entry per cell, each with ONE command for every target of the cell
+        "stale_by_cell": report["stale_by_cell"],
+        # c15b H2: rulings a Disagreements row asked for ("… rule which"), recorded over the value recorded now
+        "rulings_over_the_value_recorded": report["over_recorded"],
         "invalid_cells": cells["invalid"],
         # an invalid cell refused ONLY because its word is not on the field's list: kept as a vocabulary request
         "vocabulary_requests": requests,
         "clashes": report["clashes"],
+        "clashes_by_cell": report["clashes_by_cell"],
         "refused": report["refused"],
         "unmapped_columns": list(cells["unmapped"].values()),
         "recorded_nowhere": report["nowhere"],
@@ -2961,8 +3196,12 @@ def import_template(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None 
         "campaign_not_filled": report["campaign_not_filled"],
         # a beamtime-wide answer recorded here that a group's own, differing answer keeps from its record
         "not_reached": report["not_reached"],
-        "statement": ("Recorded as scientist decisions (identity: self_reported_local_user, unverified)."
-                      if apply else "PREVIEW: nothing was written. Add --apply to record these decisions."),
+        # c15b L2: an --apply that records no decision says so, never "Recorded as scientist decisions"
+        "statement": ("PREVIEW: nothing was written. Add --apply to record these decisions." if not apply else
+                      "Recorded as scientist decisions (identity: self_reported_local_user, unverified)."
+                      if report["recorded_target_ids"] else
+                      "Nothing new recorded: no scientist decision" + (
+                          "; the vocabulary request(s) above were kept." if any(r.get("new") for r in requests) else ".")),
     })
 
 
@@ -3075,6 +3314,39 @@ def _tied_summary(rep: Mapping) -> str:
             f"({len(tied)} target{'s' if len(tied) != 1 else ''})")
 
 
+def _cell_lines(items: Sequence[Mapping]) -> list[str]:
+    """c15b M1: one line per cell of ``clashes_by_cell`` / ``stale_by_cell``: its targets and runs, how many clash, are
+    held back with them or already hold the value, its own reason, and one command for every target of it."""
+    out = []
+    for x in items:
+        parts = [f"{x['clashes']} clash{'' if x['clashes'] == 1 else 'es'}" if x["clashes"] else "", f"{x['held_back']} held back with them"
+                 if x["held_back"] else "", f"{x['hold_value']} already hold the value" if x["hold_value"] else ""]
+        parts = [p for p in parts if p]
+        runs = f" on {x['runs']} run(s)" if x["runs"] else ""
+        head = f"  {x['cell']} {x.get('header') or ''} = {x['value']!r}: {x['targets']} target(s){runs}"
+        detail = f" ({', '.join(parts)})" if x["targets"] > 1 and parts else ""
+        tail = (f". One command records it for all {len(x['target_ids'])} of them: {x['command']}" if x.get("command")
+                and len(x["target_ids"]) > 1 else f", or record this value directly: {x['command']}" if x.get("command")
+                else "")
+        out.append(f"{head}{detail}: {x['reason']}{tail}")
+    return out
+
+
+def _over_lines(items: Sequence[Mapping]) -> list[str]:
+    """c15b H2: one line per ruling cell recorded over the value recorded now: the runs and what each held."""
+    groups: dict[str, list[Mapping]] = {}
+    for x in items:
+        groups.setdefault(x["cell"], []).append(x)
+    out = []
+    for name, xs in groups.items():
+        was = sorted({_shown(x["recorded_now"]) for x in xs})
+        runs = len({x["run_id"] for x in xs if x.get("run_id")})
+        out.append(f"  {name} {xs[0].get('header') or ''} = {xs[0]['value']!r}: {len(xs)} target(s)"
+                   + (f" on {runs} run(s)" if runs else "")
+                   + (f", replacing what is {xs[0]['said']}" if len(xs) == 1 else f", replacing {', '.join(was)} recorded now"))
+    return out
+
+
 def render_report(rep: Mapping, *, full: bool = False) -> str:
     """Plain text for the terminal. COMPACT by default: one line per cell or column with its number
     of decisions, then every invalid cell, clash, refusal and refused row in full, and the totals.
@@ -3117,24 +3389,40 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
         add(("Rulings recorded" if rep["applied"] else "Rulings to be recorded") + " with the same value, now tied to "
             "your sheet (the value does not change; adopting this sheet again reads them as ruled until a different "
             "value, a reject or a defer is recorded):")
-        for x in rep["rulings_tied_to_sheet"]:
+        for x in rep["rulings_tied_to_sheet"]:  # c15b L3: no decision id here (--json keeps it)
             run = f" {x['run_id']}" if x.get("run_id") else ""
-            add(f"  {x['cell']}{run} {x['header']} = {x['value']!r} (was {x['decision_id']})")
+            add(f"  {x['cell']}{run} {x['header']} = {x['value']!r}")
+    if rep.get("rulings_over_the_value_recorded"):
+        add("")
+        # c15b H2: a ruling its row asked for, made against the value recorded now, replaces it without --supersede
+        add(("Rulings recorded" if rep["applied"] else "Rulings to be recorded") + " over the value recorded now (the "
+            "row named it and asked for your ruling; read each back):")
+        for x in _over_lines(rep["rulings_over_the_value_recorded"]):
+            add(x)
     if rep.get("stale_rulings"):
         add("")
         # c14l LOW-2: neutral; each line's reason says why (adopted before the value recorded now, a damaged hidden
         # sheet, a ruling --supersede does not record over a value it never saw)
         add("Cells not tied to your sheet (nothing is recorded for them and the value recorded now is kept; each line "
             "says why):")
-        for x in rep["stale_rulings"]:
-            run = f" {x['run_id']}" if x.get("run_id") else ""
-            add(f"  {x['cell']}{run} {x['header']} = {x['value']!r}: {x['reason']}")
+        if full:
+            for x in rep["stale_rulings"]:
+                run = f" {x['run_id']}" if x.get("run_id") else ""
+                add(f"  {x['cell']}{run} {x['header']} = {x['value']!r}: {x['reason']}")
+        else:  # c15b M1: one line per cell, with one command for all its targets
+            lines += _cell_lines(rep.get("stale_by_cell") or ())
     if rep.get("disagreements_already_recorded"):
         add("")
         add("Disagreements already recorded (left blank, so the recorded value is kept; nothing new is recorded for them):")
         for x in rep["disagreements_already_recorded"]:
             add(f"  {x['id']} {x['cell']} {x['header']}: theirs {x['their_value']!r}; {x['recorded']['statement']}")
     in_full = [("Clashes (skipped)", "clashes"), ("Refused", "refused"), ("Rows refused", "rows_refused")]
+    if not full and rep["clashes"]:
+        # c15b M1: one line per cell (a whole-beamtime cell reaches every run), with one command for all its targets
+        in_full.remove(("Clashes (skipped)", "clashes"))
+        add("")
+        add("Clashes (skipped; one line per cell, --json lists every target):")
+        lines += _cell_lines(rep.get("clashes_by_cell") or ())
     if full:
         in_full.insert(0, ("Invalid cells (recorded as nothing)", "invalid_cells"))
         in_full.insert(3, ("Recorded nowhere (no target for that run/field)", "recorded_nowhere"))
@@ -3645,6 +3933,8 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
             ws[our_ref] = value
             ws[our_ref].comment = Comment(f"From your sheet: {their_file} {their_ref}", "ISAAC")
             adopted_cells.append((target_cell, their_ref))
+            if run_id is None:  # c15b M5: a Campaign Info answer reaches every File List run, on their rows or not
+                result["campaign_cells_adopted"] = result.get("campaign_cells_adopted", 0) + 1
             adopted_reach[target_cell] = {"path": path, "scope": "run" if run_id else "experiment", "runs": runs}
             adopted_paths.add((run_id, path))
             result["cells_adopted"] += 1
@@ -3822,6 +4112,7 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
                               beamtime=beamtime_reach(index, g["path"], live), chain_of=chains)
             g["already_recorded"], g["recorded_note"] = st["already_recorded"], st["recorded_note"]
             g["governing"] = st["governing"]
+            g["shown"] = st.get("shown") or []  # c15b H2: the fields whose recorded values the row names
         wd = wb.create_sheet(SHEET_DISAGREE, index=wb.sheetnames.index(SHEET_SUGGEST))
         from openpyxl.styles import Alignment, Font
 
@@ -3865,7 +4156,8 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
                 # does not (the ruling is recorded for this row's runs, beside it)
                 wd[f"{DISAGREE_RULING_COLUMN}{row}"].comment = Comment(
                     f"{rec['statement'][0].upper()}{rec['statement'][1:]}: a blank ruling records nothing new. "
-                    + ("A different value here is recorded over it only with `template import --supersede`." if rec["run_own"]
+                    + ("A different value here is recorded over it when you import (the preview names it); only if the "
+                       "value recorded changes before then does it need `template import --supersede`." if rec["run_own"]
                        else "It is a beamtime-wide answer: a different value here is recorded for this row's runs alone, "
                             "beside it (the import preview says what it records)."), "ISAAC")
             if g.get("allowed"):
@@ -3908,7 +4200,7 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
         marker.cell(row=r, column=1, value="[disagreements]")
         r += 1
         heads = ("id", "row", "kind", "header", "target_field_path", "scope", "targets", "their_file", "their_cells",
-                 "their_value", "governing_decisions")
+                 "their_value", "governing_decisions", RECORDED_SHOWN)
         for j, h in enumerate(heads, start=1):
             marker.cell(row=r, column=j, value=h)
         for g in entries:
@@ -3918,7 +4210,7 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
             # c14j MED-1: the decisions the row was ruled against (a JSON list, "[]" for none)
             for j, v in enumerate((g["id"], g["row"], g["kind"], g["header"], g["path"], g["scope"], targets, their_file,
                                    ", ".join(g["their_cells"]), _ruled_on_text(g["their_value"]),
-                                   json.dumps(g["governing"])), start=1):
+                                   json.dumps(g["governing"]), json.dumps(g["shown"])), start=1):
                 marker.cell(row=r, column=j, value=v)
         r += 2
         marker.cell(row=r, column=1, value="[meta]")  # read into the same meta as the first block
@@ -3962,10 +4254,16 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
                                _command="bundle template adopt",
                                _keep_off_list={"by": by, "orcid": orcid, "file": their_file})
     exported["adopted"] = _as_text_dates(exported["adopted"])  # their cells as read: a date cell is a datetime
+    exported["by"] = by  # c15b L1: the next command names them
     exported["statement"] = (f"Answer cells hold your sheet's value only where no file reading contradicts it; each cites "
                              f"its cell in {their_file}. Nothing that contradicts a file is in an answer cell: rule on each "
                              f"row of the {SHEET_DISAGREE} sheet (Your ruling), then `template import`.")
     return exported
+
+
+def _await(n: int) -> str:
+    """c15b L3: "1 awaits", "2 await"."""
+    return "awaits" if n == 1 else "await"
 
 
 def render_adopt_summary(result: Mapping) -> str:
@@ -3980,7 +4278,11 @@ def render_adopt_summary(result: Mapping) -> str:
                 "them); " if rb.get("shared_runs_only") else "")
              + (f"{rb['outside_live_groups_only']} row(s) name only runs in no live record group (nothing adopted from "
                 "them; --json: runs_outside_live_groups); " if rb.get("outside_live_groups_only") else "")
-             + f"{len(a['unmatched_rows'])} row(s) matched no run; {len(a['unmatched_runs'])} run(s) are on none of your rows.",
+             + f"{len(a['unmatched_rows'])} row(s) matched no run; {len(a['unmatched_runs'])} run(s) are on none of your rows"
+             # c15b M5: a Campaign Info answer reaches every File List run, those on none of their rows too
+             + (" (Campaign Info still applies to them: its answers reach every File List run)"
+                if a["unmatched_runs"] and (a.get("campaign_cells_adopted") or any(
+                    d.get("scope") == "experiment" for d in a["disagreements"])) else "") + ".",
              f"Cells adopted: {a['cells_adopted']} (each cites your cell)."]
     mapped = [f"{m['header']} -> {m['to']}" for m in a["their_columns_mapped"] if m.get("by_alias")]
     if mapped:
@@ -3994,13 +4296,14 @@ def render_adopt_summary(result: Mapping) -> str:
     settled = [d for d in a["disagreements"] if d.get("already_recorded")]
     if settled:
         # c14 MED-1: a row the scientist already ruled on (their decision stands for every run it names) is not asked again
+        left = len(a["disagreements"]) - len(settled)
         lines.append(f"Disagreements already recorded: {len(settled)} of {len(a['disagreements'])} (each says what is "
-                     f"recorded; a blank ruling keeps it); {len(a['disagreements']) - len(settled)} await your ruling.")
+                     f"recorded; a blank ruling keeps it); {left} {_await(left)} your ruling.")
 
     def waiting(ds: Sequence[Mapping]) -> str:
         done = sum(1 for d in ds if d.get("already_recorded"))
         return ("each awaits your ruling" if not done else
-                f"{len(ds) - done} await your ruling, {done} already recorded (a blank ruling keeps it)")
+                f"{len(ds) - done} {_await(len(ds) - done)} your ruling, {done} already recorded (a blank ruling keeps it)")
 
     def recorded(d: Mapping) -> str:
         said = (d.get("already_recorded") or {}).get("statement") or d.get("recorded_note")
@@ -4072,6 +4375,8 @@ def render_adopt_summary(result: Mapping) -> str:
         lines.append(f"{a['ai_readings_of_their_sheet_not_compared']} AI reading(s) of your sheet itself were not compared: they are your sheet, not the files.")
     lines.append("")
     lines.append(result["statement"])
-    lines.append(f"Then: isaac bundle template import {result.get('bundle_dir') or '<bundle_dir>'} {result['written']} --by \"<your name>\" "
+    # c15b L1: the name passed with --by, when one was
+    who = shlex.quote(result["by"].strip()) if isinstance(result.get("by"), str) and result["by"].strip() else '"<your name>"'
+    lines.append(f"Then: isaac bundle template import {result.get('bundle_dir') or '<bundle_dir>'} {result['written']} --by {who} "
                  "(a preview; add --apply to record).")
     return "\n".join(lines)

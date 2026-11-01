@@ -122,8 +122,10 @@ def test_supersede_flip_flop_converges(grouped, tmp_path, capsys, ticking):
         assert rep["recorded"] == 0 and not rep["clashes"] and not rep["rulings_tied_to_sheet"], cycle
         [stale] = rep["stale_rulings"]
         assert stale["target"]["id"] == tid and stale["value"] == 12 and stale["decision_id"] == after_a
+        # c15b L3: named by who and when, never by decision id (decision_id above keeps it)
         assert stale["reason"] == (
-            f"ruled on a workbook adopted before {after_a}; this ruling was made against an earlier value, so nothing is "
+            f"ruled on a workbook adopted before {WHO} recorded the value now (2099-01-01); this ruling was made "
+            "against an earlier value, so nothing is "
             "recorded for it, even with --supersede, and the value recorded now is kept. Adopt again and rule against "
             "what is recorded now" + _or_decide(tid, "confirm"))
         rep = _imp(grouped, tmp_path / "Ar.xlsx", capsys, "--supersede")
@@ -136,16 +138,17 @@ def test_without_supersede_the_stale_clash_says_supersede_does_not_record_it(gro
     _imp(grouped, tmp_path / "Ar.xlsx", capsys, "--supersede")
     rep = _imp(grouped, tmp_path / "Br.xlsx", capsys)
     [clash] = [c for c in rep["clashes"] if c["target"]["id"] == tid]
-    assert clash["reason"].startswith("an earlier scientist decision gives a different value; skipped, and --supersede "
+    assert clash["reason"].startswith(f"an earlier scientist decision gives a different value (recorded now: 2 by {WHO} "
+                                      "(2099-01-01), from another adoption); skipped, and --supersede "
                                       "does not record it either: this ruling was not made against the value recorded now")
     assert "pass --supersede" not in clash["reason"]
-    # a ruling made against the value recorded now keeps the old advice
+    # c15b H2: a ruling made against the value recorded now, on a row that named it, is recorded without --supersede
     b2, _ = _state(grouped, s2, tmp_path / "B2.xlsx", capsys)
     _rule(tmp_path / "B2.xlsx", tmp_path / "B2r.xlsx", {b2["id"]: 12})
     rep = _imp(grouped, tmp_path / "B2r.xlsx", capsys)
-    [clash] = [c for c in rep["clashes"] if c["target"]["id"] == tid]
-    assert clash["reason"].endswith("skipped (pass --supersede to record this one)" + _or_decide(tid, "confirm"))
-    assert len(_decisions_on(grouped, tid)) == 2
+    assert not [c for c in rep["clashes"] if c["target"]["id"] == tid]
+    assert [x["target"]["id"] for x in rep["rulings_over_the_value_recorded"]] == [tid]
+    assert len(_decisions_on(grouped, tid)) == 3 and _value_now(grouped, tid) == 12
 
 
 def test_a_fresh_ruling_against_the_value_recorded_now_still_supersedes(grouped, tmp_path, capsys, ticking):
@@ -190,8 +193,8 @@ def test_an_old_workbook_supersedes_only_when_its_time_places_it_after_the_value
     after_a = _decisions_on(grouped, tid)[-1]
     rep = _imp(grouped, tmp_path / "B_old.xlsx", capsys, "--supersede")
     [stale] = rep["stale_rulings"]
-    assert stale["reason"].startswith(f"ruled on a workbook adopted before {after_a['decision_id']}; this ruling was made "
-                                      "against an earlier value")
+    assert stale["reason"].startswith(f"ruled on a workbook adopted before {WHO} recorded the value now (2099-01-01); "
+                                      "this ruling was made against an earlier value")
     assert _value_now(grouped, tid) == 2
     _adopted_before_governing_was_kept(tmp_path / "Br.xlsx", tmp_path / "B_new.xlsx", after_a["decided_utc"])
     rep = _imp(grouped, tmp_path / "B_new.xlsx", capsys, "--supersede")
@@ -235,9 +238,10 @@ def test_a_reject_or_defer_before_the_adopt_never_stops_a_tie(grouped, tmp_path,
     tid, s, before, after = _decided_before_adopt(grouped, tmp_path, capsys, decision)
     code, text, err = _import_text(grouped, tmp_path / "Ar.xlsx", capsys, "--apply")
     assert code == 0, err
-    assert f"{before['decision_id']} {decision}ed the value since" not in text
+    assert f"{decision}ed since" not in text and before["decision_id"] not in text
     assert "Cells not tied to your sheet" not in text
-    assert "'Disagreements'!H" in text and f"(was {after['decision_id']})" in text  # tied
+    # tied (c15b L3: the line names no decision id)
+    assert "with the same value, now tied to your sheet" in text and after["decision_id"] not in text
     assert _state(grouped, s, tmp_path / "re.xlsx", capsys)[1] == "settled"  # no extra round
     assert len(_decisions_on(grouped, tid)) == 3
 
@@ -251,8 +255,10 @@ def test_without_the_adopt_position_a_decision_before_the_adopt_is_never_said_to
     _without_adopt_position(tmp_path / "Ar.xlsx", tmp_path / "old.xlsx", before["decided_utc"])  # adopted after it
     rep = _imp(grouped, tmp_path / "old.xlsx", capsys)
     [stale] = rep["stale_rulings"]
-    assert stale["reason"] == (f"ruled on a workbook adopted before {after['decision_id']}; nothing is recorded for "
-                               "this ruling: the value is already 12; adopt again to settle this row")  # c14n LOW-3
+    assert stale["reason"] == (f"ruled on a workbook adopted before {OTHER} recorded the value now (2099-01-01); "
+                               "nothing is recorded for this ruling: the value is already 12; adopt again to settle this "
+                               "row")  # c14n LOW-3
+    assert stale["decision_id"] == after["decision_id"]
     assert NOT_SINCE not in stale["reason"]
     assert len(_decisions_on(grouped, tid)) == 2
 
@@ -306,9 +312,10 @@ def test_a_different_value_recorded_after_the_adopt_is_still_said_since(grouped,
     M.decide(grouped, target_ids=[tid], decision="confirm", value=None, by=OTHER, orcid=None)  # 12 again
     back = _decisions_on(grouped, tid)[-1]["decision_id"]
     [stale] = _imp(grouped, tmp_path / "Ar.xlsx", capsys)["stale_rulings"]
-    assert stale["reason"] == (f"ruled on a workbook adopted before {back}, and a different value was recorded since "
-                               f"({changed}); nothing is recorded for this ruling: the value is already 12; adopt again "
-                               "to settle this row")  # c14n LOW-3
+    assert stale["reason"] == (f"ruled on a workbook adopted before {OTHER} recorded the value now (2099-01-01), and "
+                               f"a different value was recorded since (by {OTHER}, 2099-01-01); nothing is recorded for "
+                               "this ruling: the value is already 12; adopt again to settle this row")  # c14n LOW-3
+    assert stale["decision_id"] == back and changed != back
 
 
 # --- LOW-1 ----------------------------------------------------------------------------------------------------
@@ -352,8 +359,9 @@ def test_the_stale_section_and_summary_are_neutral(grouped, tmp_path, capsys, ti
     lines = text.splitlines()
     head = lines.index("Cells not tied to your sheet (nothing is recorded for them and the value recorded now is kept; "
                        "each line says why):")
-    assert lines[head + 1].startswith("  'Disagreements'!H") and " run-007 pH = 12: ruled on a workbook adopted before " in (
-        lines[head + 1])
+    # c15b M1: one line per cell, its runs counted
+    assert lines[head + 1].startswith("  'Disagreements'!H")
+    assert " pH = 12: 1 target(s) on 1 run(s): ruled on a workbook adopted before " in lines[head + 1]
     assert "even with --supersede" in lines[head + 1]
     summary = next(x for x in lines if x.startswith("Summary:"))
     assert "; 1 cell(s) not tied to your sheet (nothing recorded)" in summary

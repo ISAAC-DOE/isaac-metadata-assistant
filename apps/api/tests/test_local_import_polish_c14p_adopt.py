@@ -109,7 +109,8 @@ def test_p3b_a_same_value_target_and_a_clash_say_one_thing_each(grouped, tmp_pat
     stale = {x["target"]["id"]: x for x in rep["stale_rulings"]}
     assert set(stale) == {tids[1]} and set(clashes) == set(tids) - {tids[1]}  # never both
     assert "blocked_by" not in clashes[tids[0]]
-    assert clashes[tids[0]]["reason"].startswith("an earlier scientist decision gives a different value; skipped (pass "
+    assert clashes[tids[0]]["reason"].startswith("an earlier scientist decision gives a different value (recorded now: "
+                                                 f"'BL12' by {OTHER} (2099-01-01), from a decide); skipped (pass "
                                                  "--supersede to record this one)")
     for tid in tids[2:]:
         assert clashes[tid]["blocked_by"] == tids[0]
@@ -117,8 +118,12 @@ def test_p3b_a_same_value_target_and_a_clash_say_one_thing_each(grouped, tmp_pat
             f"this ruling reaches 9 targets and is recorded for all of them or none, and {tids[0]} (run-001) holds a "
             "different value, from an earlier scientist decision (its own line says why); nothing is recorded for this "
             "one either. Pass --supersede to record it for all of them")
-    assert stale[tids[1]]["reason"].endswith("the value is already 'BL11'; adopt again to settle this row")
-    assert ("1 clash(es) (7 more target(s) of the same cell(s) held back with them: all or nothing)"
+    # c15b M4: run-001 still holds BL12, so adopting again would not settle the row
+    assert stale[tids[1]]["reason"].endswith("the value is already 'BL11'; another target of this row still holds a "
+                                             "different value, so adopting again would ask it again: adopt again and "
+                                             "rule the row, or record the value for all of them with the cell's one "
+                                             "command")
+    assert ("1 cell(s) clash (8 target(s): 1 clash; 7 held back with them: all or nothing)"
             in _text(grouped, ruled, capsys))
     rep = _imp(grouped, ruled, capsys, "--supersede")  # what the lines said: --supersede records it for all
     assert {d["target"]["id"] for d in _to(rep, tids)} == set(tids) - {tids[1]}
@@ -140,7 +145,8 @@ def test_p4_supersede_is_never_offered_when_a_clash_it_would_not_record_is_there
         assert c["reason"].startswith(
             f"this ruling reaches 9 targets and is recorded for all of them or none, and {tids[1]} (run-002) holds a "
             "different value this ruling was not made against (its own line says why); nothing is recorded for this "
-            "one either. Adopt again and rule against what is recorded now, or record this value directly: ")
+            "one either. Adopt again and rule against what is recorded now, or record this value for all 9 targets of "
+            "this cell with one command (clashes_by_cell: command)")
     rep = _imp(grouped, ruled, capsys, "--supersede")  # and indeed: --supersede records none of them
     assert not _to(rep, tids) and {x["target"]["id"] for x in rep["stale_rulings"]} == set(tids)
 
@@ -156,9 +162,10 @@ def test_an_adopted_cell_is_this_cell_and_adopting_again_then_supersede_records_
     rep = _imp(grouped, tmp_path / "A.xlsx", capsys)
     own = next(c for c in rep["clashes"] if c["target"]["id"] == tids[0])
     assert own["reason"].startswith(
-        "an earlier scientist decision gives a different value; skipped, and --supersede does not record it either: "
+        f"an earlier scientist decision gives a different value (recorded now: 'ZZ Since Source' by {OTHER} "
+        "(2099-01-01), from a decide); skipped, and --supersede does not record it either: "
         "this cell was not made against the value recorded now. Adopt again, then import with --supersede, or record "
-        "this value directly: ")
+        "this value for all 9 targets of this cell with one command (clashes_by_cell: command)")
     assert all("ruling" not in c["reason"] for c in rep["clashes"] if c["cell"] == FAC_CELL)
     rep = _imp(grouped, tmp_path / "A.xlsx", capsys, "--supersede")
     stale = {x["target"]["id"]: x for x in rep["stale_rulings"]}
