@@ -4,8 +4,9 @@ WHAT THE FORMAT IS, AS FAR AS IT HAS BEEN VERIFIED (literal structure only)
 ===========================================================================
 Line 1 is the signature ``SSRL   EXAFS Data Collector 4.0`` (three spaces). The header then
 runs: line 2 a timestamp, line 3 ``PTS: N COLS: M``, line 4 a detector file name, line 5 a
-region file name, line 6 a beamline/monochromator line, line 7 a timing line, line 8 a gain
-line, any number of free-text lines, ``Weights:`` and one row, ``Offsets:`` and one row,
+region file name, line 6 a beamline/monochromator line, line 7 a timing line, line 8 the
+``.exp`` COMMENTS1 (on the BL4-3 headers seen, the gain), any number of free-text lines (there,
+COMMENTS2-4 on lines 9-11), ``Weights:`` and one row, ``Offsets:`` and one row,
 ``Data:``, then ``M`` column-name lines, a blank line and ``N`` numeric rows. A ``_A.001``,
 ``_A.002`` ... series are repeat scans of one acquisition name; ``.rgn`` / ``.det`` / ``.exp``
 files and a ``binary/`` folder of the original binary scans sit beside them. Of the run's own

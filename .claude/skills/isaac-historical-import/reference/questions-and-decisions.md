@@ -72,7 +72,8 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   and sorts last; do not ask it again unless they offer an answer (`--skip-deferred` leaves them out).
   A question they did not answer at all is not deferred: record nothing.
 - **Values read from an SSRL XDC scan header's comment lines** (rule `ssrl_xdc_header_comment_v1`: lines 9-12,
-  the `.exp` COMMENTS1-4; line 8 is the gain line and is not read): a value is offered ONLY when the line writes
+  the free text before `Weights:`; on BL4-3 headers these are COMMENTS2-4 on lines 9-11, and COMMENTS1 is line 8,
+  there the gain, which is not read): a value is offered ONLY when the line writes
   it in a plain form, each statement its own segment (split at `,` `;` `|` or two spaces), e.g. `0.1 M HClO4,
   pH 1.3, -0.3 V vs RHE` (a set-point `E = -0.3 V (RHE)`, `-300 mV vs RHE`; a pH `pH 1.3`; an electrolyte
   `100 mM NaClO4` or `KOH 1 M`), and nothing else in the line makes it doubtful (a second potential, OCP, eta,

@@ -3065,7 +3065,7 @@ def stated_potentials_beyond_candidates(bundle: Mapping, member_ids: set) -> lis
             and c.get("target_field_path") == "context.electrochemistry.potential_setpoint_V" for e in c.get("evidence") or ()}
     headers: dict[str, list[Mapping]] = {}
     for e in bundle.get("extended_context") or ():
-        # c16-r: the comment rule's own lines (line 8 is the gain line)
+        # c16-r: the comment rule's own lines (9-12; line 8, COMMENTS1, is not one)
         if (e.get("run_id") in run_ids and B.is_xdc_comment_line(e.get("concept"), e.get("locator"))
                 and isinstance(e.get("raw_literal"), str) and (e["run_id"], e.get("relative_path"), e.get("locator")) not in held):
             headers.setdefault(e["run_id"], []).append(e)
