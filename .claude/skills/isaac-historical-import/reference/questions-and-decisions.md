@@ -144,6 +144,8 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   its allowed values>`. A potentiostatic mode makes the potential set-point required; a galvanostatic
   one, the current set-point. Once the potential set-point is confirmed, the potential scale is what is
   missing until it is answered (the set-point goes in only beside it), so the scale question blocks.
+  With neither answered, both are required now and counted together in the minimum (the scale's
+  `required_because` says it is asked with the set-point), so the scientist is not asked twice.
 
 ## Recording
 

@@ -6,13 +6,44 @@ line, not a measurement.
   moves the steepest points by many robust scales): flagged points within 5 eV of E0 or where the merged curve is
   steep are listed apart and said as points on the edge, not glitches. The stored count, flag and verdict are those
   first written (qc.json is hashed into the result id), so no result id moves.
+* (MED 2) A potentiostatic group with no set-point and no confirmed scale: the minimum said 1 answer (the set-point)
+  and asked for the scale only after it. Both are named and counted now, and the scale question blocks the group.
 """
 
 from __future__ import annotations
 
+import io
+import json
+import shlex
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
+
 import pytest
 
-from test_local_import_records import BY, bdir, fake_upstream, pristine  # noqa: F401  (fixtures)
+from isaac_api.local_import import bundle as B
+from isaac_api.local_import import cli
+from isaac_api.local_import import mutations as M
+from isaac_api.local_import import questions as Q
+
+from test_local_import_records import (  # noqa: F401  (fixtures)
+    BY, _cand, _decide_everything, _miss, _portal, bdir, fake_upstream, pristine)
+from test_local_import_reader_ssrl_xdc import make_scan
+
+POT = "context.electrochemistry.potential_setpoint_V"
+SCALE = "context.electrochemistry.potential_scale"
+
+
+def _quiet(*argv: str) -> tuple[int, str]:
+    buf = io.StringIO()
+    with redirect_stdout(buf), redirect_stderr(buf):
+        rc = cli.main(list(argv))
+    return rc, buf.getvalue()
+
+
+def _questions(bdir_: Path, *extra: str) -> dict:
+    rc, out = _quiet("bundle", "questions", str(bdir_), *extra)
+    assert rc == 0, out
+    return json.loads(out)
 
 
 def _proc():
@@ -110,3 +141,44 @@ def test_a_result_with_no_point_on_the_edge_is_unchanged(tmp_path):
     assert r["qc"]["metrics"]["glitch_points"] >= 1  # the spike sits 84 eV above the edge
     assert "glitch_points_on_edge" not in r["qc"]["metrics"] and "glitch_points_on_edge" not in (r["qc"].get("statements") or {})
     assert "flagged_points_on_edge" not in T.step(r, "deglitch")["outcome"]
+
+
+# --- MED 2: a set-point and its scale are asked together -------------------------------------------------------
+
+
+def _potentiostatic_no_setpoint(bdir_: Path) -> None:
+    _decide_everything(bdir_)
+    b = M.load(bdir_)
+    M.decide(bdir_, target_ids=[_miss(b, B.CONTROL_MODE_PATH, "run-001")], decision="correct", value="potentiostatic", **BY)
+
+
+def test_the_minimum_names_and_counts_the_setpoint_and_its_scale_together(bdir):
+    _potentiostatic_no_setpoint(bdir)
+    qs = _questions(bdir, "--scope", "group:g1", "--blocking-only")
+    minimum = qs["minimum_for_one_group"]
+    assert minimum["group_id"] == "g1"
+    assert minimum["missing_required_now"] == [POT, SCALE]
+    assert minimum["blocking_questions"] == 2 and len(minimum["questions"]) == 2
+    by_field = {e["fields"][0]: e for e in minimum["questions"]}
+    assert set(by_field) == {POT, SCALE}
+    assert "asked now with it, so the scientist is not asked twice" in by_field[SCALE]["required_because"][SCALE]
+    assert f"--field {SCALE}" in by_field[SCALE]["command"]
+    # the scale question blocks this group now, so --blocking-only lists it beside the set-point's
+    listed = {q["question_id"]: q for q in qs["questions"]}
+    assert by_field[SCALE]["question_id"] in listed and listed[by_field[SCALE]["question_id"]]["blocking"] is True
+    assert by_field[POT]["question_id"] in listed
+
+    # answer the scale first, with the command the minimum named: only the set-point is left, counted once
+    argv = shlex.split(by_field[SCALE]["command"].replace("<bundle_dir>", str(bdir))
+                       .replace("<one of its allowed values>", "RHE").replace("<your name>", "Synthetic Scientist"))
+    assert _quiet(*argv[1:])[0] == 0
+    after = _questions(bdir, "--scope", "group:g1", "--blocking-only")["minimum_for_one_group"]
+    assert after["missing_required_now"] == [POT] and after["blocking_questions"] == 1
+
+
+def test_a_confirmed_setpoint_still_names_only_the_scale(bdir):
+    # the c12-q state is unchanged: a confirmed set-point held back by its scale names the scale alone
+    _potentiostatic_no_setpoint(bdir)
+    M.decide(bdir, target_ids=[_cand(M.load(bdir), POT, "run-001")["candidate_id"]], decision="confirm", value=None, **BY)
+    minimum = _questions(bdir, "--scope", "group:g1", "--blocking-only")["minimum_for_one_group"]
+    assert minimum["missing_required_now"] == [SCALE] and minimum["blocking_questions"] == 1

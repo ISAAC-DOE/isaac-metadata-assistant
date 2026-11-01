@@ -213,7 +213,10 @@ def test_a_galvanostatic_run_has_its_current_setpoint_asked_as_blocking_with_the
     assert after["kind"] == "missing_value" and after["blocking"] and CURRENT in after["why"]
     assert "--value <value> --json" in after["answer_command"]
     [other] = asked(bd, "run-002")
-    assert not other["blocking"]  # potentiostatic: optional
+    # potentiostatic: the current set-point is optional (r2-a: the question may block for the potential scale, asked
+    # with the set-point it goes in beside, never for the current set-point)
+    assert CURRENT not in (other.get("required_fields") or ())
+    assert not other["blocking"] or other["required_fields"] == ["context.electrochemistry.potential_scale"]
 
 
 def test_the_cli_stores_a_number_with_json_and_text_without(grouped, capsys):

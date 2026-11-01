@@ -175,8 +175,35 @@ def compositions(bundle: Mapping, bundle_dir: Path | None = None, *,
 _first = operator.itemgetter(0)
 
 
+#: r2-a M2: why a companion (:data:`bundle.COMPOSES_ONLY_WITH`) is required now, beside the required field it goes in with
+ASKED_WITH_COMPANION = ("the record requires {path}, which goes into the record only beside a confirmed {companion} for "
+                        "every run it comes from (the number alone does not say what it is relative to); {companion} is "
+                        "asked now with it, so the scientist is not asked twice")
+
+
+def _companions_missing(report: Mapping) -> list[dict]:
+    """r2-a M2: the companion of each required field the composer lists as missing (a set-point nobody answered) when
+    the record carries no companion either (no confirmed potential scale): answering the field alone would only hold
+    it back and list the companion next (c12-q), so the companion is required NOW, beside it, with why. Never one the
+    composer already lists or the record already carries."""
+    paths = {m["path"] for m in report.get("missing_required") or () if m.get("from") == FROM_AN_ANSWER}
+    filled = {f["path"] for f in report.get("filled") or ()}
+    return [{"path": companion, "from": FROM_AN_ANSWER, "required_because": ASKED_WITH_COMPANION.format(path=path, companion=companion)}
+            for path, companion in B.COMPOSES_ONLY_WITH.items()
+            if path in paths and companion not in paths and companion not in filled]
+
+
 def _answer_missing(report: Mapping) -> list[str]:
-    return [m["path"] for m in report.get("missing_required") or () if m.get("from") == FROM_AN_ANSWER]
+    """The composer's missing-required paths only an answer supplies, then each one's missing companion
+    (:func:`_companions_missing`)."""
+    return ([m["path"] for m in report.get("missing_required") or () if m.get("from") == FROM_AN_ANSWER]
+            + [m["path"] for m in _companions_missing(report)])
+
+
+def _required_because(report: Mapping) -> dict[str, str]:
+    """``{path: why}`` for each conditionally required path (the composer's, then :func:`_companions_missing`)."""
+    return {m["path"]: m["required_because"]
+            for m in list(report.get("missing_required") or ()) + _companions_missing(report) if m.get("required_because")}
 
 
 @functools.lru_cache(maxsize=4096)
@@ -1342,8 +1369,8 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
     from .records import RUN_ONLY_PATHS
 
     missing = {gid: set(_answer_missing(rep)) for gid, rep in reports.items()}
-    because_of = {gid: {m["path"]: m["required_because"] for m in rep.get("missing_required") or () if m.get("required_because")}
-                  for gid, rep in reports.items()}
+    because_of = {gid: _required_because(rep) for gid, rep in reports.items()}
+    companion_of = {gid: {m["path"] for m in _companions_missing(rep)} for gid, rep in reports.items()}
     filled = {gid: {f["path"] for f in rep.get("filled") or ()} for gid, rep in reports.items()}
     every = set(missing)
     order_of = {gid: i for i, gid in enumerate(missing)}
@@ -1438,10 +1465,15 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
             q["blocking"], q["tier"] = True, TIER_BLOCKING
             q["required_fields"] = sorted(fields)
             because = next((b for g in sorted(needing) for f in sorted(fields) if (b := because_of.get(g, {}).get(f))), None)
-            q["why"] = (f"The record cannot be exported without it: the record composer (what `build-records` and "
-                        f"`validate` check) lists {', '.join(sorted(fields))} as missing for {len(needing)} record "
-                        "group(s) this question reaches, and only an answer supplies it"
-                        + (f" ({because})" if because else "") + ".")
+            if because and all(f in companion_of.get(g, ()) for g in needing for f in fields):
+                # r2-a M2: required only beside a field nobody answered yet (the composer lists that one, not this)
+                q["why"] = (f"The record cannot be exported without it: {because}; it blocks {len(needing)} record "
+                            "group(s) this question reaches.")
+            else:
+                q["why"] = (f"The record cannot be exported without it: the record composer (what `build-records` and "
+                            f"`validate` check) lists {', '.join(sorted(fields))} as missing for {len(needing)} record "
+                            "group(s) this question reaches, and only an answer supplies it"
+                            + (f" ({because})" if because else "") + ".")
             if because:
                 q["required_because"] = because
     return {"basis": "records.compose_group: the missing-required list build-records and validate report",
@@ -2476,7 +2508,7 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
         chosen: dict[str, dict] = {}
         unasked: list[dict] = []
         usable = [asks[i] for i in sorted(everywhere + asks_of.get(gid, []))]
-        because = {m["path"]: m["required_because"] for m in rep.get("missing_required") or () if m.get("required_because")}
+        because = _required_because(rep)
         for path in _answer_missing(rep):
             options, seen = [], set()
             for cpath, q, field, _, _ in usable:
@@ -2577,7 +2609,7 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
         rank = (bool(hard), soft is not None, need + len(plus), n)
         if best is None or rank < best["rank"]:
             best = {"rank": rank, "group_id": gid, "need": need, "plus": plus, "questions": list(chosen.values()),
-                    "unasked": unasked, "hard": hard, "soft": soft, "missing": [m["path"] for m in rep.get("missing_required") or ()],
+                    "unasked": unasked, "hard": hard, "soft": soft, "missing": [m["path"] for m in list(rep.get("missing_required") or ()) + _companions_missing(rep)],
                     "recommended": warned, "stated": stated}
     if best is None:
         if not done:
