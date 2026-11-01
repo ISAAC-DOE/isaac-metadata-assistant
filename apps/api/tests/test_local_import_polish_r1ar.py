@@ -263,7 +263,9 @@ def test_differing_isaac_e0s_are_flagged_and_the_question_says_what_fired():
     assert out["results"] == ["proc-g1-r-0000000000000001-athena", "proc-g2-r-0000000000000001-athena"]
     q = results[1]["questions"][0]
     assert q["code"] == RUN.FIXED_E0_QUESTION and "span 1.50 eV" in q["text"] and "own edges differ" not in q["text"]
-    assert "(each QC passed) span 1.50 eV" in results[1]["qc"]["statements"][RUN.FIXED_E0_FLAG]
+    # r3-b M3: true for pass or warn (an ISAAC E0 whose QC warned is compared too)
+    assert "(each with a QC verdict of pass or warn) span 1.50 eV" in results[1]["qc"]["statements"][RUN.FIXED_E0_FLAG]
+    assert "QC passed" not in results[1]["qc"]["statements"][RUN.FIXED_E0_FLAG] and "QC passed" not in q["text"]
 
 
 def test_a_noisy_or_failed_isaac_e0_and_one_curve_in_two_groups_are_not_flagged():

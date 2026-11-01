@@ -2061,7 +2061,7 @@ def process_bundle(
             _null_non_finite(r)
         (unread_results if g.get("group_kind") in ("unread_acquisition", "generic_run") else results).extend(out)
 
-    fixed_said = possibly_fixed_athena_e0(results, bundle, all_groups)
+    fixed_said = possibly_fixed_athena_e0(results, bundle, all_groups, entries)
 
     payload = {
         **header,
@@ -2074,6 +2074,7 @@ def process_bundle(
             "projects_found": len(projects),
             "projects_read": read_ok,
             "groups_read": len(entries),
+            # the groups processed in this call (all of them without --group)
             "record_groups_matched": len(matched),
             "record_groups_with_unselected_versions": len(versions),
             "notes": (a_notes + m_notes)[:500],
@@ -2133,11 +2134,21 @@ def process_bundle(
 _STATED_SUFFIXES = 3
 
 #: r1-a M5: an Athena E0 IDENTICAL (to :data:`FIXED_E0_DECIMALS`) in DIFFERENT Athena curves of one beamtime, while
-#: ISAAC's own E0s for those groups (each QC passed) differ by at least :data:`FIXED_E0_MIN_ISAAC_SPREAD_EV`, is likely
-#: a FIXED normalisation setting (an E0 typed or carried over in Athena), not a measured edge position. Measured on a
-#: real BL4-3 sulfur beamtime: elemental S, a dry MOF and the MOF at 0 V in electrolyte all carried Athena E0
-#: 2471.901 eV while ISAAC measured 2472.958 eV for the last, and it was exported as the edge position. Names are never
-#: read (r1-a review: the same sample named two ways, CoSO4_5wt / CoSO4_0p5wt, was flagged as different chemistry).
+#: ISAAC's own E0s for those groups (each with a QC verdict of pass or warn) differ by at least
+#: :data:`FIXED_E0_MIN_ISAAC_SPREAD_EV`, is likely a FIXED normalisation setting (an E0 typed or carried over in Athena),
+#: not a measured edge position. Measured on a real BL4-3 sulfur beamtime: elemental S, a dry MOF and the MOF at 0 V
+#: in electrolyte all carried Athena E0 2471.901 eV while ISAAC measured 2472.958 eV for the last, and it was exported
+#: as the edge position. Names are never read for that comparison (r1-a review: the same sample named two ways,
+#: CoSO4_5wt / CoSO4_0p5wt, was flagged as different chemistry).
+#:
+#: r3-b M3: the E0s of EVERY Athena group of the result's own project count too, matched to a group or not (measured on
+#: a real BL4-3 Ti beamtime: one project gave E0 4977.440 eV to groups 04, 05, 07 and 10; three of those groups were
+#: rejected before processing, so no other Athena RESULT carried it and the flag never fired). Such a group counts only
+#: when it is ANOTHER SAMPLE (:func:`_sample_key`: names equal apart from counters, scan-file and merge words are one
+#: sample's repeats, never other samples) and the E0 is not where its own edge is: ISAAC's own E0 for its record group,
+#: where one exists, differs from this group's by at least the same 0.5 eV, or else its own stored data's edge (larch
+#: find_e0, ``athena.load_project``) is 0.5 eV or more from that E0. And never when ISAAC measures THIS group's edge
+#: within 0.5 eV of it: there the E0 is where this group's edge is (two samples' E0s on one grid point are no setting).
 FIXED_E0_RULE_ID = "isaac.athena.e0_possibly_fixed.v0"
 FIXED_E0_FLAG = "athena_e0_possibly_fixed"
 FIXED_E0_QUESTION = "athena_e0_measured_or_set"
@@ -2145,6 +2156,19 @@ FIXED_E0_DECIMALS = 3
 #: more than one curve's E0 moves by landing on a grid point or by noise
 FIXED_E0_MIN_ISAAC_SPREAD_EV = 0.5
 _FIXED_E0_GROUPS_SAID = 5
+_QC_SAID = "(each with a QC verdict of pass or warn)"
+_SAMPLE_NOISE = re.compile(r"^(" + A._MERGE_WORD + r")\d*$")
+
+
+def _sample_key(label: str) -> str:
+    """r3-b M3: what an Athena label says its SAMPLE is, for telling repeats of one sample from different samples: the
+    normalised name without its XDC scan-file suffix (``_a_001``), whole-number tokens (counters), a trailing XDAC
+    letter and merge words. ``""`` when nothing is left (such a name is never counted as another sample)."""
+    n = re.sub(r"_a_\d+$", "", A.normalise_name(str(label or "")))
+    toks = [t for t in n.split("_") if t and not t.isdigit() and not _SAMPLE_NOISE.match(t)]
+    if toks and toks[-1] == "a":
+        toks = toks[:-1]
+    return "_".join(toks)
 
 
 def _decided_ids(bundle: Mapping) -> set[str]:
@@ -2162,16 +2186,18 @@ def _athena_curve(r: Mapping) -> str:
     return json.dumps([i.get("relative_path"), i.get("athena_group"), i.get("per_scan_set")], sort_keys=True, default=str)
 
 
-def possibly_fixed_athena_e0(results: list[dict], bundle: Mapping, groups: Sequence[Mapping]) -> dict | None:
+def possibly_fixed_athena_e0(results: list[dict], bundle: Mapping, groups: Sequence[Mapping],
+                             entries: Sequence[Mapping] = ()) -> dict | None:
     """Flag (:data:`FIXED_E0_FLAG`) each Athena result whose E0 equals, to :data:`FIXED_E0_DECIMALS`, the Athena E0 of
-    a DIFFERENT Athena curve of another group of the beamtime while ISAAC's own E0s for those groups (QC passed) differ
-    by at least :data:`FIXED_E0_MIN_ISAAC_SPREAD_EV`. Compared: this run's Athena results and the stored ones that stay
-    stored (a decided result, or a group not processed now), never a rejected result nor one of a superseded or
-    non-live group. A flagged result of this run is not preferred for the record, says why (``qc.statements``,
-    ``athena_e0_possibly_fixed``) and asks whether the E0 was measured or set (``questions``). A STORED result that
-    would be flagged is said apart (``kept_results``) and its flag and sentence are returned as ``kept_result_notes``
-    (:func:`apply_kept_result_notes`), since ``isaac process`` keeps it as stored. Nothing hashed changes. Returns a
-    summary (or ``None``)."""
+    a DIFFERENT Athena curve of another group of the beamtime while ISAAC's own E0s for those groups (QC pass or warn)
+    differ by at least :data:`FIXED_E0_MIN_ISAAC_SPREAD_EV`, or (r3-b M3) the E0 of other Athena groups of its own
+    project (``entries``: every group read, matched or not) as set out at :data:`FIXED_E0_RULE_ID`. Compared: this
+    run's Athena results and the stored ones that stay stored (a decided result, or a group not processed now), never a
+    rejected result nor one of a superseded or non-live group. A flagged result of this run is not preferred for the
+    record, says why (``qc.statements``, ``athena_e0_possibly_fixed``) and asks whether the E0 was measured or set
+    (``questions``). A STORED result that would be flagged is said apart (``kept_results``) and its flag and sentence
+    are returned as ``kept_result_notes`` (:func:`apply_kept_result_notes`), since ``isaac process`` keeps it as
+    stored. Nothing hashed changes. Returns a summary (or ``None``)."""
     bundle = bundle or {}
     stored = list(bundle.get("processing_results") or ())
     decided = _decided_ids(bundle)
@@ -2183,13 +2209,19 @@ def possibly_fixed_athena_e0(results: list[dict], bundle: Mapping, groups: Seque
 
     pool = [*results, *stored]
 
-    def own_e0(r):
-        sib = next((x for x in pool if x.get("source") == "isaac_protocol" and x.get("group_id") == r.get("group_id")
-                    and x.get("run_id") == r.get("run_id")), None)
+    def _measured(sib) -> float | None:
         if sib is None or (sib.get("qc") or {}).get("verdict") not in ("pass", "warn"):
             return None  # only an ISAAC E0 whose QC did not fail (pass or warn) is a measurement to compare
         v = (sib.get("outputs") or {}).get("e0_eV")
         return float(v) if isinstance(v, (int, float)) and math.isfinite(v) else None
+
+    def own_e0(r):
+        return _measured(next((x for x in pool if x.get("source") == "isaac_protocol" and x.get("group_id") == r.get("group_id")
+                               and x.get("run_id") == r.get("run_id")), None))
+
+    def group_e0(gid):
+        # r3-b M3: an Athena group's record group (matched or not processed now): its ISAAC E0, this run's first
+        return _measured(next((x for x in pool if x.get("source") == "isaac_protocol" and x.get("group_id") == gid), None))
 
     def athena_e0(r):
         v = (r.get("outputs") or {}).get("e0_eV")
@@ -2206,6 +2238,41 @@ def possibly_fixed_athena_e0(results: list[dict], bundle: Mapping, groups: Seque
     def name(gid):
         g = by_group.get(gid) or {}
         return next((str(s) for s in g.get("_stems") or () if s), None) or str(gid)
+
+    # r3-b M3: every Athena group read, by (project, E0), and the record group each matches (if exactly one)
+    egroup = A.entry_groups(groups, entries) if entries else {}
+    in_project: dict[tuple, list[int]] = {}
+    for i, e in enumerate(entries):
+        v = e.get("e0_eV")
+        if isinstance(v, (int, float)) and math.isfinite(v):
+            in_project.setdefault((e.get("prj_relative_path"), round(float(v), FIXED_E0_DECIMALS)), []).append(i)
+
+    def project_partners(r, value) -> list[dict]:
+        """Other samples' Athena groups of r's own project that carry its E0 and count (:data:`FIXED_E0_RULE_ID`)."""
+        inp = (r.get("inputs") or [{}])[0] or {}
+        members = inp.get("per_scan_set") if isinstance(inp.get("per_scan_set"), Mapping) else {}
+        mine_groups = set(members.get("athena_groups") or ()) | {inp.get("athena_group")}
+        keys = {_sample_key(x) for x in (members.get("labels") or [inp.get("scan")])} - {""}
+        gid, mine = r.get("group_id"), own_e0(r)
+        if mine is not None and abs(mine - value) < FIXED_E0_MIN_ISAAC_SPREAD_EV:
+            return []  # ISAAC measures this group's edge there: the E0 is where its edge is
+        found: list[dict] = []
+        for i in in_project.get((inp.get("relative_path"), value), ()):
+            e = entries[i]
+            key = _sample_key(e.get("label"))
+            if e.get("group_name") in mine_groups or egroup.get(i) == gid or not key or key in keys:
+                continue  # this curve, this group, or a repeat of this sample: never another sample's E0
+            theirs = group_e0(egroup[i]) if i in egroup else None
+            edge = e.get("data_e0_eV")
+            if theirs is not None:
+                if mine is None or abs(mine - theirs) < FIXED_E0_MIN_ISAAC_SPREAD_EV:
+                    continue  # an ISAAC E0 that exists must differ, as for the results above
+            elif edge is None or abs(edge - value) < FIXED_E0_MIN_ISAAC_SPREAD_EV:
+                continue  # no ISAAC E0: its own data must put its edge elsewhere
+            found.append({"athena_label": e.get("label"), "athena_group": e.get("group_name"), "sample_key": key,
+                          "group_id": egroup.get(i), "isaac_e0_eV": theirs,
+                          "own_data_e0_eV": round(float(edge), FIXED_E0_DECIMALS) if edge is not None else None})
+        return found
 
     flagged, kept, notes = [], [], []
     by_value: dict[float, list] = {}
@@ -2232,31 +2299,59 @@ def possibly_fixed_athena_e0(results: list[dict], bundle: Mapping, groups: Seque
         for r, is_kept in same:
             gid, curve = r.get("group_id"), _athena_curve(r)
             others_c = partners(curve)
-            if not others_c:
-                continue
-            others = sorted({g for c in others_c for g in curves[c]} - {gid})
-            known = [own[g] for g in [gid, *others] if own.get(g) is not None]
-            spread = max(known) - min(known)
-            listed = ", ".join(f"{name(g)} (ISAAC {own[g]:.3f} eV)" if own.get(g) is not None else name(g)
-                               for g in others[:_FIXED_E0_GROUPS_SAID])
-            listed += f" and {len(others) - _FIXED_E0_GROUPS_SAID} more" if len(others) > _FIXED_E0_GROUPS_SAID else ""
             mine = own.get(gid)
-            said = (f"The scientist's Athena E0 here, {value:.{FIXED_E0_DECIMALS}f} eV, is exactly the Athena E0 of "
-                    f"{len(others)} other group{'' if len(others) == 1 else 's'} of this beamtime ({listed}), in a "
-                    f"different Athena curve, while ISAAC's own E0s for these groups (each QC passed) span "
-                    f"{spread:.2f} eV" + (f" (ISAAC measures {mine:.3f} eV here)" if mine is not None else "")
-                    + ". An E0 identical across different curves is likely a fixed normalisation setting (typed or "
-                    "carried over in Athena), not a measured edge position")
-            info = {"rule_id": FIXED_E0_RULE_ID, "athena_e0_eV": value, "decimals": FIXED_E0_DECIMALS,
-                    "groups": [{"group_id": g, "athena_e0_eV": value, "isaac_e0_eV": own.get(g)} for g in [gid, *others]],
-                    "isaac_e0_spread_eV": spread, "min_isaac_spread_eV": FIXED_E0_MIN_ISAAC_SPREAD_EV}
+            if others_c:
+                others = sorted({g for c in others_c for g in curves[c]} - {gid})
+                known = [own[g] for g in [gid, *others] if own.get(g) is not None]
+                spread = max(known) - min(known)
+                listed = ", ".join(f"{name(g)} (ISAAC {own[g]:.3f} eV)" if own.get(g) is not None else name(g)
+                                   for g in others[:_FIXED_E0_GROUPS_SAID])
+                listed += f" and {len(others) - _FIXED_E0_GROUPS_SAID} more" if len(others) > _FIXED_E0_GROUPS_SAID else ""
+                said = (f"The scientist's Athena E0 here, {value:.{FIXED_E0_DECIMALS}f} eV, is exactly the Athena E0 of "
+                        f"{len(others)} other group{'' if len(others) == 1 else 's'} of this beamtime ({listed}), in a "
+                        f"different Athena curve, while ISAAC's own E0s for these groups {_QC_SAID} span "
+                        f"{spread:.2f} eV" + (f" (ISAAC measures {mine:.3f} eV here)" if mine is not None else "")
+                        + ". An E0 identical across different curves is likely a fixed normalisation setting (typed or "
+                        "carried over in Athena), not a measured edge position")
+                info = {"rule_id": FIXED_E0_RULE_ID, "athena_e0_eV": value, "decimals": FIXED_E0_DECIMALS,
+                        "groups": [{"group_id": g, "athena_e0_eV": value, "isaac_e0_eV": own.get(g)} for g in [gid, *others]],
+                        "isaac_e0_spread_eV": spread, "min_isaac_spread_eV": FIXED_E0_MIN_ISAAC_SPREAD_EV}
+                why = (f"the same in {len(others)} other group(s) whose ISAAC E0s span {spread:.2f} eV")
+                asked = (f"The same Athena E0 is in {len(others)} other group{'' if len(others) == 1 else 's'}' Athena "
+                         f"curve{'' if len(others) == 1 else 's'}, while ISAAC's own E0s for these groups (QC pass or "
+                         f"warn) span {spread:.2f} eV.")
+            else:
+                found = project_partners(r, value)
+                if not found:
+                    continue
+                prj = PurePosixPath(str(((r.get("inputs") or [{}])[0] or {}).get("relative_path") or "")).name
+                n = len(found)
+                listed = ", ".join(f"'{f['athena_label']}'" + (f" (ISAAC {f['isaac_e0_eV']:.3f} eV)" if f["isaac_e0_eV"] is not None
+                                                             else f" (its own edge at {f['own_data_e0_eV']:.3f} eV)")
+                                   for f in found[:_FIXED_E0_GROUPS_SAID])
+                listed += f" and {n - _FIXED_E0_GROUPS_SAID} more" if n > _FIXED_E0_GROUPS_SAID else ""
+                said = (f"The scientist's Athena E0 here, {value:.{FIXED_E0_DECIMALS}f} eV, is exactly the Athena E0 of "
+                        f"{n} other Athena group{'' if n == 1 else 's'} of other samples in the same project ({prj}: "
+                        f"{listed}), matched to a record group or not, whose own edges are not there (ISAAC's E0 for "
+                        f"its record group {_QC_SAID}, else the edge of its own stored data, {FIXED_E0_MIN_ISAAC_SPREAD_EV:g} "
+                        "eV or more away)"
+                        + (f"; ISAAC measures {mine:.3f} eV here" if mine is not None else "")
+                        + ". An E0 identical across different samples' curves is likely a fixed normalisation setting "
+                        "(typed or carried over in Athena), not a measured edge position")
+                info = {"rule_id": FIXED_E0_RULE_ID, "athena_e0_eV": value, "decimals": FIXED_E0_DECIMALS,
+                        "groups": [{"group_id": gid, "athena_e0_eV": value, "isaac_e0_eV": mine}],
+                        "same_project": {"prj_relative_path": ((r.get("inputs") or [{}])[0] or {}).get("relative_path"),
+                                         "athena_groups": found},
+                        "min_isaac_spread_eV": FIXED_E0_MIN_ISAAC_SPREAD_EV}
+                why = f"the same in {n} other sample(s)' Athena group(s) of {prj}"
+                asked = (f"The same Athena E0 is in {n} other Athena group{'' if n == 1 else 's'} of other samples in "
+                         f"{prj}.")
             pid = B.processing_id(r)
             if is_kept:
                 state = r.get("state")
                 what = "approved result" if state == B.STATE_SCIENTIST_CONFIRMED else f"stored result ({state})"
                 line = (f"Athena: {what} {pid} carries a possibly fixed Athena E0 ({value:.{FIXED_E0_DECIMALS}f} eV, "
-                        f"the same in {len(others)} other group(s) whose ISAAC E0s span {spread:.2f} eV); ask the "
-                        "scientist whether it was measured.")
+                        f"{why}); ask the scientist whether it was measured.")
                 kept.append({"result_id": pid, "state": state, "statement": line})
                 notes.append({"result_id": pid, "rule_id": FIXED_E0_RULE_ID, "add_review_flags": [FIXED_E0_FLAG],
                               "statements": {FIXED_E0_FLAG: (f"{said}. This result was kept as it was decided "
@@ -2273,19 +2368,16 @@ def possibly_fixed_athena_e0(results: list[dict], bundle: Mapping, groups: Seque
             r["questions"] = [*(r.get("questions") or ()), {
                 "code": FIXED_E0_QUESTION,
                 "text": (f"Was the Athena E0 of {value:.{FIXED_E0_DECIMALS}f} eV measured from this group's own edge, or "
-                         "set (typed, or carried over from another group) in Athena? The same Athena E0 is in "
-                         f"{len(others)} other group{'' if len(others) == 1 else 's'}' Athena curve"
-                         f"{'' if len(others) == 1 else 's'}, while ISAAC's own E0s for these groups (QC passed) span "
-                         f"{spread:.2f} eV.")}]
+                         f"set (typed, or carried over from another group) in Athena? {asked}")}]
             flagged.append(pid)
     if not flagged and not kept:
         return None
     line = None
     if flagged:
         line = (f"Athena: {len(flagged)} of the scientist's Athena result(s) carry an E0 identical to other curves' "
-                f"while ISAAC's own E0s for those groups differ by {FIXED_E0_MIN_ISAAC_SPREAD_EV:g} eV or more: likely a "
-                f"fixed normalisation setting, not a measured edge position (flag {FIXED_E0_FLAG}); ask the scientist "
-                "before approving them.")
+                f"(of groups whose ISAAC E0s differ by {FIXED_E0_MIN_ISAAC_SPREAD_EV:g} eV or more, or of other samples "
+                f"in the same Athena project): likely a fixed normalisation setting, not a measured edge position (flag "
+                f"{FIXED_E0_FLAG}); ask the scientist before approving them.")
     return {"rule_id": FIXED_E0_RULE_ID, "results": flagged, "kept_results": kept, "kept_result_notes": notes,
             "statement": line}
 

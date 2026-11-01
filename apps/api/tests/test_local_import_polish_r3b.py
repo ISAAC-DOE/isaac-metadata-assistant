@@ -12,6 +12,10 @@ SYNTHETIC only: every scan, name, Athena project and value below is invented and
   shift or none, never a placeholder. A confirmed (``--accept-shift``) own-edge calibration clears
   ``own_signal_not_named_as_pure_element``; without it nothing is applied (the safety rule stands).
 * (L8) Once the scientist confirmed the shift, the sentence no longer asks "only if it is a pure element".
+* (M3) The fixed-E0 flag reads every Athena group of the result's own project, matched or not (groups rejected before
+  processing too): another SAMPLE's group (repeats of one sample, named the same apart from counters, never count) whose
+  own edge is not at that E0 (its ISAAC E0 differs, or else its own data's edge does). Its sentence says "QC pass or
+  warn", never "QC passed".
 """
 
 from __future__ import annotations
@@ -262,3 +266,157 @@ def test_would_apply_with_the_confirmed_shift_does_not_ask_again():
     assert "with its size confirmed (--accept-shift +1.2), processing applies it" in done["statement"]
     # a size that is not the shift is not a confirmation: it is asked as before
     assert "ISAAC cannot tell" in REF.would_apply(step, "S", "K", warn_eV=2.0, accepted=0.5)["statement"]
+
+
+# --- M3: the fixed-E0 flag reads every Athena group of the result's own project ----------------------------------
+
+
+def _athena_pair(gid, athena_e0, isaac_e0, label, *, verdict="pass", run="r-0000000000000001"):
+    return [
+        {"group_id": gid, "run_id": run, "source": "isaac_protocol", "outputs": {"e0_eV": isaac_e0},
+         "qc": {"verdict": verdict}, "result_id": f"proc-{gid}-{run}-isaac", "state": "needs_review"},
+        {"group_id": gid, "run_id": run, "source": "scientist_athena", "outputs": {"e0_eV": athena_e0}, "qc": {},
+         "inputs": [{"relative_path": "athena_10_SYN.prj", "athena_group": label.lower(), "scan": label}],
+         "result_id": f"proc-{gid}-{run}-athena", "state": "needs_review"},
+    ]
+
+
+def _entry(label, e0, prj="athena_10_SYN.prj", *, edge=4980.0):
+    """One Athena group read from ``prj``: its E0 and where its own stored data puts its edge (``edge``)."""
+    from isaac_api.local_import.processing import athena as A
+
+    return {"prj_relative_path": prj, "group_name": label.lower(), "label": label, "names": [A.normalise_name(label)],
+            "e0_eV": e0, "is_merge": False, "data_e0_eV": edge}
+
+
+def _group(gid, stem, status="proposed"):
+    return {"group_id": gid, "_stems": [stem], "_has_scans": True, "basis": {}, "status": status}
+
+
+FIXED = 4977.440
+LIVE = _group("g04", "04_SYN_TiON_dry_016")
+REJECTED = [_group("g05", "05_SYN_TiO2_anatase_020", "rejected"), _group("g07", "07_SYN_TiON_wet_031", "rejected"),
+            _group("g10", "10_SYN_Ti2O3_044", "rejected")]
+
+
+def _fixed_e0(results, groups, entries, bundle=None):
+    from isaac_api.local_import.processing import run as RUN
+
+    return RUN.possibly_fixed_athena_e0(results, bundle or {}, groups, entries)
+
+
+def test_one_projects_e0_given_to_rejected_groups_flags_the_live_groups_result():
+    from isaac_api.local_import.processing import run as RUN
+
+    results = _athena_pair("g04", FIXED, 4979.20, "04_SYN_TiON_dry_016_A.001")
+    entries = [_entry("04_SYN_TiON_dry_016_A.001", FIXED), _entry("05_SYN_TiO2_anatase_020", FIXED, edge=4980.1),
+               _entry("07_SYN_TiON_wet_031", FIXED, edge=4979.4), _entry("merge_10_SYN_Ti2O3", FIXED, edge=4975.9)]
+    # the old comparison (other Athena RESULTS only) saw nothing: the other groups were rejected before processing
+    assert _fixed_e0([dict(r) for r in results], [LIVE, *REJECTED], ()) is None
+    out = _fixed_e0(results, [LIVE, *REJECTED], entries)
+    assert out["results"] == ["proc-g04-r-0000000000000001-athena"]
+    ath = results[1]
+    assert RUN.FIXED_E0_FLAG in ath["review_flags"] and ath["preferred_for_record"] is False
+    said = ath["qc"]["statements"][RUN.FIXED_E0_FLAG]
+    assert said.startswith("The scientist's Athena E0 here, 4977.440 eV, is exactly the Athena E0 of 3 other Athena "
+                           "groups of other samples in the same project (athena_10_SYN.prj:")
+    assert "'05_SYN_TiO2_anatase_020' (its own edge at 4980.100 eV)" in said and "ISAAC measures 4979.200 eV here" in said
+    assert "QC passed" not in said
+    info = ath["athena_e0_possibly_fixed"]["same_project"]["athena_groups"]
+    assert {f["group_id"] for f in info} == {"g05", "g07", "g10"}
+    [q] = ath["questions"]
+    assert q["code"] == RUN.FIXED_E0_QUESTION and "3 other Athena groups of other samples" in q["text"]
+    assert "other samples in the same Athena project" in out["statement"]
+
+
+def test_repeats_of_one_sample_in_the_project_are_not_other_samples():
+    results = _athena_pair("g04", FIXED, 4979.20, "merge4_04_SYN_TiON_dry")
+    entries = [_entry(f"04_SYN_TiON_dry_{run:03d}_A.{n:03d}", FIXED) for run in (16, 17, 18) for n in (1, 2)]
+    entries += [_entry("merge4_04_SYN_TiON_dry", FIXED), _entry("04_SYN_TiON_dry_sum", FIXED)]
+    assert _fixed_e0(results, [LIVE], entries) is None
+    assert "athena_e0_possibly_fixed" not in (results[1].get("review_flags") or ())
+
+
+def test_an_e0_where_the_edges_are_is_no_setting():
+    # other samples whose OWN data put their edge at that E0: two samples' edges on one grid point, not a setting
+    results = _athena_pair("g04", FIXED, 4979.20, "04_SYN_TiON_dry_016")
+    on_edge = [_entry("05_SYN_TiO2_anatase_020", FIXED, edge=FIXED + 0.1), _entry("07_SYN_TiON_wet_031", FIXED, edge=FIXED)]
+    assert _fixed_e0([dict(r) for r in results], [LIVE, *REJECTED], on_edge) is None
+    # ISAAC measures THIS group's edge at that E0: it is where its edge is, whatever other groups carry
+    here = _athena_pair("g04", FIXED, FIXED + 0.2, "04_SYN_TiON_dry_016")
+    assert _fixed_e0(here, [LIVE, *REJECTED], [_entry("05_SYN_TiO2_anatase_020", FIXED, edge=4980.1)]) is None
+    # NEGATIVE CONTROL: one other sample whose own edge is elsewhere is enough
+    out = _fixed_e0([dict(r) for r in results], [LIVE, *REJECTED], [_entry("05_SYN_TiO2_anatase_020", FIXED, edge=4980.1)])
+    assert out and out["results"] == ["proc-g04-r-0000000000000001-athena"]
+
+
+def test_where_the_other_groups_have_an_isaac_e0_it_must_differ():
+    results = _athena_pair("g04", FIXED, 4979.20, "04_SYN_TiON_dry_016")
+    near = (_athena_pair("g05", 4970.0, 4979.30, "x", run="r-0000000000000002")[:1]
+            + _athena_pair("g07", 4970.0, 4979.10, "y", run="r-0000000000000003")[:1])
+    entries = [_entry("05_SYN_TiO2_anatase_020", FIXED), _entry("07_SYN_TiON_wet_031", FIXED)]
+    groups = [LIVE, _group("g05", "05_SYN_TiO2_anatase_020"), _group("g07", "07_SYN_TiON_wet_031")]
+    # their own data's edge (4980.0) is not consulted: the ISAAC E0 that exists decides, and it does not differ
+    assert _fixed_e0([dict(r) for r in results] + near, groups, entries) is None
+    far = _athena_pair("g05", 4970.0, 4981.0, "x", run="r-0000000000000002")[:1]
+    out = _fixed_e0([dict(r) for r in results] + far, groups, entries)
+    assert out and out["results"] == ["proc-g04-r-0000000000000001-athena"]
+
+
+def _fixed_prj(path, groups, *, e0):
+    import larch.xafs as xafs
+    from larch import Group
+    from larch.io import AthenaProject
+
+    prj = AthenaProject()
+    for label, e, mu in groups:
+        g = Group(energy=e, mu=mu, label=label, filename=label)
+        xafs.pre_edge(g, e0=e0, pre1=-50, pre2=-30, norm1=60, norm2=110, nnorm=2)
+        prj.add_group(g)
+    prj.save(str(path))
+
+
+def test_an_athena_e0_shared_with_rejected_groups_is_flagged_end_to_end(tmp_path):
+    _processing()
+    from test_local_import_processing import GRID, _athena_prj, fluo_scan, make_case, mu_edge, spec_file
+
+    stems = ["04_SYN_TiON_dry_016", "05_SYN_TiO2_anatase_020", "07_SYN_TiON_wet_031", "10_SYN_Ti2O3_044"]
+    runs = [(s, [spec_file(fluo_scan(10 * i + j)) for j in (1, 2)], {"sample_name": s}) for i, s in enumerate(stems)]
+    bdir, root, bundle = make_case(tmp_path, runs)
+    bundle["record_groups"] = [{"group_id": f"g{i}", "experiment_key": "e", "role": "sample",
+                                "member_run_keys": [r["run_key"]], "basis": {"sample": {}, "technique": {},
+                                                                              "environment": {}, "conditions": {}},
+                                "split_reasons": [], "status": "proposed" if i == 0 else "rejected", "questions": []}
+                               for i, r in enumerate(bundle["runs"])]
+    # one project: four samples' groups, every one normalised with ONE E0 typed in Athena (4977.44 eV), while their
+    # own edges sit at 4966, 4969, 4972 and 4975 eV
+    _fixed_prj(root / "athena_10_SYN.prj", [(s, GRID, mu_edge(GRID, 4966.0 + 3 * i) * 1e-2) for i, s in enumerate(stems)],
+               e0=4977.44)
+    bundle["unread_files"].append({"source_id": "prj-SYN", "relative_path": "athena_10_SYN.prj"})
+    (bdir / "bundle.json").write_text(json.dumps(bundle))
+    out, [isa], [ath] = _process(bdir, root, skip_group_ids=["g1", "g2", "g3"])
+    assert ath["group_id"] == "g0" and ath["outputs"]["e0_eV"] == pytest.approx(4977.44, abs=1e-3)
+    assert "athena_e0_possibly_fixed" in ath["review_flags"] and ath["preferred_for_record"] is False
+    assert out["athena"]["e0_possibly_fixed"]["results"] == [ath["result_id"]]
+    found = ath["athena_e0_possibly_fixed"]["same_project"]["athena_groups"]
+    assert [f["athena_label"] for f in found] == stems[1:] and all(f["isaac_e0_eV"] is None for f in found)
+
+
+def test_one_projects_measured_e0s_of_several_samples_are_not_flagged_end_to_end(tmp_path):
+    # NEGATIVE CONTROL: the same samples, each normalised at its own edge (all at 4966 eV, so one E0 for all)
+    _processing()
+    from test_local_import_processing import GRID, _athena_prj, fluo_scan, make_case, mu_edge, spec_file
+
+    stems = ["04_SYN_TiON_dry_016", "05_SYN_TiO2_anatase_020", "07_SYN_TiON_wet_031", "10_SYN_Ti2O3_044"]
+    runs = [(s, [spec_file(fluo_scan(10 * i + j)) for j in (1, 2)], {"sample_name": s}) for i, s in enumerate(stems)]
+    bdir, root, bundle = make_case(tmp_path, runs)
+    bundle["record_groups"] = [{"group_id": f"g{i}", "experiment_key": "e", "role": "sample",
+                                "member_run_keys": [r["run_key"]], "basis": {"sample": {}, "technique": {},
+                                                                              "environment": {}, "conditions": {}},
+                                "split_reasons": [], "status": "proposed" if i == 0 else "rejected", "questions": []}
+                               for i, r in enumerate(bundle["runs"])]
+    _athena_prj(root / "athena_10_SYN.prj", [(s, GRID, mu_edge(GRID) * (1e-2 + 1e-4 * i)) for i, s in enumerate(stems)])
+    bundle["unread_files"].append({"source_id": "prj-SYN", "relative_path": "athena_10_SYN.prj"})
+    (bdir / "bundle.json").write_text(json.dumps(bundle))
+    out, _, [ath] = _process(bdir, root, skip_group_ids=["g1", "g2", "g3"])
+    assert "athena_e0_possibly_fixed" not in ath["review_flags"] and "e0_possibly_fixed" not in out["athena"]

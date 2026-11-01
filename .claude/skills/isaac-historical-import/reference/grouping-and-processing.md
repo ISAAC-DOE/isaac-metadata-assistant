@@ -188,7 +188,10 @@ Ask: approve, reject, or needs changes (with a note):
 - **An Athena E0 that may be a setting** (flag `athena_e0_possibly_fixed`, `qc.statements.athena_e0_possibly_fixed`,
   question `athena_e0_measured_or_set`): the same Athena E0 (to 0.001 eV) in different Athena curves of groups whose
   ISAAC E0s (QC pass or warn) differ by 0.5 eV or more is likely a normalisation setting typed or carried over in Athena,
-  not a measured edge position (names are not read; one curve matched to two groups is one curve). The result is
+  not a measured edge position (one curve matched to two groups is one curve). Every Athena group of the result's
+  own project counts too, matched or not (e.g. groups rejected before processing): one whose record group has an
+  ISAAC E0 counts only when it differs by 0.5 eV or more; one without counts by name, when at least two other samples
+  carry that E0 (names equal apart from counters are one sample's repeats, never other samples). The result is
   not preferred. Say the statement and ask "was this E0 measured from this group's edge, or set?" before approving
   it; approve it only on "measured", with `--e0-measured` (`decide` refuses it without). If it was set, it is not the edge position: offer
   ISAAC's result instead. A result already decided is kept as it is: the summary line "approved result <id> carries

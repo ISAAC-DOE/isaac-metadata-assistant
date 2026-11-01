@@ -260,6 +260,9 @@ def load_project(path: Path, rel_path: str, source_id: str | None, np) -> tuple[
             is_merge = bool(int(getattr(ap, "is_merge", 0) or 0))
         except (TypeError, ValueError):
             pass
+        # r3-b M3: where this group's OWN data puts its edge (larch find_e0, ISAAC's method), in the scientist's frame:
+        # an Athena E0 far from it is evidence of a fixed setting (run.possibly_fixed_athena_e0); never compared or kept
+        data_e0 = _data_e0(e, m) if frame_known and not implausible else None
         out.append(
             {
                 "prj_relative_path": rel_path,
@@ -280,6 +283,7 @@ def load_project(path: Path, rel_path: str, source_id: str | None, np) -> tuple[
                 "non_finite_values": non_finite,
                 "channel_expression": {k: (str(v) if v is not None else None) for k, v in channel_expr.items()},
                 "data_hash": hashlib.sha256(e.tobytes() + m.tobytes()).hexdigest(),
+                "data_e0_eV": (data_e0 + float(eshift)) if data_e0 is not None else None,
                 # present only when true / found, so an entry without them is exactly as before
                 **({"already_normalized": True} if already_normalized else {}),
                 **({"edge_step_implausible": implausible} if implausible else {}),
@@ -292,6 +296,17 @@ def load_project(path: Path, rel_path: str, source_id: str | None, np) -> tuple[
 ALREADY_NORMALIZED_RULE_ID = "isaac.athena.already_normalized.v0"
 #: Comparison flag: the Athena curve's edge step failed the sanity bound, so it was not compared.
 EDGE_STEP_IMPLAUSIBLE_FLAG = "athena_edge_step_implausible"
+
+
+def _data_e0(energy, mu) -> float | None:
+    """larch ``find_e0`` (maximum of the first derivative) of a group's stored data, or ``None``."""
+    try:
+        from larch.xafs import find_e0
+
+        with open(os.devnull, "w") as sink, contextlib.redirect_stdout(sink):
+            return _finite(find_e0(energy, mu))
+    except Exception:  # noqa: BLE001 - an edge that cannot be found is no evidence either way
+        return None
 
 
 def _flag(ap, name: str) -> bool:
