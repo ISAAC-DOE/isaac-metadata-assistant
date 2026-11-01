@@ -239,6 +239,24 @@ _SIBLING_PATHS = {
 }
 #: Vocabulary sheet: ISAAC's six lists in the template's order, plus Technique (for the
 #: Configurations dropdown). The VALUES are bundle.allowed_values (what decide accepts and export validates against).
+#: r4-b M7: terms the pinned portal validator (``a1cb1c8``, ``portal/validation.py``) WARNS about as deprecated although
+#: its schema and vocabulary still list them, with what it says to use instead. Neither the schema nor the vocabulary
+#: marks them (only the validator's code does), so they are named here: still allowed (the truth plane is unchanged;
+#: an import of one is recorded), but left out of the template's dropdowns and marked on its Vocabulary sheet.
+DEPRECATED_TERMS: Mapping[str, Mapping[str, tuple[str, str]]] = {
+    "context.electrochemistry.cell_type": {
+        "three_electrode": ("DEPRECATED_CELL_TYPE", "the cell body (beaker_cell, h_cell, flow_cell, …); three_electrode "
+                                                    "describes the wiring, not the cell"),
+    },
+}
+
+
+def deprecated_note(path: str | None, term: Any) -> str | None:
+    """``deprecated: use …`` for a term :data:`DEPRECATED_TERMS` names, else ``None``."""
+    got = (DEPRECATED_TERMS.get(path or "") or {}).get(term) if isinstance(term, str) else None
+    return f"deprecated: use {got[1]} (the portal validator warns {got[0]})" if got else None
+
+
 VOCAB_COLUMNS: tuple[tuple[str, str], ...] = (
     ("Sample Form", "sample.sample_form"),
     ("Environment", "context.environment"),
@@ -1023,11 +1041,17 @@ def export_template(bundle_dir: Path, out: Path, *, suggestions: bool = True, fo
     # Vocabulary: ISAAC's own lists (target schema / pinned vocabulary), hidden as in ISAAC's template.
     wv = wb.create_sheet(SHEET_VOCAB)
     vocab_ref: dict[str, str] = {}
+    deprecated_in: dict[str, list[str]] = {}
     for j, (header, path) in enumerate(VOCAB_COLUMNS, start=1):
         wv.cell(row=1, column=j, value=header).font = bold
-        allowed = (rules.get(path) or {}).get("allowed") or []
+        every = (rules.get(path) or {}).get("allowed") or []
+        # r4-b M7: a deprecated term is not offered in the dropdown; it is listed below it, marked, with what to use
+        allowed = [v for v in every if not deprecated_note(path, v)]
         for i, v in enumerate(allowed, start=2):
             wv.cell(row=i, column=j, value=v)
+        for i, v in enumerate((v for v in every if deprecated_note(path, v)), start=3 + len(allowed)):
+            wv.cell(row=i, column=j, value=f"{v} ({deprecated_note(path, v)})")
+            deprecated_in.setdefault(path, []).append(f"{v}: {deprecated_note(path, v)}")
         if allowed:
             vocab_ref[path] = f"{SHEET_VOCAB}!${_letter(j)}$2:${_letter(j)}${1 + len(allowed)}"
     wv.sheet_state = "hidden"
@@ -1036,6 +1060,9 @@ def export_template(bundle_dir: Path, out: Path, *, suggestions: bool = True, fo
         if path in vocab_ref:
             dv = DataValidation(type="list", formula1=vocab_ref[path], allow_blank=True, showErrorMessage=True,
                                 errorTitle="Not an allowed value", error="Choose a value from the list.")
+            if path in deprecated_in:  # r4-b M7: said where the value is chosen
+                dv.promptTitle, dv.showInputMessage = "Not offered", True
+                dv.prompt = ("; ".join(deprecated_in[path]))[:255]
         elif path and (rules.get(path) or {}).get("numeric"):
             dv = DataValidation(type="decimal", operator="between", formula1="-1E+300", formula2="1E+300",
                                 allow_blank=True, showErrorMessage=True, errorTitle="Not a number", error="Enter a number.")

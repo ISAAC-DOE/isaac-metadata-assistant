@@ -15,6 +15,8 @@ folder and invented scans.
 * M5: a Campaign Info beamline is compared with the recorded one as the facility-hint comparison reads beamlines
   (``SSRL BL15-2`` is ``BL15-2``); a real clash with a recorded value is a whole-beamtime Disagreements row ruled once;
   a clash a typed cell makes is offered as one ``--question`` command, not one ``--target`` per target;
+* M7: the portal validator's warnings are said by ``validate`` and on each exported record, counted once with record
+  counts; a term it warns is deprecated (``three_electrode``) is kept out of the template's dropdown and marked;
 """
 
 from __future__ import annotations
@@ -31,13 +33,14 @@ from isaac_api.local_import import cli
 from isaac_api.local_import import grouping as G
 from isaac_api.local_import import mutations as M
 from isaac_api.local_import import questions as Q
+from isaac_api.local_import import records as R
 from isaac_api.local_import import template as T
 
 from test_local_import_capture_decisions import _grouped_stems
 from test_local_import_polish_c14g_adopt import _rule
 from test_local_import_template_adopt import _import, _their_sheet
 from test_local_import_records import (  # noqa: F401  (fixtures)
-    BY, _cand, bdir, fake_upstream, pristine)
+    BY, _cand, _decide_everything, _portal, bdir, fake_upstream, pristine)
 
 WHO = "SYNTHETIC TEST"
 TECH = "system.technique"
@@ -406,3 +409,68 @@ def test_a_typed_campaign_clash_is_offered_as_one_question_command(bdir, tmp_pat
     got = json.loads(capsys.readouterr().out)
     assert sorted(got["recorded"]) == sorted(cell["target_ids"])
 
+
+# --- M7: the portal validator's warnings, and a deprecated term -------------------------------------------------------
+
+PORTAL_WARNINGS = [
+    {"code": "DEPRECATED_CELL_TYPE", "path": "context/electrochemistry/cell_type",
+     "message": "SYN: cell_type 'three_electrode' describes wiring, not the cell body."},
+    {"code": "NO_DATA_OWNER", "path": "attribution/contributors", "message": "SYN: no data_owner declared."},
+]
+
+
+def test_validate_says_the_portal_validators_warnings_once_with_record_counts(bdir):
+    _decide_everything(bdir)
+    R.build_records(bdir)
+    got = R.validate_records(bdir, run_portal=_portal("publish", warnings=PORTAL_WARNINGS))
+    assert got["verdicts"] == {"g1": "exportable"}  # a warning never changes the verdict
+    assert [(w["code"], w["records"], w["group_ids"]) for w in got["portal_warnings"]] == [
+        ("DEPRECATED_CELL_TYPE", 1, ["g1"]), ("NO_DATA_OWNER", 1, ["g1"])]
+    rows = [w for w in got["warnings"] if w["code"].startswith("portal:")]
+    assert [w["code"] for w in rows] == ["portal:DEPRECATED_CELL_TYPE", "portal:NO_DATA_OWNER"]
+    assert rows[0]["text"] == ("The portal validator warns on 1 record(s) (DEPRECATED_CELL_TYPE, "
+                               "context/electrochemistry/cell_type): SYN: cell_type 'three_electrode' describes wiring, "
+                               "not the cell body.")
+    assert got["warnings_total"] >= 2
+    # without warnings, nothing is added
+    quiet = R.validate_records(bdir, run_portal=_portal("publish"))
+    assert "portal_warnings" not in quiet and not [w for w in quiet.get("warnings") or () if w["code"].startswith("portal:")]
+
+
+def test_an_exported_record_says_the_portal_validators_warnings(bdir, tmp_path):
+    _decide_everything(bdir)
+    R.build_records(bdir)
+    got = R.export_records(bdir, tmp_path / "records", run_portal=_portal("publish", warnings=PORTAL_WARNINGS))
+    [row] = got["exported"]
+    assert "Written with a portal validator warning (DEPRECATED_CELL_TYPE): SYN: cell_type" in " ".join(row["warnings"])
+    assert any(w.startswith("Written with a portal validator warning (NO_DATA_OWNER)") for w in row["warnings"])
+    assert [(w["code"], w["records"]) for w in got["portal_warnings"]] == [("DEPRECATED_CELL_TYPE", 1), ("NO_DATA_OWNER", 1)]
+    assert "The portal validator warned on written records: DEPRECATED_CELL_TYPE (1 record(s)); NO_DATA_OWNER" in got["outcome"]
+
+
+def test_a_portal_warning_on_many_records_is_counted_once():
+    said = R.portal_warning_summary({f"g{i}": PORTAL_WARNINGS[:1] for i in range(5)} | {"g9": PORTAL_WARNINGS[1:]})
+    assert [(w["code"], w["records"]) for w in said] == [("DEPRECATED_CELL_TYPE", 5), ("NO_DATA_OWNER", 1)]
+    assert len(said[0]["group_ids"]) == R.REASONS_SHOWN
+    assert R.portal_warnings_of({"portal_check": {"status": "unavailable"}}) == []
+
+
+def test_the_template_keeps_a_deprecated_term_out_of_its_dropdown_and_marks_it(bdir, tmp_path):
+    M.group(bdir)
+    out = tmp_path / "T.xlsx"
+    assert cli.main(["bundle", "template", "export", str(bdir), "--out", str(out)]) == 0
+    wb = openpyxl.load_workbook(out)
+    wv = wb["Vocabulary"]
+    j = next(c.column for c in wv[1] if c.value == "Cell Type")
+    column = [wv.cell(row=r, column=j).value for r in range(2, wv.max_row + 1)]
+    listed = column[:column.index(None)]
+    assert "three_electrode" not in listed and "beaker_cell" in listed
+    [marked] = [v for v in column if v and v.startswith("three_electrode")]
+    assert marked.startswith("three_electrode (deprecated: use the cell body (beaker_cell, h_cell, flow_cell, …)")
+    assert "DEPRECATED_CELL_TYPE" in marked
+    # the dropdown names only the listed range, and says why the term is not offered
+    letter = openpyxl.utils.get_column_letter(j)
+    dvs = [dv for dv in wb["File List"].data_validations.dataValidation
+           if dv.formula1 == f"Vocabulary!${letter}$2:${letter}${1 + len(listed)}"]
+    assert dvs and "three_electrode: deprecated: use" in dvs[0].prompt
+    assert "three_electrode" in B.allowed_values("context.electrochemistry.cell_type")  # still allowed: nothing refused

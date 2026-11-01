@@ -1968,6 +1968,39 @@ def warning_summary(warned: Sequence[Mapping], *, first: Iterable[str] | None = 
     return out
 
 
+def portal_warnings_of(report: Mapping) -> list[dict]:
+    """r4-b M7: the upstream portal validator's own WARNINGS for one record (``portal_check.result.warnings``, kept
+    verbatim in ``validation/<group>.json``), as ``[{code, path, message}]``; ``[]`` when it did not run. A warning
+    never changes the verdict (``publish`` with warnings is still exportable); it is said, not hidden."""
+    pc = report.get("portal_check") or {}
+    if pc.get("status") != "ran":
+        return []
+    out = []
+    for w in (pc.get("result") or {}).get("warnings") or ():
+        if isinstance(w, Mapping):
+            out.append({"code": str(w.get("code") or "PORTAL_WARNING"), "path": w.get("path"),
+                        "message": str(w.get("message") or w.get("code") or "")})
+        else:
+            out.append({"code": "PORTAL_WARNING", "path": None, "message": str(w)})
+    return out
+
+
+def portal_warning_summary(by_group: Mapping[str, Sequence[Mapping]]) -> list[dict]:
+    """r4-b M7: each distinct portal warning ONCE (its code and message), with how many records it is on and the first
+    of their groups: what ``validate`` and ``export`` print instead of the same warning on 78 records."""
+    seen: dict[tuple, dict] = {}
+    for gid, ws in by_group.items():
+        for w in ws:
+            row = seen.setdefault((w["code"], w["message"]), {**w, "records": 0, "group_ids": []})
+            if gid not in row["group_ids"]:
+                row["records"] += 1
+                row["group_ids"].append(gid)
+    return [{**r, "group_ids": r["group_ids"][:REASONS_SHOWN],
+             "text": f"The portal validator warns on {r['records']} record(s) ({r['code']}"
+                     + (f", {r['path']}" if r.get("path") else "") + f"): {r['message']}"}
+            for r in sorted(seen.values(), key=lambda r: (-r["records"], r["code"]))]
+
+
 #: What a warning's ``path`` is called in ``export``'s "Written without …" line (else the path itself).
 WRITTEN_WITHOUT_NAMES = {SETPOINT_PATH: "the potential set-point", B.CONTROL_MODE_PATH: "the open-circuit condition"}
 
@@ -2027,6 +2060,7 @@ def validate_records(bundle_dir: Path, *, run_portal=None, full: bool = False) -
     out_dir = bundle_dir / VALIDATION_DIR
     out_dir.mkdir(exist_ok=True)
     verdicts, stale, not_exportable = {}, [], []
+    portal_warned: dict[str, list[dict]] = {}
     fresh = fresh_compositions(bundle_dir, bundle, test_marker=marked)
     warned = with_question_commands(bundle, [w for _, _, comp in fresh for w in comp.get("warnings") or ()])
     for group_id, draft, composition in fresh:
@@ -2039,6 +2073,8 @@ def validate_records(bundle_dir: Path, *, run_portal=None, full: bool = False) -
         report["warnings"] = [w for w in warned if w["group_id"] == group_id]
         _atomic_write(out_dir / f"{group_id}.json", _json_bytes(report))
         verdicts[group_id] = report["verdict"]
+        if pw := portal_warnings_of(report):
+            portal_warned[group_id] = pw
         if report["verdict"] != "exportable":
             not_exportable.append({"group_id": group_id, "verdict": report["verdict"],
                                    "missing_required": report["missing_required"],
@@ -2061,6 +2097,15 @@ def validate_records(bundle_dir: Path, *, run_portal=None, full: bool = False) -
         )
     out.update(warning_summary(warned, first=[g for g, v in verdicts.items() if v == "exportable"], full=full,
                                where=f"{VALIDATION_DIR}/<group_id>.json lists each group's"))
+    if portal_warned:
+        # r4-b M7: the portal validator's own warnings, each ONCE with its record count (before: only in
+        # validation/<group>.json, "publish (0 error(s), 2 warning(s))", and never said here)
+        said = portal_warning_summary(portal_warned)
+        out["portal_warnings"] = said
+        out["warnings"] = list(out.get("warnings") or ()) + [
+            {"group_id": None, "code": f"portal:{w['code']}", "text": w["text"], "command": None, "records": w["records"]}
+            for w in said]
+        out["warnings_total"] = int(out.get("warnings_total") or 0) + len(said)
     from .propose_terms import pending_vocabulary
 
     pending = pending_vocabulary(bundle, fresh, verdicts)
@@ -2341,6 +2386,7 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     bundle_dir, out = Path(bundle_dir), Path(out)
     bundle = load_validated(bundle_dir)
     exported, refused = [], []
+    portal_warned: dict[str, list[dict]] = {}
     index = _read_export_index(out) if out.is_dir() else {"format": EXPORT_INDEX_FORMAT, "records": []}
     bundle_id = bundle.get("bundle_id")
     prior_of = {(r.get("bundle_id"), r.get("group_id")): r for r in index["records"] if isinstance(r, Mapping)}
@@ -2461,6 +2507,10 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
                "artifacts": artifacts, "schemas_used": report["schemas_used"], "export": status,
                "statement": "Valid for the portal's pinned schema; NOT claimed valid for the website."}
         still = [written_without(w) for w in warned if w["group_id"] == group_id]
+        if pw := portal_warnings_of(report):
+            # r4-b M7: a record the portal validator warns about says so on its row
+            portal_warned[group_id] = pw
+            still += [f"Written with a portal validator warning ({w['code']}): {w['message']}" for w in pw]
         if still:
             # c11-r: capped like every other list (count + the first few); `validate --full` lists every one
             row["warnings"] = still[:WARNINGS_SHOWN]
@@ -2527,6 +2577,12 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         "on_disk_drafts_ignored_because_they_differ": stale,
         "on_disk_drafts_ignored_with_no_confirmed_group": orphans,
     }
+    if portal_warned:
+        # r4-b M7: each portal warning once, with how many of the records written carry it
+        result["portal_warnings"] = portal_warning_summary(portal_warned)
+        result["outcome"] += (" The portal validator warned on written records: "
+                              + "; ".join(f"{w['code']} ({w['records']} record(s))" for w in result["portal_warnings"])
+                              + " (`portal_warnings`).")
     if not exported:
         # SAID PLAINLY: with nothing written there is nothing for `upload --dry-run` to show
         result["statement"] = (
