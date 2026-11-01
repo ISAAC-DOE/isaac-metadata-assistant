@@ -11,6 +11,8 @@ line, not a measurement.
 * (MED 3) The counter question (order-critical: confirmed groups cannot be joined later) came 28th of 43 in the
   experiment scope. While open it sorts first in every scope that lists it, and the minimum names it
   (``answer_first``) before any group is confirmed. No id changes.
+* (LOW 1) ``--e0-measured`` on a result not flagged ``athena_e0_possibly_fixed`` was accepted silently: refused now,
+  nothing recorded.
 """
 
 from __future__ import annotations
@@ -245,3 +247,26 @@ def test_a_deferred_or_answered_counter_question_is_not_put_first(counter_bundle
     q = next(q for q in answered["questions"] if q["question_id"] == Q.COUNTER_QUESTION_ID)
     assert q["order_critical"] is False and answered["questions"][0]["question_id"] != Q.COUNTER_QUESTION_ID
     assert not any(q["kind"] == "naming_counter_positions" for q in Q.consolidate(M.load(counter_bundle))["questions"])
+
+
+# --- LOW 1: --e0-measured only answers the fixed-E0 flag ---------------------------------------------------------
+
+
+def test_e0_measured_on_a_result_without_the_flag_is_refused_and_records_nothing(tmp_path, capsys):
+    from test_local_import_polish_r1a import _processing, _versions_case
+
+    _processing()
+    processed, root = _versions_case(tmp_path)
+    M.process(processed, source=str(root))
+    capsys.readouterr()
+    b = M.load(processed)
+    r = next(r for r in b.get("processing_results") or ()
+             if r.get("outputs") and "athena_e0_possibly_fixed" not in (r.get("review_flags") or ()))
+    pid = B.processing_id(r)
+    before = len(b.get("scientist_decisions") or ())
+    with pytest.raises(M.MutationRefused, match="does not carry that flag") as exc:
+        M.decide(processed, target_ids=[pid], decision="approve", value=None, qc_status="valid", e0_measured=True, **BY)
+    assert "athena_e0_possibly_fixed" in str(exc.value) and "Nothing was recorded." in str(exc.value)
+    assert len(M.load(processed).get("scientist_decisions") or ()) == before
+    # without the statement the same approval goes through
+    assert pid in M.decide(processed, target_ids=[pid], decision="approve", value=None, qc_status="valid", **BY)["recorded"]

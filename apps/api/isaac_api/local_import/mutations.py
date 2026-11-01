@@ -2285,6 +2285,13 @@ def record_decision(
                         f"{tid} carries a possibly fixed Athena E0 (athena_e0_possibly_fixed){': ' + said if said else '.'} "
                         "Ask the scientist whether this E0 was measured from this group's edge; only if they say it "
                         "was, approve again with --e0-measured. Nothing was recorded.")
+            if e0_measured and not (kind == "processing_result" and "athena_e0_possibly_fixed" in (obj.get("review_flags") or ())):
+                # r2-a L1: the statement answers that flag's question only; on any other target it would be kept as
+                # evidence of nothing (accepted silently before)
+                raise MutationRefused(
+                    f"--e0-measured applies only to a processing result flagged athena_e0_possibly_fixed, and {tid} "
+                    "does not carry that flag: there is no fixed-E0 question to answer. Approve it without "
+                    "--e0-measured. Nothing was recorded.")
             if same_conditions:
                 acknowledged[tid] = _same_conditions_tokens(bundle, kind, obj, merge_with)
             if qc_status is not None and kind != "processing_result":
