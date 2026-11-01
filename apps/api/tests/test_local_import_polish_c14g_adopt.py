@@ -142,7 +142,7 @@ def test_supersede_is_said_only_where_the_value_is_the_runs_own():
     assert rec["settled"] is True and rec["run_own"] is False
 
 
-def test_the_ruling_cell_of_a_settled_row_says_supersede(grouped, tmp_path, capsys, ticking):
+def test_the_ruling_cell_of_a_settled_row_says_what_a_different_ruling_does(grouped, tmp_path, capsys, ticking):
     theirs = _their_sheet(grouped, tmp_path / THEIRS)
     first = tmp_path / "adopted.xlsx"
     env = _d(_adopt_json(grouped, theirs, first, capsys), "Environment", kind="not_allowed")
@@ -152,12 +152,15 @@ def test_the_ruling_cell_of_a_settled_row_says_supersede(grouped, tmp_path, caps
     env2 = _d(_adopt_json(grouped, theirs, again, capsys), "Environment", kind="not_allowed")
     assert env2["already_recorded"]["run_own"] is True
     wd, row = _row_of(again, env2["id"])
-    assert "only with `template import --supersede`" in wd[f"H{row}"].comment.text
-    # and that is true: a different ruling is a clash without it
+    # c15b H2: the row named the value recorded now, so a different ruling made against it is recorded over it on
+    # import (the preview names it); if the value recorded changes before then, nothing is recorded: adopt again
+    assert "is recorded over it when you import (the preview names it)" in wd[f"H{row}"].comment.text
+    assert "nothing is recorded for it: adopt again" in wd[f"H{row}"].comment.text
     _rule(again, tmp_path / "other.xlsx", {env2["id"]: "ex_situ"})
     code, rep, err = _import(grouped, tmp_path / "other.xlsx", capsys)
     assert code == 0, err
-    assert rep["clashes"] and rep["would_record"] == 0
+    assert not [c for c in rep["clashes"] if c["cell"].startswith("'Disagreements'")] and rep["would_record"] > 0
+    assert {x["value"] for x in rep["rulings_over_the_value_recorded"]} == {"ex_situ"}
 
 
 # --- LOW-6 ----------------------------------------------------------------------------------------------------

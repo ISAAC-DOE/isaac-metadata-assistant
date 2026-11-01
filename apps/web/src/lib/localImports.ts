@@ -80,6 +80,8 @@ export interface LocalQuestionCounts {
   optional: number;
   /** Disagreements about something no record field holds: settling one changes no record. */
   conflicts_without_a_record_field?: number;
+  /** Disagreements every run of which already holds the scientist's decision for the field: not asked again. */
+  conflicts_covered_by_decisions?: number;
   /** Questions whose every target is in a run no live record group holds: no record is built from them. */
   outside_live_groups?: number;
   /** Listed for information only: no answer can reach a record from them yet. Counted apart from the rest. */
@@ -749,6 +751,7 @@ export const LOCAL_IMPORTS_COPY = {
   unaskedRequiredOne: 'required field no question asks yet',
   unaskedRequiredMany: 'required fields no question asks yet',
   conflictsWithoutField: 'disagreement(s) about something no record field holds (settling one changes no record)',
+  conflictsCovered: 'disagreement(s) already settled by a scientist’s decision for those runs (not asked again)',
   outsideLiveGroups: 'question(s) about runs no record group holds (no record is built from them)',
   informationalCount: 'listed for information only (no answer can reach a record from them yet)',
   deferredCount: 'deferred (“I don’t know”); they are still counted above',
@@ -966,15 +969,17 @@ export function fieldWords(path: string): string {
 }
 
 /** The short line naming the open questions the blocking / optional split leaves out (the server's tier-3 split:
- *  `questions.question_counts`: informational, a conflict no record field holds, outside every live group), so the
- *  numbers add up to the total, and the deferred ones, which overlap the others and are said as such; or null when
+ *  `questions.question_counts`: informational, a conflict the runs' own decisions cover, a conflict no record field
+ *  holds, outside every live group), so the numbers add up to the total, and the deferred ones, which overlap the others and are said as such; or null when
  *  all are zero or the server does not send them. */
 export function notCountedText(c: LocalProgress['questions'] | LocalQuestionCounts | undefined): string | null {
   const fieldless = c?.conflicts_without_a_record_field ?? 0;
+  const covered = c?.conflicts_covered_by_decisions ?? 0;
   const outside = c?.outside_live_groups ?? 0;
   const informational = c?.informational ?? 0;
   const deferred = c?.deferred ?? 0;
   const parts = [
+    ...(covered > 0 ? [`${covered} ${LOCAL_IMPORTS_COPY.conflictsCovered}`] : []),
     ...(fieldless > 0 ? [`${fieldless} ${LOCAL_IMPORTS_COPY.conflictsWithoutField}`] : []),
     ...(outside > 0 ? [`${outside} ${LOCAL_IMPORTS_COPY.outsideLiveGroups}`] : []),
     ...(informational > 0 ? [`${informational} ${LOCAL_IMPORTS_COPY.informationalCount}`] : []),

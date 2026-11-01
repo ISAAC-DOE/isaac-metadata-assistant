@@ -576,7 +576,14 @@ def collect(bundle: Mapping, sources: Mapping) -> dict:
             ]
         check(path, interp.get("proposed_value"), ORIGIN_AI, ref, citations, runs)
 
+    said: set[str] = set()
     for req in bundle.get("vocabulary_requests") or ():
+        # c15b L4: one sheet's cells kept twice under two names (a build before c15b) are one occurrence, counted once
+        key = json.dumps({k: req.get(k) for k in ("field_path", "term", "scope", "targets", "run_ids", "source", "note")}
+                         if isinstance(req, Mapping) else None, sort_keys=True, default=str)
+        if key in said and isinstance(req, Mapping) and (req.get("source") or {}).get("cells"):
+            continue
+        said.add(key)
         ref = {"kind": "vocabulary_request", "id": req.get("request_id"), "scope": req.get("scope")}
         check(req.get("field_path"), req.get("term"), ORIGIN_REQUEST, ref, [_request_citation(req)],
               list(req.get("run_ids") or ()), _request_note(req))
