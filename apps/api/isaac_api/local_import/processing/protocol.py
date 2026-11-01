@@ -28,6 +28,7 @@ RULE_VERSIONS_SINCE_PROTOCOL_VERSION: dict[str, Any] = {
     "since_protocol_version": "0.1.0",
     "rule_ids": [
         "isaac.athena.already_normalized.v0",
+        "isaac.athena.e0_possibly_fixed.v0",
         "isaac.athena.match_by_name.v1",
         "isaac.xas.calibration_overrides_stricter_only.v0",
         "isaac.xas.calibration_shift_size_confirmed.v0",

@@ -10,6 +10,10 @@ Athena project and value below is invented (``SYN_``); the chemical formulas are
   approvable Athena result on the next ``isaac process`` (built as every Athena result is); approving it makes the
   record carry that version's E0. Measured: a 42-scan group's chosen merge (E0 2473.114) changed nothing, and the
   record kept ISAAC's 2472.958.
+* (M5) An Athena E0 identical across groups of one beamtime whose own edges differ is likely a fixed normalisation
+  setting, not a measured edge position: each such Athena result is flagged ``athena_e0_possibly_fixed``, is not
+  preferred for the record, says why and asks whether the E0 was measured or set. Measured: elemental S, a dry MOF
+  and the MOF at 0 V all carried Athena E0 2471.901 eV; ISAAC measured 2472.958 eV for the last.
 """
 
 from __future__ import annotations
@@ -292,3 +296,81 @@ def test_without_a_choice_no_version_result_is_made(tmp_path, capsys):
     M.process(bdir, source=str(root))
     capsys.readouterr()
     assert _results(bdir, "scientist_athena") == []
+
+
+# --- M5: an Athena E0 that is the same in several groups -------------------------------------------------------
+
+
+def _fixed_e0_case(tmp_path, edges, athena_e0s):
+    """One run per edge (2 synthetic scans each, different samples) and ONE Athena project holding each run's curve,
+    normalised with the E0 given (a number set in Athena, not found from the curve)."""
+    import larch.xafs as xafs
+    from larch import Group
+    from larch.io import AthenaProject
+
+    from test_local_import_processing import GRID, fluo_scan, make_case, mu_edge, spec_file
+
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    runs = [(f"0{k}_SYN_ZZ{k}", [spec_file(fluo_scan(s, e0=e0)) for s in (1, 2)], {"sample_name": f"ZZ{k}"})
+            for k, e0 in enumerate(edges, start=1)]
+    bdir, root, bundle = make_case(tmp_path, runs)
+    prj = AthenaProject()
+    for (stem, _, _), e0, fixed in zip(runs, edges, athena_e0s):
+        g = Group(energy=GRID, mu=mu_edge(GRID, e0) * 1e-2, label=stem, filename=stem)
+        xafs.pre_edge(g, e0=fixed, pre1=-50, pre2=-30, norm1=60, norm2=130, nnorm=2)
+        prj.add_group(g)
+    prj.save(str(root / "SYN_fixed.prj"))
+    bundle["unread_files"].append({"source_id": "prj-fixed", "relative_path": "SYN_fixed.prj"})
+    (bdir / "bundle.json").write_text(json.dumps(bundle))
+    return bdir, root
+
+
+def _athena_results(payload):
+    return [r for r in payload["processing_results"] if r["source"] == "scientist_athena"]
+
+
+def test_one_athena_e0_in_three_groups_whose_own_edges_differ_is_flagged(tmp_path):
+    _processing()
+    from isaac_api.local_import.processing import run as RUN
+    from isaac_api.local_import.processing.cli_entry import run_process
+
+    bdir, root = _fixed_e0_case(tmp_path, [4966.0, 4968.0, 4970.0], [4967.0] * 3)
+    out = run_process(bdir, source_root=root)
+    ath = _athena_results(out)
+    assert len(ath) == 3 and {round(r["outputs"]["e0_eV"], 3) for r in ath} == {4967.0}
+    for r in ath:
+        assert RUN.FIXED_E0_FLAG in r["review_flags"] and r["preferred_for_record"] is False
+        said = r["qc"]["statements"][RUN.FIXED_E0_FLAG]
+        assert said.startswith("The scientist's Athena E0 here, 4967.000 eV, is exactly the Athena E0 of 2 other groups")
+        assert "likely a fixed normalisation setting" in said and "measured or set" in said
+        info = r["athena_e0_possibly_fixed"]
+        assert info["rule_id"] == RUN.FIXED_E0_RULE_ID and len(info["groups"]) == 3 and info["isaac_e0_spread_eV"] > 3.0
+        assert [q["code"] for q in r["questions"]] == [RUN.FIXED_E0_QUESTION]
+    assert out["athena"]["e0_possibly_fixed"]["results"] == [r["result_id"] for r in ath]
+    assert any(line.startswith("Athena: 3 of the scientist's Athena result(s) carry an E0 identical")
+               for line in out["summary"]["lines"])
+
+
+def test_a_single_group_and_different_athena_e0s_are_not_flagged(tmp_path):
+    _processing()
+    from isaac_api.local_import.processing import run as RUN
+    from isaac_api.local_import.processing.cli_entry import run_process
+
+    one, root = _fixed_e0_case(tmp_path / "one", [4966.0], [4967.0])
+    [r] = _athena_results(run_process(one, source_root=root))
+    assert RUN.FIXED_E0_FLAG not in r["review_flags"] and r["preferred_for_record"] is True
+    assert "athena_e0_possibly_fixed" not in r and not r.get("questions")
+    # NEGATIVE CONTROL: three groups, each with its own Athena E0
+    three, root = _fixed_e0_case(tmp_path / "three", [4966.0, 4968.0, 4970.0], [4966.1, 4968.1, 4970.1])
+    out = run_process(three, source_root=root)
+    assert not any(RUN.FIXED_E0_FLAG in r["review_flags"] for r in _athena_results(out))
+    assert "e0_possibly_fixed" not in out["athena"]
+
+
+def test_an_identical_athena_e0_with_the_same_own_edge_is_not_flagged(tmp_path):
+    _processing()
+    from isaac_api.local_import.processing import run as RUN
+    from isaac_api.local_import.processing.cli_entry import run_process
+
+    bdir, root = _fixed_e0_case(tmp_path, [4966.0, 4966.0], [4966.0, 4966.0])
+    assert not any(RUN.FIXED_E0_FLAG in r["review_flags"] for r in _athena_results(run_process(bdir, source_root=root)))

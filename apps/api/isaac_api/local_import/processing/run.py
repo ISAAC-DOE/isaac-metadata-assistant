@@ -1875,6 +1875,8 @@ def process_bundle(
             _null_non_finite(r)
         (unread_results if g.get("group_kind") in ("unread_acquisition", "generic_run") else results).extend(out)
 
+    fixed_said = possibly_fixed_athena_e0(results, bundle, all_groups)
+
     payload = {
         **header,
         "status": "processed",
@@ -1898,12 +1900,109 @@ def process_bundle(
     }
     if payload["athena"]["statement"]:
         payload["summary"]["lines"].append(payload["athena"]["statement"])
+    if fixed_said:
+        payload["athena"]["e0_possibly_fixed"] = fixed_said
+        payload["summary"]["lines"].append(fixed_said["statement"])
     payload["summary"]["lines"].extend(REF.ignored_overrides(resolved))  # c12-r: an ignored override is said once
     _write(out_dir / RESULTS_FILE, _json_bytes(payload))
     return payload
 
 
 _STATED_SUFFIXES = 3
+
+#: r1-a M5: an Athena E0 IDENTICAL (to :data:`FIXED_E0_DECIMALS`) across groups of one beamtime whose own edges differ
+#: is likely a FIXED normalisation setting (an E0 typed or carried over in Athena), not a measured edge position.
+#: Measured on a real BL4-3 sulfur beamtime: elemental S, a dry MOF and the MOF at 0 V in electrolyte all carried
+#: Athena E0 2471.901 eV while ISAAC measured 2472.958 eV for the last, and it was exported as the edge position.
+FIXED_E0_RULE_ID = "isaac.athena.e0_possibly_fixed.v0"
+FIXED_E0_FLAG = "athena_e0_possibly_fixed"
+FIXED_E0_QUESTION = "athena_e0_measured_or_set"
+FIXED_E0_DECIMALS = 3
+#: ISAAC's own E0s of those groups spread at least this much (more than one curve's E0 moves by landing on a grid
+#: point), or the groups' samples are named as chemically different (:func:`reference.calibrant_identity`)
+FIXED_E0_MIN_ISAAC_SPREAD_EV = 0.5
+_FIXED_E0_GROUPS_SAID = 5
+
+
+def possibly_fixed_athena_e0(results: list[dict], bundle: Mapping, groups: Sequence[Mapping]) -> dict | None:
+    """Flag (:data:`FIXED_E0_FLAG`) each Athena result of THIS run whose E0 equals, to :data:`FIXED_E0_DECIMALS`, the
+    Athena E0 of at least one OTHER group of the beamtime (this run's results, and the bundle's stored ones for groups
+    not processed now) while ISAAC's own E0s for those groups spread at least :data:`FIXED_E0_MIN_ISAAC_SPREAD_EV`, or
+    their samples are named as chemically different. A flagged result is not preferred for the record, says why
+    (``qc.statements``, ``athena_e0_possibly_fixed``) and asks whether the E0 was measured or set (``questions``).
+    Nothing hashed changes (an Athena result has no hashed file of its own). Returns a summary (or ``None``)."""
+    def own_e0(pool, r):
+        sib = next((x for x in pool if x.get("source") == "isaac_protocol" and x.get("group_id") == r.get("group_id")
+                    and x.get("run_id") == r.get("run_id")), None)
+        v = ((sib or {}).get("outputs") or {}).get("e0_eV")
+        return float(v) if isinstance(v, (int, float)) and math.isfinite(v) else None
+
+    def athena_e0(r):
+        v = (r.get("outputs") or {}).get("e0_eV")
+        return round(float(v), FIXED_E0_DECIMALS) if isinstance(v, (int, float)) and math.isfinite(v) else None
+
+    now = {r.get("group_id") for r in results}
+    stored = [r for r in (bundle or {}).get("processing_results") or () if r.get("group_id") not in now]
+    rows = [(r.get("group_id"), athena_e0(r), own_e0(results, r), r) for r in results if r.get("source") == "scientist_athena"]
+    rows += [(r.get("group_id"), athena_e0(r), own_e0(stored, r), None) for r in stored
+             if r.get("source") == "scientist_athena" and r.get("state") != "rejected"]
+    by_group = {g.get("group_id"): g for g in groups}
+
+    def name(gid):
+        g = by_group.get(gid) or {}
+        return next((str(s) for s in g.get("_stems") or () if s), None) or str(gid)
+
+    def chemistry(gid):
+        g = by_group.get(gid)
+        return tuple(REF.calibrant_identity(identity_texts(g, g.get("_stems") or ()))["named"]) if g else ()
+
+    flagged = []
+    for value in sorted({e0 for _, e0, _, _ in rows if e0 is not None}):
+        same = [row for row in rows if row[1] == value]
+        gids = sorted({gid for gid, _, _, _ in same})
+        if len(gids) < 2:
+            continue
+        own = {gid: next((o for g_, _, o, _ in same if g_ == gid and o is not None), None) for gid in gids}
+        known = [o for o in own.values() if o is not None]
+        spread = (max(known) - min(known)) if len(known) >= 2 else None
+        different = len({c for c in (chemistry(gid) for gid in gids) if c}) >= 2
+        if not ((spread is not None and spread >= FIXED_E0_MIN_ISAAC_SPREAD_EV) or different):
+            continue
+        for gid, _, mine, r in same:
+            if r is None:
+                continue
+            others = [g for g in gids if g != gid]
+            listed = ", ".join(f"{name(g)} (ISAAC {own[g]:.3f} eV)" if own[g] is not None else name(g)
+                               for g in others[:_FIXED_E0_GROUPS_SAID])
+            listed += f" and {len(others) - _FIXED_E0_GROUPS_SAID} more" if len(others) > _FIXED_E0_GROUPS_SAID else ""
+            why = (f"ISAAC's own E0s for these groups span {spread:.2f} eV" if spread is not None and spread >= FIXED_E0_MIN_ISAAC_SPREAD_EV
+                   else "their samples are named as chemically different")
+            said = (f"The scientist's Athena E0 here, {value:.{FIXED_E0_DECIMALS}f} eV, is exactly the Athena E0 of "
+                    f"{len(others)} other group{'' if len(others) == 1 else 's'} of this beamtime ({listed}), while "
+                    + (f"ISAAC measures {mine:.3f} eV here and " if mine is not None else "")
+                    + f"{why}. An E0 identical across different curves is likely a fixed normalisation setting (typed "
+                    "or carried over in Athena), not a measured edge position, so this result is not preferred for "
+                    "the record. Before approving it, ask the scientist whether this E0 was measured or set; if it was "
+                    "set, it is not this group's edge position.")
+            r.setdefault("review_flags", []).append(FIXED_E0_FLAG)
+            r["preferred_for_record"] = False
+            r.setdefault("qc", {}).setdefault("statements", {})[FIXED_E0_FLAG] = said
+            r["athena_e0_possibly_fixed"] = {
+                "rule_id": FIXED_E0_RULE_ID, "athena_e0_eV": value, "decimals": FIXED_E0_DECIMALS,
+                "groups": [{"group_id": g, "athena_e0_eV": value, "isaac_e0_eV": own[g]} for g in gids],
+                "isaac_e0_spread_eV": spread, "named_chemically_different": different, "statement": said}
+            r["questions"] = [*(r.get("questions") or ()), {
+                "code": FIXED_E0_QUESTION,
+                "text": (f"Was the Athena E0 of {value:.{FIXED_E0_DECIMALS}f} eV measured from this group's own edge, or "
+                         "set (typed, or carried over from another group) in Athena? It is the same in "
+                         f"{len(gids)} groups whose own edges differ.")}]
+            flagged.append(r.get("result_id"))
+    if not flagged:
+        return None
+    return {"rule_id": FIXED_E0_RULE_ID, "results": flagged, "statement": (
+        f"Athena: {len(flagged)} of the scientist's Athena result(s) carry an E0 identical to other groups' while "
+        "their own edges differ: likely a fixed normalisation setting, not a measured edge position (flag "
+        f"{FIXED_E0_FLAG}); ask the scientist before approving them.")}
 
 
 def athena_match_statement(groups: Sequence[Mapping], entries: Sequence[Mapping], *, matched: Mapping, notes: Sequence[Mapping]) -> str | None:
