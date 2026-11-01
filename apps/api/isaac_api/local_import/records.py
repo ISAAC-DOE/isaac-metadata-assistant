@@ -434,7 +434,9 @@ def composition_index(bundle: Mapping, decision_of: Mapping[tuple[str, str], Map
         # read when first needed, then kept: B.required_record_paths(control_mode=...) per mode (it reads the
         # schema file each call), and B.clock_zone_decision (only a confirmed local-clock start time asks for it)
         "required_by_mode": {},
-        "memo": {},
+        # read from the WHOLE bundle here, never lazily inside compose_group: a group is composed from its own
+        # values only, so a lazy read would keep the first group's view for every group
+        "memo": {"local_clock_runs": local_clock_runs(bundle), "open_start_conflicts": open_start_conflicts(bundle)},
     }
 
 
@@ -1300,6 +1302,13 @@ def _start_time_warnings(bundle: Mapping, group: Mapping, member_ids: set, field
              "command": B.CLOCK_ZONE_COMMAND, **({"unanswered": True} if unanswered else {})}]
 
 
+def open_start_conflicts(bundle: Mapping) -> list[Mapping]:
+    """The start-time conflicts still open (conflicting or needing review), each naming its run."""
+    start = {c["candidate_id"] for c in bundle.get("candidates") or () if c.get("target_field_path") == B.XDC_START_PATH}
+    return [cf for cf in bundle.get("conflicts") or () if cf.get("run_ids") and (cf.get("candidate_id") or "") in start
+            and cf.get("value_state") in (B.STATE_CONFLICTING, B.STATE_NEEDS_REVIEW)]
+
+
 def _start_time_conflict_warnings(bundle: Mapping, group: Mapping, member_ids: set, memo: dict | None = None) -> list[dict]:
     """r4-b L5: a :data:`START_TIME_WARNING` for a record that carries no start time because a member run's start-time
     readings disagree and that disagreement is unanswered (a SPEC beamtime, with no clock-zone question to defer): the
@@ -1310,10 +1319,7 @@ def _start_time_conflict_warnings(bundle: Mapping, group: Mapping, member_ids: s
 
     memo = {} if memo is None else memo
     if "open_start_conflicts" not in memo:
-        start = {c["candidate_id"] for c in bundle.get("candidates") or () if c.get("target_field_path") == B.XDC_START_PATH}
-        memo["open_start_conflicts"] = [cf for cf in bundle.get("conflicts") or () if cf.get("run_ids")
-                                        and (cf.get("candidate_id") or "") in start
-                                        and cf.get("value_state") in (B.STATE_CONFLICTING, B.STATE_NEEDS_REVIEW)]
+        memo["open_start_conflicts"] = open_start_conflicts(bundle)
     for cf in memo["open_start_conflicts"]:
         if cf["run_ids"][0] in member_ids:
             qid = Q._qid(f"group:{group['group_id']}", "resolve_conflict", cf["conflict_id"])
