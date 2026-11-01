@@ -374,6 +374,18 @@ def test_the_counter_examples_are_sample_names_where_there_are_some(tmp_path):
     assert names and all(n.startswith("SYNti_dry_") for n in names), names
 
 
+def test_a_sample_candidate_is_the_example_even_when_an_alignment_one_comes_first():
+    stems = {"k1": "align_SYNfoil_001", "k2": "align_SYNfoil_002", "k3": "SYNti_dry_015", "k4": "SYNti_dry_016"}
+    role = {"k1": "alignment", "k2": "alignment", "k3": "sample", "k4": "sample"}
+    bundle = {"runs": [{"run_key": k, "stem": v} for k, v in stems.items()],
+              "record_groups": [{"group_id": f"g-{k}", "member_run_keys": [k], "role": role[k]} for k in stems],
+              "merge_candidates": [{"group_ids": ["g-k1", "g-k2"], "reasons": [{"code": "numeric_name_token_differs"}]},
+                                   {"group_ids": ["g-k3", "g-k4"], "reasons": [{"code": "numeric_name_token_differs"}]}]}
+    got = Q._counter_examples(bundle, [G.LAST_POSITION, 3])
+    assert got[G.LAST_POSITION]["differ"] == ["SYNti_dry_[015]", "SYNti_dry_[016]"]
+    assert got[3]["differ"] == ["SYNti_dry_[015]", "SYNti_dry_[016]"]
+
+
 def test_several_counter_positions_are_each_asked_on_their_own():
     text = G.counter_question({3: 1, G.LAST_POSITION: 2}, None)["text"]
     assert "3rd / last" not in text and "Each is asked on its own: the 3rd token; the last token" in text
