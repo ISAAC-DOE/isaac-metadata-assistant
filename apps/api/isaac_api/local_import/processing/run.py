@@ -393,8 +393,9 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
     if too_few:
         flags.append(REF.TOO_FEW_FLAG)
     # r4-a: the reading every reader of the stored step makes (REF.judge): a scan whose pre-edge noise is about zero is
-    # not usable (DEGENERATE_RULE_ID), and usable edges that spread over more than the reference-spread level are not
-    # one reference (SPREAD_RULE_ID). Either BLOCKS a shift: none is applied, even under an approval. What is hashed
+    # not usable (DEGENERATE_RULE_ID): too few usable scans BLOCK a shift, none is applied even under an approval; usable
+    # edges that spread over more than the reference-spread level are not proposed and an approval of them is applied
+    # only with its size confirmed (SPREAD_RULE_ID, as a group's own edge). What is hashed
     # (measured edge, spread, computed shift) keeps the earlier rule's values, so a group whose curve does not change
     # keeps its id; only a group with a NAMED reference (approved, or a params file's) and a degenerate scan reads its
     # edge from the usable scans alone (its shift would otherwise come from a channel that is not counting).
@@ -447,7 +448,8 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
             if abs(shift) > float(cp["max_plausible_shift_eV"]):
                 flags.append("shift_implausible_not_applied")
             elif not approved:
-                if not not_named and not blocked:  # nothing awaits an approval ISAAC does not propose (not hashed)
+                if not not_named and not blocked and not j["disagree"]:  # nothing awaits an approval ISAAC does not
+                    # propose (flags are not hashed)
                     flags.append("calibration_shift_awaiting_approval")
             elif blocked:
                 pass  # r4-a: no reference is read (its flags say why); approval_not_applied names the approval
@@ -456,6 +458,9 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
                 # names cannot settle (a chemical standard's edge sits where its chemistry puts it, and moving it onto
                 # a tabulated edge erases that chemical shift): applied only with --accept-shift, whatever the size
                 flags.append(REF.CALIBRANT_NOT_CONFIRMED_FLAG)
+            elif j["disagree"] and not REF.shift_size_confirmed(accepted, shift):
+                # r4-a (SPREAD_RULE_ID): a reference whose usable edges disagree, applied only with --accept-shift
+                flags.append(REF.SPREAD_NOT_CONFIRMED_FLAG)
             elif near is not None and not REF.shift_size_confirmed(accepted, shift):
                 # r4-a (NEAR_SAMPLE_RULE_ID): the reference channel may be seeing the sample: applied only with its size
                 # confirmed (--accept-shift), whatever the size

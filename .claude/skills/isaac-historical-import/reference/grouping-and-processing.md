@@ -269,12 +269,15 @@ an element/edge already named for the group: approved, proposed, or the group's 
 - **No reference proposed** (`reference_proposed: false`; flags `reference_edge_not_found`,
   `reference_edge_in_too_few_scans` or `no_reference_available`): say the `reference_statement` ("only 1 of
   16 scans shows a usable reference edge; an in-scan reference needs one in at least 2 scans") and do NOT
-  ask for an element or edge: no shift can be approved, and `approve_calibration` is refused. Two more
-  reasons are said the same way: a scan whose reference edge stands more than 1,000,000 times its pre-edge
-  noise is a channel that is not counting, never usable (flag `reference_noise_degenerate`); and usable edges
-  that spread over more than 0.5 eV (`qc.warn_reference_e0_spread_eV`, stricter only) are not one reference
-  (flag `reference_edges_disagree`, "spread over 6.10 eV … more than the 0.5 eV they may differ by"). Ask the
-  scientist about the reference channel instead (a missing foil, a channel seeing the sample, drift).
+  ask for an element or edge: no shift can be approved, and `approve_calibration` is refused. A scan whose
+  reference edge stands more than 1,000,000 times its pre-edge noise is a channel that is not counting, never
+  usable (flag `reference_noise_degenerate`), and is said the same way.
+- **Usable edges that disagree** (flag `reference_edges_disagree`, `calibration_proposed: false`: they spread
+  over more than 0.5 eV, `qc.warn_reference_e0_spread_eV`, stricter only): not proposed. Say the sentence ("its
+  usable edges spread 6.10 eV (… median 11216.2 eV of 2 scans) …") and ask about the channel (a missing foil, a
+  channel seeing the sample, drift). Only if the scientist says the reference is what they name (a foil drifting
+  between scans), approve with `--accept-shift <the shift shown>`, whatever its size (without it: refused;
+  processing does not apply it, `calibration_reference_spread_not_confirmed`).
 - **A reference group's own edge** (`reference_source: reference_group_own_signal`, not a separate foil channel)
   is a calibration only if its sample is a pure element, and names cannot settle that: a chemical standard is not
   an energy calibrant (its edge sits where its chemistry puts it; "S K" would move a MoS2 standard onto elemental

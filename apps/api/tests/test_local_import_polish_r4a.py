@@ -55,23 +55,35 @@ def test_a_reference_channel_with_no_noise_is_not_usable():
     assert not REF.degenerate_snr(None)
 
 
-def test_usable_edges_that_disagree_are_not_one_reference():
+def test_usable_edges_that_disagree_are_not_proposed_and_need_accept_shift():
     step = _step([11213.1, 11219.2, 11220.0, 11221.0], [10.4, 11.0, 2.0, 1.5])
     r = REF.reading(step)
-    assert r["reference_proposed"] is False and r["reference_edges_disagree"] is True
+    # the edge is read (approvable), but ISAAC does not offer it as the calibration
+    assert r["reference_proposed"] is True and r["calibration_proposed"] is False and r["reference_edges_disagree"]
     assert r["reference_e0_spread_eV"] == pytest.approx(6.1) and r["reference_max_spread_eV"] == 0.5
     said = r["reference_statement"]
-    assert "2 of 4 scans show a usable reference edge" in said and "spread over 6.10 eV (11213.1 to 11219.2 eV)" in said
-    assert "more than the 0.5 eV they may differ by (qc.warn_reference_e0_spread_eV)" in said
-    assert "no reference is proposed" in said
+    assert "2 of 4 scans show a usable reference edge" in said
+    assert ("Its usable edges spread 6.10 eV (11213.1 to 11219.2 eV; median 11216.2 eV of 2 scans), more than the 0.5 "
+            "eV they may differ by (qc.warn_reference_e0_spread_eV), so ISAAC does not propose it as the reference") in said
+    assert "Approve only if the reference is what you name, with --accept-shift <the shift approving shows>" in said
+    # a small shift needs --accept-shift too, whatever its size
+    w = REF.would_apply(step, "Ir", "L3", warn_eV=2.0)
+    assert w["shown"] == "-1.2" and w["needs_size_confirmation"] and not w["needs_calibrant_confirmation"]
+    assert "median 11216.2 eV of 2 scans" in w["statement"]
+    assert "Approve only if the reference is what you name, with --accept-shift -1.2, whatever its size." in w["statement"]
+    done = REF.would_apply(step, "Ir", "L3", warn_eV=2.0, accepted=-1.2)
+    assert "You confirmed the shift's size (--accept-shift), so processing applies it." in done["statement"]
+    assert "Approve only if" not in done["statement"]
     # a reference group's own signal is judged by the same rule
     own = REF.reading(_step([11215.0, 11217.0], [300.0, 300.0], source="reference_group_own_signal"))
-    assert own["reference_proposed"] is False and own["reference_edges_disagree"]
+    assert own["calibration_proposed"] is False and own["reference_edges_disagree"]
     # a stored stricter level is read (never a looser one)
     tight = _step([11215.0, 11215.3], [300.0, 300.0], reference_max_spread_eV=0.2)
-    assert REF.reading(tight)["reference_proposed"] is False
+    assert REF.reading(tight)["calibration_proposed"] is False
     loose = _step([11215.0, 11216.0], [300.0, 300.0], reference_max_spread_eV=2.0)
-    assert REF.reading(loose)["reference_proposed"] is False
+    assert REF.reading(loose)["calibration_proposed"] is False
+    # edges that agree are offered as before
+    assert REF.reading(_step([11215.0, 11215.3], [300.0, 300.0]))["calibration_proposed"] is True
 
 
 def test_a_good_foil_is_still_proposed_and_the_reply_says_the_spread():
@@ -100,12 +112,13 @@ def test_a_reference_edge_at_the_samples_own_e0_is_said_and_needs_its_size_confi
     assert "reference_at_sample_e0_eV" not in far and "seeing the sample" not in far["reference_statement"]
 
 
-def test_a_carried_shift_from_a_reference_no_longer_proposed_is_unconfirmed():
+def test_a_carried_shift_from_edges_that_disagree_is_unconfirmed_until_its_size_is():
     step = _step([11213.1, 11219.2], [10.4, 11.0], applied=True, applied_shift_eV=-1.2,
                  reference={"element": "Ir", "edge": "L3", "basis": "scientist_decision"})
     c = REF.carried_shift(step, warn_eV=2.0, group_id="g1", result_id="p1")
     assert c is not None and not c["confirmed"]
     assert "spread over 6.10 eV" in c["reason"] and "--accept-shift -1.2" in c["statement"]
+    assert REF.carried_shift({**step, "outcome": {**step["outcome"], "accepted_shift_eV": -1.2}}, warn_eV=2.0)["confirmed"]
 
 
 def test_the_r4a_rules_are_named_outside_the_hashed_files():
@@ -117,7 +130,7 @@ def test_the_r4a_rules_are_named_outside_the_hashed_files():
 
 def test_a_params_file_cannot_loosen_the_reference_spread_rule():
     said = REF.ignored_overrides({"qc": {"warn_reference_e0_spread_eV": 3.0}})
-    assert len(said) == 1 and "still not proposed" in said[0]
+    assert len(said) == 1 and "still not proposed, and approving it still needs --accept-shift" in said[0]
     assert REF.ignored_overrides({"qc": {"warn_reference_e0_spread_eV": 0.3}}) == []
     assert REF.effective_max_spread_eV(3.0) == 0.5 and REF.effective_max_spread_eV(0.3) == 0.3
 
@@ -153,13 +166,21 @@ def test_approve_calibration_is_refused_for_a_degenerate_reference(bdir):
     assert _calibrations(bdir) == []
 
 
-def test_approve_calibration_is_refused_for_edges_that_disagree(bdir):
+def test_approve_calibration_of_edges_that_disagree_needs_accept_shift_whatever_the_size(bdir):
     gid = _with_result(bdir, [11213.1, 11219.2, 11220.0], [10.4, 11.0, 2.0])
+    args = dict(target_ids=[gid], decision="approve_calibration", value=None, element="Ir", edge="L3", **BY)
     with pytest.raises(M.MutationRefused) as exc:
-        M.decide(bdir, target_ids=[gid], decision="approve_calibration", value=None, element="Ir", edge="L3",
-                 accept_shift=1.0, **BY)
-    assert "spread over 6.10 eV" in str(exc.value) and "Nothing was recorded" in str(exc.value)
+        M.decide(bdir, **args)  # -1.2 eV: under the warning level, still refused without --accept-shift
+    said = str(exc.value)
+    assert "Its usable edges spread 6.10 eV" in said and "median 11216.2 eV of 2 scans" in said
+    assert "--accept-shift -1.2" in said and "Nothing was recorded" in said
+    with pytest.raises(M.MutationRefused):
+        M.decide(bdir, **args, accept_shift=1.0)
     assert _calibrations(bdir) == []
+    out = M.decide(bdir, **args, accept_shift=-1.2)
+    assert "approving applies -1.2 eV" in out["statement"] and "spread 6.10 eV" in out["statement"]
+    [d] = _calibrations(bdir)
+    assert d["value"] == {"accepted_shift_eV": -1.2}
 
 
 def test_approve_calibration_of_a_good_foil_says_the_spread(bdir):
@@ -243,20 +264,30 @@ def test_processing_a_degenerate_reference_is_not_proposed_nor_applied(tmp_path)
     assert "d-1" in said and "is not applied" in said and "pre-edge noise" in said
 
 
-def test_processing_reference_edges_that_disagree_are_not_proposed_nor_applied(tmp_path):
+def test_processing_reference_edges_that_disagree_apply_only_with_their_size_confirmed(tmp_path):
     T = _proc()
-    scans = [_ref_scan(T, 1, T.E0 + 8.0), _ref_scan(T, 2, T.E0 + 14.0)]
+    # a foil drifting between scans: edges 1 eV apart, a small shift (-1.0 eV) that still needs --accept-shift
+    scans = [_ref_scan(T, 1, T.E0 + 0.5, ref_noise=0.001), _ref_scan(T, 2, T.E0 + 1.5, ref_noise=0.001)]
     bdir, root, _ = T.make_case(tmp_path, [("01_SYN_ZZ1", scans, {"sample_name": "ZZ1"})])
     r = T.isaac(T.run_process(bdir, source_root=root))
     o = _cal(r)["outcome"]
-    assert o["reference_proposed"] is False and o["reference_edges_disagree"] is True
-    assert REF.SPREAD_FLAG in r["review_flags"] and "reference_e0_drift" in r["qc"]["reasons"]
-    assert "spread over 6.00 eV" in o["reference_statement"]
+    assert o["reference_proposed"] is True and o["calibration_proposed"] is False and o["reference_edges_disagree"]
+    assert REF.SPREAD_FLAG in r["review_flags"] and "calibration_shift_awaiting_approval" not in r["review_flags"]
+    assert "Its usable edges spread 1.00 eV" in o["reference_statement"]
     e0 = r["outputs"]["e0_eV"]
-    r2 = T.isaac(T.run_process(bdir, source_root=root, calibration_approvals=_approval(r["group_id"], accepted_shift_eV=-11.0)))
-    assert not _cal(r2)["outcome"]["applied"] and r2["outputs"]["e0_eV"] == pytest.approx(e0)
-    curve = [{f["role"]: f["sha256"] for f in x["outputs"]["files"]}["normalized"] for x in (r, r2)]
-    assert curve[0] == curve[1]  # nothing applied: the same curve (the approval itself is in the hashed step)
+    shift = REF.would_apply(_cal(r), "Ti", "K")["shown"]
+    assert float(shift) == pytest.approx(-1.0, abs=0.3)
+    plain = T.isaac(T.run_process(bdir, source_root=root, calibration_approvals=_approval(r["group_id"])))
+    assert not _cal(plain)["outcome"]["applied"] and plain["outputs"]["e0_eV"] == pytest.approx(e0)
+    assert REF.SPREAD_NOT_CONFIRMED_FLAG in plain["review_flags"]
+    said = plain["qc"]["statements"]["calibration_approval_not_applied"]
+    assert "d-1" in said and "spread 1.00 eV" in said and f"--accept-shift {shift}" in said
+    ok = T.isaac(T.run_process(bdir, source_root=root,
+                               calibration_approvals=_approval(r["group_id"], accepted_shift_eV=float(shift))))
+    o2 = _cal(ok)["outcome"]
+    assert o2["applied"] and REF.SPREAD_NOT_CONFIRMED_FLAG not in ok["review_flags"]
+    assert ok["outputs"]["e0_eV"] == pytest.approx(e0 + o2["applied_shift_eV"], abs=0.01)
+    assert "The scientist confirmed the shift's size" in o2["reference_statement"]
 
 
 def test_processing_a_good_foil_is_proposed_and_applied_as_before(tmp_path):

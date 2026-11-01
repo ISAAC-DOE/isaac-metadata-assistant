@@ -32,8 +32,11 @@ Three rules (all in ``protocol.RULE_VERSIONS_SINCE_PROTOCOL_VERSION``, kept outs
   measured edge. Measured on a real BL15-2 Ir L3 HERFD beamtime: in 7 groups the "usable" reference scans stood at
   1e13-1e14 times their noise, others at the threshold of 10, and their "edges" lay 11205-11233 eV apart.
 * :data:`SPREAD_RULE_ID` (r4-a) — usable reference edges that spread over more than ``qc.warn_reference_e0_spread_eV``
-  (never more than the protocol's :data:`DEFAULT_MAX_SPREAD_EV`: stricter only) are not one reference: nothing is
-  proposed. On the same beamtime "2 of 14 scans ... at 11216.2 eV (spread 6.09 eV)" was proposed and approved.
+  (never more than the protocol's :data:`DEFAULT_MAX_SPREAD_EV`: stricter only) are not PROPOSED (ISAAC does not offer
+  them as the calibration, ``calibration_proposed`` false), and an explicit approval is applied only with its size
+  confirmed (``--accept-shift``), whatever the size, as a group's own edge is: a real foil drifting between scans stays
+  approvable, once the scientist says the reference is what they name. On the same beamtime "2 of 14 scans ... at
+  11216.2 eV (spread 6.09 eV)" was proposed and approved, unconfirmed.
 * :data:`NEAR_SAMPLE_RULE_ID` (r4-a) — an in-scan reference edge within :data:`NEAR_SAMPLE_EV` of the group's own
   (uncalibrated) sample E0 may be the sample seen through the reference channel: it is said, and an approval is
   applied only with its size confirmed (``--accept-shift``), whatever the size. Measured: a chemical standard's
@@ -69,10 +72,13 @@ CALIBRANT_NOT_CONFIRMED_FLAG = "calibration_own_signal_shift_not_confirmed"
 DEGENERATE_RULE_ID = "isaac.xas.reference_noise_not_degenerate.v0"
 MAX_PLAUSIBLE_EDGE_SNR = 1e6
 DEGENERATE_FLAG = "reference_noise_degenerate"
-#: r4-a: usable reference edges that spread over more than the protocol's reference-spread level are not one reference
+#: r4-a: usable reference edges that spread over more than the protocol's reference-spread level are not proposed; an
+#: approval of them is applied only with --accept-shift
 SPREAD_RULE_ID = "isaac.xas.reference_edges_agree.v0"
 DEFAULT_MAX_SPREAD_EV = 0.5
 SPREAD_FLAG = "reference_edges_disagree"
+#: an approval of such a reference that the scientist did not also confirm with --accept-shift: not applied
+SPREAD_NOT_CONFIRMED_FLAG = "calibration_reference_spread_not_confirmed"
 #: r4-a: an in-scan reference edge this close to the group's own sample E0 may be the sample seen through the channel
 NEAR_SAMPLE_RULE_ID = "isaac.xas.reference_not_at_sample_e0.v0"
 NEAR_SAMPLE_EV = 0.5
@@ -124,7 +130,8 @@ def exceeds_warn(shift: float, warn_eV: Any = None) -> bool:
 
 
 def effective_max_spread_eV(configured: Any) -> float:
-    """r4-a (:data:`SPREAD_RULE_ID`): how far usable reference edges may spread and still be proposed: the configured
+    """r4-a (:data:`SPREAD_RULE_ID`): how far usable reference edges may spread and still be proposed (beyond it an
+    approval needs ``--accept-shift``): the configured
     ``qc.warn_reference_e0_spread_eV``, but never above the protocol's (an override may only make it stricter)."""
     return min(DEFAULT_MAX_SPREAD_EV, _num(configured, DEFAULT_MAX_SPREAD_EV))
 
@@ -136,8 +143,8 @@ def ignored_overrides(params: Mapping) -> list[str]:
     if spread is not None and _num(spread, DEFAULT_MAX_SPREAD_EV) > DEFAULT_MAX_SPREAD_EV:
         out.append(f"The params file sets qc.warn_reference_e0_spread_eV to {_num(spread, 0):g}, above the protocol's "
                    f"{DEFAULT_MAX_SPREAD_EV:g} eV; it sets the drift warning, but a reference whose usable edges spread "
-                   f"over more than {DEFAULT_MAX_SPREAD_EV:g} eV is still not proposed (an override may only make that "
-                   "rule stricter).")
+                   f"over more than {DEFAULT_MAX_SPREAD_EV:g} eV is still not proposed, and approving it still needs "
+                   "--accept-shift (an override may only make that rule stricter).")
     snr = ((params.get("calibration") or {}) if isinstance(params, Mapping) else {}).get("reference_min_edge_snr")
     if snr is not None and _num(snr, DEFAULT_MIN_SNR) < DEFAULT_MIN_SNR:
         out.append(f"The params file sets calibration.reference_min_edge_snr to {_num(snr, 0):g}, below the protocol's "
@@ -172,8 +179,9 @@ def judge(e0s: Sequence[Any], snrs: Sequence[Any], min_snr: float, source: str |
     every reader of a stored step share). ``passing``: the edges at least ``min_snr`` (the rule before r4-a, kept for
     what is hashed); ``usable``: those whose noise is not degenerate (:data:`DEGENERATE_RULE_ID`); ``degenerate``: how
     many were set aside for it; ``spread_eV`` over ``usable`` (null with fewer than two); ``disagree``: that spread is
-    above :func:`effective_max_spread_eV` (:data:`SPREAD_RULE_ID`); ``need``: the usable scans a reference needs;
-    ``proposed``: a reference is read (enough usable scans, edges that agree)."""
+    above :func:`effective_max_spread_eV` (:data:`SPREAD_RULE_ID`: not offered, approvable only with
+    ``--accept-shift``); ``need``: the usable scans a reference needs; ``proposed``: a reference edge is read (enough
+    usable scans), so an approval is possible."""
     passing, usable, degenerate = [], [], 0
     for e, s in zip(e0s or (), snrs or ()):
         v, ev = _ratio(s), _ratio(e)
@@ -192,7 +200,7 @@ def judge(e0s: Sequence[Any], snrs: Sequence[Any], min_snr: float, source: str |
     disagree = spread is not None and round(spread, 2) > limit
     return {"passing": passing, "usable": usable, "degenerate": degenerate, "need": need, "spread_eV": spread,
             "max_spread_eV": limit, "disagree": disagree,
-            "proposed": source is not None and len(usable) >= need and not disagree}
+            "proposed": source is not None and len(usable) >= need}
 
 
 def near_sample(outcome: Mapping, measured: float | None) -> float | None:
@@ -434,15 +442,6 @@ def reading(step: Mapping) -> dict:
     elif not usable:
         said = (f"No scan shows a usable reference edge (0 of {_n(listed, 'scan')} with {snr}), so no reference is "
                 "proposed and no calibration shift can be approved.")
-    elif j["disagree"]:
-        # r4-a (SPREAD_RULE_ID): edges that disagree are not one reference, whatever the scan count
-        where = "the reference channel" if source == IN_SCAN else "this reference group's own signal"
-        said = (f"{of[0].upper() + of[1:]} show{'s' if len(usable) == 1 else ''} a usable reference edge in {where} "
-                f"({snr}), but those edges spread over {spread:.2f} eV ({min(usable):.1f} to {max(usable):.1f} eV), more "
-                f"than the {j['max_spread_eV']:g} eV they may differ by (qc.warn_reference_e0_spread_eV): edges that "
-                "disagree are not one reference, so no reference is proposed and no calibration shift can be approved. "
-                "A person checks the reference channel (a foil that is missing, a channel that sees the sample, or the "
-                "energy drifting between scans).")
     elif not proposed:
         said = (f"Only {of} shows a usable reference edge ({snr}; at {measured:.1f} eV); an in-scan reference needs one "
                 f"in at least {MIN_IN_SCAN_REFERENCE_SCANS} scans, so no reference is proposed and no calibration "
@@ -464,6 +463,12 @@ def reading(step: Mapping) -> dict:
             said += " Naming its element and edge gives the shift: the tabulated edge minus this energy."
         if sample is not None:
             said += _near_sample_sentence(measured, sample)
+        if j["disagree"]:
+            # r4-a (SPREAD_RULE_ID): not offered; approvable only with --accept-shift, whatever the size
+            said = said.replace(f" (spread {spread:.2f} eV).", ".", 1) + " " + _spread_sentence(
+                spread, j["max_spread_eV"], measured, len(usable), usable,
+                shown(o["computed_shift_eV"]) if o.get("computed_shift_eV") is not None else None,
+                confirmed=_size_confirmed_step(o))
     if j["degenerate"] and source is not None:
         said = _degenerate_sentence(j["degenerate"]) + said
     return {
@@ -477,7 +482,8 @@ def reading(step: Mapping) -> dict:
         # offers it as the energy calibration (CALIBRANT_RULE_ID: a group's own edge only when its names clearly say a
         # pure element, never a compound, a mixture or an unknown; applying it needs --accept-shift either way)
         "reference_proposed": proposed,
-        "calibration_proposed": proposed and (calibrant is None or named_element(calibrant) is not None),
+        "calibration_proposed": (proposed and not j["disagree"]
+                                 and (calibrant is None or named_element(calibrant) is not None)),
         "reference_statement": said,
         # r4-a: why fewer scans are usable than before, whether the edges disagree, and an edge at the sample's own E0
         # (each only when it applies, so an unaffected reading is unchanged)
@@ -486,6 +492,26 @@ def reading(step: Mapping) -> dict:
         **({"reference_at_sample_e0_eV": sample} if sample is not None else {}),
         **({"reference_calibrant": dict(o["reference_calibrant"])} if isinstance(o.get("reference_calibrant"), Mapping) else {}),
     }
+
+
+def _size_confirmed_step(outcome: Mapping) -> bool:
+    """A scientist's approval, with its size confirmed (``--accept-shift`` matching), was applied to this curve."""
+    return bool(outcome.get("applied") and outcome.get("accepted_shift_eV") is not None
+                and shift_size_confirmed(outcome.get("accepted_shift_eV"), outcome.get("applied_shift_eV")))
+
+
+def _spread_sentence(spread: float, limit: float, measured: float, n: int, usable: Sequence[float],
+                     shift: str | None, *, confirmed: bool = False, reply: bool = False) -> str:
+    """r4-a (:data:`SPREAD_RULE_ID`): the sentence for usable reference edges that spread over more than ``limit``."""
+    said = (f"Its usable edges spread {spread:.2f} eV ({min(usable):.1f} to {max(usable):.1f} eV; median {measured:.1f} eV "
+            f"of {_n(n, 'scan')}), more than the {limit:g} eV they may differ by (qc.warn_reference_e0_spread_eV), so "
+            "ISAAC does not propose it as the reference: a missing foil, a channel that sees the sample, or the energy "
+            "drifting between scans gives this.")
+    if confirmed:
+        return said + (" You confirmed the shift's size (--accept-shift), so processing applies it." if reply else
+                       " The scientist confirmed the shift's size (--accept-shift), so it is applied.")
+    approve = f"--accept-shift {shift}" if shift is not None else "--accept-shift <the shift approving shows>"
+    return said + f" Approve only if the reference is what you name, with {approve}, whatever its size."
 
 
 def _hinted_shift(outcome: Mapping, cal: Mapping, measured: float | None) -> str | None:
@@ -553,13 +579,25 @@ def would_apply(step: Mapping, element: str, edge: str, *, warn_eV: float | None
             f"approving applies {shown(shift, warn)} eV to this group's energy axis.")
     # r4-a: what the reference edge is read from, so the approval's reply says it (the median, the scans, the spread)
     n_used = r["reference_scans_usable"]
-    said += (f" That reference edge is the median of {_n(n_used, 'usable scan')} ({measured:.1f} eV"
-             + (f", spread {r['reference_e0_spread_eV']:.2f} eV" if r["reference_e0_spread_eV"] is not None else "")
-             + ").")
+    disagree = bool(r.get("reference_edges_disagree"))
+    if not disagree:
+        said += (f" That reference edge is the median of {_n(n_used, 'usable scan')} ({measured:.1f} eV"
+                 + (f", spread {r['reference_e0_spread_eV']:.2f} eV" if r["reference_e0_spread_eV"] is not None else "")
+                 + ").")
     sample = r.get("reference_at_sample_e0_eV")
     if sample is not None:
         said += _near_sample_sentence(measured, sample, rule=False)
     implausible = abs(shift) > max_eV
+    if disagree and not implausible:
+        # r4-a (SPREAD_RULE_ID): not offered; applied only with --accept-shift, whatever the size. Said BEFORE the size
+        # sentence, so the reply that records a confirmed approval keeps it (and says the size was confirmed)
+        o = step.get("outcome") or {}
+        usable = judge(o.get("reference_e0_per_scan_eV") or [], o.get("reference_snr_per_scan") or [],
+                       effective_min_snr((step.get("params") or {}).get("reference_min_edge_snr"), r["reference_source"]),
+                       r["reference_source"], o.get("reference_max_spread_eV"))["usable"]
+        said += " " + _spread_sentence(r["reference_e0_spread_eV"], r["reference_max_spread_eV"], measured, n_used, usable,
+                                       shown(shift, warn),
+                                       confirmed=accepted is not None and shift_size_confirmed(accepted, shift), reply=True)
     big = exceeds_warn(shift, warn) and not implausible
     calibrant = own_signal(step.get("outcome") or {}) if not implausible else None
     if calibrant is not None and accepted is not None and shift_size_confirmed(accepted, shift):
@@ -586,7 +624,8 @@ def would_apply(step: Mapping, element: str, edge: str, *, warn_eV: float | None
             # the size is confirmed (--accept-shift) for a shift above the warning level, for ANY shift of a group's
             # own edge (CALIBRANT_RULE_ID), whatever its names say, and (r4-a) for an in-scan reference edge at the
             # group's own sample E0 (NEAR_SAMPLE_RULE_ID)
-            "needs_size_confirmation": big or calibrant is not None or (sample is not None and not implausible),
+            "needs_size_confirmation": (big or calibrant is not None
+                                        or ((sample is not None or disagree) and not implausible)),
             "needs_calibrant_confirmation": calibrant is not None,
             "implausible": implausible, "statement": said}
 
@@ -618,11 +657,11 @@ def carried_shift(step: Mapping, approval: Mapping | None = None, *, warn_eV: An
     reason = None
     # a step that lists no per-scan reference reading cannot be re-judged by the scan rule: only the size rule applies
     judged = "reference_snr_per_scan" in o
-    if not size_confirmed and judged and not r["reference_proposed"] and r.get("reference_edges_disagree"):
+    if not size_confirmed and judged and r["reference_proposed"] and r.get("reference_edges_disagree"):
         # r4-a (SPREAD_RULE_ID)
         reason = (f"it was approved from reference edges that spread over {r['reference_e0_spread_eV']:.2f} eV, more "
-                  f"than the {r['reference_max_spread_eV']:g} eV they may differ by, so the current rules propose no "
-                  "reference and compute no shift")
+                  f"than the {r['reference_max_spread_eV']:g} eV they may differ by, and its size was never confirmed "
+                  "(such a reference is applied only with --accept-shift)")
     elif not size_confirmed and judged and not r["reference_proposed"]:
         degenerate = (f" ({_n(r['reference_scans_degenerate'], 'scan')} set aside for a pre-edge noise of about zero)"
                       if r.get("reference_scans_degenerate") else "")
@@ -665,18 +704,28 @@ def approval_not_applied(step: Mapping, warn_eV: Any = None) -> str | None:
     flags = set(step.get("flags") or ())
     ref = o.get("reference") or {}
     if ref.get("basis") != "scientist_decision" or not flags & {TOO_FEW_FLAG, SIZE_NOT_CONFIRMED_FLAG, CALIBRANT_NOT_CONFIRMED_FLAG,
-                                                                SPREAD_FLAG, DEGENERATE_FLAG, NEAR_SAMPLE_NOT_CONFIRMED_FLAG}:
+                                                                DEGENERATE_FLAG, NEAR_SAMPLE_NOT_CONFIRMED_FLAG,
+                                                                SPREAD_NOT_CONFIRMED_FLAG}:
         return None
     named = (f"The calibration approval {ref.get('decision_id') or ''} ({ref.get('element')} {ref.get('edge')}, "
              f"by {ref.get('decided_by')})").replace("approval  (", "approval (")
     r4 = reading(step)
-    if not o.get("applied") and not r4["reference_proposed"] and flags & {SPREAD_FLAG, DEGENERATE_FLAG} and TOO_FEW_FLAG not in flags:
-        # r4-a: a reference the current rules do not propose (degenerate noise, edges that disagree)
+    if not o.get("applied") and not r4["reference_proposed"] and DEGENERATE_FLAG in flags and TOO_FEW_FLAG not in flags:
+        # r4-a: a reference the current rules do not read (its scans' pre-edge noise is about zero)
         return (f"{named} is not applied: {r4['reference_statement']} So no shift is computed for it and this curve "
                 "carries no calibration shift. A result approved earlier keeps the curve it has (`bundle show "
                 "processing-result` says whether a shift it carries is confirmed).")
-    if not flags & {TOO_FEW_FLAG, SIZE_NOT_CONFIRMED_FLAG, CALIBRANT_NOT_CONFIRMED_FLAG, NEAR_SAMPLE_NOT_CONFIRMED_FLAG}:
+    if not flags & {TOO_FEW_FLAG, SIZE_NOT_CONFIRMED_FLAG, CALIBRANT_NOT_CONFIRMED_FLAG, NEAR_SAMPLE_NOT_CONFIRMED_FLAG,
+                    SPREAD_NOT_CONFIRMED_FLAG}:
         return None
+    if SPREAD_NOT_CONFIRMED_FLAG in flags:
+        shift = o.get("computed_shift_eV")
+        said = shown(shift, warn_eV) if shift is not None else "?"
+        return (f"{named} is not applied: its usable reference edges spread {r4['reference_e0_spread_eV']:.2f} eV "
+                f"(median {r4['measured_reference_e0_eV']:.1f} eV of {_n(r4['reference_scans_usable'], 'scan')}), more "
+                f"than the {r4['reference_max_spread_eV']:g} eV they may differ by, and the size of the shift it gives, "
+                f"{said} eV, was not confirmed, so this curve carries no calibration shift. Approve again with "
+                f"--accept-shift {said} only if the reference is what the scientist names.")
     if NEAR_SAMPLE_NOT_CONFIRMED_FLAG in flags:
         shift = o.get("computed_shift_eV")
         said = shown(shift, warn_eV) if shift is not None else "?"
