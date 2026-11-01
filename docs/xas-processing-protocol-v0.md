@@ -383,6 +383,22 @@ Whether to leave such a scan out is the scientist's call: nothing is dropped for
   real Pt L3 HERFD beamtime: with 4–5 scans the flagged points sat at E0 and on the white line, and 27
   groups carried `glitches_flagged`. The rule is not a protocol parameter (params.json is hashed); the
   stored count, flag and verdict stay as first written, so no result id moves.
+
+  r4 (a real Ir L3 HERFD beamtime):
+  - **Reference scans.** A reference scan whose edge step is more than 10^6 times its pre-edge noise (or not
+    finite) is a degenerate channel, not a usable reference. Usable reference edges that spread more than
+    `qc.warn_reference_e0_spread_eV` are not proposed, and an approval of them applies only with
+    `--accept-shift`. A reference edge within 0.5 eV of the group's own sample E0 may be the sample itself and
+    also needs `--accept-shift`.
+  - **One scan sets the curve.** When leaving one scan out shrinks the merged curve's range more than 5× while the
+    other scans show an edge of their own, the verdict is `fail` with `edge_from_single_scan`: the record's E0
+    would be that scan's. `decide` refuses to approve it. When the other scans have no edge (dead, out of beam,
+    dark), nothing fails and `only_scan_with_edge` says so. A flagged point from one scan whose affine-corrected
+    residual lies far outside the median curve's own range is that scan's glitch, never "on the edge".
+  - **Leaving a scan out.** A params file's `exclude_scans` (`{group id: [file name | relative path | source
+    id[#scan]]}`) leaves named scans out of one group's merge (recorded in that group's params.json).
+  - **Bulk approval.** A bulk `decide --decision approve` is refused for any result whose curve carries a sentence
+    the scientist must hear: points on the edge, one scan's glitch, an outlier scan, or the only scan with an edge.
 * The §7 post-edge level cannot judge a scan ending < 50 eV above E0 (`post_edge_window_too_short`
   warns; its normalised curve is unchecked, its E0 usable).
 

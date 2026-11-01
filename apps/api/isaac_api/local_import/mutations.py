@@ -777,7 +777,28 @@ def no_curve_refusal(result: Mapping) -> str:
 #: (``no_edge``), or the normalised level after the edge is far from 1 (``post_edge_not_at_1``). ``decide`` refuses
 #: to approve a result failing for one of them and ``validate`` never offers that approval; any other ``fail``
 #: (e.g. ``too_few_points``) stays the scientist's call, approved only with the QC status they state.
-UNUSABLE_CURVE_REASONS = ("edge_step_implausible", "no_edge", "post_edge_not_at_1")
+UNUSABLE_CURVE_REASONS = ("edge_step_implausible", "no_edge", "post_edge_not_at_1",
+                          # r4: one scan sets the merged curve's edge (a spike in one scan): its E0 is not the sample's
+                          "edge_from_single_scan")
+
+#: r4: a bulk approval (several targets) is refused for a result whose curve carries one of these: each is read and
+#: approved on its own, its sentence said first
+BULK_APPROVE_REVIEW = (("glitch_points_on_edge", "points on the edge the glitch check cannot judge"),
+                       ("glitch_points_from_one_scan", "one scan's glitch on the edge"),
+                       ("outlier_scans", "an outlier scan"),
+                       ("only_scan_with_edge", "the group's only scan with an edge"))
+
+
+def bulk_approve_problem(obj: Mapping) -> str | None:
+    """r4: why a processing result must be approved on its own, not in a bulk call (``None`` when it may be)."""
+    qc = obj.get("qc") or {}
+    said = qc.get("statements") or {}
+    flags = set(obj.get("review_flags") or ()) | set(qc.get("reasons") or ())
+    for key, what in BULK_APPROVE_REVIEW:
+        if key in said or key in flags or (key == "outlier_scans" and "outlier_scans_flagged" in flags):
+            sentence = said.get(key) if isinstance(said.get(key), str) else ""
+            return f"{B.processing_id(obj)} carries {what}" + (f": {sentence}" if sentence else ".")
+    return None
 
 
 def unusable_curve_reasons(result: Mapping) -> list[str]:
@@ -2551,6 +2572,9 @@ def record_decision(
                 problem = approved_sibling_problem(bundle, obj, [o for k, o in planned if k == "processing_result"])
                 if problem is not None:
                     raise MutationRefused(problem)
+                if bulk and (why := bulk_approve_problem(obj)) is not None:
+                    raise MutationRefused(f"{why} Approve this one on its own, after its sentence is read to the "
+                                          "scientist; a bulk approval does not. Nothing was recorded.")
                 if "athena_e0_possibly_fixed" in (obj.get("review_flags") or ()) and not e0_measured:
                     # r1 M5: an Athena E0 shared by groups whose own edges differ may be a fixed setting, not a measure
                     said = next((s for s in (((obj.get("qc") or {}).get("statements") or {}).values())
