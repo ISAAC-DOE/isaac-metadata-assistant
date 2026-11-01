@@ -2367,8 +2367,12 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         # SAID PLAINLY FIRST (1.9.x polish): the exit code is 1 whenever any group is refused, even when records
         # were written, so a reader of the exit code alone would take "wrote 3, refused 75" for "nothing exported"
         "outcome": export_outcome(len(exported), len(refused), len(withdrawn), out,
-                                  warned=sum(1 for row in exported if row.get("warnings_total"))),
+                                  warned=sum(1 for row in exported if row.get("warnings_total")),
+                                  unchanged=sum(1 for row in exported if row.get("export") == "unchanged"),
+                                  replaced=sum(1 for row in exported if row.get("export") == "replaced")),
         "records_written": len(exported),
+        # r2-a L2: of those, the ones whose body is unchanged since their export (the same id, rewritten byte for byte)
+        "records_unchanged": sum(1 for row in exported if row.get("export") == "unchanged"),
         **({"records_written_with_warnings": n} if (n := sum(1 for row in exported if row.get("warnings_total"))) else {}),
         "groups_refused": len(refused),
         "exported": exported,
@@ -2386,12 +2390,19 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     return result
 
 
-def export_outcome(written: int, refused: int, withdrawn: int, out: Path, *, warned: int = 0) -> str:
+def export_outcome(written: int, refused: int, withdrawn: int, out: Path, *, warned: int = 0, unchanged: int = 0,
+                   replaced: int = 0) -> str:
     """One sentence: what ``export`` wrote and refused, and what its exit code means for that (and, c11-a, how many
-    records were written with a warning that still applies: each row's ``warnings`` says what it lacks)."""
-    text = f"Wrote {written} record(s), refused {refused} group(s)."
+    records were written with a warning that still applies: each row's ``warnings`` says what it lacks). ``written``
+    counts every record in ``--out`` from this run; r2-a L2: of them ``unchanged`` are the same record as at their
+    export (same id, rewritten byte for byte) and ``replaced`` replace an earlier record, so the sentence never says
+    "wrote 7" when nothing new was written."""
+    fresh = written - unchanged
+    counts = (f" ({unchanged} unchanged since their export, {fresh} written"
+              + (f", {replaced} of them replacing an earlier record" if replaced else "") + ")") if written else ""
+    text = f"{written} record(s) ready{counts}, refused {refused} group(s)."
     if written and refused:
-        text += (f" The exit code is 1 because some groups were refused; the {written} record(s) written are valid "
+        text += (f" The exit code is 1 because some groups were refused; the {written} record(s) ready are valid "
                  f"for the portal's pinned schema and are in {out}.")
     elif refused:
         text += " Nothing was written (exit 1)."

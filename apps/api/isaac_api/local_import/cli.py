@@ -63,7 +63,7 @@ EXIT CODES
  5    bounds exceeded, or the built bundle failed its own validation — nothing written
  6    not found: no bundle at ``<dir>``, or no object with that id
  1    (also) ``validate``/``export``: some draft is not exportable / was not exported. ``export`` exits 1
-      even when it WROTE some records: its reply's ``outcome`` says "Wrote N record(s), refused M group(s)"
+      even when it WROTE some records: its reply's ``outcome`` says "N record(s) ready (U unchanged since their export, W written), refused M group(s)"
 ====  ===========================================================================
 
 NOTHING IS EXECUTED. Macros and scripts in the archive are read as text by the

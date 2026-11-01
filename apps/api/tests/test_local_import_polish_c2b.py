@@ -10,7 +10,7 @@
 * The counter question takes ``defer`` ("I don't know"): recorded, grouping unchanged, the question stays, deferred.
 * ``summary.md``: runs in no file-name group are said so ("group None" before), and the conflict count says why
   it differs from the conflicting-value count; the import output says the same.
-* ``export`` says "Wrote N record(s), refused M group(s)" (its exit code is unchanged).
+* ``export`` says "N record(s) ready (...), refused M group(s)" (its exit code is unchanged; r2-a: was "Wrote N ...").
 """
 
 from __future__ import annotations
@@ -327,10 +327,10 @@ def test_export_says_plainly_what_it_wrote_and_refused(bdir, tmp_path):
     out = tmp_path / "records"
     result = R.export_records(bdir, out, run_portal=_portal("publish"))
     assert (result["records_written"], result["groups_refused"]) == (1, 1)
-    assert result["outcome"].startswith("Wrote 1 record(s), refused 1 group(s).")
+    assert result["outcome"].startswith("1 record(s) ready (0 unchanged since their export, 1 written), refused 1 group(s).")
     assert "exit code is 1" in result["outcome"] and str(out) in result["outcome"]
     assert list(result)[0] == "outcome" and cli.compact_export(result)["outcome"] == result["outcome"]
-    assert R.export_outcome(0, 3, 0, out) == "Wrote 0 record(s), refused 3 group(s). Nothing was written (exit 1)."
+    assert R.export_outcome(0, 3, 0, out) == "0 record(s) ready, refused 3 group(s). Nothing was written (exit 1)."
     assert R.export_outcome(2, 0, 0, out).endswith("(exit 0).")
 
 

@@ -235,7 +235,7 @@ names (and the set-point if `also_needs`); run its command only with their answe
 ## Step 9 · Export and dry run
 
 `<isaac> bundle export <bundle> --out <records>` writes only `exportable` records. Read its `outcome`
-("Wrote N record(s), refused M group(s)"), not its exit code (see `reference/records-and-validation.md`),
+("N record(s) ready (U unchanged…, W written), refused M group(s)"), not its exit code (see `reference/records-and-validation.md`),
 then its refusal counts. **If nothing is exportable**, export writes nothing: skip the dry run, say
 "no record is ready yet", name what blocks the nearest group (from Step 8), and go to Step 10.
 `<isaac> bundle upload <records> --dry-run` shows what *would* be sent: summarise it (how many

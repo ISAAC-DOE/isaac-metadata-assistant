@@ -83,7 +83,9 @@ After fixing, run `build-records` then `validate` again. Never hand-edit a draft
 
 `export --out <records>` writes `<ULID>.json`, `<ULID>.evidence.json` and a `<ULID>.artifacts/` folder
 (the processing files) for exportable drafts only and lists the rest with their verdicts. Its reply
-opens with `outcome` ("Wrote N record(s), refused M group(s)") and `records_written` / `groups_refused`.
+opens with `outcome` ("N record(s) ready (U unchanged since their export, W written), refused M group(s)": an
+unchanged record keeps its id and is not new; say "nothing new was written" when W is 0) and `records_written` /
+`records_unchanged` / `groups_refused`.
 It exits 1 whenever any group is refused, **even when it wrote records**: read `outcome`, never the exit
 code alone, before telling the scientist what is ready. A record written while a warning still applies lists it
 in `exported[].warnings` ("Written without the potential set-point: …"; the first 5, with `warnings_total`), and

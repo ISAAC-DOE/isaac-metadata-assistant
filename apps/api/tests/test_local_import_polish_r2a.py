@@ -13,6 +13,8 @@ line, not a measurement.
   (``answer_first``) before any group is confirmed. No id changes.
 * (LOW 1) ``--e0-measured`` on a result not flagged ``athena_e0_possibly_fixed`` was accepted silently: refused now,
   nothing recorded.
+* (LOW 2) Export said "Wrote 7 record(s)" when every record was ``unchanged``: it says how many are ready, how many
+  unchanged and how many written.
 """
 
 from __future__ import annotations
@@ -270,3 +272,24 @@ def test_e0_measured_on_a_result_without_the_flag_is_refused_and_records_nothing
     assert len(M.load(processed).get("scientist_decisions") or ()) == before
     # without the statement the same approval goes through
     assert pid in M.decide(processed, target_ids=[pid], decision="approve", value=None, qc_status="valid", **BY)["recorded"]
+
+
+# --- LOW 2: an export of unchanged records says so -------------------------------------------------------------
+
+
+def test_an_export_of_unchanged_records_says_nothing_new_was_written(bdir, tmp_path):
+    from isaac_api.local_import import records as R
+
+    _decide_everything(bdir)
+    out = tmp_path / "records"
+    first = R.export_records(bdir, out, run_portal=_portal("publish"))
+    n = first["records_written"]
+    assert n >= 1 and first["records_unchanged"] == 0
+    assert first["outcome"].startswith(f"{n} record(s) ready (0 unchanged since their export, {n} written), refused ")
+    again = R.export_records(bdir, out, run_portal=_portal("publish"))
+    assert again["records_written"] == n and again["records_unchanged"] == n
+    assert {row["export"] for row in again["exported"]} == {"unchanged"}
+    assert again["outcome"].startswith(f"{n} record(s) ready ({n} unchanged since their export, 0 written), refused ")
+    assert "Wrote" not in again["outcome"]
+    assert R.export_outcome(3, 0, 0, out, unchanged=1, replaced=1).startswith(
+        "3 record(s) ready (1 unchanged since their export, 2 written, 1 of them replacing an earlier record), refused 0")
