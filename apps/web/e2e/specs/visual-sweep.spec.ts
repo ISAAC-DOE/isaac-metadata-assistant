@@ -150,6 +150,7 @@ import { LAYOUT_SWEEP_WIDTHS, layoutWidthId } from '../layout-baseline';
 import { findClippedText, horizontalPageScroll, render, renderedFontFamily } from '../helpers/layout';
 import { openAssistant } from '../helpers/assistant';
 import { SURFACES } from '../surfaces';
+import { LONG_VALUE } from '../local-imports-mock';
 import { TUTORIAL_SESSION_STORAGE_KEY } from '../worked-example';
 import type { Locator, Page } from '@playwright/test';
 
@@ -281,6 +282,10 @@ const EXPECTED_STATE_IDS = [
   'statistics-general',
   'statistics-mine',
   'validator',
+  'schema-proposals-browse',
+  'schema-proposals-propose',
+  'local-imports-overview',
+  'local-imports-questions',
   'record-edit',
   'record-graph',
   'record-runs',
@@ -717,6 +722,57 @@ const STATES: readonly VisualState[] = [
       const validate = page.getByRole('button', { name: 'Validate', exact: true });
       await expect(validate).toBeVisible({ timeout: 20_000 });
       return validate;
+    },
+  },
+  /*
+   * SCHEMA PROPOSALS AND LOCAL IMPORTS (2026-10-29). Neither destination had ever been
+   * photographed. Both are reached through their catalogue entries (`app.open`), so the
+   * Local Imports pair gets its build flag and its SYNTHETIC, browser-side API from the
+   * same place every other sweep does (`e2e/local-imports-mock.ts`) — nothing here routes
+   * by hand, and the loop's `unrouteAll` after each state removes both again.
+   *
+   * The questions state's primary is the "Accept <57-character value>" button of the one
+   * group whose runs all suggest it: the control the narrow widths are most likely to
+   * push off the page, so it is the one the off-screen and page-scroll checks measure.
+   */
+  {
+    id: 'schema-proposals-browse',
+    what: 'Schema Proposals → Browse the Vocabulary — the portal and schema term lists',
+    async reach({ page, app }) {
+      await app.open(surface('schema-proposals'));
+      const which = page.getByRole('group', { name: 'Which list?' });
+      await expect(which).toBeVisible({ timeout: 20_000 });
+      return which;
+    },
+  },
+  {
+    id: 'schema-proposals-propose',
+    what: 'Schema Proposals → Propose a Change — the proposal form, empty',
+    async reach({ page, app }) {
+      await app.open(surface('schema-proposals-propose'));
+      const section = page.getByRole('combobox', { name: 'Section' });
+      await expect(section).toBeVisible({ timeout: 20_000 });
+      return section;
+    },
+  },
+  {
+    id: 'local-imports-overview',
+    what: 'Local Imports → Import Progress — one synthetic bundle (mocked local API)',
+    async reach({ page, app }) {
+      await app.open(surface('local-imports'));
+      const open = page.getByRole('link', { name: /^Answer Questions/ }).first();
+      await expect(open).toBeVisible({ timeout: 20_000 });
+      return open;
+    },
+  },
+  {
+    id: 'local-imports-questions',
+    what: 'Local Imports → one bundle’s questions — per-group answers, one 57-character value (mocked local API)',
+    async reach({ page, app }) {
+      await app.open(surface('local-imports-questions'));
+      const accept = page.getByRole('button', { name: new RegExp(`^(Accept|Confirm) ${LONG_VALUE}`) }).first();
+      await expect(accept).toBeVisible({ timeout: 20_000 });
+      return accept;
     },
   },
   {
@@ -1389,7 +1445,16 @@ test.describe('visual state sweep', () => {
     // removed surfaces as a `TypeError` reading `.path` of undefined, inside a
     // 20-minute browser run, at whichever width got there first. Here it is a
     // sub-second failure naming the id.
-    for (const id of ['experiments', 'experiments-example', 'evidence-graph', 'settings-api']) {
+    for (const id of [
+      'experiments',
+      'experiments-example',
+      'evidence-graph',
+      'settings-api',
+      'schema-proposals',
+      'schema-proposals-propose',
+      'local-imports',
+      'local-imports-questions',
+    ]) {
       expect(
         SURFACES.find((s) => s.id === id),
         `visual-sweep opens the catalogued surface "${id}", which is no longer in SURFACES. ` +

@@ -1299,6 +1299,22 @@ def test_the_sweep_covers_every_mutating_route_this_api_publishes(app):
         ("POST", "/api/imports/{import_id}/reconstruct"): (
             "writes candidates into the session; applies nothing and names no experiment"
         ),
+        # ── SCHEMA PROPOSALS: BOTH WRITE ONLY `_schema_proposals/` ─────────────────
+        #
+        # A proposal is a draft change to the OFFICIAL VOCABULARY, stored as one file
+        # under `<workspace>/_schema_proposals/`, which `workspace._experiment_dirs`
+        # skips unconditionally (`_`-prefixed). Neither route takes an experiment id, in
+        # the path or in the body (a body key that is not a proposal field is a 422),
+        # and neither opens the database. That this is TRUE, not merely asserted, is
+        # measured by `test_schema_proposals.py::
+        # test_a_proposal_write_leaves_every_experiment_document_byte_identical`.
+        ("POST", "/api/schema-proposals"): (
+            "drafts a vocabulary proposal into `_schema_proposals/`; names no experiment "
+            "and writes no experiment document"
+        ),
+        ("POST", "/api/schema-proposals/{proposal_id}/withdraw"): (
+            "marks one such proposal withdrawn in its own file; names no experiment"
+        ),
     }
 
     spec = app.openapi()

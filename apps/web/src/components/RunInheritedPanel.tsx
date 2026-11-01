@@ -92,6 +92,7 @@ import type { ApiRunView, JsonSchemaNode } from '../lib/types';
 import { recordFieldFacts } from '../lib/recordFields';
 import { enumOptionLabel } from '../lib/runFields';
 import { formatWhen } from '../lib/labels';
+import { ProposeTermLink } from './ProposeTermLink';
 
 /** The outcome of the last write, for the panel's one live region. */
 type Outcome =
@@ -1053,6 +1054,9 @@ function OverrideForm({
           {error}
         </span>
       )}
+      {/* A stored value outside the schema's list: if the portal's list is missing it, it can
+          be proposed. Offered only for a portal term list; navigation, nothing written. */}
+      {outsideTheList && <ProposeTermLink fieldPath={row.path} term={text} from="run_override" />}
       {/*
         THE CONFIRMATION IS THE READER'S, NOT THE CLIENT'S. The operation refuses
         without `confirmed_by_user: true`, and this box is the only thing that sets

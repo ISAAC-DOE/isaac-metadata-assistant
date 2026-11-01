@@ -224,6 +224,22 @@ export const LABELS = {
    * making a claim the surface then has to walk back.
    */
   navImports: 'Historical Import',
+  /*
+   * SCHEMA PROPOSALS — one authored string: the nav label, the page `<h1>` and the
+   * `document.title` segment all read it. It names what the destination is FOR
+   * (proposing a change to the official vocabulary) and promises nothing about an
+   * outcome: ISAAC drafts these, the standard's owners decide them elsewhere.
+   */
+  navSchemaProposals: 'Schema Proposals',
+  /*
+   * LOCAL IMPORTS — present only on a server the scientist started on their own
+   * computer for a folder of import bundles (`lib/localImports.ts` names both gates).
+   * One authored string for the nav label, the page `<h1>` and the `document.title`
+   * segment. "Local" is the load-bearing word: these bundles are read and answered on
+   * this computer and nothing about them is uploaded, which "Historical Import" (the
+   * hosted workflow) does not promise, so the two destinations must not share a name.
+   */
+  navLocalImports: 'Local Imports',
 
   // Screen titles
   screenExperiments: 'My Experiments',

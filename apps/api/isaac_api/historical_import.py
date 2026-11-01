@@ -945,15 +945,17 @@ CANDIDATE_NOT_PROPOSABLE_NOT_A_RUN = (
 def _target_scope(path: str | None) -> str | None:
     """``record`` | ``run`` | ``None`` — which writer applies a value at ``path``.
 
-    Read from ``routes``, the one derivation the proposal routes use, rather than
-    transcribed.
+    Read from :mod:`isaac_api.field_paths`, the one derivation the proposal routes
+    use (``routes`` re-exports the same function), rather than transcribed. Since
+    2026-10-28 it is no longer imported through ``routes``, so reading an archive
+    does not import FastAPI.
     """
     if not path:
         return None
-    from . import routes
+    from . import field_paths
 
-    writer = routes._proposal_writer_for(path)
-    return routes._PROPOSAL_WRITER_SCOPE.get(writer) if writer else None
+    writer = field_paths._proposal_writer_for(path)
+    return field_paths._PROPOSAL_WRITER_SCOPE.get(writer) if writer else None
 
 
 def _no_run_for(candidate: "SemanticCandidate") -> "SemanticCandidate":
@@ -1467,14 +1469,17 @@ class ReconstructionProvider(Protocol):
 def _official_field_paths() -> frozenset[str]:
     """Every official field path this build RECOGNISES, read from the ONE source.
 
-    Imported lazily from :mod:`isaac_api.routes` because ``routes`` imports this
-    module: a module-level import would be a cycle. The set is the route layer's
-    own ``NOTE_MAPPABLE_FIELD_PATHS`` rather than a transcription of it, so this
+    ~~Imported lazily from :mod:`isaac_api.routes` because ``routes`` imports this
+    module: a module-level import would be a cycle.~~ — 2026-10-28: read from
+    :mod:`isaac_api.field_paths`, which ``routes`` re-exports as the SAME object, so
+    this no longer imports ``routes`` (or FastAPI). Still lazy, so importing this
+    module stays as cheap as it was. The set is the route layer's own
+    ``NOTE_MAPPABLE_FIELD_PATHS`` rather than a transcription of it, so this
     provider cannot recognise a path the rest of the application does not.
     """
-    from . import routes
+    from . import field_paths
 
-    return frozenset(routes.NOTE_MAPPABLE_FIELD_PATHS)
+    return frozenset(field_paths.NOTE_MAPPABLE_FIELD_PATHS)
 
 
 def _writable_field_paths() -> frozenset[str]:
@@ -1483,12 +1488,13 @@ def _writable_field_paths() -> frozenset[str]:
     **THE TWO SETS ARE DIFFERENT AND THE DIFFERENCE IS LOAD-BEARING.** Measured
     at this HEAD: 25 recognised, 18 writable. A candidate at one of the other
     seven is shown with its value and its source and is marked not proposable —
-    see :data:`CANDIDATE_NOT_PROPOSABLE_NO_WRITE_PATH`. Read from ``routes``
-    rather than transcribed, for :func:`_official_field_paths`' reason.
+    see :data:`CANDIDATE_NOT_PROPOSABLE_NO_WRITE_PATH`. Read from
+    :mod:`isaac_api.field_paths` (the object ``routes`` re-exports) rather than
+    transcribed, for :func:`_official_field_paths`' reason.
     """
-    from . import routes
+    from . import field_paths
 
-    return frozenset(routes.PROPOSAL_TARGET_PATHS)
+    return frozenset(field_paths.PROPOSAL_TARGET_PATHS)
 
 
 @dataclass(frozen=True)
@@ -2581,18 +2587,40 @@ def _readers():
     }
 
 
-def _inventory_of(root: Path, *, root_label: str):
+def _inventory_of(root: Path, *, root_label: str, nested_archives: bool = False):
     """Walk a folder or a ZIP. The suffix decides which, and neither raises.
 
     ``bl15.archive`` returns an inventory carrying one refusal rather than
     raising for a root that is missing, is a symlink, or is an unopenable ZIP —
     so a scientist who chose the wrong thing gets a readable answer about it.
+
+    ``nested_archives`` (the LOCAL import only; the hosted path leaves it off) also
+    walks each ``.zip`` found in a FOLDER, one level deep, through the same guarded ZIP
+    walk (``archive.expand_nested_zips``). Use :func:`_inventory_and_containers_of` to
+    get the per-ZIP rows too.
     """
+    return _inventory_and_containers_of(
+        root, root_label=root_label, nested_archives=nested_archives
+    )[0]
+
+
+def _inventory_and_containers_of(
+    root: Path, *, root_label: str, nested_archives: bool = False
+):
+    """``(inventory, {zip archive path: NestedZip})``; the dict is empty unless asked for."""
     from .bl15 import archive
 
     if root.is_dir():
-        return archive.inventory_folder(root, root_label=root_label)
-    return archive.inventory_zip(root, root_label=root_label)
+        inventory = archive.inventory_folder(root, root_label=root_label)
+        if nested_archives:
+            return archive.expand_nested_zips(inventory, root)
+        return inventory, {}
+    # The duplicate-path refusal is local-only (it rides the same switch as nested ZIPs): the
+    # hosted path keeps every copy, as before.
+    return (
+        archive.inventory_zip(root, root_label=root_label, refuse_duplicates=nested_archives),
+        {},
+    )
 
 
 def _suppressed_in(skipped: Sequence[Mapping]) -> int:
@@ -2664,6 +2692,42 @@ def read_archive(
     the same constant — see :data:`CANDIDATE_NOT_PROPOSABLE_NO_WRITE_PATH`, whose
     wording says the limitation is this build's and never the schema's.
     """
+    name = source.fixture_name or ""
+    root = archive_root_for(name)
+    return read_archive_at(root, source=source, archive_name=name, rules=rules)
+
+
+def read_archive_at(
+    root: Path,
+    *,
+    source: SourceReference,
+    archive_name: str,
+    rules: Sequence[Any] = (),
+    evidence_sink: dict | None = None,
+    nested_archives: bool = False,
+) -> tuple[ArchiveReading, tuple[SemanticCandidate, ...]]:
+    """:func:`read_archive`'s whole chain, over an ALREADY-RESOLVED ``root``.
+
+    ADDED 2026-10-28 (slice LOCAL-1) so the local CLI (``isaac import <path>``) runs
+    THE SAME reconstruction the server runs — there is no second parser. The split
+    is mechanical: :func:`read_archive` resolves a committed-fixture or ``staged:``
+    name through :func:`archive_root_for` (its traversal boundary, unchanged) and
+    calls this; :func:`read_local_archive` validates a path the person named on
+    their own machine and calls this. Everything below that point is the body
+    :func:`read_archive` always had.
+
+    ``evidence_sink`` — when a dict is passed, it is filled with
+    ``archive_path -> [SourceEvidence]`` (the full reading this function already
+    builds and otherwise discards), so a local bundle can name each witness's
+    reader and normalisation rule instead of inferring them from prose. ``None``
+    (the server's call) changes nothing.
+
+    ``nested_archives`` — the local import turns it on (the server does not): a ``.zip``
+    found in a FOLDER is walked one level deep, its members becoming sources named
+    ``<zip>!/<member>`` that are classified and read exactly as loose files are. The ZIP
+    itself keeps its row, read by ``nested_zip_walk_v1`` (members walked, none of its
+    bytes interpreted).
+    """
     from . import convention_rules as cr
     from .bl15 import applicability as appl
     from .bl15 import archive, classify
@@ -2673,9 +2737,10 @@ def read_archive(
     from .bl15 import resolution as res
     from .bl15 import signals as sig
 
-    name = source.fixture_name or ""
-    root = archive_root_for(name)
-    inventory = _inventory_of(root, root_label=source.filename or name)
+    name = archive_name
+    inventory, nested_containers = _inventory_and_containers_of(
+        root, root_label=source.filename or name, nested_archives=nested_archives
+    )
 
     bindings = cr.bindings_from(rules)
     readers = _readers()
@@ -2750,7 +2815,26 @@ def read_archive(
             "skipped_total": 0,
             "refused_reason": None,
         }
-        if reader is None:
+        container = nested_containers.get(entry.archive_path)
+        if container is not None:
+            # A ZIP found in the folder. Its "reading" is the walk of its members: no bytes
+            # of it are interpreted as statements, and each member has its own row.
+            if container.walked:
+                row.update(
+                    {
+                        "parser_id": archive.NESTED_ZIP_READER_ID,
+                        "refused_reason": None,
+                    }
+                )
+            else:
+                row.update(
+                    {
+                        "parser_id": archive.NESTED_ZIP_READER_ID,
+                        "refused_reason": "This ZIP could not be opened, so its "
+                        f"members were not walked: {container.detail}",
+                    }
+                )
+        elif reader is None:
             row["refused_reason"] = (
                 "This build has no reader for this kind of source, so nothing "
                 "was read out of it. It is listed with its classification "
@@ -2906,9 +2990,18 @@ def read_archive(
     rules_applied.update(b.rule_ref for b in bindings if b.rule_ref)
 
     source_id_map = {path: source.source_id for path in evidence_by_source}
-    for unit_candidates in report.units:
-        unit = by_stem.get(unit_candidates.stem)
-        per_unit = semantics["units"].get(unit_candidates.stem, {})
+    for position, unit_candidates in enumerate(report.units):
+        # PAIRED BY POSITION, not by stem (2026-10-28, R1): `reconstruct` emits one
+        # UnitCandidates per relationship unit, in order, and a stem lookup gave two
+        # same-named acquisitions in different folders ONE unit — the second's path,
+        # identity and semantics for both. The stem lookup stays only as a fallback.
+        unit = (
+            relationships.units[position]
+            if position < len(relationships.units)
+            and relationships.units[position].stem == unit_candidates.stem
+            else by_stem.get(unit_candidates.stem)
+        )
+        per_unit = semantics["units"].get(_unit_key(unit), {}) if unit is not None else {}
         bounded: list[SemanticCandidate] = []
         # THE LOGBOOK'S environment / reaction / cell statements for this measurement
         # (2026-10-12) join its own candidates, so the same-field reconciliation below
@@ -3036,7 +3129,98 @@ def read_archive(
         beamtime_contributors=tuple(semantics["beamtime_contributors"]),
         acquisition_system=sig.BL152_VORTEX.to_state(),
     )
+    if evidence_sink is not None:
+        evidence_sink.update(evidence_by_source)
     return reading, tuple(candidates)
+
+
+#: The archive-name prefix a LOCAL reading carries (``local:<folder or zip name>``),
+#: so it can never collide with a committed fixture key or a ``staged:`` name.
+LOCAL_ARCHIVE_PREFIX = "local:"
+
+
+def read_local_archive(
+    path: Path,
+    *,
+    source_id: str,
+    rules: Sequence[Any] = (),
+    evidence_sink: dict | None = None,
+) -> tuple[ArchiveReading, tuple[SemanticCandidate, ...]]:
+    """Read a folder or ZIP the person named ON THEIR OWN MACHINE. Writes nothing.
+
+    The local CLI's entry point (2026-10-28). It is :func:`read_archive_at` — the
+    server's chain, byte for byte — behind a boundary of its own, because the
+    server's boundary (an allowlisted name) does not apply to a path a person typed:
+
+    * the root must exist and must NOT itself be a symbolic link (a symlinked ZIP
+      would otherwise be opened through the link; a symlinked folder is refused by
+      the walk too, and is refused here first so the answer is one clear sentence);
+    * it must be a directory or a ZIP by CONTENT (``zipfile.is_zipfile``) — anything
+      else is ``unsupported_format``, said plainly, never walked as if it were one.
+
+    Inside the root, ``bl15.archive``'s own guards run unchanged: symlinks are never
+    followed, ``..``/absolute members are refused, ZIP members are read in place
+    (nothing is extracted), and the size, count, depth and compression-ratio
+    ceilings apply. No source is ever executed.
+
+    THE PATH IS NEVER RECORDED. The reading's ``root_label`` is the folder's or
+    ZIP's own NAME and its ``archive_name`` is ``local:<name>``; every manifest row
+    is relative to the root. A path on this machine means nothing to any other.
+    """
+    import zipfile
+
+    root = Path(path)
+    if root.is_symlink():
+        raise UnsupportedImport(
+            "symlink_root",
+            "That path is a symbolic link. It was not followed; name the folder or "
+            "ZIP it points to instead.",
+        )
+    if not root.exists():
+        raise UnsupportedImport("not_found", "Nothing exists at that path.")
+    if not root.is_dir():
+        try:
+            is_zip = root.is_file() and zipfile.is_zipfile(root)
+        except OSError:
+            is_zip = False
+        if not is_zip:
+            raise UnsupportedImport(
+                "unsupported_format",
+                "That is neither a folder nor a ZIP archive, so this build cannot read "
+                "it. Pass the folder itself, or a .zip of it. (Other archive formats "
+                "such as .tar or .7z are not read.)",
+            )
+    label = root.name or "archive"
+    source = SourceReference(
+        source_id=source_id,
+        kind=SOURCE_KIND_ARCHIVE,
+        filename=label,
+        reference=f"{LOCAL_ARCHIVE_PREFIX}{label}",
+        parse_state=PARSE_STATE_UNPARSED,
+        provenance={},
+        fixture_name=None,
+    )
+    from .bl15 import archive as _archive
+
+    try:
+        return read_archive_at(
+            root,
+            source=source,
+            archive_name=f"{LOCAL_ARCHIVE_PREFIX}{label}",
+            rules=rules,
+            evidence_sink=evidence_sink,
+            # LOCAL ONLY: a ZIP inside a folder is walked one level deep (see `read_archive_at`).
+            nested_archives=True,
+        )
+    finally:
+        # the reads of this one import kept their nested ZIPs open; release them
+        _archive.close_nested_cache()
+
+
+def _unit_key(unit) -> str:
+    """A measurement unit's collision-free key inside one reading: its acquisition path
+    (relative, unique per file), else its stem."""
+    return getattr(unit, "acquisition_path", None) or unit.stem
 
 
 def _evidence_index(evidence_by_source: Mapping[str, Sequence[Any]]) -> dict:
@@ -3379,7 +3563,10 @@ def _archive_semantics(
             for row in contributors_by_number.get(unit.legacy_number, ())
         ] if unit.legacy_number is not None else []
         people.extend(dict(row) for row in beamtime_contributors)
-        per_unit[unit.stem] = {
+        # KEYED BY THE UNIT'S OWN ACQUISITION PATH (2026-10-28, real-data finding R1): two
+        # acquisition files with the same name in different folders are two units with
+        # one stem, and a stem key made the second overwrite the first's semantics.
+        per_unit[_unit_key(unit)] = {
             # ~~`f"{archive_name}:{unit.acquisition_path}@{digest}"`~~ — 2026-10-11 (QA
             # `C-02`): the archive NAME is the container's, so a folder and a ZIP of the
             # same files were two acquisitions. Now the file's own name and its bytes

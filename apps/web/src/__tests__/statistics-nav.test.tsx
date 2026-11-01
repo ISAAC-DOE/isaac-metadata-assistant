@@ -212,6 +212,7 @@ describe('sidebar destinations', () => {
       'My Experiments',
       'Historical Import',
       'Statistics',
+      'Schema Proposals',
       'Settings',
     ]);
   });
@@ -258,7 +259,8 @@ describe('sidebar destinations', () => {
     const { container } = renderAt('/governance');
     const links = navLinks(container);
 
-    expect(links).toHaveLength(4);
+    // 4 -> 5, 2026-10-28: `Schema Proposals` joined the primary list (between Statistics and Settings).
+    expect(links).toHaveLength(5);
     for (const link of links) {
       expect(link.tagName).toBe('A');
       expect(link).toHaveAttribute('href');
@@ -277,6 +279,7 @@ describe('sidebar destinations', () => {
       ROUTES.experiments,
       ROUTES.imports,
       ROUTES.statistics,
+      ROUTES.schemaProposals,
       ROUTES.settings,
     ]);
     for (const href of hrefs) {

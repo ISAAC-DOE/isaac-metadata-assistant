@@ -215,6 +215,13 @@ def test_an_unreadable_schema_fails_closed_and_writes_nothing(client, tmp_path, 
     routes._record_enum_fields.cache_clear()
     routes._record_writable_fields.cache_clear()
     monkeypatch.setattr(routes, "schema_path", lambda _root: tmp_path / "no-such-schema.json")
+    # `_record_enum_fields` MOVED to `isaac_api.field_paths` (2026-10-28) and is
+    # re-exported by `routes` as the same object; it reads the schema through ITS
+    # module's `schema_path`, so that is patched too. `_record_writable_fields` still
+    # lives in `routes` and reads the patch above.
+    from isaac_api import field_paths
+
+    monkeypatch.setattr(field_paths, "schema_path", lambda _root: tmp_path / "no-such-schema.json")
     try:
         assert dict(routes._record_enum_fields()) == {}
         assert dict(routes._record_writable_fields()) == {}

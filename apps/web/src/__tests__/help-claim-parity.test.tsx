@@ -480,9 +480,22 @@ const REQUIRED_CLAIMS: [string, RegExp][] = [
    * clause boundary in it, and this family's own rule two entries below records
    * that `[^.]` is only a sentence proxy and breaks on anything dot-shaped.
    */
+  /*
+   * *** FOUR AS OF 2026-10-30 *** — the Schema Proposals page's local-import drafts loader
+   * joins the census (`upload-claim-parity.test.tsx` §1). Updated, not relaxed:
+   *   ~~/\bthree\s+controls?\b…/~~
+   */
   [
-    'no control other than those three accepts a file',
-    /\bthree\s+controls?\b[\s\S]{0,40}\b(read|reads)\b|\bno other control\b[\s\S]{0,30}\bfile\b/i,
+    'no control other than those four accepts a file',
+    /\bfour\s+controls?\b[\s\S]{0,40}\b(read|reads)\b|\bno other control\b[\s\S]{0,30}\bfile\b/i,
+  ],
+  [
+    'the Schema Proposals drafts loader is named as the fourth file reader',
+    /\bschema proposals\b/i,
+  ],
+  [
+    'and the fourth is stated to send only a proposal the reader saves, never the file',
+    /\bschema proposals\b[\s\S]{0,200}\bsends? only a proposal\b[\s\S]{0,60}\bnever the file\b/i,
   ],
   /*
    * THE THIRD READER IS NAMED, AND SO IS THE THING THAT MAKES IT DIFFERENT.

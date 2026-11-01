@@ -12,6 +12,8 @@ import { ProjectMemory } from './screens/ProjectMemory';
 import { GovernanceRoute } from './screens/GovernancePage';
 import { StatisticsPage } from './screens/statistics/StatisticsPage';
 import { SettingsPage } from './screens/SettingsPage';
+import { SchemaProposals } from './screens/SchemaProposals';
+import { LocalImports } from './screens/LocalImports';
 import { NotFound } from './screens/NotFound';
 
 /** The route table. Record sub-surfaces (complete/evidence/export) are nested
@@ -43,6 +45,8 @@ export function AppRoutes() {
         <Route path={ROUTE_PATTERNS.memory} element={<ProjectMemory />} />
         <Route path={ROUTE_PATTERNS.governance} element={<GovernanceRoute />} />
         <Route path={ROUTE_PATTERNS.statistics} element={<StatisticsPage />} />
+        <Route path={ROUTE_PATTERNS.schemaProposals} element={<SchemaProposals />} />
+        <Route path={ROUTE_PATTERNS.localImports} element={<LocalImports />} />
         <Route path={ROUTE_PATTERNS.settings} element={<SettingsPage />} />
         {/*
           QA-020 — AN HONEST NOT-FOUND STATE, replacing a silent redirect.

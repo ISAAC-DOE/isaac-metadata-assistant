@@ -787,7 +787,7 @@ def _norm_surrounding_whitespace(value: str) -> str:
 def _norm_percent_encoding(value: str) -> str:
     """Decode unreserved percent-triplets; upper-case the hex of the rest.
 
-    RFC 3986 §6.2.2.2 and §6.2.2.1: both are normalisations that preserve
+    RFC 3986 §6.2.2 (percent-encoding and case normalization): both are normalisations that preserve
     meaning, which is exactly why an authorization server may apply them.
     """
     out: list[str] = []
@@ -816,7 +816,7 @@ def _norm_percent_encoding(value: str) -> str:
 
 
 def _norm_scheme_and_host_case(value: str) -> str:
-    """Lower-case the scheme and the host. **Never the path** — RFC 3986 §6.2.2.1
+    """Lower-case the scheme and the host. **Never the path** — RFC 3986 §6.2.2 (case normalization)
     makes scheme and host case-insensitive and leaves everything else significant,
     and lowering a path would make this function report equivalences that are not
     ones."""

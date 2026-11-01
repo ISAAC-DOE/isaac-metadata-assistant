@@ -2098,10 +2098,17 @@ def coverage() -> dict[str, int]:
 
 @lru_cache(maxsize=1)
 def _schema() -> dict:
-    root = Path(__file__).resolve().parents[4]
-    return json.loads(
-        (root / "schema" / "isaac_record_v1.json").read_text(encoding="utf-8")
-    )
+    """The vendored official schema, parsed. Located by the ONE resolver.
+
+    ~~``Path(__file__).resolve().parents[4] / "schema" / ...``~~ — 2026-10-28: a
+    depth guess that is right in a checkout and in the image and wrong in any other
+    layout. :func:`isaac_api.schema_locator.resolve_schema_path` honours
+    ``ISAAC_SCHEMA_PATH``, then walks up, then raises ``SchemaNotFound`` (an
+    ``OSError``), which :func:`schema_enum` already treats as fail-closed ``()``.
+    """
+    from ..schema_locator import resolve_schema_path
+
+    return json.loads(resolve_schema_path().read_text(encoding="utf-8"))
 
 
 @lru_cache(maxsize=None)

@@ -1,0 +1,4059 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://isaac-doe.github.io/isaac-metadata-assistant/local-import-bundle/bundle-v1.schema.json",
+  "title": "ISAAC Local Import Bundle v1",
+  "description": "What `isaac import` produced from one folder or ZIP on a scientist's own machine. NOT an official ISAAC record: it is extraction output and its evidence, which a scientist reviews before anything becomes a draft and then, through `isaac export`, an official record. Contract: docs/local-import-bundle-contract.md. Size and count ceilings are ALSO enforced by isaac_api.local_import.bundle.validate_bundle (string length and total bytes cannot be expressed here).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "format_version",
+    "is_official_record",
+    "official_record_notice",
+    "bundle_id",
+    "created_utc",
+    "generator",
+    "source_root",
+    "sources",
+    "unread_files",
+    "experiment",
+    "samples",
+    "runs",
+    "contributors",
+    "naming_profiles",
+    "candidates",
+    "conflicts",
+    "missing_values",
+    "unmapped_statements",
+    "extended_context",
+    "data_quality_notes",
+    "questions",
+    "ai_interpretations",
+    "scientist_decisions",
+    "validation",
+    "readiness",
+    "counts",
+    "bounds",
+    "authorities"
+  ],
+  "properties": {
+    "format": {
+      "const": "isaac.local-import-bundle"
+    },
+    "format_version": {
+      "enum": [
+        "1.0.0",
+        "1.1.0",
+        "1.2.0",
+        "1.3.0",
+        "1.4.0",
+        "1.5.0",
+        "1.6.0",
+        "1.7.0",
+        "1.8.0",
+        "1.9.0",
+        "1.10.0"
+      ],
+      "description": "1.1.0 adds record_groups, processing_results and exposures (all optional, so a 1.0.0 bundle still validates) and widens the decision, target and question enums. 1.2.0 adds processed_outputs (optional; absent means none were recorded) and extended_context_entry.processed_output_id. A 1.2.0 bundle REQUIRES processed_outputs (possibly empty); a bundle without it keeps its older version. 1.3.0 adds ai_interpretation.field_path and .run_ids and the optional eligibility_rederived and format_upgrades logs (all optional), and eligibility is derived under a larger writable set (context.electrochemistry.potential_setpoint_V). A 1.3.0 bundle also REQUIRES processed_outputs. 1.4.0 adds the set_clock_time_zone experiment decision (and its decision field clock_zone_binding on a confirm), the confirm_clock_time_zone question kind, the optional candidates[].local_clock block and the optional zone / zone_decision_id on a normalization step (all additive); nothing becomes newly writable. A 1.4.0 bundle also REQUIRES processed_outputs. 1.5.0 adds nothing to the bundle's shape; eligibility is derived under a larger writable set (context.electrochemistry.control_mode), as at 1.3.0. A 1.5.0 bundle also REQUIRES processed_outputs. 1.6.0 (DEC-91) adds three capture decisions — keep_apart on the new target kind merge_candidate, select_athena_version on a processing result (its value one of that result's athena_versions[].version_id; the derived athena_result_of_record / athena_result_of_record_basis), and set_not_counter_positions on the experiment (decision field not_counter_positions) — the optional superseded_merge_candidates section, the derived merge-candidate status kept_apart, and a merge decision's combined group (record_group.merged_by_decision); nothing becomes newly writable. A 1.6.0 bundle also REQUIRES processed_outputs. 1.7.0 (DEC-92) adds nothing to the bundle's shape; eligibility is derived under a larger writable set (context.electrochemistry.current_setpoint_mA_cm2), as at 1.3.0 and 1.5.0. A 1.7.0 bundle also REQUIRES processed_outputs. 1.8.0 adds nothing to the bundle's shape: the bounds on scientist_decisions and ai_interpretations are raised from 20000 to 200000 entries (both are append-only; at the old bound no further answer could be written). Nothing becomes newly writable. A 1.8.0 bundle also REQUIRES processed_outputs. 1.9.0 lets a set_counter_positions decision name -1 among its positions: the LAST filename token, whatever the name's length (`decide --positions last`), and adds a merge decision's optional same_conditions_tokens (`decide --same-conditions`); nothing else changes and nothing becomes newly writable. A 1.9.0 bundle also REQUIRES processed_outputs. 1.10.0 adds the optional vocabulary_requests section: an answer a scientist gave (decide, a template import cell, a template adopt cell of their own sheet) that its field refused only because it is not on the field's allowed list, kept as a request for the vocabulary (who, when, the field, the targets and runs, where it was said), never as a decision or a value; nothing becomes newly writable. A 1.10.0 bundle also REQUIRES processed_outputs."
+    },
+    "is_official_record": {
+      "const": false
+    },
+    "official_record_notice": {
+      "type": "string",
+      "minLength": 1
+    },
+    "bundle_id": {
+      "$ref": "#/$defs/ulid"
+    },
+    "created_utc": {
+      "$ref": "#/$defs/utc"
+    },
+    "generator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool",
+        "tool_version",
+        "engine",
+        "isaac_commit",
+        "walker_id",
+        "classifier_ids",
+        "readers",
+        "naming_profiles",
+        "profile_request"
+      ],
+      "properties": {
+        "tool": {
+          "const": "isaac import"
+        },
+        "tool_version": {
+          "type": "string"
+        },
+        "engine": {
+          "type": "string"
+        },
+        "isaac_commit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{7,64}$"
+        },
+        "walker_id": {
+          "type": "string"
+        },
+        "classifier_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64
+        },
+        "readers": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "reader_id",
+              "version"
+            ],
+            "properties": {
+              "reader_id": {
+                "type": "string"
+              },
+              "version": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "naming_profiles": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "profile_id",
+              "profile_version"
+            ],
+            "properties": {
+              "profile_id": {
+                "type": "string"
+              },
+              "profile_version": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "profile_request": {
+          "type": "string"
+        }
+      }
+    },
+    "source_root": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "kind",
+        "local_only",
+        "entry_count",
+        "total_bytes",
+        "refused_count",
+        "truncated_reason",
+        "duplicate_group_count"
+      ],
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "folder",
+            "zip"
+          ]
+        },
+        "local_only": {
+          "const": true
+        },
+        "local_root_hint": {
+          "type": "string"
+        },
+        "entry_count": {
+          "$ref": "#/$defs/count"
+        },
+        "total_bytes": {
+          "$ref": "#/$defs/count"
+        },
+        "refused_count": {
+          "$ref": "#/$defs/count"
+        },
+        "truncated_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "duplicate_group_count": {
+          "$ref": "#/$defs/count"
+        }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "unread_files": {
+      "type": "array",
+      "maxItems": 20000,
+      "items": {
+        "$ref": "#/$defs/unread_file"
+      }
+    },
+    "experiment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "context_candidate_ids",
+        "element_evidence",
+        "temperature_statements",
+        "acquisition_system",
+        "beamtime_contributor_ids",
+        "statement"
+      ],
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "context_candidate_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/candidate_id"
+          }
+        },
+        "element_evidence": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "temperature_statements": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "acquisition_system": {
+          "type": "object"
+        },
+        "beamtime_contributor_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "statement": {
+          "type": "string"
+        }
+      }
+    },
+    "samples": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": {
+        "$ref": "#/$defs/sample"
+      }
+    },
+    "runs": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": {
+        "$ref": "#/$defs/run"
+      }
+    },
+    "contributors": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": {
+        "$ref": "#/$defs/contributor"
+      }
+    },
+    "naming_profiles": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/naming_profile"
+      }
+    },
+    "candidates": {
+      "type": "array",
+      "maxItems": 4000,
+      "items": {
+        "$ref": "#/$defs/candidate"
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "maxItems": 8000,
+      "items": {
+        "$ref": "#/$defs/conflict"
+      }
+    },
+    "missing_values": {
+      "type": "array",
+      "maxItems": 200000,
+      "items": {
+        "$ref": "#/$defs/missing_value"
+      }
+    },
+    "unmapped_statements": {
+      "type": "array",
+      "maxItems": 4000,
+      "items": {
+        "$ref": "#/$defs/unmapped_statement"
+      }
+    },
+    "extended_context": {
+      "type": "array",
+      "maxItems": 50000,
+      "items": {
+        "$ref": "#/$defs/extended_context_entry"
+      }
+    },
+    "data_quality_notes": {
+      "type": "array",
+      "maxItems": 20000,
+      "items": {
+        "$ref": "#/$defs/data_quality_note"
+      }
+    },
+    "questions": {
+      "type": "array",
+      "maxItems": 20000,
+      "items": {
+        "$ref": "#/$defs/question"
+      }
+    },
+    "ai_interpretations": {
+      "type": "array",
+      "maxItems": 200000,
+      "items": {
+        "$ref": "#/$defs/ai_interpretation"
+      }
+    },
+    "scientist_decisions": {
+      "type": "array",
+      "maxItems": 200000,
+      "items": {
+        "$ref": "#/$defs/scientist_decision"
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bundle_schema",
+        "official_record_validation",
+        "statement"
+      ],
+      "properties": {
+        "bundle_schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "schema_id",
+            "checked_utc"
+          ],
+          "properties": {
+            "status": {
+              "const": "valid"
+            },
+            "schema_id": {
+              "type": "string"
+            },
+            "checked_utc": {
+              "$ref": "#/$defs/utc"
+            }
+          }
+        },
+        "official_record_validation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "reason"
+          ],
+          "properties": {
+            "status": {
+              "const": "not_applicable"
+            },
+            "reason": {
+              "type": "string"
+            }
+          }
+        },
+        "statement": {
+          "type": "string"
+        }
+      }
+    },
+    "readiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stage",
+        "is_official_record",
+        "official_record_ready",
+        "eligible_value_count",
+        "blocking",
+        "next_step"
+      ],
+      "properties": {
+        "stage": {
+          "enum": [
+            "extracted",
+            "in_review",
+            "unreadable"
+          ]
+        },
+        "is_official_record": {
+          "const": false
+        },
+        "official_record_ready": {
+          "const": false
+        },
+        "eligible_value_count": {
+          "$ref": "#/$defs/count"
+        },
+        "blocking": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "conflicts",
+            "needs_review",
+            "missing",
+            "unread_files"
+          ],
+          "properties": {
+            "conflicts": {
+              "$ref": "#/$defs/count"
+            },
+            "needs_review": {
+              "$ref": "#/$defs/count"
+            },
+            "missing": {
+              "$ref": "#/$defs/count"
+            },
+            "unread_files": {
+              "$ref": "#/$defs/count"
+            }
+          }
+        },
+        "next_step": {
+          "type": "string"
+        }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/count"
+      }
+    },
+    "bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_runs",
+        "max_candidates",
+        "max_evidence_per_candidate",
+        "max_string_chars",
+        "max_bundle_bytes",
+        "strings_truncated",
+        "evidence_windows_truncated",
+        "candidates_truncated_by_engine",
+        "engine_candidate_total"
+      ],
+      "properties": {
+        "max_runs": {
+          "$ref": "#/$defs/count"
+        },
+        "max_candidates": {
+          "$ref": "#/$defs/count"
+        },
+        "max_evidence_per_candidate": {
+          "$ref": "#/$defs/count"
+        },
+        "max_string_chars": {
+          "$ref": "#/$defs/count"
+        },
+        "max_bundle_bytes": {
+          "$ref": "#/$defs/count"
+        },
+        "strings_truncated": {
+          "$ref": "#/$defs/count"
+        },
+        "evidence_windows_truncated": {
+          "$ref": "#/$defs/count"
+        },
+        "candidates_truncated_by_engine": {
+          "type": "boolean"
+        },
+        "engine_candidate_total": {
+          "$ref": "#/$defs/count"
+        }
+      }
+    },
+    "authorities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_evidence",
+        "extraction_interpretation",
+        "scientist_confirmation",
+        "deterministic_schema_validation"
+      ],
+      "properties": {
+        "source_evidence": {
+          "type": "string"
+        },
+        "extraction_interpretation": {
+          "type": "string"
+        },
+        "scientist_confirmation": {
+          "type": "string"
+        },
+        "deterministic_schema_validation": {
+          "type": "string"
+        }
+      }
+    },
+    "record_groups": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": {
+        "$ref": "#/$defs/record_group"
+      }
+    },
+    "processing_results": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": {
+        "$ref": "#/$defs/processing_result"
+      }
+    },
+    "exposures": {
+      "type": "array",
+      "maxItems": 200000,
+      "items": {
+        "$ref": "#/$defs/exposure"
+      }
+    },
+    "merge_candidates": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": {
+        "type": "object"
+      },
+      "description": "LOCAL-P's proposals of record groups a scientist may merge with one decision. Suggestions only. A candidate may name one group plus run_keys (a zero-scan export offered to a confirmed group as context). 1.6.0: status is DERIVED kept_apart (with kept_apart_by_decision_id) while a keep_apart decision names the candidate; a kept-apart candidate is not an open merge question, and no group it names is changed."
+    },
+    "self_test": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "test_marker",
+        "set_by"
+      ],
+      "properties": {
+        "test_marker": {
+          "type": "boolean"
+        },
+        "set_by": {
+          "const": "isaac bundle build-records"
+        }
+      }
+    },
+    "grouping_questions": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {
+        "type": "object"
+      },
+      "description": "Experiment-scope questions the grouping step asks (e.g. naming_counter_positions)."
+    },
+    "processed_outputs": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": {
+        "$ref": "#/$defs/processed_output"
+      },
+      "description": "1.2.0: the scientists' own processed outputs, kept OUT of runs[] (rule isaac.processed_output.origin.v0). Optional: a 1.0/1.1 bundle has none recorded."
+    },
+    "superseded_record_groups": {
+      "type": "array",
+      "maxItems": 5000,
+      "description": "Groups a `bundle group --regroup` replaced while a decision still named them (e.g. defer, approve_calibration on a proposal). Kept so those decisions keep a target; never a record, never counted as holding its runs.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "group_id",
+          "member_run_keys",
+          "status",
+          "superseded_utc",
+          "reason"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "member_run_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "enum": [
+              "proposed"
+            ]
+          },
+          "superseded_utc": {
+            "$ref": "#/$defs/utc"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "processing_result_ids": {
+            "type": "array",
+            "maxItems": 1000,
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "superseded_merge_candidates": {
+      "type": "array",
+      "maxItems": 5000,
+      "description": "1.6.0: merge candidates a `bundle group --regroup` no longer proposes while a decision (keep_apart) still names them. Kept so those decisions keep a target; never an open question.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "merge_candidate_id",
+          "group_ids",
+          "superseded_utc",
+          "reason"
+        ],
+        "properties": {
+          "merge_candidate_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "group_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "run_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "superseded_utc": {
+            "$ref": "#/$defs/utc"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "eligibility_rederived": {
+      "type": "array",
+      "maxItems": 20000,
+      "description": "1.3.0. Values whose eligibility this build re-derived differently from the build that stored it (its writable set grew), kept so a value composed only under the newer build is never composed silently.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "id",
+          "target_field_path",
+          "from_format_version",
+          "to_format_version",
+          "rederived_utc",
+          "value_state",
+          "eligible_before",
+          "eligible_now",
+          "reason"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "candidate",
+              "missing_value"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target_field_path": {
+            "type": "string"
+          },
+          "from_format_version": {
+            "type": "string"
+          },
+          "to_format_version": {
+            "type": "string"
+          },
+          "rederived_utc": {
+            "$ref": "#/$defs/utc"
+          },
+          "value_state": {
+            "$ref": "#/$defs/value_state"
+          },
+          "eligible_before": {
+            "type": "boolean"
+          },
+          "eligible_now": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 600
+          },
+          "decision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The decision governing the value when it was re-derived."
+          }
+        }
+      }
+    },
+    "format_upgrades": {
+      "type": "array",
+      "maxItems": 100,
+      "description": "1.3.0. Each time a build first wrote (and re-derived) a bundle an older build stored. decisions_before: how many scientist decisions the bundle held then, so an answer given under the old build's wording is told from one given after.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "from_format_version",
+          "to_format_version",
+          "derived_by_format_version",
+          "upgraded_utc",
+          "decisions_before",
+          "newly_writable_paths",
+          "statement"
+        ],
+        "properties": {
+          "from_format_version": {
+            "type": "string"
+          },
+          "to_format_version": {
+            "type": "string"
+          },
+          "derived_by_format_version": {
+            "type": "string"
+          },
+          "upgraded_utc": {
+            "$ref": "#/$defs/utc"
+          },
+          "decisions_before": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "newly_writable_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 200
+          },
+          "statement": {
+            "type": "string",
+            "maxLength": 1500,
+            "description": "1.10.0 raises maxLength from 600: the statement names every change since the stored version, and from 1.4.0 or older they no longer fit in 600 characters."
+          }
+        }
+      }
+    },
+    "vocabulary_requests": {
+      "type": "array",
+      "maxItems": 20000,
+      "description": "1.10.0. Each answer refused ONLY because it is not on its field's allowed list (bundle.off_list_only). Never a decision and never a value: no record reads it. `bundle propose-terms` drafts its term.",
+      "items": {
+        "$ref": "#/$defs/vocabulary_request"
+      }
+    }
+  },
+  "$defs": {
+    "count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ulid": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    },
+    "source_id": {
+      "type": "string",
+      "pattern": "^src-[0-9]{4,}$"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^run-[0-9]{3,}$"
+    },
+    "candidate_id": {
+      "type": "string",
+      "pattern": "^cand-[0-9]{4,}$"
+    },
+    "value_state": {
+      "enum": [
+        "source_recorded",
+        "candidate_extracted",
+        "needs_review",
+        "conflicting",
+        "scientist_confirmed",
+        "rejected",
+        "unmapped",
+        "missing"
+      ]
+    },
+    "extracted_state": {
+      "description": "The state the PARSER output alone supports. scientist_confirmed and rejected are deliberately absent: only a scientist_decisions entry can produce them.",
+      "enum": [
+        "candidate_extracted",
+        "needs_review",
+        "conflicting",
+        "unmapped",
+        "missing"
+      ]
+    },
+    "relative_path": {
+      "type": "string",
+      "description": "Relative to the source root. Never absolute; never a `..` segment.",
+      "not": {
+        "pattern": "^(/|\\\\|[A-Za-z]:)"
+      },
+      "allOf": [
+        {
+          "not": {
+            "pattern": "(^|[/\\\\])\\.\\.([/\\\\]|$)"
+          }
+        }
+      ]
+    },
+    "eligibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "eligible",
+        "reason"
+      ],
+      "properties": {
+        "eligible": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "id"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "candidate",
+            "missing_value",
+            "conflict",
+            "record_group",
+            "processing_result",
+            "source",
+            "run",
+            "experiment",
+            "merge_candidate"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "naming_assignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_ids",
+        "profile_versions",
+        "binding_ids",
+        "ambiguous"
+      ],
+      "properties": {
+        "profile_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "profile_versions": {
+          "type": "array",
+          "items": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "binding_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ambiguous": {
+          "type": "boolean"
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_id",
+        "relative_path",
+        "basename",
+        "extension",
+        "parent_dir",
+        "depth",
+        "size_bytes",
+        "content_sha256",
+        "sha256_basis",
+        "local_only",
+        "classification",
+        "reader",
+        "naming_profile"
+      ],
+      "properties": {
+        "source_id": {
+          "$ref": "#/$defs/source_id"
+        },
+        "relative_path": {
+          "$ref": "#/$defs/relative_path"
+        },
+        "basename": {
+          "type": "string"
+        },
+        "extension": {
+          "type": "string"
+        },
+        "parent_dir": {
+          "type": "string"
+        },
+        "depth": {
+          "$ref": "#/$defs/count"
+        },
+        "size_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "content_sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "sha256_basis": {
+          "const": "computed_by_the_walk_over_the_bytes_read_on_this_machine"
+        },
+        "local_only": {
+          "const": true
+        },
+        "classification": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source_type",
+            "reason",
+            "confidence",
+            "overridable",
+            "classifier_id"
+          ],
+          "properties": {
+            "source_type": {
+              "type": "string"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "confidence": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "overridable": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "classifier_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "reader": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "reader_id",
+            "content_read",
+            "statements_read",
+            "statements_suppressed",
+            "partial",
+            "skipped_total",
+            "refused_reason"
+          ],
+          "properties": {
+            "reader_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "content_read": {
+              "type": "boolean"
+            },
+            "statements_read": {
+              "$ref": "#/$defs/count"
+            },
+            "statements_suppressed": {
+              "$ref": "#/$defs/count"
+            },
+            "partial": {
+              "type": "boolean"
+            },
+            "skipped_total": {
+              "$ref": "#/$defs/count"
+            },
+            "refused_reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "naming_profile": {
+          "$ref": "#/$defs/naming_assignment"
+        }
+      }
+    },
+    "unread_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relative_path",
+        "source_id",
+        "source_type",
+        "reason_code",
+        "reason",
+        "local_only"
+      ],
+      "properties": {
+        "relative_path": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/relative_path"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/source_id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason_code": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "local_only": {
+          "const": true
+        }
+      }
+    },
+    "sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sample_id",
+        "group_token",
+        "run_ids",
+        "legacy_low",
+        "legacy_high",
+        "contiguous",
+        "sample_name_readings",
+        "basis"
+      ],
+      "properties": {
+        "sample_id": {
+          "type": "string"
+        },
+        "group_token": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/run_id"
+          }
+        },
+        "legacy_low": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "legacy_high": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "contiguous": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "sample_name_readings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "basis": {
+          "type": "string"
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "run_key",
+        "label",
+        "stem",
+        "source_type",
+        "run_candidate",
+        "legacy_number",
+        "legacy_number_shared",
+        "shares_legacy_number_with",
+        "group_token",
+        "sample_id",
+        "acquisition_source_id",
+        "scans",
+        "scan_count",
+        "declared_by",
+        "note_rows",
+        "other_relationships",
+        "candidate_ids",
+        "conflict_ids",
+        "contributor_ids",
+        "data_quality_note_ids",
+        "naming_profile",
+        "signal_selection"
+      ],
+      "properties": {
+        "run_id": {
+          "$ref": "#/$defs/run_id"
+        },
+        "run_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string"
+        },
+        "stem": {
+          "type": "string"
+        },
+        "source_type": {
+          "type": "string"
+        },
+        "run_candidate": {
+          "type": "boolean"
+        },
+        "legacy_number": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "legacy_number_shared": {
+          "type": "boolean"
+        },
+        "shares_legacy_number_with": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/run_id"
+          }
+        },
+        "group_token": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sample_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "acquisition_source_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/source_id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scans": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source_id",
+              "relative_path",
+              "scan_index"
+            ],
+            "properties": {
+              "source_id": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/source_id"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "relative_path": {
+                "$ref": "#/$defs/relative_path"
+              },
+              "scan_index": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "scan_count": {
+          "$ref": "#/$defs/count"
+        },
+        "declared_by": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "macro_source_id",
+              "macro_path",
+              "block_index",
+              "declared_target",
+              "acquired"
+            ],
+            "properties": {
+              "macro_source_id": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/source_id"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "macro_path": {
+                "$ref": "#/$defs/relative_path"
+              },
+              "block_index": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "declared_target": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "acquired": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "note_rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source_id",
+              "locator",
+              "value"
+            ],
+            "properties": {
+              "source_id": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/source_id"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "locator": {
+                "type": "string"
+              },
+              "value": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "other_relationships": {
+          "type": "object"
+        },
+        "candidate_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/candidate_id"
+          }
+        },
+        "conflict_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "contributor_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "data_quality_note_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "naming_profile": {
+          "type": "object"
+        },
+        "signal_selection": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "shares_file_name_with": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/run_id"
+          },
+          "description": "Other runs whose acquisition file has the same name in a different folder (possible duplicate data; see conflicts[] kind same_file_name_different_folders)."
+        },
+        "reader": {
+          "type": "object",
+          "description": "For a run a GENERIC reader found: which reader, profile and version, and how many statements it kept."
+        }
+      }
+    },
+    "contributor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contributor_id",
+        "name",
+        "labels",
+        "scope",
+        "run_ids",
+        "evidence",
+        "role",
+        "is_actor",
+        "is_naming_profile",
+        "value_state"
+      ],
+      "properties": {
+        "contributor_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "scope": {
+          "enum": [
+            "run",
+            "beamtime"
+          ]
+        },
+        "run_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/run_id"
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source_id",
+              "locator",
+              "section",
+              "basis"
+            ],
+            "properties": {
+              "source_id": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/source_id"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "locator": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "section": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "basis": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "role": {
+          "const": "provenance"
+        },
+        "is_actor": {
+          "const": false
+        },
+        "is_naming_profile": {
+          "const": false
+        },
+        "value_state": {
+          "const": "source_recorded"
+        }
+      }
+    },
+    "naming_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "binding_id",
+        "profile_id",
+        "profile_version",
+        "display_name",
+        "scope",
+        "basis",
+        "selector_description",
+        "source_count"
+      ],
+      "properties": {
+        "binding_id": {
+          "type": "string"
+        },
+        "profile_id": {
+          "type": "string"
+        },
+        "profile_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "display_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "basis": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selector_description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_count": {
+          "$ref": "#/$defs/count"
+        }
+      }
+    },
+    "normalization_step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "step",
+        "rule_id",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "step": {
+          "type": "string"
+        },
+        "rule_id": {
+          "type": "string"
+        },
+        "from": {},
+        "to": {},
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "zone": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "1.4.0 local_clock_to_utc step: the IANA zone a scientist confirmed for the instrument clock."
+        },
+        "zone_decision_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "1.4.0 local_clock_to_utc step: the set_clock_time_zone decision that stated the zone."
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_id",
+        "source_id",
+        "relative_path",
+        "locator",
+        "statement_key",
+        "literal_value",
+        "method",
+        "method_id",
+        "relation",
+        "reading_index",
+        "normalization"
+      ],
+      "properties": {
+        "evidence_id": {
+          "type": "string"
+        },
+        "source_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/source_id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "relative_path": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/relative_path"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "locator": {
+          "type": "string"
+        },
+        "statement_key": {
+          "type": "string"
+        },
+        "literal_value": {},
+        "method": {
+          "enum": [
+            "deterministic_parser",
+            "stored_rule",
+            "ai_interpretation",
+            "scientist_answer"
+          ]
+        },
+        "method_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "relation": {
+          "enum": [
+            "supports",
+            "contradicts",
+            "context"
+          ]
+        },
+        "reading_index": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "normalization": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/normalization_step"
+          }
+        },
+        "locator_kind": {
+          "enum": [
+            "source_file",
+            "described",
+            "unlocated"
+          ]
+        }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_id",
+        "engine_candidate_id",
+        "kind",
+        "run_id",
+        "scope",
+        "statement_key",
+        "target_field_path",
+        "target_write_scope",
+        "value",
+        "observed_literals",
+        "extracted_state",
+        "value_state",
+        "state_basis",
+        "rule",
+        "evidence",
+        "evidence_total",
+        "evidence_truncated",
+        "distinct_sources",
+        "variation",
+        "eligibility_for_official_record"
+      ],
+      "properties": {
+        "candidate_id": {
+          "$ref": "#/$defs/candidate_id"
+        },
+        "engine_candidate_id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "field",
+            "experiment",
+            "run"
+          ]
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/run_id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scope": {
+          "enum": [
+            "run",
+            "beamtime"
+          ]
+        },
+        "statement_key": {
+          "type": "string"
+        },
+        "target_field_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target_write_scope": {
+          "enum": [
+            "record",
+            "run",
+            null
+          ]
+        },
+        "value": {},
+        "observed_literals": {
+          "type": "array",
+          "items": {},
+          "maxItems": 8
+        },
+        "extracted_state": {
+          "$ref": "#/$defs/extracted_state"
+        },
+        "value_state": {
+          "$ref": "#/$defs/value_state"
+        },
+        "state_basis": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "review_status",
+            "agreement",
+            "determinism",
+            "proposable",
+            "unresolved_reason",
+            "not_proposable_reason",
+            "not_proposable_summary",
+            "resolved_by_rule"
+          ],
+          "properties": {
+            "review_status": {
+              "type": "string"
+            },
+            "agreement": {
+              "type": "string"
+            },
+            "determinism": {
+              "type": "string"
+            },
+            "proposable": {
+              "type": "boolean"
+            },
+            "unresolved_reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "not_proposable_reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "not_proposable_summary": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "resolved_by_rule": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "rule": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "evidence_total": {
+          "$ref": "#/$defs/count"
+        },
+        "evidence_truncated": {
+          "type": "boolean"
+        },
+        "distinct_sources": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "variation": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "eligibility_for_official_record": {
+          "$ref": "#/$defs/eligibility"
+        },
+        "observed_literals_total": {
+          "$ref": "#/$defs/count"
+        },
+        "observed_literals_truncated": {
+          "type": "boolean"
+        },
+        "readings": {
+          "type": "array",
+          "items": {},
+          "description": "The engine's raw disagreement readings, in order, duplicates kept: the ONE index space chosen_reading_index uses."
+        },
+        "standing_resolution": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "local_clock": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "rule_id",
+            "conversion_rule_id",
+            "timezone_stated",
+            "start_rule",
+            "status",
+            "zone",
+            "zone_decision_id",
+            "local_time",
+            "literal",
+            "excluded_scans",
+            "order_note",
+            "explanation"
+          ],
+          "properties": {
+            "rule_id": {
+              "const": "ssrl_xdc_scan_start_v1"
+            },
+            "conversion_rule_id": {
+              "const": "local_clock_to_utc_via_confirmed_zone_v1"
+            },
+            "timezone_stated": {
+              "const": "not_stated"
+            },
+            "start_rule": {
+              "const": "earliest"
+            },
+            "start_source_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "start_relative_path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "scans_used": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "status": {
+              "enum": [
+                "awaiting_clock_time_zone",
+                "converted",
+                "ambiguous_in_zone",
+                "nonexistent_in_zone"
+              ]
+            },
+            "zone": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "zone_decision_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "local_time": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "literal": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "excluded_scans": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "object"
+              }
+            },
+            "order_note": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "explanation": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "What the conversion did (or why there is no value), in words. The not_proposable_reason says only why the value is not proposable to the website."
+            },
+            "excluded_scans_total": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "How many scans were not used, when excluded_scans is a window."
+            }
+          },
+          "description": "1.4.0, a timestamps.acquired_start_utc candidate of rule ssrl_xdc_scan_start_v1: the earliest line-2 local clock time of the run's scans, which names no zone. status is re-derived on every save from the latest set_clock_time_zone decision (rule local_clock_to_utc_via_confirmed_zone_v1); an ambiguous or nonexistent local time in that zone gets no value."
+        }
+      }
+    },
+    "conflict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conflict_id",
+        "engine_conflict_id",
+        "kind",
+        "subject",
+        "candidate_id",
+        "run_ids",
+        "readings",
+        "explanation",
+        "recommendation",
+        "value_state"
+      ],
+      "properties": {
+        "conflict_id": {
+          "type": "string",
+          "pattern": "^conf-[0-9]{3,}$"
+        },
+        "engine_conflict_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "subject": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "candidate_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/candidate_id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/run_id"
+          }
+        },
+        "readings": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "reading_index",
+              "value",
+              "witnesses"
+            ],
+            "properties": {
+              "reading_index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "value": {},
+              "witnesses": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "source_id",
+                    "relative_path",
+                    "locator",
+                    "source_role"
+                  ],
+                  "properties": {
+                    "source_id": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/source_id"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "relative_path": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/relative_path"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "locator": {
+                      "type": "string"
+                    },
+                    "source_role": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "explanation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "recommendation": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "value_state": {
+          "enum": [
+            "conflicting",
+            "needs_review",
+            "scientist_confirmed",
+            "rejected"
+          ]
+        },
+        "resolution": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      }
+    },
+    "missing_value": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value_id",
+        "run_id",
+        "target_field_path",
+        "target_write_scope",
+        "value",
+        "extracted_state",
+        "value_state",
+        "reason",
+        "beamtime_context_candidate_ids",
+        "eligibility_for_official_record"
+      ],
+      "properties": {
+        "value_id": {
+          "type": "string",
+          "pattern": "^miss-[0-9]{4,}$"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/run_id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target_field_path": {
+          "type": "string"
+        },
+        "target_write_scope": {
+          "enum": [
+            "record",
+            "run"
+          ]
+        },
+        "value": {
+          "type": "null"
+        },
+        "extracted_state": {
+          "const": "missing"
+        },
+        "value_state": {
+          "$ref": "#/$defs/value_state"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "beamtime_context_candidate_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/candidate_id"
+          }
+        },
+        "eligibility_for_official_record": {
+          "$ref": "#/$defs/eligibility"
+        }
+      }
+    },
+    "unmapped_statement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_id",
+        "run_id",
+        "statement_key",
+        "reason"
+      ],
+      "properties": {
+        "candidate_id": {
+          "$ref": "#/$defs/candidate_id"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/run_id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "statement_key": {
+          "type": "string"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "extended_context_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entry_id",
+        "concept",
+        "raw_literal",
+        "source_id",
+        "relative_path",
+        "locator",
+        "normalized_value",
+        "unit",
+        "normalization_rule_id",
+        "parser_id",
+        "scope",
+        "official_path",
+        "value_state",
+        "is_official_field_value"
+      ],
+      "properties": {
+        "entry_id": {
+          "type": "string"
+        },
+        "concept": {
+          "type": "string"
+        },
+        "raw_literal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/source_id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "relative_path": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/relative_path"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "locator": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "normalized_value": {},
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "normalization_rule_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parser_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "official_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value_state": {
+          "const": "source_recorded"
+        },
+        "is_official_field_value": {
+          "const": false
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/run_id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "processed_output_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/processed_output_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set when the statement was read from a processed output; such an entry never carries a run_id."
+        }
+      }
+    },
+    "data_quality_note": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "note_id",
+        "text",
+        "run_ids",
+        "source_id",
+        "locator",
+        "label",
+        "writes_qc_status",
+        "legacy_number_shared",
+        "value_state"
+      ],
+      "properties": {
+        "note_id": {
+          "type": "string",
+          "pattern": "^dq-[0-9]{3,}$"
+        },
+        "text": {
+          "type": "string"
+        },
+        "run_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/run_id"
+          }
+        },
+        "source_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/source_id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "locator": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "writes_qc_status": {
+          "const": false
+        },
+        "legacy_number_shared": {
+          "type": "boolean"
+        },
+        "value_state": {
+          "const": "source_recorded"
+        }
+      }
+    },
+    "question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "question_id",
+        "kind",
+        "target",
+        "run_id",
+        "prompt",
+        "options"
+      ],
+      "properties": {
+        "question_id": {
+          "type": "string",
+          "pattern": "^q-[0-9]{4,}$"
+        },
+        "kind": {
+          "enum": [
+            "resolve_conflict",
+            "confirm_value",
+            "missing_value",
+            "confirm_clock_time_zone"
+          ]
+        },
+        "target": {
+          "$ref": "#/$defs/target"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/run_id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {}
+        },
+        "required_by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ai_interpretation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "interpretation_id",
+        "target",
+        "proposed_value",
+        "rationale",
+        "source_refs",
+        "method",
+        "model",
+        "created_utc",
+        "max_state"
+      ],
+      "properties": {
+        "interpretation_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "$ref": "#/$defs/target"
+        },
+        "proposed_value": {},
+        "rationale": {
+          "type": "string"
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source_id",
+              "locator"
+            ],
+            "properties": {
+              "source_id": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/source_id"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "locator": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "method": {
+          "const": "ai_interpretation"
+        },
+        "model": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "created_utc": {
+          "$ref": "#/$defs/utc"
+        },
+        "max_state": {
+          "const": "needs_review"
+        },
+        "blind": {
+          "type": "boolean"
+        },
+        "blind_basis": {
+          "type": "string"
+        },
+        "excerpt_locator": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_path": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "The file the reading cites, relative to the imported folder (or ../<name> for a document beside it). Set when the reading came from a findings file; source_refs carries the source_id when the file is one of the bundle's sources."
+        },
+        "quote": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "The words the reading rests on, as the reader quoted them from the cited file. Not checked against the file by this build."
+        },
+        "strength": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "stated",
+            "inferred",
+            null
+          ],
+          "description": "stated: the file says it; inferred: one written step from what the file says."
+        },
+        "finding_id": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "field_path": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "1.3.0. The field a reading-pass finding reads, set when the target does not say it: a system.element or system.edge finding recorded on a record group (the absorber has no record field). A suggestion only; only a set_absorber decision gives the absorber."
+        },
+        "run_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2000,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/run_id"
+          },
+          "description": "1.3.0. For a record-group reading from a finding that names runs (applies_to.scope runs): which of the group's runs it named. Absent: the finding is about the whole beamtime."
+        }
+      }
+    },
+    "scientist_decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision_id",
+        "target",
+        "decision",
+        "value",
+        "chosen_reading_index",
+        "decided_by",
+        "decided_utc",
+        "method",
+        "note"
+      ],
+      "properties": {
+        "decision_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "$ref": "#/$defs/target"
+        },
+        "decision": {
+          "enum": [
+            "confirm",
+            "correct",
+            "reject",
+            "defer",
+            "choose_reading",
+            "provide_value",
+            "split",
+            "merge",
+            "approve",
+            "needs_changes",
+            "approve_calibration",
+            "set_absorber",
+            "set_counter_positions",
+            "set_clock_time_zone",
+            "keep_apart",
+            "select_athena_version",
+            "set_not_counter_positions"
+          ]
+        },
+        "value": {},
+        "chosen_reading_index": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "decided_by": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "basis"
+          ],
+          "properties": {
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "basis": {
+              "const": "self_reported_local_user"
+            },
+            "identity": {
+              "const": "local_unverified",
+              "description": "Always. This build authenticates nobody; a name typed at the CLI is a claim."
+            },
+            "orcid_claimed": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": false,
+              "required": [
+                "value",
+                "basis"
+              ],
+              "properties": {
+                "value": {
+                  "type": "string",
+                  "pattern": "^[0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{3}[0-9X]$"
+                },
+                "basis": {
+                  "const": "claimed_for_credit_not_authentication"
+                }
+              }
+            }
+          }
+        },
+        "decided_utc": {
+          "$ref": "#/$defs/utc"
+        },
+        "method": {
+          "const": "scientist_answer"
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "batch_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "split_into": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "merge_with": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "same_conditions_tokens": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 200,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "1.9.0, merge only (decide --same-conditions): the file-name words the merged groups' names differ in, which the scientist stated are labels, not conditions (the runs measured the same sample under the same conditions). A merge whose names differ in a word not listed here is not combined on the same confirmed sample."
+        },
+        "qc_status": {
+          "type": "string",
+          "description": "processing_result approve only: measurement.qc.status a scientist stated (pinned vocabulary)."
+        },
+        "qc_note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "qc_evidence": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "The processing result's own QC verdict and metrics the scientist was shown."
+        },
+        "element": {
+          "type": "string",
+          "pattern": "^[A-Z][a-z]?$"
+        },
+        "edge": {
+          "type": "string",
+          "pattern": "^(K|L[1-3]|M[1-5])$"
+        },
+        "approved_files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "relative_path",
+              "sha256"
+            ],
+            "properties": {
+              "role": {
+                "type": "string"
+              },
+              "relative_path": {
+                "type": "string"
+              },
+              "sha256": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "processing approve: the exact files (and hashes) the approval binds to."
+        },
+        "positions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "const": -1
+              }
+            ]
+          },
+          "description": "set_counter_positions: the 1-based filename token positions that are run/acquisition counters. 1.9.0: -1 names the LAST token, whatever the name's length."
+        },
+        "clock_zone_binding": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "zone",
+            "zone_decision_id",
+            "value",
+            "rule_id"
+          ],
+          "properties": {
+            "zone": {
+              "type": "string"
+            },
+            "zone_decision_id": {
+              "type": "string"
+            },
+            "value": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rule_id": {
+              "const": "local_clock_to_utc_via_confirmed_zone_v1"
+            }
+          },
+          "description": "1.4.0, confirm of a local-clock start-time candidate only: the instrument clock's time zone (and its set_clock_time_zone decision) the confirmation was made under, and the UTC value that zone gave. A candidate whose current zone or value differs is not eligible until confirmed again."
+        },
+        "not_counter_positions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "description": "1.6.0, set_not_counter_positions only: the 1-based filename token positions a scientist stated are NOT run/acquisition counters. Grouping is unchanged by it; the counter question stops asking about them."
+        },
+        "athena_version_provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "prj_relative_path",
+            "athena_group",
+            "data_sha256_prefix"
+          ],
+          "properties": {
+            "prj_relative_path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "athena_group": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "data_sha256_prefix": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "description": "1.6.0, select_athena_version only: the selected version's own identity (project file, Athena group, data hash prefix). Version ids are positional and move when a project file is added or removed; the selection follows this identity, never the number."
+        }
+      }
+    },
+    "exposure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "exposure_id",
+        "target",
+        "command",
+        "at_utc"
+      ],
+      "properties": {
+        "exposure_id": {
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/target"
+        },
+        "command": {
+          "type": "string"
+        },
+        "at_utc": {
+          "$ref": "#/$defs/utc"
+        }
+      }
+    },
+    "record_group": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "group_id",
+        "experiment_key",
+        "member_run_keys",
+        "basis",
+        "split_reasons",
+        "status",
+        "questions"
+      ],
+      "properties": {
+        "group_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "experiment_key": {
+          "type": "string"
+        },
+        "member_run_keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "basis": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "sample",
+            "technique",
+            "environment",
+            "conditions"
+          ],
+          "properties": {
+            "sample": {},
+            "technique": {},
+            "environment": {},
+            "conditions": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "value",
+                  "candidate_ids"
+                ],
+                "properties": {
+                  "value": {},
+                  "candidate_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "split_reasons": {
+          "type": "array",
+          "items": {}
+        },
+        "status": {
+          "enum": [
+            "proposed",
+            "scientist_confirmed",
+            "split",
+            "merged",
+            "rejected"
+          ]
+        },
+        "questions": {
+          "type": "array",
+          "items": {}
+        },
+        "condition_violations": {
+          "type": "array",
+          "items": {},
+          "description": "Recorded conditions the group's members disagree on. A proposed group must have none."
+        },
+        "merged_by_decision": {
+          "type": "object",
+          "description": "1.6.0: present on the ONE group `bundle group --regroup` proposes for a scientist's merge decision (decision_id, merged_group_id, merge_with, decided_by, from_groups, basis_keys_dropped, statement). Proposed only; a confirm decision makes it a record."
+        }
+      }
+    },
+    "processing_result": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "group_id",
+        "protocol_id",
+        "protocol_version",
+        "protocol_status",
+        "source",
+        "inputs",
+        "steps",
+        "outputs",
+        "qc",
+        "comparison",
+        "state"
+      ],
+      "properties": {
+        "result_id": {
+          "type": "string"
+        },
+        "group_id": {
+          "type": "string"
+        },
+        "protocol_id": {
+          "type": "string"
+        },
+        "protocol_version": {
+          "type": "string"
+        },
+        "protocol_status": {
+          "enum": [
+            "draft_unreviewed",
+            "scientist_approved"
+          ]
+        },
+        "source": {
+          "enum": [
+            "isaac_protocol",
+            "scientist_athena"
+          ]
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "source_id"
+            ],
+            "properties": {
+              "source_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "scan": {},
+              "channel": {}
+            }
+          }
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "step"
+            ],
+            "properties": {
+              "step": {
+                "enum": [
+                  "calibration",
+                  "deglitch",
+                  "merge",
+                  "normalize",
+                  "qc"
+                ]
+              },
+              "params": {
+                "type": "object"
+              },
+              "outcome": {
+                "type": "object"
+              },
+              "flags": {
+                "type": "array"
+              }
+            }
+          }
+        },
+        "outputs": {
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "role",
+                  "relative_path",
+                  "sha256"
+                ],
+                "properties": {
+                  "role": {
+                    "type": "string"
+                  },
+                  "relative_path": {
+                    "$ref": "#/$defs/relative_path"
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                }
+              }
+            },
+            "e0_eV": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "edge_step": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "points": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          }
+        },
+        "qc": {
+          "type": "object",
+          "properties": {
+            "metrics": {
+              "type": "object"
+            },
+            "verdict": {
+              "enum": [
+                "pass",
+                "warn",
+                "fail"
+              ]
+            }
+          }
+        },
+        "comparison": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/value_state"
+        },
+        "applicability": {
+          "description": "Optional (absent = the protocol applied). not_applicable: the protocol could not be applied to the group, which is an explicit outcome and NOT a QC verdict. reason_code no_scans = the group lists no scan; no_xas_channel = no energy axis or absorption signal could be formed from the scan's columns. what_the_data_states holds literals (source type, reader, the reader's stated layout, scan format, column labels), never an inferred technique. Such a result carries no qc.verdict and no output file, and no decision is accepted on it.",
+          "type": "object",
+          "required": [
+            "status",
+            "reason_code"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "not_applicable"
+              ]
+            },
+            "reason_code": {
+              "enum": [
+                "no_scans",
+                "no_xas_channel"
+              ]
+            },
+            "detail": {
+              "type": "string"
+            },
+            "statement": {
+              "type": "string"
+            },
+            "what_the_data_states": {
+              "type": "object"
+            }
+          }
+        },
+        "athena_result_of_record": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Null until a select_athena_version decision names one of athena_versions[].version_id; DERIVED from the latest such decision on every save. Never changes state, QC or outputs."
+        },
+        "athena_result_of_record_basis": {
+          "type": "object",
+          "description": "1.6.0, derived: the select_athena_version decision (decision_id, decided_by, statement) behind athena_result_of_record."
+        }
+      },
+      "if": {
+        "required": [
+          "applicability"
+        ]
+      },
+      "then": {
+        "properties": {
+          "qc": {
+            "not": {
+              "required": [
+                "verdict"
+              ]
+            }
+          },
+          "outputs": {
+            "properties": {
+              "files": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    "processed_output_id": {
+      "type": "string",
+      "pattern": "^po-[0-9a-f]{16}$"
+    },
+    "processed_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One of the scientists' own processed outputs (Athena/Demeter XDI), grouped by name stem as the reader groups it. A reference result and evidence: never a run, never a record group.",
+      "required": [
+        "processed_output_id",
+        "output_key",
+        "label",
+        "directory",
+        "role",
+        "is_acquisition",
+        "becomes_a_record",
+        "statement",
+        "reader",
+        "files",
+        "states",
+        "anomalies",
+        "extended_context_entry_ids",
+        "proposed_links",
+        "link_note",
+        "value_state"
+      ],
+      "properties": {
+        "processed_output_id": {
+          "$ref": "#/$defs/processed_output_id"
+        },
+        "output_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string"
+        },
+        "directory": {
+          "type": "string"
+        },
+        "role": {
+          "const": "reference_result"
+        },
+        "is_acquisition": {
+          "const": false
+        },
+        "becomes_a_record": {
+          "const": false
+        },
+        "statement": {
+          "type": "string"
+        },
+        "reader": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "reader_id",
+            "profile",
+            "profile_version",
+            "statements_total",
+            "statements_kept"
+          ],
+          "properties": {
+            "reader_id": {
+              "type": "string"
+            },
+            "profile": {
+              "type": "string"
+            },
+            "profile_version": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "statements_total": {
+              "$ref": "#/$defs/count"
+            },
+            "statements_kept": {
+              "$ref": "#/$defs/count"
+            }
+          }
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source_id",
+              "relative_path",
+              "sha256",
+              "size_bytes",
+              "extension",
+              "columns",
+              "points",
+              "processing_origin"
+            ],
+            "properties": {
+              "source_id": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/source_id"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "relative_path": {
+                "$ref": "#/$defs/relative_path"
+              },
+              "sha256": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "size_bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "extension": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "columns": {
+                "type": "array",
+                "maxItems": 50,
+                "items": {
+                  "type": "string"
+                }
+              },
+              "points": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "processing_origin": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "rule_id",
+                  "basis",
+                  "processed_by",
+                  "application_version",
+                  "line_1_applications",
+                  "names_a_processing_application",
+                  "has_demeter_output_filetype",
+                  "has_athena_fields"
+                ],
+                "properties": {
+                  "rule_id": {
+                    "const": "isaac.processed_output.origin.v0"
+                  },
+                  "processed_by": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "application_version": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "names_a_processing_application": {
+                    "type": "boolean"
+                  },
+                  "has_demeter_output_filetype": {
+                    "type": "boolean"
+                  },
+                  "has_athena_fields": {
+                    "type": "boolean"
+                  },
+                  "basis": {
+                    "enum": [
+                      "line_1",
+                      "fields"
+                    ]
+                  },
+                  "line_1_applications": {
+                    "type": "array",
+                    "maxItems": 10,
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "states": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "What the files' own headers state about themselves, literally, each with its locator. Never a run value.",
+          "required": [
+            "processed_by",
+            "element_symbol",
+            "element_edge",
+            "demeter_output_filetype"
+          ],
+          "properties": {
+            "processed_by": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "literal",
+                  "source_id",
+                  "locator"
+                ],
+                "properties": {
+                  "literal": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "source_id": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/source_id"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "locator": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            },
+            "element_symbol": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "literal",
+                  "source_id",
+                  "locator"
+                ],
+                "properties": {
+                  "literal": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "source_id": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/source_id"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "locator": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            },
+            "element_edge": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "literal",
+                  "source_id",
+                  "locator"
+                ],
+                "properties": {
+                  "literal": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "source_id": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/source_id"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "locator": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            },
+            "demeter_output_filetype": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "literal",
+                  "source_id",
+                  "locator"
+                ],
+                "properties": {
+                  "literal": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "source_id": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/source_id"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "locator": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "anomalies": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object"
+          }
+        },
+        "extended_context_entry_ids": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "string"
+          }
+        },
+        "proposed_links": {
+          "type": "array",
+          "maxItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "rule_id",
+              "status",
+              "match",
+              "scan_selection_literal",
+              "scan_selection_basis",
+              "run_id",
+              "run_key",
+              "run_stem",
+              "group_id",
+              "assumption"
+            ],
+            "properties": {
+              "rule_id": {
+                "const": "isaac.processed_output.link_by_run_stem.v0"
+              },
+              "status": {
+                "const": "proposed"
+              },
+              "match": {
+                "enum": [
+                  "exact",
+                  "scan_selection_suffix"
+                ]
+              },
+              "scan_selection_literal": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "run_id": {
+                "$ref": "#/$defs/run_id"
+              },
+              "run_key": {
+                "type": "string"
+              },
+              "run_stem": {
+                "type": "string"
+              },
+              "group_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "scan_selection_basis": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "scan_indices",
+                  "scan_count",
+                  null
+                ]
+              },
+              "assumption": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "link_note": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "code",
+                "match",
+                "run_keys",
+                "detail"
+              ],
+              "properties": {
+                "code": {
+                  "enum": [
+                    "ambiguous",
+                    "no_run_named_like_it",
+                    "exact_name_run_has_no_scans"
+                  ]
+                },
+                "match": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "exact",
+                    "scan_selection_suffix",
+                    null
+                  ]
+                },
+                "run_keys": {
+                  "type": "array",
+                  "maxItems": 20,
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "detail": {
+                  "type": "string"
+                }
+              }
+            }
+          ]
+        },
+        "value_state": {
+          "const": "source_recorded"
+        }
+      }
+    },
+    "vocabulary_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "field_path",
+        "term",
+        "requested_by",
+        "requested_utc",
+        "scope",
+        "targets",
+        "run_ids",
+        "source"
+      ],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "pattern": "^vr-[0-9]{5,}$"
+        },
+        "field_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "term": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Exactly as the scientist gave it; never rewritten."
+        },
+        "requested_by": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "basis"
+          ],
+          "description": "The --by of the command that refused it; null when no name was given (template adopt without --by).",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "basis": {
+              "const": "self_reported_local_user"
+            },
+            "identity": {
+              "const": "local_unverified"
+            },
+            "orcid_claimed": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": false,
+              "required": [
+                "value",
+                "basis"
+              ],
+              "properties": {
+                "value": {
+                  "type": "string"
+                },
+                "basis": {
+                  "const": "claimed_for_credit_not_authentication"
+                }
+              }
+            }
+          }
+        },
+        "requested_utc": {
+          "$ref": "#/$defs/utc"
+        },
+        "reaffirmed_utc": {
+          "$ref": "#/$defs/utc",
+          "description": "Optional: the last time the same `decide --as-said` answer was given again. `bundle propose-terms` reads an allowed value given before the later of this and requested_utc as not answering the request."
+        },
+        "scope": {
+          "enum": [
+            "run",
+            "experiment"
+          ]
+        },
+        "targets": {
+          "type": "array",
+          "maxItems": 5000,
+          "items": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "run_ids": {
+          "type": "array",
+          "maxItems": 5000,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "command"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "decide_answer",
+                "template_cell",
+                "adopted_sheet_cell"
+              ]
+            },
+            "command": {
+              "type": "string"
+            },
+            "decision": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "question_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "file": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "A file NAME only (no folders)."
+            },
+            "cells": {
+              "type": "array",
+              "maxItems": 5000,
+              "items": {
+                "type": "string"
+              }
+            },
+            "as_said": {
+              "const": true,
+              "description": "decide_answer only: kept because the scientist said it is their own word (`decide --as-said`). Absent on a template cell, whose sheet is the scientist's own writing."
+            }
+          }
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 2000,
+          "description": "The scientist's own --note, verbatim."
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "format_version": {
+            "const": "1.2.0"
+          }
+        },
+        "required": [
+          "format_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "processed_outputs"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "format_version": {
+            "const": "1.3.0"
+          }
+        },
+        "required": [
+          "format_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "processed_outputs"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "format_version": {
+            "const": "1.4.0"
+          }
+        },
+        "required": [
+          "format_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "processed_outputs"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "format_version": {
+            "const": "1.5.0"
+          }
+        },
+        "required": [
+          "format_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "processed_outputs"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "format_version": {
+            "const": "1.6.0"
+          }
+        },
+        "required": [
+          "format_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "processed_outputs"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "format_version": {
+            "const": "1.7.0"
+          }
+        },
+        "required": [
+          "format_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "processed_outputs"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "format_version": {
+            "const": "1.8.0"
+          }
+        },
+        "required": [
+          "format_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "processed_outputs"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "format_version": {
+            "const": "1.9.0"
+          }
+        },
+        "required": [
+          "format_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "processed_outputs"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "format_version": {
+            "const": "1.10.0"
+          }
+        },
+        "required": [
+          "format_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "processed_outputs"
+        ]
+      }
+    }
+  ]
+}

@@ -247,6 +247,91 @@ are separate, none of them a placeholder:
   Endpoint Explorer over the app's own generated OpenAPI document. Every tab is
   informational — this build has no user-adjustable settings.
 
+## Local Imports (local-only, `DEC-94`)
+
+A destination for **import bundles on your own computer** (`isaac import … --out <folder>/<name>`):
+an import-progress overview of every bundle in one folder, and each bundle's consolidated
+questions (`isaac bundle questions`), answered in the browser with the same code as
+`isaac bundle decide --question`. It never exists on a hosted deployment.
+
+```bash
+# Backend: name the folder that HOLDS the bundle folders (each one has a bundle.json)
+ISAAC_LOCAL_BUNDLES_DIR=~/isaac-bundles \
+  .venv/bin/uvicorn isaac_api.app:app --app-dir apps/api --host 127.0.0.1 --port 8000
+
+# Frontend: a local build with the flag, so the nav item may ask the server
+cd apps/web
+VITE_ISAAC_LOCAL_IMPORTS=1 npm run dev
+```
+
+Open `http://localhost:5173/local-imports`. What holds, and what each half refuses:
+
+- **Unset (every hosted deployment): no route is registered** — `/api/local-bundles*` is the ordinary
+  404 and the OpenAPI document does not list it; the nav item is absent. The server refuses to boot
+  with the variable beside `ISAAC_BASE_PATH`, or naming no directory.
+- **Only this computer may ask, by its own name, from ISAAC's own pages.** Every `/api/local-bundles*`
+  request is refused before anything is read unless the client address is loopback (403), the `Host`
+  is `localhost`, `127.0.0.1` or `[::1]` with this server's port (421 — a DNS-rebinding page names its
+  own host), any `Origin` is on the local bundles' OWN allowlist or is this server's own loopback
+  origin (403), and the request carries `X-ISAAC-Local: 1` (403). A custom header cannot be sent
+  cross-origin without a preflight the API grants only to its allowlist, so a page elsewhere — an
+  `<img>`, a form — can neither read the questions nor make the server record exposures.
+- **The local bundles' origin allowlist is not the app's CORS list.** It is
+  `ISAAC_LOCAL_BUNDLES_ORIGINS` (comma-separated; default `http://localhost:5173,http://127.0.0.1:5173`,
+  the ISAAC web dev server). Only loopback origins (`http(s)://localhost|127.0.0.1|[::1]:<port>`) are
+  honoured: any other entry is ignored and the server prints a `WARNING` at start-up. An origin in
+  `ISAAC_UI_CORS_ORIGINS` (added, say, for a hosted tool) may NOT use local bundles unless it is also
+  in this list, and start-up says so. A local origin must ALSO be in `ISAAC_UI_CORS_ORIGINS`, or the
+  browser's preflight fails (start-up warns about that too).
+- **Residual risk: an origin is a port, not an application.** Any page served from an allowed origin
+  — `http://localhost:5173` is Vite's default port, so ANOTHER Vite project you run there while this
+  server is up — is, to the browser and to this server, the ISAAC web app: it can read every bundle's
+  questions (recording exposures) and record answers by any typed name. Nothing at the Origin level
+  can tell the two apart, and no secret helps unless it reaches ISAAC's page by a route the other
+  page cannot take (a token printed at server start and pasted into the page, or injected by ISAAC's
+  own Vite build): an endpoint handing it out would hand it to the same-origin impostor too. That is
+  not built (it needs a web change). Until it is: don't run another dev server on the allowed ports
+  while `ISAAC_LOCAL_BUNDLES_DIR` is set, or set `ISAAC_LOCAL_BUNDLES_ORIGINS` to a port only ISAAC
+  uses (and start ISAAC's Vite there with `--strictPort`, also adding it to `ISAAC_UI_CORS_ORIGINS`).
+  The server prints this as a `NOTE` at start-up. Processes on this computer running as you are
+  outside this protection entirely (they can read the bundle folder directly).
+- **A bundle whose lock cannot be taken is refused, not a server error.** A `.bundle.lock` that is a
+  symlink, or a bundle in a read-only folder (the lock cannot be created), is listed as `INVALID`
+  with `not_accessible: true`; its other routes answer 409 `bundle_not_accessible`. No response body
+  names an absolute path: refusals name the bundle by its folder name.
+- **The server refuses to boot when told to listen beyond loopback** (`--host 0.0.0.0`, `--host=::`,
+  `UVICORN_HOST`), as the hosted image does. A server started another way (another ASGI server,
+  `uvicorn.run(host=…)` in code) is not detected at boot; the per-request loopback check above still
+  refuses every other computer. Start it with `--host 127.0.0.1` (uvicorn's default).
+- **Only bundle folders directly inside that folder** are served; a name with `..`, a leading dot or a
+  symlink that resolves outside is "no such bundle". Only what the bundle holds is shown (its quotes
+  and locators, and `validation/<group>.json` from the last `isaac bundle validate`); no source file
+  is opened.
+- **An answer** is a local, unverified statement by the name you type, written into `bundle.json` on
+  this computer. It names the bundle version the page read; if a command changed the bundle since,
+  nothing is written and the questions are read again. "Same for all groups" lists the exact targets
+  before it writes, and flags every group whose OWN files (or the AI readings made for it) suggest a
+  different value, with that suggestion and its file. Where the groups' own suggestions differ, no scope
+  is pre-chosen: answer group by group in the table (each row shows its own suggestion and quote), or
+  choose "same for all" explicitly. Nothing is uploaded and no portal is called.
+- **Reading the questions records exposures** in the bundle (as `isaac bundle questions` does), so a
+  later blind cross-check knows which parser values were shown.
+- **An answered question can be changed on the page**, as `isaac bundle decide --question` changes it.
+  "Show answered questions" (below the open ones, paged, read only when asked for) lists every question
+  each of whose values has an answer — `bundle show question`'s `status: answered` — with its current
+  answers in words (the value, or element and edge; who; when; for how many values or groups). Showing
+  them records exactly the exposures `bundle show question` records. "Change answer" opens the same
+  controls as an open question and always previews first: a later answer replaces the earlier one, the
+  same answer again says nothing new would be written (and offers no write), and a whole re-answer of
+  the absorber question names the groups answered on their own that it leaves as they are. A question
+  answered only "I don't know" stays among the open ones.
+
+The six operations are `GET /api/local-bundles`, `GET …/{bundle}/progress`, `GET …/{bundle}/questions`,
+`GET …/{bundle}/questions/answered`, `POST …/{bundle}/questions/{question_id}/answer` (an open or an
+answered question), and `POST …/{bundle}/decisions` for the merge,
+keep-apart and Athena-version decisions; with the variable set the OpenAPI document lists them under
+*Local Import Bundles*. Contract: `docs/local-import-bundle-contract.md` §23.
+
 ## Project Memory (Phase 24)
 
 The **Project Memory** nav destination (`/memory`) is a real, read-only

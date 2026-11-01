@@ -104,20 +104,24 @@ sit in a ZIP's central directory.
 from __future__ import annotations
 
 import codecs
+import atexit
 import copy
 import hashlib
 import os
 import re
 import stat
+import threading
 import zipfile
 import zlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Iterator
 
 from .inventory import (
     REFUSAL_ABSOLUTE_PATH,
     REFUSAL_COMPRESSION_RATIO,
+    REFUSAL_DUPLICATE_PATH,
+    REFUSAL_NESTED_ARCHIVE,
     REFUSAL_OS_METADATA,
     REFUSAL_PATH_TOO_LONG,
     REFUSAL_PATH_TRAVERSAL,
@@ -136,15 +140,25 @@ from .inventory import (
 __all__ = [
     "ARCHIVE_WALKER_ID",
     "DecodedSource",
+    "NESTED_SEPARATOR",
+    "NESTED_ZIP_READER_ID",
+    "NestedWalk",
+    "NestedZip",
+    "close_nested_cache",
     "common_root_prefix",
     "decode_source_bytes",
+    "expand_nested_zips",
     "inventory_folder",
     "is_os_metadata",
     "inventory_zip",
+    "iter_zip_member_bytes",
+    "nested_archive_path",
     "read_source_decoded",
     "read_source_head",
     "read_source_text",
     "resolve_within",
+    "split_nested_path",
+    "walk_nested_zip",
 ]
 
 #: Recorded so a caller that wants to say WHICH walk produced an inventory has
@@ -1113,6 +1127,7 @@ def inventory_zip(
     root_label: str,
     limits: ArchiveLimits = ArchiveLimits(),
     strip_common_root: bool = True,
+    refuse_duplicates: bool = False,
 ) -> ArchiveInventory:
     """Inventory a ZIP **without extracting it**.
 
@@ -1127,6 +1142,13 @@ def inventory_zip(
     because a "compress this folder" ZIP is the shape a scientist actually hands
     over, and off it the same corpus read two ways produces two different path
     sets.
+
+    ``refuse_duplicates`` (OPT-IN; the hosted path leaves it off and is unchanged): when two
+    members share one archive path once their names are normalised, NONE of them is
+    inventoried and each is refused with :data:`~.inventory.REFUSAL_DUPLICATE_PATH`. The
+    default keeps every copy, as it always has; the local import turns this on because two
+    entries with one path make a bundle that cannot validate and a read that cannot say
+    which member it read.
     """
     zip_path = Path(zip_path)
     try:
@@ -1160,6 +1182,22 @@ def inventory_zip(
                     },
                 ),
             )
+        if refuse_duplicates:
+            counts: dict[str, int] = {}
+            for c in candidates:
+                counts[c.archive_path] = counts.get(c.archive_path, 0) + 1
+            for c in candidates:
+                if counts[c.archive_path] > 1:
+                    refused.append(
+                        {
+                            "archive_path": c.archive_path,
+                            "reason": REFUSAL_DUPLICATE_PATH,
+                            "detail": f"{counts[c.archive_path]} members of this archive have "
+                            "this path once their names are normalised; which one is meant "
+                            "cannot be told, so none of them was read",
+                        }
+                    )
+            candidates = [c for c in candidates if counts[c.archive_path] == 1]
         return _inventory_from_candidates(
             root_label=root_label,
             candidates=candidates,
@@ -1168,6 +1206,342 @@ def inventory_zip(
             limits=limits,
             zf=zf,
         )
+    finally:
+        zf.close()
+
+
+# --- a ZIP found inside a folder: walked ONE level deep ----------------------
+#
+# Added 2026-10-28 (local import). A beamtime folder often holds ``Electrode2.zip`` beside
+# the scientist's own project files. Left alone that ZIP is one opaque, unread file; opened,
+# its members are ordinary sources. THE WALK IS NOT RE-IMPLEMENTED HERE: every member goes
+# through :func:`inventory_zip` and so through exactly the guards a top-level ZIP import
+# already has — traversal and absolute-path refusal, symlink refusal, the per-entry size and
+# compression-ratio ceilings (declared AND measured), the entry-count and total-byte
+# ceilings, CRC and length checks, and nothing extracted to disk by THIS module. Only three
+# things are new, and each is a bound rather than a feature:
+#
+# * the name of a member is ``<archive path>!/<member path>`` (``NESTED_SEPARATOR``); that
+#   string is the member's ``archive_path`` everywhere downstream and is relative, never
+#   absolute, and never contains a ``..`` segment (a hostile member name is refused before
+#   it can be joined);
+# * the member budget is SHARED with the folder: a folder of a hundred ZIPs cannot buy a
+#   hundred times the entry or byte ceiling;
+# * nesting is ONE level. A ZIP among a nested ZIP's members is refused with
+#   :data:`~.inventory.REFUSAL_NESTED_ARCHIVE` and never opened, so there is no recursion
+#   and so no recursive bomb.
+
+#: Separates a ZIP found in a folder from one of its members in an ``archive_path``.
+NESTED_SEPARATOR = "!/"
+
+#: The reader id stamped on a container ZIP whose members were walked (``_vN`` is its
+#: version, by the same rule as every other reader id).
+NESTED_ZIP_READER_ID = "nested_zip_walk_v1"
+
+# The SHORTEST prefix ending in ``.zip!/`` — a directory legitimately called ``Hello!`` is
+# not a separator, only ``<something>.zip!/`` is.
+_NESTED_PATH = re.compile(r"^(?P<zip>.+?\.zip)!/(?P<member>.+)$", re.IGNORECASE)
+
+
+def split_nested_path(archive_path: str) -> tuple[str, str] | None:
+    """``(zip path, member path)`` for a nested ``archive_path``, else ``None``."""
+    match = _NESTED_PATH.match(str(archive_path))
+    return (match.group("zip"), match.group("member")) if match else None
+
+
+def nested_archive_path(zip_path: str, member_path: str) -> str:
+    """The ``archive_path`` of ``member_path`` inside the ZIP at ``zip_path``."""
+    return f"{zip_path}{NESTED_SEPARATOR}{member_path}"
+
+
+@dataclass(frozen=True)
+class NestedZip:
+    """What became of ONE ZIP found in a folder: the reading row of the container."""
+
+    #: The container's own archive path (``.../Electrode2.zip``).
+    archive_path: str
+    #: ``True`` when the ZIP opened and its members were walked (even if some were refused).
+    walked: bool
+    member_count: int = 0
+    refused_count: int = 0
+    #: For a ZIP that did not open: the walk's own sentence. ``""`` otherwise.
+    detail: str = ""
+
+
+@dataclass(frozen=True)
+class NestedWalk:
+    """:func:`walk_nested_zip`'s result: the container's members, nested-named."""
+
+    container: NestedZip
+    entries: tuple[SourceRecord, ...] = ()
+    refused: tuple[dict, ...] = ()
+    truncated_reason: str | None = None
+
+
+def walk_nested_zip(
+    zip_path: Path,
+    *,
+    container: str,
+    container_depth: int,
+    limits: ArchiveLimits = ArchiveLimits(),
+    taken: Iterable[str] = (),
+) -> NestedWalk:
+    """Walk ONE ZIP found in a folder, returning its members under nested names.
+
+    ``limits`` is whatever budget the caller has LEFT, so a folder of many ZIPs is bounded
+    as a whole (see :func:`expand_nested_zips`). Never raises: a ZIP that will not open is a
+    :class:`NestedZip` with ``walked=False`` and the walk's sentence in ``detail``.
+
+    ``taken`` is the set of archive paths the folder already holds (a real folder can contain
+    a file literally named ``Box.zip!/m.txt``): a member whose nested path is in it is refused
+    with :data:`~.inventory.REFUSAL_DUPLICATE_PATH`, the real file winning. Members that collide
+    with one another are refused too (``inventory_zip(refuse_duplicates=True)``).
+    """
+    taken = set(taken)
+    inner = inventory_zip(
+        zip_path,
+        root_label=container,
+        limits=limits,
+        strip_common_root=False,
+        refuse_duplicates=True,
+    )
+    top_level = [r for r in inner.refused if not r.get("archive_path")]
+    if not inner.entries and top_level and not inner.truncated_reason:
+        # The archive itself would not open (or its directory was unreadable).
+        return NestedWalk(
+            container=NestedZip(
+                container, False, detail=str(top_level[0].get("detail") or "")
+            )
+        )
+
+    entries: list[SourceRecord] = []
+    refused: list[dict] = []
+    for row in inner.refused:
+        member = str(row.get("archive_path") or "")
+        refused.append(
+            {
+                **row,
+                # A row about the whole inner archive ("" — e.g. its entry ceiling) names
+                # the container's own namespace; every other row names its member.
+                "archive_path": nested_archive_path(container, member),
+            }
+        )
+    for entry in inner.entries:
+        nested_path = nested_archive_path(container, entry.archive_path)
+        if nested_path in taken:
+            refused.append(
+                {
+                    "archive_path": nested_path,
+                    "reason": REFUSAL_DUPLICATE_PATH,
+                    "detail": "a real file in the folder already has this path, so the "
+                    "ZIP member was not read",
+                }
+            )
+            continue
+        if entry.extension == "zip":
+            refused.append(
+                {
+                    "archive_path": nested_path,
+                    "reason": REFUSAL_NESTED_ARCHIVE,
+                    "detail": "a ZIP inside a ZIP inside a folder: nested archives are "
+                    "walked one level deep, so this one was listed and not opened",
+                }
+            )
+            continue
+        depth = container_depth + 1 + entry.depth
+        if len(nested_path) > limits.max_path_chars:
+            refused.append(
+                {
+                    "archive_path": nested_path[:253] + "...",
+                    "reason": REFUSAL_PATH_TOO_LONG,
+                    "detail": f"path is {len(nested_path)} characters; "
+                    f"the ceiling is {limits.max_path_chars}",
+                }
+            )
+            continue
+        if depth > limits.max_depth:
+            refused.append(
+                {
+                    "archive_path": nested_path,
+                    "reason": REFUSAL_TOO_DEEP,
+                    "detail": f"path is {depth} level(s) below the archive root; "
+                    f"the ceiling is {limits.max_depth}",
+                }
+            )
+            continue
+        parent = entry.parent_dir
+        entries.append(
+            SourceRecord(
+                archive_path=nested_path,
+                basename=entry.basename,
+                extension=entry.extension,
+                size_bytes=entry.size_bytes,
+                content_sha256=entry.content_sha256,
+                parent_dir=f"{container}!/{parent}" if parent else f"{container}!",
+                depth=depth,
+            )
+        )
+    return NestedWalk(
+        container=NestedZip(
+            container,
+            True,
+            member_count=len(entries),
+            refused_count=len(refused),
+        ),
+        entries=tuple(entries),
+        refused=tuple(refused),
+        truncated_reason=inner.truncated_reason,
+    )
+
+
+def expand_nested_zips(
+    inventory: ArchiveInventory,
+    root: Path,
+    *,
+    limits: ArchiveLimits = ArchiveLimits(),
+) -> tuple[ArchiveInventory, dict[str, NestedZip]]:
+    """``inventory`` plus the members of every ZIP in it, and one row per ZIP.
+
+    ``root`` must be the FOLDER ``inventory`` was walked from. Each ``.zip`` entry stays in
+    the inventory (it is a file the scientist has, with a digest) and its members are
+    added beside it under ``<zip>!/<member>``. The result is sorted and its duplicate
+    groups recomputed over the whole set, so the same bytes in a loose file and in a ZIP are
+    one group, not two witnesses.
+
+    The returned dict is ``zip archive path -> NestedZip``: the container's reading row (did
+    it open, how many members, how many refused). A truncation is carried on the result's
+    ``truncated_reason`` exactly as for a plain walk.
+    """
+    root = Path(root)
+    entries = list(inventory.entries)
+    refused = list(inventory.refused)
+    added: list[SourceRecord] = []
+    containers: dict[str, NestedZip] = {}
+    total = inventory.total_bytes
+    truncated = inventory.truncated_reason
+
+    for entry in inventory.entries:
+        if entry.extension != "zip":
+            continue
+        try:
+            target = resolve_within(root, entry.archive_path)
+            if target.is_symlink() or not target.is_file():
+                raise ValueError("not a regular file")
+        except (ValueError, OSError):
+            containers[entry.archive_path] = NestedZip(
+                entry.archive_path, False, detail="the ZIP could not be located again"
+            )
+            continue
+        budget = replace(
+            limits,
+            max_entries=max(limits.max_entries - len(entries) - len(added), 0),
+            max_total_bytes=max(limits.max_total_bytes - total, 0),
+        )
+        walk = walk_nested_zip(
+            target,
+            container=entry.archive_path,
+            container_depth=entry.depth,
+            limits=budget,
+            taken={e.archive_path for e in entries},
+        )
+        containers[entry.archive_path] = walk.container
+        refused.extend(walk.refused)
+        added.extend(walk.entries)
+        total += sum(e.size_bytes for e in walk.entries)
+        truncated = truncated or walk.truncated_reason
+
+    everything = sorted(entries + added, key=lambda e: e.archive_path)
+    refused.sort(key=lambda r: (r["archive_path"], r["reason"], r["detail"]))
+    return (
+        ArchiveInventory(
+            root_label=inventory.root_label,
+            entries=tuple(everything),
+            refused=tuple(refused),
+            total_bytes=total,
+            truncated_reason=truncated,
+            duplicate_groups=_duplicate_groups(everything),
+        ),
+        containers,
+    )
+
+
+#: Open ZIPs kept for the reads of ONE import, so that reading the 3,000th member of a nested
+#: ZIP does not re-parse the central directory and re-scan the member list 3,000 times.
+#: ``(path, size, mtime_ns) -> (ZipFile, {normalised member name: ZipInfo})``. Bounded to a few
+#: archives and closed by :func:`close_nested_cache` (the local import calls it when its reading
+#: ends; it is also registered with ``atexit``). A changed file has a new key.
+_NESTED_CACHE: dict[tuple[str, int, int], tuple[zipfile.ZipFile, dict[str, zipfile.ZipInfo]]] = {}
+_NESTED_CACHE_MAX = 4
+_NESTED_CACHE_LOCK = threading.RLock()
+
+
+def close_nested_cache() -> None:
+    """Close every ZIP the nested-member reads kept open."""
+    with _NESTED_CACHE_LOCK:
+        for zf, _index in _NESTED_CACHE.values():
+            try:
+                zf.close()
+            except Exception:  # noqa: BLE001 - closing must never raise out of a cleanup
+                pass
+        _NESTED_CACHE.clear()
+
+
+atexit.register(close_nested_cache)
+
+
+def _cached_zip(zip_target: Path, limits: ArchiveLimits):
+    """``(ZipFile, name -> ZipInfo)`` for ``zip_target``, opened and indexed once."""
+    stat_result = zip_target.stat()
+    key = (str(zip_target), stat_result.st_size, stat_result.st_mtime_ns)
+    with _NESTED_CACHE_LOCK:
+        hit = _NESTED_CACHE.get(key)
+        if hit is not None:
+            return hit
+        zf = zipfile.ZipFile(zip_target, "r")
+        index: dict[str, zipfile.ZipInfo] = {}
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            name = _normalise_member_name(info.filename, limits).archive_path
+            if name is not None and name not in index:
+                index[name] = info
+        while len(_NESTED_CACHE) >= _NESTED_CACHE_MAX:
+            oldest = next(iter(_NESTED_CACHE))
+            _NESTED_CACHE.pop(oldest)[0].close()
+        _NESTED_CACHE[key] = (zf, index)
+        return _NESTED_CACHE[key]
+
+
+def iter_zip_member_bytes(
+    zip_path: Path,
+    member_paths: Iterable[str],
+    limits: ArchiveLimits = ArchiveLimits(),
+) -> Iterator[tuple[str, bytes | None]]:
+    """``(member path, bytes or None)`` for each wanted member, the ZIP opened once.
+
+    Reads through :func:`_read_zip_member` — the same three bounds as every other member
+    read. ``None`` is a member that is missing or that failed a bound; the caller has
+    already been told why by :func:`walk_nested_zip`.
+    """
+    wanted = list(member_paths)
+    try:
+        zf = zipfile.ZipFile(zip_path, "r")
+    except _ZIP_ERRORS:
+        for name in wanted:
+            yield name, None
+        return
+    try:
+        by_name: dict[str, zipfile.ZipInfo] = {}
+        want = set(wanted)
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            name = _normalise_member_name(info.filename, limits).archive_path
+            if name in want and name not in by_name:
+                by_name[name] = info
+        for name in wanted:
+            info = by_name.get(name)
+            yield name, (_read_zip_member(zf, info, limits).data if info else None)
     finally:
         zf.close()
 
@@ -1206,7 +1580,49 @@ def read_source_decoded(
     want = limits.head_bytes if head_only else None
     data: bytes
 
-    if source_root.is_dir():
+    nested = split_nested_path(archive_path) if source_root.is_dir() else None
+    if nested is not None:
+        # A member of a ZIP found inside the folder (``<zip>!/<member>``). A real file (or a
+        # symlink) that happens to have that spelling takes the ordinary route, so an odd
+        # directory name is never shadowed and a symlink is still reported as one.
+        try:
+            lexical = source_root / archive_path
+            if lexical.is_symlink() or lexical.is_file():
+                nested = None
+        except OSError:
+            pass
+
+    if nested is not None:
+        zip_part, member_part = nested
+        try:
+            if (source_root / zip_part).is_symlink():
+                return None, REFUSAL_SYMLINK
+            zip_target = resolve_within(source_root, zip_part)
+            if zip_target.is_symlink() or not zip_target.is_file():
+                return None, REFUSAL_UNREADABLE
+        except ValueError:
+            return None, REFUSAL_PATH_TRAVERSAL
+        # THE READ HAPPENS UNDER THE CACHE LOCK: another thread's lookup may evict and close
+        # this ZipFile, so the handle is only used while no eviction can run.
+        with _NESTED_CACHE_LOCK:
+            try:
+                zf, index = _cached_zip(zip_target, limits)
+            except _ZIP_ERRORS:
+                return None, REFUSAL_UNREADABLE
+            info = index.get(member_part)
+            if info is None:
+                return None, REFUSAL_UNREADABLE
+            if head_only:
+                head = _read_zip_head(zf, info, limits)
+                if head is None:
+                    return None, REFUSAL_UNREADABLE
+                data = head
+            else:
+                read = _read_zip_member(zf, info, limits)
+                if read.data is None:
+                    return None, read.reason or REFUSAL_UNREADABLE
+                data = read.data
+    elif source_root.is_dir():
         # **THE SYMLINK TEST COMES FIRST, AND THE ORDER IS THE POINT.** A symlink
         # planted after the walk usually points OUTSIDE the root, so
         # `resolve_within` would also catch it — but it would report
