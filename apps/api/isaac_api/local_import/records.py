@@ -1131,6 +1131,7 @@ def _potential_sources_warnings(bundle: Mapping, group: Mapping, member_ids: set
                         repr(h["literal"]) + (f" at {h['locator']} of {h['relative_path']}" if h.get("relative_path") else "")
                         for h in heads)), "carried_V": carried, "carried_scale": scale,
                     "mentions": _mention_lines(lines, not_name, not_carried),
+                    "headers_disagree": bool(name_v and head_v and not name_v & head_v),
                     "same_scale": name_scales == head_scales and None not in name_scales,
                     "name_scale": Q.written_scales(name_scales), "header_scale": Q.written_scales(head_scales),
                     "no_header_reading": not held, "command": command})
@@ -1227,7 +1228,7 @@ def potential_sources_text(w: Mapping) -> str:
     else:
         differ = f"write different numbers ({sources}; file name: {w['name_scale']}; scan header: {w['header_scale']})"
     head = f"the file name and the scan header of {w['run_id']} {differ}, and the record carries {said}"
-    if w.get("mentions") and not w.get("headers"):
+    if any(h["differ_name"] or h["differ_carried"] for h in w.get("mentions") or ()) and not w.get("headers_disagree"):
         # r3a H2: a header line read with NO value, said plainly by what it writes, beside the file name's and the
         # record's; never "state a potential" (that reads as agreement)
         lines = w["mentions"]
@@ -1247,8 +1248,10 @@ def potential_sources_text(w: Mapping) -> str:
                    f"scan header: {w['header_scale']}") + "). No value is read from that header line (not written in "
                 "a plain form)")
         if w.get("targets") and not w.get("no_header_reading"):
-            return (f"{head}; no one has ruled on it yet: give the potential the run was held at (--decision correct "
-                    f"--value <volts> --json): {w['command']}")
+            return (f"{head}; no one has ruled on it yet: "
+                    + ("give the potential the run was held at (--decision correct --value <volts> --json): "
+                       if "--decision correct" in w["command"] else "confirm the header's reading or correct it: ")
+                    + w["command"])
     if w.get("targets") and not w.get("no_header_reading"):
         return (f"{head}; no one has ruled on the scan header's reading yet: confirm it if the header is right, or "
                 "correct it (--decision correct --value <volts> --json) to the potential the run was held at: "

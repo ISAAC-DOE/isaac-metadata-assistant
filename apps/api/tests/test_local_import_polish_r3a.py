@@ -379,3 +379,19 @@ def test_several_counter_positions_are_each_asked_on_their_own():
     assert "3rd / last" not in text and "Each is asked on its own: the 3rd token; the last token" in text
     assert "--positions 3,last for both, or one of them" in text
     assert "is the 1st token of the file names a run counter?" in G.counter_question({1: 1}, None)["text"]
+
+
+# --- H2 (follow-up): a mention that differs is said as a mention beside a header reading that agrees --------------
+
+
+def test_a_differing_mention_beside_an_agreeing_reading_is_said_by_what_it_writes(tmp_path):
+    src = tmp_path / "SYN_bt43"
+    label = "01_SYNti_m600mV_096"
+    make_scan(src / f"{label}_A.001", free_text=("-0.6 V vs RHE", "Sample A in 1M KOH 0Vrhe"))
+    out = _import(src, tmp_path / "bundle")
+    b = M.load(out)
+    rid = _rid(b, label)
+    [w] = R._potential_sources_warnings(b, _group(b, rid), {rid}, CARRIED)
+    assert f"the scan header of {rid} writes '0Vrhe' (its line 'Sample A in 1M KOH 0Vrhe' at line:10" in w["text"]
+    assert "'0Vrhe' differs from the file name's and the record's" in w["text"]
+    assert "write different numbers (file name" not in w["text"]
