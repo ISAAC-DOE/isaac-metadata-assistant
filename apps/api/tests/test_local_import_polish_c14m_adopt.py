@@ -331,7 +331,7 @@ def test_a_whole_beamtime_ruling_is_recorded_for_every_run_or_none(grouped, tmp_
     code, text, err = _import_text(grouped, tmp_path / "Ar.xlsx", capsys, "--apply", "--supersede")
     assert code == 0, err
     summary = next(x for x in text.splitlines() if x.startswith("Summary:"))
-    assert "; 1 ruling cell(s) not tied to your sheet (nothing recorded)" in summary
+    assert "; 1 cell(s) not tied to your sheet (nothing recorded)" in summary
     assert {tid: len(_decisions_on(grouped, tid)) for tid in tids} == n
 
 

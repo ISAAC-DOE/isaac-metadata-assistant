@@ -1900,8 +1900,8 @@ adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
   governs only when it was made against it (a decision of that run was among those its row read, or nothing was
   recorded on the target since the adopt); otherwise it is listed in `stale_rulings` ("… this ruling was made against
   an earlier value, so nothing is recorded for it, even with --supersede …"), so two workbooks ruling different values
-  never flip the value at each import. The report lists them under "Rulings not tied to your sheet" and the summary
-  says "N ruling cell(s) not tied to your sheet (nothing recorded)"; each reason says why. A damaged
+  never flip the value at each import. The report lists them under "Cells not tied to your sheet" and the summary
+  says "N cell(s) not tied to your sheet (nothing recorded)" (rulings and adopted cells alike); each reason says why. A damaged
   `governing_decisions` list (any element that is not a decision id) is never tied. A ruling takes its target from a
   File List cell giving the same value.
   (c14m) **The rule.** A ruling is made against the value recorded now when one of the same-value run that governs
@@ -1939,7 +1939,11 @@ adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
   value their last one recorded. (c14p) A target that already holds the ruling's value never holds back the rest (it
   is listed: "the value is already X; adopt again to settle this row"); a cell held back with another target's clash
   is listed with `blocked_by` naming it, and the summary counts those apart from the clashes. An adopted cell, never
-  a ruling, is "this cell", and is settled by adopting again then importing with `--supersede`. The rule is
+  a ruling, is "this cell", and is settled by adopting again then importing with `--supersede`; a target of one that
+  already holds its value is listed with just "the value is already X" (no "adopt again to settle this row", which is
+  a ruling's). (c15a) A clash that `--supersede` would record is said so only when every clash of its cell is one: when
+  another target is unseen or split, the line says `--supersede` records none of the cell's targets, and why. A target
+  that already holds the value is not counted as held back in the summary. The rule is
   asymmetric on purpose: an adopted Campaign Info cell is all or nothing, while the same cell typed into a template
   that was never adopted is not gated and records target by target, as before.
   Settled, it says "already recorded: <value> (<date>); leave blank to keep" (the adopt result's `already_recorded`,

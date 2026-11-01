@@ -236,7 +236,7 @@ def test_a_reject_or_defer_before_the_adopt_never_stops_a_tie(grouped, tmp_path,
     code, text, err = _import_text(grouped, tmp_path / "Ar.xlsx", capsys, "--apply")
     assert code == 0, err
     assert f"{before['decision_id']} {decision}ed the value since" not in text
-    assert "Rulings not tied to your sheet" not in text
+    assert "Cells not tied to your sheet" not in text
     assert "'Disagreements'!H" in text and f"(was {after['decision_id']})" in text  # tied
     assert _state(grouped, s, tmp_path / "re.xlsx", capsys)[1] == "settled"  # no extra round
     assert len(_decisions_on(grouped, tid)) == 3
@@ -285,7 +285,7 @@ def test_an_off_list_value_before_the_adopt_never_stops_a_tie(grouped, tmp_path,
     M.decide(grouped, target_ids=targets, decision="correct", value="in_situ", by=OTHER, orcid=None)
     code, text, err = _import_text(grouped, tmp_path / "Ar.xlsx", capsys, "--apply")
     assert code == 0, err
-    assert "a different value was recorded since" not in text and "Rulings not tied to your sheet" not in text
+    assert "a different value was recorded since" not in text and "Cells not tied to your sheet" not in text
     code, rep, err = _import(grouped, tmp_path / "Ar.xlsx", capsys)
     assert code == 0, err
     assert not rep["stale_rulings"] and not rep["rulings_tied_to_sheet"] and rep["would_record"] == 0
@@ -350,13 +350,13 @@ def test_the_stale_section_and_summary_are_neutral(grouped, tmp_path, capsys, ti
     code, text, err = _import_text(grouped, tmp_path / "Br.xlsx", capsys, "--apply", "--supersede")
     assert code == 0, err
     lines = text.splitlines()
-    head = lines.index("Rulings not tied to your sheet (nothing is recorded for them and the value recorded now is kept; "
+    head = lines.index("Cells not tied to your sheet (nothing is recorded for them and the value recorded now is kept; "
                        "each line says why):")
     assert lines[head + 1].startswith("  'Disagreements'!H") and " run-007 pH = 12: ruled on a workbook adopted before " in (
         lines[head + 1])
     assert "even with --supersede" in lines[head + 1]
     summary = next(x for x in lines if x.startswith("Summary:"))
-    assert "; 1 ruling cell(s) not tied to your sheet (nothing recorded)" in summary
+    assert "; 1 cell(s) not tied to your sheet (nothing recorded)" in summary
     assert "adopted before the value recorded now" not in text
 
 
