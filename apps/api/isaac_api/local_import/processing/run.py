@@ -51,7 +51,7 @@ from . import _deps
 from . import athena as A
 from . import core as C
 from . import protocol as P
-from .channels import MODE_TRANSMISSION, ChannelChoice, choose_channels, dead_candidates
+from .channels import MODE_TRANSMISSION, ChannelChoice, choose_channels, dead_candidates, needs_review_statement
 from . import reference as REF
 from .edges import edge_energy
 from .readers import read_scan_file
@@ -1893,6 +1893,9 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     few_said = _few_scan_glitch_statement(len(scans_data), dg["flagged_points_total"], params)
     if few_said:
         res["qc"].setdefault("statements", {})["glitch_check_few_scans"] = few_said
+    # r4-a L6: a channel chosen by column-name priority (no selection ISAAC can check) is said, not only flagged
+    if "channel_choice_needs_review" in choice.flags:
+        res["qc"].setdefault("statements", {})["channel_choice_needs_review"] = needs_review_statement(choice)
     # r2-a: flagged points at E0 or where the merged curve is steep are on the edge, not glitches: listed apart,
     # counted and said (after run_id: qc.json is hashed, so no id moves; the stored count, flag and verdict stay)
     clean = C.merge(M, dg["point_flags"], None, np)["mean"]  # review: steepness read without the flagged points
@@ -2484,7 +2487,7 @@ def process_bundle(
         if fixed_said["statement"]:
             payload["summary"]["lines"].append(fixed_said["statement"])
         # r1-a M5: a stored result that stays as it was (decided, or not processed now) is said apart, by its own id
-        payload["summary"]["lines"].extend(k["statement"] for k in fixed_said["kept_results"])
+        payload["summary"]["lines"].extend(kept_fixed_e0_lines(fixed_said["kept_results"], wanted))
     stored_by_id = {B.processing_id(r): r for r in bundle.get("processing_results") or ()}
     for r in results:
         for x in r.get("athena_version_replaces_approved") or ():
@@ -2753,7 +2756,7 @@ def possibly_fixed_athena_e0(results: list[dict], bundle: Mapping, groups: Seque
                 what = "approved result" if state == B.STATE_SCIENTIST_CONFIRMED else f"stored result ({state})"
                 line = (f"Athena: {what} {pid} carries a possibly fixed Athena E0 ({value:.{FIXED_E0_DECIMALS}f} eV, "
                         f"{why}); ask the scientist whether it was measured.")
-                kept.append({"result_id": pid, "state": state, "statement": line})
+                kept.append({"result_id": pid, "group_id": gid, "state": state, "statement": line})
                 notes.append({"result_id": pid, "rule_id": FIXED_E0_RULE_ID, "add_review_flags": [FIXED_E0_FLAG],
                               "statements": {FIXED_E0_FLAG: (f"{said}. This result was kept as it was decided "
                                                              f"({state}): ask the scientist whether this E0 was measured "
@@ -2781,6 +2784,23 @@ def possibly_fixed_athena_e0(results: list[dict], bundle: Mapping, groups: Seque
                 f"{FIXED_E0_FLAG}); ask the scientist before approving them.")
     return {"rule_id": FIXED_E0_RULE_ID, "results": flagged, "kept_results": kept, "kept_result_notes": notes,
             "statement": line}
+
+
+def kept_fixed_e0_lines(kept: Sequence[Mapping], wanted: set | None) -> list[str]:
+    """The summary lines for STORED results flagged by :func:`possibly_fixed_athena_e0` (``kept_results``): each by
+    its own id; r4-a L1: with ``--group`` (``wanted``), only the named groups' by id and the other groups' in one count
+    line (a real beamtime printed 67 such lines, about other groups, for one named group)."""
+    if wanted is None:
+        return [k["statement"] for k in kept]
+    rest = [k for k in kept if k.get("group_id") not in wanted]
+    lines = [k["statement"] for k in kept if k.get("group_id") in wanted]
+    if rest:
+        groups = len({k.get("group_id") for k in rest})
+        lines.append(f"Athena: {len(rest)} more stored result{'' if len(rest) == 1 else 's'} of {groups} "
+                     f"group{'' if groups == 1 else 's'} not processed now carr{'ies' if len(rest) == 1 else 'y'} a "
+                     f"possibly fixed Athena E0 (flag {FIXED_E0_FLAG}); `isaac bundle list <bundle_dir> processing-results` "
+                     "lists them. Ask the scientist whether each E0 was measured before approving one.")
+    return lines
 
 
 def apply_kept_result_notes(results: Sequence[dict], notes: Sequence[Mapping]) -> int:

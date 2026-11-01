@@ -489,3 +489,58 @@ def test_the_outlier_and_single_scan_statements_say_how_to_leave_the_scan_out(tm
     pf.write_text(hint)
     fixed = T.isaac(T.run_process(bdir_, source_root=root, params_file=pf, group_ids=[r["group_id"]]))
     assert "edge_from_single_scan" not in fixed["qc"]["reasons"] and fixed["qc"]["metrics"]["scans_used"] == 4
+
+
+# --- L1: `process --group` says other groups' stored fixed-E0 results as one count ---------------------------------
+
+
+def test_with_named_groups_only_their_stored_fixed_e0_results_are_listed():
+    from isaac_api.local_import.processing import run as RUN
+    from test_local_import_polish_r1ar import _groups, _pair
+
+    stored = [r for g, e in (("g7", 2474.0), ("g8", 2475.0), ("g9", 2476.0)) for r in _pair(g, 2472.0, e)]
+    bundle = {"processing_results": stored,
+              "record_groups": [{"group_id": g, "status": "proposed"} for g in ("g1", "g7", "g8", "g9")]}
+    out = RUN.possibly_fixed_athena_e0(_pair("g1", 2472.0, 2472.05), bundle, _groups(("g1", "SYN_S")))
+    kept = out["kept_results"]
+    assert [k["group_id"] for k in kept] == ["g7", "g8", "g9"]
+    every = RUN.kept_fixed_e0_lines(kept, None)
+    assert len(every) == 3 and all("carries a possibly fixed Athena E0" in x for x in every)
+    named = RUN.kept_fixed_e0_lines(kept, {"g1", "g8"})
+    assert len(named) == 2 and "proc-g8-" in named[0]
+    assert named[1].startswith("Athena: 2 more stored results of 2 groups not processed now carry a possibly fixed")
+    assert RUN.kept_fixed_e0_lines(kept, {"g1"})[0].startswith("Athena: 3 more stored results of 3 groups")
+    assert RUN.kept_fixed_e0_lines(kept[:1], {"g1"}) == [
+        "Athena: 1 more stored result of 1 group not processed now carries a possibly fixed Athena E0 (flag "
+        "athena_e0_possibly_fixed); `isaac bundle list <bundle_dir> processing-results` lists them. Ask the scientist "
+        "whether each E0 was measured before approving one."]
+
+
+# --- L6: channel_choice_needs_review is said ------------------------------------------------------------------------
+
+
+def test_the_channel_choice_flag_has_a_sentence():
+    from isaac_api.local_import.processing.channels import ChannelChoice, needs_review_statement
+
+    c = ChannelChoice(energy="energy", mode="fluorescence", signal_columns=["vortDT"], i0="I0",
+                      basis={"basis": "channel_name_priority", "candidate": "vortDT",
+                             "bl15_signal_selection_not_used": "SYN_no_proposal"},
+                      alternatives=[{"mode": "fluorescence", "columns": ["vortDT"], "candidate": "vortDT"},
+                                    {"mode": "fluorescence", "columns": ["PIPS"], "candidate": "PIPS"},
+                                    {"mode": "transmission", "columns": ["I0", "I1"], "candidate": "transmission"}])
+    said = needs_review_statement(c)
+    assert said.startswith("ISAAC chose the fluorescence channel (vortDT)/I0 by column name (the first fluorescence "
+                           "name present, 'vortDT'), not from a reading of the data")
+    assert "the BL15-2 signal selector did not propose one it could use (SYN_no_proposal)" in said
+    assert "The scan also has: fluorescence PIPS, transmission I0+I1." in said
+    assert "A person confirms this is the channel the measurement used" in said
+
+
+def test_processing_says_the_channel_choice_flag(tmp_path):
+    T = _proc()
+    bdir, root, _ = T.make_case(tmp_path, [("01_SYN_ZZ1", [T.spec_file(T.fluo_scan(s)) for s in (1, 2)], {"sample_name": "ZZ1"})])
+    r = T.isaac(T.run_process(bdir, source_root=root))
+    assert "channel_choice_needs_review" in r["review_flags"]
+    assert r["qc"]["statements"]["channel_choice_needs_review"].startswith("ISAAC chose the fluorescence channel (vortDT)/I0")
+    qc_file = next(f for f in r["outputs"]["files"] if f["role"] == "qc")
+    assert "channel_choice_needs_review" not in (bdir / qc_file["relative_path"]).read_text()  # hashed: no id moves

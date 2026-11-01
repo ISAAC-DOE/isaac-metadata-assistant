@@ -205,3 +205,30 @@ def choose_channels(
         flags.append("no_energy_column_found")
     choice.flags = flags
     return choice
+
+
+def needs_review_statement(choice: ChannelChoice) -> str:
+    """r4-a L6: the plain sentence for flag ``channel_choice_needs_review``: the channel was chosen by the protocol's
+    column-name priority (``channels.*_candidates``), not by the BL15-2 selector's proposal, so nothing in the data
+    confirms it is the channel the scientist used. Names the channel, the rule, why the selector was not used and the
+    other channels the scan has."""
+    basis = choice.basis or {}
+    if basis.get("rule"):
+        how = f"the rule '{basis['rule']}'"
+    elif basis.get("candidate"):
+        how = f"the first fluorescence name present, '{basis['candidate']}'"
+    else:
+        how = "the protocol's order of column names"
+    said = (f"ISAAC chose the {choice.mode or 'signal'} channel {choice.signal_name or '(none)'} by column name ({how}), "
+            "not from a reading of the data")
+    if basis.get("bl15_signal_selection_not_used"):
+        said += f"; the BL15-2 signal selector did not propose one it could use ({basis['bl15_signal_selection_not_used']})"
+    others = [a for a in choice.alternatives
+              if not (a.get("mode") == choice.mode and list(a.get("columns") or ()) == list(choice.signal_columns))
+              and not (a.get("mode") == MODE_TRANSMISSION and choice.mode == MODE_TRANSMISSION)]
+    if others:
+        listed = ", ".join(f"{a.get('mode')} {'+'.join(a.get('columns') or ())}" for a in others[:5])
+        said += f". The scan also has: {listed}{' and more' if len(others) > 5 else ''}"
+    return (said + ". A person confirms this is the channel the measurement used; another is chosen only on the "
+            "scientist's word, with a params file (channels.fluorescence_candidates or channels.transmission_after_sample).")
+

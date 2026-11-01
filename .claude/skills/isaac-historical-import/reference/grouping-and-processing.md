@@ -98,6 +98,9 @@ it finds one. Show per group, in words:
   "the project does not say which scans". An Athena project does not list the scan files it merged, so
   say which of the three it is and, when it is the last, ask the scientist; never infer scans from the
   curve. `scans_used: null` in its metrics means exactly that, not zero scans;
+- **a channel chosen by name** (flag `channel_choice_needs_review`, `qc.statements.channel_choice_needs_review`): the
+  protocol's column-name order chose it, not the BL15-2 selector; say the sentence (the channel, why, the other
+  channels the scan has) and ask the scientist to confirm it is the channel the measurement used;
 - **when the channel fell back** (reason and flag `channel_fallback_transmission_not_positive`: a
   group named as a reference or standard takes transmission first, but I0 or I1 was not positive in
   every scan, so fluorescence was used): say the sentence in `qc.json` → `statements` and ask the
@@ -210,7 +213,8 @@ Ask: approve, reject, or needs changes (with a note):
   not preferred. Say the statement and ask "was this E0 measured from this group's edge, or set?" before approving
   it; approve it only on "measured", with `--e0-measured` (`decide` refuses it without). If it was set, it is not the edge position: offer
   ISAAC's result instead. A result already decided is kept as it is: the summary line "approved result <id> carries
-  a possibly fixed Athena E0" names it; ask the scientist the same question about it.
+  a possibly fixed Athena E0" names it; ask the scientist the same question about it. With `--group`, other groups'
+  stored results are one count line ("N more stored results of M groups not processed now …").
 - **A result with no curve** (no output file, e.g. `no_usable_scan`) cannot be approved; `decide`
   refuses. Say why in words and offer: reject the result; `needs_changes` (the protocol needs a setting
   the scientist chooses; only on their explicit choice re-process with `--params-file`); or leave the
