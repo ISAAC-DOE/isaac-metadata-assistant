@@ -384,7 +384,10 @@ def _per_scan_set(pool: Sequence[Mapping], stems: Sequence[str], np) -> dict | N
     sels = [_selection_of_run(c["label"], stems) for c in pool]
     if any(s is None or len(s[1]) != 1 for s in sels) or len({(s[0], s[1][0]) for s in sels}) != len(sels):
         return None
-    order = sorted(range(len(pool)), key=lambda i: (sels[i][0], sels[i][1][0]))
+    # scan order as before when the scan numbers are distinct (so no set that formed before changes its first member,
+    # its grid or its id); run, then scan, when runs repeat them
+    distinct = len({s[1][0] for s in sels}) == len(sels)
+    order = sorted(range(len(pool)), key=lambda i: sels[i][1][0] if distinct else (sels[i][0], sels[i][1][0]))
     runs = [str(stems[sels[i][0]]) for i in order]
     base = pool[order[0]]
     e = base["energy"]

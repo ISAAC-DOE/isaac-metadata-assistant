@@ -122,25 +122,10 @@ def _resolve_source(root: Path, rel: str) -> Path | None:
 NAMES_NOT_A_PURE_ELEMENT = "names_not_a_pure_element"
 
 
-def stated_reference(name: str, bundle: Mapping, header_lines: Sequence[str],
-                     calibrant: Mapping | None = None) -> tuple[dict | None, str]:
-    """A reference foil's element + edge, ONLY when evidence states both. (reference, reason).
-
-    Element: r3-b M2: the ONE name reading that also says whether the group is named as a pure element
-    (:func:`reference.calibrant_identity` — ``calibrant``, the group's reading, else ``name``'s alone): its element when
-    it says one pure element (``33_Ti_foil_I1``, ``01_Tifoil_calib_1x3mm``), else nothing is proposed
-    (:data:`NAMES_NOT_A_PURE_ELEMENT`). Before, a ``foil`` token and one case-sensitive symbol proposed Ti K for a name
-    the other reading called "ISAAC cannot tell", and ``Tifoil`` proposed nothing. Edge: an edge label in the names
-    (``Ti_K_foil``), the bundle's ``experiment.element_evidence`` for that element, and/or a header line shaped
-    ``<El><Edge>_`` (an XDAC region file, e.g. ``ZzK_SYNTHETIC.rgn``); every stated edge must agree.
-    """
-    cal = calibrant if calibrant is not None else REF.calibrant_identity([name])
-    el = REF.named_element(cal)
-    if el is None:
-        return None, NAMES_NOT_A_PURE_ELEMENT
-    basis = [{"kind": "name_reading", "rule_id": REF.CALIBRANT_RULE_ID, "name": name,
-              "read_from": list(cal.get("read_from") or [name]), "element": el}]
-    edges = {cal["edge"]} if cal.get("edge") else set()
+def _stated_edges(el: str, bundle: Mapping, header_lines: Sequence[str]) -> tuple[set, list[dict]]:
+    """The edges the evidence states for element ``el`` (bundle element evidence, XDAC region-file header lines)."""
+    edges: set = set()
+    basis: list[dict] = []
     for ev in (bundle.get("experiment") or {}).get("element_evidence") or ():
         if ev.get("element") == el and ev.get("edge"):
             edges.add(ev["edge"])
@@ -150,8 +135,41 @@ def stated_reference(name: str, bundle: Mapping, header_lines: Sequence[str],
         if m and m.group(1) == el:
             edges.add(m.group(2))
             basis.append({"kind": "scan_header_region_symbol", "header_line_index": i, "literal": line.strip()[:80], "edge": m.group(2)})
+    return edges, basis
+
+
+def stated_reference(name: str, bundle: Mapping, header_lines: Sequence[str],
+                     calibrant: Mapping | None = None) -> tuple[dict | None, str]:
+    """A reference foil's element + edge, ONLY when evidence states both. (reference, reason).
+
+    Element: r3-b M2: the ONE name reading that also says whether the group is named as a pure element
+    (:func:`reference.calibrant_identity` — ``calibrant``, the group's reading, else ``name``'s alone): its element when
+    it says one pure element (``33_Ti_foil_I1``, ``01_Tifoil_calib_1x3mm``), else nothing is proposed. Before, a
+    ``foil`` token and one case-sensitive symbol proposed Ti K for a name the other reading called "ISAAC cannot tell",
+    and ``Tifoil`` proposed nothing. Edge: the bundle's ``experiment.element_evidence`` for that element, and/or a
+    header line shaped ``<El><Edge>_`` (an XDAC region file, e.g. ``ZzK_SYNTHETIC.rgn``); every stated edge must agree.
+
+    THE HASHED OUTCOME DOES NOT MOVE where the proposal does not: the reference and its evidence keep the shape they
+    had (``name_token``), and when nothing is proposed the reason is the one the earlier rule gave (``name_has_no_foil_
+    token``, ``foil_element_not_unique:[...]``, ``edge_not_stated_uniquely:[...]``), so only a group whose PROPOSAL
+    changes gets a new result id (:data:`NAMES_NOT_A_PURE_ELEMENT` when the earlier rule proposed one that this reading
+    does not). The statement (not hashed) says what the reading says.
+    """
+    toks = [t for t in _TOKEN.split(name) if t]
+    foil = any(t.casefold().startswith("foil") for t in toks)
+    els = sorted({t for t in toks if t in ELEMENTS})
+    legacy = "name_has_no_foil_token" if not foil else (f"foil_element_not_unique:{els}" if len(els) != 1 else None)
+    if legacy is None:
+        edges, _ = _stated_edges(els[0], bundle, header_lines)
+        legacy = None if len(edges) == 1 else f"edge_not_stated_uniquely:{sorted(edges)}"
+    cal = calibrant if calibrant is not None else REF.calibrant_identity([name])
+    el = REF.named_element(cal)
+    if el is None:
+        return None, legacy or NAMES_NOT_A_PURE_ELEMENT
+    edges, stated = _stated_edges(el, bundle, header_lines)
     if len(edges) != 1:
-        return None, f"edge_not_stated_uniquely:{sorted(edges)}"
+        return None, legacy or f"edge_not_stated_uniquely:{sorted(edges)}"
+    basis = [{"kind": "name_token", "name": name, "element": el}, *stated]
     return {"element": el, "edge": next(iter(edges)), "basis": "stated_by_evidence", "evidence": basis}, "stated_by_evidence"
 
 

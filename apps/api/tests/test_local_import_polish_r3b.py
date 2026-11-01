@@ -216,7 +216,10 @@ def test_a_foil_named_with_measurement_words_is_proposed_and_said_as_ti_with_the
     cal = _cal(isa)
     o = cal["outcome"]
     assert (o["reference"]["element"], o["reference"]["edge"]) == ("Ti", "K")
-    assert o["reference"]["evidence"][0]["kind"] == "name_reading"
+    # the hashed reference keeps the shape it had: a proposal the earlier rule made too keeps its result id
+    assert o["reference"]["evidence"] == [{"kind": "name_token", "name": stem, "element": "Ti"},
+                                          {"kind": "bundle_element_evidence", "source_id": "src-001-a",
+                                           "locator": "SYN region file", "edge": "K"}]
     assert REF.NOT_NAMED_ELEMENT_FLAG not in cal["flags"] and o["calibration_proposed"] is True
     said = o["reference_statement"]
     shift = REF.shown(o["computed_shift_eV"])
@@ -230,7 +233,8 @@ def test_with_no_edge_stated_no_shift_is_said_and_no_placeholder_either(tmp_path
     bdir, root = _reference_case(tmp_path, "01_Tifoil_calib_1x3mm", element_evidence=False)
     _, [isa], _ = _process(bdir, root)
     o = _cal(isa)["outcome"]
-    assert o["computed_shift_eV"] is None and o["unconfirmed_reason"].startswith("edge_not_stated_uniquely")
+    # nothing is proposed, as before: the hashed reason is the one the earlier rule gave, so the id does not move
+    assert o["computed_shift_eV"] is None and o["reference"] is None and o["unconfirmed_reason"] == "name_has_no_foil_token"
     said = o["reference_statement"]
     assert "<the shift shown>" not in said and "approve with --accept-shift" not in said
     assert REF.NO_SHIFT_YET in said and "its names say it is Ti" in said
@@ -243,6 +247,7 @@ def test_a_confirmed_own_edge_calibration_clears_the_names_flag_and_stops_asking
     _, [isa], _ = _process(bdir, root)
     cal = _cal(isa)
     assert REF.NOT_NAMED_ELEMENT_FLAG in cal["flags"] and REF.NOT_NAMED_ELEMENT_FLAG in isa["review_flags"]
+    assert cal["outcome"]["unconfirmed_reason"] == "name_has_no_foil_token"  # hashed: as the earlier rule gave it
     shift = round(edge_energy("Ti", "K")[0] - cal["outcome"]["measured_reference_e0_eV"], 1)
     approval = {"element": "Ti", "edge": "K", "decided_by": "SYN Scientist", "decision_id": "d-syn", "accepted_shift_eV": shift}
     _, [isa2], _ = _process(bdir, root, calibration_approvals={"g-ref": approval})
