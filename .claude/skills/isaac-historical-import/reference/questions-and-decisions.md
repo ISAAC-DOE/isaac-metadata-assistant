@@ -41,7 +41,8 @@ is for lookup only.
 Order (SKILL.md Step 7): the minimum for one group → experiment-scope questions, once → the template
 (below) for what the files never state, then per group only what it leaves → conflicts that affect a
 record → optional. The counter question (`naming_counter_positions`) is asked earlier, in Step 5,
-before any group is confirmed. Every printed command with `<placeholders>` (`answer_command`,
+before any group is confirmed: while it is open it is listed FIRST in every scope that lists it, and until a
+group is confirmed the minimum names it in `answer_first` (not counted; never after a `defer`). Every printed command with `<placeholders>` (`answer_command`,
 `next_commands`) is a template: fill it from the scientist's answer, never run it as it is.
 
 ## How to ask

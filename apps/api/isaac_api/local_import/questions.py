@@ -1126,6 +1126,9 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                            "locator": "file names in this bundle, the asked token in [brackets]" if example_names else "the grouping step"}],
                 "allowed_values": None,
                 "answered": answered_positions,
+                # r2-a M3: while a position is open the answer decides which runs are repeats, and a regroup keeps
+                # decided groups: it is asked before any group is confirmed, so it sorts first (`order` below)
+                "order_critical": not (asked_positions and not open_positions),
                 **({"deferred": deferred} if (deferred := counter_deferral(bundle)) else {}),
                 "answer_command": (
                     'isaac bundle decide <bundle_dir> --target experiment --decision set_counter_positions '
@@ -1248,8 +1251,12 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         else:
             s = (2, run_order.get(scope[4:], 10**9))
         # an informational question (nothing to answer) sorts after every question that has an answer; a
-        # DEFERRED one ("I don't know") after every one not deferred in its tier, so it is not asked again first
-        return (q["tier"], bool(q.get("informational")), bool(q.get("deferred")), s, q["target_field_path"] or "", q["question_id"])
+        # DEFERRED one ("I don't know") after every one not deferred in its tier, so it is not asked again first.
+        # r2-a M3: the open counter question (not deferred) before every other, whatever its tier: confirmed groups
+        # cannot be joined later (measured: 28th of 43 in the experiment scope, after 27 blocking questions)
+        first = not (q.get("order_critical") and not q.get("deferred"))
+        return (first, q["tier"], bool(q.get("informational")), bool(q.get("deferred")), s, q["target_field_path"] or "",
+                q["question_id"])
 
     if has_groups:
         reports = compositions(bundle, decision_of=decisions)
@@ -2633,6 +2640,17 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
         # the candidates whose parser values (a file-name literal, the volts it was read as) the warnings state: a
         # page or command showing them records each as an exposure first (c7-r MED-4)
         out["values_shown_from"] = sorted(set(best["stated"]))
+    counter = next((q for q in payload["questions"] if q["kind"] == "naming_counter_positions" and q.get("order_critical")
+                    and not q.get("deferred")), None)  # "I don't know" (defer) is an answer: never asked again first
+    if counter is not None and not any(g.get("status") == B.STATE_SCIENTIST_CONFIRMED for g in live_groups(bundle)):
+        # r2-a M3: NAMED BEFORE ANY GROUP IS CONFIRMED, not counted (it blocks no record): a regroup keeps decided
+        # groups, so an answer given after a confirmation can no longer join them
+        out["answer_first"] = {
+            "question_id": counter["question_id"], "kind": counter["kind"],
+            "why": ("Answer the counter question before confirming any group: it decides which runs are repeats of one "
+                    "measurement, and a regroup keeps decided groups, so an answer given after a group is confirmed can "
+                    "no longer join it."),
+            "answer_command": counter["answer_command"]}
     if best["hard"]:
         out["blocked"] = "; ".join(best["hard"])
     if best["soft"]:

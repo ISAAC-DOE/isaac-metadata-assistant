@@ -8,6 +8,9 @@ line, not a measurement.
   first written (qc.json is hashed into the result id), so no result id moves.
 * (MED 2) A potentiostatic group with no set-point and no confirmed scale: the minimum said 1 answer (the set-point)
   and asked for the scale only after it. Both are named and counted now, and the scale question blocks the group.
+* (MED 3) The counter question (order-critical: confirmed groups cannot be joined later) came 28th of 43 in the
+  experiment scope. While open it sorts first in every scope that lists it, and the minimum names it
+  (``answer_first``) before any group is confirmed. No id changes.
 """
 
 from __future__ import annotations
@@ -182,3 +185,63 @@ def test_a_confirmed_setpoint_still_names_only_the_scale(bdir):
     M.decide(bdir, target_ids=[_cand(M.load(bdir), POT, "run-001")["candidate_id"]], decision="confirm", value=None, **BY)
     minimum = _questions(bdir, "--scope", "group:g1", "--blocking-only")["minimum_for_one_group"]
     assert minimum["missing_required_now"] == [SCALE] and minimum["blocking_questions"] == 1
+
+
+# --- MED 3: the counter question comes first ---------------------------------------------------------------------
+
+RUNS = ("01_SYNelS_015", "01_SYNelS_016", "03_SYNmofA_dry_017", "03_SYNmofA_dry_018")  # last tokens at 3 and 4
+
+
+@pytest.fixture()
+def counter_bundle(tmp_path) -> Path:
+    src = tmp_path / "SYN_bt"
+    for name in RUNS:
+        make_scan(src / f"{name}_A.001", free_text=("SYNTHETIC comment line",))
+    out = tmp_path / "b"
+    assert _quiet("import", str(src), "--out", str(out))[0] == 0
+    assert _quiet("bundle", "group", str(out))[0] == 0
+    return out
+
+
+def _ids(page: dict) -> list[str]:
+    return [q["question_id"] for q in page["questions"]]
+
+
+def test_the_open_counter_question_sorts_first_in_every_scope_that_lists_it(counter_bundle):
+    payload = Q.consolidate(M.load(counter_bundle))
+    every = [q["question_id"] for q in payload["questions"]]
+    assert every[0] == Q.COUNTER_QUESTION_ID and any(q["blocking"] for q in payload["questions"])
+    assert payload["questions"][0]["tier"] == Q.TIER_CONFLICT  # its tier and id are unchanged; only its place
+    exp = _questions(counter_bundle, "--scope", "experiment", "--with-targets")
+    assert _ids(exp)[0] == Q.COUNTER_QUESTION_ID
+    gid = M.load(counter_bundle)["record_groups"][0]["group_id"]
+    grp = _questions(counter_bundle, "--scope", f"group:{gid}", "--with-targets")
+    assert _ids(grp)[0] == Q.COUNTER_QUESTION_ID
+    # the minimum names it before any group is confirmed, not counted
+    minimum = grp["minimum_for_one_group"]
+    first = minimum["answer_first"]
+    assert first["question_id"] == Q.COUNTER_QUESTION_ID and "before confirming any group" in first["why"]
+    assert "set_counter_positions" in first["answer_command"]
+    assert all(e["question_id"] != Q.COUNTER_QUESTION_ID for e in minimum.get("questions") or ())
+    # the same ids, in the same set, before and after: only the order moved
+    assert sorted(every) == sorted(q["question_id"] for q in Q.consolidate(M.load(counter_bundle))["questions"])
+
+    # once a group is confirmed, the minimum no longer names it (the skill's order is past)
+    M.decide(counter_bundle, target_ids=[gid], decision="confirm", value=None, by="SYNTHETIC TEST", orcid=None)
+    assert "answer_first" not in _questions(counter_bundle, "--scope", f"group:{gid}")["minimum_for_one_group"]
+
+
+def test_a_deferred_or_answered_counter_question_is_not_put_first(counter_bundle):
+    M.decide_question(counter_bundle, question_id=Q.COUNTER_QUESTION_ID, decision="defer", value=None, by="SYNTHETIC TEST",
+                      orcid=None)
+    b = M.load(counter_bundle)
+    payload = Q.consolidate(b)
+    counter = next(q for q in payload["questions"] if q["question_id"] == Q.COUNTER_QUESTION_ID)
+    assert counter.get("deferred") and payload["questions"][0]["question_id"] != Q.COUNTER_QUESTION_ID
+    assert "answer_first" not in (Q.minimum_answers_for_one_group(payload, b) or {})
+    M.decide(counter_bundle, target_ids=["experiment"], decision=B.NOT_COUNTER_DECISION, value=None, by="SYNTHETIC TEST",
+             orcid=None, positions=[3, 4])
+    answered = Q.consolidate(M.load(counter_bundle), include_answered=True)
+    q = next(q for q in answered["questions"] if q["question_id"] == Q.COUNTER_QUESTION_ID)
+    assert q["order_critical"] is False and answered["questions"][0]["question_id"] != Q.COUNTER_QUESTION_ID
+    assert not any(q["kind"] == "naming_counter_positions" for q in Q.consolidate(M.load(counter_bundle))["questions"])
