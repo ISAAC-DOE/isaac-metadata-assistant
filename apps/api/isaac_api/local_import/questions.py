@@ -793,6 +793,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             # A number given without --json is stored as text, which the schema's type check
             # then keeps out of the record (bundle.value_problem): say which fields need it.
             numeric_fields = sorted(f for f in q["fields"] if _is_numeric(_node(schema, f)))
+            field_reach = _optional_field_reach(bundle, q["fields"]) if scope == "experiment" and has_groups else {}
             questions.append(
                 {
                     "question_id": qid,
@@ -809,8 +810,10 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                                 and (reading := _sample_reading_text(sorted({group_of[r] for r in q["runs"] if r in group_of}),
                                                                      sample_written_of_group)) else "")
                              + (_field_hints_text(fh) if (fh := _optional_field_hints(bundle, q["fields"], ai_hints)) else "")
-                             + _asked_again_text(q["asked_again"], {f: _eligible_values(f) for f in q["fields"]})),
+                             + _asked_again_text(q["asked_again"], {f: _eligible_values(f) for f in q["fields"]})
+                             + _field_reach_text(field_reach)),
                     "asked_again": q["asked_again"],
+                    **({"field_reach": field_reach} if field_reach else {}),
                     "applies_to": {"groups": len({group_of[r] for r in q["runs"] if r in group_of}), "runs": len(q["runs"]), "targets": len(q["targets"]),
                                    "runs_outside_live_groups": outside(q["runs"])},
                     "targets": q["targets"],
@@ -2103,6 +2106,43 @@ def _note_shared_reading_groups(questions: list[dict], cand_by_id: Mapping[str, 
             q["text"] = q["text"].replace(before, said, 1) if before and before in q["text"] else q["text"] + said
 
 
+def _optional_field_reach(bundle: Mapping, fields: Mapping[str, Sequence[str]]) -> dict[str, dict]:
+    """r4-b M4: for each field of an optional question asked for the whole beamtime, the live groups and runs an answer
+    with ``--field`` reaches (``mutations.answer_reach``: the rest already hold their own answer, or no target here),
+    and the groups the word would not describe (``mutations.misfit_groups``). Only the fields an answer reaches LESS
+    than every group with, or that would land on a group it does not describe: ``{field: {groups, groups_total, runs,
+    group_ids, misfit_groups?}}``."""
+    from . import mutations as M
+
+    out = {}
+    for f, ids in sorted(fields.items()):
+        r = M.answer_reach(bundle, ids, f)
+        bad = M.misfit_groups(bundle, f, r["group_ids"])
+        if len(r["group_ids"]) < r["groups_total"] or bad or r["beamtime_fills_none"]:
+            out[f] = {"groups": len(r["group_ids"]), "groups_total": r["groups_total"], "runs": len(r["run_ids"]),
+                      "group_ids": r["group_ids"][:_CROSS_REFERENCES * 5], **({"misfit_groups": bad} if bad else {})}
+    return out
+
+
+def _field_reach_text(field_reach: Mapping[str, Mapping]) -> str:
+    """The sentence for :func:`_optional_field_reach`: per field, what an answer here reaches, and any group it does
+    not fit, said plainly."""
+    if not field_reach:
+        return ""
+    parts = []
+    for f, r in field_reach.items():
+        part = (f"{f} reaches {r['groups']} of {r['groups_total']} group(s) ({r['runs']} run(s)"
+                + (f": {', '.join(r['group_ids'][:8])}{', …' if len(r['group_ids']) > 8 else ''}" if r["group_ids"] else "")
+                + (f"), the other {r['groups_total'] - r['groups']} already answered per group or not asked here"
+                   if r["groups"] < r["groups_total"] else ")"))
+        if r.get("misfit_groups"):
+            part += (f" — careful: it would put a {f.rsplit('.', 1)[-1].replace('_', ' ')} on "
+                     + "; ".join(f"{b['group_id']} ({b['why']})" for b in r["misfit_groups"][:8])
+                     + ", which it does not describe; answer only the groups it fits (--only group:<id>)")
+        parts.append(part)
+    return " An answer here, per field: " + "; ".join(parts) + "."
+
+
 def _ai_hint_index(bundle: Mapping):
     """``ids -> suggestions.ai_hints(bundle, ids)``, with the AI interpretations indexed by target once:
     each call reads only the interpretations of ``ids`` (in their bundle order, so the output is
@@ -2431,10 +2471,17 @@ def _for_group(q: Mapping, scope: str, report: Mapping | None) -> Mapping | None
     lead = f"{len(q['fields'])} optional field(s) no parser read a value for: {', '.join(sorted(q['fields']))}."
     said = (f"{len(open_fields)} optional field(s) no parser read a value for and this group's record does not carry: "
             f"{', '.join(sorted(open_fields))}.")
-    return {**q, "fields": {f: ids for f, ids in q["fields"].items() if f in open_fields},
+    text = q["text"].replace(lead, said, 1)
+    reach = {}
+    if q.get("field_reach"):  # r4-b M4: the per-field reach, of the fields still open for the group only
+        reach = {f: r for f, r in q["field_reach"].items() if f in open_fields}
+        text = text.replace(_field_reach_text(q["field_reach"]), _field_reach_text(reach), 1)
+    return {**{k: v for k, v in q.items() if k != "field_reach"},
+            "fields": {f: ids for f, ids in q["fields"].items() if f in open_fields},
             "field_allowed_values": {f: a for f, a in (q.get("field_allowed_values") or {}).items() if f in open_fields},
             **({"field_hints": {f: h for f, h in q["field_hints"].items() if f in open_fields}} if q.get("field_hints") else {}),
-            "text": q["text"].replace(lead, said, 1),
+            **({"field_reach": reach} if reach else {}),
+            "text": text,
             "fields_already_in_this_groups_record": len(q["fields"]) - len(open_fields)}
 
 

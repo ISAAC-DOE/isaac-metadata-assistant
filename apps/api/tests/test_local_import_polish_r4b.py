@@ -9,6 +9,9 @@ folder and invented scans.
   keep_apart of several candidates is said in the plural;
 * M3: per-group questions about one field that share a reading in their own files share a ``same_reading_group``,
   answered together with ``--same-reading``; no id changes, and file names that read the field differently never share;
+* M4: a field of an optional question asked for the whole beamtime says which groups and runs an answer there reaches
+  (the rest are answered per group); the decide reply (and an ``--as-said`` refusal) names them, and says plainly when
+  the word would land on groups it does not describe (an ex-situ run, a standard, for a cell type);
 """
 
 from __future__ import annotations
@@ -248,3 +251,67 @@ def test_file_names_that_read_the_field_differently_never_share_a_group(monkeypa
     assert qs[0]["same_reading_group"] == qs[1]["same_reading_group"] != qs[2]["same_reading_group"] == qs[3]["same_reading_group"]
     assert all(q["same_reading_count"] == 2 for q in qs)
     assert "their file names read alike for this field (0.6)" in qs[0]["text"]
+
+
+# --- M4: what a beamtime-wide optional answer reaches, and where it does not fit -----------------------------------
+
+CELL = "context.electrochemistry.cell_type"
+
+
+def _leftover_cell_type(bdir):
+    """Six runs' cell types answered per run (a template's File List), and two of the rest recorded ex situ."""
+    M.group(bdir)
+    b = M.load(bdir)
+    cells = [m["value_id"] for m in b["missing_values"] if m["target_field_path"] == CELL]
+    M.decide(bdir, target_ids=cells[:6], decision="correct", value="three_electrode", **BY)
+    env = [m["value_id"] for m in b["missing_values"]
+           if m["target_field_path"] == "context.environment" and m["run_id"] in ("run-008", "run-009")]
+    M.decide(bdir, target_ids=env, decision="correct", value="ex_situ", **BY)
+    q = next(q for q in Q.consolidate(M.load(bdir))["questions"] if q["kind"] == "optional_values" and CELL in q["fields"])
+    return q, {g["group_id"]: g for g in M.load(bdir)["record_groups"]}
+
+
+def _group_of(groups, run_id):
+    return next(gid for gid, g in groups.items() if run_id in g["member_run_ids"])
+
+
+def test_the_question_says_which_groups_a_beamtime_answer_reaches_per_field(bdir):
+    q, groups = _leftover_cell_type(bdir)
+    assert q["scope"] == "experiment" and len(q["fields"][CELL]) == 3
+    reach = q["field_reach"][CELL]
+    assert reach["groups"] == 3 and reach["groups_total"] == 9 and reach["runs"] == 3
+    assert reach["group_ids"] == [_group_of(groups, r) for r in ("run-007", "run-008", "run-009")]
+    assert [b["group_id"] for b in reach["misfit_groups"]] == [_group_of(groups, r) for r in ("run-008", "run-009")]
+    assert f"{CELL} reaches 3 of 9 group(s) (3 run(s): " in q["text"]
+    assert "the other 6 already answered per group" in q["text"]
+    assert "careful: it would put a cell type on " in q["text"] and "recorded ex situ: measured outside a cell" in q["text"]
+
+
+def test_the_decide_reply_names_the_groups_and_runs_it_reached_and_the_misfits(bdir):
+    q, groups = _leftover_cell_type(bdir)
+    got = M.decide_question(bdir, question_id=q["question_id"], field=CELL, decision="correct", value="beaker_cell",
+                            by=WHO, orcid=None)
+    assert got["reach"]["run_ids"] == ["run-007", "run-008", "run-009"] and got["reach"]["groups_total"] == 9
+    assert f"For {CELL} it reaches 3 of the beamtime's 9 record groups (3 runs: " in got["statement"]
+    assert "It reaches every record group" not in got["statement"]
+    assert "Careful: it puts a cell type on 2 groups it does not describe" in got["statement"]
+
+
+def test_an_as_said_word_says_which_groups_it_would_reach(bdir):
+    q, _ = _leftover_cell_type(bdir)
+    with pytest.raises(M.OffListRefused) as exc:
+        M.decide_question(bdir, question_id=q["question_id"], field=CELL, decision="correct", value="SYN cell",
+                          by=WHO, orcid=None, as_said=True)
+    said = str(exc.value)
+    assert "kept as a vocabulary request" in said
+    assert "recorded, it would reach 3 of the beamtime's 9 record groups (3 runs: " in said
+    assert "Careful: it would put a cell type on 2 groups it does not describe" in said
+
+
+def test_a_standard_is_never_described_by_a_cell_type():
+    bundle = {"runs": [{"run_key": "k1", "run_id": "r1"}, {"run_key": "k2", "run_id": "r2"}],
+              "record_groups": [{"group_id": "g-std", "role": G.ROLE_REFERENCE, "member_run_keys": ["k1"]},
+                                {"group_id": "g-cell", "role": G.ROLE_SAMPLE, "member_run_keys": ["k2"]}],
+              "candidates": [], "missing_values": [], "scientist_decisions": []}
+    assert [b["group_id"] for b in M.misfit_groups(bundle, CELL, ["g-std", "g-cell"])] == ["g-std"]
+    assert M.misfit_groups(bundle, "sample.material.name", ["g-std"]) == []  # only a cell's own words

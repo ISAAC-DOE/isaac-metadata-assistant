@@ -1655,6 +1655,96 @@ def _count(n: int, noun: str) -> str:
     return f"{n} {noun}{'' if n == 1 else 's'}"
 
 
+#: r4-b M4: the words for an electrochemical cell or its control, which do not describe a run measured outside one
+CELL_FIELDS = frozenset({"context.electrochemistry.cell_type", "context.electrochemistry.control_mode"})
+_GROUP_IDS_SHOWN = 8
+
+
+def answer_reach(bundle: Mapping, target_ids: Sequence[str], path: str) -> dict:
+    """r4-b M4: the live record groups and runs an answer on ``target_ids`` for ``path`` reaches: a run's own target
+    fills its run's group; a beamtime-wide one every group, except at a run-only path (``records.RUN_ONLY_PATHS``,
+    DEC-69: it fills none). ``{group_ids, run_ids, groups_total, beamtime_fills_none}``, in the bundle's order."""
+    from . import questions as Q
+    from .records import RUN_ONLY_PATHS
+
+    run_ids: set[str] = set()
+    beamtime = False
+    for tid in target_ids:
+        try:
+            kind, obj = resolve_target(bundle, tid)
+        except MutationRefused:
+            continue
+        if kind in ("candidate", "missing_value"):
+            if obj.get("run_id"):
+                run_ids.add(obj["run_id"])
+            else:
+                beamtime = True
+    run_of_key = {r["run_key"]: r["run_id"] for r in bundle.get("runs") or ()}
+    every = beamtime and path not in RUN_ONLY_PATHS
+    groups, runs = [], []
+    live = Q.live_groups(bundle)
+    for g in live:
+        members = [run_of_key[k] for k in g.get("member_run_keys") or () if k in run_of_key]
+        mine = members if every else [r for r in members if r in run_ids]
+        if mine:
+            groups.append(g["group_id"])
+            runs += [r for r in mine if r not in runs]
+    return {"group_ids": groups, "run_ids": runs, "groups_total": len(live),
+            "beamtime_fills_none": beamtime and path in RUN_ONLY_PATHS}
+
+
+def misfit_groups(bundle: Mapping, path: str, group_ids: Sequence[str]) -> list[dict]:
+    """r4-b M4: of ``group_ids``, the groups a word for an electrochemical cell or its control (:data:`CELL_FIELDS`)
+    does not describe: a reference or alignment group (a standard, a foil), or one every run of which is recorded ex
+    situ (a confirmed or eligible ``context.environment``, the beamtime-wide one included). ``[{group_id, why}]``;
+    never a guess: a group with no recorded environment is not listed."""
+    from . import grouping as G
+
+    if path not in CELL_FIELDS or not group_ids:
+        return []
+    env: dict[str | None, set[str]] = {}
+    for rid, _tid, v, _answered in _options_for(bundle, "context.environment"):
+        env.setdefault(rid, set()).add(json.dumps(v))
+    run_of_key = {r["run_key"]: r["run_id"] for r in bundle.get("runs") or ()}
+    by_id = {g["group_id"]: g for g in bundle.get("record_groups") or ()}
+    out = []
+    for gid in group_ids:
+        g = by_id.get(gid) or {}
+        members = [run_of_key[k] for k in g.get("member_run_keys") or () if k in run_of_key]
+        if g.get("role") in (G.ROLE_REFERENCE, G.ROLE_ALIGNMENT):
+            out.append({"group_id": gid, "why": f"a {g['role']} group: a standard or foil, not an electrode in a cell"})
+        elif members and all((env.get(r) or env.get(None)) == {json.dumps("ex_situ")} for r in members):
+            out.append({"group_id": gid, "why": "recorded ex situ: measured outside a cell"})
+    return out
+
+
+def reach_sentence(bundle: Mapping, target_ids: Sequence[str], path: str, *, would: bool = False,
+                   lead: str | None = None) -> tuple[str, dict]:
+    """r4-b M4: the plain sentence (and its detail) for :func:`answer_reach` and :func:`misfit_groups`: the groups and
+    runs an answer for ``path`` reaches, how many the beamtime holds besides (already answered per group, or reached
+    otherwise), and, plainly, any group the word does not describe. ``would``: worded for an answer not recorded;
+    ``lead``: what the sentence opens with (default ``For <path> it reaches``)."""
+    r = answer_reach(bundle, target_ids, path)
+    gids, n = r["group_ids"], r["groups_total"]
+    verb = "would reach" if would else "reaches"
+    shown = ", ".join(gids[:_GROUP_IDS_SHOWN]) + (", …" if len(gids) > _GROUP_IDS_SHOWN else "")
+    text = (f"{lead or f'For {path} it {verb}'} {len(gids)} of the beamtime's {_count(n, 'record group')} "
+            f"({_count(len(r['run_ids']), 'run')}{': ' + shown if gids else ''})")
+    if r["beamtime_fills_none"]:
+        text += f"; a beamtime-wide {path} fills no record (it is a run-level field), only each run's own answer does"
+    if 0 < len(gids) < n:
+        text += f"; the other {_count(n - len(gids), 'group')} already have their own answer for it, or no target here"
+    text += "."
+    bad = misfit_groups(bundle, path, gids)
+    if bad:
+        label = path.rsplit(".", 1)[-1].replace("_", " ")
+        text += (f" Careful: it {'would put' if would else 'puts'} a {label} on {_count(len(bad), 'group')} it does not "
+                 "describe: " + "; ".join(f"{b['group_id']} ({b['why']})" for b in bad[:_GROUP_IDS_SHOWN])
+                 + ("; …" if len(bad) > _GROUP_IDS_SHOWN else "")
+                 + ". Answer only the groups it fits (`--only group:<id>`), and reject it for these.")
+    return text, {**r, "path": path, **({"misfit_groups": bad} if bad else {})}
+
+
 def group_answer_targets(bundle: dict, asked: Mapping, only: str, field: str | None,
                          decision: str) -> tuple[list[str], list[str], dict] | None:
     """``decide --question <Q> --only group:<id>`` for a question that asks its field ONCE for the whole beamtime
@@ -1966,6 +2056,12 @@ def decide_question(
         def reached(on: dict, result: dict) -> dict:
             # read from the bundle the decision was recorded on (a dry run's copy too), its states derived as the
             # save will derive them: what each group's record now takes
+            if override is None and field:
+                # r4-b M4: one field of a question asked for the whole beamtime: the groups and runs THIS answer
+                # reaches (the rest answered per group), never "every record group" for the leftover runs
+                text, detail = reach_sentence(B.apply_derivations(copy.deepcopy(on)), found, field)
+                return {"statement": " ".join(x for x in (result.get("statement"), text) if x), "reach": detail,
+                        **{k: v for k, v in result.items() if k != "statement"}}
             if override is None and not _beamtime_level(on, found):
                 return result
             view = B.apply_derivations(copy.deepcopy(on))
@@ -1989,10 +2085,17 @@ def decide_question(
             if not as_said:
                 raise _not_kept(exc) from None
             slot_runs = [m.get("run_id") for m in bundle.get("missing_values") or () if m["value_id"] in set(slots_added)]
-            raise _keep_refused_answer(bundle_dir, bundle, exc, target_ids=params["target_ids"], by=by, orcid=orcid,
-                                       note=note, slots=slots_added, slot_runs=[r for r in slot_runs if r],
-                                       source={"kind": "decide_answer", "command": "bundle decide", "decision": decision,
-                                               "question_id": question_id, "as_said": True}) from None
+            # r4-b M4: the groups and runs the kept word is for, read before the refusal drops any slot it added
+            where = reach_sentence(bundle, params["target_ids"], field, would=True,
+                                   lead="The request is for the targets this answer named; recorded, it would reach")[0] if field else None
+            kept_exc = _keep_refused_answer(bundle_dir, bundle, exc, target_ids=params["target_ids"], by=by, orcid=orcid,
+                                            note=note, slots=slots_added, slot_runs=[r for r in slot_runs if r],
+                                            source={"kind": "decide_answer", "command": "bundle decide", "decision": decision,
+                                                    "question_id": question_id, "as_said": True})
+            if where:
+                kept_exc = OffListRefused(f"{kept_exc} {where}",
+                                          field_path=exc.field_path, term=exc.term, code=exc.code, problem=exc.problem)
+            raise kept_exc from None
         result = _said_on_list(_with_answered(_with_kept(kept_overrides, reached(bundle, recorded)), bundle, before), as_said)
         if same_members:
             result = _with_same_reading(result, same_members)

@@ -162,6 +162,11 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   missing until it is answered (the set-point goes in only beside it), so the scale question blocks.
   With neither answered, both are required now and counted together in the minimum (the scale's
   `required_because` says it is asked with the set-point), so the scientist is not asked twice.
+- **An optional field asked for the whole beamtime** whose groups were mostly answered already (a File List): its
+  `field_reach` (and the text, "… reaches 9 of 78 group(s) …, the other 69 already answered per group") says which
+  groups and runs an answer there lands on; the reply to `--field` says the same. Say those groups, not "the whole
+  beamtime". When it says "careful: it would put a cell type on …" (a standard, or a run recorded ex situ), do not
+  answer it there: answer only the groups it fits (`--only group:<id>`).
 
 ## Recording
 
