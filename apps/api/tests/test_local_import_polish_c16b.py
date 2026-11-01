@@ -35,7 +35,7 @@ def _read(line: str) -> dict:
 
 
 @pytest.mark.parametrize("line", ["-0.3 V vs RHE", "-0.3V vs. RHE", "-300 mV vs RHE", "-300mV vs RHE",
-                                  "E = -0.3 V versus RHE", "-0.3V_RHE", "−0.3 V vs RHE"])
+                                  "E = -0.3 V versus RHE", "-0.3V RHE", "−0.3 V vs RHE"])
 def test_every_spelling_of_a_potential_on_rhe_reads_the_same(line):
     assert _read(line) == {SETPOINT: -0.3, SCALE: "RHE"}
 
@@ -43,21 +43,26 @@ def test_every_spelling_of_a_potential_on_rhe_reads_the_same(line):
 def test_a_potential_with_no_scale_reads_no_scale_and_a_bias_is_no_potential():
     assert _read("-300mV") == {SETPOINT: -0.3}
     assert _read("-300 mV") == {SETPOINT: -0.3}
-    assert _read("detector 1500V bias") == {}
+    assert _read("detector 1500V bias") == {SETPOINT: None}  # r1d: mentioned, not a set-point: asked, no value
     assert _read("0.1 V vs NHE") == {SETPOINT: 0.1}  # NHE is not a scale the record takes: kept as written only
     assert _read("0.1 V vs RHE then 0.5 V vs RHE") == {SETPOINT: None}  # two potentials in one line: no value
 
 
 def test_the_electrolyte_line_reads_name_concentration_and_ph_never_the_gas():
-    assert _read("100mM NaClO4 pH1.3 He") == {NAME: "NaClO4", CONC: 0.1, PH: 1.3}
+    assert _read("100 mM NaClO4, pH 1.3, He") == {NAME: "NaClO4", CONC: 0.1, PH: 1.3}
     assert _read("0.5 M H2SO4, pH 0.3") == {NAME: "H2SO4", CONC: 0.5, PH: 0.3}
     assert _read("He atmosphere") == {}
-    assert _read("0.1 M KOH + 0.5 M NaCl") == {}  # two concentrations: which is the electrolyte is not read
+    # r1d: no segment written plainly (one run of words): each field it mentions is asked, with no value
+    assert _read("100mM NaClO4 pH1.3 He") == {NAME: None, CONC: None, PH: None}
+    assert _read("0.1 M KOH + 0.5 M NaCl") == {NAME: None, CONC: None}  # two concentrations: which is not read
 
 
 def test_header_potentials_in_line_keeps_the_literal_as_written():
-    [p] = Q.header_potentials_in_line("100mM NaClO4 -0.3 V vs RHE He")
+    [p] = Q.header_potentials_in_line("100mM NaClO4, -0.3 V vs RHE, He")
     assert (p["literal"], p["scale"], p["volts"]) == ("-0.3 V vs RHE", "RHE", -0.3)
+    # r1d: a line that is not written plainly states a potential, but none is read from it (the whole line, no volts)
+    [p] = Q.header_potentials_in_line("100mM NaClO4 -0.3 V vs RHE He")
+    assert (p["literal"], p["scale"], p["volts"]) == ("100mM NaClO4 -0.3 V vs RHE He", None, None)
 
 
 # --- the import ------------------------------------------------------------------------------------------
@@ -66,7 +71,7 @@ def test_header_potentials_in_line_keeps_the_literal_as_written():
 @pytest.fixture(scope="module")
 def imported(tmp_path_factory) -> dict:
     src = tmp_path_factory.mktemp("c16b") / "SYN_bt43"
-    comments = ("100mM NaClO4 pH1.3 He", "-0.3 V vs RHE", "SYN spare 3", "SYN spare 4", "-0.9 V vs RHE")  # lines 9-13
+    comments = ("100 mM NaClO4, pH 1.3, He", "-0.3 V vs RHE", "SYN spare 3", "SYN spare 4", "-0.9 V vs RHE")  # lines 9-13
     for i in (1, 2):
         make_scan(src / f"04_SYNmof_wet_019_A.{i:03d}", free_text=comments)
         make_scan(src / f"05_SYNmof_m150mV_021_A.{i:03d}", free_text=("100mM NaClO4 pH1.3", "-300mV vs RHE"))
@@ -113,9 +118,9 @@ def test_scans_stating_different_values_give_a_candidate_with_no_value(imported)
     two = _cands(imported["bundle"], "08_SYNmof_two_024")
     assert two[SETPOINT]["value"] is None and SCALE not in two
     reason = two[SETPOINT]["state_basis"]["not_proposable_reason"]
-    # c16-r: the whole line and its place are said, with why no value was read
-    assert "more than one potential: -0.3 V vs RHE; -0.5 V vs RHE" in reason
-    assert "The comment line '-0.3 V vs RHE (was -0.5 V vs RHE)' (line 9 of 08_SYNmof_two_024_A.001)" in reason
+    # c16-r / r1d: the whole line and its place are said, and that the scientist states the value
+    assert ("The comment line '-0.3 V vs RHE (was -0.5 V vs RHE)' (line 9 of 08_SYNmof_two_024_A.001) mentions a "
+            "potential; ISAAC does not read a value from free text it cannot parse exactly") in reason
 
 
 def test_the_warning_names_each_sources_scale_never_the_same_scale(imported):

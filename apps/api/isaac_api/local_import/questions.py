@@ -59,6 +59,7 @@ import hashlib
 import json
 import operator
 import re
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Container, Mapping, Sequence
 
@@ -845,6 +846,18 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 text = (f"For information only: the files hold a reading for the {_label(path)} ({path}), and no answer here can "
                         f"reach the record ({never}). The reading stays evidence; nothing is asked.")
                 decisions_offered = list(INFORMATIONAL_DECISIONS)
+            elif (len(valueless) == len(q["targets"])
+                  and all(B.is_header_comment_candidate(cand_by_id.get(i) or {}) for i in valueless)):
+                # r1d: a scan-header comment line that mentions the field in no form the rule reads: quoted, and asked
+                lines = list(dict.fromkeys((e.get("literal_value"), e.get("locator"), e.get("relative_path"))
+                                           for i in valueless for e in (cand_by_id[i].get("evidence") or ())[:1]))
+                said = header_unread_text(path, *lines[0]) if lines else "a scan-header comment line mentions it"
+                text = (f"What is the {_label(path)} ({path})? {said[:1].upper()}{said[1:]}"
+                        + (f" ({len(lines) - 1} more comment line(s) like it: see the hints)" if len(lines) > 1 else "")
+                        + ". There is nothing to confirm: give the value (correct), reject it if no value is stated for "
+                        "this scan, or defer it.")
+                decision = "correct"
+                decisions_offered = list(VALUELESS_DECISIONS)
             elif len(valueless) == len(q["targets"]):
                 text = (f"What is the {_label(path)} ({path})? The files hold text for it (see the hints) but no value this "
                         "build can carry" + (f": {summary.rstrip('.')}" if summary else "")
@@ -2637,7 +2650,8 @@ def header_potential(token: str) -> dict | None:
     with a scale written onto it (``0.5Vrhe``, ``0.1V_vs_Hg/HgO``) states one; a token with none only at the size a
     potential can have (|V| <= :data:`HEADER_POTENTIAL_MAX_V`) and not in brackets: ``800V``, ``12V``, ``5v`` or a
     parenthesised ``(1.2V)`` (a device's setting beside its name) are not. The scale keeps its own spelling. Only
-    RECOGNISES the statement, for a warning: nothing is read as a value."""
+    RECOGNISES the statement, for a warning: nothing is read as a value. r1d: a whole comment LINE is read by
+    :func:`header_comment_readings` alone; this token rule names the scale a file-name token writes."""
     bare = token.strip(",;")
     bracketed = bare != bare.strip("()")
     bare = bare.strip("()")
@@ -2652,166 +2666,193 @@ def header_potential(token: str) -> dict | None:
     return {"literal": bare, "scale": scale}
 
 
-#: A potential written as a PHRASE in a scan-header comment line (BL4-3: ``-0.3 V vs RHE``, ``-0.3V vs. RHE``,
-#: ``-300 mV vs RHE``, ``-300mV``): a number, a space or none, ``V`` or ``mV``, and the scale named after ``vs``.
-#: Each match is checked by :func:`header_potential` (the token rule: a size bound without a scale), so the phrase
-#: and the token forms (``0.5Vrhe``) recognise the same statements. Never a value by itself.
-_HEADER_POTENTIAL_PHRASE = re.compile(
-    r"(?<![\w.])(?P<num>[-+\u2212]?(?:\d+(?:\.\d+)?|\.\d+))\s?(?P<unit>mV|V)(?![\w/])"
-    r"(?:\s*(?:vs\.?|versus)\s*(?P<scale>RHE|SHE|NHE|SCE|Ag/?AgCl|Hg/?HgO|Hg/?HgSO4|MSE)(?![A-Za-z]))?",
-    re.IGNORECASE)
-
-
-#: c16-r: the dash characters a header may write for a minus sign (U+2010-U+2015, U+2212): each is read as ``-``.
-_MINUS_LIKE = re.compile("[\u2010-\u2015\u2212]")
-#: c16-r: what follows a number's unit when the number is a RATE, not a potential (``10 mV s-1``, ``50 mV s^-1``,
-#: ``10 mV /s``; ``V/s``, ``mV/s`` and ``/dec`` are never matched as a potential at all).
-_RATE_AFTER = re.compile(r"\s*(?:/\s*s\b|s\s*\^?\s*\(?\s*-\s*1\b|/\s*dec\b)", re.IGNORECASE)
-#: c16-r: words that say a line's potential may NOT be the one held during the scan: open circuit, a half-wave or
-#: onset potential, a step amplitude, a sweep (CV, LSV), a cell voltage, what came before (``pre-``) or after
-#: (``after``, ``then``, ``->``), or a range (``from``, ``to``, ``between``). A line naming one gives no value.
-_HEADER_POTENTIAL_CAUTION = re.compile(
-    r"(?i:\bOC[PV]\b|open[\s_-]*circuit|\bE\s*1/2|onset|amplitude|sweep|\bLSV\b|\bCV\b|cell|\bpre-|\bafter\b|\bthen\b"
-    r"|\bfrom\b|\bto\b|\bbetween\b|->|\u2192)|\bdE\b")
-#: c16-r: words that say a concentration in a line may be a REFERENCE ELECTRODE'S filling or a solution standard,
-#: not the electrolyte (``-1.2 V vs Ag/AgCl 3M KCl``, ``0.5 M Na2SO4 standard``). A line naming one gives no value.
-_HEADER_ELECTROLYTE_CAUTION = re.compile(
-    r"(?i)Ag\s*/?\s*AgCl|\bSCE\b|Hg\s*/?\s*Hg|reference|\bref\b|filling|standard|\bsat(?:urated|\.)?(?![a-z])")
-
-
-def _header_text(line: str) -> str:
-    """A comment line with every minus-like dash read as ``-`` and a minus written apart from its number
-    (``- 0.3 V``) joined to it, where what comes before cannot make it a range or a difference: after a digit, a
-    bracket or a point (``1.3 - 0.3 V``) the dash stays apart, and the number after it is read as no value."""
-    text = _MINUS_LIKE.sub("-", str(line or ""))
-
-    def joined(m: re.Match) -> str:
-        before = text[:m.start()].rstrip()
-        return "-" if not before or not (before[-1].isdigit() or before[-1] in ").") else m.group(0)
-
-    return re.sub(r"-\s+(?=\.?\d)", joined, text)
-
-
-def _refused_number(text: str, m: re.Match) -> str | None:
-    """Why a potential-shaped match of :data:`_HEADER_POTENTIAL_PHRASE` is NOT read as a value, or ``None``:
-    ``"rate"`` for a sweep rate (not a potential at all), else what makes its number or sign uncertain."""
-    if _RATE_AFTER.match(text, m.end("unit")):
-        return "rate"
-    before = text[:m.start()]
-    signed = m.group("num")[:1] in "+-"
-    for pattern, why in ((r"\d,$", "a comma decimal"), (r"/\s*$", "a number after a slash"),
-                         (r"(?i)\b(?:to|from)\s*$", "a number after to/from"), (r"\d[eE][-+]?$", "an exponent"),
-                         (r"[-+\u00b1]\s*$", "two signs" if signed else "a sign apart from its number")):
-        if re.search(pattern, before):
-            return why
-    return None
-
-
-def _header_potential_scan(line: str) -> tuple[list[dict], list[str]]:
-    """``(potentials, refused)`` of one scan-header comment LINE: each potential read as stated (see
-    :func:`header_potentials_in_line`) and why each other potential-shaped number was NOT read (a comma decimal,
-    a number after ``/``, ``to`` or ``from``, an uncertain sign). A sweep rate is neither."""
-    text = _header_text(line)
-    out: list[dict] = []
-    refused: list[str] = []
-    spans: list[tuple[int, int]] = []
-    for m in _HEADER_POTENTIAL_PHRASE.finditer(text):
-        why = _refused_number(text, m)
-        compact = m.group("num") + m.group("unit") + (f"_{m.group('scale')}" if m.group("scale") else "")
-        got = header_potential(compact)
-        if why == "rate" or got is None:
-            if why == "rate":
-                spans.append(m.span())
-            continue
-        spans.append(m.span())
-        if why:
-            # what was not read, with the text just before it (``-0,3 V``, ``-0.3/-0.5 V``, ``to 0.2 V``)
-            refused.append(f"{why}: {' '.join((re.search(r'[^ ]*[ ]?$', text[:m.start()]).group(0) + m.group(0)).split())!r}")
-            continue
-        out.append({"literal": " ".join(m.group(0).split()), "scale": got["scale"], "volts": _token_volts(compact),
-                    "compact": compact, "start": m.start()})
-    for m in re.finditer(r"\S+", text):
-        if any(a < m.end() and m.start() < b for a, b in spans):
-            continue
-        got = header_potential(m.group(0))
-        if got is not None:
-            out.append({"literal": got["literal"], "scale": got["scale"], "volts": _token_volts(got["literal"]),
-                        "compact": got["literal"], "start": m.start()})
-    return [{k: v for k, v in x.items() if k != "start"} for x in sorted(out, key=lambda x: x["start"])], refused
-
-
-def header_potentials_in_line(line: str) -> list[dict]:
-    """``[{"literal", "scale", "volts", "compact"}]``: each potential a scan-header comment LINE states, in order —
-    the phrase forms (:data:`_HEADER_POTENTIAL_PHRASE`) and, in what is left, the token forms
-    (:func:`header_potential`). ``literal`` is the text as written; ``scale`` its own spelling or ``None`` (none
-    named); ``volts`` the number the spelling writes (:func:`_token_volts`), ONLY to compare statements. c16-r: a
-    minus-like dash (``–0.3 V``, ``- 0.3 V``) is a minus; a number after a comma decimal (``-0,3 V``), a slash, ``to``
-    or ``from``, or with an uncertain sign is not listed, nor a rate (``10 mV s-1``)."""
-    return _header_potential_scan(line)[0]
-
-
-#: A pH written in a comment line: ``pH1.3``, ``pH 13``, ``pH=7``, ``pH1p3`` (``p`` for the decimal point, as in
-#: the file names, ``template._PH_TOKEN``).
-_HEADER_PH = re.compile(r"(?<![A-Za-z])pH\s*[=:]?\s*(?P<v>\d+(?:[.p]\d+)?)(?![\d.A-Za-z])")
-#: An electrolyte NAME written after its concentration (``100mM NaClO4``, ``0.5 M H2SO4``): a formula's shape.
-_FORMULA = re.compile(r"^(?:[A-Z][a-z]?\d*|\((?:[A-Z][a-z]?\d*)+\)\d*)+$")
 #: The reference-electrode scales the record's ``potential_scale`` takes (the official schema's enum), each
 #: in the schema's spelling: a scale outside it (NHE, MSE) is kept as written and proposes no scale.
 POTENTIAL_SCALES = ("RHE", "SHE", "Ag/AgCl", "SCE", "Hg/HgO", "Hg/HgSO4")
 SCALE_PATH = "context.electrochemistry.potential_scale"
 
 
-def header_comment_readings(line: str) -> list[dict]:
-    """What ONE scan-header comment line states, by pattern, for the record's fields (rule
-    ``bundle.XDC_COMMENT_RULE_ID``): ``[{"path", "value", "literal", "unit"}]`` — the electrolyte name and its
-    concentration in mol/L (one concentration in the line, the formula after it:
-    :func:`template.electrolyte_statement_parts` reads the pair), the pH, the potential in volts and its scale
-    (:func:`header_potentials_in_line`). Free text read by a pattern: each becomes a candidate that NEEDS REVIEW,
-    never a confirmed value. A gas or atmosphere word is not read: the bundle has no write route for an atmosphere
-    field.
+# --- THE COMMENT RULE'S GRAMMAR (r1d): a value only where a whole SEGMENT of the line is written plainly ------------
+#
+# A comment line is free text a scientist typed at the beamline. Patching a reader of free text against each
+# misreading still left confidently wrong values (``1e-3 M KCl`` as 3 M, ``NiFe - 1.55 V`` as -1.55 V, ``eta = 300
+# mV`` as a set-point), so the rule is a WHITELIST: the line is split into segments (:func:`comment_segments`), and
+# a value is offered only where a whole segment is one statement in a strict grammar (a set-point, a pH, an
+# electrolyte) and nothing else in the line can make it a different quantity. Every other line that mentions the
+# field gives a candidate with NO value that quotes the line: the scientist says the value.
 
-    c16-r: ``literal`` is the WHOLE line (what the scientist checks the value against). A reading the line does not
-    state plainly is ``ambiguous`` with NO value and says ``why``: a line naming two potentials, a potential number
-    not read (a comma decimal, after ``/``, ``to`` or ``from``, an uncertain sign), or a word that says the potential
-    may not be the one held (:data:`_HEADER_POTENTIAL_CAUTION`: OCP, E1/2, onset, a sweep, a cell, a range, ...); an
-    electrolyte beside a reference-electrode or standard word (:data:`_HEADER_ELECTROLYTE_CAUTION`)."""
-    from .template import _CONCENTRATION_IN_NAME, ELECTROLYTE_CONC_PATH, ELECTROLYTE_NAME_PATH, PH_PATH, POTENTIAL_PATH
-    from .template import electrolyte_statement_parts
+#: where a comment line splits into segments: ``,`` ``;`` ``|`` and runs of two or more spaces
+_SEGMENT_SEPARATOR = re.compile(r"\s*[,;|]\s*|\s{2,}")
+#: a segment that ENDS in a number standing alone (``-0``, ``pH 1``, ``1``): a separator after it with no space
+#: before the next digit, or of spaces only, may be a comma decimal or a digit group (``-0,3 V``, ``pH 1,3``,
+#: ``1  000 mV``), so neither side is read (``pH 1.3, 0.1 M HClO4`` is two statements)
+_ENDS_IN_A_NUMBER = re.compile(r"(?:^|[^\w.])[-+\u2212\u2013]?[\d.]*\d$")
+#: the scales a set-point segment may name after ``vs``, in the spelling the warnings use (only
+#: :data:`POTENTIAL_SCALES` is proposed as the record's scale)
+_SCALE_NAMES = {s.casefold(): s for s in (*POTENTIAL_SCALES, "NHE", "MSE", "Li/Li+")}
+_SCALES = "|".join(re.escape(s) for s in sorted(_SCALE_NAMES.values(), key=len, reverse=True))
+#: A SET-POINT segment, the whole of it: an optional label (``E``, ``E =``, ``E:``, ``potential``, ``potential:``,
+#: ``held at``, ``at``, ``@``); a sign written onto the number (``+``, ``-``, U+2212, an en dash); a plain decimal
+#: (``0.3``, ``.3``); ``V`` or ``mV``; and an optional scale (``vs RHE``, ``vs. Ag/AgCl``, ``versus SCE``, ``(RHE)``,
+#: a bare ``RHE``).
+_SETPOINT_SEGMENT = re.compile(
+    r"(?:(?:E|potential)(?:\s*[=:]\s*|\s+)|held\s+at\s+|at\s+|@\s*)?"
+    r"(?P<sign>[-+\u2212\u2013])?(?P<num>\d+(?:\.\d+)?|\.\d+)\s?(?P<unit>(?-i:mV|V|mv|v))"
+    rf"(?:\s*(?:vs\.?|versus)\s*(?P<vs>{_SCALES})|\s*\((?P<paren>{_SCALES})\)|\s+(?P<bare>RHE))?",
+    re.IGNORECASE)
+#: a POTENTIAL-LIKE number anywhere in a line: one with a voltage unit (``V``, ``mV``, ``kV``, ``µV``) or a sign
+#: (``-0.5``, ``± 0.01``). A set-point is offered only when its own number is the line's only one.
+_POTENTIAL_LIKE = re.compile(r"(?<![\w.])(?P<sign>[-+\u2212\u2010-\u2015\u00b1~]\s?)?(?:\d+(?:[.,]\d+)?|[.,]\d+)"
+                             r"(?P<unit>\s*(?:[kmu\u00b5\u03bc]?V|mv|v(?![a-z])))?")
+#: words that say a line's potential may not be the one held during the scan (open circuit, a half-wave, onset or
+#: over-potential, a step, amplitude or difference, a rate or a Tafel slope, a sweep, a current or galvanostatic
+#: control, what came before or after, an offset, bias or gain, an iR drop, an edge, a cell voltage, a range, and a
+#: reference electrode: ``RE: 3.5 M KCl, -0.4 V``)
+_SETPOINT_CONTEXT = re.compile(
+    r"(?i:OC[PV]|open[\s_-]*circuit|(?<![a-z])rest|E\s*(?:1/2|\u00bd)|onset|overpotential|(?<![a-z])eta(?![a-z])"
+    r"|\u03b7|\u0394|(?<![a-z])delta|(?<![a-z])step|amplitude|(?<![a-z])rate|/\s*s(?![a-z])"
+    r"|(?<![a-z])s\s*\^?\(?\s*[-\u2212\u207b]\s*[1\u00b9]|(?<![a-z])dec|tafel|(?<![a-z])(?:cv|lsv|cp)(?![a-z])"
+    r"|(?<![a-z])sweep|(?<![a-z])scan|galvano|chronopot|(?<![a-z])current|(?<![a-z])pre|(?<![a-z])post"
+    r"|(?<![a-z])(?:before|after|then|to|from)(?![a-z])|(?<![a-z])prior|(?<![a-z])activat|(?<![a-z])condition"
+    r"|ex[\s_-]*situ|offset|(?<![a-z])bias|(?<![a-z])gain|(?<![a-z])amp|(?<![a-z])ir(?![a-z])|(?<![a-z])drop|edge"
+    r"|cell|->|\u2192|(?<![a-z])ref(?:erence)?(?![a-z]))|(?<![A-Za-z])(?:dE|mA|RE)(?![a-z])")
+#: any voltage a line writes (``-0.3 V``, ``0.5Vrhe``, ``300mV``): the line MENTIONS a potential
+_VOLTS_MENTIONED = re.compile(r"\d\s*(?:m?V|mv|v(?![a-z]))")
+#: A pH segment, the whole of it: ``pH 1.3``, ``pH=12.5``, ``pH7``
+_PH_SEGMENT = re.compile(r"pH\s*=?\s*(?P<v>\d{1,2}(?:\.\d+)?)")
+_PH_MENTIONED = re.compile(r"(?<![A-Za-z])pH(?![a-z])")
+#: a pH range or a comma decimal anywhere in the line (``pH 6.8-7.2``, ``pH 7 to 10``, ``pH 1,3``)
+_PH_RANGE = re.compile(r"pH\s*[=:]?\s*\d+(?:\.\d+)?(?:,\d|\s*(?:[-\u2010-\u2015\u2212~]|to(?![a-z]))\s*\d)")
+#: words that say a line's concentration may be a reference electrode's filling, a salt bridge, a standard, a
+#: precursor or one part of a mixture, not the electrolyte (``salt bridge 3 M KCl``, ``Ag/AgCl 3M KCl``)
+_ELECTROLYTE_CONTEXT = re.compile(
+    r"(?i:Ag\s*/\s*AgCl|(?<![a-z])SCE(?![a-z])|Hg\s*/\s*Hg|(?<![a-z])ref|bridge|junction|filling|(?<![a-z])inner"
+    r"|(?<![a-z])outer|standard|(?<![a-z])sat(?:\.|urated|(?![a-z]))|precursor|additive|(?<![a-z])and(?![a-z]))"
+    r"|\+|(?<![A-Za-z])RE(?![A-Za-z])")
+#: why a field a line mentions gives no value (the reading's ``why``)
+HEADER_UNREAD_WHY = "not written in a form ISAAC reads exactly"
+#: what a line that mentions a field is said to mention, per field (:func:`header_unread_text`)
+_HEADER_MENTIONS = {
+    "context.electrochemistry.potential_setpoint_V": "a potential",
+    "context.electrochemistry.pH": "a pH",
+    "context.electrochemistry.electrolyte.name": "an electrolyte",
+    "context.electrochemistry.electrolyte.concentration_M": "an electrolyte concentration",
+}
+
+
+def comment_segments(line: str) -> list[tuple[str, bool]]:
+    """``[(segment, readable)]`` of a comment line: its text split at :data:`_SEGMENT_SEPARATOR`, each stripped. A
+    segment beside a separator that has a number standing alone before it and a digit after it (``-0,3``, ``pH
+    1,3``, ``1  000``) is NOT readable: the separator may be a comma decimal or a digit group."""
+    text = str(line or "").strip()
+    parts, seps, at = [], [], 0
+    for m in _SEGMENT_SEPARATOR.finditer(text):
+        parts.append(text[at:m.start()])
+        seps.append(m.group(0))
+        at = m.end()
+    parts.append(text[at:])
+    readable = [bool(p) for p in parts]
+    for i, sep in enumerate(seps):
+        joined = not sep[-1].isspace() or not sep.strip()  # ``1,3`` or ``1  000``; never ``pH 7, 10 mM``
+        if joined and _ENDS_IN_A_NUMBER.search(parts[i]) and parts[i + 1][:1] in ".0123456789":
+            readable[i] = readable[i + 1] = False
+    return [(p, ok) for p, ok in zip(parts, readable) if p]
+
+
+def header_setpoint(segment: str) -> dict | None:
+    """``{"literal", "scale", "volts"}`` when ``segment`` is, as a whole, a set-point (:data:`_SETPOINT_SEGMENT`), else
+    ``None``. ``scale`` is the one named, in :data:`_SCALE_NAMES`' spelling, or ``None``; with none named the size
+    must be one a potential can have (|V| <= :data:`HEADER_POTENTIAL_MAX_V`): ``5 V`` alone is no set-point."""
+    m = _SETPOINT_SEGMENT.fullmatch(segment.strip())
+    if m is None:
+        return None
+    volts = Decimal(m.group("num")) / (1000 if m.group("unit").lower() == "mv" else 1)
+    if m.group("sign") not in (None, "+"):
+        volts = -volts
+    written = m.group("vs") or m.group("paren") or m.group("bare")
+    scale = _SCALE_NAMES[written.casefold()] if written else None
+    if scale is None and abs(volts) > Decimal(str(HEADER_POTENTIAL_MAX_V)):
+        return None
+    return {"literal": segment.strip(), "scale": scale, "volts": float(volts) + 0.0}
+
+
+def header_comment_readings(line: str) -> list[dict]:
+    """What ONE scan-header comment line states for the record's fields (rule ``bundle.XDC_COMMENT_RULE_ID``):
+    ``[{"path", "value", "literal", "unit"}]``, ``literal`` the WHOLE line (what the scientist checks the value
+    against). Each becomes a candidate that NEEDS REVIEW, never a confirmed value. No gas is read (no write route).
+
+    r1d, A WHITELIST: a value is offered only where a whole segment (:func:`comment_segments`) is one plain statement
+    and the line gives no reason to doubt it —
+
+    * the set-point (volts) and its scale: a segment :func:`header_setpoint` reads, the line's only potential-like
+      number (:data:`_POTENTIAL_LIKE`), and none of :data:`_SETPOINT_CONTEXT`'s words in the line (OCP, onset, eta,
+      a step, a rate, a sweep, galvanostatic, pre-/post-, then, an offset, a cell, a range, ...); the scale only
+      when it is one the record takes (:data:`POTENTIAL_SCALES`);
+    * the pH: a segment ``pH 1.3`` / ``pH=1.3``, the line's only pH, with no range or comma decimal after it;
+    * the electrolyte name and concentration (mol/L): the line's one segment ``template.electrolyte_statement``
+      reads (the template's own grammar), the line's only concentration, and none of :data:`_ELECTROLYTE_CONTEXT`'s
+      words (a reference, a bridge, a filling, a standard, ``+``, ``and``).
+
+    A field the line MENTIONS (a voltage, ``pH``, a concentration) and gives no value for is a reading with NO
+    value, ``ambiguous`` and ``why``: the scientist says the value."""
+    from .template import (_CONCENTRATION_IN_NAME, ELECTROLYTE_CONC_PATH, ELECTROLYTE_NAME_PATH, PH_PATH, POTENTIAL_PATH,
+                           electrolyte_statement)
 
     text = str(line or "").strip()
+    segments = [seg for seg, readable in comment_segments(text) if readable]
     out: list[dict] = []
-    concs = list(_CONCENTRATION_IN_NAME.finditer(text))
-    if len(concs) == 1:
-        m = concs[0]
-        after = text[m.end():].split()
-        name = after[0].strip(",;") if after else ""
-        parts = electrolyte_statement_parts(f"{m.group(0)} {name}") if _FORMULA.match(name) else None
-        if parts:
-            caution = _HEADER_ELECTROLYTE_CAUTION.search(text)
-            if caution is not None:
-                why = f"the line also names {caution.group(0)!r}: the concentration may be a reference electrode's filling or a standard"
-                out.append({"path": ELECTROLYTE_NAME_PATH, "value": None, "literal": text, "unit": None, "ambiguous": True, "why": why})
-                out.append({"path": ELECTROLYTE_CONC_PATH, "value": None, "literal": text, "unit": "M", "ambiguous": True, "why": why})
-            else:
-                out.append({"path": ELECTROLYTE_NAME_PATH, "value": parts[0], "literal": text, "unit": None})
-                out.append({"path": ELECTROLYTE_CONC_PATH, "value": parts[1], "literal": text, "unit": "M"})
-    phs = list(_HEADER_PH.finditer(text))
-    if len(phs) == 1:
-        v = phs[0].group("v").replace("p", ".")
-        out.append({"path": PH_PATH, "value": float(v), "literal": text, "unit": None})
-    pots, refused = _header_potential_scan(text)
-    caution = _HEADER_POTENTIAL_CAUTION.search(_header_text(text)) if pots or refused else None
-    if len(pots) == 1 and pots[0]["volts"] is not None and not refused and caution is None:
+
+    def unread(path: str, unit: str | None) -> None:
+        out.append({"path": path, "value": None, "literal": text, "unit": unit, "ambiguous": True, "why": HEADER_UNREAD_WHY})
+
+    stated = [got for seg in segments if (got := electrolyte_statement(seg)) is not None]
+    if (len(stated) == 1 and len(list(_CONCENTRATION_IN_NAME.finditer(text))) == 1
+            and _ELECTROLYTE_CONTEXT.search(text) is None):
+        out.append({"path": ELECTROLYTE_NAME_PATH, "value": stated[0]["name"], "literal": text, "unit": None})
+        out.append({"path": ELECTROLYTE_CONC_PATH, "value": stated[0]["concentration_M"], "literal": text, "unit": "M"})
+    elif _CONCENTRATION_IN_NAME.search(text):
+        unread(ELECTROLYTE_NAME_PATH, None)
+        unread(ELECTROLYTE_CONC_PATH, "M")
+    phs = [m for seg in segments if (m := _PH_SEGMENT.fullmatch(seg)) is not None]
+    if len(phs) == 1 and len(_PH_MENTIONED.findall(text)) == 1 and _PH_RANGE.search(text) is None:
+        out.append({"path": PH_PATH, "value": float(phs[0].group("v")), "literal": text, "unit": None})
+    elif _PH_MENTIONED.search(text):
+        unread(PH_PATH, None)
+    pots = [got for seg in segments if (got := header_setpoint(seg)) is not None]
+    like = sum(1 for m in _POTENTIAL_LIKE.finditer(text) if m.group("sign") or m.group("unit"))
+    if len(pots) == 1 and like == 1 and _SETPOINT_CONTEXT.search(text) is None:
         pot = pots[0]
-        out.append({"path": POTENTIAL_PATH, "value": pot["volts"], "literal": text, "unit": "V", "scale": pot["scale"]})
+        out.append({"path": POTENTIAL_PATH, "value": pot["volts"], "literal": text, "unit": "V", "scale": pot["scale"],
+                    "segment": pot["literal"]})
         if pot["scale"] in POTENTIAL_SCALES:
             out.append({"path": SCALE_PATH, "value": pot["scale"], "literal": text, "unit": None})
-    elif pots or refused:
-        # which potential the run was held at, if any, is the scientist's call (no value)
-        why = (refused[0] if refused else f"the line says {caution.group(0)!r}" if caution is not None
-               else f"the line names more than one potential: {'; '.join(p['literal'] for p in pots)}")
-        out.append({"path": POTENTIAL_PATH, "value": None, "literal": text, "unit": "V", "ambiguous": True, "why": why})
+    elif _VOLTS_MENTIONED.search(text):
+        unread(POTENTIAL_PATH, "V")
     return out
+
+
+def header_potentials_in_line(line: str) -> list[dict]:
+    """``[{"literal", "scale", "volts"}]``: the potential a scan-header comment LINE states, for the warnings of a
+    line no candidate holds (``stated_potentials_beyond_candidates``). The set-point :func:`header_comment_readings`
+    reads (``literal`` its segment, ``-0.3 V vs RHE``; ``scale`` as named; ``volts`` ONLY to compare statements), or,
+    for a line that mentions a potential it reads no value from, the whole line with no scale and no volts."""
+    from .template import POTENTIAL_PATH
+
+    got = next((r for r in header_comment_readings(line) if r["path"] == POTENTIAL_PATH), None)
+    if got is None:
+        return []
+    if got["value"] is None:
+        return [{"literal": got["literal"], "scale": None, "volts": None}]
+    return [{"literal": got["segment"], "scale": got["scale"], "volts": got["value"]}]
+
+
+def header_unread_text(path: str, line: str, locator: Any, relative_path: Any) -> str:
+    """What a candidate with no value from a comment line says (r1d): the line, where it is, what it mentions, and
+    that the scientist states the value."""
+    where = str(locator or "").replace("line:", "line ")
+    return (f"the comment line {_quoted(line)}" + (f" ({where} of {relative_path})" if where and relative_path else "")
+            + f" mentions {_HEADER_MENTIONS.get(path, 'this field')}; ISAAC does not read a value from free text it "
+            "cannot parse exactly; tell me the value held during this scan, or say it isn't stated")
 
 
 def _generic_member_runs(bundle: Mapping, member_ids: set) -> list[Mapping]:
@@ -2881,12 +2922,15 @@ def stated_potential_notes(w: Mapping) -> str:
         return ""
     scales = sorted({s["scale"] for s in header if s.get("scale")})
     lits = list(dict.fromkeys(stated_literal(s) for s in header))
-    read = all(s.get("candidate_id") for s in header)  # c16b: read from the line as values that need review
+    held = all(s.get("candidate_id") for s in header)  # c16b: the comment rule's candidates hold the lines
+    read = held and any(s.get("read_as_V") is not None for s in header)  # r1d: a value, read from a plain form
     text = (f" {', '.join(lits[:3])}{', …' if len(lits) > 3 else ''} {'is' if len(lits) == 1 else 'are'} written in the "
             "scan header (a comment line), not the file name"
             + ((f", with the scale ({', '.join(scales)})" if scales else "")
                + "; read from that free-text line, the set-point" + (" and the scale" if scales else "")
                + " need your review (confirm or correct)" if read else
+               "; no value is read from that free-text line (not written in a plain form), so the set-point is asked: "
+               "the value held during the scan" if held else
                f", with the scale ({', '.join(scales)}); no reader reads the set-point or the scale from it, so both "
                "are asked" if scales else "") + ".")
     by_run: dict[str, dict[str, list[tuple[str, str | None, float | None]]]] = {}

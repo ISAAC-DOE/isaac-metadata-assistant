@@ -1468,16 +1468,19 @@ LOCAL_CLOCK_NONEXISTENT = "nonexistent_in_zone"
 #: THE COMMENT RULE (``ssrl_xdc_header_comment_v1``, applied at import by :func:`_xdc_comment_candidates`): the
 #: comment lines of an ``ssrl_xdc_v1`` scan header (lines 9-12; the ``.exp`` COMMENTS1-4: line 8 is the gain line,
 #: ``readers.ssrl_xdc``) are free text a scientist
-#: typed at the beamline, e.g. ``100mM NaClO4 pH1.3 He`` and ``-0.3 V vs RHE``. What a line states by pattern
-#: (``questions.header_comment_readings``: the electrolyte and its concentration, the pH, the potential and the scale
-#: written after ``vs``) becomes ONE candidate per run and field that NEEDS REVIEW: never proposable, never
-#: confirmed until a scientist confirms (or corrects) it. A gas or atmosphere word is not read (no write route).
+#: typed at the beamline, e.g. ``0.1 M HClO4, pH 1.3, -0.3 V vs RHE``. What a line states in a PLAIN form
+#: (``questions.header_comment_readings``, a whitelist: a whole segment of the line that is one set-point, pH or
+#: electrolyte statement, and nothing else in the line that makes it doubtful) becomes ONE candidate per run and field
+#: that NEEDS REVIEW: never proposable, never confirmed until a scientist confirms (or corrects) it. A field a line
+#: only mentions (``100mM NaClO4 pH1.3 He``, ``eta = 300 mV``) is a candidate with NO value that quotes the line: the
+#: scientist states the value. A gas or atmosphere word is not read (no write route).
 XDC_COMMENT_RULE_ID = "ssrl_xdc_header_comment_v1"
 XDC_COMMENT_RULE = (
     f"{XDC_COMMENT_RULE_ID}: a comment line of the run's SSRL EXAFS Data Collector 4.0 scan headers (lines 9-12, the "
-    "experiment file's COMMENTS1-4) that writes an electrolyte after its concentration, a pH, or a potential (the "
-    "scale named after `vs`) is read by pattern into a candidate that NEEDS REVIEW. The line is free text, so the "
-    "value is never proposed or confirmed until a scientist confirms or corrects it."
+    "experiment file's COMMENTS1-4) that writes an electrolyte and its concentration, a pH, or a potential (and its "
+    "scale) in a plain form is read into a candidate that NEEDS REVIEW; a line that only mentions one gives a "
+    "candidate with no value that quotes the line. The line is free text, so the value is never proposed or "
+    "confirmed until a scientist confirms or corrects it."
 )
 XDC_COMMENT_LINES = range(9, 13)
 #: the reader's key for those lines (line 8, ``header_line_8_literal``, is the gain line and is never read)
@@ -1533,7 +1536,7 @@ def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_
     scans that state DIFFERENT values give a candidate with no value (it says which). Built through the engine's
     own candidate type and :func:`_candidate_record`, so its shape is every other candidate's."""
     from .. import historical_import as hist
-    from .questions import header_comment_readings
+    from .questions import header_comment_readings, header_unread_text
 
     scans = {sc.get("relative_path") for sc in run_scans}
     found: dict[str, list[tuple]] = {}
@@ -1570,11 +1573,10 @@ def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_
             })
         ambiguous = [h for h in hits if h[4].get("ambiguous")]
         if ambiguous:
-            # c16-r: the whole line and why no value was read from it (a range, OCP, a comma decimal, a filling, ...)
-            _i, a_rel, a_loc, a_line, a_reading = ambiguous[0]
-            reason = (f"The comment line {a_line!r} ({a_loc.replace(':', ' ')} of {a_rel}) does not state one value "
-                      f"for this plainly ({a_reading.get('why') or 'more than one value'}), so none was read: a "
-                      "scientist says which value, if any, applied during the scan.")
+            # r1d: the line mentions the field in no form the whitelist reads: it is quoted, and the scientist says
+            _i, a_rel, a_loc, a_line, _reading = ambiguous[0]
+            said = header_unread_text(path, a_line, a_loc, a_rel)
+            reason = f"{said[:1].upper()}{said[1:]}."
         elif value is None:
             reason = ("The scans' comment lines state different values ("
                       + "; ".join(dict.fromkeys(h[4]["literal"] for h in hits[:4])) + "): a scientist says which is right.")

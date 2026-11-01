@@ -45,8 +45,8 @@ SETPOINT, SCALE = "context.electrochemistry.potential_setpoint_V", "context.elec
 MODE = "context.electrochemistry.control_mode"
 #: name -> (first scan's local time, header comment line, scans)
 RUNS = {
-    "SYN_cat_500mV_101": ("2099-07-14T10:00:00", "SYN sample in 1M KOH 0.5Vrhe", 2),
-    "SYN_cat_m600mV_102": ("2099-07-14T11:00:00", "SYN sample in 1M KOH 0Vrhe", 1),
+    "SYN_cat_500mV_101": ("2099-07-14T10:00:00", "SYN sample in 1M KOH, 0.5 V vs RHE", 2),
+    "SYN_cat_m600mV_102": ("2099-07-14T11:00:00", "SYN sample in 1M KOH, 0 V vs RHE", 1),
     "SYN_cat_OCV_103": ("2099-07-14T12:00:00", "SYN sample in 1M KOH", 1),
     "SYN_align_104": ("2099-07-14T13:00:00", "trans_e.adet", 1),
 }
@@ -307,13 +307,13 @@ def test_a_potential_in_the_name_and_the_header_names_both_steps_and_the_headers
     assert w["code"] == R.STATED_POTENTIAL_WARNING and w["needs"] == SCALE and w["also_needs"] == SETPOINT
     # c16-r: a header statement's literal is its whole comment line
     assert [(s["literal"], s["stated_in"]) for s in w["stated"]] == [("500mV", "file name"),
-                                                                    ("SYN sample in 1M KOH 0.5Vrhe", "scan header")]
+                                                                    ("SYN sample in 1M KOH, 0.5 V vs RHE", "scan header")]
     name, header = w["stated"]
     assert name["read_as_V"] is None and name["candidate_id"] is None  # nothing is read from a file name here
     # c16b: the header's comment line is read into candidates that need review (rule ssrl_xdc_header_comment_v1)
     assert header["read_as_V"] == 0.5 and header["value_state"] == B.STATE_NEEDS_REVIEW and header["scale"] == "RHE"
     text = w["text"]
-    assert "500mV" in text and "'SYN sample in 1M KOH 0.5Vrhe' is written in the scan header" in text and "(RHE)" in text
+    assert "500mV" in text and "'SYN sample in 1M KOH, 0.5 V vs RHE' is written in the scan header" in text and "(RHE)" in text
     assert "set-point" in text and "scale" in text and "DISAGREE" not in text
     assert "the set-point and the scale need your review (confirm or correct)" in text
     assert text.count("--decision confirm") == 2  # both steps: the header's scale and its set-point
@@ -325,7 +325,7 @@ def test_a_name_and_a_header_that_write_different_numbers_are_both_named(grouped
     rid = _run_id(b, "SYN_cat_m600mV_102")
     # c8-r: the name writes no scale and the header writes RHE, so they may be one potential on two scales: never
     # "disagree", the scientist is asked which applies
-    assert (f"write different numbers for 1 run(s) ({rid}: file name m600mV, scan header 'SYN sample in 1M KOH 0Vrhe' "
+    assert (f"write different numbers for 1 run(s) ({rid}: file name m600mV, scan header 'SYN sample in 1M KOH, 0 V vs RHE' "
             "(file name: no scale; scan header: RHE)), and nothing says both are on one scale: ask which applies") in w["text"]
     assert "disagree for" not in w["text"].lower() and "neither is used" in w["text"]
 
@@ -352,7 +352,7 @@ def test_validate_and_the_minimum_carry_the_warnings(grouped, capsys):
     gid = next(g["group_id"] for g in b["record_groups"] if _run_id(b, "SYN_cat_m600mV_102") in g["member_run_ids"])
     minimum = Q.minimum_answers_for_one_group(Q.consolidate(b), b, scope=f"group:{gid}")
     assert sorted(f for r in minimum["recommended"] for f in r["fields"]) == sorted([SCALE, SETPOINT])
-    assert all("0Vrhe" in r["why"] for r in minimum["recommended"])
+    assert all("0 V vs RHE" in r["why"] for r in minimum["recommended"])
 
 
 def test_no_candidate_is_added_for_a_file_name_potential(grouped):

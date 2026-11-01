@@ -1032,8 +1032,11 @@ def _stated_potential_warnings(bundle: Mapping, group: Mapping, member_ids: set,
                 if o.get("target_field_path") == path and o.get("run_id") in member_ids
                 and o.get("value_state") in (B.STATE_MISSING, B.STATE_NEEDS_REVIEW, B.STATE_CANDIDATE_EXTRACTED)]
 
+    valued = {c["candidate_id"] for c in bundle["candidates"] if c.get("value") is not None}
+
     def command_for(path: str, targets: Sequence[str]) -> str:
-        if targets and targets[0].startswith("cand-") and path == SETPOINT_PATH:
+        # r1d: a candidate with no value (a comment line not written plainly) is answered with its value, not confirmed
+        if targets and targets[0] in valued and path == SETPOINT_PATH:
             command = f'isaac bundle decide <bundle_dir> --target {targets[0]} --decision confirm --by "<your name>"'
         elif targets:
             command = (f"isaac bundle decide <bundle_dir> --target {targets[0]} --decision correct --value "

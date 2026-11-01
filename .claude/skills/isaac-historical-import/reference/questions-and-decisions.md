@@ -68,14 +68,15 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   and sorts last; do not ask it again unless they offer an answer (`--skip-deferred` leaves them out).
   A question they did not answer at all is not deferred: record nothing.
 - **Values read from an SSRL XDC scan header's comment lines** (rule `ssrl_xdc_header_comment_v1`: lines 9-12,
-  the `.exp` COMMENTS1-4; line 8 is the gain line and is not read; e.g. `100mM NaClO4 pH1.3 He`, `-0.3 V vs RHE`):
-  the electrolyte and its concentration, the pH, the potential and its scale are candidates that always need
-  review. The question quotes the whole line and its line number; ask the scientist to check it is the value
-  held during that scan, and confirm or correct each. A line that does not state one value plainly gives none
-  (ask which, if any): two potentials, a range (`-0.3 to 0.2 V`, `CV from …`), OCP/E1/2/onset/amplitude/a
-  cell voltage, `pre-`/`after`/`then`, a comma decimal (`-0,3 V`), a number after `/`; an electrolyte beside
-  `Ag/AgCl`, `SCE`, `reference`, `filling` or `standard` (a reference filling, not the electrolyte). A rate
-  (`10 mV s-1`) is no potential. No gas is read.
+  the `.exp` COMMENTS1-4; line 8 is the gain line and is not read): a value is offered ONLY when the line writes
+  it in a plain form, each statement its own segment (split at `,` `;` `|` or two spaces), e.g. `0.1 M HClO4,
+  pH 1.3, -0.3 V vs RHE` (a set-point `E = -0.3 V (RHE)`, `-300 mV vs RHE`; a pH `pH 1.3`; an electrolyte
+  `100 mM NaClO4` or `KOH 1 M`), and nothing else in the line makes it doubtful (a second potential, OCP, eta,
+  a step or rate, a sweep, `pre-`/`then`, an offset, a range; a reference, bridge or filling beside an
+  electrolyte). Such values always need review: the question quotes the whole line and its line number; ask the
+  scientist to check it is the value held during that scan, and confirm or correct each. Otherwise
+  (`100mM NaClO4 pH1.3 He`, `1e-3 M KCl`, `eta = 300 mV`) the line is quoted with NO value: ask the scientist
+  to state the value (`correct`), or `reject` when the line states none for that scan. No gas is read.
 - **A conflict with `affects_record: false`** (`no_record_field`): the readings differ, but no record
   field carries them (a comment line, a unit spelling). Say how many there are; do not ask each.
 - **A conflict with `covered_by_decisions`** (also `affects_record: false`; counted in

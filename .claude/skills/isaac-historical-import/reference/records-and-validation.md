@@ -31,11 +31,11 @@ confirmed, with the command that lets it in. When no set-point was read from the
 such as `-500mV`) and no scale is confirmed, the warning names BOTH (`also_needs`, `also_command`): ask the
 set-point in volts and the scale together, so the scientist is not asked twice. A run a generic reader found
 (SSRL XDC) warns too: from its file name (`500mV`, `m600mV`, `1800mV`) and from a scan-header comment
-token (`0.5Vrhe`, with the scale written on it, spelled as written: `Hg/HgO`, `Ag/AgCl`; a header token
-with no scale counts only at |V| ≤ 3 and not in brackets, so `800V`, `12V` or `(1.2V)` is not a
-potential); a run whose name and header write different numbers on the SAME named scale is named as a
+line (a set-point written in the plain form, `0.5 V vs RHE`, with its scale spelled as written: `Hg/HgO`,
+`Ag/AgCl`; a line that only mentions a potential, such as `sample in 1M KOH 0.5Vrhe`, is named with no
+number read from it); a run whose name and header write different numbers on the SAME named scale is named as a
 disagreement ("state different potentials") for the scientist to settle, while a scale missing on either
-side or two scales (`…_m600mV` with `0Vrhe`) may be one potential on two scales: the warning says "write
+side or two scales (`…_m600mV` with `0 V vs RHE`) may be one potential on two scales: the warning says "write
 different numbers (file name: no scale; scan header: RHE)" and to ask which applies. A record that CARRIES
 a set-point while its run's name and header write different numbers warns `potential_sources_disagree` until
 the scientist rules on the header's reading (in a bundle imported before header readings: by recording the

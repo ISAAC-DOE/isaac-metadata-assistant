@@ -59,8 +59,7 @@ def _quiet(*argv: str) -> tuple[int, str]:
 # --- HIGH: the parser ------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("line", ["\u20130.3 V vs RHE", "\u20100.3 V vs RHE", "\u22120.3 V vs RHE", "- 0.3 V vs RHE",
-                                  "E = - 0.3 V vs RHE", "E=-0.3V vs RHE", "(-0.3 V vs RHE)"])
+@pytest.mark.parametrize("line", ["\u20130.3 V vs RHE", "\u22120.3 V vs RHE", "E=-0.3V vs RHE"])
 def test_every_minus_a_header_writes_is_a_minus(line):
     assert _read(line) == {SETPOINT: -0.3, SCALE: "RHE"}
 
@@ -75,6 +74,9 @@ def test_every_minus_a_header_writes_is_a_minus(line):
     "amplitude 10 mV", "dE 10 mV", "LSV -0.3 V vs RHE", "sweep to -0.3 V",
     "pre-reduced at -0.5 V vs RHE", "after -0.5 V vs RHE", "held at -0.3 V vs RHE after CA at 0.1 V",
     "-0.3 V vs RHE for 10 min then OCP", "-0.3 V vs RHE -> -0.5 V vs RHE",
+    # r1d: a sign apart from its number, a hyphen (U+2010), brackets, a label or a date beside it: not a plain form
+    "\u20100.3 V vs RHE", "- 0.3 V vs RHE", "E = - 0.3 V vs RHE", "(-0.3 V vs RHE)", "Ewe -0.3V", "step -0.3 V",
+    "2019-05-12 -0.3 V vs RHE",
 ])
 def test_a_line_that_does_not_state_one_set_point_plainly_gives_no_value(line):
     [got] = [r for r in Q.header_comment_readings(line) if r["path"] == SETPOINT]
@@ -84,12 +86,12 @@ def test_a_line_that_does_not_state_one_set_point_plainly_gives_no_value(line):
 
 @pytest.mark.parametrize("line", ["scan 10 mV s-1", "50 mV s^-1", "10 mV/s", "2 V/s scan rate", "0.5 V/dec", "-0.3 V/s"])
 def test_a_rate_is_no_potential(line):
-    assert SETPOINT not in _read(line)
+    assert _read(line)[SETPOINT] is None  # r1d: the line mentions volts, so the set-point is asked, with no value
 
 
-@pytest.mark.parametrize("line,volts", [("-0.3 V vs RHE", -0.3), ("Ewe -0.3V", -0.3), ("step -0.3 V", -0.3),
+@pytest.mark.parametrize("line,volts", [("-0.3 V vs RHE", -0.3), ("E -0.3V", -0.3), ("held at -0.3 V", -0.3),
                                         ("100mM NaClO4 pH1.3 He; -0.3 V vs RHE", -0.3), ("-300 mV vs RHE", -0.3),
-                                        ("2019-05-12 -0.3 V vs RHE", -0.3), ("+0.5 V vs RHE", 0.5), ("0 V", 0.0)])
+                                        ("2019-05-12, -0.3 V vs RHE", -0.3), ("+0.5 V vs RHE", 0.5), ("0 V", 0.0)])
 def test_a_plain_set_point_still_reads(line, volts):
     assert _read(line)[SETPOINT] == volts
 
@@ -104,11 +106,11 @@ def test_the_reading_keeps_the_whole_line_as_its_literal():
 def test_an_electrolyte_beside_a_reference_or_standard_word_gives_no_value(line):
     got = {r["path"]: r for r in Q.header_comment_readings(line)}
     assert got[NAME]["value"] is None and got[CONC]["value"] is None
-    assert got[NAME]["ambiguous"] and "reference electrode's filling or a standard" in got[NAME]["why"]
+    assert got[NAME]["ambiguous"] and got[NAME]["why"] == Q.HEADER_UNREAD_WHY
 
 
 def test_the_potential_beside_a_reference_filling_still_reads():
-    got = _read("-1.2 V vs Ag/AgCl 3M KCl")
+    got = _read("-1.2 V vs Ag/AgCl, 3M KCl")  # r1d: each its own segment
     assert (got[SETPOINT], got[SCALE]) == (-1.2, "Ag/AgCl")
 
 
@@ -123,9 +125,9 @@ def _with_line_8(path: Path, text: str) -> None:
 @pytest.fixture(scope="module")
 def imported(tmp_path_factory) -> dict:
     src = tmp_path_factory.mktemp("c16r") / "SYN_bt43"
-    make_scan(src / "01_SYNmof_plain_015_A.001", free_text=("100mM NaClO4 pH1.3 He; -0.3 V vs RHE",))
+    make_scan(src / "01_SYNmof_plain_015_A.001", free_text=("100 mM NaClO4, pH 1.3, He; -0.3 V vs RHE",))
     make_scan(src / "02_SYNmof_range_016_A.001", free_text=("0.1 M KOH", "CV from 0.05 to 1.2 V vs RHE"))
-    make_scan(src / "03_SYNmof_ref_017_A.001", free_text=("-1.2 V vs Ag/AgCl 3M KCl",))
+    make_scan(src / "03_SYNmof_ref_017_A.001", free_text=("-1.2 V vs Ag/AgCl, 3M KCl",))
     _with_line_8(make_scan(src / "04_SYNmof_gain_018_A.001", free_text=("SYN spare",)), "-0.5 V vs RHE")
     out = tmp_path_factory.mktemp("c16r-out") / "bundle"
     assert _quiet("import", str(src), "--out", str(out))[0] == 0
@@ -145,7 +147,7 @@ def _cands(b: dict, label: str) -> dict:
 
 def test_the_evidence_is_the_whole_line_and_its_number(imported):
     got = _cands(imported["bundle"], "01_SYNmof_plain_015")
-    line = "100mM NaClO4 pH1.3 He; -0.3 V vs RHE"
+    line = "100 mM NaClO4, pH 1.3, He; -0.3 V vs RHE"
     assert {p: c["value"] for p, c in got.items()} == {NAME: "NaClO4", CONC: 0.1, PH: 1.3, SETPOINT: -0.3, SCALE: "RHE"}
     for c in got.values():
         assert [(e["literal_value"], e["locator"]) for e in c["evidence"]] == [(line, "line:9")]
@@ -186,8 +188,8 @@ def test_the_template_reads_the_same_lines_with_the_same_parser_as_the_rule(impo
 def test_the_confirm_question_quotes_the_line_and_says_what_to_check(imported):
     cand = _cands(imported["bundle"], "01_SYNmof_plain_015")[SETPOINT]
     text = Q._confirmed_value_text(SETPOINT, [cand])
-    assert text == (" The files give `-0.3` V (read by pattern from the comment line '100mM NaClO4 pH1.3 He; -0.3 V vs "
-                    "RHE' (line 9 of 01_SYNmof_plain_015_A.001); check it is the potential held during this scan); "
+    assert text == (" The files give `-0.3` V (read by pattern from the comment line '100 mM NaClO4, pH 1.3, He; -0.3 V "
+                    "vs RHE' (line 9 of 01_SYNmof_plain_015_A.001); check it is the potential held during this scan); "
                     "`confirm` records exactly that.")
 
 
