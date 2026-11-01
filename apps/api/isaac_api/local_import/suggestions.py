@@ -474,6 +474,8 @@ def ai_hints(bundle: Mapping, target_ids: Iterable[str], *, limit: int = 5) -> l
     it was read for and its first citation. For the consolidated questions."""
     wanted = set(target_ids)
     by_value: dict[str, dict] = {}
+    # r4-b L7: a hint names the FILE it cites (the skill says no ids): an interpretation that kept only a source id
+    path_of = {s["source_id"]: s.get("relative_path") for s in bundle.get("sources") or ()}
     for i in bundle.get("ai_interpretations") or ():
         if (i.get("target") or {}).get("id") not in wanted:
             continue
@@ -486,7 +488,7 @@ def ai_hints(bundle: Mapping, target_ids: Iterable[str], *, limit: int = 5) -> l
                 "literal": i.get("proposed_value"),
                 "locator": ref.get("locator"),
                 "source_id": ref.get("source_id"),
-                "source_path": i.get("source_path"),
+                "source_path": i.get("source_path") or path_of.get(ref.get("source_id")),
                 "quote": i.get("quote"),
                 "strength": i.get("strength"),
                 "model_id": (i.get("model") or {}).get("model_id"),

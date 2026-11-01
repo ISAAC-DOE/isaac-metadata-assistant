@@ -1873,10 +1873,12 @@ def file_name_readings(bundle: Mapping, run: Mapping, path: str) -> list[dict]:
     return list(out.values())
 
 
-def same_reading_members(bundle: Mapping, q: Mapping, cand_by_id: Mapping[str, Mapping]) -> list[dict]:
+def same_reading_members(bundle: Mapping, q: Mapping, cand_by_id: Mapping[str, Mapping],
+                         runs: Mapping[str, Mapping] | None = None) -> list[dict]:
     """``[{question_id, run_id, file_name}]``: the run (and its first scan file) each of a question's targets is
-    about, as a same-reading group names its members (r3c HIGH)."""
-    runs = {r.get("run_id"): r for r in bundle.get("runs") or ()}
+    about, as a same-reading group names its members (r3c HIGH). ``runs``: the bundle's runs by id, when built."""
+    if runs is None:
+        runs = {r.get("run_id"): r for r in bundle.get("runs") or ()}
     out, seen = [], set()
     for t in q["targets"]:
         c = cand_by_id.get(t["id"]) or {}
@@ -1954,7 +1956,7 @@ def _note_same_reading_groups(questions: list[dict], cand_by_id: Mapping[str, Ma
         lines = list(dict.fromkeys(got for q in members if (got := lines_of(q)) is not None))
         said = (f"the same comment line ({lines[0][0]!r})" if len(lines) == 1 and len(lines[0]) == 1 else
                 f"the same comment lines ({', '.join(map(repr, lines[0]))})" if len(lines) == 1 else "the same reading")
-        named = [m for q in sorted(members, key=lambda q: q["question_id"]) for m in same_reading_members(bundle, q, cand_by_id)]
+        named = [m for q in sorted(members, key=lambda q: q["question_id"]) for m in same_reading_members(bundle, q, cand_by_id, runs)]
         files = list(dict.fromkeys(str(m["file_name"]) for m in named if m["file_name"]))
         shown = ", ".join(files[:SAME_READING_NAMES_SHOWN]) + (
             f", and {len(files) - SAME_READING_NAMES_SHOWN} more" if len(files) > SAME_READING_NAMES_SHOWN else "")
@@ -2089,7 +2091,8 @@ def _note_shared_reading_groups(questions: list[dict], cand_by_id: Mapping[str, 
             continue
         ids = sorted(q["question_id"] for q in members)
         key = "SR-" + hashlib.sha256("\n".join(ids).encode()).hexdigest()[:10]
-        named = [m for q in sorted(members, key=lambda q: q["question_id"]) for m in same_reading_members(bundle, q, cand_by_id)]
+        named = [m for q in sorted(members, key=lambda q: q["question_id"])
+                 for m in same_reading_members(bundle, q, cand_by_id, runs)]
         files = list(dict.fromkeys(str(m["file_name"]) for m in named if m["file_name"]))
         shown = ", ".join(files[:SAME_READING_NAMES_SHOWN]) + (
             f", and {len(files) - SAME_READING_NAMES_SHOWN} more" if len(files) > SAME_READING_NAMES_SHOWN else "")
@@ -2148,6 +2151,7 @@ def _ai_hint_index(bundle: Mapping):
     each call reads only the interpretations of ``ids`` (in their bundle order, so the output is
     identical), never the whole list again — per question that was quadratic in a large import."""
     interps = list(bundle.get("ai_interpretations") or ())
+    sources = list(bundle.get("sources") or ())  # r4-b L7: a hint names its file by the source's path
     at: dict[Any, list[int]] = {}
     for n, i in enumerate(interps):
         at.setdefault((i.get("target") or {}).get("id"), []).append(n)
@@ -2157,7 +2161,7 @@ def _ai_hint_index(bundle: Mapping):
     def hints(ids: Sequence[str], scopes: Mapping[str, Sequence[str]] | None = None) -> list[dict]:
         wanted = set(ids)
         rows = sorted(n for tid in wanted for n in at.get(tid, ()))
-        out = S.ai_hints({"ai_interpretations": [interps[n] for n in rows]}, wanted) if rows else []
+        out = S.ai_hints({"ai_interpretations": [interps[n] for n in rows], "sources": sources}, wanted) if rows else []
         for i, h in enumerate(out):
             # A READING OF FEWER RUNS THAN THE QUESTION ASKS ABOUT says so: "applies to 82 groups" beside an AI
             # suggestion read from one file must never read as a beamtime-wide reading
@@ -2192,7 +2196,7 @@ def _ai_sentence(ai: Sequence[Mapping]) -> str:
     """The sentence a value question adds for its AI suggestions, led by ``ai[0]``. AN AI READING IS NOT FILE
     EVIDENCE: no parser read this value, so it is never worded as one the files state."""
     top = ai[0]
-    cite = top.get("source_path") or top.get("source_id") or "a file"
+    cite = top.get("source_path") or "a file"  # r4-b L7: the file's name, never its source id
     return (f" An AI reading of the files suggests {top['literal']!r}"
             + (f", {top['read_for']}" if top.get("read_for") else "")
             + " (not file evidence: it needs your "
@@ -2369,9 +2373,13 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_a
         from_files = [(g, s) for g, s in items if s["status"] == "agrees"]
         ai_only = len(items) - len(from_files)
         if not ai_only:
+            own = sum(1 for _, s in items if s['group_specific_statements'])
+            statements = items[0][1]['beamtime_wide_statements']
+            # r4-b L3: the rest counted in groups, the statements apart ("the rest (2, …)" read as two groups of eight)
             text = (f"The files state element {element}, edge {edge} for {len(items)} group(s), and no file disagrees: "
-                    f"{sum(1 for _, s in items if s['group_specific_statements'])} of them from processed outputs linked to their runs, "
-                    f"the rest only from beamtime-wide statements ({items[0][1]['beamtime_wide_statements']}, e.g. an acquisition macro's name). "
+                    f"{own} of them from processed outputs linked to their runs, "
+                    f"the rest only from beamtime-wide statements: {len(items) - own} group(s), from {statements} "
+                    "statement(s) (e.g. an acquisition macro's name). "
                     "Is that the absorber? Answer once, or per group (a reference foil or blank cell may differ).")
         else:
             partial = sum(1 for _, s in items for r in s["ai_readings"] if r.get("read_for"))

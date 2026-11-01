@@ -17,6 +17,10 @@ folder and invented scans.
   a clash a typed cell makes is offered as one ``--question`` command, not one ``--target`` per target;
 * M7: the portal validator's warnings are said by ``validate`` and on each exported record, counted once with record
   counts; a term it warns is deprecated (``three_electrode``) is kept out of the template's dropdown and marked;
+* L2-L7: the set-point warning names the scale when the scale holds it back; the absorber question counts the rest in
+  groups and its statements apart; ``reveal`` compares a reading with what the file writes when the parser holds no
+  value; a record left without its start time by an unanswered start-time disagreement says so (validate, export,
+  sidecar, dry run); an AI suggestion cites its file, never a source id.
 """
 
 from __future__ import annotations
@@ -40,7 +44,7 @@ from test_local_import_capture_decisions import _grouped_stems
 from test_local_import_polish_c14g_adopt import _rule
 from test_local_import_template_adopt import _import, _their_sheet
 from test_local_import_records import (  # noqa: F401  (fixtures)
-    BY, _cand, _decide_everything, _portal, bdir, fake_upstream, pristine)
+    BY, _cand, _decide_everything, _miss, _portal, bdir, fake_upstream, pristine)
 
 WHO = "SYNTHETIC TEST"
 TECH = "system.technique"
@@ -474,3 +478,120 @@ def test_the_template_keeps_a_deprecated_term_out_of_its_dropdown_and_marks_it(b
            if dv.formula1 == f"Vocabulary!${letter}$2:${letter}${1 + len(listed)}"]
     assert dvs and "three_electrode: deprecated: use" in dvs[0].prompt
     assert "three_electrode" in B.allowed_values("context.electrochemistry.cell_type")  # still allowed: nothing refused
+
+
+# --- L2: the set-point warning names the scale that holds it back -------------------------------------------------
+
+SCALE = "context.electrochemistry.potential_scale"
+
+
+def test_a_set_point_held_back_by_its_scale_warns_about_the_scale(bdir):
+    """Two runs in one group, one set-point confirmed for both, the scale confirmed for one: the set-point is held back
+    by the scale (its ``required_because``), and the warning says so."""
+    b = M.load(bdir)
+    r1, r2 = b["runs"][0], b["runs"][1]
+    b["record_groups"] = [{"group_id": "g12", "experiment_key": "exp", "member_run_keys": [r1["run_key"], r2["run_key"]],
+                           "basis": {"sample": "s", "technique": "t", "environment": None, "conditions": {}},
+                           "split_reasons": [], "status": "proposed", "questions": []}]
+    M.save_bundle(bdir, b)
+    M.decide(bdir, target_ids=["g12"], decision="confirm", value=None, **BY)
+    b = M.load(bdir)
+    sp = [_cand(b, SETPOINT, r["run_id"])["candidate_id"] for r in (r1, r2)]
+    M.decide(bdir, target_ids=sp, decision="correct", value=0.1, **BY)
+    M.decide(bdir, target_ids=[_miss(b, SCALE, r1["run_id"])], decision="correct", value="RHE", **BY)
+    R.build_records(bdir)
+    composed = json.loads((bdir / R.DRAFTS_DIR / "index.json").read_text())
+    got = R.validate_records(bdir, run_portal=_portal("publish"), full=True)
+    [w] = [w for w in got.get("warnings") or () if w["code"] == R.STATED_POTENTIAL_WARNING]
+    assert "until the potential scale is confirmed" in w["text"] and "set-point is confirmed" not in w["text"]
+    assert _miss(M.load(bdir), SCALE, r2["run_id"]) in w["command"] or "--question" in w["command"]
+    assert composed  # the drafts were written
+
+
+# --- L3: the absorber question counts the rest in groups ----------------------------------------------------------
+
+
+def test_the_absorber_question_counts_the_rest_in_groups_and_the_statements_apart(bdir):
+    M.group(bdir)
+    [q] = [q for q in Q.consolidate(M.load(bdir))["questions"] if q["kind"] == "confirm_absorber"]
+    assert ("0 of them from processed outputs linked to their runs, the rest only from beamtime-wide statements: "
+            "9 group(s), from 2 statement(s) (e.g. an acquisition macro's name).") in q["text"]
+
+
+# --- L4: reveal compares a reading with what the file writes ------------------------------------------------------
+
+
+def test_reveal_compares_a_blind_reading_with_the_literal_when_the_parser_holds_no_value(bdir):
+    M.group(bdir)
+    b = M.load(bdir)
+    c = next(c for c in b["candidates"] if c["target_field_path"] == NAME and c["value"] is None and c["observed_literals"])
+    lit = c["observed_literals"][0]
+    for value in (lit, "SYN other material"):
+        M.annotate(bdir, target_id=c["candidate_id"], value=value, excerpt_locator=None, source_id=None,
+                   model_id="synthetic", blind=True, rationale="synthetic")
+    same, other = M.reveal(bdir, c["candidate_id"])["ai_readings"]
+    assert same["agrees_with_parser"] is None and same["agrees_with_literal"] is True
+    assert same["compared_as"] == M.LITERAL_COMPARED_AS and f"it is the same text as {lit!r}" in same["comparison_note"]
+    assert other["agrees_with_literal"] is False and "is not found in" in other["comparison_note"]
+    assert "nothing to compare" not in same["comparison_note"]
+
+
+# --- L5: a record left without its start time by an unanswered disagreement says so -------------------------------
+
+START = "timestamps.acquired_start_utc"
+
+
+def _start_disagreement_unanswered(bdir):
+    """The records fixture's exportable group, its run's start time not confirmed, and a disagreement about that start
+    time left open (a SPEC run's #D local time beside its #E epoch: no clock question to defer)."""
+    _decide_everything(bdir)
+    b = M.load(bdir)
+    M.decide(bdir, target_ids=[_cand(b, START, "run-001")["candidate_id"]], decision="reject", value=None, **BY)
+
+    def disagree(b):
+        cf = next(cf for cf in b["conflicts"] if cf["conflict_id"] == RULED)  # conf-007, a start-time disagreement
+        cf["run_ids"] = ["run-001"]
+        next(c for c in b["candidates"] if c["candidate_id"] == cf["candidate_id"])["run_id"] = "run-001"
+    M.mutate(bdir, disagree)
+    R.build_records(bdir)
+    qid = Q._qid("group:g1", "resolve_conflict", RULED)
+    assert Q.question(Q.consolidate(M.load(bdir)), qid) is not None  # the question it names is the one asked
+    return R.START_TIME_LEFT_OUT_CONFLICT.format(question=qid)
+
+
+def test_an_unanswered_start_time_disagreement_is_said_at_validate_export_and_the_dry_run(bdir, tmp_path, capsys):
+    line = _start_disagreement_unanswered(bdir)
+    got = R.validate_records(bdir, run_portal=_portal("publish"), full=True)
+    assert [w["text"] for w in got["warnings"] if w["code"] == R.START_TIME_WARNING] == [line]
+    assert line.startswith("start time left out: the start-time disagreement is unanswered (question Q-")
+    out = tmp_path / "records"
+    [row] = R.export_records(bdir, out, run_portal=_portal("publish"))["exported"]
+    assert f"Written without the start time: {line}" in row["warnings"]
+    assert json.loads((out / f"{row['record_id']}.evidence.json").read_text())["notes"] == [line]
+    capsys.readouterr()
+    assert cli.main(["bundle", "upload", str(out), "--dry-run"]) == 0
+    [rec] = json.loads(capsys.readouterr().out)["records"]
+    assert rec["notes"] == [line]
+
+
+def test_settling_the_start_time_disagreement_ends_the_warning(bdir):
+    _start_disagreement_unanswered(bdir)
+    M.decide(bdir, target_ids=[RULED], decision="reject", value=None, **BY)
+    R.build_records(bdir)
+    got = R.validate_records(bdir, run_portal=_portal("publish"), full=True)
+    assert not [w for w in got.get("warnings") or () if w["code"] == R.START_TIME_WARNING]
+
+
+# --- L7: an AI suggestion cites its file -----------------------------------------------------------------------------
+
+
+def test_an_ai_suggestion_cites_the_file_never_its_source_id(bdir):
+    M.group(bdir)
+    b = M.load(bdir)
+    src = b["sources"][0]
+    target = _miss(b, "context.environment", "run-001")
+    M.annotate(bdir, target_id=target, value="in_situ", excerpt_locator="filename token 4", source_id=src["source_id"],
+               model_id="synthetic", blind=False, rationale="synthetic")
+    q = next(q for q in Q.consolidate(M.load(bdir))["questions"] if any(t["id"] == target for t in q["targets"]))
+    assert f"citing {src['relative_path']} @ filename token 4" in q["text"]
+    assert f"citing {src['source_id']}" not in q["text"]

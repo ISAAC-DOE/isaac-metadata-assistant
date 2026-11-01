@@ -82,6 +82,10 @@ START_TIME_WARNING = "start_time_left_out"
 START_TIME_LEFT_OUT = "start time left out: instrument clock zone deferred (question {question})"
 #: c16-r L6: the same, while the clock question has no answer at all (neither a zone nor a defer)
 START_TIME_LEFT_OUT_UNANSWERED = "start time left out: instrument clock zone not answered yet (question {question})"
+#: r4-b L5: the same, for a run whose start-time readings disagree (a SPEC `#D` local time beside its `#E` epoch) and
+#: nobody has settled it: the UTC reading the files give is offered only inside that question
+START_TIME_LEFT_OUT_CONFLICT = ("start time left out: the start-time disagreement is unanswered (question {question}; it "
+                                "offers the UTC reading the files give, e.g. a scan's #E epoch)")
 
 
 @functools.lru_cache(maxsize=512)
@@ -956,10 +960,11 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
         report["missing_required"].append(need)
     from . import questions as Q  # c8-b: the conditions generic runs' names and headers state (questions.py)
 
-    report["warnings"] = (_stated_potential_warnings(bundle, group, member_ids, fields, proposals)
+    report["warnings"] = (_stated_potential_warnings(bundle, group, member_ids, fields, proposals,
+                                                     held_by_scale=held_by_companion.get(SETPOINT_PATH, (None,))[0] == SCALE_PATH)
                           + _potential_sources_warnings(bundle, group, member_ids, fields)
                           + Q.open_circuit_warnings(bundle, group, member_ids, fields)
-                          + _start_time_warnings(bundle, group, member_ids, fields))
+                          + _start_time_warnings(bundle, group, member_ids, fields, index["memo"]))
     return draft, report
 
 
@@ -1009,7 +1014,7 @@ def _stated_potentials(bundle: Mapping, member_ids: set) -> list[dict]:
 
 
 def _stated_potential_warnings(bundle: Mapping, group: Mapping, member_ids: set, fields: Mapping,
-                               proposals: Mapping[str, list]) -> list[dict]:
+                               proposals: Mapping[str, list], *, held_by_scale: bool = False) -> list[dict]:
     """A WARNING (never a refusal) for a group whose file names state a potential that its record will not carry:
     the condition that defines the record would be silently absent. Why it is absent — no confirmed potential
     scale (a set-point composes only beside one, :data:`bundle.COMPOSES_ONLY_WITH`) or no confirmed set-point —
@@ -1019,14 +1024,16 @@ def _stated_potential_warnings(bundle: Mapping, group: Mapping, member_ids: set,
     that carries a set-point gets none; so does one whose file names state no potential, and so does one whose
     set-point is itself listed as missing (a required value nobody answered: the missing list already says it). A
     confirmed set-point held back until its scale is answered is NOT listed (c12-q: the scale is), so it warns; a
-    ``missing`` placeholder for the scale carries no scale."""
+    ``missing`` placeholder for the scale carries no scale. r4-b L2: ``held_by_scale``: the set-point is confirmed and
+    held back by its scale (some run of the group has none, while another's fills the field), so the SCALE is what is
+    missing, as its ``required_because`` says, never "until the potential set-point is confirmed"."""
     if SETPOINT_PATH in fields:
         return []
     stated = _stated_potentials(bundle, member_ids)
     if not stated:
         return []
     answered = [v for v, _, _ in proposals.get(SETPOINT_PATH, ()) if isinstance(v, (int, float)) and not isinstance(v, bool)]
-    scale_missing = _present(fields, SCALE_PATH) is None
+    scale_missing = _present(fields, SCALE_PATH) is None or held_by_scale
 
     def open_targets(path: str) -> list[str]:
         return [o.get("candidate_id") or o.get("value_id")
@@ -1265,7 +1272,8 @@ def local_clock_runs(bundle: Mapping) -> set[str]:
     return {c["run_id"] for c in bundle.get("candidates") or () if c.get("run_id") is not None and B.is_local_clock_start(c)}
 
 
-def _start_time_warnings(bundle: Mapping, group: Mapping, member_ids: set, fields: Mapping) -> list[dict]:
+def _start_time_warnings(bundle: Mapping, group: Mapping, member_ids: set, fields: Mapping,
+                         memo: dict | None = None) -> list[dict]:
     """A :data:`START_TIME_WARNING` for a record that carries no start time while a member run's scan headers write
     one (``bundle.XDC_START_RULE_ID``) and the latest answer to the clock question is ``defer``: the record goes out
     without it, and says so. c16-r L6: so does one while the clock question has no answer yet (no zone, no defer),
@@ -1273,8 +1281,10 @@ def _start_time_warnings(bundle: Mapping, group: Mapping, member_ids: set, field
     from . import questions as Q
     from .mutations import clock_zone_deferral
 
-    if _present(fields, B.XDC_START_PATH) is not None or not local_clock_runs(bundle) & set(member_ids):
+    if _present(fields, B.XDC_START_PATH) is not None:
         return []
+    if not local_clock_runs(bundle) & set(member_ids):
+        return _start_time_conflict_warnings(bundle, group, member_ids, memo)
     if clock_zone_deferral(bundle) is not None:
         unanswered = False
     elif B.clock_zone_decision(bundle) is None:
@@ -1285,6 +1295,30 @@ def _start_time_warnings(bundle: Mapping, group: Mapping, member_ids: set, field
     return [{"code": START_TIME_WARNING, "group_id": group["group_id"], "path": B.XDC_START_PATH,
              "needs": B.XDC_START_PATH, "targets": [], "question_id": Q.CLOCK_QUESTION_ID, "text": text,
              "command": B.CLOCK_ZONE_COMMAND, **({"unanswered": True} if unanswered else {})}]
+
+
+def _start_time_conflict_warnings(bundle: Mapping, group: Mapping, member_ids: set, memo: dict | None = None) -> list[dict]:
+    """r4-b L5: a :data:`START_TIME_WARNING` for a record that carries no start time because a member run's start-time
+    readings disagree and that disagreement is unanswered (a SPEC beamtime, with no clock-zone question to defer): the
+    record goes out without it and says why, at validate, export, in its evidence file and the upload dry run, as
+    for the deferred clock zone (c16d). Named by the question this group asks it in. ``memo``: the composition
+    index's, so the open start-time disagreements are found once per bundle, not once per group."""
+    from . import questions as Q
+
+    memo = {} if memo is None else memo
+    if "open_start_conflicts" not in memo:
+        start = {c["candidate_id"] for c in bundle.get("candidates") or () if c.get("target_field_path") == B.XDC_START_PATH}
+        memo["open_start_conflicts"] = [cf for cf in bundle.get("conflicts") or () if cf.get("run_ids")
+                                        and (cf.get("candidate_id") or "") in start
+                                        and cf.get("value_state") in (B.STATE_CONFLICTING, B.STATE_NEEDS_REVIEW)]
+    for cf in memo["open_start_conflicts"]:
+        if cf["run_ids"][0] in member_ids:
+            qid = Q._qid(f"group:{group['group_id']}", "resolve_conflict", cf["conflict_id"])
+            return [{"code": START_TIME_WARNING, "group_id": group["group_id"], "path": B.XDC_START_PATH,
+                     "needs": B.XDC_START_PATH, "targets": [cf["conflict_id"]], "question_id": qid,
+                     "text": START_TIME_LEFT_OUT_CONFLICT.format(question=qid), "conflict": True,
+                     "command": f"isaac bundle show question <bundle_dir> {qid}"}]
+    return []
 
 
 def potential_sources_text(w: Mapping) -> str:
@@ -1366,7 +1400,8 @@ def potential_warning_text(w: Mapping) -> str:
     if w.get("code") == POTENTIAL_SOURCES_WARNING:
         return potential_sources_text(w)
     if w.get("code") == START_TIME_WARNING:
-        return (START_TIME_LEFT_OUT_UNANSWERED if w.get("unanswered") else START_TIME_LEFT_OUT).format(question=w["question_id"])
+        return (START_TIME_LEFT_OUT_CONFLICT if w.get("conflict") else START_TIME_LEFT_OUT_UNANSWERED if w.get("unanswered")
+                else START_TIME_LEFT_OUT).format(question=w["question_id"])
     if w.get("open_circuit"):
         return Q.open_circuit_text(w)
     extra = Q.stated_potential_notes(w)

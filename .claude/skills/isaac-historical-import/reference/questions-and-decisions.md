@@ -207,7 +207,9 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   no start time is converted, the question stays under its id, marked `deferred`, and the counter
   question is not touched. Every record of those runs then goes out without its start time, and says
   so: `validate` and `export` warn "start time left out: instrument clock zone deferred (question <Q>)"
-  (while the question is not answered at all: "… not answered yet (question <Q>)"),
+  (while the question is not answered at all: "… not answered yet (question <Q>)"; on a SPEC beamtime, with no
+  clock question, a run whose start-time readings disagree and are unsettled: "start time left out: the start-time
+  disagreement is unanswered (question <Q>; …)", whose question offers the `#E` epoch's UTC reading),
   the record's evidence file keeps that line under `notes`, and `upload --dry-run` repeats it; tell the
   scientist before they export. Once a zone is recorded, `defer` is refused (it would not withdraw the
   zone); to change the zone, state it again.

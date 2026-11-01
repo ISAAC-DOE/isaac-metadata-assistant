@@ -1667,14 +1667,12 @@ def answer_reach(bundle: Mapping, target_ids: Sequence[str], path: str) -> dict:
     from . import questions as Q
     from .records import RUN_ONLY_PATHS
 
+    # one pass over the values, never a lookup per target (an optional question of 4,000 runs asks each field)
+    wanted = set(target_ids)
     run_ids: set[str] = set()
     beamtime = False
-    for tid in target_ids:
-        try:
-            kind, obj = resolve_target(bundle, tid)
-        except MutationRefused:
-            continue
-        if kind in ("candidate", "missing_value"):
+    for obj in [*(bundle.get("candidates") or ()), *(bundle.get("missing_values") or ())]:
+        if (obj.get("candidate_id") or obj.get("value_id")) in wanted:
             if obj.get("run_id"):
                 run_ids.add(obj["run_id"])
             else:
@@ -3114,6 +3112,25 @@ def excerpt(bundle: Mapping, target_id: str, *, source: str | None) -> dict:
 
 #: Why ``reveal`` gives no ``agrees_with_parser`` for a reading: there is no parser value to hold it against.
 NO_PARSER_VALUE_NOTE = "the parser holds no value for this target, so there is nothing to compare"
+#: r4-b L4: ``compared_as`` for a reading held against what the file writes, when the parser holds no value
+LITERAL_COMPARED_AS = "observed literal"
+
+
+def _against_literals(proposed: Any, literals: Sequence[str]) -> dict:
+    """r4-b L4: a blind reading of a target the parser holds NO value for, held against what the file writes there
+    (its ``observed_literals``; before: "nothing to compare"). ``agrees_with_literal``: the reading is that text
+    (trimmed, case aside) or found in it; ``False`` when in none. ``agrees_with_parser`` stays ``None``: there is no
+    parser value, and a literal is not one."""
+    said = " ".join(str(proposed).split()).casefold() if proposed is not None else ""
+    shown = ", ".join(repr(x) for x in literals[:3]) + (" …" if len(literals) > 3 else "")
+    same = bool(said) and any(" ".join(x.split()).casefold() == said for x in literals)
+    within = bool(said) and not same and any(said in " ".join(x.split()).casefold() for x in literals)
+    how = ("is the same text as" if same else "is found in" if within else "is not found in")
+    return {"agrees_with_parser": None, "agrees_with_literal": same or within, "compared_as": LITERAL_COMPARED_AS,
+            "comparison_note": (f"the parser holds no value for this target, so the reading {proposed!r} was compared "
+                                f"with what the file writes there: it {how} {shown}")}
+
+
 #: ``compared_as`` for a reading of a scan start time held against the header's local clock time (c8-b).
 LOCAL_CLOCK_COMPARED_AS = "local clock time"
 #: What a ``crosscheck-plan`` item of a scan start time tells the reader to write down (c8-b).
@@ -3236,6 +3253,9 @@ def reveal(bundle_dir: Path, target_id: str) -> dict:
             if got is not None:
                 return got
         if base is None:
+            literals = [str(x) for x in (obj.get("observed_literals") or ()) if str(x).strip()] if kind == "candidate" else []
+            if literals:
+                return _against_literals(proposed, literals)
             return {"agrees_with_parser": None, "comparison_note": NO_PARSER_VALUE_NOTE}
         zone_less = _zone_less_against_instant(path, proposed, base)
         if zone_less is not None:
