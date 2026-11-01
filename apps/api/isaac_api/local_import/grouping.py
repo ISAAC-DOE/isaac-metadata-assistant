@@ -1138,7 +1138,7 @@ def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: froz
             for key in m["soft"]:
                 reasons.append({"code": "conflicting_unknown_key", "group_id": gid_of_run[m["run"]["run_key"]], "key": key})
         mcid = "mc-" + hashlib.sha256((exp_key + "\n" + "\n".join(gids)).encode()).hexdigest()[:16]
-        caution = merge_candidate_caution(by_gid, runs_by_key, gids)
+        caution = merge_candidate_caution(by_gid, runs_by_key, gids, data_files)
         nq = _question(
             "merge_candidate",
             "".join(f"CAUTION: {c['statement']} " for c in caution)
@@ -1666,20 +1666,25 @@ def merge_reason_code(reasons: Sequence[Mapping]) -> str:
     return next((c for c in MERGE_REASON_ORDER if c in codes), None) or (sorted(codes) or [AGREE_ON_CLASSIFIED])[0]
 
 
-def merge_candidate_caution(groups_by_id: Mapping[str, Mapping], runs_by_key: Mapping[str, Mapping], group_ids: Sequence[str]) -> list[dict]:
+def merge_candidate_caution(groups_by_id: Mapping[str, Mapping], runs_by_key: Mapping[str, Mapping], group_ids: Sequence[str],
+                            data_files: Mapping[str, str] | None = None) -> list[dict]:
     """Why saying yes to a merge candidate could make one WRONG record — empty when nothing says so.
 
     * its groups' file names differ in more than numbers and repeat markers (``name_stem_key(loose=True)``):
       measured on a real beamtime, one candidate of 29 groups would have combined elemental S, a dry MOF and
       the MOF at three potentials, whose names said so, because no source stated their samples;
     * no group states a sample, environment or condition the build classified: nothing read shows the
-      runs are one measurement."""
+      runs are one measurement — unless (r3a M1) every run's own ``.exp`` names one acquisition (``data_files``,
+      ``run_id -> DATA_FILE``: :func:`exp_data_files`), each its run's own (:func:`exp_data_file_agrees`): the
+      caution then says that is what was read, and that it is still the scientist's call."""
     groups = [groups_by_id[g] for g in group_ids if g in groups_by_id]
     stems_of: dict[str, str] = {}
+    members: list[Mapping] = []
     for g in groups:
         context = set(g.get("context_run_keys") or ())
         for k in g.get("member_run_keys") or ():
             if k in runs_by_key and k not in context:
+                members.append(runs_by_key[k])
                 stems_of.setdefault(name_stem_key(runs_by_key[k].get("stem") or "", loose=True), runs_by_key[k].get("stem") or "")
     out = []
     if len(stems_of) > 1:
@@ -1690,11 +1695,22 @@ def merge_candidate_caution(groups_by_id: Mapping[str, Mapping], runs_by_key: Ma
                          "merging them would make one wrong record — check before saying yes.",
         })
     if groups and not any((g.get("basis") or {}).get(part) for g in groups for part in ("sample", "environment", "conditions")):
-        out.append({
-            "code": CAUTION_NOTHING_CLASSIFIED,
-            "statement": "This build classified no sample or condition for these runs, so nothing read from their files shows they "
-                         "are the same measurement; merging them could make one wrong record — check before saying yes.",
-        })
+        named = [(data_files or {}).get(str(r.get("run_id"))) for r in members]
+        own = [d for r, d in zip(members, named) if exp_data_file_agrees(r.get("stem") or "", d)]
+        if len(members) > 1 and len(own) == len(members) and len({d.strip().casefold() for d in own}) == 1:
+            out.append({
+                "code": CAUTION_NOTHING_CLASSIFIED,
+                "data_file": own[0].strip(),
+                "statement": "This build classified no sample or condition for these runs; what was read is that each "
+                             f"run's own .exp file names the same acquisition (DATA_FILE {own[0].strip()}), so they look "
+                             "like repeats of one measurement. Nothing else read says so: check before saying yes.",
+            })
+        else:
+            out.append({
+                "code": CAUTION_NOTHING_CLASSIFIED,
+                "statement": "This build classified no sample or condition for these runs, so nothing read from their files shows they "
+                             "are the same measurement; merging them could make one wrong record — check before saying yes.",
+            })
     return out
 
 

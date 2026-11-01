@@ -3207,7 +3207,7 @@ def _regroup(bundle: dict, *, regroup: bool = True) -> dict:
             "merge_candidate_id": mcid, "experiment_key": exp_key, "group_ids": gids, "run_keys": [],
             "status": "proposed", "rule_id": G.BINDING_RULE_ID, "reasons": [reason],
             "reason_code": "scientist_decided_merge", "reason_codes": ["scientist_decided_merge"],
-            "caution": G.merge_candidate_caution({h["group_id"]: h for h in holders}, runs_by_key, gids),
+            "caution": G.merge_candidate_caution({h["group_id"]: h for h in holders}, runs_by_key, gids, G.exp_data_files(bundle)),
         })
     if combined_by:
         # a candidate that named a group now combined names the combined group instead; one left

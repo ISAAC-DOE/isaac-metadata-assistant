@@ -5,7 +5,9 @@ BL4-3 scan headers write a sample, an electrolyte and a potential glued into one
 
 * H1: ``bundle excerpt`` of a candidate shows the line its ``line:N`` locator names, and says so when it cannot;
 * H2: a potential a value-less header line MENTIONS (``0Vrhe``) is compared, never offered: against the file name's
-  (``m600mV``) and the typed value, warned at validate until a scientist rules, and never said to agree.
+  (``m600mV``) and the typed value, warned at validate until a scientist rules, and never said to agree;
+* M1: with no ``<name>.exp``, the DATA_FILE of the ONLY ``.exp`` in the run's own folder (a reused template) is read,
+  kept only when it is the run's own name minus its counter, and a merge candidate whose DATA_FILEs agree says so.
 """
 
 from __future__ import annotations
@@ -18,10 +20,12 @@ import pytest
 
 from isaac_api.local_import import bundle as B
 from isaac_api.local_import import cli
+from isaac_api.local_import import grouping as G
 from isaac_api.local_import import mutations as M
 from isaac_api.local_import import questions as Q
 from isaac_api.local_import import records as R
 from isaac_api.local_import import template as T
+from isaac_api.local_import.readers import ssrl_xdc as x
 
 from test_local_import_reader_ssrl_xdc import make_scan
 
@@ -214,3 +218,74 @@ def test_the_template_preview_names_a_header_mention_the_typed_value_contradicts
 def test_the_template_preview_lists_no_mention_that_agrees(glued, tmp_path, capsys):
     rep = _typed(glued, tmp_path, SAME, -0.6, capsys)
     assert not [x for x in rep["replaces_or_contradicts_a_file_reading"] if x["target_field_path"] == SETPOINT]
+
+
+# --- M1: the .exp DATA_FILE of a template reused under another name ----------------------------------------------
+
+
+TEMPLATE = "AgL3_SYN_exp1.exp"
+
+
+def _template_beamtime(root: Path, data_files: dict[str, str | None], *, extra_exp: bool = False) -> Path:
+    """Each run in its own folder with a copy of one template .exp (``None``: no DATA_FILE line in it)."""
+    src = root / "SYN_bt43"
+    for name, data_file in data_files.items():
+        for i in (1, 2):
+            make_scan(src / name / f"{name}_A.{i:03d}", free_text=("SYN gain 1e8", "SYN comment"))
+        (src / name / TEMPLATE).write_text("EXPT_TYPE SYN\n" + (f"DATA_FILE {data_file}\n" if data_file else "")
+                                           + "COMMENTS1 SYNTHETIC\n")
+        if extra_exp:
+            (src / name / "SYN_other.exp").write_text(f"DATA_FILE {data_file}\n")
+    return src
+
+
+def _data_files(src: Path) -> dict[str, list[dict]]:
+    return {r.label: [s for s in r.statements if s["key"] == "exp_data_file"] for r in x.collect_generic_runs(src)}
+
+
+def test_the_only_exp_in_the_runs_own_folder_is_read(tmp_path):
+    src = _template_beamtime(tmp_path, {"SYNti_m600mV_096": "SYNti_m600mV"})
+    [st] = _data_files(src)["SYNti_m600mV_096"]
+    assert (st["literal"], st["locator"], st["source_relative_path"]) == ("SYNti_m600mV", "line:2",
+                                                                          f"SYNti_m600mV_096/{TEMPLATE}")
+    [run] = x.collect_generic_runs(src)
+    assert [(c["relative_path"], c["role"], c["parsed"]) for c in run.companions if c["role"] == "experiment"] == [
+        (f"SYNti_m600mV_096/{TEMPLATE}", "experiment", True)]
+
+
+def test_a_template_naming_another_acquisition_says_nothing(tmp_path):
+    src = _template_beamtime(tmp_path, {"SYNti_m600mV_096": "AgL3_xas", "SYNti_m300mV_097": None})
+    assert _data_files(src) == {"SYNti_m600mV_096": [], "SYNti_m300mV_097": []}
+    out = _import(src, tmp_path / "bundle")
+    assert not any(G.EXP_NAME_DIFFERS_FLAG in g["flags"] for g in M.load(out)["record_groups"])
+
+
+def test_two_exp_files_in_the_folder_are_not_read(tmp_path):
+    src = _template_beamtime(tmp_path, {"SYNti_m600mV_096": "SYNti_m600mV"}, extra_exp=True)
+    assert _data_files(src) == {"SYNti_m600mV_096": []}
+
+
+def test_the_exp_files_own_name_is_never_a_hint(tmp_path):
+    src = tmp_path / "SYN_bt43"
+    make_scan(src / "SYNti_m600mV_096" / "SYNti_m600mV_096_A.001")
+    (src / "SYNti_m600mV_096" / "SYNti_m600mV.exp").write_text("EXPT_TYPE SYN\n")  # named like the run, no DATA_FILE
+    assert _data_files(src) == {"SYNti_m600mV_096": []}
+
+
+def test_the_runs_own_exp_is_still_the_one_read(tmp_path):
+    src = _template_beamtime(tmp_path, {"SYNti_m600mV_096": "SYNti_m600mV"})
+    (src / "SYNti_m600mV_096" / "SYNti_m600mV_096.exp").write_text("DATA_FILE SYNti_m600mV\n")
+    [st] = _data_files(src)["SYNti_m600mV_096"]
+    assert st["source_relative_path"] == "SYNti_m600mV_096/SYNti_m600mV_096.exp"
+
+
+def test_a_merge_candidate_whose_data_files_agree_says_so(tmp_path):
+    src = _template_beamtime(tmp_path, {"SYNti_m600mV_096": "SYNti_m600mV", "SYNti_m600mV_097": "SYNti_m600mV"})
+    b = M.load(_import(src, tmp_path / "bundle"))
+    [mc] = b["merge_candidates"]
+    [caution] = [c for c in mc["caution"] if c["code"] == G.CAUTION_NOTHING_CLASSIFIED]
+    assert caution["data_file"] == "SYNti_m600mV"
+    assert "each run's own .exp file names the same acquisition (DATA_FILE SYNti_m600mV)" in caution["statement"]
+    assert "nothing read from their files shows they are the same measurement" not in caution["statement"]
+    assert caution["statement"] in mc["question"]["text"]
+
