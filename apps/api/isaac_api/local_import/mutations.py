@@ -2726,7 +2726,11 @@ def _source_root(bundle: Mapping, explicit: str | None) -> Path:
     )
 
 
-_LINE_RE = re.compile(r"\bline (\d+)\b")
+#: r3a H1: the line a locator names, in every form the readers write: ``line:10`` (the XDC, XDI, two-column, MCA and
+#: tab readers, an ``Anomaly``, a scan-header comment candidate), ``line 3`` (a Larch session header) and ``(lines
+#: 4-9)`` (a Larch command, its first and last line). An Igor ``history line N`` counts lines of the packed history,
+#: not of the file, so it names none.
+_LINE_RE = re.compile(r"(?<!history )\blines?[: ](?P<first>\d+)(?:-(?P<last>\d+))?\b")
 
 
 def excerpt(bundle: Mapping, target_id: str, *, source: str | None) -> dict:
@@ -2785,13 +2789,25 @@ def excerpt(bundle: Mapping, target_id: str, *, source: str | None) -> dict:
             continue
         lines = text.splitlines()
         match = _LINE_RE.search(loc["locator"] or "")
+        note = None
         if match:
-            n = int(match.group(1))
-            lo, hi = max(1, n - EXCERPT_CONTEXT_LINES), min(len(lines), n + EXCERPT_CONTEXT_LINES)
+            n = int(match.group("first"))
+            last = max(n, int(match.group("last") or n))
+            if n < 1 or n > len(lines):
+                # r3a H1: never the first lines in place of the line asked for
+                out.append({"source_id": src["source_id"], "relative_path": path, "locator": loc["locator"],
+                            "refused": f"the locator names line {n} and the file has {len(lines)} line(s) now"})
+                continue
+            lo, hi = max(1, n - EXCERPT_CONTEXT_LINES), min(len(lines), last + EXCERPT_CONTEXT_LINES)
         else:
             lo, hi = 1, min(len(lines), 2 * EXCERPT_CONTEXT_LINES + 1)
+            if loc["locator"] and loc["locator"] != "line 1":
+                note = f"the locator ({loc['locator']}) names no line of the file: its first lines are shown"
         body = "\n".join(f"{i:>5}: {lines[i - 1]}" for i in range(lo, hi + 1))
         truncated = len(body) > MAX_EXCERPT_CHARS
+        if match and truncated and f"\n{n:>5}: " not in "\n" + body[:MAX_EXCERPT_CHARS]:
+            note = (f"line {n}, the one the locator names, is past the {MAX_EXCERPT_CHARS} characters shown (the lines "
+                    "before it are long): read it with the Read tool")
         out.append(
             {
                 "source_id": src["source_id"],
@@ -2800,6 +2816,7 @@ def excerpt(bundle: Mapping, target_id: str, *, source: str | None) -> dict:
                 "lines": [lo, hi],
                 "text": body[:MAX_EXCERPT_CHARS],
                 "truncated": truncated,
+                **({"note": note} if note else {}),
             }
         )
     return {
