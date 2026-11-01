@@ -77,7 +77,10 @@ it finds one. Show per group, in words:
 - the verdict and the reasons (counts, noise, glitches, energy range). **Glitch counts with fewer than 3
   scans**: when `qc.statements.glitch_check_few_scans` is present, say that sentence instead of reading
   the count as glitches (with one or two scans the check compares neighbouring points and also flags the
-  white line and the oscillations); never call those points glitches yourself;
+  white line and the oscillations); never call those points glitches yourself. **Points on the edge**:
+  when `qc.statements.glitch_points_on_edge` is present (metrics `glitch_points_on_edge` /
+  `glitch_points_off_edge`), say that sentence; only the off-edge count is glitches (flagged points within
+  5 eV of E0 or where the merged curve is steep are the edge, not glitches; the stored verdict is unchanged);
 - **when scans were skipped** (reason `scans_skipped_lacking_chosen_columns`; flag
   `channel_from_a_later_scan` when the first scan was one of them): the used / readable / skipped
   counts in plain words — "14 of 165 scans were used; 150 had different columns (they may be motor

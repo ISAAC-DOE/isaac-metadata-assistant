@@ -153,8 +153,8 @@ readable one `process` refuses and writes nothing. After a ZIP import, ask the s
 outside the bundle, and confirm the unzipped folder is the data they approved. Read the Processing
 section of `reference/grouping-and-processing.md`. Page results with
 `<isaac> bundle list <bundle> processing-results --limit 20`. For each group show the verdict in words,
-glitch flags (with `glitch_check_few_scans`, say its sentence instead), skipped scans, agreement with
-their own Athena output, and the plot (open the PNG with Read and describe it). Ask approve / reject / needs changes.
+glitch flags (with `glitch_check_few_scans` or `glitch_points_on_edge`, say its sentence instead), skipped scans,
+agreement with their own Athena output, and the plot (open the PNG with Read and describe it). Ask approve / reject / needs changes.
 
 - **Approval is the scientist's call.** A `warn` is theirs to accept. A `fail` for `edge_step_implausible`,
   `no_edge` or `post_edge_not_at_1` is never offered for approval: offer reject or `needs_changes`. When

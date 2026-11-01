@@ -465,6 +465,29 @@ def _few_scan_glitch_statement(n_scans: int, flagged: int, params: Mapping) -> s
             f"{flagged} flag{'' if flagged == 1 else 's'} are not by themselves evidence of glitches.")
 
 
+def _glitch_points_on_edge(points: Sequence[tuple[int, float, bool]], e0, names: Sequence[str]) -> dict | None:
+    """r2-a: the flagged points on the edge (:func:`core.glitch_points_on_edge`), listed apart and said, or ``None``
+    when no flagged point is on the edge (an unaffected result is unchanged). ``names`` are the used scans' file
+    names by scan position. The stored count, flag and verdict are not changed (qc.json is hashed)."""
+    edge = [(s, e) for s, e, on in points if on]
+    if not edge:
+        return None
+    off = len(points) - len(edge)
+    shown = ", ".join(f"{e:.3f} eV ({names[s]})" for s, e in edge[:10]) + (f" and {len(edge) - 10} more" if len(edge) > 10 else "")
+    e0_said = f" {float(e0):.3f} eV" if e0 is not None else ""
+    off_said = (f"The other {off} flagged point{'' if off == 1 else 's'} {'is' if off == 1 else 'are'} off the edge and "
+                "counted as glitches." if off else "No point off the edge is flagged, so nothing here is evidence of a glitch.")
+    return {
+        "on_edge": len(edge), "off_edge": off,
+        "listed": [{"scan_position": s, "energy_eV": e} for s, e in edge[:200]],
+        "statement": (f"{len(edge)} of the {len(points)} flagged point{'' if len(points) == 1 else 's'} lie on the edge "
+                      f"(within {C.GLITCH_EDGE_WINDOW_EV:g} eV of E0{e0_said}, or where the merged curve is steep): "
+                      f"points on the edge, not counted as glitches, since the check cannot tell a glitch from the "
+                      f"steep edge there: {shown}. {off_said} The stored verdict keeps glitches_flagged as it was "
+                      "first written; look at the plot."),
+    }
+
+
 def _csv(path: Path, header: Sequence[str], cols: Sequence, np) -> None:
     lines = ["# DRAFT protocol isaac.xas.v0 (draft_unreviewed) - review material, not an official value", ",".join(header)]
     for row in zip(*cols):
@@ -1493,6 +1516,17 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     few_said = _few_scan_glitch_statement(len(scans_data), dg["flagged_points_total"], params)
     if few_said:
         res["qc"].setdefault("statements", {})["glitch_check_few_scans"] = few_said
+    # r2-a: flagged points at E0 or where the merged curve is steep are on the edge, not glitches: listed apart,
+    # counted and said (after run_id: qc.json is hashed, so no id moves; the stored count, flag and verdict stay)
+    on_edge = _glitch_points_on_edge(C.glitch_points_on_edge(dg["point_flags"], grid, g2, mean, nm["e0_eV"], np),
+                                     nm["e0_eV"], [_file_name(e) for e in used_entries])
+    if on_edge:
+        res["qc"]["metrics"].update(glitch_points_on_edge=on_edge["on_edge"], glitch_points_off_edge=on_edge["off_edge"])
+        res["qc"].setdefault("statements", {})["glitch_points_on_edge"] = on_edge["statement"]
+        dg_step = next(s_ for s_ in res["steps"] if s_.get("step") == "deglitch")
+        dg_step["outcome"]["flagged_points_on_edge"] = [{"source_id": pos_sid[p["scan_position"]], "energy_eV": p["energy_eV"]}
+                                                        for p in on_edge["listed"]]
+        dg_step["outcome"]["glitch_edge_rule_id"] = C.GLITCH_EDGE_RULE_ID
     zero_points_said = _zero_signal_points_statement(used_entries, scans_data, _raw_signal(choice), np)
     if zero_points_said:
         res["qc"].setdefault("statements", {})["merged_scan_zero_signal_points"] = zero_points_said

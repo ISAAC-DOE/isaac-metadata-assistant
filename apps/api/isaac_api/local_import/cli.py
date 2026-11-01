@@ -954,7 +954,7 @@ NOT_OPENED_NOTE = ("files a run reader kept beside a run without any reader open
                    "claimed them, and not read either. Pass --all to list them, each with its run and role")
 #: Metrics a ``processing-results`` row carries (the rest are in ``processing/processing_results.json``).
 _RESULT_METRICS = ("scans_listed", "scans_used", "points", "e0_eV", "edge_step", "pre_edge_noise", "scan_spread",
-                   "glitch_points", "outlier_scans", "nonfinite_dropped")
+                   "glitch_points", "glitch_points_on_edge", "glitch_points_off_edge", "outlier_scans", "nonfinite_dropped")
 #: Review flags every draft-protocol result carries: left off the compact row (they say nothing per result).
 _EVERY_RESULT_FLAGS = frozenset({"protocol_draft_unreviewed"})
 _SHOW_SECTION = {
