@@ -2531,14 +2531,14 @@ def source_reader_block(bundle: Mapping, src: Mapping, uses: Mapping[str, dict] 
     use = (uses if uses is not None else generic_source_uses(bundle)).get(src.get("source_id"))
     if use is None or not _says_no_reader(block):
         return block
-    if use["as"] == "companion":
+    if statements is None:
+        statements = _kept_statements(bundle, use["reader_id"], {src.get("source_id")})
+    kept = int(statements.get(src.get("source_id"), 0))
+    if use["as"] == "companion" and not kept:  # a run's own `.exp` whose DATA_FILE line was read is a read file
         return {**block, "reader_id": None, "content_read": False,
                 "refused_reason": (f"No reader opened this file: {use['reader_id']} kept it beside run {use['run_id']} as its "
                                    f"{_COMPANION_ROLE_WORDS.get(use.get('role'), 'context file')} (its name, size and digest "
                                    "are recorded; its contents are not read).")}
-    if statements is None:
-        statements = _kept_statements(bundle, use["reader_id"], {src.get("source_id")})
-    kept = int(statements.get(src.get("source_id"), 0))
     return {**block, "reader_id": use["reader_id"], "content_read": True,
             "statements_read": int(block.get("statements_read") or 0) + kept, "refused_reason": None}
 
@@ -2560,13 +2560,17 @@ def source_read_as(bundle: Mapping, src: Mapping, uses: Mapping[str, dict] | Non
     use = (uses if uses is not None else generic_source_uses(bundle)).get(sid)
     if use is None:
         return None
+    kept = _kept_statements(bundle, use["reader_id"], {sid}).get(sid, 0)
+    if use["as"] == "companion" and kept:
+        return {"reader_id": use["reader_id"], "as": "companion", "role": use.get("role"), "run_id": use["run_id"],
+                "opened": True, "gave": [f"{kept} statement(s) kept as evidence (extended context): the run's base name "
+                                         "(DATA_FILE), used only to offer merge candidates"]}
     if use["as"] == "companion":
         return {"reader_id": None, "kept_by": use["reader_id"], "as": "companion", "role": use.get("role"),
                 "run_id": use["run_id"], "opened": False,
                 "statement": (f"Kept beside run {use['run_id']} as its "
                               f"{_COMPANION_ROLE_WORDS.get(use.get('role'), 'context file')}; no reader opened it. "
                               f"Not counted as unread: `isaac bundle list <dir> unread --all` lists these files.")}
-    kept = _kept_statements(bundle, use["reader_id"], {sid}).get(sid, 0)
     backs = sorted({(c["candidate_id"], c.get("target_field_path")) for c in bundle.get("candidates") or ()
                     for e in c.get("evidence") or () if e.get("source_id") == sid and e.get("method") == "deterministic_parser"})
     gave = [f"{kept} statement(s) from its header kept as evidence (extended context)"]

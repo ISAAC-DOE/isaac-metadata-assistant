@@ -1557,6 +1557,8 @@ def question_targets(payload: Mapping, question_id: str, *, decision: str, only:
         raise MutationRefused(f"No open question {question_id!r}" + (f" for {only}" if only else "") + ".", code=6)
     if asked is not None and asked["kind"] == "naming_counter_positions" and decision == B.NOT_COUNTER_DECISION and positions is None:
         positions = list(asked.get("positions") or [])  # the positions the question asks about now
+        if -1 in positions:  # `last` (grouping.LAST_POSITION): "no" names the positions those last tokens sit at
+            positions = sorted({p for p in positions if p != -1} | set(asked.get("last_token_positions") or ()))
     return list(found), (list(positions) if positions is not None else None)
 
 
@@ -2137,6 +2139,18 @@ def _shown_value(value: Any) -> str:
     return text if len(text) <= 60 else text[:57] + "…"
 
 
+def _counter_positions_words(positions: Sequence[int] | None) -> str:
+    """``counter position(s) 2, 3 recorded``; the last token in words (``-1`` is how it is stored, never what is said):
+    ``the last token recorded as the run counter``, ``counter position(s) 2 and the last token recorded``."""
+    from .grouping import LAST_POSITION
+
+    pos = list(positions or ())
+    numbers = ", ".join(str(p) for p in pos if p != LAST_POSITION)
+    if LAST_POSITION not in pos:
+        return f"counter position(s) {numbers} recorded"
+    return f"counter position(s) {numbers} and the last token recorded" if numbers else "the last token recorded as the run counter"
+
+
 def plain_statement(bundle: Mapping, planned: Sequence[tuple[str, Mapping]], target_ids: Sequence[str],
                     recorded: Sequence[str], *, decision: str, value: Any, element: str | None = None,
                     edge: str | None = None, positions: Sequence[int] | None = None, qc_status: str | None = None) -> str:
@@ -2149,7 +2163,7 @@ def plain_statement(bundle: Mapping, planned: Sequence[tuple[str, Mapping]], tar
         "confirm": "confirmed", "reject": "rejected", "defer": "deferred", "correct": f"{_shown_value(value)} recorded",
         "approve": "approved" + (f" (QC status {qc_status})" if qc_status else ""),
         "merge": "merge recorded", "split": "split recorded",
-        "set_counter_positions": f"counter position(s) {', '.join(map(str, positions or ()))} recorded",
+        "set_counter_positions": _counter_positions_words(positions),
         B.CLOCK_ZONE_DECISION: f"instrument clock time zone {value} recorded",
     }.get(decision, f"{decision} recorded")
     cand_path = {c["candidate_id"]: c.get("target_field_path") for c in bundle.get("candidates") or ()}

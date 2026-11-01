@@ -64,6 +64,7 @@ from typing import Any, Mapping, Sequence
 
 from . import bundle as B
 from . import suggestions as S
+from .grouping import LAST_POSITION, last_token_positions
 
 FORMAT_ID = "isaac.questions"
 FORMAT_VERSION = "2.0.0"
@@ -1013,7 +1014,10 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                                    + str(pending.get("statement") or "")) + ")"}]
     for gq in counter_gqs:
         asked_positions = [int(p) for p in gq.get("positions") or () if isinstance(p, int)]
-        open_positions = [p for p in asked_positions if p not in said_counter and p not in said_not]
+        # `last` is answered "no" when every position those last tokens sit at is said not to be a counter
+        last_at = last_token_positions(bundle) if LAST_POSITION in asked_positions else []
+        open_positions = [p for p in asked_positions if p not in said_counter and p not in said_not
+                          and not (p == LAST_POSITION and last_at and set(last_at) <= set(said_not))]
         if asked_positions and not open_positions and not include_answered:
             continue  # every position it asks about is answered: it drops out of the open list
         qid = _qid("experiment", "naming_counter_positions", str(gq.get("id") or gq.get("text") or ""))
@@ -1027,10 +1031,10 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 for p, ex in examples.items()) + ")")
         example_names = {str(p): ex["differ"] + ([ex["elsewhere"]] if ex["elsewhere"] else []) for p, ex in examples.items()}
         if asked_positions and not open_positions:
-            text += " Already answered: every position it asks about (" + ", ".join(map(str, asked_positions)) + ")."
+            text += " Already answered: every position it asks about (" + ", ".join(map(_position_shown, asked_positions)) + ")."
         elif len(open_positions) < len(asked_positions):
-            text += (" Already answered: position(s) " + ", ".join(str(p) for p in asked_positions if p not in open_positions)
-                     + f"; still open: {', '.join(map(str, open_positions))}.")
+            text += (" Already answered: position(s) " + ", ".join(_position_shown(p) for p in asked_positions if p not in open_positions)
+                     + f"; still open: {', '.join(map(_position_shown, open_positions))}.")
         text += (" If none of the open positions is a counter (the numbers name distinct samples, electrodes or "
                  "conditions, or are a plain sequence that does not mark repeats), say so with "
                  f"{B.NOT_COUNTER_DECISION}: grouping is unchanged by that answer and each merge candidate stays open.")
@@ -1047,6 +1051,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 "text": text,
                 # answered (include_answered): the positions a no-counter answer names again, never one said to be a counter
                 "positions": open_positions or [p for p in asked_positions if p not in said_counter] or asked_positions,
+                **({"last_token_positions": last_at} if last_at and LAST_POSITION in asked_positions else {}),
                 **({"example_names": example_names} if example_names else {}),
                 "applies_to": {"groups": len(groups), "runs": len(bundle["runs"]), "targets": 1},
                 "targets": [{"kind": "experiment", "id": "experiment"}],
@@ -1412,7 +1417,12 @@ _COUNTER_PLACEHOLDER = "(e.g. XX_02_… vs XX_03_…)"
 
 
 def _ordinal(n: int) -> str:
-    return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+    return "last" if n == LAST_POSITION else f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+def _position_shown(p: int) -> str:
+    """A counter position as the scientist answers it: ``3``, or ``last`` for the last token (never ``-1``)."""
+    return "last" if p == LAST_POSITION else str(p)
 
 
 def _marked_token(stem: str, position: int) -> str | None:
@@ -1437,6 +1447,20 @@ def _counter_examples(bundle: Mapping, positions: Sequence[int]) -> dict[int, di
     runs_by_key = {r["run_key"]: r for r in bundle.get("runs") or ()}
     groups = {g["group_id"]: g for g in bundle.get("record_groups") or ()}
     out: dict[int, dict] = {}
+    if LAST_POSITION in positions:
+        # the last token: two names of one merge candidate that differ only there, in a number
+        for mc in bundle.get("merge_candidates") or ():
+            stems = []
+            for gid in mc.get("group_ids") or ():
+                keys = (groups.get(gid) or {}).get("member_run_keys") or ()
+                stem = (runs_by_key.get(keys[0]) or {}).get("stem") if keys else None
+                if stem and stem not in stems:
+                    stems.append(stem)
+            toks = [_stem_tokens(x) for x in stems[:2]]
+            if (len(toks) == 2 and len(toks[0]) == len(toks[1]) > 1 and toks[0][:-1] == toks[1][:-1]
+                    and toks[0][-1] != toks[1][-1] and all(t[-1].isdigit() for t in toks)):
+                out[LAST_POSITION] = {"differ": [_marked_token(x, len(t)) for x, t in zip(stems, toks)], "elsewhere": None}
+                break
     for mc in bundle.get("merge_candidates") or ():
         if not any(r.get("code") == "numeric_name_token_differs" for r in mc.get("reasons") or ()):
             continue
@@ -1452,6 +1476,8 @@ def _counter_examples(bundle: Mapping, positions: Sequence[int]) -> dict[int, di
             if p not in out and len(stems) >= 2 and len(col) == len(toks) and len(set(col)) > 1 and all(c.isdigit() for c in col):
                 out[p] = {"differ": [_marked_token(s, p) for s in stems[:2]], "elsewhere": None}
     for p, ex in out.items():
+        if p == LAST_POSITION:
+            continue  # every name has a last token: there is no "elsewhere" to show
         other = next((r["stem"] for r in bundle.get("runs") or () if r.get("stem") and len(t := _stem_tokens(r["stem"])) >= p
                       and not t[p - 1].isdigit()), None)
         ex["elsewhere"] = _marked_token(other, p) if other else None

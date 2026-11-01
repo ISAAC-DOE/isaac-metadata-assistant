@@ -313,7 +313,17 @@ def test_a_refused_merge_and_its_rule_candidate_are_one_candidate_keeping_the_ru
 
 
 def test_a_candidate_of_names_stating_different_samples_carries_a_caution(tmp_path, capsys):
-    b = _xdc(tmp_path, ["SYN_03_MOFdry_015_A", "SYN_03_MOFdry_spot2_017_A", "SYN_01_Sref_006_A"])
+    # c16a: runs whose sample no file states meet in a candidate only under a shared base name (here the `.exp`
+    # DATA_FILE both name), never in one candidate for the beamtime; their names still differ, so it is cautioned
+    def exp(src):
+        for stem in ("SYN_03_MOFdry_015", "SYN_03_MOFdry_spot2_017"):
+            (src / f"{stem}.exp").write_text("DATA_FILE SYN_03_MOFdry\n")
+        (src / "SYN_01_Sref_006.exp").write_text("DATA_FILE SYN_01_Sref\n")
+
+    out = _import(tmp_path, {f"{s}.001": stamp("2099-07-14T10:23:45")
+                             for s in ["SYN_03_MOFdry_015_A", "SYN_03_MOFdry_spot2_017_A", "SYN_01_Sref_006_A"]}, extra=exp)
+    M.group(out)
+    b = out
     [mc] = M.load(b)["merge_candidates"]
     assert mc["reason_code"] == "sample_identity_not_stated"
     codes = {c["code"] for c in mc["caution"]}
@@ -325,7 +335,7 @@ def test_a_candidate_of_names_stating_different_samples_carries_a_caution(tmp_pa
     [row] = json.loads(capsys.readouterr().out)["items"]
     assert row["reason_code"] == "sample_identity_not_stated" and row["caution"]
     assert sorted(lab for g in row["groups"] for lab in g["run_labels"]) == sorted(
-        ["SYN_03_MOFdry_015", "SYN_03_MOFdry_spot2_017", "SYN_01_Sref_006"])
+        ["SYN_03_MOFdry_015", "SYN_03_MOFdry_spot2_017"])
     assert cli.main(["bundle", "show", str(b), "merge-candidate", mc["merge_candidate_id"]]) == 0
     shown = json.loads(capsys.readouterr().out)
     assert shown["merge_candidate_id"] == mc["merge_candidate_id"] and shown["groups"] and shown["caution"]

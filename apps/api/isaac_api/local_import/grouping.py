@@ -392,6 +392,56 @@ def counter_tokens(stem: str, *, counter_positions: Iterable[int] = (), known_co
     return [t for i, t in enumerate(toks) if t.isdigit() and _is_counter_token(toks, i, positions, known)]
 
 
+#: The extended-context concept the SSRL XDC reader gives a run's own ``.exp`` ``DATA_FILE`` line.
+EXP_DATA_FILE_CONCEPT = "exp_data_file"
+
+
+def exp_data_files(bundle: Mapping) -> dict[str, str]:
+    """``run_id -> DATA_FILE`` literal read from the run's own ``.exp`` (the first one; none for other readers)."""
+    out: dict[str, str] = {}
+    for e in bundle.get("extended_context") or ():
+        if isinstance(e, Mapping) and e.get("concept") == EXP_DATA_FILE_CONCEPT and e.get("run_id") and str(e.get("raw_literal") or "").strip():
+            out.setdefault(str(e["run_id"]), str(e["raw_literal"]).strip())
+    return out
+
+
+def base_name_key(stem: str, data_file: str | None = None) -> str:
+    """The name a run shares with its repeats, casefolded (``000mV`` = ``0mV``), repeat markers (``again``, and a
+    number after one) left out: the ``.exp`` ``DATA_FILE`` where one was read, else the name without its last token
+    when that token is a whole number (``x_dry_015`` and ``x_dry_016`` share ``x_dry``; ``x`` and ``x_again`` share
+    ``x``), else the whole name. Used ONLY to offer merge candidates for runs whose sample no source states (one per
+    base name, never one for the whole beamtime): never a sample key, never a group."""
+    toks = _stem_tokens(data_file if data_file else stem or "")
+    toks = [t for i, t in enumerate(toks)
+            if not _REPEAT_TOKEN.match(t) and not (i and t.isdigit() and _REPEAT_TOKEN.match(toks[i - 1]))]
+    if not data_file and len(toks) > 1 and toks[-1].isdigit():
+        toks = toks[:-1]
+    return "_".join(_unit_token(t) for t in toks).casefold()
+
+
+def last_token_positions(bundle: Mapping) -> list[int]:
+    """The 1-based positions at which the last tokens of names that differ ONLY in that token, a whole number, sit
+    (``x_dry_015`` / ``x_dry_016``: 3). What a "no" to the counter question asked about the last token names, since
+    a not-a-counter answer takes whole-number positions only."""
+    heads: dict[tuple, set[str]] = {}
+    for run in bundle.get("runs") or ():
+        toks = [_unit_token(t).casefold() for t in _stem_tokens(run.get("stem") or "")]
+        if len(toks) > 1 and toks[-1].isdigit():
+            heads.setdefault(tuple(toks[:-1]), set()).add(toks[-1])
+    return sorted({len(head) + 1 for head, last in heads.items() if len(last) > 1})
+
+
+def _last_token_families(infos: Sequence[Mapping], gid_of_run: Mapping[str, str]) -> dict[tuple, dict[str, set]]:
+    """Names that differ ONLY in their last token, a whole number, and sit in different proposed groups:
+    ``{tokens before the last: {last token: group ids}}`` (two or more last tokens, two or more groups)."""
+    families: dict[tuple, dict[str, set]] = {}
+    for info in infos:
+        toks = [_unit_token(t).casefold() for t in _stem_tokens(info["run"].get("stem") or "")]
+        if len(toks) > 1 and toks[-1].isdigit():
+            families.setdefault(tuple(toks[:-1]), {}).setdefault(toks[-1], set()).add(gid_of_run[info["run"]["run_key"]])
+    return {head: f for head, f in families.items() if len(f) > 1 and len(set().union(*f.values())) > 1}
+
+
 def _known_counters(run: Mapping) -> list[int]:
     out = []
     try:
@@ -763,6 +813,7 @@ def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: froz
     def klass(key: str) -> str:
         return classify_key(key, overrides=overrides)
 
+    data_files = exp_data_files(bundle)
     infos = []
     for index, (run, (readings, books)) in enumerate(zip(runs, raw)):
         role, role_basis = run_role(run, sources)
@@ -810,6 +861,7 @@ def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: froz
                 "index": index, "run": run, "readings": readings, "books": books, "classes": classes,
                 "role": role, "role_basis": role_basis, "hard": hard, "soft": soft, "blockers": blockers,
                 "issues": issues, "blocking": blocking, "cond_sig": cond_sig, "cond_sig_loose": cond_sig_loose, "name_key": name_key, "unk_sig": unk_sig, "scans": scans,
+                "base_name": base_name_key(run.get("stem") or "", data_files.get(str(run.get("run_id")))),
                 "candidate_eligible": not hard and scans > 0,
             }
         )
@@ -1077,7 +1129,17 @@ def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: froz
 
     runs_by_key = {r["run_key"]: r for r in runs}
     for pool in pools.values():
-        _add_candidate(pool)
+        if all("sample_identity_not_stated" in m["blockers"] for m in pool):
+            # NOTHING READ says which of these runs measured what: one candidate per shared base name (the `.exp`
+            # DATA_FILE, or the name without its trailing number), never one for every such run of the beamtime
+            # (measured on a real beamtime: one candidate lumped 29 unrelated groups, elemental S to electrochemistry)
+            by_base: dict[str, list[dict]] = {}
+            for m in pool:
+                by_base.setdefault(m["base_name"], []).append(m)
+            for members in by_base.values():
+                _add_candidate(members)
+        else:
+            _add_candidate(pool)
     run_info = {i["run"]["run_key"]: i for i in infos}
     for info in infos:
         for issue in info["issues"]:
@@ -1093,6 +1155,14 @@ def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: froz
                 stems = [by_gid[g]["_members"][0]["run"].get("stem") or "" for g in mc["group_ids"]]
                 for pos in _differing_number_positions(stems, counter_positions=cpos, last_exempt=last_exempt):
                     pos_count[pos] = pos_count.get(pos, 0) + 1
+    # UP FRONT: names that differ only in their LAST token, a number, held in different groups (a BL4-3 style
+    # beamtime, `<name>_015`, `<name>_016`): whether that token counts acquisitions is asked before any merge, not
+    # first inside a merge refusal. Not when `last` (or every such position) is already declared a counter, nor
+    # when the question above already asks every position those last tokens sit at.
+    families = _last_token_families(infos, gid_of_run) if LAST_POSITION not in cpos else {}
+    last_positions = sorted({len(head) + 1 for head in families})
+    if families and not set(last_positions) <= set(cpos) and not set(last_positions) <= set(pos_count):
+        pos_count[LAST_POSITION] = len(families)
     q = counter_question(pos_count, counter_decision)
     if q:
         experiment_questions.append(q)
@@ -1173,15 +1243,37 @@ def _differing_number_positions(stems: Sequence[str], *, counter_positions: Iter
     return out
 
 
+def position_words(p: int) -> str:
+    """A counter position in words: ``3rd``, or ``last`` for :data:`LAST_POSITION`."""
+    if p == LAST_POSITION:
+        return "last"
+    return f"{p}{'th' if 10 <= p % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(p % 10, 'th')}"
+
+
 def counter_question(pos_count: Mapping[int, int], counter_decision: Mapping | None) -> dict | None:
-    """The ONE experiment-scope question about counter positions (None when nothing to ask)."""
+    """The ONE experiment-scope question about counter positions (None when nothing to ask), :data:`LAST_POSITION`
+    among them when names differ only in their last token (asked on its own, it is worded for that)."""
     if not pos_count:
         return None
-
-    def ordinal(n: int) -> str:
-        return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
-
-    positions = sorted(int(p) for p in pos_count)
+    positions = sorted((int(p) for p in pos_count), key=lambda p: (p == LAST_POSITION, p))
+    if positions == [LAST_POSITION]:
+        return {
+            "question_id": "rgq-experiment-counter-positions",
+            "id": "rgq-experiment-counter-positions",
+            "kind": "naming_counter_positions",
+            "code": "set_counter_positions",
+            "examples": ["XX_dry_015", "XX_dry_016"],
+            "scope": "experiment",
+            "target": "experiment",
+            "text": "In this beamtime, is the last token of the file names a run counter? (e.g. XX_02_… vs XX_03_…). "
+            "Some names are the same but for that last number, and no file states which sample they measured. If it "
+            "counts acquisitions, answer `last`: each merge candidate of the runs that share the rest of the name can "
+            "then be merged.",
+            "positions": positions,
+            "candidates_resolved_by_position": {str(LAST_POSITION): int(pos_count[LAST_POSITION])},
+            "answer_shape": {"decision": "set_counter_positions", "target": {"kind": "experiment", "id": "experiment"}, "positions": positions, "decided_by": "<name>"},
+            "already_decided": counter_decision,
+        }
     return {
         "question_id": "rgq-experiment-counter-positions",
         "id": "rgq-experiment-counter-positions",
@@ -1190,7 +1282,7 @@ def counter_question(pos_count: Mapping[int, int], counter_decision: Mapping | N
         "examples": ["XX_02_…", "XX_03_…"],
         "scope": "experiment",
         "target": "experiment",
-        "text": "In this beamtime, is the " + " / ".join(ordinal(p) for p in positions)
+        "text": "In this beamtime, is the " + " / ".join(position_words(p) for p in positions)
         + " token of the file names a run counter? (e.g. XX_02_… vs XX_03_…). If yes, runs whose names differ only there are proposed as one group."
         " If the counter is always the LAST token, whatever the name's length, answer `last`.",
         "positions": positions,
