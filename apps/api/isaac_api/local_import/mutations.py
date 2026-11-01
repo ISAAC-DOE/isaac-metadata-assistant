@@ -2374,7 +2374,7 @@ def record_decision(
                     raise MutationRefused(problem)
                 if "athena_e0_possibly_fixed" in (obj.get("review_flags") or ()) and not e0_measured:
                     # r1 M5: an Athena E0 shared by groups whose own edges differ may be a fixed setting, not a measure
-                    said = next((s for s in ((obj.get("qc") or {}).get("statements") or ())
+                    said = next((s for s in (((obj.get("qc") or {}).get("statements") or {}).values())
                                  if isinstance(s, str) and "Athena" in s and "E0" in s), "")
                     raise MutationRefused(
                         f"{tid} carries a possibly fixed Athena E0 (athena_e0_possibly_fixed){': ' + said if said else '.'} "
@@ -4507,7 +4507,7 @@ def calibration_shift_said(bundle: Mapping, group_id: str, element: str, edge: s
                 "again then with --accept-shift <the shift shown>.")
     # c12-r (REF.STRICTER_ONLY_RULE_ID): never a params file's higher warning level
     warn = REF.effective_warn_eV(((qc or {}).get("params") or {}).get("warn_energy_shift_eV") or warn)
-    w = REF.would_apply(cal, element, edge, warn_eV=warn)
+    w = REF.would_apply(cal, element, edge, warn_eV=warn, accepted=accepted)  # r3 L8: a confirmed size is said as such
     if not REF.reading(cal)["reference_proposed"]:
         # c12-r: a DECIDED result approved under an older build may carry a shift from this reference: confirming
         # its exact size (--accept-shift) is the scientist keeping that curve; nothing else can be approved

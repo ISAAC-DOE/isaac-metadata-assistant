@@ -8,12 +8,12 @@ Athena project and value below is invented (``SYN_``); the chemical formulas are
   names only hint, from a closed list (the review's probes: test_local_import_polish_r1ar.py).
 * (M4) Choosing an Athena version as the result of record (``select_athena_version``) gives that version its own
   approvable Athena result on the next ``isaac process`` (built as every Athena result is); approving it makes the
-  record carry that version's E0. Measured: a 42-scan group's chosen merge (E0 2473.114) changed nothing, and the
-  record kept ISAAC's 2472.958.
+  record carry that version's E0. Seen on a real beamtime: choosing a large group's merge changed nothing, and the
+  record kept ISAAC's own E0.
 * (M5) An Athena E0 identical across groups of one beamtime whose own edges differ is likely a fixed normalisation
   setting, not a measured edge position: each such Athena result is flagged ``athena_e0_possibly_fixed``, is not
-  preferred for the record, says why and asks whether the E0 was measured or set. Measured: elemental S, a dry MOF
-  and the MOF at 0 V all carried Athena E0 2471.901 eV; ISAAC measured 2472.958 eV for the last.
+  preferred for the record, says why and asks whether the E0 was measured or set. Seen on a real beamtime: three
+  chemically different groups carried one identical Athena E0 while ISAAC measured a different edge for one.
 """
 
 from __future__ import annotations
