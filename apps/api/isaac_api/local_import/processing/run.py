@@ -751,6 +751,67 @@ def _file_name(entry: Mapping) -> str:
     return PurePosixPath(str(entry.get("relative_path") or entry.get("source_id"))).name
 
 
+#: r3-b M4: a merged scan's point departs from the other scans' median by more than this fraction of that median's span
+OUTLIER_DEPARTS_FRACTION = 0.1
+
+
+def _outlier_scans_statement(scan_flags: Sequence[bool], used_entries: Sequence[Mapping], grid, M, merged,
+                             excluded: bool, np) -> str | None:
+    """r3-b M4: one plain statement naming each scan the deglitch step flagged as an OUTLIER (its deviation from the
+    group's median spectrum is far above the others'), by its FILE, with the energy range where it departs from the
+    other scans' median (by more than :data:`OUTLIER_DEPARTS_FRACTION` of that median's span), its signal there as a
+    share of theirs, and what merging it did to the merged curve there; it asks whether the scan belongs in the merge.
+    ``None`` when no scan is flagged. Measured on a real BL4-3 Ti beamtime: one scan's signal fell to about 0.05 after
+    4985 eV and the merge was about 30% low there, said only as a count (``outlier_scans_flagged``). Descriptive only:
+    nothing is skipped or changed for it. Said after the run id (qc.json is hashed), so no result id moves."""
+    flagged = [k for k, f in enumerate(scan_flags) if f]
+    if not flagged:
+        return None
+    n = M.shape[0]
+    parts = []
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        for k in flagged:
+            others = [j for j in range(n) if j != k and not scan_flags[j]] or [j for j in range(n) if j != k]
+            if not others:
+                continue
+            ref = np.nanmedian(M[others], axis=0)
+            mine = np.isfinite(M[k])
+            ok = mine & np.isfinite(ref)
+            name = _file_name(used_entries[k])
+            if not ok.any():
+                continue
+            span = float(np.nanmax(ref[ok]) - np.nanmin(ref[ok])) or 1.0
+            away = ok & (np.abs(M[k] - ref) > OUTLIER_DEPARTS_FRACTION * span)
+            if not away.any():
+                lo, hi = float(grid[mine][0]), float(grid[mine][-1])
+                parts.append(f"{name} ({lo:.1f}-{hi:.1f} eV) differs from the other scans more than they differ from "
+                             "each other, though nowhere by more than a tenth of the edge's height.")
+                continue
+            idx = np.flatnonzero(away)
+            lo, hi = float(grid[idx[0]]), float(grid[idx[-1]])
+            nonzero = away & (np.abs(ref) > 0)
+            share = float(np.median(M[k][nonzero] / ref[nonzero])) if nonzero.any() else None
+            said = (f"{name} departs from the other scans' median from {lo:.1f} to {hi:.1f} eV ({int(away.sum())} of its "
+                    f"{int(mine.sum())} points)" + (f": its signal there is about {share * 100:.0f}% of theirs" if share is not None else ""))
+            fin = nonzero & np.isfinite(merged)
+            if excluded:
+                said += "; it is left out of the merge (deglitch.exclude_flagged)."
+            elif fin.any():
+                effect = float(np.median(merged[fin] / ref[fin]) - 1.0)
+                said += (f"; it is merged unchanged, so the merged curve there is about {abs(effect) * 100:.0f}% "
+                         f"{'lower' if effect < 0 else 'higher'} than the other scans' median.")
+            else:
+                said += "; it is merged unchanged."
+            parts.append(said)
+    if not parts:
+        return None
+    more = f" {len(parts) - 10} more flagged scan(s) are said in the deglitch step." if len(parts) > 10 else ""
+    one = len(flagged) == 1
+    return (" ".join(parts[:10]) + more + f" Ask the scientist whether {'this scan belongs' if one else 'these scans belong'} "
+            "in the merge (a beam loss, a sample that moved or a detector that stopped counting would not).")
+
+
 def _scan_name(entry: Mapping) -> str:
     return f"{entry.get('source_id')} (scan {entry['scan']})" if entry.get("scan") is not None else str(entry.get("source_id"))
 
@@ -1564,6 +1625,10 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     if zero_points_said:
         res["qc"].setdefault("statements", {})["merged_scan_zero_signal_points"] = zero_points_said
         res["review_flags"].append(ZERO_SIGNAL_POINTS_FLAG)
+    # r3-b M4: an outlier scan is named, with where it departs and what merging it did (the count alone said nothing)
+    outlier_said = _outlier_scans_statement(dg["scan_flags"], used_entries, grid, M, mg["mean"], excl, np)
+    if outlier_said:
+        res["qc"].setdefault("statements", {})["outlier_scans"] = outlier_said
     # c12-cal: zeros whose counts come back are counted in one line (no flag), never said as a lost beam
     isolated_said = _isolated_zero_points_statement(used_entries, scans_data, _raw_signal(choice), np)
     if isolated_said:

@@ -19,6 +19,8 @@ SYNTHETIC only: every scan, name, Athena project and value below is invented and
 * (M5) After ``process --group``, the Athena statement speaks of the groups processed NOW and counts the project's
   Athena groups that match any record group (this run's match over every group, and the stored results); it never
   says "matched no record group" while other groups hold matched Athena results.
+* (M4) An outlier scan is named by its file, with the energy range where it departs from the other scans, its signal
+  there as a share of theirs and what merging it did, and the scientist is asked whether it belongs in the merge.
 """
 
 from __future__ import annotations
@@ -486,3 +488,42 @@ def test_a_stored_match_counts_even_when_this_run_matches_nothing(tmp_path):
     # nothing matched anywhere: the line is the one it always was
     assert RUN.athena_match_statement(groups, entries, matched={}, notes=[], processed={"g1"}).startswith(
         "Athena: 2 Athena group(s) were read and matched no record group")
+
+
+# --- M4: an outlier scan is named, not only counted -----------------------------------------------------------------
+
+
+def test_a_scan_whose_signal_dies_is_named_with_where_and_what_merging_it_did(tmp_path):
+    _processing()
+    import numpy as np
+    from test_local_import_processing import GRID, fluo_scan, make_case, spec_file
+
+    def dying(seed):
+        cols = fluo_scan(seed)
+        cols["vortDT"] = np.where(GRID > 4985.0, cols["vortDT"] * 0.05, cols["vortDT"])  # the counts fall to 5 %
+        return cols
+
+    scans = [spec_file(fluo_scan(1)), spec_file(fluo_scan(2)), spec_file(dying(3)), spec_file(fluo_scan(4))]
+    bdir, root, _ = make_case(tmp_path, [("01_SYN_TiON_dry_016", scans, {"sample_name": "ZZ1"})])
+    _, [isa], _ = _process(bdir, root)
+    dg = next(s for s in isa["steps"] if s["step"] == "deglitch")
+    assert "outlier_scans_flagged" in dg["flags"] and len(dg["outcome"]["outlier_scans"]) == 1
+    said = isa["qc"]["statements"]["outlier_scans"]
+    assert said.startswith("01_SYN_TiON_dry_016_003.dat departs from the other scans' median from 4985.")
+    assert "its signal there is about 5% of theirs" in said
+    assert "it is merged unchanged, so the merged curve there is about 24% lower than the other scans' median" in said
+    assert said.endswith("Ask the scientist whether this scan belongs in the merge (a beam loss, a sample that moved or "
+                         "a detector that stopped counting would not).")
+    # said outside the hashed qc.json: the file keeps what it had (no id moves)
+    qc = json.loads(next(bdir / f["relative_path"] for f in isa["outputs"]["files"] if f["role"] == "qc").read_text())
+    assert "outlier_scans" not in (qc.get("statements") or {})
+
+
+def test_scans_that_agree_get_no_outlier_sentence(tmp_path):
+    _processing()
+    from test_local_import_processing import fluo_scan, make_case, spec_file
+
+    bdir, root, _ = make_case(tmp_path, [("01_SYN_TiON_dry_016", [spec_file(fluo_scan(k)) for k in (1, 2, 3, 4)],
+                                          {"sample_name": "ZZ1"})])
+    _, [isa], _ = _process(bdir, root)
+    assert "outlier_scans" not in (isa["qc"].get("statements") or {})

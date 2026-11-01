@@ -109,7 +109,10 @@ it finds one. Show per group, in words:
   under 5 % are `qc.statements.merged_scan_short_zero_runs` (no flag): say the count, and do not call them
   dropouts or a lost beam. `merged_curve_end_from_one_scan`: the curve's first or
   last point comes from one scan alone whose signal is zero there (the merged value is 0, a visible drop):
-  say it when you describe the plot;
+  say it when you describe the plot. An outlier scan (`outlier_scans_flagged`) is named in
+  `qc.statements.outlier_scans` with where it departs from the other scans and what merging it did ("…_003.dat
+  departs … from 4985.0 to 5100.0 eV: its signal there is about 5% of theirs; … about 24% lower"): say it and ask
+  whether the scan belongs in the merge, as for zeros;
 - **when a scan ends early** (reason `scans_truncated`, flag `scan_range_truncated`; `scans_used` still
   counts it): say the sentence in `bundle show processing-result` → `qc.statements`, which names each file
   (`qc.json` keeps the source ids it was first written with): how many scans end early, which, the
