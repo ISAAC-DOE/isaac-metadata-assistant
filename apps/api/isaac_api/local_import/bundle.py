@@ -984,7 +984,8 @@ def not_counter_positions(bundle: Mapping) -> dict[int, Mapping]:
 def context_run_ids(bundle: Mapping) -> set[str]:
     """r2-a L4: the runs a record group keeps beside its measurements as CONTEXT (``context_run_keys``: e.g. the
     scientist's exported ``.dat`` of a run, read as an acquisition), so they are never counted as measurement runs."""
-    keys = {k for g in bundle.get("record_groups") or () if isinstance(g, Mapping) for k in g.get("context_run_keys") or ()}
+    keys = {k for g in bundle.get("record_groups") or () if isinstance(g, Mapping)
+            and g.get("status") in LIVE_GROUP_STATUSES for k in g.get("context_run_keys") or ()}  # review L2: live only
     return {r["run_id"] for r in bundle.get("runs") or () if r.get("run_key") in keys} if keys else set()
 
 

@@ -478,15 +478,16 @@ def _glitch_points_on_edge(points: Sequence[tuple[int, float, bool]], e0, names:
     shown = ", ".join(f"{e:.3f} eV ({names[s]})" for s, e in edge[:10]) + (f" and {len(edge) - 10} more" if len(edge) > 10 else "")
     e0_said = f" {float(e0):.3f} eV" if e0 is not None else ""
     off_said = (f"The other {off} flagged point{'' if off == 1 else 's'} {'is' if off == 1 else 'are'} off the edge and "
-                "counted as glitches." if off else "No point off the edge is flagged, so nothing here is evidence of a glitch.")
+                "counted as glitches." if off else "No point off the edge is flagged.")
     return {
         "on_edge": len(edge), "off_edge": off,
         "listed": [{"scan_position": s, "energy_eV": e} for s, e in edge[:200]],
-        "statement": (f"{len(edge)} of the {len(points)} flagged point{'' if len(points) == 1 else 's'} lie on the edge "
-                      f"(within {C.GLITCH_EDGE_WINDOW_EV:g} eV of E0{e0_said}, or where the merged curve is steep): "
-                      f"points on the edge, not counted as glitches, since the check cannot tell a glitch from the "
-                      f"steep edge there: {shown}. {off_said} The stored verdict keeps glitches_flagged as it was "
-                      "first written; look at the plot."),
+        "statement": (f"{len(edge)} of the {len(points)} flagged point{'' if len(points) == 1 else 's'} "
+                      f"{'lies' if len(edge) == 1 else 'lie'} on the edge "
+                      f"(within {C.GLITCH_EDGE_WINDOW_EV:g} eV of E0{e0_said}, or in the steep stretch of the edge): "
+                      f"the check cannot judge {'it' if len(edge) == 1 else 'them'}, since it cannot tell a glitch from "
+                      f"the steep edge there: {shown}. They are neither counted as glitches nor cleared. {off_said} "
+                      "The stored verdict keeps glitches_flagged as it was first written; look at the plot near E0."),
     }
 
 
@@ -1520,7 +1521,10 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         res["qc"].setdefault("statements", {})["glitch_check_few_scans"] = few_said
     # r2-a: flagged points at E0 or where the merged curve is steep are on the edge, not glitches: listed apart,
     # counted and said (after run_id: qc.json is hashed, so no id moves; the stored count, flag and verdict stay)
-    on_edge = _glitch_points_on_edge(C.glitch_points_on_edge(dg["point_flags"], grid, g2, mean, nm["e0_eV"], np),
+    clean = C.merge(M, dg["point_flags"], None, np)["mean"]  # review: steepness read without the flagged points
+    okc = np.isfinite(clean)
+    on_edge = _glitch_points_on_edge(C.glitch_points_on_edge(dg["point_flags"], grid, grid[okc], clean[okc],
+                                                             nm["e0_eV"], np),
                                      nm["e0_eV"], [_file_name(e) for e in used_entries])
     if on_edge:
         res["qc"]["metrics"].update(glitch_points_on_edge=on_edge["on_edge"], glitch_points_off_edge=on_edge["off_edge"])

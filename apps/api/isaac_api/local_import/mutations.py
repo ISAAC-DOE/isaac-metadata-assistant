@@ -2191,7 +2191,8 @@ def plain_statement(bundle: Mapping, planned: Sequence[tuple[str, Mapping]], tar
                 if measured:
                     parts.append(count(len(measured), "run"))
                 elif runs - {None}:
-                    parts.append(count(len(runs - {None}), "exported file kept as context"))
+                    k = len(runs - {None})  # review L1: the plural goes on "file", not on the phrase's end
+                    parts.append(f"{k} exported file{'' if k == 1 else 's'} kept as context")
                 if None in runs:
                     parts.append("the whole beamtime")
             elif kind == "experiment":

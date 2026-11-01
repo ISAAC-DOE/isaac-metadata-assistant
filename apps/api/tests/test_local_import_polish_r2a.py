@@ -132,7 +132,7 @@ def test_processing_lists_points_on_the_edge_apart_and_keeps_the_hashed_files(tm
     assert m["glitch_points_on_edge"] == m["glitch_points"] and m["glitch_points_off_edge"] == 0
     said = r["qc"]["statements"]["glitch_points_on_edge"]
     assert f"{m['glitch_points']} of the {m['glitch_points']} flagged points lie on the edge" in said
-    assert "points on the edge, not counted as glitches" in said and "(01_SYN_ZZ1_003.dat)" in said  # the jittered scan
+    assert "neither counted as glitches nor cleared" in said and "(01_SYN_ZZ1_003.dat)" in said  # the jittered scan
     assert "No point off the edge is flagged" in said and "within 5 eV of E0" in said
     step = T.step(r, "deglitch")["outcome"]
     assert len(step["flagged_points_on_edge"]) == m["glitch_points"]

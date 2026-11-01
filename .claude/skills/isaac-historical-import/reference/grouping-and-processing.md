@@ -80,7 +80,8 @@ it finds one. Show per group, in words:
   white line and the oscillations); never call those points glitches yourself. **Points on the edge**:
   when `qc.statements.glitch_points_on_edge` is present (metrics `glitch_points_on_edge` /
   `glitch_points_off_edge`), say that sentence; only the off-edge count is glitches (flagged points within
-  5 eV of E0 or where the merged curve is steep are the edge, not glitches; the stored verdict is unchanged);
+  5 eV of E0 or in the steep stretch of the edge are unjudged, not cleared: say to look at the plot near E0;
+  the stored verdict is unchanged);
 - **when scans were skipped** (reason `scans_skipped_lacking_chosen_columns`; flag
   `channel_from_a_later_scan` when the first scan was one of them): the used / readable / skipped
   counts in plain words — "14 of 165 scans were used; 150 had different columns (they may be motor

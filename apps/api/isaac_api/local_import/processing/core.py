@@ -301,24 +301,36 @@ GLITCH_EDGE_SLOPE_HALF_WIDTH = 2
 
 def glitch_points_on_edge(point_flags, grid, energy, curve, e0, np) -> list[tuple[int, float, bool]]:
     """Each flagged point (``deglitch``'s ``point_flags`` on ``grid``) as ``(scan_position, energy_eV, on_edge)``.
-    ``energy``/``curve`` are the merged curve (the existing one; nothing is refitted) and ``e0`` its E0. A point is on
-    the edge when it lies within :data:`GLITCH_EDGE_WINDOW_EV` of ``e0`` or where the curve's slope is at least
-    :data:`GLITCH_EDGE_STEEP_FRACTION` of its steepest (:data:`GLITCH_EDGE_RULE_ID`)."""
+    ``energy``/``curve`` are the merged curve WITH THE FLAGGED POINTS LEFT OUT (a glitch must not make its own
+    neighbourhood look steep) and ``e0`` its E0. A point is on the edge when it lies within
+    :data:`GLITCH_EDGE_WINDOW_EV` of ``e0``, or inside the one stretch of steep slope (at least
+    :data:`GLITCH_EDGE_STEEP_FRACTION` of the steepest) that holds the edge: a steep patch elsewhere never counts
+    (:data:`GLITCH_EDGE_RULE_ID`)."""
     k = GLITCH_EDGE_SLOPE_HALF_WIDTH
     slope = np.full(energy.size, np.nan)
     if energy.size > 2 * k:
         with np.errstate(invalid="ignore", divide="ignore"):
             slope[k:-k] = np.abs((curve[2 * k:] - curve[:-2 * k]) / (energy[2 * k:] - energy[:-2 * k]))
-    steepest = float(np.nanmax(slope)) if np.isfinite(slope).any() else 0.0
+    finite = np.isfinite(slope)
+    steepest = float(np.nanmax(slope)) if finite.any() else 0.0
+    lo = hi = None
+    if steepest > 0:
+        steep = finite & (np.nan_to_num(slope, nan=0.0) >= GLITCH_EDGE_STEEP_FRACTION * steepest)
+        # the stretch that holds the edge: around E0 when it is steep there, else around the steepest point
+        at = int(np.argmin(np.abs(energy - float(e0)))) if e0 is not None else int(np.nanargmax(slope))
+        if not steep[at]:
+            at = int(np.nanargmax(slope))
+        lo = hi = at
+        while lo > 0 and steep[lo - 1]:
+            lo -= 1
+        while hi < energy.size - 1 and steep[hi + 1]:
+            hi += 1
     out = []
     for s, i in zip(*np.nonzero(point_flags)):
         e = float(grid[i])
         near = e0 is not None and abs(e - float(e0)) <= GLITCH_EDGE_WINDOW_EV
-        steep = False
-        if steepest > 0 and energy[0] <= e <= energy[-1]:
-            at = float(np.interp(e, energy, np.nan_to_num(slope, nan=0.0)))
-            steep = at >= GLITCH_EDGE_STEEP_FRACTION * steepest
-        out.append((int(s), e, bool(near or steep)))
+        in_edge = lo is not None and float(energy[lo]) <= e <= float(energy[hi])
+        out.append((int(s), e, bool(near or in_edge)))
     return out
 
 
