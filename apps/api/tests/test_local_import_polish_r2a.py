@@ -15,6 +15,9 @@ line, not a measurement.
   nothing recorded.
 * (LOW 2) Export said "Wrote 7 record(s)" when every record was ``unchanged``: it says how many are ready, how many
   unchanged and how many written.
+* (LOW 3) A group's question list showed what does not apply to it: a beamtime-wide optional question listed fields
+  the group's record already carries, and a conflict that affects no record and reaches no group showed in every
+  group's list. Neither does now (ids unchanged).
 """
 
 from __future__ import annotations
@@ -293,3 +296,44 @@ def test_an_export_of_unchanged_records_says_nothing_new_was_written(bdir, tmp_p
     assert "Wrote" not in again["outcome"]
     assert R.export_outcome(3, 0, 0, out, unchanged=1, replaced=1).startswith(
         "3 record(s) ready (1 unchanged since their export, 2 written, 1 of them replacing an earlier record), refused 0")
+
+
+# --- LOW 3: a group's list shows only what applies to it ---------------------------------------------------------
+
+BEAMLINE = "system.facility.beamline"
+
+
+def test_a_groups_list_leaves_out_optional_fields_its_record_already_carries(counter_bundle):
+    b = M.load(counter_bundle)
+    a, other = (g["group_id"] for g in b["record_groups"][:2])
+    [q] = [q for q in Q.consolidate(b)["questions"]
+           if q["kind"] == "optional_values" and q["scope"] == "experiment" and BEAMLINE in q["fields"]]
+    qid = q["question_id"]
+    M.decide_question(counter_bundle, question_id=qid, only=f"group:{a}", field=BEAMLINE, decision="correct",
+                      value="SYN-BL-9", by="SYNTHETIC TEST", orcid=None)
+
+    def listed(gid):
+        page = _questions(counter_bundle, "--scope", f"group:{gid}", "--with-targets", "--limit", "200")
+        return next((x for x in page["questions"] if x["question_id"] == qid), None), page
+
+    mine, page = listed(a)
+    assert mine is not None and BEAMLINE not in mine["fields"] and mine["fields"]  # the other fields are still open
+    assert mine["fields_already_in_this_groups_record"] == 1
+    assert BEAMLINE not in mine["text"] and "this group's record does not carry" in mine["text"]
+    theirs, _ = listed(other)
+    assert BEAMLINE in theirs["fields"] and "fields_already_in_this_groups_record" not in theirs
+    # the unscoped question is unchanged (the same id, every field the beamtime still lacks)
+    whole = next(x for x in Q.consolidate(M.load(counter_bundle))["questions"] if x["question_id"] == qid)
+    assert BEAMLINE in whole["fields"]
+
+
+def test_a_conflict_that_reaches_no_group_is_left_out_of_every_groups_list():
+    nowhere = {"question_id": "Q-syn-1", "kind": "resolve_conflict", "scope": "experiment", "blocking": False,
+               "affects_record": False, "applies_to": {"groups": 0, "runs": 0, "targets": 1},
+               "per_scope_targets": {"experiment": ["conf-1"]}, "hints": []}
+    reaching = {**nowhere, "question_id": "Q-syn-2", "applies_to": {"groups": 2, "runs": 0, "targets": 1}}
+    affecting = {**nowhere, "question_id": "Q-syn-3", "affects_record": True}
+    payload = {"questions": [nowhere, reaching, affecting]}
+    assert [q["question_id"] for q in Q.filter_questions(payload, scope="group:g1")] == ["Q-syn-2", "Q-syn-3"]
+    assert [q["question_id"] for q in Q.filter_questions(payload, scope="experiment")] == ["Q-syn-1", "Q-syn-2", "Q-syn-3"]
+    assert Q.scope_counts(payload | {"questions": [nowhere]}, "group:g1")["total"] == 0

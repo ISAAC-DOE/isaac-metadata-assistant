@@ -37,6 +37,9 @@ in words and `plus_decisions` never says "approve its processing result" for the
 worth answering for that group, with the warning that explains it (`warnings`): today, a potential the
 file names state that the record will not carry until its scale is confirmed. Pages hold at most 200 (`--limit` above that is refused). The older fine-grained list (`bundle list <bundle> questions`)
 is for lookup only.
+In a group's scope a question asked for more runs lists only what is still open for that group: an
+optional-values question drops the fields its record already carries (`fields_already_in_this_groups_record`
+counts them), and a conflict that affects no record and reaches no group is left out.
 
 Order (SKILL.md Step 7): the minimum for one group → experiment-scope questions, once → the template
 (below) for what the files never state, then per group only what it leaves → conflicts that affect a

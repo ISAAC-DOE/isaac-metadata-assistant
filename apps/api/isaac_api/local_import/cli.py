@@ -1617,7 +1617,7 @@ def cmd_bundle_questions(args) -> int:
         bundle = M.load(Path(args.bundle_dir))
         reports: dict = {}  # composed once: consolidate's reports are reused by the minimum below
         payload = Q.consolidate(bundle, compositions_out=reports)
-        rows = Q.filter_questions(payload, scope=args.scope, blocking_only=args.blocking_only)
+        rows = Q.filter_questions(payload, scope=args.scope, blocking_only=args.blocking_only, reports=reports)
         kept = [q for q in rows if not (args.skip_deferred and q.get("deferred"))]
         page = kept[args.offset : args.offset + args.limit]
         minimum = Q.minimum_answers_for_one_group(payload, bundle, scope=args.scope, bundle_dir=Path(args.bundle_dir),
@@ -1632,7 +1632,7 @@ def cmd_bundle_questions(args) -> int:
             "blocking_basis": payload["blocking_basis"],
             # THE SCOPE'S counts (every question --scope selects, before --blocking-only / --skip-deferred), and the
             # whole bundle's under their own name
-            "counts": Q.scope_counts(payload, args.scope),
+            "counts": Q.scope_counts(payload, args.scope, reports),
             **({"counts_whole_bundle": payload["counts"]} if args.scope else {}),
             "total": len(kept), "offset": args.offset, "limit": args.limit, "returned": len(page),
             "omitted_before": min(args.offset, len(kept)),

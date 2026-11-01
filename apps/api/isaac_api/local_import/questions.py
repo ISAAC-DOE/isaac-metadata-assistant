@@ -1335,11 +1335,11 @@ def question_counts(questions: Sequence[Mapping], *, fine_grained_v1: int | None
     return out
 
 
-def scope_counts(payload: Mapping, scope: str | None) -> dict:
+def scope_counts(payload: Mapping, scope: str | None, reports: Mapping[str, Mapping] | None = None) -> dict:
     """:func:`question_counts` for the questions ``scope`` selects, where ``blocking`` means blocking THERE: in a
     group's scope, a question the composer says blocks only other groups counts as optional (exactly what
-    ``filter_questions(..., blocking_only=True)`` leaves out)."""
-    rows = filter_questions(payload, scope=scope)
+    ``filter_questions(..., blocking_only=True)`` leaves out). ``reports`` as :func:`filter_questions`."""
+    rows = filter_questions(payload, scope=scope, reports=reports)
     if scope and scope.startswith("group:"):
         gid = scope[len("group:"):]
         rows = [{**q, "blocking": False, "tier": TIER_OPTIONAL}
@@ -2144,8 +2144,41 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_a
     return out
 
 
+def _for_group(q: Mapping, scope: str, report: Mapping | None) -> Mapping | None:
+    """r2-a L3: a question from outside a group's own scope as that group's list shows it, or ``None`` when nothing in
+    it applies to the group: a conflict that affects no record and reaches no group, or an optional-values question
+    every field of which the record composed for the group already carries (e.g. answered for its runs by a template).
+    Otherwise its fields are only those still open for the group (a copy; its id and the unscoped question are
+    unchanged). ``report``: the group's composition (``consolidate(compositions_out=...)``); without one the fields are
+    left as they are."""
+    if q["scope"] == scope:
+        return q
+    if (q.get("kind") == "resolve_conflict" and not q.get("affects_record") and not q.get("blocking")
+            and not int((q.get("applies_to") or {}).get("groups") or 0)):
+        return None
+    if q.get("kind") != "optional_values" or report is None or not q.get("fields"):
+        return q
+    filled = [f["path"] for f in report.get("filled") or ()]
+    open_fields = [f for f in q["fields"] if not any(_fills(f, p) for p in filled)]
+    if len(open_fields) == len(q["fields"]):
+        return q
+    if not open_fields:
+        return None
+    lead = f"{len(q['fields'])} optional field(s) no parser read a value for: {', '.join(sorted(q['fields']))}."
+    said = (f"{len(open_fields)} optional field(s) no parser read a value for and this group's record does not carry: "
+            f"{', '.join(sorted(open_fields))}.")
+    return {**q, "fields": {f: ids for f, ids in q["fields"].items() if f in open_fields},
+            "field_allowed_values": {f: a for f, a in (q.get("field_allowed_values") or {}).items() if f in open_fields},
+            **({"field_hints": {f: h for f, h in q["field_hints"].items() if f in open_fields}} if q.get("field_hints") else {}),
+            "text": q["text"].replace(lead, said, 1),
+            "fields_already_in_this_groups_record": len(q["fields"]) - len(open_fields)}
+
+
 def filter_questions(payload: Mapping, *, scope: str | None = None, blocking_only: bool = False,
-                     skip_deferred: bool = False) -> list[dict]:
+                     skip_deferred: bool = False, reports: Mapping[str, Mapping] | None = None) -> list[dict]:
+    """The questions ``scope`` selects. In a group's scope (r2-a L3) a question from outside it lists only what still
+    applies to the group (:func:`_for_group`; ``reports``: ``consolidate``'s compositions, which say what the group's
+    record already carries)."""
     qs = list(payload["questions"])
     if blocking_only:
         qs = [q for q in qs if q["blocking"]]
@@ -2165,6 +2198,8 @@ def filter_questions(payload: Mapping, *, scope: str | None = None, blocking_onl
             ]
             # c10-m: and it leads with the AI suggestion read for THIS group's runs
             qs = [led_by_scope(q, scope) for q in qs]
+            report = (reports or {}).get(scope[len("group:"):])
+            qs = [g for q in qs if (g := _for_group(q, scope, report)) is not None]
         elif scope.startswith("run:") or scope == "experiment":
             qs = [q for q in qs if q["scope"] == scope]
     return qs
