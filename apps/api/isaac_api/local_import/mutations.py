@@ -1174,6 +1174,7 @@ def _same_ruling_peers(bundle: Mapping, target_ids: Sequence[str]) -> list[dict]
             continue
         held: list[str] = []
         runs: list[str] = []
+        values: list = []
         for d in log:
             target = d.get("target") if isinstance(d, Mapping) else None
             if not isinstance(target, Mapping) or (d.get("batch_id"), d.get("note")) != key or target.get("id") in named:
@@ -1184,10 +1185,12 @@ def _same_ruling_peers(bundle: Mapping, target_ids: Sequence[str]) -> list[dict]
                 continue
             if _governing(bundle, pkind, pobj, latest) is d and target["id"] not in held:
                 held.append(target["id"])
+                # the value the peer holds now: a confirm ruling's value is its candidate's own (c15 review)
+                values.append(B.final_value(pobj.get("value") if pkind == "candidate" else None, d, pobj.get("readings")))
                 if pobj.get("run_id"):
                     runs.append(pobj["run_id"])
         if held:
-            out[key] = {"ruling": found.group(0).lstrip("(").removeprefix("your "), "value": prior.get("value"),
+            out[key] = {"ruling": found.group(0).lstrip("(").removeprefix("your "), "value": values[0],
                         "decision": prior.get("decision"), "target_ids": held, "run_ids": runs}
     return list(out.values())
 

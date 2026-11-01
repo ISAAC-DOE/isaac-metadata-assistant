@@ -2337,7 +2337,8 @@ def _by_cell_and_commands(report: dict, how_of: Mapping[tuple[str, str], str],
 def _cell_command(pairs: Sequence[tuple[str, str]], value: Any, slot_of: Mapping[str, tuple[str, str]]) -> str:
     """c15b M2: the ``decide`` command(s) recording ``value`` for every target of ``pairs`` ((target, decision)) at once:
     one per decision, naming every target (a per-run answer slot the import added is answered through its question,
-    one run at a time: ``--question <id> --only run:<id>``), joined by ``&&``."""
+    one run at a time: ``--question <id> --only run:<id>``), joined by ``&&``: run as one shell line, each command
+    records its own targets, so a refusal of the second leaves the first recorded (say "these commands")."""
     by_how: dict[str, list[str]] = {}
     slots = []
     for tid, how in pairs:
@@ -2674,7 +2675,7 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                         if not unseen:
                             seen_lines.setdefault(cell["cell"], []).append((entry, tid, decision, cell["value"], said_now))
                     continue
-                if asked and not supersede:
+                if asked:  # c15 review: listed with --supersede too, so each one is read back
                     report["over_recorded"].append({"cell": cell["cell"], "target": {"kind": kind, "id": tid},
                                                     "value": cell["value"], "run_id": obj.get("run_id"),
                                                     "header": cell["header"], "recorded_now": before,
@@ -3314,18 +3315,22 @@ def _tied_summary(rep: Mapping) -> str:
             f"({len(tied)} target{'s' if len(tied) != 1 else ''})")
 
 
-def _cell_lines(items: Sequence[Mapping]) -> list[str]:
-    """c15b M1: one line per cell of ``clashes_by_cell`` / ``stale_by_cell``: its targets and runs, how many clash, are
-    held back with them or already hold the value, its own reason, and one command for every target of it."""
+def _cell_lines(items: Sequence[Mapping], what: str = "clash") -> list[str]:
+    """c15b M1: one line per cell of ``clashes_by_cell`` / ``stale_by_cell``: its targets and runs, how many clash (or,
+    for ``stale_by_cell``, are not tied: ``what``), are held back with them or already hold the value, its own reason,
+    and one command for every target of it."""
     out = []
     for x in items:
-        parts = [f"{x['clashes']} clash{'' if x['clashes'] == 1 else 'es'}" if x["clashes"] else "", f"{x['held_back']} held back with them"
+        n = x["clashes"]
+        parts = [(f"{n} clash{'' if n == 1 else 'es'}" if what == "clash" else f"{n} not tied") if n else "", f"{x['held_back']} held back with them"
                  if x["held_back"] else "", f"{x['hold_value']} already hold the value" if x["hold_value"] else ""]
         parts = [p for p in parts if p]
         runs = f" on {x['runs']} run(s)" if x["runs"] else ""
         head = f"  {x['cell']} {x.get('header') or ''} = {x['value']!r}: {x['targets']} target(s){runs}"
         detail = f" ({', '.join(parts)})" if x["targets"] > 1 and parts else ""
-        tail = (f". One command records it for all {len(x['target_ids'])} of them: {x['command']}" if x.get("command")
+        many = " && " in (x.get("command") or "")
+        tail = (f". {'These commands record' if many else 'One command records'} it for all {len(x['target_ids'])} of them: "
+                f"{x['command']}" if x.get("command")
                 and len(x["target_ids"]) > 1 else f", or record this value directly: {x['command']}" if x.get("command")
                 else "")
         out.append(f"{head}{detail}: {x['reason']}{tail}")
@@ -3410,7 +3415,7 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
                 run = f" {x['run_id']}" if x.get("run_id") else ""
                 add(f"  {x['cell']}{run} {x['header']} = {x['value']!r}: {x['reason']}")
         else:  # c15b M1: one line per cell, with one command for all its targets
-            lines += _cell_lines(rep.get("stale_by_cell") or ())
+            lines += _cell_lines(rep.get("stale_by_cell") or (), "not tied")
     if rep.get("disagreements_already_recorded"):
         add("")
         add("Disagreements already recorded (left blank, so the recorded value is kept; nothing new is recorded for them):")
@@ -4156,8 +4161,8 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
                 # does not (the ruling is recorded for this row's runs, beside it)
                 wd[f"{DISAGREE_RULING_COLUMN}{row}"].comment = Comment(
                     f"{rec['statement'][0].upper()}{rec['statement'][1:]}: a blank ruling records nothing new. "
-                    + ("A different value here is recorded over it when you import (the preview names it); only if the "
-                       "value recorded changes before then does it need `template import --supersede`." if rec["run_own"]
+                    + ("A different value here is recorded over it when you import (the preview names it); if the "
+                       "value recorded changes before then, nothing is recorded for it: adopt again." if rec["run_own"]
                        else "It is a beamtime-wide answer: a different value here is recorded for this row's runs alone, "
                             "beside it (the import preview says what it records)."), "ISAAC")
             if g.get("allowed"):

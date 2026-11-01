@@ -69,7 +69,7 @@ def test_adopting_again_marks_the_rows_already_ruled_and_a_blank_ruling_keeps_th
     wd = openpyxl.load_workbook(again)["Disagreements"]
     row = next(r for r in range(2, wd.max_row + 1) if wd[f"A{r}"].value == settled["Environment"]["id"])
     assert wd[f"B{row}"].value.startswith("already recorded: 'in_situ' (") and wd[f"H{row}"].value is None
-    assert "--supersede" in wd[f"H{row}"].comment.text
+    assert "adopt again" in wd[f"H{row}"].comment.text
     # the summary counts them apart, and never says every row awaits a ruling
     code, text, err = _adopt(grouped, theirs, tmp_path / "adopted3.xlsx", capsys)
     assert code == 0, err

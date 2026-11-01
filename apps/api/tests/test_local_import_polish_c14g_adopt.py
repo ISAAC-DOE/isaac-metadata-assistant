@@ -153,9 +153,9 @@ def test_the_ruling_cell_of_a_settled_row_says_what_a_different_ruling_does(grou
     assert env2["already_recorded"]["run_own"] is True
     wd, row = _row_of(again, env2["id"])
     # c15b H2: the row named the value recorded now, so a different ruling made against it is recorded over it on
-    # import (the preview names it); --supersede is needed only if the value recorded changes before then
+    # import (the preview names it); if the value recorded changes before then, nothing is recorded: adopt again
     assert "is recorded over it when you import (the preview names it)" in wd[f"H{row}"].comment.text
-    assert "`template import --supersede`" in wd[f"H{row}"].comment.text
+    assert "nothing is recorded for it: adopt again" in wd[f"H{row}"].comment.text
     _rule(again, tmp_path / "other.xlsx", {env2["id"]: "ex_situ"})
     code, rep, err = _import(grouped, tmp_path / "other.xlsx", capsys)
     assert code == 0, err
