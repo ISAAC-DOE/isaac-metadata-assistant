@@ -261,7 +261,8 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   (one line per cell or column; `--full` for every decision); add `--apply` only after the scientist has seen the preview. Each cell becomes decisions; each note
   cites its cell. Invalid cells (not an allowed value exactly, not a number) record nothing.
 - A cell that disagrees with an earlier decision is a clash and is skipped. Use `--supersede` only
-  when the scientist says the sheet is the newer answer.
+  when the scientist says the sheet is the newer answer. (A ruling on an adopted sheet's Disagreements row that
+  named the value recorded now needs no `--supersede`; see below.)
 - Columns recorded nowhere (no official field, or no target in this bundle) are listed with their
   cells. Tell the scientist; do not move their values into another field.
 - A run's cell for a field this bundle asks ONCE for the whole beamtime (e.g. Technique, a shared
@@ -298,7 +299,8 @@ and to use it (a sheet you found in the folder is not that; ask first). Never re
    hint is not a reading; say both and let them rule. The facility's organization is in no hint and is not
    compared.
 2. Say the summary: rows matched, cells adopted, their columns not read, unmatched rows and runs (those
-   runs get nothing from the sheet), and the rows that reach more than one run, with the count (a scan
+   runs get nothing from their File List rows; when it says "Campaign Info still applies to them", their
+   Campaign Info answers do reach those runs: say so), and the rows that reach more than one run, with the count (a scan
    and its `_dir` calibration file are two runs; one value of theirs goes to each). Then read **every** disagreement back, one by one, in plain words:
    "your sheet says 0.8 V for Q4_07; the file name says m800mV, which these names use for −0.8 V". For
    a not-allowed value, give the field's allowed list once and map their words to one value only on
@@ -314,7 +316,12 @@ and to use it (a sheet you found in the folder is not that; ask first). Never re
    "already recorded: 'in_situ' (2026-10-30); leave blank to keep", counted apart ("Disagreements already recorded: 14 of 16"): do not
    ask for that ruling again; say it is settled, and read back only the rest. A row whose recorded value is older
    than the sheet and differs says "recorded `12` (date); your sheet says `2`: rule which": it still awaits their
-   ruling, so read both values back. An electrolyte row with only the name ruled says "name recorded: 'KOH';
+   ruling, so read both values back. "Rule which" means: the bundle holds one value, their sheet says another, and
+   ISAAC picks neither; whatever they type in "Your ruling" (either value, or a third) is recorded for every run of the
+   row by `template import --apply`, no `--supersede` needed (the row was made against the value recorded now; if
+   something was recorded for it since the adopt, the import says so and nothing is recorded: adopt again). Runs
+   holding different values are counted per value ("recorded `-0.8` (8 runs), `-0.6` (1 run)"): say which, and that
+   one ruling sets them all. An electrolyte row with only the name ruled says "name recorded: 'KOH';
    concentration awaits your ruling": ask the concentration (column J).
    A word "The sheet still says 'oxidation' … answered since with `surface_oxidation`" (with or without `--by`,
    under "Answered since") is said as: "your sheet's 'oxidation' was already replaced by surface_oxidation;
@@ -333,7 +340,17 @@ and to use it (a sheet you found in the folder is not that; ask first). Never re
    the rulings it read, and each "awaiting your ruling" row (nothing is recorded for those); rows under
    "Disagreements already recorded" keep their value when left blank, and "N decision(s) (from M cell(s)) already
    recorded" are answers given before: neither is asked again. Add
-   `--apply` only on their yes. Re-importing the same file after more rulings is harmless.
+   `--apply` only on their yes. Re-importing the same file after more rulings is harmless. Rulings on rows that
+   named the value recorded now are listed under "Rulings … over the value recorded now": read each back (old value,
+   new value, runs) before `--apply`. Clashes and "Cells not tied to your sheet" are one line per cell (`--json` lists
+   every target), each with ONE command for all its targets: offer that one, never a single target's (it would split
+   the row), and `decide` warns if a command changed only some targets of one ruling.
+   **"Cells not tied to your sheet"** are cells whose workbook did not see the value recorded now: a decision came
+   since the adopt (a `decide`, another adoption of the sheet, or "another copy of this workbook": a colleague, or
+   they, importing a copy of the same file), or the bundle was copied or restored. Nothing is recorded for them and
+   the value now is kept; each line says who recorded it and when ("recorded now: '12' by Name (date), from a
+   decide"). Say that plainly; tell them to run `template adopt` again and rule against what is recorded now, or use
+   the cell's one command if they are sure. Never read a decision id out (`--json` keeps them).
    A file reading added AFTER the adopt (an AI reading of a scan file, say) that contradicts an adopted
    cell is named under "Replaces or contradicts a file reading" as *not recorded* and listed as awaiting
    a ruling "(not yet on the Disagreements sheet)": run `template adopt` again so it gets a Disagreements

@@ -1957,3 +1957,29 @@ adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
   says "The sheet still says … answered since with …" with or without `--by`; one answered for every run
   (`every_run`) is listed apart (`vocabulary_requests_not_kept.answered_since`), never as a word to keep or draft. The
   import summary says "N decision(s) (from M cell(s)) already recorded".
+- **(c15b) A ruling the row asked for; one line and one command per cell.** Adopt keeps, per Disagreements row, the
+  fields whose recorded values its statement named (`_isaac` `recorded_shown`, a JSON list). A ruling giving such a
+  field a different value is recorded over the value that governs WITHOUT `--supersede` when it was made against it:
+  the workbook is placeable (c14m) and one of the same-value run governing now is among the decisions the row read at
+  adopt (`governing_decisions`). It is listed in `rulings_over_the_value_recorded` ("Rulings … over the value recorded
+  now"). A row that did not name the value (a whole-beamtime row where some runs held nothing), a workbook without the
+  column, a decision recorded since the adopt, a copy of the workbook (c14n) or a correction recorded from this same
+  adoption still need `--supersede`, and every c14l-c14p rule (stale, all or nothing, never flipped by two adoptions
+  or copies) is unchanged. Every clash reason says what is recorded now, by whom, when and from where ("recorded now:
+  '12' by Name (2099-01-01), from a decide | a template import | another adoption | an earlier import of this workbook |
+  another copy of this workbook"); no reason names a decision id (entries keep `decision_id`, `existing`). The text
+  report prints clashes and cells not tied to the sheet one line per cell (`clashes_by_cell`, `stale_by_cell`: targets,
+  runs, clashes, held back, already holding the value, the cell's reason and ONE `decide` command naming every target
+  that does not hold it; `decide` takes `--target` once per target), and the summary counts clashes by cell ("2
+  cell(s) clash (286 target(s): …)"); a per-target reason of a cell reaching several targets ends by naming that
+  command, never its own. A target already holding the value, in a cell another of whose targets still holds a
+  different recorded value, is not told adopting again settles the row. `decide` on a target whose governing decision
+  came from a ruling that reached several targets (the same note and `batch_id`) warns when that ruling's other targets
+  still hold another value (`same_ruling_left`); nothing else ties targets to one sheet row, so nothing else is said.
+  A re-adopted row says, when its runs hold different values, how many hold each ("recorded `-0.8` (8 runs), `-0.6` (1
+  run)"). A ruling note from a build before c14h (provenance, no value, no adopt id) settles its row at adopt, which
+  says so ("by your ruling on this row from an earlier build …"); it is never read when tying or superseding. Adopt
+  says when Campaign Info still reaches the runs on none of their rows, and names `--by` in its next command; an
+  `--apply` that records nothing says "Nothing new recorded"; the same sheet's off-list word adopted under another
+  `--by` is not kept twice (a request keeps one name; the bundle schema has no second), and `propose-terms` counts an
+  older duplicate of one sheet's cells once.
