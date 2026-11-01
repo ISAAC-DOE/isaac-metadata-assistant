@@ -19,6 +19,7 @@ from isaac_api.local_import import mutations as M
 
 from test_local_import_template_adopt import (  # noqa: F401  (fixtures)
     WHO, _adopt_json, _d, corpus, grouped, grouped_base, ticking)
+from test_local_import_polish_c14g_adopt import _rule
 from test_local_import_polish_c14l_adopt import OTHER, _imp, _sheets
 from test_local_import_polish_c14o_adopt import FAC_CELL, _beamline_ruling, _fac_tids, _from_cell, _latest_value
 
@@ -164,17 +165,19 @@ def test_an_adopted_cell_is_this_cell_and_adopting_again_then_supersede_records_
     assert own["reason"].startswith(
         f"an earlier scientist decision gives a different value (recorded now: 'ZZ Since Source' by {OTHER} "
         "(2099-01-01), from a decide); skipped, and --supersede does not record it either: "
-        "this cell was not made against the value recorded now. Adopt again, then import with --supersede, or record "
+        "this cell was not made against the value recorded now. Adopt again: a Campaign Info value that differs from "
+        "the one recorded now becomes a row of the Disagreements sheet; rule it there, or record "
         "this value for all 9 targets of this cell with one command (clashes_by_cell: command)")
     assert all("ruling" not in c["reason"] for c in rep["clashes"] if c["cell"] == FAC_CELL)
     rep = _imp(grouped, tmp_path / "A.xlsx", capsys, "--supersede")
     stale = {x["target"]["id"]: x for x in rep["stale_rulings"]}
     assert stale[tids[0]]["reason"].startswith(
         "this cell was adopted with nothing recorded here, before ")
-    assert all("ruling" not in x["reason"] and "Adopt again, then import with --supersede" in x["reason"]
+    assert all("ruling" not in x["reason"] and "Adopt again: a Campaign Info value that differs" in x["reason"]
                for x in stale.values())
-    # the advice: adopt again (the cell reads the value recorded now), then import with --supersede
-    _adopt_json(grouped, s, tmp_path / "A2.xlsx", capsys)
-    rep = _imp(grouped, tmp_path / "A2.xlsx", capsys, "--supersede")
-    assert {d["target"]["id"] for d in _from_cell(rep, FAC_CELL)} == set(tids)
+    # the advice: adopt again (r4-b M5: the value recorded since makes it a whole-beamtime Disagreements row), rule it
+    row = _d(_adopt_json(grouped, s, tmp_path / "A2.xlsx", capsys), "Facility Name", kind="recorded")
+    _rule(tmp_path / "A2.xlsx", tmp_path / "A2r.xlsx", {row["id"]: SAME})
+    rep = _imp(grouped, tmp_path / "A2r.xlsx", capsys, "--supersede")
+    assert {d["target"]["id"] for d in rep["decisions"] if d["target"]["id"] in set(tids)} == set(tids)
     assert {_latest_value(grouped, t) for t in tids} == {SAME}

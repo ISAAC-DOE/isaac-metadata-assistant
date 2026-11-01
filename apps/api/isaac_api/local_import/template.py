@@ -656,6 +656,14 @@ def facility_hint_lines(bundle: Mapping, path: str, value: Any) -> list[str]:
             if (not same_beamline(r["value"], value) if path == BEAMLINE_PATH else r["form"] != mine)]
 
 
+def agrees_for(path: str | None, a: Any, b: Any) -> bool:
+    """r4-b M5: :func:`_agrees`, except that two beamlines agree when they are one beamline (:func:`same_beamline`,
+    as the facility-hint comparison reads them: ``SSRL BL15-2`` and ``BL15-2``)."""
+    if path == BEAMLINE_PATH and isinstance(a, str) and isinstance(b, str):
+        return _agrees(a, b) or same_beamline(a, b)
+    return _agrees(a, b)
+
+
 def _agrees(a: Any, b: Any) -> bool:
     """The same value: numbers by number (within rounding), text after trimming. A number never
     equals text."""
@@ -1814,7 +1822,7 @@ def recorded_ruling(answers: Mapping, path: str | None, run_ids: Sequence[str], 
     old_form = False
     settled = True
     for a in got:
-        if (their_value is not None and _agrees(a[0], their_value)) or _ruled_in_chain(log, chain(a[2]), provenance):
+        if (their_value is not None and agrees_for(path, a[0], their_value)) or _ruled_in_chain(log, chain(a[2]), provenance):
             continue
         if any(_ruled_here_old_form(log, p, provenance) for p in chain(a[2])):
             old_form = True
@@ -2289,10 +2297,17 @@ def _clash_count(clashes: Sequence[Mapping]) -> str:
     return f"{cells} cell(s) clash ({len(clashes)} target(s): {'; '.join(parts)})"
 
 
-def _again(ruling: bool) -> str:
+def _again(ruling: bool, cell: str | None = None) -> str:
     """c14p LOW-3: how a gated cell not made against the value recorded now is settled. A Disagreements ruling is ruled
-    again; an adopted answer cell has no row to rule on: a fresh adopt reads the value now, and --supersede records it."""
-    return "Adopt again and rule against what is recorded now" if ruling else "Adopt again, then import with --supersede"
+    again; an adopted answer cell has no row to rule on: a fresh adopt reads the value now, and --supersede records it.
+    r4-b M5: an adopted CAMPAIGN INFO cell (``cell``) whose value differs from one recorded becomes, adopted again, a
+    whole-beamtime row of the Disagreements sheet, ruled once there."""
+    if ruling:
+        return "Adopt again and rule against what is recorded now"
+    if str(cell or "").startswith(_cell_ref(SHEET_CAMPAIGN, "")):
+        return (f"Adopt again: a Campaign Info value that differs from the one recorded now becomes a row of the "
+                f"{SHEET_DISAGREE} sheet; rule it there")
+    return "Adopt again, then import with --supersede"
 
 
 def _stale_reason(cell: Mapping, chain: Sequence[Mapping], chains: "_Chains", run: Sequence[int],
@@ -2341,7 +2356,7 @@ def _stale_reason(cell: Mapping, chain: Sequence[Mapping], chains: "_Chains", ru
                     f"nothing is recorded for this {noun}: {_already_there(cell.get('value'), not adopted)}")
         return (f"{'adopted from' if adopted else 'ruled on'} a workbook whose `_isaac` governing_decisions value is "
                 "damaged, so it is never recorded over another value, even with --supersede; the value recorded now is "
-                f"kept and nothing is recorded for this {noun}. {_again(not adopted)}" + alternative)
+                f"kept and nothing is recorded for this {noun}. {_again(not adopted, cell.get('cell'))}" + alternative)
     if (changed is not None and against is not None and changed.get("decision_id") not in against
             and _since_adopt(ended, changed, adopted_at, exported_utc)):
         since = (f", and the value was {'rejected' if changed.get('decision') == 'reject' else 'deferred'} since "
@@ -2353,7 +2368,7 @@ def _stale_reason(cell: Mapping, chain: Sequence[Mapping], chains: "_Chains", ru
                 else f"ruled on a workbook whose adoption time cannot be placed after {first}")
         return f"{lead}{since}; nothing is recorded for this {noun}: {_already_there(cell.get('value'), not adopted)}"
     tail = (" nothing is recorded for it, even with --supersede, and the value recorded now is kept. "
-            + _again(not adopted) + alternative)
+            + _again(not adopted, cell.get("cell")) + alternative)
     here = "this cell" if adopted else "this row"
     # c14n MED-1: a copy of this very workbook (the same adopt id), imported by someone else, recorded the value now
     copy = next((chains.log[p] for p in run if adopt_id is not None and by is not None
@@ -2397,14 +2412,17 @@ _OFFER = ", or record this value directly: "
 
 
 def _by_cell_and_commands(report: dict, how_of: Mapping[tuple[str, str], str],
-                          slot_of: Mapping[str, tuple[str, str]]) -> None:
+                          slot_of: Mapping[str, tuple[str, str]], bundle: Mapping | None = None) -> None:
     """c15b M1, M2, M4 (:func:`plan_and_record`): ``clashes_by_cell`` and ``stale_by_cell``, one entry per cell of the
     per-target ``clashes`` and ``stale`` lists (kept, per target, in ``--json``): how many targets and runs, how many
     clash, are held back with them, or already hold the value, the cell's own reason, and ONE command that records the
     value for every target of the cell that does not hold it (:func:`decide_command`; ``isaac bundle decide`` takes
     ``--target`` once per target). A per-target reason of a cell that reaches several targets ends by naming that
     command instead of its own. c15b M4: a target that already holds the value, in a cell another of whose targets
-    still holds a different one, is never told adopting again settles the row: adopting again would still ask it."""
+    still holds a different one, is never told adopting again settles the row: adopting again would still ask it.
+    r4-b M5: with ``bundle``, a cell whose targets are exactly what one question resolves to is offered as ``decide
+    --question <id>`` (:func:`_question_command`), never as one ``--target`` per target (82 of them)."""
+    asked: dict = {}
     def holding(x: Mapping) -> bool:
         reason = str(x.get("reason") or "")
         return bool(x.get("holds_value")) or _ALREADY_TAIL in reason or reason.endswith(
@@ -2424,7 +2442,8 @@ def _by_cell_and_commands(report: dict, how_of: Mapping[tuple[str, str], str],
             needs = [x for x in xs if x not in holds]
             own = next((x for x in needs if not x.get("blocked_by")), needs[0] if needs else xs[0])
             pairs = [(x["target"]["id"], how_of.get((name, x["target"]["id"]), "correct")) for x in needs]
-            command = _cell_command(pairs, xs[0]["value"], slot_of) if pairs else None
+            command = ((bundle is not None and len(pairs) > 1 and _question_command(bundle, pairs, xs[0]["value"], slot_of, asked))
+                       or (_cell_command(pairs, xs[0]["value"], slot_of) if pairs else None))
             if name in differs:
                 for x in holds:  # M4: adopting again would still find another target holding a different value
                     x["reason"] = str(x["reason"]).replace(_ALREADY_TAIL, (
@@ -2446,6 +2465,35 @@ def _by_cell_and_commands(report: dict, how_of: Mapping[tuple[str, str], str],
                 "target_ids": [x["target"]["id"] for x in needs],
                 "reason": reason.split(_OFFER, 1)[0].split(_CELL_COMMAND_TAIL.split("{", 1)[0], 1)[0],
                 "command": command})
+
+
+def _question_command(bundle: Mapping, pairs: Sequence[tuple[str, str]], value: Any, slot_of: Mapping[str, tuple[str, str]],
+                      cache: dict) -> str | None:
+    """r4-b M5: ``decide --question <id> [--field <path>]`` recording ``value`` on exactly the targets of ``pairs`` (one
+    decision, no answer slot), when an ANSWERED question (nothing of it open: ``decide --question`` then resolves its
+    answered targets) holds exactly those targets; else ``None``. ``cache``: the consolidated questions, read once."""
+    from . import questions as Q
+
+    hows = {how for _t, how in pairs}
+    tids = {t for t, _h in pairs}
+    if len(hows) != 1 or tids & set(slot_of):
+        return None
+    if "by_targets" not in cache:
+        open_payload = Q.consolidate(bundle)
+        answered = Q.consolidate(bundle, include_answered=True, explain_counter=False)
+        by_targets: dict[frozenset, tuple[str, str | None]] = {}
+        for q in answered["questions"]:
+            for field in (sorted(q.get("fields") or ()) if q["kind"] == "optional_values" else [None]):
+                ids = frozenset(Q.targets_for(answered, q["question_id"], None, field))
+                if ids and not Q.targets_for(open_payload, q["question_id"], None, field):
+                    by_targets.setdefault(ids, (q["question_id"], field))
+        cache["by_targets"] = by_targets
+    found = cache["by_targets"].get(frozenset(tids))
+    if found is None:
+        return None
+    qid, field = found
+    return decide_command(None, hows.pop(), value).replace(
+        "--target <target id>", f"--question {qid}" + (f" --field {field}" if field else ""), 1)
 
 
 def _cell_command(pairs: Sequence[tuple[str, str]], value: Any, slot_of: Mapping[str, tuple[str, str]]) -> str:
@@ -2752,7 +2800,9 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                                                                 **stale_said)})
                 keeps_value.add((cell["cell"], tid))  # c14p MED-1: the target already holds this value
                 continue
-            elif same:
+            elif same or (prior.get("decision") != "reject" and obj.get("target_field_path") == BEAMLINE_PATH
+                          and agrees_for(BEAMLINE_PATH, before, cell["value"])):
+                # r4-b M5: one beamline in two spellings (`SSRL BL15-2` beside the recorded `BL15-2`) is no clash
                 report["already"].append({"cell": cell["cell"], "target": {"kind": kind, "id": tid}, "value": cell["value"],
                                           "decided_by": (prior.get("decided_by") or {}).get("name"), "decision_id": prior.get("decision_id")})
                 continue
@@ -2786,7 +2836,7 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                                        " and rule against what is recorded now" if noun_of[cell["cell"]] == "ruling"
                                        else ", then import with --supersede") if unplaceable else
                                        f"this {noun_of[cell['cell']]} was not made against the value recorded now. "
-                                       + _again(noun_of[cell["cell"]] == "ruling"))
+                                       + _again(noun_of[cell["cell"]] == "ruling", cell["cell"]))
                                    + offer(tid, decision, cell["value"]) if unseen else
                                    # c14n LOW-6: the parenthesis closes before the command, so a pasted one ends cleanly
                                    f"an earlier scientist decision gives a different value ({said_now}); skipped (pass "
@@ -2880,7 +2930,7 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                     f"{first['target']['id']}{' (' + first['run_id'] + ')' if first.get('run_id') else ''} was not made "
                     "against the value recorded there now (its own line says why); nothing is recorded for this one "
                     + (f"either, and {_already_there(x['value'], noun == 'ruling')}" if (name, x["target"]["id"]) in holds else
-                       f"either. {_again(noun == 'ruling')}" + offer(x["target"]["id"], how, x["value"]))),
+                       f"either. {_again(noun == 'ruling', name)}" + offer(x["target"]["id"], how, x["value"]))),
                     "blocked_by": first["target"]["id"]})
         for key in ("decisions", "tied", "already"):
             report[key] = [d for d in report[key] if d["cell"] not in stale_cells]
@@ -2906,7 +2956,7 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                                                             if noun == "ruling" else ", and import again"),
                    "seen": "Pass --supersede to record it for all of them" + (
                        ", or adopt again and rule against what is recorded now" if noun == "ruling" else ""),
-                   "unseen": _again(noun == "ruling")}[first["why"]]
+                   "unseen": _again(noun == "ruling", name)}[first["why"]]
             if first["why"] != "seen":
                 # c15a LOW-1: --supersede records none of this cell's targets while another is unseen or split, so a
                 # "seen" line never says to pass it: it says what stops it, and offers adopting again
@@ -2959,7 +3009,7 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                                if (x["cell"], x["target"]["id"]) in {(d["cell"], d["target"]["id"]) for d in report["decisions"]}]
     # c15b M1, M2, M4: each cell's clashes and stale targets, ONE entry per cell, with one command for all its targets
     how_of = {(c["cell"], tid): d for c, d, _k, _o, tid in planned}
-    _by_cell_and_commands(report, how_of, slot_of)
+    _by_cell_and_commands(report, how_of, slot_of, bundle)
     kept = {(d["cell"], d.get("run_id") or "") for d in report["decisions"]}
     kept_cells = {d["cell"] for d in report["decisions"]}
     report["contradictions"] = [c for c in report["contradictions"]
@@ -4044,6 +4094,25 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
             return g
 
         wf_theirs = theirs["files"]
+        recorded_answers: dict[str, Mapping] = {}
+
+        def recorded_against(path: str | None, value: Any) -> list[tuple[Any, int]]:
+            """r4-b M5: ``[(value, runs holding it)]``: the answers a scientist recorded (confirming, allowed) for the
+            targets a Campaign Info answer for ``path`` reaches (:func:`beamtime_reach`), when one of them differs from
+            ``value`` (:func:`agrees_for`); ``[]`` when none does."""
+            from . import propose_terms as P
+
+            if not path:
+                return []
+            if path not in recorded_answers:
+                recorded_answers[path] = P.allowed_answers(bundle, [path])
+            held: dict[str, list] = {}
+            for rid in beamtime_reach(index, path, set(our_row)):
+                for a in P._answers_for_run(recorded_answers[path], path, rid):
+                    held.setdefault(json.dumps(a[0], sort_keys=True, default=str), [a[0], set()])[1].add(rid)
+            if all(agrees_for(path, v, value) for v, _ in held.values()):
+                return []
+            return [(v, len({r for r in rids if r is not None})) for v, rids in held.values()]
 
         def unread_hints(their_row: int | None, allowed: Sequence | None) -> list[tuple]:
             """M4: ``[(column, header, their text, the allowed value it is)]`` — a column of THEIR row adopt does not
@@ -4102,6 +4171,17 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
                          _readings=[f"differs: {_shown_reading(r)}" for r in bad] + hinted
                          + [f"agrees: {_shown_reading(r)}" for r in good],
                          _their_cells=[their_ref], _runs=runs, _answer_cells=[target_cell])
+                return
+            recorded = recorded_against(path, value) if run_id is None else []
+            if recorded:
+                # r4-b M5: a Campaign Info value that differs from an answer a scientist recorded for the runs it
+                # reaches (`SLAC National Accelerator Laboratory` beside the recorded `SLAC`) is ruled ONCE on its
+                # whole-beamtime Disagreements row, never adopted to clash at every import (and every re-adopt)
+                disagree(("recorded", sheet, col.header, their_ref), kind="recorded", sheet=sheet, header=col.header,
+                         path=path, their_value=value, reason="a value already recorded says otherwise", scope="experiment",
+                         _readings=[f"recorded: {_shown(v)} ({n} run(s))" if n else f"recorded: {_shown(v)} (the beamtime)"
+                                    for v, n in recorded],
+                         _their_cells=[their_ref], _runs=[], _answer_cells=[target_cell])
                 return
             ws = wb[sheet]
             ws[our_ref] = value
@@ -4272,7 +4352,7 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
         result["unmatched_runs"] = [{"run_id": r["run_id"], "file_name": r["file_name"]} for r in rows if r["run_id"] not in matched_runs]
 
         # Disagreements: one row per disagreement; the answer cell stays EMPTY and says why
-        order = {"file_reading": 0, "hint": 1, "name_only": 2, "not_allowed": 3, "invalid": 4}
+        order = {"file_reading": 0, "hint": 1, "recorded": 2, "name_only": 3, "not_allowed": 4, "invalid": 5}
         entries = sorted(groups.values(), key=lambda g: order[g["kind"]])
         # c14 MED-1: a row whose field the scientist already answered for every run it names says so (adopting again
         # after a new reading must not ask for rulings already given); a blank ruling there keeps the recorded value
@@ -4303,6 +4383,8 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
         what = {"file_reading": "your value contradicts a file reading",
                 "hint": "your value names another one than a hint (the folder's or the acquisition system's name; a hint, "
                         "not a file reading)",
+                "recorded": "your value differs from the value already recorded for the runs it reaches (whole "
+                            "beamtime: one ruling here settles it)",
                 "name_only": "", "not_allowed": "", "invalid": "cannot be adopted as written: "}
         allowed_once: dict[str, list] = {}
         for i, g in enumerate(entries, start=1):
@@ -4311,7 +4393,7 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
             g["row"] = row
             g["unread_hints"] = [{"column": c, "header": h, "value": v, "allowed_value": a, "rows": n}
                                  for (c, h, v, a), n in g["unread_hints"].items()]
-            said = what[g["kind"]] if g["kind"] in ("file_reading", "hint") else what[g["kind"]] + g["reason"] + (
+            said = what[g["kind"]] if g["kind"] in ("file_reading", "hint", "recorded") else what[g["kind"]] + g["reason"] + (
                 " (each field's allowed values are listed once, below)" if g["kind"] == "not_allowed" else "")
             if g["unread_hints"]:
                 said += ". " + "; ".join(_unread_hint_text(h, len(g["runs"])) for h in g["unread_hints"])
@@ -4466,7 +4548,8 @@ def render_adopt_summary(result: Mapping) -> str:
                      + ", ".join(f"{c['column']} {c['header']!r}" for c in a["their_columns_not_read"]) + ".")
     file_ds = [d for d in a["disagreements"] if d["kind"] == "file_reading"]
     hint_ds = [d for d in a["disagreements"] if d["kind"] == "hint"]
-    other = [d for d in a["disagreements"] if d["kind"] not in ("file_reading", "hint")]
+    recorded_ds = [d for d in a["disagreements"] if d["kind"] == "recorded"]
+    other = [d for d in a["disagreements"] if d["kind"] not in ("file_reading", "hint", "recorded")]
     settled = [d for d in a["disagreements"] if d.get("already_recorded")]
     if settled:
         # c14 MED-1: a row the scientist already ruled on (their decision stands for every run it names) is not asked again
@@ -4497,6 +4580,13 @@ def render_adopt_summary(result: Mapping) -> str:
         lines.append(f"Disagreements with a hint ({len(hint_ds)}; not adopted, {waiting(hint_ds)}; a hint is not a file "
                      "reading, so say both and let the scientist rule):")
         for d in hint_ds:
+            lines.append(f"  {d['id']} {d['header']}: yours {_shown(d['their_value'])} ({_refs_shown(d['their_cells'], 2)}); "
+                         f"{'; '.join(d['readings'])}{recorded(d)}")
+    if recorded_ds:
+        lines.append("")
+        lines.append(f"Disagreements with a value already recorded ({len(recorded_ds)}; not adopted, {waiting(recorded_ds)}; "
+                     "whole beamtime: one ruling on its row settles it):")
+        for d in recorded_ds:
             lines.append(f"  {d['id']} {d['header']}: yours {_shown(d['their_value'])} ({_refs_shown(d['their_cells'], 2)}); "
                          f"{'; '.join(d['readings'])}{recorded(d)}")
     if other:

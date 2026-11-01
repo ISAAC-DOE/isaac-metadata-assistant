@@ -298,7 +298,8 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   (one line per cell or column; `--full` for every decision); add `--apply` only after the scientist has seen the preview. Each cell becomes decisions; each note
   cites its cell. Invalid cells (not an allowed value exactly, not a number) record nothing.
 - A cell that disagrees with an earlier decision is a clash and is skipped. Use `--supersede` only
-  when the scientist says the sheet is the newer answer. (A ruling on an adopted sheet's Disagreements row that
+  when the scientist says the sheet is the newer answer. A clash's `clashes_by_cell` command is a `--question`
+  command when the cell's targets are exactly one question's. (A ruling on an adopted sheet's Disagreements row that
   named the value recorded now needs no `--supersede`; see below.)
 - Columns recorded nowhere (no official field, or no target in this bundle) are listed with their
   cells. Tell the scientist; do not move their values into another field.
@@ -334,7 +335,9 @@ and to use it (a sheet you found in the folder is not that; ask first). Never re
    or the acquisition system the scan headers match: what `ISAAC Suggestions` shows) is a row too, kind
    `hint`: compared without `BL` and separators, so `BL15-2`, `BL152` and `15-2` agree and `62b` does not. A
    hint is not a reading; say both and let them rule. The facility's organization is in no hint and is not
-   compared.
+   compared. A Campaign Info value that differs from an answer already RECORDED for the runs it reaches (`SLAC
+   National Accelerator Laboratory` beside a recorded `SLAC`) is a whole-beamtime row too, kind `recorded`: one ruling
+   settles it for every run. A beamline is compared as the hints are, so `SSRL BL15-2` beside a recorded `BL15-2` agrees.
 2. Say the summary: rows matched, cells adopted, their columns not read, unmatched rows and runs (those
    runs get nothing from their File List rows; when it says "Campaign Info still applies to them", their
    Campaign Info answers do reach those runs: say so), and the rows that reach more than one run, with the count (a scan

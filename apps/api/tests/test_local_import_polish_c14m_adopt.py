@@ -339,7 +339,9 @@ def test_a_whole_beamtime_ruling_is_recorded_for_every_run_or_none(grouped, tmp_
         assert stale[tid]["reason"].endswith(", or record this value for all 9 targets of this cell with one command "
                                              "(stale_by_cell: command)")
     [cell] = rep["stale_by_cell"]
-    assert cell["command"].count("--target ") == 9 and cell["command"].endswith("--value=BL99 --by \"<your name>\"")
+    # r4-b M5: the nine are exactly what the beamline question resolves to: one --question command, not nine --target
+    assert "--question Q-" in cell["command"] and "--field system.facility.beamline" in cell["command"]
+    assert "--target " not in cell["command"] and cell["command"].endswith("--value=BL99 --by \"<your name>\"")
     code, text, err = _import_text(grouped, tmp_path / "Ar.xlsx", capsys, "--apply", "--supersede")
     assert code == 0, err
     summary = next(x for x in text.splitlines() if x.startswith("Summary:"))

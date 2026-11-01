@@ -12,13 +12,18 @@ folder and invented scans.
 * M4: a field of an optional question asked for the whole beamtime says which groups and runs an answer there reaches
   (the rest are answered per group); the decide reply (and an ``--as-said`` refusal) names them, and says plainly when
   the word would land on groups it does not describe (an ex-situ run, a standard, for a cell type);
+* M5: a Campaign Info beamline is compared with the recorded one as the facility-hint comparison reads beamlines
+  (``SSRL BL15-2`` is ``BL15-2``); a real clash with a recorded value is a whole-beamtime Disagreements row ruled once;
+  a clash a typed cell makes is offered as one ``--question`` command, not one ``--target`` per target;
 """
 
 from __future__ import annotations
 
 import json
+import re
 import shlex
 
+import openpyxl
 import pytest
 
 from isaac_api.local_import import bundle as B
@@ -26,8 +31,11 @@ from isaac_api.local_import import cli
 from isaac_api.local_import import grouping as G
 from isaac_api.local_import import mutations as M
 from isaac_api.local_import import questions as Q
+from isaac_api.local_import import template as T
 
 from test_local_import_capture_decisions import _grouped_stems
+from test_local_import_polish_c14g_adopt import _rule
+from test_local_import_template_adopt import _import, _their_sheet
 from test_local_import_records import (  # noqa: F401  (fixtures)
     BY, _cand, bdir, fake_upstream, pristine)
 
@@ -315,3 +323,86 @@ def test_a_standard_is_never_described_by_a_cell_type():
               "candidates": [], "missing_values": [], "scientist_decisions": []}
     assert [b["group_id"] for b in M.misfit_groups(bundle, CELL, ["g-std", "g-cell"])] == ["g-std"]
     assert M.misfit_groups(bundle, "sample.material.name", ["g-std"]) == []  # only a cell's own words
+
+
+# --- M5: Campaign Info against the values already recorded ----------------------------------------------------------
+
+BEAMLINE, FACILITY = "system.facility.beamline", "system.facility.facility_name"
+
+
+def _recorded_campaign(bdir, beamline="BL15-2", facility="SYN Lab"):
+    """Every run's beamline and facility name recorded by a decide (before any sheet)."""
+    M.group(bdir)
+    b = M.load(bdir)
+    for path, value in ((BEAMLINE, beamline), (FACILITY, facility)):
+        tids = [m["value_id"] for m in b["missing_values"] if m["target_field_path"] == path]
+        M.decide(bdir, target_ids=tids, decision="correct", value=value, by="SYN Other Person", orcid=None)
+    return b
+
+
+def _adopt(bdir, theirs, out, capsys):
+    capsys.readouterr()
+    assert cli.main(["bundle", "template", "adopt", str(bdir), str(theirs), "--out", str(out), "--json"]) == 0
+    return json.loads(capsys.readouterr().out)["adopted"]
+
+
+def test_one_beamline_in_two_spellings_is_no_clash(bdir, tmp_path, capsys):
+    _recorded_campaign(bdir)
+    s = _their_sheet(bdir, tmp_path / "theirs.xlsx", beamline="SSRL BL15-2")
+    adopted = _adopt(bdir, s, tmp_path / "A.xlsx", capsys)
+    assert not [d for d in adopted["disagreements"] if d["header"] == "Beamline/Instrument"]
+    code, rep, err = _import(bdir, tmp_path / "A.xlsx", capsys)
+    assert code == 0, err
+    assert not [c for c in rep["clashes"] if c["header"] == "Beamline/Instrument"]
+    held = [x for x in rep["already_decided_same_value"] if x["cell"] == "'Campaign Info'!B5"]
+    assert len(held) == 9  # every run's recorded BL15-2 is the beamline their sheet names
+    assert T.agrees_for(BEAMLINE, "SSRL BL15-2", "BL15-2") and not T.agrees_for(BEAMLINE, "BL15-2", "BL11-2")
+    assert not T.agrees_for(FACILITY, "SSRL", "SSRL BL15-2")  # only a beamline is read so
+
+
+def test_a_campaign_value_a_recorded_answer_contradicts_is_ruled_once_on_its_row(bdir, tmp_path, capsys):
+    _recorded_campaign(bdir)
+    s = _their_sheet(bdir, tmp_path / "theirs.xlsx", beamline="SSRL BL15-2")
+    adopted = _adopt(bdir, s, tmp_path / "A.xlsx", capsys)
+    [row] = [d for d in adopted["disagreements"] if d["kind"] == "recorded"]
+    assert row["header"] == "Facility Name" and row["scope"] == "experiment" and row["runs"] == []
+    assert row["readings"] == ["recorded: 'SYN Lab' (9 run(s))"]
+    assert row["recorded_note"].endswith("your sheet says `Synthetic Light Source`: rule which")
+    assert openpyxl.load_workbook(tmp_path / "A.xlsx")["Campaign Info"]["B3"].value is None  # not adopted
+    code, rep, _ = _import(bdir, tmp_path / "A.xlsx", capsys)
+    assert code == 0 and rep["clashes"] == []  # nothing clashes: it waits on its row
+    # one ruling on the row records it for every run, without --supersede (the row named the recorded value)
+    _rule(tmp_path / "A.xlsx", tmp_path / "Ar.xlsx", {row["id"]: "Synthetic Light Source"})
+    code, rep, err = _import(bdir, tmp_path / "Ar.xlsx", capsys, "--apply")
+    assert code == 0, err
+    b = M.load(bdir)
+    held = {m["value_id"]: m for m in b["missing_values"] if m["target_field_path"] == FACILITY}
+    latest = {}
+    for d in b["scientist_decisions"]:
+        if d["target"]["id"] in held:
+            latest[d["target"]["id"]] = d["value"]
+    assert set(latest.values()) == {"Synthetic Light Source"} and len(latest) == 9
+    # adopting again: nothing left to rule, the value is adopted
+    again = _adopt(bdir, s, tmp_path / "B.xlsx", capsys)
+    assert not [d for d in again["disagreements"] if d["kind"] == "recorded"]
+
+
+def test_a_typed_campaign_clash_is_offered_as_one_question_command(bdir, tmp_path, capsys):
+    _recorded_campaign(bdir)
+    out = tmp_path / "T.xlsx"
+    assert cli.main(["bundle", "template", "export", str(bdir), "--out", str(out)]) == 0
+    wb = openpyxl.load_workbook(out)
+    wb["Campaign Info"]["B3"] = "Synthetic Light Source"  # typed by the scientist, never adopted
+    wb.save(out)
+    code, rep, err = _import(bdir, out, capsys)
+    assert code == 0, err
+    [cell] = rep["clashes_by_cell"]
+    assert cell["targets"] == 9 and "--target" not in cell["command"]
+    assert re.search(rf"--question Q-\w+ --field {FACILITY} --decision correct --value='Synthetic Light Source'", cell["command"])
+    # the command records exactly the cell's targets
+    argv = shlex.split(cell["command"].replace("<bundle_dir>", str(bdir)).replace("<your name>", WHO))
+    capsys.readouterr()
+    assert cli.main(argv[1:]) == 0
+    got = json.loads(capsys.readouterr().out)
+    assert sorted(got["recorded"]) == sorted(cell["target_ids"])
+
