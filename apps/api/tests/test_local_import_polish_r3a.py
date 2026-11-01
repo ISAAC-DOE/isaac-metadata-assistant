@@ -7,7 +7,9 @@ BL4-3 scan headers write a sample, an electrolyte and a potential glued into one
 * H2: a potential a value-less header line MENTIONS (``0Vrhe``) is compared, never offered: against the file name's
   (``m600mV``) and the typed value, warned at validate until a scientist rules, and never said to agree;
 * M1: with no ``<name>.exp``, the DATA_FILE of the ONLY ``.exp`` in the run's own folder (a reused template) is read,
-  kept only when it is the run's own name minus its counter, and a merge candidate whose DATA_FILEs agree says so.
+  kept only when it is the run's own name minus its counter, and a merge candidate whose DATA_FILEs agree says so;
+* M6: a no-value question says it asks for a value (``no_value``, the kind unchanged), and the per-run questions that
+  quote one comment line for one field share a ``same_reading_group`` answered at once (``--same-reading``).
 """
 
 from __future__ import annotations
@@ -289,3 +291,67 @@ def test_a_merge_candidate_whose_data_files_agree_says_so(tmp_path):
     assert "nothing read from their files shows they are the same measurement" not in caution["statement"]
     assert caution["statement"] in mc["question"]["text"]
 
+
+# --- M6: no-value questions that quote one comment line are answered at once -------------------------------------
+
+
+NAME = "context.electrochemistry.electrolyte.name"
+SAME_LINE = "Sample A in 1M KOH 0Vrhe"
+
+
+@pytest.fixture()
+def repeated(tmp_path):
+    src = tmp_path / "SYN_bt43"
+    for k in range(3):
+        make_scan(src / f"0{k + 1}_SYNti_sample{k + 1}_m600mV_{96 + k:03d}_A.001", free_text=("SYN gain 1e8", SAME_LINE))
+    make_scan(src / "09_SYNti_other_m600mV_099_A.001", free_text=("SYN gain 1e8", "Sample B in 1M KOH 0Vrhe"))
+    return _import(src, tmp_path / "bundle")
+
+
+def _name_questions(b: dict) -> list[dict]:
+    return [q for q in Q.consolidate(b)["questions"] if q["target_field_path"] == NAME and q["kind"] == "confirm_value"]
+
+
+def test_a_no_value_question_says_it_asks_for_a_value_under_its_kind(repeated):
+    qs = _name_questions(M.load(repeated))
+    assert len(qs) == 4 and all(q["no_value"] for q in qs)
+    for q in qs:
+        assert "There is nothing to confirm" not in q["text"] and "this asks for one (no_value)" in q["text"]
+        assert q["allowed_decisions"] == list(Q.VALUELESS_DECISIONS)
+
+
+def test_questions_that_quote_one_line_share_a_group_and_say_so(repeated):
+    qs = _name_questions(M.load(repeated))
+    same = [q for q in qs if SAME_LINE in q["text"]]
+    [other] = [q for q in qs if q not in same]
+    assert len(same) == 3 and len({q["same_reading_group"] for q in same}) == 1
+    assert all(q["same_reading_count"] == 3 for q in same) and "same_reading_group" not in other
+    q = same[0]
+    assert f"--question {q['question_id']} --same-reading --decision correct" in q["same_reading_command"]
+    assert "2 other question(s) ask the" in q["text"] and "template's File List columns are the easy path" in q["text"]
+
+
+def test_one_decide_answers_every_question_of_the_group(repeated):
+    qs = [q for q in _name_questions(M.load(repeated)) if SAME_LINE in q["text"]]
+    ids_before = sorted(q["question_id"] for q in qs)
+    got = M.decide_question(repeated, question_id=qs[0]["question_id"], same_reading=True, decision="correct",
+                            value="KOH", by=WHO, orcid=None)
+    targets = sorted(t["id"] for q in qs for t in q["targets"])
+    assert sorted(got["recorded"]) == targets
+    left = _name_questions(M.load(repeated))
+    assert len(left) == 1 and left[0]["question_id"] not in ids_before  # the other line's question stays open
+
+
+def test_same_reading_is_refused_where_it_does_not_apply(repeated, capsys):
+    qs = _name_questions(M.load(repeated))
+    [other] = [q for q in qs if SAME_LINE not in q["text"]]
+    with pytest.raises(M.MutationRefused, match="names no same_reading_group"):
+        M.decide_question(repeated, question_id=other["question_id"], same_reading=True, decision="correct",
+                          value="KOH", by=WHO, orcid=None)
+    same = next(q for q in qs if q.get("same_reading_group"))
+    with pytest.raises(M.MutationRefused, match="does not take --only"):
+        M.decide_question(repeated, question_id=same["question_id"], same_reading=True, only=same["scope"],
+                          decision="correct", value="KOH", by=WHO, orcid=None)
+    assert cli.main(["bundle", "decide", str(repeated), "--target", "cand-0001", "--same-reading", "--decision",
+                     "correct", "--value", "KOH", "--by", WHO]) != 0
+    assert "--same-reading goes with --question" in capsys.readouterr().err

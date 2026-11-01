@@ -1751,6 +1751,9 @@ def cmd_bundle_decide(args) -> int:
         if args.question and getattr(args, "accept_shift", None) is not None:
             raise M.MutationRefused("--accept-shift goes with --target <group id> --decision approve_calibration. "
                                     "Nothing was recorded.")
+        if args.same_reading and not args.question:
+            raise M.MutationRefused("--same-reading goes with --question <id> (a question that names a "
+                                    "same_reading_group). Nothing was recorded.")
         if args.question:
             # the question is resolved to its targets under the write's own lock (mutations.decide_question,
             # shared with the local questions screen)
@@ -1760,6 +1763,7 @@ def cmd_bundle_decide(args) -> int:
                 only=args.only,
                 field=args.field,
                 extra_targets=targets,
+                same_reading=args.same_reading,
                 decision=args.decision,
                 value=M.parse_value(args.value, args.json),
                 by=args.by,
@@ -2196,6 +2200,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--question", help="answer a consolidated question: one decision per target, each listed")
     q.add_argument("--only", help="with --question: only this scope (group:<id> or run:<id>) — a per-group override")
     q.add_argument("--field", help="with --question on an optional-values question: the one field being answered")
+    q.add_argument("--same-reading", action="store_true",
+                   help="with --question on a question that names a same_reading_group: answer every open question of "
+                        "that group with the same decision and value (one decision per target, each listed)")
     q.add_argument("--decision", required=True,
                    help="candidate / missing value / conflict: confirm correct reject defer; record group: confirm split merge "
                         "reject defer approve_calibration set_absorber; processing result: approve reject needs_changes defer, "

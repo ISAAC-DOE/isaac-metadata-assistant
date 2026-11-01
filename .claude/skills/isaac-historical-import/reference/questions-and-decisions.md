@@ -79,8 +79,13 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   a step or rate, a sweep, `pre-`/`then`, an offset, a range; a reference, bridge or filling beside an
   electrolyte). Such values always need review: the question quotes the whole line and its line number; ask the
   scientist to check it is the value held during that scan, and confirm or correct each. Otherwise
-  (`100mM NaClO4 pH1.3 He`, `1e-3 M KCl`, `eta = 300 mV`) the line is quoted with NO value: ask the scientist
-  to state the value (`correct`), or `reject` when the line states none for that scan. No gas is read.
+  (`100mM NaClO4 pH1.3 He`, `1e-3 M KCl`, `eta = 300 mV`) the line is quoted with NO value (`no_value: true`;
+  the kind stays `confirm_value`): ask the scientist to state the value (`correct`), or `reject` when the line
+  states none for that scan. No gas is read. Questions that quote one line for one field share a
+  `same_reading_group` (`same_reading_count` of them): if the value is the same for all, one
+  `<isaac> bundle decide <bundle> --question <Q> --same-reading --decision correct --value <v> --by "<name>"`
+  answers every open one (its `same_reading_command`). For many runs (30 runs all `1M KOH`), the template's
+  File List columns are the easy path: `<isaac> bundle template export <bundle> --out <file.xlsx>`.
 - **A conflict with `affects_record: false`** (`no_record_field`): the readings differ, but no record
   field carries them (a comment line, a unit spelling). Say how many there are; do not ask each.
 - **A conflict with `covered_by_decisions`** (also `affects_record: false`; counted in

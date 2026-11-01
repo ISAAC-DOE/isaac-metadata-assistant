@@ -881,14 +881,15 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 said = header_unread_text(path, *lines[0]) if lines else "a scan-header comment line mentions it"
                 text = (f"What is the {_label(path)} ({path})? {said[:1].upper()}{said[1:]}"
                         + (f" ({len(lines) - 1} more comment line(s) like it: see the hints)" if len(lines) > 1 else "")
-                        + ". There is nothing to confirm: give the value (correct), reject it if no value is stated for "
-                        "this scan, or defer it.")
+                        + ". No value was read from it, so this asks for one (no_value): give the value (correct), reject "
+                        "it if no value is stated for this scan, or defer it.")
                 decision = "correct"
                 decisions_offered = list(VALUELESS_DECISIONS)
             elif len(valueless) == len(q["targets"]):
                 text = (f"What is the {_label(path)} ({path})? The files hold text for it (see the hints) but no value this "
                         "build can carry" + (f": {summary.rstrip('.')}" if summary else "")
-                        + ". There is nothing to confirm: give the value yourself (correct), or reject or defer it.")
+                        + ". No value was read, so this asks for one (no_value): give the value yourself (correct), or "
+                        "reject or defer it.")
                 decision = "correct"
                 decisions_offered = list(VALUELESS_DECISIONS)
             elif len(unconfirmable) == len(q["targets"]):
@@ -991,6 +992,9 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             entry["reason"] = "answer_not_eligible_for_official_record"
         if decisions_offered is not None:
             entry["allowed_decisions"] = decisions_offered
+        if kind == "confirm_value" and valueless and len(valueless) == len(q["targets"]) and not never:
+            # r3a M6: a confirm_value question (the kind keeps its id) whose targets hold NO value asks for one
+            entry["no_value"] = True
         questions.append(entry)
     for scope, cf, affects, path, required in conflicts_out:
         enum = _eligible_values(path) if path else None
@@ -1265,6 +1269,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         basis = {**basis, "record_composer": _agree_with_composer(questions, bundle, group_of, cand_by_id, reports,
                                                                        decision_of=decisions)}
     _note_shared_evidence(questions, cand_by_id, bundle)
+    _note_same_reading_groups(questions, cand_by_id)
     _mark_deferred(questions, decisions)
     _covered_by_run_decisions(questions, covered_conflicts)
     _say_the_one_group(questions)
@@ -1763,6 +1768,64 @@ def _conflict_answer(qid: str, cf: Mapping, path: str | None, enum: list | None,
     return {"text": text, "hints": hints, "fields": fields,
             "command": (f"isaac bundle decide <bundle_dir> --question {qid} --decision correct --value {placeholder}"
                         + (" --json" if numeric and not is_utc else "") + f' --by "<your name>"{comment}')}
+
+
+#: r3a M6: how a question that shares a reading with others is answered with them all at once (``decide
+#: --question <id> --same-reading``).
+SAME_READING_FLAG = "--same-reading"
+
+
+def _note_same_reading_groups(questions: list[dict], cand_by_id: Mapping[str, Mapping]) -> None:
+    """r3a M6: per-run ``no_value`` questions about one field that quote the SAME scan-header comment line (30 runs'
+    ``Sample A in 1M KOH 0Vrhe``), or that ``same_reading_as`` / ``same_statement_as`` already names together, share
+    a ``same_reading_group`` key, and say how to answer them all at once (:data:`SAME_READING_FLAG`). Ids, scopes,
+    kinds and targets are untouched: only ``same_reading_group``, ``same_reading_count`` and the text are added."""
+    def line_of(q: Mapping) -> str | None:
+        lines = {str(e.get("literal_value") or "").strip() for t in q["targets"]
+                 for e in ((cand_by_id.get(t["id"]) or {}).get("evidence") or ())[:1]}
+        return next(iter(lines)) if len(lines) == 1 and "" not in lines else None
+
+    asked = [q for q in questions if q.get("no_value") and q["targets"]
+             and all(B.is_header_comment_candidate(cand_by_id.get(t["id"]) or {}) for t in q["targets"])]
+    by_id = {q["question_id"]: q for q in asked}
+    parent: dict[str, str] = {q["question_id"]: q["question_id"] for q in asked}
+
+    def root(i: str) -> str:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def join(a: str, b: str) -> None:
+        if a in parent and b in parent:
+            parent[root(a)] = root(b)
+
+    first_of: dict[tuple, str] = {}
+    for q in asked:
+        if (line := line_of(q)) is not None:
+            join(q["question_id"], first_of.setdefault((q["target_field_path"], line), q["question_id"]))
+        for other in (q.get("same_reading_as") or []) + (q.get("same_statement_as") or []):
+            if other in by_id and by_id[other]["target_field_path"] == q["target_field_path"]:
+                join(q["question_id"], other)
+    groups: dict[str, list[dict]] = {}
+    for q in asked:
+        groups.setdefault(root(q["question_id"]), []).append(q)
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        ids = sorted(q["question_id"] for q in members)
+        key = "SR-" + hashlib.sha256("\n".join(ids).encode()).hexdigest()[:10]
+        lines = list(dict.fromkeys(line for q in members if (line := line_of(q)) is not None))
+        said = (f"the same comment line ({lines[0]!r})" if len(lines) == 1 else "the same reading")
+        for q in members:
+            q["same_reading_group"], q["same_reading_count"] = key, len(members)
+            command = q["answer_command"].replace(f"--question {q['question_id']} ",
+                                                  f"--question {q['question_id']} {SAME_READING_FLAG} ", 1)
+            q["same_reading_command"] = command
+            q["text"] += (f" {len(members) - 1} other question(s) ask the {_label(q['target_field_path'])} of {said} "
+                          f"(same_reading_group {key}): if it is the same for all of them, answer all {len(members)} at once: "
+                          f"{command}. For many runs, the template's File List columns are the easy path (isaac bundle template "
+                          "export <bundle_dir> --out <file.xlsx>).")
 
 
 def _note_shared_evidence(questions: list[dict], cand_by_id: Mapping[str, Mapping], bundle: Mapping) -> None:

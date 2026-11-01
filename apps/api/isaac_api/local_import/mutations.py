@@ -1883,10 +1883,14 @@ def decide_question(
     with_version: bool = False,
     same_conditions: bool = False,
     as_said: bool = False,
+    same_reading: bool = False,
 ) -> Any:
     """``isaac bundle decide --question`` — the CLI and the local questions screen both call this.
 
     ``as_said``: as for :func:`decide` (the local questions screen never passes it, so it never keeps a request).
+    ``same_reading`` (r3a M6): also every other OPEN question of the asked one's ``same_reading_group`` (no-value
+    questions that quote one comment line for one field), with the same decision and value; refused with ``--only``
+    and for a question that names no such group.
 
     The question is resolved to its targets UNDER THE SAME LOCK as the write, from the bundle that
     write changes, so an answer can never land on targets another command changed in between. With
@@ -1933,6 +1937,8 @@ def decide_question(
                 found, slots_added, override = got
             if asked["kind"] == "confirm_absorber" and decision == "set_absorber" and only is None:
                 found, kept_overrides = _keep_absorber_overrides(bundle, found)
+        if same_reading:
+            found = found + [t for t in _same_reading_targets(bundle, question_id, only, field) if t not in found]
         clock_defer = False
         if decision == "defer" and (Q.question(Q.consolidate(bundle, include_answered=True, explain_counter=False),
                                                question_id) or {}).get("kind") == "clock_time_zone":
@@ -1983,6 +1989,24 @@ def decide_question(
         result = _said_on_list(_with_answered(_with_kept(kept_overrides, reached(bundle, recorded)), bundle, before), as_said)
         save_bundle(bundle_dir, bundle)
         return (result, bundle_version(bundle_dir)) if with_version else result
+
+
+def _same_reading_targets(bundle: Mapping, question_id: str, only: str | None, field: str | None) -> list[str]:
+    """r3a M6: the targets of every OTHER open question in ``question_id``'s ``same_reading_group``."""
+    from . import questions as Q
+
+    if only:
+        raise MutationRefused(f"{Q.SAME_READING_FLAG} answers every question of a same_reading_group; it does not take "
+                              "--only. Nothing was recorded.")
+    payload = Q.consolidate(bundle)
+    asked = Q.question(payload, question_id) or {}
+    group = asked.get("same_reading_group")
+    if not group:
+        raise MutationRefused(f"Question {question_id} names no same_reading_group (it is open, and no other open "
+                              f"question quotes its comment line for this field), so {Q.SAME_READING_FLAG} has nothing "
+                              "more to answer. Nothing was recorded.")
+    return [t for q in payload["questions"] if q.get("same_reading_group") == group and q["question_id"] != question_id
+            for t in Q.targets_for(payload, q["question_id"], None, field)]
 
 
 def _would_say(statement: str | None) -> str | None:
