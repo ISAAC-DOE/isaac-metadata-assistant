@@ -197,7 +197,8 @@ def judge(e0s: Sequence[Any], snrs: Sequence[Any], min_snr: float, source: str |
     need = MIN_IN_SCAN_REFERENCE_SCANS if source == IN_SCAN else 1
     spread = float(max(usable) - min(usable)) if len(usable) >= 2 else None
     limit = effective_max_spread_eV(max_spread_eV)
-    disagree = spread is not None and round(spread, 2) > limit
+    # r4-a review: compared as qc_verdict compares reference_e0_drift (unrounded), so the two never disagree
+    disagree = spread is not None and spread > limit
     return {"passing": passing, "usable": usable, "degenerate": degenerate, "need": need, "spread_eV": spread,
             "max_spread_eV": limit, "disagree": disagree,
             "proposed": source is not None and len(usable) >= need}
@@ -503,7 +504,9 @@ def _size_confirmed_step(outcome: Mapping) -> bool:
 def _spread_sentence(spread: float, limit: float, measured: float, n: int, usable: Sequence[float],
                      shift: str | None, *, confirmed: bool = False, reply: bool = False) -> str:
     """r4-a (:data:`SPREAD_RULE_ID`): the sentence for usable reference edges that spread over more than ``limit``."""
-    said = (f"Its usable edges spread {spread:.2f} eV ({min(usable):.1f} to {max(usable):.1f} eV; median {measured:.1f} eV "
+    # r4-a review: just above the level, 0.001 eV, so "0.50 eV, more than 0.5 eV" is never said
+    sp = f"{spread:.3f}" if round(spread, 2) <= limit else f"{spread:.2f}"
+    said = (f"Its usable edges spread {sp} eV ({min(usable):.1f} to {max(usable):.1f} eV; median {measured:.1f} eV "
             f"of {_n(n, 'scan')}), more than the {limit:g} eV they may differ by (qc.warn_reference_e0_spread_eV), so "
             "ISAAC does not propose it as the reference: a missing foil, a channel that sees the sample, or the energy "
             "drifting between scans gives this.")

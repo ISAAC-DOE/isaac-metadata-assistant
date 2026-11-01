@@ -301,21 +301,48 @@ GLITCH_EDGE_STEEP_FRACTION = 0.25
 GLITCH_EDGE_SLOPE_HALF_WIDTH = 2
 
 
-#: r4-a: a flagged point is from ONE scan alone when its departure from the per-energy median of the scans is more
-#: than this many times every other scan's departure there...
+#: r4-a: a flagged point is from ONE scan alone when, with each scan put on the median spectrum's scale first
+#: (``a + b*median`` fitted to its unflagged points, as :func:`deglitch` does, so a gain step is not a departure), its
+#: residual is more than this many times every other scan's residual there...
 GLITCH_ONE_SCAN_FACTOR = 10.0
 #: ...and more than this fraction of the median curve's whole range (an energy jitter on the steep edge moves a point
-#: by a fraction of the edge's height; a spike that becomes the white line moves it by many times the height).
+#: by a fraction of the edge's height; a spike that becomes the white line moves it by many times the height)...
+GLITCH_ONE_SCAN_SPAN_FRACTION = 0.5
+#: ...and, on the median's scale, it lies outside the median curve's own range (above its maximum or below its
+#: minimum) by more than this many times that range: a white line that grows in situ, or is damped by
+#: self-absorption, stays inside it (a white line 2.5 times as tall reaches about 1 range above), a spike does not.
 #: Measured on a real BL15-2 Ir L3 HERFD beamtime: one scan of five read about 28 where the others read about 0.01;
 #: 15 of its 22 flagged points lay on the edge and were "unjudged", and the merge's white line and E0 came from it.
-GLITCH_ONE_SCAN_SPAN_FRACTION = 0.5
+GLITCH_ONE_SCAN_ENVELOPE_SPANS = 2.0
+#: a median curve, or the other scans' mean, "has an edge" when its range, with a straight line taken out, is at least
+#: this many times its point-to-point noise (dead, dark or out-of-beam scans have none)
+HAS_EDGE_MIN_NOISE_MULTIPLE = 10.0
+
+
+def has_edge(y, grid, np) -> bool:
+    """r4-a: ``y`` (on ``grid``) rises or falls by at least :data:`HAS_EDGE_MIN_NOISE_MULTIPLE` times its own
+    point-to-point noise once a straight line is taken out: a spectrum, not dark counts, scatter or a dead channel."""
+    ok = np.isfinite(y) & np.isfinite(grid)
+    if int(ok.sum()) < 5:
+        return False
+    e, v = grid[ok], y[ok]
+    resid = v - np.polyval(np.polyfit(e, v, 1), e)
+    d = np.diff(v)
+    noise = 1.4826 * float(np.median(np.abs(d - np.median(d))))
+    if noise <= 0:
+        noise = float(np.std(d))
+    noise /= math.sqrt(2.0)
+    span = float(np.ptp(resid))
+    return span > 0 and (noise <= 0 or span >= HAS_EDGE_MIN_NOISE_MULTIPLE * noise)
 
 
 def glitch_points_from_one_scan(point_flags, grid, M, np) -> set[tuple[int, float]]:
-    """r4-a: the flagged points (``(scan_position, energy_eV)``) whose scan departs from the per-energy median of the
-    scans (``M``, scans x ``grid``) far beyond every other scan there (:data:`GLITCH_ONE_SCAN_FACTOR`) and by more than
-    :data:`GLITCH_ONE_SCAN_SPAN_FRACTION` of the median curve's range: one scan's glitch, never the edge. Needs at least
-    three scans (with two, the median is their mean and neither departs more than the other)."""
+    """r4-a: the flagged points (``(scan_position, energy_eV)``) that are ONE scan's glitch, never the edge: on the
+    median spectrum's scale (each scan's ``a + b*median`` fitted to its unflagged points), the scan's residual there is
+    far beyond every other scan's (:data:`GLITCH_ONE_SCAN_FACTOR`), more than :data:`GLITCH_ONE_SCAN_SPAN_FRACTION` of
+    the median curve's range, and outside that curve's own range by more than :data:`GLITCH_ONE_SCAN_ENVELOPE_SPANS`
+    ranges. Needs at least three scans (with two, the median is their mean) and a median curve with an edge
+    (:func:`has_edge`: against dead or dark scans nothing can be judged)."""
     n = M.shape[0]
     out: set[tuple[int, float]] = set()
     if n < 3 or not np.any(point_flags):
@@ -323,17 +350,32 @@ def glitch_points_from_one_scan(point_flags, grid, M, np) -> set[tuple[int, floa
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
         med = np.nanmedian(M, axis=0)
-    finite = med[np.isfinite(med)]
-    if finite.size < 2:
+    fin = np.isfinite(med)
+    if int(fin.sum()) < 5 or not has_edge(med, grid, np):
         return out
-    span = float(finite.max() - finite.min())
-    dev = np.abs(M - med)
+    lo, hi = float(np.nanmin(med)), float(np.nanmax(med))
+    span = hi - lo
+    R = np.full_like(M, np.nan, dtype=float)
+    V = np.full_like(M, np.nan, dtype=float)  # each scan on the median's scale: (M - a) / b
+    for s in range(n):
+        ok = np.isfinite(M[s]) & fin & ~point_flags[s]
+        if int(ok.sum()) < 3:
+            continue
+        A = np.vstack([np.ones(int(ok.sum())), med[ok]]).T
+        (a, b), *_ = np.linalg.lstsq(A, M[s][ok], rcond=None)
+        if not b > 0.1:
+            continue  # not the median's shape on any sensible scale: nothing to judge it by
+        R[s] = M[s] - (a + b * med)
+        V[s] = (M[s] - a) / b
+    dev = np.abs(R)
     for s, i in zip(*np.nonzero(point_flags)):
         d = float(dev[s, i])
         others = [float(dev[j, i]) for j in range(n) if j != s and np.isfinite(dev[j, i])]
         if not math.isfinite(d) or not others:
             continue
-        if d > GLITCH_ONE_SCAN_FACTOR * max(others) and d > GLITCH_ONE_SCAN_SPAN_FRACTION * span:
+        v = float(V[s, i])
+        outside = v > hi + GLITCH_ONE_SCAN_ENVELOPE_SPANS * span or v < lo - GLITCH_ONE_SCAN_ENVELOPE_SPANS * span
+        if d > GLITCH_ONE_SCAN_FACTOR * max(others) and d > GLITCH_ONE_SCAN_SPAN_FRACTION * span and outside:
             out.add((int(s), float(grid[i])))
     return out
 
@@ -377,29 +419,48 @@ def glitch_points_on_edge(point_flags, grid, energy, curve, e0, np, *, M=None) -
 
 #: THE MERGED CURVE FROM ONE SCAN (``isaac.xas.edge_not_from_single_scan.v0``, r4-a). A merge describes its scans
 #: only when no single scan sets it: the curve FAILS ``edge_from_single_scan`` when, with one scan left out, the
-#: merged curve's range (its edge step and white line, max - min) shrinks by more than :data:`SINGLE_SCAN_SPAN_FACTOR`
-#: times, AND that scan's SHAPE departs from the others' by more than the same factor: each curve is put on its own
-#: robust scale (its :data:`SINGLE_SCAN_SCALE_PERCENTILES` range, which a short stretch does not move), and the scan
-#: departs from the others there by more than :data:`SINGLE_SCAN_SPAN_FACTOR` of that scale. A scan that is only
-#: larger everywhere (a gain step) or dead has the others' shape, or less, and is left to the outlier check. Measured on
-#: a real BL15-2 Ir L3 HERFD beamtime: one scan of five read about 28 where the others read about 0.01, the merge's
+#: merged curve's range (max - min) shrinks by more than :data:`SINGLE_SCAN_SPAN_FACTOR` times, the OTHER scans have an
+#: edge of their own (:func:`has_edge`), AND that scan's shape departs from theirs by more than the same factor, each
+#: curve measured in units of its OWN edge step (its post-edge minus its pre-edge level, medians of the first and last
+#: :data:`SINGLE_SCAN_LEVEL_FRACTION` of the points, so a tall white line is not a spike). A scan that is only larger
+#: everywhere (a gain step) has the others' shape. When the others have no edge (dead, out of the beam, dark counts),
+#: the scan is the group's only scan with an edge: that is said (``only_scan_with_edge``), never failed. Measured on a
+#: real BL15-2 Ir L3 HERFD beamtime: one scan of five read about 28 where the others read about 0.01, the merge's
 #: normalised white line was 2586 (the median curve's near 5) and its E0 2.7-3 eV from the neighbouring groups'; the
 #: verdict was ``warn``. Not a protocol parameter (params.json is hashed into every id): a sanity bound.
 SINGLE_SCAN_RULE_ID = "isaac.xas.edge_not_from_single_scan.v0"
 SINGLE_SCAN_SPAN_FACTOR = 5.0
-SINGLE_SCAN_SCALE_PERCENTILES = (10.0, 90.0)
+SINGLE_SCAN_LEVEL_FRACTION = 0.15
+#: a departure within this window around the others' steepest point (eV below, eV above) is said as on the edge
+SINGLE_SCAN_EDGE_WINDOW_EV = (10.0, 20.0)
 
 
-def _robust_shape(y, np):
-    """``y`` on its own robust scale (0 and 1 at its :data:`SINGLE_SCAN_SCALE_PERCENTILES`), or ``None`` (flat)."""
-    lo, hi = (float(v) for v in np.percentile(y, SINGLE_SCAN_SCALE_PERCENTILES))
-    return (y - lo) / (hi - lo) if hi > lo else None
+def _in_step_units(y, np):
+    """``y`` with its pre-edge level at 0 and its post-edge level at 1 (medians of its first and last
+    :data:`SINGLE_SCAN_LEVEL_FRACTION` of points), or ``None`` (no positive step)."""
+    k = max(2, int(round(SINGLE_SCAN_LEVEL_FRACTION * y.size)))
+    pre, post = float(np.median(y[:k])), float(np.median(y[-k:]))
+    step = post - pre
+    return (y - pre) / step if step > 0 else None
+
+
+def _region(lo: float, hi: float, edge: float | None) -> str:
+    if edge is None:
+        return "edge"
+    below, above = SINGLE_SCAN_EDGE_WINDOW_EV
+    if lo > edge + above:
+        return "above_edge"
+    if hi < edge - below:
+        return "below_edge"
+    return "edge"
 
 
 def single_scan_dominance(M, grid, np, *, exclude_points=None, exclude_scans=None) -> dict | None:
-    """``None`` when no single scan sets the merged curve (above); else the scan's position, the ratio of the merged
-    curve's range to its range without that scan, both ranges, and the energies where the scan departs. ``M`` is
-    scans x ``grid``; the exclusions are the merge's own (``deglitch.exclude_flagged``)."""
+    """``None`` when no single scan sets the merged curve (above); else the scan's position, ``kind``
+    (``one_scan_sets_merge``: QC fails; ``only_scan_with_edge``: the other scans have no edge, said only), the ratio of
+    the merged curve's range to its range without that scan, both ranges, the energies where the scan departs and
+    their ``region`` (``edge``, ``above_edge`` or ``below_edge`` of the others' steepest point). ``M`` is scans x
+    ``grid``; the exclusions are the merge's own (``deglitch.exclude_flagged``)."""
     n = M.shape[0]
     if n < 2:
         return None
@@ -419,26 +480,36 @@ def single_scan_dominance(M, grid, np, *, exclude_points=None, exclude_scans=Non
                 continue
             rest = np.nanmean(np.delete(X, s, axis=0), axis=0)
             both = np.isfinite(rest) & np.isfinite(mean) & np.isfinite(X[s])
-            if int(both.sum()) < 3:
+            if int(both.sum()) < 5:
                 continue
             span_rest = float(np.ptp(rest[both]))
             span_all = float(np.ptp(mean[both]))
             if span_rest <= 0 or span_all < SINGLE_SCAN_SPAN_FACTOR * span_rest:
                 continue
-            mine, theirs = _robust_shape(X[s][both], np), _robust_shape(rest[both], np)
+            e = grid[both]
+            ratio = span_all / span_rest
+            base = {"rule_id": SINGLE_SCAN_RULE_ID, "scan_position": int(s), "ratio": ratio, "span_merged": span_all,
+                    "span_without_scan": span_rest, "factor": SINGLE_SCAN_SPAN_FACTOR, "points": int(both.sum())}
+            if not has_edge(rest[both], e, np):
+                # the others are dead, dark or out of the beam: this is the group's only scan with an edge, not a spike
+                if has_edge(X[s][both], e, np) and (best is None or best["kind"] != "one_scan_sets_merge"):
+                    best = {**base, "kind": "only_scan_with_edge", "departs_eV": [float(e[0]), float(e[-1])],
+                            "departs_points": int(both.sum()), "region": "edge"}
+                continue
+            mine, theirs = _in_step_units(X[s][both], np), _in_step_units(rest[both], np)
             if mine is None or theirs is None:
                 continue
             away = np.abs(mine - theirs)
             if float(away.max()) < SINGLE_SCAN_SPAN_FACTOR:
-                continue  # the others' shape on a larger (or smaller) scale: a gain step or a dead scan
+                continue  # the others' shape on a larger (or smaller) scale: a gain step
             far = away > 0.5 * float(away.max())
-            ratio = span_all / span_rest
-            if best is None or ratio > best["ratio"]:
-                e = grid[both][far]
-                best = {"rule_id": SINGLE_SCAN_RULE_ID, "scan_position": int(s), "ratio": ratio,
-                        "span_merged": span_all, "span_without_scan": span_rest, "factor": SINGLE_SCAN_SPAN_FACTOR,
-                        "departs_eV": [float(e.min()), float(e.max())], "departs_points": int(far.sum()),
-                        "points": int(both.sum())}
+            if best is None or best["kind"] != "one_scan_sets_merge" or ratio > best["ratio"]:
+                where = e[far]
+                slope = np.abs(np.gradient(rest[both], e))
+                edge = float(e[int(np.nanargmax(slope))]) if np.isfinite(slope).any() else None
+                best = {**base, "kind": "one_scan_sets_merge", "departs_eV": [float(where.min()), float(where.max())],
+                        "departs_points": int(far.sum()), "edge_eV": edge,
+                        "region": _region(float(where.min()), float(where.max()), edge)}
     return best
 
 

@@ -483,7 +483,8 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
     confirmed = approved
     basis = approved or proposed
     per_scan_shifts = None
-    if cp.get("align_scans_by_reference") and usable and len(usable) == len(scans_data):
+    # r4-a review: aligned only by usable edges (REF.judge: never a scan whose pre-edge noise is about zero)
+    if cp.get("align_scans_by_reference") and j["usable"] and len(j["usable"]) == len(scans_data):
         per_scan_shifts = [measured - r["e0_eV"] for r in per_scan]  # type: ignore[index]
     return {
         "step": "calibration",
@@ -613,13 +614,39 @@ def _single_scan_statement(dominant: Mapping, names: Sequence[str], group_id: st
     naming the scan by its file and saying how to leave it out (:func:`exclude_hint`)."""
     name = names[dominant["scan_position"]]
     lo, hi = dominant["departs_eV"]
-    return (f"One scan sets this merged curve: with {name} left out, the merged curve's range (max - min: its edge step "
-            f"and white line) is {dominant['span_without_scan']:.4g}; with it, {dominant['span_merged']:.4g}, "
+    where = f"from {lo:.1f} to {hi:.1f} eV" if hi > lo else f"at {lo:.1f} eV"
+    # r4-a review: said by WHERE the scan departs (the others' steepest point is the edge)
+    what = {"edge": "the merged white line, edge step and E0 come from that scan's stretch",
+            "above_edge": ("that stretch lies above the edge, so the merged post-edge, and with it the edge step and the "
+                           "normalised curve, come from that scan there"),
+            "below_edge": ("that stretch lies below the edge, so the merged pre-edge, and with it the edge step and the "
+                           "normalised curve, come from that scan there")}[dominant.get("region") or "edge"]
+    return (f"One scan sets this merged curve: with {name} left out, the merged curve's range (max - min) is "
+            f"{dominant['span_without_scan']:.4g}; with it, {dominant['span_merged']:.4g}, "
             f"{dominant['ratio']:.3g} times as large (more than {dominant['factor']:g} times is one scan, not a merge). "
-            f"{name} departs from the other scans only from {lo:.1f} to {hi:.1f} eV "
-            f"({_n_points(dominant['departs_points'])} of {dominant['points']}), so the merged white line, edge step and "
-            "E0 come from that scan's stretch, not from the measurement: this curve is not usable as it is. Ask the "
+            f"{name} departs from the other scans only {where} "
+            f"({_n_points(dominant['departs_points'])} of {dominant['points']}), measured in each curve's own edge "
+            f"steps; {what}, not from the measurement: this curve is not usable as it is. Ask the "
             "scientist whether that scan belongs in the merge. " + exclude_hint(group_id, [excluded_as]))
+
+
+#: r4-a review: the statement (and review flag) of a group whose other scans have no edge (core.single_scan_dominance)
+ONLY_EDGE_FLAG = "only_scan_with_edge"
+
+
+def _only_edge_statement(dominant: Mapping, names: Sequence[str]) -> str:
+    """r4-a review: one scan has an edge and the others none: said, never failed, and never "leave it out"."""
+    name = names[dominant["scan_position"]]
+    others = len(names) - 1
+    return (f"{name} is the group's only scan with an edge: the other {_n(others, 'scan')} show no edge (dead, out of "
+            f"the beam or dark counts), so the merged curve is {name}'s, averaged with {'that scan' if others == 1 else 'them'} "
+            f"(its range is {dominant['ratio']:.3g} times theirs). The sentences on zero or missing signal "
+            "(merged_scan_zero_signal_points, outlier_scans) say which scans recorded nothing; ask the scientist "
+            f"whether {'that scan belongs' if others == 1 else 'those scans belong'} in the merge.")
+
+
+def _n(n: int, noun: str) -> str:
+    return f"{n} {noun}{'' if n == 1 else 's'}"
 
 
 def _csv(path: Path, header: Sequence[str], cols: Sequence, np) -> None:
@@ -883,17 +910,32 @@ def _excluded_as(entry: Mapping, names: Sequence[str]) -> str | None:
         return None
     rel = str(entry.get("relative_path") or "")
     own = {str(entry.get("source_id") or ""), rel, PurePosixPath(rel).name} - {""}
+
+    def _clean(x: str) -> str:
+        x = x.strip()
+        return x[2:] if x.startswith("./") else x
+
     for name in names:
-        base, _, scan = name.rpartition("#") if "#" in name else (name, "", "")
-        if base in own and (not scan or str(entry.get("scan")) == scan.strip()):
+        # r4-a review: the whole name first (a file name may hold a '#'), then <name>#<scan> (spaces allowed)
+        if _clean(name) in own:
             return name
+        if "#" in name:
+            base, _, scan = name.rpartition("#")
+            if (_clean(base) in own and scan.strip() and entry.get("scan") is not None
+                    and scan.strip().lstrip("0") == str(entry["scan"]).lstrip("0")):
+                return name
     return None
 
 
 def exclusion_name(entry: Mapping, inputs: Sequence[Mapping]) -> str:
-    """How ``exclude_scans`` names one input: its file name, with ``#<scan>`` when another input shares the file."""
+    """How ``exclude_scans`` names one input so that it names that input alone: its file name; its relative path when
+    another input of the group has the same file name in another folder (``day1/x.dat``, ``day2/x.dat``); and
+    ``#<scan>`` when another input shares the file."""
     name = _file_name(entry)
-    shared = sum(1 for i in inputs if _file_name(i) == name) > 1
+    rel = str(entry.get("relative_path") or "")
+    if any(_file_name(i) == name and str(i.get("relative_path") or "") != rel for i in inputs):
+        name = rel or name
+    shared = sum(1 for i in inputs if str(i.get("relative_path") or "") == rel) > 1
     return f"{name}#{entry['scan']}" if shared and entry.get("scan") is not None else name
 
 
@@ -917,17 +959,31 @@ def _exclusion_statement(excluded: Sequence[Mapping], names: Sequence[str], list
     said = ""
     if excluded:
         k = len(excluded)
-        files = ", ".join(PurePosixPath(str(x["relative_path"] or x["source_id"])).name
-                          + (f" (scan {x['scan']})" if x.get("scan") is not None else "") for x in excluded[:10])
+        base = [PurePosixPath(str(x["relative_path"] or x["source_id"])).name for x in excluded]
+        # r4-a review: by relative path when file names repeat across folders
+        shown = [str(x["relative_path"] or x["source_id"]) if base.count(b) > 1 else b for x, b in zip(excluded, base)]
+        files = ", ".join(n + (f" (scan {x['scan']})" if x.get("scan") is not None else "")
+                          for n, x in zip(shown[:10], excluded[:10]))
         files += f" and {k - 10} more" if k > 10 else ""
         said = (f"{k} of {listed} listed scans {'was' if k == 1 else 'were'} left out of the merge by the params file "
-                f"({P.EXCLUDE_SCANS_SECTION}): {files}. The curve merges {used} scan{'' if used == 1 else 's'}; the "
-                "group's earlier result, with every scan, stays as it was.")
+                f"({P.EXCLUDE_SCANS_SECTION}): {files}. "
+                + (f"The curve merges {used} scan{'' if used == 1 else 's'}" if used else
+                   "No scan is left, so there is no curve")
+                + "; the group's earlier result, with every scan, stays as it was.")
     if missing:
         said += (" " if said else "") + (
             f"The params file's {P.EXCLUDE_SCANS_SECTION} names {', '.join(repr(n) for n in missing)} for this group, "
             "which matches none of its scans (a file name, relative path or source id, optionally #<scan>): nothing "
             "was left out for it. Check the name.")
+    many = {n: [x for x in excluded if x["named_as"] == n] for n in found}
+    for n, xs in many.items():
+        if len(xs) > 1:
+            # r4-a review: one name that left out more than one scan (a file name repeated across folders, or a
+            # multi-scan file named without #<scan>) is said, so it is never more than the scientist meant
+            said += (f" The name {n!r} matched {len(xs)} scans ("
+                     + ", ".join(str(x["relative_path"] or x["source_id"]) + (f" scan {x['scan']}" if x.get("scan") is not None else "")
+                                 for x in xs[:5])
+                     + "); if only one was meant, name it by its relative path, or with #<scan>.")
     return said
 
 
@@ -1538,7 +1594,13 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         tables.append((entry, table))
     if not tables:
         causes = sorted({e.get("skip_reason") or "?" for e in res["inputs"]})
-        return [_fail(res, "no_readable_scan", ";".join(causes))]
+        out = _fail(res, "no_readable_scan", ";".join(causes))
+        said = _exclusion_statement(excluded, exclude, len(res["inputs"]), 0)
+        if said:
+            # r4-a review: every scan left out by the params file: said and flagged here too (outside the failure's hash)
+            out["qc"]["statements"] = {EXCLUDED_REASON: said}
+            out["review_flags"].append(EXCLUDED_REASON)
+        return [out]
 
     role = group.get("role", "sample")
     choice = choose_channels(tables[0][1], params=params, role=role, bl15_selection=sel)
@@ -1645,9 +1707,12 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         }
     )
     mg = C.merge(M, dg["point_flags"] if excl else None, dg["scan_flags"] if excl else None, np)
-    # r4-a (C.SINGLE_SCAN_RULE_ID): one scan's stretch that sets the merged curve's range fails the curve
-    dominant = C.single_scan_dominance(M, grid, np, exclude_points=dg["point_flags"] if excl else None,
-                                       exclude_scans=dg["scan_flags"] if excl else None)
+    # r4-a (C.SINGLE_SCAN_RULE_ID): one scan's stretch that sets the merged curve's range fails the curve; a group whose
+    # other scans have no edge is said, never failed (only_scan_with_edge)
+    found = C.single_scan_dominance(M, grid, np, exclude_points=dg["point_flags"] if excl else None,
+                                    exclude_scans=dg["scan_flags"] if excl else None)
+    dominant = found if found and found["kind"] == "one_scan_sets_merge" else None
+    only_edge = found if found and found["kind"] == "only_scan_with_edge" else None
     ok = np.isfinite(mg["mean"])
     g2, mean = grid[ok], mg["mean"][ok]
     if g2.size < int(params["merge"]["min_points"]):
@@ -1925,6 +1990,9 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         res["review_flags"].append(SINGLE_SCAN_FLAG)
         res["qc"].setdefault("statements", {})[SINGLE_SCAN_FLAG] = _single_scan_statement(
             dominant, names, group["group_id"], exclusion_name(used_entries[dominant["scan_position"]], res["inputs"]))
+    if only_edge:
+        res["review_flags"].append(ONLY_EDGE_FLAG)
+        res["qc"].setdefault("statements", {})[ONLY_EDGE_FLAG] = _only_edge_statement(only_edge, names)
     if on_edge:
         res["qc"]["metrics"].update(glitch_points_on_edge=on_edge["on_edge"], glitch_points_off_edge=on_edge["off_edge"])
         res["qc"].setdefault("statements", {})["glitch_points_on_edge"] = on_edge["statement"]
@@ -2457,6 +2525,7 @@ def process_bundle(
             _null_non_finite(r)
         (unread_results if g.get("group_kind") in ("unread_acquisition", "generic_run") else results).extend(out)
 
+    unknown_excl = sorted(set(ctx.exclusions) - {g["group_id"] for g in all_groups})
     fixed_said = possibly_fixed_athena_e0(results, bundle, all_groups, entries)
     processed = {r.get("group_id") for r in results + unread_results}
 
@@ -2525,6 +2594,12 @@ def process_bundle(
         # for the STORED results `isaac process` keeps as they were: apply_kept_result_notes (outside the hashed files)
         payload["kept_result_notes"] = kept_notes
     payload["summary"]["lines"].extend(REF.ignored_overrides(resolved))  # c12-r: an ignored override is said once
+    if unknown_excl:
+        # r4-a review: an exclude_scans group id that is no group of this bundle left nothing out
+        payload["summary"]["lines"].append(
+            f"The params file's {P.EXCLUDE_SCANS_SECTION} names {', '.join(repr(g) for g in unknown_excl)}, which "
+            f"{'is' if len(unknown_excl) == 1 else 'are'} no record group of this bundle: nothing was left out for "
+            f"{'it' if len(unknown_excl) == 1 else 'them'}. Check the group id (`isaac bundle list <bundle_dir> groups`).")
     _write(out_dir / RESULTS_FILE, _json_bytes(payload))
     return payload
 

@@ -85,8 +85,10 @@ it finds one. Show per group, in words:
   "unjudged": `qc.statements.glitch_points_from_one_scan` names the scan and counts those points as glitches.
   **One scan sets the curve** (QC `fail` `edge_from_single_scan`, `qc.statements.edge_from_single_scan`): with
   that scan left out the merged curve's range shrinks more than 5 times, so its white line, edge step and E0 are
-  that scan's stretch. Say the sentence, never offer to approve the curve, and ask whether the scan belongs in
-  the merge;
+  that scan's stretch (or, said as such, its post- or pre-edge). Say the sentence, never offer to approve the
+  curve, and ask whether the scan belongs in the merge. **The only scan with an edge** (flag and
+  `qc.statements.only_scan_with_edge`, never a fail): the other scans are dead, dark or out of the beam; say it
+  and ask about those scans, never offer to leave the good one out;
 - **when scans were skipped** (reason `scans_skipped_lacking_chosen_columns`; flag
   `channel_from_a_later_scan` when the first scan was one of them): the used / readable / skipped
   counts in plain words — "14 of 165 scans were used; 150 had different columns (they may be motor
@@ -373,7 +375,8 @@ a threshold is the protocol's, not a fix.
 
 **Leaving a scan out of a merge**, only when the scientist says it does not belong (a dead scan, a lost beam,
 one scan's spike): the outlier, zero-signal and `edge_from_single_scan` sentences give the exact file,
-`{"exclude_scans": {"<group id>": ["<file name>"]}}` (a relative path or source id works too; `<file>#<scan>` for
-one scan of a multi-scan file). Re-process that group with it as above: the new result lists the scan as skipped
+`{"exclude_scans": {"<group id>": ["<file name>"]}}` (a relative path or source id works too, and the sentence uses
+the relative path when a file name repeats across folders; `<file>#<scan>` for one scan of a multi-scan file; a
+name that left out more than one scan, or a group id that is no group, is said). Re-process that group with it as above: the new result lists the scan as skipped
 `scans_excluded_by_params_file`, says it (`qc.statements.scans_excluded_by_params_file`, also a name that matched
 no scan), and records it in `params.json` `excluded_scans`; the earlier result stays as it was.

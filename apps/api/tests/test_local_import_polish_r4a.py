@@ -575,3 +575,219 @@ def test_processing_says_the_channel_choice_flag(tmp_path):
     assert r["qc"]["statements"]["channel_choice_needs_review"].startswith("ISAAC chose the fluorescence channel (vortDT)/I0")
     qc_file = next(f for f in r["outputs"]["files"] if f["role"] == "qc")
     assert "channel_choice_needs_review" not in (bdir / qc_file["relative_path"]).read_text()  # hashed: no id moves
+
+
+# --- r4-a review (probes reviewr4a/p1-p6, turned into tests; every curve invented) ----------------------------------
+
+
+def test_review_p1_a_foil_stored_with_six_decimals_is_never_degenerate():
+    T = _proc()
+    np = T.np
+    from larch import xafs
+
+    from isaac_api.local_import.processing import core as C
+
+    def edge(e):
+        return 0.5 + 1e-4 * (e - e[0]) + 0.5 + np.arctan((e - 11215.0) / 0.5) / np.pi
+
+    grids = [np.arange(11050.0, 11400.0, 0.5),
+             np.concatenate([np.arange(11180.0, 11200.0, 2.0), np.arange(11200.0, 11240.0, 0.25), np.arange(11240, 11300, 1.0)]),
+             np.concatenate([[11150.0, 11160.0, 11170.0, 11180.0], np.arange(11200.0, 11240.0, 0.25), np.arange(11240, 11300, 1.0)])]
+    for e in grids:
+        for noise in (0.0, 1e-6, 1e-4, 1e-3):
+            for seed in range(3):
+                mu = edge(e) + np.random.default_rng(seed).normal(0, noise, e.size)
+                i2 = np.round(5e4 * np.exp(-mu), 6)  # as a SPEC file stores I2
+                r = C.edge_e0(e, np.log(5e4 / i2), np, xafs)
+                assert r is not None and not REF.degenerate_snr(r["snr"]), (e[0], noise, r)
+
+
+def _probe_grid(np):
+    return np.concatenate([np.arange(11150.0, 11200.0, 2.0), np.arange(11200.0, 11240.0, 0.25), np.arange(11240.0, 11350.0, 1.0)])
+
+
+def _probe_herfd(np, e, shift=0.0, wl=1.0, scale=1.0):
+    x = e - shift
+    return scale * (0.05 + (0.5 + np.arctan((x - SYN_IR_E0) / 0.7) / np.pi)
+                    + wl * 1.8 * np.exp(-0.5 * ((x - SYN_IR_E0 - 1.6) / 1.1) ** 2))
+
+
+def _one_scan(C, T, np, e, M):
+    dg = C.deglitch(M, e, T.P.resolve_params(), np)
+    return dg, C.glitch_points_from_one_scan(dg["point_flags"], e, M, np)
+
+
+@pytest.mark.parametrize("wl", [1.0, 3.0])
+@pytest.mark.parametrize("ndead", [1, 2, 4])
+@pytest.mark.parametrize("dark", ["gauss", "poisson", "scatter"])
+def test_review_p2_p6_the_only_scan_with_an_edge_is_said_never_failed_nor_a_glitch(wl, ndead, dark):
+    T = _proc()
+    np = T.np
+    from isaac_api.local_import.processing import core as C
+
+    e = _probe_grid(np)
+    rng = np.random.default_rng(0)
+    good = _probe_herfd(np, e, wl=wl) + rng.normal(0, 0.003, e.size)
+    make = {"gauss": lambda: np.abs(rng.normal(0, 1e-4, e.size)),
+            "poisson": lambda: rng.poisson(0.3, e.size) * 1e-5,
+            "scatter": lambda: 0.002 + 1e-6 * (e - e[0]) + rng.normal(0, 2e-5, e.size)}[dark]
+    M = np.vstack([good] + [make() for _ in range(ndead)])
+    found = C.single_scan_dominance(M, e, np)
+    assert found is not None and found["kind"] == "only_scan_with_edge" and found["scan_position"] == 0
+    _, one = _one_scan(C, T, np, e, M)
+    assert one == set()
+
+
+def test_review_p6_end_to_end_one_good_scan_and_one_out_of_the_beam_is_not_failed(tmp_path):
+    T = _proc()
+    np = T.np
+    e = _probe_grid(np)
+    rng = np.random.default_rng(3)
+    good = _probe_herfd(np, e, wl=3.0) + rng.normal(0, 0.003, e.size)
+    bg = 0.002 + 1e-6 * (e - e[0]) + rng.normal(0, 2e-5, e.size)
+    bdir_, root, _ = _herfd_case(T, tmp_path, np.vstack([good, bg]), e)
+    r = T.isaac(T.run_process(bdir_, source_root=root))
+    q = r["qc"]
+    assert "edge_from_single_scan" not in q["reasons"] and "single_scan_span_ratio" not in q["metrics"]
+    said = q["statements"]["only_scan_with_edge"]
+    assert said.startswith("01_SYN_ZZ1_001.dat is the group's only scan with an edge: the other 1 scan show")
+    assert "dead, out of the beam or dark counts" in said and "exclude_scans" not in said
+    assert "only_scan_with_edge" in r["review_flags"]
+
+
+GAIN_CASES = [(3.0, 0.3, 4), (0.4, 0.3, 4), (2.0, 0.2, 5), (1.0, 0.3, 4)]
+
+
+@pytest.mark.parametrize("gain, jitter, n", GAIN_CASES)
+def test_review_p5_a_gain_step_with_jitter_stays_on_the_edge(gain, jitter, n):
+    T = _proc()
+    np = T.np
+    from isaac_api.local_import.processing import core as C
+
+    e = _probe_grid(np)
+    rng = np.random.default_rng(1)
+    M = np.vstack([_probe_herfd(np, e) + rng.normal(0, 0.003, e.size) for _ in range(n)])
+    M[0] = gain * (_probe_herfd(np, e, shift=jitter) + rng.normal(0, 0.003, e.size))
+    dg, one = _one_scan(C, T, np, e, M)
+    assert dg["flagged_points_total"] > 0 and one == set()
+    mean = C.merge(M, dg["point_flags"], None, np)["mean"]
+    ok = np.isfinite(mean)
+    v0 = C.glitch_points_on_edge(dg["point_flags"], e, e[ok], mean[ok], SYN_IR_E0, np)
+    v1 = C.glitch_points_on_edge(dg["point_flags"], e, e[ok], mean[ok], SYN_IR_E0, np, M=M)
+    assert v0 == v1  # as r2-a left them: on the edge
+    assert C.single_scan_dominance(M, e, np) is None
+
+
+@pytest.mark.parametrize("n", [3, 5])
+@pytest.mark.parametrize("shift, wl", [(-2.0, 1.6), (-1.0, 1.0), (0.0, 2.5)])
+def test_review_p2_in_situ_growth_or_an_energy_jump_stays_on_the_edge(n, shift, wl):
+    T = _proc()
+    np = T.np
+    from isaac_api.local_import.processing import core as C
+
+    e = _probe_grid(np)
+    rng = np.random.default_rng(0)
+    M = np.vstack([_probe_herfd(np, e) + rng.normal(0, 0.003, e.size) for _ in range(n)])
+    M[n - 1] = _probe_herfd(np, e, shift=shift, wl=wl) + rng.normal(0, 0.003, e.size)
+    _, one = _one_scan(C, T, np, e, M)
+    assert one == set() and C.single_scan_dominance(M, e, np) is None
+
+
+def test_review_p2_self_absorption_and_a_gain_of_100_are_not_glitches():
+    T = _proc()
+    np = T.np
+    from isaac_api.local_import.processing import core as C
+
+    e = _probe_grid(np)
+    rng = np.random.default_rng(0)
+    damped = np.vstack([_probe_herfd(np, e, wl=0.4, scale=0.6)] + [_probe_herfd(np, e) + rng.normal(0, 0.003, e.size) for _ in range(3)])
+    assert _one_scan(C, T, np, e, damped)[1] == set() and C.single_scan_dominance(damped, e, np) is None
+    gain = np.vstack([_probe_herfd(np, e) + rng.normal(0, 0.003, e.size) for _ in range(4)])
+    gain[0] *= 100
+    assert _one_scan(C, T, np, e, gain)[1] == set() and C.single_scan_dominance(gain, e, np) is None
+
+
+def test_review_the_28_versus_001_spike_is_still_one_scans_glitch_and_fails_the_curve():
+    T = _proc()
+    np = T.np
+    from isaac_api.local_import.processing import core as C
+
+    e = _probe_grid(np)
+    rng = np.random.default_rng(5)
+    M = np.vstack([0.01 * _probe_herfd(np, e) + rng.normal(0, 3e-5, e.size) for _ in range(5)])  # the others read ~0.01
+    wl = (e >= SYN_IR_E0 + 1.0) & (e <= SYN_IR_E0 + 3.0)
+    M[4, wl] = 28.0 + rng.normal(0, 0.1, int(wl.sum()))  # one scan reads ~28 over the white line
+    _, one = _one_scan(C, T, np, e, M)
+    assert one and {s for s, _ in one} == {4} and all(SYN_IR_E0 + 1.0 <= en <= SYN_IR_E0 + 3.0 for _, en in one)
+    found = C.single_scan_dominance(M, e, np)
+    assert found["kind"] == "one_scan_sets_merge" and found["scan_position"] == 4 and found["region"] == "edge"
+
+
+def test_review_a_spike_far_above_the_edge_is_worded_by_where_it_is():
+    T = _proc()
+    np = T.np
+    from isaac_api.local_import.processing import core as C
+    from isaac_api.local_import.processing import run as RUN
+
+    e = _probe_grid(np)
+    rng = np.random.default_rng(0)
+    M = np.vstack([_probe_herfd(np, e) + rng.normal(0, 0.003, e.size) for _ in range(4)])
+    M[1, int(np.argmin(abs(e - 11320.0)))] += 100.0
+    found = C.single_scan_dominance(M, e, np)
+    assert found["kind"] == "one_scan_sets_merge" and found["region"] == "above_edge"
+    names = [f"SYN_{k}.dat" for k in range(4)]
+    said = RUN._single_scan_statement(found, names, "rg-1", "SYN_1.dat")
+    assert "only at 11320.0 eV" in said and "that stretch lies above the edge" in said and "white line" not in said
+    edge = C.single_scan_dominance(_five_scans(np, _herfd_grid(np)), _herfd_grid(np), np)
+    assert "the merged white line, edge step and E0 come from" in RUN._single_scan_statement(edge, [f"s{k}" for k in range(5)], "rg-1", "s3")
+
+
+def test_review_p3_repeated_file_names_are_hinted_by_relative_path_and_matching_is_strict():
+    from isaac_api.local_import.processing import run as RUN
+
+    inputs = [{"source_id": "src-1", "relative_path": "day1/SYN_Ir_001.dat", "scan": 1},
+              {"source_id": "src-2", "relative_path": "day2/SYN_Ir_001.dat", "scan": 1},
+              {"source_id": "src-3", "relative_path": "day2/SYN_Ir_002.dat", "scan": 2}]
+    for k, entry in enumerate(inputs):
+        hint = RUN.exclusion_name(entry, inputs)
+        assert [i["relative_path"] for i in inputs if RUN._excluded_as(i, [hint])] == [entry["relative_path"]], hint
+    assert RUN.exclusion_name(inputs[0], inputs) == "day1/SYN_Ir_001.dat"
+    assert RUN.exclusion_name(inputs[2], inputs) == "SYN_Ir_002.dat"
+    multi = [{"source_id": "src-9", "relative_path": "a/SYN_m.spec", "scan": 3},
+             {"source_id": "src-9", "relative_path": "a/SYN_m.spec", "scan": 4}]
+    assert RUN.exclusion_name(multi[0], multi) == "SYN_m.spec#3"
+    assert [RUN._excluded_as(i, ["SYN_m.spec#3"]) for i in multi] == ["SYN_m.spec#3", None]
+    hashed = {"source_id": "s", "relative_path": "x/SYN_Ir#2_001.dat", "scan": None}
+    assert RUN._excluded_as(hashed, [RUN.exclusion_name(hashed, [hashed])]) == "SYN_Ir#2_001.dat"
+    e = inputs[0]
+    for name in ("./day1/SYN_Ir_001.dat", "day1/SYN_Ir_001.dat", "SYN_Ir_001.dat#01", "SYN_Ir_001.dat # 1"):
+        assert RUN._excluded_as(e, [name]) == name, name
+    for name in ("/abs/day1/SYN_Ir_001.dat", "../day1/SYN_Ir_001.dat", "SYN_Ir_001.dat#2"):
+        assert RUN._excluded_as(e, [name]) is None, name
+    # one name that left out more than one scan is said
+    excluded = [{"source_id": i["source_id"], "relative_path": i["relative_path"], "scan": 1, "named_as": "SYN_Ir_001.dat"}
+                for i in inputs[:2]]
+    said = RUN._exclusion_statement(excluded, ["SYN_Ir_001.dat"], 3, 1)
+    assert "day1/SYN_Ir_001.dat (scan 1), day2/SYN_Ir_001.dat (scan 1)" in said
+    assert "The name 'SYN_Ir_001.dat' matched 2 scans" in said and "relative path" in said
+
+
+def test_review_p4_every_scan_excluded_and_an_unknown_group_id_are_said(tmp_path):
+    T = _proc()
+    bdir, root, _ = T.make_case(tmp_path, [("01_SYN_ZZ1", [T.spec_file(T.fluo_scan(s)) for s in (1, 2)], {"sample_name": "ZZ1"})])
+    a = T.isaac(T.run_process(bdir, source_root=root))
+    gid = a["group_id"]
+    b = T.isaac(T.run_process(bdir, source_root=root, group_ids=[gid],
+                              params={"exclude_scans": {gid: ["01_SYN_ZZ1_001.dat", "01_SYN_ZZ1_002.dat"]}}))
+    assert b["failure"]["code"] == "no_readable_scan" and "scans_excluded_by_params_file" in b["review_flags"]
+    said = b["qc"]["statements"]["scans_excluded_by_params_file"]
+    assert said.startswith("2 of 2 listed scans were left out") and "No scan is left, so there is no curve" in said
+    c = T.run_process(bdir, source_root=root, group_ids=[gid], params={"exclude_scans": {"rg-SYN-typo": ["x.dat"]}})
+    assert T.isaac(c)["result_id"] == a["result_id"]
+    assert any("names 'rg-SYN-typo', which is no record group of this bundle" in x for x in c["summary"]["lines"])
+
+
+def test_review_the_spread_is_compared_as_the_drift_warning_compares_it():
+    r = REF.reading(_step([11215.000, 11215.504], [300.0, 300.0]))  # 0.504 eV: said 0.50, above 0.5 both ways
+    assert r["reference_edges_disagree"] is True and "Its usable edges spread 0.504 eV" in r["reference_statement"]
+    assert not REF.reading(_step([11215.0, 11215.5], [300.0, 300.0])).get("reference_edges_disagree")
