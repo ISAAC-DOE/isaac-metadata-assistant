@@ -232,7 +232,7 @@ def test_the_template_preview_lists_no_mention_that_agrees(glued, tmp_path, caps
 # --- M1: the .exp DATA_FILE of a template reused under another name ----------------------------------------------
 
 
-TEMPLATE = "AgL3_SYN_exp1.exp"
+TEMPLATE = "SYN_template_exp1.exp"
 
 
 def _template_beamtime(root: Path, data_files: dict[str, str | None], *, extra_exp: bool = False) -> Path:
@@ -263,7 +263,7 @@ def test_the_only_exp_in_the_runs_own_folder_is_read(tmp_path):
 
 
 def test_a_template_naming_another_acquisition_says_nothing(tmp_path):
-    src = _template_beamtime(tmp_path, {"SYNti_m600mV_096": "AgL3_xas", "SYNti_m300mV_097": None})
+    src = _template_beamtime(tmp_path, {"SYNti_m600mV_096": "SYNother_xas", "SYNti_m300mV_097": None})
     assert _data_files(src) == {"SYNti_m600mV_096": [], "SYNti_m300mV_097": []}
     out = _import(src, tmp_path / "bundle")
     assert not any(G.EXP_NAME_DIFFERS_FLAG in g["flags"] for g in M.load(out)["record_groups"])
