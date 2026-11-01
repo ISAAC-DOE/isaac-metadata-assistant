@@ -832,6 +832,7 @@ def propose_terms(bundle: Mapping, sources: Mapping) -> dict:
     answers = allowed_answers(bundle, [r.get("field_path") for r in requests.values()]) if requests else {}
     live = live_run_ids(bundle) if requests else None
     log = list(bundle.get("scientist_decisions") or ())
+    context = B.context_run_ids(bundle)
     fields = []
     drafts = answered_terms = 0
     for path in sorted(by_field):
@@ -857,7 +858,10 @@ def propose_terms(bundle: Mapping, sources: Mapping) -> dict:
             citations: list[dict] = []
             seen: set = set()
             total_citations = 0
-            run_ids = sorted({r for o in counted for r in o.get("run_ids") or ()})
+            # r2-a L4: a run kept beside a measurement as context (an exported file) is counted apart, never as a run
+            every_run = sorted({r for o in counted for r in o.get("run_ids") or ()})
+            run_ids = [r for r in every_run if r not in context]
+            kept_as_context = [r for r in every_run if r in context]
             for o in counted:
                 for cit in o["citations"]:
                     key = (cit.get("file"), cit.get("locator"), tuple(cit.get("run_ids") or ()))
@@ -885,6 +889,7 @@ def propose_terms(bundle: Mapping, sources: Mapping) -> dict:
                     "missing_from": sorted({m for o in occs for m in o["missing_from"]}),
                     "runs": len(run_ids),
                     "run_ids": run_ids,
+                    **({"context_run_ids": kept_as_context} if kept_as_context else {}),
                     "scientist_notes": notes,
                     "answered_scientist_notes": answered_notes,
                     "citations": citations,

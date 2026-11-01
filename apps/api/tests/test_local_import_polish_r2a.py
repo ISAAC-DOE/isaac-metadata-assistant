@@ -18,6 +18,8 @@ line, not a measurement.
 * (LOW 3) A group's question list showed what does not apply to it: a beamtime-wide optional question listed fields
   the group's record already carries, and a conflict that affects no record and reaches no group showed in every
   group's list. Neither does now (ids unchanged).
+* (LOW 4) The scientist's exported ``.dat``, kept beside a run as a context run, was counted as a run in a decide
+  statement ("recorded for 2 runs") and in propose-terms ``runs``: measurement runs only now.
 """
 
 from __future__ import annotations
@@ -337,3 +339,60 @@ def test_a_conflict_that_reaches_no_group_is_left_out_of_every_groups_list():
     assert [q["question_id"] for q in Q.filter_questions(payload, scope="group:g1")] == ["Q-syn-2", "Q-syn-3"]
     assert [q["question_id"] for q in Q.filter_questions(payload, scope="experiment")] == ["Q-syn-1", "Q-syn-2", "Q-syn-3"]
     assert Q.scope_counts(payload | {"questions": [nowhere]}, "group:g1")["total"] == 0
+
+
+# --- LOW 4: a run kept as context is not a measurement run -------------------------------------------------------
+
+
+def _with_context_run(b: dict) -> tuple[dict, str, str]:
+    """``b`` (a copy) with its first record group keeping its second run beside the first as CONTEXT: the shape grouping
+    gives an exported file joined to its run's group (``grouping``: ``export_kept_as_context``)."""
+    import copy
+
+    b = copy.deepcopy(b)
+    run, ctx = b["runs"][0], b["runs"][1]
+    b["record_groups"] = [{"group_id": "g-syn", "status": "proposed", "member_run_keys": [run["run_key"], ctx["run_key"]],
+                           "context_run_keys": [ctx["run_key"]], "flags": ["export_kept_as_context"]}]
+    return b, run["run_id"], ctx["run_id"]
+
+
+def test_a_decide_statement_counts_measurement_runs_only(pristine):
+    b, run_id, ctx_id = _with_context_run(M.load(pristine))
+    assert B.context_run_ids(b) == {ctx_id}
+    mine = [m for m in b["missing_values"] if m["target_field_path"] == "context.temperature_K" and m["run_id"] in (run_id, ctx_id)]
+    assert {m["run_id"] for m in mine} == {run_id, ctx_id}
+    ids = [m["value_id"] for m in mine]
+    said = M.plain_statement(b, [("missing_value", m) for m in mine], ids, ids, decision="correct", value=300)
+    assert said == "300 recorded for 1 run: temperature K."
+    only_ctx = [m for m in mine if m["run_id"] == ctx_id]
+    said = M.plain_statement(b, [("missing_value", m) for m in only_ctx], [only_ctx[0]["value_id"]],
+                             [only_ctx[0]["value_id"]], decision="correct", value=300)
+    assert said == "300 recorded for 1 exported file kept as context: temperature K."
+    # without a context run, as before
+    plain = M.load(pristine)
+    assert "for 2 runs" in M.plain_statement(plain, [("missing_value", m) for m in mine], ids, ids, decision="correct", value=300)
+
+
+def test_propose_terms_counts_measurement_runs_only(pristine):
+    from isaac_api import schema_locator
+    from isaac_api import schema_proposal_rules as SR
+    from isaac_api.local_import import propose_terms as P
+
+    field = "context.electrochemistry.cell_type"
+    b = M.load(pristine)
+    for m in [m for m in b["missing_values"] if m["target_field_path"] == field][:2]:
+        M.annotate(pristine, target_id=m["value_id"], value="syn_static_cell", excerpt_locator="page 1 (synthetic)",
+                   source_id=None, model_id="synthetic-test-model", blind=False, rationale="synthetic test reading")
+    b = M.load(pristine)
+    ran = sorted({m["run_id"] for m in b["missing_values"] if m["target_field_path"] == field})[:2]
+    b["runs"] = sorted(b["runs"], key=lambda r: r["run_id"] not in ran)  # the two annotated runs first
+    sources = SR.load_sources_at(schema_locator.resolve_schema_path())
+
+    def term(bundle):
+        f = next(f for f in P.propose_terms(bundle, sources)["fields"] if f["field_path"] == field)
+        return next(t for t in f["terms"] if t["term"] == "syn_static_cell")
+
+    assert term(b)["runs"] == 2 and "context_run_ids" not in term(b)
+    with_ctx, run_id, ctx_id = _with_context_run(b)
+    t = term(with_ctx)
+    assert t["runs"] == 1 and t["run_ids"] == [run_id] and t["context_run_ids"] == [ctx_id]

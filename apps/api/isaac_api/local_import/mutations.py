@@ -2171,6 +2171,7 @@ def plain_statement(bundle: Mapping, planned: Sequence[tuple[str, Mapping]], tar
         B.CLOCK_ZONE_DECISION: f"instrument clock time zone {value} recorded",
     }.get(decision, f"{decision} recorded")
     cand_path = {c["candidate_id"]: c.get("target_field_path") for c in bundle.get("candidates") or ()}
+    context = B.context_run_ids(bundle)  # r2-a L4: a run kept as context (an exported file) is no measurement run
 
     def count(n: int, noun: str) -> str:
         return f"{n} {noun}{'' if n == 1 else 's'}"
@@ -2186,8 +2187,11 @@ def plain_statement(bundle: Mapping, planned: Sequence[tuple[str, Mapping]], tar
         for kind, objs in by_kind.items():
             if kind in ("candidate", "missing_value"):
                 runs = {o.get("run_id") for o in objs}
-                if runs - {None}:
-                    parts.append(count(len(runs - {None}), "run"))
+                measured = runs - {None} - context
+                if measured:
+                    parts.append(count(len(measured), "run"))
+                elif runs - {None}:
+                    parts.append(count(len(runs - {None}), "exported file kept as context"))
                 if None in runs:
                     parts.append("the whole beamtime")
             elif kind == "experiment":
