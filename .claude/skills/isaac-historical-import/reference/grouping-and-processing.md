@@ -223,7 +223,17 @@ an element/edge already named for the group: approved, proposed, or the group's 
   `reference_edge_in_too_few_scans` or `no_reference_available`): say the `reference_statement` ("only 1 of
   16 scans shows a usable reference edge; an in-scan reference needs one in at least 2 scans") and do NOT
   ask for an element or edge: no shift can be approved, and `approve_calibration` is refused.
-- **A reference is proposed** (`calibration.reference_proposed: true` in `show processing-result`; the flag
+- **A standard's own edge** (review flag `own_signal_not_an_energy_calibrant`; the `reference_statement` says it is
+  not proposed): a chemical standard is not an energy calibrant: its edge sits where its
+  chemistry puts it. A reference group's own edge is proposed only when its sample is named as a pure element (a
+  foil, elemental sulfur); a compound (CoSO4, MoS2), a mixture (5 wt% in sucrose) or a sample whose names do not say
+  is not (the statement says what was read). Say the `reference_statement` and do NOT ask for an
+  element or edge: "S K" would move the standard onto elemental sulfur's tabulated edge and erase the chemical shift
+  it was measured to show. Only if the scientist asks for it, `approve_calibration` needs `--accept-shift <the shift
+  shown>` whatever its size (without it, refused; nothing recorded; processing does not apply it,
+  `calibration_own_signal_shift_not_confirmed`).
+- **A reference is proposed** (`calibration.reference_proposed: true` in `show processing-result`, without the flag
+  `own_signal_not_an_energy_calibrant`; the flag
   `calibration_reference_unconfirmed` alone only means no reference is approved yet): say how many scans show a
   reference edge and where ("2 of 2 scans show a reference edge at 4974.6 eV"), then ask which element and
   edge the reference measures (`--element Ir`, `--edge L3` style). Never guess it from a file name. Record

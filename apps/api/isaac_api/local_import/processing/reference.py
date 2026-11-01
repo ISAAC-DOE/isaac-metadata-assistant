@@ -17,12 +17,21 @@ Three rules (all in ``protocol.RULE_VERSIONS_SINCE_PROTOCOL_VERSION``, kept outs
   in-scan reference's edge rule (``calibration.reference_min_edge_snr``) STRICTER, never looser: the protocol's value
   is a floor / ceiling (:func:`effective_warn_eV`, :func:`effective_min_snr`) and an override past it is ignored and
   said (:func:`ignored_overrides`).
+* :data:`CALIBRANT_RULE_ID` — a reference group's OWN edge is proposed as the energy calibration only when the group's
+  sample is named as a pure element (a foil, elemental sulfur; :func:`calibrant_identity`). A chemical standard is not
+  an energy calibrant: its edge sits where its chemistry puts it. Measured on a real BL4-3 sulfur K-edge beamtime:
+  CoSO4, MoS2 and Na2S2O3 standards (5 and 0.5 wt% in sucrose) were offered as their own calibration, and a truthful
+  "S K" would have moved them by -9.6 and +1.2 eV onto elemental sulfur's tabulated edge, erasing the chemical shift
+  each was measured to show. A compound, a mixture or a sample whose identity is not stated is not proposed
+  (``calibration_proposed: false``, said why); approving its own edge anyway needs ``--accept-shift`` with the shift
+  shown, WHATEVER its size. A stored step without ``reference_calibrant`` (made before this rule) is read as before.
 """
 
 from __future__ import annotations
 
+import re
 import statistics
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from .edges import edge_energy
 
@@ -30,9 +39,22 @@ MIN_IN_SCAN_REFERENCE_SCANS = 2
 IN_SCAN_MIN_RULE_ID = "isaac.xas.in_scan_reference_min_scans.v0"
 SHIFT_SIZE_RULE_ID = "isaac.xas.calibration_shift_size_confirmed.v0"
 STRICTER_ONLY_RULE_ID = "isaac.xas.calibration_overrides_stricter_only.v0"
+CALIBRANT_RULE_ID = "isaac.xas.own_signal_calibrant_pure_element.v0"
 IN_SCAN = "in_scan_reference_channel"
+OWN_SIGNAL = "reference_group_own_signal"
 TOO_FEW_FLAG = "reference_edge_in_too_few_scans"
 SIZE_NOT_CONFIRMED_FLAG = "calibration_shift_size_not_confirmed"
+#: a reference group whose own edge is not proposed as the calibration (its sample is not named as a pure element)
+NOT_A_CALIBRANT_FLAG = "own_signal_not_an_energy_calibrant"
+#: an approval of such a group's own edge that the scientist did not also confirm with --accept-shift: not applied
+CALIBRANT_NOT_CONFIRMED_FLAG = "calibration_own_signal_shift_not_confirmed"
+CHEMICAL_STANDARD = "A chemical standard is not an energy calibrant: its edge sits where its chemistry puts it"
+
+ELEMENTS = frozenset(
+    "H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr "
+    "Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm "
+    "Yb Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn Fr Ra Ac Th Pa U Np Pu".split()
+)
 #: the protocol's defaults (``protocol.DEFAULT_PARAMS``): used when a stored step does not carry its own value, and the
 #: floor of the in-scan SNR rule and the ceiling of the size-confirmation level (:data:`STRICTER_ONLY_RULE_ID`)
 DEFAULT_MIN_SNR = 10.0
@@ -95,12 +117,106 @@ def _n(n: int, noun: str) -> str:
     return f"{n} {noun}{'' if n == 1 else 's'}"
 
 
+# --- what a reference group's sample is (CALIBRANT_RULE_ID) --------------------------------------------------------
+
+_ID_TOKEN = re.compile(r"[_\-\s.,;/+]+")
+_FORMULA = re.compile(r"^(?:[A-Z][a-z]?\d*)+$")
+_FORMULA_PART = re.compile(r"([A-Z][a-z]?)\d*")
+_FOIL_OF = re.compile(r"^([A-Z][a-z]?)foil$")
+#: ion-chamber and detector names (I0, I1, I2, IF): never iodine
+_DETECTOR = re.compile(r"^I[0-9F]$")
+#: an element's own molecule, named as such (elemental sulfur is S8)
+_ALLOTROPES = {"S8": "S", "P4": "P"}
+#: a dilution or a matrix: 5wt, 0p5wt, wt%, sucrose, BN ...
+_DILUTION = re.compile(r"^(\d+(p\d+)?)?(wt|wtpct|pct|percent|ppm)%?$")
+_MIXTURE_WORDS = frozenset({"sucrose", "cellulose", "bn", "mix", "mixed", "mixture", "dilute", "diluted", "dilution",
+                            "blend", "composite", "alloy", "matrix"})
+_COMPOUND_WORDS = frozenset({"mof", "complex", "salt", "polymer", "compound", "mineral"})
+_COMPOUND_ENDINGS = ("ide", "ate", "ite")
+_IDENTITY_TEXTS_SAID = 4
+
+
+def _texts(values: Any) -> list[str]:
+    if isinstance(values, str):
+        return [values]
+    if isinstance(values, Mapping):
+        return [t for v in values.values() for t in _texts(v)]
+    if isinstance(values, (list, tuple)):
+        return [t for v in values for t in _texts(v)]
+    return []
+
+
+def calibrant_identity(texts: Sequence[str]) -> dict:
+    """What a reference group's sample is named as, read ONLY from the names it has (its sample identity and run
+    names): ``kind`` is ``element`` (exactly one element, named alone: ``S``, ``Ti``, ``Tifoil``, ``S8``), ``compound``
+    (a formula of two or more elements, ``CoSO4``, ``MoS2``, or a word such as oxide or MOF), ``mixture`` (a dilution or
+    matrix: ``5wt``, ``sucrose``) or ``unknown`` (no chemistry named, or several elements). Only ``element`` lets the
+    group's own edge be proposed as the energy calibration (:data:`CALIBRANT_RULE_ID`). Case-sensitive: an all-capital
+    word with no digit (``SYN``, ``STD``) is never read as a formula."""
+    texts = [str(t) for t in texts if str(t or "").strip()]
+    elements, compounds, mixtures = set(), [], []
+    for text in texts:
+        for tok in (t for t in _ID_TOKEN.split(text) if t):
+            bare = re.sub(r"[()\[\]]", "", tok)
+            low = bare.casefold()
+            if _DILUTION.match(low) or low in _MIXTURE_WORDS:
+                mixtures.append(tok)
+            elif low in _COMPOUND_WORDS or (len(low) >= 5 and low.isalpha() and low.endswith(_COMPOUND_ENDINGS)):
+                compounds.append(tok)
+            elif bare in ELEMENTS and not _DETECTOR.match(bare):
+                elements.add(bare)
+            elif bare in _ALLOTROPES:
+                elements.add(_ALLOTROPES[bare])
+            elif (m := _FOIL_OF.match(bare)) and m.group(1) in ELEMENTS:
+                elements.add(m.group(1))
+            elif (_FORMULA.match(bare) and not _DETECTOR.match(bare) and (bare != bare.upper() or any(c.isdigit() for c in bare))):
+                parts = {p for p in _FORMULA_PART.findall(bare)}
+                if parts <= ELEMENTS and len(parts) >= 2:
+                    compounds.append(tok)
+    named = sorted(set(compounds)) + sorted(set(mixtures)) + sorted(elements)
+    where = ", ".join(f"'{t}'" for t in texts[:_IDENTITY_TEXTS_SAID]) + (" …" if len(texts) > _IDENTITY_TEXTS_SAID else "")
+    if compounds:
+        kind, element = "compound", None
+        said = f"This group's sample is named as a compound ({', '.join(sorted(set(compounds)))}, read from {where})."
+    elif mixtures:
+        kind, element = "mixture", None
+        said = f"This group's sample is named as a mixture or dilution ({', '.join(sorted(set(mixtures)))}, read from {where})."
+    elif len(elements) == 1:
+        kind, element = "element", next(iter(elements))
+        said = f"This group's sample is named as the pure element {element} (read from {where})."
+    else:
+        kind, element = "unknown", None
+        said = ("This group's names do not state that its sample is a pure element ("
+                + (f"they name several elements: {', '.join(sorted(elements))}; " if elements else "")
+                + (f"read from {where})." if texts else "no name was read)."))
+    return {"rule_id": CALIBRANT_RULE_ID, "kind": kind, "element": element, "named": named,
+            "read_from": texts[:_IDENTITY_TEXTS_SAID], "statement": said}
+
+
+def not_a_calibrant(outcome: Mapping) -> dict | None:
+    """The ``reference_calibrant`` of an own-signal step whose sample is NOT named as a pure element, else ``None``
+    (another source, a pure element, or a step stored before :data:`CALIBRANT_RULE_ID`, which is read as before)."""
+    cal = outcome.get("reference_calibrant") if isinstance(outcome, Mapping) else None
+    if outcome.get("reference_source") != OWN_SIGNAL or not isinstance(cal, Mapping) or cal.get("kind") == "element":
+        return None
+    return cal
+
+
+def not_proposed_sentence(cal: Mapping) -> str:
+    """Why a reference group's own edge is not proposed as the calibration, in plain words."""
+    return (f"{cal.get('statement') or ''} {CHEMICAL_STANDARD}, so this group's own edge is not proposed as the energy "
+            "calibration; only a pure element (a foil, elemental sulfur) is.").strip()
+
+
 def reading(step: Mapping) -> dict:
     """The reference a calibration step read: ``reference_source``, ``reference_scans_usable`` / ``_listed``,
     ``measured_reference_e0_eV`` (median of the usable scans), ``reference_e0_spread_eV`` (null with fewer than two
-    usable scans: one scan has no spread), ``reference_proposed`` and ``reference_statement`` (one plain sentence)."""
+    usable scans: one scan has no spread), ``reference_proposed`` (a usable reference edge was read),
+    ``calibration_proposed`` (ISAAC offers it as the energy calibration: not for a reference group whose sample is not
+    named as a pure element, :data:`CALIBRANT_RULE_ID`) and ``reference_statement`` (one plain sentence)."""
     o = step.get("outcome") or {}
     source = o.get("reference_source")
+    calibrant = not_a_calibrant(o)
     min_snr = effective_min_snr((step.get("params") or {}).get("reference_min_edge_snr"), source)
     usable = _usable(o, min_snr)
     listed = len(o.get("reference_snr_per_scan") or [])
@@ -124,8 +240,13 @@ def reading(step: Mapping) -> dict:
         where = "the reference channel" if source == IN_SCAN else "this reference group's own signal"
         said = (f"{of[0].upper() + of[1:]} show{'s' if len(usable) == 1 else ''} a usable reference edge in {where} "
                 f"({snr}), at {measured:.1f} eV"
-                + (f" (spread {spread:.2f} eV)." if spread is not None else ".")
-                + " Naming its element and edge gives the shift: the tabulated edge minus this energy.")
+                + (f" (spread {spread:.2f} eV)." if spread is not None else "."))
+        if calibrant is not None:
+            # CALIBRANT_RULE_ID: the edge is read, but it is not offered as the calibration
+            said += (f" {not_proposed_sentence(calibrant)} Only if the scientist asks for it: approving it needs "
+                     "--accept-shift with the shift it gives, whatever its size.")
+        else:
+            said += " Naming its element and edge gives the shift: the tabulated edge minus this energy."
     return {
         "reference_source": source,
         "reference_scans_usable": len(usable),
@@ -133,8 +254,12 @@ def reading(step: Mapping) -> dict:
         "reference_min_scans": need if source is not None else None,
         "measured_reference_e0_eV": measured,
         "reference_e0_spread_eV": spread,
+        # a usable reference edge was read (approve_calibration is possible); calibration_proposed says whether ISAAC
+        # offers it as the energy calibration (CALIBRANT_RULE_ID: never a compound standard's own edge)
         "reference_proposed": proposed,
+        "calibration_proposed": proposed and calibrant is None,
         "reference_statement": said,
+        **({"reference_calibrant": dict(o["reference_calibrant"])} if isinstance(o.get("reference_calibrant"), Mapping) else {}),
     }
 
 
@@ -166,14 +291,17 @@ def shift_size_confirmed(accepted: Any, shift: float) -> bool:
 def would_apply(step: Mapping, element: str, edge: str, *, warn_eV: float | None = None) -> dict:
     """What approving ``element`` ``edge`` as this step's reference would do: ``shift_eV`` (tabulated - measured),
     ``shown``, ``needs_size_confirmation`` (|shift| above ``qc.warn_energy_shift_eV``), ``implausible`` (above
-    ``calibration.max_plausible_shift_eV``: never applied), ``statement``. ``shift_eV`` is null when no reference is
-    proposed or the edge energy is unknown (``statement`` says why)."""
+    ``calibration.max_plausible_shift_eV``: never applied), ``needs_calibrant_confirmation`` (a reference group's own
+    edge whose sample is not named as a pure element, :data:`CALIBRANT_RULE_ID`: its size is confirmed whatever it is,
+    so ``needs_size_confirmation`` is true too), ``statement``. ``shift_eV`` is null when no reference is proposed or
+    the edge energy is unknown (``statement`` says why)."""
     r = reading(step)
     warn = effective_warn_eV(warn_eV)
     max_eV = float((step.get("params") or {}).get("max_plausible_shift_eV") or DEFAULT_MAX_SHIFT_EV)
     out = {"element": element, "edge": edge, "tabulated_edge_eV": None, "tabulated_edge_source": None,
            "measured_reference_e0_eV": r["measured_reference_e0_eV"], "shift_eV": None, "shown": None,
-           "warn_energy_shift_eV": warn, "needs_size_confirmation": False, "implausible": False}
+           "warn_energy_shift_eV": warn, "needs_size_confirmation": False, "needs_calibrant_confirmation": False,
+           "implausible": False}
     if not r["reference_proposed"]:
         return {**out, "statement": r["reference_statement"]}
     tab, src = edge_energy(element, edge)
@@ -188,6 +316,13 @@ def would_apply(step: Mapping, element: str, edge: str, *, warn_eV: float | None
             f"approving applies {shown(shift, warn)} eV to this group's energy axis.")
     implausible = abs(shift) > max_eV
     big = exceeds_warn(shift, warn) and not implausible
+    calibrant = not_a_calibrant(step.get("outcome") or {}) if not implausible else None
+    if calibrant is not None:
+        # CALIBRANT_RULE_ID: said BEFORE the size sentence (a confirmed approval's reply keeps the text before it)
+        said += (f" {not_proposed_sentence(calibrant)} Approving it moves this group's edge onto {element} {edge}'s "
+                 "tabulated energy and erases the chemical shift it was measured to show: it is applied only when the "
+                 f"scientist asks for it and also confirms its size (--accept-shift {shown(shift, warn)}), whatever "
+                 "the size.")
     if implausible:
         said += (f" That is more than the protocol's {max_eV:g} eV plausible limit, so it would not be applied: "
                  f"check the element and edge.")
@@ -196,7 +331,10 @@ def would_apply(step: Mapping, element: str, edge: str, *, warn_eV: float | None
                  f"(E0 included) by that much: it is applied only when you also confirm its size "
                  f"(--accept-shift {shown(shift, warn)}).")
     return {**out, "tabulated_edge_eV": tab, "tabulated_edge_source": src, "shift_eV": shift, "shown": shown(shift, warn),
-            "needs_size_confirmation": big, "implausible": implausible, "statement": said}
+            # the size is confirmed (--accept-shift) for a shift above the warning level, and for ANY shift of an
+            # own edge that is not an energy calibrant
+            "needs_size_confirmation": big or calibrant is not None, "needs_calibrant_confirmation": calibrant is not None,
+            "implausible": implausible, "statement": said}
 
 
 def carried_shift(step: Mapping, approval: Mapping | None = None, *, warn_eV: Any = None,
@@ -233,6 +371,9 @@ def carried_shift(step: Mapping, approval: Mapping | None = None, *, warn_eV: An
     elif not size_confirmed and exceeds_warn(applied, warn):
         reason = (f"it is more than the protocol's {warn:g} eV warning level and its size was never confirmed "
                   "(an older build applied it without --accept-shift)")
+    elif not size_confirmed and not_a_calibrant(o) is not None:
+        reason = ("it calibrates on this group's own edge, whose sample is not named as a pure element, and its size "
+                  f"was never confirmed ({CHEMICAL_STANDARD[0].lower() + CHEMICAL_STANDARD[1:]})")
     ref = o.get("reference") or {}
     el, ed = ref.get("element") or "<element>", ref.get("edge") or "<edge>"
     if reason is None:
@@ -255,7 +396,7 @@ def approval_not_applied(step: Mapping, warn_eV: Any = None) -> str | None:
     o = step.get("outcome") or {}
     flags = set(step.get("flags") or ())
     ref = o.get("reference") or {}
-    if ref.get("basis") != "scientist_decision" or not flags & {TOO_FEW_FLAG, SIZE_NOT_CONFIRMED_FLAG}:
+    if ref.get("basis") != "scientist_decision" or not flags & {TOO_FEW_FLAG, SIZE_NOT_CONFIRMED_FLAG, CALIBRANT_NOT_CONFIRMED_FLAG}:
         return None
     named = (f"The calibration approval {ref.get('decision_id') or ''} ({ref.get('element')} {ref.get('edge')}, "
              f"by {ref.get('decided_by')})").replace("approval  (", "approval (")
@@ -272,6 +413,12 @@ def approval_not_applied(step: Mapping, warn_eV: Any = None) -> str | None:
     accepted = o.get("accepted_shift_eV")
     why = (f"the size confirmed (--accept-shift {shown(accepted, warn)}) is not the shift it gives" if accepted is not None
            else "its size was not confirmed")
+    if CALIBRANT_NOT_CONFIRMED_FLAG in flags:
+        cal = not_a_calibrant(o) or {}
+        return (f"{named} is not applied: it calibrates on this group's own edge, and {not_proposed_sentence(cal)} "
+                f"The shift it gives, {said} eV, would move this group's edge onto "
+                f"{ref.get('element')} {ref.get('edge')}'s tabulated energy and {why}, so this curve carries no "
+                f"calibration shift. Approve again with --accept-shift {said} only if the scientist asks for that shift.")
     return (f"{named} is not applied: the shift it gives, {said} eV, is more than the protocol's {warn:g} eV warning "
             f"level and {why}, so this curve carries no calibration shift. Approve again with --accept-shift {said} "
             "if the scientist confirms that size.")

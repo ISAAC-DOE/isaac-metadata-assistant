@@ -62,11 +62,7 @@ RESULTS_FORMAT = "isaac.processing-results"
 #: 0.2.0 (additive): ``applicability`` on a not-applicable result; ``summary.not_applicable``.
 RESULTS_FORMAT_VERSION = "0.2.0"
 
-ELEMENTS = frozenset(
-    "H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr "
-    "Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm "
-    "Yb Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn Fr Ra Ac Th Pa U Np Pu".split()
-)
+ELEMENTS = REF.ELEMENTS
 #: The region/method-file shape ``<Element><Edge>_...`` — the same shape
 #: ``bl15.signals.RULE_METHOD_SYMBOL_ELEMENT_EDGE`` reads from a BL15-2 method macro.
 _REGION_SYMBOL = re.compile(r"^([A-Z][a-z]?)(K|L[1-3]|M[1-5])_")
@@ -302,7 +298,19 @@ def _not_applicable(res: dict, code: str, detail: str, states: Mapping) -> dict:
     return res
 
 
-def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], headers: Sequence[str], ctx: _Ctx) -> dict:
+def identity_texts(group: Mapping, stems: Sequence[str]) -> list[str]:
+    """The names a group's sample is known by: its sample identity readings (``basis.sample``) and its run names."""
+    sample = (group.get("basis") or {}).get("sample")
+    said = [t for entry in (sample.values() if isinstance(sample, Mapping) else ())
+            for t in REF._texts((entry or {}).get("value") if isinstance(entry, Mapping) else entry)]
+    return list(dict.fromkeys([*said, *(str(s) for s in stems if s)]))
+
+
+def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], headers: Sequence[str], ctx: _Ctx,
+                 calibrant: Mapping | None = None) -> dict:
+    """``calibrant``: :func:`reference.calibrant_identity` of a REFERENCE group (``None`` otherwise). When it is not a
+    pure element, an approval of the group's own edge is applied only with its size confirmed, whatever the size
+    (:data:`reference.CALIBRANT_RULE_ID`)."""
     np, cp = ctx.np, ctx.params["calibration"]
     role = group.get("role", "sample")
     flags: list[str] = []
@@ -328,6 +336,9 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
     per_scan: list[dict | None] = []
     ref_source = None
     unconfirmed_reason = None
+    own_not_element = role == "reference" and calibrant is not None and calibrant.get("kind") != "element"
+    if own_not_element:
+        flags.append(REF.NOT_A_CALIBRANT_FLAG)
     if role == "reference":
         ref_source = "reference_group_own_signal"
         per_scan = [C.edge_e0(sa["energy"], sa["mu"], np, ctx.xafs) for sa in scans_data]
@@ -373,6 +384,10 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
                 flags.append("shift_implausible_not_applied")
             elif not approved:
                 flags.append("calibration_shift_awaiting_approval")
+            elif own_not_element and not REF.shift_size_confirmed(accepted, shift):
+                # CALIBRANT_RULE_ID: a compound or mixture standard's own edge sits where its chemistry puts it; moving it
+                # onto a tabulated edge erases that chemical shift, so even a small shift needs its size confirmed
+                flags.append(REF.CALIBRANT_NOT_CONFIRMED_FLAG)
             elif REF.exceeds_warn(shift, ctx.params["qc"]["warn_energy_shift_eV"]) and not REF.shift_size_confirmed(accepted, shift):
                 # c12-cal (REF.SHIFT_SIZE_RULE_ID): a shift above the warning level moves every energy of the record by
                 # that much; it is applied only when the scientist also confirmed its size (--accept-shift). c12-r: the
@@ -417,15 +432,18 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
     }
 
 
-def _said_reference(cal: dict) -> dict:
+def _said_reference(cal: dict, calibrant: Mapping | None = None) -> dict:
     """``cal`` with what its reference reading says (:func:`reference.reading`: the usable / listed scan counts,
     whether a reference is proposed, a plain sentence, and a spread that is null with fewer than two usable scans)
     added to its outcome. Returns the outcome AS IT IS HASHED (params.json, qc.json): exactly the keys and values
-    the step had before these sentences existed, so a group whose curve does not change keeps its result id."""
+    the step had before these sentences existed, so a group whose curve does not change keeps its result id.
+    ``calibrant`` (a reference group's :func:`reference.calibrant_identity`) is said here too, never hashed."""
     hashed = copy.deepcopy(cal["outcome"])
+    if calibrant is not None and cal["outcome"].get("reference_source") == REF.OWN_SIGNAL:
+        cal["outcome"]["reference_calibrant"] = dict(calibrant)
     said = REF.reading(cal)
     cal["outcome"].update({k: said[k] for k in ("reference_scans_usable", "reference_scans_listed", "reference_min_scans",
-                                                "reference_proposed", "reference_statement")})
+                                                "reference_proposed", "calibration_proposed", "reference_statement")})
     if said["reference_e0_spread_eV"] is None:
         cal["outcome"]["reference_e0_spread_eV"] = None
     return hashed
@@ -1187,8 +1205,9 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
             out["qc"]["statements"] = {"no_usable_scan": said}
         return [out]
 
-    cal = _calibration(group, stems, scans_data, headers, ctx)
-    hashed_cal = _said_reference(cal)  # c12-cal: said in the result, not in the hashed files (no id moves)
+    calibrant = REF.calibrant_identity(identity_texts(group, stems)) if role == "reference" else None
+    cal = _calibration(group, stems, scans_data, headers, ctx, calibrant=calibrant)
+    hashed_cal = _said_reference(cal, calibrant)  # c12-cal: said in the result, not in the hashed files (no id moves)
     res["steps"].append(cal)
     res["review_flags"] += cal["flags"]
     shifts = cal["outcome"]["per_scan_alignment_shifts_eV"] or [0.0] * len(scans_data)
