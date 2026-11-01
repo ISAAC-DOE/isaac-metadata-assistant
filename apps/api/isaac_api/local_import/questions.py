@@ -1524,15 +1524,19 @@ def _counter_examples(bundle: Mapping, positions: Sequence[int], ruled: Containe
     """For each asked position: ``differ`` — the names (at most 2) of one merge candidate whose names differ there in
     a number (what the question is asked for), the token marked — and ``elsewhere``, one name of the bundle where
     that token is not a number (or ``None``). Real names of this bundle, never a pattern. c16-r M5: the last-token
-    example is never one whose last token sits at a position in ``ruled`` (already answered)."""
-    from .grouping import _stem_tokens
+    example is never one whose last token sits at a position in ``ruled`` (already answered). r3a L1: a candidate of
+    SAMPLE groups is the example where there is one (an alignment or reference run's names say little about how the
+    samples' names count)."""
+    from .grouping import ROLE_SAMPLE, _stem_tokens
 
     runs_by_key = {r["run_key"]: r for r in bundle.get("runs") or ()}
     groups = {g["group_id"]: g for g in bundle.get("record_groups") or ()}
+    candidates = sorted(bundle.get("merge_candidates") or (), key=lambda mc: not all(
+        (groups.get(gid) or {}).get("role") == ROLE_SAMPLE for gid in mc.get("group_ids") or ()))
     out: dict[int, dict] = {}
     if LAST_POSITION in positions:
         # the last token: two names of one merge candidate that differ only there, in a number
-        for mc in bundle.get("merge_candidates") or ():
+        for mc in candidates:
             stems = []
             for gid in mc.get("group_ids") or ():
                 keys = (groups.get(gid) or {}).get("member_run_keys") or ()
@@ -1544,7 +1548,7 @@ def _counter_examples(bundle: Mapping, positions: Sequence[int], ruled: Containe
                     and toks[0][-1] != toks[1][-1] and all(t[-1].isdigit() for t in toks) and len(toks[0]) not in ruled):
                 out[LAST_POSITION] = {"differ": [_marked_token(x, len(t)) for x, t in zip(stems, toks)], "elsewhere": None}
                 break
-    for mc in bundle.get("merge_candidates") or ():
+    for mc in candidates:
         if not any(r.get("code") == "numeric_name_token_differs" for r in mc.get("reasons") or ()):
             continue
         stems = []

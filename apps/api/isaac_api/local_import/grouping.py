@@ -1317,9 +1317,17 @@ def counter_question(pos_count: Mapping[int, int], counter_decision: Mapping | N
         "examples": ["XX_02_…", "XX_03_…"],
         "scope": "experiment",
         "target": "experiment",
-        "text": "In this beamtime, is the " + " / ".join(position_words(p) for p in positions)
-        + " token of the file names a run counter? (e.g. XX_02_… vs XX_03_…). If yes, runs whose names differ only there are proposed as one group."
-        " If the counter is always the LAST token, whatever the name's length, answer `last`.",
+        # r3a L1: several positions are each asked on their own, never as one "3rd / last" yes or no
+        "text": ("In this beamtime, is the " + position_words(positions[0]) + " token of the file names a run counter? "
+                 "(e.g. XX_02_… vs XX_03_…). If yes, runs whose names differ only there are proposed as one group."
+                 if len(positions) == 1 else
+                 "In this beamtime, which of these tokens of the file names are run counters? Each is asked on its own: "
+                 + "; ".join(f"the {position_words(p)} token" for p in positions) + " (e.g. XX_02_… vs XX_03_…). Answer "
+                 "with every position that is one (e.g. --positions "
+                 + ",".join("last" if p == LAST_POSITION else str(p) for p in positions[:2])
+                 + " for both, or one of them); runs whose names differ only in a counter are proposed as one group.")
+        + ("" if LAST_POSITION in positions else
+           " If the counter is always the LAST token, whatever the name's length, answer `last`."),
         "positions": positions,
         "candidates_resolved_by_position": {str(p): int(pos_count[p]) for p in positions},
         "answer_shape": {"decision": "set_counter_positions", "target": {"kind": "experiment", "id": "experiment"}, "positions": positions, "decided_by": "<name>"},

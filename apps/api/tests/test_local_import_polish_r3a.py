@@ -9,7 +9,9 @@ BL4-3 scan headers write a sample, an electrolyte and a potential glued into one
 * M1: with no ``<name>.exp``, the DATA_FILE of the ONLY ``.exp`` in the run's own folder (a reused template) is read,
   kept only when it is the run's own name minus its counter, and a merge candidate whose DATA_FILEs agree says so;
 * M6: a no-value question says it asks for a value (``no_value``, the kind unchanged), and the per-run questions that
-  quote one comment line for one field share a ``same_reading_group`` answered at once (``--same-reading``).
+  quote one comment line for one field share a ``same_reading_group`` answered at once (``--same-reading``);
+* L1: the counter question's example names come from sample groups where there are some, and several positions are
+  each asked on their own.
 """
 
 from __future__ import annotations
@@ -355,3 +357,25 @@ def test_same_reading_is_refused_where_it_does_not_apply(repeated, capsys):
     assert cli.main(["bundle", "decide", str(repeated), "--target", "cand-0001", "--same-reading", "--decision",
                      "correct", "--value", "KOH", "--by", WHO]) != 0
     assert "--same-reading goes with --question" in capsys.readouterr().err
+
+
+# --- L1: the counter question's examples come from sample groups, each position asked on its own ----------------
+
+
+def test_the_counter_examples_are_sample_names_where_there_are_some(tmp_path):
+    src = tmp_path / "SYN_bt43"
+    for stem in ("align_SYNfoil_001", "align_SYNfoil_002", "SYNti_dry_015", "SYNti_dry_016"):
+        make_scan(src / f"{stem}_A.001")
+    b = M.load(_import(src, tmp_path / "bundle"))
+    roles = {g["role"] for g in b["record_groups"]}
+    assert {"alignment", "sample"} <= roles  # both kinds of candidate are there
+    [q] = [q for q in Q.consolidate(b)["questions"] if q["kind"] == "naming_counter_positions"]
+    names = [n for got in q["example_names"].values() for n in got]
+    assert names and all(n.startswith("SYNti_dry_") for n in names), names
+
+
+def test_several_counter_positions_are_each_asked_on_their_own():
+    text = G.counter_question({3: 1, G.LAST_POSITION: 2}, None)["text"]
+    assert "3rd / last" not in text and "Each is asked on its own: the 3rd token; the last token" in text
+    assert "--positions 3,last for both, or one of them" in text
+    assert "is the 1st token of the file names a run counter?" in G.counter_question({1: 1}, None)["text"]
