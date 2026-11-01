@@ -25,6 +25,15 @@ separator (``_A001``) or anything after the number is not, and there is no prefi
 matching. A name that fits two record groups (``x`` + ``_A.001`` and ``x_A`` + ``_001``) is
 ambiguous like any other and matches neither.
 
+THE SCIENTIST'S OWN MERGE (``isaac.athena.scientist_merge_label.v0``, :data:`SCIENTIST_MERGE_RULE_ID`). An Athena name
+that is a merge word (+ digits) followed by ``_`` and a name (``merge4_22_tion_dry``, ``merge_29_tio2_anatase``) matches a
+record group when that name EQUALS one of the group's stems (that run's merge) or the group's shared BASE name
+(:func:`base_names`: the stems with the whole-number token in which they differ removed, or a lone stem without its
+trailing run counter ``_016`` / ``_016_a``): the merge of every run of the group. Measured on a real BL4-3 Ti K-edge
+beamtime: the scientists' merges ``merge4_22_<sample>_dry``, ``merge_11_<sample>_dry`` (of runs ``…_091`` and ``…_092``)
+matched nothing, and ISAAC averaged the per-scan groups beside them instead, saying the scientist made no merge. Such a
+merge is a merged candidate like any other (below), so it is preferred over the per-scan groups of the same project.
+
 * an Athena group matching several record groups: an exact match wins over suffix matches;
   still several -> ambiguous, matched to none, and noted;
 * several Athena groups for one record group: identical data (same energy+mu bytes) count
@@ -82,6 +91,8 @@ from typing import Iterable, Mapping, Sequence
 from . import core as C
 
 MATCH_RULE_ID = "isaac.athena.match_by_name.v1"
+#: r3-b H3: a merge word BEFORE a group's run or base name is the scientist's merge of it (module docstring)
+SCIENTIST_MERGE_RULE_ID = "isaac.athena.scientist_merge_label.v0"
 COMPARE_RULE_ID = "isaac.athena.compare.v0"
 
 _EXT = re.compile(r"\.(txt|dat|xmu|nor|csv)$", re.IGNORECASE)
@@ -93,6 +104,9 @@ _HAS_MERGE_WORD = re.compile(r"(^|_)" + _MERGE_WORD + r"(_|$|\d)")
 _XDC_SCAN_FILE = re.compile(r"^a_(\d+)$")
 #: The same suffix after ``<stem>`` in a raw label (``_A.001``, ``_a_001``, ``.a.001``), case-insensitive.
 _XDC_SCAN_FILE_RAW = re.compile(r"^[_\-. ][aA][._](\d+)$")
+#: r3-b H3: a merge word (+ digits) BEFORE the rest of a normalised name (``merge4_<base>``)
+_MERGE_PREFIX = re.compile(r"^" + _MERGE_WORD + r"\d*_(.+)$")
+_WHOLE = re.compile(r"^[0-9]+$")
 
 
 def normalise_name(name: str) -> str:
@@ -116,6 +130,52 @@ def _match_kind(names: Iterable[str], stem: str) -> str | None:
             elif _XDC_SCAN_FILE.match(tail) and best is None:
                 best = "xdc_scan_file"
     return best
+
+
+def base_names(stems: Sequence[str]) -> set[str]:
+    """The group's shared BASE name (normalised), the name without its counter, as a set (empty when there is none).
+    Several runs: the stems with the token positions in which they differ removed, only when every such token is a
+    whole number in every stem (``11_x_dry_091`` + ``11_x_dry_092`` -> ``11_x_dry``). One run: the stem without its
+    trailing run counter (``_016``, XDAC ``_016_a``), else the stem itself."""
+    names = sorted({normalise_name(s) for s in stems if s} - {""})
+    if not names:
+        return set()
+    toks = [n.split("_") for n in names]
+    if len(names) == 1:
+        t = toks[0]
+        if len(t) > 2 and len(t[-1]) == 1 and t[-1].isalpha() and _WHOLE.match(t[-2]):
+            t = t[:-2]
+        elif len(t) > 1 and _WHOLE.match(t[-1]):
+            t = t[:-1]
+        return {"_".join(t)}
+    if len({len(t) for t in toks}) != 1:
+        return set()
+    differ = {i for i in range(len(toks[0])) if len({t[i] for t in toks}) > 1}
+    if not all(_WHOLE.match(t[i]) for t in toks for i in differ):
+        return set()
+    base = [x for i, x in enumerate(toks[0]) if i not in differ]
+    return {"_".join(base)} if base else set()
+
+
+def scientist_merge_of(names: Iterable[str], stems: Sequence[str], bases: Iterable[str]) -> list[str] | None:
+    """The (normalised) stems a scientist's merge named ``<merge word>[digits]_<name>`` covers (:data:`SCIENTIST_MERGE_RULE_ID`):
+    ``[stem]`` when ``<name>`` is one stem, every stem when it is the group's base name; ``None`` otherwise."""
+    stems = [s for s in stems if s]
+    for n in names:
+        m = _MERGE_PREFIX.match(n or "")
+        if not m:
+            continue
+        rest = m.group(2)
+        if rest in stems:
+            return [rest]
+        if rest in set(bases):
+            return list(stems)
+    return None
+
+
+def is_scientist_merge(entry: Mapping) -> bool:
+    """An Athena group the scientist merged: Athena flags it ``is_merge``, or one of its names carries a merge word."""
+    return bool(entry.get("is_merge")) or any(_HAS_MERGE_WORD.search(n) for n in entry.get("names") or ())
 
 
 def accepted_suffix(tail: str) -> bool:
@@ -297,15 +357,20 @@ def _per_scan_set(pool: Sequence[Mapping], stems: Sequence[str], np) -> dict | N
     """When the scientist kept ONE Athena group per scan file (no merge) — every candidate
     selects exactly one, distinct, scan of this record group, all in one project — the
     scientist's result is that SET. It is compared as the mean of the scientist's own
-    per-scan normalised spectra (on the first group's grid), labelled as derived."""
+    per-scan normalised spectra (on the first group's grid), labelled as derived.
+
+    r3-b H3: in a group of SEVERAL runs a scan is a run's scan (scan numbers restart in each run): the members are told
+    apart by (run, scan), so the per-scan groups of every run form one set (measured on a real BL4-3 beamtime: of a
+    two-run group, only one run's per-scan groups were read). Such a set names each member's run (``runs``)."""
     if np is None or len(pool) < 2 or len({c["prj_relative_path"] for c in pool}) != 1:
         return None
     if not all(frame_known(c) for c in pool):
         return None  # a curve in an unknown energy frame is never averaged: the versions stay listed
-    sels = [scan_selection(c["label"], stems) for c in pool]
-    if any(s is None or len(s) != 1 for s in sels) or len({s[0] for s in sels}) != len(sels):
+    sels = [_selection_of_run(c["label"], stems) for c in pool]
+    if any(s is None or len(s[1]) != 1 for s in sels) or len({(s[0], s[1][0]) for s in sels}) != len(sels):
         return None
-    order = sorted(range(len(pool)), key=lambda i: sels[i][0])
+    order = sorted(range(len(pool)), key=lambda i: (sels[i][0], sels[i][1][0]))
+    runs = [str(stems[sels[i][0]]) for i in order]
     base = pool[order[0]]
     e = base["energy"]
 
@@ -329,7 +394,9 @@ def _per_scan_set(pool: Sequence[Mapping], stems: Sequence[str], np) -> dict | N
             "edge_step": _mean_or_none([pool[i]["edge_step"] for i in order], np),
             "non_finite_values": sorted({v for i in order for v in pool[i].get("non_finite_values") or ()}),
             "per_scan_set": {
-                "scans": [sels[i][0] for i in order],
+                "scans": [sels[i][1][0] for i in order],
+                # r3-b H3: the run of each member, only when they span several runs (absent otherwise, as before)
+                **({"runs": runs} if len(set(runs)) > 1 else {}),
                 "labels": [pool[i]["label"] for i in order],
                 "athena_groups": [pool[i]["group_name"] for i in order],
                 "e0_eV": [pool[i]["e0_eV"] for i in order],
@@ -428,6 +495,8 @@ def _set_named(entry: Mapping, members: Mapping) -> dict:
     """What a set's provenance names: its member groups, labels and scans, and (c10-r) the other projects that
     hold the identical set (absent when none does)."""
     out = {k: list(members[k]) for k in ("athena_groups", "labels", "scans")}
+    if members.get("runs"):
+        out["runs"] = list(members["runs"])
     if entry.get("identical_sets_in"):
         out["identical_in_projects"] = list(entry["identical_sets_in"])
     return out
@@ -473,14 +542,11 @@ def match_with_versions(groups: Sequence[Mapping], entries: Sequence[Mapping], n
     """
     stems = {g["group_id"]: [normalise_name(s) for s in g.get("_stems") or ()] for g in groups if g.get("_has_scans", True)}
     raw_stems = {g["group_id"]: list(g.get("_stems") or ()) for g in groups}
+    bases = {gid: base_names(gstems) for gid, gstems in stems.items()}
     notes: list[dict] = []
     by_group: dict[str, list[dict]] = {}
     for idx, entry in enumerate(entries):
-        hits = []
-        for gid, gstems in stems.items():
-            kinds = [k for k in (_match_kind(entry["names"], s) for s in gstems) if k]
-            if kinds:
-                hits.append((gid, "exact" if "exact" in kinds else ("suffix" if "suffix" in kinds else kinds[0])))
+        hits = _hits(entry, stems, bases)
         if not hits:
             continue
         exact = [h for h in hits if h[1] == "exact"]
@@ -495,7 +561,9 @@ def match_with_versions(groups: Sequence[Mapping], entries: Sequence[Mapping], n
                 }
             )
             continue
-        by_group.setdefault(chosen[0][0], []).append({**entry, "_match_kind": chosen[0][1], "_index": idx})
+        gid, kind, covers = chosen[0]
+        by_group.setdefault(gid, []).append({**entry, "_match_kind": kind, "_index": idx,
+                                             **({"_merge_of": covers} if kind == "scientist_merge" else {})})
     matched: dict[str, dict] = {}
     versions: dict[str, list[dict]] = {}
     for gid, cands in by_group.items():
@@ -508,7 +576,9 @@ def match_with_versions(groups: Sequence[Mapping], entries: Sequence[Mapping], n
             uniq.setdefault(_curve_key(c) if several else c["data_hash"], c)
         pool = list(uniq.values())
         if len(pool) > 1:
-            merged = [c for c in pool if c["is_merge"] or any(_HAS_MERGE_WORD.search(n) for n in c["names"])]
+            # one merged candidate is the scientist's result (r3-b H3: a ``merge_<base>`` group too, so it is preferred
+            # over the per-scan groups beside it, which ISAAC would otherwise average)
+            merged = [c for c in pool if is_scientist_merge(c)]
             if len(merged) == 1:
                 pool = merged
         if len(pool) > 1:
@@ -534,6 +604,34 @@ def match_with_versions(groups: Sequence[Mapping], entries: Sequence[Mapping], n
     return matched, notes, versions
 
 
+def _hits(entry: Mapping, stems: Mapping[str, Sequence[str]], bases: Mapping[str, set]) -> list[tuple]:
+    """``[(group_id, kind, covered stems or None)]``: every record group one Athena entry matches (module docstring)."""
+    hits = []
+    for gid, gstems in stems.items():
+        kinds = [k for k in (_match_kind(entry["names"], s) for s in gstems) if k]
+        if kinds:
+            hits.append((gid, "exact" if "exact" in kinds else ("suffix" if "suffix" in kinds else kinds[0]), None))
+            continue
+        covers = scientist_merge_of(entry["names"], gstems, bases.get(gid) or ())
+        if covers:
+            hits.append((gid, "scientist_merge", covers))
+    return hits
+
+
+def entry_groups(groups: Sequence[Mapping], entries: Sequence[Mapping]) -> dict[int, str]:
+    """``{entry index: group_id}`` for every Athena entry that matches exactly ONE record group (an exact match winning,
+    as :func:`match_with_versions` decides), whether or not that group then uses it."""
+    stems = {g["group_id"]: [normalise_name(s) for s in g.get("_stems") or ()] for g in groups if g.get("_has_scans", True)}
+    bases = {gid: base_names(gstems) for gid, gstems in stems.items()}
+    out = {}
+    for idx, entry in enumerate(entries):
+        hits = _hits(entry, stems, bases)
+        chosen = [h for h in hits if h[1] == "exact"] or hits
+        if len(chosen) == 1:
+            out[idx] = chosen[0][0]
+    return out
+
+
 _RANGE = re.compile(r"^(\d+)\s*-\s*(\d+)$")
 
 
@@ -542,16 +640,22 @@ def scan_selection(label: str, stems: Sequence[str]) -> list[int] | None:
     [5, 6]; ``..._1-3_7`` -> [1, 2, 3, 7]; XDAC ``...A.003`` -> [3], whether or not the stem
     ends in ``A``: ``<stem>_A.003`` is that run's scan file 3); None when the label states no
     selection."""
+    got = _selection_of_run(label, stems)
+    return got[1] if got else None
+
+
+def _selection_of_run(label: str, stems: Sequence[str]) -> tuple[int, list[int]] | None:
+    """``(position in stems of the run the label names, its scan selection)`` (:func:`scan_selection`), else None."""
     raw = PurePosixPath(str(label)).name
     raw = _EXT.sub("", raw)
     low = raw.casefold()
-    for stem in stems:
+    for k, stem in enumerate(stems):
         st = str(stem).casefold()
         if not st or not low.startswith(st) or len(low) == len(st) or low[len(st)] not in "_-. ":
             continue
         xdc = _XDC_SCAN_FILE_RAW.match(raw[len(st) :])
         if xdc:
-            return [int(xdc.group(1))]
+            return k, [int(xdc.group(1))]
         rest = raw[len(st) + 1 :]
         out: list[int] = []
         for tok in re.split(r"[_,\s.]+", rest):
@@ -567,7 +671,7 @@ def scan_selection(label: str, stems: Sequence[str]) -> list[int] | None:
                 out.append(int(tok))
             else:
                 return None
-        return sorted(set(out)) or None
+        return (k, sorted(set(out))) if out else None
     return None
 
 
@@ -586,6 +690,7 @@ def compare(isaac: Mapping, entry: Mapping, params: Mapping, np) -> dict:
         "athena_label": entry["label"],
         "match_rule": MATCH_RULE_ID,
         "match_kind": entry.get("_match_kind"),
+        **({"merge_rule": SCIENTIST_MERGE_RULE_ID} if entry.get("_match_kind") == "scientist_merge" else {}),
         **({"athena_data": "already_normalized", "athena_data_rule": ALREADY_NORMALIZED_RULE_ID} if already_normalized(entry) else {}),
     }
     out = {"athena_ref": ref, "rule_id": COMPARE_RULE_ID, "metrics": {}, "verdict": "not_comparable", "flags": [], "tolerances": dict(tol)}

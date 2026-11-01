@@ -1023,6 +1023,9 @@ def _athena_coverage(entry: Mapping, stems: Sequence[str], used_entries: Sequenc
     members = entry.get("per_scan_set") if entry.get("_match_kind") == "per_scan_set" else None
     names = [A.normalise_name(n) for n in members.get("labels") or ()] if members else list(entry.get("names") or ())
     runs = [s for s in group_runs if any(A._match_kind([n], A.normalise_name(s)) for n in names)]
+    if entry.get("_match_kind") == "scientist_merge":
+        # r3-b H3: the scientist's merge named after one run, or after the group's base name (every run)
+        runs = [s for s in group_runs if A.normalise_name(s) in set(entry.get("_merge_of") or ())]
     if not runs:
         return None
     sel = [int(n) for n in members["scans"]] if members and members.get("scans") else A.scan_selection(str(entry.get("label") or ""), runs)
@@ -1094,8 +1097,17 @@ def _athena_scans_used(entry: Mapping, stems: Sequence[str], isaac_counts: tuple
 
     if members and members.get("scans"):
         scans = [int(n) for n in members["scans"]]
-        said = (f"The scientist's curve is ISAAC's mean of {len(scans)} per-scan Athena groups, one each for scans "
-                f"{_scans_phrase(scans)}{of_run} (read from their labels).{ours}{part}{subset(scans)}")
+        if members.get("runs"):
+            # r3-b H3: members of several runs (scan numbers restart in each run): each run's scans named apart
+            by_run: dict[str, list[int]] = {}
+            for run_, n in zip(members["runs"], scans):
+                by_run.setdefault(run_, []).append(n)
+            each = " and ".join(f"scan{'s' if len(v) > 1 else ''} {_scans_phrase(v)} of run {k}" for k, v in by_run.items())
+            said = (f"The scientist's curve is ISAAC's mean of {len(scans)} per-scan Athena groups, one each for {each} "
+                    f"(read from their labels).{ours}{part}")
+        else:
+            said = (f"The scientist's curve is ISAAC's mean of {len(scans)} per-scan Athena groups, one each for scans "
+                    f"{_scans_phrase(scans)}{of_run} (read from their labels).{ours}{part}{subset(scans)}")
         return {"basis": "per_scan_set", "scans": scans, "statement": said}
     sel = A.scan_selection(label, stems)
     if sel:
@@ -1106,8 +1118,13 @@ def _athena_scans_used(entry: Mapping, stems: Sequence[str], isaac_counts: tuple
     made_from = PurePosixPath(str(entry.get("filename") or "").replace("\\", "/")).name
     # c12-cal: Athena writes its own null marker when a group names no source file: said in words, never printed
     unnamed = not made_from or made_from == A.ATHENA_NULL_MARKER
+    merge_of = ([x for x in stems if A.normalise_name(x) in set(entry.get("_merge_of") or ())]
+                if entry.get("_match_kind") == "scientist_merge" else None)
     said = (f"The project does not say which scans the scientist's curve used: its Athena label '{label}' names no scan"
             + (", though Athena marks the group as a merge" if entry.get("is_merge") else "")
+            # r3-b H3: a merge named before the run or base name (athena.SCIENTIST_MERGE_RULE_ID) is the scientist's merge
+            + (f"; its label names it the scientist's merge of {'run' if len(merge_of) == 1 else 'runs'} "
+               f"{', '.join(merge_of)} ({A.SCIENTIST_MERGE_RULE_ID})" if merge_of and not coverage else "")
             + (", and the project does not name its source file" if unnamed else
                f", and it records the group as made from the file '{made_from}'" if made_from.casefold() != label.casefold() else "")
             + (f"; its name names run{'s' if len(coverage['runs']) > 1 else ''} {', '.join(coverage['runs'])}" if coverage else "")
@@ -1876,6 +1893,22 @@ def _athena_result(group: Mapping, entry: Mapping, files: Sequence[Mapping], par
             "flags": ["scientist_params_recorded"] + (["athena_already_normalized"] if A.already_normalized(entry) else []),
         }
     ]
+    if members:
+        # r3-b H3: ISAAC AVERAGED the scientist's per-scan curves: a merge step, so a record lists spectrum_merging (the
+        # Athena result's steps are not in a hashed file: no id moves)
+        res["steps"].append({"step": "merge",
+                             "params": {"made_by": "ISAAC", "statistic": "mean of the scientist's per-scan Athena "
+                                        "normalisations (norm, flat) and E0s, on the first group's energy points"},
+                             "outcome": {"n_scans": len(members.get("scans") or ()),
+                                         "athena_groups": list(members.get("athena_groups") or ())},
+                             "flags": ["isaac_computed_mean_of_scientist_per_scan_curves"]})
+    elif A.is_scientist_merge(entry):
+        # the scientist merged in Athena (flagged is_merge, or a merge word in its name); how many scans is not stated
+        res["steps"].append({"step": "merge",
+                             "params": {"made_by": "the scientist, in Athena", "statistic": "not stated by the project"},
+                             "outcome": {"n_scans": None, "basis": "athena_is_merge" if entry.get("is_merge") else
+                                         "merge_word_in_athena_name"},
+                             "flags": ["scientist_merge"]})
     steps_ok = np.all(np.diff(e) > 0)
     metrics = {
         "scans_used": None,

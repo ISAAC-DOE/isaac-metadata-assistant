@@ -181,6 +181,10 @@ Ask: approve, reject, or needs changes (with a note):
   scientist kept one Athena group per scan (`match_kind: per_scan_set`), the curve and E0 are ISAAC's MEAN of
   those groups, not a merge the scientist made: the descriptor says so, names the groups, and is ISAAC's
   (`source: auto`). Say that plainly before they approve it. A record names no folder, only the project's file name.
+  The scientist's own merge named before the run name (`merge4_<name>`, `merge_<name>`, where `<name>` is a run's
+  name or the group's name without its run counter: `match_kind: scientist_merge`) is matched and preferred over
+  the per-scan groups beside it; per-scan groups of every run of a merged group form one set (`per_scan_set.runs`).
+  Either way the result's steps include a merge, so the record lists `spectrum_merging`.
 - **An Athena E0 that may be a setting** (flag `athena_e0_possibly_fixed`, `qc.statements.athena_e0_possibly_fixed`,
   question `athena_e0_measured_or_set`): the same Athena E0 (to 0.001 eV) in different Athena curves of groups whose
   ISAAC E0s (QC pass or warn) differ by 0.5 eV or more is likely a normalisation setting typed or carried over in Athena,
