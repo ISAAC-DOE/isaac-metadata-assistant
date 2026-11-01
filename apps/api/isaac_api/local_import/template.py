@@ -2564,7 +2564,7 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
             if outside:
                 report["campaign_not_filled"].append({
                     "cell": cell["cell"], "target_field_path": path, "targets": len(outside),
-                    "run_ids": sorted({m["run_id"] for m in outside})[:20],
+                    "run_ids": sorted({m["run_id"] for m in outside})[:20], "runs": len({m["run_id"] for m in outside}),
                     "reason": "these runs are not in the template's File List or no longer in a live record group, so a "
                               "Campaign Info answer does not reach them; nothing was recorded for them",
                 })
@@ -3459,6 +3459,24 @@ def _over_lines(items: Sequence[Mapping]) -> list[str]:
     return out
 
 
+def _campaign_not_filled_lines(rep: Mapping, *, full: bool) -> list[str]:
+    """The report's lines for ``campaign_not_filled``: with ``full`` one per cell, each with its runs; else (r3a L5)
+    the same runs (a rejected group's, say) said ONCE with the cells they miss, never once per cell."""
+    if full:
+        return [f"  {x['cell']} {x['target_field_path']}: {x['targets']} target(s) (runs {', '.join(map(str, x['run_ids']))}); "
+                f"{x['reason']}" for x in rep["campaign_not_filled"]]
+    by_runs: dict[tuple, list[Mapping]] = {}
+    for x in rep["campaign_not_filled"]:
+        by_runs.setdefault(tuple(x["run_ids"]), []).append(x)
+    out = []
+    for runs, xs in by_runs.items():
+        n = int(xs[0].get("runs") or len(runs))
+        out.append(f"  {n} run(s) ({', '.join(map(str, runs[:_CELLS_SHOWN]))}{', …' if n > _CELLS_SHOWN else ''}; --full "
+                   "lists them per cell): " + "; ".join(f"{x['cell']} {x['target_field_path']}" for x in xs)
+                   + f"; {xs[0]['reason']}")
+    return out
+
+
 def render_report(rep: Mapping, *, full: bool = False) -> str:
     """Plain text for the terminal. COMPACT by default: one line per cell or column with its number
     of decisions, then every invalid cell, clash, refusal and refused row in full, and the totals.
@@ -3600,8 +3618,8 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
     if rep.get("campaign_not_filled"):
         add("")
         add("Campaign Info answers not filled for runs outside the File List:")
-        for x in rep["campaign_not_filled"]:
-            add(f"  {x['cell']} {x['target_field_path']}: {x['targets']} target(s) (runs {', '.join(map(str, x['run_ids']))}); {x['reason']}")
+        for line in _campaign_not_filled_lines(rep, full=full):
+            add(line)
     if rep["extracted_values_left_alone"]:
         add("")
         add("Extracted values left alone:")

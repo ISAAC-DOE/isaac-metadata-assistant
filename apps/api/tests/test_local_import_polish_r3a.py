@@ -11,7 +11,9 @@ BL4-3 scan headers write a sample, an electrolyte and a potential glued into one
 * M6: a no-value question says it asks for a value (``no_value``, the kind unchanged), and the per-run questions that
   quote one comment line for one field share a ``same_reading_group`` answered at once (``--same-reading``);
 * L1: the counter question's example names come from sample groups where there are some, and several positions are
-  each asked on their own.
+  each asked on their own;
+* L5: questions about runs in no live record group are counted, not listed, by default (a flag lists them), and the
+  template report names a rejected group's runs once, not once per Campaign Info cell.
 """
 
 from __future__ import annotations
@@ -391,6 +393,55 @@ def test_several_counter_positions_are_each_asked_on_their_own():
     assert "3rd / last" not in text and "Each is asked on its own: the 3rd token; the last token" in text
     assert "--positions 3,last for both, or one of them" in text
     assert "is the 1st token of the file names a run counter?" in G.counter_question({1: 1}, None)["text"]
+
+
+# --- L5: questions about runs in no live record group are counted, not listed, by default -------------------------
+
+
+@pytest.fixture()
+def one_rejected(tmp_path):
+    src = tmp_path / "SYN_bt43"
+    for stem in ("align_SYNfoil_001", "SYNti_dry_015", "SYNti_wet_016"):
+        make_scan(src / f"{stem}_A.001", free_text=("SYN gain 1e8", "Sample A in 1M KOH 0Vrhe"))
+    out = tmp_path / "bundle"
+    assert cli.main(["import", str(src), "--out", str(out)]) == 0
+    M.group(out)
+    b = M.load(out)
+    [align] = [g for g in b["record_groups"] if g["role"] == "alignment"]
+    M.decide(out, target_ids=[align["group_id"]], decision="reject", value=None, by=WHO, orcid=None)
+    return out, align["member_run_ids"][0]
+
+
+def _questions_cli(out: Path, capsys, *extra: str) -> dict:
+    capsys.readouterr()
+    assert cli.main(["bundle", "questions", str(out), "--limit", "200", *extra]) == 0
+    return json.loads(capsys.readouterr().out)
+
+
+def test_questions_outside_live_groups_are_counted_not_listed(one_rejected, capsys):
+    out, rid = one_rejected
+    outside = [q["question_id"] for q in Q.consolidate(M.load(out))["questions"] if q.get("outside_live_groups")]
+    assert outside
+    page = _questions_cli(out, capsys)
+    assert not {q["question_id"] for q in page["questions"]} & set(outside)
+    assert page["hidden_outside_live_groups"] == len(outside)
+    assert "--include-outside-live-groups lists them" in page["hidden_outside_live_groups_statement"]
+    every = _questions_cli(out, capsys, "--include-outside-live-groups")
+    assert set(outside) <= {q["question_id"] for q in every["questions"]} and "hidden_outside_live_groups" not in every
+    assert every["counts"] == page["counts"]  # the counts are the bundle's, whatever is listed
+    assert every["total"] == page["total"] + len(outside)
+    own = _questions_cli(out, capsys, "--scope", f"run:{rid}")  # a run's own scope, asked for: listed
+    assert "hidden_outside_live_groups" not in own and own["questions"]
+
+
+def test_the_template_report_says_runs_a_campaign_answer_misses_once():
+    rep_cells = [{"cell": f"Campaign Info B{i}", "target_field_path": f"system.facility.f{i}", "targets": 27,
+                  "run_ids": [f"run-{k:03d}" for k in range(20)], "runs": 27, "reason": "SYN reason"} for i in (3, 4, 5)]
+    rep = {"campaign_not_filled": rep_cells}
+    lines = T._campaign_not_filled_lines(rep, full=False)
+    assert len(lines) == 1 and lines[0].startswith("  27 run(s) (run-000, run-001, run-002, …; --full lists them per cell): ")
+    assert "Campaign Info B3 system.facility.f3; Campaign Info B4" in lines[0] and lines[0].count("SYN reason") == 1
+    assert len(T._campaign_not_filled_lines(rep, full=True)) == 3
 
 
 # --- H2 (follow-up): a mention that differs is said as a mention beside a header reading that agrees --------------

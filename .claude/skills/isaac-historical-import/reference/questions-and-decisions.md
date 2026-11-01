@@ -16,7 +16,8 @@ hint notes in `hint_notes`. A question blocks only when a live group's record ne
 fields (`blocks_groups`, `required_fields`; reaction drive and catalysis only once a reaction is in
 the record, `required_when`; a member an object the record carries requires, e.g. the electrolyte's
 `concentration_M` once its name is answered, with `required_because`); questions only about runs in no
-live group say `outside_live_groups`; an optional value of such a run is asked in that run's own question,
+live group say `outside_live_groups` and are counted, not listed (`hidden_outside_live_groups`; add
+`--include-outside-live-groups` to list them, or ask `--scope run:<id>`); an optional value of such a run is asked in that run's own question,
 never inside the beamtime's or a live group's. A beamtime-wide conflict (no run named) counts every live group
 it reaches (`applies_to.beamtime_wide: true`, `groups` = `blocks_groups`).
 The reply also has

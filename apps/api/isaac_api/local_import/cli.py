@@ -1619,6 +1619,11 @@ def cmd_bundle_questions(args) -> int:
         payload = Q.consolidate(bundle, compositions_out=reports)
         rows = Q.filter_questions(payload, scope=args.scope, blocking_only=args.blocking_only, reports=reports)
         kept = [q for q in rows if not (args.skip_deferred and q.get("deferred"))]
+        # r3a L5: a question about runs no live record group holds builds no record: counted, listed on request (or
+        # when a run's own scope is asked for)
+        show_outside = args.include_outside_live_groups or (args.scope or "").startswith("run:")
+        outside = [] if show_outside else [q for q in kept if q.get("outside_live_groups")]
+        kept = [q for q in kept if not (outside and q.get("outside_live_groups"))]
         page = kept[args.offset : args.offset + args.limit]
         minimum = Q.minimum_answers_for_one_group(payload, bundle, scope=args.scope, bundle_dir=Path(args.bundle_dir),
                                                   reports=reports)
@@ -1638,7 +1643,12 @@ def cmd_bundle_questions(args) -> int:
             "omitted_before": min(args.offset, len(kept)),
             "omitted_after": max(0, len(kept) - args.offset - len(page)),
             **_more(len(kept) - args.offset - len(page), args.offset + len(page)),
-            **({"skipped_deferred": len(rows) - len(kept)} if args.skip_deferred else {}),
+            **({"skipped_deferred": sum(1 for q in rows if q.get("deferred"))} if args.skip_deferred else {}),
+            **({"hidden_outside_live_groups": len(outside),
+                "hidden_outside_live_groups_statement": (
+                    f"{len(outside)} question(s) about runs in no live record group (e.g. a rejected group's runs; no "
+                    "record is built from them) are not listed: --include-outside-live-groups lists them")}
+               if outside else {}),
             "minimum_for_one_group": minimum,
             **({"questions": page} if args.with_targets else _compact_page(page)),
         }
@@ -2266,6 +2276,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
                    help="leave out questions whose every target was deferred (still counted: counts.deferred)")
     q.add_argument("--with-targets", action="store_true",
                    help="list each question's target ids (targets, per_scope_targets); by default they are counted")
+    q.add_argument("--include-outside-live-groups", action="store_true",
+                   help="also list questions whose every target is in a run no live record group holds (a rejected "
+                        "group's runs: no record is built from them); by default they are counted, not listed")
     q.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     q.add_argument("--offset", type=int, default=0)
     q.set_defaults(func=cmd_bundle_questions)
