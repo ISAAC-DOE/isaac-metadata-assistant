@@ -16,6 +16,9 @@ SYNTHETIC only: every scan, name, Athena project and value below is invented and
   processing too): another SAMPLE's group (repeats of one sample, named the same apart from counters, never count) whose
   own edge is not at that E0 (its ISAAC E0 differs, or else its own data's edge does). Its sentence says "QC pass or
   warn", never "QC passed".
+* (M5) After ``process --group``, the Athena statement speaks of the groups processed NOW and counts the project's
+  Athena groups that match any record group (this run's match over every group, and the stored results); it never
+  says "matched no record group" while other groups hold matched Athena results.
 """
 
 from __future__ import annotations
@@ -420,3 +423,66 @@ def test_one_projects_measured_e0s_of_several_samples_are_not_flagged_end_to_end
     (bdir / "bundle.json").write_text(json.dumps(bundle))
     out, _, [ath] = _process(bdir, root, skip_group_ids=["g1", "g2", "g3"])
     assert "athena_e0_possibly_fixed" not in ath["review_flags"] and "e0_possibly_fixed" not in out["athena"]
+
+
+# --- M5: `process --group` never says no Athena group matched while other groups' did -----------------------------
+
+
+def _two_groups(tmp_path):
+    """Two imported runs of two samples (synthetic XDAC scans), grouped, and one project: an exact match for the first
+    run, another sample's group, and a near miss of the second run's name."""
+    _processing()
+    from test_local_import_polish_c10m import _prj
+    from test_local_import_polish_c2f import _xdac, std_scan
+    from test_local_import_processing import GRID, mu_edge
+
+    from isaac_api.local_import import cli
+    from isaac_api.local_import import mutations as M
+
+    root = tmp_path / "SYN_beamtime"
+    stems = ["08_SYN_ZZ_pellet_030", "09_SYN_QQ_film_031"]
+    for i, stem in enumerate(stems):
+        for k in (1, 2):
+            _xdac(root / "bt" / f"{stem}_A.00{k}", std_scan(10 * i + k, i1_positive=True))
+    _prj(root / "bt" / "SYN.prj", [(stems[0], GRID, mu_edge(GRID) * 1e-2), ("SYN_other_sample", GRID, mu_edge(GRID) * 2e-2),
+                                   (f"{stems[1]}_again", GRID, mu_edge(GRID) * 3e-2)])
+    out = tmp_path / "out"
+    assert cli.main(["import", str(root), "--out", str(out)]) == 0
+    M.group(out)
+    return out, root, stems
+
+
+def test_process_group_scopes_the_athena_statement_to_the_groups_processed_now(tmp_path):
+    from isaac_api.local_import import mutations as M
+
+    bdir, root, stems = _two_groups(tmp_path)
+    full = M.process(bdir, source=str(root))
+    assert not any("matched no record group" in line for line in full["summary"]["lines"])
+    groups = M.load(bdir)["record_groups"]
+    assert len(groups) == 2
+    by_stem = {r["run_key"]: r["stem"] for r in M.load(bdir)["runs"]}
+    g_a, g_b = (next(g["group_id"] for g in groups if by_stem[g["member_run_keys"][0]] == s) for s in stems)
+    out = M.process(bdir, source=str(root), group_ids=[g_b])
+    [line] = [x for x in out["summary"]["lines"] if x.startswith("Athena:")]
+    assert line.startswith("Athena: none of the 1 group(s) processed now has an Athena match under rule "
+                           "isaac.athena.match_by_name.v1")
+    assert "of the 3 Athena group(s) read, 1 match a record group" in line and "2 match none" in line
+    assert "1 of those begin with a group's scan name but end in a suffix the rule does not accept ('_again')" in line
+    assert "matched no record group" not in line and "No ISAAC result was compared" not in line
+    assert line.endswith("No ISAAC result processed now was compared with the scientist's Athena processing.")
+    # g-a's matched Athena result is kept as stored
+    assert any(r["source"] == "scientist_athena" and r["group_id"] == g_a for r in M.load(bdir)["processing_results"])
+
+
+def test_a_stored_match_counts_even_when_this_run_matches_nothing(tmp_path):
+    from isaac_api.local_import.processing import run as RUN
+
+    entries = [{"prj_relative_path": "SYN.prj", "group_name": "old_name", "label": "old_name", "names": ["old_name"]},
+               {"prj_relative_path": "SYN.prj", "group_name": "x", "label": "x", "names": ["x"]}]
+    groups = [{"group_id": "g1", "_stems": ["01_SYN_ZZ1"], "_has_scans": True}]
+    stored = [{"source": "scientist_athena", "group_id": "g9", "inputs": [{"relative_path": "SYN.prj", "athena_group": "old_name"}]}]
+    line = RUN.athena_match_statement(groups, entries, matched={}, notes=[], processed={"g1"}, stored=stored)
+    assert "of the 2 Athena group(s) read, 1 match a record group" in line and "matched no record group" not in line
+    # nothing matched anywhere: the line is the one it always was
+    assert RUN.athena_match_statement(groups, entries, matched={}, notes=[], processed={"g1"}).startswith(
+        "Athena: 2 Athena group(s) were read and matched no record group")

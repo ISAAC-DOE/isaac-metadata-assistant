@@ -149,7 +149,8 @@ it finds one. Show per group, in words:
   version's comparison; long lists are counted, not printed); its `result_file` (`result.json`) is the result as the run first wrote it and is never rewritten, so
   the current sentences are in this output, not necessarily in that file.
 - when `process` says why none of the scientist's Athena groups matched (`athena.statement`), say it
-  in those words.
+  in those words. After `process --group`, it speaks of the groups processed now ("none of the 2 group(s) processed
+  now has an Athena match"), counting the project's Athena groups that match other groups (stored results too).
 
 Ask: approve, reject, or needs changes (with a note):
 `<isaac> bundle decide <bundle> --target <result_id> --decision approve --qc-status <word> [--qc-note "<their words>"] --by "<name>"`, or

@@ -2019,10 +2019,10 @@ def process_bundle(
         unread = G.groups_from_generic_runs(generic_runs, experiment_key=G.experiment_key_of(bundle), sources_by_path=by_path)
     if not include_unread:
         unread = []
-    if group_ids:
-        wanted = set(group_ids)
-        rec = [g for g in rec if g["group_id"] in wanted]
-        unread = [g for g in unread if g["group_id"] in wanted]
+    # r3-b M5: ``group_ids`` selects what is PROCESSED; every group still takes part in the Athena name match (as
+    # ``skip_group_ids`` always did), so a named group's match is the one a full run makes and the Athena statement
+    # can count the whole project
+    wanted = set(group_ids) if group_ids else None
     runs_by_key = {r["run_key"]: r for r in bundle.get("runs") or ()}
     sources = {s["source_id"]: s for s in bundle.get("sources") or () if s.get("source_id")}
     ctx = _Ctx(bundle=bundle, bundle_dir=bundle_dir, root=root, params=resolved, np=np, xafs=xafs, out_dir=out_dir, sources=sources, runs_by_key=runs_by_key)
@@ -2053,6 +2053,8 @@ def process_bundle(
     for g in all_groups:
         if g["group_id"] in skipped and g.get("group_kind") not in ("unread_acquisition", "generic_run"):
             continue
+        if wanted is not None and g["group_id"] not in wanted:
+            continue
         try:
             out = process_group(g, ctx, matched.get(g["group_id"]), athena_versions=versions.get(g["group_id"]))
         except Exception as exc:  # noqa: BLE001 - one group's crash is that group's failure, never a pass
@@ -2062,6 +2064,7 @@ def process_bundle(
         (unread_results if g.get("group_kind") in ("unread_acquisition", "generic_run") else results).extend(out)
 
     fixed_said = possibly_fixed_athena_e0(results, bundle, all_groups, entries)
+    processed = {r.get("group_id") for r in results + unread_results}
 
     payload = {
         **header,
@@ -2075,11 +2078,12 @@ def process_bundle(
             "projects_read": read_ok,
             "groups_read": len(entries),
             # the groups processed in this call (all of them without --group)
-            "record_groups_matched": len(matched),
-            "record_groups_with_unselected_versions": len(versions),
+            "record_groups_matched": len([g for g in matched if g in processed]),
+            "record_groups_with_unselected_versions": len([g for g in versions if g in processed]),
             "notes": (a_notes + m_notes)[:500],
             "match_rule": A.MATCH_RULE_ID,
-            "statement": athena_match_statement(all_groups, entries, matched={**versions, **matched}, notes=m_notes),
+            "statement": athena_match_statement(all_groups, entries, matched={**versions, **matched}, notes=m_notes,
+                                                processed=processed, stored=bundle.get("processing_results") or ()),
         },
         "processing_results": results,
         "unread_acquisition_results": unread_results,
@@ -2406,18 +2410,57 @@ def apply_kept_result_notes(results: Sequence[dict], notes: Sequence[Mapping]) -
     return changed
 
 
-def athena_match_statement(groups: Sequence[Mapping], entries: Sequence[Mapping], *, matched: Mapping, notes: Sequence[Mapping]) -> str | None:
-    """ONE LINE saying why the Athena groups that were read matched NO record group, or ``None`` when
-    there were none to match or some matched. Names how many Athena names BEGIN with a group's scan
+def _stored_athena_matches(stored: Sequence[Mapping]) -> set[tuple]:
+    """r3-b M5: ``(project path, Athena group)`` of every Athena group a STORED result was matched to: an Athena result's
+    input (and a set's members) and the versions an ISAAC result lists."""
+    out: set[tuple] = set()
+
+    def add(path, group, members):
+        if path and group:
+            out.add((str(path), str(group)))
+        for m in (members or {}).get("athena_groups") or () if isinstance(members, Mapping) else ():
+            out.add((str(path), str(m)))
+
+    for r in stored or ():
+        if not isinstance(r, Mapping):
+            continue
+        if r.get("source") == "scientist_athena":
+            for i in r.get("inputs") or ():
+                if isinstance(i, Mapping):
+                    add(i.get("relative_path"), i.get("athena_group"), i.get("per_scan_set"))
+        for v in r.get("athena_versions") or ():
+            prov = (v or {}).get("provenance") or {} if isinstance(v, Mapping) else {}
+            add(prov.get("prj_relative_path"), prov.get("athena_group"), prov.get("per_scan_set"))
+    return out
+
+
+def athena_match_statement(groups: Sequence[Mapping], entries: Sequence[Mapping], *, matched: Mapping, notes: Sequence[Mapping],
+                           processed: Sequence[str] | set | None = None, stored: Sequence[Mapping] = ()) -> str | None:
+    """ONE LINE saying why the Athena groups that were read matched NO group processed now, or ``None`` when there
+    were none to match or a group processed now matched. Names how many Athena names BEGIN with a group's scan
     name but end in a suffix the match rule does not accept (measured on a real BL4-3 beamtime: 161
     Athena groups named ``<scan>_a_001``, none matched under v0; v1 accepts that XDC scan-file suffix),
-    and how many matched several groups. A name the rule accepts is never counted as a near miss."""
-    if not entries or matched:
+    and how many matched several groups. A name the rule accepts is never counted as a near miss.
+
+    r3-b M5: scoped to the groups processed NOW (``processed``; every group when ``None``). An Athena group counts as
+    matched when it matches a record group of the bundle (this run's match over every group) or a STORED result was
+    matched to it (``stored``). When any is, the line says how many of the project's Athena groups match and that
+    none of the groups processed now does; it never says "matched no record group" (measured: after ``process
+    --group A --group B`` it did, while 6 groups held matched Athena results)."""
+    if not entries:
         return None
+    processed = set(processed) if processed is not None else {g.get("group_id") for g in groups}
+    if any(g in processed for g in matched):
+        return None
+    of_group = A.entry_groups(groups, entries)
+    held = _stored_athena_matches(stored)
+    hit = {i for i, gid in of_group.items() if gid in matched} | {
+        i for i, e in enumerate(entries) if (str(e.get("prj_relative_path")), str(e.get("group_name"))) in held}
+    unmatched = [e for i, e in enumerate(entries) if i not in hit]
     stems = {A.normalise_name(s) for g in groups if g.get("_has_scans", True) for s in g.get("_stems") or ()}
     stems.discard("")
     near, suffixes = 0, []
-    for e in entries:
+    for e in unmatched:
         tails = [n[len(st):] for n in e.get("names") or () for st in stems
                  if n and n.startswith(st + "_") and not A.accepted_suffix(n[len(st) + 1:])]
         if tails:
@@ -2426,16 +2469,26 @@ def athena_match_statement(groups: Sequence[Mapping], entries: Sequence[Mapping]
             if tail not in suffixes:
                 suffixes.append(tail)
     ambiguous = sum(1 for n in notes if n.get("code") == "athena_group_matches_several_record_groups")
-    line = (f"Athena: {len(entries)} Athena group(s) were read and matched no record group under rule {A.MATCH_RULE_ID} "
-            "(an Athena name equal to a group's scan name, or that name plus a scan or merge suffix such as _001 or _merged, "
-            "or plus an XDC scan-file suffix such as _A.001)")
+    rule = ("(an Athena name equal to a group's scan name, or that name plus a scan or merge suffix such as _001 or "
+            "_merged, or plus an XDC scan-file suffix such as _A.001)")
+    if hit:
+        n_now = len(processed)
+        line = (f"Athena: none of the {n_now} group(s) processed now has an Athena match under rule {A.MATCH_RULE_ID} "
+                f"{rule}; of the {len(entries)} Athena group(s) read, {len(hit)} match a record group (this run's match "
+                f"over every group of the bundle, and the Athena results stored for groups not processed now) and "
+                f"{len(unmatched)} match none")
+    else:
+        line = (f"Athena: {len(entries)} Athena group(s) were read and matched no record group under rule {A.MATCH_RULE_ID} "
+                f"{rule}")
     if near:
         shown = ", ".join(f"'{t}'" for t in suffixes[:_STATED_SUFFIXES]) + (" …" if len(suffixes) > _STATED_SUFFIXES else "")
-        line += f"; {near} of them begin with a group's scan name but end in a suffix the rule does not accept ({shown})"
+        line += f"; {near} of {'those' if hit else 'them'} begin with a group's scan name but end in a suffix the rule does not accept ({shown})"
     if ambiguous:
         line += f"; {ambiguous} matched several record groups, so none was used"
-    if not near and not ambiguous:
-        line += "; their names are not the scan names"
+    if not near and not ambiguous and unmatched:
+        line += f"; {'the other' if hit else 'their'} names are not the scan names"
+    if hit:
+        return line + ". No ISAAC result processed now was compared with the scientist's Athena processing."
     return line + ". No ISAAC result was compared with the scientist's Athena processing."
 
 
