@@ -2103,8 +2103,8 @@ def possibly_fixed_athena_e0(results: list[dict], bundle: Mapping, groups: Seque
     def own_e0(r):
         sib = next((x for x in pool if x.get("source") == "isaac_protocol" and x.get("group_id") == r.get("group_id")
                     and x.get("run_id") == r.get("run_id")), None)
-        if sib is None or (sib.get("qc") or {}).get("verdict") != "pass":
-            return None  # only an ISAAC E0 whose QC passed is a measurement to compare
+        if sib is None or (sib.get("qc") or {}).get("verdict") not in ("pass", "warn"):
+            return None  # only an ISAAC E0 whose QC did not fail (pass or warn) is a measurement to compare
         v = (sib.get("outputs") or {}).get("e0_eV")
         return float(v) if isinstance(v, (int, float)) and math.isfinite(v) else None
 

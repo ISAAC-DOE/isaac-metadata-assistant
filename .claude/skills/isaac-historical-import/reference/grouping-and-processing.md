@@ -179,10 +179,10 @@ Ask: approve, reject, or needs changes (with a note):
   (`source: auto`). Say that plainly before they approve it. A record names no folder, only the project's file name.
 - **An Athena E0 that may be a setting** (flag `athena_e0_possibly_fixed`, `qc.statements.athena_e0_possibly_fixed`,
   question `athena_e0_measured_or_set`): the same Athena E0 (to 0.001 eV) in different Athena curves of groups whose
-  ISAAC E0s (QC passed) differ by 0.5 eV or more is likely a normalisation setting typed or carried over in Athena,
+  ISAAC E0s (QC pass or warn) differ by 0.5 eV or more is likely a normalisation setting typed or carried over in Athena,
   not a measured edge position (names are not read; one curve matched to two groups is one curve). The result is
   not preferred. Say the statement and ask "was this E0 measured from this group's edge, or set?" before approving
-  it; approve it only on "measured" (say it in `--qc-note`). If it was set, it is not the edge position: offer
+  it; approve it only on "measured", with `--e0-measured` (`decide` refuses it without). If it was set, it is not the edge position: offer
   ISAAC's result instead. A result already decided is kept as it is: the summary line "approved result <id> carries
   a possibly fixed Athena E0" names it; ask the scientist the same question about it.
 - **A result with no curve** (no output file, e.g. `no_usable_scan`) cannot be approved; `decide`

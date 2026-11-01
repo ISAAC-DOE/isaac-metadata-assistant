@@ -1231,7 +1231,8 @@ def _calibration_view(bundle: Mapping, r: Mapping) -> dict | None:
         for element, edge, basis in named:
             w = REF.would_apply(cal, element, edge, warn_eV=float(warn))
             would.append({"element": element, "edge": edge, "basis": basis,
-                          **{k: w[k] for k in ("tabulated_edge_eV", "shown", "needs_size_confirmation", "statement")}})
+                          **{k: w[k] for k in ("tabulated_edge_eV", "shown", "needs_size_confirmation",
+                                               "needs_calibrant_confirmation", "statement") if k in w}})
     # c12-r: the shift the CURVE carries (outcome.applied), said beside what an approval would do: a result approved
     # under an older build may carry one the current rules would not apply (it is kept on re-processing: decided)
     from . import bundle as B
@@ -1241,6 +1242,9 @@ def _calibration_view(bundle: Mapping, r: Mapping) -> dict | None:
     out = {k: said[k] for k in ("reference_source", "reference_scans_usable", "reference_scans_listed",
                                 "measured_reference_e0_eV", "reference_e0_spread_eV", "reference_proposed",
                                 "reference_statement")}
+    for k in ("calibration_proposed", "reference_calibrant"):  # r1 H1: whether ISAAC offers the group's own edge
+        if k in said:
+            out[k] = said[k]
     if said["reference_e0_spread_eV"] is None and said["reference_scans_usable"] == 1:
         out["reference_e0_spread_note"] = ("The spread is null: fewer than 2 usable reference scans. The stored qc.json "
                                            "and params.json say 0.0: they predate this rule and are hashed into the "
@@ -1779,6 +1783,7 @@ def cmd_bundle_decide(args) -> int:
             same_conditions=args.same_conditions,
             as_said=args.as_said,
             accept_shift=getattr(args, "accept_shift", None),
+            e0_measured=getattr(args, "e0_measured", False),
         )
 
     return _mutation(run)
@@ -2224,6 +2229,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--qc-note", help="with --qc-status: what is compromised or failed, and why")
     q.add_argument("--element", help="record group + approve_calibration (the calibration reference) or set_absorber (the absorber): an element, e.g. Ir")
     q.add_argument("--edge", help="with --element: the edge (K, L1-L3, M1-M5)")
+    q.add_argument("--e0-measured", action="store_true", dest="e0_measured",
+                   help="with --decision approve on an Athena result flagged athena_e0_possibly_fixed: the "
+                        "scientist states this E0 was measured from the group's own edge, not set in Athena")
     q.add_argument("--accept-shift", type=float, dest="accept_shift",
                    help="with approve_calibration: the shift in eV the scientist accepts, exactly as the reply showed it "
                         "(e.g. -8.6); needed when the shift is above the protocol's warning level")
