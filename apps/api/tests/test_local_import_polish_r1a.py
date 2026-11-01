@@ -54,7 +54,7 @@ def _processing():
     (["Ti_foil_A"], "unknown", None),  # "A" is not on the closed list
     (["Ti_foil_005"], "element", "Ti"),
     (["01_Cofoil_std_005"], "element", "Co"),
-    (["31_Ti_foil_I2_120"], "unknown", None),  # I2 (a detector) is not on the list
+    (["31_Ti_foil_I2_120"], "element", "Ti"),  # r3-b M2: a detector channel (I0-I3) says nothing of the chemistry
     (["SYN_S_std"], "unknown", None),  # SYN is not on the list: ISAAC cannot tell
     (["STD_REF"], "unknown", None),
     (["Ti_Co_std"], "unknown", None),  # two elements: which is it?
@@ -198,7 +198,9 @@ def test_processing_proposes_elemental_sulfur_but_applies_it_only_with_accept_sh
     r, cal = _calibration_of(run_process(bdir, source_root=root))
     o = cal["outcome"]
     assert o["calibration_proposed"] is True and o["reference_calibrant"]["kind"] == "element"
-    assert "its names say it is S; if so, approve with --accept-shift" in o["reference_statement"]
+    # r3-b M2: no edge is stated, so no shift is known: the sentence never shows a placeholder as the shift
+    assert f"its names say it is S; if so, {REF.NO_SHIFT_YET}." in o["reference_statement"]
+    assert "<the shift shown>" not in o["reference_statement"]
     assert REF.NOT_NAMED_ELEMENT_FLAG not in r["review_flags"]
     approval = {"element": "S", "edge": "K", "decided_by": "SYN Scientist", "decision_id": "d-old"}
     r2, cal = _calibration_of(run_process(bdir, source_root=root, calibration_approvals={r["group_id"]: approval}))

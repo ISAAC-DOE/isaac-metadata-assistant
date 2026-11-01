@@ -118,23 +118,29 @@ def _resolve_source(root: Path, rel: str) -> Path | None:
     return full
 
 
-def stated_reference(name: str, bundle: Mapping, header_lines: Sequence[str]) -> tuple[dict | None, str]:
+#: r3-b M2: why a reference group's own edge is not proposed: its names do not clearly say one pure element
+NAMES_NOT_A_PURE_ELEMENT = "names_not_a_pure_element"
+
+
+def stated_reference(name: str, bundle: Mapping, header_lines: Sequence[str],
+                     calibrant: Mapping | None = None) -> tuple[dict | None, str]:
     """A reference foil's element + edge, ONLY when evidence states both. (reference, reason).
 
-    Element: the name has a ``foil`` token and exactly one token that is an element symbol
-    (case-sensitive). Edge: the bundle's ``experiment.element_evidence`` for that element,
-    and/or a header line shaped ``<El><Edge>_`` (an XDAC region file, e.g. ``ZzK_SYNTHETIC.rgn``);
-    every stated edge must agree.
+    Element: r3-b M2: the ONE name reading that also says whether the group is named as a pure element
+    (:func:`reference.calibrant_identity` — ``calibrant``, the group's reading, else ``name``'s alone): its element when
+    it says one pure element (``33_Ti_foil_I1``, ``01_Tifoil_calib_1x3mm``), else nothing is proposed
+    (:data:`NAMES_NOT_A_PURE_ELEMENT`). Before, a ``foil`` token and one case-sensitive symbol proposed Ti K for a name
+    the other reading called "ISAAC cannot tell", and ``Tifoil`` proposed nothing. Edge: an edge label in the names
+    (``Ti_K_foil``), the bundle's ``experiment.element_evidence`` for that element, and/or a header line shaped
+    ``<El><Edge>_`` (an XDAC region file, e.g. ``ZzK_SYNTHETIC.rgn``); every stated edge must agree.
     """
-    toks = [t for t in _TOKEN.split(name) if t]
-    if not any(t.casefold().startswith("foil") for t in toks):
-        return None, "name_has_no_foil_token"
-    els = sorted({t for t in toks if t in ELEMENTS})
-    if len(els) != 1:
-        return None, f"foil_element_not_unique:{els}"
-    el = els[0]
-    basis = [{"kind": "name_token", "name": name, "element": el}]
-    edges = set()
+    cal = calibrant if calibrant is not None else REF.calibrant_identity([name])
+    el = REF.named_element(cal)
+    if el is None:
+        return None, NAMES_NOT_A_PURE_ELEMENT
+    basis = [{"kind": "name_reading", "rule_id": REF.CALIBRANT_RULE_ID, "name": name,
+              "read_from": list(cal.get("read_from") or [name]), "element": el}]
+    edges = {cal["edge"]} if cal.get("edge") else set()
     for ev in (bundle.get("experiment") or {}).get("element_evidence") or ():
         if ev.get("element") == el and ev.get("edge"):
             edges.add(ev["edge"])
@@ -345,7 +351,7 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
         ref_source = "reference_group_own_signal"
         per_scan = [C.edge_e0(sa["energy"], sa["mu"], np, ctx.xafs) for sa in scans_data]
         if not proposed:
-            stated, unconfirmed_reason = stated_reference(stems[0] if stems else "", ctx.bundle, headers)
+            stated, unconfirmed_reason = stated_reference(stems[0] if stems else "", ctx.bundle, headers, calibrant)
             if stated:
                 proposed = stated
     elif cp.get("use_in_scan_reference_channel") and any(sa.get("mu_ref") is not None for sa in scans_data):
@@ -401,6 +407,10 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
                 flags.append(REF.SIZE_NOT_CONFIRMED_FLAG)
             elif cp.get("apply_shift_when_confirmed"):
                 applied = shift
+    if not_named and applied and REF.shift_size_confirmed(accepted, shift):
+        # r3-b M2: the scientist confirmed this group's own edge (--accept-shift) and it is applied: its names no longer
+        # stand in the way of anything (step flags are not hashed: no id moves)
+        flags.remove(REF.NOT_NAMED_ELEMENT_FLAG)
     if approved:
         unconfirmed_reason = None
     elif proposed:

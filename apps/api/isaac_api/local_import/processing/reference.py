@@ -145,10 +145,14 @@ ELEMENT_NAMES = {
 }
 #: an element's own molecule, named as such (elemental sulfur is S8)
 _ALLOTROPES = {"s8": "S", "p4": "P"}
-#: words that say nothing about the chemistry (a digit suffix allowed: ref1, scan2)
-_NEUTRAL = re.compile(r"^(ref|std|cal|foil|metal|powder|elemental|pure|edge|scan|merged)\d*$", re.IGNORECASE)
+#: words that say nothing about the chemistry (a digit suffix allowed: ref1, scan2). r3-b M2: also what a run name says
+#: about HOW it was measured — calibration (calib), a beam size (1x3mm, 0p5x1mm), a detector channel (I0-I3, trans,
+#: transDet, fluo, fluor, PIPS, Lytle) and a run counter (run2). Measured on a real BL4-3 Ti beamtime: ``33_Ti_foil_I1``
+#: and ``01_Tifoil_calib_1x3mm`` were read "ISAAC cannot tell from its names", while the same names proposed Ti K.
+_NEUTRAL = re.compile(r"^(ref|std|cal|calib|foil|metal|powder|elemental|pure|edge|scan|merged|run|trans|transdet|"
+                      r"fluo|fluor|pips|lytle)\d*$|^i[0-3]$|^\d+(p\d+)?x\d+(p\d+)?(mm|um)?$", re.IGNORECASE)
 #: a word after which a lone symbol reads as a LABEL, not an element (ref_B, std_K: reference B, standard K)
-_LABEL_AFTER = re.compile(r"^(ref|std|cal|scan)\d*$", re.IGNORECASE)
+_LABEL_AFTER = re.compile(r"^(ref|std|cal|calib|scan)\d*$", re.IGNORECASE)
 #: an absorption edge named after a symbol: K, L1-L3, M1-M5 (Kedge, L3edge too)
 _EDGE = re.compile(r"^(K|L[1-3]|M[1-5])(edge)?$", re.IGNORECASE)
 _JOINED_FOIL = re.compile(r"^([a-z]+)foil\d*$", re.IGNORECASE)
@@ -172,7 +176,8 @@ def _symbol(word: str, any_case: bool) -> str | None:
         return word
     if any_case and word.capitalize() in ELEMENTS:
         return word.capitalize()
-    return ELEMENT_NAMES.get(word.casefold())
+    # r3-b M2: an English name only as a word (``tin``, ``Tin``), never a formula's capitals (``TiN`` is not tin)
+    return ELEMENT_NAMES.get(word.casefold()) if (word.islower() or word.istitle()) else None
 
 
 def _text_element(text: str) -> tuple[set, str | None] | None:
@@ -181,9 +186,12 @@ def _text_element(text: str) -> tuple[set, str | None] | None:
     tokens = [t for t in _ID_TOKEN.split(text) if t]
     foil = any("foil" in t.casefold() for t in tokens)
     elements, edges, prev = set(), set(), None
-    for tok in tokens:
+    for i, tok in enumerate(tokens):
         if tok.isdigit():
             pass
+        elif tok in ("A", "a") and ((i == len(tokens) - 1 and prev is not None and prev.isdigit())
+                                    or (i == len(tokens) - 2 and tokens[-1].isdigit())):
+            pass  # r3-b M2: the XDAC counter at the end of a name: ``_016_A`` (a run), ``_A.001`` (its scan file)
         elif elements and (m := _EDGE.match(tok)):
             edges.add(m.group(1).upper())
         elif _NEUTRAL.match(tok):
@@ -209,9 +217,12 @@ def calibrant_identity(texts: Sequence[str]) -> dict:
     (:data:`CALIBRANT_RULE_ID`: a group's own edge is applied only with ``--accept-shift``, whatever its names say).
     ``kind`` is ``element`` only when EVERY name read (its sample identity readings and run names) is on a closed list
     naming one pure element: the symbol (any case only beside ``foil``) or English name (sulfur / sulphur), S8, P4,
-    ``<El>foil``, ``<El>ref``, with only the words ref, std, cal, foil, metal, powder, elemental, pure, edge, scan,
-    merged, an edge label after the symbol (K, L1-L3, M1-M5) and digits beside it. Anything else (a compound, a
-    mixture, a mineral, a label such as ``ref_B``, a name ISAAC does not know) is ``unknown``: ISAAC cannot tell."""
+    ``<El>foil``, ``<El>ref``, with only the words ref, std, cal, calib, foil, metal, powder, elemental, pure, edge,
+    scan, merged, a beam size (``1x3mm``), a detector channel (I0-I3, trans, transDet, fluo, fluor, PIPS, Lytle), a run
+    counter (``run2``, digits, a final XDAC ``_A``), an edge label after the symbol (K, L1-L3, M1-M5) and digits beside
+    it. Anything else (a compound, a mixture, a mineral, a label such as ``ref_B``, a name ISAAC does not know) is
+    ``unknown``: ISAAC cannot tell. r3-b M2: this ONE reading also says which element a reference group's own edge is
+    proposed as (``run.stated_reference``), so a proposal never contradicts it."""
     texts = [str(t) for t in texts if str(t or "").strip()]
     read = [_text_element(t) for t in texts]
     elements = set().union(*(r[0] for r in read if r is not None)) if read else set()
@@ -241,19 +252,43 @@ def named_element(cal: Mapping | None) -> str | None:
     return cal.get("element") if isinstance(cal, Mapping) and cal.get("kind") == "element" else None
 
 
-def own_signal_sentence(cal: Mapping | None, shift: str, element: str | None = None) -> str:
+#: r3-b M2: said in place of "approve with --accept-shift <shift>" when no shift is known yet (no edge named)
+NO_SHIFT_YET = "naming its element and edge gives the shift, which is then confirmed with --accept-shift"
+
+
+def own_signal_sentence(cal: Mapping | None, shift: str | None, element: str | None = None) -> str:
     """The plain sentence for a calibration on a group's own edge: always confirmed with ``--accept-shift`` (shown
-    ``shift``); its names are only a hint. ``element``: the element an approval names (a mismatch is said)."""
+    ``shift``); its names are only a hint. ``element``: the element an approval names (a mismatch is said). r3-b M2:
+    ``shift`` ``None`` (no shift is known: no edge is named) drops the "approve with --accept-shift" clause, never a
+    placeholder in its place."""
     said = OWN_SIGNAL_RULE
     el = named_element(cal)
+    approve = f"approve with --accept-shift {shift}" if shift is not None else NO_SHIFT_YET
     if el is not None and element is not None and element != el:
         return (f"{said}: its names say it is {el}, not {element}; check the element. Only if it is pure {element}, "
-                f"approve with --accept-shift {shift}.")
+                f"{approve}.")
     if el is not None:
-        return f"{said}: its names say it is {el}; if so, approve with --accept-shift {shift}."
+        return f"{said}: its names say it is {el}; if so, {approve}."
     return (f"{said}. ISAAC cannot tell from its names that this is a pure element; "
-            f"{CHEMICAL_STANDARD[0].lower() + CHEMICAL_STANDARD[1:]}. Only if it is a pure element, approve with "
-            f"--accept-shift {shift}.")
+            f"{CHEMICAL_STANDARD[0].lower() + CHEMICAL_STANDARD[1:]}. Only if it is a pure element, {approve}.")
+
+
+def confirmed_sentence(shift: str, ref: Mapping | None = None) -> str:
+    """r3-b L8: what a calibration on a group's own edge says once the scientist CONFIRMED it (``--accept-shift``
+    matching the shift): no question is left, so the names' hint and "only if it is a pure element" are not said."""
+    ref = ref or {}
+    who = f" by {ref['decided_by']}" if ref.get("decided_by") else ""
+    named = f" ({ref['element']} {ref['edge']})" if ref.get("element") and ref.get("edge") else ""
+    return (f"The scientist confirmed this group's own edge as the energy calibration{named}{who}, with "
+            f"--accept-shift {shift}, so it is applied.")
+
+
+def _confirmed(outcome: Mapping) -> bool:
+    """A scientist's approval whose size they confirmed (``--accept-shift``) was applied to this step's curve."""
+    ref = outcome.get("reference") or {}
+    return bool(outcome.get("applied") and ref.get("basis") == "scientist_decision"
+                and outcome.get("accepted_shift_eV") is not None
+                and shift_size_confirmed(outcome.get("accepted_shift_eV"), outcome.get("applied_shift_eV")))
 
 
 def reading(step: Mapping) -> dict:
@@ -290,7 +325,10 @@ def reading(step: Mapping) -> dict:
         said = (f"{of[0].upper() + of[1:]} show{'s' if len(usable) == 1 else ''} a usable reference edge in {where} "
                 f"({snr}), at {measured:.1f} eV"
                 + (f" (spread {spread:.2f} eV)." if spread is not None else "."))
-        if calibrant is not None:
+        if calibrant is not None and _confirmed(o):
+            # r3-b L8: the scientist confirmed it (--accept-shift): the question is answered, so it is not asked again
+            said += " " + confirmed_sentence(shown(o["applied_shift_eV"]), o.get("reference"))
+        elif calibrant is not None:
             # CALIBRANT_RULE_ID: the edge is read; applying it always needs --accept-shift, the names are a hint
             said += " " + own_signal_sentence(calibrant, _hinted_shift(o, calibrant, measured))
             if calibrant.get("read_from"):
@@ -314,14 +352,15 @@ def reading(step: Mapping) -> dict:
     }
 
 
-def _hinted_shift(outcome: Mapping, cal: Mapping, measured: float | None) -> str:
+def _hinted_shift(outcome: Mapping, cal: Mapping, measured: float | None) -> str | None:
     """The shift ``--accept-shift`` would take for a group's own edge, as shown, when it is known: the step's computed
-    shift (its proposed or approved element and edge), else the tabulated edge its names give minus ``measured``."""
+    shift (its proposed or approved element and edge), else the tabulated edge its names give minus ``measured``;
+    ``None`` when neither is known (r3-b M2: never a placeholder said as if it were a shift)."""
     if outcome.get("computed_shift_eV") is not None:
         return shown(outcome["computed_shift_eV"])
     el, ed = named_element(cal), cal.get("edge")
     tab = edge_energy(el, ed)[0] if el and ed and measured is not None else None
-    return shown(tab - measured) if tab is not None else "<the shift shown>"
+    return shown(tab - measured) if tab is not None else None
 
 
 def _digits(value: float, warn_eV: Any) -> int:
@@ -349,13 +388,14 @@ def shift_size_confirmed(accepted: Any, shift: float) -> bool:
         return False
 
 
-def would_apply(step: Mapping, element: str, edge: str, *, warn_eV: float | None = None) -> dict:
+def would_apply(step: Mapping, element: str, edge: str, *, warn_eV: float | None = None, accepted: Any = None) -> dict:
     """What approving ``element`` ``edge`` as this step's reference would do: ``shift_eV`` (tabulated - measured),
     ``shown``, ``needs_size_confirmation`` (|shift| above ``qc.warn_energy_shift_eV``), ``implausible`` (above
     ``calibration.max_plausible_shift_eV``: never applied), ``needs_calibrant_confirmation`` (a reference group's own
     edge, :data:`CALIBRANT_RULE_ID`: its size is confirmed whatever it is and whatever its names say, so
     ``needs_size_confirmation`` is true too), ``statement``. ``shift_eV`` is null when no reference is proposed or
-    the edge energy is unknown (``statement`` says why)."""
+    the edge energy is unknown (``statement`` says why). r3-b L8: ``accepted`` (the ``--accept-shift`` value): when it
+    confirms the shift of a group's own edge, the statement says it is confirmed instead of asking again."""
     r = reading(step)
     warn = effective_warn_eV(warn_eV)
     max_eV = float((step.get("params") or {}).get("max_plausible_shift_eV") or DEFAULT_MAX_SHIFT_EV)
@@ -378,7 +418,12 @@ def would_apply(step: Mapping, element: str, edge: str, *, warn_eV: float | None
     implausible = abs(shift) > max_eV
     big = exceeds_warn(shift, warn) and not implausible
     calibrant = own_signal(step.get("outcome") or {}) if not implausible else None
-    if calibrant is not None:
+    if calibrant is not None and accepted is not None and shift_size_confirmed(accepted, shift):
+        # r3-b L8: the scientist confirmed this size: "ISAAC cannot tell ... only if it is a pure element" is not
+        # said again in the reply that records it
+        said += (f" This is the group's own edge: with its size confirmed (--accept-shift {shown(shift, warn)}), "
+                 "processing applies it as the energy calibration.")
+    elif calibrant is not None:
         # CALIBRANT_RULE_ID: said BEFORE the size sentence (a confirmed approval's reply keeps the text before it); the
         # names are a hint only, and an element they name that is not the approved one is said
         said += " " + own_signal_sentence(calibrant, shown(shift, warn), element)

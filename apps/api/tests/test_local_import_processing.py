@@ -308,7 +308,9 @@ def _foil_xdac(region, seed):
 
 
 def test_foil_name_evidence_proposes_the_reference_but_only_an_approval_applies_it(tmp_path):
-    unread = {"SYN_Ti_foil_A.001": _foil_xdac("TiK_SYNTHETIC_region.rgn", 1), "SYN_Ti_foil_A.002": _foil_xdac("TiK_SYNTHETIC_region.rgn", 2)}
+    # r3-b M2: the name is read ONCE (reference.calibrant_identity) for the proposal and for "named as a pure element":
+    # a name with another word (``SYN_Ti_foil``) proposes nothing, so the fixture is named as a real XDAC foil run is
+    unread = {"33_Ti_foil_016_A.001": _foil_xdac("TiK_SYNTHETIC_region.rgn", 1), "33_Ti_foil_016_A.002": _foil_xdac("TiK_SYNTHETIC_region.rgn", 2)}
     bdir, root, _ = make_case(tmp_path, [], unread=unread)
     out = run_process(bdir, source_root=root)
     r = out["unread_acquisition_results"][0]
@@ -317,10 +319,11 @@ def test_foil_name_evidence_proposes_the_reference_but_only_an_approval_applies_
     o = cal["outcome"]
     assert o["reference"]["basis"] == "stated_by_evidence" and (o["reference"]["element"], o["reference"]["edge"]) == ("Ti", "K")
     assert o["computed_shift_eV"] == pytest.approx(-3.0, abs=0.6) and not o["applied"]
-    # r1-a review: a group's own edge whose names do not clearly say one pure element ("A" is not on the closed list)
-    # is not proposed, so nothing awaits an approval; an approval of it is applied only with --accept-shift
-    assert "calibration_shift_awaiting_approval" not in cal["flags"]
-    assert "own_signal_not_named_as_pure_element" in cal["flags"]
+    # r3-b M2: the names say Ti (the XDAC "_016_A" is a counter), so the proposal and the reading agree: it awaits an
+    # approval, which is applied only with --accept-shift
+    assert "calibration_shift_awaiting_approval" in cal["flags"]
+    assert "own_signal_not_named_as_pure_element" not in cal["flags"]
+    assert o["reference_calibrant"]["element"] == "Ti" and o["calibration_proposed"] is True
     # c12-cal: -3 eV is above qc.warn_energy_shift_eV (2), so the approval also confirms its size (--accept-shift)
     approval = {"element": "Ti", "edge": "K", "decided_by": "SYN Scientist", "accepted_shift_eV": round(o["computed_shift_eV"], 1)}
     approved = run_process(bdir, source_root=root, calibration_approvals={r["group_id"]: approval})
@@ -329,7 +332,7 @@ def test_foil_name_evidence_proposes_the_reference_but_only_an_approval_applies_
 
     tmp2 = tmp_path / "noedge"
     tmp2.mkdir()
-    unread2 = {"SYN_Ti_foil_A.001": _foil_xdac("SYN_region.rgn", 1)}
+    unread2 = {"33_Ti_foil_016_A.001": _foil_xdac("SYN_region.rgn", 1)}
     bdir2, root2, _ = make_case(tmp2, [], unread=unread2)
     r2 = run_process(bdir2, source_root=root2)["unread_acquisition_results"][0]
     c2 = step(r2, "calibration")

@@ -254,12 +254,16 @@ an element/edge already named for the group: approved, proposed, or the group's 
   sulfur's edge and erase the chemical shift it was measured to show). So `approve_calibration` on it ALWAYS needs
   `--accept-shift <the shift shown>`, whatever its size and names (without it: refused, nothing recorded; processing
   does not apply it, `calibration_own_signal_shift_not_confirmed`). The names only hint: "its names say it is S; if
-  so, approve with --accept-shift +0.4" (a closed list: symbol or English name, S8, `Cu foil`, `Sref`, `S_K`), or
-  "ISAAC cannot tell from its names that this is a pure element" (flag `own_signal_not_named_as_pure_element`,
-  `calibration_proposed: false`): then do NOT ask for an element or edge unless the scientist says it is a pure
-  element. A reply naming another element than the names ("its names say it is Fe, not Cu") is said and asked. An
-  approval recorded before this rule (no `--accept-shift`) is not applied to a result processed now (its statement
-  says so); a result already approved keeps its curve.
+  so, approve with --accept-shift +0.4" (a closed list: symbol or English name, S8, `Cu foil`, `Tifoil`, `Sref`,
+  `S_K`, beside words of how it was measured: calib, a beam size `1x3mm`, I0-I3, trans, fluor, PIPS, Lytle, run
+  counters), or "ISAAC cannot tell from its names that this is a pure element" (flag
+  `own_signal_not_named_as_pure_element`, `calibration_proposed: false`): then do NOT ask for an element or edge
+  unless the scientist says it is a pure element. The same reading proposes the element, so the two never disagree.
+  With no edge stated the sentence names no shift ("naming its element and edge gives the shift"): get it from
+  `would_apply` after they name the edge. A reply naming another element than the names ("its names say it is Fe,
+  not Cu") is said and asked. Once a confirmed calibration is applied, the flag is gone and the statement says the
+  scientist confirmed it: do not ask again. An approval recorded before this rule (no `--accept-shift`) is not
+  applied to a result processed now (its statement says so); a result already approved keeps its curve.
 - **A reference is proposed** (`calibration.reference_proposed: true` in `show processing-result`, without the flag
   `own_signal_not_named_as_pure_element`; the flag
   `calibration_reference_unconfirmed` alone only means no reference is approved yet): say how many scans show a

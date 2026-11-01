@@ -6,6 +6,12 @@ SYNTHETIC only: every scan, name, Athena project and value below is invented and
   so ISAAC never averages those and never says the scientist made no merge. Per-scan groups of EVERY run of a merged
   group form one set (told apart by run and scan). When ISAAC averages, the Athena result's steps say so (a merge
   step: a record lists ``spectrum_merging``).
+* (M2) A foil's names are read ONCE for "which element is proposed" and "is it named as a pure element": words of how
+  it was measured (calib, a beam size, I0-I3, trans, fluor, PIPS, Lytle, run counters) are neutral and ``Tifoil`` is
+  Ti + foil, so ``33_Ti_foil_I1`` and ``01_Tifoil_calib_1x3mm`` are proposed AND said as Ti. A sentence shows the real
+  shift or none, never a placeholder. A confirmed (``--accept-shift``) own-edge calibration clears
+  ``own_signal_not_named_as_pure_element``; without it nothing is applied (the safety rule stands).
+* (L8) Once the scientist confirmed the shift, the sentence no longer asks "only if it is a pure element".
 """
 
 from __future__ import annotations
@@ -146,3 +152,113 @@ def test_base_names_drop_only_a_counter():
     assert A.base_names(["22_x_dry"]) == {"22_x_dry"}
     # runs that differ in a word, not a number, share no base name
     assert A.base_names(["11_x_dry_091", "11_x_wet_092"]) == set()
+
+
+# --- M2: ONE name reading for "which element is proposed" and "is it named as a pure element" --------------------
+
+
+from isaac_api.local_import.processing import reference as REF  # noqa: E402
+
+
+@pytest.mark.parametrize("name", ["33_Ti_foil_I1", "01_Tifoil_calib_1x3mm", "Ti_foil_trans_PIPS_run2", "Ti_foil_Lytle_I0",
+                                  "02_Ti_foil_0p5x1mm_fluor", "Ti_foil_transDet_016_A", "33_Ti_foil_A.001"])
+def test_how_a_foil_was_measured_says_nothing_of_its_chemistry(name):
+    c = REF.calibrant_identity([name])
+    assert (c["kind"], c["element"]) == ("element", "Ti"), name
+
+
+@pytest.mark.parametrize("name", ["SYN_TiO2_calib_1x3mm", "Ti_foil_A", "calib_B_1x3mm", "TiN_foil_I1", "Ti_Co_foil_I0"])
+def test_a_measurement_word_never_makes_a_compound_or_a_label_pure(name):
+    assert REF.calibrant_identity([name])["kind"] == "unknown", name
+
+
+def _reference_case(tmp_path, stem, *, e0_offset=0.2, element_evidence=True):
+    _processing()
+    from test_local_import_processing import E0, GRID, make_case, mu_edge, spec_file
+    import numpy as np
+
+    def scan(seed):
+        rng = np.random.default_rng(seed)
+        i0 = np.full(GRID.size, 1.0e5)
+        i1 = i0 * np.exp(-(mu_edge(GRID, E0 + e0_offset) + rng.normal(0, 0.0005, GRID.size)))
+        return spec_file({"energy": GRID, "I0": i0, "I1": i1})
+
+    bdir, root, bundle = make_case(tmp_path, [(stem, [scan(1), scan(2)], {"sample_name": stem})])
+    bundle["record_groups"] = [{"group_id": "g-ref", "experiment_key": "e", "role": "reference",
+                                "member_run_keys": [bundle["runs"][0]["run_key"]],
+                                "basis": {"sample": {}, "technique": {}, "environment": {}, "conditions": {}},
+                                "split_reasons": [], "status": "proposed", "questions": []}]
+    if element_evidence:
+        bundle["experiment"]["element_evidence"] = [{"element": "Ti", "edge": "K", "source_id": "src-001-a",
+                                                     "locator": "SYN region file"}]
+    (bdir / "bundle.json").write_text(json.dumps(bundle))
+    return bdir, root
+
+
+def _cal(result):
+    return next(s for s in result["steps"] if s["step"] == "calibration")
+
+
+@pytest.mark.parametrize("stem", ["33_Ti_foil_I1", "01_Tifoil_calib_1x3mm"])
+def test_a_foil_named_with_measurement_words_is_proposed_and_said_as_ti_with_the_shift(tmp_path, stem):
+    bdir, root = _reference_case(tmp_path, stem)
+    _, [isa], _ = _process(bdir, root)
+    cal = _cal(isa)
+    o = cal["outcome"]
+    assert (o["reference"]["element"], o["reference"]["edge"]) == ("Ti", "K")
+    assert o["reference"]["evidence"][0]["kind"] == "name_reading"
+    assert REF.NOT_NAMED_ELEMENT_FLAG not in cal["flags"] and o["calibration_proposed"] is True
+    said = o["reference_statement"]
+    shift = REF.shown(o["computed_shift_eV"])
+    assert f"its names say it is Ti; if so, approve with --accept-shift {shift}." in said
+    assert "cannot tell" not in said and "<the shift shown>" not in said
+    w = REF.would_apply(cal, "Ti", "K", warn_eV=2.0)
+    assert "cannot tell" not in w["statement"] and w["needs_calibrant_confirmation"]  # still --accept-shift
+
+
+def test_with_no_edge_stated_no_shift_is_said_and_no_placeholder_either(tmp_path):
+    bdir, root = _reference_case(tmp_path, "01_Tifoil_calib_1x3mm", element_evidence=False)
+    _, [isa], _ = _process(bdir, root)
+    o = _cal(isa)["outcome"]
+    assert o["computed_shift_eV"] is None and o["unconfirmed_reason"].startswith("edge_not_stated_uniquely")
+    said = o["reference_statement"]
+    assert "<the shift shown>" not in said and "approve with --accept-shift" not in said
+    assert REF.NO_SHIFT_YET in said and "its names say it is Ti" in said
+
+
+def test_a_confirmed_own_edge_calibration_clears_the_names_flag_and_stops_asking(tmp_path):
+    from isaac_api.local_import.processing.edges import edge_energy
+
+    bdir, root = _reference_case(tmp_path, "05_SYN_TiO2_std", e0_offset=1.0)
+    _, [isa], _ = _process(bdir, root)
+    cal = _cal(isa)
+    assert REF.NOT_NAMED_ELEMENT_FLAG in cal["flags"] and REF.NOT_NAMED_ELEMENT_FLAG in isa["review_flags"]
+    shift = round(edge_energy("Ti", "K")[0] - cal["outcome"]["measured_reference_e0_eV"], 1)
+    approval = {"element": "Ti", "edge": "K", "decided_by": "SYN Scientist", "decision_id": "d-syn", "accepted_shift_eV": shift}
+    _, [isa2], _ = _process(bdir, root, calibration_approvals={"g-ref": approval})
+    cal2 = _cal(isa2)
+    assert cal2["outcome"]["applied"] is True
+    assert REF.NOT_NAMED_ELEMENT_FLAG not in cal2["flags"] and REF.NOT_NAMED_ELEMENT_FLAG not in isa2["review_flags"]
+    said = cal2["outcome"]["reference_statement"]
+    assert "The scientist confirmed this group's own edge as the energy calibration (Ti K) by SYN Scientist" in said
+    assert "cannot tell" not in said and "Only if" not in said
+    # without its size confirmed nothing is applied and the flag stays (the safety rule)
+    _, [isa3], _ = _process(bdir, root, calibration_approvals={"g-ref": {**approval, "accepted_shift_eV": None}})
+    assert _cal(isa3)["outcome"]["applied"] is False and REF.NOT_NAMED_ELEMENT_FLAG in _cal(isa3)["flags"]
+
+
+# --- L8: the reply that records a confirmed own-edge calibration asks nothing again --------------------------------
+
+
+def test_would_apply_with_the_confirmed_shift_does_not_ask_again():
+    step = {"step": "calibration", "params": {"reference_min_edge_snr": 10.0, "max_plausible_shift_eV": 25.0},
+            "outcome": {"reference_source": REF.OWN_SIGNAL, "reference_e0_per_scan_eV": [2470.8, 2470.8],
+                        "reference_snr_per_scan": [400.0, 380.0],
+                        "reference_calibrant": REF.calibrant_identity(["SYN_MoS2_std"])}}
+    asked = REF.would_apply(step, "S", "K", warn_eV=2.0)["statement"]
+    assert "ISAAC cannot tell" in asked and "Only if it is a pure element, approve with --accept-shift +1.2." in asked
+    done = REF.would_apply(step, "S", "K", warn_eV=2.0, accepted=1.2)
+    assert "cannot tell" not in done["statement"] and "Only if" not in done["statement"]
+    assert "with its size confirmed (--accept-shift +1.2), processing applies it" in done["statement"]
+    # a size that is not the shift is not a confirmation: it is asked as before
+    assert "ISAAC cannot tell" in REF.would_apply(step, "S", "K", warn_eV=2.0, accepted=0.5)["statement"]
