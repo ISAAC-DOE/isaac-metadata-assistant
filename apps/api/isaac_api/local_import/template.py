@@ -437,6 +437,27 @@ def run_names(bundle: Mapping, run: Mapping) -> list[str]:
     return list(dict.fromkeys([str(run.get("stem") or ""), *parts]))
 
 
+def header_potential_readings(bundle: Mapping, run: Mapping) -> list[dict]:
+    """``[{value, literal, scale, relative_path, locator}]``: each potential a run's SCAN HEADER comment lines state
+    (``questions.header_potentials_in_line``: ``-300 mV vs RHE``, ``0.5Vrhe``), in volts as its spelling writes it —
+    a FILE READING to compare a typed set-point against (c16c), never a value. One per literal and line."""
+    from .questions import header_potentials_in_line
+
+    out, seen = [], set()
+    for e in bundle.get("extended_context") or ():
+        if (e.get("run_id") != run.get("run_id") or e.get("concept") not in ("free_text", "header_line_8_literal")
+                or not isinstance(e.get("raw_literal"), str)):
+            continue
+        for pot in header_potentials_in_line(e["raw_literal"]):
+            key = (pot["literal"], e.get("relative_path"), e.get("locator"))
+            if pot["volts"] is None or key in seen:
+                continue
+            seen.add(key)
+            out.append({"value": pot["volts"], "literal": pot["literal"], "scale": pot["scale"],
+                        "relative_path": e.get("relative_path"), "locator": e.get("locator")})
+    return out
+
+
 # --- facility hints: a HINT to compare against, never a value ---------------------------------------
 #
 # The folder's name (``SSRL_BL152_2019-05_…``) and, when its scan headers match, the acquisition system's name are
@@ -2380,14 +2401,17 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
         readings = []
         if decision == "correct" and kind == "candidate" and obj.get("value") is not None:
             ev = next((e for e in obj["evidence"] if e["method"] != "ai_interpretation"), None)
-            readings.append(f"replaces extracted {_shown(obj['value'])} — {_ev_where(index, ev)}")
+            # c16c: a value read from a scan-header comment line says so, with the header's own words
+            said = (f", read from the scan header's {ev['literal_value']!r}" if ev is not None and B.is_header_comment_candidate(obj)
+                    else "")
+            readings.append(f"replaces extracted {_shown(obj['value'])}{said} — {_ev_where(index, ev)}")
         run = runs_by_id.get(obj.get("run_id") or "")
         if run is not None:
             for t in name_token_readings(run_names(bundle, run), cell["path"]):
                 if not _agrees(t["value"], cell["value"]):
                     readings.append(f"contradicts the file name token {t['token']} ({t['value']!r}) in {t['name']}")
         for r in adopter.against(cell["value"], obj.get("run_id"), cell["path"]):
-            if r["kind"] == "ai_reading":
+            if r["kind"] in ("ai_reading", "scan_header"):  # c16c: what a scan header states is a file reading
                 readings.append(f"contradicts the {r['source']}: {_shown(r['value'])}")
         return readings
 
@@ -3721,6 +3745,16 @@ class _Adopter:
             for t in name_token_readings(run_names(self.bundle, self.runs[run_id]), path):
                 out.setdefault((repr(float(t["value"])), "token"), {
                     "value": t["value"], "kind": "file_name_token", "source": f"file name token {t['token']} in {t['name']}"})
+        if run_id is not None and path == POTENTIAL_PATH:
+            # c16c: a potential the run's scan header states is a file reading too; a line a candidate already holds
+            # (its value is the extracted reading above) is not listed twice
+            held = {(e.get("relative_path"), e.get("locator")) for c in cands if c["value"] is not None for e in c["evidence"]}
+            for h in header_potential_readings(self.bundle, self.runs[run_id]):
+                if (h["relative_path"], h["locator"]) in held:
+                    continue
+                out.setdefault((repr(float(h["value"])), "scan_header"), {
+                    "value": h["value"], "kind": "scan_header",
+                    "source": f"scan header {h['literal']} at {h['locator']} of {h['relative_path']}"})
         targets = [("candidate", c["candidate_id"]) for c in cands] + [("missing_value", m["value_id"]) for m in missing]
         for kind, tid in targets:
             for i in self.ai_of.get((kind, tid), []):

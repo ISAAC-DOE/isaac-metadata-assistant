@@ -72,6 +72,9 @@ FROM_AN_ANSWER = "a scientist's answer"
 #: ``-0.5V``). Only RECOGNISES the statement, to warn that the record will not carry it: no value is read from it.
 _POTENTIAL_TOKEN = re.compile(r"^(?:m|n|neg|minus|-|\+)?\d+(?:[p.]\d+)?m?V$", re.IGNORECASE)
 STATED_POTENTIAL_WARNING = "stated_potential_not_in_record"
+#: c16c: a record carries a set-point while a member run's FILE NAME and SCAN HEADER state different potentials and
+#: no scientist has ruled on the header's reading (a decision on its candidate): the disagreement stays said.
+POTENTIAL_SOURCES_WARNING = "potential_sources_disagree"
 
 
 @functools.lru_cache(maxsize=512)
@@ -947,6 +950,7 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
     from . import questions as Q  # c8-b: the conditions generic runs' names and headers state (questions.py)
 
     report["warnings"] = (_stated_potential_warnings(bundle, group, member_ids, fields, proposals)
+                          + _potential_sources_warnings(bundle, group, member_ids, fields)
                           + Q.open_circuit_warnings(bundle, group, member_ids, fields))
     return draft, report
 
@@ -1053,10 +1057,67 @@ def _stated_potential_warnings(bundle: Mapping, group: Mapping, member_ids: set,
     return [{**w, "text": potential_warning_text(w)}]
 
 
+def _potential_sources_warnings(bundle: Mapping, group: Mapping, member_ids: set, fields: Mapping) -> list[dict]:
+    """A :data:`POTENTIAL_SOURCES_WARNING` (never a refusal) for a record that CARRIES a set-point while a member run's
+    file name and scan header state different potentials (``m150mV`` and ``-300 mV vs RHE``) — a disagreement of the
+    files the template's typed value does not settle by itself. Unresolved, and so warned, until a scientist decides
+    the header's reading (its ``bundle.XDC_COMMENT_RULE_ID`` candidate: confirm or correct it); a bundle imported
+    before those candidates existed has nothing to decide, and is told to re-import. A record without a set-point
+    gets the stated-potential warning instead, which names the same disagreement (``questions.stated_potential_notes``)."""
+    from . import questions as Q
+    from .template import header_potential_readings
+
+    if _present(fields, SETPOINT_PATH) is None:
+        return []
+    decided = {d["target"]["id"] for d in bundle.get("scientist_decisions") or () if d["target"]["kind"] == "candidate"}
+    carried = fields[SETPOINT_PATH].get("value") if isinstance(fields.get(SETPOINT_PATH), Mapping) else None
+    scale = fields[SCALE_PATH].get("value") if isinstance(fields.get(SCALE_PATH), Mapping) else None
+    out = []
+    for r in Q._generic_member_runs(bundle, member_ids):
+        names = [t for t in Q._name_tokens(r) if _POTENTIAL_TOKEN.match(t)]
+        name_v = {round(v, 9) for v in map(Q._token_volts, names) if v is not None}
+        heads = header_potential_readings(bundle, r)
+        head_v = {round(h["value"], 9) for h in heads}
+        if not name_v or not head_v or name_v & head_v:
+            continue
+        held = [c for c in bundle.get("candidates") or () if c.get("run_id") == r["run_id"]
+                and B.is_header_comment_candidate(c) and c.get("target_field_path") == SETPOINT_PATH]
+        if held and all(c["candidate_id"] in decided for c in held):
+            continue  # a scientist ruled on the header's reading
+        out.append({"code": POTENTIAL_SOURCES_WARNING, "group_id": group["group_id"], "path": SETPOINT_PATH,
+                    "needs": SETPOINT_PATH, "run_id": r["run_id"], "targets": [c["candidate_id"] for c in held],
+                    "names": list(dict.fromkeys(names)), "headers": list(dict.fromkeys(
+                        h["literal"] + (f" at {h['locator']} of {h['relative_path']}" if h.get("relative_path") else "")
+                        for h in heads)), "carried_V": carried, "carried_scale": scale,
+                    "command": ("isaac import <the beamtime folder> --out <a new bundle folder>" if not held else
+                                f'isaac bundle decide <bundle_dir> --target {held[0]["candidate_id"]} --decision confirm '
+                                '--by "<your name>"' if held[0].get("value") is not None else
+                                f'isaac bundle decide <bundle_dir> --target {held[0]["candidate_id"]} --decision correct '
+                                '--value <volts> --json --by "<your name>"')})
+    return [{**w, "text": potential_sources_text(w)} for w in out]
+
+
+def potential_sources_text(w: Mapping) -> str:
+    """The plain sentence for a :data:`POTENTIAL_SOURCES_WARNING`, ending with its command."""
+    carried = w.get("carried_V")
+    said = (f"{carried:g} V" if isinstance(carried, (int, float)) and not isinstance(carried, bool) else "a set-point")
+    said += f" on {w['carried_scale']}" if w.get("carried_scale") else ""
+    head = (f"the file name and the scan header of {w['run_id']} state different potentials (file name "
+            f"{'/'.join(w['names'][:3])}; scan header {'; '.join(w['headers'][:3])}) and the record carries {said}")
+    if w.get("targets"):
+        return (f"{head}; no one has ruled on the scan header's reading yet: confirm it if the header is right, or "
+                "correct it (--decision correct --value <volts> --json) to the potential the run was held at: "
+                f"{w['command']}")
+    return (f"{head}; this bundle was imported before scan-header potentials were read as values, so there is no "
+            f"reading to rule on: re-import the beamtime to rule on it ({w['command']})")
+
+
 def potential_warning_text(w: Mapping) -> str:
     """The plain sentence for a :data:`STATED_POTENTIAL_WARNING` warning, ending with its command."""
     from . import questions as Q  # c8-b: open circuit, and what scan headers state (questions.py)
 
+    if w.get("code") == POTENTIAL_SOURCES_WARNING:
+        return potential_sources_text(w)
     if w.get("open_circuit"):
         return Q.open_circuit_text(w)
     extra = Q.stated_potential_notes(w)
@@ -1665,6 +1726,8 @@ WRITTEN_WITHOUT_NAMES = {SETPOINT_PATH: "the potential set-point", B.CONTROL_MOD
 def written_without(w: Mapping) -> str:
     """``export``'s line for a record WRITTEN while warning ``w`` still applies: "Written without the potential
     set-point: <the warning's sentence>" (c11-a: an export is never silent about a condition the record lacks)."""
+    if w.get("code") == POTENTIAL_SOURCES_WARNING:
+        return f"Written with a potential its files disagree about: {w['text']}"
     name = WRITTEN_WITHOUT_NAMES.get(w.get("path"), w.get("path") or "a stated condition")
     return f"Written without {name}: {w['text']}"
 
