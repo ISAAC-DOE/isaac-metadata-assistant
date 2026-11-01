@@ -95,8 +95,11 @@ def test_without_a_header_reading_the_header_is_still_a_file_reading_and_validat
     assert f"contradicts the scan header -300mV vs RHE at line:10 of {LABEL}_A.001: -0.3" in _readings(rep)
     _typed(out, tmp_path, -0.15, capsys, "--apply")
     [w] = _warnings(out, R.POTENTIAL_SOURCES_WARNING)
-    assert f"the file name and the scan header of {_run_id(out)} state different potentials (file name m150mV; " in w["text"]
-    assert "-300mV vs RHE at line:10" in w["text"] and "the record carries -0.15 V on RHE" in w["text"]
+    # c16-r M3: the file name names no scale, so they "write different numbers", each scale said
+    assert (f"the file name and the scan header of {_run_id(out)} write different numbers (file name m150mV; scan header "
+            f"'-300mV vs RHE' at line:10 of {LABEL}_A.001; '-300mV vs RHE' at line:10 of {LABEL}_A.002; file name: no "
+            "scale; scan header: RHE)") in w["text"]
+    assert "the record carries -0.15 V on RHE" in w["text"] and "different potentials" not in w["text"]
     assert "re-import the beamtime" in w["text"]
 
 
@@ -121,4 +124,4 @@ def test_a_record_without_a_setpoint_gets_the_stated_potential_warning_instead(t
     out = _imported(tmp_path)
     assert not _warnings(out, R.POTENTIAL_SOURCES_WARNING)
     [w] = _warnings(out, R.STATED_POTENTIAL_WARNING)
-    assert "file name m150mV, scan header -300mV vs RHE" in w["text"]
+    assert "file name m150mV, scan header '-300mV vs RHE'" in w["text"]

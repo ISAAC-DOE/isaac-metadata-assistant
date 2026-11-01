@@ -67,10 +67,15 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
 - **Deferred** (`deferred: {by, decided_utc}`): the scientist said "I don't know". It is still counted
   and sorts last; do not ask it again unless they offer an answer (`--skip-deferred` leaves them out).
   A question they did not answer at all is not deferred: record nothing.
-- **Values read from an SSRL XDC scan header's comment lines** (rule `ssrl_xdc_header_comment_v1`: lines 8-12,
-  e.g. `100mM NaClO4 pH1.3 He`, `-0.3 V vs RHE`): the electrolyte and its concentration, the pH, the potential
-  and its scale are candidates that always need review. Show the header's own words and ask the scientist to
-  confirm or correct each; a line naming two potentials gives no value (ask which). No gas is read.
+- **Values read from an SSRL XDC scan header's comment lines** (rule `ssrl_xdc_header_comment_v1`: lines 9-12,
+  the `.exp` COMMENTS1-4; line 8 is the gain line and is not read; e.g. `100mM NaClO4 pH1.3 He`, `-0.3 V vs RHE`):
+  the electrolyte and its concentration, the pH, the potential and its scale are candidates that always need
+  review. The question quotes the whole line and its line number; ask the scientist to check it is the value
+  held during that scan, and confirm or correct each. A line that does not state one value plainly gives none
+  (ask which, if any): two potentials, a range (`-0.3 to 0.2 V`, `CV from …`), OCP/E1/2/onset/amplitude/a
+  cell voltage, `pre-`/`after`/`then`, a comma decimal (`-0,3 V`), a number after `/`; an electrolyte beside
+  `Ag/AgCl`, `SCE`, `reference`, `filling` or `standard` (a reference filling, not the electrolyte). A rate
+  (`10 mV s-1`) is no potential. No gas is read.
 - **A conflict with `affects_record: false`** (`no_record_field`): the readings differ, but no record
   field carries them (a comment line, a unit spelling). Say how many there are; do not ask each.
 - **A conflict with `covered_by_decisions`** (also `affects_record: false`; counted in
@@ -177,7 +182,8 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   chooses which "I don't know" it is). That records "I don't know":
   no start time is converted, the question stays under its id, marked `deferred`, and the counter
   question is not touched. Every record of those runs then goes out without its start time, and says
-  so: `validate` and `export` warn "start time left out: instrument clock zone deferred (question <Q>)",
+  so: `validate` and `export` warn "start time left out: instrument clock zone deferred (question <Q>)"
+  (while the question is not answered at all: "… not answered yet (question <Q>)"),
   the record's evidence file keeps that line under `notes`, and `upload --dry-run` repeats it; tell the
   scientist before they export. Once a zone is recorded, `defer` is refused (it would not withdraw the
   zone); to change the zone, state it again.

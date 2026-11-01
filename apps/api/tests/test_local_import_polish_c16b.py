@@ -1,6 +1,6 @@
 """c16b (M1): what a BL4-3 scan header's comment lines state. Synthetic only (SYN names, invented lines).
 
-On a real BL4-3 beamtime the comment lines of each scan header (lines 8-12, the ``.exp`` COMMENTS1-4) held the
+On a real BL4-3 beamtime the comment lines of each scan header (lines 9-12, the ``.exp`` COMMENTS1-4) held the
 electrolyte, pH, potential with its scale, and gas (``100mM NaClO4 pH1.3 He``, ``-0.3 V vs RHE``), and only the
 start time was read. ``vs RHE`` was no scale, ``-0.3 V`` (with a space) was not seen at all, and a warning said
 "file name m150mV, scan header -300mV), on the same scale" when the header named RHE and the name no scale.
@@ -112,7 +112,10 @@ def test_scans_stating_different_values_give_a_candidate_with_no_value(imported)
     assert not _cands(imported["bundle"], "07_SYNfoil_023")
     two = _cands(imported["bundle"], "08_SYNmof_two_024")
     assert two[SETPOINT]["value"] is None and SCALE not in two
-    assert "more than one potential (-0.3 V vs RHE; -0.5 V vs RHE)" in two[SETPOINT]["state_basis"]["not_proposable_reason"]
+    reason = two[SETPOINT]["state_basis"]["not_proposable_reason"]
+    # c16-r: the whole line and its place are said, with why no value was read
+    assert "more than one potential: -0.3 V vs RHE; -0.5 V vs RHE" in reason
+    assert "The comment line '-0.3 V vs RHE (was -0.5 V vs RHE)' (line 9 of 08_SYNmof_two_024_A.001)" in reason
 
 
 def test_the_warning_names_each_sources_scale_never_the_same_scale(imported):
@@ -122,7 +125,9 @@ def test_the_warning_names_each_sources_scale_never_the_same_scale(imported):
     [w] = R._stated_potential_warnings(b, group, {rid}, {}, {})
     text = R.potential_warning_text(w)
     assert "same scale" not in text and "no reader reads the set-point" not in text
-    assert f"({rid}: file name m150mV, scan header -300mV vs RHE; the scan header names RHE, the file name no scale)" in text
+    # c16-r M3: a scale missing on one side is never "different potentials"
+    assert f"({rid}: file name m150mV, scan header '-300mV vs RHE' (file name: no scale; scan header: RHE))" in text
+    assert "different potentials" not in text
     assert "read from that free-text line, the set-point and the scale need your review" in text
 
 
@@ -130,4 +135,5 @@ def test_neither_scale_stated_is_said_so():
     text = Q.stated_potential_notes({"stated": [
         {"literal": "m150mV", "stated_in": "file name", "runs": ["run-1"]},
         {"literal": "-300mV", "stated_in": "scan header", "runs": ["run-1"]}]})
-    assert "neither names its scale" in text and "same scale" not in text
+    assert "(file name: no scale; scan header: no scale)" in text and "same scale" not in text
+    assert "different potentials" not in text and "write different numbers for 1 run(s)" in text

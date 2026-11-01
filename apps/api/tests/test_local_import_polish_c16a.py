@@ -109,7 +109,8 @@ def test_one_merge_candidate_per_shared_base_name_never_one_for_the_beamtime(gro
 def test_the_data_file_decides_the_base_name_where_it_was_read():
     assert G.base_name_key("03_SYNx_dry_017") == "03_synx_dry"
     assert G.base_name_key("03_SYNx_dry_017", "03_SYNx_dry") == "03_synx_dry"
-    assert G.base_name_key("03_SYNx_dry_017", "SYN_other") == "syn_other"
+    # c16-r M4: a DATA_FILE naming another acquisition than the run's own name is not used
+    assert G.base_name_key("03_SYNx_dry_017", "SYN_other") == "03_synx_dry"
     assert G.base_name_key("03_SYNx_dry") == "03_synx_dry"  # the last token is a word: the whole name
 
 

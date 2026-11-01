@@ -317,6 +317,8 @@ def render_summary(bundle: Mapping) -> str:
         f"- Conflicts: {counts['conflicts']}{_conflict_breakdown(bundle)} · Missing values: {counts['missing_values']} "
         f"(nothing defaulted) · Questions: {counts['questions']}"
     )
+    if counts.get(B.HEADER_COMMENT_RUNS_NOT_READ):
+        add(f"  - {B.header_comment_runs_not_read_text(counts[B.HEADER_COMMENT_RUNS_NOT_READ])}")
     add(f"- People named in the sources: {counts['contributors']} (evidence, not the naming profile)")
     groups = bundle.get("record_groups") or []
     if groups or bundle.get("processing_results"):
@@ -616,6 +618,7 @@ def cmd_import(args) -> int:
         **section_payloads(bundle),
         "reading.full.json": B.encode(full),
     }
+    replaced = (out / "bundle.json").is_file()  # --force over an earlier bundle: its answers do not carry over
     out.mkdir(parents=True, exist_ok=True)
     # STAGE EVERY FILE FIRST, then move each into place: a failure while writing leaves
     # --out exactly as it was, and nothing else in --out is ever touched.
@@ -635,6 +638,13 @@ def cmd_import(args) -> int:
         f"({c['conflicts']} conflicts{_conflict_breakdown(bundle)}, {c['needs_review']} need review, "
         f"{c['missing_values']} missing, {c['unread_files']} unread file{'s' if c['unread_files'] != 1 else ''})"
     )
+    if c.get(B.HEADER_COMMENT_RUNS_NOT_READ):
+        print(f"  {B.header_comment_runs_not_read_text(c[B.HEADER_COMMENT_RUNS_NOT_READ])}")
+    if replaced:
+        # c16-r L1: a re-import is a NEW bundle
+        from .records import REIMPORT_CAVEAT
+
+        print(f"  It replaces the bundle that was in {out}: {REIMPORT_CAVEAT}.")
     if n_athena := sum(1 for u in bundle["unread_files"] if _is_athena_project(u)):
         print(f"  {_athena_read_by_process(n_athena)}")
     if n_kept := len(B.files_not_opened(bundle)):

@@ -60,7 +60,7 @@ import json
 import operator
 import re
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Container, Mapping, Sequence
 
 from . import bundle as B
 from . import suggestions as S
@@ -364,6 +364,14 @@ def _confirmed_value_text(path: str, cands: Sequence[Mapping]) -> str:
             lit = (c.get("observed_literals") or [None])[0]
             # a start time is the UTC value the stated clock zone gives the header's LOCAL time, not the text itself
             source = ("from the local clock time {} under the stated time zone" if B.is_local_clock_start(c) else "from: {}")
+            if B.is_header_comment_candidate(c):
+                # c16-r: read by PATTERN from free text — the whole line, where it is, and what to check
+                ev = next((e for e in c.get("evidence") or () if e.get("literal_value")), None) or {}
+                lit = ev.get("literal_value", lit)
+                where = str(ev.get("locator") or "").replace("line:", "line ")
+                source = ("read by pattern from the comment line {}"
+                          + (f" ({where} of {ev['relative_path']})" if where and ev.get("relative_path") else "")
+                          + f"; check it is {HEADER_CHECK.get(path, 'what this scan was measured with')}")
             seen[key] = [_shown_value(c["value"], _unit_of(path, c)), lit, 0, source]
         seen[key][2] += 1
     if not seen:
@@ -378,6 +386,16 @@ def _confirmed_value_text(path: str, cands: Sequence[Mapping]) -> str:
     if any((c.get("state_basis") or {}).get("not_proposable_reason") == B.BEAMTIME_WIDE_REASON for c in cands):
         text += f" It is {B.BEAMTIME_WIDE_SUMMARY}"
     return text
+
+
+#: c16-r: what a scientist checks a value read from a scan-header comment line against, per field.
+HEADER_CHECK = {
+    "context.electrochemistry.potential_setpoint_V": "the potential held during this scan",
+    "context.electrochemistry.potential_scale": "the reference scale of the potential held during this scan",
+    "context.electrochemistry.pH": "the pH of the electrolyte during this scan",
+    "context.electrochemistry.electrolyte.name": "the electrolyte the sample was in during this scan",
+    "context.electrochemistry.electrolyte.concentration_M": "the electrolyte's concentration during this scan",
+}
 
 
 def _confirmable_candidates(targets: Sequence[Mapping], cand_by_id: Mapping[str, Mapping],
@@ -1018,14 +1036,17 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         asked_positions = [int(p) for p in gq.get("positions") or () if isinstance(p, int)]
         # `last` is answered "no" when every position those last tokens sit at is said not to be a counter
         last_at = last_token_positions(bundle) if LAST_POSITION in asked_positions else []
+        # c16-r M5: a last-token position ruled either way (a counter, or not one) is answered
+        ruled_at = set(said_counter) | set(said_not)
+        open_last = [p for p in last_at if p not in ruled_at]
         open_positions = [p for p in asked_positions if p not in said_counter and p not in said_not
-                          and not (p == LAST_POSITION and last_at and set(last_at) <= set(said_not))]
+                          and not (p == LAST_POSITION and last_at and not open_last)]
         if asked_positions and not open_positions and not include_answered:
             continue  # every position it asks about is answered: it drops out of the open list
         qid = _qid("experiment", "naming_counter_positions", str(gq.get("id") or gq.get("text") or ""))
         text = str(gq.get("text") or "Which filename token positions are run or acquisition counters?")
         # REAL NAMES, NOT A PATTERN: the file names this bundle holds, the asked token marked
-        examples = _counter_examples(bundle, open_positions or asked_positions)
+        examples = _counter_examples(bundle, open_positions or asked_positions, ruled=ruled_at)
         if examples and _COUNTER_PLACEHOLDER in text:
             text = text.replace(_COUNTER_PLACEHOLDER, "(e.g. " + "; ".join(
                 f"the {_ordinal(p)} token: " + " vs ".join(ex["differ"])
@@ -1053,7 +1074,9 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 "text": text,
                 # answered (include_answered): the positions a no-counter answer names again, never one said to be a counter
                 "positions": open_positions or [p for p in asked_positions if p not in said_counter] or asked_positions,
-                **({"last_token_positions": last_at} if last_at and LAST_POSITION in asked_positions else {}),
+                # what a "no" names: the open last-token positions (never one already said to be a counter)
+                **({"last_token_positions": open_last or [p for p in last_at if p not in said_counter] or last_at}
+                   if last_at and LAST_POSITION in asked_positions else {}),
                 **({"example_names": example_names} if example_names else {}),
                 "applies_to": {"groups": len(groups), "runs": len(bundle["runs"]), "targets": 1},
                 "targets": [{"kind": "experiment", "id": "experiment"}],
@@ -1440,10 +1463,11 @@ def _marked_token(stem: str, position: int) -> str | None:
     return f"{stem[:a]}[{stem[a:b]}]{stem[b:]}"
 
 
-def _counter_examples(bundle: Mapping, positions: Sequence[int]) -> dict[int, dict]:
+def _counter_examples(bundle: Mapping, positions: Sequence[int], ruled: Container[int] = ()) -> dict[int, dict]:
     """For each asked position: ``differ`` — the names (at most 2) of one merge candidate whose names differ there in
     a number (what the question is asked for), the token marked — and ``elsewhere``, one name of the bundle where
-    that token is not a number (or ``None``). Real names of this bundle, never a pattern."""
+    that token is not a number (or ``None``). Real names of this bundle, never a pattern. c16-r M5: the last-token
+    example is never one whose last token sits at a position in ``ruled`` (already answered)."""
     from .grouping import _stem_tokens
 
     runs_by_key = {r["run_key"]: r for r in bundle.get("runs") or ()}
@@ -1460,7 +1484,7 @@ def _counter_examples(bundle: Mapping, positions: Sequence[int]) -> dict[int, di
                     stems.append(stem)
             toks = [_stem_tokens(x) for x in stems[:2]]
             if (len(toks) == 2 and len(toks[0]) == len(toks[1]) > 1 and toks[0][:-1] == toks[1][:-1]
-                    and toks[0][-1] != toks[1][-1] and all(t[-1].isdigit() for t in toks)):
+                    and toks[0][-1] != toks[1][-1] and all(t[-1].isdigit() for t in toks) and len(toks[0]) not in ruled):
                 out[LAST_POSITION] = {"differ": [_marked_token(x, len(t)) for x, t in zip(stems, toks)], "elsewhere": None}
                 break
     for mc in bundle.get("merge_candidates") or ():
@@ -2638,20 +2662,72 @@ _HEADER_POTENTIAL_PHRASE = re.compile(
     re.IGNORECASE)
 
 
-def header_potentials_in_line(line: str) -> list[dict]:
-    """``[{"literal", "scale", "volts", "compact"}]``: each potential a scan-header comment LINE states, in order —
-    the phrase forms (:data:`_HEADER_POTENTIAL_PHRASE`) and, in what is left, the token forms
-    (:func:`header_potential`). ``literal`` is the text as written; ``scale`` its own spelling or ``None`` (none
-    named); ``volts`` the number the spelling writes (:func:`_token_volts`), ONLY to compare statements."""
-    text = str(line or "").replace("\u2212", "-")
+#: c16-r: the dash characters a header may write for a minus sign (U+2010-U+2015, U+2212): each is read as ``-``.
+_MINUS_LIKE = re.compile("[\u2010-\u2015\u2212]")
+#: c16-r: what follows a number's unit when the number is a RATE, not a potential (``10 mV s-1``, ``50 mV s^-1``,
+#: ``10 mV /s``; ``V/s``, ``mV/s`` and ``/dec`` are never matched as a potential at all).
+_RATE_AFTER = re.compile(r"\s*(?:/\s*s\b|s\s*\^?\s*\(?\s*-\s*1\b|/\s*dec\b)", re.IGNORECASE)
+#: c16-r: words that say a line's potential may NOT be the one held during the scan: open circuit, a half-wave or
+#: onset potential, a step amplitude, a sweep (CV, LSV), a cell voltage, what came before (``pre-``) or after
+#: (``after``, ``then``, ``->``), or a range (``from``, ``to``, ``between``). A line naming one gives no value.
+_HEADER_POTENTIAL_CAUTION = re.compile(
+    r"(?i:\bOC[PV]\b|open[\s_-]*circuit|\bE\s*1/2|onset|amplitude|sweep|\bLSV\b|\bCV\b|cell|\bpre-|\bafter\b|\bthen\b"
+    r"|\bfrom\b|\bto\b|\bbetween\b|->|\u2192)|\bdE\b")
+#: c16-r: words that say a concentration in a line may be a REFERENCE ELECTRODE'S filling or a solution standard,
+#: not the electrolyte (``-1.2 V vs Ag/AgCl 3M KCl``, ``0.5 M Na2SO4 standard``). A line naming one gives no value.
+_HEADER_ELECTROLYTE_CAUTION = re.compile(
+    r"(?i)Ag\s*/?\s*AgCl|\bSCE\b|Hg\s*/?\s*Hg|reference|\bref\b|filling|standard|\bsat(?:urated|\.)?(?![a-z])")
+
+
+def _header_text(line: str) -> str:
+    """A comment line with every minus-like dash read as ``-`` and a minus written apart from its number
+    (``- 0.3 V``) joined to it, where what comes before cannot make it a range or a difference: after a digit, a
+    bracket or a point (``1.3 - 0.3 V``) the dash stays apart, and the number after it is read as no value."""
+    text = _MINUS_LIKE.sub("-", str(line or ""))
+
+    def joined(m: re.Match) -> str:
+        before = text[:m.start()].rstrip()
+        return "-" if not before or not (before[-1].isdigit() or before[-1] in ").") else m.group(0)
+
+    return re.sub(r"-\s+(?=\.?\d)", joined, text)
+
+
+def _refused_number(text: str, m: re.Match) -> str | None:
+    """Why a potential-shaped match of :data:`_HEADER_POTENTIAL_PHRASE` is NOT read as a value, or ``None``:
+    ``"rate"`` for a sweep rate (not a potential at all), else what makes its number or sign uncertain."""
+    if _RATE_AFTER.match(text, m.end("unit")):
+        return "rate"
+    before = text[:m.start()]
+    signed = m.group("num")[:1] in "+-"
+    for pattern, why in ((r"\d,$", "a comma decimal"), (r"/\s*$", "a number after a slash"),
+                         (r"(?i)\b(?:to|from)\s*$", "a number after to/from"), (r"\d[eE][-+]?$", "an exponent"),
+                         (r"[-+\u00b1]\s*$", "two signs" if signed else "a sign apart from its number")):
+        if re.search(pattern, before):
+            return why
+    return None
+
+
+def _header_potential_scan(line: str) -> tuple[list[dict], list[str]]:
+    """``(potentials, refused)`` of one scan-header comment LINE: each potential read as stated (see
+    :func:`header_potentials_in_line`) and why each other potential-shaped number was NOT read (a comma decimal,
+    a number after ``/``, ``to`` or ``from``, an uncertain sign). A sweep rate is neither."""
+    text = _header_text(line)
     out: list[dict] = []
+    refused: list[str] = []
     spans: list[tuple[int, int]] = []
     for m in _HEADER_POTENTIAL_PHRASE.finditer(text):
+        why = _refused_number(text, m)
         compact = m.group("num") + m.group("unit") + (f"_{m.group('scale')}" if m.group("scale") else "")
         got = header_potential(compact)
-        if got is None:
+        if why == "rate" or got is None:
+            if why == "rate":
+                spans.append(m.span())
             continue
         spans.append(m.span())
+        if why:
+            # what was not read, with the text just before it (``-0,3 V``, ``-0.3/-0.5 V``, ``to 0.2 V``)
+            refused.append(f"{why}: {' '.join((re.search(r'[^ ]*[ ]?$', text[:m.start()]).group(0) + m.group(0)).split())!r}")
+            continue
         out.append({"literal": " ".join(m.group(0).split()), "scale": got["scale"], "volts": _token_volts(compact),
                     "compact": compact, "start": m.start()})
     for m in re.finditer(r"\S+", text):
@@ -2661,7 +2737,17 @@ def header_potentials_in_line(line: str) -> list[dict]:
         if got is not None:
             out.append({"literal": got["literal"], "scale": got["scale"], "volts": _token_volts(got["literal"]),
                         "compact": got["literal"], "start": m.start()})
-    return [{k: v for k, v in x.items() if k != "start"} for x in sorted(out, key=lambda x: x["start"])]
+    return [{k: v for k, v in x.items() if k != "start"} for x in sorted(out, key=lambda x: x["start"])], refused
+
+
+def header_potentials_in_line(line: str) -> list[dict]:
+    """``[{"literal", "scale", "volts", "compact"}]``: each potential a scan-header comment LINE states, in order —
+    the phrase forms (:data:`_HEADER_POTENTIAL_PHRASE`) and, in what is left, the token forms
+    (:func:`header_potential`). ``literal`` is the text as written; ``scale`` its own spelling or ``None`` (none
+    named); ``volts`` the number the spelling writes (:func:`_token_volts`), ONLY to compare statements. c16-r: a
+    minus-like dash (``–0.3 V``, ``- 0.3 V``) is a minus; a number after a comma decimal (``-0,3 V``), a slash, ``to``
+    or ``from``, or with an uncertain sign is not listed, nor a rate (``10 mV s-1``)."""
+    return _header_potential_scan(line)[0]
 
 
 #: A pH written in a comment line: ``pH1.3``, ``pH 13``, ``pH=7``, ``pH1p3`` (``p`` for the decimal point, as in
@@ -2680,13 +2766,19 @@ def header_comment_readings(line: str) -> list[dict]:
     ``bundle.XDC_COMMENT_RULE_ID``): ``[{"path", "value", "literal", "unit"}]`` — the electrolyte name and its
     concentration in mol/L (one concentration in the line, the formula after it:
     :func:`template.electrolyte_statement_parts` reads the pair), the pH, the potential in volts and its scale
-    (:func:`header_potentials_in_line`; a line naming two or more gives a reading with no value). Free text read by a
-    pattern: each becomes a candidate that NEEDS REVIEW, never a confirmed value. A gas or atmosphere word is
-    not read: the bundle has no write route for an atmosphere field."""
+    (:func:`header_potentials_in_line`). Free text read by a pattern: each becomes a candidate that NEEDS REVIEW,
+    never a confirmed value. A gas or atmosphere word is not read: the bundle has no write route for an atmosphere
+    field.
+
+    c16-r: ``literal`` is the WHOLE line (what the scientist checks the value against). A reading the line does not
+    state plainly is ``ambiguous`` with NO value and says ``why``: a line naming two potentials, a potential number
+    not read (a comma decimal, after ``/``, ``to`` or ``from``, an uncertain sign), or a word that says the potential
+    may not be the one held (:data:`_HEADER_POTENTIAL_CAUTION`: OCP, E1/2, onset, a sweep, a cell, a range, ...); an
+    electrolyte beside a reference-electrode or standard word (:data:`_HEADER_ELECTROLYTE_CAUTION`)."""
     from .template import _CONCENTRATION_IN_NAME, ELECTROLYTE_CONC_PATH, ELECTROLYTE_NAME_PATH, PH_PATH, POTENTIAL_PATH
     from .template import electrolyte_statement_parts
 
-    text = str(line or "")
+    text = str(line or "").strip()
     out: list[dict] = []
     concs = list(_CONCENTRATION_IN_NAME.finditer(text))
     if len(concs) == 1:
@@ -2695,23 +2787,30 @@ def header_comment_readings(line: str) -> list[dict]:
         name = after[0].strip(",;") if after else ""
         parts = electrolyte_statement_parts(f"{m.group(0)} {name}") if _FORMULA.match(name) else None
         if parts:
-            literal = f"{m.group(0)} {name}"
-            out.append({"path": ELECTROLYTE_NAME_PATH, "value": parts[0], "literal": literal, "unit": None})
-            out.append({"path": ELECTROLYTE_CONC_PATH, "value": parts[1], "literal": literal, "unit": "M"})
+            caution = _HEADER_ELECTROLYTE_CAUTION.search(text)
+            if caution is not None:
+                why = f"the line also names {caution.group(0)!r}: the concentration may be a reference electrode's filling or a standard"
+                out.append({"path": ELECTROLYTE_NAME_PATH, "value": None, "literal": text, "unit": None, "ambiguous": True, "why": why})
+                out.append({"path": ELECTROLYTE_CONC_PATH, "value": None, "literal": text, "unit": "M", "ambiguous": True, "why": why})
+            else:
+                out.append({"path": ELECTROLYTE_NAME_PATH, "value": parts[0], "literal": text, "unit": None})
+                out.append({"path": ELECTROLYTE_CONC_PATH, "value": parts[1], "literal": text, "unit": "M"})
     phs = list(_HEADER_PH.finditer(text))
     if len(phs) == 1:
         v = phs[0].group("v").replace("p", ".")
-        out.append({"path": PH_PATH, "value": float(v), "literal": phs[0].group(0), "unit": None})
-    pots = header_potentials_in_line(text)
-    if len(pots) == 1 and pots[0]["volts"] is not None:
+        out.append({"path": PH_PATH, "value": float(v), "literal": text, "unit": None})
+    pots, refused = _header_potential_scan(text)
+    caution = _HEADER_POTENTIAL_CAUTION.search(_header_text(text)) if pots or refused else None
+    if len(pots) == 1 and pots[0]["volts"] is not None and not refused and caution is None:
         pot = pots[0]
-        out.append({"path": POTENTIAL_PATH, "value": pot["volts"], "literal": pot["literal"], "unit": "V"})
+        out.append({"path": POTENTIAL_PATH, "value": pot["volts"], "literal": text, "unit": "V", "scale": pot["scale"]})
         if pot["scale"] in POTENTIAL_SCALES:
-            out.append({"path": SCALE_PATH, "value": pot["scale"], "literal": pot["literal"], "unit": None})
-    elif len(pots) > 1:
-        # more than one potential in one line: which the run was held at is the scientist's call (no value)
-        out.append({"path": POTENTIAL_PATH, "value": None, "literal": "; ".join(p["literal"] for p in pots), "unit": "V",
-                    "ambiguous": True})
+            out.append({"path": SCALE_PATH, "value": pot["scale"], "literal": text, "unit": None})
+    elif pots or refused:
+        # which potential the run was held at, if any, is the scientist's call (no value)
+        why = (refused[0] if refused else f"the line says {caution.group(0)!r}" if caution is not None
+               else f"the line names more than one potential: {'; '.join(p['literal'] for p in pots)}")
+        out.append({"path": POTENTIAL_PATH, "value": None, "literal": text, "unit": "V", "ambiguous": True, "why": why})
     return out
 
 
@@ -2743,21 +2842,24 @@ def stated_potentials_beyond_candidates(bundle: Mapping, member_ids: set) -> lis
             and c.get("target_field_path") == "context.electrochemistry.potential_setpoint_V" for e in c.get("evidence") or ()}
     headers: dict[str, list[Mapping]] = {}
     for e in bundle.get("extended_context") or ():
-        if (e.get("run_id") in run_ids and e.get("concept") in ("free_text", "header_line_8_literal")
+        # c16-r: the comment rule's own lines (line 8 is the gain line)
+        if (e.get("run_id") in run_ids and B.is_xdc_comment_line(e.get("concept"), e.get("locator"))
                 and isinstance(e.get("raw_literal"), str) and (e["run_id"], e.get("relative_path"), e.get("locator")) not in held):
             headers.setdefault(e["run_id"], []).append(e)
     for r in runs:
         first = next((sc.get("relative_path") for sc in r.get("scans") or () if sc.get("relative_path")), None)
-        found = [("file name", tok, first, "file name", None) for tok in _name_tokens(r) if _POTENTIAL_TOKEN.match(tok)]
+        found = [("file name", tok, first, "file name", None, _token_volts(tok))
+                 for tok in _name_tokens(r) if _POTENTIAL_TOKEN.match(tok)]
         for e in headers.get(r["run_id"], ()):
             for got in header_potentials_in_line(e["raw_literal"]):  # `-0.3 V vs RHE` as well as `0.5Vrhe`
-                found.append(("scan header", got["literal"], e.get("relative_path"), e.get("locator"), got["scale"]))
-        for where, lit, rel, locator, scale in found:
+                found.append(("scan header", got["literal"], e.get("relative_path"), e.get("locator"), got["scale"], got["volts"]))
+        for where, lit, rel, locator, scale, volts in found:
             if (r["run_id"], where + lit) in seen:
                 continue
             seen.add((r["run_id"], where + lit))
             out.append({"literal": lit, "relative_path": rel, "candidate_id": None, "read_as_V": None, "value_state": None,
-                        "stated_in": where, "locator": locator, "run_id": r["run_id"], **({"scale": scale} if scale else {})})
+                        "stated_in": where, "locator": locator, "run_id": r["run_id"], "volts": volts,
+                        **({"scale": scale} if scale else {})})
     # one item per literal and place across the group's runs (the text names a few; a group of 16 scans is one run)
     first_of: dict[tuple[str, str], dict] = {}
     for s in out:
@@ -2778,7 +2880,7 @@ def stated_potential_notes(w: Mapping) -> str:
     if not header:
         return ""
     scales = sorted({s["scale"] for s in header if s.get("scale")})
-    lits = list(dict.fromkeys(s["literal"] for s in header))
+    lits = list(dict.fromkeys(stated_literal(s) for s in header))
     read = all(s.get("candidate_id") for s in header)  # c16b: read from the line as values that need review
     text = (f" {', '.join(lits[:3])}{', …' if len(lits) > 3 else ''} {'is' if len(lits) == 1 else 'are'} written in the "
             "scan header (a comment line), not the file name"
@@ -2787,43 +2889,51 @@ def stated_potential_notes(w: Mapping) -> str:
                + " need your review (confirm or correct)" if read else
                f", with the scale ({', '.join(scales)}); no reader reads the set-point or the scale from it, so both "
                "are asked" if scales else "") + ".")
-    by_run: dict[str, dict[str, list[tuple[str, str | None]]]] = {}
+    by_run: dict[str, dict[str, list[tuple[str, str | None, float | None]]]] = {}
     for s in stated:
+        # the volts each statement writes (c16-r: a header statement's literal is its whole comment line, so its volts
+        # come with it; a file-name token's are its own spelling's)
+        volts = s["volts"] if "volts" in s else _token_volts(s["literal"])
         for rid in s.get("runs") or ([s["run_id"]] if s.get("run_id") else []):
-            by_run.setdefault(rid, {}).setdefault(s.get("stated_in") or "", []).append((s["literal"], s.get("scale")))
+            by_run.setdefault(rid, {}).setdefault(s.get("stated_in") or "", []).append((stated_literal(s), s.get("scale"), volts))
     differ, scales_differ = [], []
     for rid, places in by_run.items():
         names, heads = places.get("file name") or [], places.get("scan header") or []
-        nv = {v for v in (_token_volts(lit) for lit, _ in names) if v is not None}
-        hv = {v for v in (_token_volts(lit) for lit, _ in heads) if v is not None}
+        nv = {v for _, _, v in names if v is not None}
+        hv = {v for _, _, v in heads if v is not None}
         if not (nv and hv) or nv & hv:
             continue
-        said = (f"{rid}: file name {'/'.join(dict.fromkeys(lit for lit, _ in names))}, "
-                f"scan header {'/'.join(dict.fromkeys(lit for lit, _ in heads))}")
-        name_scales, head_scales = {sc for _, sc in names}, {sc for _, sc in heads}
-
-        def written(scales: set) -> str:
-            named = sorted(sc for sc in scales if sc)
-            return "/".join(named) if named else "no scale"
-
+        said = (f"{rid}: file name {'/'.join(dict.fromkeys(lit for lit, _, _ in names))}, "
+                f"scan header {'/'.join(dict.fromkeys(lit for lit, _, _ in heads))}")
+        name_scales, head_scales = {sc for _, sc, _ in names}, {sc for _, sc, _ in heads}
         if name_scales == head_scales and None not in name_scales:
             # THE SAME NAMED SCALE: two numbers for one potential, a real disagreement
-            differ.append(f"{said}; both on {written(name_scales)}")
-        elif name_scales == head_scales:
-            # neither names its scale: two numbers, and nothing says they are on one scale (never "the same scale")
-            differ.append(f"{said}; neither names its scale")
+            differ.append(f"{said}; both on {written_scales(name_scales)}")
         else:
-            # c8-r: m600mV (no scale) and 0Vrhe may be ONE potential written on two scales: never "disagree"
-            scales_differ.append(f"{said}; the scan header names {written(head_scales)}, the file name {written(name_scales)}")
+            # c8-r / c16-r M3: a scale missing on either side, or two scales: m600mV (no scale) and 0Vrhe may be ONE
+            # potential written on two scales, so never "different potentials", never "disagree"
+            scales_differ.append(f"{said} (file name: {written_scales(name_scales)}; scan header: {written_scales(head_scales)})")
     if differ:
         text += (f" The file name and the scan header state different potentials for {len(differ)} run(s) "
                  f"({'; '.join(differ[:3])}" + ("; …" if len(differ) > 3 else "") + "): ask the scientist which is right; "
                  "neither is used.")
     if scales_differ:
-        text += (f" The file name and the scan header write different numbers on possibly different scales for "
-                 f"{len(scales_differ)} run(s) ({'; '.join(scales_differ[:3])}" + ("; …" if len(scales_differ) > 3 else "")
-                 + "): ask which applies; neither is used.")
+        text += (f" The file name and the scan header write different numbers for {len(scales_differ)} run(s) "
+                 f"({'; '.join(scales_differ[:3])}" + ("; …" if len(scales_differ) > 3 else "")
+                 + "), and nothing says both are on one scale: ask which applies; neither is used.")
     return text
+
+
+def stated_literal(s: Mapping) -> str:
+    """How a stated potential's literal is said in a warning: a scan header's in quotes (c16-r: it is the whole comment
+    line the value was read from, ``'100mM NaClO4 -0.3 V vs RHE'``), a file-name token as it is (``m150mV``)."""
+    return repr(s["literal"]) if s.get("stated_in") == "scan header" else str(s["literal"])
+
+
+def written_scales(scales) -> str:
+    """The reference scales a source writes, as said in a warning: ``RHE``, ``Ag/AgCl/RHE``, or ``no scale``."""
+    named = sorted(sc for sc in scales if sc)
+    return "/".join(named) if named else "no scale"
 
 
 def open_circuit_warnings(bundle: Mapping, group: Mapping, member_ids: set, fields: Mapping) -> list[dict]:

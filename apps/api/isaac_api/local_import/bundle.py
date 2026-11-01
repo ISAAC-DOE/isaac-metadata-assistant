@@ -1466,19 +1466,22 @@ LOCAL_CLOCK_NONEXISTENT = "nonexistent_in_zone"
 
 
 #: THE COMMENT RULE (``ssrl_xdc_header_comment_v1``, applied at import by :func:`_xdc_comment_candidates`): the
-#: comment lines of an ``ssrl_xdc_v1`` scan header (lines 8-12; the ``.exp`` COMMENTS1-4) are free text a scientist
+#: comment lines of an ``ssrl_xdc_v1`` scan header (lines 9-12; the ``.exp`` COMMENTS1-4: line 8 is the gain line,
+#: ``readers.ssrl_xdc``) are free text a scientist
 #: typed at the beamline, e.g. ``100mM NaClO4 pH1.3 He`` and ``-0.3 V vs RHE``. What a line states by pattern
 #: (``questions.header_comment_readings``: the electrolyte and its concentration, the pH, the potential and the scale
 #: written after ``vs``) becomes ONE candidate per run and field that NEEDS REVIEW: never proposable, never
 #: confirmed until a scientist confirms (or corrects) it. A gas or atmosphere word is not read (no write route).
 XDC_COMMENT_RULE_ID = "ssrl_xdc_header_comment_v1"
 XDC_COMMENT_RULE = (
-    f"{XDC_COMMENT_RULE_ID}: a comment line of the run's SSRL EXAFS Data Collector 4.0 scan headers (lines 8-12, the "
+    f"{XDC_COMMENT_RULE_ID}: a comment line of the run's SSRL EXAFS Data Collector 4.0 scan headers (lines 9-12, the "
     "experiment file's COMMENTS1-4) that writes an electrolyte after its concentration, a pH, or a potential (the "
     "scale named after `vs`) is read by pattern into a candidate that NEEDS REVIEW. The line is free text, so the "
     "value is never proposed or confirmed until a scientist confirms or corrects it."
 )
-XDC_COMMENT_LINES = range(8, 13)
+XDC_COMMENT_LINES = range(9, 13)
+#: the reader's key for those lines (line 8, ``header_line_8_literal``, is the gain line and is never read)
+XDC_COMMENT_STATEMENT_KEY = "free_text"
 #: statement key per field (each a grouping CONDITION key: a different value is a different record)
 XDC_COMMENT_KEYS: Mapping[str, str] = {
     "context.electrochemistry.electrolyte.name": "scan_header_electrolyte",
@@ -1493,9 +1496,34 @@ XDC_COMMENT_REASON = (
 )
 
 
+#: c16-r M1: ``counts`` key — the XDC runs whose comment lines were NOT read into candidates, because their readings
+#: would have passed :data:`MAX_CANDIDATES` (absent when every run was read).
+HEADER_COMMENT_RUNS_NOT_READ = "header_comment_runs_not_read"
+
+
+def header_comment_runs_not_read_text(n: int) -> str:
+    """The summary's line for :data:`HEADER_COMMENT_RUNS_NOT_READ`."""
+    return (f"{n} SSRL XDC run(s) had their scan-header comment lines NOT read into values (rule {XDC_COMMENT_RULE_ID}): "
+            f"reading them would pass the bound of {MAX_CANDIDATES} candidates. Their lines are kept as context; ask the "
+            "scientist for the electrolyte, pH and potential of those runs as for any missing value.")
+
+
 def is_header_comment_candidate(candidate: Mapping) -> bool:
     """A candidate of :data:`XDC_COMMENT_RULE_ID` (a value read from a scan-header comment line)."""
     return _rule_id(candidate.get("rule")) == XDC_COMMENT_RULE_ID
+
+
+def is_xdc_comment_line(key: Any, locator: Any) -> bool:
+    """Whether a scan-header statement (its reader ``key``, its ``line:N`` locator) is one of the comment lines
+    :data:`XDC_COMMENT_RULE_ID` reads (:data:`XDC_COMMENT_LINES`). ONE test for the rule and for every reading of
+    the same lines (``template.header_potential_readings``), so the two never read different lines."""
+    loc = str(locator or "")
+    if key != XDC_COMMENT_STATEMENT_KEY or not loc.startswith("line:"):
+        return False
+    try:
+        return int(loc.split(":", 1)[1]) in XDC_COMMENT_LINES
+    except ValueError:
+        return False
 
 
 def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_n: int, sid_of: Mapping,
@@ -1511,13 +1539,7 @@ def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_
     found: dict[str, list[tuple]] = {}
     for st in g.statements:
         rel, loc = st.get("source_relative_path"), str(st.get("locator") or "")
-        if rel not in scans or st.get("key") not in ("header_line_8_literal", "free_text") or not loc.startswith("line:"):
-            continue
-        try:
-            line = int(loc.split(":", 1)[1])
-        except ValueError:
-            continue
-        if line not in XDC_COMMENT_LINES or not isinstance(st.get("literal"), str):
+        if rel not in scans or not is_xdc_comment_line(st.get("key"), loc) or not isinstance(st.get("literal"), str):
             continue
         for reading in header_comment_readings(st["literal"]):
             found.setdefault(reading["path"], []).append((st.get("scan_index"), rel, loc, st["literal"], reading))
@@ -1546,10 +1568,13 @@ def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_
                 "normalization": [{"step": "normalize", "rule_id": XDC_COMMENT_RULE_ID, "from": reading["literal"],
                                    "to": reading["value"], "unit": reading["unit"]}],
             })
-        ambiguous = [h[4]["literal"] for h in hits if h[4].get("ambiguous")]
+        ambiguous = [h for h in hits if h[4].get("ambiguous")]
         if ambiguous:
-            reason = (f"A comment line names more than one potential ({ambiguous[0]}): a scientist says which the run "
-                      "was held at.")
+            # c16-r: the whole line and why no value was read from it (a range, OCP, a comma decimal, a filling, ...)
+            _i, a_rel, a_loc, a_line, a_reading = ambiguous[0]
+            reason = (f"The comment line {a_line!r} ({a_loc.replace(':', ' ')} of {a_rel}) does not state one value "
+                      f"for this plainly ({a_reading.get('why') or 'more than one value'}), so none was read: a "
+                      "scientist says which value, if any, applied during the scan.")
         elif value is None:
             reason = ("The scans' comment lines state different values ("
                       + "; ".join(dict.fromkeys(h[4]["literal"] for h in hits[:4])) + "): a scientist says which is right.")
@@ -3513,9 +3538,20 @@ def build_bundle(
         runs_by_id[run_id]["candidate_ids"].append(cand["candidate_id"])
         if order_anomaly is not None:
             runs_by_id[run_id]["other_relationships"]["anomalies"].append(order_anomaly)
-    # ssrl_xdc_header_comment_v1: what the comment lines state, AFTER every start-time candidate (their ids stand)
+    # ssrl_xdc_header_comment_v1: what the comment lines state, AFTER every start-time candidate (their ids stand).
+    # c16-r M1: these readings never refuse an import. A run whose readings would pass MAX_CANDIDATES is not read
+    # this way (its lines stay in extended_context, as before the rule), and the bundle counts it
+    # (counts.header_comment_runs_not_read, said in the summary): a large XDC beamtime imports as it did before.
+    comment_runs_not_read = 0
     for run_id, g, run_scans in xdc_runs:
-        for cand in _xdc_comment_candidates(g, run_scans, run_id, len(out_candidates) + 1, sid_of, writable):
+        if comment_runs_not_read:
+            comment_runs_not_read += 1  # in run order: once one run is left out, every later one is too
+            continue
+        cands = _xdc_comment_candidates(g, run_scans, run_id, len(out_candidates) + 1, sid_of, writable)
+        if len(out_candidates) + len(cands) > MAX_CANDIDATES:
+            comment_runs_not_read += 1
+            continue
+        for cand in cands:
             out_candidates.append(cand)
             runs_by_id[run_id]["candidate_ids"].append(cand["candidate_id"])
     if len(out_candidates) > MAX_CANDIDATES:
@@ -3750,6 +3786,7 @@ def build_bundle(
         "data_quality_notes": len(dq_notes),
         "questions": len(questions),
         **processed_output_counts(processed_outputs),
+        **({HEADER_COMMENT_RUNS_NOT_READ: comment_runs_not_read} if comment_runs_not_read else {}),
     }
     eligible = sum(1 for c in out_candidates if c["eligibility_for_official_record"]["eligible"])
     readiness = {

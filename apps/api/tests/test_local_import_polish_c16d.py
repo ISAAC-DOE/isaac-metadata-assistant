@@ -60,7 +60,8 @@ def test_the_clock_question_id_is_the_one_the_question_is_asked_under(xdc):
 
 
 def test_validate_says_the_start_time_is_left_out_while_the_zone_is_deferred(xdc):
-    assert not _start_warnings(xdc)  # not deferred: the clock question is asked (optional), no warning
+    # c16-r L6: not answered at all, the record still says it goes out without its start time
+    assert {w["text"] for w in _start_warnings(xdc)} == {LINE.replace("deferred", "not answered yet")}
     _defer_clock(xdc)
     got = _start_warnings(xdc)
     assert len(got) == 2 and {w["text"] for w in got} == {LINE}

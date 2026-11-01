@@ -33,10 +33,14 @@ set-point in volts and the scale together, so the scientist is not asked twice. 
 (SSRL XDC) warns too: from its file name (`500mV`, `m600mV`, `1800mV`) and from a scan-header comment
 token (`0.5Vrhe`, with the scale written on it, spelled as written: `Hg/HgO`, `Ag/AgCl`; a header token
 with no scale counts only at |V| ≤ 3 and not in brackets, so `800V`, `12V` or `(1.2V)` is not a
-potential); a run whose name and header write different numbers on the SAME scale (or neither writes
-one) is named as a disagreement for the scientist to settle, while a name with no scale beside a header
-on RHE (`…_m600mV` with `0Vrhe`) may be one potential on two scales: the warning says "different numbers
-on possibly different scales" and to ask which applies. A name stating open
+potential); a run whose name and header write different numbers on the SAME named scale is named as a
+disagreement ("state different potentials") for the scientist to settle, while a scale missing on either
+side or two scales (`…_m600mV` with `0Vrhe`) may be one potential on two scales: the warning says "write
+different numbers (file name: no scale; scan header: RHE)" and to ask which applies. A record that CARRIES
+a set-point while its run's name and header write different numbers warns `potential_sources_disagree` until
+the scientist rules on the header's reading (in a bundle imported before header readings: by recording the
+record's set-point again, the warning's command). Re-importing instead starts with no answers: earlier
+decisions and a filled workbook do not carry over, and ids printed for the old bundle name other things. A name stating open
 circuit (`OCV`) warns until the control mode is confirmed. None of these is read as a value. It is not a refusal: the record can still be exportable,
 without the condition that defines it. Say each one to the scientist in words and ask the scale question it names (and the set-point when `also_needs` is set); its command is a template: run it only with their answer. Explain the counts first ("all 78 lack the producing group; 70 wait for a curve
 approval; 5 have no protocol"), then open `validation/<group id>.json` only for a group they leave

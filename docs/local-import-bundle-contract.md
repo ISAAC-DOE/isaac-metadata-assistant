@@ -844,6 +844,10 @@ Exit codes for the LOCAL-2 commands: `validate` and `export` exit 1 when any dra
   `normalization` (deglitch and qc have no token and are not written).
 - The writable set now includes these portal-target fields
   (`bundle.UPSTREAM_TARGET_FIELDS`). They are NOT website write paths.
+- The evidence sidecar `export.build_sidecar` writes may carry one more key, added by `local_import` after it
+  (`export.py` unchanged): `notes`, a list of plain sentences saying what the record was written WITHOUT —
+  today the start time left out while the instrument clock's zone is deferred or not answered yet
+  (`records.START_TIME_WARNING`). Absent when there is nothing to say; `upload --dry-run` repeats each.
 
 ## 14. LOCAL-3: generic readers, grouping, processing
 

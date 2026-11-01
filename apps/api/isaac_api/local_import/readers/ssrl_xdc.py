@@ -520,26 +520,46 @@ def _companions(prefix: str, name: str, by_rel: dict[str, tuple[Path, int]], lim
 MAX_EXP_BYTES = 64_000
 #: ``DATA_FILE`` and its value: the acquisition's base name (the run name without its trailing ``_NNN``).
 _EXP_DATA_FILE = re.compile(r"^\s*DATA_FILE(?:\s*[:=]\s*|\s+)(?P<value>\S(?:.*\S)?)\s*$")
+#: c16-r L4: a terminal escape sequence, then any other control character, removed from the value
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def _data_file_name(value: str) -> str:
+    """The base name a ``DATA_FILE`` value writes: control characters removed (c16-r L4) and, for a path-like value
+    (``C:\\xdc\\data\\01_SYNa.dat``, ``/data/01_SYNa.dat``), its last part without the extension."""
+    text = _CONTROL_CHARS.sub("", _ANSI_ESCAPE.sub("", value)).strip()
+    if "/" in text or "\\" in text:
+        text = re.split(r"[/\\]", text)[-1]
+        text = re.sub(r"\.[A-Za-z][A-Za-z0-9]{0,4}$", "", text)
+    return text.strip()
 
 
 def _exp_data_file(rel: str, by_rel: dict[str, tuple[Path, int]], companions: list[dict]) -> dict | None:
     """The ``DATA_FILE`` line of the run's own ``<name>.exp`` (a sibling with the run's name), as one statement
-    (key ``exp_data_file``, the literal value, its line) — or ``None`` when there is no such file, it is too large,
-    or no line names it. Nothing else in the file is read here (``EXPT_TYPE``, ``COMMENTS1-4`` are not); the
+    (key ``exp_data_file``, the base name it writes, its line) — or ``None`` when there is no such file, it is too
+    large, or no line names one. Nothing else in the file is read here (``EXPT_TYPE``, ``COMMENTS1-4`` are not); the
     companion is marked ``parsed`` only when the line was taken. A value of a known meaning, used ONLY to offer
-    merge candidates by base name (``grouping``): never a field value."""
+    merge candidates by base name when it agrees with the run's own name (``grouping``): never a field value.
+    c16-r L4: at most :data:`MAX_EXP_BYTES` + 1 bytes are read (more is too large, whatever the size said); lines end
+    at CR, LF or CRLF; control characters are removed and a path-like value gives its base name."""
     companion = next((c for c in companions if c["relative_path"] == rel), None)
     if companion is None or rel not in by_rel or by_rel[rel][1] > MAX_EXP_BYTES:
         return None
     try:
-        text = by_rel[rel][0].read_bytes().decode("latin-1")
+        with by_rel[rel][0].open("rb") as fh:
+            raw = fh.read(MAX_EXP_BYTES + 1)
     except OSError:
         return None
-    for number, line in enumerate(text.split("\n"), 1):
-        m = _EXP_DATA_FILE.match(line.rstrip("\r"))
+    if len(raw) > MAX_EXP_BYTES:
+        return None
+    for number, line in enumerate(re.split(r"\r\n|\r|\n", raw.decode("latin-1")), 1):
+        m = _EXP_DATA_FILE.match(line)
         if m:
+            value = _data_file_name(m.group("value")[:MAX_STATEMENT_CHARS])
+            if not value:
+                continue
             companion["parsed"] = True
-            value = m.group("value")[:MAX_STATEMENT_CHARS]
             return {"key": "exp_data_file", "literal": value, "tokens": None, "locator": f"line:{number}",
                     "source_relative_path": rel, "scan_index": None}
     return None

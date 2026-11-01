@@ -400,6 +400,9 @@ def counter_tokens(stem: str, *, counter_positions: Iterable[int] = (), known_co
 
 #: The extended-context concept the SSRL XDC reader gives a run's own ``.exp`` ``DATA_FILE`` line.
 EXP_DATA_FILE_CONCEPT = "exp_data_file"
+#: c16-r M4: a group flag — a member run's name and its own ``.exp`` DATA_FILE name different acquisitions (the
+#: run was renamed, or the ``.exp`` copied); the run's name is used, and ``exp_data_file_differs`` names both.
+EXP_NAME_DIFFERS_FLAG = "exp_data_file_differs_from_name"
 
 
 def exp_data_files(bundle: Mapping) -> dict[str, str]:
@@ -411,12 +414,24 @@ def exp_data_files(bundle: Mapping) -> dict[str, str]:
     return out
 
 
+def exp_data_file_agrees(stem: str, data_file: str | None) -> bool:
+    """c16-r M4: whether a run's ``.exp`` ``DATA_FILE`` names the run's OWN acquisition: it equals the run's name
+    without its trailing number (``x_dry_015`` with ``x_dry``), casefolded. A run renamed after acquisition whose
+    ``.exp`` still names another acquisition does not agree, and its own name is used."""
+    if not data_file:
+        return False
+    return data_file.strip().casefold() == re.sub(r"_\d+$", "", stem or "").casefold()
+
+
 def base_name_key(stem: str, data_file: str | None = None) -> str:
     """The name a run shares with its repeats, casefolded (``000mV`` = ``0mV``), repeat markers (``again``, and a
-    number after one) left out: the ``.exp`` ``DATA_FILE`` where one was read, else the name without its last token
+    number after one) left out: the ``.exp`` ``DATA_FILE`` where one was read AND it names the run's own acquisition
+    (:func:`exp_data_file_agrees`; c16-r M4: never another run's name), else the name without its last token
     when that token is a whole number (``x_dry_015`` and ``x_dry_016`` share ``x_dry``; ``x`` and ``x_again`` share
     ``x``), else the whole name. Used ONLY to offer merge candidates for runs whose sample no source states (one per
     base name, never one for the whole beamtime): never a sample key, never a group."""
+    if not exp_data_file_agrees(stem, data_file):
+        data_file = None
     toks = _stem_tokens(data_file if data_file else stem or "")
     toks = [t for i, t in enumerate(toks)
             if not _REPEAT_TOKEN.match(t) and not (i and t.isdigit() and _REPEAT_TOKEN.match(toks[i - 1]))]
@@ -856,6 +871,7 @@ def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: froz
         if run["run_key"] in _force_alone:
             blockers.append("condition_check_failed")
         name_key = name_stem_key(run.get("stem") or "", counter_positions=cpos_of(run), known_counters=_known_counters(run))
+        data_file = data_files.get(str(run.get("run_id")))
         cond_sig = _canon({k: _comparable(r) for k, r in sorted(readings.items()) if classes[k] == CLASS_CONDITION})
         # For merge CANDIDATES only: the name-stem key with every digit token dropped.
         cond_sig_loose = _canon(
@@ -867,7 +883,9 @@ def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: froz
                 "index": index, "run": run, "readings": readings, "books": books, "classes": classes,
                 "role": role, "role_basis": role_basis, "hard": hard, "soft": soft, "blockers": blockers,
                 "issues": issues, "blocking": blocking, "cond_sig": cond_sig, "cond_sig_loose": cond_sig_loose, "name_key": name_key, "unk_sig": unk_sig, "scans": scans,
-                "base_name": base_name_key(run.get("stem") or "", data_files.get(str(run.get("run_id")))),
+                "base_name": base_name_key(run.get("stem") or "", data_file),
+                # c16-r M4: a `.exp` DATA_FILE that names another acquisition than the run's own name (not used)
+                "exp_differs": data_file if data_file and not exp_data_file_agrees(run.get("stem") or "", data_file) else None,
                 "candidate_eligible": not hard and scans > 0,
             }
         )
@@ -900,6 +918,10 @@ def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: froz
             flags.append("multi_run_group")
         if first["blocking"]:
             flags.append("blocked_by_engine_reading")
+        differs = [{"run_key": m["run"]["run_key"], "stem": m["run"].get("stem"), "exp_data_file": m["exp_differs"]}
+                   for m in members if m.get("exp_differs")]
+        if differs:
+            flags.append(EXP_NAME_DIFFERS_FLAG)
         despite = [
             {"kind": i["code"], "run_key": m["run"]["run_key"], "statement_key": i.get("statement_key"), "evidence": i.get("evidence"), "rule_id": i.get("rule_id")}
             for m in members
@@ -924,6 +946,7 @@ def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: froz
             "engine_reading_issues": [i for m in members for i in m["issues"]],
             "merged_despite_engine_reading": despite if len(members) > 1 else [],
             "context_run_keys": [],
+            **({"exp_data_file_differs": differs} if differs else {}),
             "counter_positions_basis": (counter_decision or {}).get("decision_id") if any("sample_name_stem" in m["readings"] for m in members) and counter_decision else None,
             "rule_id": GROUPING_RULE_ID,
             "_members": members,
@@ -1166,8 +1189,14 @@ def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: froz
     # first inside a merge refusal. Not when `last` (or every such position) is already declared a counter, nor
     # when the question above already asks every position those last tokens sit at.
     families = _last_token_families(infos, gid_of_run) if LAST_POSITION not in cpos else {}
+    # c16-r M5: a position a scientist already ruled on (a counter, or not one) is not asked again: only the
+    # families whose last token sits at a position still open count, so an answered bundle stays answered
+    from .bundle import not_counter_positions
+
+    ruled = set(cpos) | set(not_counter_positions(bundle))
+    families = {head: f for head, f in families.items() if len(head) + 1 not in ruled}
     last_positions = sorted({len(head) + 1 for head in families})
-    if families and not set(last_positions) <= set(cpos) and not set(last_positions) <= set(pos_count):
+    if families and not set(last_positions) <= set(pos_count):
         pos_count[LAST_POSITION] = len(families)
     q = counter_question(pos_count, counter_decision)
     if q:

@@ -439,21 +439,24 @@ def run_names(bundle: Mapping, run: Mapping) -> list[str]:
 
 def header_potential_readings(bundle: Mapping, run: Mapping) -> list[dict]:
     """``[{value, literal, scale, relative_path, locator}]``: each potential a run's SCAN HEADER comment lines state
-    (``questions.header_potentials_in_line``: ``-300 mV vs RHE``, ``0.5Vrhe``), in volts as its spelling writes it —
-    a FILE READING to compare a typed set-point against (c16c), never a value. One per literal and line."""
-    from .questions import header_potentials_in_line
+    as a value — a FILE READING to compare a typed set-point against (c16c), never a value itself. One per line.
+
+    c16-r: the SAME lines (``bundle.is_xdc_comment_line``) and the SAME parser (``questions.header_comment_readings``)
+    as the comment rule's candidates, so the two never disagree: a line that gives the rule no value (a range, OCP,
+    a comma decimal, two potentials) gives no reading here either. ``literal`` is the whole line."""
+    from .questions import header_comment_readings
 
     out, seen = [], set()
     for e in bundle.get("extended_context") or ():
-        if (e.get("run_id") != run.get("run_id") or e.get("concept") not in ("free_text", "header_line_8_literal")
+        if (e.get("run_id") != run.get("run_id") or not B.is_xdc_comment_line(e.get("concept"), e.get("locator"))
                 or not isinstance(e.get("raw_literal"), str)):
             continue
-        for pot in header_potentials_in_line(e["raw_literal"]):
-            key = (pot["literal"], e.get("relative_path"), e.get("locator"))
-            if pot["volts"] is None or key in seen:
+        for reading in header_comment_readings(e["raw_literal"]):
+            key = (reading["literal"], e.get("relative_path"), e.get("locator"))
+            if reading["path"] != POTENTIAL_PATH or reading["value"] is None or key in seen:
                 continue
             seen.add(key)
-            out.append({"value": pot["volts"], "literal": pot["literal"], "scale": pot["scale"],
+            out.append({"value": reading["value"], "literal": reading["literal"], "scale": reading.get("scale"),
                         "relative_path": e.get("relative_path"), "locator": e.get("locator")})
     return out
 
