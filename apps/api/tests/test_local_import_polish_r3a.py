@@ -13,7 +13,8 @@ BL4-3 scan headers write a sample, an electrolyte and a potential glued into one
 * L1: the counter question's example names come from sample groups where there are some, and several positions are
   each asked on their own;
 * L5: questions about runs in no live record group are counted, not listed, by default (a flag lists them), and the
-  template report names a rejected group's runs once, not once per Campaign Info cell.
+  template report names a rejected group's runs once, not once per Campaign Info cell;
+* L6: the Campaign Info hints on ISAAC Suggestions have their own column label (never "Config ID").
 """
 
 from __future__ import annotations
@@ -442,6 +443,19 @@ def test_the_template_report_says_runs_a_campaign_answer_misses_once():
     assert len(lines) == 1 and lines[0].startswith("  27 run(s) (run-000, run-001, run-002, …; --full lists them per cell): ")
     assert "Campaign Info B3 system.facility.f3; Campaign Info B4" in lines[0] and lines[0].count("SYN reason") == 1
     assert len(T._campaign_not_filled_lines(rep, full=True)) == 3
+
+
+# --- L6: the Campaign Info hints on ISAAC Suggestions have their own column label ---------------------------------
+
+
+def test_campaign_info_hints_are_not_under_a_file_list_header(excerpted, tmp_path):
+    _src, out = excerpted
+    xlsx = tmp_path / "t.xlsx"
+    assert cli.main(["bundle", "template", "export", str(out), "--out", str(xlsx)]) == 0
+    rows = list(openpyxl.load_workbook(xlsx)[T.SHEET_SUGGEST].iter_rows(values_only=True))
+    assert rows[0][1] == "Config ID"  # the File List block's header, over the runs' rows
+    [block] = [r for r in rows if r[0] == T.SHEET_CAMPAIGN]
+    assert block[1] == T.SUGGEST_CAMPAIGN_HEADER and "Campaign Info" in block[1]
 
 
 # --- H2 (follow-up): a mention that differs is said as a mention beside a header reading that agrees --------------

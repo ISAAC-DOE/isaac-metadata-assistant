@@ -77,6 +77,8 @@ SHEET_CONFIG = "Configurations"
 SHEET_FILES = "File List"
 SHEET_VOCAB = "Vocabulary"
 SHEET_SUGGEST = "ISAAC Suggestions"
+#: r3a L6: the label of the Campaign Info block's hint column on :data:`SHEET_SUGGEST` (not a File List header)
+SUGGEST_CAMPAIGN_HEADER = "What the files say for this Campaign Info row (a hint, not an answer)"
 SHEET_MARKER = "_isaac"
 #: ``template adopt`` only: every value of the scientist's own sheet that a file reading contradicts, or
 #: that the field does not take, with an empty "Your ruling" column (:data:`DISAGREE_RULING_COLUMN`).
@@ -1064,6 +1066,9 @@ def export_template(bundle_dir: Path, out: Path, *, suggestions: bool = True, fo
                 coverage[key] = coverage.get(key, 0) + 1
     block = last + 3
     wsg.cell(row=block, column=1, value=SHEET_CAMPAIGN).font = bold
+    # r3a L6: the block's own column label — row 1's File List headers do not name these cells (column B is "Config
+    # ID" there, and a facility hint read as one)
+    wsg.cell(row=block, column=2, value=SUGGEST_CAMPAIGN_HEADER).font = bold
     for i, col in enumerate(CAMPAIGN_FIELDS, start=1):
         wsg.cell(row=block + i, column=1, value=col.header)
         if suggester is not None and col.path:
