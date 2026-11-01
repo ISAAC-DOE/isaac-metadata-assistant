@@ -8,12 +8,12 @@ Athena project and value below is invented (``SYN_``); the chemical formulas are
   names only hint, from a closed list (the review's probes: test_local_import_polish_r1ar.py).
 * (M4) Choosing an Athena version as the result of record (``select_athena_version``) gives that version its own
   approvable Athena result on the next ``isaac process`` (built as every Athena result is); approving it makes the
-  record carry that version's E0. Measured: a 42-scan group's chosen merge (E0 2473.114) changed nothing, and the
-  record kept ISAAC's 2472.958.
+  record carry that version's E0. Seen on a real beamtime: choosing a large group's merge changed nothing, and the
+  record kept ISAAC's own E0.
 * (M5) An Athena E0 identical across groups of one beamtime whose own edges differ is likely a fixed normalisation
   setting, not a measured edge position: each such Athena result is flagged ``athena_e0_possibly_fixed``, is not
-  preferred for the record, says why and asks whether the E0 was measured or set. Measured: elemental S, a dry MOF
-  and the MOF at 0 V all carried Athena E0 2471.901 eV; ISAAC measured 2472.958 eV for the last.
+  preferred for the record, says why and asks whether the E0 was measured or set. Seen on a real beamtime: three
+  chemically different groups carried one identical Athena E0 while ISAAC measured a different edge for one.
 """
 
 from __future__ import annotations
@@ -54,8 +54,9 @@ def _processing():
     (["Ti_foil_A"], "unknown", None),  # "A" is not on the closed list
     (["Ti_foil_005"], "element", "Ti"),
     (["01_Cofoil_std_005"], "element", "Co"),
-    (["31_Ti_foil_I2_120"], "unknown", None),  # I2 (a detector) is not on the list
-    (["SYN_S_std"], "unknown", None),  # SYN is not on the list: ISAAC cannot tell
+    (["31_Ti_foil_I2_120"], "element", "Ti"),  # r3-b M2: a detector channel (I0-I3) says nothing of the chemistry
+    (["SYN_S_std"], "element", "S"),  # r3-d: SYN marks an invented name: neutral, like ZZ
+    (["QQ_S_std"], "unknown", None),  # QQ is not on the list: ISAAC cannot tell
     (["STD_REF"], "unknown", None),
     (["Ti_Co_std"], "unknown", None),  # two elements: which is it?
     ([], "unknown", None),
@@ -198,7 +199,9 @@ def test_processing_proposes_elemental_sulfur_but_applies_it_only_with_accept_sh
     r, cal = _calibration_of(run_process(bdir, source_root=root))
     o = cal["outcome"]
     assert o["calibration_proposed"] is True and o["reference_calibrant"]["kind"] == "element"
-    assert "its names say it is S; if so, approve with --accept-shift" in o["reference_statement"]
+    # r3-b M2: no edge is stated, so no shift is known: the sentence never shows a placeholder as the shift
+    assert f"its names say it is S; if so, {REF.NO_SHIFT_YET}." in o["reference_statement"]
+    assert "<the shift shown>" not in o["reference_statement"]
     assert REF.NOT_NAMED_ELEMENT_FLAG not in r["review_flags"]
     approval = {"element": "S", "edge": "K", "decided_by": "SYN Scientist", "decision_id": "d-old"}
     r2, cal = _calibration_of(run_process(bdir, source_root=root, calibration_approvals={r["group_id"]: approval}))

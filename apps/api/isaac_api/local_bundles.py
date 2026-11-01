@@ -1415,6 +1415,9 @@ def get_local_bundle_questions(
     scope: str | None = Query(None, max_length=300, description="`experiment`, `group:<id>` or `run:<id>`."),
     limit: int = Query(MAX_LIMIT, ge=1, le=MAX_LIMIT, description="Page size."),
     offset: int = Query(0, ge=0, le=1_000_000, description="Questions to skip."),
+    include_outside_live_groups: bool = Query(
+        False, description="Also list the questions whose answer reaches no live record group (counted, not listed, "
+                           "by default, as `isaac bundle questions` does; a `run:` scope lists them)."),
 ):
     from .local_import import mutations as M
     from .local_import import questions as Q
@@ -1432,6 +1435,8 @@ def get_local_bundle_questions(
         rows = Q.filter_questions(payload, scope=scope, blocking_only=blocking_only, reports=reports)
         if kind:
             rows = [q for q in rows if q["kind"] == kind]
+        # r3c LOW-3: hidden by default, counted, as `isaac bundle questions` hides them
+        rows, outside = Q.hide_outside_live_groups(rows, scope=scope, include=include_outside_live_groups)
         page = rows[offset: offset + limit]
         # THE EXPOSURES `bundle questions` RECORDS (hint candidates, conflicts), plus every candidate
         # whose extracted value this page shows beside a confirm question
@@ -1487,6 +1492,7 @@ def get_local_bundle_questions(
         "returned": len(page),
         "omitted_before": min(offset, len(rows)),
         "omitted_after": max(0, len(rows) - offset - len(page)),
+        **Q.hidden_outside_live_groups(outside, "include_outside_live_groups=true"),
         "minimum_for_one_group": minimum,
         "questions": out_questions,
         "capture": capture,

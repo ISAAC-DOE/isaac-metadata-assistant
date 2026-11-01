@@ -4,12 +4,15 @@ WHAT THE FORMAT IS, AS FAR AS IT HAS BEEN VERIFIED (literal structure only)
 ===========================================================================
 Line 1 is the signature ``SSRL   EXAFS Data Collector 4.0`` (three spaces). The header then
 runs: line 2 a timestamp, line 3 ``PTS: N COLS: M``, line 4 a detector file name, line 5 a
-region file name, line 6 a beamline/monochromator line, line 7 a timing line, line 8 a gain
-line, any number of free-text lines, ``Weights:`` and one row, ``Offsets:`` and one row,
+region file name, line 6 a beamline/monochromator line, line 7 a timing line, line 8 the
+``.exp`` COMMENTS1 (on the BL4-3 headers seen, the gain), any number of free-text lines (there,
+COMMENTS2-4 on lines 9-11), ``Weights:`` and one row, ``Offsets:`` and one row,
 ``Data:``, then ``M`` column-name lines, a blank line and ``N`` numeric rows. A ``_A.001``,
 ``_A.002`` ... series are repeat scans of one acquisition name; ``.rgn`` / ``.det`` / ``.exp``
 files and a ``binary/`` folder of the original binary scans sit beside them. Of the run's own
-``<name>.exp`` only the ``DATA_FILE`` line (the name without its trailing ``_NNN``) is read.
+``<name>.exp`` only the ``DATA_FILE`` line (the name without its trailing ``_NNN``) is read; with no
+``<name>.exp``, the same line of the ONLY ``.exp`` in the run's own folder (a template reused under
+another name), kept only when it is the run's own name without its counter.
 
 WHAT THIS MODULE DOES NOT DO
 ============================
@@ -394,6 +397,7 @@ def collect_from_files(
         groups.setdefault((directory, m.group("name")), []).append((int(m.group("index")), rel, path, size))
 
     runs: list[GenericRun] = []
+    exp_taken: set[str] = set()
     for (directory, name), members in sorted(groups.items()):
         members.sort()
         prefix = f"{directory}/" if directory else ""
@@ -456,6 +460,14 @@ def collect_from_files(
         for c in companions:
             consumed.append((c["relative_path"], c["role"]))
         data_file = _exp_data_file(f"{prefix}{name}.exp", by_rel, companions)
+        if data_file is None and f"{prefix}{name}.exp" not in by_rel:
+            # r3a M1: a template `.exp` reused under another name (34 runs, each folder with its own copy of
+            # `<template>_exp1.exp`): read when it is the ONLY `.exp` in the run's own folder, and kept only when its
+            # DATA_FILE is the run's own name without its counter; the `.exp` file's own name is never a hint
+            data_file = _folder_exp_data_file(prefix, name, by_rel, claimed, companions, limits, exp_taken)
+            if data_file is not None and data_file["source_relative_path"] not in exp_taken:
+                exp_taken.add(data_file["source_relative_path"])  # repeats in one folder share it: consumed once
+                consumed.append((data_file["source_relative_path"], "experiment"))
         if data_file is not None:
             statements.append(data_file)
         runs.append(
@@ -563,6 +575,34 @@ def _exp_data_file(rel: str, by_rel: dict[str, tuple[Path, int]], companions: li
             return {"key": "exp_data_file", "literal": value, "tokens": None, "locator": f"line:{number}",
                     "source_relative_path": rel, "scan_index": None}
     return None
+
+
+def _folder_exp_data_file(prefix: str, name: str, by_rel: dict[str, tuple[Path, int]], claimed: set[str],
+                          companions: list[dict], limits: Limits, taken: set[str]) -> dict | None:
+    """r3a M1: the ``DATA_FILE`` of the ONE ``.exp`` in the run's own folder (the folder its scans are in, or a
+    same-named folder beside them) when the run has no ``<name>.exp`` of its own — an experiment file reused as a
+    template under another name. ``None`` when there are none or several there, or when its ``DATA_FILE`` is not
+    the run's own name without its trailing counter (the folder's template then names another acquisition, and
+    nothing is said about it). The ``.exp`` file's own name is never read as a hint. Read as
+    :func:`_exp_data_file` reads, and the file becomes the ``experiment`` companion of the first run that takes it
+    (``taken``: a folder's repeats share one)."""
+    own_dir = f"{prefix}{name}/"
+    found = sorted(rel for rel in by_rel
+                   if os.path.splitext(rel)[1].lower() == ".exp"
+                   and any(rel.startswith(d) and "/" not in rel[len(d):] for d in (prefix, own_dir)))
+    if len(found) != 1 or found[0] in claimed:
+        return None
+    rel = found[0]
+    companion = next((c for c in companions if c["relative_path"] == rel), None)
+    probe = companion or {"relative_path": rel, "role": "experiment", "size_bytes": by_rel[rel][1], "parsed": False}
+    got = _exp_data_file(rel, by_rel, [probe])
+    if got is None or got["literal"].casefold() != re.sub(r"_\d+$", "", name).casefold():
+        if companion is not None:
+            companion["parsed"] = False
+        return None
+    if companion is None and rel not in taken and len(companions) < limits.max_companions_per_run:
+        companions.append({**probe, "sha256": _sha256(by_rel[rel][0])})
+    return got
 
 
 def collect_generic_runs(root: str | Path, limits: Limits = Limits()) -> list[GenericRun]:

@@ -39,6 +39,7 @@ import json
 import math
 import re
 import shutil
+import statistics
 import tempfile
 import warnings
 from pathlib import Path, PurePosixPath
@@ -118,23 +119,10 @@ def _resolve_source(root: Path, rel: str) -> Path | None:
     return full
 
 
-def stated_reference(name: str, bundle: Mapping, header_lines: Sequence[str]) -> tuple[dict | None, str]:
-    """A reference foil's element + edge, ONLY when evidence states both. (reference, reason).
-
-    Element: the name has a ``foil`` token and exactly one token that is an element symbol
-    (case-sensitive). Edge: the bundle's ``experiment.element_evidence`` for that element,
-    and/or a header line shaped ``<El><Edge>_`` (an XDAC region file, e.g. ``ZzK_SYNTHETIC.rgn``);
-    every stated edge must agree.
-    """
-    toks = [t for t in _TOKEN.split(name) if t]
-    if not any(t.casefold().startswith("foil") for t in toks):
-        return None, "name_has_no_foil_token"
-    els = sorted({t for t in toks if t in ELEMENTS})
-    if len(els) != 1:
-        return None, f"foil_element_not_unique:{els}"
-    el = els[0]
-    basis = [{"kind": "name_token", "name": name, "element": el}]
-    edges = set()
+def _stated_edges(el: str, bundle: Mapping, header_lines: Sequence[str]) -> tuple[set, list[dict]]:
+    """The edges the evidence states for element ``el`` (bundle element evidence, XDAC region-file header lines)."""
+    edges: set = set()
+    basis: list[dict] = []
     for ev in (bundle.get("experiment") or {}).get("element_evidence") or ():
         if ev.get("element") == el and ev.get("edge"):
             edges.add(ev["edge"])
@@ -144,8 +132,47 @@ def stated_reference(name: str, bundle: Mapping, header_lines: Sequence[str]) ->
         if m and m.group(1) == el:
             edges.add(m.group(2))
             basis.append({"kind": "scan_header_region_symbol", "header_line_index": i, "literal": line.strip()[:80], "edge": m.group(2)})
+    return edges, basis
+
+
+def stated_reference(name: str, bundle: Mapping, header_lines: Sequence[str],
+                     calibrant: Mapping | None = None) -> tuple[dict | None, str]:
+    """A reference foil's element + edge, ONLY when evidence states both. (reference, reason).
+
+    Element: r3-b M2: the ONE name reading that also says whether the group is named as a pure element
+    (:func:`reference.calibrant_identity` — ``calibrant``, the group's reading, else ``name``'s alone): its element when
+    it says one pure element (a foil named with words of how it was measured, ``SYN_Ti_foil_I1``, ``SYN_Tifoil_calib_
+    1x3mm``). Before, only a ``foil`` token and one case-sensitive symbol were read, and ``Tifoil`` proposed nothing.
+    Edge: the bundle's ``experiment.element_evidence`` for that element, and/or a header line shaped ``<El><Edge>_`` (an
+    XDAC region file, e.g. ``ZzK_SYNTHETIC.rgn``); every stated edge must agree.
+
+    THE HASHED OUTCOME DOES NOT MOVE where the proposal did not: the reference and its evidence keep the shape they
+    had (``name_token``), and when nothing is proposed the reason is the one the earlier rule gave (``name_has_no_foil_
+    token``, ``foil_element_not_unique:[...]``, ``edge_not_stated_uniquely:[...]``). r3-d: where the earlier rule (a
+    ``foil`` token and one symbol, an edge stated) found a reference and the reading says "ISAAC cannot tell" (a word
+    not on its list beside them), that reference is returned too: it stays in the hashed outcome with its computed
+    shift, which the scientist needs for ``--accept-shift``, and the result id does not move. It is still NOT proposed
+    (``calibration_proposed`` follows the reading, :func:`reference.reading`; nothing awaits an approval). So only a
+    group the reading newly names (``Tifoil``) gets a new result id. The statement (not hashed) says what the reading
+    says.
+    """
+    toks = [t for t in _TOKEN.split(name) if t]
+    foil = any(t.casefold().startswith("foil") for t in toks)
+    els = sorted({t for t in toks if t in ELEMENTS})
+    legacy = "name_has_no_foil_token" if not foil else (f"foil_element_not_unique:{els}" if len(els) != 1 else None)
+    if legacy is None:
+        edges, _ = _stated_edges(els[0], bundle, header_lines)
+        legacy = None if len(edges) == 1 else f"edge_not_stated_uniquely:{sorted(edges)}"
+    cal = calibrant if calibrant is not None else REF.calibrant_identity([name])
+    el = REF.named_element(cal)
+    if el is None and legacy is None:
+        el = els[0]  # r3-d: the earlier rule's reference stays hashed (with its shift); the reading keeps it unproposed
+    if el is None:
+        return None, legacy
+    edges, stated = _stated_edges(el, bundle, header_lines)
     if len(edges) != 1:
-        return None, f"edge_not_stated_uniquely:{sorted(edges)}"
+        return None, legacy or f"edge_not_stated_uniquely:{sorted(edges)}"
+    basis = [{"kind": "name_token", "name": name, "element": el}, *stated]
     return {"element": el, "edge": next(iter(edges)), "basis": "stated_by_evidence", "evidence": basis}, "stated_by_evidence"
 
 
@@ -345,7 +372,7 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
         ref_source = "reference_group_own_signal"
         per_scan = [C.edge_e0(sa["energy"], sa["mu"], np, ctx.xafs) for sa in scans_data]
         if not proposed:
-            stated, unconfirmed_reason = stated_reference(stems[0] if stems else "", ctx.bundle, headers)
+            stated, unconfirmed_reason = stated_reference(stems[0] if stems else "", ctx.bundle, headers, calibrant)
             if stated:
                 proposed = stated
     elif cp.get("use_in_scan_reference_channel") and any(sa.get("mu_ref") is not None for sa in scans_data):
@@ -401,6 +428,10 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
                 flags.append(REF.SIZE_NOT_CONFIRMED_FLAG)
             elif cp.get("apply_shift_when_confirmed"):
                 applied = shift
+    if not_named and applied and REF.shift_size_confirmed(accepted, shift):
+        # r3-b M2: the scientist confirmed this group's own edge (--accept-shift) and it is applied: its names no longer
+        # stand in the way of anything (step flags are not hashed: no id moves)
+        flags.remove(REF.NOT_NAMED_ELEMENT_FLAG)
     if approved:
         unconfirmed_reason = None
     elif proposed:
@@ -741,6 +772,67 @@ def _file_name(entry: Mapping) -> str:
     return PurePosixPath(str(entry.get("relative_path") or entry.get("source_id"))).name
 
 
+#: r3-b M4: a merged scan's point departs from the other scans' median by more than this fraction of that median's span
+OUTLIER_DEPARTS_FRACTION = 0.1
+
+
+def _outlier_scans_statement(scan_flags: Sequence[bool], used_entries: Sequence[Mapping], grid, M, merged,
+                             excluded: bool, np) -> str | None:
+    """r3-b M4: one plain statement naming each scan the deglitch step flagged as an OUTLIER (its deviation from the
+    group's median spectrum is far above the others'), by its FILE, with the energy range where it departs from the
+    other scans' median (by more than :data:`OUTLIER_DEPARTS_FRACTION` of that median's span), its signal there as a
+    share of theirs, and what merging it did to the merged curve there; it asks whether the scan belongs in the merge.
+    ``None`` when no scan is flagged. Measured on a real BL4-3 Ti beamtime: one scan's signal fell to about 0.05 after
+    4985 eV and the merge was about 30% low there, said only as a count (``outlier_scans_flagged``). Descriptive only:
+    nothing is skipped or changed for it. Said after the run id (qc.json is hashed), so no result id moves."""
+    flagged = [k for k, f in enumerate(scan_flags) if f]
+    if not flagged:
+        return None
+    n = M.shape[0]
+    parts = []
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        for k in flagged:
+            others = [j for j in range(n) if j != k and not scan_flags[j]] or [j for j in range(n) if j != k]
+            if not others:
+                continue
+            ref = np.nanmedian(M[others], axis=0)
+            mine = np.isfinite(M[k])
+            ok = mine & np.isfinite(ref)
+            name = _file_name(used_entries[k])
+            if not ok.any():
+                continue
+            span = float(np.nanmax(ref[ok]) - np.nanmin(ref[ok])) or 1.0
+            away = ok & (np.abs(M[k] - ref) > OUTLIER_DEPARTS_FRACTION * span)
+            if not away.any():
+                lo, hi = float(grid[mine][0]), float(grid[mine][-1])
+                parts.append(f"{name} ({lo:.1f}-{hi:.1f} eV) differs from the other scans more than they differ from "
+                             "each other, though nowhere by more than a tenth of the edge's height.")
+                continue
+            idx = np.flatnonzero(away)
+            lo, hi = float(grid[idx[0]]), float(grid[idx[-1]])
+            nonzero = away & (np.abs(ref) > 0)
+            share = float(np.median(M[k][nonzero] / ref[nonzero])) if nonzero.any() else None
+            said = (f"{name} departs from the other scans' median from {lo:.1f} to {hi:.1f} eV ({int(away.sum())} of its "
+                    f"{int(mine.sum())} points)" + (f": its signal there is about {share * 100:.0f}% of theirs" if share is not None else ""))
+            fin = nonzero & np.isfinite(merged)
+            if excluded:
+                said += "; it is left out of the merge (deglitch.exclude_flagged)."
+            elif fin.any():
+                effect = float(np.median(merged[fin] / ref[fin]) - 1.0)
+                said += (f"; it is merged unchanged, so the merged curve there is about {abs(effect) * 100:.0f}% "
+                         f"{'lower' if effect < 0 else 'higher'} than the other scans' median.")
+            else:
+                said += "; it is merged unchanged."
+            parts.append(said)
+    if not parts:
+        return None
+    more = f" {len(parts) - 10} more flagged scan(s) are said in the deglitch step." if len(parts) > 10 else ""
+    one = len(flagged) == 1
+    return (" ".join(parts[:10]) + more + f" Ask the scientist whether {'this scan belongs' if one else 'these scans belong'} "
+            "in the merge (a beam loss, a sample that moved or a detector that stopped counting would not).")
+
+
 def _scan_name(entry: Mapping) -> str:
     return f"{entry.get('source_id')} (scan {entry['scan']})" if entry.get("scan") is not None else str(entry.get("source_id"))
 
@@ -759,10 +851,32 @@ def _scans_phrase(scans: Sequence[int]) -> str:
     return ", ".join(out)
 
 
-def _no_usable_scan_statement(inputs: Sequence[Mapping], too_few: Sequence[int], *, signal: str | None = None) -> str | None:
+def _no_usable_scan_statement(inputs: Sequence[Mapping], too_few: Sequence[int], *, signal: str | None = None,
+                              transmission: bool = False) -> str | None:
     """c10-m: one plain sentence when NO scan could be used because scans have too few points (``None`` when none
     did): "The only scan has 2 usable points; at least 5 are needed". Scans skipped for other reasons are counted.
-    c11-a: when no scan has too few points but every one's signal is zero at every point, that is said instead."""
+    c11-a: when no scan has too few points but every one's signal is zero at every point, that is said instead.
+    r3-b L4: when no scan has too few points and scans were skipped ``signal_not_finite`` (the beam off, I0 negative),
+    that is said: how many points are not finite and at how many I0 is zero or negative."""
+    nonfinite = [i for i in inputs if i.get("skip_reason") == C.SIGNAL_NOT_FINITE]
+    if not too_few and nonfinite:
+        diags = [i.get("diagnostics") or {} for i in nonfinite]
+        dropped = sum(int(d.get("nonfinite_dropped") or 0) for d in diags)
+        read = sum(int(d.get("points_read") or 0) for d in diags)
+        i0 = [int(d["i0_nonpositive"]) for d in diags if d.get("i0_nonpositive") is not None]
+        k, n = len(nonfinite), len(inputs)
+        named = f"signal ({signal})" if signal else "signal"
+        who = ("The only scan's" if n == 1 else
+               f"In {'both scans' if k == n == 2 else f'all {k} scans' if k == n else f'{k} of the {n} scans'}, the")
+        needs = f"I0 and {signal}" if transmission and signal else "I0"
+        said = (f"{who} {named} is not a finite number at {dropped} of {read} points"
+                + (f"; I0 is zero or negative at {sum(i0)} of them" if i0 and sum(i0) else "")
+                + f" (the absorption is computed only where {needs} {'are' if ' and ' in needs else 'is'} above zero), so "
+                "there is no curve to process. A beam that was off or a detector that was not counting gives this; a "
+                "person checks the scan" + ("s" if k > 1 else ""))
+        other = n - k
+        return said + (f". {other} more {'scan was' if other == 1 else 'scans were'} skipped for other reasons (see "
+                       "inputs)." if other else ".")
     if not too_few:
         zero = sum(1 for i in inputs if i.get("skip_reason") == C.SIGNAL_ALL_ZERO)
         if not zero or zero != len(inputs):
@@ -1023,6 +1137,9 @@ def _athena_coverage(entry: Mapping, stems: Sequence[str], used_entries: Sequenc
     members = entry.get("per_scan_set") if entry.get("_match_kind") == "per_scan_set" else None
     names = [A.normalise_name(n) for n in members.get("labels") or ()] if members else list(entry.get("names") or ())
     runs = [s for s in group_runs if any(A._match_kind([n], A.normalise_name(s)) for n in names)]
+    if entry.get("_match_kind") == "scientist_merge":
+        # r3-b H3: the scientist's merge named after one run, or after the group's base name (every run)
+        runs = [s for s in group_runs if A.normalise_name(s) in set(entry.get("_merge_of") or ())]
     if not runs:
         return None
     sel = [int(n) for n in members["scans"]] if members and members.get("scans") else A.scan_selection(str(entry.get("label") or ""), runs)
@@ -1094,8 +1211,17 @@ def _athena_scans_used(entry: Mapping, stems: Sequence[str], isaac_counts: tuple
 
     if members and members.get("scans"):
         scans = [int(n) for n in members["scans"]]
-        said = (f"The scientist's curve is ISAAC's mean of {len(scans)} per-scan Athena groups, one each for scans "
-                f"{_scans_phrase(scans)}{of_run} (read from their labels).{ours}{part}{subset(scans)}")
+        if members.get("runs"):
+            # r3-b H3: members of several runs (scan numbers restart in each run): each run's scans named apart
+            by_run: dict[str, list[int]] = {}
+            for run_, n in zip(members["runs"], scans):
+                by_run.setdefault(run_, []).append(n)
+            each = " and ".join(f"scan{'s' if len(v) > 1 else ''} {_scans_phrase(v)} of run {k}" for k, v in by_run.items())
+            said = (f"The scientist's curve is ISAAC's mean of {len(scans)} per-scan Athena groups, one each for {each} "
+                    f"(read from their labels).{ours}{part}")
+        else:
+            said = (f"The scientist's curve is ISAAC's mean of {len(scans)} per-scan Athena groups, one each for scans "
+                    f"{_scans_phrase(scans)}{of_run} (read from their labels).{ours}{part}{subset(scans)}")
         return {"basis": "per_scan_set", "scans": scans, "statement": said}
     sel = A.scan_selection(label, stems)
     if sel:
@@ -1106,13 +1232,80 @@ def _athena_scans_used(entry: Mapping, stems: Sequence[str], isaac_counts: tuple
     made_from = PurePosixPath(str(entry.get("filename") or "").replace("\\", "/")).name
     # c12-cal: Athena writes its own null marker when a group names no source file: said in words, never printed
     unnamed = not made_from or made_from == A.ATHENA_NULL_MARKER
+    merge_of = ([x for x in stems if A.normalise_name(x) in set(entry.get("_merge_of") or ())]
+                if entry.get("_match_kind") == "scientist_merge" else None)
     said = (f"The project does not say which scans the scientist's curve used: its Athena label '{label}' names no scan"
             + (", though Athena marks the group as a merge" if entry.get("is_merge") else "")
+            # r3-b H3: a merge named before the run or base name (athena.SCIENTIST_MERGE_RULE_ID) is the scientist's merge
+            + (f"; its label names it the scientist's merge of {'run' if len(merge_of) == 1 else 'runs'} "
+               f"{', '.join(merge_of)} ({A.SCIENTIST_MERGE_RULE_ID})" if merge_of and not coverage else "")
             + (", and the project does not name its source file" if unnamed else
                f", and it records the group as made from the file '{made_from}'" if made_from.casefold() != label.casefold() else "")
             + (f"; its name names run{'s' if len(coverage['runs']) > 1 else ''} {', '.join(coverage['runs'])}" if coverage else "")
             + f".{ours}{part} Ask the scientist which scans went into it.")
     return {"basis": "not_stated", "scans": None, "statement": said}
+
+
+#: r3-d: the statement (``qc.statements``) of an Athena result whose per-scan groups beside its merge were set aside
+SET_ASIDE_STATEMENT = "athena_per_scan_set_set_aside"
+#: r3-d: the scientist's merge differs from the mean of a per-scan set beside it that covers every scan of the group
+MERGE_DIFFERS_FROM_SET_FLAG = "athena_merge_differs_from_per_scan_set"
+MERGE_OR_SET_QUESTION = "athena_merge_or_per_scan_set"
+
+
+def _sets_aside(entry: Mapping, stems: Sequence[str], inputs: Sequence[Mapping], numbers: Sequence[int | None],
+                stem_of: Mapping[str, str], params: Mapping, np) -> dict | None:
+    """r3-d: what the per-scan sets set aside beside the scientist's merge (``athena.match_with_versions``,
+    ``_sets_aside``) are: each listed with its provenance (:func:`athena.version_provenance`), whether it covers every
+    scan of the group (each listed scan's run and number among its members'; never when a number is unknown) and, when
+    it does, the merge compared with its mean (:func:`athena.merge_versus_set`). ``differs``: such a comparison differs
+    beyond the comparison's tolerances. ``None`` when nothing was set aside."""
+    sets = list(entry.get("_sets_aside") or ())
+    if not sets:
+        return None
+    one = A.normalise_name(stems[0]) if len({A.normalise_name(x) for x in stems if x}) == 1 else None
+    known = B.all_scan_numbers_known(numbers)
+    group = ({(A.normalise_name(stem_of.get(i.get("source_id")) or "") or one, n) for i, n in zip(inputs, numbers)}
+             if known else set())
+    label, listed, said, differs = entry["label"], [], [], False
+    for v in sets:
+        members = v["per_scan_set"]
+        have = set()
+        for lab in members["labels"]:
+            got = A._selection_of_run(lab, stems)
+            if got is not None:
+                have.add((A.normalise_name(stems[got[0]]), got[1][0]))
+        covers = bool(group) and None not in {g[0] for g in group} and group <= have
+        n = len(members["labels"])
+        prj = PurePosixPath(str(v["prj_relative_path"])).name
+        item = {"provenance": A.version_provenance(v, stems), "per_scan_groups": n, "covers_every_scan_of_group": covers}
+        head = (f"The {n} per-scan Athena groups beside it in {prj} ('{members['labels'][0]}' …) were set aside: the "
+                "scientist's merge is preferred, so ISAAC does not average them")
+        if not covers:
+            said.append(head + ("; they do not cover every scan of this group" if known else
+                                "; whether they cover every scan of this group is not known (a scan states no number)")
+                        + ", so the merge was not compared with their mean.")
+        else:
+            cmp_ = A.merge_versus_set(entry, v, params, np)
+            item["comparison"] = cmp_
+            m = cmp_["metrics"]
+            how = (f"E0 {m['e0_delta_eV']:+.2f} eV, rms {m['rms_norm']:.3f} of the normalised curves"
+                   if m.get("e0_delta_eV") is not None and m.get("rms_norm") is not None else "")
+            if cmp_["verdict"] == "differs":
+                differs = True
+                said.append(f"The scientist's merge '{label}' differs from the mean of the {n} per-scan groups beside it "
+                            f"({prj}, covering every scan of this group; {how}), so it is not preferred for the record; "
+                            "ask which is the result of record.")
+            elif cmp_["verdict"] == "agree":
+                said.append(head + f"; their mean covers every scan of this group and agrees with the merge ({how}).")
+            else:
+                said.append(head + "; their mean covers every scan of this group, but the merge could not be compared "
+                            f"with it ({', '.join(cmp_['flags']) or 'not comparable'}).")
+        listed.append(item)
+    question = (f"The scientist's merge '{label}' differs from the mean of the per-scan Athena groups beside it, which "
+                "cover every scan of this group. Which is the result of record: the merge, or the per-scan groups? Approving "
+                "this result puts the merge's E0 and curve in the record.") if differs else None
+    return {"sets": listed, "statement": " ".join(said), "differs": differs, "question": question}
 
 
 def _versions_question_text(versions: Sequence[Mapping]) -> str:
@@ -1232,7 +1425,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         # c10-m: said in the result and the lists, outside the failure's hash (its id does not move): how many scans
         # were listed and used, and, when scans were too short, how short
         out["qc"]["metrics"].update(scans_listed=len(res["inputs"]), scans_used=0)
-        said = _no_usable_scan_statement(res["inputs"], too_few, signal=_raw_signal(choice))
+        said = _no_usable_scan_statement(res["inputs"], too_few, signal=_raw_signal(choice),
+                                         transmission=choice.mode == MODE_TRANSMISSION)
         if said:
             out["qc"]["statements"] = {"no_usable_scan": said}
         return [out]
@@ -1537,6 +1731,10 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     if zero_points_said:
         res["qc"].setdefault("statements", {})["merged_scan_zero_signal_points"] = zero_points_said
         res["review_flags"].append(ZERO_SIGNAL_POINTS_FLAG)
+    # r3-b M4: an outlier scan is named, with where it departs and what merging it did (the count alone said nothing)
+    outlier_said = _outlier_scans_statement(dg["scan_flags"], used_entries, grid, M, mg["mean"], excl, np)
+    if outlier_said:
+        res["qc"].setdefault("statements", {})["outlier_scans"] = outlier_said
     # c12-cal: zeros whose counts come back are counted in one line (no flag), never said as a lost beam
     isolated_said = _isolated_zero_points_statement(used_entries, scans_data, _raw_signal(choice), np)
     if isolated_said:
@@ -1575,6 +1773,17 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
                                               and not (coverage or {}).get("partial"))
         athena_res["run_id"] = run_id
         athena_res["result_id"] = f"proc-{group['group_id']}-{run_id}-athena"
+        # r3-d: the per-scan sets set aside beside the scientist's merge are listed and said, and a merge that differs
+        # from the mean of a set covering every scan of the group is not preferred (after run_id: no id moves)
+        aside = _sets_aside(athena_entry, stems, res["inputs"], numbers, stem_of, params, np)
+        if aside is not None:
+            athena_res["athena_per_scan_sets_set_aside"] = aside["sets"]
+            athena_res["qc"]["statements"][SET_ASIDE_STATEMENT] = aside["statement"]
+            if aside["differs"]:
+                athena_res["review_flags"].append(MERGE_DIFFERS_FROM_SET_FLAG)
+                athena_res["preferred_for_record"] = False
+                athena_res["questions"] = [*(athena_res.get("questions") or ()),
+                                           {"code": MERGE_OR_SET_QUESTION, "text": aside["question"]}]
         out.append(athena_res)
     picked = None
     chosen = _group_selection(group["group_id"], res, ctx.bundle)
@@ -1876,6 +2085,22 @@ def _athena_result(group: Mapping, entry: Mapping, files: Sequence[Mapping], par
             "flags": ["scientist_params_recorded"] + (["athena_already_normalized"] if A.already_normalized(entry) else []),
         }
     ]
+    if members:
+        # r3-b H3: ISAAC AVERAGED the scientist's per-scan curves: a merge step, so a record lists spectrum_merging (the
+        # Athena result's steps are not in a hashed file: no id moves)
+        res["steps"].append({"step": "merge",
+                             "params": {"made_by": "ISAAC", "statistic": "mean of the scientist's per-scan Athena "
+                                        "normalisations (norm, flat) and E0s, on the first group's energy points"},
+                             "outcome": {"n_scans": len(members.get("scans") or ()),
+                                         "athena_groups": list(members.get("athena_groups") or ())},
+                             "flags": ["isaac_computed_mean_of_scientist_per_scan_curves"]})
+    elif A.is_scientist_merge(entry):
+        # the scientist merged in Athena (flagged is_merge, or a merge word in its name); how many scans is not stated
+        res["steps"].append({"step": "merge",
+                             "params": {"made_by": "the scientist, in Athena", "statistic": "not stated by the project"},
+                             "outcome": {"n_scans": None, "basis": "athena_is_merge" if entry.get("is_merge") else
+                                         "merge_word_in_athena_name"},
+                             "flags": ["scientist_merge"]})
     steps_ok = np.all(np.diff(e) > 0)
     metrics = {
         "scans_used": None,
@@ -1976,10 +2201,10 @@ def process_bundle(
         unread = G.groups_from_generic_runs(generic_runs, experiment_key=G.experiment_key_of(bundle), sources_by_path=by_path)
     if not include_unread:
         unread = []
-    if group_ids:
-        wanted = set(group_ids)
-        rec = [g for g in rec if g["group_id"] in wanted]
-        unread = [g for g in unread if g["group_id"] in wanted]
+    # r3-b M5: ``group_ids`` selects what is PROCESSED; every group still takes part in the Athena name match (as
+    # ``skip_group_ids`` always did), so a named group's match is the one a full run makes and the Athena statement
+    # can count the whole project
+    wanted = set(group_ids) if group_ids else None
     runs_by_key = {r["run_key"]: r for r in bundle.get("runs") or ()}
     sources = {s["source_id"]: s for s in bundle.get("sources") or () if s.get("source_id")}
     ctx = _Ctx(bundle=bundle, bundle_dir=bundle_dir, root=root, params=resolved, np=np, xafs=xafs, out_dir=out_dir, sources=sources, runs_by_key=runs_by_key)
@@ -2010,6 +2235,8 @@ def process_bundle(
     for g in all_groups:
         if g["group_id"] in skipped and g.get("group_kind") not in ("unread_acquisition", "generic_run"):
             continue
+        if wanted is not None and g["group_id"] not in wanted:
+            continue
         try:
             out = process_group(g, ctx, matched.get(g["group_id"]), athena_versions=versions.get(g["group_id"]))
         except Exception as exc:  # noqa: BLE001 - one group's crash is that group's failure, never a pass
@@ -2018,7 +2245,8 @@ def process_bundle(
             _null_non_finite(r)
         (unread_results if g.get("group_kind") in ("unread_acquisition", "generic_run") else results).extend(out)
 
-    fixed_said = possibly_fixed_athena_e0(results, bundle, all_groups)
+    fixed_said = possibly_fixed_athena_e0(results, bundle, all_groups, entries)
+    processed = {r.get("group_id") for r in results + unread_results}
 
     payload = {
         **header,
@@ -2031,11 +2259,13 @@ def process_bundle(
             "projects_found": len(projects),
             "projects_read": read_ok,
             "groups_read": len(entries),
-            "record_groups_matched": len(matched),
-            "record_groups_with_unselected_versions": len(versions),
+            # the groups processed in this call (all of them without --group)
+            "record_groups_matched": len([g for g in matched if g in processed]),
+            "record_groups_with_unselected_versions": len([g for g in versions if g in processed]),
             "notes": (a_notes + m_notes)[:500],
             "match_rule": A.MATCH_RULE_ID,
-            "statement": athena_match_statement(all_groups, entries, matched={**versions, **matched}, notes=m_notes),
+            "statement": athena_match_statement(all_groups, entries, matched={**versions, **matched}, notes=m_notes,
+                                                processed=processed, stored=bundle.get("processing_results") or ()),
         },
         "processing_results": results,
         "unread_acquisition_results": unread_results,
@@ -2090,11 +2320,22 @@ def process_bundle(
 _STATED_SUFFIXES = 3
 
 #: r1-a M5: an Athena E0 IDENTICAL (to :data:`FIXED_E0_DECIMALS`) in DIFFERENT Athena curves of one beamtime, while
-#: ISAAC's own E0s for those groups (each QC passed) differ by at least :data:`FIXED_E0_MIN_ISAAC_SPREAD_EV`, is likely
-#: a FIXED normalisation setting (an E0 typed or carried over in Athena), not a measured edge position. Measured on a
-#: real BL4-3 sulfur beamtime: elemental S, a dry MOF and the MOF at 0 V in electrolyte all carried Athena E0
-#: 2471.901 eV while ISAAC measured 2472.958 eV for the last, and it was exported as the edge position. Names are never
-#: read (r1-a review: the same sample named two ways, CoSO4_5wt / CoSO4_0p5wt, was flagged as different chemistry).
+#: ISAAC's own E0s for those groups (each with a QC verdict of pass or warn) differ by at least
+#: :data:`FIXED_E0_MIN_ISAAC_SPREAD_EV`, is likely a FIXED normalisation setting (an E0 typed or carried over in Athena),
+#: not a measured edge position. Measured on a real BL4-3 sulfur beamtime: an elemental standard and two samples carried
+#: one Athena E0 while ISAAC measured the last about 1 eV away, and it was exported as the edge position. Names are
+#: never read for that comparison (r1-a review: one sample named two ways was flagged as different chemistry).
+#:
+#: r3-b M3: the E0s of EVERY Athena group of the result's own project count too, matched to a group or not (measured on
+#: a real BL4-3 beamtime: one project gave one E0 to four samples' groups; three of those groups were rejected before
+#: processing, so no other Athena RESULT carried it and the flag never fired). Such a group counts only
+#: when it is ANOTHER SAMPLE (:func:`_sample_key`: names equal apart from counters, scan-file and merge words are one
+#: sample's repeats, never other samples) and the E0 is not where its own edge is: ISAAC's own E0 for its record group,
+#: where one exists and this group has one too, differs from this group's by at least the same 0.5 eV, or else its own
+#: stored data's edge (larch find_e0 near the E0, ``athena.load_project``) is 0.5 eV or more from that E0. And never
+#: when THIS curve's own data puts its edge within 0.5 eV of it (r3-d L-2: in the Athena E0's own frame; ISAAC's E0
+#: only when the project gives none): there the E0 is where this group's edge is (two samples' E0s on one grid point
+#: are no setting).
 FIXED_E0_RULE_ID = "isaac.athena.e0_possibly_fixed.v0"
 FIXED_E0_FLAG = "athena_e0_possibly_fixed"
 FIXED_E0_QUESTION = "athena_e0_measured_or_set"
@@ -2102,6 +2343,19 @@ FIXED_E0_DECIMALS = 3
 #: more than one curve's E0 moves by landing on a grid point or by noise
 FIXED_E0_MIN_ISAAC_SPREAD_EV = 0.5
 _FIXED_E0_GROUPS_SAID = 5
+_QC_SAID = "(each with a QC verdict of pass or warn)"
+_SAMPLE_NOISE = re.compile(r"^(" + A._MERGE_WORD + r")\d*$")
+
+
+def _sample_key(label: str) -> str:
+    """r3-b M3: what an Athena label says its SAMPLE is, for telling repeats of one sample from different samples: the
+    normalised name without its XDC scan-file suffix (``_a_001``), whole-number tokens (counters), a trailing XDAC
+    letter and merge words. ``""`` when nothing is left (such a name is never counted as another sample)."""
+    n = re.sub(r"_a_\d+$", "", A.normalise_name(str(label or "")))
+    toks = [t for t in n.split("_") if t and not t.isdigit() and not _SAMPLE_NOISE.match(t)]
+    if toks and toks[-1] == "a":
+        toks = toks[:-1]
+    return "_".join(toks)
 
 
 def _decided_ids(bundle: Mapping) -> set[str]:
@@ -2119,16 +2373,18 @@ def _athena_curve(r: Mapping) -> str:
     return json.dumps([i.get("relative_path"), i.get("athena_group"), i.get("per_scan_set")], sort_keys=True, default=str)
 
 
-def possibly_fixed_athena_e0(results: list[dict], bundle: Mapping, groups: Sequence[Mapping]) -> dict | None:
+def possibly_fixed_athena_e0(results: list[dict], bundle: Mapping, groups: Sequence[Mapping],
+                             entries: Sequence[Mapping] = ()) -> dict | None:
     """Flag (:data:`FIXED_E0_FLAG`) each Athena result whose E0 equals, to :data:`FIXED_E0_DECIMALS`, the Athena E0 of
-    a DIFFERENT Athena curve of another group of the beamtime while ISAAC's own E0s for those groups (QC passed) differ
-    by at least :data:`FIXED_E0_MIN_ISAAC_SPREAD_EV`. Compared: this run's Athena results and the stored ones that stay
-    stored (a decided result, or a group not processed now), never a rejected result nor one of a superseded or
-    non-live group. A flagged result of this run is not preferred for the record, says why (``qc.statements``,
-    ``athena_e0_possibly_fixed``) and asks whether the E0 was measured or set (``questions``). A STORED result that
-    would be flagged is said apart (``kept_results``) and its flag and sentence are returned as ``kept_result_notes``
-    (:func:`apply_kept_result_notes`), since ``isaac process`` keeps it as stored. Nothing hashed changes. Returns a
-    summary (or ``None``)."""
+    a DIFFERENT Athena curve of another group of the beamtime while ISAAC's own E0s for those groups (QC pass or warn)
+    differ by at least :data:`FIXED_E0_MIN_ISAAC_SPREAD_EV`, or (r3-b M3) the E0 of other Athena groups of its own
+    project (``entries``: every group read, matched or not) as set out at :data:`FIXED_E0_RULE_ID`. Compared: this
+    run's Athena results and the stored ones that stay stored (a decided result, or a group not processed now), never a
+    rejected result nor one of a superseded or non-live group. A flagged result of this run is not preferred for the
+    record, says why (``qc.statements``, ``athena_e0_possibly_fixed``) and asks whether the E0 was measured or set
+    (``questions``). A STORED result that would be flagged is said apart (``kept_results``) and its flag and sentence
+    are returned as ``kept_result_notes`` (:func:`apply_kept_result_notes`), since ``isaac process`` keeps it as
+    stored. Nothing hashed changes. Returns a summary (or ``None``)."""
     bundle = bundle or {}
     stored = list(bundle.get("processing_results") or ())
     decided = _decided_ids(bundle)
@@ -2140,13 +2396,19 @@ def possibly_fixed_athena_e0(results: list[dict], bundle: Mapping, groups: Seque
 
     pool = [*results, *stored]
 
-    def own_e0(r):
-        sib = next((x for x in pool if x.get("source") == "isaac_protocol" and x.get("group_id") == r.get("group_id")
-                    and x.get("run_id") == r.get("run_id")), None)
+    def _measured(sib) -> float | None:
         if sib is None or (sib.get("qc") or {}).get("verdict") not in ("pass", "warn"):
             return None  # only an ISAAC E0 whose QC did not fail (pass or warn) is a measurement to compare
         v = (sib.get("outputs") or {}).get("e0_eV")
         return float(v) if isinstance(v, (int, float)) and math.isfinite(v) else None
+
+    def own_e0(r):
+        return _measured(next((x for x in pool if x.get("source") == "isaac_protocol" and x.get("group_id") == r.get("group_id")
+                               and x.get("run_id") == r.get("run_id")), None))
+
+    def group_e0(gid):
+        # r3-b M3: an Athena group's record group (matched or not processed now): its ISAAC E0, this run's first
+        return _measured(next((x for x in pool if x.get("source") == "isaac_protocol" and x.get("group_id") == gid), None))
 
     def athena_e0(r):
         v = (r.get("outputs") or {}).get("e0_eV")
@@ -2163,6 +2425,51 @@ def possibly_fixed_athena_e0(results: list[dict], bundle: Mapping, groups: Seque
     def name(gid):
         g = by_group.get(gid) or {}
         return next((str(s) for s in g.get("_stems") or () if s), None) or str(gid)
+
+    # r3-b M3: every Athena group read, by (project, E0), and the record group each matches (if exactly one)
+    egroup = A.entry_groups(groups, entries) if entries else {}
+    in_project: dict[tuple, list[int]] = {}
+    for i, e in enumerate(entries):
+        v = e.get("e0_eV")
+        if isinstance(v, (int, float)) and math.isfinite(v):
+            in_project.setdefault((e.get("prj_relative_path"), round(float(v), FIXED_E0_DECIMALS)), []).append(i)
+
+    def project_partners(r, value) -> list[dict]:
+        """Other samples' Athena groups of r's own project that carry its E0 and count (:data:`FIXED_E0_RULE_ID`)."""
+        inp = (r.get("inputs") or [{}])[0] or {}
+        members = inp.get("per_scan_set") if isinstance(inp.get("per_scan_set"), Mapping) else {}
+        mine_groups = set(members.get("athena_groups") or ()) | {inp.get("athena_group")}
+        keys = {_sample_key(x) for x in (members.get("labels") or [inp.get("scan")])} - {""}
+        gid, mine = r.get("group_id"), own_e0(r)
+        # r3-d L-2: where this curve's OWN data puts its edge, in the scientist's frame (the Athena E0's frame, with
+        # bkg_eshift); ISAAC's E0 (its own, uncalibrated frame) only when the project gives no such edge for this curve
+        here = [float(e["data_e0_eV"]) for e in entries if e.get("prj_relative_path") == inp.get("relative_path")
+                and e.get("group_name") in mine_groups and isinstance(e.get("data_e0_eV"), (int, float))
+                and math.isfinite(e["data_e0_eV"])]
+        at = float(statistics.median(here)) if here else mine
+        if at is not None and abs(at - value) < FIXED_E0_MIN_ISAAC_SPREAD_EV:
+            return []  # this group's edge is there: the E0 is where its edge is
+        found: list[dict] = []
+        for i in in_project.get((inp.get("relative_path"), value), ()):
+            e = entries[i]
+            key = _sample_key(e.get("label"))
+            if e.get("group_name") in mine_groups or egroup.get(i) == gid or not key or key in keys:
+                continue  # this curve, this group, or a repeat of this sample: never another sample's E0
+            theirs = group_e0(egroup[i]) if i in egroup else None
+            edge = e.get("data_e0_eV")
+            by_isaac = theirs is not None and mine is not None
+            if by_isaac:
+                if abs(mine - theirs) < FIXED_E0_MIN_ISAAC_SPREAD_EV:
+                    continue  # an ISAAC E0 that exists must differ, as for the results above
+            elif edge is None or abs(edge - value) < FIXED_E0_MIN_ISAAC_SPREAD_EV:
+                # no two ISAAC E0s to compare (r3-d L-2: also when this group's own ISAAC QC failed, never a skip): its
+                # own data must put its edge elsewhere
+                continue
+            found.append({"athena_label": e.get("label"), "athena_group": e.get("group_name"), "sample_key": key,
+                          "group_id": egroup.get(i), "isaac_e0_eV": theirs,
+                          "basis": "isaac_e0" if by_isaac else "own_data_edge",
+                          "own_data_e0_eV": round(float(edge), FIXED_E0_DECIMALS) if edge is not None else None})
+        return found
 
     flagged, kept, notes = [], [], []
     by_value: dict[float, list] = {}
@@ -2189,31 +2496,59 @@ def possibly_fixed_athena_e0(results: list[dict], bundle: Mapping, groups: Seque
         for r, is_kept in same:
             gid, curve = r.get("group_id"), _athena_curve(r)
             others_c = partners(curve)
-            if not others_c:
-                continue
-            others = sorted({g for c in others_c for g in curves[c]} - {gid})
-            known = [own[g] for g in [gid, *others] if own.get(g) is not None]
-            spread = max(known) - min(known)
-            listed = ", ".join(f"{name(g)} (ISAAC {own[g]:.3f} eV)" if own.get(g) is not None else name(g)
-                               for g in others[:_FIXED_E0_GROUPS_SAID])
-            listed += f" and {len(others) - _FIXED_E0_GROUPS_SAID} more" if len(others) > _FIXED_E0_GROUPS_SAID else ""
             mine = own.get(gid)
-            said = (f"The scientist's Athena E0 here, {value:.{FIXED_E0_DECIMALS}f} eV, is exactly the Athena E0 of "
-                    f"{len(others)} other group{'' if len(others) == 1 else 's'} of this beamtime ({listed}), in a "
-                    f"different Athena curve, while ISAAC's own E0s for these groups (each QC passed) span "
-                    f"{spread:.2f} eV" + (f" (ISAAC measures {mine:.3f} eV here)" if mine is not None else "")
-                    + ". An E0 identical across different curves is likely a fixed normalisation setting (typed or "
-                    "carried over in Athena), not a measured edge position")
-            info = {"rule_id": FIXED_E0_RULE_ID, "athena_e0_eV": value, "decimals": FIXED_E0_DECIMALS,
-                    "groups": [{"group_id": g, "athena_e0_eV": value, "isaac_e0_eV": own.get(g)} for g in [gid, *others]],
-                    "isaac_e0_spread_eV": spread, "min_isaac_spread_eV": FIXED_E0_MIN_ISAAC_SPREAD_EV}
+            if others_c:
+                others = sorted({g for c in others_c for g in curves[c]} - {gid})
+                known = [own[g] for g in [gid, *others] if own.get(g) is not None]
+                spread = max(known) - min(known)
+                listed = ", ".join(f"{name(g)} (ISAAC {own[g]:.3f} eV)" if own.get(g) is not None else name(g)
+                                   for g in others[:_FIXED_E0_GROUPS_SAID])
+                listed += f" and {len(others) - _FIXED_E0_GROUPS_SAID} more" if len(others) > _FIXED_E0_GROUPS_SAID else ""
+                said = (f"The scientist's Athena E0 here, {value:.{FIXED_E0_DECIMALS}f} eV, is exactly the Athena E0 of "
+                        f"{len(others)} other group{'' if len(others) == 1 else 's'} of this beamtime ({listed}), in a "
+                        f"different Athena curve, while ISAAC's own E0s for these groups {_QC_SAID} span "
+                        f"{spread:.2f} eV" + (f" (ISAAC measures {mine:.3f} eV here)" if mine is not None else "")
+                        + ". An E0 identical across different curves is likely a fixed normalisation setting (typed or "
+                        "carried over in Athena), not a measured edge position")
+                info = {"rule_id": FIXED_E0_RULE_ID, "athena_e0_eV": value, "decimals": FIXED_E0_DECIMALS,
+                        "groups": [{"group_id": g, "athena_e0_eV": value, "isaac_e0_eV": own.get(g)} for g in [gid, *others]],
+                        "isaac_e0_spread_eV": spread, "min_isaac_spread_eV": FIXED_E0_MIN_ISAAC_SPREAD_EV}
+                why = (f"the same in {len(others)} other group(s) whose ISAAC E0s span {spread:.2f} eV")
+                asked = (f"The same Athena E0 is in {len(others)} other group{'' if len(others) == 1 else 's'}' Athena "
+                         f"curve{'' if len(others) == 1 else 's'}, while ISAAC's own E0s for these groups (QC pass or "
+                         f"warn) span {spread:.2f} eV.")
+            else:
+                found = project_partners(r, value)
+                if not found:
+                    continue
+                prj = PurePosixPath(str(((r.get("inputs") or [{}])[0] or {}).get("relative_path") or "")).name
+                n = len(found)
+                listed = ", ".join(f"'{f['athena_label']}'" + (f" (ISAAC {f['isaac_e0_eV']:.3f} eV)" if f["basis"] == "isaac_e0"
+                                                             else f" (its own edge at {f['own_data_e0_eV']:.3f} eV)")
+                                   for f in found[:_FIXED_E0_GROUPS_SAID])
+                listed += f" and {n - _FIXED_E0_GROUPS_SAID} more" if n > _FIXED_E0_GROUPS_SAID else ""
+                said = (f"The scientist's Athena E0 here, {value:.{FIXED_E0_DECIMALS}f} eV, is exactly the Athena E0 of "
+                        f"{n} other Athena group{'' if n == 1 else 's'} of other samples in the same project ({prj}: "
+                        f"{listed}), matched to a record group or not, whose own edges are not there (ISAAC's E0 for "
+                        f"its record group {_QC_SAID}, else the edge of its own stored data, {FIXED_E0_MIN_ISAAC_SPREAD_EV:g} "
+                        "eV or more away)"
+                        + (f"; ISAAC measures {mine:.3f} eV here" if mine is not None else "")
+                        + ". An E0 identical across different samples' curves is likely a fixed normalisation setting "
+                        "(typed or carried over in Athena), not a measured edge position")
+                info = {"rule_id": FIXED_E0_RULE_ID, "athena_e0_eV": value, "decimals": FIXED_E0_DECIMALS,
+                        "groups": [{"group_id": gid, "athena_e0_eV": value, "isaac_e0_eV": mine}],
+                        "same_project": {"prj_relative_path": ((r.get("inputs") or [{}])[0] or {}).get("relative_path"),
+                                         "athena_groups": found},
+                        "min_isaac_spread_eV": FIXED_E0_MIN_ISAAC_SPREAD_EV}
+                why = f"the same in {n} other sample(s)' Athena group(s) of {prj}"
+                asked = (f"The same Athena E0 is in {n} other Athena group{'' if n == 1 else 's'} of other samples in "
+                         f"{prj}.")
             pid = B.processing_id(r)
             if is_kept:
                 state = r.get("state")
                 what = "approved result" if state == B.STATE_SCIENTIST_CONFIRMED else f"stored result ({state})"
                 line = (f"Athena: {what} {pid} carries a possibly fixed Athena E0 ({value:.{FIXED_E0_DECIMALS}f} eV, "
-                        f"the same in {len(others)} other group(s) whose ISAAC E0s span {spread:.2f} eV); ask the "
-                        "scientist whether it was measured.")
+                        f"{why}); ask the scientist whether it was measured.")
                 kept.append({"result_id": pid, "state": state, "statement": line})
                 notes.append({"result_id": pid, "rule_id": FIXED_E0_RULE_ID, "add_review_flags": [FIXED_E0_FLAG],
                               "statements": {FIXED_E0_FLAG: (f"{said}. This result was kept as it was decided "
@@ -2230,19 +2565,16 @@ def possibly_fixed_athena_e0(results: list[dict], bundle: Mapping, groups: Seque
             r["questions"] = [*(r.get("questions") or ()), {
                 "code": FIXED_E0_QUESTION,
                 "text": (f"Was the Athena E0 of {value:.{FIXED_E0_DECIMALS}f} eV measured from this group's own edge, or "
-                         "set (typed, or carried over from another group) in Athena? The same Athena E0 is in "
-                         f"{len(others)} other group{'' if len(others) == 1 else 's'}' Athena curve"
-                         f"{'' if len(others) == 1 else 's'}, while ISAAC's own E0s for these groups (QC passed) span "
-                         f"{spread:.2f} eV.")}]
+                         f"set (typed, or carried over from another group) in Athena? {asked}")}]
             flagged.append(pid)
     if not flagged and not kept:
         return None
     line = None
     if flagged:
         line = (f"Athena: {len(flagged)} of the scientist's Athena result(s) carry an E0 identical to other curves' "
-                f"while ISAAC's own E0s for those groups differ by {FIXED_E0_MIN_ISAAC_SPREAD_EV:g} eV or more: likely a "
-                f"fixed normalisation setting, not a measured edge position (flag {FIXED_E0_FLAG}); ask the scientist "
-                "before approving them.")
+                f"(of groups whose ISAAC E0s differ by {FIXED_E0_MIN_ISAAC_SPREAD_EV:g} eV or more, or of other samples "
+                f"in the same Athena project): likely a fixed normalisation setting, not a measured edge position (flag "
+                f"{FIXED_E0_FLAG}); ask the scientist before approving them.")
     return {"rule_id": FIXED_E0_RULE_ID, "results": flagged, "kept_results": kept, "kept_result_notes": notes,
             "statement": line}
 
@@ -2271,18 +2603,57 @@ def apply_kept_result_notes(results: Sequence[dict], notes: Sequence[Mapping]) -
     return changed
 
 
-def athena_match_statement(groups: Sequence[Mapping], entries: Sequence[Mapping], *, matched: Mapping, notes: Sequence[Mapping]) -> str | None:
-    """ONE LINE saying why the Athena groups that were read matched NO record group, or ``None`` when
-    there were none to match or some matched. Names how many Athena names BEGIN with a group's scan
+def _stored_athena_matches(stored: Sequence[Mapping]) -> set[tuple]:
+    """r3-b M5: ``(project path, Athena group)`` of every Athena group a STORED result was matched to: an Athena result's
+    input (and a set's members) and the versions an ISAAC result lists."""
+    out: set[tuple] = set()
+
+    def add(path, group, members):
+        if path and group:
+            out.add((str(path), str(group)))
+        for m in (members or {}).get("athena_groups") or () if isinstance(members, Mapping) else ():
+            out.add((str(path), str(m)))
+
+    for r in stored or ():
+        if not isinstance(r, Mapping):
+            continue
+        if r.get("source") == "scientist_athena":
+            for i in r.get("inputs") or ():
+                if isinstance(i, Mapping):
+                    add(i.get("relative_path"), i.get("athena_group"), i.get("per_scan_set"))
+        for v in r.get("athena_versions") or ():
+            prov = (v or {}).get("provenance") or {} if isinstance(v, Mapping) else {}
+            add(prov.get("prj_relative_path"), prov.get("athena_group"), prov.get("per_scan_set"))
+    return out
+
+
+def athena_match_statement(groups: Sequence[Mapping], entries: Sequence[Mapping], *, matched: Mapping, notes: Sequence[Mapping],
+                           processed: Sequence[str] | set | None = None, stored: Sequence[Mapping] = ()) -> str | None:
+    """ONE LINE saying why the Athena groups that were read matched NO group processed now, or ``None`` when there
+    were none to match or a group processed now matched. Names how many Athena names BEGIN with a group's scan
     name but end in a suffix the match rule does not accept (measured on a real BL4-3 beamtime: 161
     Athena groups named ``<scan>_a_001``, none matched under v0; v1 accepts that XDC scan-file suffix),
-    and how many matched several groups. A name the rule accepts is never counted as a near miss."""
-    if not entries or matched:
+    and how many matched several groups. A name the rule accepts is never counted as a near miss.
+
+    r3-b M5: scoped to the groups processed NOW (``processed``; every group when ``None``). An Athena group counts as
+    matched when it matches a record group of the bundle (this run's match over every group) or a STORED result was
+    matched to it (``stored``). When any is, the line says how many of the project's Athena groups match and that
+    none of the groups processed now does; it never says "matched no record group" (measured: after ``process
+    --group A --group B`` it did, while 6 groups held matched Athena results)."""
+    if not entries:
         return None
+    processed = set(processed) if processed is not None else {g.get("group_id") for g in groups}
+    if any(g in processed for g in matched):
+        return None
+    of_group = A.entry_groups(groups, entries)
+    held = _stored_athena_matches(stored)
+    hit = {i for i, gid in of_group.items() if gid in matched} | {
+        i for i, e in enumerate(entries) if (str(e.get("prj_relative_path")), str(e.get("group_name"))) in held}
+    unmatched = [e for i, e in enumerate(entries) if i not in hit]
     stems = {A.normalise_name(s) for g in groups if g.get("_has_scans", True) for s in g.get("_stems") or ()}
     stems.discard("")
     near, suffixes = 0, []
-    for e in entries:
+    for e in unmatched:
         tails = [n[len(st):] for n in e.get("names") or () for st in stems
                  if n and n.startswith(st + "_") and not A.accepted_suffix(n[len(st) + 1:])]
         if tails:
@@ -2291,16 +2662,26 @@ def athena_match_statement(groups: Sequence[Mapping], entries: Sequence[Mapping]
             if tail not in suffixes:
                 suffixes.append(tail)
     ambiguous = sum(1 for n in notes if n.get("code") == "athena_group_matches_several_record_groups")
-    line = (f"Athena: {len(entries)} Athena group(s) were read and matched no record group under rule {A.MATCH_RULE_ID} "
-            "(an Athena name equal to a group's scan name, or that name plus a scan or merge suffix such as _001 or _merged, "
-            "or plus an XDC scan-file suffix such as _A.001)")
+    rule = ("(an Athena name equal to a group's scan name, or that name plus a scan or merge suffix such as _001 or "
+            "_merged, or plus an XDC scan-file suffix such as _A.001)")
+    if hit:
+        n_now = len(processed)
+        line = (f"Athena: none of the {n_now} group(s) processed now has an Athena match under rule {A.MATCH_RULE_ID} "
+                f"{rule}; of the {len(entries)} Athena group(s) read, {len(hit)} match a record group (this run's match "
+                f"over every group of the bundle, and the Athena results stored for groups not processed now) and "
+                f"{len(unmatched)} match none")
+    else:
+        line = (f"Athena: {len(entries)} Athena group(s) were read and matched no record group under rule {A.MATCH_RULE_ID} "
+                f"{rule}")
     if near:
         shown = ", ".join(f"'{t}'" for t in suffixes[:_STATED_SUFFIXES]) + (" …" if len(suffixes) > _STATED_SUFFIXES else "")
-        line += f"; {near} of them begin with a group's scan name but end in a suffix the rule does not accept ({shown})"
+        line += f"; {near} of {'those' if hit else 'them'} begin with a group's scan name but end in a suffix the rule does not accept ({shown})"
     if ambiguous:
         line += f"; {ambiguous} matched several record groups, so none was used"
-    if not near and not ambiguous:
-        line += "; their names are not the scan names"
+    if not near and not ambiguous and unmatched:
+        line += f"; {'the other' if hit else 'their'} names are not the scan names"
+    if hit:
+        return line + ". No ISAAC result processed now was compared with the scientist's Athena processing."
     return line + ". No ISAAC result was compared with the scientist's Athena processing."
 
 

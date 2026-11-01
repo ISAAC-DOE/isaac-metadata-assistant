@@ -1474,9 +1474,10 @@ LOCAL_CLOCK_NONEXISTENT = "nonexistent_in_zone"
 
 
 #: THE COMMENT RULE (``ssrl_xdc_header_comment_v1``, applied at import by :func:`_xdc_comment_candidates`): the
-#: comment lines of an ``ssrl_xdc_v1`` scan header (lines 9-12; the ``.exp`` COMMENTS1-4: line 8 is the gain line,
-#: ``readers.ssrl_xdc``) are free text a scientist
-#: typed at the beamline, e.g. ``0.1 M HClO4, pH 1.3, -0.3 V vs RHE``. What a line states in a PLAIN form
+#: comment lines of an ``ssrl_xdc_v1`` scan header (lines 9-12, the free-text lines the reader keeps before
+#: ``Weights:``; on the BL4-3 headers seen these are the ``.exp`` COMMENTS2-4 on lines 9-11, and COMMENTS1 is line 8,
+#: which there holds the gain and which the reader keeps as ``header_line_8_literal``, unread: ``readers.ssrl_xdc``)
+#: are free text a scientist typed at the beamline, e.g. ``0.1 M HClO4, pH 1.3, -0.3 V vs RHE``. What a line states in a PLAIN form
 #: (``questions.header_comment_readings``, a whitelist: a whole segment of the line that is one set-point, pH or
 #: electrolyte statement, and nothing else in the line that makes it doubtful) becomes ONE candidate per run and field
 #: that NEEDS REVIEW: never proposable, never confirmed until a scientist confirms (or corrects) it. A field a line
@@ -1485,13 +1486,14 @@ LOCAL_CLOCK_NONEXISTENT = "nonexistent_in_zone"
 XDC_COMMENT_RULE_ID = "ssrl_xdc_header_comment_v1"
 XDC_COMMENT_RULE = (
     f"{XDC_COMMENT_RULE_ID}: a comment line of the run's SSRL EXAFS Data Collector 4.0 scan headers (lines 9-12, the "
-    "experiment file's COMMENTS1-4) that writes an electrolyte and its concentration, a pH, or a potential (and its "
+    "free text before Weights:; line 8, the experiment file's COMMENTS1, is not read) that writes an electrolyte and its concentration, a pH, or a potential (and its "
     "scale) in a plain form is read into a candidate that NEEDS REVIEW; a line that only mentions one gives a "
     "candidate with no value that quotes the line. The line is free text, so the value is never proposed or "
     "confirmed until a scientist confirms or corrects it."
 )
 XDC_COMMENT_LINES = range(9, 13)
-#: the reader's key for those lines (line 8, ``header_line_8_literal``, is the gain line and is never read)
+#: the reader's key for those lines (line 8, ``header_line_8_literal``: COMMENTS1, the gain on the BL4-3 headers seen,
+#: is never read)
 XDC_COMMENT_STATEMENT_KEY = "free_text"
 #: statement key per field (each a grouping CONDITION key: a different value is a different record)
 XDC_COMMENT_KEYS: Mapping[str, str] = {

@@ -1,0 +1,503 @@
+"""r3a: what a real-data run on an SSRL BL4-3 Ti K-edge beamtime found. Synthetic only (invented lines, SYN names).
+
+BL4-3 scan headers write a sample, an electrolyte and a potential glued into one comment line (``Sample A in 1M KOH
+0Vrhe``), so every comment line gives the whitelist rule no value. What these pin:
+
+* H1: ``bundle excerpt`` of a candidate shows the line its ``line:N`` locator names, and says so when it cannot;
+* H2: a potential a value-less header line MENTIONS (``0Vrhe``) is compared, never offered: against the file name's
+  (``m600mV``) and the typed value, warned at validate until a scientist rules, and never said to agree;
+* M1: with no ``<name>.exp``, the DATA_FILE of the ONLY ``.exp`` in the run's own folder (a reused template) is read,
+  kept only when it is the run's own name minus its counter, and a merge candidate whose DATA_FILEs agree says so;
+* M6: a no-value question says it asks for a value (``no_value``, the kind unchanged), and the per-run questions that
+  quote one comment line for one field share a ``same_reading_group`` answered at once (``--same-reading``);
+* L1: the counter question's example names come from sample groups where there are some, and several positions are
+  each asked on their own;
+* L5: questions about runs in no live record group are counted, not listed, by default (a flag lists them), and the
+  template report names a rejected group's runs once, not once per Campaign Info cell;
+* L6: the Campaign Info hints on ISAAC Suggestions have their own column label (never "Config ID");
+* L7: propose-terms says the runs and sheet cells its occurrences cover.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import openpyxl
+import pytest
+
+from isaac_api.local_import import bundle as B
+from isaac_api.local_import import cli
+from isaac_api.local_import import grouping as G
+from isaac_api.local_import import mutations as M
+from isaac_api.local_import import propose_terms as P
+from isaac_api.local_import import questions as Q
+from isaac_api.local_import import records as R
+from isaac_api.local_import import template as T
+from isaac_api.local_import.readers import ssrl_xdc as x
+
+from test_local_import_reader_ssrl_xdc import make_scan
+
+WHO = "SYNTHETIC TEST"
+SETPOINT = "context.electrochemistry.potential_setpoint_V"
+
+
+def _import(src: Path, out: Path) -> Path:
+    assert cli.main(["import", str(src), "--out", str(out)]) == 0
+    M.group(out)
+    for g in M.load(out)["record_groups"]:
+        M.decide(out, target_ids=[g["group_id"]], decision="confirm", value=None, by=WHO, orcid=None)
+    return out
+
+
+def _header_cands(b: dict, path: str) -> list[dict]:
+    return [c for c in b["candidates"] if B.is_header_comment_candidate(c) and c["target_field_path"] == path]
+
+
+# --- H1: excerpt shows the line a candidate's locator names ------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def excerpted(tmp_path_factory):
+    root = tmp_path_factory.mktemp("r3a-h1")
+    src = root / "SYN_bt43"
+    make_scan(src / "01_SYNti_m600mV_096_A.001", free_text=("SYN gain 1e8", "Sample A in 1M KOH 0Vrhe", "SYN note"))
+    return src, _import(src, root / "bundle")
+
+
+def test_excerpt_of_a_header_comment_candidate_shows_its_line(excerpted):
+    src, out = excerpted
+    b = M.load(out)
+    [cand] = _header_cands(b, SETPOINT)
+    assert cand["evidence"][0]["locator"] == "line:10"
+    got = M.excerpt(b, cand["candidate_id"], source=str(src))
+    [hit] = got["excerpts"]
+    assert hit["locator"] == "line:10" and hit["lines"] == [7, 13] and "note" not in hit
+    assert "   10: Sample A in 1M KOH 0Vrhe" in hit["text"].splitlines()
+
+
+@pytest.mark.parametrize("locator,first,last", [("line:10", 10, None), ("line 3", 3, None),
+                                                ("command 2 (lines 4-9)", 4, "9")])
+def test_every_line_locator_the_readers_write_is_read(locator, first, last):
+    m = M._LINE_RE.search(locator)
+    assert m is not None and int(m.group("first")) == first and m.group("last") == last
+
+
+def test_a_locator_that_names_no_file_line_is_not_read_as_one():
+    assert M._LINE_RE.search("history line 4") is None  # an Igor history line is not a line of the file
+    assert M._LINE_RE.search("record 3 (wave note)") is None
+
+
+def test_a_line_past_the_end_of_the_file_is_refused_not_replaced_by_the_first_lines(excerpted, monkeypatch):
+    src, out = excerpted
+    b = M.load(out)
+    [cand] = _header_cands(b, SETPOINT)
+    monkeypatch.setattr(M, "_locators", lambda c: [{"source_id": e["source_id"], "relative_path": e["relative_path"],
+                                                    "locator": "line:900"} for e in c["evidence"]][:1])
+    [hit] = M.excerpt(b, cand["candidate_id"], source=str(src))["excerpts"]
+    assert "lines" not in hit and hit["refused"].startswith("the locator names line 900 and the file has ")
+
+
+def test_a_locator_with_no_line_says_the_first_lines_are_shown(excerpted, monkeypatch):
+    src, out = excerpted
+    b = M.load(out)
+    [cand] = _header_cands(b, SETPOINT)
+    monkeypatch.setattr(M, "_locators", lambda c: [{"source_id": e["source_id"], "relative_path": e["relative_path"],
+                                                    "locator": "record 3"} for e in c["evidence"]][:1])
+    [hit] = M.excerpt(b, cand["candidate_id"], source=str(src))["excerpts"]
+    assert hit["lines"] == [1, 7] and hit["note"] == "the locator (record 3) names no line of the file: its first lines are shown"
+
+
+# --- H2: a potential a value-less header line mentions is compared, never offered --------------------------------
+
+
+WRONG, SAME, TWO = "01_SYNti_m600mV_096", "02_SYNti_m600mV_097", "03_SYNti_1p6V_098"
+LINES = {WRONG: "Sample A in 1M KOH 0Vrhe", SAME: "Sample A in 1M KOH -0.6Vrhe", TWO: "SYN 0.5 V then 1.6 V vs RHE"}
+
+
+@pytest.fixture()
+def glued(tmp_path):
+    src = tmp_path / "SYN_bt43"
+    for label, line in LINES.items():
+        for i in (1, 2):
+            make_scan(src / f"{label}_A.{i:03d}", free_text=("SYN gain 1e8", line))
+    return _import(src, tmp_path / "bundle")
+
+
+def _rid(b: dict, label: str) -> str:
+    return next(r["run_id"] for r in b["runs"] if r["label"] == label)
+
+
+def _group(b: dict, rid: str) -> dict:
+    return next(g for g in b["record_groups"] if g["member_run_ids"] == [rid])
+
+
+CARRIED = {SETPOINT: {"value": -0.6, "status": "scientist_confirmed", "evidence": []},
+           "context.electrochemistry.potential_scale": {"value": "RHE", "status": "scientist_confirmed", "evidence": []}}
+
+
+def test_every_potential_a_line_mentions_is_kept_and_none_is_picked():
+    assert [(m["literal"], m["volts"], m["scale"]) for m in Q.header_potential_mentions("Sample A in 1M KOH 0Vrhe")] == [
+        ("0Vrhe", 0.0, "RHE")]
+    assert [m["literal"] for m in Q.header_potential_mentions("SYN 0.5 V then 1.6 V vs RHE")] == ["0.5 V", "1.6 V vs RHE"]
+    assert [m["volts"] for m in Q.header_potential_mentions("in 1M KOH 0.5Vrhe; -300 mV vs Ag/AgCl")] == [0.5, -0.3]
+    for none in ("PMT 0.8 kV", "5 µV noise", "5 Volts", "1M KOH", "V K-edge"):
+        assert Q.header_potential_mentions(none) == [], none
+
+
+def test_a_mention_is_never_offered_as_a_value(glued):
+    b = M.load(glued)
+    for label in LINES:
+        run = next(r for r in b["runs"] if r["label"] == label)
+        assert T.header_potential_readings(b, run) == []
+    assert all(c["value"] is None for c in _header_cands(b, SETPOINT))
+
+
+def test_a_file_name_and_a_header_mention_that_differ_are_warned_at_validate(glued):
+    b = M.load(glued)
+    rid = _rid(b, WRONG)
+    [w] = R._potential_sources_warnings(b, _group(b, rid), {rid}, CARRIED)
+    assert w["code"] == R.POTENTIAL_SOURCES_WARNING
+    assert w["text"].startswith(f"the scan header of {rid} writes '0Vrhe' (its line 'Sample A in 1M KOH 0Vrhe' at line:10 "
+                                f"of {WRONG}_A.001, line:10 of {WRONG}_A.002), the file name writes m600mV, and the record "
+                                "carries -0.6 V on RHE: '0Vrhe' differs from the file name's and the record's")
+    assert "state a potential" not in w["text"] and "--decision correct --value <volts> --json" in w["command"]
+
+
+def test_matching_mentions_are_not_warned(glued):
+    b = M.load(glued)
+    rid = _rid(b, SAME)
+    assert R._potential_sources_warnings(b, _group(b, rid), {rid}, CARRIED) == []
+
+
+def test_each_of_several_mentions_is_compared(glued):
+    b = M.load(glued)
+    rid = _rid(b, TWO)
+    carried = {**CARRIED, SETPOINT: {**CARRIED[SETPOINT], "value": 1.6}}
+    [w] = R._potential_sources_warnings(b, _group(b, rid), {rid}, carried)
+    assert "writes '0.5 V' and '1.6 V vs RHE' (its line" in w["text"]
+    assert "'0.5 V' differs from the file name's and the record's" in w["text"] and "'1.6 V vs RHE' differs" not in w["text"]
+
+
+def test_a_ruling_on_the_header_line_clears_the_warning(glued):
+    b = M.load(glued)
+    rid = _rid(b, WRONG)
+    [cand] = [c for c in _header_cands(b, SETPOINT) if c["run_id"] == rid]
+    M.decide(glued, target_ids=[cand["candidate_id"]], decision="correct", value=-0.6, by=WHO, orcid=None)
+    assert R._potential_sources_warnings(M.load(glued), _group(b, rid), {rid}, CARRIED) == []
+
+
+def test_build_records_never_says_a_differing_file_name_and_header_state_one_potential(glued):
+    R.build_records(glued)
+    got = {w["group_id"]: w["text"] for w in R.validate_records(glued, full=False).get("warnings") or ()
+           if w["code"] == R.STATED_POTENTIAL_WARNING}
+    b = M.load(glued)
+    wrong, same = got[_group(b, _rid(b, WRONG))["group_id"]], got[_group(b, _rid(b, SAME))["group_id"]]
+    assert wrong.startswith("the file names and scan headers write different potentials (m600mV in ")
+    assert f"{_rid(b, WRONG)}: the scan header writes '0Vrhe', the file name writes m600mV" in wrong
+    assert "state a potential" not in wrong
+    assert same.startswith("the file names and scan headers state a potential (m600mV in ")
+    assert "different" not in same
+
+
+def _typed(out: Path, tmp_path: Path, label: str, volts: float, capsys) -> dict:
+    xlsx = tmp_path / "t.xlsx"
+    assert cli.main(["bundle", "template", "export", str(out), "--out", str(xlsx)]) == 0
+    wb = openpyxl.load_workbook(xlsx)
+    rid = _rid(M.load(out), label)
+    row = next(int(v[1]) for v in wb["_isaac"].iter_rows(values_only=True) if v[0] == "File List" and v[2] == rid)
+    header = next(r for r in range(1, 10) if any(c.value == "Potential (V)" for c in wb["File List"][r]))
+    col = {c.value: c.column_letter for c in wb["File List"][header] if c.value}
+    wb["File List"][f"{col['Potential (V)']}{row}"] = volts
+    wb["File List"][f"{col['Potential Scale']}{row}"] = "RHE"
+    wb.save(xlsx)
+    capsys.readouterr()
+    assert cli.main(["bundle", "template", "import", str(out), str(xlsx), "--by", WHO, "--json"]) == 0
+    return json.loads(capsys.readouterr().out)
+
+
+def test_the_template_preview_names_a_header_mention_the_typed_value_contradicts(glued, tmp_path, capsys):
+    rep = _typed(glued, tmp_path, WRONG, -0.6, capsys)
+    lines = [line for x in rep["replaces_or_contradicts_a_file_reading"] if x["target_field_path"] == SETPOINT
+             for line in x["readings"]]
+    assert (f"contradicts the scan header, which writes '0Vrhe' in its line 'Sample A in 1M KOH 0Vrhe' at line:10 of "
+            f"{WRONG}_A.001 (a mention: no value is read from it)") in lines
+
+
+def test_the_template_preview_lists_no_mention_that_agrees(glued, tmp_path, capsys):
+    rep = _typed(glued, tmp_path, SAME, -0.6, capsys)
+    assert not [x for x in rep["replaces_or_contradicts_a_file_reading"] if x["target_field_path"] == SETPOINT]
+
+
+# --- M1: the .exp DATA_FILE of a template reused under another name ----------------------------------------------
+
+
+TEMPLATE = "SYN_template_exp1.exp"
+
+
+def _template_beamtime(root: Path, data_files: dict[str, str | None], *, extra_exp: bool = False) -> Path:
+    """Each run in its own folder with a copy of one template .exp (``None``: no DATA_FILE line in it)."""
+    src = root / "SYN_bt43"
+    for name, data_file in data_files.items():
+        for i in (1, 2):
+            make_scan(src / name / f"{name}_A.{i:03d}", free_text=("SYN gain 1e8", "SYN comment"))
+        (src / name / TEMPLATE).write_text("EXPT_TYPE SYN\n" + (f"DATA_FILE {data_file}\n" if data_file else "")
+                                           + "COMMENTS1 SYNTHETIC\n")
+        if extra_exp:
+            (src / name / "SYN_other.exp").write_text(f"DATA_FILE {data_file}\n")
+    return src
+
+
+def _data_files(src: Path) -> dict[str, list[dict]]:
+    return {r.label: [s for s in r.statements if s["key"] == "exp_data_file"] for r in x.collect_generic_runs(src)}
+
+
+def test_the_only_exp_in_the_runs_own_folder_is_read(tmp_path):
+    src = _template_beamtime(tmp_path, {"SYNti_m600mV_096": "SYNti_m600mV"})
+    [st] = _data_files(src)["SYNti_m600mV_096"]
+    assert (st["literal"], st["locator"], st["source_relative_path"]) == ("SYNti_m600mV", "line:2",
+                                                                          f"SYNti_m600mV_096/{TEMPLATE}")
+    [run] = x.collect_generic_runs(src)
+    assert [(c["relative_path"], c["role"], c["parsed"]) for c in run.companions if c["role"] == "experiment"] == [
+        (f"SYNti_m600mV_096/{TEMPLATE}", "experiment", True)]
+
+
+def test_a_template_naming_another_acquisition_says_nothing(tmp_path):
+    src = _template_beamtime(tmp_path, {"SYNti_m600mV_096": "SYNother_xas", "SYNti_m300mV_097": None})
+    assert _data_files(src) == {"SYNti_m600mV_096": [], "SYNti_m300mV_097": []}
+    out = _import(src, tmp_path / "bundle")
+    assert not any(G.EXP_NAME_DIFFERS_FLAG in g["flags"] for g in M.load(out)["record_groups"])
+
+
+def test_two_exp_files_in_the_folder_are_not_read(tmp_path):
+    src = _template_beamtime(tmp_path, {"SYNti_m600mV_096": "SYNti_m600mV"}, extra_exp=True)
+    assert _data_files(src) == {"SYNti_m600mV_096": []}
+
+
+def test_the_exp_files_own_name_is_never_a_hint(tmp_path):
+    src = tmp_path / "SYN_bt43"
+    make_scan(src / "SYNti_m600mV_096" / "SYNti_m600mV_096_A.001")
+    (src / "SYNti_m600mV_096" / "SYNti_m600mV.exp").write_text("EXPT_TYPE SYN\n")  # named like the run, no DATA_FILE
+    assert _data_files(src) == {"SYNti_m600mV_096": []}
+
+
+def test_the_runs_own_exp_is_still_the_one_read(tmp_path):
+    src = _template_beamtime(tmp_path, {"SYNti_m600mV_096": "SYNti_m600mV"})
+    (src / "SYNti_m600mV_096" / "SYNti_m600mV_096.exp").write_text("DATA_FILE SYNti_m600mV\n")
+    [st] = _data_files(src)["SYNti_m600mV_096"]
+    assert st["source_relative_path"] == "SYNti_m600mV_096/SYNti_m600mV_096.exp"
+
+
+def test_a_merge_candidate_whose_data_files_agree_says_so(tmp_path):
+    src = _template_beamtime(tmp_path, {"SYNti_m600mV_096": "SYNti_m600mV", "SYNti_m600mV_097": "SYNti_m600mV"})
+    b = M.load(_import(src, tmp_path / "bundle"))
+    [mc] = b["merge_candidates"]
+    [caution] = [c for c in mc["caution"] if c["code"] == G.CAUTION_NOTHING_CLASSIFIED]
+    assert caution["data_file"] == "SYNti_m600mV"
+    assert "each run's own .exp file names the same acquisition (DATA_FILE SYNti_m600mV)" in caution["statement"]
+    assert "nothing read from their files shows they are the same measurement" not in caution["statement"]
+    assert caution["statement"] in mc["question"]["text"]
+
+
+# --- M6: no-value questions that quote one comment line are answered at once -------------------------------------
+
+
+NAME = "context.electrochemistry.electrolyte.name"
+SAME_LINE = "Sample A in 1M KOH 0Vrhe"
+
+
+@pytest.fixture()
+def repeated(tmp_path):
+    src = tmp_path / "SYN_bt43"
+    for k in range(3):
+        make_scan(src / f"0{k + 1}_SYNti_sample{k + 1}_m600mV_{96 + k:03d}_A.001", free_text=("SYN gain 1e8", SAME_LINE))
+    make_scan(src / "09_SYNti_other_m600mV_099_A.001", free_text=("SYN gain 1e8", "Sample B in 1M KOH 0Vrhe"))
+    return _import(src, tmp_path / "bundle")
+
+
+def _name_questions(b: dict) -> list[dict]:
+    return [q for q in Q.consolidate(b)["questions"] if q["target_field_path"] == NAME and q["kind"] == "confirm_value"]
+
+
+def test_a_no_value_question_says_it_asks_for_a_value_under_its_kind(repeated):
+    qs = _name_questions(M.load(repeated))
+    assert len(qs) == 4 and all(q["no_value"] for q in qs)
+    for q in qs:
+        assert "There is nothing to confirm" not in q["text"] and "this asks for one (no_value)" in q["text"]
+        assert q["allowed_decisions"] == list(Q.VALUELESS_DECISIONS)
+
+
+def test_questions_that_quote_one_line_share_a_group_and_say_so(repeated):
+    qs = _name_questions(M.load(repeated))
+    same = [q for q in qs if SAME_LINE in q["text"]]
+    [other] = [q for q in qs if q not in same]
+    assert len(same) == 3 and len({q["same_reading_group"] for q in same}) == 1
+    assert all(q["same_reading_count"] == 3 for q in same) and "same_reading_group" not in other
+    q = same[0]
+    assert f"--question {q['question_id']} --same-reading --decision correct" in q["same_reading_command"]
+    assert "2 other question(s) ask the" in q["text"] and "template's File List columns are the easy path" in q["text"]
+
+
+def test_one_decide_answers_every_question_of_the_group(repeated):
+    qs = [q for q in _name_questions(M.load(repeated)) if SAME_LINE in q["text"]]
+    ids_before = sorted(q["question_id"] for q in qs)
+    got = M.decide_question(repeated, question_id=qs[0]["question_id"], same_reading=True, decision="correct",
+                            value="KOH", by=WHO, orcid=None)
+    targets = sorted(t["id"] for q in qs for t in q["targets"])
+    assert sorted(got["recorded"]) == targets
+    left = _name_questions(M.load(repeated))
+    assert len(left) == 1 and left[0]["question_id"] not in ids_before  # the other line's question stays open
+
+
+def test_same_reading_is_refused_where_it_does_not_apply(repeated, capsys):
+    qs = _name_questions(M.load(repeated))
+    [other] = [q for q in qs if SAME_LINE not in q["text"]]
+    with pytest.raises(M.MutationRefused, match="names no same_reading_group"):
+        M.decide_question(repeated, question_id=other["question_id"], same_reading=True, decision="correct",
+                          value="KOH", by=WHO, orcid=None)
+    same = next(q for q in qs if q.get("same_reading_group"))
+    with pytest.raises(M.MutationRefused, match="does not take --only"):
+        M.decide_question(repeated, question_id=same["question_id"], same_reading=True, only=same["scope"],
+                          decision="correct", value="KOH", by=WHO, orcid=None)
+    assert cli.main(["bundle", "decide", str(repeated), "--target", "cand-0001", "--same-reading", "--decision",
+                     "correct", "--value", "KOH", "--by", WHO]) != 0
+    assert "--same-reading goes with --question" in capsys.readouterr().err
+
+
+# --- L1: the counter question's examples come from sample groups, each position asked on its own ----------------
+
+
+def test_the_counter_examples_are_sample_names_where_there_are_some(tmp_path):
+    src = tmp_path / "SYN_bt43"
+    for stem in ("align_SYNfoil_001", "align_SYNfoil_002", "SYNti_dry_015", "SYNti_dry_016"):
+        make_scan(src / f"{stem}_A.001")
+    b = M.load(_import(src, tmp_path / "bundle"))
+    roles = {g["role"] for g in b["record_groups"]}
+    assert {"alignment", "sample"} <= roles  # both kinds of candidate are there
+    [q] = [q for q in Q.consolidate(b)["questions"] if q["kind"] == "naming_counter_positions"]
+    names = [n for got in q["example_names"].values() for n in got]
+    assert names and all(n.startswith("SYNti_dry_") for n in names), names
+
+
+def test_a_sample_candidate_is_the_example_even_when_an_alignment_one_comes_first():
+    stems = {"k1": "align_SYNfoil_001", "k2": "align_SYNfoil_002", "k3": "SYNti_dry_015", "k4": "SYNti_dry_016"}
+    role = {"k1": "alignment", "k2": "alignment", "k3": "sample", "k4": "sample"}
+    bundle = {"runs": [{"run_key": k, "stem": v} for k, v in stems.items()],
+              "record_groups": [{"group_id": f"g-{k}", "member_run_keys": [k], "role": role[k]} for k in stems],
+              "merge_candidates": [{"group_ids": ["g-k1", "g-k2"], "reasons": [{"code": "numeric_name_token_differs"}]},
+                                   {"group_ids": ["g-k3", "g-k4"], "reasons": [{"code": "numeric_name_token_differs"}]}]}
+    got = Q._counter_examples(bundle, [G.LAST_POSITION, 3])
+    assert got[G.LAST_POSITION]["differ"] == ["SYNti_dry_[015]", "SYNti_dry_[016]"]
+    assert got[3]["differ"] == ["SYNti_dry_[015]", "SYNti_dry_[016]"]
+
+
+def test_several_counter_positions_are_each_asked_on_their_own():
+    text = G.counter_question({3: 1, G.LAST_POSITION: 2}, None)["text"]
+    assert "3rd / last" not in text and "Each is asked on its own: the 3rd token; the last token" in text
+    assert "--positions 3,last for both, or one of them" in text
+    assert "is the 1st token of the file names a run counter?" in G.counter_question({1: 1}, None)["text"]
+
+
+# --- L5: questions about runs in no live record group are counted, not listed, by default -------------------------
+
+
+@pytest.fixture()
+def one_rejected(tmp_path):
+    src = tmp_path / "SYN_bt43"
+    for stem in ("align_SYNfoil_001", "SYNti_dry_015", "SYNti_wet_016"):
+        make_scan(src / f"{stem}_A.001", free_text=("SYN gain 1e8", "Sample A in 1M KOH 0Vrhe"))
+    out = tmp_path / "bundle"
+    assert cli.main(["import", str(src), "--out", str(out)]) == 0
+    M.group(out)
+    b = M.load(out)
+    [align] = [g for g in b["record_groups"] if g["role"] == "alignment"]
+    M.decide(out, target_ids=[align["group_id"]], decision="reject", value=None, by=WHO, orcid=None)
+    return out, align["member_run_ids"][0]
+
+
+def _questions_cli(out: Path, capsys, *extra: str) -> dict:
+    capsys.readouterr()
+    assert cli.main(["bundle", "questions", str(out), "--limit", "200", *extra]) == 0
+    return json.loads(capsys.readouterr().out)
+
+
+def test_questions_outside_live_groups_are_counted_not_listed(one_rejected, capsys):
+    out, rid = one_rejected
+    outside = [q["question_id"] for q in Q.consolidate(M.load(out))["questions"] if q.get("outside_live_groups")]
+    assert outside
+    page = _questions_cli(out, capsys)
+    assert not {q["question_id"] for q in page["questions"]} & set(outside)
+    assert page["hidden_outside_live_groups"] == len(outside)
+    assert "--include-outside-live-groups lists them" in page["hidden_outside_live_groups_statement"]
+    every = _questions_cli(out, capsys, "--include-outside-live-groups")
+    assert set(outside) <= {q["question_id"] for q in every["questions"]} and "hidden_outside_live_groups" not in every
+    assert every["counts"] == page["counts"]  # the counts are the bundle's, whatever is listed
+    assert every["total"] == page["total"] + len(outside)
+    own = _questions_cli(out, capsys, "--scope", f"run:{rid}")  # a run's own scope, asked for: listed
+    assert "hidden_outside_live_groups" not in own and own["questions"]
+
+
+def test_the_template_report_says_runs_a_campaign_answer_misses_once():
+    rep_cells = [{"cell": f"Campaign Info B{i}", "target_field_path": f"system.facility.f{i}", "targets": 27,
+                  "run_ids": [f"run-{k:03d}" for k in range(20)], "runs": 27, "reason": "SYN reason"} for i in (3, 4, 5)]
+    rep = {"campaign_not_filled": rep_cells}
+    lines = T._campaign_not_filled_lines(rep, full=False)
+    assert len(lines) == 1 and lines[0].startswith("  27 run(s) (run-000, run-001, run-002, …; --full lists them per cell): ")
+    assert "Campaign Info B3 system.facility.f3; Campaign Info B4" in lines[0] and lines[0].count("SYN reason") == 1
+    assert len(T._campaign_not_filled_lines(rep, full=True)) == 3
+
+
+# --- L6: the Campaign Info hints on ISAAC Suggestions have their own column label ---------------------------------
+
+
+def test_campaign_info_hints_are_not_under_a_file_list_header(excerpted, tmp_path):
+    _src, out = excerpted
+    xlsx = tmp_path / "t.xlsx"
+    assert cli.main(["bundle", "template", "export", str(out), "--out", str(xlsx)]) == 0
+    rows = list(openpyxl.load_workbook(xlsx)[T.SHEET_SUGGEST].iter_rows(values_only=True))
+    assert rows[0][1] == "Config ID"  # the File List block's header, over the runs' rows
+    [block] = [r for r in rows if r[0] == T.SHEET_CAMPAIGN]
+    assert block[1] == T.SUGGEST_CAMPAIGN_HEADER and "Campaign Info" in block[1]
+
+
+# --- L7: propose-terms says the runs and cells one occurrence covers -----------------------------------------------
+
+
+def test_propose_terms_says_the_runs_one_request_covers(repeated, tmp_path, capsys):
+    cell = "context.electrochemistry.cell_type"
+    ids = [m["value_id"] for m in M.load(repeated)["missing_values"] if m["target_field_path"] == cell and m["run_id"]]
+    assert len(ids) >= 3
+    args = [a for i in ids for a in ("--target", i)]
+    capsys.readouterr()
+    cli.main(["bundle", "decide", str(repeated), *args, "--decision", "correct", "--value", "SYN_static_cell",
+              "--as-said", "--by", WHO])
+    assert len(M.load(repeated)["vocabulary_requests"]) == 1
+    capsys.readouterr()
+    assert cli.main(["bundle", "propose-terms", str(repeated), "--out", str(tmp_path / "drafts.json")]) == 0
+    said = capsys.readouterr().out
+    assert f"1 occurrence(s) (a request, reading or value each) covering {len(ids)} run(s)," in said
+
+
+def test_the_cells_a_request_was_typed_in_are_counted_once():
+    occ = [{"note": {"source": {"file": "t.xlsx", "cells": ["File List!H2", "File List!H3"]}}},
+           {"note": {"source": {"file": "t.xlsx", "cells": ["File List!H3", "File List!H4", "File List!H5"]}}},
+           {"note": None}]
+    assert len(P._cells_of(occ)) == 4
+    report = {"fields": [{"terms": [{"run_ids": ["run-001", "run-002"], "cells": 4}, {"run_ids": ["run-002"], "cells": 0}]}]}
+    assert P.covered(report) == {"runs": 2, "cells": 4}
+
+
+# --- H2 (follow-up): a mention that differs is said as a mention beside a header reading that agrees --------------
+
+
+def test_a_differing_mention_beside_an_agreeing_reading_is_said_by_what_it_writes(tmp_path):
+    src = tmp_path / "SYN_bt43"
+    label = "01_SYNti_m600mV_096"
+    make_scan(src / f"{label}_A.001", free_text=("-0.6 V vs RHE", "Sample A in 1M KOH 0Vrhe"))
+    out = _import(src, tmp_path / "bundle")
+    b = M.load(out)
+    rid = _rid(b, label)
+    [w] = R._potential_sources_warnings(b, _group(b, rid), {rid}, CARRIED)
+    assert f"the scan header of {rid} writes '0Vrhe' (its line 'Sample A in 1M KOH 0Vrhe' at line:10" in w["text"]
+    assert "'0Vrhe' differs from the file name's and the record's" in w["text"]
+    assert "write different numbers (file name" not in w["text"]

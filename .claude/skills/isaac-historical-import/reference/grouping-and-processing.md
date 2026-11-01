@@ -97,7 +97,8 @@ it finds one. Show per group, in words:
   group named as a reference or standard takes transmission first, but I0 or I1 was not positive in
   every scan, so fluorescence was used): say the sentence in `qc.json` → `statements` and ask the
   scientist to confirm the channel. A scan skipped `signal_not_finite` has its points but a signal
-  that is never finite (I0 or I1 ≤ 0); never call that "too few points". A scan skipped `signal_all_zero`
+  that is never finite (I0 or I1 ≤ 0); never call that "too few points" (when no scan is left,
+  `qc.statements.no_usable_scan` says it, e.g. a beam that was off). A scan skipped `signal_all_zero`
   recorded a signal of zero at every point: say it in words, naming the file as the statement does
   ("SYN_008.txt's signal is zero at every point, so it was left out"); the curve uses the other scans. A
   merged scan flagged `merged_scan_has_zero_signal_points` has counts that STOP (zero from some point to the
@@ -109,7 +110,10 @@ it finds one. Show per group, in words:
   under 5 % are `qc.statements.merged_scan_short_zero_runs` (no flag): say the count, and do not call them
   dropouts or a lost beam. `merged_curve_end_from_one_scan`: the curve's first or
   last point comes from one scan alone whose signal is zero there (the merged value is 0, a visible drop):
-  say it when you describe the plot;
+  say it when you describe the plot. An outlier scan (`outlier_scans_flagged`) is named in
+  `qc.statements.outlier_scans` with where it departs from the other scans and what merging it did ("…_003.dat
+  departs … from 4985.0 to 5100.0 eV: its signal there is about 5% of theirs; … about 24% lower"): say it and ask
+  whether the scan belongs in the merge, as for zeros;
 - **when a scan ends early** (reason `scans_truncated`, flag `scan_range_truncated`; `scans_used` still
   counts it): say the sentence in `bundle show processing-result` → `qc.statements`, which names each file
   (`qc.json` keeps the source ids it was first written with): how many scans end early, which, the
@@ -149,7 +153,8 @@ it finds one. Show per group, in words:
   version's comparison; long lists are counted, not printed); its `result_file` (`result.json`) is the result as the run first wrote it and is never rewritten, so
   the current sentences are in this output, not necessarily in that file.
 - when `process` says why none of the scientist's Athena groups matched (`athena.statement`), say it
-  in those words.
+  in those words. After `process --group`, it speaks of the groups processed now ("none of the 2 group(s) processed
+  now has an Athena match"), counting the project's Athena groups that match other groups (stored results too).
 
 Ask: approve, reject, or needs changes (with a note):
 `<isaac> bundle decide <bundle> --target <result_id> --decision approve --qc-status <word> [--qc-note "<their words>"] --by "<name>"`, or
@@ -181,10 +186,22 @@ Ask: approve, reject, or needs changes (with a note):
   scientist kept one Athena group per scan (`match_kind: per_scan_set`), the curve and E0 are ISAAC's MEAN of
   those groups, not a merge the scientist made: the descriptor says so, names the groups, and is ISAAC's
   (`source: auto`). Say that plainly before they approve it. A record names no folder, only the project's file name.
+  The scientist's own merge named before the run name (`merge4_<name>`, `merge_<name>`, where `<name>` is a run's
+  name or the group's name without its run counter: `match_kind: scientist_merge`) is matched and preferred over
+  the per-scan groups beside it; per-scan groups of every run of a merged group form one set (`per_scan_set.runs`).
+  Either way the result's steps include a merge, so the record lists `spectrum_merging`. The per-scan groups beside
+  such a merge are listed as set aside (`athena_per_scan_sets_set_aside`, `qc.statements.athena_per_scan_set_set_aside`):
+  say so. When they cover every scan of the group and their mean differs from the merge (flag
+  `athena_merge_differs_from_per_scan_set`, question `athena_merge_or_per_scan_set`), the merge is not preferred: say
+  the statement and ask which is the result of record before approving either.
 - **An Athena E0 that may be a setting** (flag `athena_e0_possibly_fixed`, `qc.statements.athena_e0_possibly_fixed`,
   question `athena_e0_measured_or_set`): the same Athena E0 (to 0.001 eV) in different Athena curves of groups whose
   ISAAC E0s (QC pass or warn) differ by 0.5 eV or more is likely a normalisation setting typed or carried over in Athena,
-  not a measured edge position (names are not read; one curve matched to two groups is one curve). The result is
+  not a measured edge position (one curve matched to two groups is one curve). Every Athena group of the result's
+  own project counts too, matched or not (e.g. groups rejected before processing): one whose record group has an
+  ISAAC E0 counts only when it differs by 0.5 eV or more; one without (or when this group's own ISAAC QC failed) counts
+  when its own stored data puts its edge 0.5 eV or more from that E0 (names equal apart from counters are one sample's
+  repeats, never other samples). Nothing is flagged when this curve's own data puts its edge at that E0. The result is
   not preferred. Say the statement and ask "was this E0 measured from this group's edge, or set?" before approving
   it; approve it only on "measured", with `--e0-measured` (`decide` refuses it without). If it was set, it is not the edge position: offer
   ISAAC's result instead. A result already decided is kept as it is: the summary line "approved result <id> carries
@@ -250,12 +267,16 @@ an element/edge already named for the group: approved, proposed, or the group's 
   sulfur's edge and erase the chemical shift it was measured to show). So `approve_calibration` on it ALWAYS needs
   `--accept-shift <the shift shown>`, whatever its size and names (without it: refused, nothing recorded; processing
   does not apply it, `calibration_own_signal_shift_not_confirmed`). The names only hint: "its names say it is S; if
-  so, approve with --accept-shift +0.4" (a closed list: symbol or English name, S8, `Cu foil`, `Sref`, `S_K`), or
-  "ISAAC cannot tell from its names that this is a pure element" (flag `own_signal_not_named_as_pure_element`,
-  `calibration_proposed: false`): then do NOT ask for an element or edge unless the scientist says it is a pure
-  element. A reply naming another element than the names ("its names say it is Fe, not Cu") is said and asked. An
-  approval recorded before this rule (no `--accept-shift`) is not applied to a result processed now (its statement
-  says so); a result already approved keeps its curve.
+  so, approve with --accept-shift +0.4" (a closed list: symbol or English name, S8, `Cu foil`, `Tifoil`, `Sref`,
+  `S_K`, beside words of how it was measured: calib, a beam size `1x3mm`, a thickness `7um`, I0-I3, trans, fluor, PIPS,
+  Lytle, run counters; a one-letter symbol beside a channel word, `S_trans`, needs `foil` or `ref`), or "ISAAC cannot tell from its names that this is a pure element" (flag
+  `own_signal_not_named_as_pure_element`, `calibration_proposed: false`): then do NOT ask for an element or edge
+  unless the scientist says it is a pure element. The same reading proposes the element, so the two never disagree.
+  With no edge stated the sentence names no shift ("naming its element and edge gives the shift"): get it from
+  `would_apply` after they name the edge. A reply naming another element than the names ("its names say it is Fe,
+  not Cu") is said and asked. Once a confirmed calibration is applied, the flag is gone and the statement says the
+  scientist confirmed it: do not ask again. An approval recorded before this rule (no `--accept-shift`) is not
+  applied to a result processed now (its statement says so); a result already approved keeps its curve.
 - **A reference is proposed** (`calibration.reference_proposed: true` in `show processing-result`, without the flag
   `own_signal_not_named_as_pure_element`; the flag
   `calibration_reference_unconfirmed` alone only means no reference is approved yet): say how many scans show a

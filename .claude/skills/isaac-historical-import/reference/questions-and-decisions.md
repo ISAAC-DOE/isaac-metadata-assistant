@@ -16,7 +16,8 @@ hint notes in `hint_notes`. A question blocks only when a live group's record ne
 fields (`blocks_groups`, `required_fields`; reaction drive and catalysis only once a reaction is in
 the record, `required_when`; a member an object the record carries requires, e.g. the electrolyte's
 `concentration_M` once its name is answered, with `required_because`); questions only about runs in no
-live group say `outside_live_groups`; an optional value of such a run is asked in that run's own question,
+live group say `outside_live_groups` and are counted, not listed (`hidden_outside_live_groups`; add
+`--include-outside-live-groups` to list them, or ask `--scope run:<id>`); an optional value of such a run is asked in that run's own question,
 never inside the beamtime's or a live group's. A beamtime-wide conflict (no run named) counts every live group
 it reaches (`applies_to.beamtime_wide: true`, `groups` = `blocks_groups`).
 The reply also has
@@ -72,15 +73,21 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   and sorts last; do not ask it again unless they offer an answer (`--skip-deferred` leaves them out).
   A question they did not answer at all is not deferred: record nothing.
 - **Values read from an SSRL XDC scan header's comment lines** (rule `ssrl_xdc_header_comment_v1`: lines 9-12,
-  the `.exp` COMMENTS1-4; line 8 is the gain line and is not read): a value is offered ONLY when the line writes
+  the free text before `Weights:`; on BL4-3 headers these are COMMENTS2-4 on lines 9-11, and COMMENTS1 is line 8,
+  there the gain, which is not read): a value is offered ONLY when the line writes
   it in a plain form, each statement its own segment (split at `,` `;` `|` or two spaces), e.g. `0.1 M HClO4,
   pH 1.3, -0.3 V vs RHE` (a set-point `E = -0.3 V (RHE)`, `-300 mV vs RHE`; a pH `pH 1.3`; an electrolyte
   `100 mM NaClO4` or `KOH 1 M`), and nothing else in the line makes it doubtful (a second potential, OCP, eta,
   a step or rate, a sweep, `pre-`/`then`, an offset, a range; a reference, bridge or filling beside an
   electrolyte). Such values always need review: the question quotes the whole line and its line number; ask the
   scientist to check it is the value held during that scan, and confirm or correct each. Otherwise
-  (`100mM NaClO4 pH1.3 He`, `1e-3 M KCl`, `eta = 300 mV`) the line is quoted with NO value: ask the scientist
-  to state the value (`correct`), or `reject` when the line states none for that scan. No gas is read.
+  (`100mM NaClO4 pH1.3 He`, `1e-3 M KCl`, `eta = 300 mV`) the line is quoted with NO value (`no_value: true`;
+  the kind stays `confirm_value`): ask the scientist to state the value (`correct`), or `reject` when the line
+  states none for that scan. No gas is read. Questions that quote one line for one field share a
+  `same_reading_group` (`same_reading_count` of them): if the value is the same for all, one
+  `<isaac> bundle decide <bundle> --question <Q> --same-reading --decision correct --value <v> --by "<name>"`
+  answers every open one (its `same_reading_command`). For many runs (30 runs all `1M KOH`), the template's
+  File List columns are the easy path: `<isaac> bundle template export <bundle> --out <file.xlsx>`.
 - **A conflict with `affects_record: false`** (`no_record_field`): the readings differ, but no record
   field carries them (a comment line, a unit spelling). Say how many there are; do not ask each.
 - **A conflict with `covered_by_decisions`** (also `affects_record: false`; counted in

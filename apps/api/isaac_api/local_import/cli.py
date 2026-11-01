@@ -1619,6 +1619,9 @@ def cmd_bundle_questions(args) -> int:
         payload = Q.consolidate(bundle, compositions_out=reports)
         rows = Q.filter_questions(payload, scope=args.scope, blocking_only=args.blocking_only, reports=reports)
         kept = [q for q in rows if not (args.skip_deferred and q.get("deferred"))]
+        # r3a L5: a question about runs no live record group holds builds no record: counted, listed on request (or
+        # when a run's own scope is asked for); the local questions screen hides them the same way (r3c LOW-3)
+        kept, outside = Q.hide_outside_live_groups(kept, scope=args.scope, include=args.include_outside_live_groups)
         page = kept[args.offset : args.offset + args.limit]
         minimum = Q.minimum_answers_for_one_group(payload, bundle, scope=args.scope, bundle_dir=Path(args.bundle_dir),
                                                   reports=reports)
@@ -1638,7 +1641,8 @@ def cmd_bundle_questions(args) -> int:
             "omitted_before": min(args.offset, len(kept)),
             "omitted_after": max(0, len(kept) - args.offset - len(page)),
             **_more(len(kept) - args.offset - len(page), args.offset + len(page)),
-            **({"skipped_deferred": len(rows) - len(kept)} if args.skip_deferred else {}),
+            **({"skipped_deferred": sum(1 for q in rows if q.get("deferred"))} if args.skip_deferred else {}),
+            **Q.hidden_outside_live_groups(outside, "--include-outside-live-groups"),
             "minimum_for_one_group": minimum,
             **({"questions": page} if args.with_targets else _compact_page(page)),
         }
@@ -1751,6 +1755,9 @@ def cmd_bundle_decide(args) -> int:
         if args.question and getattr(args, "accept_shift", None) is not None:
             raise M.MutationRefused("--accept-shift goes with --target <group id> --decision approve_calibration. "
                                     "Nothing was recorded.")
+        if args.same_reading and not args.question:
+            raise M.MutationRefused("--same-reading goes with --question <id> (a question that names a "
+                                    "same_reading_group). Nothing was recorded.")
         if args.question:
             # the question is resolved to its targets under the write's own lock (mutations.decide_question,
             # shared with the local questions screen)
@@ -1760,6 +1767,7 @@ def cmd_bundle_decide(args) -> int:
                 only=args.only,
                 field=args.field,
                 extra_targets=targets,
+                same_reading=args.same_reading,
                 decision=args.decision,
                 value=M.parse_value(args.value, args.json),
                 by=args.by,
@@ -2021,6 +2029,7 @@ def cmd_bundle_propose_terms(args) -> int:
         return EXIT_OK
     _atomic_write(out_path, text.encode("utf-8"))
     totals = report["totals"]
+    cover = P.covered(report)
     merged = ""
     if change is not None:
         kept = change["descriptions_kept"]
@@ -2034,7 +2043,9 @@ def cmd_bundle_propose_terms(args) -> int:
                   "No draft is marked ready to send.")
     print(
         f"Wrote {out_path}: {totals['terms']} term(s) outside the vocabulary in {totals['fields']} field(s), "
-        f"{totals['occurrences']} occurrence(s), {totals['drafts']} draft proposal(s)."
+        f"{totals['occurrences']} occurrence(s) (a request, reading or value each) covering {cover['runs']} run(s)"
+        + (f" and {cover['cells']} sheet cell(s)" if cover["cells"] else "")
+        + f", {totals['drafts']} draft proposal(s)."
         + (f" {totals['answered_since']} term(s) the scientist asked for now hold an allowed value for every run named: "
            "answered since, not drafted." if totals.get("answered_since") else "")
         + (f" {totals['partly_answered']} draft(s) are partly answered (each says how)." if totals.get("partly_answered") else "")
@@ -2196,6 +2207,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--question", help="answer a consolidated question: one decision per target, each listed")
     q.add_argument("--only", help="with --question: only this scope (group:<id> or run:<id>) — a per-group override")
     q.add_argument("--field", help="with --question on an optional-values question: the one field being answered")
+    q.add_argument("--same-reading", action="store_true",
+                   help="with --question on a question that names a same_reading_group: answer every open question of "
+                        "that group with the same decision and value (one decision per target, each listed)")
     q.add_argument("--decision", required=True,
                    help="candidate / missing value / conflict: confirm correct reject defer; record group: confirm split merge "
                         "reject defer approve_calibration set_absorber; processing result: approve reject needs_changes defer, "
@@ -2259,6 +2273,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
                    help="leave out questions whose every target was deferred (still counted: counts.deferred)")
     q.add_argument("--with-targets", action="store_true",
                    help="list each question's target ids (targets, per_scope_targets); by default they are counted")
+    q.add_argument("--include-outside-live-groups", action="store_true",
+                   help="also list questions whose every target is in a run no live record group holds (a rejected "
+                        "group's runs: no record is built from them); by default they are counted, not listed")
     q.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     q.add_argument("--offset", type=int, default=0)
     q.set_defaults(func=cmd_bundle_questions)
