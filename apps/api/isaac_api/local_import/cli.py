@@ -1935,8 +1935,12 @@ def cmd_bundle_upload(args) -> int:
         _err(f"No records directory at {args.records_dir}.")
         return EXIT_NOT_FOUND
     plan = R.upload_plan(Path(args.records_dir), args.portal_url)
+    noted = [line for p in plan for line in p.get("notes") or ()]
     _print({"dry_run": True, "network_calls": 0, "records": plan,
-            "statement": "Nothing was sent. The token is never read or printed."})
+            "statement": "Nothing was sent. The token is never read or printed."
+            # c16d: what a record would go out without (its evidence file's notes), said once more before an upload
+            + "".join(f" {line} ({n} record(s); records[].notes)." for line, n in
+                      {x: noted.count(x) for x in dict.fromkeys(noted)}.items())})
     return EXIT_OK
 
 

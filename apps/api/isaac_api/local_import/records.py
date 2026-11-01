@@ -75,6 +75,11 @@ STATED_POTENTIAL_WARNING = "stated_potential_not_in_record"
 #: c16c: a record carries a set-point while a member run's FILE NAME and SCAN HEADER state different potentials and
 #: no scientist has ruled on the header's reading (a decision on its candidate): the disagreement stays said.
 POTENTIAL_SOURCES_WARNING = "potential_sources_disagree"
+#: c16d: a record of runs whose scan headers write a local clock start time, written without it because the
+#: scientist deferred the instrument clock's time zone ("I don't know"): said at validate, export, in the evidence
+#: sidecar and the upload dry run, never left for the reader to notice.
+START_TIME_WARNING = "start_time_left_out"
+START_TIME_LEFT_OUT = "start time left out: instrument clock zone deferred (question {question})"
 
 
 @functools.lru_cache(maxsize=512)
@@ -951,7 +956,8 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
 
     report["warnings"] = (_stated_potential_warnings(bundle, group, member_ids, fields, proposals)
                           + _potential_sources_warnings(bundle, group, member_ids, fields)
-                          + Q.open_circuit_warnings(bundle, group, member_ids, fields))
+                          + Q.open_circuit_warnings(bundle, group, member_ids, fields)
+                          + _start_time_warnings(bundle, group, member_ids, fields))
     return draft, report
 
 
@@ -1097,6 +1103,28 @@ def _potential_sources_warnings(bundle: Mapping, group: Mapping, member_ids: set
     return [{**w, "text": potential_sources_text(w)} for w in out]
 
 
+def local_clock_runs(bundle: Mapping) -> set[str]:
+    """The runs whose start time waits on the instrument clock's zone (a ``bundle.XDC_START_RULE_ID`` candidate)."""
+    return {c.get("run_id") for c in bundle.get("candidates") or () if B.is_local_clock_start(c)}
+
+
+def _start_time_warnings(bundle: Mapping, group: Mapping, member_ids: set, fields: Mapping) -> list[dict]:
+    """A :data:`START_TIME_WARNING` for a record that carries no start time while a member run's scan headers write
+    one (``bundle.XDC_START_RULE_ID``) and the latest answer to the clock question is ``defer``: the record goes out
+    without it, and says so. A zone not yet answered is the clock question's (asked, optional), not this warning."""
+    from . import questions as Q
+    from .mutations import clock_zone_deferral
+
+    if _present(fields, B.XDC_START_PATH) is not None or clock_zone_deferral(bundle) is None:
+        return []
+    if not local_clock_runs(bundle) & set(member_ids):
+        return []
+    text = START_TIME_LEFT_OUT.format(question=Q.CLOCK_QUESTION_ID)
+    return [{"code": START_TIME_WARNING, "group_id": group["group_id"], "path": B.XDC_START_PATH,
+             "needs": B.XDC_START_PATH, "targets": [], "question_id": Q.CLOCK_QUESTION_ID, "text": text,
+             "command": B.CLOCK_ZONE_COMMAND}]
+
+
 def potential_sources_text(w: Mapping) -> str:
     """The plain sentence for a :data:`POTENTIAL_SOURCES_WARNING`, ending with its command."""
     carried = w.get("carried_V")
@@ -1118,6 +1146,8 @@ def potential_warning_text(w: Mapping) -> str:
 
     if w.get("code") == POTENTIAL_SOURCES_WARNING:
         return potential_sources_text(w)
+    if w.get("code") == START_TIME_WARNING:
+        return START_TIME_LEFT_OUT.format(question=w["question_id"])
     if w.get("open_circuit"):
         return Q.open_circuit_text(w)
     extra = Q.stated_potential_notes(w)
@@ -1728,6 +1758,8 @@ def written_without(w: Mapping) -> str:
     set-point: <the warning's sentence>" (c11-a: an export is never silent about a condition the record lacks)."""
     if w.get("code") == POTENTIAL_SOURCES_WARNING:
         return f"Written with a potential its files disagree about: {w['text']}"
+    if w.get("code") == START_TIME_WARNING:
+        return f"Written without the start time: {w['text']}"
     name = WRITTEN_WITHOUT_NAMES.get(w.get("path"), w.get("path") or "a stated condition")
     return f"Written without {name}: {w['text']}"
 
@@ -1966,6 +1998,8 @@ def evidence_changes(old: Mapping | None, new: Mapping) -> list[str]:
             lines.append(f"{key}: " + ", ".join(sorted(EVIDENCE_KEY_WORDS.get(k, k) for k in diff)))
     if old.get("schemas_used") != new.get("schemas_used"):
         lines.append("the schemas used to validate it")
+    if old.get("notes") != new.get("notes"):
+        lines.append("its notes on what the record is written without")
     return lines
 
 
@@ -2159,6 +2193,10 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
             continue
         sidecar = build_sidecar(dict(draft), record)
         sidecar["schemas_used"] = report["schemas_used"]
+        left_out = [w["text"] for w in warned if w["group_id"] == group_id and w.get("code") == START_TIME_WARNING]
+        if left_out:
+            # c16d: what the record is written WITHOUT, said in its evidence file in plain words (never silently)
+            sidecar["notes"] = left_out
         # when the sidecar was written: the record's export time, kept while its evidence is unchanged (so an
         # unchanged re-export is byte for byte), and now when the evidence file is rewritten (c15c LOW 1)
         sidecar["generated_utc"] = (prior.get("sidecar_generated_utc") or at) if status == "unchanged" else at
@@ -2322,6 +2360,10 @@ def upload_plan(records_dir: Path, portal_url: str | None) -> list[dict]:
                 ],
             }
         )
+        notes = _sidecar_notes(path.with_name(path.name[: -len(".json")] + ".evidence.json"))
+        if notes:
+            # c16d: what the record is written WITHOUT (its evidence file's notes), said before an upload too
+            plan[-1]["notes"] = notes
         if old := replaces.get(path.name[: -len(".json")]):
             # H1: SAID BEFORE AN UPLOAD, never only in the export's output: a replaced record already uploaded stays
             # on the portal, so uploading this one adds a second record for the same group
@@ -2333,6 +2375,15 @@ def upload_plan(records_dir: Path, portal_url: str | None) -> list[dict]:
                 + f". If {'any of them was' if many else 'it was'} already uploaded, the portal still holds it, and "
                 "uploading this one adds a second record for the same group.")
     return plan
+
+
+def _sidecar_notes(path: Path) -> list[str]:
+    """The ``notes`` an evidence sidecar carries (what its record is written without), or ``[]``."""
+    try:
+        notes = json.loads(path.read_text(encoding="utf-8")).get("notes")
+    except (OSError, ValueError, AttributeError):
+        return []
+    return [n for n in notes if isinstance(n, str)] if isinstance(notes, list) else []
 
 
 def _where_now(records_dir: Path, record_id: str) -> str:

@@ -176,7 +176,10 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   experiment takes none, and `--target experiment --decision defer --value …` is refused; the question
   chooses which "I don't know" it is). That records "I don't know":
   no start time is converted, the question stays under its id, marked `deferred`, and the counter
-  question is not touched. Once a zone is recorded, `defer` is refused (it would not withdraw the
+  question is not touched. Every record of those runs then goes out without its start time, and says
+  so: `validate` and `export` warn "start time left out: instrument clock zone deferred (question <Q>)",
+  the record's evidence file keeps that line under `notes`, and `upload --dry-run` repeats it; tell the
+  scientist before they export. Once a zone is recorded, `defer` is refused (it would not withdraw the
   zone); to change the zone, state it again.
 - **QC status** is asked when approving processing, not here (Step 6).
 - **In a browser.** The local-only *Local Imports* page (`docs/ui-local-dev.md`) shows the same

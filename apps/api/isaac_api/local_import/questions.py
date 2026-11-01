@@ -418,6 +418,8 @@ def _qid(*parts: str) -> str:
 
 #: The counter question's id (the grouping step's experiment-wide question; DEC-91: never changes).
 COUNTER_QUESTION_ID = _qid("experiment", "naming_counter_positions", _COUNTER_GQ_ID)
+#: The instrument clock's time-zone question's id (the same inputs as always).
+CLOCK_QUESTION_ID = _qid("experiment", "clock_time_zone", "instrument_clock")
 
 
 def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, include_answered: bool = False,
@@ -1079,7 +1081,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         zq = B.clock_zone_question({**bundle, "scientist_decisions": [
             d for d in bundle.get("scientist_decisions") or () if d.get("decision") != B.CLOCK_ZONE_DECISION]})
     if zq is not None:
-        qid = _qid("experiment", "clock_time_zone", "instrument_clock")
+        qid = CLOCK_QUESTION_ID
         questions.append(
             {
                 "question_id": qid,
