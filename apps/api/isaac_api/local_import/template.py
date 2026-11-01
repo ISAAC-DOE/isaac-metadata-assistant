@@ -515,6 +515,30 @@ def header_potential_readings(bundle: Mapping, run: Mapping) -> list[dict]:
     return out
 
 
+def header_potential_mentions(bundle: Mapping, run: Mapping) -> list[dict]:
+    """``[{line, relative_path, locator, mentions}]``: each scan-header comment line of a run that MENTIONS a potential
+    the rule reads no value from (``Sample A in 1M KOH 0Vrhe``), with every potential it mentions
+    (``questions.header_potential_mentions``: ``[{literal, scale, volts}]``). r3a H2: to COMPARE a file name's or a
+    typed set-point against, never a value: the whitelist (:func:`header_potential_readings`) alone offers values.
+    One per line and place."""
+    from .questions import header_comment_readings, header_potential_mentions as mentioned
+
+    out, seen = [], set()
+    for e in bundle.get("extended_context") or ():
+        if (e.get("run_id") != run.get("run_id") or not B.is_xdc_comment_line(e.get("concept"), e.get("locator"))
+                or not isinstance(e.get("raw_literal"), str)):
+            continue
+        key = (e["raw_literal"], e.get("relative_path"), e.get("locator"))
+        if key in seen or not any(r["path"] == POTENTIAL_PATH and r["value"] is None
+                                  for r in header_comment_readings(e["raw_literal"])):
+            continue
+        seen.add(key)
+        if got := mentioned(e["raw_literal"]):
+            out.append({"line": e["raw_literal"].strip(), "relative_path": e.get("relative_path"),
+                        "locator": e.get("locator"), "mentions": got})
+    return out
+
+
 # --- facility hints: a HINT to compare against, never a value ---------------------------------------
 #
 # The folder's name (``SSRL_BL152_2019-05_…``) and, when its scan headers match, the acquisition system's name are
@@ -2470,6 +2494,8 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
         for r in adopter.against(cell["value"], obj.get("run_id"), cell["path"]):
             if r["kind"] in ("ai_reading", "scan_header"):  # c16c: what a scan header states is a file reading
                 readings.append(f"contradicts the {r['source']}: {_shown(r['value'])}")
+            elif r["kind"] == "scan_header_mention":  # r3a H2: said as written, never as a value read
+                readings.append(f"contradicts the {r['source']}")
         return readings
 
     def contradiction(cell: Mapping, obj: Mapping, readings: list[str], outcome: str) -> None:
@@ -3812,6 +3838,14 @@ class _Adopter:
                 out.setdefault((repr(float(h["value"])), "scan_header"), {
                     "value": h["value"], "kind": "scan_header",
                     "source": f"scan header {h['literal']} at {h['locator']} of {h['relative_path']}"})
+            # r3a H2: a potential a value-less header line only MENTIONS (``0Vrhe``) is compared too, each one
+            # (never offered: no candidate holds it as a value)
+            for h in header_potential_mentions(self.bundle, self.runs[run_id]):
+                for m in h["mentions"]:
+                    out.setdefault((repr(float(m["volts"])), "scan_header_mention"), {
+                        "value": m["volts"], "kind": "scan_header_mention", "mention": m["literal"],
+                        "source": (f"scan header, which writes {m['literal']!r} in its line {h['line']!r} at "
+                                   f"{h['locator']} of {h['relative_path']} (a mention: no value is read from it)")})
         targets = [("candidate", c["candidate_id"]) for c in cands] + [("missing_value", m["value_id"]) for m in missing]
         for kind, tid in targets:
             for i in self.ai_of.get((kind, tid), []):

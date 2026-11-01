@@ -986,7 +986,9 @@ def _stated_potentials(bundle: Mapping, member_ids: set) -> list[dict]:
                 header.append({"literal": lit, "relative_path": e.get("relative_path"), "candidate_id": c["candidate_id"],
                                "read_as_V": value, "value_state": c.get("value_state"), "stated_in": "scan header",
                                "locator": e.get("locator"), "run_id": c["run_id"], "runs": [c["run_id"]],
-                               "volts": got.get("value"), **({"scale": got["scale"]} if got.get("scale") else {})})
+                               "volts": got.get("value"), **({"scale": got["scale"]} if got.get("scale") else {}),
+                               # r3a H2: what a line read with no value mentions, to compare only
+                               **({"mentions": Q.header_potential_mentions(lit)} if got.get("value") is None else {})})
             continue
         for e in c.get("evidence") or ():
             if e.get("method") == "ai_interpretation" or not str(e.get("locator") or "").startswith("filename token"):
@@ -1080,19 +1082,27 @@ def _potential_sources_warnings(bundle: Mapping, group: Mapping, member_ids: set
     a new bundle does not carry over. A record without a set-point gets the stated-potential warning instead, which
     names the same disagreement (``questions.stated_potential_notes``)."""
     from . import questions as Q
-    from .template import header_potential_readings
+    from .template import header_potential_mentions, header_potential_readings
 
     if _present(fields, SETPOINT_PATH) is None:
         return []
     carried = fields[SETPOINT_PATH].get("value") if isinstance(fields.get(SETPOINT_PATH), Mapping) else None
     scale = fields[SCALE_PATH].get("value") if isinstance(fields.get(SCALE_PATH), Mapping) else None
+    carried_v = (round(float(carried), 9) if isinstance(carried, (int, float)) and not isinstance(carried, bool)
+                 else None)
     out = []
     for r in Q._generic_member_runs(bundle, member_ids):
         names = [t for t in Q._name_tokens(r) if _POTENTIAL_TOKEN.match(t)]
         name_v = {round(v, 9) for v in map(Q._token_volts, names) if v is not None}
         heads = header_potential_readings(bundle, r)
         head_v = {round(h["value"], 9) for h in heads}
-        if not name_v or not head_v or name_v & head_v:
+        # r3a H2: a value-less header line's MENTIONS (``0Vrhe``), EACH compared with the file name's potential and
+        # the record's set-point: any one that differs from either is a disagreement (none is picked as the value)
+        lines = header_potential_mentions(bundle, r)
+        not_name = [m for h in lines for m in h["mentions"] if name_v and round(m["volts"], 9) not in name_v]
+        not_carried = [m for h in lines for m in h["mentions"] if carried_v is not None and round(m["volts"], 9) != carried_v]
+        odd = not_name + not_carried
+        if not odd and (not name_v or not head_v or name_v & head_v):
             continue
         held = [c for c in bundle.get("candidates") or () if c.get("run_id") == r["run_id"]
                 and B.is_header_comment_candidate(c) and c.get("target_field_path") == SETPOINT_PATH]
@@ -1100,7 +1110,7 @@ def _potential_sources_warnings(bundle: Mapping, group: Mapping, member_ids: set
         if ruled:
             continue
         name_scales = {(Q.header_potential(t) or {}).get("scale") for t in names}
-        head_scales = {h.get("scale") for h in heads}
+        head_scales = {h.get("scale") for h in heads} | {m.get("scale") for h in lines for m in h["mentions"]}
         if held:
             command = (f'isaac bundle decide <bundle_dir> --target {held[0]["candidate_id"]} --decision confirm '
                        '--by "<your name>"' if held[0].get("value") is not None else
@@ -1120,10 +1130,25 @@ def _potential_sources_warnings(bundle: Mapping, group: Mapping, member_ids: set
                     "names": list(dict.fromkeys(names)), "headers": list(dict.fromkeys(
                         repr(h["literal"]) + (f" at {h['locator']} of {h['relative_path']}" if h.get("relative_path") else "")
                         for h in heads)), "carried_V": carried, "carried_scale": scale,
+                    "mentions": _mention_lines(lines, not_name, not_carried),
                     "same_scale": name_scales == head_scales and None not in name_scales,
                     "name_scale": Q.written_scales(name_scales), "header_scale": Q.written_scales(head_scales),
                     "no_header_reading": not held, "command": command})
     return [{**w, "text": potential_sources_text(w)} for w in out]
+
+
+def _mention_lines(lines: Sequence[Mapping], not_name: Sequence[Mapping], not_carried: Sequence[Mapping]) -> list[dict]:
+    """r3a H2: the header lines a :data:`POTENTIAL_SOURCES_WARNING` names by what they MENTION, one per line text
+    (a run's scans repeat it): ``{line, literals, differ_name, differ_carried, where}``, the mentions that differ
+    from the file name's potential and from the record's set-point."""
+    out: dict[str, dict] = {}
+    for h in lines:
+        got = out.setdefault(h["line"], {"line": h["line"], "literals": [m["literal"] for m in h["mentions"]],
+                                         "differ_name": [m["literal"] for m in h["mentions"] if m in not_name],
+                                         "differ_carried": [m["literal"] for m in h["mentions"] if m in not_carried],
+                                         "where": []})
+        got["where"].append(f"{h['locator']} of {h['relative_path']}")
+    return list(out.values())
 
 
 #: c16-r M2: the re-import a bundle built before scan-header readings existed is offered, and what it does not keep.
@@ -1191,6 +1216,8 @@ def potential_sources_text(w: Mapping) -> str:
     """The plain sentence for a :data:`POTENTIAL_SOURCES_WARNING`, ending with its command. c16-r M3: "state
     different potentials" only when both name the SAME scale; else they "write different numbers", each one's scale
     said (a number without a scale may be the same potential on another scale)."""
+    from . import questions as Q
+
     carried = w.get("carried_V")
     said = (f"{carried:g} V" if isinstance(carried, (int, float)) and not isinstance(carried, bool) else "a set-point")
     said += f" on {w['carried_scale']}" if w.get("carried_scale") else ""
@@ -1200,6 +1227,28 @@ def potential_sources_text(w: Mapping) -> str:
     else:
         differ = f"write different numbers ({sources}; file name: {w['name_scale']}; scan header: {w['header_scale']})"
     head = f"the file name and the scan header of {w['run_id']} {differ}, and the record carries {said}"
+    if w.get("mentions") and not w.get("headers"):
+        # r3a H2: a header line read with NO value, said plainly by what it writes, beside the file name's and the
+        # record's; never "state a potential" (that reads as agreement)
+        lines = w["mentions"]
+        written = "; ".join(f"{Q.mentions_said([{'literal': x} for x in h['literals']])} (its line {h['line']!r} at "
+                            + ", ".join(h["where"][:2]) + (", …" if len(h["where"]) > 2 else "") + ")" for h in lines[:3])
+        differ: dict[tuple, list[str]] = {}
+        for key, whose in (("differ_name", "the file name's"), ("differ_carried", "the record's")):
+            if lits := tuple(dict.fromkeys(x for h in lines for x in h[key])):
+                differ.setdefault(lits, []).append(whose)
+        differing = [f"{Q.mentions_said([{'literal': x} for x in lits])} {'differs' if len(lits) == 1 else 'differ'} "
+                     f"from {' and '.join(whose)}" for lits, whose in differ.items()]
+        head = (f"the scan header of {w['run_id']} writes {written}"
+                + (f", the file name writes {'/'.join(w['names'][:3])}" if w.get("names") else "")
+                + f", and the record carries {said}: {'; '.join(differing)} ("
+                + (f"both on {w['name_scale']}" if w.get("same_scale") else
+                   f"file name: {w['name_scale']}; scan header: {w['header_scale']}" if w.get("names") else
+                   f"scan header: {w['header_scale']}") + "). No value is read from that header line (not written in "
+                "a plain form)")
+        if w.get("targets") and not w.get("no_header_reading"):
+            return (f"{head}; no one has ruled on it yet: give the potential the run was held at (--decision correct "
+                    f"--value <volts> --json): {w['command']}")
     if w.get("targets") and not w.get("no_header_reading"):
         return (f"{head}; no one has ruled on the scan header's reading yet: confirm it if the header is right, or "
                 "correct it (--decision correct --value <volts> --json) to the potential the run was held at: "
@@ -1234,18 +1283,18 @@ def potential_warning_text(w: Mapping) -> str:
         lits += "; the set-point answered for it: " + ", ".join(f"{v:g} V" for v in w["answered_V"][:3])
     if w.get("also_needs") and w.get("setpoint_needs_review"):
         # c16b: the set-point was read from a scan-header comment line and waits for review, as the scale does
-        return (f"{Q.stated_subject(w)} a potential ({lits}) but the record will not carry it until the potential scale AND "
+        return (f"{Q.stated_opening(w, lits)} until the potential scale AND "
                 f"the set-point read from the scan header are confirmed (or corrected).{extra} "
                 f"Both: {w['also_command']}  ;  {w['command']}")
     if w.get("also_needs"):
         # no value was read for the set-point: the scientist gives the volts AND the scale, both commands now
-        return (f"{Q.stated_subject(w)} a potential ({lits}) but the record will not carry it until the potential scale is "
+        return (f"{Q.stated_opening(w, lits)} until the potential scale is "
                 f"confirmed AND a set-point is given (no set-point value was read from the file names: give it in volts).{extra} "
                 f"Both: {w['also_command']}  ;  {w['command']}")
     until = "the potential scale is confirmed" if w["needs"] == SCALE_PATH else "the potential set-point is confirmed"
-    return (f"{Q.stated_subject(w)} a potential ({lits}) but the record will not carry it until {until}.{extra} "
+    return (f"{Q.stated_opening(w, lits)} until {until}.{extra} "
             f"Do it: {w['command']}" if extra else
-            f"{Q.stated_subject(w)} a potential ({lits}) but the record will not carry it until {until}: "
+            f"{Q.stated_opening(w, lits)} until {until}: "
             f"{w['command']}")
 
 

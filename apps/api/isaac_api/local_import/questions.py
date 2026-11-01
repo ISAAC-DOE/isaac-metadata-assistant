@@ -2926,9 +2926,39 @@ def header_potentials_in_line(line: str) -> list[dict]:
     got = next((r for r in header_comment_readings(line) if r["path"] == POTENTIAL_PATH), None)
     if got is None:
         return []
-    if got["value"] is None:
-        return [{"literal": got["literal"], "scale": None, "volts": None}]
+    if got["value"] is None:  # r3a H2: what it mentions, to compare only
+        return [{"literal": got["literal"], "scale": None, "volts": None, "mentions": header_potential_mentions(line)}]
     return [{"literal": got["segment"], "scale": got["scale"], "volts": got["value"]}]
+
+
+#: r3a H2: a potential a comment line MENTIONS, for COMPARISON only: a number with ``V`` or ``mV`` and an optional
+#: scale written onto it or after ``vs`` (``0Vrhe``, ``0.5Vrhe``, ``-0.6 V_RHE``, ``-300 mV vs RHE``, ``0.5 V vs.
+#: Ag/AgCl``). ``kV`` / ``µV`` are not potentials, and a word glued onto the unit (``5 Volts``) is not one.
+_POTENTIAL_MENTION = re.compile(
+    r"(?<![\w.])(?P<sign>[-+\u2212\u2013])?(?P<num>\d+(?:\.\d+)?|\.\d+)\s*(?P<unit>mV|mv|V|v)"
+    rf"(?:\s*(?:(?:vs\.?|versus)\s*|[_/(]\s*)?(?P<scale>{_SCALES})(?![A-Za-z])\)?|(?![A-Za-z]))", re.IGNORECASE)
+
+
+def header_potential_mentions(line: str) -> list[dict]:
+    """``[{"literal", "scale", "volts"}]``: EVERY potential a comment line mentions (:data:`_POTENTIAL_MENTION`), in
+    line order, ``literal`` as written (``0Vrhe``). r3a H2: what a line the whitelist reads NO value from
+    (``Sample A in 1M KOH 0Vrhe``) still says about the potential, so a file name (``m600mV``) or a typed value that
+    differs is warned, never silently written. ONLY to compare: never a value, never offered, never stored as one;
+    a line with several mentions keeps them all and none is picked."""
+    out = []
+    for m in _POTENTIAL_MENTION.finditer(str(line or "")):
+        volts = Decimal(m.group("num")) / (1000 if m.group("unit").lower() == "mv" else 1)
+        if m.group("sign") not in (None, "+"):
+            volts = -volts
+        scale = _SCALE_NAMES[m.group("scale").casefold()] if m.group("scale") else None
+        out.append({"literal": m.group(0).strip(), "scale": scale, "volts": float(volts) + 0.0})
+    return out
+
+
+def mentions_said(mentions: Sequence[Mapping]) -> str:
+    """How a line's mentions are said: ``'0Vrhe'``, ``'0.5 V' and '1.6 V vs RHE'``."""
+    lits = [repr(m["literal"]) for m in mentions]
+    return lits[0] if len(lits) == 1 else ", ".join(lits[:-1]) + " and " + lits[-1]
 
 
 def header_unread_text(path: str, line: str, locator: Any, relative_path: Any) -> str:
@@ -3025,15 +3055,25 @@ def stated_potential_notes(w: Mapping) -> str:
         volts = s["volts"] if "volts" in s else _token_volts(s["literal"])
         for rid in s.get("runs") or ([s["run_id"]] if s.get("run_id") else []):
             by_run.setdefault(rid, {}).setdefault(s.get("stated_in") or "", []).append((stated_literal(s), s.get("scale"), volts))
+            for m in s.get("mentions") or () if volts is None else ():
+                # r3a H2: what a line read with NO value mentions (``0Vrhe``), each compared, none picked
+                by_run[rid].setdefault("mentions", []).append((repr(m["literal"]), m.get("scale"), m["volts"]))
     differ, scales_differ = [], []
     for rid, places in by_run.items():
         names, heads = places.get("file name") or [], places.get("scan header") or []
         nv = {v for _, _, v in names if v is not None}
         hv = {v for _, _, v in heads if v is not None}
-        if not (nv and hv) or nv & hv:
+        odd = [x for x in places.get("mentions") or () if nv and round(x[2], 9) not in {round(v, 9) for v in nv}]
+        if odd:
+            # said plainly by what each writes: never "a potential" both state
+            heads = list(dict.fromkeys(odd))
+            said = (f"{rid}: the scan header writes {'/'.join(dict.fromkeys(lit for lit, _, _ in heads))}, "
+                    f"the file name writes {'/'.join(dict.fromkeys(lit for lit, _, _ in names))}")
+        elif not (nv and hv) or nv & hv:
             continue
-        said = (f"{rid}: file name {'/'.join(dict.fromkeys(lit for lit, _, _ in names))}, "
-                f"scan header {'/'.join(dict.fromkeys(lit for lit, _, _ in heads))}")
+        else:
+            said = (f"{rid}: file name {'/'.join(dict.fromkeys(lit for lit, _, _ in names))}, "
+                    f"scan header {'/'.join(dict.fromkeys(lit for lit, _, _ in heads))}")
         name_scales, head_scales = {sc for _, sc, _ in names}, {sc for _, sc, _ in heads}
         if name_scales == head_scales and None not in name_scales:
             # THE SAME NAMED SCALE: two numbers for one potential, a real disagreement
@@ -3108,6 +3148,28 @@ def stated_subject(w: Mapping) -> str:
     # c10-m: a potential written in a scan header is never said to be the file name's
     return ("the scan headers state" if header and all(header) else
             "the file names and scan headers state" if any(header) else "the file names state")
+
+
+def stated_opening(w: Mapping, lits: str) -> str:
+    """How a stated-potential warning opens: ``<who> state a potential (<lits>) but the record will not carry it``.
+    r3a H2: when a header line read with no value MENTIONS a potential its file name does not write (``0Vrhe`` beside
+    ``m600mV``), "state a potential" would read as agreement: they "write different potentials" instead, and the
+    notes (:func:`stated_potential_notes`) say which."""
+    if _mentions_differ(list(w.get("stated") or ())):
+        return f"the file names and scan headers write different potentials ({lits}), so the record carries none"
+    return f"{stated_subject(w)} a potential ({lits}) but the record will not carry it"
+
+
+def _mentions_differ(stated: Sequence[Mapping]) -> bool:
+    """Whether a run's value-less header line mentions a potential its file name does not write (r3a H2)."""
+    names: dict[str, set] = {}
+    for s in stated:
+        if s.get("stated_in") != "scan header" and (v := s["volts"] if "volts" in s else _token_volts(s["literal"])) is not None:
+            for rid in s.get("runs") or ([s["run_id"]] if s.get("run_id") else []):
+                names.setdefault(rid, set()).add(round(v, 9))
+    return any(names.get(rid) and round(m["volts"], 9) not in names[rid]
+               for s in stated if s.get("stated_in") == "scan header" and s.get("volts") is None
+               for m in s.get("mentions") or () for rid in s.get("runs") or ([s["run_id"]] if s.get("run_id") else []))
 
 
 def _move_outside_optional_targets(buckets: dict, bundle: Mapping, group_of: Mapping[str, str], add) -> None:
