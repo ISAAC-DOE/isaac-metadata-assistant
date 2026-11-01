@@ -464,6 +464,10 @@ def _qid(*parts: str) -> str:
 
 #: The counter question's id (the grouping step's experiment-wide question; DEC-91: never changes).
 COUNTER_QUESTION_ID = _qid("experiment", "naming_counter_positions", _COUNTER_GQ_ID)
+#: r4-b M2: one command keeps apart every open merge candidate whose names differ only at positions a scientist said
+#: are not counters (``grouping.said_not_counter_candidates``), resolved through the counter question's id
+KEEP_APART_SAID_NOT_COUNTER_COMMAND = (f"isaac bundle decide <bundle_dir> --question {COUNTER_QUESTION_ID} "
+                                       f"--decision {B.KEEP_APART_DECISION} --by \"<your name>\"")
 #: The instrument clock's time-zone question's id (the same inputs as always).
 CLOCK_QUESTION_ID = _qid("experiment", "clock_time_zone", "instrument_clock")
 
@@ -1541,8 +1545,8 @@ def _marked_token(stem: str, position: int) -> str | None:
 
 
 def _counter_examples(bundle: Mapping, positions: Sequence[int], ruled: Container[int] = ()) -> dict[int, dict]:
-    """For each asked position: ``differ`` — the names (at most 2) of one merge candidate whose names differ there in
-    a number (what the question is asked for), the token marked — and ``elsewhere``, one name of the bundle where
+    """For each asked position: ``differ`` — two names of one merge candidate that differ ONLY there, in a number (what
+    the question is asked for; r4-b M2: else two such names of the bundle, else none), the token marked — and ``elsewhere``, one name of the bundle where
     that token is not a number (or ``None``). Real names of this bundle, never a pattern. c16-r M5: the last-token
     example is never one whose last token sits at a position in ``ruled`` (already answered). r3a L1: a candidate of
     SAMPLE groups is the example where there is one (an alignment or reference run's names say little about how the
@@ -1568,6 +1572,20 @@ def _counter_examples(bundle: Mapping, positions: Sequence[int], ruled: Containe
                     and toks[0][-1] != toks[1][-1] and all(t[-1].isdigit() for t in toks) and len(toks[0]) not in ruled):
                 out[LAST_POSITION] = {"differ": [_marked_token(x, len(t)) for x, t in zip(stems, toks)], "elsewhere": None}
                 break
+    def only_there(stems: Sequence[str], p: int) -> list[str] | None:
+        # r4-b M2: two names that differ ONLY at position p, in a number there (before: the candidate's first two
+        # names, which could differ at another position too: `[01]_13_…` vs `[03]_12_…` asked about the 1st token)
+        seen: dict[tuple, str] = {}
+        for stem in stems:
+            t = _stem_tokens(stem)
+            if not 1 <= p <= len(t) or not t[p - 1].isdigit():
+                continue
+            key = (len(t), tuple(x for i, x in enumerate(t) if i != p - 1))
+            other = seen.setdefault(key, stem)
+            if other != stem and _stem_tokens(other)[p - 1] != t[p - 1]:
+                return [other, stem]
+        return None
+
     for mc in candidates:
         if not any(r.get("code") == "numeric_name_token_differs" for r in mc.get("reasons") or ()):
             continue
@@ -1577,11 +1595,14 @@ def _counter_examples(bundle: Mapping, positions: Sequence[int], ruled: Containe
             stem = (runs_by_key.get(keys[0]) or {}).get("stem") if keys else None
             if stem and stem not in stems:
                 stems.append(stem)
-        toks = [_stem_tokens(s) for s in stems]
         for p in positions:
-            col = [t[p - 1] for t in toks if 1 <= p <= len(t)]
-            if p not in out and len(stems) >= 2 and len(col) == len(toks) and len(set(col)) > 1 and all(c.isdigit() for c in col):
-                out[p] = {"differ": [_marked_token(s, p) for s in stems[:2]], "elsewhere": None}
+            if p not in out and p != LAST_POSITION and (pair := only_there(stems, p)):
+                out[p] = {"differ": [_marked_token(s, p) for s in pair], "elsewhere": None}
+    # no merge candidate has such a pair: two names of the bundle that do (never a pair differing elsewhere too)
+    every = list(dict.fromkeys(str(r["stem"]) for r in bundle.get("runs") or () if r.get("stem")))
+    for p in positions:
+        if p not in out and p != LAST_POSITION and (pair := only_there(every, p)):
+            out[p] = {"differ": [_marked_token(s, p) for s in pair], "elsewhere": None}
     for p, ex in out.items():
         if p == LAST_POSITION:
             continue  # every name has a last token: there is no "elsewhere" to show

@@ -1751,6 +1751,83 @@ def merge_candidate_caution(groups_by_id: Mapping[str, Mapping], runs_by_key: Ma
     return out
 
 
+CAUTION_SAID_NOT_COUNTER = "said_not_a_counter"
+
+
+def differing_name_positions(stems: Sequence[str]) -> list[int] | None:
+    """The 1-based token positions where same-length names differ (compared as the grouping key compares them:
+    :func:`_unit_token`), or ``None`` when the names have different lengths (a repeat marker, say)."""
+    toks = [[_unit_token(x) for x in _stem_tokens(s)] for s in stems]
+    if not toks or len({len(t) for t in toks}) != 1:
+        return None
+    return [i + 1 for i in range(len(toks[0])) if len({t[i] for t in toks}) > 1]
+
+
+def _live_stems(bundle: Mapping, mc: Mapping) -> list[str]:
+    """The first member run's file-name stem of each LIVE group a merge candidate names (one per group)."""
+    from .bundle import LIVE_GROUP_STATUSES
+
+    runs = {r["run_key"]: r for r in bundle.get("runs") or ()}
+    groups = {g["group_id"]: g for g in bundle.get("record_groups") or ()}
+    stems: list[str] = []
+    for gid in mc.get("group_ids") or ():
+        g = groups.get(gid) or {}
+        keys = g.get("member_run_keys") or ()
+        stem = (runs.get(keys[0]) or {}).get("stem") if keys and g.get("status") in LIVE_GROUP_STATUSES else None
+        if stem and stem not in stems:
+            stems.append(stem)
+    return stems
+
+
+def said_not_counter_caution(bundle: Mapping, mc: Mapping, said_not: Mapping[int, Mapping] | None = None) -> dict | None:
+    """r4-b M2: the caution of an OPEN merge candidate whose groups' file names differ ONLY at positions a scientist
+    said are NOT run/acquisition counters (``set_not_counter_positions``): there the numbers name distinct samples,
+    electrodes or conditions, so merging the groups would make one wrong record. Read from the decisions each time
+    (a not-counter answer changes no group and no stored candidate); ``None`` when it does not apply. Nothing is
+    decided: the scientist keeps them apart (one command for all: :func:`said_not_counter_candidates`) or merges."""
+    from .bundle import not_counter_positions
+
+    said_not = not_counter_positions(bundle) if said_not is None else said_not
+    if not said_not or mc.get("status") != "proposed" or merge_candidate_inert(bundle, mc):
+        return None
+    stems = _live_stems(bundle, mc)
+    where = differing_name_positions(stems) if len(stems) >= 2 else None
+    if not where or not set(where) <= set(said_not):
+        return None
+    toks = [_stem_tokens(s) for s in stems]
+    if not all(t[p - 1].isdigit() for t in toks for p in where):
+        return None
+    ids = sorted({str(said_not[p].get("decision_id")) for p in where})
+    shown = "position " + str(where[0]) + " is not a counter" if len(where) == 1 else (
+        "positions " + ", ".join(map(str, where[:-1])) + f" and {where[-1]} are not counters")
+    return {
+        "code": CAUTION_SAID_NOT_COUNTER,
+        "positions": where,
+        "decision_ids": ids,
+        "statement": (f"the scientist said {shown} ({', '.join(ids)}), and these file names differ only there "
+                      f"({' / '.join(stems[:3])}{' …' if len(stems) > 3 else ''}): they name different samples, "
+                      "electrodes or conditions, not repeats, so merging them would make one wrong record. Not decided: "
+                      "keep them apart, or merge them only if you know they are one measurement."),
+    }
+
+
+def said_not_counter_candidates(bundle: Mapping) -> list[str]:
+    """The ids of the open merge candidates :func:`said_not_counter_caution` cautions, in the bundle's order."""
+    from .bundle import not_counter_positions
+
+    said_not = not_counter_positions(bundle)
+    if not said_not:
+        return []
+    return [str(mc.get("merge_candidate_id")) for mc in bundle.get("merge_candidates") or ()
+            if said_not_counter_caution(bundle, mc, said_not) is not None]
+
+
+def current_caution(bundle: Mapping, mc: Mapping) -> list[dict]:
+    """A merge candidate's stored caution, and the one a not-counter answer given since adds (r4-b M2)."""
+    extra = said_not_counter_caution(bundle, mc)
+    return [*(c for c in mc.get("caution") or () if isinstance(c, Mapping)), *([extra] if extra else [])]
+
+
 def merge_candidate_groups(bundle: Mapping, mc: Mapping, *, cap: int = RUN_LABELS_PER_GROUP) -> list[dict]:
     """Each group a merge candidate names, with its runs' file-name stems (at most ``cap``, the rest
     counted) — what a scientist needs to see before saying yes. File names only; no parser value."""

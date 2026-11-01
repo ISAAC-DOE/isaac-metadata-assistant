@@ -1915,7 +1915,10 @@ def decide_question(
         override = None
         slots_added: list[str] = []
         try:
-            found, positions = question_targets(Q.consolidate(bundle), question_id, **resolve)
+            if question_id == Q.COUNTER_QUESTION_ID and decision == B.KEEP_APART_DECISION:
+                found = _said_not_counter_keep_apart(bundle, only, field, positions, only_scopes)
+            else:
+                found, positions = question_targets(Q.consolidate(bundle), question_id, **resolve)
         except MutationRefused as exc:
             # AN ANSWERED QUESTION is resolved too, under the id it was asked with (its answered targets back in:
             # consolidate(include_answered=True)): a later decision replaces an earlier one, a repeat records
@@ -1995,6 +1998,29 @@ def decide_question(
             result = _with_same_reading(result, same_members)
         save_bundle(bundle_dir, bundle)
         return (result, bundle_version(bundle_dir)) if with_version else result
+
+
+def _said_not_counter_keep_apart(bundle: Mapping, only: str | None, field: str | None, positions: Sequence[int] | None,
+                                 only_scopes: Sequence[str] | None) -> list[str]:
+    """r4-b M2: ``decide --question <the counter question> --decision keep_apart``: every OPEN merge candidate whose
+    groups' file names differ only at positions a scientist said are not counters (``grouping.said_not_counter_
+    candidates``), kept apart at once. Refused (code 2, so it is never resolved as another question) when there is
+    none, or with a flag that narrows a question's targets."""
+    from . import grouping as G
+    from . import questions as Q
+
+    if only or field or positions or only_scopes:
+        raise MutationRefused(f"--decision {B.KEEP_APART_DECISION} on question {Q.COUNTER_QUESTION_ID} keeps apart every "
+                              "merge candidate a not-counter answer cautions; it takes no --only, --field or --positions. "
+                              "Nothing was recorded.")
+    found = G.said_not_counter_candidates(bundle)
+    if not found:
+        raise MutationRefused(
+            f"No open merge candidate has file names that differ only at positions said not to be counters, so "
+            f"--decision {B.KEEP_APART_DECISION} on question {Q.COUNTER_QUESTION_ID} has nothing to keep apart (say "
+            f"which positions are not counters first: --decision {B.NOT_COUNTER_DECISION} --positions <n[,m]>; or "
+            "keep one candidate apart: --target <mc-…> --decision keep_apart). Nothing was recorded.")
+    return found
 
 
 def _same_reading_targets(bundle: Mapping, question_id: str, only: str | None, field: str | None,
@@ -2203,6 +2229,12 @@ def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, ed
     return positions
 
 
+#: ``keep_apart`` on several merge candidates at once (r4-b M2)
+KEEP_APART_MANY = (
+    "Recorded: for each of these {n} merge candidates, the groups it names are distinct and stay apart. The candidates "
+    "are no longer open merge questions (status kept_apart). No group was changed, confirmed or rejected: confirm (or "
+    "otherwise decide) each group on its own."
+)
 #: What a 1.6.0 capture decision records — and what it does NOT do (DEC-91). Returned by ``decide``.
 CAPTURE_STATEMENTS: Mapping[str, str] = {
     B.KEEP_APART_DECISION: (
@@ -2579,6 +2611,24 @@ def record_decision(
         statement = CAPTURE_STATEMENTS.get(decision)
         if statement:
             result["statement"] = statement.format(value=value, positions=", ".join(map(str, positions or ())))
+        kept = [t for kind, t in planned if kind == "merge_candidate"] if decision == B.KEEP_APART_DECISION else []
+        if len(kept) > 1:
+            # r4-b M2: a batch is said as a batch (before: "this merge candidate" for 25 of them)
+            result["statement"] = KEEP_APART_MANY.format(n=len(kept))
+        if decision == B.NOT_COUNTER_DECISION and recorded:
+            # r4-b M2: the open merge candidates whose names differ ONLY at positions now said not to be counters are
+            # named, cautioned (grouping.said_not_counter_caution) and offered one command; none is decided here
+            from . import grouping as G
+            from . import questions as Q
+
+            cautioned = G.said_not_counter_candidates(bundle)
+            if cautioned:
+                result["said_not_counter_merge_candidates"] = cautioned
+                result["statement"] += (
+                    f" {len(cautioned)} open merge candidate(s) have file names that differ only at position(s) you said "
+                    f"are not counters ({', '.join(cautioned[:5])}{', …' if len(cautioned) > 5 else ''}); each now carries "
+                    "that caution and none was decided. To keep them all apart with one command: "
+                    f"`{Q.KEEP_APART_SAID_NOT_COUNTER_COMMAND}`.")
         if acknowledged:
             words = " / ".join(dict.fromkeys(t for ts in acknowledged.values() for t in ts))
             result["statement"] = (

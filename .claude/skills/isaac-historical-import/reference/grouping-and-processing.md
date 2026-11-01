@@ -351,7 +351,11 @@ an element/edge already named for the group: approved, proposed, or the group's 
   decisions it would let the regroup combine (`merge_decisions_unblocked`): tell the scientist before
   regrouping. When they say a position is NOT a counter:
   `<isaac> bundle decide <bundle> --target experiment --decision set_not_counter_positions --positions 2 --by "<name>"`
-  (grouping is unchanged; the question drops out). When they say they do not know:
+  (grouping is unchanged; the question drops out). Every open merge candidate whose names differ ONLY at those
+  positions then carries the caution "the scientist said position N is not a counter", and the reply names them
+  (`said_not_counter_merge_candidates`); none is decided. If the scientist agrees they are all distinct, one command
+  keeps them all apart: `<isaac> bundle decide <bundle> --question <counter question id> --decision keep_apart --by "<name>"`.
+  When they say they do not know:
   `<isaac> bundle decide <bundle> --target experiment --decision defer --by "<name>"` records it; grouping is unchanged, the question stays, marked `deferred`, and a later
   answer supersedes it. Never guess a position for them.
 
