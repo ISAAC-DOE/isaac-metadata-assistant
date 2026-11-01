@@ -15,6 +15,14 @@ from __future__ import annotations
 EDGE_TABLE_SOURCE = "xraydb 4.5.8 xray_edge() (Elam, Ravel & Sieber 2002), snapshot 2026-10-28"
 
 EDGE_TABLE_EV: dict[tuple[str, str], float] = {
+    # tender X-ray edges (BL4-3-style beamtimes): without them a sulfur or phosphorus calibration had no shift
+    # wherever xraydb is not installed
+    ("P", "K"): 2145.5,
+    ("S", "K"): 2472.0,
+    ("Mo", "L3"): 2520.0,
+    ("Cl", "K"): 2822.0,
+    ("Ag", "L3"): 3351.0,
+    ("Ca", "K"): 4038.5,
     ("Ti", "K"): 4966.0,
     ("V", "K"): 5465.0,
     ("Cr", "K"): 5989.0,
@@ -25,10 +33,16 @@ EDGE_TABLE_EV: dict[tuple[str, str], float] = {
     ("Cu", "K"): 8979.0,
     ("Zn", "K"): 9659.0,
     ("Ir", "L3"): 11215.0,
+    ("Ce", "L3"): 5723.0,
+    ("Ga", "K"): 10367.0,
+    ("Ge", "K"): 11103.0,
     ("Pt", "L3"): 11564.0,
+    ("Se", "K"): 12658.0,
+    ("Mo", "K"): 20000.0,
     ("Au", "L3"): 11919.0,
     ("Ru", "K"): 22117.0,
     ("Pd", "K"): 24350.0,
+    ("Ag", "K"): 25514.0,
 }
 
 
