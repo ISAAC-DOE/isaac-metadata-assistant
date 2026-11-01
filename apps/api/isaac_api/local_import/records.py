@@ -1259,8 +1259,10 @@ def _setpoint_ruled(bundle: Mapping, run_id: str, held: Sequence[Mapping]) -> tu
 
 
 def local_clock_runs(bundle: Mapping) -> set[str]:
-    """The runs whose start time waits on the instrument clock's zone (a ``bundle.XDC_START_RULE_ID`` candidate)."""
-    return {c.get("run_id") for c in bundle.get("candidates") or () if B.is_local_clock_start(c)}
+    """The runs whose start time waits on the instrument clock's zone (a ``bundle.XDC_START_RULE_ID`` candidate).
+    A beamtime-wide candidate (no run) names no run, so it is skipped before its rule is read: a group is composed
+    with every beamtime-wide candidate beside its own, and reading each one's rule per group was quadratic."""
+    return {c["run_id"] for c in bundle.get("candidates") or () if c.get("run_id") is not None and B.is_local_clock_start(c)}
 
 
 def _start_time_warnings(bundle: Mapping, group: Mapping, member_ids: set, fields: Mapping) -> list[dict]:
