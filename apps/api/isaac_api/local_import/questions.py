@@ -1269,7 +1269,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         basis = {**basis, "record_composer": _agree_with_composer(questions, bundle, group_of, cand_by_id, reports,
                                                                        decision_of=decisions)}
     _note_shared_evidence(questions, cand_by_id, bundle)
-    _note_same_reading_groups(questions, cand_by_id)
+    _note_same_reading_groups(questions, cand_by_id, bundle)
     _mark_deferred(questions, decisions)
     _covered_by_run_decisions(questions, covered_conflicts)
     _say_the_one_group(questions)
@@ -1774,24 +1774,110 @@ def _conflict_answer(qid: str, cf: Mapping, path: str | None, enum: list | None,
                         + (" --json" if numeric and not is_utc else "") + f' --by "<your name>"{comment}')}
 
 
+def hide_outside_live_groups(questions: Sequence[Mapping], *, scope: str | None, include: bool) -> tuple[list, list]:
+    """r3a L5: ``(listed, hidden)``: a question whose answer reaches no live record group (``outside_live_groups``)
+    builds no record, so it is counted, not listed — unless ``include`` asks for them, or a run's own scope is asked
+    for. ONE rule for ``isaac bundle questions`` and the local questions screen (r3c LOW-3)."""
+    if include or (scope or "").startswith("run:"):
+        return list(questions), []
+    hidden = [q for q in questions if q.get("outside_live_groups")]
+    return [q for q in questions if not q.get("outside_live_groups")], hidden
+
+
+def hidden_outside_live_groups(hidden: Sequence[Mapping], flag: str) -> dict:
+    """The ``hidden_outside_live_groups`` count and statement of a page that hides them (``flag`` lists them), or
+    ``{}``. r3c LOW-3: such a question is about runs in no live record group (a rejected group's) OR asks a value
+    once for the beamtime on a field each record takes from its own runs (a beamtime value never fills it)."""
+    if not hidden:
+        return {}
+    return {"hidden_outside_live_groups": len(hidden),
+            "hidden_outside_live_groups_statement": (
+                f"{len(hidden)} question(s) whose answer would reach no live record group are not listed (their runs "
+                "are in none, e.g. a rejected group's, or the value is asked once for the beamtime on a field each "
+                f"record takes from its own runs; no record is built from it): {flag} lists them")}
+
+
 #: r3a M6: how a question that shares a reading with others is answered with them all at once (``decide
 #: --question <id> --same-reading``).
 SAME_READING_FLAG = "--same-reading"
 
 
-def _note_same_reading_groups(questions: list[dict], cand_by_id: Mapping[str, Mapping]) -> None:
-    """r3a M6: per-run ``no_value`` questions about one field that quote the SAME scan-header comment line (30 runs'
-    ``Sample A in 1M KOH 0Vrhe``), or that ``same_reading_as`` / ``same_statement_as`` already names together, share
-    a ``same_reading_group`` key, and say how to answer them all at once (:data:`SAME_READING_FLAG`). Ids, scopes,
-    kinds and targets are untouched: only ``same_reading_group``, ``same_reading_count`` and the text are added."""
-    def line_of(q: Mapping) -> str | None:
-        lines = {str(e.get("literal_value") or "").strip() for t in q["targets"]
-                 for e in ((cand_by_id.get(t["id"]) or {}).get("evidence") or ())[:1]}
-        return next(iter(lines)) if len(lines) == 1 and "" not in lines else None
+#: r3c HIGH: how many members' file names a same-reading group's text names (the rest are counted)
+SAME_READING_NAMES_SHOWN = 10
+
+
+def file_name_readings(bundle: Mapping, run: Mapping, path: str) -> list[dict]:
+    """``[{value, token, name}]``: what a run's OWN file and folder names read as for ``path`` — a set-point
+    (``m600mV``), a pH (``pH13``; ``template.name_token_readings``) or a scale written onto a potential token
+    (``0p5VRHE``) — ONLY to compare: never offered, never a value. ``[]`` for any other field. r3c HIGH: runs whose
+    file names read differently never share a ``same_reading_group``, and ``--same-reading`` is refused for a value
+    one of them contradicts."""
+    from .template import NAME_TOKEN_PATHS, name_token_readings, run_names
+
+    names = run_names(bundle, run)
+    if path in NAME_TOKEN_PATHS:
+        return name_token_readings(names, path)
+    if path != SCALE_PATH:
+        return []
+    out: dict[str, dict] = {}
+    for name in names:
+        for token in re.split(r"[_\s]+", name or ""):
+            got = header_potential(token) if _HEADER_POTENTIAL_TOKEN.match(token.strip(",;()")) else None
+            if got and got.get("scale"):
+                out.setdefault(got["scale"], {"value": got["scale"], "token": token, "name": name})
+    return list(out.values())
+
+
+def same_reading_members(bundle: Mapping, q: Mapping, cand_by_id: Mapping[str, Mapping]) -> list[dict]:
+    """``[{question_id, run_id, file_name}]``: the run (and its first scan file) each of a question's targets is
+    about, as a same-reading group names its members (r3c HIGH)."""
+    runs = {r.get("run_id"): r for r in bundle.get("runs") or ()}
+    out, seen = [], set()
+    for t in q["targets"]:
+        c = cand_by_id.get(t["id"]) or {}
+        rid = c.get("run_id")
+        if rid in seen:
+            continue
+        seen.add(rid)
+        ev = next(iter(c.get("evidence") or ()), {})
+        run = runs.get(rid) or {}
+        out.append({"question_id": q["question_id"], "run_id": rid,
+                    "file_name": ev.get("relative_path") or run.get("stem") or run.get("label")})
+    return out
+
+
+def _note_same_reading_groups(questions: list[dict], cand_by_id: Mapping[str, Mapping], bundle: Mapping) -> None:
+    """r3a M6: per-run ``no_value`` questions about one field that quote the SAME scan-header comment line(s) (30
+    runs' ``Sample A in 1M KOH 0Vrhe``), or that ``same_reading_as`` / ``same_statement_as`` already names together,
+    share a ``same_reading_group`` key, and say how to answer them all at once (:data:`SAME_READING_FLAG`). Ids,
+    scopes, kinds and targets are untouched: only ``same_reading_group``, ``same_reading_count``,
+    ``same_reading_members`` and the text are added.
+
+    r3c: the key is the FULL tuple of each target's evidence lines (never only the first: ``same_reading_as`` joins
+    only questions whose every line agrees); the run's own FILE-NAME
+    reading of the field (:func:`file_name_readings`: ``m600mV`` and ``m300mV`` are two groups, whatever line they
+    share); and whether the question reaches a live record group (one about runs in none is never counted beside
+    the listed ones). The text and ``same_reading_members`` name each member's file."""
+    runs = {r.get("run_id"): r for r in bundle.get("runs") or ()}
+
+    def lines_of(q: Mapping) -> tuple | None:
+        lines = {tuple(str(e.get("literal_value") or "").strip() for e in (cand_by_id.get(t["id"]) or {}).get("evidence") or ())
+                 for t in q["targets"]}
+        got = next(iter(lines)) if len(lines) == 1 else None
+        return got if got and "" not in got else None
+
+    def name_key(q: Mapping) -> tuple:
+        rids = sorted({(cand_by_id.get(t["id"]) or {}).get("run_id") or "" for t in q["targets"]})
+        return tuple(sorted({repr(r["value"]) for rid in rids if rid in runs
+                             for r in file_name_readings(bundle, runs[rid], q["target_field_path"])}))
+
+    def key_of(q: Mapping) -> tuple:
+        return (q["target_field_path"], name_key(q), bool(q.get("outside_live_groups")))
 
     asked = [q for q in questions if q.get("no_value") and q["targets"]
              and all(B.is_header_comment_candidate(cand_by_id.get(t["id"]) or {}) for t in q["targets"])]
     by_id = {q["question_id"]: q for q in asked}
+    keys = {q["question_id"]: key_of(q) for q in asked}
     parent: dict[str, str] = {q["question_id"]: q["question_id"] for q in asked}
 
     def root(i: str) -> str:
@@ -1801,15 +1887,16 @@ def _note_same_reading_groups(questions: list[dict], cand_by_id: Mapping[str, Ma
         return i
 
     def join(a: str, b: str) -> None:
-        if a in parent and b in parent:
+        if a in parent and b in parent and keys[a] == keys[b]:
             parent[root(a)] = root(b)
 
     first_of: dict[tuple, str] = {}
     for q in asked:
-        if (line := line_of(q)) is not None:
-            join(q["question_id"], first_of.setdefault((q["target_field_path"], line), q["question_id"]))
+        if (lines := lines_of(q)) is not None:
+            join(q["question_id"], first_of.setdefault((keys[q["question_id"]], lines), q["question_id"]))
         for other in (q.get("same_reading_as") or []) + (q.get("same_statement_as") or []):
-            if other in by_id and by_id[other]["target_field_path"] == q["target_field_path"]:
+            # r3c LOW-2: named together on their FIRST literal, joined only when every line agrees too
+            if other in by_id and lines_of(by_id[other]) == lines_of(q):
                 join(q["question_id"], other)
     groups: dict[str, list[dict]] = {}
     for q in asked:
@@ -1819,17 +1906,25 @@ def _note_same_reading_groups(questions: list[dict], cand_by_id: Mapping[str, Ma
             continue
         ids = sorted(q["question_id"] for q in members)
         key = "SR-" + hashlib.sha256("\n".join(ids).encode()).hexdigest()[:10]
-        lines = list(dict.fromkeys(line for q in members if (line := line_of(q)) is not None))
-        said = (f"the same comment line ({lines[0]!r})" if len(lines) == 1 else "the same reading")
+        lines = list(dict.fromkeys(got for q in members if (got := lines_of(q)) is not None))
+        said = (f"the same comment line ({lines[0][0]!r})" if len(lines) == 1 and len(lines[0]) == 1 else
+                f"the same comment lines ({', '.join(map(repr, lines[0]))})" if len(lines) == 1 else "the same reading")
+        named = [m for q in sorted(members, key=lambda q: q["question_id"]) for m in same_reading_members(bundle, q, cand_by_id)]
+        files = list(dict.fromkeys(str(m["file_name"]) for m in named if m["file_name"]))
+        shown = ", ".join(files[:SAME_READING_NAMES_SHOWN]) + (
+            f", and {len(files) - SAME_READING_NAMES_SHOWN} more" if len(files) > SAME_READING_NAMES_SHOWN else "")
+        readings = keys[members[0]["question_id"]][1]
+        alike = (f"; their file names read alike for this field ({', '.join(readings)})" if readings else "")
         for q in members:
             q["same_reading_group"], q["same_reading_count"] = key, len(members)
+            q["same_reading_members"] = named
             command = q["answer_command"].replace(f"--question {q['question_id']} ",
                                                   f"--question {q['question_id']} {SAME_READING_FLAG} ", 1)
             q["same_reading_command"] = command
             q["text"] += (f" {len(members) - 1} other question(s) ask the {_label(q['target_field_path'])} of {said} "
-                          f"(same_reading_group {key}): if it is the same for all of them, answer all {len(members)} at once: "
-                          f"{command}. For many runs, the template's File List columns are the easy path (isaac bundle template "
-                          "export <bundle_dir> --out <file.xlsx>).")
+                          f"(same_reading_group {key}; the files: {shown}{alike}): if it is the same for all of them, "
+                          f"answer all {len(members)} at once: {command}. For many runs, the template's File List "
+                          "columns are the easy path (isaac bundle template export <bundle_dir> --out <file.xlsx>).")
 
 
 def _note_shared_evidence(questions: list[dict], cand_by_id: Mapping[str, Mapping], bundle: Mapping) -> None:
@@ -3000,25 +3095,61 @@ def header_potentials_in_line(line: str) -> list[dict]:
 
 #: r3a H2: a potential a comment line MENTIONS, for COMPARISON only: a number with ``V`` or ``mV`` and an optional
 #: scale written onto it or after ``vs`` (``0Vrhe``, ``0.5Vrhe``, ``-0.6 V_RHE``, ``-300 mV vs RHE``, ``0.5 V vs.
-#: Ag/AgCl``). ``kV`` / ``µV`` are not potentials, and a word glued onto the unit (``5 Volts``) is not one.
+#: Ag/AgCl``). ``kV`` / ``µV`` are not potentials, and a word glued onto the unit (``5 Volts``) is not one. r3c MED-1:
+#: never the tail of another number: an exponent (``1e-3 V``, ``x10^3 V``) or a comma decimal (``1,5 V``).
 _POTENTIAL_MENTION = re.compile(
-    r"(?<![\w.])(?P<sign>[-+\u2212\u2013])?(?P<num>\d+(?:\.\d+)?|\.\d+)\s*(?P<unit>mV|mv|V|v)"
+    r"(?<![\w.^])(?<!\d,)(?P<sign>[-+\u2212\u2013])?(?<![eE][-+\u2212])(?<!\^[-+\u2212])(?<!\d,)"
+    r"(?P<num>\d+(?:\.\d+)?|\.\d+)\s*(?P<unit>mV|mv|V|v)"
     rf"(?:\s*(?:(?:vs\.?|versus)\s*|[_/(]\s*)?(?P<scale>{_SCALES})(?![A-Za-z])\)?|(?![A-Za-z]))", re.IGNORECASE)
+#: r3c MED-1: a mention that is a RATE (``5 mV/s``, ``10 mV s-1``, ``mV s^-1``, ``mV·s``), not a potential
+_MENTION_RATE_AFTER = re.compile(r"\s*(?:/\s*(?:s|min)(?![a-z])|s\s*\^?\s*[-\u2212]\s*1|[\u00b7\u22c5*]\s*s(?![a-z]))",
+                                 re.IGNORECASE)
+#: r3c MED-1: the words that make a voltage next to them something other than the set-point held: a detector's (PMT,
+#: HV, gain, bias), an amplitude, an over-potential (eta, η), open circuit (OCP, OCV) or a rate. "Next to" is the word
+#: right before the number (``PMT 900V``, ``eta = 300 mV``, ``OCP (0.95 V)``) or right after it (``50mV amplitude``,
+#: ``1 V gain``, ``0.3V OCP``).
+_MENTION_CONTEXT_WORDS = (r"amplitude|PMT|HV|gain|detector|bias|eta|\u03b7|over-?potential|OC[PV]|rate")
+_MENTION_CONTEXT_BEFORE = re.compile(rf"(?:(?<![A-Za-z])(?:{_MENTION_CONTEXT_WORDS})|\u03b7)\s*(?:[=:~(]|of|at|is)?\s*\(?\s*$",
+                                     re.IGNORECASE)
+_MENTION_CONTEXT_AFTER = re.compile(rf"^\s*\)?\s*(?:(?:{_MENTION_CONTEXT_WORDS})(?![A-Za-z])|\u03b7)", re.IGNORECASE)
+#: r3c MED-1: a mention larger than this, with no scale written onto it, is a supply or a detector setting
+MENTION_MAX_V = 5.0
+#: where a mention's QUOTE (the text around it, as written) stops: a space or a segment separator
+_QUOTE_STOP = " \t,;|"
+
+
+def _mention_quote(text: str, start: int, end: int) -> str:
+    """The whole written token(s) a mention sits in (``(0.95 V)``, ``E=0.3V``), so it is never quoted cut short."""
+    while start > 0 and text[start - 1] not in _QUOTE_STOP:
+        start -= 1
+    while end < len(text) and text[end] not in _QUOTE_STOP:
+        end += 1
+    return text[start:end].strip()
 
 
 def header_potential_mentions(line: str) -> list[dict]:
-    """``[{"literal", "scale", "volts"}]``: EVERY potential a comment line mentions (:data:`_POTENTIAL_MENTION`), in
-    line order, ``literal`` as written (``0Vrhe``). r3a H2: what a line the whitelist reads NO value from
-    (``Sample A in 1M KOH 0Vrhe``) still says about the potential, so a file name (``m600mV``) or a typed value that
-    differs is warned, never silently written. ONLY to compare: never a value, never offered, never stored as one;
-    a line with several mentions keeps them all and none is picked."""
+    """``[{"literal", "quote", "scale", "volts"}]``: EVERY potential a comment line mentions
+    (:data:`_POTENTIAL_MENTION`), in line order, ``literal`` as matched (``0Vrhe``) and ``quote`` the written token(s)
+    around it. r3a H2: what a line the whitelist reads NO value from (``Sample A in 1M KOH 0Vrhe``) still says about
+    the potential, so a file name (``m600mV``) or a typed value that differs is warned, never silently written. ONLY
+    to compare: never a value, never offered, never stored as one; a line with several mentions keeps them all and
+    none is picked. r3c MED-1: a voltage that is no set-point is not a mention: a rate (:data:`_MENTION_RATE_AFTER`),
+    one beside a detector, amplitude, over-potential, open-circuit or rate word (:data:`_MENTION_CONTEXT_WORDS`), or
+    one over :data:`MENTION_MAX_V` with no scale."""
+    text = str(line or "")
     out = []
-    for m in _POTENTIAL_MENTION.finditer(str(line or "")):
+    for m in _POTENTIAL_MENTION.finditer(text):
+        if (_MENTION_RATE_AFTER.match(text, m.end()) or _MENTION_CONTEXT_BEFORE.search(text[:m.start()])
+                or _MENTION_CONTEXT_AFTER.search(text[m.end():])):
+            continue
         volts = Decimal(m.group("num")) / (1000 if m.group("unit").lower() == "mv" else 1)
         if m.group("sign") not in (None, "+"):
             volts = -volts
         scale = _SCALE_NAMES[m.group("scale").casefold()] if m.group("scale") else None
-        out.append({"literal": m.group(0).strip(), "scale": scale, "volts": float(volts) + 0.0})
+        if scale is None and abs(volts) > Decimal(str(MENTION_MAX_V)):
+            continue
+        out.append({"literal": m.group(0).strip(), "quote": _mention_quote(text, m.start(), m.end()), "scale": scale,
+                    "volts": float(volts) + 0.0})
     return out
 
 
@@ -3124,7 +3255,7 @@ def stated_potential_notes(w: Mapping) -> str:
             by_run.setdefault(rid, {}).setdefault(s.get("stated_in") or "", []).append((stated_literal(s), s.get("scale"), volts))
             for m in s.get("mentions") or () if volts is None else ():
                 # r3a H2: what a line read with NO value mentions (``0Vrhe``), each compared, none picked
-                by_run[rid].setdefault("mentions", []).append((repr(m["literal"]), m.get("scale"), m["volts"]))
+                by_run[rid].setdefault("mentions", []).append((repr(m.get("quote") or m["literal"]), m.get("scale"), m["volts"]))
     differ, scales_differ = [], []
     for rid, places in by_run.items():
         names, heads = places.get("file name") or [], places.get("scan header") or []

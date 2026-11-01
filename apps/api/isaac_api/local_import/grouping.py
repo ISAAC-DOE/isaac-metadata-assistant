@@ -414,6 +414,17 @@ def exp_data_files(bundle: Mapping) -> dict[str, str]:
     return out
 
 
+def exp_data_file_sources(bundle: Mapping) -> dict[str, str]:
+    """``run_id -> the .exp file`` its :func:`exp_data_files` DATA_FILE was read from (r3c MED-3: two runs of one
+    folder may take it from ONE template ``.exp``)."""
+    out: dict[str, str] = {}
+    for e in bundle.get("extended_context") or ():
+        if (isinstance(e, Mapping) and e.get("concept") == EXP_DATA_FILE_CONCEPT and e.get("run_id")
+                and str(e.get("raw_literal") or "").strip() and e.get("relative_path")):
+            out.setdefault(str(e["run_id"]), str(e["relative_path"]))
+    return out
+
+
 def exp_data_file_agrees(stem: str, data_file: str | None) -> bool:
     """c16-r M4: whether a run's ``.exp`` ``DATA_FILE`` names the run's OWN acquisition: it equals the run's name
     without its trailing number (``x_dry_015`` with ``x_dry``), casefolded. A run renamed after acquisition whose
@@ -1138,7 +1149,7 @@ def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: froz
             for key in m["soft"]:
                 reasons.append({"code": "conflicting_unknown_key", "group_id": gid_of_run[m["run"]["run_key"]], "key": key})
         mcid = "mc-" + hashlib.sha256((exp_key + "\n" + "\n".join(gids)).encode()).hexdigest()[:16]
-        caution = merge_candidate_caution(by_gid, runs_by_key, gids, data_files)
+        caution = merge_candidate_caution(by_gid, runs_by_key, gids, data_files, exp_data_file_sources(bundle))
         nq = _question(
             "merge_candidate",
             "".join(f"CAUTION: {c['statement']} " for c in caution)
@@ -1675,7 +1686,8 @@ def merge_reason_code(reasons: Sequence[Mapping]) -> str:
 
 
 def merge_candidate_caution(groups_by_id: Mapping[str, Mapping], runs_by_key: Mapping[str, Mapping], group_ids: Sequence[str],
-                            data_files: Mapping[str, str] | None = None) -> list[dict]:
+                            data_files: Mapping[str, str] | None = None,
+                            data_file_sources: Mapping[str, str] | None = None) -> list[dict]:
     """Why saying yes to a merge candidate could make one WRONG record — empty when nothing says so.
 
     * its groups' file names differ in more than numbers and repeat markers (``name_stem_key(loose=True)``):
@@ -1684,7 +1696,10 @@ def merge_candidate_caution(groups_by_id: Mapping[str, Mapping], runs_by_key: Ma
     * no group states a sample, environment or condition the build classified: nothing read shows the
       runs are one measurement — unless (r3a M1) every run's own ``.exp`` names one acquisition (``data_files``,
       ``run_id -> DATA_FILE``: :func:`exp_data_files`), each its run's own (:func:`exp_data_file_agrees`): the
-      caution then says that is what was read, and that it is still the scientist's call."""
+      caution then says that is what was read, and that it is still the scientist's call. r3c MED-3: only when each
+      run's DATA_FILE comes from a DIFFERENT ``.exp`` (``data_file_sources``, ``run_id -> .exp path``:
+      :func:`exp_data_file_sources`); one ``.exp`` that several of them take it from is a template, not evidence
+      they are one measurement, and the caution says so and keeps that merging could make one wrong record."""
     groups = [groups_by_id[g] for g in group_ids if g in groups_by_id]
     stems_of: dict[str, str] = {}
     members: list[Mapping] = []
@@ -1705,7 +1720,21 @@ def merge_candidate_caution(groups_by_id: Mapping[str, Mapping], runs_by_key: Ma
     if groups and not any((g.get("basis") or {}).get(part) for g in groups for part in ("sample", "environment", "conditions")):
         named = [(data_files or {}).get(str(r.get("run_id"))) for r in members]
         own = [d for r, d in zip(members, named) if exp_data_file_agrees(r.get("stem") or "", d)]
-        if len(members) > 1 and len(own) == len(members) and len({d.strip().casefold() for d in own}) == 1:
+        sources = [(data_file_sources or {}).get(str(r.get("run_id"))) for r in members]
+        shared = sorted({x for x in sources if x and sources.count(x) > 1})
+        one = len(members) > 1 and len(own) == len(members) and len({d.strip().casefold() for d in own}) == 1
+        if one and shared:
+            where = (f"one .exp in their folder ({shared[0]})" if len(shared) == 1 else
+                     f"one .exp in each of their folders ({', '.join(shared[:3])}{', …' if len(shared) > 3 else ''})")
+            out.append({
+                "code": CAUTION_NOTHING_CLASSIFIED,
+                "data_file": own[0].strip(), "data_file_shared": shared,
+                "statement": f"This build classified no sample or condition for these runs; {where} names "
+                             f"{own[0].strip()} (DATA_FILE); that is a template, not evidence they are one measurement, so "
+                             "nothing read from their files shows they are the same measurement; merging them could make "
+                             "one wrong record — check before saying yes.",
+            })
+        elif one and all(sources):
             out.append({
                 "code": CAUTION_NOTHING_CLASSIFIED,
                 "data_file": own[0].strip(),

@@ -1937,8 +1937,10 @@ def decide_question(
                 found, slots_added, override = got
             if asked["kind"] == "confirm_absorber" and decision == "set_absorber" and only is None:
                 found, kept_overrides = _keep_absorber_overrides(bundle, found)
+        same_members: list[dict] = []
         if same_reading:
-            found = found + [t for t in _same_reading_targets(bundle, question_id, only, field) if t not in found]
+            more, same_members = _same_reading_targets(bundle, question_id, only, field, decision, value)
+            found = found + [t for t in more if t not in found]
         clock_defer = False
         if decision == "defer" and (Q.question(Q.consolidate(bundle, include_answered=True, explain_counter=False),
                                                question_id) or {}).get("kind") == "clock_time_zone":
@@ -1973,6 +1975,8 @@ def decide_question(
         if dry_run:
             copied = copy.deepcopy(bundle)
             planned = reached(copied, record_decision(copied, **params))
+            if same_members:
+                planned = _with_same_reading(planned, same_members)
             planned = {**planned, "statement": _would_say(planned.get("statement"))}
             return _with_kept(kept_overrides, {"dry_run": True, "bundle_version": version, "target_ids": params["target_ids"], **planned})
         before = open_requests_before(bundle, decision)
@@ -1987,26 +1991,88 @@ def decide_question(
                                        source={"kind": "decide_answer", "command": "bundle decide", "decision": decision,
                                                "question_id": question_id, "as_said": True}) from None
         result = _said_on_list(_with_answered(_with_kept(kept_overrides, reached(bundle, recorded)), bundle, before), as_said)
+        if same_members:
+            result = _with_same_reading(result, same_members)
         save_bundle(bundle_dir, bundle)
         return (result, bundle_version(bundle_dir)) if with_version else result
 
 
-def _same_reading_targets(bundle: Mapping, question_id: str, only: str | None, field: str | None) -> list[str]:
-    """r3a M6: the targets of every OTHER open question in ``question_id``'s ``same_reading_group``."""
+def _same_reading_targets(bundle: Mapping, question_id: str, only: str | None, field: str | None,
+                          decision: str | None = None, value: Any = None) -> tuple[list[str], list[dict]]:
+    """r3a M6: ``(targets, members)``: the targets of every OTHER open question in ``question_id``'s
+    ``same_reading_group``, and every member's ``{question_id, run_id, file_name}`` (the reply names them).
+
+    r3c HIGH: ALL OR NOTHING — refused, naming the runs, when the value contradicts any member run's own FILE-NAME
+    reading of the field (``questions.file_name_readings``: ``m300mV`` beside ``--value -0.6``); one shared comment
+    line never gives two runs whose names state different set-points one value. An ANSWERED question is said to be
+    answered (``--same-reading`` answers open questions only)."""
     from . import questions as Q
+    from .template import _agrees
 
     if only:
         raise MutationRefused(f"{Q.SAME_READING_FLAG} answers every question of a same_reading_group; it does not take "
                               "--only. Nothing was recorded.")
     payload = Q.consolidate(bundle)
-    asked = Q.question(payload, question_id) or {}
+    asked = Q.question(payload, question_id)
+    if asked is None:
+        raise MutationRefused(f"Question {question_id} is already answered, so {Q.SAME_READING_FLAG} (which answers "
+                              "the OPEN questions of its same_reading_group) has nothing to answer with it. To change "
+                              f"its answer, decide it again without {Q.SAME_READING_FLAG} (isaac bundle show question "
+                              f"<bundle_dir> {question_id} shows what was recorded). Nothing was recorded.")
     group = asked.get("same_reading_group")
     if not group:
         raise MutationRefused(f"Question {question_id} names no same_reading_group (it is open, and no other open "
                               f"question quotes its comment line for this field), so {Q.SAME_READING_FLAG} has nothing "
                               "more to answer. Nothing was recorded.")
-    return [t for q in payload["questions"] if q.get("same_reading_group") == group and q["question_id"] != question_id
-            for t in Q.targets_for(payload, q["question_id"], None, field)]
+    members = [q for q in payload["questions"] if q.get("same_reading_group") == group]
+    named = list(asked.get("same_reading_members") or ())
+    if value is not None and decision in _VALUE_DECISIONS_SAID:
+        said = value
+        if isinstance(said, str) and re.fullmatch(r"\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?\s*", said):
+            said = float(said)
+        runs = {r.get("run_id"): r for r in bundle.get("runs") or ()}
+        against = []
+        for m in named:
+            run = runs.get(m["run_id"])
+            path = asked["target_field_path"]
+            for r in Q.file_name_readings(bundle, run, path) if run is not None else ():
+                if not _agrees(r["value"], said):
+                    against.append(f"{m['file_name']} ({m['run_id']}: its file name writes {r['token']}, "
+                                   f"{r['value']!r})")
+        if against:
+            raise MutationRefused(
+                f"{Q.SAME_READING_FLAG} would record {value!r} for every run of {group}, and the file names of "
+                f"{len(against)} of them say otherwise: {'; '.join(against[:Q.SAME_READING_NAMES_SHOWN])}"
+                + ("; …" if len(against) > Q.SAME_READING_NAMES_SHOWN else "")
+                + ". One comment line they share does not make their set-points one: answer each run on its own "
+                f"(--question <id> without {Q.SAME_READING_FLAG}). Nothing was recorded.")
+    targets = [t for q in members if q["question_id"] != question_id
+               for t in Q.targets_for(payload, q["question_id"], None, field)]
+    return targets, named
+
+
+#: the decisions whose value a same-reading answer gives every member (compared with their file names)
+_VALUE_DECISIONS_SAID = ("confirm", "correct", "provide_value")
+
+
+def _with_same_reading(result: dict, members: Sequence[Mapping]) -> dict:
+    """A ``--same-reading`` reply names every member it answered: its question, run and file (r3c HIGH)."""
+    from . import questions as Q
+
+    files = list(dict.fromkeys(str(m["file_name"]) for m in members if m.get("file_name")))
+    shown = ", ".join(files[:Q.SAME_READING_NAMES_SHOWN]) + (
+        f", and {len(files) - Q.SAME_READING_NAMES_SHOWN} more" if len(files) > Q.SAME_READING_NAMES_SHOWN else "")
+    said = f"{Q.SAME_READING_FLAG} answered {len({m['question_id'] for m in members})} question(s), for: {shown}."
+    return {**result, "same_reading_members": list(members),
+            "statement": " ".join(x for x in (result.get("statement"), said) if x)}
+
+
+def _restated_for_one_run(kind: str, obj: Mapping, prior: Mapping, bulk: bool) -> bool:
+    """r3c HIGH: a run's set-point restated ON ITS OWN after a decision that answered several targets at once (a
+    batch: ``--same-reading``, a bulk decide) is a new statement, even with the same value: it is the ruling made for
+    that run alone that settles a record differing from the run's file name (``records._ruled_for_run_alone``)."""
+    return (not bulk and kind in ("candidate", "missing_value") and bool(prior.get("batch_id"))
+            and obj.get("target_field_path") == "context.electrochemistry.potential_setpoint_V" and bool(obj.get("run_id")))
 
 
 def _would_say(statement: str | None) -> str | None:
@@ -2436,9 +2502,11 @@ def record_decision(
                 json.dumps(prior.get("same_conditions_tokens")),
             ) == signature and not record_unchanged and not (
                     kind == "processing_result" and decision == "approve" and approval_is_stale(prior, obj)) and not (
-                    restated_after_request(bundle, kind, obj, prior, request_index)):
+                    restated_after_request(bundle, kind, obj, prior, request_index)) and not (
+                    _restated_for_one_run(kind, obj, prior, bulk)):
                 # an approval restated after its result's files changed binds it to them: a new statement; so is a
-                # value restated after the scientist asked for their own word on its field (c13g M1)
+                # value restated after the scientist asked for their own word on its field (c13g M1), and a set-point
+                # restated for one run after an answer given to several at once (r3c HIGH)
                 unchanged.append(tid)
                 continue
             entry = {
@@ -2755,6 +2823,29 @@ def _source_root(bundle: Mapping, explicit: str | None) -> Path:
 #: 4-9)`` (a Larch command, its first and last line). An Igor ``history line N`` counts lines of the packed history,
 #: not of the file, so it names none.
 _LINE_RE = re.compile(r"(?<!history )\blines?[: ](?P<first>\d+)(?:-(?P<last>\d+))?\b")
+#: r3c MED-4: the line breaks the readers count lines by (``\r\n``, ``\r``, ``\n``): never ``str.splitlines``, which
+#: also breaks at a form feed, ``\x1c``-``\x1e``, ``\x85`` or U+2028, and so numbers the lines after one differently
+_LINE_BREAK_RE = re.compile(r"\r\n|\r|\n")
+
+
+def _file_lines(text: str) -> list[str]:
+    """``text``'s lines as the readers number them (:data:`_LINE_BREAK_RE`); a final line break ends the last line."""
+    lines = _LINE_BREAK_RE.split(text)
+    return lines[:-1] if lines and lines[-1] == "" else lines
+
+
+def _joined_within(lines: Sequence[str], lo: int, hi: int, cap: int) -> tuple[str, int]:
+    """``(body, last)``: ``lines[lo..hi]`` (1-based) numbered and joined, stopping once ``cap`` characters are reached
+    (r3c LOW-4: a long ``(lines a-b)`` range is never joined whole), ``last`` the last line begun."""
+    parts, size, last = [], 0, lo - 1
+    for i in range(lo, hi + 1):
+        part = f"{i:>5}: {lines[i - 1]}"
+        parts.append(part)
+        size += len(part) + (1 if len(parts) > 1 else 0)
+        last = i
+        if size > cap:
+            break
+    return "\n".join(parts), last
 
 
 def excerpt(bundle: Mapping, target_id: str, *, source: str | None) -> dict:
@@ -2766,6 +2857,11 @@ def excerpt(bundle: Mapping, target_id: str, *, source: str | None) -> dict:
     kind, obj = resolve_target(bundle, target_id)
     if kind == "candidate":
         locs = _locators(obj)
+        # r3c MED-4: each locator's own evidence words, to check the line shown against (never shown: a parser
+        # literal; the crosscheck plan's locators never carry them)
+        said = {(e["source_id"], e["locator"]): e.get("literal_value") for e in obj["evidence"]
+                if e["method"] != "ai_interpretation"}
+        locs = [{**x, "literal_value": said.get((x["source_id"], x["locator"]))} for x in locs]
     elif kind == "source":
         locs = [{"source_id": obj["source_id"], "relative_path": obj["relative_path"], "locator": "line 1"}]
     elif kind == "run":
@@ -2811,7 +2907,7 @@ def excerpt(bundle: Mapping, target_id: str, *, source: str | None) -> dict:
         if text is None:
             out.append({"source_id": src["source_id"], "relative_path": path, "refused": str(refusal)})
             continue
-        lines = text.splitlines()
+        lines = _file_lines(text)
         match = _LINE_RE.search(loc["locator"] or "")
         note = None
         if match:
@@ -2827,18 +2923,30 @@ def excerpt(bundle: Mapping, target_id: str, *, source: str | None) -> dict:
             lo, hi = 1, min(len(lines), 2 * EXCERPT_CONTEXT_LINES + 1)
             if loc["locator"] and loc["locator"] != "line 1":
                 note = f"the locator ({loc['locator']}) names no line of the file: its first lines are shown"
-        body = "\n".join(f"{i:>5}: {lines[i - 1]}" for i in range(lo, hi + 1))
-        truncated = len(body) > MAX_EXCERPT_CHARS
-        if match and truncated and f"\n{n:>5}: " not in "\n" + body[:MAX_EXCERPT_CHARS]:
-            note = (f"line {n}, the one the locator names, is past the {MAX_EXCERPT_CHARS} characters shown (the lines "
-                    "before it are long): read it with the Read tool")
+        body, last_begun = _joined_within(lines, lo, hi, MAX_EXCERPT_CHARS)
+        truncated = len(body) > MAX_EXCERPT_CHARS or last_begun < hi
+        shown = body[:MAX_EXCERPT_CHARS]
+        notes = []
+        if match and f"\n{n:>5}: " not in "\n" + shown:
+            notes.append(f"line {n}, the one the locator names, is past the {MAX_EXCERPT_CHARS} characters shown (the "
+                         "lines before it are long): read it with the Read tool")
+        elif match and f"\n{n:>5}: {lines[n - 1]}\n" not in f"\n{shown}\n":
+            # r3c LOW-4: the line the locator names is cut partway: never shown as if whole
+            notes.append(f"line {n}, the one the locator names, is cut at the {MAX_EXCERPT_CHARS} characters shown: "
+                         "read the rest with the Read tool")
+        literal = " ".join(str(loc.get("literal_value") or "").split())
+        if match and not match.group("last") and literal and literal not in " ".join(lines[n - 1].split()):
+            # r3c MED-4: the evidence's own words are checked against the one line shown for it
+            notes.append(f"line {n} as read now does not contain the text the import read there: the file may "
+                         "number its lines differently; read it with the Read tool")
+        note = "; ".join(([note] if note else []) + notes) or None
         out.append(
             {
                 "source_id": src["source_id"],
                 "relative_path": path,
                 "locator": loc["locator"],
                 "lines": [lo, hi],
-                "text": body[:MAX_EXCERPT_CHARS],
+                "text": shown,
                 "truncated": truncated,
                 **({"note": note} if note else {}),
             }
@@ -3231,7 +3339,8 @@ def _regroup(bundle: dict, *, regroup: bool = True) -> dict:
             "merge_candidate_id": mcid, "experiment_key": exp_key, "group_ids": gids, "run_keys": [],
             "status": "proposed", "rule_id": G.BINDING_RULE_ID, "reasons": [reason],
             "reason_code": "scientist_decided_merge", "reason_codes": ["scientist_decided_merge"],
-            "caution": G.merge_candidate_caution({h["group_id"]: h for h in holders}, runs_by_key, gids, G.exp_data_files(bundle)),
+            "caution": G.merge_candidate_caution({h["group_id"]: h for h in holders}, runs_by_key, gids,
+                                                 G.exp_data_files(bundle), G.exp_data_file_sources(bundle)),
         })
     if combined_by:
         # a candidate that named a group now combined names the combined group instead; one left

@@ -1080,7 +1080,13 @@ def _potential_sources_warnings(bundle: Mapping, group: Mapping, member_ids: set
     record's own set-point target, by a decision recorded after the one that gave the record its set-point (the
     warning, which shows the header's words, can only be shown after that one). The re-import alternative says what
     a new bundle does not carry over. A record without a set-point gets the stated-potential warning instead, which
-    names the same disagreement (``questions.stated_potential_notes``)."""
+    names the same disagreement (``questions.stated_potential_notes``).
+
+    r3c: a header candidate whose latest answer is ``reject`` says its line states no set-point: that line is not
+    compared (a reject, like a defer, is no ruling on the set-point). And THE RECORD AGAINST THE RUN'S OWN FILE NAME
+    (``m300mV`` while the record carries -0.6 V) is warned whatever the header rulings say, until a value decision
+    is recorded for THAT RUN ALONE (:func:`_ruled_for_run_alone`): an answer given to several runs at once
+    (``--same-reading``, a bulk decide, a beamtime value) was not made looking at this run's name."""
     from . import questions as Q
     from .template import header_potential_mentions, header_potential_readings
 
@@ -1090,30 +1096,39 @@ def _potential_sources_warnings(bundle: Mapping, group: Mapping, member_ids: set
     scale = fields[SCALE_PATH].get("value") if isinstance(fields.get(SCALE_PATH), Mapping) else None
     carried_v = (round(float(carried), 9) if isinstance(carried, (int, float)) and not isinstance(carried, bool)
                  else None)
+    latest = _latest_decisions(bundle)
     out = []
     for r in Q._generic_member_runs(bundle, member_ids):
         names = [t for t in Q._name_tokens(r) if _POTENTIAL_TOKEN.match(t)]
         name_v = {round(v, 9) for v in map(Q._token_volts, names) if v is not None}
-        heads = header_potential_readings(bundle, r)
+        held_all = [c for c in bundle.get("candidates") or () if c.get("run_id") == r["run_id"]
+                    and B.is_header_comment_candidate(c) and c.get("target_field_path") == SETPOINT_PATH]
+        # r3c: a line the scientist said states no set-point (a reject of its header candidate) is not compared
+        rejected = {(e.get("relative_path"), e.get("locator")) for c in held_all
+                    if (latest.get(c["candidate_id"]) or {}).get("decision") == "reject" for e in c.get("evidence") or ()}
+        held = [c for c in held_all if (latest.get(c["candidate_id"]) or {}).get("decision") != "reject"]
+        heads = [h for h in header_potential_readings(bundle, r) if (h["relative_path"], h["locator"]) not in rejected]
         head_v = {round(h["value"], 9) for h in heads}
         # r3a H2: a value-less header line's MENTIONS (``0Vrhe``), EACH compared with the file name's potential and
         # the record's set-point: any one that differs from either is a disagreement (none is picked as the value)
-        lines = header_potential_mentions(bundle, r)
+        lines = [h for h in header_potential_mentions(bundle, r) if (h["relative_path"], h["locator"]) not in rejected]
         not_name = [m for h in lines for m in h["mentions"] if name_v and round(m["volts"], 9) not in name_v]
         not_carried = [m for h in lines for m in h["mentions"] if carried_v is not None and round(m["volts"], 9) != carried_v]
         odd = not_name + not_carried
-        if not odd and (not name_v or not head_v or name_v & head_v):
+        # r3c HIGH: the record's set-point against this run's own file name, settled only by a ruling on this run
+        record_vs_name = (bool(name_v) and carried_v is not None and carried_v not in name_v
+                          and not _ruled_for_run_alone(bundle, r["run_id"], latest))
+        files_differ = bool(odd) or bool(name_v and head_v and not name_v & head_v)
+        if not files_differ and not record_vs_name:
             continue
-        held = [c for c in bundle.get("candidates") or () if c.get("run_id") == r["run_id"]
-                and B.is_header_comment_candidate(c) and c.get("target_field_path") == SETPOINT_PATH]
-        ruled, own = _setpoint_ruled(bundle, r["run_id"], held)
-        if ruled:
+        ruled, own = _setpoint_ruled(bundle, r["run_id"], held) if files_differ else (True, None)
+        if ruled and not record_vs_name:
             continue
         name_scales = {(Q.header_potential(t) or {}).get("scale") for t in names}
         head_scales = {h.get("scale") for h in heads} | {m.get("scale") for h in lines for m in h["mentions"]}
         if held:
             command = (f'isaac bundle decide <bundle_dir> --target {held[0]["candidate_id"]} --decision confirm '
-                       '--by "<your name>"' if held[0].get("value") is not None else
+                       '--by "<your name>"' if held[0].get("value") is not None and not record_vs_name else
                        f'isaac bundle decide <bundle_dir> --target {held[0]["candidate_id"]} --decision correct '
                        '--value <volts> --json --by "<your name>"')
         elif own is not None:
@@ -1122,31 +1137,86 @@ def _potential_sources_warnings(bundle: Mapping, group: Mapping, member_ids: set
             shown = f"{carried:g}" if isinstance(carried, (int, float)) and not isinstance(carried, bool) else "<volts>"
             command = (f'isaac bundle decide <bundle_dir> --target {own["target"]} --decision {again} --value {shown} '
                        '--json --by "<your name>"')
+        elif record_vs_name and (mine := _run_setpoint_targets(bundle, r["run_id"])):
+            command = (f'isaac bundle decide <bundle_dir> --target {mine[0]} --decision correct --value <volts> --json '
+                       '--by "<your name>"')
+        elif record_vs_name:
+            command = f"isaac bundle questions <bundle_dir> --scope run:{r['run_id']}"
         else:
             command = REIMPORT_COMMAND
         out.append({"code": POTENTIAL_SOURCES_WARNING, "group_id": group["group_id"], "path": SETPOINT_PATH,
                     "needs": SETPOINT_PATH, "run_id": r["run_id"],
-                    "targets": [c["candidate_id"] for c in held] or ([own["target"]] if own is not None else []),
+                    "targets": ([c["candidate_id"] for c in held] or ([own["target"]] if own is not None else [])
+                                or (_run_setpoint_targets(bundle, r["run_id"])[:1] if record_vs_name else [])),
                     "names": list(dict.fromkeys(names)), "headers": list(dict.fromkeys(
                         repr(h["literal"]) + (f" at {h['locator']} of {h['relative_path']}" if h.get("relative_path") else "")
                         for h in heads)), "carried_V": carried, "carried_scale": scale,
                     "mentions": _mention_lines(lines, not_name, not_carried),
+                    # r3c MED-1: the scale only the DIFFERING mentions write (never one another mention has)
+                    "mention_scale": Q.written_scales({m.get("scale") for m in odd}),
                     "headers_disagree": bool(name_v and head_v and not name_v & head_v),
                     "same_scale": name_scales == head_scales and None not in name_scales,
                     "name_scale": Q.written_scales(name_scales), "header_scale": Q.written_scales(head_scales),
-                    "no_header_reading": not held, "command": command})
+                    "no_header_reading": not held_all, "command": command,
+                    **({"files_ruled": True} if ruled else {}),
+                    **({"record_differs_from_name": True, "file_name_V": sorted(name_v)} if record_vs_name else {})})
     return [{**w, "text": potential_sources_text(w)} for w in out]
+
+
+def _latest_decisions(bundle: Mapping) -> dict[str, Mapping]:
+    """``target id -> the latest decision on it`` (candidates and missing values)."""
+    out: dict[str, Mapping] = {}
+    for d in bundle.get("scientist_decisions") or ():
+        t = d.get("target") or {}
+        if t.get("kind") in ("candidate", "missing_value") and t.get("id"):
+            out[t["id"]] = d
+    return out
+
+
+def _run_setpoint_targets(bundle: Mapping, run_id: str) -> list[str]:
+    """The set-point targets that are THIS run's own (a candidate or missing value with its ``run_id``), header
+    candidates first."""
+    objs = [o for o in list(bundle.get("candidates") or ()) + list(bundle.get("missing_values") or ())
+            if o.get("target_field_path") == SETPOINT_PATH and o.get("run_id") == run_id]
+    objs.sort(key=lambda o: not B.is_header_comment_candidate(o))
+    return [o.get("candidate_id") or o.get("value_id") for o in objs]
+
+
+def _ruled_for_run_alone(bundle: Mapping, run_id: str, latest: Mapping[str, Mapping]) -> bool:
+    """r3c HIGH: whether the latest decision on one of this run's OWN set-point targets is a value decision
+    (:data:`_VALUE_DECISIONS`) recorded for this run alone: on its own, or in a batch whose every target is this
+    run's. An answer given to several runs at once (``--same-reading``, a bulk ``decide``) is not."""
+    mine = set(_run_setpoint_targets(bundle, run_id))
+    if not mine:
+        return False
+    run_of = {o.get("candidate_id") or o.get("value_id"): o.get("run_id")
+              for o in list(bundle.get("candidates") or ()) + list(bundle.get("missing_values") or ())}
+    batches: dict[str, set] = {}
+    for d in bundle.get("scientist_decisions") or ():
+        if d.get("batch_id"):
+            batches.setdefault(d["batch_id"], set()).add(run_of.get((d.get("target") or {}).get("id")))
+    for tid in mine:
+        d = latest.get(tid)
+        if d is None or d.get("decision") not in _VALUE_DECISIONS:
+            continue
+        if not d.get("batch_id") or batches.get(d["batch_id"]) == {run_id}:
+            return True
+    return False
 
 
 def _mention_lines(lines: Sequence[Mapping], not_name: Sequence[Mapping], not_carried: Sequence[Mapping]) -> list[dict]:
     """r3a H2: the header lines a :data:`POTENTIAL_SOURCES_WARNING` names by what they MENTION, one per line text
     (a run's scans repeat it): ``{line, literals, differ_name, differ_carried, where}``, the mentions that differ
-    from the file name's potential and from the record's set-point."""
+    from the file name's potential and from the record's set-point, each QUOTED as written around it (r3c MED-1)."""
     out: dict[str, dict] = {}
+
+    def said(m: Mapping) -> str:
+        return m.get("quote") or m["literal"]
+
     for h in lines:
-        got = out.setdefault(h["line"], {"line": h["line"], "literals": [m["literal"] for m in h["mentions"]],
-                                         "differ_name": [m["literal"] for m in h["mentions"] if m in not_name],
-                                         "differ_carried": [m["literal"] for m in h["mentions"] if m in not_carried],
+        got = out.setdefault(h["line"], {"line": h["line"], "literals": [said(m) for m in h["mentions"]],
+                                         "differ_name": [said(m) for m in h["mentions"] if m in not_name],
+                                         "differ_carried": [said(m) for m in h["mentions"] if m in not_carried],
                                          "where": []})
         got["where"].append(f"{h['locator']} of {h['relative_path']}")
     return list(out.values())
@@ -1171,8 +1241,10 @@ def _setpoint_ruled(bundle: Mapping, run_id: str, held: Sequence[Mapping]) -> tu
     value decision), for the command."""
     decisions = [d for d in bundle.get("scientist_decisions") or () if (d.get("target") or {}).get("kind") in ("candidate", "missing_value")]
     if held:
-        decided = {d["target"]["id"] for d in decisions if d["target"]["kind"] == "candidate"}
-        return all(c["candidate_id"] in decided for c in held), None
+        # r3c LOW-1: only a confirm or a correct is a ruling on the set-point (a defer or a reject is not), as the
+        # latest answer on the candidate
+        latest = {d["target"]["id"]: d.get("decision") for d in decisions if d["target"]["kind"] == "candidate"}
+        return all(latest.get(c["candidate_id"]) in ("confirm", "correct") for c in held), None
     objs = [o for o in list(bundle.get("candidates") or ()) + list(bundle.get("missing_values") or ())
             if o.get("target_field_path") == SETPOINT_PATH and not B.is_header_comment_candidate(o)]
     for scope in (run_id, None):
@@ -1216,12 +1288,31 @@ def _start_time_warnings(bundle: Mapping, group: Mapping, member_ids: set, field
 def potential_sources_text(w: Mapping) -> str:
     """The plain sentence for a :data:`POTENTIAL_SOURCES_WARNING`, ending with its command. c16-r M3: "state
     different potentials" only when both name the SAME scale; else they "write different numbers", each one's scale
-    said (a number without a scale may be the same potential on another scale)."""
+    said (a number without a scale may be the same potential on another scale). r3c HIGH: a record whose set-point
+    differs from the run's own file name, with no value recorded for that run alone, is said too (on its own once
+    the files' disagreement is ruled)."""
+    carried = w.get("carried_V")
+    volts = f"{carried:g} V" if isinstance(carried, (int, float)) and not isinstance(carried, bool) else "a set-point"
+    said = volts + (f" on {w['carried_scale']}" if w.get("carried_scale") else "")
+    if w.get("record_differs_from_name"):
+        # r3c HIGH: the record against the run's OWN file name, said on its own once the files' disagreement is ruled
+        own = (f"the record carries {said} for {w['run_id']}, but its file name writes {'/'.join(w['names'][:3])} "
+               f"({', '.join(f'{v:g} V' for v in w.get('file_name_V') or ())}), and no value was recorded for this run "
+               "on its own (an answer given to several runs at once, with --same-reading, a bulk decide or a beamtime "
+               "value, was not made looking at this run's name): record the set-point this run was held at, for it "
+               f"alone, whichever is right (the file name's or {volts}): {w['command']}")
+        if w.get("files_ruled"):
+            return own
+        tail = f" Also: {own}."
+    else:
+        tail = ""
+    return _potential_sources_text(w, said) + tail
+
+
+def _potential_sources_text(w: Mapping, said: str) -> str:
+    """:func:`potential_sources_text` for the files' own disagreement (file name, scan header, record)."""
     from . import questions as Q
 
-    carried = w.get("carried_V")
-    said = (f"{carried:g} V" if isinstance(carried, (int, float)) and not isinstance(carried, bool) else "a set-point")
-    said += f" on {w['carried_scale']}" if w.get("carried_scale") else ""
     sources = f"file name {'/'.join(w['names'][:3])}; scan header {'; '.join(w['headers'][:3])}"
     if w.get("same_scale"):
         differ = f"state different potentials ({sources}; both on {w['name_scale']})"
@@ -1243,15 +1334,16 @@ def potential_sources_text(w: Mapping) -> str:
         head = (f"the scan header of {w['run_id']} writes {written}"
                 + (f", the file name writes {'/'.join(w['names'][:3])}" if w.get("names") else "")
                 + f", and the record carries {said}: {'; '.join(differing)} ("
-                + (f"both on {w['name_scale']}" if w.get("same_scale") else
-                   f"file name: {w['name_scale']}; scan header: {w['header_scale']}" if w.get("names") else
-                   f"scan header: {w['header_scale']}") + "). No value is read from that header line (not written in "
-                "a plain form)")
+                # r3c MED-1: the scale the differing mentions write, never one only another mention has
+                + (f"file name: {w['name_scale']}; scan header: {w.get('mention_scale') or w['header_scale']}"
+                   if w.get("names") else f"scan header: {w.get('mention_scale') or w['header_scale']}")
+                + "). No value is read from that header line (not written in a plain form)")
         if w.get("targets") and not w.get("no_header_reading"):
+            reject = w["command"].split(" --decision ")[0] + ' --decision reject --by "<your name>"'
             return (f"{head}; no one has ruled on it yet: "
                     + ("give the potential the run was held at (--decision correct --value <volts> --json): "
                        if "--decision correct" in w["command"] else "confirm the header's reading or correct it: ")
-                    + w["command"])
+                    + w["command"] + f"; or reject the header reading if this line states no set-point: {reject}")
     if w.get("targets") and not w.get("no_header_reading"):
         return (f"{head}; no one has ruled on the scan header's reading yet: confirm it if the header is right, or "
                 "correct it (--decision correct --value <volts> --json) to the potential the run was held at: "

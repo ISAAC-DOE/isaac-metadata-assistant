@@ -541,6 +541,13 @@ def header_potential_mentions(bundle: Mapping, run: Mapping) -> list[dict]:
     return out
 
 
+def mention_can_contradict(mention: Mapping, line_mentions: Sequence[Mapping]) -> bool:
+    """r3c MED-2: whether a header MENTION is said to contradict a typed value (template adopt, preview and import):
+    only one with a scale written onto it (``0Vrhe``), or the line's only potential-like mention after the
+    filtering of ``questions.header_potential_mentions`` (``0.5 V`` alone). Of ``0.5 V then 1.6 V`` neither is."""
+    return bool(mention.get("scale")) or len(line_mentions) == 1
+
+
 # --- facility hints: a HINT to compare against, never a value ---------------------------------------
 #
 # The folder's name (``SSRL_BL152_2019-05_…``) and, when its scan headers match, the acquisition system's name are
@@ -2475,16 +2482,17 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                                "contradictions": []}
     runs_by_id = {r["run_id"]: r for r in bundle["runs"]}
     contradicted: set[tuple[str, str]] = set()
+    outcome_of: dict[tuple[str, str], str] = {}  # r3c MED-2: (cell, run) recorded with a header mention as a note
     awaiting: list[dict] = []
     # a file reading is what adopt compares (:class:`_Adopter`): a parser value, a file-name token, an AI
     # reading of a FILE; an AI reading of the sheet the cells were adopted from is that sheet, not a file
     adopter = _Adopter(bundle, index, field_rules(), str(cells.get("adopted_from") or ""))
 
-    def file_readings(cell: Mapping, decision: str, kind: str, obj: Mapping) -> list[str]:
-        """What a file says against this cell for this target, one line each. A literal from which no value
-        was derived (a macro's file name, a sample token) is not a reading of a value: answering it
-        replaces nothing."""
-        readings = []
+    def file_readings(cell: Mapping, decision: str, kind: str, obj: Mapping) -> tuple[list[str], bool]:
+        """``(lines, mentions_only)``: what a file says against this cell for this target, one line each, and
+        whether every line is a scan-header MENTION (r3c MED-2). A literal from which no value was derived (a
+        macro's file name, a sample token) is not a reading of a value: answering it replaces nothing."""
+        readings, mentions = [], 0
         if decision == "correct" and kind == "candidate" and obj.get("value") is not None:
             ev = next((e for e in obj["evidence"] if e["method"] != "ai_interpretation"), None)
             # c16c: a value read from a scan-header comment line says so, with the header's own words
@@ -2501,13 +2509,15 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                 readings.append(f"contradicts the {r['source']}: {_shown(r['value'])}")
             elif r["kind"] == "scan_header_mention":  # r3a H2: said as written, never as a value read
                 readings.append(f"contradicts the {r['source']}")
-        return readings
+                mentions += 1
+        return readings, bool(readings) and mentions == len(readings)
 
     def contradiction(cell: Mapping, obj: Mapping, readings: list[str], outcome: str) -> None:
         """A cell that REPLACES an extracted value, or contradicts the run's file-name token or an AI reading
         of a file, is named on its own line: a count of ``correct`` decisions never shows it. ``outcome``
-        says what happens to it: ``recorded_as_typed`` (the scientist typed it, or ruled it) or
-        ``awaiting_ruling`` (adopted from their sheet before the reading existed: not recorded)."""
+        says what happens to it: ``recorded_as_typed`` (the scientist typed it, or ruled it),
+        ``awaiting_ruling`` (adopted from their sheet before the reading existed: not recorded) or
+        ``recorded_with_mention_note`` (r3c MED-2: adopted, and only a scan-header mention differs: recorded)."""
         key = (cell["cell"], obj.get("run_id") or "")
         if readings and key not in contradicted:
             contradicted.add(key)
@@ -2818,8 +2828,12 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                                              "lists this as a disagreement to rule on")})
             if cell.get("adopted"):
                 continue
-        readings = file_readings(cell, decision, kind, obj)
-        if readings and cell.get("adopted"):
+        readings, mentions_only = file_readings(cell, decision, kind, obj)
+        if mentions_only and cell.get("adopted"):
+            # r3c MED-2: a cell adopted before header MENTIONS were compared is never newly held back by one alone
+            # (a mention is no value read): it is recorded, and the mention listed beside it as a note
+            outcome_of[(cell["cell"], obj.get("run_id") or "")] = "recorded_with_mention_note"
+        elif readings and cell.get("adopted"):
             # adopted because no file reading contradicted it THEN; one does now. The scientist never typed
             # this cell here, so it is not recorded until they rule (a fresh adopt lists it as a disagreement).
             origin = cell["adopted"]
@@ -2837,7 +2851,7 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                                     "target": {"kind": kind, "id": tid}, "target_field_path": cell["path"],
                                     "run_id": obj.get("run_id"), "decision": decision, "value": cell["value"]})
         if tid not in tied:  # c14j LOW-1: a tied ruling keeps the recorded value, so it replaces no file reading
-            contradiction(cell, obj, readings, "recorded_as_typed")
+            contradiction(cell, obj, readings, outcome_of.get((cell["cell"], obj.get("run_id") or ""), "recorded_as_typed"))
 
     # c14m MED-1: A RULING CELL IS ALL OR NOTHING. When any target it reaches was not made against the value recorded
     # now (listed in `stale_rulings`), nothing is recorded for any of them, and every one is listed there (as two cells
@@ -3508,6 +3522,9 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
             run = f" {x['run_id']}" if x.get("run_id") else ""
             if x.get("outcome") == "awaiting_ruling":
                 said = "not recorded: adopted from your sheet before this reading, awaiting your ruling"
+            elif x.get("outcome") == "recorded_with_mention_note":
+                said = (("recorded" if rep["applied"] else "would be recorded") + ": adopted from your sheet; a "
+                        "scan-header mention is no value read, so it is a note, not a hold")
             else:
                 said = ("recorded" if rep["applied"] else "would be recorded") + ": you typed it"
             add(f"  {x['cell']}{run} {x['target_field_path']} = {x['value']!r} [{said}]: {'; '.join(x['readings'])}")
@@ -3861,14 +3878,18 @@ class _Adopter:
                 out.setdefault((repr(float(h["value"])), "scan_header"), {
                     "value": h["value"], "kind": "scan_header",
                     "source": f"scan header {h['literal']} at {h['locator']} of {h['relative_path']}"})
-            # r3a H2: a potential a value-less header line only MENTIONS (``0Vrhe``) is compared too, each one
-            # (never offered: no candidate holds it as a value)
+            # r3a H2: a potential a value-less header line only MENTIONS (``0Vrhe``) is compared too (never offered:
+            # no candidate holds it as a value). r3c MED-2: only a mention that can be the line's set-point — one with
+            # a scale written onto it, or the line's only mention — contradicts a typed value
             for h in header_potential_mentions(self.bundle, self.runs[run_id]):
                 for m in h["mentions"]:
+                    if not mention_can_contradict(m, h["mentions"]):
+                        continue
                     out.setdefault((repr(float(m["volts"])), "scan_header_mention"), {
                         "value": m["volts"], "kind": "scan_header_mention", "mention": m["literal"],
-                        "source": (f"scan header, which writes {m['literal']!r} in its line {h['line']!r} at "
-                                   f"{h['locator']} of {h['relative_path']} (a mention: no value is read from it)")})
+                        "source": (f"scan header, which writes {m.get('quote') or m['literal']!r} in its line "
+                                   f"{h['line']!r} at {h['locator']} of {h['relative_path']} (a mention: no value is "
+                                   "read from it)")})
         targets = [("candidate", c["candidate_id"]) for c in cands] + [("missing_value", m["value_id"]) for m in missing]
         for kind, tid in targets:
             for i in self.ai_of.get((kind, tid), []):

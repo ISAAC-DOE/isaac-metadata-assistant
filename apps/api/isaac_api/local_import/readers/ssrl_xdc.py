@@ -462,7 +462,7 @@ def collect_from_files(
         data_file = _exp_data_file(f"{prefix}{name}.exp", by_rel, companions)
         if data_file is None and f"{prefix}{name}.exp" not in by_rel:
             # r3a M1: a template `.exp` reused under another name (34 runs, each folder with its own copy of
-            # `AgL3_xas_exp1.exp`): read when it is the ONLY `.exp` in the run's own folder, and kept only when its
+            # `<template>_exp1.exp`): read when it is the ONLY `.exp` in the run's own folder, and kept only when its
             # DATA_FILE is the run's own name without its counter; the `.exp` file's own name is never a hint
             data_file = _folder_exp_data_file(prefix, name, by_rel, claimed, companions, limits, exp_taken)
             if data_file is not None and data_file["source_relative_path"] not in exp_taken:

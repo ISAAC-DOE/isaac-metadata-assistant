@@ -1620,10 +1620,8 @@ def cmd_bundle_questions(args) -> int:
         rows = Q.filter_questions(payload, scope=args.scope, blocking_only=args.blocking_only, reports=reports)
         kept = [q for q in rows if not (args.skip_deferred and q.get("deferred"))]
         # r3a L5: a question about runs no live record group holds builds no record: counted, listed on request (or
-        # when a run's own scope is asked for)
-        show_outside = args.include_outside_live_groups or (args.scope or "").startswith("run:")
-        outside = [] if show_outside else [q for q in kept if q.get("outside_live_groups")]
-        kept = [q for q in kept if not (outside and q.get("outside_live_groups"))]
+        # when a run's own scope is asked for); the local questions screen hides them the same way (r3c LOW-3)
+        kept, outside = Q.hide_outside_live_groups(kept, scope=args.scope, include=args.include_outside_live_groups)
         page = kept[args.offset : args.offset + args.limit]
         minimum = Q.minimum_answers_for_one_group(payload, bundle, scope=args.scope, bundle_dir=Path(args.bundle_dir),
                                                   reports=reports)
@@ -1644,11 +1642,7 @@ def cmd_bundle_questions(args) -> int:
             "omitted_after": max(0, len(kept) - args.offset - len(page)),
             **_more(len(kept) - args.offset - len(page), args.offset + len(page)),
             **({"skipped_deferred": sum(1 for q in rows if q.get("deferred"))} if args.skip_deferred else {}),
-            **({"hidden_outside_live_groups": len(outside),
-                "hidden_outside_live_groups_statement": (
-                    f"{len(outside)} question(s) about runs in no live record group (e.g. a rejected group's runs; no "
-                    "record is built from them) are not listed: --include-outside-live-groups lists them")}
-               if outside else {}),
+            **Q.hidden_outside_live_groups(outside, "--include-outside-live-groups"),
             "minimum_for_one_group": minimum,
             **({"questions": page} if args.with_targets else _compact_page(page)),
         }
