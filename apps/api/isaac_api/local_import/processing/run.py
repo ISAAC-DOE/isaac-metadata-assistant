@@ -830,10 +830,32 @@ def _scans_phrase(scans: Sequence[int]) -> str:
     return ", ".join(out)
 
 
-def _no_usable_scan_statement(inputs: Sequence[Mapping], too_few: Sequence[int], *, signal: str | None = None) -> str | None:
+def _no_usable_scan_statement(inputs: Sequence[Mapping], too_few: Sequence[int], *, signal: str | None = None,
+                              transmission: bool = False) -> str | None:
     """c10-m: one plain sentence when NO scan could be used because scans have too few points (``None`` when none
     did): "The only scan has 2 usable points; at least 5 are needed". Scans skipped for other reasons are counted.
-    c11-a: when no scan has too few points but every one's signal is zero at every point, that is said instead."""
+    c11-a: when no scan has too few points but every one's signal is zero at every point, that is said instead.
+    r3-b L4: when no scan has too few points and scans were skipped ``signal_not_finite`` (the beam off, I0 negative),
+    that is said: how many points are not finite and at how many I0 is zero or negative."""
+    nonfinite = [i for i in inputs if i.get("skip_reason") == C.SIGNAL_NOT_FINITE]
+    if not too_few and nonfinite:
+        diags = [i.get("diagnostics") or {} for i in nonfinite]
+        dropped = sum(int(d.get("nonfinite_dropped") or 0) for d in diags)
+        read = sum(int(d.get("points_read") or 0) for d in diags)
+        i0 = [int(d["i0_nonpositive"]) for d in diags if d.get("i0_nonpositive") is not None]
+        k, n = len(nonfinite), len(inputs)
+        named = f"signal ({signal})" if signal else "signal"
+        who = ("The only scan's" if n == 1 else
+               f"In {'both scans' if k == n == 2 else f'all {k} scans' if k == n else f'{k} of the {n} scans'}, the")
+        needs = f"I0 and {signal}" if transmission and signal else "I0"
+        said = (f"{who} {named} is not a finite number at {dropped} of {read} points"
+                + (f"; I0 is zero or negative at {sum(i0)} of them" if i0 and sum(i0) else "")
+                + f" (the absorption is computed only where {needs} {'are' if ' and ' in needs else 'is'} above zero), so "
+                "there is no curve to process. A beam that was off or a detector that was not counting gives this; a "
+                "person checks the scan" + ("s" if k > 1 else ""))
+        other = n - k
+        return said + (f". {other} more {'scan was' if other == 1 else 'scans were'} skipped for other reasons (see "
+                       "inputs)." if other else ".")
     if not too_few:
         zero = sum(1 for i in inputs if i.get("skip_reason") == C.SIGNAL_ALL_ZERO)
         if not zero or zero != len(inputs):
@@ -1320,7 +1342,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         # c10-m: said in the result and the lists, outside the failure's hash (its id does not move): how many scans
         # were listed and used, and, when scans were too short, how short
         out["qc"]["metrics"].update(scans_listed=len(res["inputs"]), scans_used=0)
-        said = _no_usable_scan_statement(res["inputs"], too_few, signal=_raw_signal(choice))
+        said = _no_usable_scan_statement(res["inputs"], too_few, signal=_raw_signal(choice),
+                                         transmission=choice.mode == MODE_TRANSMISSION)
         if said:
             out["qc"]["statements"] = {"no_usable_scan": said}
         return [out]

@@ -97,7 +97,8 @@ it finds one. Show per group, in words:
   group named as a reference or standard takes transmission first, but I0 or I1 was not positive in
   every scan, so fluorescence was used): say the sentence in `qc.json` → `statements` and ask the
   scientist to confirm the channel. A scan skipped `signal_not_finite` has its points but a signal
-  that is never finite (I0 or I1 ≤ 0); never call that "too few points". A scan skipped `signal_all_zero`
+  that is never finite (I0 or I1 ≤ 0); never call that "too few points" (when no scan is left,
+  `qc.statements.no_usable_scan` says it, e.g. a beam that was off). A scan skipped `signal_all_zero`
   recorded a signal of zero at every point: say it in words, naming the file as the statement does
   ("SYN_008.txt's signal is zero at every point, so it was left out"); the curve uses the other scans. A
   merged scan flagged `merged_scan_has_zero_signal_points` has counts that STOP (zero from some point to the

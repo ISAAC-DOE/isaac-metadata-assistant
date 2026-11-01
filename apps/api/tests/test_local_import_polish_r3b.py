@@ -21,6 +21,7 @@ SYNTHETIC only: every scan, name, Athena project and value below is invented and
   says "matched no record group" while other groups hold matched Athena results.
 * (M4) An outlier scan is named by its file, with the energy range where it departs from the other scans, its signal
   there as a share of theirs and what merging it did, and the scientist is asked whether it belongs in the merge.
+* (L4) A group with no usable scan because its signal is never finite (the beam off, I0 negative) says so.
 """
 
 from __future__ import annotations
@@ -527,3 +528,28 @@ def test_scans_that_agree_get_no_outlier_sentence(tmp_path):
                                           {"sample_name": "ZZ1"})])
     _, [isa], _ = _process(bdir, root)
     assert "outlier_scans" not in (isa["qc"].get("statements") or {})
+
+
+# --- L4: no usable scan because the signal is never finite (the beam off) -------------------------------------------
+
+
+@pytest.mark.parametrize("n", [1, 2])
+def test_a_beam_off_group_says_why_no_scan_could_be_used(tmp_path, n):
+    _processing()
+    import numpy as np
+    from test_local_import_processing import GRID, make_case, mu_edge, spec_file
+
+    def beam_off(seed):
+        i0 = np.full(GRID.size, -3.0)  # an offset-subtracted I0 with the beam off: negative everywhere
+        return spec_file({"energy": GRID, "I0": i0, "I1": np.abs(i0) * np.exp(-mu_edge(GRID))})
+
+    bdir, root, _ = make_case(tmp_path, [("01_SYN_ZZ1", [beam_off(k) for k in range(n)], {"sample_name": "ZZ1"})])
+    _, [isa], _ = _process(bdir, root)
+    assert isa["failure"]["code"] == "no_usable_scan" and "signal_not_finite" in isa["failure"]["detail"]
+    said = isa["qc"]["statements"]["no_usable_scan"]
+    pts = GRID.size * n
+    start = "The only scan's signal (I1)" if n == 1 else "In both scans, the signal (I1)"
+    assert said == (f"{start} is not a finite number at {pts} of {pts} points; I0 is zero or negative at {pts} of them "
+                    "(the absorption is computed only where I0 and I1 are above zero), so there is no curve to process. "
+                    "A beam that was off or a detector that was not counting gives this; a person checks the scan"
+                    + ("s." if n > 1 else "."))
