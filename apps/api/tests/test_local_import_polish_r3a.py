@@ -14,7 +14,8 @@ BL4-3 scan headers write a sample, an electrolyte and a potential glued into one
   each asked on their own;
 * L5: questions about runs in no live record group are counted, not listed, by default (a flag lists them), and the
   template report names a rejected group's runs once, not once per Campaign Info cell;
-* L6: the Campaign Info hints on ISAAC Suggestions have their own column label (never "Config ID").
+* L6: the Campaign Info hints on ISAAC Suggestions have their own column label (never "Config ID");
+* L7: propose-terms says the runs and sheet cells its occurrences cover.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from isaac_api.local_import import bundle as B
 from isaac_api.local_import import cli
 from isaac_api.local_import import grouping as G
 from isaac_api.local_import import mutations as M
+from isaac_api.local_import import propose_terms as P
 from isaac_api.local_import import questions as Q
 from isaac_api.local_import import records as R
 from isaac_api.local_import import template as T
@@ -456,6 +458,33 @@ def test_campaign_info_hints_are_not_under_a_file_list_header(excerpted, tmp_pat
     assert rows[0][1] == "Config ID"  # the File List block's header, over the runs' rows
     [block] = [r for r in rows if r[0] == T.SHEET_CAMPAIGN]
     assert block[1] == T.SUGGEST_CAMPAIGN_HEADER and "Campaign Info" in block[1]
+
+
+# --- L7: propose-terms says the runs and cells one occurrence covers -----------------------------------------------
+
+
+def test_propose_terms_says_the_runs_one_request_covers(repeated, tmp_path, capsys):
+    cell = "context.electrochemistry.cell_type"
+    ids = [m["value_id"] for m in M.load(repeated)["missing_values"] if m["target_field_path"] == cell and m["run_id"]]
+    assert len(ids) >= 3
+    args = [a for i in ids for a in ("--target", i)]
+    capsys.readouterr()
+    cli.main(["bundle", "decide", str(repeated), *args, "--decision", "correct", "--value", "SYN_static_cell",
+              "--as-said", "--by", WHO])
+    assert len(M.load(repeated)["vocabulary_requests"]) == 1
+    capsys.readouterr()
+    assert cli.main(["bundle", "propose-terms", str(repeated), "--out", str(tmp_path / "drafts.json")]) == 0
+    said = capsys.readouterr().out
+    assert f"1 occurrence(s) (a request, reading or value each) covering {len(ids)} run(s)," in said
+
+
+def test_the_cells_a_request_was_typed_in_are_counted_once():
+    occ = [{"note": {"source": {"file": "t.xlsx", "cells": ["File List!H2", "File List!H3"]}}},
+           {"note": {"source": {"file": "t.xlsx", "cells": ["File List!H3", "File List!H4", "File List!H5"]}}},
+           {"note": None}]
+    assert len(P._cells_of(occ)) == 4
+    report = {"fields": [{"terms": [{"run_ids": ["run-001", "run-002"], "cells": 4}, {"run_ids": ["run-002"], "cells": 0}]}]}
+    assert P.covered(report) == {"runs": 2, "cells": 4}
 
 
 # --- H2 (follow-up): a mention that differs is said as a mention beside a header reading that agrees --------------

@@ -245,6 +245,21 @@ def _evidence_citations(evidence: Sequence[Mapping], run_ids: Sequence[str]) -> 
     return out
 
 
+def _cells_of(occurrences: Sequence[Mapping]) -> set[tuple]:
+    """r3a L7: the distinct sheet cells (file, cell) the vocabulary requests among ``occurrences`` were typed in."""
+    return {(o["note"]["source"].get("file"), cell) for o in occurrences
+            if isinstance(o.get("note"), Mapping) and isinstance(o["note"].get("source"), Mapping)
+            for cell in o["note"]["source"].get("cells") or ()}
+
+
+def covered(report: Mapping) -> dict:
+    """r3a L7: ``{runs, cells}`` the report's occurrences cover — the distinct runs its terms name and the sheet cells
+    its requests were typed in: one request may name 4 runs and 4 cells, which "1 occurrence" never said."""
+    terms = [t for f in report.get("fields") or () for t in f.get("terms") or ()]
+    return {"runs": len({r for t in terms for r in t.get("run_ids") or ()}),
+            "cells": sum(int(t.get("cells") or 0) for t in terms)}
+
+
 def _request_citation(req: Mapping) -> dict:
     """Where a vocabulary request was said: the sheet and its cells, or the ``decide`` answer."""
     src = req.get("source") or {}
@@ -889,6 +904,8 @@ def propose_terms(bundle: Mapping, sources: Mapping) -> dict:
                     "missing_from": sorted({m for o in occs for m in o["missing_from"]}),
                     "runs": len(run_ids),
                     "run_ids": run_ids,
+                    # r3a L7: the sheet cells its requests were typed in ("1 occurrence" was one request of 4 cells)
+                    "cells": len(_cells_of(counted)),
                     **({"context_run_ids": kept_as_context} if kept_as_context else {}),
                     "scientist_notes": notes,
                     "answered_scientist_notes": answered_notes,

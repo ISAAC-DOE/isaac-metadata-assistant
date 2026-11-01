@@ -2035,6 +2035,7 @@ def cmd_bundle_propose_terms(args) -> int:
         return EXIT_OK
     _atomic_write(out_path, text.encode("utf-8"))
     totals = report["totals"]
+    cover = P.covered(report)
     merged = ""
     if change is not None:
         kept = change["descriptions_kept"]
@@ -2048,7 +2049,9 @@ def cmd_bundle_propose_terms(args) -> int:
                   "No draft is marked ready to send.")
     print(
         f"Wrote {out_path}: {totals['terms']} term(s) outside the vocabulary in {totals['fields']} field(s), "
-        f"{totals['occurrences']} occurrence(s), {totals['drafts']} draft proposal(s)."
+        f"{totals['occurrences']} occurrence(s) (a request, reading or value each) covering {cover['runs']} run(s)"
+        + (f" and {cover['cells']} sheet cell(s)" if cover["cells"] else "")
+        + f", {totals['drafts']} draft proposal(s)."
         + (f" {totals['answered_since']} term(s) the scientist asked for now hold an allowed value for every run named: "
            "answered since, not drafted." if totals.get("answered_since") else "")
         + (f" {totals['partly_answered']} draft(s) are partly answered (each says how)." if totals.get("partly_answered") else "")
