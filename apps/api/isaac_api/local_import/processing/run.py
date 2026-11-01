@@ -373,7 +373,9 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
     ref = approved or proposed
     tab = tab_src = shift = None
     applied = 0.0
-    if not approved:
+    if not approved and ref_source is not None:
+        # r2-a L5: with no reference at all, no_reference_available says it; "unconfirmed" would suggest one to confirm
+        # (every result of a beamtime without one carried both). Flags are not hashed: no result id moves.
         flags.append("calibration_reference_unconfirmed")
     accepted = approval.get("accepted_shift_eV") if approved and approval else None
     if ref and measured is not None and not too_few:

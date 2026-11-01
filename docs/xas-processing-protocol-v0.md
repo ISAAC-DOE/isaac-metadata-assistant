@@ -157,7 +157,8 @@ applied (`calibration_shift_awaiting_approval`, `reference_approved: false`):
   exactly one element-symbol token, and an edge from the bundle's element evidence and/or a
   header `<El><Edge>_` symbol (XDAC region file), all agreeing.
 
-Without any reference: no shift, `calibration_reference_unconfirmed`. A foil group's shift is
+Without any reference: no shift, `no_reference_available` (r2-a: not also
+`calibration_reference_unconfirmed`, which flags a reference found but not approved). A foil group's shift is
 never propagated to sample groups. `max_plausible_shift_eV` 25; `align_scans_by_reference`
 false. **All calibration params need approval.**
 

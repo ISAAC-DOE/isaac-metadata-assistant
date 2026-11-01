@@ -235,7 +235,8 @@ def test_end_to_end_repeats_merge_outputs_hashed_and_relative(tmp_path):
     merged = out_path["merged"].read_text().splitlines()
     assert merged[1] == "energy_eV,mu_mean,mu_std,mu_stderr,n_scans"
     assert r["qc"]["verdict"] in ("pass", "warn") and "glitches_flagged" in r["qc"]["reasons"]
-    assert "calibration_reference_unconfirmed" in r["review_flags"]
+    # r2-a L5: no reference at all is said once (no_reference_available), never also as one to confirm
+    assert "no_reference_available" in r["review_flags"] and "calibration_reference_unconfirmed" not in r["review_flags"]
     params = json.loads(out_path["params"].read_text())
     assert params["protocol_status"] == "draft_unreviewed" and "deglitch.exclude_flagged" in params["needs_scientist_approval"]
     saved = json.loads((bdir / "processing" / "processing_results.json").read_text())

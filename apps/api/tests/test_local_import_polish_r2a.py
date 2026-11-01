@@ -20,6 +20,8 @@ line, not a measurement.
   group's list. Neither does now (ids unchanged).
 * (LOW 4) The scientist's exported ``.dat``, kept beside a run as a context run, was counted as a run in a decide
   statement ("recorded for 2 runs") and in propose-terms ``runs``: measurement runs only now.
+* (LOW 5) Every result of a beamtime with no reference carried both ``no_reference_available`` and
+  ``calibration_reference_unconfirmed``: only the first now (flags are not hashed: no result id moves).
 """
 
 from __future__ import annotations
@@ -396,3 +398,25 @@ def test_propose_terms_counts_measurement_runs_only(pristine):
     with_ctx, run_id, ctx_id = _with_context_run(b)
     t = term(with_ctx)
     assert t["runs"] == 1 and t["run_ids"] == [run_id] and t["context_run_ids"] == [ctx_id]
+
+
+# --- LOW 5: no reference is said once ----------------------------------------------------------------------------
+
+
+def test_a_result_with_no_reference_is_not_also_flagged_unconfirmed(tmp_path):
+    T = _proc()
+    bdir_, root, _ = T.make_case(tmp_path, [("01_SYN_ZZ1", [T.spec_file(T.fluo_scan(s)) for s in (1, 2)], {"sample_name": "ZZ1"}),
+                                            ("02_SYN_ZZ2", [T.spec_file(T.fluo_scan(s, ref_e0=T.E0 + 2.0)) for s in (1, 2)],
+                                             {"sample_name": "ZZ2"})])
+    out = T.run_process(bdir_, source_root=root)
+    by_stem = {r["inputs"][0]["relative_path"].split("/")[0]: r for r in out["processing_results"] if r["source"] == "isaac_protocol"}
+    none, channel = by_stem["01_SYN_ZZ1_dir"], by_stem["02_SYN_ZZ2_dir"]
+    assert "no_reference_available" in none["review_flags"] and "calibration_reference_unconfirmed" not in none["review_flags"]
+    assert "calibration_reference_unconfirmed" not in T.step(none, "calibration")["flags"]
+    # a reference that was found but not approved still says so
+    assert "calibration_reference_unconfirmed" in channel["review_flags"] and "no_reference_available" not in channel["review_flags"]
+    # the flag is not in the hashed files
+    for r in (none, channel):
+        for f in r["outputs"]["files"]:
+            if f["role"] in ("qc", "params"):
+                assert "calibration_reference_unconfirmed" not in (bdir_ / f["relative_path"]).read_text()
