@@ -1761,6 +1761,62 @@ def content_sha256(draft: Mapping, composition: Mapping | None) -> str:
     return "sha256:" + hashlib.sha256(json.dumps(basis, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
+#: The record id and export time :func:`substance_sha256` composes its probe record with (never written anywhere).
+SUBSTANCE_PROBE_ID, SUBSTANCE_PROBE_AT = "SUBSTANCE-PROBE", "1970-01-01T00:00:00Z"
+
+
+def _without_provenance_ids(obj: Any) -> Any:
+    """``obj`` without what says WHICH decision recorded a value and WHEN: every ``decision_id`` (and
+    ``*_decision_id``), and a ``user_confirmation``'s ``timestamp``. What the value is and where it comes from
+    (the source, the question, the answer, who decided) is kept."""
+    if isinstance(obj, Mapping):
+        confirmation = obj.get("source_type") == "user_confirmation"
+        return {k: _without_provenance_ids(v) for k, v in obj.items()
+                if not (k == "decision_id" or str(k).endswith("_decision_id") or (confirmation and k == "timestamp"))}
+    if isinstance(obj, (list, tuple)):
+        return [_without_provenance_ids(v) for v in obj]
+    return obj
+
+
+def substance_sha256(record: Mapping, evidence: Mapping, artifacts: Sequence[Sequence[Any]], *,
+                     exported_utc: Any = None) -> str:
+    """What an exported record SAYS, hashed (H1): its body without its own record id and export time, its
+    evidence's values and sources without decision ids or decision times, and its artifacts' bytes. A ruling
+    that keeps the value already held is recorded again with a new decision id and time (c14i MED-1): the
+    draft changes (:func:`content_sha256`), this does not, so the record keeps its id. ``exported_utc``: the
+    time the record was composed with (default: the probe's)."""
+    body = dict(record)
+    body.pop("record_id", None)
+    stamps = dict(body.get("timestamps") or {})
+    if stamps.get("created_utc") == (exported_utc or SUBSTANCE_PROBE_AT):
+        stamps["created_utc"] = None  # the export time transform() defaulted it to, not a value of the record
+    body["timestamps"] = stamps
+    basis = {"record": body, "evidence": _without_provenance_ids(evidence),
+             "artifacts": sorted([str(a[0]), str(a[1])] for a in artifacts)}
+    return "sha256:" + hashlib.sha256(json.dumps(basis, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def _substance_on_disk(out: Path, earlier: Mapping) -> str | None:
+    """:func:`substance_sha256` of the files an earlier export wrote for ``earlier`` (an index entry from a build
+    that did not keep it), read where they are now (the top of ``--out``, or :data:`WITHDRAWN_DIR`); ``None``
+    when they cannot be read."""
+    rid = earlier.get("record_id")
+    for where in (out, out / WITHDRAWN_DIR):
+        try:
+            record = json.loads((where / f"{rid}.json").read_text(encoding="utf-8"))
+            sidecar = json.loads((where / f"{rid}.evidence.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not (isinstance(record, dict) and isinstance(sidecar, dict) and record.get("record_id") == rid):
+            continue
+        base = where / f"{rid}.artifacts"
+        artifacts = ([(p.relative_to(base).as_posix(), hashlib.sha256(p.read_bytes()).hexdigest())
+                      for p in sorted(base.rglob("*")) if p.is_file() and not p.is_symlink()]
+                     if base.is_dir() and not base.is_symlink() else [])
+        return substance_sha256(record, sidecar.get("evidence") or {}, artifacts, exported_utc=earlier.get("exported_utc"))
+    return None
+
+
 def _read_export_index(out: Path) -> dict:
     path = out / EXPORT_INDEX
     try:
@@ -1810,6 +1866,20 @@ def _move_superseded(out: Path, record_id: str, into: str = SUPERSEDED_DIR) -> l
     return moved
 
 
+def _artifact_sources(bundle: Mapping, bundle_dir: Path, group_id: str) -> list[tuple[dict, Path | None]]:
+    """Each output file of the group's scientist-confirmed processing result, with its file in the bundle, or
+    ``None`` when it is outside the bundle, missing, or not the bytes the result recorded (I2)."""
+    out = []
+    for r in bundle.get("processing_results") or ():
+        if r["group_id"] == group_id and r["state"] == B.STATE_SCIENTIST_CONFIRMED:
+            for f in (r.get("outputs") or {}).get("files") or ():
+                src = contained_file(bundle_dir, f["relative_path"])
+                if src is not None and hashlib.sha256(src.read_bytes()).hexdigest() != f.get("sha256"):
+                    src = None
+                out.append((f, src))
+    return out
+
+
 def _withdrawal_statement(record_id: str, exported_utc: Any, moved: Sequence[str], why: str) -> str:
     where = (f"its files were moved to {WITHDRAWN_DIR}/ (kept, never in an upload plan)" if moved
              else "no file of it is at the top of --out (nothing to move)")
@@ -1826,7 +1896,9 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     RE-EXPORT IS IDEMPOTENT: ``--out``'s :data:`EXPORT_INDEX` keeps, per bundle and group, the record
     id its record got and the :func:`content_sha256` it was composed from. Exporting an UNCHANGED group
     again reuses that id and export time, so the files are rewritten byte for byte and no second record
-    appears. A CHANGED group gets a new id; the record it replaces is moved to ``superseded/`` (kept,
+    appears. A group whose draft changed but whose record did not (H1: a decision recorded again with the value
+    it already held, so only a decision id and time differ; :func:`substance_sha256`) is unchanged too: the same
+    id and record bytes, and only its evidence sidecar is rewritten (``evidence_refreshed``). A CHANGED group gets a new id; the record it replaces is moved to ``superseded/`` (kept,
     never in an upload plan) and the result says so (``replaced``). A group exported before that is NOT
     exportable now — refused by a gate, or no longer a scientist-confirmed group — has its record moved to
     ``withdrawn/`` (kept, never in an upload plan; nothing replaces it), its index entry marked
@@ -1889,7 +1961,15 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
 
         digest = content_sha256(draft, composition)
         prior = prior_of.get((bundle_id, group_id))
-        if prior is not None and prior.get("content_sha256") == digest and prior.get("record_id"):
+        sources = _artifact_sources(bundle, bundle_dir, group_id)
+        probe = compose_record(draft, composition, record_id=SUBSTANCE_PROBE_ID, now=SUBSTANCE_PROBE_AT)
+        substance = substance_sha256(probe, build_sidecar(dict(draft), probe)["evidence"],
+                                     [(f["relative_path"], f["sha256"]) for f, src in sources if src is not None])
+        # H1: the draft changed but the record did not (a decision recorded again with the value it already held:
+        # a new decision id and time only): the same record id, and only its evidence sidecar is rewritten
+        refreshed = bool(prior is not None and prior.get("record_id") and prior.get("content_sha256") != digest and (
+            prior.get("substance_sha256") or (_substance_on_disk(out, prior) if out.is_dir() else None)) == substance)
+        if prior is not None and prior.get("record_id") and (prior.get("content_sha256") == digest or refreshed):
             rid, at, status = prior["record_id"], prior.get("exported_utc") or now_utc(), "unchanged"
         else:
             rid, at, status = new_record_id(), now_utc(), ("replaced" if prior is not None else "new")
@@ -1906,24 +1986,20 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         _atomic_write(record_path, (json.dumps(record, indent=2) + "\n").encode("utf-8"))
         _atomic_write(sidecar_path, (json.dumps(sidecar, indent=2) + "\n").encode("utf-8"))
         artifacts = []
-        for r in bundle.get("processing_results") or ():
-            if r["group_id"] == group_id and r["state"] == B.STATE_SCIENTIST_CONFIRMED:
-                for f in (r.get("outputs") or {}).get("files") or ():
-                    # I2: contained in the bundle, sha256 verified, contained in --out.
-                    src = contained_file(bundle_dir, f["relative_path"])
-                    if src is None or hashlib.sha256(src.read_bytes()).hexdigest() != f.get("sha256"):
-                        artifacts.append({"relative_path": f.get("relative_path"), "refused": "outside the bundle, missing, or sha256 mismatch"})
-                        continue
-                    base = (out / f"{rid}.artifacts").resolve()
-                    dest = (base / f["relative_path"]).resolve()
-                    try:
-                        dest.relative_to(base)
-                    except ValueError:
-                        artifacts.append({"relative_path": f.get("relative_path"), "refused": "would land outside --out"})
-                        continue
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copyfile(src, dest)
-                    artifacts.append(f["relative_path"])
+        for f, src in sources:
+            if src is None:
+                artifacts.append({"relative_path": f.get("relative_path"), "refused": "outside the bundle, missing, or sha256 mismatch"})
+                continue
+            base = (out / f"{rid}.artifacts").resolve()
+            dest = (base / f["relative_path"]).resolve()
+            try:
+                dest.relative_to(base)
+            except ValueError:
+                artifacts.append({"relative_path": f.get("relative_path"), "refused": "would land outside --out"})
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dest)
+            artifacts.append(f["relative_path"])
         row = {"group_id": group_id, "record_id": rid, "record": record_path.name, "sidecar": sidecar_path.name,
                "artifacts": artifacts, "schemas_used": report["schemas_used"], "export": status,
                "statement": "Valid for the portal's pinned schema; NOT claimed valid for the website."}
@@ -1935,9 +2011,16 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
             if len(still) > WARNINGS_SHOWN:
                 row["warnings_omitted"] = len(still) - WARNINGS_SHOWN
                 row["warnings_full_list"] = "`isaac bundle validate <bundle_dir> --full` lists every warning."
-        if status == "unchanged":
+        if status == "unchanged" and refreshed:
+            row["evidence_refreshed"] = True
+            row["export_statement"] = (f"Unchanged since its export at {at}: the same record id, the record rewritten byte "
+                                       "for byte. Only its evidence sidecar was rewritten: a decision was recorded again "
+                                       "with the value it already held, so the sidecar cites the new decision id and "
+                                       "time; no value or source changed. No second record was made.")
+        elif status == "unchanged":
             row["export_statement"] = (f"Unchanged since its export at {at}: the same record id, rewritten byte for byte. "
                                        "No second record was made.")
+        if status == "unchanged":
             if prior.get("withdrawn_utc"):
                 row["restored_from_withdrawn"] = True
                 row["export_statement"] += (f" It had been withdrawn ({prior['withdrawn_utc']}); the group is exportable "
@@ -1949,7 +2032,8 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
                                        f"new record; the old one was moved to {SUPERSEDED_DIR}/ (kept, never in an upload "
                                        "plan). If the old record was already uploaded, the portal still holds it.")
         exported.append(row)
-        entry = {"bundle_id": bundle_id, "group_id": group_id, "record_id": rid, "content_sha256": digest, "exported_utc": at,
+        entry = {"bundle_id": bundle_id, "group_id": group_id, "record_id": rid, "content_sha256": digest,
+                 "substance_sha256": substance, "exported_utc": at,
                  "replaced_record_ids": ([*(prior.get("replaced_record_ids") or []), prior.get("record_id")]
                                          if status == "replaced" else list((prior or {}).get("replaced_record_ids") or []))}
         index["records"] = [r for r in index["records"]
@@ -2012,6 +2096,7 @@ def upload_plan(records_dir: Path, portal_url: str | None) -> list[dict]:
     """Exactly what an upload WOULD send. Reads record files; opens no socket and never
     reads the token (the Authorization header names where it would come from)."""
     base = (portal_url or "<portal-url>").rstrip("/")
+    replaces = _replaced_by(Path(records_dir))
     plan = []
     for path in sorted(Path(records_dir).glob("*.json")):
         if path.name.endswith(".evidence.json"):
@@ -2032,4 +2117,25 @@ def upload_plan(records_dir: Path, portal_url: str | None) -> list[dict]:
                 ],
             }
         )
+        if old := replaces.get(path.name[: -len(".json")]):
+            # H1: SAID BEFORE AN UPLOAD, never only in the export's output: a replaced record already uploaded stays
+            # on the portal, so uploading this one adds a second record for the same group
+            plan[-1]["replaces_record_ids"] = old
+            plan[-1]["replaces_statement"] = (
+                f"This record replaces {', '.join(old)} (an earlier export of the same group, moved to "
+                f"{SUPERSEDED_DIR}/). If that record was already uploaded, the portal still holds it, and uploading "
+                "this one adds a second record for the same group.")
     return plan
+
+
+def _replaced_by(records_dir: Path) -> dict[str, list[str]]:
+    """``record id -> the record ids it replaced``, from ``records_dir``'s :data:`EXPORT_INDEX`; ``{}`` when there is
+    none or it cannot be read (the dry run lists the records all the same)."""
+    try:
+        index = json.loads((records_dir / EXPORT_INDEX).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    rows = index.get("records") if isinstance(index, Mapping) else None
+    return {r["record_id"]: [x for x in r["replaced_record_ids"] if isinstance(x, str)]
+            for r in rows or () if isinstance(r, Mapping) and isinstance(r.get("record_id"), str)
+            and isinstance(r.get("replaced_record_ids"), list) and r["replaced_record_ids"]}
