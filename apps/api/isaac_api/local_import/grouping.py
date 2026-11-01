@@ -92,6 +92,12 @@ CONDITION_KEYS: Mapping[str, str] = {
     "temperature_statement": "condition: temperature changes the state",
     "filter": "detector setup: an attenuating filter changes the measured count rate and dose",
     "emission_energy": "detector setup: the HERFD emission energy selects which line is measured",
+    # an SSRL XDC scan header's comment lines (bundle.XDC_COMMENT_RULE_ID): values that need review
+    "scan_header_electrolyte": "condition: electrolyte/medium changes the state",
+    "scan_header_electrolyte_concentration": "condition: electrolyte concentration changes the state",
+    "scan_header_ph": "condition: pH changes the state",
+    "scan_header_potential": "condition: the applied potential sets the electrochemical state",
+    "scan_header_potential_scale": "condition: a potential means nothing without its reference scale",
 }
 
 #: How the acquisition was filed, not what was measured. key -> reason.

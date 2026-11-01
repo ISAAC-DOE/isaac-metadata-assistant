@@ -2579,11 +2579,12 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
 #: A SCAN HEADER comment token that states a potential, with the scale written onto it (``0.5Vrhe``, ``-0.6V_RHE``,
 #: ``500mV``). Only RECOGNISES the statement, to warn that the record will not carry it: nothing is read as a value.
 _HEADER_POTENTIAL_TOKEN = re.compile(
-    r"^(?P<v>(?:m|n|neg|minus|-|\+)?\d+(?:[p.]\d+)?m?V)(?:_?(?:vs)?_?(?P<scale>RHE|SHE|NHE|SCE|Ag/?AgCl|Hg/?HgO|MSE))?$",
+    r"^(?P<v>(?:m|n|neg|minus|-|\+)?\d+(?:[p.]\d+)?m?V)(?:_?(?:vs)?_?(?P<scale>RHE|SHE|NHE|SCE|Ag/?AgCl|Hg/?HgSO4|Hg/?HgO|MSE))?$",
     re.IGNORECASE)
 #: c8-r: each reference-electrode scale a header token may write, in ITS OWN spelling (``Hg/HgO``, never ``HG/HGO``).
 _SCALE_SPELLING = {"rhe": "RHE", "she": "SHE", "nhe": "NHE", "sce": "SCE", "mse": "MSE",
-                   "ag/agcl": "Ag/AgCl", "agagcl": "Ag/AgCl", "hg/hgo": "Hg/HgO", "hghgo": "Hg/HgO"}
+                   "ag/agcl": "Ag/AgCl", "agagcl": "Ag/AgCl", "hg/hgo": "Hg/HgO", "hghgo": "Hg/HgO",
+                   "hg/hgso4": "Hg/HgSO4", "hghgso4": "Hg/HgSO4"}
 #: c8-r: the largest size (volts) a scan-header token with NO scale written onto it is taken to state a potential
 #: at: an electrode potential is a few volts at most, while a header's ``800V``, ``1500V`` or ``12V`` is a detector
 #: bias or a supply. A token with a scale (``12V_RHE``) is taken whatever its size.
@@ -2625,6 +2626,93 @@ def header_potential(token: str) -> dict | None:
     return {"literal": bare, "scale": scale}
 
 
+#: A potential written as a PHRASE in a scan-header comment line (BL4-3: ``-0.3 V vs RHE``, ``-0.3V vs. RHE``,
+#: ``-300 mV vs RHE``, ``-300mV``): a number, a space or none, ``V`` or ``mV``, and the scale named after ``vs``.
+#: Each match is checked by :func:`header_potential` (the token rule: a size bound without a scale), so the phrase
+#: and the token forms (``0.5Vrhe``) recognise the same statements. Never a value by itself.
+_HEADER_POTENTIAL_PHRASE = re.compile(
+    r"(?<![\w.])(?P<num>[-+\u2212]?(?:\d+(?:\.\d+)?|\.\d+))\s?(?P<unit>mV|V)(?![\w/])"
+    r"(?:\s*(?:vs\.?|versus)\s*(?P<scale>RHE|SHE|NHE|SCE|Ag/?AgCl|Hg/?HgO|Hg/?HgSO4|MSE)(?![A-Za-z]))?",
+    re.IGNORECASE)
+
+
+def header_potentials_in_line(line: str) -> list[dict]:
+    """``[{"literal", "scale", "volts", "compact"}]``: each potential a scan-header comment LINE states, in order —
+    the phrase forms (:data:`_HEADER_POTENTIAL_PHRASE`) and, in what is left, the token forms
+    (:func:`header_potential`). ``literal`` is the text as written; ``scale`` its own spelling or ``None`` (none
+    named); ``volts`` the number the spelling writes (:func:`_token_volts`), ONLY to compare statements."""
+    text = str(line or "").replace("\u2212", "-")
+    out: list[dict] = []
+    spans: list[tuple[int, int]] = []
+    for m in _HEADER_POTENTIAL_PHRASE.finditer(text):
+        compact = m.group("num") + m.group("unit") + (f"_{m.group('scale')}" if m.group("scale") else "")
+        got = header_potential(compact)
+        if got is None:
+            continue
+        spans.append(m.span())
+        out.append({"literal": " ".join(m.group(0).split()), "scale": got["scale"], "volts": _token_volts(compact),
+                    "compact": compact, "start": m.start()})
+    for m in re.finditer(r"\S+", text):
+        if any(a < m.end() and m.start() < b for a, b in spans):
+            continue
+        got = header_potential(m.group(0))
+        if got is not None:
+            out.append({"literal": got["literal"], "scale": got["scale"], "volts": _token_volts(got["literal"]),
+                        "compact": got["literal"], "start": m.start()})
+    return [{k: v for k, v in x.items() if k != "start"} for x in sorted(out, key=lambda x: x["start"])]
+
+
+#: A pH written in a comment line: ``pH1.3``, ``pH 13``, ``pH=7``, ``pH1p3`` (``p`` for the decimal point, as in
+#: the file names, ``template._PH_TOKEN``).
+_HEADER_PH = re.compile(r"(?<![A-Za-z])pH\s*[=:]?\s*(?P<v>\d+(?:[.p]\d+)?)(?![\d.A-Za-z])")
+#: An electrolyte NAME written after its concentration (``100mM NaClO4``, ``0.5 M H2SO4``): a formula's shape.
+_FORMULA = re.compile(r"^(?:[A-Z][a-z]?\d*|\((?:[A-Z][a-z]?\d*)+\)\d*)+$")
+#: The reference-electrode scales the record's ``potential_scale`` takes (the official schema's enum), each
+#: in the schema's spelling: a scale outside it (NHE, MSE) is kept as written and proposes no scale.
+POTENTIAL_SCALES = ("RHE", "SHE", "Ag/AgCl", "SCE", "Hg/HgO", "Hg/HgSO4")
+SCALE_PATH = "context.electrochemistry.potential_scale"
+
+
+def header_comment_readings(line: str) -> list[dict]:
+    """What ONE scan-header comment line states, by pattern, for the record's fields (rule
+    ``bundle.XDC_COMMENT_RULE_ID``): ``[{"path", "value", "literal", "unit"}]`` — the electrolyte name and its
+    concentration in mol/L (one concentration in the line, the formula after it:
+    :func:`template.electrolyte_statement_parts` reads the pair), the pH, the potential in volts and its scale
+    (:func:`header_potentials_in_line`; a line naming two or more gives a reading with no value). Free text read by a
+    pattern: each becomes a candidate that NEEDS REVIEW, never a confirmed value. A gas or atmosphere word is
+    not read: the bundle has no write route for an atmosphere field."""
+    from .template import _CONCENTRATION_IN_NAME, ELECTROLYTE_CONC_PATH, ELECTROLYTE_NAME_PATH, PH_PATH, POTENTIAL_PATH
+    from .template import electrolyte_statement_parts
+
+    text = str(line or "")
+    out: list[dict] = []
+    concs = list(_CONCENTRATION_IN_NAME.finditer(text))
+    if len(concs) == 1:
+        m = concs[0]
+        after = text[m.end():].split()
+        name = after[0].strip(",;") if after else ""
+        parts = electrolyte_statement_parts(f"{m.group(0)} {name}") if _FORMULA.match(name) else None
+        if parts:
+            literal = f"{m.group(0)} {name}"
+            out.append({"path": ELECTROLYTE_NAME_PATH, "value": parts[0], "literal": literal, "unit": None})
+            out.append({"path": ELECTROLYTE_CONC_PATH, "value": parts[1], "literal": literal, "unit": "M"})
+    phs = list(_HEADER_PH.finditer(text))
+    if len(phs) == 1:
+        v = phs[0].group("v").replace("p", ".")
+        out.append({"path": PH_PATH, "value": float(v), "literal": phs[0].group(0), "unit": None})
+    pots = header_potentials_in_line(text)
+    if len(pots) == 1 and pots[0]["volts"] is not None:
+        pot = pots[0]
+        out.append({"path": POTENTIAL_PATH, "value": pot["volts"], "literal": pot["literal"], "unit": "V"})
+        if pot["scale"] in POTENTIAL_SCALES:
+            out.append({"path": SCALE_PATH, "value": pot["scale"], "literal": pot["literal"], "unit": None})
+    elif len(pots) > 1:
+        # more than one potential in one line: which the run was held at is the scientist's call (no value)
+        out.append({"path": POTENTIAL_PATH, "value": None, "literal": "; ".join(p["literal"] for p in pots), "unit": "V",
+                    "ambiguous": True})
+    return out
+
+
 def _generic_member_runs(bundle: Mapping, member_ids: set) -> list[Mapping]:
     """The member runs a GENERIC run reader found (an SSRL XDC scan set, ...): the engine's own runs carry their
     file-name potentials as candidates already (``records._stated_potentials``)."""
@@ -2647,18 +2735,21 @@ def stated_potentials_beyond_candidates(bundle: Mapping, member_ids: set) -> lis
     seen: set[tuple[str, str]] = set()
     runs = _generic_member_runs(bundle, member_ids)
     run_ids = {r["run_id"] for r in runs}
+    # c16b: a header line a set-point candidate already holds (``bundle.XDC_COMMENT_RULE_ID``) is stated by that candidate
+    held = {(c.get("run_id"), e.get("relative_path"), e.get("locator")) for c in bundle.get("candidates") or ()
+            if c.get("run_id") in run_ids and B.is_header_comment_candidate(c)
+            and c.get("target_field_path") == "context.electrochemistry.potential_setpoint_V" for e in c.get("evidence") or ()}
     headers: dict[str, list[Mapping]] = {}
     for e in bundle.get("extended_context") or ():
-        if e.get("run_id") in run_ids and e.get("concept") == "free_text" and isinstance(e.get("raw_literal"), str):
+        if (e.get("run_id") in run_ids and e.get("concept") in ("free_text", "header_line_8_literal")
+                and isinstance(e.get("raw_literal"), str) and (e["run_id"], e.get("relative_path"), e.get("locator")) not in held):
             headers.setdefault(e["run_id"], []).append(e)
     for r in runs:
         first = next((sc.get("relative_path") for sc in r.get("scans") or () if sc.get("relative_path")), None)
         found = [("file name", tok, first, "file name", None) for tok in _name_tokens(r) if _POTENTIAL_TOKEN.match(tok)]
         for e in headers.get(r["run_id"], ()):
-            for tok in e["raw_literal"].split():
-                got = header_potential(tok)
-                if got:
-                    found.append(("scan header", got["literal"], e.get("relative_path"), e.get("locator"), got["scale"]))
+            for got in header_potentials_in_line(e["raw_literal"]):  # `-0.3 V vs RHE` as well as `0.5Vrhe`
+                found.append(("scan header", got["literal"], e.get("relative_path"), e.get("locator"), got["scale"]))
         for where, lit, rel, locator, scale in found:
             if (r["run_id"], where + lit) in seen:
                 continue
@@ -2686,9 +2777,13 @@ def stated_potential_notes(w: Mapping) -> str:
         return ""
     scales = sorted({s["scale"] for s in header if s.get("scale")})
     lits = list(dict.fromkeys(s["literal"] for s in header))
+    read = all(s.get("candidate_id") for s in header)  # c16b: read from the line as values that need review
     text = (f" {', '.join(lits[:3])}{', …' if len(lits) > 3 else ''} {'is' if len(lits) == 1 else 'are'} written in the "
             "scan header (a comment line), not the file name"
-            + (f", with the scale ({', '.join(scales)}); no reader reads the set-point or the scale from it, so both "
+            + ((f", with the scale ({', '.join(scales)})" if scales else "")
+               + "; read from that free-text line, the set-point" + (" and the scale" if scales else "")
+               + " need your review (confirm or correct)" if read else
+               f", with the scale ({', '.join(scales)}); no reader reads the set-point or the scale from it, so both "
                "are asked" if scales else "") + ".")
     by_run: dict[str, dict[str, list[tuple[str, str | None]]]] = {}
     for s in stated:
@@ -2704,18 +2799,23 @@ def stated_potential_notes(w: Mapping) -> str:
         said = (f"{rid}: file name {'/'.join(dict.fromkeys(lit for lit, _ in names))}, "
                 f"scan header {'/'.join(dict.fromkeys(lit for lit, _ in heads))}")
         name_scales, head_scales = {sc for _, sc in names}, {sc for _, sc in heads}
-        if name_scales == head_scales:
-            # THE SAME SCALE (or none on either): two numbers for one potential, a real disagreement
-            differ.append(said)
+
+        def written(scales: set) -> str:
+            named = sorted(sc for sc in scales if sc)
+            return "/".join(named) if named else "no scale"
+
+        if name_scales == head_scales and None not in name_scales:
+            # THE SAME NAMED SCALE: two numbers for one potential, a real disagreement
+            differ.append(f"{said}; both on {written(name_scales)}")
+        elif name_scales == head_scales:
+            # neither names its scale: two numbers, and nothing says they are on one scale (never "the same scale")
+            differ.append(f"{said}; neither names its scale")
         else:
             # c8-r: m600mV (no scale) and 0Vrhe may be ONE potential written on two scales: never "disagree"
-            def written(scales: set) -> str:
-                return "/".join(sorted(sc for sc in scales if sc)) or "none"
-
-            scales_differ.append(f"{said}; the header writes {written(head_scales)}, the name {written(name_scales)}")
+            scales_differ.append(f"{said}; the scan header names {written(head_scales)}, the file name {written(name_scales)}")
     if differ:
-        text += (f" The file name and the scan header disagree for {len(differ)} run(s) ({'; '.join(differ[:3])}"
-                 + ("; …" if len(differ) > 3 else "") + "), on the same scale: ask the scientist which is right; "
+        text += (f" The file name and the scan header state different potentials for {len(differ)} run(s) "
+                 f"({'; '.join(differ[:3])}" + ("; …" if len(differ) > 3 else "") + "): ask the scientist which is right; "
                  "neither is used.")
     if scales_differ:
         text += (f" The file name and the scan header write different numbers on possibly different scales for "

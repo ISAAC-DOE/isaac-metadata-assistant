@@ -955,9 +955,25 @@ def _stated_potentials(bundle: Mapping, member_ids: set) -> list[dict]:
     """Each potential a member run's FILE NAME states, as the import already holds it: a set-point candidate read
     from a file-name token (its literal and the volts it was read as), or an unmapped file-name token shaped like a
     potential (:data:`_POTENTIAL_TOKEN`, its literal only: nothing is read from it). Bundle order, each once."""
-    out, seen = [], set()
+    from . import questions as Q  # c8-b: a generic run's file names and scan headers (no candidate holds them)
+
+    out, seen, header = [], set(), []
     for c in bundle["candidates"]:
         if c.get("run_id") not in member_ids:
+            continue
+        if B.is_header_comment_candidate(c) and c.get("target_field_path") == SETPOINT_PATH:
+            # c16b: a set-point read from a scan-header comment line (it needs review): stated by the HEADER
+            value = c.get("value") if isinstance(c.get("value"), (int, float)) and not isinstance(c.get("value"), bool) else None
+            for e in c.get("evidence") or ():
+                lit = e.get("literal_value")
+                if (lit, c["run_id"]) in seen or not isinstance(lit, str):
+                    continue
+                seen.add((lit, c["run_id"]))
+                pots = Q.header_potentials_in_line(lit)
+                header.append({"literal": lit, "relative_path": e.get("relative_path"), "candidate_id": c["candidate_id"],
+                               "read_as_V": value, "value_state": c.get("value_state"), "stated_in": "scan header",
+                               "locator": e.get("locator"), "run_id": c["run_id"], "runs": [c["run_id"]],
+                               **({"scale": pots[0]["scale"]} if pots and pots[0]["scale"] else {})})
             continue
         for e in c.get("evidence") or ():
             if e.get("method") == "ai_interpretation" or not str(e.get("locator") or "").startswith("filename token"):
@@ -974,9 +990,7 @@ def _stated_potentials(bundle: Mapping, member_ids: set) -> list[dict]:
                 seen.add(key)
                 out.append({"literal": lit, "relative_path": e.get("relative_path"), "candidate_id": c["candidate_id"],
                             "read_as_V": value, "value_state": c.get("value_state")})
-    from . import questions as Q  # c8-b: a generic run's file names and scan headers (no candidate holds them)
-
-    return out + Q.stated_potentials_beyond_candidates(bundle, member_ids)
+    return out + Q.stated_potentials_beyond_candidates(bundle, member_ids) + header  # the names first, as before
 
 
 def _stated_potential_warnings(bundle: Mapping, group: Mapping, member_ids: set, fields: Mapping,
@@ -1025,6 +1039,14 @@ def _stated_potential_warnings(bundle: Mapping, group: Mapping, member_ids: set,
     # e.g. `m500mV` kept as unknown_token) nor answered: confirming the scale alone would only move the warning on
     # to the set-point, so both are named now, each with its command
     unread = not answered and all(s.get("read_as_V") is None for s in stated)
+    # c16b: a set-point read from a scan-header comment line still needs review: confirming the scale alone would
+    # move the warning on to it, so both are named now, as for an unread one
+    header_read = not answered and not unread and all(
+        s.get("read_as_V") is None or (s.get("stated_in") == "scan header" and s.get("value_state") == B.STATE_NEEDS_REVIEW)
+        for s in stated)
+    if header_read:
+        w["setpoint_needs_review"] = True
+        unread = True
     also = open_targets(SETPOINT_PATH) if scale_missing and unread else []
     if also:
         w.update(also_needs=SETPOINT_PATH, also_targets=also, also_command=command_for(SETPOINT_PATH, also))
@@ -1038,12 +1060,19 @@ def potential_warning_text(w: Mapping) -> str:
     if w.get("open_circuit"):
         return Q.open_circuit_text(w)
     extra = Q.stated_potential_notes(w)
-    lits = "; ".join(s["literal"] + (f", read as {s['read_as_V']:g} V" if s.get("read_as_V") is not None else "")
+    # c16b: a set-point read from a scan header (it needs review) still says where it is written
+    lits = "; ".join(s["literal"]
                      + (f" in {'the scan header of ' if s.get('stated_in') == 'scan header' else ''}{s['relative_path']}"
-                        if s.get("read_as_V") is None and s.get("relative_path") else "")
+                        if (s.get("read_as_V") is None or s.get("stated_in") == "scan header") and s.get("relative_path") else "")
+                     + (f", read as {s['read_as_V']:g} V" if s.get("read_as_V") is not None else "")
                      for s in w["stated"][:3])
     if w.get("answered_V"):
         lits += "; the set-point answered for it: " + ", ".join(f"{v:g} V" for v in w["answered_V"][:3])
+    if w.get("also_needs") and w.get("setpoint_needs_review"):
+        # c16b: the set-point was read from a scan-header comment line and waits for review, as the scale does
+        return (f"{Q.stated_subject(w)} a potential ({lits}) but the record will not carry it until the potential scale AND "
+                f"the set-point read from the scan header are confirmed (or corrected).{extra} "
+                f"Both: {w['also_command']}  ;  {w['command']}")
     if w.get("also_needs"):
         # no value was read for the set-point: the scientist gives the volts AND the scale, both commands now
         return (f"{Q.stated_subject(w)} a potential ({lits}) but the record will not carry it until the potential scale is "

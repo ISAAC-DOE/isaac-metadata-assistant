@@ -1465,6 +1465,113 @@ LOCAL_CLOCK_AMBIGUOUS = "ambiguous_in_zone"
 LOCAL_CLOCK_NONEXISTENT = "nonexistent_in_zone"
 
 
+#: THE COMMENT RULE (``ssrl_xdc_header_comment_v1``, applied at import by :func:`_xdc_comment_candidates`): the
+#: comment lines of an ``ssrl_xdc_v1`` scan header (lines 8-12; the ``.exp`` COMMENTS1-4) are free text a scientist
+#: typed at the beamline, e.g. ``100mM NaClO4 pH1.3 He`` and ``-0.3 V vs RHE``. What a line states by pattern
+#: (``questions.header_comment_readings``: the electrolyte and its concentration, the pH, the potential and the scale
+#: written after ``vs``) becomes ONE candidate per run and field that NEEDS REVIEW: never proposable, never
+#: confirmed until a scientist confirms (or corrects) it. A gas or atmosphere word is not read (no write route).
+XDC_COMMENT_RULE_ID = "ssrl_xdc_header_comment_v1"
+XDC_COMMENT_RULE = (
+    f"{XDC_COMMENT_RULE_ID}: a comment line of the run's SSRL EXAFS Data Collector 4.0 scan headers (lines 8-12, the "
+    "experiment file's COMMENTS1-4) that writes an electrolyte after its concentration, a pH, or a potential (the "
+    "scale named after `vs`) is read by pattern into a candidate that NEEDS REVIEW. The line is free text, so the "
+    "value is never proposed or confirmed until a scientist confirms or corrects it."
+)
+XDC_COMMENT_LINES = range(8, 13)
+#: statement key per field (each a grouping CONDITION key: a different value is a different record)
+XDC_COMMENT_KEYS: Mapping[str, str] = {
+    "context.electrochemistry.electrolyte.name": "scan_header_electrolyte",
+    "context.electrochemistry.electrolyte.concentration_M": "scan_header_electrolyte_concentration",
+    "context.electrochemistry.pH": "scan_header_ph",
+    "context.electrochemistry.potential_setpoint_V": "scan_header_potential",
+    "context.electrochemistry.potential_scale": "scan_header_potential_scale",
+}
+XDC_COMMENT_REASON = (
+    "Read by a pattern from a free-text comment line of the scan header (written at the beamline, not a field "
+    "the instrument fills in). A scientist confirms it, or corrects it, before any record carries it."
+)
+
+
+def is_header_comment_candidate(candidate: Mapping) -> bool:
+    """A candidate of :data:`XDC_COMMENT_RULE_ID` (a value read from a scan-header comment line)."""
+    return _rule_id(candidate.get("rule")) == XDC_COMMENT_RULE_ID
+
+
+def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_n: int, sid_of: Mapping,
+                            writable) -> list[dict]:
+    """The :data:`XDC_COMMENT_RULE_ID` candidates of ONE ``ssrl_xdc_v1`` run (ids ``cand-<first_n>`` on), one per
+    field its scans' comment lines state, in :data:`XDC_COMMENT_KEYS` order. Every scan stating it is evidence;
+    scans that state DIFFERENT values give a candidate with no value (it says which). Built through the engine's
+    own candidate type and :func:`_candidate_record`, so its shape is every other candidate's."""
+    from .. import historical_import as hist
+    from .questions import header_comment_readings
+
+    scans = {sc.get("relative_path") for sc in run_scans}
+    found: dict[str, list[tuple]] = {}
+    for st in g.statements:
+        rel, loc = st.get("source_relative_path"), str(st.get("locator") or "")
+        if rel not in scans or st.get("key") not in ("header_line_8_literal", "free_text") or not loc.startswith("line:"):
+            continue
+        try:
+            line = int(loc.split(":", 1)[1])
+        except ValueError:
+            continue
+        if line not in XDC_COMMENT_LINES or not isinstance(st.get("literal"), str):
+            continue
+        for reading in header_comment_readings(st["literal"]):
+            found.setdefault(reading["path"], []).append((st.get("scan_index"), rel, loc, st["literal"], reading))
+    out: list[dict] = []
+    for path, key in XDC_COMMENT_KEYS.items():
+        hits = sorted(found.get(path) or (), key=lambda h: (h[0] is None, h[0] or 0, h[2]))
+        if not hits:
+            continue
+        values = list(dict.fromkeys(json.dumps(h[4]["value"]) for h in hits))
+        value = hits[0][4]["value"] if len(values) == 1 and not any(h[4].get("ambiguous") for h in hits) else None
+        bundle_cid = f"cand-{first_n + len(out):04d}"
+        evidence = []
+        for index, rel, loc, literal, reading in hits[:MAX_EVIDENCE_PER_CANDIDATE]:
+            evidence.append({
+                "evidence_id": f"{bundle_cid}.e{len(evidence) + 1:03d}",
+                "source_id": sid_of.get(rel),
+                "relative_path": _safe_relative(rel) if rel in sid_of else None,
+                "locator_kind": "source_file" if rel in sid_of else "described",
+                "locator": loc,
+                "statement_key": key,
+                "literal_value": reading["literal"],
+                "method": "deterministic_parser",
+                "method_id": XDC_COMMENT_RULE_ID,
+                "relation": "supports" if value is not None and len(evidence) == 0 else "context",
+                "reading_index": None,
+                "normalization": [{"step": "normalize", "rule_id": XDC_COMMENT_RULE_ID, "from": reading["literal"],
+                                   "to": reading["value"], "unit": reading["unit"]}],
+            })
+        ambiguous = [h[4]["literal"] for h in hits if h[4].get("ambiguous")]
+        if ambiguous:
+            reason = (f"A comment line names more than one potential ({ambiguous[0]}): a scientist says which the run "
+                      "was held at.")
+        elif value is None:
+            reason = ("The scans' comment lines state different values ("
+                      + "; ".join(dict.fromkeys(h[4]["literal"] for h in hits[:4])) + "): a scientist says which is right.")
+        else:
+            reason = XDC_COMMENT_REASON
+        engine = hist.SemanticCandidate(
+            candidate_id=f"{g.run_key}::{XDC_COMMENT_RULE_ID}::{key}",
+            kind=hist.CANDIDATE_KIND_FIELD,
+            determinism=hist.DETERMINISM_DETERMINISTIC,
+            rule=XDC_COMMENT_RULE,
+            supporting_source_ids=tuple(dict.fromkeys(h[1] for h in hits)),
+            target_field_path=path,
+            proposed_value=value,
+            not_proposable_reason=reason,
+            supporting_statement_total=len(hits),
+            distinct_sources=len({h[1] for h in hits}),
+        )
+        out.append(_candidate_record(engine, bundle_cid=bundle_cid, run_id=run_id, key=key, evidence=evidence,
+                                     total=len(hits), writable=writable))
+    return out
+
+
 def _awaiting_zone_reason() -> str:
     return (
         "The scan header writes a local clock time, names no time zone and states no epoch, so it is "
@@ -3406,6 +3513,11 @@ def build_bundle(
         runs_by_id[run_id]["candidate_ids"].append(cand["candidate_id"])
         if order_anomaly is not None:
             runs_by_id[run_id]["other_relationships"]["anomalies"].append(order_anomaly)
+    # ssrl_xdc_header_comment_v1: what the comment lines state, AFTER every start-time candidate (their ids stand)
+    for run_id, g, run_scans in xdc_runs:
+        for cand in _xdc_comment_candidates(g, run_scans, run_id, len(out_candidates) + 1, sid_of, writable):
+            out_candidates.append(cand)
+            runs_by_id[run_id]["candidate_ids"].append(cand["candidate_id"])
     if len(out_candidates) > MAX_CANDIDATES:
         raise BundleBoundsExceeded(f"{len(out_candidates)} candidates exceeds the bound of {MAX_CANDIDATES}.")
 

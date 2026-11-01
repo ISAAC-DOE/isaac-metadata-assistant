@@ -67,6 +67,10 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
 - **Deferred** (`deferred: {by, decided_utc}`): the scientist said "I don't know". It is still counted
   and sorts last; do not ask it again unless they offer an answer (`--skip-deferred` leaves them out).
   A question they did not answer at all is not deferred: record nothing.
+- **Values read from an SSRL XDC scan header's comment lines** (rule `ssrl_xdc_header_comment_v1`: lines 8-12,
+  e.g. `100mM NaClO4 pH1.3 He`, `-0.3 V vs RHE`): the electrolyte and its concentration, the pH, the potential
+  and its scale are candidates that always need review. Show the header's own words and ask the scientist to
+  confirm or correct each; a line naming two potentials gives no value (ask which). No gas is read.
 - **A conflict with `affects_record: false`** (`no_record_field`): the readings differ, but no record
   field carries them (a comment line, a unit spelling). Say how many there are; do not ask each.
 - **A conflict with `covered_by_decisions`** (also `affects_record: false`; counted in
