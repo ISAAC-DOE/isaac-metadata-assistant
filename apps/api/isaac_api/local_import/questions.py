@@ -676,6 +676,28 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     if has_groups:
         _move_outside_optional_targets(buckets, bundle, group_of, add)
 
+    # M6 (c15c): WHAT A RUN ALREADY HOLDS A SCIENTIST'S DECISION FOR: ``(run_id, composer path) -> [decision]``, from
+    # every candidate and missing value of the run whose value a scientist confirmed or corrected (and the record can
+    # take), alias-aware as the composer writes it (_composer_path). Built once, and only when a conflict names a run.
+    held_by_run: dict[tuple[str, str], list[Mapping]] | None = None
+
+    def held(run_id: str, path: str) -> list[Mapping]:
+        nonlocal held_by_run
+        if held_by_run is None:
+            held_by_run = {}
+            conflict_ids_of = B.conflict_ids_by_candidate(bundle)
+            for kind, objs in (("candidate", bundle["candidates"]), ("missing_value", bundle["missing_values"])):
+                for o in objs:
+                    if (o.get("run_id") is None or not o.get("target_field_path")
+                            or o.get("value_state") != B.STATE_SCIENTIST_CONFIRMED or B.unusable_answer_reason(o, writable)):
+                        continue
+                    d = (B.candidate_decision(bundle, o, decisions, conflict_ids_of) if kind == "candidate"
+                         else decisions.get(("missing_value", o["value_id"])))
+                    if d is not None and d.get("decision") in B.CONFIRMING_DECISIONS:
+                        held_by_run.setdefault((o["run_id"], _composer_path(o["target_field_path"])), []).append(d)
+        return held_by_run.get((run_id, _composer_path(path)), [])
+
+    covered_conflicts: dict[str, list[str]] = {}
     conflicts_out = []
     for cf in bundle["conflicts"]:
         if (cf["value_state"] not in (B.STATE_CONFLICTING, B.STATE_NEEDS_REVIEW) and cf["conflict_id"] not in conflict_again
@@ -689,6 +711,12 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         # a missing value does (a beamtime-scope one blocks every record).
         required = required_for(path, rids[0] if rids else None) if path else None
         affects = any(r in group_of for r in rids) or (not group_of and bool(rids)) or (required and not rids)
+        if path and rids:
+            # a decision that IS this conflict's own answer settles it already (it is then not open): not counted here
+            own = {"kind": "conflict", "id": cf["conflict_id"]}
+            by_run = [[d for d in held(r, path) if d.get("target") != own] for r in rids]
+            if all(by_run):
+                covered_conflicts[cf["conflict_id"]] = sorted({str(d.get("decision_id")) for ds in by_run for d in ds})
         conflicts_out.append((scope, cf, affects, path, required))
 
     questions: list[dict] = []
@@ -1156,6 +1184,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         basis = {**basis, "record_composer": _agree_with_composer(questions, bundle, group_of, cand_by_id, reports,
                                                                        decision_of=decisions)}
     _note_shared_evidence(questions, cand_by_id, bundle)
+    _covered_by_run_decisions(questions, covered_conflicts)
     _mark_deferred(questions, decisions)
     _say_the_one_group(questions)
     questions.sort(key=order)
@@ -1169,6 +1198,24 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         "counts": question_counts(questions, fine_grained_v1=len(bundle.get("questions") or ())),
         "questions": questions,
     }
+
+
+def _covered_by_run_decisions(questions: list[dict], covered: Mapping[str, Sequence[str]]) -> None:
+    """M6 (c15c): a run's disagreement whose every run already holds a scientist's decision for its field (a sheet
+    ruling, an answer to another question: ``covered``, conflict id -> those decision ids) is settled for the record by
+    that decision; the record is composed from it, not from either reading. Unless it still blocks (the composer still
+    lacks the field for a group it reaches), it is not a conflict affecting a record: ``affects_record`` false, tier
+    optional, ``covered_by_decisions`` naming them, and a plain ``why``. Its id, scope and targets are unchanged."""
+    for q in questions:
+        ids = covered.get(q["targets"][0]["id"]) if q["kind"] == "resolve_conflict" and q["targets"] else None
+        if not ids or q["blocking"] or not q.get("affects_record"):
+            continue
+        runs = q["applies_to"].get("runs") if isinstance(q.get("applies_to"), Mapping) else None
+        q.update(tier=TIER_OPTIONAL, affects_record=False, covered_by_decisions=list(ids))
+        q["why"] = (f"Already decided: {'its run holds' if runs == 1 else 'each of its runs holds'} a scientist's decision "
+                    f"for {q['target_field_path']} ({', '.join(ids[:5])}{'…' if len(ids) > 5 else ''}), and the record "
+                    "is composed from that decision, not from either reading. Nothing to ask: to change the value, change "
+                    "that decision.")
 
 
 def question_counts(questions: Sequence[Mapping], *, fine_grained_v1: int | None = None) -> dict:

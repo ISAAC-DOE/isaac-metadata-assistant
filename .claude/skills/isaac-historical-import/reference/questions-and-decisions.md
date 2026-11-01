@@ -69,6 +69,9 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   A question they did not answer at all is not deferred: record nothing.
 - **A conflict with `affects_record: false`** (`no_record_field`): the readings differ, but no record
   field carries them (a comment line, a unit spelling). Say how many there are; do not ask each.
+- **A conflict with `covered_by_decisions`** (also `affects_record: false`): each of its runs already holds the
+  scientist's decision for that field (e.g. a sheet's Technique ruling), and the record is built from it. Do not ask
+  it again; say how many there are.
 - **A conflict no reading of which the field takes** (`readings_that_fit_the_field: 0`; each reading
   hint has `fits_field`): `confirm --value <one reading>` would be refused, so `answer_command` is
   `correct --value <…>`. Start times: the `#D` readings are local clock times with no zone and can never

@@ -3,6 +3,9 @@
 * H1: a decision recorded again with the value it already held (a sheet ruling "tied to your sheet") changes
   only a decision id and time. A re-export keeps the record's id and rewrites only its evidence sidecar; a real
   value change still gets a new id and supersedes; ``upload --dry-run`` names the record ids a record replaces.
+* M6: a run's technique disagreement whose run already holds a scientist's decision for the field (a sheet ruling)
+  is covered by it: ``affects_record`` false, not counted in ``conflicts_affecting_a_record``, under the same id. A
+  run with no decision of its own still counts.
 """
 
 from __future__ import annotations
@@ -10,6 +13,7 @@ from __future__ import annotations
 import json
 
 from isaac_api.local_import import mutations as M
+from isaac_api.local_import import questions as Q
 from isaac_api.local_import import records as R
 
 from test_local_import_records import (  # noqa: F401  (fixtures)
@@ -108,3 +112,62 @@ def test_the_upload_dry_run_names_the_record_ids_a_record_replaces(bdir, tmp_pat
     [plan] = R.upload_plan(out, None)
     assert plan["record"] == f"{new}.json" and plan["replaces_record_ids"] == [old]
     assert old in plan["replaces_statement"] and "the portal still holds it" in plan["replaces_statement"]
+
+
+# --- M6 ------------------------------------------------------------------------------------------------------------
+
+TECH = "system.technique"
+RULED, UNRULED = "conf-007", "conf-009"  # run-004's and run-005's disagreements in the corpus
+
+
+def _technique_conflicts(bdir):
+    """The BL15-2 shape (as test_d6 makes it): two runs' disagreements are about the technique."""
+    M.group(bdir)
+    b = M.load(bdir)
+    cand_of = {c["candidate_id"]: c for c in b["candidates"]}
+    conflicts = {cf["conflict_id"]: cf for cf in b["conflicts"]}
+    for cid in (RULED, UNRULED):
+        cand_of[conflicts[cid]["candidate_id"]]["target_field_path"] = TECH
+    M.save_bundle(bdir, b)
+    beam = next(c for c in b["candidates"] if c["target_field_path"] == TECH and c["run_id"] is None)
+    # the sheet's beamtime Technique: every record has the field, so neither disagreement blocks
+    M.decide(bdir, target_ids=[beam["candidate_id"]], decision="correct", value="HERFD-XAS", **BY)
+    return conflicts
+
+
+def _conflict_q(payload, conflict_id):
+    return next(q for q in payload["questions"] if q["targets"] == [{"kind": "conflict", "id": conflict_id}])
+
+
+def test_a_ruled_technique_on_a_run_takes_its_conflict_out_of_the_affecting_count(bdir):
+    conflicts = _technique_conflicts(bdir)
+    before = Q.consolidate(M.load(bdir))
+    q0 = _conflict_q(before, RULED)
+    assert q0["tier"] == Q.TIER_CONFLICT and q0["affects_record"] is True  # the walk's "Answer here only with the same thing"
+    # the run's own ruling: HERFD-XAS for run-004 (what a sheet row's Technique ruling records)
+    M.decide(bdir, target_ids=[conflicts[RULED]["candidate_id"]], decision="correct", value="HERFD-XAS", **BY)
+    after = Q.consolidate(M.load(bdir))
+    assert next(cf for cf in M.load(bdir)["conflicts"] if cf["conflict_id"] == RULED)["value_state"] == "conflicting"
+    q = _conflict_q(after, RULED)
+    assert q["question_id"] == q0["question_id"]  # the same id
+    assert q["affects_record"] is False and q["tier"] == Q.TIER_OPTIONAL and not q["blocking"]
+    [did] = q["covered_by_decisions"]
+    assert q["why"].startswith(f"Already decided: its run holds a scientist's decision for {TECH} ({did})")
+    assert after["counts"]["conflicts_affecting_a_record"] == before["counts"]["conflicts_affecting_a_record"] - 1
+    assert after["counts"]["conflicts_affecting_a_record"] == sum(x["tier"] == Q.TIER_CONFLICT for x in after["questions"])
+
+
+def test_an_unruled_run_still_counts(bdir):
+    conflicts = _technique_conflicts(bdir)
+    M.decide(bdir, target_ids=[conflicts[RULED]["candidate_id"]], decision="correct", value="HERFD-XAS", **BY)
+    p = Q.consolidate(M.load(bdir))
+    q = _conflict_q(p, UNRULED)
+    assert q["affects_record"] is True and q["tier"] == Q.TIER_CONFLICT and "covered_by_decisions" not in q
+    assert p["counts"]["conflicts_affecting_a_record"] >= 1
+
+
+def test_a_deferred_run_answer_does_not_cover_its_conflict(bdir):
+    conflicts = _technique_conflicts(bdir)
+    M.decide(bdir, target_ids=[conflicts[RULED]["candidate_id"]], decision="defer", value=None, **BY)
+    q = _conflict_q(Q.consolidate(M.load(bdir)), RULED)
+    assert q["affects_record"] is True and q["tier"] == Q.TIER_CONFLICT and "covered_by_decisions" not in q
