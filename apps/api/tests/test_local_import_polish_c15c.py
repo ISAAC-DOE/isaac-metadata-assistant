@@ -220,21 +220,25 @@ def test_the_upload_dry_run_names_the_record_ids_a_record_replaces(bdir, tmp_pat
 # --- M6 ------------------------------------------------------------------------------------------------------------
 
 TECH = "system.technique"
+# r4-b M1: a beamtime-wide technique answer now covers every run's technique disagreement itself, so the run-level
+# rulings below are tested on an OPTIONAL field no beamtime answer fills (a disagreement there never blocks)
+OWN = "sample.material.formula"
 RULED, UNRULED = "conf-007", "conf-009"  # run-004's and run-005's disagreements in the corpus
 
 
-def _technique_conflicts(bdir):
-    """The BL15-2 shape (as test_d6 makes it): two runs' disagreements are about the technique."""
+def _technique_conflicts(bdir, path=OWN):
+    """The BL15-2 shape (as test_d6 makes it): two runs' disagreements are about one field. For the technique, the
+    sheet's beamtime Technique is answered too: every record has the field, so neither disagreement blocks."""
     M.group(bdir)
     b = M.load(bdir)
     cand_of = {c["candidate_id"]: c for c in b["candidates"]}
     conflicts = {cf["conflict_id"]: cf for cf in b["conflicts"]}
     for cid in (RULED, UNRULED):
-        cand_of[conflicts[cid]["candidate_id"]]["target_field_path"] = TECH
+        cand_of[conflicts[cid]["candidate_id"]]["target_field_path"] = path
     M.save_bundle(bdir, b)
-    beam = next(c for c in b["candidates"] if c["target_field_path"] == TECH and c["run_id"] is None)
-    # the sheet's beamtime Technique: every record has the field, so neither disagreement blocks
-    M.decide(bdir, target_ids=[beam["candidate_id"]], decision="correct", value="HERFD-XAS", **BY)
+    if path == TECH:
+        beam = next(c for c in b["candidates"] if c["target_field_path"] == TECH and c["run_id"] is None)
+        M.decide(bdir, target_ids=[beam["candidate_id"]], decision="correct", value="HERFD-XAS", **BY)
     return conflicts
 
 
@@ -255,7 +259,7 @@ def test_a_ruled_technique_on_a_run_takes_its_conflict_out_of_the_affecting_coun
     assert q["question_id"] == q0["question_id"]  # the same id
     assert q["affects_record"] is False and q["tier"] == Q.TIER_OPTIONAL and not q["blocking"]
     [did] = q["covered_by_decisions"]
-    assert q["why"].startswith(f"Already decided: its run holds a scientist's decision for {TECH} ({did})")
+    assert q["why"].startswith(f"Already decided: its run holds a scientist's decision for {OWN} ({did})")
     assert after["counts"]["conflicts_affecting_a_record"] == before["counts"]["conflicts_affecting_a_record"] - 1
     assert after["counts"]["conflicts_affecting_a_record"] == sum(x["tier"] == Q.TIER_CONFLICT for x in after["questions"])
     # counted apart, never as optional (c15c review)

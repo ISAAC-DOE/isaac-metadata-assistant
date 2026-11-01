@@ -728,25 +728,35 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     # M6 (c15c): WHAT A RUN ALREADY HOLDS A SCIENTIST'S DECISION FOR: ``(run_id, composer path) -> [decision]``, from
     # every candidate and missing value of the run whose value a scientist confirmed or corrected (and the record can
     # take), alias-aware as the composer writes it (_composer_path). Built once, and only when a conflict names a run.
-    held_by_run: dict[tuple[str, str], list[tuple[Mapping, Any]]] | None = None
+    # r4-b M1: ...and a BEAMTIME-WIDE decision (a candidate or missing value with no run) reaches every run a live record
+    # group holds (records.compose_group proposes it for every group), except at a run-only path (DEC-69): held under
+    # run None and counted for each such run. With no record groups yet, it reaches every run.
+    from .records import RUN_ONLY_PATHS
+    held_by_run: dict[tuple[str | None, str], list[tuple[Mapping, Any]]] | None = None
+    beamtime_decision_ids: set[str] = set()
 
     def held(run_id: str, path: str) -> list[tuple[Mapping, Any]]:
-        """``[(decision, the value it gives)]`` the run holds for ``path``."""
+        """``[(decision, the value it gives)]`` the run holds for ``path``: its own, then a beamtime-wide one."""
         nonlocal held_by_run
         if held_by_run is None:
             held_by_run = {}
             conflict_ids_of = B.conflict_ids_by_candidate(bundle)
             for kind, objs in (("candidate", bundle["candidates"]), ("missing_value", bundle["missing_values"])):
                 for o in objs:
-                    if (o.get("run_id") is None or not o.get("target_field_path")
-                            or o.get("value_state") != B.STATE_SCIENTIST_CONFIRMED or B.unusable_answer_reason(o, writable)):
+                    if (not o.get("target_field_path") or o.get("value_state") != B.STATE_SCIENTIST_CONFIRMED
+                            or B.unusable_answer_reason(o, writable)
+                            or (o.get("run_id") is None and o["target_field_path"] in RUN_ONLY_PATHS)):
                         continue
                     d = (B.candidate_decision(bundle, o, decisions, conflict_ids_of) if kind == "candidate"
                          else decisions.get(("missing_value", o["value_id"])))
                     if d is not None and d.get("decision") in B.CONFIRMING_DECISIONS:
                         value = B.final_value(o.get("value") if kind == "candidate" else None, d, o.get("readings"))
-                        held_by_run.setdefault((o["run_id"], _composer_path(o["target_field_path"])), []).append((d, value))
-        return held_by_run.get((run_id, _composer_path(path)), [])
+                        held_by_run.setdefault((o.get("run_id"), _composer_path(o["target_field_path"])), []).append((d, value))
+                        if o.get("run_id") is None:
+                            beamtime_decision_ids.add(str(d.get("decision_id")))
+        key = _composer_path(path)
+        beamtime = held_by_run.get((None, key), []) if (run_id in group_of or not has_groups) else []
+        return held_by_run.get((run_id, key), []) + beamtime
 
     covered_conflicts: dict[str, list[str]] = {}
     conflicts_out = []
@@ -1271,7 +1281,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     _note_shared_evidence(questions, cand_by_id, bundle)
     _note_same_reading_groups(questions, cand_by_id, bundle)
     _mark_deferred(questions, decisions)
-    _covered_by_run_decisions(questions, covered_conflicts)
+    _covered_by_run_decisions(questions, covered_conflicts, beamtime_decision_ids)
     _say_the_one_group(questions)
     questions.sort(key=order)
     for q in questions:
@@ -1286,14 +1296,18 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     }
 
 
-def _covered_by_run_decisions(questions: list[dict], covered: Mapping[str, Sequence[str]]) -> None:
+def _covered_by_run_decisions(questions: list[dict], covered: Mapping[str, Sequence[str]],
+                              beamtime_ids: Container[str] = ()) -> None:
     """M6 (c15c): a run's disagreement whose every run already holds a scientist's decision for its field (a sheet
     ruling, an answer to another question: ``covered``, conflict id -> those decision ids) is settled for the record by
     that decision; the record is composed from it, not from either reading. Unless it still blocks (the composer still
     lacks the field for a group it reaches), it is not a conflict affecting a record: ``affects_record`` false, tier
     optional, ``covered_by_decisions`` naming them, and a plain ``why``, counted apart
     (``conflicts_covered_by_decisions``) and never ``deferred`` (it is not waiting on an answer). Across several runs
-    the decisions must give one value. Its id, scope and targets are unchanged. Runs after :func:`_mark_deferred`."""
+    the decisions must give one value. Its id, scope and targets are unchanged. Runs after :func:`_mark_deferred`.
+
+    r4-b M1: a beamtime-wide decision for the field (``beamtime_ids``) reaches every run a live group holds, so it covers
+    them too (the record is composed from it); a run's own decision that differs still disagrees with it."""
     for q in questions:
         ids = covered.get(q["targets"][0]["id"]) if q["kind"] == "resolve_conflict" and q["targets"] else None
         if not ids or q["blocking"] or not q.get("affects_record"):
@@ -1301,8 +1315,14 @@ def _covered_by_run_decisions(questions: list[dict], covered: Mapping[str, Seque
         runs = q["applies_to"].get("runs") if isinstance(q.get("applies_to"), Mapping) else None
         q.update(tier=TIER_OPTIONAL, affects_record=False, covered_by_decisions=list(ids))
         q.pop("deferred", None)
+        said = f"{', '.join(ids[:5])}{'…' if len(ids) > 5 else ''}"
+        if all(i in beamtime_ids for i in ids):
+            q["why"] = (f"Already decided: the beamtime-wide answer for {q['target_field_path']} ({said}) reaches "
+                        f"{'its run' if runs == 1 else 'each of its runs'}, and the record is composed from that answer, "
+                        "not from either reading. Nothing to ask: to change the value, change that answer.")
+            continue
         q["why"] = (f"Already decided: {'its run holds' if runs == 1 else 'each of its runs holds'} a scientist's decision "
-                    f"for {q['target_field_path']} ({', '.join(ids[:5])}{'…' if len(ids) > 5 else ''}), and the record "
+                    f"for {q['target_field_path']} ({said}), and the record "
                     "is composed from that decision, not from either reading. Nothing to ask: to change the value, change "
                     "that decision.")
 
