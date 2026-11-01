@@ -392,12 +392,45 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
     too_few = ref_source == REF.IN_SCAN and 0 < len(usable) < REF.MIN_IN_SCAN_REFERENCE_SCANS
     if too_few:
         flags.append(REF.TOO_FEW_FLAG)
+    # r4-a: the reading every reader of the stored step makes (REF.judge): a scan whose pre-edge noise is about zero is
+    # not usable (DEGENERATE_RULE_ID), and usable edges that spread over more than the reference-spread level are not
+    # one reference (SPREAD_RULE_ID). Either BLOCKS a shift: none is applied, even under an approval. What is hashed
+    # (measured edge, spread, computed shift) keeps the earlier rule's values, so a group whose curve does not change
+    # keeps its id; only a group with a NAMED reference (approved, or a params file's) and a degenerate scan reads its
+    # edge from the usable scans alone (its shift would otherwise come from a channel that is not counting).
+    j = REF.judge([r.get("e0_eV") if r else None for r in per_scan], [r.get("snr") if r else None for r in per_scan],
+                  min_snr, ref_source, ctx.params["qc"].get("warn_reference_e0_spread_eV"))
+    blocked = ref_source is not None and not j["proposed"]
+    if j["degenerate"]:
+        flags.append(REF.DEGENERATE_FLAG)
+    if j["disagree"]:
+        flags.append(REF.SPREAD_FLAG)
+    if ref_source == REF.IN_SCAN and 0 < len(j["usable"]) < j["need"] and not too_few:
+        flags.append(REF.TOO_FEW_FLAG)
+    if usable and not j["usable"]:
+        flags.append("reference_edge_not_found")
     measured = spread = None
     if usable:
         e0s = [r["e0_eV"] for r in usable]
         measured = float(np.median(e0s))
         spread = float(max(e0s) - min(e0s))
     ref = approved or proposed
+    if ref and j["degenerate"]:
+        measured = float(np.median(j["usable"])) if j["usable"] else None
+        spread = float(max(j["usable"]) - min(j["usable"])) if j["usable"] else None
+    # r4-a (NEAR_SAMPLE_RULE_ID): an in-scan reference edge at the group's own (uncalibrated) sample E0
+    said: dict = {}
+    near = None
+    if ref_source == REF.IN_SCAN and j["proposed"]:
+        own_e0 = [x["e0_eV"] for x in (C.edge_e0(sa["energy"], sa["mu"], np, ctx.xafs) for sa in scans_data)
+                  if x and x.get("e0_eV") is not None]
+        if own_e0:
+            said["sample_e0_eV"] = float(np.median(own_e0))
+            near = REF.near_sample({"reference_source": ref_source, **said}, float(np.median(j["usable"])))
+            if near is not None:
+                flags.append(REF.NEAR_SAMPLE_FLAG)
+    if j["max_spread_eV"] != REF.DEFAULT_MAX_SPREAD_EV:
+        said["reference_max_spread_eV"] = j["max_spread_eV"]
     tab = tab_src = shift = None
     applied = 0.0
     if not approved and ref_source is not None:
@@ -414,13 +447,19 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
             if abs(shift) > float(cp["max_plausible_shift_eV"]):
                 flags.append("shift_implausible_not_applied")
             elif not approved:
-                if not not_named:  # nothing awaits an approval ISAAC does not propose (flags are not hashed)
+                if not not_named and not blocked:  # nothing awaits an approval ISAAC does not propose (not hashed)
                     flags.append("calibration_shift_awaiting_approval")
+            elif blocked:
+                pass  # r4-a: no reference is read (its flags say why); approval_not_applied names the approval
             elif own and not REF.shift_size_confirmed(accepted, shift):
                 # CALIBRANT_RULE_ID: a group's own edge is a calibration only if its sample is a pure element, which
                 # names cannot settle (a chemical standard's edge sits where its chemistry puts it, and moving it onto
                 # a tabulated edge erases that chemical shift): applied only with --accept-shift, whatever the size
                 flags.append(REF.CALIBRANT_NOT_CONFIRMED_FLAG)
+            elif near is not None and not REF.shift_size_confirmed(accepted, shift):
+                # r4-a (NEAR_SAMPLE_RULE_ID): the reference channel may be seeing the sample: applied only with its size
+                # confirmed (--accept-shift), whatever the size
+                flags.append(REF.NEAR_SAMPLE_NOT_CONFIRMED_FLAG)
             elif REF.exceeds_warn(shift, ctx.params["qc"]["warn_energy_shift_eV"]) and not REF.shift_size_confirmed(accepted, shift):
                 # c12-cal (REF.SHIFT_SIZE_RULE_ID): a shift above the warning level moves every energy of the record by
                 # that much; it is applied only when the scientist also confirmed its size (--accept-shift). c12-r: the
@@ -466,6 +505,8 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
             **({"accepted_shift_eV": float(accepted)} if accepted is not None else {}),
         },
         "flags": flags,
+        # r4-a: written into the outcome by _said_reference, after the hashed copy (no id moves)
+        "said": said,
     }
 
 
@@ -476,13 +517,22 @@ def _said_reference(cal: dict, calibrant: Mapping | None = None) -> dict:
     the step had before these sentences existed, so a group whose curve does not change keeps its result id.
     ``calibrant`` (a reference group's :func:`reference.calibrant_identity`) is said here too, never hashed."""
     hashed = copy.deepcopy(cal["outcome"])
+    cal["outcome"].update(cal.pop("said", None) or {})  # r4-a: the sample E0 and spread level the reading uses
     if calibrant is not None and cal["outcome"].get("reference_source") == REF.OWN_SIGNAL:
         cal["outcome"]["reference_calibrant"] = dict(calibrant)
     said = REF.reading(cal)
     cal["outcome"].update({k: said[k] for k in ("reference_scans_usable", "reference_scans_listed", "reference_min_scans",
                                                 "reference_proposed", "calibration_proposed", "reference_statement")})
-    if said["reference_e0_spread_eV"] is None:
-        cal["outcome"]["reference_e0_spread_eV"] = None
+    cal["outcome"].update({k: said[k] for k in ("reference_scans_degenerate", "reference_edges_disagree",
+                                                "reference_at_sample_e0_eV") if k in said})
+    o = cal["outcome"]
+    passing = REF.judge(o.get("reference_e0_per_scan_eV") or [], o.get("reference_snr_per_scan") or [],
+                        REF.effective_min_snr((cal.get("params") or {}).get("reference_min_edge_snr"), o.get("reference_source")),
+                        o.get("reference_source"))["passing"]
+    if said["reference_e0_spread_eV"] is None and len(passing) < 2:
+        # one usable scan has no spread (c12-cal). r4-a: never nulled for scans the degenerate-noise rule set aside:
+        # the QC verdict reads this value, and qc.json keeps the earlier rule's (an unchanged curve keeps its id)
+        o["reference_e0_spread_eV"] = None
     return hashed
 
 

@@ -260,7 +260,12 @@ an element/edge already named for the group: approved, proposed, or the group's 
 - **No reference proposed** (`reference_proposed: false`; flags `reference_edge_not_found`,
   `reference_edge_in_too_few_scans` or `no_reference_available`): say the `reference_statement` ("only 1 of
   16 scans shows a usable reference edge; an in-scan reference needs one in at least 2 scans") and do NOT
-  ask for an element or edge: no shift can be approved, and `approve_calibration` is refused.
+  ask for an element or edge: no shift can be approved, and `approve_calibration` is refused. Two more
+  reasons are said the same way: a scan whose reference edge stands more than 1,000,000 times its pre-edge
+  noise is a channel that is not counting, never usable (flag `reference_noise_degenerate`); and usable edges
+  that spread over more than 0.5 eV (`qc.warn_reference_e0_spread_eV`, stricter only) are not one reference
+  (flag `reference_edges_disagree`, "spread over 6.10 eV … more than the 0.5 eV they may differ by"). Ask the
+  scientist about the reference channel instead (a missing foil, a channel seeing the sample, drift).
 - **A reference group's own edge** (`reference_source: reference_group_own_signal`, not a separate foil channel)
   is a calibration only if its sample is a pure element, and names cannot settle that: a chemical standard is not
   an energy calibrant (its edge sits where its chemistry puts it; "S K" would move a MoS2 standard onto elemental
@@ -284,7 +289,12 @@ an element/edge already named for the group: approved, proposed, or the group's 
   edge the reference measures (`--element Ir`, `--edge L3` style). Never guess it from a file name. Record
   `<isaac> bundle decide <bundle> --target <group id> --decision approve_calibration --element <symbol> --edge <K|L1-L3|M1-M5> --by "<name>"`.
   The reply (or the refusal) says the shift it applies: "the reference edge sits 8.6 eV above Ti K's
-  tabulated 4966.0 eV; approving applies -8.6 eV". Say it to the scientist in those words.
+  tabulated 4966.0 eV; approving applies -8.6 eV", and what it is read from ("the median of 3 usable scans
+  (4974.6 eV, spread 0.20 eV)"). Say it to the scientist in those words. **An in-scan reference edge within
+  0.5 eV of the group's own sample E0** (flag `reference_edge_at_sample_e0`): the channel may be seeing the
+  sample, not a foil. Say the sentence and ask whether the channel holds a reference foil; approving it needs
+  `--accept-shift` whatever the size (without it processing does not apply it,
+  `calibration_reference_at_sample_e0_not_confirmed`).
 - **A shift above the protocol's 2 eV warning level** (`qc.warn_energy_shift_eV`) is refused until the
   scientist also accepts its size: it moves every energy of the record, E0 included, by that much, and can
   erase a chemical shift the study measures. Say the size, ask "apply -8.6 eV to this group?", and only on
