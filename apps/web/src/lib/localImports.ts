@@ -751,7 +751,7 @@ export const LOCAL_IMPORTS_COPY = {
   unaskedRequiredOne: 'required field no question asks yet',
   unaskedRequiredMany: 'required fields no question asks yet',
   conflictsWithoutField: 'disagreement(s) about something no record field holds (settling one changes no record)',
-  conflictsCovered: 'disagreement(s) already settled by your own decision for those runs (not asked again)',
+  conflictsCovered: 'disagreement(s) already settled by a scientist’s decision for those runs (not asked again)',
   outsideLiveGroups: 'question(s) about runs no record group holds (no record is built from them)',
   informationalCount: 'listed for information only (no answer can reach a record from them yet)',
   deferredCount: 'deferred (“I don’t know”); they are still counted above',

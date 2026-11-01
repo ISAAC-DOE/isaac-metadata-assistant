@@ -123,6 +123,54 @@ def test_the_same_value_read_from_another_source_file_keeps_the_id(bdir, tmp_pat
     assert any(e.get("source_file") == "SYN_other/ZZ_same_statement.txt" for e in sidecar["evidence"][NAME])
 
 
+def test_a_newer_build_composing_another_body_from_the_same_draft_gets_a_new_id(bdir, tmp_path, monkeypatch):
+    """c15c LOW 1: the same draft (content_sha256 unchanged) is not enough; the body hash is compared too."""
+    _decide_everything(bdir)
+    R.build_records(bdir)
+    out = tmp_path / "records"
+    old = _export(bdir, out)["record_id"]
+    compose = R.compose_record
+
+    def newer_build(draft, composition, *, record_id, now):
+        record = compose(draft, composition, record_id=record_id, now=now)
+        record["tags"] = ["SYN-from-a-newer-build"]
+        return record
+    monkeypatch.setattr(R, "compose_record", newer_build)
+    row = _export(bdir, out)
+    assert row["export"] == "replaced" and row["record_id"] != old and row["replaces_record_id"] == old
+    assert (out / R.SUPERSEDED_DIR / f"{old}.json").is_file()
+
+
+def test_a_restored_record_leaves_no_copy_in_withdrawn(bdir, tmp_path):
+    """c15c LOW 2: restored under its id (the same body): its withdrawn copy is removed, one id names one set of files."""
+    _decide_everything(bdir)
+    R.build_records(bdir)
+    out = tmp_path / "records"
+    rid = _export(bdir, out)["record_id"]
+    R.export_records(bdir, out, run_portal=_portal("needs_review"))
+    assert (out / R.WITHDRAWN_DIR / f"{rid}.json").is_file()
+    _rerecord_same_value(bdir, by="Another Synthetic Operator")
+    row = _export(bdir, out)
+    assert row["record_id"] == rid and row["restored_from_withdrawn"] is True and row["evidence_refreshed"] is True
+    names = [f"{rid}.json", f"{rid}.evidence.json", f"{rid}.artifacts"]
+    assert row["withdrawn_copy_removed"] == [f"{R.WITHDRAWN_DIR}/{n}" for n in names]
+    assert not any((out / R.WITHDRAWN_DIR / n).exists() for n in names)
+    assert (out / f"{rid}.artifacts").is_dir()  # the processed curve is at the top, with the record
+    assert "its copy in isaac-export/withdrawn/ was removed" in row["export_statement"]
+    assert [p["record"] for p in R.upload_plan(out, None)] == [f"{rid}.json"]
+
+
+def test_evidence_changes_match_entries_by_content():
+    """c15c LOW 3: an added entry is said as such, never as positional mismatches; a reordered list differs in nothing."""
+    a = {"source_type": "document", "source_file": "SYN_a.txt", "quote": "ZZ1"}
+    b = {"source_type": "document", "source_file": "SYN_b.txt", "quote": "ZZ1"}
+    c = {"source_type": "user_confirmation", "decided_by": "Synthetic Scientist", "answer": "ZZ1"}
+    old = {"evidence": {NAME: [a, c]}, "schemas_used": {}}
+    assert R.evidence_changes(old, {"evidence": {NAME: [b, a, c]}, "schemas_used": {}}) == [f"{NAME}: entries added or removed"]
+    assert R.evidence_changes(old, {"evidence": {NAME: [c, a]}, "schemas_used": {}}) == []
+    assert R.evidence_changes(old, {"evidence": {NAME: [c, b]}, "schemas_used": {}}) == [f"{NAME}: the source file"]
+
+
 def test_a_value_change_still_gets_a_new_id_and_supersedes(bdir, tmp_path):
     _decide_everything(bdir)
     R.build_records(bdir)

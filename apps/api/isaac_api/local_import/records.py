@@ -1751,8 +1751,8 @@ EXPORT_INDEX_FORMAT = "isaac.local-export-index"
 SUPERSEDED_DIR = f"{EXPORT_STATE_DIR}/superseded"
 #: In ``--out``: where a record is moved when its group, exported before, is NOT exportable now (refused by
 #: a gate, or no longer a scientist-confirmed group): nothing replaces it, so it is WITHDRAWN, not
-#: superseded. Kept (never deleted), never in an upload plan. A later export of the same content restores
-#: it under its id at the top level.
+#: superseded. Kept (never deleted), never in an upload plan. A later export of the same record body restores
+#: it under its id at the top level (and its copy here is then removed: the record is back at the top).
 WITHDRAWN_DIR = f"{EXPORT_STATE_DIR}/withdrawn"
 
 
@@ -1823,14 +1823,15 @@ EVIDENCE_KEY_WORDS = {
     "source_id": "the source", "locator": "where in the file", "quote": "the quoted text", "relation": "how the source "
     "relates to the value", "provenance": "whether it was confirmed or corrected", "previous_value": "the value it "
     "replaced", "note": "the note", "method": "the reading method",
+    "(entries added or removed)": "entries added or removed", "(the value)": "the value",
 }
 #: How many ``evidence_changed`` lines an export row shows (``evidence_changed_total`` counts them all).
 EVIDENCE_CHANGES_SHOWN = 10
 
 
 def _differing_keys(old: Any, new: Any) -> set[str]:
-    """The dict keys, at any depth, whose values differ between ``old`` and ``new`` (a list compared item by item;
-    ``"(entries added or removed)"`` when its length differs)."""
+    """The dict keys, at any depth, whose values differ between ``old`` and ``new`` (a list's entries matched by
+    content, the rest compared in order; ``"(entries added or removed)"`` when its length differs)."""
     if old == new:
         return set()
     if isinstance(old, Mapping) and isinstance(new, Mapping):
@@ -1843,8 +1844,17 @@ def _differing_keys(old: Any, new: Any) -> set[str]:
                 out |= _differing_keys(old[k], new[k]) or ({str(k)} if old[k] != new[k] else set())
         return out
     if isinstance(old, list) and isinstance(new, list):
-        out = {"(entries added or removed)"} if len(old) != len(new) else set()
-        for a, b in zip(old, new):
+        if len(old) != len(new):
+            return {"(entries added or removed)"}
+        # entries matched by content first, so a reordered list differs in nothing and only unmatched ones are compared
+        unmatched_old, unmatched_new = list(old), []
+        for b in new:
+            if b in unmatched_old:
+                unmatched_old.remove(b)
+            else:
+                unmatched_new.append(b)
+        out = set()
+        for a, b in zip(unmatched_old, unmatched_new):
             out |= _differing_keys(a, b)
         return out
     return {"(the value)"}
@@ -1906,7 +1916,7 @@ def _move_superseded(out: Path, record_id: str, into: str = SUPERSEDED_DIR) -> l
         if src.exists() and not src.is_symlink():
             dest.mkdir(parents=True, exist_ok=True)
             target = dest / name
-            # only ever the SAME record (an id is reused only for the same content_sha256), withdrawn again
+            # only ever the SAME record (an id is reused only for the same record body, body_sha256), withdrawn again
             if target.is_dir() and not target.is_symlink():
                 shutil.rmtree(target)
             elif target.exists() or target.is_symlink():
@@ -1928,6 +1938,26 @@ def _artifact_sources(bundle: Mapping, bundle_dir: Path, group_id: str) -> list[
                     src = None
                 out.append((f, src))
     return out
+
+
+def _remove_withdrawn_copy(out: Path, record_id: str) -> list[str]:
+    """c15c LOW 2: a withdrawn record restored under its id (the same record body) is back at the top of ``--out``:
+    its copy in :data:`WITHDRAWN_DIR` is removed, so one id names one set of files. Returns what was removed."""
+    from isaac_records.ids import is_record_id
+
+    if not is_record_id(record_id):
+        return []
+    removed = []
+    for name in (f"{record_id}.json", f"{record_id}.evidence.json", f"{record_id}.artifacts"):
+        target = out / WITHDRAWN_DIR / name
+        if target.is_dir() and not target.is_symlink():
+            shutil.rmtree(target)
+        elif target.exists() or target.is_symlink():
+            target.unlink()
+        else:
+            continue
+        removed.append(f"{WITHDRAWN_DIR}/{name}")
+    return removed
 
 
 def _withdrawal_statement(record_id: str, exported_utc: Any, moved: Sequence[str], why: str) -> str:
@@ -1954,7 +1984,7 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     exportable now — refused by a gate, or no longer a scientist-confirmed group — has its record moved to
     ``withdrawn/`` (kept, never in an upload plan; nothing replaces it), its index entry marked
     ``withdrawn_utc``, and the result lists it under ``withdrawn`` (and on its ``refused`` row). Exporting
-    the same content again later restores it under the same id."""
+    the same record body again later restores it under the same id, and its withdrawn copy is removed."""
     from isaac_records.export import build_sidecar
     from isaac_records.ids import new_record_id
     from isaac_records.official import validate_official
@@ -2015,11 +2045,19 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         sources = _artifact_sources(bundle, bundle_dir, group_id)
         probe = compose_record(draft, composition, record_id=SUBSTANCE_PROBE_ID, now=SUBSTANCE_PROBE_AT)
         body = body_sha256(probe, [(f["relative_path"], f["sha256"]) for f, src in sources if src is not None])
-        # H1: the draft changed but the record body did not (the same value recorded again, by anyone, citing any
-        # source): the same record id; only its evidence sidecar may be rewritten
-        same_body = bool(prior is not None and prior.get("record_id") and prior.get("content_sha256") != digest and (
-            prior.get("body_sha256") or (_body_on_disk(out, prior) if out.is_dir() else None)) == body)
-        if prior is not None and prior.get("record_id") and (prior.get("content_sha256") == digest or same_body):
+        # H1: the id follows the record BODY. The draft may change while the body does not (the same value recorded
+        # again, by anyone, citing any source): the same record id, and only its evidence sidecar may be rewritten.
+        # c15c LOW 1: the body is compared even when the draft is the same, since a newer build may compose another
+        # body from it; only an index entry from a build that kept no body hash falls back to the draft hash (and,
+        # when that differs, to the record it wrote)
+        same_body = False
+        if prior is not None and prior.get("record_id"):
+            if prior.get("body_sha256"):
+                same_body = prior["body_sha256"] == body
+            else:
+                same_body = prior.get("content_sha256") == digest or (
+                    (_body_on_disk(out, prior) if out.is_dir() else None) == body)
+        if same_body:
             rid, at, status = prior["record_id"], prior.get("exported_utc") or now_utc(), "unchanged"
         else:
             rid, at, status = new_record_id(), now_utc(), ("replaced" if prior is not None else "new")
@@ -2048,7 +2086,7 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
                 except ValueError:
                     earlier_sidecar = None
                 changed_evidence = evidence_changes(earlier_sidecar if isinstance(earlier_sidecar, Mapping) else None,
-                                                    sidecar) or ["the evidence file's layout"]
+                                                    sidecar) or ["the evidence file differed only in its layout or time"]
                 sidecar["generated_utc"] = now_utc()
         out.mkdir(parents=True, exist_ok=True)
         moved = _move_superseded(out, prior["record_id"]) if status == "replaced" and prior.get("record_id") else []
@@ -2097,7 +2135,9 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
             if prior.get("withdrawn_utc"):
                 row["restored_from_withdrawn"] = True
                 row["export_statement"] += (f" It had been withdrawn ({prior['withdrawn_utc']}); the group is exportable "
-                                            "again with the same content, so the record is back at the top of --out.")
+                                            "again with the same record body, so the record is back at the top of "
+                                            f"--out, and its copy in {WITHDRAWN_DIR}/ was removed.")
+                row["withdrawn_copy_removed"] = _remove_withdrawn_copy(out, rid)
         elif status == "replaced":
             row["replaces_record_id"] = prior.get("record_id")
             row["superseded_files"] = moved

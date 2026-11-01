@@ -63,8 +63,8 @@ describe('notCountedText', () => {
 
   it('names the disagreements the runs\' own decisions already cover', () => {
     expect(notCountedText({ total: 6, blocking: 1, optional: 2, conflicts_covered_by_decisions: 3 })).toBe(
-      'Neither blocking nor counted as optional: 3 disagreement(s) already settled by your own decision for those runs ' +
-        '(not asked again).',
+      'Neither blocking nor counted as optional: 3 disagreement(s) already settled by a scientist’s decision for those ' +
+        'runs (not asked again).',
     );
   });
 
