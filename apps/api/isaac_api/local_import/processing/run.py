@@ -1091,7 +1091,9 @@ def _versions_question_text(versions: Sequence[Mapping]) -> str:
     (measured on a real BL15-2 beamtime: one scan file in three projects read as "3 different Athena versions").
     Byte-identical curves with the same parameters are already one version (athena.match_with_versions)."""
     n = len(versions)
-    ask = " Which one is the result of record? None is selected until you choose."
+    ask = (" Which one is the result of record? None is selected until you choose. Once one is chosen, processing this "
+           "group again gives that version its own Athena result to approve; the record carries the E0 and curve of the "
+           "result that is approved.")
     hashes = {str(v.get("data_hash") or "") for v in versions}
     sets = any(v.get("_match_kind") == "per_scan_set" or v.get("per_scan_set") for v in versions)
     if sets or len(hashes) != 1 or "" in hashes:  # a set of per-scan groups is named by its members, not one curve
@@ -1365,6 +1367,7 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         elif A.ENERGY_FRAME_UNKNOWN_FLAG not in res["review_flags"]:
             res["review_flags"].append(A.ENERGY_FRAME_UNKNOWN_FLAG)
     version_files = []
+    version_coverage: list[dict | None] = []
     if athena_versions:
         # Several distinct Athena versions for this group (e.g. re-normalised, glitch-removed,
         # smoothed). NONE is selected: each is listed with what its own files state, compared,
@@ -1372,7 +1375,7 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         res["athena_versions"] = []
         for n, v in enumerate(athena_versions, start=1):
             cmp_ = A.compare({"grid": g2, "norm": nm["norm"], "flat": nm["flat"], "e0_eV": nm["e0_eV"], "edge_step": step}, v, params, np)
-            _diagnose(cmp_, v, stems, used_entries, grid, M, ctx, stem_of=stem_of, number_of=number_of)
+            version_coverage.append(_diagnose(cmp_, v, stems, used_entries, grid, M, ctx, stem_of=stem_of, number_of=number_of))
             listed = {"version_id": f"{group['group_id']}-v{n:02d}", "provenance": A.version_provenance(v, stems), "comparison": cmp_}
             if not A.plausible(v):
                 listed["flags"] = [A.EDGE_STEP_IMPLAUSIBLE_FLAG]
@@ -1529,6 +1532,33 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         athena_res["run_id"] = run_id
         athena_res["result_id"] = f"proc-{group['group_id']}-{run_id}-athena"
         out.append(athena_res)
+    picked = _selected_version(res, ctx.bundle) if athena_versions else None
+    if picked is not None:
+        # r1-a M4: the version the scientist chose as the result of record gets its own Athena result, built as
+        # every Athena result is; approving it (never the choice alone) makes the record carry its E0 and curve
+        n, decision = picked
+        v, listed = athena_versions[n - 1], res["athena_versions"][n - 1]
+        vfiles = [{**f, "role": "athena_normalized"} for f in files if f["role"] == f"athena_version_{n:02d}"]
+        vfiles += [f for f in files if f["role"] == "plot"]
+        vres = _athena_result(group, v, vfiles, params, np, ctx, stems=stems, isaac_counts=(len(scans_data), len(scans)),
+                              coverage=version_coverage[n - 1],
+                              isaac_scans=[number_of[id(e)] for e in used_entries] if listed_scans else None,
+                              listed_scans=listed_scans,
+                              numbered_from_file_names=numbering == B.SCAN_NUMBERS_FROM_FILE_NAME)
+        vres["comparison"] = listed["comparison"]
+        vres["preferred_for_record"] = (A.frame_known(v) and A.plausible(v)
+                                        and not (version_coverage[n - 1] or {}).get("partial"))
+        vres["run_id"] = run_id
+        vres["result_id"] = f"proc-{group['group_id']}-{run_id}-athena-v{n:02d}"
+        said = _version_chosen_statement(listed, decision, vres, res)
+        vres["athena_version_id"] = listed["version_id"]
+        vres["athena_version_selected"] = {"decision_id": decision.get("decision_id"),
+                                           "decided_by": (decision.get("decided_by") or {}).get("name"),
+                                           "isaac_result_id": res["result_id"], "statement": said["athena"]}
+        vres["qc"]["statements"]["athena_version_selected"] = said["athena"]
+        # after run_id: said in the result and the lists, never in the hashed files (no id moves)
+        res["qc"].setdefault("statements", {})["athena_version_selected"] = said["isaac"]
+        out.append(vres)
     # result.json is a SNAPSHOT, written once with the run folder: a re-run into an existing folder leaves it as it is
     # (the folder is content-addressed and never rewritten), so a sentence added to the result later (the non-hashed
     # `qc.statements`) is in bundle.json and the list/show output, not necessarily in an older result.json
@@ -1536,6 +1566,35 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     if not record.exists():
         _write(record, _json_bytes({"results": out}))
     return out
+
+
+def _selected_version(res: Mapping, bundle: Mapping | None) -> tuple[int, Mapping] | None:
+    """``(position from 1, decision)`` of the version the scientist's LATEST ``select_athena_version`` on ``res`` (by its
+    result id) resolves to among the versions ``res`` lists now (:func:`bundle.athena_resolve`: by the provenance the
+    decision recorded), else ``None``. A choice that no longer resolves is never carried over to another curve."""
+    d = B.latest_athena_selection(bundle or {}, res)
+    vid = B.athena_resolve(res, d) if d is not None else None
+    ids = B.athena_version_ids(res)
+    return (ids.index(vid) + 1, d) if vid in ids else None
+
+
+def _version_chosen_statement(listed: Mapping, decision: Mapping, vres: Mapping, res: Mapping) -> dict:
+    """What choosing an Athena version did, in words, for the version's own result and for ISAAC's."""
+    prov = listed.get("provenance") or {}
+    who = (decision.get("decided_by") or {}).get("name")
+    named = ", ".join(x for x in (prov.get("prj_file_name"), f"Athena group {prov['athena_group']}" if prov.get("athena_group") else None) if x)
+    e0 = (vres.get("outputs") or {}).get("e0_eV")
+    own = (res.get("outputs") or {}).get("e0_eV")
+    e0_said = f"{e0:.3f} eV" if isinstance(e0, (int, float)) else "not stated"
+    own_said = f"{own:.3f} eV" if isinstance(own, (int, float)) else "not stated"
+    chose = f"The scientist chose {listed['version_id']} ({named}) as the result of record ({decision.get('decision_id')}, by {who})."
+    return {
+        "athena": (f"{chose} This result is that version: approving it makes the record carry its E0 ({e0_said}) and "
+                   f"curve. ISAAC's own result for this group ({res['result_id']}) has E0 {own_said}."),
+        "isaac": (f"{chose} Its own Athena result is {vres['result_id']} (E0 {e0_said}); this ISAAC result's E0 is "
+                  f"{own_said}. The record carries the E0 and curve of whichever result is approved: approve "
+                  f"{vres['result_id']} for the chosen version's."),
+    }
 
 
 def _diagnose(comparison: dict, entry: Mapping, stems: Sequence[str], used_entries: Sequence[Mapping], grid, M, ctx: _Ctx,
@@ -1831,7 +1890,7 @@ def process_bundle(
             "record_groups_with_unselected_versions": len(versions),
             "notes": (a_notes + m_notes)[:500],
             "match_rule": A.MATCH_RULE_ID,
-            "statement": athena_match_statement(all_groups, entries, matched=matched, notes=m_notes),
+            "statement": athena_match_statement(all_groups, entries, matched={**versions, **matched}, notes=m_notes),
         },
         "processing_results": results,
         "unread_acquisition_results": unread_results,

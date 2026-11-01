@@ -202,7 +202,11 @@ Ask: approve, reject, or needs changes (with a note):
 - **Several Athena versions.** When a result lists more than one of the scientist's Athena versions
   (`athena_versions[]`), ask which one is their result of record and record
   `<isaac> bundle decide <bundle> --target <result_id> --decision select_athena_version --value <version_id> --by "<name>"`. It changes no QC
-  status and no processed value, and it is not an approval. When `isaac process` replies
+  status and no processed value, and it is not an approval. Then run `process --source <folder> --group <group id>`
+  again: the chosen version gets its own Athena result (`…-athena-v02`, `athena_version_id`; its
+  `qc.statements.athena_version_selected` says it), built like any Athena result. Show it and ask for approval
+  as usual: the record carries the E0 and curve of the ONE approved result (ISAAC's, if that is the one approved),
+  never of a version that was only chosen. When `isaac process` replies
   `athena_selections_not_carried_over`, say its statement in plain words: their earlier choice no longer
   matches a version ISAAC lists (the files, or how ISAAC reads them, changed), nothing is selected now,
   and ask the question again. A version that is a set of per-scan groups names any project holding the

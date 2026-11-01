@@ -6,6 +6,10 @@ Athena project and value below is invented (``SYN_``); the chemical formulas are
   tabulated edge (measured: +1.2 eV for a MoS2 standard, inside the 2 eV guard). Only a reference group whose sample
   is named as a pure element is proposed; a compound, a mixture or an unknown identity is not (said why), and an
   approval of its own edge needs ``--accept-shift`` whatever the size.
+* (M4) Choosing an Athena version as the result of record (``select_athena_version``) gives that version its own
+  approvable Athena result on the next ``isaac process`` (built as every Athena result is); approving it makes the
+  record carry that version's E0. Measured: a 42-scan group's chosen merge (E0 2473.114) changed nothing, and the
+  record kept ISAAC's 2472.958.
 """
 
 from __future__ import annotations
@@ -212,3 +216,79 @@ def test_an_approved_compound_own_edge_is_applied_only_with_its_size_confirmed(t
     confirmed = {**approval, "accepted_shift_eV": round(shift, 1)}
     _, cal = _calibration_of(run_process(bdir, source_root=root, calibration_approvals={gid: confirmed}))
     assert cal["outcome"]["applied"] and cal["outcome"]["applied_shift_eV"] == pytest.approx(shift)
+
+
+# --- M4: the chosen Athena version becomes an approvable result --------------------------------------------------
+
+STEM = "08_SYN_ZZ_pellet_030"
+
+
+def _versions_case(tmp_path):
+    """One imported run (2 synthetic XDAC scans, edge at 4966 eV) and TWO Athena projects whose merged group of it
+    differs (edges at 4966 and 4969 eV): two versions, none selected."""
+    from test_local_import_polish_c10m import _prj
+    from test_local_import_polish_c2f import _xdac, std_scan
+    from test_local_import_processing import GRID, mu_edge
+
+    from isaac_api.local_import import cli
+
+    root = tmp_path / "SYN_beamtime"
+    for k in (1, 2):
+        _xdac(root / "bt" / f"{STEM}_A.00{k}", std_scan(k, i1_positive=True))
+    _prj(root / "bt" / "a" / "SYN_one.prj", [(f"{STEM}_merged", GRID, mu_edge(GRID, 4966.0) * 1e-2)])
+    _prj(root / "bt" / "b" / "SYN_two.prj", [(f"{STEM}_merged", GRID, mu_edge(GRID, 4969.0) * 1e-2)])
+    out = tmp_path / "out"
+    assert cli.main(["import", str(root), "--out", str(out)]) == 0
+    M.group(out)
+    return out, root
+
+
+def _results(bdir, source):
+    return [r for r in M.load(bdir)["processing_results"] if r["source"] == source]
+
+
+def test_choosing_an_athena_version_then_approving_it_gives_the_record_its_e0(tmp_path, capsys):
+    _processing()
+    from isaac_api.local_import import records as R
+
+    bdir, root = _versions_case(tmp_path)
+    out = M.process(bdir, source=str(root))
+    capsys.readouterr()
+    [isa] = _results(bdir, "isaac_protocol")
+    assert _results(bdir, "scientist_athena") == [] and len(isa["athena_versions"]) == 2
+    assert "processing this group again gives that version its own Athena result" in isa["questions"][0]["text"]
+    # NEVER "matched no record group" when the group lists the scientist's versions
+    assert not any("matched no record group" in line for line in out["summary"]["lines"])
+    v02 = isa["athena_versions"][1]
+    assert v02["provenance"]["prj_file_name"] == "SYN_two.prj"
+    M.decide(bdir, target_ids=[isa["result_id"]], decision="select_athena_version", value=v02["version_id"], **BY)
+    M.process(bdir, source=str(root))
+    [isa] = _results(bdir, "isaac_protocol")
+    [ath] = _results(bdir, "scientist_athena")
+    assert ath["athena_version_id"] == v02["version_id"] and ath["result_id"] == f"proc-{isa['group_id']}-{isa['run_id']}-athena-v02"
+    assert ath["inputs"][0]["relative_path"].endswith("SYN_two.prj") and ath["state"] == "needs_review"
+    assert ath["outputs"]["e0_eV"] == pytest.approx(4969.0, abs=0.6)
+    assert abs(ath["outputs"]["e0_eV"] - isa["outputs"]["e0_eV"]) > 2.0
+    assert [f["role"] for f in ath["outputs"]["files"]][0] == "athena_normalized"
+    assert "approving it makes the record carry its E0" in ath["qc"]["statements"]["athena_version_selected"]
+    assert ath["result_id"] in isa["qc"]["statements"]["athena_version_selected"]
+    assert isa["athena_result_of_record"] == v02["version_id"]
+    group = next(g for g in M.load(bdir)["record_groups"] if g["group_id"] == isa["group_id"])
+    # before the approval the record carries no E0 from either result
+    draft, _ = R.compose_group(M.load(bdir), group, bdir)
+    assert not draft.get("descriptors_outputs")
+    M.decide(bdir, target_ids=[ath["result_id"]], decision="approve", value=None, qc_status="valid", **BY)
+    draft, report = R.compose_group(M.load(bdir), group, bdir)
+    [d] = draft["descriptors_outputs"][0]["descriptors"]
+    assert d["name"] == "edge_position" and d["value"] == pytest.approx(ath["outputs"]["e0_eV"])
+    assert d["source"] == "imported" and "SYN_two.prj" in draft["descriptors_outputs"][0]["label"]
+    assert report["processing"]["result"] == ath["result_id"]
+
+
+def test_without_a_choice_no_version_result_is_made(tmp_path, capsys):
+    _processing()
+    bdir, root = _versions_case(tmp_path)
+    M.process(bdir, source=str(root))
+    M.process(bdir, source=str(root))
+    capsys.readouterr()
+    assert _results(bdir, "scientist_athena") == []
