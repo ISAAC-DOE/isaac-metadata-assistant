@@ -316,7 +316,10 @@ def test_foil_name_evidence_proposes_the_reference_but_only_an_approval_applies_
     o = cal["outcome"]
     assert o["reference"]["basis"] == "stated_by_evidence" and (o["reference"]["element"], o["reference"]["edge"]) == ("Ti", "K")
     assert o["computed_shift_eV"] == pytest.approx(-3.0, abs=0.6) and not o["applied"]
-    assert "calibration_shift_awaiting_approval" in cal["flags"]
+    # r1-a review: a group's own edge whose names do not clearly say one pure element ("A" is not on the closed list)
+    # is not proposed, so nothing awaits an approval; an approval of it is applied only with --accept-shift
+    assert "calibration_shift_awaiting_approval" not in cal["flags"]
+    assert "own_signal_not_named_as_pure_element" in cal["flags"]
     # c12-cal: -3 eV is above qc.warn_energy_shift_eV (2), so the approval also confirms its size (--accept-shift)
     approval = {"element": "Ti", "edge": "K", "decided_by": "SYN Scientist", "accepted_shift_eV": round(o["computed_shift_eV"], 1)}
     approved = run_process(bdir, source_root=root, calibration_approvals={r["group_id"]: approval})

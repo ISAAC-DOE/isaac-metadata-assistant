@@ -3,9 +3,9 @@ Athena project and value below is invented (``SYN_``); the chemical formulas are
 
 * (H1) A compound standard's own edge is never offered as the energy calibration. A chemical standard is not an
   energy calibrant: its edge sits where its chemistry puts it, and "S K" would move it onto elemental sulfur's
-  tabulated edge (measured: +1.2 eV for a MoS2 standard, inside the 2 eV guard). Only a reference group whose sample
-  is named as a pure element is proposed; a compound, a mixture or an unknown identity is not (said why), and an
-  approval of its own edge needs ``--accept-shift`` whatever the size.
+  tabulated edge (measured: +1.2 eV for a MoS2 standard, inside the 2 eV guard). r1-a review: names cannot settle
+  it, so a calibration on a group's OWN edge is applied only with ``--accept-shift``, whatever its size and names;
+  names only hint, from a closed list (the review's probes: test_local_import_polish_r1ar.py).
 * (M4) Choosing an Athena version as the result of record (``select_athena_version``) gives that version its own
   approvable Athena result on the next ``isaac process`` (built as every Athena result is); approving it makes the
   record carry that version's E0. Measured: a 42-scan group's chosen merge (E0 2473.114) changed nothing, and the
@@ -26,7 +26,7 @@ import pytest
 from isaac_api.local_import import mutations as M
 from isaac_api.local_import.processing import reference as REF
 
-from test_local_import_records import BY, bdir, pristine  # noqa: F401  (fixtures)
+from test_local_import_records import BY, bdir, fake_upstream, pristine  # noqa: F401  (fixtures)
 
 LEGACY_OUTCOME_KEYS = [
     "reference_source", "reference_e0_per_scan_eV", "reference_snr_per_scan", "measured_reference_e0_eV",
@@ -44,22 +44,23 @@ def _processing():
 
 
 @pytest.mark.parametrize("names, kind, element", [
-    (["SYN_CoSO4_5wt_sucrose_std"], "compound", None),
-    (["SYN_MoS2_0.5wt_std"], "compound", None),
-    (["SYN_Na2S2O3_std"], "compound", None),
-    (["05_SYN_CoO_std_005"], "compound", None),
-    (["SYN_Zz_oxide_std"], "compound", None),
-    (["SYN_S_in_sucrose_std"], "mixture", None),
-    (["SYN_S_std", "S"], "element", "S"),
-    (["SYN_S8_std"], "element", "S"),
-    (["SYN_Ti_foil_A"], "element", "Ti"),
-    (["01_SYN_Cofoil_std_005"], "element", "Co"),
-    (["31_SYN_Ti_foil_I2_120"], "element", "Ti"),  # I2 is a detector, never iodine
-    (["SYN_STD_REF"], "unknown", None),  # capitals with no digit are never a formula
-    (["SYN_Ti_Co_std"], "unknown", None),  # two elements: which is it?
+    (["SYN_CoSO4_5wt_sucrose_std"], "unknown", None),
+    (["SYN_MoS2_0.5wt_std"], "unknown", None),
+    (["Na2S2O3_std"], "unknown", None),
+    (["05_CoO_std_005"], "unknown", None),
+    (["S_in_sucrose_std"], "unknown", None),
+    (["S_std", "S"], "element", "S"),
+    (["S8_std"], "element", "S"),
+    (["Ti_foil_A"], "unknown", None),  # "A" is not on the closed list
+    (["Ti_foil_005"], "element", "Ti"),
+    (["01_Cofoil_std_005"], "element", "Co"),
+    (["31_Ti_foil_I2_120"], "unknown", None),  # I2 (a detector) is not on the list
+    (["SYN_S_std"], "unknown", None),  # SYN is not on the list: ISAAC cannot tell
+    (["STD_REF"], "unknown", None),
+    (["Ti_Co_std"], "unknown", None),  # two elements: which is it?
     ([], "unknown", None),
 ])
-def test_a_reference_groups_sample_is_read_from_its_names_only(names, kind, element):
+def test_a_reference_groups_names_give_only_a_closed_list_hint(names, kind, element):
     c = REF.calibrant_identity(names)
     assert (c["kind"], c["element"]) == (kind, element)
     assert c["rule_id"] == REF.CALIBRANT_RULE_ID and c["statement"]
@@ -74,20 +75,26 @@ def _step(e0s, snrs, calibrant=None, source="reference_group_own_signal"):
     return step
 
 
+CHEM = REF.CHEMICAL_STANDARD[0].lower() + REF.CHEMICAL_STANDARD[1:]
+
+
 def test_a_compound_standards_own_edge_is_read_but_not_proposed_and_needs_its_size_confirmed():
     step = _step([2470.8, 2470.8], [400.0, 380.0], calibrant=["SYN_MoS2_std"])
     r = REF.reading(step)
     assert r["reference_proposed"] is True and r["calibration_proposed"] is False
-    assert REF.CHEMICAL_STANDARD in r["reference_statement"] and "MoS2" in r["reference_statement"]
+    assert CHEM in r["reference_statement"] and "SYN_MoS2_std" in r["reference_statement"]
+    assert "ISAAC cannot tell from its names that this is a pure element" in r["reference_statement"]
     assert "Naming its element and edge" not in r["reference_statement"]
     w = REF.would_apply(step, "S", "K", warn_eV=2.0)
     assert w["shown"] == "+1.2" and w["needs_size_confirmation"] and w["needs_calibrant_confirmation"]
-    assert "--accept-shift +1.2" in w["statement"] and "whatever the size" in w["statement"]
-    # NEGATIVE CONTROLS: elemental sulfur, and a step stored before the rule (no reference_calibrant), as before
-    for same in (_step([2471.6], [400.0], calibrant=["SYN_S_std"]), _step([2471.6], [400.0])):
-        assert REF.reading(same)["calibration_proposed"] is True
-        w = REF.would_apply(same, "S", "K", warn_eV=2.0)
-        assert w["shown"] == "+0.4" and not w["needs_size_confirmation"] and not w["needs_calibrant_confirmation"]
+    assert "Only if it is a pure element, approve with --accept-shift +1.2." in w["statement"]
+    assert "whatever its size" in w["statement"]
+    # elemental sulfur's own edge is proposed, and STILL needs --accept-shift (names are a hint only)
+    same = _step([2471.6], [400.0], calibrant=["S_std"])
+    assert REF.reading(same)["calibration_proposed"] is True
+    w = REF.would_apply(same, "S", "K", warn_eV=2.0)
+    assert w["shown"] == "+0.4" and w["needs_size_confirmation"] and w["needs_calibrant_confirmation"]
+    assert "its names say it is S; if so, approve with --accept-shift +0.4." in w["statement"]
     # an in-scan reference channel is never judged by the group's name
     assert REF.reading(_step([2470.8, 2470.8], [40.0, 40.0], calibrant=["SYN_MoS2_std"],
                              source=REF.IN_SCAN))["calibration_proposed"] is True
@@ -119,7 +126,7 @@ def test_an_explicit_own_edge_calibration_of_a_compound_needs_accept_shift_howev
     with pytest.raises(M.MutationRefused) as exc:
         M.decide(bdir, **args)
     said = str(exc.value)
-    assert "approving applies +1.2 eV" in said and REF.CHEMICAL_STANDARD in said
+    assert "approving applies +1.2 eV" in said and CHEM in said
     assert "--accept-shift +1.2" in said and "Nothing was recorded" in said
     assert _calibrations(bdir) == []
     out = M.decide(bdir, **args, accept_shift=1.2)
@@ -128,12 +135,17 @@ def test_an_explicit_own_edge_calibration_of_a_compound_needs_accept_shift_howev
     assert d["value"] == {"accepted_shift_eV": 1.2}
 
 
-def test_elemental_sulfurs_own_edge_is_approved_as_before(bdir):
-    gid = _with_result(bdir, _step([2471.6], [400.0], calibrant=["SYN_S_std"]))
-    out = M.decide(bdir, target_ids=[gid], decision="approve_calibration", value=None, element="S", edge="K", **BY)
+def test_elemental_sulfurs_own_edge_also_needs_accept_shift(bdir):
+    gid = _with_result(bdir, _step([2471.6], [400.0], calibrant=["S_std"]))
+    args = dict(target_ids=[gid], decision="approve_calibration", value=None, element="S", edge="K", **BY)
+    with pytest.raises(M.MutationRefused) as exc:
+        M.decide(bdir, **args)
+    assert "its names say it is S; if so, approve with --accept-shift +0.4." in str(exc.value)
+    assert _calibrations(bdir) == []
+    out = M.decide(bdir, **args, accept_shift=0.4)
     assert "approving applies +0.4 eV" in out["statement"]
     [d] = _calibrations(bdir)
-    assert d["value"] is None
+    assert d["value"] == {"accepted_shift_eV": 0.4}
 
 
 # --- H1 through processing (numpy + larch) ------------------------------------------------------------------------
@@ -168,26 +180,36 @@ def test_processing_never_proposes_a_compound_standards_own_edge(tmp_path):
     r, cal = _calibration_of(run_process(bdir, source_root=root))
     o = cal["outcome"]
     assert o["reference_source"] == REF.OWN_SIGNAL and o["reference_proposed"] is True
-    assert o["calibration_proposed"] is False and o["reference_calibrant"]["kind"] == "compound"
-    assert REF.CHEMICAL_STANDARD in o["reference_statement"]
-    assert REF.NOT_A_CALIBRANT_FLAG in r["review_flags"]
+    assert o["calibration_proposed"] is False and o["reference_calibrant"]["kind"] == "unknown"
+    assert CHEM in o["reference_statement"]
+    assert REF.NOT_NAMED_ELEMENT_FLAG in r["review_flags"]
+    # LOW: nothing awaits an approval ISAAC does not propose
+    assert "calibration_shift_awaiting_approval" not in r["review_flags"]
     # said outside the hashed files: params.json keeps exactly the calibration keys it had (no id moves)
     params = json.loads(next(bdir / f["relative_path"] for f in r["outputs"]["files"] if f["role"] == "params").read_text())
     assert list(params["calibration"]) == LEGACY_OUTCOME_KEYS
 
 
-def test_processing_still_proposes_elemental_sulfur(tmp_path):
+def test_processing_proposes_elemental_sulfur_but_applies_it_only_with_accept_shift(tmp_path):
     _processing()
     from isaac_api.local_import.processing.cli_entry import run_process
 
-    bdir, root, _ = _sulfur_case(tmp_path, "05_SYN_S_std_005", 2471.6)
+    bdir, root, _ = _sulfur_case(tmp_path, "05_S_ref_005", 2471.6)
     r, cal = _calibration_of(run_process(bdir, source_root=root))
     o = cal["outcome"]
     assert o["calibration_proposed"] is True and o["reference_calibrant"]["kind"] == "element"
-    assert "Naming its element and edge gives the shift" in o["reference_statement"]
-    assert REF.NOT_A_CALIBRANT_FLAG not in r["review_flags"]
-    approval = {"element": "S", "edge": "K", "decided_by": "SYN Scientist"}
-    _, cal = _calibration_of(run_process(bdir, source_root=root, calibration_approvals={r["group_id"]: approval}))
+    assert "its names say it is S; if so, approve with --accept-shift" in o["reference_statement"]
+    assert REF.NOT_NAMED_ELEMENT_FLAG not in r["review_flags"]
+    approval = {"element": "S", "edge": "K", "decided_by": "SYN Scientist", "decision_id": "d-old"}
+    r2, cal = _calibration_of(run_process(bdir, source_root=root, calibration_approvals={r["group_id"]: approval}))
+    # an approval recorded without --accept-shift (before this rule): not applied to a result processed now, said so
+    assert not cal["outcome"]["applied"] and REF.CALIBRANT_NOT_CONFIRMED_FLAG in cal["flags"]
+    said = r2["qc"]["statements"]["calibration_approval_not_applied"]
+    assert "recorded without --accept-shift, before ISAAC required it" in said
+    assert "a result already approved keeps the curve it has" in said
+    shift = cal["outcome"]["computed_shift_eV"]
+    confirmed = {**approval, "accepted_shift_eV": round(shift, 1)}
+    _, cal = _calibration_of(run_process(bdir, source_root=root, calibration_approvals={r["group_id"]: confirmed}))
     assert cal["outcome"]["applied"] and cal["outcome"]["applied_shift_eV"] == pytest.approx(0.4, abs=0.2)
 
 
@@ -199,7 +221,7 @@ def test_a_compound_whose_identity_is_unknown_is_not_proposed_either(tmp_path):
     _, cal = _calibration_of(run_process(bdir, source_root=root))
     o = cal["outcome"]
     assert o["calibration_proposed"] is False and o["reference_calibrant"]["kind"] == "unknown"
-    assert "do not state that its sample is a pure element" in o["reference_statement"]
+    assert "ISAAC cannot tell from its names that this is a pure element" in o["reference_statement"]
 
 
 def test_an_approved_compound_own_edge_is_applied_only_with_its_size_confirmed(tmp_path):
@@ -216,7 +238,7 @@ def test_an_approved_compound_own_edge_is_applied_only_with_its_size_confirmed(t
     assert said.startswith("The calibration approval d-syn (S K, by SYN Scientist) is not applied")
     shift = cal["outcome"]["computed_shift_eV"]
     assert 0 < shift < 2.0  # inside the 2 eV guard: before this rule it was applied with no size confirmed
-    assert REF.CHEMICAL_STANDARD in said and f"--accept-shift {REF.shown(shift)}" in said
+    assert CHEM in said and f"--accept-shift {REF.shown(shift)}" in said
     confirmed = {**approval, "accepted_shift_eV": round(shift, 1)}
     _, cal = _calibration_of(run_process(bdir, source_root=root, calibration_approvals={gid: confirmed}))
     assert cal["outcome"]["applied"] and cal["outcome"]["applied_shift_eV"] == pytest.approx(shift)
@@ -302,7 +324,7 @@ def test_without_a_choice_no_version_result_is_made(tmp_path, capsys):
 
 
 def _fixed_e0_case(tmp_path, edges, athena_e0s):
-    """One run per edge (2 synthetic scans each, different samples) and ONE Athena project holding each run's curve,
+    """One run per edge (4 synthetic scans each, different samples) and ONE Athena project holding each run's curve,
     normalised with the E0 given (a number set in Athena, not found from the curve)."""
     import larch.xafs as xafs
     from larch import Group
@@ -311,7 +333,9 @@ def _fixed_e0_case(tmp_path, edges, athena_e0s):
     from test_local_import_processing import GRID, fluo_scan, make_case, mu_edge, spec_file
 
     tmp_path.mkdir(parents=True, exist_ok=True)
-    runs = [(f"0{k}_SYN_ZZ{k}", [spec_file(fluo_scan(s, e0=e0)) for s in (1, 2)], {"sample_name": f"ZZ{k}"})
+    # four scans each: ISAAC's QC passes (two scans warn: the few-scan glitch check), and only an ISAAC E0 whose QC
+    # passed is compared (r1-a review)
+    runs = [(f"0{k}_SYN_ZZ{k}", [spec_file(fluo_scan(s, e0=e0)) for s in (1, 2, 3, 4)], {"sample_name": f"ZZ{k}"})
             for k, e0 in enumerate(edges, start=1)]
     bdir, root, bundle = make_case(tmp_path, runs)
     prj = AthenaProject()

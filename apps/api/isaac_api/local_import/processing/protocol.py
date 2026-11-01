@@ -35,7 +35,7 @@ RULE_VERSIONS_SINCE_PROTOCOL_VERSION: dict[str, Any] = {
         "isaac.xas.edge_above_noise.v0",
         "isaac.xas.edge_step_plausible.v0",
         "isaac.xas.in_scan_reference_min_scans.v0",
-        "isaac.xas.own_signal_calibrant_pure_element.v0",
+        "isaac.xas.own_signal_shift_confirmed.v0",
         "isaac.xas.post_edge_level.v1",
         "isaac.xas.reference_channel_fallback.v1",
         "isaac.xas.skip_signal_all_zero.v0",

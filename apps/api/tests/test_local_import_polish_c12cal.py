@@ -66,9 +66,12 @@ def test_two_usable_scans_propose_and_say_the_would_be_shift():
     assert w["shown"] == "-8.6" and w["needs_size_confirmation"] and not w["implausible"]
     assert "sits 8.6 eV above Ti K's tabulated 4966.0 eV; approving applies -8.6 eV" in w["statement"]
     assert "--accept-shift -8.6" in w["statement"]
-    # a reference group's own signal needs only one scan; a small shift needs no size confirmation
+    # a reference group's own signal needs only one scan; r1-a review: its shift is applied only with --accept-shift,
+    # whatever its size (on a separate in-scan channel a small shift needs no size confirmation)
     foil = REF.would_apply(_step([4966.205], [500.0], source="reference_group_own_signal"), "Ti", "K", warn_eV=2.0)
-    assert foil["shown"] == "-0.2" and not foil["needs_size_confirmation"]
+    assert foil["shown"] == "-0.2" and foil["needs_size_confirmation"]
+    channel = REF.would_apply(_step([4966.205, 4966.205], [500.0, 500.0]), "Ti", "K", warn_eV=2.0)
+    assert channel["shown"] == "-0.2" and not channel["needs_size_confirmation"]
     assert REF.reading(_step([4966.205], [500.0], source="reference_group_own_signal"))["reference_e0_spread_eV"] is None
 
 
@@ -134,7 +137,8 @@ def test_a_large_shift_needs_accept_shift_matching_the_shift_shown(bdir):
 
 
 def test_a_small_shift_is_approved_as_before_and_said(bdir):
-    gid = _with_result(bdir, [4966.205], [500.0], source="reference_group_own_signal")
+    # a separate in-scan channel; r1-a review: a group's OWN edge always needs --accept-shift (test_local_import_polish_r1a)
+    gid = _with_result(bdir, [4966.205, 4966.205], [500.0, 500.0])
     out = M.decide(bdir, target_ids=[gid], decision="approve_calibration", value=None, element="Ti", edge="K", **BY)
     assert "approving applies -0.2 eV" in out["statement"] and "calibration Ti K approved" in out["statement"]
     [d] = _calibrations(bdir)

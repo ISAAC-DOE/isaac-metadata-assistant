@@ -154,7 +154,9 @@ Ask: approve, reject, or needs changes (with a note):
 - **QC status is the scientist's.** Approving also needs `--qc-status <word>` (and `--qc-note` when the status says something is compromised or failed: `decide` refuses those without one). The processing verdict (`pass`/`warn`/`fail`) is shown to help them choose; it is never turned into a status for them, and `warn` never auto-maps. Offer the allowed words from the vocabulary and the flags that bear on the choice.
 - **One approved result per group.** A group can hold ISAAC's result (`…-isaac`) and one for the
   scientist's own Athena curve (`…-athena`, often `preferred_for_record: true`); the record uses exactly
-  one. Approving one while the other is approved is refused (`decide` names the approved one):
+  one: the APPROVED one. "Preferred" is only a suggestion; `preferred_for_record: false` on a result can leave no
+  result preferred, and the record still uses only the approved result. Approving one while the other is approved
+  is refused (`decide` names the approved one):
   keep it, or withdraw it first (`--decision defer` or `reject` on it) and then approve the other. A bundle
   an older build let hold two approvals says so in `validate` (`processing_blocker:
   more_than_one_approved_result`, "two results approved for this group; approve exactly one: <ids>");
@@ -176,11 +178,13 @@ Ask: approve, reject, or needs changes (with a note):
   those groups, not a merge the scientist made: the descriptor says so, names the groups, and is ISAAC's
   (`source: auto`). Say that plainly before they approve it. A record names no folder, only the project's file name.
 - **An Athena E0 that may be a setting** (flag `athena_e0_possibly_fixed`, `qc.statements.athena_e0_possibly_fixed`,
-  question `athena_e0_measured_or_set`): the same Athena E0 (to 0.001 eV) in several groups whose own edges differ
-  (ISAAC's E0s spread 0.5 eV or more, or the samples are named as chemically different) is likely a normalisation
-  setting typed or carried over in Athena, not a measured edge position. The result is not preferred. Say the
-  statement and ask "was this E0 measured from this group's edge, or set?" before approving it; approve it only
-  on "measured" (say it in `--qc-note`). If it was set, it is not the edge position: offer ISAAC's result instead.
+  question `athena_e0_measured_or_set`): the same Athena E0 (to 0.001 eV) in different Athena curves of groups whose
+  ISAAC E0s (QC passed) differ by 0.5 eV or more is likely a normalisation setting typed or carried over in Athena,
+  not a measured edge position (names are not read; one curve matched to two groups is one curve). The result is
+  not preferred. Say the statement and ask "was this E0 measured from this group's edge, or set?" before approving
+  it; approve it only on "measured" (say it in `--qc-note`). If it was set, it is not the edge position: offer
+  ISAAC's result instead. A result already decided is kept as it is: the summary line "approved result <id> carries
+  a possibly fixed Athena E0" names it; ask the scientist the same question about it.
 - **A result with no curve** (no output file, e.g. `no_usable_scan`) cannot be approved; `decide`
   refuses. Say why in words and offer: reject the result; `needs_changes` (the protocol needs a setting
   the scientist chooses; only on their explicit choice re-process with `--params-file`); or leave the
@@ -212,8 +216,11 @@ Ask: approve, reject, or needs changes (with a note):
   again: the chosen version gets its own Athena result (`…-athena-v02`, `athena_version_id`; its
   `qc.statements.athena_version_selected` says it), built like any Athena result. Show it and ask for approval
   as usual: the record carries the E0 and curve of the ONE approved result (ISAAC's, if that is the one approved),
-  never of a version that was only chosen. When `isaac process` replies
-  `athena_selections_not_carried_over`, say its statement in plain words: their earlier choice no longer
+  never of a version that was only chosen. The choice carries over when ISAAC's own result id changes (a params
+  file, a calibration): it is matched by the version's project file, Athena group and data hash. If they choose
+  another version after one was approved, the reply says "reject <old id> first, then approve <new id>": ask
+  before each step. When `isaac process` replies `athena_selections_not_carried_over` (or a summary line says
+  so), say its statement in plain words: their earlier choice no longer
   matches a version ISAAC lists (the files, or how ISAAC reads them, changed), nothing is selected now,
   and ask the question again. A version that is a set of per-scan groups names any project holding the
   identical set (`per_scan_set.identical_in_projects`); say so.
@@ -233,17 +240,20 @@ an element/edge already named for the group: approved, proposed, or the group's 
   `reference_edge_in_too_few_scans` or `no_reference_available`): say the `reference_statement` ("only 1 of
   16 scans shows a usable reference edge; an in-scan reference needs one in at least 2 scans") and do NOT
   ask for an element or edge: no shift can be approved, and `approve_calibration` is refused.
-- **A standard's own edge** (review flag `own_signal_not_an_energy_calibrant`; the `reference_statement` says it is
-  not proposed): a chemical standard is not an energy calibrant: its edge sits where its
-  chemistry puts it. A reference group's own edge is proposed only when its sample is named as a pure element (a
-  foil, elemental sulfur); a compound (CoSO4, MoS2), a mixture (5 wt% in sucrose) or a sample whose names do not say
-  is not (the statement says what was read). Say the `reference_statement` and do NOT ask for an
-  element or edge: "S K" would move the standard onto elemental sulfur's tabulated edge and erase the chemical shift
-  it was measured to show. Only if the scientist asks for it, `approve_calibration` needs `--accept-shift <the shift
-  shown>` whatever its size (without it, refused; nothing recorded; processing does not apply it,
-  `calibration_own_signal_shift_not_confirmed`).
+- **A reference group's own edge** (`reference_source: reference_group_own_signal`, not a separate foil channel)
+  is a calibration only if its sample is a pure element, and names cannot settle that: a chemical standard is not
+  an energy calibrant (its edge sits where its chemistry puts it; "S K" would move a MoS2 standard onto elemental
+  sulfur's edge and erase the chemical shift it was measured to show). So `approve_calibration` on it ALWAYS needs
+  `--accept-shift <the shift shown>`, whatever its size and names (without it: refused, nothing recorded; processing
+  does not apply it, `calibration_own_signal_shift_not_confirmed`). The names only hint: "its names say it is S; if
+  so, approve with --accept-shift +0.4" (a closed list: symbol or English name, S8, `Cu foil`, `Sref`, `S_K`), or
+  "ISAAC cannot tell from its names that this is a pure element" (flag `own_signal_not_named_as_pure_element`,
+  `calibration_proposed: false`): then do NOT ask for an element or edge unless the scientist says it is a pure
+  element. A reply naming another element than the names ("its names say it is Fe, not Cu") is said and asked. An
+  approval recorded before this rule (no `--accept-shift`) is not applied to a result processed now (its statement
+  says so); a result already approved keeps its curve.
 - **A reference is proposed** (`calibration.reference_proposed: true` in `show processing-result`, without the flag
-  `own_signal_not_an_energy_calibrant`; the flag
+  `own_signal_not_named_as_pure_element`; the flag
   `calibration_reference_unconfirmed` alone only means no reference is approved yet): say how many scans show a
   reference edge and where ("2 of 2 scans show a reference edge at 4974.6 eV"), then ask which element and
   edge the reference measures (`--element Ir`, `--edge L3` style). Never guess it from a file name. Record
@@ -257,7 +267,8 @@ an element/edge already named for the group: approved, proposed, or the group's 
   recorded by a refusal. A result whose approval lacks the confirmed size carries
   `calibration_shift_size_not_confirmed` and is not shifted.
 - Then run `process --source <folder> --group <group id>` again and say the result's `applied_shift_eV`.
-  A shift of 2 eV or less is approved as before, without `--accept-shift`.
+  On a separate foil channel, a shift of 2 eV or less is approved without `--accept-shift`; a group's own edge
+  always needs it.
 - **A curve that already carries a shift** (`calibration.carried_shift`, `confirmed: false`): a result
   approved under an older build baked in a shift the current rules would not apply (e.g. -8.6 eV from 1 of 16
   usable scans, or a large shift whose size nobody confirmed). It is kept on re-processing, and

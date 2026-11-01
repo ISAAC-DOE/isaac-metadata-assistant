@@ -308,9 +308,9 @@ def identity_texts(group: Mapping, stems: Sequence[str]) -> list[str]:
 
 def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], headers: Sequence[str], ctx: _Ctx,
                  calibrant: Mapping | None = None) -> dict:
-    """``calibrant``: :func:`reference.calibrant_identity` of a REFERENCE group (``None`` otherwise). When it is not a
-    pure element, an approval of the group's own edge is applied only with its size confirmed, whatever the size
-    (:data:`reference.CALIBRANT_RULE_ID`)."""
+    """``calibrant``: :func:`reference.calibrant_identity` of a REFERENCE group (``None`` otherwise): a hint only. An
+    approval of a reference group's own edge is applied only with its size confirmed (``--accept-shift``), whatever
+    the size and whatever its names say (:data:`reference.CALIBRANT_RULE_ID`)."""
     np, cp = ctx.np, ctx.params["calibration"]
     role = group.get("role", "sample")
     flags: list[str] = []
@@ -336,9 +336,11 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
     per_scan: list[dict | None] = []
     ref_source = None
     unconfirmed_reason = None
-    own_not_element = role == "reference" and calibrant is not None and calibrant.get("kind") != "element"
-    if own_not_element:
-        flags.append(REF.NOT_A_CALIBRANT_FLAG)
+    own = role == "reference"
+    # CALIBRANT_RULE_ID: names that do not clearly say one pure element: the group's own edge is not proposed
+    not_named = own and REF.named_element(calibrant) is None
+    if not_named:
+        flags.append(REF.NOT_NAMED_ELEMENT_FLAG)
     if role == "reference":
         ref_source = "reference_group_own_signal"
         per_scan = [C.edge_e0(sa["energy"], sa["mu"], np, ctx.xafs) for sa in scans_data]
@@ -383,10 +385,12 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
             if abs(shift) > float(cp["max_plausible_shift_eV"]):
                 flags.append("shift_implausible_not_applied")
             elif not approved:
-                flags.append("calibration_shift_awaiting_approval")
-            elif own_not_element and not REF.shift_size_confirmed(accepted, shift):
-                # CALIBRANT_RULE_ID: a compound or mixture standard's own edge sits where its chemistry puts it; moving it
-                # onto a tabulated edge erases that chemical shift, so even a small shift needs its size confirmed
+                if not not_named:  # nothing awaits an approval ISAAC does not propose (flags are not hashed)
+                    flags.append("calibration_shift_awaiting_approval")
+            elif own and not REF.shift_size_confirmed(accepted, shift):
+                # CALIBRANT_RULE_ID: a group's own edge is a calibration only if its sample is a pure element, which
+                # names cannot settle (a chemical standard's edge sits where its chemistry puts it, and moving it onto
+                # a tabulated edge erases that chemical shift): applied only with --accept-shift, whatever the size
                 flags.append(REF.CALIBRANT_NOT_CONFIRMED_FLAG)
             elif REF.exceeds_warn(shift, ctx.params["qc"]["warn_energy_shift_eV"]) and not REF.shift_size_confirmed(accepted, shift):
                 # c12-cal (REF.SHIFT_SIZE_RULE_ID): a shift above the warning level moves every energy of the record by
@@ -1532,7 +1536,18 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         athena_res["run_id"] = run_id
         athena_res["result_id"] = f"proc-{group['group_id']}-{run_id}-athena"
         out.append(athena_res)
-    picked = _selected_version(res, ctx.bundle) if athena_versions else None
+    picked = None
+    chosen = _group_selection(group["group_id"], res, ctx.bundle)
+    if chosen is not None:
+        decision, vid = chosen
+        ids = B.athena_version_ids(res)
+        if vid in ids:
+            picked = (ids.index(vid) + 1, decision)
+        elif (decision.get("target") or {}).get("id") != res["result_id"]:
+            # r1-a M2: chosen on ANOTHER result of this group (ISAAC's own result id moved: a params file, a
+            # calibration) and it names no version listed now: never carried over to another curve, and said. A choice
+            # on this very result id is said by `isaac process` (mutations) as before.
+            _say_selection_not_carried_over(res, decision)
     if picked is not None:
         # r1-a M4: the version the scientist chose as the result of record gets its own Athena result, built as
         # every Athena result is; approving it (never the choice alone) makes the record carry its E0 and curve
@@ -1551,6 +1566,22 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         vres["run_id"] = run_id
         vres["result_id"] = f"proc-{group['group_id']}-{run_id}-athena-v{n:02d}"
         said = _version_chosen_statement(listed, decision, vres, res)
+        made_on = (decision.get("target") or {}).get("id")
+        if made_on != res["result_id"]:
+            # r1-a M2: the choice was made on an earlier ISAAC result of this group and is carried over by the version's
+            # own provenance (project file, Athena group, data hash), never by its position
+            carried = (f" The choice was made on an earlier ISAAC result of this group, {made_on}; the same version "
+                       "(same project file, Athena group and data hash) is listed here, so it is carried over. This "
+                       "result's own question stays open until a choice is recorded on it; approving "
+                       f"{vres['result_id']} is what puts that version's E0 and curve in the record.")
+            said = {"athena": said["athena"] + carried, "isaac": said["isaac"] + carried}
+        replaced = _approved_other_versions(group["group_id"], decision, vres["result_id"], ctx.bundle)
+        if replaced:
+            # r1-a M3: an approved result of a version the scientist chose EARLIER, while the latest choice is another: a
+            # record uses one approved result (decide refuses a second), so the order is said
+            vres["athena_version_replaces_approved"] = replaced
+            both = " ".join(x["statement"] for x in replaced)
+            said = {"athena": f"{said['athena']} {both}", "isaac": f"{said['isaac']} {both}"}
         vres["athena_version_id"] = listed["version_id"]
         vres["athena_version_selected"] = {"decision_id": decision.get("decision_id"),
                                            "decided_by": (decision.get("decided_by") or {}).get("name"),
@@ -1568,14 +1599,86 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     return out
 
 
-def _selected_version(res: Mapping, bundle: Mapping | None) -> tuple[int, Mapping] | None:
-    """``(position from 1, decision)`` of the version the scientist's LATEST ``select_athena_version`` on ``res`` (by its
-    result id) resolves to among the versions ``res`` lists now (:func:`bundle.athena_resolve`: by the provenance the
-    decision recorded), else ``None``. A choice that no longer resolves is never carried over to another curve."""
-    d = B.latest_athena_selection(bundle or {}, res)
-    vid = B.athena_resolve(res, d) if d is not None else None
-    ids = B.athena_version_ids(res)
-    return (ids.index(vid) + 1, d) if vid in ids else None
+#: r1-a M3: an approved Athena-version result that is no longer the scientist's latest choice (on that stored result)
+VERSION_NOT_CHOSEN_FLAG = "athena_version_no_longer_chosen"
+_ISAAC_RESULT_ID = re.compile(r"^proc-(?P<group>.+)-r-[0-9a-f]{16}-isaac$")
+
+
+def _group_selection(group_id: str, res: Mapping, bundle: Mapping | None) -> tuple[Mapping, str | None] | None:
+    """``(decision, version id or None)``: the scientist's LATEST ``select_athena_version`` on ANY ISAAC result of this
+    group (r1-a M2: a new params file or a calibration gives ISAAC's own result a new id; the choice must not be lost),
+    resolved among the versions ``res`` lists now. A choice made on another result is resolved ONLY by the provenance
+    it recorded (:func:`bundle.athena_resolve`: project file, Athena group, data hash), never by a position, so it is
+    never carried over to another curve. ``None`` when the group has no choice."""
+    bundle = bundle or {}
+    mine = {B.processing_id(r) for r in bundle.get("processing_results") or ()
+            if r.get("group_id") == group_id and r.get("source") == "isaac_protocol"} | {res.get("result_id")}
+    latest = None
+    for d in bundle.get("scientist_decisions") or ():
+        t = d.get("target") if isinstance(d, Mapping) else None
+        if d.get("decision") != B.ATHENA_SELECT_DECISION or not isinstance(t, Mapping) or t.get("kind") != "processing_result":
+            continue
+        m = _ISAAC_RESULT_ID.match(str(t.get("id")))
+        if t.get("id") in mine or (m is not None and m.group("group") == group_id):
+            latest = d
+    if latest is None:
+        return None
+    elsewhere = (latest.get("target") or {}).get("id") != res.get("result_id")
+    if elsewhere and not isinstance(latest.get("athena_version_provenance"), Mapping):
+        return latest, None
+    return latest, (B.athena_resolve(res, latest) if B.athena_version_ids(res) else None)
+
+
+def _say_selection_not_carried_over(res: dict, decision: Mapping) -> None:
+    """r1-a M2: on ``res``, say that the group's latest choice, made on another result, names no version listed now."""
+    who = (decision.get("decided_by") or {}).get("name")
+    lists = bool(B.athena_version_ids(res))
+    said = (f"The scientist's latest choice of this group's Athena result of record, {decision.get('value')} "
+            f"({decision.get('decision_id')}, by {who}, made on the earlier result "
+            f"{(decision.get('target') or {}).get('id')}), is not one of the Athena versions this result lists now "
+            "(matched by project file, Athena group and data hash), so it is not carried over to another curve"
+            + (" and the question is asked again." if lists else "; this result lists no Athena versions to choose between now."))
+    res[B.ATHENA_NOT_CARRIED_OVER] = {"decision_id": decision.get("decision_id"), "value": decision.get("value"),
+                                      "decided_by": who, "statement": said}
+    res["qc"].setdefault("statements", {})[B.ATHENA_NOT_CARRIED_OVER] = said
+    for q in res.get("questions") or ():
+        if isinstance(q, dict) and q.get("code") == B.ATHENA_QUESTION_CODE:
+            q["text"] = f"{q.get('text', '')} {said}".strip()
+
+
+def _choice_identity(decision: Mapping | None) -> str | None:
+    if not isinstance(decision, Mapping):
+        return None
+    prov = decision.get("athena_version_provenance")
+    if isinstance(prov, Mapping):
+        return json.dumps({k: prov.get(k) for k in B.ATHENA_IDENTITY_KEYS}, sort_keys=True)
+    return json.dumps({"decision_id": decision.get("decision_id")})
+
+
+def _approved_other_versions(group_id: str, latest: Mapping, new_id: str, bundle: Mapping | None) -> list[dict]:
+    """r1-a M3: the group's APPROVED Athena-version results (stored) whose version is not the one the scientist's
+    ``latest`` choice names: ``[{result_id, version_id, chosen_in, statement}]``, the statement saying the order
+    (reject the old result first, then approve ``new_id``)."""
+    bundle = bundle or {}
+    by_id = {d.get("decision_id"): d for d in bundle.get("scientist_decisions") or () if isinstance(d, Mapping)}
+    want = _choice_identity(latest)
+    out = []
+    for r in bundle.get("processing_results") or ():
+        if (r.get("group_id") != group_id or r.get("source") != "scientist_athena" or not r.get("athena_version_id")
+                or r.get("state") != B.STATE_SCIENTIST_CONFIRMED or B.processing_id(r) == new_id):
+            continue
+        made = (r.get("athena_version_selected") or {}).get("decision_id")
+        if made is not None and _choice_identity(by_id.get(made)) == want:
+            continue  # the same version the latest choice names
+        old = B.processing_id(r)
+        out.append({"result_id": old, "version_id": r.get("athena_version_id"), "chosen_in": made,
+                    "latest_decision_id": latest.get("decision_id"), "latest_value": latest.get("value"),
+                    "new_result_id": new_id,
+                    "statement": (f"{old} (version {r.get('athena_version_id')}, chosen earlier in {made}) is approved, "
+                                  f"but the scientist's latest choice is {latest.get('value')} "
+                                  f"({latest.get('decision_id')}). A record uses exactly one approved result: reject "
+                                  f"{old} first, then approve {new_id}.")})
+    return out
 
 
 def _version_chosen_statement(listed: Mapping, decision: Mapping, vres: Mapping, res: Mapping) -> dict:
@@ -1900,9 +2003,45 @@ def process_bundle(
     }
     if payload["athena"]["statement"]:
         payload["summary"]["lines"].append(payload["athena"]["statement"])
+    kept_notes: list[dict] = []
     if fixed_said:
+        kept_notes += fixed_said.pop("kept_result_notes")
         payload["athena"]["e0_possibly_fixed"] = fixed_said
-        payload["summary"]["lines"].append(fixed_said["statement"])
+        if fixed_said["statement"]:
+            payload["summary"]["lines"].append(fixed_said["statement"])
+        # r1-a M5: a stored result that stays as it was (decided, or not processed now) is said apart, by its own id
+        payload["summary"]["lines"].extend(k["statement"] for k in fixed_said["kept_results"])
+    stored_by_id = {B.processing_id(r): r for r in bundle.get("processing_results") or ()}
+    for r in results:
+        for x in r.get("athena_version_replaces_approved") or ():
+            # r1-a M3: the approved result of an earlier choice no longer says it is the scientist's choice
+            payload["summary"]["lines"].append(f"Athena: {x['statement']}")
+            said = (f"This result is version {x['version_id']}, which the scientist chose earlier ({x['chosen_in']}) "
+                    f"and approved. It is no longer the scientist's choice: the latest is {x['latest_value']} "
+                    f"({x['latest_decision_id']}). A record uses exactly one approved result: reject {x['result_id']} "
+                    f"first, then approve {x['new_result_id']}.")
+            sel = dict((stored_by_id.get(x["result_id"]) or {}).get("athena_version_selected") or {})
+            kept_notes.append({"result_id": x["result_id"], "add_review_flags": [VERSION_NOT_CHOSEN_FLAG],
+                               "statements": {"athena_version_selected": said},
+                               "fields": {"athena_version_selected": {**sel, "statement": said,
+                                                                      "superseded_by_decision_id": x["latest_decision_id"],
+                                                                      "superseded_by_result_id": x["new_result_id"]}}})
+    not_carried = [r for r in results if isinstance(r.get(B.ATHENA_NOT_CARRIED_OVER), Mapping)]
+    if not_carried:
+        # r1-a M2: a choice made on another ISAAC result of the group that names no version listed now
+        line = (f"Athena: {len(not_carried)} earlier choice(s) of the Athena result of record, made on an earlier ISAAC "
+                "result of the group, no longer match a version ISAAC lists ("
+                + "; ".join(f"{r['result_id']}: {r[B.ATHENA_NOT_CARRIED_OVER]['value']} "
+                            f"({r[B.ATHENA_NOT_CARRIED_OVER]['decision_id']})" for r in not_carried)
+                + "): not carried over to another curve; where versions are listed, the question is asked again.")
+        payload["athena_selections_not_carried_over"] = {
+            "results": [{"result_id": r["result_id"], "decision_id": r[B.ATHENA_NOT_CARRIED_OVER]["decision_id"],
+                         "value": r[B.ATHENA_NOT_CARRIED_OVER]["value"]} for r in not_carried],
+            "statement": line}
+        payload["summary"]["lines"].append(line)
+    if kept_notes:
+        # for the STORED results `isaac process` keeps as they were: apply_kept_result_notes (outside the hashed files)
+        payload["kept_result_notes"] = kept_notes
     payload["summary"]["lines"].extend(REF.ignored_overrides(resolved))  # c12-r: an ignored override is said once
     _write(out_dir / RESULTS_FILE, _json_bytes(payload))
     return payload
@@ -1910,31 +2049,63 @@ def process_bundle(
 
 _STATED_SUFFIXES = 3
 
-#: r1-a M5: an Athena E0 IDENTICAL (to :data:`FIXED_E0_DECIMALS`) across groups of one beamtime whose own edges differ
-#: is likely a FIXED normalisation setting (an E0 typed or carried over in Athena), not a measured edge position.
-#: Measured on a real BL4-3 sulfur beamtime: elemental S, a dry MOF and the MOF at 0 V in electrolyte all carried
-#: Athena E0 2471.901 eV while ISAAC measured 2472.958 eV for the last, and it was exported as the edge position.
+#: r1-a M5: an Athena E0 IDENTICAL (to :data:`FIXED_E0_DECIMALS`) in DIFFERENT Athena curves of one beamtime, while
+#: ISAAC's own E0s for those groups (each QC passed) differ by at least :data:`FIXED_E0_MIN_ISAAC_SPREAD_EV`, is likely
+#: a FIXED normalisation setting (an E0 typed or carried over in Athena), not a measured edge position. Measured on a
+#: real BL4-3 sulfur beamtime: elemental S, a dry MOF and the MOF at 0 V in electrolyte all carried Athena E0
+#: 2471.901 eV while ISAAC measured 2472.958 eV for the last, and it was exported as the edge position. Names are never
+#: read (r1-a review: the same sample named two ways, CoSO4_5wt / CoSO4_0p5wt, was flagged as different chemistry).
 FIXED_E0_RULE_ID = "isaac.athena.e0_possibly_fixed.v0"
 FIXED_E0_FLAG = "athena_e0_possibly_fixed"
 FIXED_E0_QUESTION = "athena_e0_measured_or_set"
 FIXED_E0_DECIMALS = 3
-#: ISAAC's own E0s of those groups spread at least this much (more than one curve's E0 moves by landing on a grid
-#: point), or the groups' samples are named as chemically different (:func:`reference.calibrant_identity`)
+#: more than one curve's E0 moves by landing on a grid point or by noise
 FIXED_E0_MIN_ISAAC_SPREAD_EV = 0.5
 _FIXED_E0_GROUPS_SAID = 5
 
 
+def _decided_ids(bundle: Mapping) -> set[str]:
+    """The processing results a scientist decided (approve / reject / needs_changes / defer): ``isaac process`` keeps
+    each as stored, and a fresh result of the same id is not stored."""
+    return {str((d.get("target") or {}).get("id")) for d in bundle.get("scientist_decisions") or ()
+            if isinstance(d, Mapping) and (d.get("target") or {}).get("kind") == "processing_result"
+            and d.get("decision") in B.PROCESSING_STATE_DECISIONS}
+
+
+def _athena_curve(r: Mapping) -> str:
+    """The curve an Athena result is (its project file, Athena group, a set's members): one curve matched to two
+    groups is ONE curve, never an E0 shared across curves."""
+    i = (r.get("inputs") or [{}])[0] or {}
+    return json.dumps([i.get("relative_path"), i.get("athena_group"), i.get("per_scan_set")], sort_keys=True, default=str)
+
+
 def possibly_fixed_athena_e0(results: list[dict], bundle: Mapping, groups: Sequence[Mapping]) -> dict | None:
-    """Flag (:data:`FIXED_E0_FLAG`) each Athena result of THIS run whose E0 equals, to :data:`FIXED_E0_DECIMALS`, the
-    Athena E0 of at least one OTHER group of the beamtime (this run's results, and the bundle's stored ones for groups
-    not processed now) while ISAAC's own E0s for those groups spread at least :data:`FIXED_E0_MIN_ISAAC_SPREAD_EV`, or
-    their samples are named as chemically different. A flagged result is not preferred for the record, says why
-    (``qc.statements``, ``athena_e0_possibly_fixed``) and asks whether the E0 was measured or set (``questions``).
-    Nothing hashed changes (an Athena result has no hashed file of its own). Returns a summary (or ``None``)."""
-    def own_e0(pool, r):
+    """Flag (:data:`FIXED_E0_FLAG`) each Athena result whose E0 equals, to :data:`FIXED_E0_DECIMALS`, the Athena E0 of
+    a DIFFERENT Athena curve of another group of the beamtime while ISAAC's own E0s for those groups (QC passed) differ
+    by at least :data:`FIXED_E0_MIN_ISAAC_SPREAD_EV`. Compared: this run's Athena results and the stored ones that stay
+    stored (a decided result, or a group not processed now), never a rejected result nor one of a superseded or
+    non-live group. A flagged result of this run is not preferred for the record, says why (``qc.statements``,
+    ``athena_e0_possibly_fixed``) and asks whether the E0 was measured or set (``questions``). A STORED result that
+    would be flagged is said apart (``kept_results``) and its flag and sentence are returned as ``kept_result_notes``
+    (:func:`apply_kept_result_notes`), since ``isaac process`` keeps it as stored. Nothing hashed changes. Returns a
+    summary (or ``None``)."""
+    bundle = bundle or {}
+    stored = list(bundle.get("processing_results") or ())
+    decided = _decided_ids(bundle)
+    superseded = {g.get("group_id") for g in bundle.get("superseded_record_groups") or ()}
+    status = {g.get("group_id"): g.get("status") for g in [*(bundle.get("record_groups") or ()), *groups]}
+
+    def live(gid):
+        return gid not in superseded and gid in status and (status[gid] or "proposed") in B.LIVE_GROUP_STATUSES
+
+    pool = [*results, *stored]
+
+    def own_e0(r):
         sib = next((x for x in pool if x.get("source") == "isaac_protocol" and x.get("group_id") == r.get("group_id")
                     and x.get("run_id") == r.get("run_id")), None)
-        v = ((sib or {}).get("outputs") or {}).get("e0_eV")
+        if sib is None or (sib.get("qc") or {}).get("verdict") != "pass":
+            return None  # only an ISAAC E0 whose QC passed is a measurement to compare
+        v = (sib.get("outputs") or {}).get("e0_eV")
         return float(v) if isinstance(v, (int, float)) and math.isfinite(v) else None
 
     def athena_e0(r):
@@ -1942,67 +2113,122 @@ def possibly_fixed_athena_e0(results: list[dict], bundle: Mapping, groups: Seque
         return round(float(v), FIXED_E0_DECIMALS) if isinstance(v, (int, float)) and math.isfinite(v) else None
 
     now = {r.get("group_id") for r in results}
-    stored = [r for r in (bundle or {}).get("processing_results") or () if r.get("group_id") not in now]
-    rows = [(r.get("group_id"), athena_e0(r), own_e0(results, r), r) for r in results if r.get("source") == "scientist_athena"]
-    rows += [(r.get("group_id"), athena_e0(r), own_e0(stored, r), None) for r in stored
-             if r.get("source") == "scientist_athena" and r.get("state") != "rejected"]
+    stored_ids = {B.processing_id(r) for r in stored}
+    rows = [(r, False) for r in results if r.get("source") == "scientist_athena"
+            and not (B.processing_id(r) in decided and B.processing_id(r) in stored_ids)]  # else the stored one stays
+    rows += [(r, True) for r in stored if r.get("source") == "scientist_athena" and r.get("state") != B.STATE_REJECTED
+             and live(r.get("group_id")) and (r.get("group_id") not in now or B.processing_id(r) in decided)]
     by_group = {g.get("group_id"): g for g in groups}
 
     def name(gid):
         g = by_group.get(gid) or {}
         return next((str(s) for s in g.get("_stems") or () if s), None) or str(gid)
 
-    def chemistry(gid):
-        g = by_group.get(gid)
-        return tuple(REF.calibrant_identity(identity_texts(g, g.get("_stems") or ()))["named"]) if g else ()
+    flagged, kept, notes = [], [], []
+    by_value: dict[float, list] = {}
+    for r, is_kept in rows:
+        if athena_e0(r) is not None:
+            by_value.setdefault(athena_e0(r), []).append((r, is_kept))
+    for value in sorted(by_value):
+        same = by_value[value]
+        own = {}
+        for r, _ in same:
+            if own.get(r.get("group_id")) is None:
+                own[r.get("group_id")] = own_e0(r)
+        curves: dict[str, set] = {}
+        for r, _ in same:
+            curves.setdefault(_athena_curve(r), set()).add(r.get("group_id"))
 
-    flagged = []
-    for value in sorted({e0 for _, e0, _, _ in rows if e0 is not None}):
-        same = [row for row in rows if row[1] == value]
-        gids = sorted({gid for gid, _, _, _ in same})
-        if len(gids) < 2:
-            continue
-        own = {gid: next((o for g_, _, o, _ in same if g_ == gid and o is not None), None) for gid in gids}
-        known = [o for o in own.values() if o is not None]
-        spread = (max(known) - min(known)) if len(known) >= 2 else None
-        different = len({c for c in (chemistry(gid) for gid in gids) if c}) >= 2
-        if not ((spread is not None and spread >= FIXED_E0_MIN_ISAAC_SPREAD_EV) or different):
-            continue
-        for gid, _, mine, r in same:
-            if r is None:
+        def partners(curve):
+            # other curves holding a group whose ISAAC E0 differs from one of this curve's groups by the minimum
+            mine = [own[g] for g in curves[curve] if own.get(g) is not None]
+            return [c for c, gids in curves.items() if c != curve and any(
+                abs(a - own[g]) >= FIXED_E0_MIN_ISAAC_SPREAD_EV for g in gids - curves[curve] if own.get(g) is not None
+                for a in mine)]
+
+        for r, is_kept in same:
+            gid, curve = r.get("group_id"), _athena_curve(r)
+            others_c = partners(curve)
+            if not others_c:
                 continue
-            others = [g for g in gids if g != gid]
-            listed = ", ".join(f"{name(g)} (ISAAC {own[g]:.3f} eV)" if own[g] is not None else name(g)
+            others = sorted({g for c in others_c for g in curves[c]} - {gid})
+            known = [own[g] for g in [gid, *others] if own.get(g) is not None]
+            spread = max(known) - min(known)
+            listed = ", ".join(f"{name(g)} (ISAAC {own[g]:.3f} eV)" if own.get(g) is not None else name(g)
                                for g in others[:_FIXED_E0_GROUPS_SAID])
             listed += f" and {len(others) - _FIXED_E0_GROUPS_SAID} more" if len(others) > _FIXED_E0_GROUPS_SAID else ""
-            why = (f"ISAAC's own E0s for these groups span {spread:.2f} eV" if spread is not None and spread >= FIXED_E0_MIN_ISAAC_SPREAD_EV
-                   else "their samples are named as chemically different")
+            mine = own.get(gid)
             said = (f"The scientist's Athena E0 here, {value:.{FIXED_E0_DECIMALS}f} eV, is exactly the Athena E0 of "
-                    f"{len(others)} other group{'' if len(others) == 1 else 's'} of this beamtime ({listed}), while "
-                    + (f"ISAAC measures {mine:.3f} eV here and " if mine is not None else "")
-                    + f"{why}. An E0 identical across different curves is likely a fixed normalisation setting (typed "
-                    "or carried over in Athena), not a measured edge position, so this result is not preferred for "
-                    "the record. Before approving it, ask the scientist whether this E0 was measured or set; if it was "
-                    "set, it is not this group's edge position.")
+                    f"{len(others)} other group{'' if len(others) == 1 else 's'} of this beamtime ({listed}), in a "
+                    f"different Athena curve, while ISAAC's own E0s for these groups (each QC passed) span "
+                    f"{spread:.2f} eV" + (f" (ISAAC measures {mine:.3f} eV here)" if mine is not None else "")
+                    + ". An E0 identical across different curves is likely a fixed normalisation setting (typed or "
+                    "carried over in Athena), not a measured edge position")
+            info = {"rule_id": FIXED_E0_RULE_ID, "athena_e0_eV": value, "decimals": FIXED_E0_DECIMALS,
+                    "groups": [{"group_id": g, "athena_e0_eV": value, "isaac_e0_eV": own.get(g)} for g in [gid, *others]],
+                    "isaac_e0_spread_eV": spread, "min_isaac_spread_eV": FIXED_E0_MIN_ISAAC_SPREAD_EV}
+            pid = B.processing_id(r)
+            if is_kept:
+                state = r.get("state")
+                what = "approved result" if state == B.STATE_SCIENTIST_CONFIRMED else f"stored result ({state})"
+                line = (f"Athena: {what} {pid} carries a possibly fixed Athena E0 ({value:.{FIXED_E0_DECIMALS}f} eV, "
+                        f"the same in {len(others)} other group(s) whose ISAAC E0s span {spread:.2f} eV); ask the "
+                        "scientist whether it was measured.")
+                kept.append({"result_id": pid, "state": state, "statement": line})
+                notes.append({"result_id": pid, "rule_id": FIXED_E0_RULE_ID, "add_review_flags": [FIXED_E0_FLAG],
+                              "statements": {FIXED_E0_FLAG: (f"{said}. This result was kept as it was decided "
+                                                             f"({state}): ask the scientist whether this E0 was measured "
+                                                             "or set; if it was set, it is not this group's edge position.")},
+                              "fields": {"athena_e0_possibly_fixed": {**info, "statement": line}}})
+                continue
+            said += (", so this result is not preferred for the record. Before approving it, ask the scientist whether "
+                     "this E0 was measured or set; if it was set, it is not this group's edge position.")
             r.setdefault("review_flags", []).append(FIXED_E0_FLAG)
             r["preferred_for_record"] = False
             r.setdefault("qc", {}).setdefault("statements", {})[FIXED_E0_FLAG] = said
-            r["athena_e0_possibly_fixed"] = {
-                "rule_id": FIXED_E0_RULE_ID, "athena_e0_eV": value, "decimals": FIXED_E0_DECIMALS,
-                "groups": [{"group_id": g, "athena_e0_eV": value, "isaac_e0_eV": own[g]} for g in gids],
-                "isaac_e0_spread_eV": spread, "named_chemically_different": different, "statement": said}
+            r["athena_e0_possibly_fixed"] = {**info, "statement": said}
             r["questions"] = [*(r.get("questions") or ()), {
                 "code": FIXED_E0_QUESTION,
                 "text": (f"Was the Athena E0 of {value:.{FIXED_E0_DECIMALS}f} eV measured from this group's own edge, or "
-                         "set (typed, or carried over from another group) in Athena? It is the same in "
-                         f"{len(gids)} groups whose own edges differ.")}]
-            flagged.append(r.get("result_id"))
-    if not flagged:
+                         "set (typed, or carried over from another group) in Athena? The same Athena E0 is in "
+                         f"{len(others)} other group{'' if len(others) == 1 else 's'}' Athena curve"
+                         f"{'' if len(others) == 1 else 's'}, while ISAAC's own E0s for these groups (QC passed) span "
+                         f"{spread:.2f} eV.")}]
+            flagged.append(pid)
+    if not flagged and not kept:
         return None
-    return {"rule_id": FIXED_E0_RULE_ID, "results": flagged, "statement": (
-        f"Athena: {len(flagged)} of the scientist's Athena result(s) carry an E0 identical to other groups' while "
-        "their own edges differ: likely a fixed normalisation setting, not a measured edge position (flag "
-        f"{FIXED_E0_FLAG}); ask the scientist before approving them.")}
+    line = None
+    if flagged:
+        line = (f"Athena: {len(flagged)} of the scientist's Athena result(s) carry an E0 identical to other curves' "
+                f"while ISAAC's own E0s for those groups differ by {FIXED_E0_MIN_ISAAC_SPREAD_EV:g} eV or more: likely a "
+                f"fixed normalisation setting, not a measured edge position (flag {FIXED_E0_FLAG}); ask the scientist "
+                "before approving them.")
+    return {"rule_id": FIXED_E0_RULE_ID, "results": flagged, "kept_results": kept, "kept_result_notes": notes,
+            "statement": line}
+
+
+def apply_kept_result_notes(results: Sequence[dict], notes: Sequence[Mapping]) -> int:
+    """Apply ``kept_result_notes`` (from :func:`process_bundle`) to the STORED results ``isaac process`` keeps as they
+    were (a decided result, a group not processed now): each note's ``add_review_flags`` (no duplicates),
+    ``statements`` (into ``qc.statements``) and ``fields`` (set on the result). All outside the hashed files, so no id
+    moves and no decision changes. Returns how many results were changed. Stdlib only (``mutations.process`` calls
+    it on the results it keeps)."""
+    by_id: dict[str, list[Mapping]] = {}
+    for n in notes or ():
+        if isinstance(n, Mapping) and n.get("result_id"):
+            by_id.setdefault(str(n["result_id"]), []).append(n)
+    changed = 0
+    for r in results:
+        mine = by_id.get(B.processing_id(r))
+        if not mine:
+            continue
+        for n in mine:
+            flags = r.setdefault("review_flags", [])
+            flags.extend(f for f in n.get("add_review_flags") or () if f not in flags)
+            r.setdefault("qc", {}).setdefault("statements", {}).update(dict(n.get("statements") or {}))
+            r.update(copy.deepcopy(dict(n.get("fields") or {})))
+        changed += 1
+    return changed
 
 
 def athena_match_statement(groups: Sequence[Mapping], entries: Sequence[Mapping], *, matched: Mapping, notes: Sequence[Mapping]) -> str | None:
