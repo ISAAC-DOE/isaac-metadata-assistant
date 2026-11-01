@@ -1660,54 +1660,79 @@ CELL_FIELDS = frozenset({"context.electrochemistry.cell_type", "context.electroc
 _GROUP_IDS_SHOWN = 8
 
 
-def answer_reach(bundle: Mapping, target_ids: Sequence[str], path: str) -> dict:
+def reach_index(bundle: Mapping) -> dict:
+    """r4-c HIGH-2: what :func:`answer_reach` and :func:`misfit_groups` read, built ONCE for an unchanged bundle (a
+    beamtime-wide optional question asks each field, per ``sample=<key>`` partition too, so a rebuild per call is
+    quadratic at thousands of runs): the live groups' member runs, each run's live groups, each target's run, the
+    groups by id, and (on first use) each run's recorded ``context.environment``."""
+    from . import questions as Q
+
+    run_of_key = {r["run_key"]: r["run_id"] for r in bundle.get("runs") or ()}
+    live = [(g["group_id"], [run_of_key[k] for k in g.get("member_run_keys") or () if k in run_of_key])
+            for g in Q.live_groups(bundle)]
+    groups_of_run: dict[str, list[int]] = {}
+    for i, (_gid, members) in enumerate(live):
+        for r in members:
+            groups_of_run.setdefault(r, []).append(i)
+    run_of_target = {(o.get("candidate_id") or o.get("value_id")): o.get("run_id")
+                     for o in [*(bundle.get("candidates") or ()), *(bundle.get("missing_values") or ())]}
+    return {"live": live, "groups_of_run": groups_of_run, "run_of_target": run_of_target, "run_of_key": run_of_key,
+            "group_by_id": {g["group_id"]: g for g in bundle.get("record_groups") or ()}, "env": None}
+
+
+def answer_reach(bundle: Mapping, target_ids: Sequence[str], path: str, index: dict | None = None) -> dict:
     """r4-b M4: the live record groups and runs an answer on ``target_ids`` for ``path`` reaches: a run's own target
     fills its run's group; a beamtime-wide one every group, except at a run-only path (``records.RUN_ONLY_PATHS``,
-    DEC-69: it fills none). ``{group_ids, run_ids, groups_total, beamtime_fills_none}``, in the bundle's order."""
-    from . import questions as Q
+    DEC-69: it fills none). ``{group_ids, run_ids, groups_total, beamtime_fills_none}``, in the bundle's order.
+    ``index``: the caller's :func:`reach_index` of this same bundle (built here when not given)."""
     from .records import RUN_ONLY_PATHS
 
-    # one pass over the values, never a lookup per target (an optional question of 4,000 runs asks each field)
-    wanted = set(target_ids)
+    index = index if index is not None else reach_index(bundle)
+    absent = object()
     run_ids: set[str] = set()
     beamtime = False
-    for obj in [*(bundle.get("candidates") or ()), *(bundle.get("missing_values") or ())]:
-        if (obj.get("candidate_id") or obj.get("value_id")) in wanted:
-            if obj.get("run_id"):
-                run_ids.add(obj["run_id"])
-            else:
-                beamtime = True
-    run_of_key = {r["run_key"]: r["run_id"] for r in bundle.get("runs") or ()}
+    for tid in set(target_ids):
+        rid = index["run_of_target"].get(tid, absent)
+        if rid is absent:
+            continue
+        if rid:
+            run_ids.add(rid)
+        else:
+            beamtime = True
+    live = index["live"]
     every = beamtime and path not in RUN_ONLY_PATHS
-    groups, runs = [], []
-    live = Q.live_groups(bundle)
-    for g in live:
-        members = [run_of_key[k] for k in g.get("member_run_keys") or () if k in run_of_key]
+    touched = range(len(live)) if every else sorted({i for r in run_ids for i in index["groups_of_run"].get(r, ())})
+    groups, runs, seen = [], [], set()
+    for i in touched:
+        gid, members = live[i]
         mine = members if every else [r for r in members if r in run_ids]
         if mine:
-            groups.append(g["group_id"])
-            runs += [r for r in mine if r not in runs]
+            groups.append(gid)
+            runs += [r for r in mine if not (r in seen or seen.add(r))]
     return {"group_ids": groups, "run_ids": runs, "groups_total": len(live),
             "beamtime_fills_none": beamtime and path in RUN_ONLY_PATHS}
 
 
-def misfit_groups(bundle: Mapping, path: str, group_ids: Sequence[str]) -> list[dict]:
+def misfit_groups(bundle: Mapping, path: str, group_ids: Sequence[str], index: dict | None = None) -> list[dict]:
     """r4-b M4: of ``group_ids``, the groups a word for an electrochemical cell or its control (:data:`CELL_FIELDS`)
     does not describe: a reference or alignment group (a standard, a foil), or one every run of which is recorded ex
     situ (a confirmed or eligible ``context.environment``, the beamtime-wide one included). ``[{group_id, why}]``;
-    never a guess: a group with no recorded environment is not listed."""
+    never a guess: a group with no recorded environment is not listed. ``index``: as for :func:`answer_reach`; the
+    environments are read once into it."""
     from . import grouping as G
 
     if path not in CELL_FIELDS or not group_ids:
         return []
-    env: dict[str | None, set[str]] = {}
-    for rid, _tid, v, _answered in _options_for(bundle, "context.environment"):
-        env.setdefault(rid, set()).add(json.dumps(v))
-    run_of_key = {r["run_key"]: r["run_id"] for r in bundle.get("runs") or ()}
-    by_id = {g["group_id"]: g for g in bundle.get("record_groups") or ()}
+    index = index if index is not None else reach_index(bundle)
+    if index["env"] is None:
+        env: dict[str | None, set[str]] = {}
+        for rid, _tid, v, _answered in _options_for(bundle, "context.environment"):
+            env.setdefault(rid, set()).add(json.dumps(v))
+        index["env"] = env
+    env, run_of_key = index["env"], index["run_of_key"]
     out = []
     for gid in group_ids:
-        g = by_id.get(gid) or {}
+        g = index["group_by_id"].get(gid) or {}
         members = [run_of_key[k] for k in g.get("member_run_keys") or () if k in run_of_key]
         if g.get("role") in (G.ROLE_REFERENCE, G.ROLE_ALIGNMENT):
             out.append({"group_id": gid, "why": f"a {g['role']} group: a standard or foil, not an electrode in a cell"})
@@ -1722,7 +1747,8 @@ def reach_sentence(bundle: Mapping, target_ids: Sequence[str], path: str, *, wou
     runs an answer for ``path`` reaches, how many the beamtime holds besides (already answered per group, or reached
     otherwise), and, plainly, any group the word does not describe. ``would``: worded for an answer not recorded;
     ``lead``: what the sentence opens with (default ``For <path> it reaches``)."""
-    r = answer_reach(bundle, target_ids, path)
+    index = reach_index(bundle)
+    r = answer_reach(bundle, target_ids, path, index)
     gids, n = r["group_ids"], r["groups_total"]
     verb = "would reach" if would else "reaches"
     shown = ", ".join(gids[:_GROUP_IDS_SHOWN]) + (", …" if len(gids) > _GROUP_IDS_SHOWN else "")
@@ -1733,7 +1759,7 @@ def reach_sentence(bundle: Mapping, target_ids: Sequence[str], path: str, *, wou
     if 0 < len(gids) < n:
         text += f"; the other {_count(n - len(gids), 'group')} already have their own answer for it, or no target here"
     text += "."
-    bad = misfit_groups(bundle, path, gids)
+    bad = misfit_groups(bundle, path, gids, index)
     if bad:
         label = path.rsplit(".", 1)[-1].replace("_", " ")
         text += (f" Careful: it {'would put' if would else 'puts'} a {label} on {_count(len(bad), 'group')} it does not "
@@ -2004,7 +2030,8 @@ def decide_question(
         slots_added: list[str] = []
         try:
             if question_id == Q.COUNTER_QUESTION_ID and decision == B.KEEP_APART_DECISION:
-                found = _said_not_counter_keep_apart(bundle, only, field, positions, only_scopes)
+                found = _said_not_counter_keep_apart(bundle, only, field, positions, only_scopes, extra_targets)
+                extra_targets = ()  # r4-c L3: they pinned exactly the candidates found
             else:
                 found, positions = question_targets(Q.consolidate(bundle), question_id, **resolve)
         except MutationRefused as exc:
@@ -2102,11 +2129,16 @@ def decide_question(
 
 
 def _said_not_counter_keep_apart(bundle: Mapping, only: str | None, field: str | None, positions: Sequence[int] | None,
-                                 only_scopes: Sequence[str] | None) -> list[str]:
+                                 only_scopes: Sequence[str] | None, pinned: Sequence[str] = ()) -> list[str]:
     """r4-b M2: ``decide --question <the counter question> --decision keep_apart``: every OPEN merge candidate whose
     groups' file names differ only at positions a scientist said are not counters (``grouping.said_not_counter_
     candidates``), kept apart at once. Refused (code 2, so it is never resolved as another question) when there is
-    none, or with a flag that narrows a question's targets."""
+    none, or with a flag that narrows a question's targets.
+
+    r4-c L3: PINNED to the candidates the reply listed (``pinned``: its ``--target`` ids,
+    :func:`questions.keep_apart_said_not_counter_command`): refused, naming what changed, when the open cautioned
+    candidates are no longer exactly those (one decided, a regroup, another not-counter answer since), and when none
+    is given (the reply then lists the ones it would keep apart, in the pinned command)."""
     from . import grouping as G
     from . import questions as Q
 
@@ -2121,6 +2153,20 @@ def _said_not_counter_keep_apart(bundle: Mapping, only: str | None, field: str |
             f"--decision {B.KEEP_APART_DECISION} on question {Q.COUNTER_QUESTION_ID} has nothing to keep apart (say "
             f"which positions are not counters first: --decision {B.NOT_COUNTER_DECISION} --positions <n[,m]>; or "
             "keep one candidate apart: --target <mc-…> --decision keep_apart). Nothing was recorded.")
+    command = Q.keep_apart_said_not_counter_command(found)
+    if not pinned:
+        raise MutationRefused(
+            f"--decision {B.KEEP_APART_DECISION} on question {Q.COUNTER_QUESTION_ID} keeps apart exactly the merge "
+            f"candidates you name with --target, the ones its reply listed; {_count(len(found), 'open merge candidate')} "
+            f"{'is' if len(found) == 1 else 'are'} cautioned now ({', '.join(found)}). To keep them apart: `{command}`. "
+            "Nothing was recorded.")
+    if set(pinned) != set(found):
+        gone, new = sorted(set(pinned) - set(found)), [i for i in found if i not in set(pinned)]
+        raise MutationRefused(
+            f"The merge candidates a not-counter answer cautions changed since that list: "
+            + "; ".join(([f"no longer open and cautioned: {', '.join(gone)}"] if gone else [])
+                        + ([f"cautioned now and not listed: {', '.join(new)}"] if new else []))
+            + f". Nothing was recorded. To keep apart the {_count(len(found), 'candidate')} cautioned now: `{command}`.")
     return found
 
 
@@ -2729,7 +2775,7 @@ def record_decision(
                     f" {len(cautioned)} open merge candidate(s) have file names that differ only at position(s) you said "
                     f"are not counters ({', '.join(cautioned[:5])}{', …' if len(cautioned) > 5 else ''}); each now carries "
                     "that caution and none was decided. To keep them all apart with one command: "
-                    f"`{Q.KEEP_APART_SAID_NOT_COUNTER_COMMAND}`.")
+                    f"`{Q.keep_apart_said_not_counter_command(cautioned)}`.")
         if acknowledged:
             words = " / ".join(dict.fromkeys(t for ts in acknowledged.values() for t in ts))
             result["statement"] = (
@@ -3116,15 +3162,31 @@ NO_PARSER_VALUE_NOTE = "the parser holds no value for this target, so there is n
 LITERAL_COMPARED_AS = "observed literal"
 
 
+_NUMBER_IN_TEXT = re.compile(r"[-+]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?")
+
+
+def _found_in_literal(said: str, literal: str) -> bool:
+    """r4-c L1: whether a reading (``said``, trimmed and casefolded) is found in what the file writes: a number is one of
+    the literal's numbers, compared as numbers (``0.1`` is not in ``0.15 V`` nor in ``-0.1 V``; ``400`` is in
+    ``400mV``); other text only on word boundaries (``KOH`` is in ``0.1 M KOH``, ``KO`` is not)."""
+    try:
+        number = float(said) if _NUMBER_IN_TEXT.fullmatch(said) else None
+    except ValueError:
+        number = None
+    if number is not None:
+        return any(float(x) == number for x in _NUMBER_IN_TEXT.findall(literal))
+    return re.search(rf"(?<!\w){re.escape(said)}(?!\w)", literal) is not None
+
+
 def _against_literals(proposed: Any, literals: Sequence[str]) -> dict:
     """r4-b L4: a blind reading of a target the parser holds NO value for, held against what the file writes there
     (its ``observed_literals``; before: "nothing to compare"). ``agrees_with_literal``: the reading is that text
-    (trimmed, case aside) or found in it; ``False`` when in none. ``agrees_with_parser`` stays ``None``: there is no
-    parser value, and a literal is not one."""
+    (trimmed, case aside) or found in it (:func:`_found_in_literal`: on word boundaries, a number as a number);
+    ``False`` when in none. ``agrees_with_parser`` stays ``None``: there is no parser value, and a literal is not one."""
     said = " ".join(str(proposed).split()).casefold() if proposed is not None else ""
     shown = ", ".join(repr(x) for x in literals[:3]) + (" …" if len(literals) > 3 else "")
     same = bool(said) and any(" ".join(x.split()).casefold() == said for x in literals)
-    within = bool(said) and not same and any(said in " ".join(x.split()).casefold() for x in literals)
+    within = bool(said) and not same and any(_found_in_literal(said, " ".join(x.split()).casefold()) for x in literals)
     how = ("is the same text as" if same else "is found in" if within else "is not found in")
     return {"agrees_with_parser": None, "agrees_with_literal": same or within, "compared_as": LITERAL_COMPARED_AS,
             "comparison_note": (f"the parser holds no value for this target, so the reading {proposed!r} was compared "

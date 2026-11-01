@@ -929,7 +929,7 @@ def _merge_candidate_view(bundle: Mapping, obj: Mapping) -> dict:
             f"isaac bundle decide <bundle_dir> --target {(obj.get('group_ids') or ['<group>'])[0]} --decision merge "
             f"--merge-with {' '.join((obj.get('group_ids') or [])[1:]) or '<group>'} --by \"<your name>\"  &&  isaac bundle group <bundle_dir> --regroup",
             f"isaac bundle decide <bundle_dir> --target {obj.get('merge_candidate_id')} --decision keep_apart --by \"<your name>\"",
-        ] + ([f"{Q.KEEP_APART_SAID_NOT_COUNTER_COMMAND}   # every open candidate whose names differ only at positions "
+        ] + ([f"{Q.keep_apart_said_not_counter_command(G.said_not_counter_candidates(bundle))}   # every open candidate whose names differ only at positions "
               "said not to be counters, this one included"] if G.said_not_counter_caution(bundle, obj) else []),
         "notice": "Readings' values are not printed here; `isaac bundle show <bundle_dir> group <group_id>` prints a group's.",
     }

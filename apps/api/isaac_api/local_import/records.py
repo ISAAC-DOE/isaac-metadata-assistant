@@ -1283,7 +1283,10 @@ def _start_time_warnings(bundle: Mapping, group: Mapping, member_ids: set, field
 
     if _present(fields, B.XDC_START_PATH) is not None:
         return []
-    if not local_clock_runs(bundle) & set(member_ids):
+    memo = {} if memo is None else memo
+    if "local_clock_runs" not in memo:  # r4-c: read once per composition, never once per group
+        memo["local_clock_runs"] = local_clock_runs(bundle)
+    if not memo["local_clock_runs"] & set(member_ids):
         return _start_time_conflict_warnings(bundle, group, member_ids, memo)
     if clock_zone_deferral(bundle) is not None:
         unanswered = False

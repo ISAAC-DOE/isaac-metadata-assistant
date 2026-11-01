@@ -93,7 +93,9 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
 - **A conflict with `covered_by_decisions`** (also `affects_record: false`; counted in
   `conflicts_covered_by_decisions`, not in `optional`): each of its runs already holds the scientist's decision for
   that field, one value across its runs (e.g. a sheet's Technique ruling, or a beamtime-wide answer, which reaches
-  every run a live group holds), and the record is built from it. Do not ask it again; say how many there are.
+  every run a live group holds), and the record is built from it. Do not ask it again; say how many there are. A run
+  whose own answer differs from the beamtime-wide one, or another run of its group answered otherwise (the record pools
+  them), is not covered: the record fills nothing for that field until they agree.
 - **A conflict no reading of which the field takes** (`readings_that_fit_the_field: 0`; each reading
   hint has `fits_field`): `confirm --value <one reading>` would be refused, so `answer_command` is
   `correct --value <…>`. Start times: the `#D` readings are local clock times with no zone and can never

@@ -1,5 +1,5 @@
-"""r4b: what a real-data run on an SSRL BL15-2 Ir L3 HERFD beamtime found (87 runs of 6 electrodes at many potentials,
-plus 5 standards, 78 record groups). Synthetic only: the committed multi-operator corpus (ZZ names), the SYN counter
+"""r4b: what a run on a large beamtime found (many runs of several electrodes at many potentials, plus standards, and
+dozens of record groups). Synthetic only: the committed multi-operator corpus (ZZ names), the SYN counter
 folder and invented scans.
 
 * M1: a beamtime-wide answer for a field covers each run's disagreement about it (the record is composed from that
@@ -176,7 +176,8 @@ def test_one_command_keeps_them_all_apart_and_says_so_in_the_plural(electrodes, 
     M.decide_question(electrodes, question_id=Q.COUNTER_QUESTION_ID, decision=B.NOT_COUNTER_DECISION, value=None,
                       by=WHO, orcid=None, positions=[1, 2])
     cautioned = G.said_not_counter_candidates(M.load(electrodes))
-    argv = shlex.split(Q.KEEP_APART_SAID_NOT_COUNTER_COMMAND.replace("<bundle_dir>", str(electrodes)).replace("<your name>", WHO))
+    argv = shlex.split(Q.keep_apart_said_not_counter_command(cautioned).replace("<bundle_dir>", str(electrodes))
+                       .replace("<your name>", WHO))
     capsys.readouterr()
     assert argv[0] == "isaac" and cli.main(argv[1:]) == 0
     out = json.loads(capsys.readouterr().out)
@@ -188,7 +189,7 @@ def test_one_command_keeps_them_all_apart_and_says_so_in_the_plural(electrodes, 
     assert G.said_not_counter_candidates(b) == []
     with pytest.raises(M.MutationRefused, match="has nothing to keep apart"):
         M.decide_question(electrodes, question_id=Q.COUNTER_QUESTION_ID, decision=B.KEEP_APART_DECISION, value=None,
-                          by=WHO, orcid=None)
+                          by=WHO, orcid=None, extra_targets=cautioned)
 
 
 def test_the_bulk_keep_apart_needs_a_not_counter_answer_first(electrodes):

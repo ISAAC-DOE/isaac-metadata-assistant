@@ -2498,24 +2498,41 @@ def _question_command(bundle: Mapping, pairs: Sequence[tuple[str, str]], value: 
                       cache: dict) -> str | None:
     """r4-b M5: ``decide --question <id> [--field <path>]`` recording ``value`` on exactly the targets of ``pairs`` (one
     decision, no answer slot), when an ANSWERED question (nothing of it open: ``decide --question`` then resolves its
-    answered targets) holds exactly those targets; else ``None``. ``cache``: the consolidated questions, read once."""
+    answered targets) holds exactly those targets; else ``None``. ``cache``: the consolidated questions, read once.
+    r4-c HIGH-1: consolidated ONCE (``answered_out`` says which targets only the answered payload asks), and only the
+    questions on the cell's own field are indexed, each read directly (never a ``targets_for`` search per question)."""
     from . import questions as Q
 
     hows = {how for _t, how in pairs}
     tids = {t for t, _h in pairs}
     if len(hows) != 1 or tids & set(slot_of):
         return None
-    if "by_targets" not in cache:
-        open_payload = Q.consolidate(bundle)
-        answered = Q.consolidate(bundle, include_answered=True, explain_counter=False)
-        by_targets: dict[frozenset, tuple[str, str | None]] = {}
-        for q in answered["questions"]:
-            for field in (sorted(q.get("fields") or ()) if q["kind"] == "optional_values" else [None]):
-                ids = frozenset(Q.targets_for(answered, q["question_id"], None, field))
-                if ids and not Q.targets_for(open_payload, q["question_id"], None, field):
-                    by_targets.setdefault(ids, (q["question_id"], field))
-        cache["by_targets"] = by_targets
-    found = cache["by_targets"].get(frozenset(tids))
+    if "answered" not in cache:
+        back: set = set()
+        cache["answered"] = Q.consolidate(bundle, include_answered=True, explain_counter=False, answered_out=back)
+        cand_path = {c["candidate_id"]: c.get("target_field_path") for c in bundle.get("candidates") or ()}
+        cache["back"], cache["by_field"] = back, {}
+        cache["path_of"] = {**cand_path,
+                            **{m["value_id"]: m.get("target_field_path") for m in bundle.get("missing_values") or ()},
+                            **{cf["conflict_id"]: cand_path.get(cf.get("candidate_id") or "") for cf in bundle.get("conflicts") or ()}}
+    paths = {cache["path_of"].get(t) for t in tids}
+    if len(paths) != 1 or None in paths:
+        return None
+    [path] = paths
+    if path not in cache["by_field"]:
+        back, by_targets = cache["back"], {}
+        for q in cache["answered"]["questions"]:
+            if q["kind"] == "optional_values":
+                field, ids = path, (q.get("fields") or {}).get(path)
+            elif q.get("target_field_path") == path:
+                field, ids = None, [t["id"] for t in q["targets"]]
+            else:
+                continue
+            # nothing of it open: every target for the field was answered, and the plain payload keeps none there
+            if ids and all(i in back for i in ids) and ("open", q["question_id"], field) not in back:
+                by_targets.setdefault(frozenset(ids), (q["question_id"], field))
+        cache["by_field"][path] = by_targets
+    found = cache["by_field"][path].get(frozenset(tids))
     if found is None:
         return None
     qid, field = found
@@ -4394,6 +4411,11 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
             g["already_recorded"], g["recorded_note"] = st["already_recorded"], st["recorded_note"]
             g["governing"] = st["governing"]
             g["shown"] = st.get("shown") or []  # c15b H2: the fields whose recorded values the row names
+            if g["kind"] == "recorded" and g["path"] and not g["shown"]:
+                # r4-c MED-2: a Campaign Info row whose recorded value only SOME runs hold names it too (its readings:
+                # "recorded: 'X' (2 run(s))"), and its governing decisions are theirs: a ruling against it is the one
+                # the row asked for (recorded over it without --supersede, on a placeable workbook that saw them)
+                g["shown"] = [g["path"]]
         wd = wb.create_sheet(SHEET_DISAGREE, index=wb.sheetnames.index(SHEET_SUGGEST))
         from openpyxl.styles import Alignment, Font
 
