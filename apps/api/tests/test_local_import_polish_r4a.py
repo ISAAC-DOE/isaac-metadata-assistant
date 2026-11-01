@@ -407,3 +407,85 @@ def test_processing_the_same_scans_without_the_spike_are_unchanged(tmp_path):
     assert "single_scan_span_ratio" not in q["metrics"] and "edge_from_single_scan" not in q["reasons"]
     assert "glitch_points_from_one_scan" not in (q.get("statements") or {})
     assert "flagged_points_from_one_scan_on_edge" not in T.step(r, "deglitch")["outcome"]
+
+
+# --- M6: a named scan can be left out of a group's merge by a params file ------------------------------------------
+
+
+def test_the_exclude_scans_section_is_read_apart_and_never_in_the_hashed_params():
+    assert P.scan_exclusions(None) == {} and P.scan_exclusions({"qc": {"warn_min_scans": 3}}) == {}
+    got = P.scan_exclusions({"exclude_scans": {"rg-1": ["a.dat", " b.dat ", "a.dat"], "rg-2": "c.dat#2"}})
+    assert got == {"rg-1": ["a.dat", "b.dat"], "rg-2": ["c.dat#2"]}
+    # resolve_params leaves it out: params.json of every other group is unchanged (no id moves)
+    assert P.resolve_params({"exclude_scans": {"rg-1": ["a.dat"]}}) == P.resolve_params()
+    for bad in ({"exclude_scans": ["a.dat"]}, {"exclude_scans": {"rg-1": []}}, {"exclude_scans": {"rg-1": [3]}}):
+        with pytest.raises(ValueError, match="exclude_scans must be"):
+            P.resolve_params(bad)
+
+
+def _dead_from(T, seed, k):
+    cols = T.fluo_scan(seed)
+    cols["vortDT"] = T.np.where(T.np.arange(T.GRID.size) >= k, 0.0, cols["vortDT"])
+    return T.spec_file(cols)
+
+
+def test_processing_leaves_a_named_scan_out_and_says_how_from_the_zero_signal_statement(tmp_path):
+    T = _proc()
+    zz1 = [T.spec_file(T.fluo_scan(1)), T.spec_file(T.fluo_scan(2)), _dead_from(T, 3, 22)]
+    zz2 = [T.spec_file(T.fluo_scan(s)) for s in (4, 5)]
+    bdir, root, _ = T.make_case(tmp_path, [("01_SYN_ZZ1", zz1, {"sample_name": "ZZ1"}),
+                                           ("02_SYN_ZZ2", zz2, {"sample_name": "ZZ2"})])
+    first = T.run_process(bdir, source_root=root)
+    a, other = (T.isaac(first, i) for i in (0, 1))
+    if "01_SYN_ZZ1" not in a["inputs"][0]["relative_path"]:
+        a, other = other, a
+    gid = a["group_id"]
+    said = a["qc"]["statements"]["merged_scan_zero_signal_points"]
+    shape = {"exclude_scans": {gid: ["01_SYN_ZZ1_003.dat"]}}
+    assert json.dumps(shape) in said
+    assert f"`isaac process <bundle_dir> --source <the beamtime folder you imported> --group {gid} --params-file" in said
+    # the scientist's answer, written as the sentence says, re-processes the group without that scan
+    pf = tmp_path / "exclude.json"
+    pf.write_text(json.dumps(shape))
+    b = T.isaac(T.run_process(bdir, source_root=root, params_file=pf, group_ids=[gid]))
+    assert b["group_id"] == gid and b["result_id"] != a["result_id"]
+    assert [i.get("skip_reason") for i in b["inputs"]] == [None, None, "scans_excluded_by_params_file"]
+    assert b["inputs"][2]["excluded_as"] == "01_SYN_ZZ1_003.dat"
+    assert b["qc"]["metrics"]["scans_used"] == 2 and b["qc"]["metrics"]["scans_excluded_by_params_file"] == 1
+    assert "merged_scan_zero_signal_points" not in b["qc"]["statements"]
+    assert "scans_excluded_by_params_file" in b["review_flags"]
+    assert b["qc"]["statements"]["scans_excluded_by_params_file"].startswith(
+        "1 of 3 listed scans was left out of the merge by the params file (exclude_scans): 01_SYN_ZZ1_003.dat (scan 3).")
+    params = _hashed(bdir, b, "params")
+    assert params["excluded_scans"] == [{"source_id": b["inputs"][2]["source_id"], "relative_path": b["inputs"][2]["relative_path"],
+                                         "scan": 3, "named_as": "01_SYN_ZZ1_003.dat"}]
+    assert "exclude_scans" not in params["params"] and params["changed_from_default"] == []
+    # the other group, processed with the same params file, keeps its id (its params.json is unchanged)
+    again = T.run_process(bdir, source_root=root, params_file=pf)
+    assert other["result_id"] in {r["result_id"] for r in again["processing_results"]}
+    assert "excluded_scans" not in _hashed(bdir, other, "params")
+
+
+def test_processing_says_an_exclusion_that_names_no_scan(tmp_path):
+    T = _proc()
+    bdir, root, _ = T.make_case(tmp_path, [("01_SYN_ZZ1", [T.spec_file(T.fluo_scan(s)) for s in (1, 2)], {"sample_name": "ZZ1"})])
+    gid = T.isaac(T.run_process(bdir, source_root=root))["group_id"]
+    r = T.isaac(T.run_process(bdir, source_root=root, params={"exclude_scans": {gid: ["SYN_typo.dat"]}}))
+    said = r["qc"]["statements"]["scans_excluded_by_params_file"]
+    assert "names 'SYN_typo.dat' for this group, which matches none of its scans" in said
+    assert r["qc"]["metrics"]["scans_used"] == 2 and "scans_excluded_by_params_file" not in r["qc"]["metrics"]
+
+
+def test_the_outlier_and_single_scan_statements_say_how_to_leave_the_scan_out(tmp_path):
+    T = _proc()
+    np = T.np
+    e = _herfd_grid(np)
+    bdir_, root, _ = _herfd_case(T, tmp_path, _five_scans(np, e), e)
+    r = T.isaac(T.run_process(bdir_, source_root=root))
+    hint = json.dumps({"exclude_scans": {r["group_id"]: ["01_SYN_ZZ1_004.dat"]}})
+    assert hint in r["qc"]["statements"]["edge_from_single_scan"]
+    assert '"01_SYN_ZZ1_004.dat"' in r["qc"]["statements"]["outlier_scans"]
+    pf = tmp_path / "exclude.json"
+    pf.write_text(hint)
+    fixed = T.isaac(T.run_process(bdir_, source_root=root, params_file=pf, group_ids=[r["group_id"]]))
+    assert "edge_from_single_scan" not in fixed["qc"]["reasons"] and fixed["qc"]["metrics"]["scans_used"] == 4

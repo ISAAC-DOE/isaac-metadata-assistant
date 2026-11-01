@@ -603,9 +603,9 @@ def _n_points(n: int) -> str:
 SINGLE_SCAN_FLAG = "edge_from_single_scan"
 
 
-def _single_scan_statement(dominant: Mapping, names: Sequence[str], group_id: str) -> str:
+def _single_scan_statement(dominant: Mapping, names: Sequence[str], group_id: str, excluded_as: str) -> str:
     """r4-a: the plain sentence for a merged curve whose range one scan's stretch sets (:func:`core.single_scan_dominance`),
-    naming the scan by its file."""
+    naming the scan by its file and saying how to leave it out (:func:`exclude_hint`)."""
     name = names[dominant["scan_position"]]
     lo, hi = dominant["departs_eV"]
     return (f"One scan sets this merged curve: with {name} left out, the merged curve's range (max - min: its edge step "
@@ -614,7 +614,7 @@ def _single_scan_statement(dominant: Mapping, names: Sequence[str], group_id: st
             f"{name} departs from the other scans only from {lo:.1f} to {hi:.1f} eV "
             f"({_n_points(dominant['departs_points'])} of {dominant['points']}), so the merged white line, edge step and "
             "E0 come from that scan's stretch, not from the measurement: this curve is not usable as it is. Ask the "
-            "scientist whether that scan belongs in the merge.")
+            "scientist whether that scan belongs in the merge. " + exclude_hint(group_id, [excluded_as]))
 
 
 def _csv(path: Path, header: Sequence[str], cols: Sequence, np) -> None:
@@ -867,19 +867,80 @@ def _file_name(entry: Mapping) -> str:
     return PurePosixPath(str(entry.get("relative_path") or entry.get("source_id"))).name
 
 
+#: r4-a M6: the skip reason (and review flag, and statement key) of a scan a params file leaves out of the merge
+EXCLUDED_REASON = "scans_excluded_by_params_file"
+
+
+def _excluded_as(entry: Mapping, names: Sequence[str]) -> str | None:
+    """The ``exclude_scans`` name (:data:`protocol.EXCLUDE_SCANS_SECTION`) that names this input, else ``None``: its
+    source id, relative path or file name, optionally with ``#<scan number>`` for one scan of a multi-scan file."""
+    if not names:
+        return None
+    rel = str(entry.get("relative_path") or "")
+    own = {str(entry.get("source_id") or ""), rel, PurePosixPath(rel).name} - {""}
+    for name in names:
+        base, _, scan = name.rpartition("#") if "#" in name else (name, "", "")
+        if base in own and (not scan or str(entry.get("scan")) == scan.strip()):
+            return name
+    return None
+
+
+def exclusion_name(entry: Mapping, inputs: Sequence[Mapping]) -> str:
+    """How ``exclude_scans`` names one input: its file name, with ``#<scan>`` when another input shares the file."""
+    name = _file_name(entry)
+    shared = sum(1 for i in inputs if _file_name(i) == name) > 1
+    return f"{name}#{entry['scan']}" if shared and entry.get("scan") is not None else name
+
+
+def exclude_hint(group_id: str, names: Sequence[str]) -> str:
+    """r4-a M6: how to leave named scans out of a group's merge: the params file's exact shape and the command."""
+    one = len(names) == 1
+    listed = ", ".join(json.dumps(n) for n in names)
+    return (f"If the scientist says {'it does' if one else 'they do'} not belong in the merge, re-process the group with a "
+            f"params file {{\"{P.EXCLUDE_SCANS_SECTION}\": {{\"{group_id}\": [{listed}]}}}}: `isaac process "
+            f"<bundle_dir> --source <the beamtime folder you imported> --group {group_id} --params-file <that file>`. "
+            f"That gives a new result without {'it' if one else 'them'} to review; this one stays as it is.")
+
+
+def _exclusion_statement(excluded: Sequence[Mapping], names: Sequence[str], listed: int, used: int) -> str | None:
+    """r4-a M6: which scans the params file left out of this group's merge, and any name that matched none of its
+    scans (``None`` when the params file names none for this group)."""
+    if not names:
+        return None
+    found = {x["named_as"] for x in excluded}
+    missing = [n for n in names if n not in found]
+    said = ""
+    if excluded:
+        k = len(excluded)
+        files = ", ".join(PurePosixPath(str(x["relative_path"] or x["source_id"])).name
+                          + (f" (scan {x['scan']})" if x.get("scan") is not None else "") for x in excluded[:10])
+        files += f" and {k - 10} more" if k > 10 else ""
+        said = (f"{k} of {listed} listed scans {'was' if k == 1 else 'were'} left out of the merge by the params file "
+                f"({P.EXCLUDE_SCANS_SECTION}): {files}. The curve merges {used} scan{'' if used == 1 else 's'}; the "
+                "group's earlier result, with every scan, stays as it was.")
+    if missing:
+        said += (" " if said else "") + (
+            f"The params file's {P.EXCLUDE_SCANS_SECTION} names {', '.join(repr(n) for n in missing)} for this group, "
+            "which matches none of its scans (a file name, relative path or source id, optionally #<scan>): nothing "
+            "was left out for it. Check the name.")
+    return said
+
+
 #: r3-b M4: a merged scan's point departs from the other scans' median by more than this fraction of that median's span
 OUTLIER_DEPARTS_FRACTION = 0.1
 
 
 def _outlier_scans_statement(scan_flags: Sequence[bool], used_entries: Sequence[Mapping], grid, M, merged,
-                             excluded: bool, np) -> str | None:
+                             excluded: bool, np, *, group_id: str | None = None,
+                             inputs: Sequence[Mapping] = ()) -> str | None:
     """r3-b M4: one plain statement naming each scan the deglitch step flagged as an OUTLIER (its deviation from the
     group's median spectrum is far above the others'), by its FILE, with the energy range where it departs from the
     other scans' median (by more than :data:`OUTLIER_DEPARTS_FRACTION` of that median's span), its signal there as a
     share of theirs, and what merging it did to the merged curve there; it asks whether the scan belongs in the merge.
     ``None`` when no scan is flagged. Measured on a real BL4-3 Ti beamtime: one scan's signal fell to about 0.05 after
     4985 eV and the merge was about 30% low there, said only as a count (``outlier_scans_flagged``). Descriptive only:
-    nothing is skipped or changed for it. Said after the run id (qc.json is hashed), so no result id moves."""
+    nothing is skipped or changed for it. Said after the run id (qc.json is hashed), so no result id moves. r4-a M6:
+    with ``group_id``, how to leave the scans out (:func:`exclude_hint`)."""
     flagged = [k for k, f in enumerate(scan_flags) if f]
     if not flagged:
         return None
@@ -924,8 +985,10 @@ def _outlier_scans_statement(scan_flags: Sequence[bool], used_entries: Sequence[
         return None
     more = f" {len(parts) - 10} more flagged scan(s) are said in the deglitch step." if len(parts) > 10 else ""
     one = len(flagged) == 1
+    hint = (" " + exclude_hint(group_id, [exclusion_name(used_entries[k], inputs or used_entries) for k in flagged])
+            if group_id and not excluded else "")
     return (" ".join(parts[:10]) + more + f" Ask the scientist whether {'this scan belongs' if one else 'these scans belong'} "
-            "in the merge (a beam loss, a sample that moved or a detector that stopped counting would not).")
+            "in the merge (a beam loss, a sample that moved or a detector that stopped counting would not)." + hint)
 
 
 def _scan_name(entry: Mapping) -> str:
@@ -1036,7 +1099,7 @@ def _long_runs(z: Mapping) -> list[tuple[int, int]]:
 
 
 def _zero_signal_points_statement(used_entries: Sequence[Mapping], scans_data: Sequence[Mapping], signal: str | None,
-                                  np) -> str | None:
+                                  np, *, group_id: str | None = None, inputs: Sequence[Mapping] = ()) -> str | None:
     """c11-r: one plain statement naming each MERGED scan whose counts STOP (its signal is exactly zero from some point
     to the scan's last point, a run of at least two points) or, c12-r, DROP OUT FOR A WHILE (a run of zeros at least
     :data:`BEAM_LOSS_MIN_FRACTION` of the scan and :data:`BEAM_LOSS_MIN_POINTS` long, whose counts come back), where
@@ -1044,8 +1107,9 @@ def _zero_signal_points_statement(used_entries: Sequence[Mapping], scans_data: S
     otherwise. Shorter runs whose counts come back are counted apart (:func:`_isolated_zero_points_statement`,
     :func:`_short_zero_runs_statement`), never said as a lost beam. Descriptive only: nothing is skipped or changed
     for it (whether such a scan belongs in the merge is the scientist's call, docs/xas-processing-protocol-v0.md).
-    Said in the result, NOT in qc.json (hashed into the run id), so no result id moves."""
-    parts = []
+    Said in the result, NOT in qc.json (hashed into the run id), so no result id moves. r4-a M6: with ``group_id``, how
+    to leave those scans out (:func:`exclude_hint`)."""
+    parts, said_entries = [], []
     for entry, sa, z in _zero_scans(used_entries, scans_data, np):
         trail = z["trailing"] if z["trailing"] >= 2 else 0
         long_runs = _long_runs(z)
@@ -1064,10 +1128,13 @@ def _zero_signal_points_statement(used_entries: Sequence[Mapping], scans_data: S
         extra = f", and at {others} other point{'' if others == 1 else 's'}" if others else ""
         parts.append(f"{name}'s {named} is zero at {d.get('signal_zero_points', z['n'])} of "
                      f"{d.get('points_read', z['size'])} points ({'; '.join(where)}{extra}); it is merged unchanged.")
+        said_entries.append(entry)
     if not parts:
         return None
     more = f" {len(parts) - 10} more merged scan(s) are the same." if len(parts) > 10 else ""
-    return " ".join(parts[:10]) + more + " A person checks whether the beam was lost."
+    hint = (" " + exclude_hint(group_id, [exclusion_name(e, inputs or used_entries) for e in said_entries])
+            if group_id else "")
+    return " ".join(parts[:10]) + more + " A person checks whether the beam was lost." + hint
 
 
 def _zero_scans(used_entries: Sequence[Mapping], scans_data: Sequence[Mapping], np) -> list[tuple[Mapping, Mapping, dict]]:
@@ -1437,9 +1504,18 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     if not scans:
         return [_not_applicable(res, B.NA_NO_SCANS, "the group lists no scan", data_states(group, ctx.runs_by_key))]
     tables = []
+    exclude = list((getattr(ctx, "exclusions", None) or {}).get(group["group_id"]) or ())
+    excluded: list[dict] = []
     for s in scans:
         entry = {"source_id": s.get("source_id"), "scan": s.get("scan_index"), "relative_path": s.get("relative_path"), "channel": None, "used": False}
         res["inputs"].append(entry)
+        named = _excluded_as(entry, exclude)
+        if named is not None:
+            # r4-a M6: left out by the params file's exclude_scans, never read (recorded in params.json and said)
+            entry.update(skip_reason=EXCLUDED_REASON, excluded_as=named)
+            excluded.append({"source_id": entry["source_id"], "relative_path": entry["relative_path"],
+                             "scan": entry["scan"], "named_as": named})
+            continue
         path = _resolve_source(ctx.root, s.get("relative_path") or "") if ctx.root else None
         if path is None or not path.is_file():
             entry["skip_reason"] = "source_file_not_found"
@@ -1640,6 +1716,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         "signal_all_zero_scans": sum(1 for d in diags if d["signal_all_zero"]),
         # c11-a: only when a scan was skipped for a signal of zero at every point (absent otherwise, as above)
         **({"scans_skipped_signal_all_zero": zero_skipped} if zero_skipped else {}),
+        # r4-a M6: only when the params file left scans out (absent otherwise, as above)
+        **({"scans_excluded_by_params_file": len(excluded)} if excluded else {}),
     }
     verdict, reasons = C.qc_verdict(metrics, params)
     res["qc"] = {"metrics": metrics, "verdict": verdict, "reasons": reasons}
@@ -1765,6 +1843,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
                 "channel_choice": res["channel_choice"],
                 "calibration": hashed_cal,
                 "normalize_resolved": nm["resolved_params"],
+                # r4-a M6: only for a group the params file leaves scans out of (absent otherwise: no other id moves)
+                **({"excluded_scans": excluded} if excluded else {}),
             }
         ),
     )
@@ -1835,7 +1915,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         dg_step["outcome"]["glitch_edge_rule_id"] = C.GLITCH_EDGE_RULE_ID
     if dominant:
         res["review_flags"].append(SINGLE_SCAN_FLAG)
-        res["qc"].setdefault("statements", {})[SINGLE_SCAN_FLAG] = _single_scan_statement(dominant, names, group["group_id"])
+        res["qc"].setdefault("statements", {})[SINGLE_SCAN_FLAG] = _single_scan_statement(
+            dominant, names, group["group_id"], exclusion_name(used_entries[dominant["scan_position"]], res["inputs"]))
     if on_edge:
         res["qc"]["metrics"].update(glitch_points_on_edge=on_edge["on_edge"], glitch_points_off_edge=on_edge["off_edge"])
         res["qc"].setdefault("statements", {})["glitch_points_on_edge"] = on_edge["statement"]
@@ -1843,12 +1924,18 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         dg_step["outcome"]["flagged_points_on_edge"] = [{"source_id": pos_sid[p["scan_position"]], "energy_eV": p["energy_eV"]}
                                                         for p in on_edge["listed"]]
         dg_step["outcome"]["glitch_edge_rule_id"] = C.GLITCH_EDGE_RULE_ID
-    zero_points_said = _zero_signal_points_statement(used_entries, scans_data, _raw_signal(choice), np)
+    exclusion_said = _exclusion_statement(excluded, exclude, len(res["inputs"]), len(scans_data))
+    if exclusion_said:
+        res["qc"].setdefault("statements", {})[EXCLUDED_REASON] = exclusion_said
+        res["review_flags"].append(EXCLUDED_REASON)
+    zero_points_said = _zero_signal_points_statement(used_entries, scans_data, _raw_signal(choice), np,
+                                                     group_id=group["group_id"], inputs=res["inputs"])
     if zero_points_said:
         res["qc"].setdefault("statements", {})["merged_scan_zero_signal_points"] = zero_points_said
         res["review_flags"].append(ZERO_SIGNAL_POINTS_FLAG)
     # r3-b M4: an outlier scan is named, with where it departs and what merging it did (the count alone said nothing)
-    outlier_said = _outlier_scans_statement(dg["scan_flags"], used_entries, grid, M, mg["mean"], excl, np)
+    outlier_said = _outlier_scans_statement(dg["scan_flags"], used_entries, grid, M, mg["mean"], excl, np,
+                                            group_id=group["group_id"], inputs=res["inputs"])
     if outlier_said:
         res["qc"].setdefault("statements", {})["outlier_scans"] = outlier_said
     # c12-cal: zeros whose counts come back are counted in one line (no flag), never said as a lost beam
@@ -2326,6 +2413,7 @@ def process_bundle(
     ctx = _Ctx(bundle=bundle, bundle_dir=bundle_dir, root=root, params=resolved, np=np, xafs=xafs, out_dir=out_dir, sources=sources, runs_by_key=runs_by_key)
     ctx.scan_reader = scan_reader or read_scan_file
     ctx.calibration_approvals = dict(calibration_approvals or {})
+    ctx.exclusions = P.scan_exclusions(params)  # r4-a M6: scans a params file leaves out of a named group's merge
 
     # Athena-first: read every project once, match by name.
     entries, a_notes, projects = [], [], A.find_projects(bundle)

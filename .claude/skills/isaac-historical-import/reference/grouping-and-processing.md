@@ -363,3 +363,10 @@ post-edge from 150 eV"), write a JSON file in the notes folder beside the bundle
 keys are refused. Then `<isaac> process <bundle> --source <folder> --group <id> --params-file <file>`. Say back
 exactly what changed; every changed value is recorded on the result. Never use it to pass a QC check:
 a threshold is the protocol's, not a fix.
+
+**Leaving a scan out of a merge**, only when the scientist says it does not belong (a dead scan, a lost beam,
+one scan's spike): the outlier, zero-signal and `edge_from_single_scan` sentences give the exact file,
+`{"exclude_scans": {"<group id>": ["<file name>"]}}` (a relative path or source id works too; `<file>#<scan>` for
+one scan of a multi-scan file). Re-process that group with it as above: the new result lists the scan as skipped
+`scans_excluded_by_params_file`, says it (`qc.statements.scans_excluded_by_params_file`, also a name that matched
+no scan), and records it in `params.json` `excluded_scans`; the earlier result stays as it was.

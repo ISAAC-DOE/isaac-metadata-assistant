@@ -518,8 +518,9 @@ def test_a_scan_whose_signal_dies_is_named_with_where_and_what_merging_it_did(tm
     assert said.startswith("01_SYN_TiON_dry_016_003.dat departs from the other scans' median from 4985.")
     assert "its signal there is about 5% of theirs" in said
     assert "it is merged unchanged, so the merged curve there is about 24% lower than the other scans' median" in said
-    assert said.endswith("Ask the scientist whether this scan belongs in the merge (a beam loss, a sample that moved or "
-                         "a detector that stopped counting would not).")
+    assert ("Ask the scientist whether this scan belongs in the merge (a beam loss, a sample that moved or "
+            "a detector that stopped counting would not).") in said
+    assert f'{{"exclude_scans": {{"{isa["group_id"]}": ["01_SYN_TiON_dry_016_003.dat"]}}}}' in said  # r4-a M6
     # said outside the hashed qc.json: the file keeps what it had (no id moves)
     qc = json.loads(next(bdir / f["relative_path"] for f in isa["outputs"]["files"] if f["role"] == "qc").read_text())
     assert "outlier_scans" not in (qc.get("statements") or {})
