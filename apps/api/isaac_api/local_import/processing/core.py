@@ -285,6 +285,55 @@ def deglitch(M, grid, params: Mapping, np) -> dict:
     }
 
 
+#: r2-a: a flagged point within this many eV of E0, or where the merged curve is steep, is on the edge: the glitch
+#: check cannot tell a glitch from the edge there (a sub-eV energy jitter between scans moves the steepest points by
+#: many robust scales). Measured on a real Pt L3 HERFD beamtime: with 4-5 scans the flagged points sat at E0 and on
+#: the white line, and 27 groups carried ``glitches_flagged``. NOT a protocol parameter: params.json is hashed into
+#: every result id, so the rule lives here and is said beside the count (the stored count and verdict are unchanged).
+GLITCH_EDGE_RULE_ID = "isaac.xas.glitch_points_on_edge.v0"
+GLITCH_EDGE_WINDOW_EV = 5.0
+#: ...or where the merged curve's slope is at least this fraction of its steepest slope
+GLITCH_EDGE_STEEP_FRACTION = 0.25
+#: the slope at a point is taken between the points this many places either side, never through the point itself,
+#: so a one-point spike does not make its own slope steep
+GLITCH_EDGE_SLOPE_HALF_WIDTH = 2
+
+
+def glitch_points_on_edge(point_flags, grid, energy, curve, e0, np) -> list[tuple[int, float, bool]]:
+    """Each flagged point (``deglitch``'s ``point_flags`` on ``grid``) as ``(scan_position, energy_eV, on_edge)``.
+    ``energy``/``curve`` are the merged curve WITH THE FLAGGED POINTS LEFT OUT (a glitch must not make its own
+    neighbourhood look steep) and ``e0`` its E0. A point is on the edge when it lies within
+    :data:`GLITCH_EDGE_WINDOW_EV` of ``e0``, or inside the one stretch of steep slope (at least
+    :data:`GLITCH_EDGE_STEEP_FRACTION` of the steepest) that holds the edge: a steep patch elsewhere never counts
+    (:data:`GLITCH_EDGE_RULE_ID`)."""
+    k = GLITCH_EDGE_SLOPE_HALF_WIDTH
+    slope = np.full(energy.size, np.nan)
+    if energy.size > 2 * k:
+        with np.errstate(invalid="ignore", divide="ignore"):
+            slope[k:-k] = np.abs((curve[2 * k:] - curve[:-2 * k]) / (energy[2 * k:] - energy[:-2 * k]))
+    finite = np.isfinite(slope)
+    steepest = float(np.nanmax(slope)) if finite.any() else 0.0
+    lo = hi = None
+    if steepest > 0:
+        steep = finite & (np.nan_to_num(slope, nan=0.0) >= GLITCH_EDGE_STEEP_FRACTION * steepest)
+        # the stretch that holds the edge: around E0 when it is steep there, else around the steepest point
+        at = int(np.argmin(np.abs(energy - float(e0)))) if e0 is not None else int(np.nanargmax(slope))
+        if not steep[at]:
+            at = int(np.nanargmax(slope))
+        lo = hi = at
+        while lo > 0 and steep[lo - 1]:
+            lo -= 1
+        while hi < energy.size - 1 and steep[hi + 1]:
+            hi += 1
+    out = []
+    for s, i in zip(*np.nonzero(point_flags)):
+        e = float(grid[i])
+        near = e0 is not None and abs(e - float(e0)) <= GLITCH_EDGE_WINDOW_EV
+        in_edge = lo is not None and float(energy[lo]) <= e <= float(energy[hi])
+        out.append((int(s), e, bool(near or in_edge)))
+    return out
+
+
 def merge(M, exclude_points=None, exclude_scans: Sequence[bool] | None = None, np=None) -> dict:
     X = M.astype(float).copy()
     if exclude_points is not None:

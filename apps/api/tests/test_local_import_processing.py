@@ -235,7 +235,8 @@ def test_end_to_end_repeats_merge_outputs_hashed_and_relative(tmp_path):
     merged = out_path["merged"].read_text().splitlines()
     assert merged[1] == "energy_eV,mu_mean,mu_std,mu_stderr,n_scans"
     assert r["qc"]["verdict"] in ("pass", "warn") and "glitches_flagged" in r["qc"]["reasons"]
-    assert "calibration_reference_unconfirmed" in r["review_flags"]
+    # r2-a L5: no reference at all is said once (no_reference_available), never also as one to confirm
+    assert "no_reference_available" in r["review_flags"] and "calibration_reference_unconfirmed" not in r["review_flags"]
     params = json.loads(out_path["params"].read_text())
     assert params["protocol_status"] == "draft_unreviewed" and "deglitch.exclude_flagged" in params["needs_scientist_approval"]
     saved = json.loads((bdir / "processing" / "processing_results.json").read_text())
@@ -316,7 +317,10 @@ def test_foil_name_evidence_proposes_the_reference_but_only_an_approval_applies_
     o = cal["outcome"]
     assert o["reference"]["basis"] == "stated_by_evidence" and (o["reference"]["element"], o["reference"]["edge"]) == ("Ti", "K")
     assert o["computed_shift_eV"] == pytest.approx(-3.0, abs=0.6) and not o["applied"]
-    assert "calibration_shift_awaiting_approval" in cal["flags"]
+    # r1-a review: a group's own edge whose names do not clearly say one pure element ("A" is not on the closed list)
+    # is not proposed, so nothing awaits an approval; an approval of it is applied only with --accept-shift
+    assert "calibration_shift_awaiting_approval" not in cal["flags"]
+    assert "own_signal_not_named_as_pure_element" in cal["flags"]
     # c12-cal: -3 eV is above qc.warn_energy_shift_eV (2), so the approval also confirms its size (--accept-shift)
     approval = {"element": "Ti", "edge": "K", "decided_by": "SYN Scientist", "accepted_shift_eV": round(o["computed_shift_eV"], 1)}
     approved = run_process(bdir, source_root=root, calibration_approvals={r["group_id"]: approval})

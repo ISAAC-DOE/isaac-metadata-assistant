@@ -1429,7 +1429,7 @@ def get_local_bundle_questions(
             return _refusal(exc)
         reports: dict = {}  # composed once: consolidate's reports are reused by the minimum below
         payload = Q.consolidate(data, compositions_out=reports)
-        rows = Q.filter_questions(payload, scope=scope, blocking_only=blocking_only)
+        rows = Q.filter_questions(payload, scope=scope, blocking_only=blocking_only, reports=reports)
         if kind:
             rows = [q for q in rows if q["kind"] == kind]
         page = rows[offset: offset + limit]
@@ -1479,7 +1479,7 @@ def get_local_bundle_questions(
         "format_version": payload["format_version"],
         "blocking_basis": payload["blocking_basis"],
         # THE SCOPE'S counts, as `isaac bundle questions --scope` gives them, and the whole bundle's beside them
-        "counts": Q.scope_counts(payload, scope) if scope else payload["counts"],
+        "counts": Q.scope_counts(payload, scope, reports) if scope else payload["counts"],
         **({"counts_whole_bundle": payload["counts"]} if scope else {}),
         "total": len(rows),
         "offset": offset,

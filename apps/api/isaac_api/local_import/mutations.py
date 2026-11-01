@@ -1101,6 +1101,7 @@ def decide(
     same_conditions: bool = False,
     as_said: bool = False,
     accept_shift: float | None = None,
+    e0_measured: bool = False,
 ) -> dict:
     """Record a scientist decision for each target (ALL-OR-NOTHING), idempotently.
 
@@ -1119,6 +1120,7 @@ def decide(
         split_into=split_into, merge_with=merge_with, qc_status=qc_status, qc_note=qc_note,
         element=element, edge=edge, positions=positions, same_conditions=same_conditions,
         **({"accept_shift": accept_shift} if accept_shift is not None else {}),
+        **({"e0_measured": True} if e0_measured else {}),
     )
     _decide_arguments(**params)  # refused before the lock is taken, as always
     with locked(Path(bundle_dir)):
@@ -1557,6 +1559,8 @@ def question_targets(payload: Mapping, question_id: str, *, decision: str, only:
         raise MutationRefused(f"No open question {question_id!r}" + (f" for {only}" if only else "") + ".", code=6)
     if asked is not None and asked["kind"] == "naming_counter_positions" and decision == B.NOT_COUNTER_DECISION and positions is None:
         positions = list(asked.get("positions") or [])  # the positions the question asks about now
+        if -1 in positions:  # `last` (grouping.LAST_POSITION): "no" names the positions those last tokens sit at
+            positions = sorted({p for p in positions if p != -1} | set(asked.get("last_token_positions") or ()))
     return list(found), (list(positions) if positions is not None else None)
 
 
@@ -2037,7 +2041,7 @@ def qc_note_problem(qc_status: str | None, qc_note: str | None) -> str | None:
 
 def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, edge, positions, value=None,
                       qc_note=None, same_conditions=False, split_into=None, clock_zone_defer=False, accept_shift=None,
-                      **_rest):
+                      e0_measured=False, **_rest):
     """The checks of :func:`decide` that need no bundle. Returns ``positions`` normalised."""
     problem = B.decider_name_problem(by)
     if problem:
@@ -2072,6 +2076,8 @@ def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, ed
                 raise ValueError
         except (TypeError, ValueError):
             raise MutationRefused("--accept-shift must be a number in eV, e.g. -8.6. Nothing was recorded.") from None
+    if e0_measured and decision != "approve":
+        raise MutationRefused("--e0-measured goes with --decision approve on an Athena result flagged athena_e0_possibly_fixed: the scientist states that E0 was measured from the group's own edge. Nothing was recorded.")
     if decision in ("set_counter_positions", B.NOT_COUNTER_DECISION):
         from .grouping import LAST_POSITION
 
@@ -2137,6 +2143,18 @@ def _shown_value(value: Any) -> str:
     return text if len(text) <= 60 else text[:57] + "…"
 
 
+def _counter_positions_words(positions: Sequence[int] | None) -> str:
+    """``counter position(s) 2, 3 recorded``; the last token in words (``-1`` is how it is stored, never what is said):
+    ``the last token recorded as the run counter``, ``counter position(s) 2 and the last token recorded``."""
+    from .grouping import LAST_POSITION
+
+    pos = list(positions or ())
+    numbers = ", ".join(str(p) for p in pos if p != LAST_POSITION)
+    if LAST_POSITION not in pos:
+        return f"counter position(s) {numbers} recorded"
+    return f"counter position(s) {numbers} and the last token recorded" if numbers else "the last token recorded as the run counter"
+
+
 def plain_statement(bundle: Mapping, planned: Sequence[tuple[str, Mapping]], target_ids: Sequence[str],
                     recorded: Sequence[str], *, decision: str, value: Any, element: str | None = None,
                     edge: str | None = None, positions: Sequence[int] | None = None, qc_status: str | None = None) -> str:
@@ -2149,10 +2167,11 @@ def plain_statement(bundle: Mapping, planned: Sequence[tuple[str, Mapping]], tar
         "confirm": "confirmed", "reject": "rejected", "defer": "deferred", "correct": f"{_shown_value(value)} recorded",
         "approve": "approved" + (f" (QC status {qc_status})" if qc_status else ""),
         "merge": "merge recorded", "split": "split recorded",
-        "set_counter_positions": f"counter position(s) {', '.join(map(str, positions or ()))} recorded",
+        "set_counter_positions": _counter_positions_words(positions),
         B.CLOCK_ZONE_DECISION: f"instrument clock time zone {value} recorded",
     }.get(decision, f"{decision} recorded")
     cand_path = {c["candidate_id"]: c.get("target_field_path") for c in bundle.get("candidates") or ()}
+    context = B.context_run_ids(bundle)  # r2-a L4: a run kept as context (an exported file) is no measurement run
 
     def count(n: int, noun: str) -> str:
         return f"{n} {noun}{'' if n == 1 else 's'}"
@@ -2168,8 +2187,12 @@ def plain_statement(bundle: Mapping, planned: Sequence[tuple[str, Mapping]], tar
         for kind, objs in by_kind.items():
             if kind in ("candidate", "missing_value"):
                 runs = {o.get("run_id") for o in objs}
-                if runs - {None}:
-                    parts.append(count(len(runs - {None}), "run"))
+                measured = runs - {None} - context
+                if measured:
+                    parts.append(count(len(measured), "run"))
+                elif runs - {None}:
+                    k = len(runs - {None})  # review L1: the plural goes on "file", not on the phrase's end
+                    parts.append(f"{k} exported file{'' if k == 1 else 's'} kept as context")
                 if None in runs:
                     parts.append("the whole beamtime")
             elif kind == "experiment":
@@ -2219,6 +2242,7 @@ def record_decision(
     clock_zone_defer: bool = False,
     accept_shift: float | None = None,
     record_unchanged: bool = False,
+    e0_measured: bool = False,
 ) -> dict:
     """:func:`decide` applied to an ALREADY-LOADED bundle, under the caller's lock. Saves
     nothing: the caller saves through :func:`save_bundle` (or :func:`mutate`). Every target
@@ -2231,7 +2255,7 @@ def record_decision(
     positions = _decide_arguments(
         target_ids=target_ids, decision=decision, by=by, orcid=orcid, qc_status=qc_status,
         element=element, edge=edge, positions=positions, value=value, qc_note=qc_note, same_conditions=same_conditions,
-        split_into=split_into, clock_zone_defer=clock_zone_defer, accept_shift=accept_shift,
+        split_into=split_into, clock_zone_defer=clock_zone_defer, accept_shift=accept_shift, e0_measured=e0_measured,
     )
     bulk = len(target_ids) > 1
     # 0.01 eV: a shift near the warning level is shown to 0.01 eV (reference.shown); compared to 0.1 eV
@@ -2258,6 +2282,21 @@ def record_decision(
                 problem = approved_sibling_problem(bundle, obj, [o for k, o in planned if k == "processing_result"])
                 if problem is not None:
                     raise MutationRefused(problem)
+                if "athena_e0_possibly_fixed" in (obj.get("review_flags") or ()) and not e0_measured:
+                    # r1 M5: an Athena E0 shared by groups whose own edges differ may be a fixed setting, not a measure
+                    said = next((s for s in ((obj.get("qc") or {}).get("statements") or ())
+                                 if isinstance(s, str) and "Athena" in s and "E0" in s), "")
+                    raise MutationRefused(
+                        f"{tid} carries a possibly fixed Athena E0 (athena_e0_possibly_fixed){': ' + said if said else '.'} "
+                        "Ask the scientist whether this E0 was measured from this group's edge; only if they say it "
+                        "was, approve again with --e0-measured. Nothing was recorded.")
+            if e0_measured and not (kind == "processing_result" and "athena_e0_possibly_fixed" in (obj.get("review_flags") or ())):
+                # r2-a L1: the statement answers that flag's question only; on any other target it would be kept as
+                # evidence of nothing (accepted silently before)
+                raise MutationRefused(
+                    f"--e0-measured applies only to a processing result flagged athena_e0_possibly_fixed, and {tid} "
+                    "does not carry that flag: there is no fixed-E0 question to answer. Approve it without "
+                    "--e0-measured. Nothing was recorded.")
             if same_conditions:
                 acknowledged[tid] = _same_conditions_tokens(bundle, kind, obj, merge_with)
             if qc_status is not None and kind != "processing_result":
@@ -2419,6 +2458,8 @@ def record_decision(
                 entry["qc_status"] = qc_status
                 entry["qc_note"] = qc_note
                 entry["qc_evidence"] = {"verdict": qc.get("verdict"), "metrics": qc.get("metrics") or {}}
+                if e0_measured:
+                    entry["qc_evidence"]["e0_measured"] = {"confirmed": True, "flag": "athena_e0_possibly_fixed"}
             decisions.append(entry)
             recorded.append(tid)
             if kind == "record_group" and decision == "split":
@@ -4107,6 +4148,9 @@ def process(
         # decided results are kept, and so is every result of a SUPERSEDED group (never deleted)
         keep = [r for r in bundle.get("processing_results") or ()
                 if B.processing_id(r) in decided or r.get("group_id") in superseded or r.get("group_id") in untouched]
+        from .processing.run import apply_kept_result_notes
+
+        apply_kept_result_notes(keep, payload.get("kept_result_notes") or ())  # r1 M3/M5: outside the hashed files
         kept = {B.processing_id(r) for r in keep}
         fresh = []
         for r in produced:

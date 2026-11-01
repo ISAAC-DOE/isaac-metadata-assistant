@@ -31,12 +31,16 @@ confirmed, with the command that lets it in. When no set-point was read from the
 such as `-500mV`) and no scale is confirmed, the warning names BOTH (`also_needs`, `also_command`): ask the
 set-point in volts and the scale together, so the scientist is not asked twice. A run a generic reader found
 (SSRL XDC) warns too: from its file name (`500mV`, `m600mV`, `1800mV`) and from a scan-header comment
-token (`0.5Vrhe`, with the scale written on it, spelled as written: `Hg/HgO`, `Ag/AgCl`; a header token
-with no scale counts only at |V| ≤ 3 and not in brackets, so `800V`, `12V` or `(1.2V)` is not a
-potential); a run whose name and header write different numbers on the SAME scale (or neither writes
-one) is named as a disagreement for the scientist to settle, while a name with no scale beside a header
-on RHE (`…_m600mV` with `0Vrhe`) may be one potential on two scales: the warning says "different numbers
-on possibly different scales" and to ask which applies. A name stating open
+line (a set-point written in the plain form, `0.5 V vs RHE`, with its scale spelled as written: `Hg/HgO`,
+`Ag/AgCl`; a line that only mentions a potential, such as `sample in 1M KOH 0.5Vrhe`, is named with no
+number read from it); a run whose name and header write different numbers on the SAME named scale is named as a
+disagreement ("state different potentials") for the scientist to settle, while a scale missing on either
+side or two scales (`…_m600mV` with `0 V vs RHE`) may be one potential on two scales: the warning says "write
+different numbers (file name: no scale; scan header: RHE)" and to ask which applies. A record that CARRIES
+a set-point while its run's name and header write different numbers warns `potential_sources_disagree` until
+the scientist rules on the header's reading (in a bundle imported before header readings: by recording the
+record's set-point again, the warning's command). Re-importing instead starts with no answers: earlier
+decisions and a filled workbook do not carry over, and ids printed for the old bundle name other things. A name stating open
 circuit (`OCV`) warns until the control mode is confirmed. None of these is read as a value. It is not a refusal: the record can still be exportable,
 without the condition that defines it. Say each one to the scientist in words and ask the scale question it names (and the set-point when `also_needs` is set); its command is a template: run it only with their answer. Explain the counts first ("all 78 lack the producing group; 70 wait for a curve
 approval; 5 have no protocol"), then open `validation/<group id>.json` only for a group they leave
@@ -79,7 +83,9 @@ After fixing, run `build-records` then `validate` again. Never hand-edit a draft
 
 `export --out <records>` writes `<ULID>.json`, `<ULID>.evidence.json` and a `<ULID>.artifacts/` folder
 (the processing files) for exportable drafts only and lists the rest with their verdicts. Its reply
-opens with `outcome` ("Wrote N record(s), refused M group(s)") and `records_written` / `groups_refused`.
+opens with `outcome` ("N record(s) ready (U unchanged since their export, W written), refused M group(s)": an
+unchanged record keeps its id and is not new; say "nothing new was written" when W is 0) and `records_written` /
+`records_unchanged` / `groups_refused`.
 It exits 1 whenever any group is refused, **even when it wrote records**: read `outcome`, never the exit
 code alone, before telling the scientist what is ready. A record written while a warning still applies lists it
 in `exported[].warnings` ("Written without the potential set-point: …"; the first 5, with `warnings_total`), and

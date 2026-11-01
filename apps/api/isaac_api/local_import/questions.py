@@ -59,11 +59,13 @@ import hashlib
 import json
 import operator
 import re
+from decimal import Decimal
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Container, Mapping, Sequence
 
 from . import bundle as B
 from . import suggestions as S
+from .grouping import LAST_POSITION, last_token_positions
 
 FORMAT_ID = "isaac.questions"
 FORMAT_VERSION = "2.0.0"
@@ -173,8 +175,35 @@ def compositions(bundle: Mapping, bundle_dir: Path | None = None, *,
 _first = operator.itemgetter(0)
 
 
+#: r2-a M2: why a companion (:data:`bundle.COMPOSES_ONLY_WITH`) is required now, beside the required field it goes in with
+ASKED_WITH_COMPANION = ("the record requires {path}, which goes into the record only beside a confirmed {companion} for "
+                        "every run it comes from (the number alone does not say what it is relative to); {companion} is "
+                        "asked now with it, so the scientist is not asked twice")
+
+
+def _companions_missing(report: Mapping) -> list[dict]:
+    """r2-a M2: the companion of each required field the composer lists as missing (a set-point nobody answered) when
+    the record carries no companion either (no confirmed potential scale): answering the field alone would only hold
+    it back and list the companion next (c12-q), so the companion is required NOW, beside it, with why. Never one the
+    composer already lists or the record already carries."""
+    paths = {m["path"] for m in report.get("missing_required") or () if m.get("from") == FROM_AN_ANSWER}
+    filled = {f["path"] for f in report.get("filled") or ()}
+    return [{"path": companion, "from": FROM_AN_ANSWER, "required_because": ASKED_WITH_COMPANION.format(path=path, companion=companion)}
+            for path, companion in B.COMPOSES_ONLY_WITH.items()
+            if path in paths and companion not in paths and companion not in filled]
+
+
 def _answer_missing(report: Mapping) -> list[str]:
-    return [m["path"] for m in report.get("missing_required") or () if m.get("from") == FROM_AN_ANSWER]
+    """The composer's missing-required paths only an answer supplies, then each one's missing companion
+    (:func:`_companions_missing`)."""
+    return ([m["path"] for m in report.get("missing_required") or () if m.get("from") == FROM_AN_ANSWER]
+            + [m["path"] for m in _companions_missing(report)])
+
+
+def _required_because(report: Mapping) -> dict[str, str]:
+    """``{path: why}`` for each conditionally required path (the composer's, then :func:`_companions_missing`)."""
+    return {m["path"]: m["required_because"]
+            for m in list(report.get("missing_required") or ()) + _companions_missing(report) if m.get("required_because")}
 
 
 @functools.lru_cache(maxsize=4096)
@@ -363,6 +392,14 @@ def _confirmed_value_text(path: str, cands: Sequence[Mapping]) -> str:
             lit = (c.get("observed_literals") or [None])[0]
             # a start time is the UTC value the stated clock zone gives the header's LOCAL time, not the text itself
             source = ("from the local clock time {} under the stated time zone" if B.is_local_clock_start(c) else "from: {}")
+            if B.is_header_comment_candidate(c):
+                # c16-r: read by PATTERN from free text — the whole line, where it is, and what to check
+                ev = next((e for e in c.get("evidence") or () if e.get("literal_value")), None) or {}
+                lit = ev.get("literal_value", lit)
+                where = str(ev.get("locator") or "").replace("line:", "line ")
+                source = ("read by pattern from the comment line {}"
+                          + (f" ({where} of {ev['relative_path']})" if where and ev.get("relative_path") else "")
+                          + f"; check it is {HEADER_CHECK.get(path, 'what this scan was measured with')}")
             seen[key] = [_shown_value(c["value"], _unit_of(path, c)), lit, 0, source]
         seen[key][2] += 1
     if not seen:
@@ -377,6 +414,16 @@ def _confirmed_value_text(path: str, cands: Sequence[Mapping]) -> str:
     if any((c.get("state_basis") or {}).get("not_proposable_reason") == B.BEAMTIME_WIDE_REASON for c in cands):
         text += f" It is {B.BEAMTIME_WIDE_SUMMARY}"
     return text
+
+
+#: c16-r: what a scientist checks a value read from a scan-header comment line against, per field.
+HEADER_CHECK = {
+    "context.electrochemistry.potential_setpoint_V": "the potential held during this scan",
+    "context.electrochemistry.potential_scale": "the reference scale of the potential held during this scan",
+    "context.electrochemistry.pH": "the pH of the electrolyte during this scan",
+    "context.electrochemistry.electrolyte.name": "the electrolyte the sample was in during this scan",
+    "context.electrochemistry.electrolyte.concentration_M": "the electrolyte's concentration during this scan",
+}
 
 
 def _confirmable_candidates(targets: Sequence[Mapping], cand_by_id: Mapping[str, Mapping],
@@ -417,6 +464,8 @@ def _qid(*parts: str) -> str:
 
 #: The counter question's id (the grouping step's experiment-wide question; DEC-91: never changes).
 COUNTER_QUESTION_ID = _qid("experiment", "naming_counter_positions", _COUNTER_GQ_ID)
+#: The instrument clock's time-zone question's id (the same inputs as always).
+CLOCK_QUESTION_ID = _qid("experiment", "clock_time_zone", "instrument_clock")
 
 
 def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, include_answered: bool = False,
@@ -824,6 +873,18 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 text = (f"For information only: the files hold a reading for the {_label(path)} ({path}), and no answer here can "
                         f"reach the record ({never}). The reading stays evidence; nothing is asked.")
                 decisions_offered = list(INFORMATIONAL_DECISIONS)
+            elif (len(valueless) == len(q["targets"])
+                  and all(B.is_header_comment_candidate(cand_by_id.get(i) or {}) for i in valueless)):
+                # r1d: a scan-header comment line that mentions the field in no form the rule reads: quoted, and asked
+                lines = list(dict.fromkeys((e.get("literal_value"), e.get("locator"), e.get("relative_path"))
+                                           for i in valueless for e in (cand_by_id[i].get("evidence") or ())[:1]))
+                said = header_unread_text(path, *lines[0]) if lines else "a scan-header comment line mentions it"
+                text = (f"What is the {_label(path)} ({path})? {said[:1].upper()}{said[1:]}"
+                        + (f" ({len(lines) - 1} more comment line(s) like it: see the hints)" if len(lines) > 1 else "")
+                        + ". There is nothing to confirm: give the value (correct), reject it if no value is stated for "
+                        "this scan, or defer it.")
+                decision = "correct"
+                decisions_offered = list(VALUELESS_DECISIONS)
             elif len(valueless) == len(q["targets"]):
                 text = (f"What is the {_label(path)} ({path})? The files hold text for it (see the hints) but no value this "
                         "build can carry" + (f": {summary.rstrip('.')}" if summary else "")
@@ -1013,13 +1074,19 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                                    + str(pending.get("statement") or "")) + ")"}]
     for gq in counter_gqs:
         asked_positions = [int(p) for p in gq.get("positions") or () if isinstance(p, int)]
-        open_positions = [p for p in asked_positions if p not in said_counter and p not in said_not]
+        # `last` is answered "no" when every position those last tokens sit at is said not to be a counter
+        last_at = last_token_positions(bundle) if LAST_POSITION in asked_positions else []
+        # c16-r M5: a last-token position ruled either way (a counter, or not one) is answered
+        ruled_at = set(said_counter) | set(said_not)
+        open_last = [p for p in last_at if p not in ruled_at]
+        open_positions = [p for p in asked_positions if p not in said_counter and p not in said_not
+                          and not (p == LAST_POSITION and last_at and not open_last)]
         if asked_positions and not open_positions and not include_answered:
             continue  # every position it asks about is answered: it drops out of the open list
         qid = _qid("experiment", "naming_counter_positions", str(gq.get("id") or gq.get("text") or ""))
         text = str(gq.get("text") or "Which filename token positions are run or acquisition counters?")
         # REAL NAMES, NOT A PATTERN: the file names this bundle holds, the asked token marked
-        examples = _counter_examples(bundle, open_positions or asked_positions)
+        examples = _counter_examples(bundle, open_positions or asked_positions, ruled=ruled_at)
         if examples and _COUNTER_PLACEHOLDER in text:
             text = text.replace(_COUNTER_PLACEHOLDER, "(e.g. " + "; ".join(
                 f"the {_ordinal(p)} token: " + " vs ".join(ex["differ"])
@@ -1027,10 +1094,10 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 for p, ex in examples.items()) + ")")
         example_names = {str(p): ex["differ"] + ([ex["elsewhere"]] if ex["elsewhere"] else []) for p, ex in examples.items()}
         if asked_positions and not open_positions:
-            text += " Already answered: every position it asks about (" + ", ".join(map(str, asked_positions)) + ")."
+            text += " Already answered: every position it asks about (" + ", ".join(map(_position_shown, asked_positions)) + ")."
         elif len(open_positions) < len(asked_positions):
-            text += (" Already answered: position(s) " + ", ".join(str(p) for p in asked_positions if p not in open_positions)
-                     + f"; still open: {', '.join(map(str, open_positions))}.")
+            text += (" Already answered: position(s) " + ", ".join(_position_shown(p) for p in asked_positions if p not in open_positions)
+                     + f"; still open: {', '.join(map(_position_shown, open_positions))}.")
         text += (" If none of the open positions is a counter (the numbers name distinct samples, electrodes or "
                  "conditions, or are a plain sequence that does not mark repeats), say so with "
                  f"{B.NOT_COUNTER_DECISION}: grouping is unchanged by that answer and each merge candidate stays open.")
@@ -1047,6 +1114,9 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 "text": text,
                 # answered (include_answered): the positions a no-counter answer names again, never one said to be a counter
                 "positions": open_positions or [p for p in asked_positions if p not in said_counter] or asked_positions,
+                # what a "no" names: the open last-token positions (never one already said to be a counter)
+                **({"last_token_positions": open_last or [p for p in last_at if p not in said_counter] or last_at}
+                   if last_at and LAST_POSITION in asked_positions else {}),
                 **({"example_names": example_names} if example_names else {}),
                 "applies_to": {"groups": len(groups), "runs": len(bundle["runs"]), "targets": 1},
                 "targets": [{"kind": "experiment", "id": "experiment"}],
@@ -1056,6 +1126,9 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                            "locator": "file names in this bundle, the asked token in [brackets]" if example_names else "the grouping step"}],
                 "allowed_values": None,
                 "answered": answered_positions,
+                # r2-a M3: while a position is open the answer decides which runs are repeats, and a regroup keeps
+                # decided groups: it is asked before any group is confirmed, so it sorts first (`order` below)
+                "order_critical": not (asked_positions and not open_positions),
                 **({"deferred": deferred} if (deferred := counter_deferral(bundle)) else {}),
                 "answer_command": (
                     'isaac bundle decide <bundle_dir> --target experiment --decision set_counter_positions '
@@ -1074,7 +1147,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         zq = B.clock_zone_question({**bundle, "scientist_decisions": [
             d for d in bundle.get("scientist_decisions") or () if d.get("decision") != B.CLOCK_ZONE_DECISION]})
     if zq is not None:
-        qid = _qid("experiment", "clock_time_zone", "instrument_clock")
+        qid = CLOCK_QUESTION_ID
         questions.append(
             {
                 "question_id": qid,
@@ -1178,8 +1251,12 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         else:
             s = (2, run_order.get(scope[4:], 10**9))
         # an informational question (nothing to answer) sorts after every question that has an answer; a
-        # DEFERRED one ("I don't know") after every one not deferred in its tier, so it is not asked again first
-        return (q["tier"], bool(q.get("informational")), bool(q.get("deferred")), s, q["target_field_path"] or "", q["question_id"])
+        # DEFERRED one ("I don't know") after every one not deferred in its tier, so it is not asked again first.
+        # r2-a M3: the open counter question (not deferred) before every other, whatever its tier: confirmed groups
+        # cannot be joined later (measured: 28th of 43 in the experiment scope, after 27 blocking questions)
+        first = not (q.get("order_critical") and not q.get("deferred"))
+        return (first, q["tier"], bool(q.get("informational")), bool(q.get("deferred")), s, q["target_field_path"] or "",
+                q["question_id"])
 
     if has_groups:
         reports = compositions(bundle, decision_of=decisions)
@@ -1258,11 +1335,11 @@ def question_counts(questions: Sequence[Mapping], *, fine_grained_v1: int | None
     return out
 
 
-def scope_counts(payload: Mapping, scope: str | None) -> dict:
+def scope_counts(payload: Mapping, scope: str | None, reports: Mapping[str, Mapping] | None = None) -> dict:
     """:func:`question_counts` for the questions ``scope`` selects, where ``blocking`` means blocking THERE: in a
     group's scope, a question the composer says blocks only other groups counts as optional (exactly what
-    ``filter_questions(..., blocking_only=True)`` leaves out)."""
-    rows = filter_questions(payload, scope=scope)
+    ``filter_questions(..., blocking_only=True)`` leaves out). ``reports`` as :func:`filter_questions`."""
+    rows = filter_questions(payload, scope=scope, reports=reports)
     if scope and scope.startswith("group:"):
         gid = scope[len("group:"):]
         rows = [{**q, "blocking": False, "tier": TIER_OPTIONAL}
@@ -1299,8 +1376,8 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
     from .records import RUN_ONLY_PATHS
 
     missing = {gid: set(_answer_missing(rep)) for gid, rep in reports.items()}
-    because_of = {gid: {m["path"]: m["required_because"] for m in rep.get("missing_required") or () if m.get("required_because")}
-                  for gid, rep in reports.items()}
+    because_of = {gid: _required_because(rep) for gid, rep in reports.items()}
+    companion_of = {gid: {m["path"] for m in _companions_missing(rep)} for gid, rep in reports.items()}
     filled = {gid: {f["path"] for f in rep.get("filled") or ()} for gid, rep in reports.items()}
     every = set(missing)
     order_of = {gid: i for i, gid in enumerate(missing)}
@@ -1395,10 +1472,15 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
             q["blocking"], q["tier"] = True, TIER_BLOCKING
             q["required_fields"] = sorted(fields)
             because = next((b for g in sorted(needing) for f in sorted(fields) if (b := because_of.get(g, {}).get(f))), None)
-            q["why"] = (f"The record cannot be exported without it: the record composer (what `build-records` and "
-                        f"`validate` check) lists {', '.join(sorted(fields))} as missing for {len(needing)} record "
-                        "group(s) this question reaches, and only an answer supplies it"
-                        + (f" ({because})" if because else "") + ".")
+            if because and all(f in companion_of.get(g, ()) for g in needing for f in fields):
+                # r2-a M2: required only beside a field nobody answered yet (the composer lists that one, not this)
+                q["why"] = (f"The record cannot be exported without it: {because}; it blocks {len(needing)} record "
+                            "group(s) this question reaches.")
+            else:
+                q["why"] = (f"The record cannot be exported without it: the record composer (what `build-records` and "
+                            f"`validate` check) lists {', '.join(sorted(fields))} as missing for {len(needing)} record "
+                            "group(s) this question reaches, and only an answer supplies it"
+                            + (f" ({because})" if because else "") + ".")
             if because:
                 q["required_because"] = because
     return {"basis": "records.compose_group: the missing-required list build-records and validate report",
@@ -1412,7 +1494,12 @@ _COUNTER_PLACEHOLDER = "(e.g. XX_02_… vs XX_03_…)"
 
 
 def _ordinal(n: int) -> str:
-    return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+    return "last" if n == LAST_POSITION else f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+def _position_shown(p: int) -> str:
+    """A counter position as the scientist answers it: ``3``, or ``last`` for the last token (never ``-1``)."""
+    return "last" if p == LAST_POSITION else str(p)
 
 
 def _marked_token(stem: str, position: int) -> str | None:
@@ -1428,15 +1515,30 @@ def _marked_token(stem: str, position: int) -> str | None:
     return f"{stem[:a]}[{stem[a:b]}]{stem[b:]}"
 
 
-def _counter_examples(bundle: Mapping, positions: Sequence[int]) -> dict[int, dict]:
+def _counter_examples(bundle: Mapping, positions: Sequence[int], ruled: Container[int] = ()) -> dict[int, dict]:
     """For each asked position: ``differ`` — the names (at most 2) of one merge candidate whose names differ there in
     a number (what the question is asked for), the token marked — and ``elsewhere``, one name of the bundle where
-    that token is not a number (or ``None``). Real names of this bundle, never a pattern."""
+    that token is not a number (or ``None``). Real names of this bundle, never a pattern. c16-r M5: the last-token
+    example is never one whose last token sits at a position in ``ruled`` (already answered)."""
     from .grouping import _stem_tokens
 
     runs_by_key = {r["run_key"]: r for r in bundle.get("runs") or ()}
     groups = {g["group_id"]: g for g in bundle.get("record_groups") or ()}
     out: dict[int, dict] = {}
+    if LAST_POSITION in positions:
+        # the last token: two names of one merge candidate that differ only there, in a number
+        for mc in bundle.get("merge_candidates") or ():
+            stems = []
+            for gid in mc.get("group_ids") or ():
+                keys = (groups.get(gid) or {}).get("member_run_keys") or ()
+                stem = (runs_by_key.get(keys[0]) or {}).get("stem") if keys else None
+                if stem and stem not in stems:
+                    stems.append(stem)
+            toks = [_stem_tokens(x) for x in stems[:2]]
+            if (len(toks) == 2 and len(toks[0]) == len(toks[1]) > 1 and toks[0][:-1] == toks[1][:-1]
+                    and toks[0][-1] != toks[1][-1] and all(t[-1].isdigit() for t in toks) and len(toks[0]) not in ruled):
+                out[LAST_POSITION] = {"differ": [_marked_token(x, len(t)) for x, t in zip(stems, toks)], "elsewhere": None}
+                break
     for mc in bundle.get("merge_candidates") or ():
         if not any(r.get("code") == "numeric_name_token_differs" for r in mc.get("reasons") or ()):
             continue
@@ -1452,6 +1554,8 @@ def _counter_examples(bundle: Mapping, positions: Sequence[int]) -> dict[int, di
             if p not in out and len(stems) >= 2 and len(col) == len(toks) and len(set(col)) > 1 and all(c.isdigit() for c in col):
                 out[p] = {"differ": [_marked_token(s, p) for s in stems[:2]], "elsewhere": None}
     for p, ex in out.items():
+        if p == LAST_POSITION:
+            continue  # every name has a last token: there is no "elsewhere" to show
         other = next((r["stem"] for r in bundle.get("runs") or () if r.get("stem") and len(t := _stem_tokens(r["stem"])) >= p
                       and not t[p - 1].isdigit()), None)
         ex["elsewhere"] = _marked_token(other, p) if other else None
@@ -2040,8 +2144,41 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_a
     return out
 
 
+def _for_group(q: Mapping, scope: str, report: Mapping | None) -> Mapping | None:
+    """r2-a L3: a question from outside a group's own scope as that group's list shows it, or ``None`` when nothing in
+    it applies to the group: a conflict that affects no record and reaches no group, or an optional-values question
+    every field of which the record composed for the group already carries (e.g. answered for its runs by a template).
+    Otherwise its fields are only those still open for the group (a copy; its id and the unscoped question are
+    unchanged). ``report``: the group's composition (``consolidate(compositions_out=...)``); without one the fields are
+    left as they are."""
+    if q["scope"] == scope:
+        return q
+    if (q.get("kind") == "resolve_conflict" and not q.get("affects_record") and not q.get("blocking")
+            and not int((q.get("applies_to") or {}).get("groups") or 0)):
+        return None
+    if q.get("kind") != "optional_values" or report is None or not q.get("fields"):
+        return q
+    filled = [f["path"] for f in report.get("filled") or ()]
+    open_fields = [f for f in q["fields"] if not any(_fills(f, p) for p in filled)]
+    if len(open_fields) == len(q["fields"]):
+        return q
+    if not open_fields:
+        return None
+    lead = f"{len(q['fields'])} optional field(s) no parser read a value for: {', '.join(sorted(q['fields']))}."
+    said = (f"{len(open_fields)} optional field(s) no parser read a value for and this group's record does not carry: "
+            f"{', '.join(sorted(open_fields))}.")
+    return {**q, "fields": {f: ids for f, ids in q["fields"].items() if f in open_fields},
+            "field_allowed_values": {f: a for f, a in (q.get("field_allowed_values") or {}).items() if f in open_fields},
+            **({"field_hints": {f: h for f, h in q["field_hints"].items() if f in open_fields}} if q.get("field_hints") else {}),
+            "text": q["text"].replace(lead, said, 1),
+            "fields_already_in_this_groups_record": len(q["fields"]) - len(open_fields)}
+
+
 def filter_questions(payload: Mapping, *, scope: str | None = None, blocking_only: bool = False,
-                     skip_deferred: bool = False) -> list[dict]:
+                     skip_deferred: bool = False, reports: Mapping[str, Mapping] | None = None) -> list[dict]:
+    """The questions ``scope`` selects. In a group's scope (r2-a L3) a question from outside it lists only what still
+    applies to the group (:func:`_for_group`; ``reports``: ``consolidate``'s compositions, which say what the group's
+    record already carries)."""
     qs = list(payload["questions"])
     if blocking_only:
         qs = [q for q in qs if q["blocking"]]
@@ -2061,6 +2198,8 @@ def filter_questions(payload: Mapping, *, scope: str | None = None, blocking_onl
             ]
             # c10-m: and it leads with the AI suggestion read for THIS group's runs
             qs = [led_by_scope(q, scope) for q in qs]
+            report = (reports or {}).get(scope[len("group:"):])
+            qs = [g for q in qs if (g := _for_group(q, scope, report)) is not None]
         elif scope.startswith("run:") or scope == "experiment":
             qs = [q for q in qs if q["scope"] == scope]
     return qs
@@ -2411,7 +2550,7 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
         chosen: dict[str, dict] = {}
         unasked: list[dict] = []
         usable = [asks[i] for i in sorted(everywhere + asks_of.get(gid, []))]
-        because = {m["path"]: m["required_because"] for m in rep.get("missing_required") or () if m.get("required_because")}
+        because = _required_because(rep)
         for path in _answer_missing(rep):
             options, seen = [], set()
             for cpath, q, field, _, _ in usable:
@@ -2512,7 +2651,7 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
         rank = (bool(hard), soft is not None, need + len(plus), n)
         if best is None or rank < best["rank"]:
             best = {"rank": rank, "group_id": gid, "need": need, "plus": plus, "questions": list(chosen.values()),
-                    "unasked": unasked, "hard": hard, "soft": soft, "missing": [m["path"] for m in rep.get("missing_required") or ()],
+                    "unasked": unasked, "hard": hard, "soft": soft, "missing": [m["path"] for m in list(rep.get("missing_required") or ()) + _companions_missing(rep)],
                     "recommended": warned, "stated": stated}
     if best is None:
         if not done:
@@ -2536,6 +2675,17 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
         # the candidates whose parser values (a file-name literal, the volts it was read as) the warnings state: a
         # page or command showing them records each as an exposure first (c7-r MED-4)
         out["values_shown_from"] = sorted(set(best["stated"]))
+    counter = next((q for q in payload["questions"] if q["kind"] == "naming_counter_positions" and q.get("order_critical")
+                    and not q.get("deferred")), None)  # "I don't know" (defer) is an answer: never asked again first
+    if counter is not None and not any(g.get("status") == B.STATE_SCIENTIST_CONFIRMED for g in live_groups(bundle)):
+        # r2-a M3: NAMED BEFORE ANY GROUP IS CONFIRMED, not counted (it blocks no record): a regroup keeps decided
+        # groups, so an answer given after a confirmation can no longer join them
+        out["answer_first"] = {
+            "question_id": counter["question_id"], "kind": counter["kind"],
+            "why": ("Answer the counter question before confirming any group: it decides which runs are repeats of one "
+                    "measurement, and a regroup keeps decided groups, so an answer given after a group is confirmed can "
+                    "no longer join it."),
+            "answer_command": counter["answer_command"]}
     if best["hard"]:
         out["blocked"] = "; ".join(best["hard"])
     if best["soft"]:
@@ -2553,11 +2703,12 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
 #: A SCAN HEADER comment token that states a potential, with the scale written onto it (``0.5Vrhe``, ``-0.6V_RHE``,
 #: ``500mV``). Only RECOGNISES the statement, to warn that the record will not carry it: nothing is read as a value.
 _HEADER_POTENTIAL_TOKEN = re.compile(
-    r"^(?P<v>(?:m|n|neg|minus|-|\+)?\d+(?:[p.]\d+)?m?V)(?:_?(?:vs)?_?(?P<scale>RHE|SHE|NHE|SCE|Ag/?AgCl|Hg/?HgO|MSE))?$",
+    r"^(?P<v>(?:m|n|neg|minus|-|\+)?\d+(?:[p.]\d+)?m?V)(?:_?(?:vs)?_?(?P<scale>RHE|SHE|NHE|SCE|Ag/?AgCl|Hg/?HgSO4|Hg/?HgO|MSE))?$",
     re.IGNORECASE)
 #: c8-r: each reference-electrode scale a header token may write, in ITS OWN spelling (``Hg/HgO``, never ``HG/HGO``).
 _SCALE_SPELLING = {"rhe": "RHE", "she": "SHE", "nhe": "NHE", "sce": "SCE", "mse": "MSE",
-                   "ag/agcl": "Ag/AgCl", "agagcl": "Ag/AgCl", "hg/hgo": "Hg/HgO", "hghgo": "Hg/HgO"}
+                   "ag/agcl": "Ag/AgCl", "agagcl": "Ag/AgCl", "hg/hgo": "Hg/HgO", "hghgo": "Hg/HgO",
+                   "hg/hgso4": "Hg/HgSO4", "hghgso4": "Hg/HgSO4"}
 #: c8-r: the largest size (volts) a scan-header token with NO scale written onto it is taken to state a potential
 #: at: an electrode potential is a few volts at most, while a header's ``800V``, ``1500V`` or ``12V`` is a detector
 #: bias or a supply. A token with a scale (``12V_RHE``) is taken whatever its size.
@@ -2584,7 +2735,8 @@ def header_potential(token: str) -> dict | None:
     with a scale written onto it (``0.5Vrhe``, ``0.1V_vs_Hg/HgO``) states one; a token with none only at the size a
     potential can have (|V| <= :data:`HEADER_POTENTIAL_MAX_V`) and not in brackets: ``800V``, ``12V``, ``5v`` or a
     parenthesised ``(1.2V)`` (a device's setting beside its name) are not. The scale keeps its own spelling. Only
-    RECOGNISES the statement, for a warning: nothing is read as a value."""
+    RECOGNISES the statement, for a warning: nothing is read as a value. r1d: a whole comment LINE is read by
+    :func:`header_comment_readings` alone; this token rule names the scale a file-name token writes."""
     bare = token.strip(",;")
     bracketed = bare != bare.strip("()")
     bare = bare.strip("()")
@@ -2597,6 +2749,195 @@ def header_potential(token: str) -> dict | None:
         if bracketed or volts is None or abs(volts) > HEADER_POTENTIAL_MAX_V:
             return None
     return {"literal": bare, "scale": scale}
+
+
+#: The reference-electrode scales the record's ``potential_scale`` takes (the official schema's enum), each
+#: in the schema's spelling: a scale outside it (NHE, MSE) is kept as written and proposes no scale.
+POTENTIAL_SCALES = ("RHE", "SHE", "Ag/AgCl", "SCE", "Hg/HgO", "Hg/HgSO4")
+SCALE_PATH = "context.electrochemistry.potential_scale"
+
+
+# --- THE COMMENT RULE'S GRAMMAR (r1d): a value only where a whole SEGMENT of the line is written plainly ------------
+#
+# A comment line is free text a scientist typed at the beamline. Patching a reader of free text against each
+# misreading still left confidently wrong values (``1e-3 M KCl`` as 3 M, ``NiFe - 1.55 V`` as -1.55 V, ``eta = 300
+# mV`` as a set-point), so the rule is a WHITELIST: the line is split into segments (:func:`comment_segments`), and
+# a value is offered only where a whole segment is one statement in a strict grammar (a set-point, a pH, an
+# electrolyte) and nothing else in the line can make it a different quantity. Every other line that mentions the
+# field gives a candidate with NO value that quotes the line: the scientist says the value.
+
+#: where a comment line splits into segments: ``,`` ``;`` ``|`` and runs of two or more spaces
+_SEGMENT_SEPARATOR = re.compile(r"\s*[,;|]\s*|\s{2,}")
+#: a segment that ENDS in a number standing alone (``-0``, ``pH 1``, ``1``): a separator after it with no space
+#: before the next digit, or of spaces only, may be a comma decimal or a digit group (``-0,3 V``, ``pH 1,3``,
+#: ``1  000 mV``), so neither side is read (``pH 1.3, 0.1 M HClO4`` is two statements)
+_ENDS_IN_A_NUMBER = re.compile(r"(?:^|[^\w.])[-+\u2212\u2013]?[\d.]*\d$")
+#: the scales a set-point segment may name after ``vs``, in the spelling the warnings use (only
+#: :data:`POTENTIAL_SCALES` is proposed as the record's scale)
+_SCALE_NAMES = {s.casefold(): s for s in (*POTENTIAL_SCALES, "NHE", "MSE", "Li/Li+")}
+_SCALES = "|".join(re.escape(s) for s in sorted(_SCALE_NAMES.values(), key=len, reverse=True))
+#: A SET-POINT segment, the whole of it: an optional label (``E``, ``E =``, ``E:``, ``potential``, ``potential:``,
+#: ``held at``, ``at``, ``@``); a sign written onto the number (``+``, ``-``, U+2212, an en dash); a plain decimal
+#: (``0.3``, ``.3``); ``V`` or ``mV``; and an optional scale (``vs RHE``, ``vs. Ag/AgCl``, ``versus SCE``, ``(RHE)``,
+#: a bare ``RHE``).
+_SETPOINT_SEGMENT = re.compile(
+    r"(?:(?:E|potential)(?:\s*[=:]\s*|\s+)|held\s+at\s+|at\s+|@\s*)?"
+    r"(?P<sign>[-+\u2212\u2013])?(?P<num>\d+(?:\.\d+)?|\.\d+)\s?(?P<unit>(?-i:mV|V|mv|v))"
+    rf"(?:\s*(?:vs\.?|versus)\s*(?P<vs>{_SCALES})|\s*\((?P<paren>{_SCALES})\)|\s+(?P<bare>RHE))?",
+    re.IGNORECASE)
+#: a POTENTIAL-LIKE number anywhere in a line: one with a voltage unit (``V``, ``mV``, ``kV``, ``µV``) or a sign
+#: (``-0.5``, ``± 0.01``). A set-point is offered only when its own number is the line's only one.
+_POTENTIAL_LIKE = re.compile(r"(?<![\w.])(?P<sign>[-+\u2212\u2010-\u2015\u00b1~]\s?)?(?:\d+(?:[.,]\d+)?|[.,]\d+)"
+                             r"(?P<unit>\s*(?:[kmu\u00b5\u03bc]?V|mv|v(?![a-z])))?")
+#: words that say a line's potential may not be the one held during the scan (open circuit, a half-wave, onset or
+#: over-potential, a step, amplitude or difference, a rate or a Tafel slope, a sweep, a current or galvanostatic
+#: control, what came before or after, an offset, bias or gain, an iR drop, an edge, a cell voltage, a range, and a
+#: reference electrode: ``RE: 3.5 M KCl, -0.4 V``)
+_SETPOINT_CONTEXT = re.compile(
+    r"(?i:OC[PV]|open[\s_-]*circuit|(?<![a-z])rest|E\s*(?:1/2|\u00bd)|onset|overpotential|(?<![a-z])eta(?![a-z])"
+    r"|\u03b7|\u0394|(?<![a-z])delta|(?<![a-z])step|amplitude|(?<![a-z])rate|/\s*s(?![a-z])"
+    r"|(?<![a-z])s\s*\^?\(?\s*[-\u2212\u207b]\s*[1\u00b9]|(?<![a-z])dec|tafel|(?<![a-z])(?:cv|lsv|cp)(?![a-z])"
+    r"|(?<![a-z])sweep|(?<![a-z])scan|galvano|chronopot|(?<![a-z])current|(?<![a-z])pre|(?<![a-z])post"
+    r"|(?<![a-z])(?:before|after|then|to|from)(?![a-z])|(?<![a-z])prior|(?<![a-z])activat|(?<![a-z])condition"
+    r"|ex[\s_-]*situ|offset|(?<![a-z])bias|(?<![a-z])gain|(?<![a-z])amp|(?<![a-z])ir(?![a-z])|(?<![a-z])drop|edge"
+    r"|cell|->|\u2192|(?<![a-z])ref(?:erence)?(?![a-z]))|(?<![A-Za-z])(?:dE|mA|RE)(?![a-z])")
+#: any voltage a line writes (``-0.3 V``, ``0.5Vrhe``, ``300mV``): the line MENTIONS a potential
+_VOLTS_MENTIONED = re.compile(r"\d\s*(?:m?V|mv|v(?![a-z]))")
+#: A pH segment, the whole of it: ``pH 1.3``, ``pH=12.5``, ``pH7``
+_PH_SEGMENT = re.compile(r"pH\s*=?\s*(?P<v>\d{1,2}(?:\.\d+)?)")
+_PH_MENTIONED = re.compile(r"(?<![A-Za-z])pH(?![a-z])")
+#: a pH range or a comma decimal anywhere in the line (``pH 6.8-7.2``, ``pH 7 to 10``, ``pH 1,3``)
+_PH_RANGE = re.compile(r"pH\s*[=:]?\s*\d+(?:\.\d+)?(?:,\d|\s*(?:[-\u2010-\u2015\u2212~]|to(?![a-z]))\s*\d)")
+#: words that say a line's concentration may be a reference electrode's filling, a salt bridge, a standard, a
+#: precursor or one part of a mixture, not the electrolyte (``salt bridge 3 M KCl``, ``Ag/AgCl 3M KCl``)
+_ELECTROLYTE_CONTEXT = re.compile(
+    r"(?i:Ag\s*/\s*AgCl|(?<![a-z])SCE(?![a-z])|Hg\s*/\s*Hg|(?<![a-z])ref|bridge|junction|filling|(?<![a-z])inner"
+    r"|(?<![a-z])outer|standard|(?<![a-z])sat(?:\.|urated|(?![a-z]))|precursor|additive|(?<![a-z])and(?![a-z]))"
+    r"|\+|(?<![A-Za-z])RE(?![A-Za-z])")
+#: why a field a line mentions gives no value (the reading's ``why``)
+HEADER_UNREAD_WHY = "not written in a form ISAAC reads exactly"
+#: what a line that mentions a field is said to mention, per field (:func:`header_unread_text`)
+_HEADER_MENTIONS = {
+    "context.electrochemistry.potential_setpoint_V": "a potential",
+    "context.electrochemistry.pH": "a pH",
+    "context.electrochemistry.electrolyte.name": "an electrolyte",
+    "context.electrochemistry.electrolyte.concentration_M": "an electrolyte concentration",
+}
+
+
+def comment_segments(line: str) -> list[tuple[str, bool]]:
+    """``[(segment, readable)]`` of a comment line: its text split at :data:`_SEGMENT_SEPARATOR`, each stripped. A
+    segment beside a separator that has a number standing alone before it and a digit after it (``-0,3``, ``pH
+    1,3``, ``1  000``) is NOT readable: the separator may be a comma decimal or a digit group."""
+    text = str(line or "").strip()
+    parts, seps, at = [], [], 0
+    for m in _SEGMENT_SEPARATOR.finditer(text):
+        parts.append(text[at:m.start()])
+        seps.append(m.group(0))
+        at = m.end()
+    parts.append(text[at:])
+    readable = [bool(p) for p in parts]
+    for i, sep in enumerate(seps):
+        joined = not sep[-1].isspace() or not sep.strip()  # ``1,3`` or ``1  000``; never ``pH 7, 10 mM``
+        if joined and _ENDS_IN_A_NUMBER.search(parts[i]) and parts[i + 1][:1] in ".0123456789":
+            readable[i] = readable[i + 1] = False
+    return [(p, ok) for p, ok in zip(parts, readable) if p]
+
+
+def header_setpoint(segment: str) -> dict | None:
+    """``{"literal", "scale", "volts"}`` when ``segment`` is, as a whole, a set-point (:data:`_SETPOINT_SEGMENT`), else
+    ``None``. ``scale`` is the one named, in :data:`_SCALE_NAMES`' spelling, or ``None``; with none named the size
+    must be one a potential can have (|V| <= :data:`HEADER_POTENTIAL_MAX_V`): ``5 V`` alone is no set-point."""
+    m = _SETPOINT_SEGMENT.fullmatch(segment.strip())
+    if m is None:
+        return None
+    volts = Decimal(m.group("num")) / (1000 if m.group("unit").lower() == "mv" else 1)
+    if m.group("sign") not in (None, "+"):
+        volts = -volts
+    written = m.group("vs") or m.group("paren") or m.group("bare")
+    scale = _SCALE_NAMES[written.casefold()] if written else None
+    if scale is None and abs(volts) > Decimal(str(HEADER_POTENTIAL_MAX_V)):
+        return None
+    return {"literal": segment.strip(), "scale": scale, "volts": float(volts) + 0.0}
+
+
+def header_comment_readings(line: str) -> list[dict]:
+    """What ONE scan-header comment line states for the record's fields (rule ``bundle.XDC_COMMENT_RULE_ID``):
+    ``[{"path", "value", "literal", "unit"}]``, ``literal`` the WHOLE line (what the scientist checks the value
+    against). Each becomes a candidate that NEEDS REVIEW, never a confirmed value. No gas is read (no write route).
+
+    r1d, A WHITELIST: a value is offered only where a whole segment (:func:`comment_segments`) is one plain statement
+    and the line gives no reason to doubt it —
+
+    * the set-point (volts) and its scale: a segment :func:`header_setpoint` reads, the line's only potential-like
+      number (:data:`_POTENTIAL_LIKE`), and none of :data:`_SETPOINT_CONTEXT`'s words in the line (OCP, onset, eta,
+      a step, a rate, a sweep, galvanostatic, pre-/post-, then, an offset, a cell, a range, ...); the scale only
+      when it is one the record takes (:data:`POTENTIAL_SCALES`);
+    * the pH: a segment ``pH 1.3`` / ``pH=1.3``, the line's only pH, with no range or comma decimal after it;
+    * the electrolyte name and concentration (mol/L): the line's one segment ``template.electrolyte_statement``
+      reads (the template's own grammar), the line's only concentration, and none of :data:`_ELECTROLYTE_CONTEXT`'s
+      words (a reference, a bridge, a filling, a standard, ``+``, ``and``).
+
+    A field the line MENTIONS (a voltage, ``pH``, a concentration) and gives no value for is a reading with NO
+    value, ``ambiguous`` and ``why``: the scientist says the value."""
+    from .template import (_CONCENTRATION_IN_NAME, ELECTROLYTE_CONC_PATH, ELECTROLYTE_NAME_PATH, PH_PATH, POTENTIAL_PATH,
+                           electrolyte_statement)
+
+    text = str(line or "").strip()
+    segments = [seg for seg, readable in comment_segments(text) if readable]
+    out: list[dict] = []
+
+    def unread(path: str, unit: str | None) -> None:
+        out.append({"path": path, "value": None, "literal": text, "unit": unit, "ambiguous": True, "why": HEADER_UNREAD_WHY})
+
+    stated = [got for seg in segments if (got := electrolyte_statement(seg)) is not None]
+    if (len(stated) == 1 and len(list(_CONCENTRATION_IN_NAME.finditer(text))) == 1
+            and _ELECTROLYTE_CONTEXT.search(text) is None):
+        out.append({"path": ELECTROLYTE_NAME_PATH, "value": stated[0]["name"], "literal": text, "unit": None})
+        out.append({"path": ELECTROLYTE_CONC_PATH, "value": stated[0]["concentration_M"], "literal": text, "unit": "M"})
+    elif _CONCENTRATION_IN_NAME.search(text):
+        unread(ELECTROLYTE_NAME_PATH, None)
+        unread(ELECTROLYTE_CONC_PATH, "M")
+    phs = [m for seg in segments if (m := _PH_SEGMENT.fullmatch(seg)) is not None]
+    if len(phs) == 1 and len(_PH_MENTIONED.findall(text)) == 1 and _PH_RANGE.search(text) is None:
+        out.append({"path": PH_PATH, "value": float(phs[0].group("v")), "literal": text, "unit": None})
+    elif _PH_MENTIONED.search(text):
+        unread(PH_PATH, None)
+    pots = [got for seg in segments if (got := header_setpoint(seg)) is not None]
+    like = sum(1 for m in _POTENTIAL_LIKE.finditer(text) if m.group("sign") or m.group("unit"))
+    if len(pots) == 1 and like == 1 and _SETPOINT_CONTEXT.search(text) is None:
+        pot = pots[0]
+        out.append({"path": POTENTIAL_PATH, "value": pot["volts"], "literal": text, "unit": "V", "scale": pot["scale"],
+                    "segment": pot["literal"]})
+        if pot["scale"] in POTENTIAL_SCALES:
+            out.append({"path": SCALE_PATH, "value": pot["scale"], "literal": text, "unit": None})
+    elif _VOLTS_MENTIONED.search(text):
+        unread(POTENTIAL_PATH, "V")
+    return out
+
+
+def header_potentials_in_line(line: str) -> list[dict]:
+    """``[{"literal", "scale", "volts"}]``: the potential a scan-header comment LINE states, for the warnings of a
+    line no candidate holds (``stated_potentials_beyond_candidates``). The set-point :func:`header_comment_readings`
+    reads (``literal`` its segment, ``-0.3 V vs RHE``; ``scale`` as named; ``volts`` ONLY to compare statements), or,
+    for a line that mentions a potential it reads no value from, the whole line with no scale and no volts."""
+    from .template import POTENTIAL_PATH
+
+    got = next((r for r in header_comment_readings(line) if r["path"] == POTENTIAL_PATH), None)
+    if got is None:
+        return []
+    if got["value"] is None:
+        return [{"literal": got["literal"], "scale": None, "volts": None}]
+    return [{"literal": got["segment"], "scale": got["scale"], "volts": got["value"]}]
+
+
+def header_unread_text(path: str, line: str, locator: Any, relative_path: Any) -> str:
+    """What a candidate with no value from a comment line says (r1d): the line, where it is, what it mentions, and
+    that the scientist states the value."""
+    where = str(locator or "").replace("line:", "line ")
+    return (f"the comment line {_quoted(line)}" + (f" ({where} of {relative_path})" if where and relative_path else "")
+            + f" mentions {_HEADER_MENTIONS.get(path, 'this field')}; ISAAC does not read a value from free text it "
+            "cannot parse exactly; tell me the value held during this scan, or say it isn't stated")
 
 
 def _generic_member_runs(bundle: Mapping, member_ids: set) -> list[Mapping]:
@@ -2621,24 +2962,30 @@ def stated_potentials_beyond_candidates(bundle: Mapping, member_ids: set) -> lis
     seen: set[tuple[str, str]] = set()
     runs = _generic_member_runs(bundle, member_ids)
     run_ids = {r["run_id"] for r in runs}
+    # c16b: a header line a set-point candidate already holds (``bundle.XDC_COMMENT_RULE_ID``) is stated by that candidate
+    held = {(c.get("run_id"), e.get("relative_path"), e.get("locator")) for c in bundle.get("candidates") or ()
+            if c.get("run_id") in run_ids and B.is_header_comment_candidate(c)
+            and c.get("target_field_path") == "context.electrochemistry.potential_setpoint_V" for e in c.get("evidence") or ()}
     headers: dict[str, list[Mapping]] = {}
     for e in bundle.get("extended_context") or ():
-        if e.get("run_id") in run_ids and e.get("concept") == "free_text" and isinstance(e.get("raw_literal"), str):
+        # c16-r: the comment rule's own lines (line 8 is the gain line)
+        if (e.get("run_id") in run_ids and B.is_xdc_comment_line(e.get("concept"), e.get("locator"))
+                and isinstance(e.get("raw_literal"), str) and (e["run_id"], e.get("relative_path"), e.get("locator")) not in held):
             headers.setdefault(e["run_id"], []).append(e)
     for r in runs:
         first = next((sc.get("relative_path") for sc in r.get("scans") or () if sc.get("relative_path")), None)
-        found = [("file name", tok, first, "file name", None) for tok in _name_tokens(r) if _POTENTIAL_TOKEN.match(tok)]
+        found = [("file name", tok, first, "file name", None, _token_volts(tok))
+                 for tok in _name_tokens(r) if _POTENTIAL_TOKEN.match(tok)]
         for e in headers.get(r["run_id"], ()):
-            for tok in e["raw_literal"].split():
-                got = header_potential(tok)
-                if got:
-                    found.append(("scan header", got["literal"], e.get("relative_path"), e.get("locator"), got["scale"]))
-        for where, lit, rel, locator, scale in found:
+            for got in header_potentials_in_line(e["raw_literal"]):  # `-0.3 V vs RHE` as well as `0.5Vrhe`
+                found.append(("scan header", got["literal"], e.get("relative_path"), e.get("locator"), got["scale"], got["volts"]))
+        for where, lit, rel, locator, scale, volts in found:
             if (r["run_id"], where + lit) in seen:
                 continue
             seen.add((r["run_id"], where + lit))
             out.append({"literal": lit, "relative_path": rel, "candidate_id": None, "read_as_V": None, "value_state": None,
-                        "stated_in": where, "locator": locator, "run_id": r["run_id"], **({"scale": scale} if scale else {})})
+                        "stated_in": where, "locator": locator, "run_id": r["run_id"], "volts": volts,
+                        **({"scale": scale} if scale else {})})
     # one item per literal and place across the group's runs (the text names a few; a group of 16 scans is one run)
     first_of: dict[tuple[str, str], dict] = {}
     for s in out:
@@ -2659,43 +3006,63 @@ def stated_potential_notes(w: Mapping) -> str:
     if not header:
         return ""
     scales = sorted({s["scale"] for s in header if s.get("scale")})
-    lits = list(dict.fromkeys(s["literal"] for s in header))
+    lits = list(dict.fromkeys(stated_literal(s) for s in header))
+    held = all(s.get("candidate_id") for s in header)  # c16b: the comment rule's candidates hold the lines
+    read = held and any(s.get("read_as_V") is not None for s in header)  # r1d: a value, read from a plain form
     text = (f" {', '.join(lits[:3])}{', …' if len(lits) > 3 else ''} {'is' if len(lits) == 1 else 'are'} written in the "
             "scan header (a comment line), not the file name"
-            + (f", with the scale ({', '.join(scales)}); no reader reads the set-point or the scale from it, so both "
+            + ((f", with the scale ({', '.join(scales)})" if scales else "")
+               + "; read from that free-text line, the set-point" + (" and the scale" if scales else "")
+               + " need your review (confirm or correct)" if read else
+               "; no value is read from that free-text line (not written in a plain form), so the set-point is asked: "
+               "the value held during the scan" if held else
+               f", with the scale ({', '.join(scales)}); no reader reads the set-point or the scale from it, so both "
                "are asked" if scales else "") + ".")
-    by_run: dict[str, dict[str, list[tuple[str, str | None]]]] = {}
+    by_run: dict[str, dict[str, list[tuple[str, str | None, float | None]]]] = {}
     for s in stated:
+        # the volts each statement writes (c16-r: a header statement's literal is its whole comment line, so its volts
+        # come with it; a file-name token's are its own spelling's)
+        volts = s["volts"] if "volts" in s else _token_volts(s["literal"])
         for rid in s.get("runs") or ([s["run_id"]] if s.get("run_id") else []):
-            by_run.setdefault(rid, {}).setdefault(s.get("stated_in") or "", []).append((s["literal"], s.get("scale")))
+            by_run.setdefault(rid, {}).setdefault(s.get("stated_in") or "", []).append((stated_literal(s), s.get("scale"), volts))
     differ, scales_differ = [], []
     for rid, places in by_run.items():
         names, heads = places.get("file name") or [], places.get("scan header") or []
-        nv = {v for v in (_token_volts(lit) for lit, _ in names) if v is not None}
-        hv = {v for v in (_token_volts(lit) for lit, _ in heads) if v is not None}
+        nv = {v for _, _, v in names if v is not None}
+        hv = {v for _, _, v in heads if v is not None}
         if not (nv and hv) or nv & hv:
             continue
-        said = (f"{rid}: file name {'/'.join(dict.fromkeys(lit for lit, _ in names))}, "
-                f"scan header {'/'.join(dict.fromkeys(lit for lit, _ in heads))}")
-        name_scales, head_scales = {sc for _, sc in names}, {sc for _, sc in heads}
-        if name_scales == head_scales:
-            # THE SAME SCALE (or none on either): two numbers for one potential, a real disagreement
-            differ.append(said)
+        said = (f"{rid}: file name {'/'.join(dict.fromkeys(lit for lit, _, _ in names))}, "
+                f"scan header {'/'.join(dict.fromkeys(lit for lit, _, _ in heads))}")
+        name_scales, head_scales = {sc for _, sc, _ in names}, {sc for _, sc, _ in heads}
+        if name_scales == head_scales and None not in name_scales:
+            # THE SAME NAMED SCALE: two numbers for one potential, a real disagreement
+            differ.append(f"{said}; both on {written_scales(name_scales)}")
         else:
-            # c8-r: m600mV (no scale) and 0Vrhe may be ONE potential written on two scales: never "disagree"
-            def written(scales: set) -> str:
-                return "/".join(sorted(sc for sc in scales if sc)) or "none"
-
-            scales_differ.append(f"{said}; the header writes {written(head_scales)}, the name {written(name_scales)}")
+            # c8-r / c16-r M3: a scale missing on either side, or two scales: m600mV (no scale) and 0Vrhe may be ONE
+            # potential written on two scales, so never "different potentials", never "disagree"
+            scales_differ.append(f"{said} (file name: {written_scales(name_scales)}; scan header: {written_scales(head_scales)})")
     if differ:
-        text += (f" The file name and the scan header disagree for {len(differ)} run(s) ({'; '.join(differ[:3])}"
-                 + ("; …" if len(differ) > 3 else "") + "), on the same scale: ask the scientist which is right; "
+        text += (f" The file name and the scan header state different potentials for {len(differ)} run(s) "
+                 f"({'; '.join(differ[:3])}" + ("; …" if len(differ) > 3 else "") + "): ask the scientist which is right; "
                  "neither is used.")
     if scales_differ:
-        text += (f" The file name and the scan header write different numbers on possibly different scales for "
-                 f"{len(scales_differ)} run(s) ({'; '.join(scales_differ[:3])}" + ("; …" if len(scales_differ) > 3 else "")
-                 + "): ask which applies; neither is used.")
+        text += (f" The file name and the scan header write different numbers for {len(scales_differ)} run(s) "
+                 f"({'; '.join(scales_differ[:3])}" + ("; …" if len(scales_differ) > 3 else "")
+                 + "), and nothing says both are on one scale: ask which applies; neither is used.")
     return text
+
+
+def stated_literal(s: Mapping) -> str:
+    """How a stated potential's literal is said in a warning: a scan header's in quotes (c16-r: it is the whole comment
+    line the value was read from, ``'100mM NaClO4 -0.3 V vs RHE'``), a file-name token as it is (``m150mV``)."""
+    return repr(s["literal"]) if s.get("stated_in") == "scan header" else str(s["literal"])
+
+
+def written_scales(scales) -> str:
+    """The reference scales a source writes, as said in a warning: ``RHE``, ``Ag/AgCl/RHE``, or ``no scale``."""
+    named = sorted(sc for sc in scales if sc)
+    return "/".join(named) if named else "no scale"
 
 
 def open_circuit_warnings(bundle: Mapping, group: Mapping, member_ids: set, fields: Mapping) -> list[dict]:

@@ -63,7 +63,7 @@ EXIT CODES
  5    bounds exceeded, or the built bundle failed its own validation — nothing written
  6    not found: no bundle at ``<dir>``, or no object with that id
  1    (also) ``validate``/``export``: some draft is not exportable / was not exported. ``export`` exits 1
-      even when it WROTE some records: its reply's ``outcome`` says "Wrote N record(s), refused M group(s)"
+      even when it WROTE some records: its reply's ``outcome`` says "N record(s) ready (U unchanged since their export, W written), refused M group(s)"
 ====  ===========================================================================
 
 NOTHING IS EXECUTED. Macros and scripts in the archive are read as text by the
@@ -317,6 +317,8 @@ def render_summary(bundle: Mapping) -> str:
         f"- Conflicts: {counts['conflicts']}{_conflict_breakdown(bundle)} · Missing values: {counts['missing_values']} "
         f"(nothing defaulted) · Questions: {counts['questions']}"
     )
+    if counts.get(B.HEADER_COMMENT_RUNS_NOT_READ):
+        add(f"  - {B.header_comment_runs_not_read_text(counts[B.HEADER_COMMENT_RUNS_NOT_READ])}")
     add(f"- People named in the sources: {counts['contributors']} (evidence, not the naming profile)")
     groups = bundle.get("record_groups") or []
     if groups or bundle.get("processing_results"):
@@ -616,6 +618,7 @@ def cmd_import(args) -> int:
         **section_payloads(bundle),
         "reading.full.json": B.encode(full),
     }
+    replaced = (out / "bundle.json").is_file()  # --force over an earlier bundle: its answers do not carry over
     out.mkdir(parents=True, exist_ok=True)
     # STAGE EVERY FILE FIRST, then move each into place: a failure while writing leaves
     # --out exactly as it was, and nothing else in --out is ever touched.
@@ -635,6 +638,13 @@ def cmd_import(args) -> int:
         f"({c['conflicts']} conflicts{_conflict_breakdown(bundle)}, {c['needs_review']} need review, "
         f"{c['missing_values']} missing, {c['unread_files']} unread file{'s' if c['unread_files'] != 1 else ''})"
     )
+    if c.get(B.HEADER_COMMENT_RUNS_NOT_READ):
+        print(f"  {B.header_comment_runs_not_read_text(c[B.HEADER_COMMENT_RUNS_NOT_READ])}")
+    if replaced:
+        # c16-r L1: a re-import is a NEW bundle
+        from .records import REIMPORT_CAVEAT
+
+        print(f"  It replaces the bundle that was in {out}: {REIMPORT_CAVEAT}.")
     if n_athena := sum(1 for u in bundle["unread_files"] if _is_athena_project(u)):
         print(f"  {_athena_read_by_process(n_athena)}")
     if n_kept := len(B.files_not_opened(bundle)):
@@ -944,7 +954,7 @@ NOT_OPENED_NOTE = ("files a run reader kept beside a run without any reader open
                    "claimed them, and not read either. Pass --all to list them, each with its run and role")
 #: Metrics a ``processing-results`` row carries (the rest are in ``processing/processing_results.json``).
 _RESULT_METRICS = ("scans_listed", "scans_used", "points", "e0_eV", "edge_step", "pre_edge_noise", "scan_spread",
-                   "glitch_points", "outlier_scans", "nonfinite_dropped")
+                   "glitch_points", "glitch_points_on_edge", "glitch_points_off_edge", "outlier_scans", "nonfinite_dropped")
 #: Review flags every draft-protocol result carries: left off the compact row (they say nothing per result).
 _EVERY_RESULT_FLAGS = frozenset({"protocol_draft_unreviewed"})
 _SHOW_SECTION = {
@@ -1231,7 +1241,8 @@ def _calibration_view(bundle: Mapping, r: Mapping) -> dict | None:
         for element, edge, basis in named:
             w = REF.would_apply(cal, element, edge, warn_eV=float(warn))
             would.append({"element": element, "edge": edge, "basis": basis,
-                          **{k: w[k] for k in ("tabulated_edge_eV", "shown", "needs_size_confirmation", "statement")}})
+                          **{k: w[k] for k in ("tabulated_edge_eV", "shown", "needs_size_confirmation",
+                                               "needs_calibrant_confirmation", "statement") if k in w}})
     # c12-r: the shift the CURVE carries (outcome.applied), said beside what an approval would do: a result approved
     # under an older build may carry one the current rules would not apply (it is kept on re-processing: decided)
     from . import bundle as B
@@ -1241,6 +1252,9 @@ def _calibration_view(bundle: Mapping, r: Mapping) -> dict | None:
     out = {k: said[k] for k in ("reference_source", "reference_scans_usable", "reference_scans_listed",
                                 "measured_reference_e0_eV", "reference_e0_spread_eV", "reference_proposed",
                                 "reference_statement")}
+    for k in ("calibration_proposed", "reference_calibrant"):  # r1 H1: whether ISAAC offers the group's own edge
+        if k in said:
+            out[k] = said[k]
     if said["reference_e0_spread_eV"] is None and said["reference_scans_usable"] == 1:
         out["reference_e0_spread_note"] = ("The spread is null: fewer than 2 usable reference scans. The stored qc.json "
                                            "and params.json say 0.0: they predate this rule and are hashed into the "
@@ -1603,7 +1617,7 @@ def cmd_bundle_questions(args) -> int:
         bundle = M.load(Path(args.bundle_dir))
         reports: dict = {}  # composed once: consolidate's reports are reused by the minimum below
         payload = Q.consolidate(bundle, compositions_out=reports)
-        rows = Q.filter_questions(payload, scope=args.scope, blocking_only=args.blocking_only)
+        rows = Q.filter_questions(payload, scope=args.scope, blocking_only=args.blocking_only, reports=reports)
         kept = [q for q in rows if not (args.skip_deferred and q.get("deferred"))]
         page = kept[args.offset : args.offset + args.limit]
         minimum = Q.minimum_answers_for_one_group(payload, bundle, scope=args.scope, bundle_dir=Path(args.bundle_dir),
@@ -1618,7 +1632,7 @@ def cmd_bundle_questions(args) -> int:
             "blocking_basis": payload["blocking_basis"],
             # THE SCOPE'S counts (every question --scope selects, before --blocking-only / --skip-deferred), and the
             # whole bundle's under their own name
-            "counts": Q.scope_counts(payload, args.scope),
+            "counts": Q.scope_counts(payload, args.scope, reports),
             **({"counts_whole_bundle": payload["counts"]} if args.scope else {}),
             "total": len(kept), "offset": args.offset, "limit": args.limit, "returned": len(page),
             "omitted_before": min(args.offset, len(kept)),
@@ -1779,6 +1793,7 @@ def cmd_bundle_decide(args) -> int:
             same_conditions=args.same_conditions,
             as_said=args.as_said,
             accept_shift=getattr(args, "accept_shift", None),
+            e0_measured=getattr(args, "e0_measured", False),
         )
 
     return _mutation(run)
@@ -1935,8 +1950,12 @@ def cmd_bundle_upload(args) -> int:
         _err(f"No records directory at {args.records_dir}.")
         return EXIT_NOT_FOUND
     plan = R.upload_plan(Path(args.records_dir), args.portal_url)
+    noted = [line for p in plan for line in p.get("notes") or ()]
     _print({"dry_run": True, "network_calls": 0, "records": plan,
-            "statement": "Nothing was sent. The token is never read or printed."})
+            "statement": "Nothing was sent. The token is never read or printed."
+            # c16d: what a record would go out without (its evidence file's notes), said once more before an upload
+            + "".join(f" {line} ({n} record(s); records[].notes)." for line, n in
+                      {x: noted.count(x) for x in dict.fromkeys(noted)}.items())})
     return EXIT_OK
 
 
@@ -2220,6 +2239,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--qc-note", help="with --qc-status: what is compromised or failed, and why")
     q.add_argument("--element", help="record group + approve_calibration (the calibration reference) or set_absorber (the absorber): an element, e.g. Ir")
     q.add_argument("--edge", help="with --element: the edge (K, L1-L3, M1-M5)")
+    q.add_argument("--e0-measured", action="store_true", dest="e0_measured",
+                   help="with --decision approve on an Athena result flagged athena_e0_possibly_fixed: the "
+                        "scientist states this E0 was measured from the group's own edge, not set in Athena")
     q.add_argument("--accept-shift", type=float, dest="accept_shift",
                    help="with approve_calibration: the shift in eV the scientist accepts, exactly as the reply showed it "
                         "(e.g. -8.6); needed when the shift is above the protocol's warning level")

@@ -71,7 +71,7 @@ def test_the_skill_has_the_expected_shape():
 def test_every_command_in_the_skill_exists_with_its_flags(name, span, words):
     command = [w for w in words if not w.startswith(("-", "<", "[", "(", "'", '"', "\\"))]
     node, _ = _resolve(command)
-    written = set(re.findall(r"--[a-z][a-z-]*", span))
+    written = set(re.findall(r"--[a-z][a-z0-9-]*", span))
     unknown = written - _flags(node) - {"--help"}
     assert not unknown, f"{name}: `{span}` uses {sorted(unknown)} which this command does not take"
 
@@ -109,7 +109,7 @@ def test_every_flag_the_skill_writes_is_in_the_live_help(name, span, words):
     _, rest = _resolve(command)
     argv = command[: len(command) - len(rest)]
     help_text = _help_text(argv)
-    for flag in set(re.findall(r"--[a-z][a-z-]*", span)):
+    for flag in set(re.findall(r"--[a-z][a-z0-9-]*", span)):
         assert flag in help_text or flag == "--help", f"{name}: `{span}` writes {flag}, which `isaac {' '.join(argv)} --help` does not show"
 
 
@@ -124,7 +124,7 @@ def test_short_form_commands_use_real_flags():
             sub = span.split()[0]
             argv = [sub] if sub == "process" else ["bundle", sub]
             help_text = _help_text(argv)
-            for flag in set(re.findall(r"--[a-z][a-z-]*", span)):
+            for flag in set(re.findall(r"--[a-z][a-z0-9-]*", span)):
                 assert flag in help_text, f"{path.name}: `{span}` uses {flag}, not shown by `isaac {' '.join(argv)} --help`"
             seen += 1
     assert seen >= 4, "the short-form scan found almost nothing; the pattern is broken"
@@ -135,7 +135,7 @@ def test_the_extractor_commands_use_real_flags():
     seen = 0
     for path in FILES:
         for span in re.findall(r"`([^`\n]*isaac_api\.local_import\.extract[^`\n]*)`", path.read_text(encoding="utf-8")):
-            unknown = set(re.findall(r"--[a-z][a-z-]*", span)) - flags
+            unknown = set(re.findall(r"--[a-z][a-z0-9-]*", span)) - flags
             assert not unknown, f"{path.name}: `{span}` uses {sorted(unknown)}"
             seen += 1
     assert seen >= 2

@@ -72,6 +72,16 @@ FROM_AN_ANSWER = "a scientist's answer"
 #: ``-0.5V``). Only RECOGNISES the statement, to warn that the record will not carry it: no value is read from it.
 _POTENTIAL_TOKEN = re.compile(r"^(?:m|n|neg|minus|-|\+)?\d+(?:[p.]\d+)?m?V$", re.IGNORECASE)
 STATED_POTENTIAL_WARNING = "stated_potential_not_in_record"
+#: c16c: a record carries a set-point while a member run's FILE NAME and SCAN HEADER state different potentials and
+#: no scientist has ruled on the header's reading (a decision on its candidate): the disagreement stays said.
+POTENTIAL_SOURCES_WARNING = "potential_sources_disagree"
+#: c16d: a record of runs whose scan headers write a local clock start time, written without it because the
+#: scientist deferred the instrument clock's time zone ("I don't know"): said at validate, export, in the evidence
+#: sidecar and the upload dry run, never left for the reader to notice.
+START_TIME_WARNING = "start_time_left_out"
+START_TIME_LEFT_OUT = "start time left out: instrument clock zone deferred (question {question})"
+#: c16-r L6: the same, while the clock question has no answer at all (neither a zone nor a defer)
+START_TIME_LEFT_OUT_UNANSWERED = "start time left out: instrument clock zone not answered yet (question {question})"
 
 
 @functools.lru_cache(maxsize=512)
@@ -947,7 +957,9 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
     from . import questions as Q  # c8-b: the conditions generic runs' names and headers state (questions.py)
 
     report["warnings"] = (_stated_potential_warnings(bundle, group, member_ids, fields, proposals)
-                          + Q.open_circuit_warnings(bundle, group, member_ids, fields))
+                          + _potential_sources_warnings(bundle, group, member_ids, fields)
+                          + Q.open_circuit_warnings(bundle, group, member_ids, fields)
+                          + _start_time_warnings(bundle, group, member_ids, fields))
     return draft, report
 
 
@@ -955,9 +967,26 @@ def _stated_potentials(bundle: Mapping, member_ids: set) -> list[dict]:
     """Each potential a member run's FILE NAME states, as the import already holds it: a set-point candidate read
     from a file-name token (its literal and the volts it was read as), or an unmapped file-name token shaped like a
     potential (:data:`_POTENTIAL_TOKEN`, its literal only: nothing is read from it). Bundle order, each once."""
-    out, seen = [], set()
+    from . import questions as Q  # c8-b: a generic run's file names and scan headers (no candidate holds them)
+
+    out, seen, header = [], set(), []
     for c in bundle["candidates"]:
         if c.get("run_id") not in member_ids:
+            continue
+        if B.is_header_comment_candidate(c) and c.get("target_field_path") == SETPOINT_PATH:
+            # c16b: a set-point read from a scan-header comment line (it needs review): stated by the HEADER
+            value = c.get("value") if isinstance(c.get("value"), (int, float)) and not isinstance(c.get("value"), bool) else None
+            for e in c.get("evidence") or ():
+                lit = e.get("literal_value")
+                if (lit, c["run_id"]) in seen or not isinstance(lit, str):
+                    continue
+                seen.add((lit, c["run_id"]))
+                # c16-r: the literal is the whole comment line; what it states is read by the rule's own parser
+                got = next((x for x in Q.header_comment_readings(lit) if x["path"] == SETPOINT_PATH), None) or {}
+                header.append({"literal": lit, "relative_path": e.get("relative_path"), "candidate_id": c["candidate_id"],
+                               "read_as_V": value, "value_state": c.get("value_state"), "stated_in": "scan header",
+                               "locator": e.get("locator"), "run_id": c["run_id"], "runs": [c["run_id"]],
+                               "volts": got.get("value"), **({"scale": got["scale"]} if got.get("scale") else {})})
             continue
         for e in c.get("evidence") or ():
             if e.get("method") == "ai_interpretation" or not str(e.get("locator") or "").startswith("filename token"):
@@ -974,9 +1003,7 @@ def _stated_potentials(bundle: Mapping, member_ids: set) -> list[dict]:
                 seen.add(key)
                 out.append({"literal": lit, "relative_path": e.get("relative_path"), "candidate_id": c["candidate_id"],
                             "read_as_V": value, "value_state": c.get("value_state")})
-    from . import questions as Q  # c8-b: a generic run's file names and scan headers (no candidate holds them)
-
-    return out + Q.stated_potentials_beyond_candidates(bundle, member_ids)
+    return out + Q.stated_potentials_beyond_candidates(bundle, member_ids) + header  # the names first, as before
 
 
 def _stated_potential_warnings(bundle: Mapping, group: Mapping, member_ids: set, fields: Mapping,
@@ -1005,8 +1032,11 @@ def _stated_potential_warnings(bundle: Mapping, group: Mapping, member_ids: set,
                 if o.get("target_field_path") == path and o.get("run_id") in member_ids
                 and o.get("value_state") in (B.STATE_MISSING, B.STATE_NEEDS_REVIEW, B.STATE_CANDIDATE_EXTRACTED)]
 
+    valued = {c["candidate_id"] for c in bundle["candidates"] if c.get("value") is not None}
+
     def command_for(path: str, targets: Sequence[str]) -> str:
-        if targets and targets[0].startswith("cand-") and path == SETPOINT_PATH:
+        # r1d: a candidate with no value (a comment line not written plainly) is answered with its value, not confirmed
+        if targets and targets[0] in valued and path == SETPOINT_PATH:
             command = f'isaac bundle decide <bundle_dir> --target {targets[0]} --decision confirm --by "<your name>"'
         elif targets:
             command = (f"isaac bundle decide <bundle_dir> --target {targets[0]} --decision correct --value "
@@ -1025,25 +1055,190 @@ def _stated_potential_warnings(bundle: Mapping, group: Mapping, member_ids: set,
     # e.g. `m500mV` kept as unknown_token) nor answered: confirming the scale alone would only move the warning on
     # to the set-point, so both are named now, each with its command
     unread = not answered and all(s.get("read_as_V") is None for s in stated)
+    # c16b: a set-point read from a scan-header comment line still needs review: confirming the scale alone would
+    # move the warning on to it, so both are named now, as for an unread one
+    header_read = not answered and not unread and all(
+        s.get("read_as_V") is None or (s.get("stated_in") == "scan header" and s.get("value_state") == B.STATE_NEEDS_REVIEW)
+        for s in stated)
+    if header_read:
+        w["setpoint_needs_review"] = True
+        unread = True
     also = open_targets(SETPOINT_PATH) if scale_missing and unread else []
     if also:
         w.update(also_needs=SETPOINT_PATH, also_targets=also, also_command=command_for(SETPOINT_PATH, also))
     return [{**w, "text": potential_warning_text(w)}]
 
 
+def _potential_sources_warnings(bundle: Mapping, group: Mapping, member_ids: set, fields: Mapping) -> list[dict]:
+    """A :data:`POTENTIAL_SOURCES_WARNING` (never a refusal) for a record that CARRIES a set-point while a member run's
+    file name and scan header write different numbers (``m150mV`` and ``-300 mV vs RHE``) — a disagreement of the
+    files the template's typed value does not settle by itself. Unresolved, and so warned, until a scientist rules
+    (:func:`_setpoint_ruled`): on the header's reading (its ``bundle.XDC_COMMENT_RULE_ID`` candidate: confirm or
+    correct it), or — in a bundle imported before those candidates existed, which has no reading to decide — on the
+    record's own set-point target, by a decision recorded after the one that gave the record its set-point (the
+    warning, which shows the header's words, can only be shown after that one). The re-import alternative says what
+    a new bundle does not carry over. A record without a set-point gets the stated-potential warning instead, which
+    names the same disagreement (``questions.stated_potential_notes``)."""
+    from . import questions as Q
+    from .template import header_potential_readings
+
+    if _present(fields, SETPOINT_PATH) is None:
+        return []
+    carried = fields[SETPOINT_PATH].get("value") if isinstance(fields.get(SETPOINT_PATH), Mapping) else None
+    scale = fields[SCALE_PATH].get("value") if isinstance(fields.get(SCALE_PATH), Mapping) else None
+    out = []
+    for r in Q._generic_member_runs(bundle, member_ids):
+        names = [t for t in Q._name_tokens(r) if _POTENTIAL_TOKEN.match(t)]
+        name_v = {round(v, 9) for v in map(Q._token_volts, names) if v is not None}
+        heads = header_potential_readings(bundle, r)
+        head_v = {round(h["value"], 9) for h in heads}
+        if not name_v or not head_v or name_v & head_v:
+            continue
+        held = [c for c in bundle.get("candidates") or () if c.get("run_id") == r["run_id"]
+                and B.is_header_comment_candidate(c) and c.get("target_field_path") == SETPOINT_PATH]
+        ruled, own = _setpoint_ruled(bundle, r["run_id"], held)
+        if ruled:
+            continue
+        name_scales = {(Q.header_potential(t) or {}).get("scale") for t in names}
+        head_scales = {h.get("scale") for h in heads}
+        if held:
+            command = (f'isaac bundle decide <bundle_dir> --target {held[0]["candidate_id"]} --decision confirm '
+                       '--by "<your name>"' if held[0].get("value") is not None else
+                       f'isaac bundle decide <bundle_dir> --target {held[0]["candidate_id"]} --decision correct '
+                       '--value <volts> --json --by "<your name>"')
+        elif own is not None:
+            # a decision unlike the latest one on that target, so it is recorded even with the same volts
+            again = "correct" if own["latest"] == "confirm" else "confirm"
+            shown = f"{carried:g}" if isinstance(carried, (int, float)) and not isinstance(carried, bool) else "<volts>"
+            command = (f'isaac bundle decide <bundle_dir> --target {own["target"]} --decision {again} --value {shown} '
+                       '--json --by "<your name>"')
+        else:
+            command = REIMPORT_COMMAND
+        out.append({"code": POTENTIAL_SOURCES_WARNING, "group_id": group["group_id"], "path": SETPOINT_PATH,
+                    "needs": SETPOINT_PATH, "run_id": r["run_id"],
+                    "targets": [c["candidate_id"] for c in held] or ([own["target"]] if own is not None else []),
+                    "names": list(dict.fromkeys(names)), "headers": list(dict.fromkeys(
+                        repr(h["literal"]) + (f" at {h['locator']} of {h['relative_path']}" if h.get("relative_path") else "")
+                        for h in heads)), "carried_V": carried, "carried_scale": scale,
+                    "same_scale": name_scales == head_scales and None not in name_scales,
+                    "name_scale": Q.written_scales(name_scales), "header_scale": Q.written_scales(head_scales),
+                    "no_header_reading": not held, "command": command})
+    return [{**w, "text": potential_sources_text(w)} for w in out]
+
+
+#: c16-r M2: the re-import a bundle built before scan-header readings existed is offered, and what it does not keep.
+REIMPORT_COMMAND = "isaac import <the beamtime folder> --out <a new bundle folder>"
+REIMPORT_CAVEAT = ("a new bundle starts with no answers: the decisions recorded here and a filled workbook do not carry "
+                   "over to it, and the ids printed for this bundle (miss-NNNN, cand-NNNN, the question ids) name other "
+                   "things there")
+#: the decisions that state a value for a target (a ruling on what it carries)
+_VALUE_DECISIONS = ("confirm", "correct", "provide_value", "choose_reading")
+
+
+def _setpoint_ruled(bundle: Mapping, run_id: str, held: Sequence[Mapping]) -> tuple[bool, dict | None]:
+    """``(ruled, own)`` for a run whose file name and scan header write different numbers (c16-r M2). RULED when a
+    scientist decided every header set-point candidate the run holds (``held``), or — with none held, a bundle built
+    before the comment rule — when the record's own set-point target for the run (a set-point candidate or missing
+    value of that run, else of the whole beamtime) carries a value decision recorded AFTER the one that first gave
+    it a value: the warning showing the header's words appears only once the record carries a set-point, so that
+    later decision was made with it in view. ``own``: ``{target, latest}`` of that target (``None`` when it has no
+    value decision), for the command."""
+    decisions = [d for d in bundle.get("scientist_decisions") or () if (d.get("target") or {}).get("kind") in ("candidate", "missing_value")]
+    if held:
+        decided = {d["target"]["id"] for d in decisions if d["target"]["kind"] == "candidate"}
+        return all(c["candidate_id"] in decided for c in held), None
+    objs = [o for o in list(bundle.get("candidates") or ()) + list(bundle.get("missing_values") or ())
+            if o.get("target_field_path") == SETPOINT_PATH and not B.is_header_comment_candidate(o)]
+    for scope in (run_id, None):
+        for o in objs:
+            if o.get("run_id") != scope:
+                continue
+            tid = o.get("candidate_id") or o.get("value_id")
+            said = [d for d in decisions if d["target"]["id"] == tid and d.get("decision") in _VALUE_DECISIONS]
+            if said:
+                return len(said) > 1, {"target": tid, "latest": said[-1].get("decision")}
+    return False, None
+
+
+def local_clock_runs(bundle: Mapping) -> set[str]:
+    """The runs whose start time waits on the instrument clock's zone (a ``bundle.XDC_START_RULE_ID`` candidate).
+    A beamtime-wide candidate (no run) names no run, so it is skipped before its rule is read: a group is composed
+    with every beamtime-wide candidate beside its own, and reading each one's rule per group was quadratic."""
+    return {c["run_id"] for c in bundle.get("candidates") or () if c.get("run_id") is not None and B.is_local_clock_start(c)}
+
+
+def _start_time_warnings(bundle: Mapping, group: Mapping, member_ids: set, fields: Mapping) -> list[dict]:
+    """A :data:`START_TIME_WARNING` for a record that carries no start time while a member run's scan headers write
+    one (``bundle.XDC_START_RULE_ID``) and the latest answer to the clock question is ``defer``: the record goes out
+    without it, and says so. c16-r L6: so does one while the clock question has no answer yet (no zone, no defer),
+    in its own words. A zone answered ends both."""
+    from . import questions as Q
+    from .mutations import clock_zone_deferral
+
+    if _present(fields, B.XDC_START_PATH) is not None or not local_clock_runs(bundle) & set(member_ids):
+        return []
+    if clock_zone_deferral(bundle) is not None:
+        unanswered = False
+    elif B.clock_zone_decision(bundle) is None:
+        unanswered = True
+    else:
+        return []
+    text = (START_TIME_LEFT_OUT_UNANSWERED if unanswered else START_TIME_LEFT_OUT).format(question=Q.CLOCK_QUESTION_ID)
+    return [{"code": START_TIME_WARNING, "group_id": group["group_id"], "path": B.XDC_START_PATH,
+             "needs": B.XDC_START_PATH, "targets": [], "question_id": Q.CLOCK_QUESTION_ID, "text": text,
+             "command": B.CLOCK_ZONE_COMMAND, **({"unanswered": True} if unanswered else {})}]
+
+
+def potential_sources_text(w: Mapping) -> str:
+    """The plain sentence for a :data:`POTENTIAL_SOURCES_WARNING`, ending with its command. c16-r M3: "state
+    different potentials" only when both name the SAME scale; else they "write different numbers", each one's scale
+    said (a number without a scale may be the same potential on another scale)."""
+    carried = w.get("carried_V")
+    said = (f"{carried:g} V" if isinstance(carried, (int, float)) and not isinstance(carried, bool) else "a set-point")
+    said += f" on {w['carried_scale']}" if w.get("carried_scale") else ""
+    sources = f"file name {'/'.join(w['names'][:3])}; scan header {'; '.join(w['headers'][:3])}"
+    if w.get("same_scale"):
+        differ = f"state different potentials ({sources}; both on {w['name_scale']})"
+    else:
+        differ = f"write different numbers ({sources}; file name: {w['name_scale']}; scan header: {w['header_scale']})"
+    head = f"the file name and the scan header of {w['run_id']} {differ}, and the record carries {said}"
+    if w.get("targets") and not w.get("no_header_reading"):
+        return (f"{head}; no one has ruled on the scan header's reading yet: confirm it if the header is right, or "
+                "correct it (--decision correct --value <volts> --json) to the potential the run was held at: "
+                f"{w['command']}")
+    if w.get("targets"):
+        return (f"{head}; this bundle was imported before scan-header potentials were read as values, so rule on the "
+                "record's own set-point instead: record it again (the same volts if the file name is right, the "
+                f"header's if it is) with {w['command']}. Or re-import the beamtime ({REIMPORT_COMMAND}), but "
+                f"{REIMPORT_CAVEAT}.")
+    return (f"{head}; this bundle was imported before scan-header potentials were read as values, so there is no "
+            f"reading to rule on: re-import the beamtime to rule on it ({w['command']}); {REIMPORT_CAVEAT}.")
+
+
 def potential_warning_text(w: Mapping) -> str:
     """The plain sentence for a :data:`STATED_POTENTIAL_WARNING` warning, ending with its command."""
     from . import questions as Q  # c8-b: open circuit, and what scan headers state (questions.py)
 
+    if w.get("code") == POTENTIAL_SOURCES_WARNING:
+        return potential_sources_text(w)
+    if w.get("code") == START_TIME_WARNING:
+        return (START_TIME_LEFT_OUT_UNANSWERED if w.get("unanswered") else START_TIME_LEFT_OUT).format(question=w["question_id"])
     if w.get("open_circuit"):
         return Q.open_circuit_text(w)
     extra = Q.stated_potential_notes(w)
-    lits = "; ".join(s["literal"] + (f", read as {s['read_as_V']:g} V" if s.get("read_as_V") is not None else "")
+    # c16b: a set-point read from a scan header (it needs review) still says where it is written
+    lits = "; ".join(Q.stated_literal(s)
                      + (f" in {'the scan header of ' if s.get('stated_in') == 'scan header' else ''}{s['relative_path']}"
-                        if s.get("read_as_V") is None and s.get("relative_path") else "")
+                        if (s.get("read_as_V") is None or s.get("stated_in") == "scan header") and s.get("relative_path") else "")
+                     + (f", read as {s['read_as_V']:g} V" if s.get("read_as_V") is not None else "")
                      for s in w["stated"][:3])
     if w.get("answered_V"):
         lits += "; the set-point answered for it: " + ", ".join(f"{v:g} V" for v in w["answered_V"][:3])
+    if w.get("also_needs") and w.get("setpoint_needs_review"):
+        # c16b: the set-point was read from a scan-header comment line and waits for review, as the scale does
+        return (f"{Q.stated_subject(w)} a potential ({lits}) but the record will not carry it until the potential scale AND "
+                f"the set-point read from the scan header are confirmed (or corrected).{extra} "
+                f"Both: {w['also_command']}  ;  {w['command']}")
     if w.get("also_needs"):
         # no value was read for the set-point: the scientist gives the volts AND the scale, both commands now
         return (f"{Q.stated_subject(w)} a potential ({lits}) but the record will not carry it until the potential scale is "
@@ -1636,6 +1831,10 @@ WRITTEN_WITHOUT_NAMES = {SETPOINT_PATH: "the potential set-point", B.CONTROL_MOD
 def written_without(w: Mapping) -> str:
     """``export``'s line for a record WRITTEN while warning ``w`` still applies: "Written without the potential
     set-point: <the warning's sentence>" (c11-a: an export is never silent about a condition the record lacks)."""
+    if w.get("code") == POTENTIAL_SOURCES_WARNING:
+        return f"Written with a potential its files disagree about: {w['text']}"
+    if w.get("code") == START_TIME_WARNING:
+        return f"Written without the start time: {w['text']}"
     name = WRITTEN_WITHOUT_NAMES.get(w.get("path"), w.get("path") or "a stated condition")
     return f"Written without {name}: {w['text']}"
 
@@ -1874,6 +2073,8 @@ def evidence_changes(old: Mapping | None, new: Mapping) -> list[str]:
             lines.append(f"{key}: " + ", ".join(sorted(EVIDENCE_KEY_WORDS.get(k, k) for k in diff)))
     if old.get("schemas_used") != new.get("schemas_used"):
         lines.append("the schemas used to validate it")
+    if old.get("notes") != new.get("notes"):
+        lines.append("its notes on what the record is written without")
     return lines
 
 
@@ -2067,6 +2268,10 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
             continue
         sidecar = build_sidecar(dict(draft), record)
         sidecar["schemas_used"] = report["schemas_used"]
+        left_out = [w["text"] for w in warned if w["group_id"] == group_id and w.get("code") == START_TIME_WARNING]
+        if left_out:
+            # c16d: what the record is written WITHOUT, said in its evidence file in plain words (never silently)
+            sidecar["notes"] = left_out
         # when the sidecar was written: the record's export time, kept while its evidence is unchanged (so an
         # unchanged re-export is byte for byte), and now when the evidence file is rewritten (c15c LOW 1)
         sidecar["generated_utc"] = (prior.get("sidecar_generated_utc") or at) if status == "unchanged" else at
@@ -2164,8 +2369,12 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         # SAID PLAINLY FIRST (1.9.x polish): the exit code is 1 whenever any group is refused, even when records
         # were written, so a reader of the exit code alone would take "wrote 3, refused 75" for "nothing exported"
         "outcome": export_outcome(len(exported), len(refused), len(withdrawn), out,
-                                  warned=sum(1 for row in exported if row.get("warnings_total"))),
+                                  warned=sum(1 for row in exported if row.get("warnings_total")),
+                                  unchanged=sum(1 for row in exported if row.get("export") == "unchanged"),
+                                  replaced=sum(1 for row in exported if row.get("export") == "replaced")),
         "records_written": len(exported),
+        # r2-a L2: of those, the ones whose body is unchanged since their export (the same id, rewritten byte for byte)
+        "records_unchanged": sum(1 for row in exported if row.get("export") == "unchanged"),
         **({"records_written_with_warnings": n} if (n := sum(1 for row in exported if row.get("warnings_total"))) else {}),
         "groups_refused": len(refused),
         "exported": exported,
@@ -2183,12 +2392,19 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     return result
 
 
-def export_outcome(written: int, refused: int, withdrawn: int, out: Path, *, warned: int = 0) -> str:
+def export_outcome(written: int, refused: int, withdrawn: int, out: Path, *, warned: int = 0, unchanged: int = 0,
+                   replaced: int = 0) -> str:
     """One sentence: what ``export`` wrote and refused, and what its exit code means for that (and, c11-a, how many
-    records were written with a warning that still applies: each row's ``warnings`` says what it lacks)."""
-    text = f"Wrote {written} record(s), refused {refused} group(s)."
+    records were written with a warning that still applies: each row's ``warnings`` says what it lacks). ``written``
+    counts every record in ``--out`` from this run; r2-a L2: of them ``unchanged`` are the same record as at their
+    export (same id, rewritten byte for byte) and ``replaced`` replace an earlier record, so the sentence never says
+    "wrote 7" when nothing new was written."""
+    fresh = written - unchanged
+    counts = (f" ({unchanged} unchanged since their export, {fresh} written"
+              + (f", {replaced} of them replacing an earlier record" if replaced else "") + ")") if written else ""
+    text = f"{written} record(s) ready{counts}, refused {refused} group(s)."
     if written and refused:
-        text += (f" The exit code is 1 because some groups were refused; the {written} record(s) written are valid "
+        text += (f" The exit code is 1 because some groups were refused; the {written} record(s) ready are valid "
                  f"for the portal's pinned schema and are in {out}.")
     elif refused:
         text += " Nothing was written (exit 1)."
@@ -2230,6 +2446,10 @@ def upload_plan(records_dir: Path, portal_url: str | None) -> list[dict]:
                 ],
             }
         )
+        notes = _sidecar_notes(path.with_name(path.name[: -len(".json")] + ".evidence.json"))
+        if notes:
+            # c16d: what the record is written WITHOUT (its evidence file's notes), said before an upload too
+            plan[-1]["notes"] = notes
         if old := replaces.get(path.name[: -len(".json")]):
             # H1: SAID BEFORE AN UPLOAD, never only in the export's output: a replaced record already uploaded stays
             # on the portal, so uploading this one adds a second record for the same group
@@ -2241,6 +2461,15 @@ def upload_plan(records_dir: Path, portal_url: str | None) -> list[dict]:
                 + f". If {'any of them was' if many else 'it was'} already uploaded, the portal still holds it, and "
                 "uploading this one adds a second record for the same group.")
     return plan
+
+
+def _sidecar_notes(path: Path) -> list[str]:
+    """The ``notes`` an evidence sidecar carries (what its record is written without), or ``[]``."""
+    try:
+        notes = json.loads(path.read_text(encoding="utf-8")).get("notes")
+    except (OSError, ValueError, AttributeError):
+        return []
+    return [n for n in notes if isinstance(n, str)] if isinstance(notes, list) else []
 
 
 def _where_now(records_dir: Path, record_id: str) -> str:

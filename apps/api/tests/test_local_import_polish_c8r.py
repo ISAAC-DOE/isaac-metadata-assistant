@@ -170,14 +170,17 @@ def _s(lit, where, scale=None, rid="run-1"):
 def test_a_name_without_a_scale_and_a_header_on_rhe_are_not_said_to_disagree():
     text = _note([_s("m600mV", "file name"), _s("0Vrhe", "scan header", "RHE")])
     assert "DISAGREE" not in text and "disagree" not in text
-    assert ("different numbers on possibly different scales for 1 run(s) (run-1: file name m600mV, scan header "
-            "0Vrhe; the header writes RHE, the name none): ask which applies") in text
+    assert ("write different numbers for 1 run(s) (run-1: file name m600mV, scan header '0Vrhe' (file name: no scale; "
+            "scan header: RHE)), and nothing says both are on one scale: ask which applies") in text
 
 
 def test_a_name_and_a_header_on_the_same_scale_disagree():
-    assert "disagree for 1 run(s) (run-1: file name m600mV, scan header 0V)" in _note(
-        [_s("m600mV", "file name"), _s("0V", "scan header")])
-    assert "disagree for 1 run(s)" in _note([_s("0.2Vrhe", "file name", "RHE"), _s("0.5Vrhe", "scan header", "RHE")])
+    # c16-r M3: neither names a scale, so nothing says they are on one scale: never "different potentials"
+    text = _note([_s("m600mV", "file name"), _s("0V", "scan header")])
+    assert "different numbers for 1 run(s) (run-1: file name m600mV, scan header '0V' (file name: no scale; scan header: no scale))" in text
+    assert "same scale" not in text and "different potentials" not in text
+    assert "state different potentials for 1 run(s) (run-1: file name 0.2Vrhe, scan header '0.5Vrhe'; both on RHE)" in _note(
+        [_s("0.2Vrhe", "file name", "RHE"), _s("0.5Vrhe", "scan header", "RHE")])
     # the same number is no disagreement, whatever the scales
     text = _note([_s("500mV", "file name"), _s("0.5Vrhe", "scan header", "RHE")])
     assert "disagree" not in text and "different numbers" not in text

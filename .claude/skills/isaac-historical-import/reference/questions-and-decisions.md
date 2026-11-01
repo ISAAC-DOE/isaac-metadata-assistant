@@ -37,11 +37,15 @@ in words and `plus_decisions` never says "approve its processing result" for the
 worth answering for that group, with the warning that explains it (`warnings`): today, a potential the
 file names state that the record will not carry until its scale is confirmed. Pages hold at most 200 (`--limit` above that is refused). The older fine-grained list (`bundle list <bundle> questions`)
 is for lookup only.
+In a group's scope a question asked for more runs lists only what is still open for that group: an
+optional-values question drops the fields its record already carries (`fields_already_in_this_groups_record`
+counts them), and a conflict that affects no record and reaches no group is left out.
 
 Order (SKILL.md Step 7): the minimum for one group → experiment-scope questions, once → the template
 (below) for what the files never state, then per group only what it leaves → conflicts that affect a
 record → optional. The counter question (`naming_counter_positions`) is asked earlier, in Step 5,
-before any group is confirmed. Every printed command with `<placeholders>` (`answer_command`,
+before any group is confirmed: while it is open it is listed FIRST in every scope that lists it, and until a
+group is confirmed the minimum names it in `answer_first` (not counted; never after a `defer`). Every printed command with `<placeholders>` (`answer_command`,
 `next_commands`) is a template: fill it from the scientist's answer, never run it as it is.
 
 ## How to ask
@@ -67,6 +71,16 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
 - **Deferred** (`deferred: {by, decided_utc}`): the scientist said "I don't know". It is still counted
   and sorts last; do not ask it again unless they offer an answer (`--skip-deferred` leaves them out).
   A question they did not answer at all is not deferred: record nothing.
+- **Values read from an SSRL XDC scan header's comment lines** (rule `ssrl_xdc_header_comment_v1`: lines 9-12,
+  the `.exp` COMMENTS1-4; line 8 is the gain line and is not read): a value is offered ONLY when the line writes
+  it in a plain form, each statement its own segment (split at `,` `;` `|` or two spaces), e.g. `0.1 M HClO4,
+  pH 1.3, -0.3 V vs RHE` (a set-point `E = -0.3 V (RHE)`, `-300 mV vs RHE`; a pH `pH 1.3`; an electrolyte
+  `100 mM NaClO4` or `KOH 1 M`), and nothing else in the line makes it doubtful (a second potential, OCP, eta,
+  a step or rate, a sweep, `pre-`/`then`, an offset, a range; a reference, bridge or filling beside an
+  electrolyte). Such values always need review: the question quotes the whole line and its line number; ask the
+  scientist to check it is the value held during that scan, and confirm or correct each. Otherwise
+  (`100mM NaClO4 pH1.3 He`, `1e-3 M KCl`, `eta = 300 mV`) the line is quoted with NO value: ask the scientist
+  to state the value (`correct`), or `reject` when the line states none for that scan. No gas is read.
 - **A conflict with `affects_record: false`** (`no_record_field`): the readings differ, but no record
   field carries them (a comment line, a unit spelling). Say how many there are; do not ask each.
 - **A conflict with `covered_by_decisions`** (also `affects_record: false`; counted in
@@ -134,6 +148,8 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   its allowed values>`. A potentiostatic mode makes the potential set-point required; a galvanostatic
   one, the current set-point. Once the potential set-point is confirmed, the potential scale is what is
   missing until it is answered (the set-point goes in only beside it), so the scale question blocks.
+  With neither answered, both are required now and counted together in the minimum (the scale's
+  `required_because` says it is asked with the set-point), so the scientist is not asked twice.
 
 ## Recording
 
@@ -172,7 +188,11 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   experiment takes none, and `--target experiment --decision defer --value …` is refused; the question
   chooses which "I don't know" it is). That records "I don't know":
   no start time is converted, the question stays under its id, marked `deferred`, and the counter
-  question is not touched. Once a zone is recorded, `defer` is refused (it would not withdraw the
+  question is not touched. Every record of those runs then goes out without its start time, and says
+  so: `validate` and `export` warn "start time left out: instrument clock zone deferred (question <Q>)"
+  (while the question is not answered at all: "… not answered yet (question <Q>)"),
+  the record's evidence file keeps that line under `notes`, and `upload --dry-run` repeats it; tell the
+  scientist before they export. Once a zone is recorded, `defer` is refused (it would not withdraw the
   zone); to change the zone, state it again.
 - **QC status** is asked when approving processing, not here (Step 6).
 - **In a browser.** The local-only *Local Imports* page (`docs/ui-local-dev.md`) shows the same

@@ -14,7 +14,7 @@ What these pin:
 * (MED potential) a generic run whose FILE NAME states a potential (``500mV``, ``m600mV``) or whose SCAN HEADER
   comment does (``0.5Vrhe``) warns, naming both steps (set-point and scale), the header's scale, and a run whose
   name and header disagree; a name stating open circuit (``OCV``) warns until the control mode is confirmed;
-  NO candidate is added;
+  NO candidate is added for a file name (c16b: the header's comment line gives candidates that need review);
 * (LOW) an optional value of a run no live group holds is asked in that run's own question (counted under
   ``outside_live_groups``), never in the experiment's; "1 processed file"; a closed list says what to do when
   none of its values fits; no question id changes or disappears.
@@ -45,8 +45,8 @@ SETPOINT, SCALE = "context.electrochemistry.potential_setpoint_V", "context.elec
 MODE = "context.electrochemistry.control_mode"
 #: name -> (first scan's local time, header comment line, scans)
 RUNS = {
-    "SYN_cat_500mV_101": ("2099-07-14T10:00:00", "SYN sample in 1M KOH 0.5Vrhe", 2),
-    "SYN_cat_m600mV_102": ("2099-07-14T11:00:00", "SYN sample in 1M KOH 0Vrhe", 1),
+    "SYN_cat_500mV_101": ("2099-07-14T10:00:00", "SYN sample in 1M KOH, 0.5 V vs RHE", 2),
+    "SYN_cat_m600mV_102": ("2099-07-14T11:00:00", "SYN sample in 1M KOH, 0 V vs RHE", 1),
     "SYN_cat_OCV_103": ("2099-07-14T12:00:00", "SYN sample in 1M KOH", 1),
     "SYN_align_104": ("2099-07-14T13:00:00", "trans_e.adet", 1),
 }
@@ -297,19 +297,26 @@ def _confirm_groups(out: Path) -> dict:
 def _warnings_of(out: Path, b: dict, label: str) -> list[dict]:
     rid = _run_id(b, label)
     g = next(x for x in b["record_groups"] if rid in x["member_run_ids"] and x["status"] == "scientist_confirmed")
-    return R.with_question_commands(b, R.compose_group(b, g, out)[1]["warnings"])
+    # the potential warnings (c16-r L6: a start-time warning, the clock question unanswered, is c16d's and c16r's)
+    return R.with_question_commands(b, [w for w in R.compose_group(b, g, out)[1]["warnings"] if w["code"] != R.START_TIME_WARNING])
 
 
 def test_a_potential_in_the_name_and_the_header_names_both_steps_and_the_headers_scale(grouped):
     b = _confirm_groups(grouped)
     [w] = _warnings_of(grouped, b, "SYN_cat_500mV_101")
     assert w["code"] == R.STATED_POTENTIAL_WARNING and w["needs"] == SCALE and w["also_needs"] == SETPOINT
-    assert [(s["literal"], s["stated_in"]) for s in w["stated"]] == [("500mV", "file name"), ("0.5Vrhe", "scan header")]
-    assert all(s["read_as_V"] is None and s["candidate_id"] is None for s in w["stated"])
+    # c16-r: a header statement's literal is its whole comment line
+    assert [(s["literal"], s["stated_in"]) for s in w["stated"]] == [("500mV", "file name"),
+                                                                    ("SYN sample in 1M KOH, 0.5 V vs RHE", "scan header")]
+    name, header = w["stated"]
+    assert name["read_as_V"] is None and name["candidate_id"] is None  # nothing is read from a file name here
+    # c16b: the header's comment line is read into candidates that need review (rule ssrl_xdc_header_comment_v1)
+    assert header["read_as_V"] == 0.5 and header["value_state"] == B.STATE_NEEDS_REVIEW and header["scale"] == "RHE"
     text = w["text"]
-    assert "500mV" in text and "0.5Vrhe is written in the scan header" in text and "(RHE)" in text
+    assert "500mV" in text and "'SYN sample in 1M KOH, 0.5 V vs RHE' is written in the scan header" in text and "(RHE)" in text
     assert "set-point" in text and "scale" in text and "DISAGREE" not in text
-    assert f"--field {SETPOINT}" in text and f"--field {SCALE}" in text
+    assert "the set-point and the scale need your review (confirm or correct)" in text
+    assert text.count("--decision confirm") == 2  # both steps: the header's scale and its set-point
 
 
 def test_a_name_and_a_header_that_write_different_numbers_are_both_named(grouped):
@@ -318,8 +325,8 @@ def test_a_name_and_a_header_that_write_different_numbers_are_both_named(grouped
     rid = _run_id(b, "SYN_cat_m600mV_102")
     # c8-r: the name writes no scale and the header writes RHE, so they may be one potential on two scales: never
     # "disagree", the scientist is asked which applies
-    assert (f"different numbers on possibly different scales for 1 run(s) ({rid}: file name m600mV, scan header "
-            "0Vrhe; the header writes RHE, the name none): ask which applies") in w["text"]
+    assert (f"write different numbers for 1 run(s) ({rid}: file name m600mV, scan header 'SYN sample in 1M KOH, 0 V vs RHE' "
+            "(file name: no scale; scan header: RHE)), and nothing says both are on one scale: ask which applies") in w["text"]
     assert "disagree for" not in w["text"].lower() and "neither is used" in w["text"]
 
 
@@ -338,19 +345,23 @@ def test_validate_and_the_minimum_carry_the_warnings(grouped, capsys):
     capsys.readouterr()
     cli.main(["bundle", "validate", str(grouped)])
     report = json.loads(capsys.readouterr().out)
-    assert report["warnings_total"] == 3
-    assert {w["code"] for w in report["warnings"]} == {R.STATED_POTENTIAL_WARNING}
+    # c16-r L6: each of the three records also says its start time is left out while the clock question is unanswered
+    assert report["warnings_total"] == 3 + 3
+    assert {w["code"] for w in report["warnings"]} == {R.STATED_POTENTIAL_WARNING, R.START_TIME_WARNING}
     b = M.load(grouped)
     gid = next(g["group_id"] for g in b["record_groups"] if _run_id(b, "SYN_cat_m600mV_102") in g["member_run_ids"])
     minimum = Q.minimum_answers_for_one_group(Q.consolidate(b), b, scope=f"group:{gid}")
     assert sorted(f for r in minimum["recommended"] for f in r["fields"]) == sorted([SCALE, SETPOINT])
-    assert all("0Vrhe" in r["why"] for r in minimum["recommended"])
+    assert all("0 V vs RHE" in r["why"] for r in minimum["recommended"])
 
 
-def test_no_candidate_is_added_for_a_potential(grouped):
+def test_no_candidate_is_added_for_a_file_name_potential(grouped):
+    # c16b: what the header's comment lines state is a candidate that needs review; a file name gives none
     b = _confirm_groups(grouped)
-    assert {c["target_field_path"] for c in b["candidates"]} == {START}
-    assert len(b["candidates"]) == len(RUNS)
+    rest = [c for c in b["candidates"] if c["target_field_path"] != START]
+    assert len(b["candidates"]) - len(rest) == len(RUNS)
+    assert rest and all(B.is_header_comment_candidate(c) and c["value_state"] == B.STATE_NEEDS_REVIEW for c in rest)
+    assert all(e["locator"].startswith("line:") for c in rest for e in c["evidence"])
 
 
 def test_token_volts_reads_only_the_spelling():

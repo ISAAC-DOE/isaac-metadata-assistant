@@ -981,6 +981,14 @@ def not_counter_positions(bundle: Mapping) -> dict[int, Mapping]:
     return out
 
 
+def context_run_ids(bundle: Mapping) -> set[str]:
+    """r2-a L4: the runs a record group keeps beside its measurements as CONTEXT (``context_run_keys``: e.g. the
+    scientist's exported ``.dat`` of a run, read as an acquisition), so they are never counted as measurement runs."""
+    keys = {k for g in bundle.get("record_groups") or () if isinstance(g, Mapping)
+            and g.get("status") in LIVE_GROUP_STATUSES for k in g.get("context_run_keys") or ()}  # review L2: live only
+    return {r["run_id"] for r in bundle.get("runs") or () if r.get("run_key") in keys} if keys else set()
+
+
 def _interpreted_targets(interpretations: Sequence[Mapping]) -> set[tuple[str, str]]:
     out: set[tuple[str, str]] = set()
     for i in interpretations:
@@ -1463,6 +1471,140 @@ LOCAL_CLOCK_AWAITING = "awaiting_clock_time_zone"
 LOCAL_CLOCK_CONVERTED = "converted"
 LOCAL_CLOCK_AMBIGUOUS = "ambiguous_in_zone"
 LOCAL_CLOCK_NONEXISTENT = "nonexistent_in_zone"
+
+
+#: THE COMMENT RULE (``ssrl_xdc_header_comment_v1``, applied at import by :func:`_xdc_comment_candidates`): the
+#: comment lines of an ``ssrl_xdc_v1`` scan header (lines 9-12; the ``.exp`` COMMENTS1-4: line 8 is the gain line,
+#: ``readers.ssrl_xdc``) are free text a scientist
+#: typed at the beamline, e.g. ``0.1 M HClO4, pH 1.3, -0.3 V vs RHE``. What a line states in a PLAIN form
+#: (``questions.header_comment_readings``, a whitelist: a whole segment of the line that is one set-point, pH or
+#: electrolyte statement, and nothing else in the line that makes it doubtful) becomes ONE candidate per run and field
+#: that NEEDS REVIEW: never proposable, never confirmed until a scientist confirms (or corrects) it. A field a line
+#: only mentions (``100mM NaClO4 pH1.3 He``, ``eta = 300 mV``) is a candidate with NO value that quotes the line: the
+#: scientist states the value. A gas or atmosphere word is not read (no write route).
+XDC_COMMENT_RULE_ID = "ssrl_xdc_header_comment_v1"
+XDC_COMMENT_RULE = (
+    f"{XDC_COMMENT_RULE_ID}: a comment line of the run's SSRL EXAFS Data Collector 4.0 scan headers (lines 9-12, the "
+    "experiment file's COMMENTS1-4) that writes an electrolyte and its concentration, a pH, or a potential (and its "
+    "scale) in a plain form is read into a candidate that NEEDS REVIEW; a line that only mentions one gives a "
+    "candidate with no value that quotes the line. The line is free text, so the value is never proposed or "
+    "confirmed until a scientist confirms or corrects it."
+)
+XDC_COMMENT_LINES = range(9, 13)
+#: the reader's key for those lines (line 8, ``header_line_8_literal``, is the gain line and is never read)
+XDC_COMMENT_STATEMENT_KEY = "free_text"
+#: statement key per field (each a grouping CONDITION key: a different value is a different record)
+XDC_COMMENT_KEYS: Mapping[str, str] = {
+    "context.electrochemistry.electrolyte.name": "scan_header_electrolyte",
+    "context.electrochemistry.electrolyte.concentration_M": "scan_header_electrolyte_concentration",
+    "context.electrochemistry.pH": "scan_header_ph",
+    "context.electrochemistry.potential_setpoint_V": "scan_header_potential",
+    "context.electrochemistry.potential_scale": "scan_header_potential_scale",
+}
+XDC_COMMENT_REASON = (
+    "Read by a pattern from a free-text comment line of the scan header (written at the beamline, not a field "
+    "the instrument fills in). A scientist confirms it, or corrects it, before any record carries it."
+)
+
+
+#: c16-r M1: ``counts`` key — the XDC runs whose comment lines were NOT read into candidates, because their readings
+#: would have passed :data:`MAX_CANDIDATES` (absent when every run was read).
+HEADER_COMMENT_RUNS_NOT_READ = "header_comment_runs_not_read"
+
+
+def header_comment_runs_not_read_text(n: int) -> str:
+    """The summary's line for :data:`HEADER_COMMENT_RUNS_NOT_READ`."""
+    return (f"{n} SSRL XDC run(s) had their scan-header comment lines NOT read into values (rule {XDC_COMMENT_RULE_ID}): "
+            f"reading them would pass the bound of {MAX_CANDIDATES} candidates. Their lines are kept as context; ask the "
+            "scientist for the electrolyte, pH and potential of those runs as for any missing value.")
+
+
+def is_header_comment_candidate(candidate: Mapping) -> bool:
+    """A candidate of :data:`XDC_COMMENT_RULE_ID` (a value read from a scan-header comment line)."""
+    return _rule_id(candidate.get("rule")) == XDC_COMMENT_RULE_ID
+
+
+def is_xdc_comment_line(key: Any, locator: Any) -> bool:
+    """Whether a scan-header statement (its reader ``key``, its ``line:N`` locator) is one of the comment lines
+    :data:`XDC_COMMENT_RULE_ID` reads (:data:`XDC_COMMENT_LINES`). ONE test for the rule and for every reading of
+    the same lines (``template.header_potential_readings``), so the two never read different lines."""
+    loc = str(locator or "")
+    if key != XDC_COMMENT_STATEMENT_KEY or not loc.startswith("line:"):
+        return False
+    try:
+        return int(loc.split(":", 1)[1]) in XDC_COMMENT_LINES
+    except ValueError:
+        return False
+
+
+def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_n: int, sid_of: Mapping,
+                            writable) -> list[dict]:
+    """The :data:`XDC_COMMENT_RULE_ID` candidates of ONE ``ssrl_xdc_v1`` run (ids ``cand-<first_n>`` on), one per
+    field its scans' comment lines state, in :data:`XDC_COMMENT_KEYS` order. Every scan stating it is evidence;
+    scans that state DIFFERENT values give a candidate with no value (it says which). Built through the engine's
+    own candidate type and :func:`_candidate_record`, so its shape is every other candidate's."""
+    from .. import historical_import as hist
+    from .questions import header_comment_readings, header_unread_text
+
+    scans = {sc.get("relative_path") for sc in run_scans}
+    found: dict[str, list[tuple]] = {}
+    for st in g.statements:
+        rel, loc = st.get("source_relative_path"), str(st.get("locator") or "")
+        if rel not in scans or not is_xdc_comment_line(st.get("key"), loc) or not isinstance(st.get("literal"), str):
+            continue
+        for reading in header_comment_readings(st["literal"]):
+            found.setdefault(reading["path"], []).append((st.get("scan_index"), rel, loc, st["literal"], reading))
+    out: list[dict] = []
+    for path, key in XDC_COMMENT_KEYS.items():
+        hits = sorted(found.get(path) or (), key=lambda h: (h[0] is None, h[0] or 0, h[2]))
+        if not hits:
+            continue
+        values = list(dict.fromkeys(json.dumps(h[4]["value"]) for h in hits))
+        value = hits[0][4]["value"] if len(values) == 1 and not any(h[4].get("ambiguous") for h in hits) else None
+        bundle_cid = f"cand-{first_n + len(out):04d}"
+        evidence = []
+        for index, rel, loc, literal, reading in hits[:MAX_EVIDENCE_PER_CANDIDATE]:
+            evidence.append({
+                "evidence_id": f"{bundle_cid}.e{len(evidence) + 1:03d}",
+                "source_id": sid_of.get(rel),
+                "relative_path": _safe_relative(rel) if rel in sid_of else None,
+                "locator_kind": "source_file" if rel in sid_of else "described",
+                "locator": loc,
+                "statement_key": key,
+                "literal_value": reading["literal"],
+                "method": "deterministic_parser",
+                "method_id": XDC_COMMENT_RULE_ID,
+                "relation": "supports" if value is not None and len(evidence) == 0 else "context",
+                "reading_index": None,
+                "normalization": [{"step": "normalize", "rule_id": XDC_COMMENT_RULE_ID, "from": reading["literal"],
+                                   "to": reading["value"], "unit": reading["unit"]}],
+            })
+        ambiguous = [h for h in hits if h[4].get("ambiguous")]
+        if ambiguous:
+            # r1d: the line mentions the field in no form the whitelist reads: it is quoted, and the scientist says
+            _i, a_rel, a_loc, a_line, _reading = ambiguous[0]
+            said = header_unread_text(path, a_line, a_loc, a_rel)
+            reason = f"{said[:1].upper()}{said[1:]}."
+        elif value is None:
+            reason = ("The scans' comment lines state different values ("
+                      + "; ".join(dict.fromkeys(h[4]["literal"] for h in hits[:4])) + "): a scientist says which is right.")
+        else:
+            reason = XDC_COMMENT_REASON
+        engine = hist.SemanticCandidate(
+            candidate_id=f"{g.run_key}::{XDC_COMMENT_RULE_ID}::{key}",
+            kind=hist.CANDIDATE_KIND_FIELD,
+            determinism=hist.DETERMINISM_DETERMINISTIC,
+            rule=XDC_COMMENT_RULE,
+            supporting_source_ids=tuple(dict.fromkeys(h[1] for h in hits)),
+            target_field_path=path,
+            proposed_value=value,
+            not_proposable_reason=reason,
+            supporting_statement_total=len(hits),
+            distinct_sources=len({h[1] for h in hits}),
+        )
+        out.append(_candidate_record(engine, bundle_cid=bundle_cid, run_id=run_id, key=key, evidence=evidence,
+                                     total=len(hits), writable=writable))
+    return out
 
 
 def _awaiting_zone_reason() -> str:
@@ -2531,14 +2673,14 @@ def source_reader_block(bundle: Mapping, src: Mapping, uses: Mapping[str, dict] 
     use = (uses if uses is not None else generic_source_uses(bundle)).get(src.get("source_id"))
     if use is None or not _says_no_reader(block):
         return block
-    if use["as"] == "companion":
+    if statements is None:
+        statements = _kept_statements(bundle, use["reader_id"], {src.get("source_id")})
+    kept = int(statements.get(src.get("source_id"), 0))
+    if use["as"] == "companion" and not kept:  # a run's own `.exp` whose DATA_FILE line was read is a read file
         return {**block, "reader_id": None, "content_read": False,
                 "refused_reason": (f"No reader opened this file: {use['reader_id']} kept it beside run {use['run_id']} as its "
                                    f"{_COMPANION_ROLE_WORDS.get(use.get('role'), 'context file')} (its name, size and digest "
                                    "are recorded; its contents are not read).")}
-    if statements is None:
-        statements = _kept_statements(bundle, use["reader_id"], {src.get("source_id")})
-    kept = int(statements.get(src.get("source_id"), 0))
     return {**block, "reader_id": use["reader_id"], "content_read": True,
             "statements_read": int(block.get("statements_read") or 0) + kept, "refused_reason": None}
 
@@ -2560,13 +2702,17 @@ def source_read_as(bundle: Mapping, src: Mapping, uses: Mapping[str, dict] | Non
     use = (uses if uses is not None else generic_source_uses(bundle)).get(sid)
     if use is None:
         return None
+    kept = _kept_statements(bundle, use["reader_id"], {sid}).get(sid, 0)
+    if use["as"] == "companion" and kept:
+        return {"reader_id": use["reader_id"], "as": "companion", "role": use.get("role"), "run_id": use["run_id"],
+                "opened": True, "gave": [f"{kept} statement(s) kept as evidence (extended context): the run's base name "
+                                         "(DATA_FILE), used only to offer merge candidates"]}
     if use["as"] == "companion":
         return {"reader_id": None, "kept_by": use["reader_id"], "as": "companion", "role": use.get("role"),
                 "run_id": use["run_id"], "opened": False,
                 "statement": (f"Kept beside run {use['run_id']} as its "
                               f"{_COMPANION_ROLE_WORDS.get(use.get('role'), 'context file')}; no reader opened it. "
                               f"Not counted as unread: `isaac bundle list <dir> unread --all` lists these files.")}
-    kept = _kept_statements(bundle, use["reader_id"], {sid}).get(sid, 0)
     backs = sorted({(c["candidate_id"], c.get("target_field_path")) for c in bundle.get("candidates") or ()
                     for e in c.get("evidence") or () if e.get("source_id") == sid and e.get("method") == "deterministic_parser"})
     gave = [f"{kept} statement(s) from its header kept as evidence (extended context)"]
@@ -3402,6 +3548,22 @@ def build_bundle(
         runs_by_id[run_id]["candidate_ids"].append(cand["candidate_id"])
         if order_anomaly is not None:
             runs_by_id[run_id]["other_relationships"]["anomalies"].append(order_anomaly)
+    # ssrl_xdc_header_comment_v1: what the comment lines state, AFTER every start-time candidate (their ids stand).
+    # c16-r M1: these readings never refuse an import. A run whose readings would pass MAX_CANDIDATES is not read
+    # this way (its lines stay in extended_context, as before the rule), and the bundle counts it
+    # (counts.header_comment_runs_not_read, said in the summary): a large XDC beamtime imports as it did before.
+    comment_runs_not_read = 0
+    for run_id, g, run_scans in xdc_runs:
+        if comment_runs_not_read:
+            comment_runs_not_read += 1  # in run order: once one run is left out, every later one is too
+            continue
+        cands = _xdc_comment_candidates(g, run_scans, run_id, len(out_candidates) + 1, sid_of, writable)
+        if len(out_candidates) + len(cands) > MAX_CANDIDATES:
+            comment_runs_not_read += 1
+            continue
+        for cand in cands:
+            out_candidates.append(cand)
+            runs_by_id[run_id]["candidate_ids"].append(cand["candidate_id"])
     if len(out_candidates) > MAX_CANDIDATES:
         raise BundleBoundsExceeded(f"{len(out_candidates)} candidates exceeds the bound of {MAX_CANDIDATES}.")
 
@@ -3634,6 +3796,7 @@ def build_bundle(
         "data_quality_notes": len(dq_notes),
         "questions": len(questions),
         **processed_output_counts(processed_outputs),
+        **({HEADER_COMMENT_RUNS_NOT_READ: comment_runs_not_read} if comment_runs_not_read else {}),
     }
     eligible = sum(1 for c in out_candidates if c["eligibility_for_official_record"]["eligible"])
     readiness = {

@@ -157,7 +157,8 @@ applied (`calibration_shift_awaiting_approval`, `reference_approved: false`):
   exactly one element-symbol token, and an edge from the bundle's element evidence and/or a
   header `<El><Edge>_` symbol (XDAC region file), all agreeing.
 
-Without any reference: no shift, `calibration_reference_unconfirmed`. A foil group's shift is
+Without any reference: no shift, `no_reference_available` (r2-a: not also
+`calibration_reference_unconfirmed`, which flags a reference found but not approved). A foil group's shift is
 never propagated to sample groups. `max_plausible_shift_eV` 25; `align_scans_by_reference`
 false. **All calibration params need approval.**
 
@@ -372,6 +373,16 @@ Whether to leave such a scan out is the scientist's call: nothing is dropped for
   oscillations; these N flags are not by themselves evidence of glitches"); measured on a real BL4-3
   beamtime: a clean Ti foil had 21 points flagged (z up to 37.7), two-scan groups 30–31, and 30 of
   34 results carried `glitches_flagged`. No count, flag, verdict or id changes (said after the run id).
+  r2-a (`isaac.xas.glitch_points_on_edge.v0`): a flagged point within 5 eV of E0, or inside the one
+  stretch of steep slope that holds the edge (slope taken on the merged curve WITH THE FLAGGED POINTS LEFT
+  OUT, between the points two places either side; at least a quarter of its steepest), is on the edge:
+  the check cannot tell a glitch from the edge there, so the point is unjudged, never cleared. Such
+  points are listed apart (`steps[deglitch].outcome.flagged_points_on_edge`), counted
+  (`qc.metrics.glitch_points_on_edge` / `glitch_points_off_edge`) and said
+  (`qc.statements.glitch_points_on_edge`: "neither counted as glitches nor cleared"); measured on a
+  real Pt L3 HERFD beamtime: with 4–5 scans the flagged points sat at E0 and on the white line, and 27
+  groups carried `glitches_flagged`. The rule is not a protocol parameter (params.json is hashed); the
+  stored count, flag and verdict stay as first written, so no result id moves.
 * The §7 post-edge level cannot judge a scan ending < 50 eV above E0 (`post_edge_window_too_short`
   warns; its normalised curve is unchecked, its E0 usable).
 

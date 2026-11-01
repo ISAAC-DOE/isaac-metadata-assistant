@@ -355,40 +355,94 @@ ELECTROLYTE_NAME_PATH = "context.electrochemistry.electrolyte.name"
 ELECTROLYTE_CONC_PATH = "context.electrochemistry.electrolyte.concentration_M"
 POTENTIAL_PATH = "context.electrochemistry.potential_setpoint_V"
 PH_PATH = "context.electrochemistry.pH"
-#: A concentration written into the electrolyte NAME ("0.01 M HClO4", "1M KOH", "KOH 100 mM").
-_CONCENTRATION_IN_NAME = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?|\.\d+)\s*(mM|M|mol\s*/\s*L)(?![A-Za-z])")
+#: A concentration's SHAPE in a text ("0.01 M HClO4", "1M KOH", "KOH 100 mM", and ``1e-3 M`` too): only RECOGNISES
+#: that the text states one (a name cell refused as name only, a comment line that mentions a concentration). Its
+#: number is never read from this match: :func:`electrolyte_statement` reads a statement, or nothing.
+_CONCENTRATION_IN_NAME = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?|\.\d+)\s*(mM|\u00b5M|\u03bcM|M|mol\s*/\s*L)(?![A-Za-z])")
+#: r1d: THE ELECTROLYTE GRAMMAR, one for the template and for the scan-header comment rule
+#: (``questions.header_comment_readings``): a statement is read ONLY when the whole of it is ``<number> <unit>
+#: <formula>`` or ``<formula> <number> <unit>``: the number a plain decimal (no exponent, no comma decimal, no
+#: ``x10``), the unit ``M``, ``mM`` or ``mol/L``, the formula one :func:`electrolyte_formula` takes.
+_STATED_CONCENTRATION = r"(?P<num>\d+(?:\.\d+)?|\.\d+)\s?(?P<unit>mM|M|mol\s*/\s*L)"
+_ELECTROLYTE_STATEMENTS = (re.compile(_STATED_CONCENTRATION + r"\s+(?P<formula>\S+)"),
+                           re.compile(r"(?P<formula>\S+)\s+" + _STATED_CONCENTRATION))
+#: the element symbols an electrolyte formula is written in (the periodic table, 1-118)
+ELEMENT_SYMBOLS = frozenset("""
+    H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr Rb Sr Y Zr Nb
+    Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta W Re Os Ir Pt Au
+    Hg Tl Pb Bi Po At Rn Fr Ra Ac Th Pa U Np Pu Am Cm Bk Cf Es Fm Md No Lr Rf Db Sg Bh Hs Mt Ds Rg Cn Nh Fl Mc Lv Ts
+    Og""".split())
+#: formulas of element symbols that are no electrolyte: a gas or atmosphere (no write route), or an acronym a
+#: comment line writes (``PBS``, ``CV``, ``OCP``)
+_NOT_AN_ELECTROLYTE = frozenset({"Ar", "He", "Ne", "Kr", "Xe", "N2", "O2", "H2", "Cl2", "CO2", "CO", "NH3", "CH4",
+                                 "PBS", "CV", "CP", "OCP", "OCV", "CHES", "SYN", "CNT", "BN", "NP", "NPs"})
+_FORMULA_PART = re.compile(r"([A-Z][a-z]?)\d*|\(|\)\d*")
+
+
+def electrolyte_formula(text: str) -> bool:
+    """Whether ``text`` is written as an electrolyte formula (r1d): real element symbols (:data:`ELEMENT_SYMBOLS`),
+    digits and balanced brackets only, starting with a symbol, naming two elements or more (a bare element, ``Cu``
+    or ``N2``, is none; ``HCl`` is two), and not a gas or an acronym (:data:`_NOT_AN_ELECTROLYTE`)."""
+    if not text or not text[0].isupper() or text in _NOT_AN_ELECTROLYTE:
+        return False
+    at, depth, elements = 0, 0, set()
+    while at < len(text):
+        m = _FORMULA_PART.match(text, at)
+        if m is None:
+            return False
+        if m.group(1) is not None:
+            if m.group(1) not in ELEMENT_SYMBOLS:
+                return False
+            elements.add(m.group(1))
+        else:
+            depth += 1 if m.group(0) == "(" else -1
+            if depth < 0:
+                return False
+        at = m.end()
+    return depth == 0 and len(elements) >= 2
+
+
+def electrolyte_statement(value: Any) -> dict | None:
+    """``{"name", "number", "unit", "concentration_M"}`` of a text that is, as a whole, ONE electrolyte statement in
+    the plain grammar (r1d; ``"0.5 M H2SO4"``, ``"KOH 100 mM"``, ``"0.1 mol/L KOH"``), else ``None`` — ``1e-3 M
+    KCl``, ``0,1 M KOH``, ``KOH 1 M Ar``, ``0.1 M phosphate buffer`` and every sentence around a statement give
+    nothing. ``number`` and ``unit`` are as written; ``concentration_M`` is in mol/L."""
+    if not isinstance(value, str):
+        return None
+    text = " ".join(value.split())
+    for pattern in _ELECTROLYTE_STATEMENTS:
+        m = pattern.fullmatch(text)
+        if m is not None and electrolyte_formula(m.group("formula")):
+            number = Decimal(m.group("num"))
+            return {"name": m.group("formula"), "number": m.group("num"), "unit": m.group("unit"),
+                    "concentration_M": float(number / 1000 if m.group("unit") == "mM" else number)}
+    return None
 
 
 def electrolyte_name_problem(value: Any) -> str | None:
     """Why an Electrolyte (name) cell holding a concentration is refused, or ``None``. The split is the
-    scientist's: the number is named back to them, never moved into the concentration column."""
-    if not isinstance(value, str):
+    scientist's: the number is named back to them, never moved into the concentration column (r1d: only a number
+    :func:`electrolyte_statement` reads is named; any other is not repeated)."""
+    if not isinstance(value, str) or not _CONCENTRATION_IN_NAME.search(value):
         return None
-    m = _CONCENTRATION_IN_NAME.search(value)
-    if not m:
-        return None
-    if m.group(2) == "mM":
-        return (f"name only: {value!r} also states a concentration ({m.group(1)} mM); put it in "
+    got = electrolyte_statement(value)
+    if got is None:
+        return (f"name only: {value!r} also states a concentration; put it in 'Electrolyte Concentration (M)' in "
+                "mol/L, and only the name here")
+    if got["unit"] == "mM":
+        return (f"name only: {value!r} also states a concentration ({got['number']} mM); put it in "
                 "'Electrolyte Concentration (M)' in mol/L, and only the name here")
-    return f"name only: put {m.group(1)} in 'Electrolyte Concentration (M)', and only the name here"
+    return f"name only: put {got['number']} in 'Electrolyte Concentration (M)', and only the name here"
 
 
 def electrolyte_statement_parts(value: Any) -> tuple[str, float] | None:
-    """``(name, concentration in mol/L)`` of an electrolyte STATEMENT that carries exactly one concentration
-    (``"0.5 M H2SO4"`` -> ``("H2SO4", 0.5)``; ``"KOH 100 mM"`` -> ``("KOH", 0.1)``), else ``None``. The template
-    asks the two apart (name only; the concentration in its own column), so a cell that is one part of a
-    reading agrees with it; a statement with two concentrations is not split."""
-    if not isinstance(value, str):
-        return None
-    found = list(_CONCENTRATION_IN_NAME.finditer(value))
-    if len(found) != 1:
-        return None
-    m = found[0]
-    name = " ".join((value[:m.start()] + " " + value[m.end():]).split())
-    if not name:
-        return None
-    number = float(m.group(1))
-    return name, (number / 1000 if m.group(2) == "mM" else number)
+    """``(name, concentration in mol/L)`` of an electrolyte STATEMENT (``"0.5 M H2SO4"`` -> ``("H2SO4", 0.5)``;
+    ``"KOH 100 mM"`` -> ``("KOH", 0.1)``), else ``None``: :func:`electrolyte_statement`, the grammar the scan-header
+    comment rule reads too. The template asks the two apart (name only; the concentration in its own column), so a
+    cell that is one part of a reading agrees with it; a statement with two concentrations, or not written plainly,
+    is not split."""
+    got = electrolyte_statement(value)
+    return None if got is None else (got["name"], got["concentration_M"])
 
 
 # --- file-name tokens: a READING to compare against, never a value ---------------------------------
@@ -435,6 +489,30 @@ def run_names(bundle: Mapping, run: Mapping) -> list[str]:
     if parts:
         parts[-1] = parts[-1].rsplit(".", 1)[0] if "." in parts[-1] else parts[-1]
     return list(dict.fromkeys([str(run.get("stem") or ""), *parts]))
+
+
+def header_potential_readings(bundle: Mapping, run: Mapping) -> list[dict]:
+    """``[{value, literal, scale, relative_path, locator}]``: each potential a run's SCAN HEADER comment lines state
+    as a value — a FILE READING to compare a typed set-point against (c16c), never a value itself. One per line.
+
+    c16-r: the SAME lines (``bundle.is_xdc_comment_line``) and the SAME parser (``questions.header_comment_readings``)
+    as the comment rule's candidates, so the two never disagree: a line that gives the rule no value (a range, OCP,
+    a comma decimal, two potentials) gives no reading here either. ``literal`` is the whole line."""
+    from .questions import header_comment_readings
+
+    out, seen = [], set()
+    for e in bundle.get("extended_context") or ():
+        if (e.get("run_id") != run.get("run_id") or not B.is_xdc_comment_line(e.get("concept"), e.get("locator"))
+                or not isinstance(e.get("raw_literal"), str)):
+            continue
+        for reading in header_comment_readings(e["raw_literal"]):
+            key = (reading["literal"], e.get("relative_path"), e.get("locator"))
+            if reading["path"] != POTENTIAL_PATH or reading["value"] is None or key in seen:
+                continue
+            seen.add(key)
+            out.append({"value": reading["value"], "literal": reading["literal"], "scale": reading.get("scale"),
+                        "relative_path": e.get("relative_path"), "locator": e.get("locator")})
+    return out
 
 
 # --- facility hints: a HINT to compare against, never a value ---------------------------------------
@@ -2380,14 +2458,17 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
         readings = []
         if decision == "correct" and kind == "candidate" and obj.get("value") is not None:
             ev = next((e for e in obj["evidence"] if e["method"] != "ai_interpretation"), None)
-            readings.append(f"replaces extracted {_shown(obj['value'])} — {_ev_where(index, ev)}")
+            # c16c: a value read from a scan-header comment line says so, with the header's own words
+            said = (f", read from the scan header's {ev['literal_value']!r}" if ev is not None and B.is_header_comment_candidate(obj)
+                    else "")
+            readings.append(f"replaces extracted {_shown(obj['value'])}{said} — {_ev_where(index, ev)}")
         run = runs_by_id.get(obj.get("run_id") or "")
         if run is not None:
             for t in name_token_readings(run_names(bundle, run), cell["path"]):
                 if not _agrees(t["value"], cell["value"]):
                     readings.append(f"contradicts the file name token {t['token']} ({t['value']!r}) in {t['name']}")
         for r in adopter.against(cell["value"], obj.get("run_id"), cell["path"]):
-            if r["kind"] == "ai_reading":
+            if r["kind"] in ("ai_reading", "scan_header"):  # c16c: what a scan header states is a file reading
                 readings.append(f"contradicts the {r['source']}: {_shown(r['value'])}")
         return readings
 
@@ -3721,6 +3802,16 @@ class _Adopter:
             for t in name_token_readings(run_names(self.bundle, self.runs[run_id]), path):
                 out.setdefault((repr(float(t["value"])), "token"), {
                     "value": t["value"], "kind": "file_name_token", "source": f"file name token {t['token']} in {t['name']}"})
+        if run_id is not None and path == POTENTIAL_PATH:
+            # c16c: a potential the run's scan header states is a file reading too; a line a candidate already holds
+            # (its value is the extracted reading above) is not listed twice
+            held = {(e.get("relative_path"), e.get("locator")) for c in cands if c["value"] is not None for e in c["evidence"]}
+            for h in header_potential_readings(self.bundle, self.runs[run_id]):
+                if (h["relative_path"], h["locator"]) in held:
+                    continue
+                out.setdefault((repr(float(h["value"])), "scan_header"), {
+                    "value": h["value"], "kind": "scan_header",
+                    "source": f"scan header {h['literal']} at {h['locator']} of {h['relative_path']}"})
         targets = [("candidate", c["candidate_id"]) for c in cands] + [("missing_value", m["value_id"]) for m in missing]
         for kind, tid in targets:
             for i in self.ai_of.get((kind, tid), []):
@@ -3814,8 +3905,8 @@ def _adopt_name_only_reason(value: Any) -> str | None:
     concentration in "Your ruling: concentration (M)". ISAAC never splits it for them."""
     if electrolyte_name_problem(value) is None:
         return None
-    m = _CONCENTRATION_IN_NAME.search(value)
-    stated = f"{m.group(1)} {m.group(2)}" if m else "a concentration"
+    got = electrolyte_statement(value)
+    stated = f"{got['number']} {got['unit']}" if got else "a concentration"
     return (f"name only: {value!r} also states a concentration ({stated}); rule with the NAME in 'Your ruling' and the "
             f"concentration in mol/L in '{DISAGREE_HEADERS[9]}' (column {DISAGREE_CONC_COLUMN}), both for this row's runs")
 
