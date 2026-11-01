@@ -8,7 +8,7 @@ SYNTHETIC only: every scan, name, Athena project and value below is invented and
   step: a record lists ``spectrum_merging``).
 * (M2) A foil's names are read ONCE for "which element is proposed" and "is it named as a pure element": words of how
   it was measured (calib, a beam size, I0-I3, trans, fluor, PIPS, Lytle, run counters) are neutral and ``Tifoil`` is
-  Ti + foil, so ``33_Ti_foil_I1`` and ``01_Tifoil_calib_1x3mm`` are proposed AND said as Ti. A sentence shows the real
+  Ti + foil, so ``SYN_Ti_foil_I1`` and ``SYN_Tifoil_calib_1x3mm`` are proposed AND said as Ti. A sentence shows the real
   shift or none, never a placeholder. A confirmed (``--accept-shift``) own-edge calibration clears
   ``own_signal_not_named_as_pure_element``; without it nothing is applied (the safety rule stands).
 * (L8) Once the scientist confirmed the shift, the sentence no longer asks "only if it is a pure element".
@@ -170,8 +170,8 @@ def test_base_names_drop_only_a_counter():
 from isaac_api.local_import.processing import reference as REF  # noqa: E402
 
 
-@pytest.mark.parametrize("name", ["33_Ti_foil_I1", "01_Tifoil_calib_1x3mm", "Ti_foil_trans_PIPS_run2", "Ti_foil_Lytle_I0",
-                                  "02_Ti_foil_0p5x1mm_fluor", "Ti_foil_transDet_016_A", "33_Ti_foil_A.001"])
+@pytest.mark.parametrize("name", ["SYN_Ti_foil_I1", "SYN_Tifoil_calib_1x3mm", "Ti_foil_trans_PIPS_run2", "Ti_foil_Lytle_I0",
+                                  "02_Ti_foil_0p5x1mm_fluor", "Ti_foil_transDet_016_A", "SYN_Ti_foil_A.001"])
 def test_how_a_foil_was_measured_says_nothing_of_its_chemistry(name):
     c = REF.calibrant_identity([name])
     assert (c["kind"], c["element"]) == ("element", "Ti"), name
@@ -209,7 +209,7 @@ def _cal(result):
     return next(s for s in result["steps"] if s["step"] == "calibration")
 
 
-@pytest.mark.parametrize("stem", ["33_Ti_foil_I1", "01_Tifoil_calib_1x3mm"])
+@pytest.mark.parametrize("stem", ["SYN_Ti_foil_I1", "SYN_Tifoil_calib_1x3mm"])
 def test_a_foil_named_with_measurement_words_is_proposed_and_said_as_ti_with_the_shift(tmp_path, stem):
     bdir, root = _reference_case(tmp_path, stem)
     _, [isa], _ = _process(bdir, root)
@@ -230,7 +230,7 @@ def test_a_foil_named_with_measurement_words_is_proposed_and_said_as_ti_with_the
 
 
 def test_with_no_edge_stated_no_shift_is_said_and_no_placeholder_either(tmp_path):
-    bdir, root = _reference_case(tmp_path, "01_Tifoil_calib_1x3mm", element_evidence=False)
+    bdir, root = _reference_case(tmp_path, "SYN_Tifoil_calib_1x3mm", element_evidence=False)
     _, [isa], _ = _process(bdir, root)
     o = _cal(isa)["outcome"]
     # nothing is proposed, as before: the hashed reason is the one the earlier rule gave, so the id does not move
@@ -304,7 +304,7 @@ def _group(gid, stem, status="proposed"):
     return {"group_id": gid, "_stems": [stem], "_has_scans": True, "basis": {}, "status": status}
 
 
-FIXED = 4977.440
+FIXED = 4978.123  # invented
 LIVE = _group("g04", "04_SYN_TiON_dry_016")
 REJECTED = [_group("g05", "05_SYN_TiO2_anatase_020", "rejected"), _group("g07", "07_SYN_TiON_wet_031", "rejected"),
             _group("g10", "10_SYN_Ti2O3_044", "rejected")]
@@ -329,7 +329,7 @@ def test_one_projects_e0_given_to_rejected_groups_flags_the_live_groups_result()
     ath = results[1]
     assert RUN.FIXED_E0_FLAG in ath["review_flags"] and ath["preferred_for_record"] is False
     said = ath["qc"]["statements"][RUN.FIXED_E0_FLAG]
-    assert said.startswith("The scientist's Athena E0 here, 4977.440 eV, is exactly the Athena E0 of 3 other Athena "
+    assert said.startswith("The scientist's Athena E0 here, 4978.123 eV, is exactly the Athena E0 of 3 other Athena "
                            "groups of other samples in the same project (athena_10_SYN.prj:")
     assert "'05_SYN_TiO2_anatase_020' (its own edge at 4980.100 eV)" in said and "ISAAC measures 4979.200 eV here" in said
     assert "QC passed" not in said
@@ -399,14 +399,14 @@ def test_an_athena_e0_shared_with_rejected_groups_is_flagged_end_to_end(tmp_path
                                                                               "environment": {}, "conditions": {}},
                                 "split_reasons": [], "status": "proposed" if i == 0 else "rejected", "questions": []}
                                for i, r in enumerate(bundle["runs"])]
-    # one project: four samples' groups, every one normalised with ONE E0 typed in Athena (4977.44 eV), while their
+    # one project: four samples' groups, every one normalised with ONE E0 typed in Athena (4978.123 eV, invented), while their
     # own edges sit at 4966, 4969, 4972 and 4975 eV
     _fixed_prj(root / "athena_10_SYN.prj", [(s, GRID, mu_edge(GRID, 4966.0 + 3 * i) * 1e-2) for i, s in enumerate(stems)],
-               e0=4977.44)
+               e0=4978.123)
     bundle["unread_files"].append({"source_id": "prj-SYN", "relative_path": "athena_10_SYN.prj"})
     (bdir / "bundle.json").write_text(json.dumps(bundle))
     out, [isa], [ath] = _process(bdir, root, skip_group_ids=["g1", "g2", "g3"])
-    assert ath["group_id"] == "g0" and ath["outputs"]["e0_eV"] == pytest.approx(4977.44, abs=1e-3)
+    assert ath["group_id"] == "g0" and ath["outputs"]["e0_eV"] == pytest.approx(4978.123, abs=1e-3)
     assert "athena_e0_possibly_fixed" in ath["review_flags"] and ath["preferred_for_record"] is False
     assert out["athena"]["e0_possibly_fixed"]["results"] == [ath["result_id"]]
     found = ath["athena_e0_possibly_fixed"]["same_project"]["athena_groups"]

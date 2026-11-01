@@ -55,7 +55,8 @@ def _processing():
     (["Ti_foil_005"], "element", "Ti"),
     (["01_Cofoil_std_005"], "element", "Co"),
     (["31_Ti_foil_I2_120"], "element", "Ti"),  # r3-b M2: a detector channel (I0-I3) says nothing of the chemistry
-    (["SYN_S_std"], "unknown", None),  # SYN is not on the list: ISAAC cannot tell
+    (["SYN_S_std"], "element", "S"),  # r3-d: SYN marks an invented name: neutral, like ZZ
+    (["QQ_S_std"], "unknown", None),  # QQ is not on the list: ISAAC cannot tell
     (["STD_REF"], "unknown", None),
     (["Ti_Co_std"], "unknown", None),  # two elements: which is it?
     ([], "unknown", None),

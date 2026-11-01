@@ -189,14 +189,19 @@ Ask: approve, reject, or needs changes (with a note):
   The scientist's own merge named before the run name (`merge4_<name>`, `merge_<name>`, where `<name>` is a run's
   name or the group's name without its run counter: `match_kind: scientist_merge`) is matched and preferred over
   the per-scan groups beside it; per-scan groups of every run of a merged group form one set (`per_scan_set.runs`).
-  Either way the result's steps include a merge, so the record lists `spectrum_merging`.
+  Either way the result's steps include a merge, so the record lists `spectrum_merging`. The per-scan groups beside
+  such a merge are listed as set aside (`athena_per_scan_sets_set_aside`, `qc.statements.athena_per_scan_set_set_aside`):
+  say so. When they cover every scan of the group and their mean differs from the merge (flag
+  `athena_merge_differs_from_per_scan_set`, question `athena_merge_or_per_scan_set`), the merge is not preferred: say
+  the statement and ask which is the result of record before approving either.
 - **An Athena E0 that may be a setting** (flag `athena_e0_possibly_fixed`, `qc.statements.athena_e0_possibly_fixed`,
   question `athena_e0_measured_or_set`): the same Athena E0 (to 0.001 eV) in different Athena curves of groups whose
   ISAAC E0s (QC pass or warn) differ by 0.5 eV or more is likely a normalisation setting typed or carried over in Athena,
   not a measured edge position (one curve matched to two groups is one curve). Every Athena group of the result's
   own project counts too, matched or not (e.g. groups rejected before processing): one whose record group has an
-  ISAAC E0 counts only when it differs by 0.5 eV or more; one without counts by name, when at least two other samples
-  carry that E0 (names equal apart from counters are one sample's repeats, never other samples). The result is
+  ISAAC E0 counts only when it differs by 0.5 eV or more; one without (or when this group's own ISAAC QC failed) counts
+  when its own stored data puts its edge 0.5 eV or more from that E0 (names equal apart from counters are one sample's
+  repeats, never other samples). Nothing is flagged when this curve's own data puts its edge at that E0. The result is
   not preferred. Say the statement and ask "was this E0 measured from this group's edge, or set?" before approving
   it; approve it only on "measured", with `--e0-measured` (`decide` refuses it without). If it was set, it is not the edge position: offer
   ISAAC's result instead. A result already decided is kept as it is: the summary line "approved result <id> carries
@@ -263,8 +268,8 @@ an element/edge already named for the group: approved, proposed, or the group's 
   `--accept-shift <the shift shown>`, whatever its size and names (without it: refused, nothing recorded; processing
   does not apply it, `calibration_own_signal_shift_not_confirmed`). The names only hint: "its names say it is S; if
   so, approve with --accept-shift +0.4" (a closed list: symbol or English name, S8, `Cu foil`, `Tifoil`, `Sref`,
-  `S_K`, beside words of how it was measured: calib, a beam size `1x3mm`, I0-I3, trans, fluor, PIPS, Lytle, run
-  counters), or "ISAAC cannot tell from its names that this is a pure element" (flag
+  `S_K`, beside words of how it was measured: calib, a beam size `1x3mm`, a thickness `7um`, I0-I3, trans, fluor, PIPS,
+  Lytle, run counters; a one-letter symbol beside a channel word, `S_trans`, needs `foil` or `ref`), or "ISAAC cannot tell from its names that this is a pure element" (flag
   `own_signal_not_named_as_pure_element`, `calibration_proposed: false`): then do NOT ask for an element or edge
   unless the scientist says it is a pure element. The same reading proposes the element, so the two never disagree.
   With no edge stated the sentence names no shift ("naming its element and edge gives the shift"): get it from

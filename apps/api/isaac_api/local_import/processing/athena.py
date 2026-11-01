@@ -26,13 +26,19 @@ matching. A name that fits two record groups (``x`` + ``_A.001`` and ``x_A`` + `
 ambiguous like any other and matches neither.
 
 THE SCIENTIST'S OWN MERGE (``isaac.athena.scientist_merge_label.v0``, :data:`SCIENTIST_MERGE_RULE_ID`). An Athena name
-that is a merge word (+ digits) followed by ``_`` and a name (``merge4_22_tion_dry``, ``merge_29_tio2_anatase``) matches a
+that is a merge word (+ digits) followed by ``_`` and a name (``merge4_<base>``, ``merge_<run name>``) matches a
 record group when that name EQUALS one of the group's stems (that run's merge) or the group's shared BASE name
-(:func:`base_names`: the stems with the whole-number token in which they differ removed, or a lone stem without its
-trailing run counter ``_016`` / ``_016_a``): the merge of every run of the group. Measured on a real BL4-3 Ti K-edge
-beamtime: the scientists' merges ``merge4_22_<sample>_dry``, ``merge_11_<sample>_dry`` (of runs ``…_091`` and ``…_092``)
-matched nothing, and ISAAC averaged the per-scan groups beside them instead, saying the scientist made no merge. Such a
-merge is a merged candidate like any other (below), so it is preferred over the per-scan groups of the same project.
+(:func:`base_names`: the stems with the whole-number token in which they differ removed, and an XDAC ``_a`` after it, or
+a lone stem without its trailing run counter ``_016`` / ``_016_a``): the merge of every run of the group. Measured on a
+real BL4-3 beamtime: the scientists' merges named before a two-run group's base name matched nothing, and ISAAC averaged
+the per-scan groups beside them instead, saying the scientist made no merge. Such a merge is a merged candidate like any
+other (below), so it is preferred over the per-scan groups of the same project.
+
+A PER-SCAN SET BESIDE THE MERGE (r3-d). The per-scan groups beside the preferred merge are never dropped silently: each
+set they form (:func:`_per_scan_set`, one per project) is kept on the matched entry (``_sets_aside``), and the result says
+it was set aside. When such a set covers every scan of the group, the merge is compared with the set's mean
+(:func:`compare`, the same tolerances); a merge that differs from it (stale, or of only some scans) is no longer preferred,
+and the scientist is asked which is the result of record (``run.process_group``).
 
 * an Athena group matching several record groups: an exact match wins over suffix matches;
   still several -> ambiguous, matched to none, and noted;
@@ -135,8 +141,9 @@ def _match_kind(names: Iterable[str], stem: str) -> str | None:
 def base_names(stems: Sequence[str]) -> set[str]:
     """The group's shared BASE name (normalised), the name without its counter, as a set (empty when there is none).
     Several runs: the stems with the token positions in which they differ removed, only when every such token is a
-    whole number in every stem (``11_x_dry_091`` + ``11_x_dry_092`` -> ``11_x_dry``). One run: the stem without its
-    trailing run counter (``_016``, XDAC ``_016_a``), else the stem itself."""
+    whole number in every stem (``11_x_dry_091`` + ``11_x_dry_092`` -> ``11_x_dry``), and (r3-d) the XDAC letter after a
+    removed final counter too (``22_x_dry_016_a`` + ``22_x_dry_017_a`` -> ``22_x_dry``, as for one run). One run: the
+    stem without its trailing run counter (``_016``, XDAC ``_016_a``), else the stem itself."""
     names = sorted({normalise_name(s) for s in stems if s} - {""})
     if not names:
         return set()
@@ -153,7 +160,12 @@ def base_names(stems: Sequence[str]) -> set[str]:
     differ = {i for i in range(len(toks[0])) if len({t[i] for t in toks}) > 1}
     if not all(_WHOLE.match(t[i]) for t in toks for i in differ):
         return set()
-    base = [x for i, x in enumerate(toks[0]) if i not in differ]
+    drop = set(differ)
+    last = len(toks[0]) - 1
+    if (last >= 2 and (last - 1) in differ and last not in differ and len(toks[0][last]) == 1 and toks[0][last].isalpha()
+            and any(i not in differ for i in range(last - 1))):
+        drop.add(last)  # the XDAC letter of a run counter that was removed (``_016_a``): part of the counter
+    base = [x for i, x in enumerate(toks[0]) if i not in drop]
     return {"_".join(base)} if base else set()
 
 
@@ -261,8 +273,9 @@ def load_project(path: Path, rel_path: str, source_id: str | None, np) -> tuple[
         except (TypeError, ValueError):
             pass
         # r3-b M3: where this group's OWN data puts its edge (larch find_e0, ISAAC's method), in the scientist's frame:
-        # an Athena E0 far from it is evidence of a fixed setting (run.possibly_fixed_athena_e0); never compared or kept
-        data_e0 = _data_e0(e, m) if frame_known and not implausible else None
+        # an Athena E0 far from it is evidence of a fixed setting (run.possibly_fixed_athena_e0); never compared or kept.
+        # r3-d L-1: looked for only near the group's Athena E0 (DATA_E0_WINDOW_EV), so a glitch far away is never its edge
+        data_e0 = _data_e0(e, m, e0_raw, np) if frame_known and not implausible else None
         out.append(
             {
                 "prj_relative_path": rel_path,
@@ -298,13 +311,29 @@ ALREADY_NORMALIZED_RULE_ID = "isaac.athena.already_normalized.v0"
 EDGE_STEP_IMPLAUSIBLE_FLAG = "athena_edge_step_implausible"
 
 
-def _data_e0(energy, mu) -> float | None:
-    """larch ``find_e0`` (maximum of the first derivative) of a group's stored data, or ``None``."""
+#: r3-d L-1: the half-width (eV) of the window around a group's Athena E0 in which its own data's edge is looked for
+DATA_E0_WINDOW_EV = 25.0
+_DATA_E0_MIN_POINTS = 10
+
+
+def _data_e0(energy, mu, e0, np) -> float | None:
+    """larch ``find_e0`` (maximum of the first derivative) of a group's stored data within :data:`DATA_E0_WINDOW_EV` of
+    its Athena E0 ``e0`` (both in the stored frame), or ``None`` (no E0, too few points there, no edge found).
+
+    r3-d L-1: over the whole curve, one glitch (a spike well above the edge) can have the largest derivative, which put
+    "its own edge" tens of eV from the E0 and counted as evidence of a fixed E0. An edge outside the window still reads
+    as far from the E0 (the steepest point inside is then on the window's side nearest the edge)."""
+    if e0 is None:
+        return None
     try:
         from larch.xafs import find_e0
 
+        e, m = np.asarray(energy, dtype=float), np.asarray(mu, dtype=float)
+        sel = np.isfinite(e) & np.isfinite(m) & (np.abs(e - float(e0)) <= DATA_E0_WINDOW_EV)
+        if int(np.sum(sel)) < _DATA_E0_MIN_POINTS:
+            return None
         with open(os.devnull, "w") as sink, contextlib.redirect_stdout(sink):
-            return _finite(find_e0(energy, mu))
+            return _finite(find_e0(e[sel], m[sel]))
     except Exception:  # noqa: BLE001 - an edge that cannot be found is no evidence either way
         return None
 
@@ -593,11 +622,14 @@ def match_with_versions(groups: Sequence[Mapping], entries: Sequence[Mapping], n
         for c in cands:
             uniq.setdefault(_curve_key(c) if several else c["data_hash"], c)
         pool = list(uniq.values())
+        aside: list[dict] = []
         if len(pool) > 1:
             # one merged candidate is the scientist's result (r3-b H3: a ``merge_<base>`` group too, so it is preferred
             # over the per-scan groups beside it, which ISAAC would otherwise average)
             merged = [c for c in pool if is_scientist_merge(c)]
             if len(merged) == 1:
+                # r3-d: the per-scan sets beside it are kept (set aside, said, and compared with it in run.process_group)
+                aside = _sets_beside([c for c in pool if c is not merged[0]], raw_stems.get(gid) or (), np)
                 pool = merged
         if len(pool) > 1:
             if several:
@@ -609,7 +641,7 @@ def match_with_versions(groups: Sequence[Mapping], entries: Sequence[Mapping], n
                 if combined is not None:
                     pool = [{**combined, "_match_kind": "per_scan_set"}]
         if len(pool) == 1:
-            matched[gid] = {**pool[0], "_candidates": len(cands), "_distinct": len(uniq)}
+            matched[gid] = {**pool[0], "_candidates": len(cands), "_distinct": len(uniq), **({"_sets_aside": aside} if aside else {})}
         else:
             notes.append(
                 {
@@ -620,6 +652,35 @@ def match_with_versions(groups: Sequence[Mapping], entries: Sequence[Mapping], n
             )
             versions[gid] = [{**c, "_match_kind": c.get("_match_kind")} for c in sorted(pool, key=lambda c: (c["prj_relative_path"], c["group_name"]))][:MAX_VERSIONS]
     return matched, notes, versions
+
+
+def _sets_beside(rest: Sequence[Mapping], stems: Sequence[str], np) -> list[dict]:
+    """r3-d: the per-scan sets (:func:`_per_scan_set`, one per project) that the candidates beside a scientist's merge
+    form, in project order; each is a ``per_scan_set`` entry exactly as it would be matched without the merge."""
+    by_prj: dict[str, list[Mapping]] = {}
+    for c in rest:
+        by_prj.setdefault(c["prj_relative_path"], []).append(c)
+    out = []
+    for path in sorted(by_prj):
+        combined = _per_scan_set(by_prj[path], stems, np) if len(by_prj[path]) > 1 else None
+        if combined is not None:
+            out.append({**combined, "_match_kind": "per_scan_set"})
+    return out
+
+
+def merge_versus_set(merge: Mapping, aside: Mapping, params: Mapping, np) -> dict:
+    """r3-d: the scientist's merge compared with the mean of a per-scan set beside it (:func:`compare`, the same
+    tolerances, the merge in ISAAC's place): ``verdict`` ``agree`` | ``differs`` | ``not_comparable``."""
+    if not frame_known(merge) or not plausible(merge):
+        return {"verdict": "not_comparable", "metrics": {}, "flags": [ENERGY_FRAME_UNKNOWN_FLAG if not frame_known(merge)
+                                                                   else EDGE_STEP_IMPLAUSIBLE_FLAG]}
+    got = compare({"grid": merge["energy"], "norm": merge["norm"], "flat": merge["flat"], "e0_eV": merge["e0_eV"],
+                   "edge_step": merge["edge_step"]}, aside, params, np)
+    m = got["metrics"]
+    metrics = {"e0_merge_eV": m.get("e0_isaac_eV"), "e0_set_mean_eV": m.get("e0_athena_eV"), "e0_delta_eV": m.get("e0_delta_eV"),
+               "edge_step_merge": m.get("edge_step_isaac"), "edge_step_set_mean": m.get("edge_step_athena"),
+               **{k: m[k] for k in ("compared_quantity", "overlap_points", "rms_norm") if k in m}}
+    return {"verdict": got["verdict"], "metrics": metrics, "flags": list(got["flags"]), "tolerances": got["tolerances"]}
 
 
 def _hits(entry: Mapping, stems: Mapping[str, Sequence[str]], bases: Mapping[str, set]) -> list[tuple]:
@@ -663,11 +724,13 @@ def scan_selection(label: str, stems: Sequence[str]) -> list[int] | None:
 
 
 def _selection_of_run(label: str, stems: Sequence[str]) -> tuple[int, list[int]] | None:
-    """``(position in stems of the run the label names, its scan selection)`` (:func:`scan_selection`), else None."""
+    """``(position in stems of the run the label names, its scan selection)`` (:func:`scan_selection`), else None.
+    r3-d L-5: the longest stem is tried first, so ``x_dry_2_003`` is scan 3 of run ``x_dry_2``, never scans 2 and 3 of
+    run ``x_dry`` (stems of one length keep their order)."""
     raw = PurePosixPath(str(label)).name
     raw = _EXT.sub("", raw)
     low = raw.casefold()
-    for k, stem in enumerate(stems):
+    for k, stem in sorted(enumerate(stems), key=lambda ks: -len(str(ks[1]))):
         st = str(stem).casefold()
         if not st or not low.startswith(st) or len(low) == len(st) or low[len(st)] not in "_-. ":
             continue

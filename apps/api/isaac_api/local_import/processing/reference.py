@@ -147,10 +147,16 @@ ELEMENT_NAMES = {
 _ALLOTROPES = {"s8": "S", "p4": "P"}
 #: words that say nothing about the chemistry (a digit suffix allowed: ref1, scan2). r3-b M2: also what a run name says
 #: about HOW it was measured — calibration (calib), a beam size (1x3mm, 0p5x1mm), a detector channel (I0-I3, trans,
-#: transDet, fluo, fluor, PIPS, Lytle) and a run counter (run2). Measured on a real BL4-3 Ti beamtime: ``33_Ti_foil_I1``
-#: and ``01_Tifoil_calib_1x3mm`` were read "ISAAC cannot tell from its names", while the same names proposed Ti K.
+#: transDet, fluo, fluor, PIPS, Lytle) and a run counter (run2). Measured on a real BL4-3 beamtime: foils named with such
+#: words were read "ISAAC cannot tell from its names", while the same names proposed the foil's element. r3-d: a foil
+#: thickness (7um, 7p5um, 0p1mm, 50nm) too, and the SYN / ZZ marker of an invented (synthetic) name.
 _NEUTRAL = re.compile(r"^(ref|std|cal|calib|foil|metal|powder|elemental|pure|edge|scan|merged|run|trans|transdet|"
-                      r"fluo|fluor|pips|lytle)\d*$|^i[0-3]$|^\d+(p\d+)?x\d+(p\d+)?(mm|um)?$", re.IGNORECASE)
+                      r"fluo|fluor|pips|lytle|syn|zz)\d*$|^i[0-3]$|^\d+(p\d+)?x\d+(p\d+)?(mm|um)?$"
+                      r"|^\d+(p\d+)?(um|nm|mm)$", re.IGNORECASE)
+#: r3-d L-3: the detector-channel words of :data:`_NEUTRAL`: beside them, without a foil or ref word, a lone ONE-letter
+#: symbol is a label of how the run was measured (``B_trans``, ``S_fluo``, ``C_I1``), never read as that element
+_CHANNEL = re.compile(r"^(trans|transdet|fluo|fluor|pips|lytle)\d*$|^i[0-3]$", re.IGNORECASE)
+_REF_WORD = re.compile(r"^ref\d*$", re.IGNORECASE)
 #: a word after which a lone symbol reads as a LABEL, not an element (ref_B, std_K: reference B, standard K)
 _LABEL_AFTER = re.compile(r"^(ref|std|cal|calib|scan)\d*$", re.IGNORECASE)
 #: an absorption edge named after a symbol: K, L1-L3, M1-M5 (Kedge, L3edge too)
@@ -185,6 +191,8 @@ def _text_element(text: str) -> tuple[set, str | None] | None:
     :func:`calibrant_identity`), else ``None``."""
     tokens = [t for t in _ID_TOKEN.split(text) if t]
     foil = any("foil" in t.casefold() for t in tokens)
+    # r3-d L-3: a lone one-letter symbol beside a channel word, with no foil or ref word, reads as unknown
+    channel_label = not foil and not any(_REF_WORD.match(t) for t in tokens) and any(_CHANNEL.match(t) for t in tokens)
     elements, edges, prev = set(), set(), None
     for i, tok in enumerate(tokens):
         if tok.isdigit():
@@ -201,6 +209,8 @@ def _text_element(text: str) -> tuple[set, str | None] | None:
         elif (el := _symbol(tok, foil)) is not None:
             if prev is not None and _LABEL_AFTER.match(prev) and len(tok) <= 2:
                 return None  # ref_B, std_K: a label, not an element
+            if channel_label and len(tok) == 1:
+                return None  # B_trans, S_fluo: a label of how it was measured, not a pure element
             elements.add(el)
         elif (m := _JOINED_FOIL.match(tok)) and _symbol(m.group(1), True) is not None:
             elements.add(_symbol(m.group(1), True))
@@ -218,9 +228,10 @@ def calibrant_identity(texts: Sequence[str]) -> dict:
     ``kind`` is ``element`` only when EVERY name read (its sample identity readings and run names) is on a closed list
     naming one pure element: the symbol (any case only beside ``foil``) or English name (sulfur / sulphur), S8, P4,
     ``<El>foil``, ``<El>ref``, with only the words ref, std, cal, calib, foil, metal, powder, elemental, pure, edge,
-    scan, merged, a beam size (``1x3mm``), a detector channel (I0-I3, trans, transDet, fluo, fluor, PIPS, Lytle), a run
-    counter (``run2``, digits, a final XDAC ``_A``), an edge label after the symbol (K, L1-L3, M1-M5) and digits beside
-    it. Anything else (a compound, a mixture, a mineral, a label such as ``ref_B``, a name ISAAC does not know) is
+    scan, merged, a beam size (``1x3mm``), a foil thickness (``7um``), a detector channel (I0-I3, trans, transDet, fluo,
+    fluor, PIPS, Lytle; beside one, a one-letter symbol needs a foil or ref word), a run counter (``run2``, digits, a
+    final XDAC ``_A``), the SYN / ZZ marker of an invented name, an edge label after the symbol (K, L1-L3, M1-M5) and
+    digits beside it. Anything else (a compound, a mixture, a mineral, a label such as ``ref_B``, a name ISAAC does not know) is
     ``unknown``: ISAAC cannot tell. r3-b M2: this ONE reading also says which element a reference group's own edge is
     proposed as (``run.stated_reference``), so a proposal never contradicts it."""
     texts = [str(t) for t in texts if str(t or "").strip()]

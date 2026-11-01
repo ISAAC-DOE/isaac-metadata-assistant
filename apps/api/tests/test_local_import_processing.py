@@ -308,9 +308,9 @@ def _foil_xdac(region, seed):
 
 
 def test_foil_name_evidence_proposes_the_reference_but_only_an_approval_applies_it(tmp_path):
-    # r3-b M2: the name is read ONCE (reference.calibrant_identity) for the proposal and for "named as a pure element":
-    # a name with another word (``SYN_Ti_foil``) proposes nothing, so the fixture is named as a real XDAC foil run is
-    unread = {"33_Ti_foil_016_A.001": _foil_xdac("TiK_SYNTHETIC_region.rgn", 1), "33_Ti_foil_016_A.002": _foil_xdac("TiK_SYNTHETIC_region.rgn", 2)}
+    # r3-d: the fixture's own synthetic name again; SYN is a neutral word of the name reading, and the XDAC "_016_A" is a
+    # counter, so the names say Ti (reference.calibrant_identity)
+    unread = {"SYN_Ti_foil_016_A.001": _foil_xdac("TiK_SYNTHETIC_region.rgn", 1), "SYN_Ti_foil_016_A.002": _foil_xdac("TiK_SYNTHETIC_region.rgn", 2)}
     bdir, root, _ = make_case(tmp_path, [], unread=unread)
     out = run_process(bdir, source_root=root)
     r = out["unread_acquisition_results"][0]
@@ -332,7 +332,7 @@ def test_foil_name_evidence_proposes_the_reference_but_only_an_approval_applies_
 
     tmp2 = tmp_path / "noedge"
     tmp2.mkdir()
-    unread2 = {"33_Ti_foil_016_A.001": _foil_xdac("SYN_region.rgn", 1)}
+    unread2 = {"SYN_Ti_foil_016_A.001": _foil_xdac("SYN_region.rgn", 1)}
     bdir2, root2, _ = make_case(tmp2, [], unread=unread2)
     r2 = run_process(bdir2, source_root=root2)["unread_acquisition_results"][0]
     c2 = step(r2, "calibration")
