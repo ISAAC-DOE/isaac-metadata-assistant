@@ -61,6 +61,13 @@ describe('notCountedText', () => {
     );
   });
 
+  it('names the disagreements the runs\' own decisions already cover', () => {
+    expect(notCountedText({ total: 6, blocking: 1, optional: 2, conflicts_covered_by_decisions: 3 })).toBe(
+      'Neither blocking nor counted as optional: 3 disagreement(s) already settled by your own decision for those runs ' +
+        '(not asked again).',
+    );
+  });
+
   it('says nothing when both are zero, absent, or the counts are unavailable', () => {
     expect(notCountedText({ total: 3, blocking: 1, conflicts_without_a_record_field: 0, outside_live_groups: 0 })).toBeNull();
     expect(notCountedText({ total: 3, blocking: 1 })).toBeNull();

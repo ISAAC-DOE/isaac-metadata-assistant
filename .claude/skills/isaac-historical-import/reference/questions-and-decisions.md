@@ -21,7 +21,7 @@ never inside the beamtime's or a live group's. A beamtime-wide conflict (no run 
 it reaches (`applies_to.beamtime_wide: true`, `groups` = `blocks_groups`).
 The reply also has
 `counts` (for the scope asked; `counts_whole_bundle` beside it when `--scope` is given: `blocking`,
-`conflicts_affecting_a_record`, `conflicts_without_a_record_field`, `optional`, `informational`,
+`conflicts_affecting_a_record`, `conflicts_covered_by_decisions`, `conflicts_without_a_record_field`, `optional`, `informational`,
 `asked_again`, `deferred`, `outside_live_groups`;
 quote these, not `summary.md`'s "Questions: N", which is `fine_grained_v1`) and
 `minimum_for_one_group` ("7 blocking questions plus: confirm the group, approve its processing
@@ -69,9 +69,10 @@ before any group is confirmed. Every printed command with `<placeholders>` (`ans
   A question they did not answer at all is not deferred: record nothing.
 - **A conflict with `affects_record: false`** (`no_record_field`): the readings differ, but no record
   field carries them (a comment line, a unit spelling). Say how many there are; do not ask each.
-- **A conflict with `covered_by_decisions`** (also `affects_record: false`): each of its runs already holds the
-  scientist's decision for that field (e.g. a sheet's Technique ruling), and the record is built from it. Do not ask
-  it again; say how many there are.
+- **A conflict with `covered_by_decisions`** (also `affects_record: false`; counted in
+  `conflicts_covered_by_decisions`, not in `optional`): each of its runs already holds the scientist's decision for
+  that field, one value across its runs (e.g. a sheet's Technique ruling), and the record is built from it. Do not
+  ask it again; say how many there are.
 - **A conflict no reading of which the field takes** (`readings_that_fit_the_field: 0`; each reading
   hint has `fits_field`): `confirm --value <one reading>` would be refused, so `answer_command` is
   `correct --value <…>`. Start times: the `#D` readings are local clock times with no zone and can never

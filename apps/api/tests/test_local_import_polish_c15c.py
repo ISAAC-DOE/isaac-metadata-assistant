@@ -3,6 +3,8 @@
 * H1: a decision recorded again with the value it already held (a sheet ruling "tied to your sheet") changes
   only a decision id and time. A re-export keeps the record's id and rewrites only its evidence sidecar; a real
   value change still gets a new id and supersedes; ``upload --dry-run`` names the record ids a record replaces.
+* H1 review (MED): the id follows the record BODY alone. The same value confirmed by another operator, or read
+  from another source file, keeps the id; ``evidence_changed`` says what the rewritten evidence file changed.
 * M6: a run's technique disagreement whose run already holds a scientist's decision for the field (a sheet ruling)
   is covered by it: ``affects_record`` false, not counted in ``conflicts_affecting_a_record``, under the same id. A
   run with no decision of its own still counts.
@@ -22,13 +24,13 @@ from test_local_import_records import (  # noqa: F401  (fixtures)
 NAME = "sample.material.name"
 
 
-def _rerecord_same_value(bdir, path=NAME, run_id="run-001"):
+def _rerecord_same_value(bdir, path=NAME, run_id="run-001", by=BY["by"]):
     """What ``template import --apply`` does for a ruling that keeps the value already held (c14i MED-1)."""
     def change(b):
         c = _cand(b, path, run_id)
         latest = [d for d in b["scientist_decisions"] if d["target"] == {"kind": "candidate", "id": c["candidate_id"]}][-1]
         return M.record_decision(b, target_ids=[c["candidate_id"]], decision=latest["decision"], value=latest["value"],
-                                 by=BY["by"], orcid=BY["orcid"], note="tied to your sheet", record_unchanged=True)
+                                 by=by, orcid=BY["orcid"], note="tied to your sheet", record_unchanged=True)
     got = M.mutate(bdir, change)
     assert got["recorded"], got  # a NEW decision, with a new id and time
     R.build_records(bdir)
@@ -45,19 +47,24 @@ def test_a_same_value_re_record_keeps_the_record_id_and_refreshes_only_the_sidec
     out = tmp_path / "records"
     first = _export(bdir, out)
     rid = first["record_id"]
+    first_at = json.loads((out / R.EXPORT_INDEX).read_text())["records"][0]["exported_utc"]
     record, sidecar = (out / f"{rid}.json").read_bytes(), json.loads((out / f"{rid}.evidence.json").read_text())
     _rerecord_same_value(bdir)
     row = _export(bdir, out)
     assert row["record_id"] == rid and row["export"] == "unchanged" and row["evidence_refreshed"] is True
-    assert "replaces_record_id" not in row and "Only its evidence sidecar was rewritten" in row["export_statement"]
+    assert "replaces_record_id" not in row and "The evidence file was rewritten: " in row["export_statement"]
+    assert "a decision was recorded again" not in row["export_statement"]
+    assert row["evidence_changed"] == [f"{NAME}: the decision id, the decision time"] and row["evidence_changed_total"] == 1
     assert (out / f"{rid}.json").read_bytes() == record  # the record, byte for byte
     assert not (out / R.SUPERSEDED_DIR).exists()
     new_sidecar = json.loads((out / f"{rid}.evidence.json").read_text())
     assert new_sidecar != sidecar  # it cites the new decision
+    assert new_sidecar["generated_utc"] != sidecar["generated_utc"]  # written now, not at the record's export time
     ids = lambda s: {e.get("decision_id") for e in s["evidence"][NAME] if e.get("source_type") == "user_confirmation"}  # noqa: E731
     assert ids(new_sidecar) != ids(sidecar)
     [entry] = json.loads((out / R.EXPORT_INDEX).read_text())["records"]
-    assert entry["record_id"] == rid and entry["replaced_record_ids"] == [] and entry["substance_sha256"].startswith("sha256:")
+    assert entry["record_id"] == rid and entry["replaced_record_ids"] == [] and entry["body_sha256"].startswith("sha256:")
+    assert entry["sidecar_generated_utc"] == new_sidecar["generated_utc"] and entry["exported_utc"] == first_at
     assert [p["record"] for p in R.upload_plan(out, None)] == [f"{rid}.json"]
     # and exporting once more is unchanged byte for byte, the sidecar included
     files = {p.name: p.read_bytes() for p in out.glob("*.json")}
@@ -67,17 +74,53 @@ def test_a_same_value_re_record_keeps_the_record_id_and_refreshes_only_the_sidec
 
 
 def test_an_index_from_an_earlier_build_is_compared_with_the_files_it_wrote(bdir, tmp_path):
-    """An index entry with no ``substance_sha256`` (written before this fix): the record on disk is compared."""
+    """An index entry with no ``body_sha256`` (written before this fix): the record on disk is compared."""
     _decide_everything(bdir)
     R.build_records(bdir)
     out = tmp_path / "records"
     rid = _export(bdir, out)["record_id"]
     index = json.loads((out / R.EXPORT_INDEX).read_text())
-    del index["records"][0]["substance_sha256"]
+    del index["records"][0]["body_sha256"]
+    del index["records"][0]["sidecar_generated_utc"]
     (out / R.EXPORT_INDEX).write_text(json.dumps(index))
     _rerecord_same_value(bdir)
     row = _export(bdir, out)
     assert row["record_id"] == rid and row["evidence_refreshed"] is True
+
+
+def test_another_operator_confirming_the_same_value_keeps_the_id_and_says_what_changed(bdir, tmp_path):
+    _decide_everything(bdir)
+    R.build_records(bdir)
+    out = tmp_path / "records"
+    rid = _export(bdir, out)["record_id"]
+    record = (out / f"{rid}.json").read_bytes()
+    _rerecord_same_value(bdir, by="Another Synthetic Operator")
+    row = _export(bdir, out)
+    assert row["record_id"] == rid and row["export"] == "unchanged" and row["evidence_refreshed"] is True
+    assert (out / f"{rid}.json").read_bytes() == record
+    [line] = row["evidence_changed"]
+    assert line.startswith(f"{NAME}: ") and "who confirmed it" in line
+    assert [p.get("replaces_record_ids") for p in R.upload_plan(out, None)] == [None]
+
+
+def test_the_same_value_read_from_another_source_file_keeps_the_id(bdir, tmp_path):
+    _decide_everything(bdir)
+    R.build_records(bdir)
+    out = tmp_path / "records"
+    rid = _export(bdir, out)["record_id"]
+    record = (out / f"{rid}.json").read_bytes()
+
+    def cite_another_file(b):
+        for e in _cand(b, NAME, "run-001")["evidence"]:
+            if e["method"] != "ai_interpretation":
+                e["relative_path"] = "SYN_other/ZZ_same_statement.txt"
+    M.mutate(bdir, cite_another_file)
+    R.build_records(bdir)
+    row = _export(bdir, out)
+    assert row["record_id"] == rid and row["export"] == "unchanged" and (out / f"{rid}.json").read_bytes() == record
+    assert any(x.startswith(f"{NAME}: ") and "the source file" in x for x in row["evidence_changed"])
+    sidecar = json.loads((out / f"{rid}.evidence.json").read_text())
+    assert any(e.get("source_file") == "SYN_other/ZZ_same_statement.txt" for e in sidecar["evidence"][NAME])
 
 
 def test_a_value_change_still_gets_a_new_id_and_supersedes(bdir, tmp_path):
@@ -111,7 +154,19 @@ def test_the_upload_dry_run_names_the_record_ids_a_record_replaces(bdir, tmp_pat
     new = _export(bdir, out)["record_id"]
     [plan] = R.upload_plan(out, None)
     assert plan["record"] == f"{new}.json" and plan["replaces_record_ids"] == [old]
-    assert old in plan["replaces_statement"] and "the portal still holds it" in plan["replaces_statement"]
+    assert plan["replaces_statement"].startswith(f"This record replaces an earlier export of the same group: {old} "
+                                                 f"(in {R.SUPERSEDED_DIR}/).")
+    assert "the portal still holds it" in plan["replaces_statement"]
+    # a second change: two earlier exports, each named where it is
+    M.decide(bdir, target_ids=[_cand(M.load(bdir), NAME, "run-001")["candidate_id"]], decision="correct",
+             value="ZZ1 synthetic, revised twice", **BY)
+    R.build_records(bdir)
+    newest = _export(bdir, out)["record_id"]
+    [plan] = R.upload_plan(out, None)
+    assert plan["record"] == f"{newest}.json" and plan["replaces_record_ids"] == [old, new]
+    assert plan["replaces_statement"].startswith(
+        f"This record replaces earlier exports of the same group: {old} (in {R.SUPERSEDED_DIR}/); {new} (in "
+        f"{R.SUPERSEDED_DIR}/). If any of them was already uploaded")
 
 
 # --- M6 ------------------------------------------------------------------------------------------------------------
@@ -155,6 +210,9 @@ def test_a_ruled_technique_on_a_run_takes_its_conflict_out_of_the_affecting_coun
     assert q["why"].startswith(f"Already decided: its run holds a scientist's decision for {TECH} ({did})")
     assert after["counts"]["conflicts_affecting_a_record"] == before["counts"]["conflicts_affecting_a_record"] - 1
     assert after["counts"]["conflicts_affecting_a_record"] == sum(x["tier"] == Q.TIER_CONFLICT for x in after["questions"])
+    # counted apart, never as optional (c15c review)
+    assert after["counts"]["conflicts_covered_by_decisions"] == before["counts"]["conflicts_covered_by_decisions"] + 1
+    assert after["counts"]["optional"] == before["counts"]["optional"]
 
 
 def test_an_unruled_run_still_counts(bdir):
@@ -171,3 +229,34 @@ def test_a_deferred_run_answer_does_not_cover_its_conflict(bdir):
     M.decide(bdir, target_ids=[conflicts[RULED]["candidate_id"]], decision="defer", value=None, **BY)
     q = _conflict_q(Q.consolidate(M.load(bdir)), RULED)
     assert q["affects_record"] is True and q["tier"] == Q.TIER_CONFLICT and "covered_by_decisions" not in q
+
+
+def _two_runs(bdir):
+    """RULED's disagreement names run-004 and run-005 (UNRULED's candidate is run-005's technique)."""
+    def change(b):
+        next(cf for cf in b["conflicts"] if cf["conflict_id"] == RULED)["run_ids"] = ["run-004", "run-005"]
+    M.mutate(bdir, change)
+
+
+def test_a_two_run_conflict_is_covered_only_when_its_runs_decisions_agree(bdir):
+    conflicts = _technique_conflicts(bdir)
+    _two_runs(bdir)
+    M.decide(bdir, target_ids=[conflicts[RULED]["candidate_id"]], decision="correct", value="HERFD-XAS", **BY)
+    M.decide(bdir, target_ids=[conflicts[UNRULED]["candidate_id"]], decision="correct", value="XAS", **BY)
+    q = _conflict_q(Q.consolidate(M.load(bdir)), RULED)
+    assert "covered_by_decisions" not in q and q["affects_record"] is True  # the runs were decided differently
+    M.decide(bdir, target_ids=[conflicts[UNRULED]["candidate_id"]], decision="correct", value="HERFD-XAS", **BY)
+    q = _conflict_q(Q.consolidate(M.load(bdir)), RULED)
+    assert len(q["covered_by_decisions"]) == 2 and q["affects_record"] is False
+    assert q["why"].startswith("Already decided: each of its runs holds")
+
+
+def test_a_covered_conflict_is_not_also_shown_as_deferred(bdir):
+    conflicts = _technique_conflicts(bdir)
+    M.decide(bdir, target_ids=[RULED], decision="defer", value=None, **BY)  # "I don't know" on the disagreement
+    assert _conflict_q(Q.consolidate(M.load(bdir)), RULED).get("deferred")
+    M.decide(bdir, target_ids=[conflicts[RULED]["candidate_id"]], decision="correct", value="HERFD-XAS", **BY)
+    p = Q.consolidate(M.load(bdir))
+    q = _conflict_q(p, RULED)
+    assert q["covered_by_decisions"] and "deferred" not in q
+    assert p["counts"]["deferred"] == sum(bool(x.get("deferred")) for x in p["questions"])

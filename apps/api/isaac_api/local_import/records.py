@@ -813,6 +813,8 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
             draft["descriptors_outputs"] = [
                 {
                     "label": label,
+                    # the approval's time, in the record body (the pinned schema requires generated_utc): a result
+                    # approved again with the same curves composes another body, so its record gets a new id (c15c)
                     "generated_utc": d.get("decided_utc"),
                     "generated_by": generated_by,
                     "descriptors": [
@@ -1761,60 +1763,108 @@ def content_sha256(draft: Mapping, composition: Mapping | None) -> str:
     return "sha256:" + hashlib.sha256(json.dumps(basis, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
-#: The record id and export time :func:`substance_sha256` composes its probe record with (never written anywhere).
+#: The record id and export time :func:`body_sha256` composes its probe record with (never written anywhere).
 SUBSTANCE_PROBE_ID, SUBSTANCE_PROBE_AT = "SUBSTANCE-PROBE", "1970-01-01T00:00:00Z"
 
 
-def _without_provenance_ids(obj: Any) -> Any:
-    """``obj`` without what says WHICH decision recorded a value and WHEN: every ``decision_id`` (and
-    ``*_decision_id``), and a ``user_confirmation``'s ``timestamp``. What the value is and where it comes from
-    (the source, the question, the answer, who decided) is kept."""
-    if isinstance(obj, Mapping):
-        confirmation = obj.get("source_type") == "user_confirmation"
-        return {k: _without_provenance_ids(v) for k, v in obj.items()
-                if not (k == "decision_id" or str(k).endswith("_decision_id") or (confirmation and k == "timestamp"))}
-    if isinstance(obj, (list, tuple)):
-        return [_without_provenance_ids(v) for v in obj]
-    return obj
+def body_sha256(record: Mapping, artifacts: Sequence[Sequence[Any]], *, exported_utc: Any = None) -> str:
+    """What decides a record's id (H1, c15c review MED): the record BODY the portal stores, without its own record id
+    and export time, plus its artifacts' bytes (upload sends none; kept as a cautious extra), hashed. The evidence
+    sidecar is not part of it: the same value recorded again, by another operator or citing another source file,
+    composes the same body, so the record keeps its id and only its sidecar is rewritten (``evidence_changed``).
+    A body that differs gets a new id. ``exported_utc``: the time the record was composed with (default: the probe's).
 
-
-def substance_sha256(record: Mapping, evidence: Mapping, artifacts: Sequence[Sequence[Any]], *,
-                     exported_utc: Any = None) -> str:
-    """What an exported record SAYS, hashed (H1): its body without its own record id and export time, its
-    evidence's values and sources without decision ids or decision times, and its artifacts' bytes. A ruling
-    that keeps the value already held is recorded again with a new decision id and time (c14i MED-1): the
-    draft changes (:func:`content_sha256`), this does not, so the record keeps its id. ``exported_utc``: the
-    time the record was composed with (default: the probe's)."""
+    ``descriptors.outputs[].generated_utc`` IS part of the body: the pinned schema requires it, and the composer
+    writes the processing approval's time there (:func:`compose_group`). A processing result approved again with the
+    same curves therefore composes another body, and gets a new id; this is left as it is."""
     body = dict(record)
     body.pop("record_id", None)
     stamps = dict(body.get("timestamps") or {})
     if stamps.get("created_utc") == (exported_utc or SUBSTANCE_PROBE_AT):
         stamps["created_utc"] = None  # the export time transform() defaulted it to, not a value of the record
     body["timestamps"] = stamps
-    basis = {"record": body, "evidence": _without_provenance_ids(evidence),
-             "artifacts": sorted([str(a[0]), str(a[1])] for a in artifacts)}
+    basis = {"record": body, "artifacts": sorted([str(a[0]), str(a[1])] for a in artifacts)}
     return "sha256:" + hashlib.sha256(json.dumps(basis, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
-def _substance_on_disk(out: Path, earlier: Mapping) -> str | None:
-    """:func:`substance_sha256` of the files an earlier export wrote for ``earlier`` (an index entry from a build
-    that did not keep it), read where they are now (the top of ``--out``, or :data:`WITHDRAWN_DIR`); ``None``
-    when they cannot be read."""
-    rid = earlier.get("record_id")
+def _earlier_files(out: Path, rid: Any) -> Path | None:
+    """Where an earlier export's ``<rid>.json`` is now: the top of ``--out``, or :data:`WITHDRAWN_DIR`; or ``None``."""
     for where in (out, out / WITHDRAWN_DIR):
-        try:
-            record = json.loads((where / f"{rid}.json").read_text(encoding="utf-8"))
-            sidecar = json.loads((where / f"{rid}.evidence.json").read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if not (isinstance(record, dict) and isinstance(sidecar, dict) and record.get("record_id") == rid):
-            continue
+        if (where / f"{rid}.json").is_file():
+            return where
+    return None
+
+
+def _body_on_disk(out: Path, earlier: Mapping) -> str | None:
+    """:func:`body_sha256` of the files an earlier export wrote for ``earlier`` (an index entry from a build that did
+    not keep it), read where they are now; ``None`` when they cannot be read."""
+    rid = earlier.get("record_id")
+    where = _earlier_files(out, rid)
+    if where is None:
+        return None
+    try:
+        record = json.loads((where / f"{rid}.json").read_text(encoding="utf-8"))
         base = where / f"{rid}.artifacts"
         artifacts = ([(p.relative_to(base).as_posix(), hashlib.sha256(p.read_bytes()).hexdigest())
                       for p in sorted(base.rglob("*")) if p.is_file() and not p.is_symlink()]
                      if base.is_dir() and not base.is_symlink() else [])
-        return substance_sha256(record, sidecar.get("evidence") or {}, artifacts, exported_utc=earlier.get("exported_utc"))
-    return None
+    except (OSError, ValueError):
+        return None
+    if not (isinstance(record, dict) and record.get("record_id") == rid):
+        return None
+    return body_sha256(record, artifacts, exported_utc=earlier.get("exported_utc"))
+
+
+#: An evidence entry's keys, in plain words, for ``evidence_changed``; any other key is named as it is spelled.
+EVIDENCE_KEY_WORDS = {
+    "decided_by": "who confirmed it", "identity": "the confirmer's identity", "orcid_claimed": "the confirmer's ORCID",
+    "decision_id": "the decision id", "timestamp": "the decision time", "question": "the question asked",
+    "answer": "the answer", "source_type": "the kind of source", "source_file": "the source file",
+    "source_id": "the source", "locator": "where in the file", "quote": "the quoted text", "relation": "how the source "
+    "relates to the value", "provenance": "whether it was confirmed or corrected", "previous_value": "the value it "
+    "replaced", "note": "the note", "method": "the reading method",
+}
+#: How many ``evidence_changed`` lines an export row shows (``evidence_changed_total`` counts them all).
+EVIDENCE_CHANGES_SHOWN = 10
+
+
+def _differing_keys(old: Any, new: Any) -> set[str]:
+    """The dict keys, at any depth, whose values differ between ``old`` and ``new`` (a list compared item by item;
+    ``"(entries added or removed)"`` when its length differs)."""
+    if old == new:
+        return set()
+    if isinstance(old, Mapping) and isinstance(new, Mapping):
+        out: set[str] = set()
+        for k in set(old) | set(new):
+            if k not in old or k not in new or not isinstance(old[k], (Mapping, list)):
+                if old.get(k) != new.get(k):
+                    out.add(str(k))
+            else:
+                out |= _differing_keys(old[k], new[k]) or ({str(k)} if old[k] != new[k] else set())
+        return out
+    if isinstance(old, list) and isinstance(new, list):
+        out = {"(entries added or removed)"} if len(old) != len(new) else set()
+        for a, b in zip(old, new):
+            out |= _differing_keys(a, b)
+        return out
+    return {"(the value)"}
+
+
+def evidence_changes(old: Mapping | None, new: Mapping) -> list[str]:
+    """``["<evidence key>: <what differs, in plain words>", ...]`` between an earlier sidecar and a new one, for the
+    keys whose evidence differs (and its schemas); one line saying so when the earlier one could not be read."""
+    if old is None:
+        return ["the earlier evidence file could not be read, so it was written anew"]
+    lines = []
+    old_ev, new_ev = old.get("evidence") or {}, new.get("evidence") or {}
+    for key in sorted(set(old_ev) | set(new_ev)):
+        if key not in old_ev or key not in new_ev:
+            lines.append(f"{key}: {'evidence added' if key not in old_ev else 'evidence removed'}")
+        elif (diff := _differing_keys(old_ev[key], new_ev[key])):
+            lines.append(f"{key}: " + ", ".join(sorted(EVIDENCE_KEY_WORDS.get(k, k) for k in diff)))
+    if old.get("schemas_used") != new.get("schemas_used"):
+        lines.append("the schemas used to validate it")
+    return lines
 
 
 def _read_export_index(out: Path) -> dict:
@@ -1896,9 +1946,10 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     RE-EXPORT IS IDEMPOTENT: ``--out``'s :data:`EXPORT_INDEX` keeps, per bundle and group, the record
     id its record got and the :func:`content_sha256` it was composed from. Exporting an UNCHANGED group
     again reuses that id and export time, so the files are rewritten byte for byte and no second record
-    appears. A group whose draft changed but whose record did not (H1: a decision recorded again with the value
-    it already held, so only a decision id and time differ; :func:`substance_sha256`) is unchanged too: the same
-    id and record bytes, and only its evidence sidecar is rewritten (``evidence_refreshed``). A CHANGED group gets a new id; the record it replaces is moved to ``superseded/`` (kept,
+    appears. A group whose draft changed but whose record body did not (H1: the same value recorded again, by
+    another operator or citing another source; :func:`body_sha256`) is unchanged too: the same id and record bytes,
+    and its evidence sidecar is rewritten when its bytes differ (``evidence_refreshed``, ``evidence_changed`` saying
+    what). A group whose record body CHANGED gets a new id; the record it replaces is moved to ``superseded/`` (kept,
     never in an upload plan) and the result says so (``replaced``). A group exported before that is NOT
     exportable now — refused by a gate, or no longer a scientist-confirmed group — has its record moved to
     ``withdrawn/`` (kept, never in an upload plan; nothing replaces it), its index entry marked
@@ -1963,13 +2014,12 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         prior = prior_of.get((bundle_id, group_id))
         sources = _artifact_sources(bundle, bundle_dir, group_id)
         probe = compose_record(draft, composition, record_id=SUBSTANCE_PROBE_ID, now=SUBSTANCE_PROBE_AT)
-        substance = substance_sha256(probe, build_sidecar(dict(draft), probe)["evidence"],
-                                     [(f["relative_path"], f["sha256"]) for f, src in sources if src is not None])
-        # H1: the draft changed but the record did not (a decision recorded again with the value it already held:
-        # a new decision id and time only): the same record id, and only its evidence sidecar is rewritten
-        refreshed = bool(prior is not None and prior.get("record_id") and prior.get("content_sha256") != digest and (
-            prior.get("substance_sha256") or (_substance_on_disk(out, prior) if out.is_dir() else None)) == substance)
-        if prior is not None and prior.get("record_id") and (prior.get("content_sha256") == digest or refreshed):
+        body = body_sha256(probe, [(f["relative_path"], f["sha256"]) for f, src in sources if src is not None])
+        # H1: the draft changed but the record body did not (the same value recorded again, by anyone, citing any
+        # source): the same record id; only its evidence sidecar may be rewritten
+        same_body = bool(prior is not None and prior.get("record_id") and prior.get("content_sha256") != digest and (
+            prior.get("body_sha256") or (_body_on_disk(out, prior) if out.is_dir() else None)) == body)
+        if prior is not None and prior.get("record_id") and (prior.get("content_sha256") == digest or same_body):
             rid, at, status = prior["record_id"], prior.get("exported_utc") or now_utc(), "unchanged"
         else:
             rid, at, status = new_record_id(), now_utc(), ("replaced" if prior is not None else "new")
@@ -1979,7 +2029,27 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
             continue
         sidecar = build_sidecar(dict(draft), record)
         sidecar["schemas_used"] = report["schemas_used"]
-        sidecar["generated_utc"] = at  # the record's own export time, so an unchanged re-export is byte for byte
+        # when the sidecar was written: the record's export time, kept while its evidence is unchanged (so an
+        # unchanged re-export is byte for byte), and now when the evidence file is rewritten (c15c LOW 1)
+        sidecar["generated_utc"] = (prior.get("sidecar_generated_utc") or at) if status == "unchanged" else at
+        changed_evidence: list[str] = []
+        if status == "unchanged":
+            # c15c LOW 2: "refreshed" only when the evidence file's bytes differ from the one written before
+            earlier_dir = _earlier_files(out, rid) if out.is_dir() else None
+            try:
+                earlier_bytes = (earlier_dir / f"{rid}.evidence.json").read_bytes() if earlier_dir is not None else None
+            except OSError:
+                earlier_bytes = None
+            if earlier_bytes is None and prior.get("content_sha256") == digest:
+                pass  # nothing to compare with, and nothing changed: written as before
+            elif earlier_bytes != (json.dumps(sidecar, indent=2) + "\n").encode("utf-8"):
+                try:
+                    earlier_sidecar = json.loads(earlier_bytes) if earlier_bytes is not None else None
+                except ValueError:
+                    earlier_sidecar = None
+                changed_evidence = evidence_changes(earlier_sidecar if isinstance(earlier_sidecar, Mapping) else None,
+                                                    sidecar) or ["the evidence file's layout"]
+                sidecar["generated_utc"] = now_utc()
         out.mkdir(parents=True, exist_ok=True)
         moved = _move_superseded(out, prior["record_id"]) if status == "replaced" and prior.get("record_id") else []
         record_path, sidecar_path = out / f"{rid}.json", out / f"{rid}.evidence.json"
@@ -2011,12 +2081,15 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
             if len(still) > WARNINGS_SHOWN:
                 row["warnings_omitted"] = len(still) - WARNINGS_SHOWN
                 row["warnings_full_list"] = "`isaac bundle validate <bundle_dir> --full` lists every warning."
-        if status == "unchanged" and refreshed:
+        if changed_evidence:
             row["evidence_refreshed"] = True
+            row["evidence_changed"] = changed_evidence[:EVIDENCE_CHANGES_SHOWN]
+            row["evidence_changed_total"] = len(changed_evidence)
+            shown = "; ".join(changed_evidence[:3]) + (f"; and {len(changed_evidence) - 3} more (evidence_changed)"
+                                                       if len(changed_evidence) > 3 else "")
             row["export_statement"] = (f"Unchanged since its export at {at}: the same record id, the record rewritten byte "
-                                       "for byte. Only its evidence sidecar was rewritten: a decision was recorded again "
-                                       "with the value it already held, so the sidecar cites the new decision id and "
-                                       "time; no value or source changed. No second record was made.")
+                                       f"for byte. The evidence file was rewritten: {shown}. No record value changed, "
+                                       "and no second record was made.")
         elif status == "unchanged":
             row["export_statement"] = (f"Unchanged since its export at {at}: the same record id, rewritten byte for byte. "
                                        "No second record was made.")
@@ -2033,7 +2106,7 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
                                        "plan). If the old record was already uploaded, the portal still holds it.")
         exported.append(row)
         entry = {"bundle_id": bundle_id, "group_id": group_id, "record_id": rid, "content_sha256": digest,
-                 "substance_sha256": substance, "exported_utc": at,
+                 "body_sha256": body, "exported_utc": at, "sidecar_generated_utc": sidecar["generated_utc"],
                  "replaced_record_ids": ([*(prior.get("replaced_record_ids") or []), prior.get("record_id")]
                                          if status == "replaced" else list((prior or {}).get("replaced_record_ids") or []))}
         index["records"] = [r for r in index["records"]
@@ -2121,11 +2194,22 @@ def upload_plan(records_dir: Path, portal_url: str | None) -> list[dict]:
             # H1: SAID BEFORE AN UPLOAD, never only in the export's output: a replaced record already uploaded stays
             # on the portal, so uploading this one adds a second record for the same group
             plan[-1]["replaces_record_ids"] = old
+            many = len(old) > 1
             plan[-1]["replaces_statement"] = (
-                f"This record replaces {', '.join(old)} (an earlier export of the same group, moved to "
-                f"{SUPERSEDED_DIR}/). If that record was already uploaded, the portal still holds it, and uploading "
-                "this one adds a second record for the same group.")
+                f"This record replaces {'earlier exports' if many else 'an earlier export'} of the same group: "
+                + "; ".join(f"{x} ({_where_now(Path(records_dir), x)})" for x in old)
+                + f". If {'any of them was' if many else 'it was'} already uploaded, the portal still holds it, and "
+                "uploading this one adds a second record for the same group.")
     return plan
+
+
+def _where_now(records_dir: Path, record_id: str) -> str:
+    """Where a replaced record's file is now, in ``records_dir``: :data:`SUPERSEDED_DIR`, :data:`WITHDRAWN_DIR`, or
+    neither."""
+    for where in (SUPERSEDED_DIR, WITHDRAWN_DIR):
+        if (records_dir / where / f"{record_id}.json").is_file():
+            return f"in {where}/"
+    return f"no longer in {SUPERSEDED_DIR}/ or {WITHDRAWN_DIR}/"
 
 
 def _replaced_by(records_dir: Path) -> dict[str, list[str]]:
