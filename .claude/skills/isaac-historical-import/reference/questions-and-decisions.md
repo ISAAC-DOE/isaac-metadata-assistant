@@ -119,6 +119,11 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
 - **Sample questions asked once for several groups** name the shared sample reading as the files write it
   ("with the same sample reading (sample name 'ZZ1', sample or electrode number '01', as the files write
   it)"). Say that reading when you ask.
+- **Per-group questions that share a reading** (73 groups' material name `'JK1C'`, one set-point per potential) are
+  kept one per group (each record carries its own answer; their ids never change), but share a `same_reading_group`
+  (`same_reading_count` of them), and the text says "N questions share this reading (…); answer them together with
+  … --same-reading …". Ask once ("are all N the same thing?"); on a yes, run its `same_reading_command`. Runs whose
+  file names read the field differently never share one; answer the others on their own.
 - **No value to confirm.** Text like "What is the technique? The files hold text for it … but no
   value this build can carry", with no `confirm` in `allowed_decisions`, means there is nothing to
   accept. Never invent a value and never confirm one. Ask "What is X?", show the file's text (the

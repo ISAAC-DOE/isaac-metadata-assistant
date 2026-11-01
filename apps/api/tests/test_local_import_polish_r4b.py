@@ -7,6 +7,8 @@ folder and invented scans.
 * M2: the counter question's example names differ ONLY at the asked position; a not-counter answer cautions every open
   merge candidate whose names differ only there, offers one command to keep them all apart, and decides none; a
   keep_apart of several candidates is said in the plural;
+* M3: per-group questions about one field that share a reading in their own files share a ``same_reading_group``,
+  answered together with ``--same-reading``; no id changes, and file names that read the field differently never share;
 """
 
 from __future__ import annotations
@@ -183,3 +185,66 @@ def test_a_candidate_whose_names_differ_at_a_position_still_open_is_not_cautione
     M.decide_question(electrodes, question_id=Q.COUNTER_QUESTION_ID, decision=B.NOT_COUNTER_DECISION, value=None,
                       by=WHO, orcid=None, positions=[2])
     assert G.said_not_counter_candidates(M.load(electrodes)) == []  # they differ at the 1st token
+
+
+# --- M3: per-group questions that share a reading are answered together ------------------------------------------
+
+NAME = "sample.material.name"
+SETPOINT = "context.electrochemistry.potential_setpoint_V"
+
+
+def _per_group(payload, path):
+    return [q for q in payload["questions"] if q["target_field_path"] == path and q["scope"].startswith("group:")
+            and q["kind"] == "confirm_value"]
+
+
+def test_per_group_questions_sharing_a_reading_share_a_group_and_keep_their_ids(bdir, monkeypatch):
+    M.group(bdir)
+    b = M.load(bdir)
+    grouped = Q.consolidate(b)
+    with monkeypatch.context() as m:
+        m.setattr(Q, "_note_shared_reading_groups", lambda *a: None)  # as before r4-b
+        plain = Q.consolidate(b)
+    key = lambda p: [(q["question_id"], q["scope"], q["kind"], q["targets"]) for q in p["questions"]]  # noqa: E731
+    assert key(grouped) == key(plain)  # no question merged, removed or renamed
+    names = _per_group(grouped, NAME)
+    zz2 = [q for q in names if "'ZZ2'" in q["text"]]
+    assert len(zz2) == 3 and len({q["same_reading_group"] for q in zz2}) == 1 and zz2[0]["same_reading_count"] == 3
+    q = zz2[0]
+    assert "3 questions share this reading ('ZZ2', as the files write it)" in q["text"]
+    assert f"answer them together with {q['same_reading_command']}" in q["text"]
+    assert f"--question {q['question_id']} --same-reading --decision correct" in q["same_reading_command"]
+    assert "other group(s) hold the same reading" not in q["text"]  # said once, as a group
+    assert {m["question_id"] for m in q["same_reading_members"]} == {x["question_id"] for x in zz2}
+    # set-points: one group per potential the file names write
+    by_value = {}
+    for sp in _per_group(grouped, SETPOINT):
+        by_value.setdefault(sp.get("same_reading_group"), []).append(sp)
+    sizes = sorted(len(v) for k, v in by_value.items() if k)
+    assert sizes == [2, 3] and all("their file names read alike for this field" in sp["text"]
+                                   for k, v in by_value.items() if k for sp in v)
+
+
+def test_one_decide_answers_every_question_of_a_shared_reading(bdir):
+    M.group(bdir)
+    zz2 = [q for q in _per_group(Q.consolidate(M.load(bdir)), NAME) if "'ZZ2'" in q["text"]]
+    got = M.decide_question(bdir, question_id=zz2[0]["question_id"], same_reading=True, decision="correct",
+                            value="ZZ2 synthetic", by=WHO, orcid=None)
+    assert sorted(got["recorded"]) == sorted(t["id"] for q in zz2 for t in q["targets"])
+    left = {q["question_id"] for q in _per_group(Q.consolidate(M.load(bdir)), NAME)}
+    assert not left & {q["question_id"] for q in zz2}
+
+
+def test_file_names_that_read_the_field_differently_never_share_a_group(monkeypatch):
+    """The r3c rule: one reading in the files, but the runs' own names write two set-points: two keys, no group."""
+    cands = {f"c{i}": {"candidate_id": f"c{i}", "run_id": f"r{i}", "observed_literals": ["SYN 1 V"],
+                       "evidence": [{"relative_path": f"SYN_{i}.dat"}]} for i in range(4)}
+    runs = [{"run_id": f"r{i}", "stem": f"SYN_{i}"} for i in range(4)]
+    qs = [{"question_id": f"Q-{i}", "target_field_path": SETPOINT, "targets": [{"kind": "candidate", "id": f"c{i}"}],
+           "same_reading_as": ["Q-x"], "text": "Q.", "answer_command": f"isaac bundle decide <bundle_dir> --question Q-{i} --decision confirm"}
+          for i in range(4)]
+    monkeypatch.setattr(Q, "file_name_readings", lambda bundle, run, path: [{"value": 0.6 if run["run_id"] in ("r0", "r1") else 0.3}])
+    Q._note_shared_reading_groups(qs, cands, {"runs": runs}, {})
+    assert qs[0]["same_reading_group"] == qs[1]["same_reading_group"] != qs[2]["same_reading_group"] == qs[3]["same_reading_group"]
+    assert all(q["same_reading_count"] == 2 for q in qs)
+    assert "their file names read alike for this field (0.6)" in qs[0]["text"]

@@ -1282,8 +1282,9 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             compositions_out.update(reports)
         basis = {**basis, "record_composer": _agree_with_composer(questions, bundle, group_of, cand_by_id, reports,
                                                                        decision_of=decisions)}
-    _note_shared_evidence(questions, cand_by_id, bundle)
+    reading_said = _note_shared_evidence(questions, cand_by_id, bundle)
     _note_same_reading_groups(questions, cand_by_id, bundle)
+    _note_shared_reading_groups(questions, cand_by_id, bundle, reading_said)
     _mark_deferred(questions, decisions)
     _covered_by_run_decisions(questions, covered_conflicts, beamtime_decision_ids)
     _say_the_one_group(questions)
@@ -1968,14 +1969,17 @@ def _note_same_reading_groups(questions: list[dict], cand_by_id: Mapping[str, Ma
                           "columns are the easy path (isaac bundle template export <bundle_dir> --out <file.xlsx>).")
 
 
-def _note_shared_evidence(questions: list[dict], cand_by_id: Mapping[str, Mapping], bundle: Mapping) -> None:
+def _note_shared_evidence(questions: list[dict], cand_by_id: Mapping[str, Mapping], bundle: Mapping) -> dict[str, str]:
     """Per-group ``confirm_value`` questions about one field that rest on the SAME file statement (or the
     same literal reading) name each other (``same_statement_as`` / ``same_reading_as``), so one file line
     asked per group is visibly one statement. And where a BEAMTIME value for that field is open or already
     answered (it fills every record but DEC-69's run-only fields, records.compose_group), the per-group
     question does not block: answering the experiment-wide one fills this group's record too. Ids, scopes
-    and targets are untouched (DEC-91): only text, ``blocking`` and ``tier`` change."""
+    and targets are untouched (DEC-91): only text, ``blocking`` and ``tier`` change. Returns ``{question id: the
+    same-reading sentence added to its text}`` (:func:`_note_shared_reading_groups` words it again when it groups them)."""
     from .records import RUN_ONLY_PATHS
+
+    reading_said: dict[str, str] = {}
 
     def statement(q):
         out = set()
@@ -2017,8 +2021,10 @@ def _note_shared_evidence(questions: list[dict], cand_by_id: Mapping[str, Mappin
         ids = [o["question_id"] for o in qs]
         for q in rest:
             q["same_reading_as"] = [i for i in ids[:_CROSS_REFERENCES + 1] if i != q["question_id"]][:_CROSS_REFERENCES]
-            q["text"] += (f" {len(qs) - 1} other group(s) hold the same reading ({', '.join(sorted(map(repr, lits)))}) for this "
-                          f"field in their own files (same_reading_as names up to {_CROSS_REFERENCES}): if they are the same thing, give each the same answer.")
+            said = (f" {len(qs) - 1} other group(s) hold the same reading ({', '.join(sorted(map(repr, lits)))}) for this "
+                    f"field in their own files (same_reading_as names up to {_CROSS_REFERENCES}): if they are the same thing, give each the same answer.")
+            q["text"] += said
+            reading_said[q["question_id"]] = said
     # a beamtime value for the field: open at experiment scope, or answered and eligible
     run_of = {m["value_id"]: m["run_id"] for m in bundle["missing_values"]}
     run_of.update({cid: c["run_id"] for cid, c in cand_by_id.items()})
@@ -2040,6 +2046,61 @@ def _note_shared_evidence(questions: list[dict], cand_by_id: Mapping[str, Mappin
                        else "included, and one is already answered.")
                     + " Answer here only with the same thing: if this group's answer differs from the beamtime one, the "
                     "record builder fills nothing for this field (two confirmed values that differ fill nothing).")
+    return reading_said
+
+
+def _note_shared_reading_groups(questions: list[dict], cand_by_id: Mapping[str, Mapping], bundle: Mapping,
+                                reading_said: Mapping[str, str]) -> None:
+    """r4-b M3: per-group questions about one field that hold the SAME reading in their own files (``same_reading_as``
+    / ``same_statement_as``, :func:`_note_shared_evidence`: 73 groups' ``'JK1C'`` for the material name, or one
+    set-point) share a ``same_reading_group``, answered together with ``decide --question <id> --same-reading``, as the
+    comment-line ones of :func:`_note_same_reading_groups` are (which runs first; a question it grouped is left as it
+    is). Nothing is merged: every id, scope, kind and target is unchanged; only ``same_reading_group``,
+    ``same_reading_count``, ``same_reading_members``, ``same_reading_command`` and the text are added. The r3c rule
+    holds: the key holds each run's own FILE-NAME reading of the field (:func:`file_name_readings`), so runs whose file
+    names read the field differently never share a group, and whether the question reaches a live record group."""
+    runs = {r.get("run_id"): r for r in bundle.get("runs") or ()}
+
+    def lits_of(q: Mapping) -> frozenset | None:
+        out = set()
+        for t in q["targets"]:
+            lits = (cand_by_id.get(t["id"]) or {}).get("observed_literals")
+            if not lits:
+                return None
+            out.add(lits[0])
+        return frozenset(out) or None
+
+    def name_key(q: Mapping) -> tuple:
+        rids = sorted({(cand_by_id.get(t["id"]) or {}).get("run_id") or "" for t in q["targets"]})
+        return tuple(sorted({repr(r["value"]) for rid in rids if rid in runs
+                             for r in file_name_readings(bundle, runs[rid], q["target_field_path"])}))
+
+    shared: dict[tuple, list[dict]] = {}
+    for q in questions:
+        if q.get("same_reading_group") or not (q.get("same_reading_as") or q.get("same_statement_as")):
+            continue
+        if (lits := lits_of(q)) is not None:
+            shared.setdefault((q["target_field_path"], lits, name_key(q), bool(q.get("outside_live_groups"))), []).append(q)
+    for (path, lits, readings, _), members in shared.items():
+        if len(members) < 2:
+            continue
+        ids = sorted(q["question_id"] for q in members)
+        key = "SR-" + hashlib.sha256("\n".join(ids).encode()).hexdigest()[:10]
+        named = [m for q in sorted(members, key=lambda q: q["question_id"]) for m in same_reading_members(bundle, q, cand_by_id)]
+        files = list(dict.fromkeys(str(m["file_name"]) for m in named if m["file_name"]))
+        shown = ", ".join(files[:SAME_READING_NAMES_SHOWN]) + (
+            f", and {len(files) - SAME_READING_NAMES_SHOWN} more" if len(files) > SAME_READING_NAMES_SHOWN else "")
+        alike = f"; their file names read alike for this field ({', '.join(readings)})" if readings else ""
+        for q in members:
+            command = q["answer_command"].replace(f"--question {q['question_id']} ",
+                                                  f"--question {q['question_id']} {SAME_READING_FLAG} ", 1)
+            q["same_reading_group"], q["same_reading_count"] = key, len(members)
+            q["same_reading_members"], q["same_reading_command"] = named, command
+            said = (f" {len(members)} questions share this reading ({', '.join(sorted(map(repr, lits)))}, as the files write "
+                    f"it) for this field, one per group (same_reading_group {key}; the files: {shown}{alike}); answer them "
+                    f"together with {command} if it is the same thing for all of them, or each on its own if not.")
+            before = reading_said.get(q["question_id"])
+            q["text"] = q["text"].replace(before, said, 1) if before and before in q["text"] else q["text"] + said
 
 
 def _ai_hint_index(bundle: Mapping):
