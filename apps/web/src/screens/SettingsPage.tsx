@@ -16,6 +16,7 @@ import {
   DiagnosticsPanel,
 } from '../components/FetchStates';
 import { Widget } from '../components/Widget';
+import { Disclosure } from '../components/Disclosure';
 import { LazyDisclosure } from '../components/LazyDisclosure';
 import { ChevronRight, Clock, LayoutList, Network, Settings, Shield } from '../components/icons';
 import { LABELS } from '../lib/labels';
@@ -461,8 +462,9 @@ function BuildWidget({ state, graphStatus }: { state: AboutState; graphStatus: G
             />
             <Figure label="Core" value={<span className="mono">{state.data.core}</span>} source="build" />
           </dl>
-          <details className="settings-runtime">
-            <summary>{COPY.buildRuntime}</summary>
+          {/* The app's chevron disclosure, not the browser's own `<details>` triangle
+              (2026-11-02): one "there's more here" affordance across the app. */}
+          <Disclosure className="settings-runtime" summary={COPY.buildRuntime}>
             <dl className="settings-figures settings-facts">
               <Figure
                 label="Runtime Mode"
@@ -480,7 +482,7 @@ function BuildWidget({ state, graphStatus }: { state: AboutState; graphStatus: G
                 source="live"
               />
             </dl>
-          </details>
+          </Disclosure>
         </>
       )}
     </Widget>

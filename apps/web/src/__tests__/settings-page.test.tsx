@@ -783,7 +783,7 @@ describe('Settings — Overview', () => {
  *   · `?tab=about` → Overview, scrolled to This Build.
  */
 describe('Settings — This Build and Technical Details (was About)', () => {
-  it('This Build shows its Build rows, with Runtime one press away in a <details>', async () => {
+  it('This Build shows its Build rows, with Runtime one press away in a disclosure', async () => {
     stubFetchRoutes(fullRoutes());
     const { container } = renderSettings();
     expect(await screen.findByText('0.1.0')).toBeInTheDocument();
@@ -792,10 +792,14 @@ describe('Settings — This Build and Technical Details (was About)', () => {
       Array.from(el.querySelectorAll(':scope > dl .settings-figure-label, :scope > .settings-figure .settings-figure-label')).map(
         (l) => l.textContent,
       );
-    const runtime = build.querySelector('details.settings-runtime') as HTMLDetailsElement;
+    // The app's chevron `Disclosure`, not a native `<details>` (2026-11-02).
+    const runtime = build.querySelector('.disclosure.settings-runtime') as HTMLElement;
     expect(runtime).not.toBeNull();
-    expect(runtime.open).toBe(false);
-    expect(runtime.querySelector('summary')?.textContent).toBe('Runtime');
+    expect(build.querySelector('details.settings-runtime')).toBeNull();
+    const trigger = runtime.querySelector('.disclosure-trigger') as HTMLButtonElement;
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(trigger.textContent).toBe('Runtime');
+    expect(runtime.querySelector('.disclosure-body')).toHaveAttribute('hidden');
     expect(Array.from(runtime.querySelectorAll('.settings-figure-label')).map((l) => l.textContent)).toEqual([
       'Runtime Mode',
       'Data Regime',

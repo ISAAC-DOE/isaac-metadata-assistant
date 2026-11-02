@@ -306,26 +306,44 @@
   color: var(--text-secondary);
 }
 
-/* The quiet native disclosures this page uses for secondary detail: This Build's
-   Runtime rows and Advanced's Technical Details. */
+/* The quiet disclosures this page uses for secondary detail: This Build's Runtime
+   rows (the shared chevron `Disclosure` since 2026-11-02, drawn without its own
+   frame because it sits inside a widget card) and Advanced's Technical Details. */
 .settings-runtime,
 .settings-technical {
   margin-top: var(--space-md);
   font-size: var(--font-size-body);
 }
-.settings-runtime > summary,
+.settings-runtime.disclosure {
+  border: 0;
+  background: transparent;
+}
+.settings-runtime > .disclosure-trigger {
+  width: auto;
+  min-height: 0;
+  padding: var(--space-2xs) 0;
+  color: var(--action);
+}
+.settings-runtime > .disclosure-trigger:hover {
+  background: transparent;
+  color: var(--action-hover);
+}
+.settings-runtime > .disclosure-trigger .disclosure-chevron {
+  color: currentColor;
+}
+.settings-runtime > .disclosure-body > dl {
+  margin-top: var(--space-sm);
+}
 .settings-technical > summary {
   cursor: pointer;
   color: var(--action);
   font-weight: var(--font-weight-medium);
 }
-.settings-runtime > summary:focus-visible,
 .settings-technical > summary:focus-visible {
   outline: 2px solid var(--action);
   outline-offset: 2px;
   border-radius: var(--radius-control);
 }
-.settings-runtime[open] > dl,
 .settings-technical[open] > dl {
   margin-top: var(--space-sm);
 }
