@@ -1419,7 +1419,9 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         first = not (q.get("order_critical") and not q.get("deferred"))
         # r6h H2: within a tier, a disagreement about anything else before the (often many) start-time ones: a macro's
         # set-point was 40th of 93, behind 39 start-time conflicts
-        start_time = q["kind"] == "resolve_conflict" and (q["target_field_path"] or "").startswith("timestamps.")
+        # (the beamtime-wide start-time question too: after the other disagreements, before the per-group ones by scope)
+        start_time = (q["kind"] in ("resolve_conflict", STATED_UTC_START_KIND)
+                      and (q["target_field_path"] or "").startswith("timestamps."))
         return (first, q["tier"], start_time, bool(q.get("informational")), bool(q.get("deferred")), s,
                 q["target_field_path"] or "", q["question_id"])
 
