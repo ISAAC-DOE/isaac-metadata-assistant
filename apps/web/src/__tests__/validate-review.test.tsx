@@ -1212,8 +1212,9 @@ describe('read-only', () => {
     for (const forbidden of ['/export', '/answers', '/edit', '/runs/RUN-1/edit', '/demo/reset']) {
       expect(calls.some((c) => c.includes(forbidden))).toBe(false);
     }
-    // Said at section level AND again on the per-run detail, deliberately: a
-    // reader who scrolled straight to one run's findings never saw the first.
-    expect(screen.getAllByText(/Read-only/)).toHaveLength(2);
+    // The standing "Read-only" sentences were retired (declutter, 2026-11-02): the
+    // call list above is the proof. The per-run detail still names its version.
+    expect(screen.queryAllByText(/Read-only/)).toHaveLength(0);
+    expect(screen.getByText(/Detail for run version/)).toBeInTheDocument();
   });
 });
