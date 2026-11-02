@@ -718,22 +718,19 @@ function Loaded({
 
   return (
     <>
-      {/* THE SERVER'S OWN `not_official` SENTENCE, ONE `?` AWAY, rendered VERBATIM:
-          it is the artifact's definition of itself. The standing short caveat that
-          used to precede it was retired (declutter, 2026-11-02). */}
-      <p className="extctx-not-official">
-        <HelpTip subject={LABELS.extendedContextHeading} label="About Extended Context">
-          <span className="extctx-not-official-full">{loaded.not_official}</span>
-        </HelpTip>
-      </p>
-
       <ul className="extctx-counts">
         {/* EVERY NUMBER DESCRIBING THE RECORD IS THE SERVER'S. `total` is what the
             record holds, and it is stated even when the page shows all of it, because
             a reader must be able to tell a complete list from a first page without
             counting rows. */}
         <li className="extctx-count">
-          {loaded.total} {loaded.total === 1 ? 'entry' : 'entries'} on this record
+          {loaded.total} {loaded.total === 1 ? 'entry' : 'entries'} on this record{' '}
+          {/* THE SERVER'S OWN `not_official` SENTENCE, ONE `?` AWAY, rendered
+              VERBATIM: it is the artifact's definition of itself. It sits on the
+              count line rather than in a paragraph of its own (declutter review). */}
+          <HelpTip subject={LABELS.extendedContextHeading} label="About Extended Context">
+            <span className="extctx-not-official-full">{loaded.not_official}</span>
+          </HelpTip>
         </li>
         {shownCount > 0 && shownCount < loaded.total && (
           <li className="extctx-count">Showing the first {shownCount}</li>

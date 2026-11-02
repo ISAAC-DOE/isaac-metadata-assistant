@@ -325,7 +325,7 @@ describe('attribution', () => {
     });
     await renderOpen();
     expect(await screen.findByText(/ada\.lovelace/)).toBeTruthy();
-    expect(screen.getByText(/not proof anyone authenticated/i)).toBeTruthy();
+    expect(screen.getByText(/not a verified sign-in/i)).toBeTruthy();
   });
 });
 
@@ -655,7 +655,7 @@ describe('the words', () => {
   });
 
   it('qualifies a fixture basis and stays silent about a verified one', () => {
-    expect(actorBasisNote(ATTRIBUTED)).toMatch(/not proof anyone authenticated/);
+    expect(actorBasisNote(ATTRIBUTED)).toMatch(/not a verified sign-in/);
     expect(
       actorBasisNote({
         subject: 'a',
@@ -969,7 +969,9 @@ describe('REV-002 · Last Submitted Revision versus Current Working Changes', ()
     expect(within(card).getByText(WORKING_CHANGES_HEADING)).toBeInTheDocument();
     // The standing immutability note was retired (declutter, 2026-11-02); nothing on
     // the card may claim a submitted revision can be edited, reverted or restored.
-    expect(card.textContent ?? '').not.toMatch(/\b(can be|may be) (edited|reverted|restored)\b/i);
+    const MUTABLE_CLAIM = /\b(can be|may be) (edited|reverted|restored)\b/i;
+    expect(MUTABLE_CLAIM.test('A submitted revision can be restored from here.')).toBe(true);
+    expect(card.textContent ?? '').not.toMatch(MUTABLE_CLAIM);
     // FROM THE RESPONSE — and now in WORDS (QA A-15), the identifier itself kept in
     // `title`. This used to assert the raw token as the visible text, which pinned the
     // defect; it is inverted rather than deleted. The words come from an EXACT-match

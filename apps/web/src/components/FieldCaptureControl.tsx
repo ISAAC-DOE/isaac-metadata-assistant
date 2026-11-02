@@ -168,7 +168,7 @@ export function captureHint(
   if (path === CREATED_UTC_PATH) {
     return 'There is nothing to type here. When the record is exported, the exporter keeps a value the draft already holds and stamps the export time only when it holds none.';
   }
-  return 'There is nothing to type here.';
+  return 'There is nothing to type here: no route writes a value at this path.';
 }
 
 /** The `?at=` address `RecordWorkbench` opens Record Description for (QA A-08). */

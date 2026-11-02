@@ -112,9 +112,9 @@ describe('CsvReconcilePanel — pre-upload', () => {
     // real or private data.
     const { container } = renderPanel();
     expect(container.querySelector('.csv-recon-banner-warn')).toBeNull();
-    expect(container.textContent ?? '').not.toMatch(
-      /\b(checks|screens|detects|verifies)\b[^.]{0,40}\b(real|private|synthetic)\b/i,
-    );
+    const SCREENING_CLAIM = /\b(checks|screens|detects|verifies)\b[^.]{0,40}\b(real|private|synthetic)\b/i;
+    expect(SCREENING_CLAIM.test('ISAAC checks the file for real or private data.')).toBe(true);
+    expect(container.textContent ?? '').not.toMatch(SCREENING_CLAIM);
   });
 
   it('states this is review evidence, not a write to the record', () => {

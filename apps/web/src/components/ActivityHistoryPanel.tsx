@@ -591,8 +591,10 @@ function readableTimeOfDay(iso: string): string {
  * take at face value.
  *
  *
- * There is no standing attribution sentence: a row says who acted only when the
- * loaded history names someone, and the sentinel says "Unattributed" in words.
+ * There is no standing attribution sentence. A row says who acted only when the
+ * loaded history names someone; in a mixed history the unattributed rows then say
+ * "Unattributed" in words. When NOTHING is attributed no actor is rendered at all,
+ * so nothing on screen states it (inventory #126-#129 REMOVE).
  */
 /* THE TWO SERVER CONSTANTS, TRANSCRIBED — and now guarded rather than trusted.
    `activity.ACTOR_UNATTRIBUTED` and `identity.TRUST_BASIS_TEST_FIXTURE` are the

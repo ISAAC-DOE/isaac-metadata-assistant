@@ -69,10 +69,10 @@
  * selection, the typed value and the rationale exactly where they are; only a
  * decision the server RECORDED clears the form that produced it.
  */
-import { LABELS } from '../lib/labels';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { api, ApiError } from '../lib/api';
+import { LABELS } from '../lib/labels';
 import { mutationFailureCopy, staleWriteCurrentVersion } from '../lib/mutationErrors';
 import { RUNS_PAGE_SIZE } from '../lib/runPaging';
 import { SourceTypeToken } from './EvidenceRow';
@@ -1066,8 +1066,8 @@ function RecordedDecision({ resolution }: { resolution: ApiConflictResolution })
 
       <p className="conflict-decision-note">
         This is a record of a choice. It is not the field’s value and not an evidence
-        entry — the ISAAC API states both on the wire — and the competing entries it
-        was decided between are all still on the record.
+        entry, and the competing entries it was decided between are all still on the
+        record.
       </p>
 
       <h4 className="conflict-history-title">

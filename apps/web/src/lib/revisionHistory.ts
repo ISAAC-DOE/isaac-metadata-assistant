@@ -82,7 +82,7 @@ export function actorText(actor: ApiRevisionActor | null | undefined): string {
 export function actorBasisNote(actor: ApiRevisionActor | null | undefined): string | null {
   if (!actor || !actor.attributed) return null;
   if (actor.trust_basis === 'test_fixture') {
-    return 'recorded on a test-fixture basis — not proof anyone authenticated';
+    return 'test fixture — not a verified sign-in';
   }
   return null;
 }

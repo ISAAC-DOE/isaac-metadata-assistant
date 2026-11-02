@@ -55,14 +55,6 @@
   max-width: 68ch;
 }
 
-/* The `?` that carries the server's own `not_official` sentence, verbatim. */
-.extctx-not-official {
-  margin: 0;
-  font-size: var(--font-size-body);
-  line-height: var(--line-height-normal);
-  color: var(--text-secondary);
-}
-
 .extctx-counts {
   display: flex;
   flex-wrap: wrap;

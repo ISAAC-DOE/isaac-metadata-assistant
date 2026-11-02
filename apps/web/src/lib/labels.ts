@@ -625,7 +625,7 @@ export const LABELS = {
      qualification appears exactly when the basis is one a reader would otherwise
      take at face value. A fixture-verified deployment mints a subject from its own
      process environment, which is not proof anybody authenticated. */
-  activityTrustFixture: 'unverified test sign-in',
+  activityTrustFixture: 'test fixture — not a verified sign-in',
 
   /* ── ACT-003b, ROUND 2: THREE FINDINGS FROM AN INDEPENDENT REVIEW ──────────
 
@@ -1798,7 +1798,6 @@ export const LABELS = {
   // Export artifacts
   officialRecord: 'Official Record',
   sidecarConvention: 'evidence sidecar',
-  sidecarNotOfficial: 'evidence sidecar',
 } as const;
 
 export type LabelKey = keyof typeof LABELS;

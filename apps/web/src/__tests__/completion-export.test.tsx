@@ -439,7 +439,7 @@ describe('S6 · Ready to Export (live)', () => {
     // Evidence Trail row on this screen too, as it does on every record screen, so the
     // words appear twice — once as the sidecar card's title, once as a navigation link.
     expect(within(cards[1] as HTMLElement).getByText('Evidence Trail')).toBeInTheDocument();
-    expect(within(cards[1] as HTMLElement).getByText(LABELS.sidecarNotOfficial)).toBeInTheDocument();
+    expect(within(cards[1] as HTMLElement).getByText(LABELS.sidecarConvention)).toBeInTheDocument();
     expect(getByText(/Review the sidecar before sharing/)).toBeInTheDocument();
     // The standing hedges were retired (declutter, 2026-11-02); none may come back.
     expect(container.textContent).not.toMatch(/assistant convention|no portal submission/);

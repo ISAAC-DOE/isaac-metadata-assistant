@@ -1591,7 +1591,7 @@ describe('each refusal keeps the server\'s own distinction', () => {
     return screen.findByRole('alert');
   }
 
-  it('a human_actor_required refusal is reported as configuration, not as failure', async () => {
+  it('a human_actor_required refusal is reported as a standing condition, not a fault in the record', async () => {
     const alert = await refuse(409, { error: 'human_actor_required', message: 'no actor' });
 
     expect(alert.textContent).toMatch(/nothing was written/i);
@@ -2826,9 +2826,14 @@ describe('the acceptance preflight', () => {
     // ONE sentence that still says what a scientist can do.
     expect(
       screen.getByText(
-        'Scientist sign-in is not enabled; you can still reject or withdraw a proposal, or enter its value in the field directly.',
+        'Scientist sign-in is not enabled; you can still reject or withdraw a proposal.',
       ),
     ).toBeTruthy();
+    // The panel-wide line promises no direct entry: that route exists only on cards
+    // whose target is writable, and the card says so itself (proposal-card-honesty).
+    const DIRECT_ENTRY = /enter (its|the) value|in the field directly/i;
+    expect(DIRECT_ENTRY.test('or enter its value in the field directly')).toBe(true);
+    expect(DIRECT_ENTRY.test(document.querySelector('.proposals-lock-line')?.textContent ?? '')).toBe(false);
     // Described by the ONE-LINE sentence (review #277, minor) — not the whole notice,
     // which would also read out its Why? and Reload controls.
     const lock = document.querySelector('.proposals-lock-line') as HTMLElement;

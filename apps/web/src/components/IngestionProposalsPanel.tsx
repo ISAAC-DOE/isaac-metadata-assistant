@@ -285,7 +285,7 @@ function StateChip({ state }: { state: string }) {
  */
 function acceptanceLockLine(reason: string | null): string {
   if (reason === 'no_verifier_configured') {
-    return 'Scientist sign-in is not enabled; you can still reject or withdraw a proposal, or enter its value in the field directly.';
+    return 'Scientist sign-in is not enabled; you can still reject or withdraw a proposal.';
   }
   return 'No proposal can be accepted here; you can still reject or withdraw one.';
 }

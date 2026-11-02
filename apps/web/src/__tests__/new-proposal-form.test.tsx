@@ -42,10 +42,10 @@
  * ALSO proven against a real uvicorn over HTTP while this was written — see the
  * slice report; a form proven only against a mock has not been proven to work.
  */
-import { LABELS } from '../lib/labels';
 import { describe, it, expect, afterEach, vi, type Mock } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { LABELS } from '../lib/labels';
 
 import { IngestionProposalsPanel } from '../components/IngestionProposalsPanel';
 import {
@@ -458,7 +458,9 @@ describe('New Proposal · it never claims a write it did not make', () => {
     // form never claims acceptance works, and never claims it is blocked here — the
     // review card's own notice says that, only when it is true.
     expect(screen.queryByText(/What happens after you store it\?/)).toBeNull();
-    expect(screen.queryByText(/accepting one (works|does not)/i)).toBeNull();
+    const ACCEPT_CLAIM = /accepting one (works|does not)/i;
+    expect(ACCEPT_CLAIM.test('Creating a proposal works. Accepting one does not, in this deployment')).toBe(true);
+    expect(screen.queryByText(ACCEPT_CLAIM)).toBeNull();
   });
 
   it('shows the exact provenance sentence that will be stored, rather than hiding it', async () => {

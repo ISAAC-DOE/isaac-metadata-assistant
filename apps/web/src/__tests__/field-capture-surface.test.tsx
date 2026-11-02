@@ -519,9 +519,10 @@ describe('a row the record HAS a value at', () => {
     expect(captureHint(NOWHERE_STAMPED, false, 'system.configuration.n_scans')).not.toContain(
       'exporter',
     );
-    // …and it still says the one thing that IS true of every path reaching it.
-    expect(captureHint(NOWHERE_STAMPED, false, 'system.configuration.n_scans')).toContain(
-      'nothing to type',
+    // …and it still says the one thing that IS true of every path reaching it, WITH
+    // its reason: the field has no write route (inventory #262, SHORTEN-TO-REASON).
+    expect(captureHint(NOWHERE_STAMPED, false, 'system.configuration.n_scans')).toBe(
+      'There is nothing to type here: no route writes a value at this path.',
     );
   });
 });
