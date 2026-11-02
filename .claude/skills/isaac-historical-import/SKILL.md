@@ -161,7 +161,7 @@ agreement with their own Athena output, and the plot (open the PNG with Read and
   approving, ask for the QC status: map their words to one of the four
   (`--qc-status valid|compromised|failed|pending`), say it back, record on yes; never derive it from the verdict.
 - **Two results for one group**: ISAAC's curve (`…-isaac`) and their own Athena curve (`…-athena`).
-  Show both, say which scans each used, ask which is the record's, approve exactly one.
+  Show both, say which scans each used, ask which is the record's, approve exactly one. "A merge exists but was not matched": ask which group it is for; never pick a near name (reference: `athena_match`).
 - A `not_applicable` result is not a fail; never ask to approve it ("no ISAAC processing protocol
   covers this data yet"). A result with **no curve** cannot be approved; offer: reject the result,
   `needs_changes`, or leave the group out.
@@ -188,7 +188,7 @@ when a live group's record needs it. Ask 3 to 5 per message, by theme, with prog
    groups differ" (`--only group:<id>` overrides one group). `clock_time_zone` needs the zone the
    instrument clock was set to (an IANA name); never suggest one.
 3. **The template**, for everything the files never state (see below); ask per group only what it leaves.
-4. **Conflicts that affect a record.** `affects_record: false` ones change no record: give their count.
+4. **Conflicts that affect a record.** Ask `stated_utc_start_times` (every group's start at once) first. `affects_record: false` ones change no record: give their count.
 5. **The rest, if they want**: optional questions (`--scope group:<id>` shows what blocks one group).
 
 A deferred question sorts last; do not re-ask it unless they offer. How to put each kind of question
@@ -231,13 +231,13 @@ Read `reference/records-and-validation.md`; explain the verdicts from validate's
 `processing_fix` means its curve needs approval in Step 6). Say each `warnings` item in words
 (only 5 warnings show by default; `validate --full` lists all; the most serious come first: a stated value left out of a record, then a portal warning, then the routine start-time note), and ask the scale question it names (and the set-point
 if `also_needs`, with `also_command`; a missing set-point lists its scale as missing too). `athena_version_no_longer_chosen`: the
-approved curve is not the version they chose last; say its steps. Run a command only with their answer. Never edit a draft or relax a check.
+approved curve is not the version they chose last; say its steps (to keep it: reject, then approve again; approving again alone records nothing). `macro_setpoint_unanswered` and `in_situ_conditions_not_in_record`: ask the question each names. Run a command only with their answer. Never edit a draft or relax a check.
 
 ## Step 9 · Export and dry run
 
 `<isaac> bundle export <bundle> --out <records>` writes only `exportable` records. Read its `outcome`
 ("N record(s) ready (U unchanged…, W written), refused M group(s)"), not its exit code (see `reference/records-and-validation.md`),
-then its refusal counts (`records_ready` = N; `records_written` = W, new or replacing records only).
+then its refusal counts (`records_ready` = N; `records_written` = W, new or replacing records only; `refused_by_reason`, and every refused, withdrawn or replaced row in full; only repeated ok rows are cut to 3, `--full` prints all).
 **If nothing is exportable**, export writes nothing: skip the dry run, say "no record is ready yet", name what
 blocks the nearest group (from Step 8), and go to Step 10. `<isaac> bundle upload <records> --dry-run` shows what
 *would* be sent: summarise it (its `statement` leads with "N records, 2 requests each, to <portal>", and says each note and each portal warning once, with a count) and say **nothing was sent and this build cannot send**. The scientist uploads through the ISAAC portal themselves.

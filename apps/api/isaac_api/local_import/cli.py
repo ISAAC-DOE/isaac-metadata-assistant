@@ -824,12 +824,11 @@ def group_list_extras(bundle: Mapping) -> dict[str, dict]:
     """``{group_id: fields}`` a ``bundle list <dir> groups`` row adds: a few member FILE NAMES (the run's stem,
     the name a scientist recognises), the scan count, the reader (the runs' source type) and, when known,
     ``cannot_export_reason``. File names and counts only — no parser value, so no exposure."""
-    from . import bundle as B
     from . import questions as Q
 
     runs = {r["run_key"]: r for r in bundle.get("runs") or ()}
-    blocked = B.processing_blocked_groups(bundle)
     not_measured = Q.not_a_measurement_groups(bundle)  # r5 B4: said up front, not only once its curve is approved
+    reasons = Q.cannot_export_reasons(bundle, not_measured)  # r6 I2: the one order `bundle group` says them in
     out: dict[str, dict] = {}
     for g in bundle.get("record_groups") or ():
         members = [runs[k] for k in g.get("member_run_keys") or () if k in runs]
@@ -846,14 +845,11 @@ def group_list_extras(bundle: Mapping) -> dict[str, dict]:
         if exported:
             row["exported_file"] = exported[:GROUP_ROW_FILES]
             row["exported_file_note"] = "the scientist's exported/processed file of a run: context, its data not merged"
-        na = blocked.get(g["group_id"])
-        if na is not None:
-            row["cannot_export_reason"] = f"processing_not_applicable:{(na.get('applicability') or {}).get('reason_code')}"
-        elif members and scans == 0:
-            row["cannot_export_reason"] = "no_scans"
-        elif g["group_id"] in not_measured:
-            row["cannot_export_reason"] = "not_a_measurement_run"
-            row["cannot_export_fields"] = not_measured[g["group_id"]]
+        reason = reasons.get(g["group_id"])
+        if reason is not None:
+            row["cannot_export_reason"] = reason
+            if reason == "not_a_measurement_run":
+                row["cannot_export_fields"] = not_measured[g["group_id"]]
         out[g["group_id"]] = row
     return out
 
@@ -1204,6 +1200,14 @@ def _scans_line(r: Mapping) -> str | None:
             # facts from its comparison, which has always carried the label's selection
             scans = comparison["athena_scan_selection"]
             basis = "label" if scans else "not_stated"
+        runs = ((ref.get("per_scan_set") or {}).get("runs") or []) if isinstance(ref.get("per_scan_set"), Mapping) else []
+        if basis == "per_scan_set" and scans and len(runs) == len(scans) and len(set(runs)) > 1:
+            # r6 G2: members of several runs (scan numbers restart in each run): each run's scans named apart
+            by_run: dict[str, list] = {}
+            for run_, n in zip(runs, scans):
+                by_run.setdefault(str(run_), []).append(n)
+            each = "; ".join(f"scan{'s' if len(set(v)) > 1 else ''} {_scan_ranges(v)} of run {k}" for k, v in by_run.items())
+            return f"{len(scans)} per-scan groups from {len(by_run)} runs: {each} (averaged by ISAAC)"
         if basis == "per_scan_set" and scans:
             return f"scans {_scan_ranges(scans)} (the scientist's per-scan groups, averaged by ISAAC)"
         if basis == "label" and scans:
@@ -1347,13 +1351,19 @@ def _processing_result_view(bundle: Mapping, r: Mapping) -> dict:
         "scans": _scans_line(r),
         **({"scans_note": note} if note else {}),
         **({"calibration": calibration} if calibration else {}),
-        "steps": [{"step": s.get("step"), "flags": list(s.get("flags") or ()), "outcome": s.get("outcome")} for s in r.get("steps") or ()],
+        "steps": [{"step": s.get("step"), "flags": list(s.get("flags") or ()), "outcome": s.get("outcome"),
+                   # r6 G3: how the scientist's Athena curve was made (stored values, Athena's re-fit, as stored)
+                   **({"reproduced_with": s["params"]["reproduced_with"]}
+                      if isinstance(s.get("params"), Mapping) and s["params"].get("reproduced_with") else {})}
+                  for s in r.get("steps") or ()],
         "outputs": {"e0_eV": (r.get("outputs") or {}).get("e0_eV"), "edge_step": (r.get("outputs") or {}).get("edge_step"),
                     "points": (r.get("outputs") or {}).get("points"),
                     "files": [{"role": f.get("role"), "relative_path": f.get("relative_path")} for f in files]},
         "comparison": ({"verdict": cmp_.get("verdict"), "flags": cmp_.get("flags"), "athena_ref": cmp_.get("athena_ref"),
                         **({"reason": cmp_["reason"]} if cmp_.get("reason") else {}), "metrics": cmp_.get("metrics")} if cmp_ else None),
         "athena_versions": versions,
+        # r6 review LOW 1 / M1: how larch's reading differs from the curve used, and a tie the scientist made
+        **({k: r[k] for k in ("renormalised_from_project", "athena_match_tie") if r.get(k)}),
         "athena_result_of_record": r.get("athena_result_of_record"),
         "questions": r.get("questions") or [],
         "result_file": f"{run_dir}/result.json" if run_dir else None,
@@ -1442,7 +1452,7 @@ def _show_consolidated_question(args) -> int:
             # under the id it was asked with, with what its answered targets carry now
             seen = Q.answered_question(bundle, args.id, open_payload=payload)
             if seen is not None and (q is None or seen["answered_targets"]):
-                extra = {k: seen[k] for k in ("status", "answered_targets", "current_answers", "statement")}
+                extra = {k: seen[k] for k in ("status", "answered_targets", "current_answers", "current_answers_total", "statement") if k in seen}
                 q = q or seen
         if q is None:
             raise M.MutationRefused(
@@ -1647,6 +1657,8 @@ def cmd_bundle_questions(args) -> int:
         # r3a L5: a question about runs no live record group holds builds no record: counted, listed on request (or
         # when a run's own scope is asked for); the local questions screen hides them the same way (r3c LOW-3)
         kept, outside = Q.hide_outside_live_groups(kept, scope=args.scope, include=args.include_outside_live_groups)
+        # r6 I1: a per-group question a listed beamtime-wide question answers at once is counted, listed on request
+        kept, folded = Q.fold_answered_at_once(kept, scope=args.scope, include=getattr(args, "each_group", False))
         page = kept[args.offset : args.offset + args.limit]
         minimum = Q.minimum_answers_for_one_group(payload, bundle, scope=args.scope, bundle_dir=Path(args.bundle_dir),
                                                   reports=reports)
@@ -1668,6 +1680,7 @@ def cmd_bundle_questions(args) -> int:
             **_more(len(kept) - args.offset - len(page), args.offset + len(page)),
             **({"skipped_deferred": sum(1 for q in rows if q.get("deferred"))} if args.skip_deferred else {}),
             **Q.hidden_outside_live_groups(outside, "--include-outside-live-groups"),
+            **Q.folded_answered_at_once(folded, "--each-group"),
             "minimum_for_one_group": minimum,
             **({"questions": page} if args.with_targets else _compact_page(page)),
         }
@@ -1737,7 +1750,7 @@ def _compact_question(q: Mapping) -> dict:
     ``per_scope_targets``, an optional-values question's per-field ids, the groups it blocks) are COUNTED, not
     listed — `decide --question` resolves them itself, and they were most of the page. ``--with-targets`` prints
     them in full."""
-    out = {k: v for k, v in q.items() if k not in ("targets", "per_scope_targets", "blocks_group_ids")
+    out = {k: v for k, v in q.items() if k not in ("targets", "per_scope_targets", "blocks_group_ids", "stated_utc_candidates")
            # nothing said by an empty value: left out (the full question, --with-targets, keeps every key)
            and not (k in _COMPACT_DROP_EMPTY and not v)}
     if isinstance(out.get("applies_to"), Mapping) and not out["applies_to"].get("runs_outside_live_groups"):
@@ -1937,30 +1950,121 @@ def cmd_bundle_validate(args) -> int:
     return code
 
 
-#: How many refused groups ``bundle export`` prints in full by default (``--full`` prints all).
-EXPORT_REFUSED_SHOWN = 3
+#: r6h H1: how many REPEATED "ok" rows ``bundle export`` and ``bundle upload --dry-run`` print by default (``--full``
+#: prints every row). A refused, withdrawn, replaced or restored row, and one with something of its own to say, is
+#: always printed in full.
+OK_ROWS_SHOWN = 3
+
+
+def _said_key(text: Any) -> str:
+    """A warning or note as said once (``records.group_by_text``): its question id is the one part that differs."""
+    from . import records as R
+
+    return R._QUESTION_ID_IN_TEXT.sub("<question id>", str(text))
+
+
+def _repeated_texts(texts_per_row: Sequence[Sequence[Any]]) -> set[str]:
+    """The texts (:func:`_said_key`) more than :data:`OK_ROWS_SHOWN` rows carry: what the reply's by-text summary
+    says once with its count. A row carrying any other text (its own, or one only a few rows share) is listed."""
+    counts: dict[str, int] = {}
+    for texts in texts_per_row:
+        for key in {_said_key(t) for t in texts}:
+            counts[key] = counts.get(key, 0) + 1
+    return {k for k, n in counts.items() if n > OK_ROWS_SHOWN}
+
+
+def _lines_every_row_says(summaries: Sequence[Sequence[Any]]) -> list[str]:
+    """The summary lines every one of two or more refused rows carries word for word, in the first row's order."""
+    if len(summaries) < 2:
+        return []
+    common = set.intersection(*({str(x) for x in s} for s in summaries))
+    return [str(x) for x in summaries[0] if str(x) in common]
 
 
 def compact_export(result: Mapping) -> dict:
-    """``bundle export``'s reply without every refused group's full summary: counts by reason, the
-    first :data:`EXPORT_REFUSED_SHOWN` refusals in full, and where the rest are. Measured on a real
-    BL4-3 bundle with nothing exportable: 35 refusals printed 40 KB."""
+    """r6h H1: ``bundle export``'s DEFAULT reply. Every refused, withdrawn, replaced or restored row is listed in
+    full, and so is every record with something of its own to say (a warning no more than :data:`OK_ROWS_SHOWN`
+    records carry, more warnings than a row shows, a refreshed evidence file, an artifact refused). Only the REPEATED "ok" rows (written
+    or unchanged, nothing of their own) are cut to the first :data:`OK_ROWS_SHOWN`; the counts, ``warnings_by_text``
+    and ``portal_warnings`` already say what they carry. ``schemas_used`` (and the rows' one statement) is said once
+    at the top when every row has the same; summary lines every refused row repeats are said once
+    (``refused_every_summary_says``). ``refused_by_reason`` and ``missing_required_by_field`` are always there when a
+    group was refused. Measured on a real BL15-2 bundle: 88 unchanged records printed 169 KB."""
     from . import records as R
 
-    refused = list(result.get("refused") or ())
-    if len(refused) <= EXPORT_REFUSED_SHOWN:
-        return dict(result)
-    by_reason, by_field = R.refusal_counts(refused)
-    out = {k: v for k, v in result.items() if k != "refused"}
-    out.update(
-        refused_total=len(refused),
-        refused_by_reason=by_reason,
-        missing_required_by_field=by_field,
-        refused=refused[:EXPORT_REFUSED_SHOWN],
-        refused_omitted=len(refused) - EXPORT_REFUSED_SHOWN,
-        refused_full_list=("Pass --full to print every refused group's summary, or run `isaac bundle validate "
-                           "<bundle_dir>`: it writes each group's full report to <bundle_dir>/validation/<group_id>.json."),
-    )
+    exported = [dict(r) for r in result.get("exported") or ()]
+    refused = [dict(r) for r in result.get("refused") or ()]
+    top: dict[str, Any] = {}
+    if exported and all("schemas_used" in r for r in exported) and len(
+            {json.dumps(r["schemas_used"], sort_keys=True) for r in exported}) == 1:
+        top["schemas_used"] = exported[0]["schemas_used"]
+        for r in exported:
+            del r["schemas_used"]
+    if exported and all("statement" in r for r in exported) and len({r["statement"] for r in exported}) == 1:
+        top["records_statement"] = exported[0]["statement"]
+        for r in exported:
+            del r["statement"]
+    common = _repeated_texts([r.get("warnings") or () for r in exported])
+
+    def has_its_own(r: Mapping) -> bool:
+        return bool(r.get("export") not in ("new", "unchanged") or r.get("replaces_record_id") or r.get("restored_from_withdrawn")
+                    or r.get("evidence_refreshed") or r.get("withdrawn") or r.get("warnings_omitted")
+                    or any(not isinstance(a, str) for a in r.get("artifacts") or ())
+                    or not {_said_key(t) for t in r.get("warnings") or ()} <= common)
+
+    ok = [r for r in exported if not has_its_own(r)]
+    keep = {id(r) for r in ok[:OK_ROWS_SHOWN]} | {id(r) for r in exported if has_its_own(r)}
+    rows = [r for r in exported if id(r) in keep]
+    shared = _lines_every_row_says([r.get("summary") or () for r in refused])
+    if shared:
+        for r in refused:
+            r["summary"] = [x for x in r.get("summary") or () if str(x) not in set(shared)]
+    out: dict[str, Any] = {}
+    for k, v in result.items():
+        if k == "exported":
+            out.update(top)
+            out["exported"] = rows
+            if len(rows) < len(exported):
+                out.update(
+                    exported_shown=len(rows), exported_omitted=len(exported) - len(rows),
+                    exported_full_list=(
+                        "Each record left out here is ready with nothing of its own to say: written or unchanged, "
+                        "replacing nothing, carrying only warnings many ready records carry (warnings_by_text, "
+                        "portal_warnings, each with its record count). A replaced or restored record, and one with a warning of its own, is always "
+                        "listed. Pass --full for every row; <out>/isaac-export/index.json lists every record id."))
+        elif k == "refused":
+            if refused:
+                by_reason, by_field = R.refusal_counts(refused)
+                out.update(refused_total=len(refused), refused_by_reason=by_reason, missing_required_by_field=by_field)
+                if shared:
+                    out["refused_every_summary_says"] = shared
+            out["refused"] = refused
+        else:
+            out[k] = v
+    return out
+
+
+def compact_upload(plan: Sequence[Mapping]) -> dict:
+    """r6h H1: ``bundle upload --dry-run``'s DEFAULT ``records``: every record that replaces an earlier one, or carries
+    a note no more than :data:`OK_ROWS_SHOWN` records carry, in full; of the rest (the same two requests, only the body size and hash differ)
+    the first :data:`OK_ROWS_SHOWN`; with the counts and the total body size. ``notes_by_text`` says the shared notes."""
+    common = _repeated_texts([p.get("notes") or () for p in plan])
+
+    def has_its_own(p: Mapping) -> bool:
+        return bool(p.get("replaces_record_ids") or not {_said_key(t) for t in p.get("notes") or ()} <= common)
+
+    ok = [p for p in plan if not has_its_own(p)]
+    keep = {id(p) for p in ok[:OK_ROWS_SHOWN]} | {id(p) for p in plan if has_its_own(p)}
+    rows = [p for p in plan if id(p) in keep]
+    out: dict[str, Any] = {"records_total": len(plan),
+                           "body_bytes_total": sum(int((p.get("requests") or [{}])[0].get("body_bytes") or 0) for p in plan)}
+    if len(rows) < len(plan):
+        out.update(records_shown=len(rows), records_omitted=len(plan) - len(rows),
+                   records_full_list=("Each record left out here would be sent the same way as those shown (POST validate, "
+                                      "then POST records only if it publishes); only its body size and sha256 differ, and its "
+                                      "notes are ones many records carry (notes_by_text, with the count). A record that replaces an "
+                                      "earlier one, or has a note of its own, is always listed. Pass --full for every row."))
+    out["records"] = rows
     return out
 
 
@@ -1993,8 +2097,11 @@ def cmd_bundle_upload(args) -> int:
     # r5f L3: the statement leads ("N records, 2 requests each, to <portal>") and says each distinct note and each
     # portal warning once (a note differing only in its question id is one note); a record's own notes stay in `records`
     summary = R.upload_summary(plan, Path(args.records_dir), args.portal_url)
+    # r6h H1: by default the repeated rows are cut to the first few (every replacing record, and every one with a note
+    # of its own, is listed); --full prints every row
     _print({"dry_run": True, "network_calls": 0, "statement": summary["statement"],
-            **{k: v for k, v in summary.items() if k != "statement"}, "records": plan})
+            **{k: v for k, v in summary.items() if k != "statement"},
+            **({"records_total": len(plan), "records": plan} if args.full else compact_upload(plan))})
     return EXIT_OK
 
 
@@ -2307,6 +2414,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--include-outside-live-groups", action="store_true",
                    help="also list questions whose every target is in a run no live record group holds (a rejected "
                         "group's runs: no record is built from them); by default they are counted, not listed")
+    q.add_argument("--each-group", action="store_true",
+                   help="also list each per-group question a beamtime-wide question answers at once (e.g. the start "
+                        "time); by default they are counted, not listed")
     q.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     q.add_argument("--offset", type=int, default=0)
     q.set_defaults(func=cmd_bundle_questions)
@@ -2359,13 +2469,16 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q = bsub.add_parser("export", help="write official records that pass every gate")
     q.add_argument("bundle_dir")
     q.add_argument("--out", required=True)
-    q.add_argument("--full", action="store_true", help="print every refused group's full summary (default: counts and the first few)")
+    q.add_argument("--full", action="store_true", help="print every exported row in full (default: every refused, withdrawn, "
+                   "replaced row and every row with a warning of its own; of the repeated ones the first few)")
     q.set_defaults(func=cmd_bundle_export)
 
     q = bsub.add_parser("upload", help="DRY RUN ONLY: what would be sent to the portal")
     q.add_argument("records_dir")
     q.add_argument("--dry-run", action="store_true")
     q.add_argument("--portal-url")
+    q.add_argument("--full", action="store_true", help="print every record's requests (default: every replacing record and "
+                   "every one with a note of its own; of the repeated ones the first few)")
     q.set_defaults(func=cmd_bundle_upload)
 
     q = bsub.add_parser("template", help="the ISAAC metadata template: export it, fill it once, import the answers")

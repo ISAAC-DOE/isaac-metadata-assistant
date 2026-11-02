@@ -17,7 +17,8 @@ fields (`blocks_groups`, `required_fields`; reaction drive and catalysis only on
 the record, `required_when`; a member an object the record carries requires, e.g. the electrolyte's
 `concentration_M` once its name is answered, with `required_because`); questions only about runs in no
 live group say `outside_live_groups` and are counted, not listed (`hidden_outside_live_groups`; add
-`--include-outside-live-groups` to list them, or ask `--scope run:<id>`); an optional value of such a run is asked in that run's own question,
+`--include-outside-live-groups` to list them, or ask `--scope run:<id>`); per-group questions that one beamtime
+question answers at once are counted, not listed (`answered_at_once`; add `--each-group` to list them); an optional value of such a run is asked in that run's own question,
 never inside the beamtime's or a live group's. A beamtime-wide conflict (no run named) counts every live group
 it reaches (`applies_to.beamtime_wide: true`, `groups` = `blocks_groups`).
 The reply also has
@@ -34,7 +35,9 @@ confirmed and its result approved); for a group with scans but no processing res
 `isaac process` first", and for one whose only results were rejected, "re-process it". It never names a group that cannot export while another exists: no
 ISAAC protocol covers its data, its result has no curve, none of its runs lists a scan (`no_scans`, the
 `cannot_export_reason` of `bundle list <bundle> groups`), or every run is a reference standard or alignment
-scan whose record needs a field nothing can hold (`not_a_measurement_run`). When only such groups are left, `blocked` says why
+scan whose record needs a field nothing can hold (`not_a_measurement_run`). No question counts as blocking for a
+group whose runs are all not measurement runs; `blocking_basis.record_composer.groups_that_cannot_export` names those
+groups once, with each one's `cannot_export_reason`. When only such groups are left, `blocked` says why
 in words and `plus_decisions` never says "approve its processing result" for them. `recommended[]` (never blocking, not counted) names a question
 worth answering for that group, with the warning that explains it (`warnings`): today, a potential the
 file names state that the record will not carry until its scale is confirmed. Pages hold at most 200 (`--limit` above that is refused). The older fine-grained list (`bundle list <bundle> questions`)
@@ -104,9 +107,31 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   `correct --value <…>`. Start times: the `#D` readings are local clock times with no zone and can never
   be recorded; `utc_readings` (also `utc_reading` hints) lists the UTC instants the bundle already holds
   for that run, each with its source (e.g. the `#E` epoch line). Show them as readings, ask which is the
-  start, and record `correct --value <the instant they choose>`; never pick it for them. A closed field
+  start, and record `correct --value <the instant they choose>`; never pick it for them. Many groups at once:
+  see the next item. A closed field
   (e.g. the technique read from macro names or Python helper lines): show `allowed_values` and record
   the one they name. When only some readings fit, `confirm` one of those.
+- **One answer for every group's start time** (`stated_utc_start_times`, experiment scope). A SPEC file
+  states in its header when the file was CREATED: `#E` (a UTC epoch) and `#D` (the same instant, a local
+  clock time with no zone). Each scan then writes its own `#D`, a little later. When these disagree in two
+  or more groups, this one question asks once. `#E` is the file's creation, not the first scan's start. The
+  question says the largest gap to the first scan (`largest_file_to_first_scan_s`, read on one clock) and
+  leaves out a run whose gap is above 10 minutes. Ask the scientist: "Use each file's creation instant (#E)
+  as the record's start? The first scan started at most N s later." Only on their yes:
+  `decide --question <Q> --decision confirm --by "<name>"` (no `--value`; `--only group:<id>` for one
+  group). Each run gets its own `#E` instant; nothing is shared between runs. Which instant a record's start
+  should be (file creation or first scan) is open for the protocol review (DEC-89): say so. The reply says
+  how many groups were recorded, which open groups it does not reach and why (`not_reached`, one entry per
+  group: no `#E` line, `#E` readings that disagree, a late first scan, or a group with two runs, where the
+  scientist says which run's start the record takes), and which groups keep an answer of their own. Answer
+  the groups it does not reach one by one. A record whose runs were given different starts carries none and
+  warns "start time left out: this group's runs were given different start times". While the question is
+  open, each start-time warning names it too.
+  The question is never asked for local clock times waiting on a clock zone (BL4-3; `clock_time_zone`).
+  `bundle questions` lists it and folds the per-group start-time questions it answers
+  (`answered_at_once`; `--each-group` lists them). Each per-group question keeps its id and stays
+  answerable: answer one to give that group another value. The Local Imports page does not show this
+  question yet; it asks per group.
 
 - **A confirm question states its value.** Its text says exactly what `confirm` records, with the unit
   the field's name fixes and the file text it was read from: "The files give `0.06` V (from: '060mV');
@@ -124,7 +149,9 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
 - **A cell named only in passing** ("What is the cell type? … The notes name a cell only in passing, in a
   sentence about something else: '…'"): a notes line that names a cell but is about something else gives no
   cell type. That is a to-do or reminder ("TODO: flow cell needs a gasket"), handling or storing it ("kept with
-  the flow cell", "rinse the flow cell"), or any line not shaped like a statement of the cell. The question quotes the line and asks; it offers no `confirm` and no
+  the flow cell", "rinse the flow cell"), or any line not shaped like a statement of the cell. The question quotes the line and asks. When one
+  line is behind many groups, only the first question quotes it; the others name that question, and each keeps the
+  line in its `file_literal` hint. Show the line once. It offers no `confirm` and no
   `--same-reading` batch. Ask "What cell was used for these runs?" per group (or in the template's Cell Type
   column) and record `correct --value <their answer>`. A record cites such a line as `context`, never as
   support. A line about the cell is read as before: a short header ("PEEK flow cell", "In situ flow cell,

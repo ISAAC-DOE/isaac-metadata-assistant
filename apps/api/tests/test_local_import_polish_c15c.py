@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 from isaac_api.local_import import mutations as M
 from isaac_api.local_import import questions as Q
@@ -49,6 +50,7 @@ def test_a_same_value_re_record_keeps_the_record_id_and_refreshes_only_the_sidec
     rid = first["record_id"]
     first_at = json.loads((out / R.EXPORT_INDEX).read_text())["records"][0]["exported_utc"]
     record, sidecar = (out / f"{rid}.json").read_bytes(), json.loads((out / f"{rid}.evidence.json").read_text())
+    time.sleep(1.05)  # r6h: the times below are to the second; without this a fast run wrote both in one second
     _rerecord_same_value(bdir)
     row = _export(bdir, out)
     assert row["record_id"] == rid and row["export"] == "unchanged" and row["evidence_refreshed"] is True

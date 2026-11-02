@@ -369,6 +369,32 @@ def unknown_field_reason(path: str, paths: Iterable[str], near: list[str]) -> st
     return reason + " Kept in the findings file only: fix field_path and load the file again."
 
 
+#: r6 I4: words a reading uses to say the files state NO value. Such a reading is no value: shown to the scientist it
+#: would read "An AI reading suggests 'not stated'", and propose-terms would draft it as a vocabulary term.
+NOTHING_STATED_READINGS = frozenset({
+    "not stated", "none stated", "nothing stated", "not given", "not specified", "unspecified", "not mentioned",
+    "not reported", "not recorded", "not found", "not available", "no value", "not in the files", "not in file",
+    "unknown", "n/a",
+})
+
+
+def nothing_stated_reason(value: Any, path: str | None) -> str | None:
+    """r6 I4: why an AI reading of ``value`` for ``path`` is not kept because it says the files state nothing, or
+    ``None``. A word off a field's list is kept (``propose-terms`` drafts it as a vocabulary request); a value on the
+    field's own list is kept, compared without case (r6 review L4: ``Unknown`` for a list holding ``unknown``)."""
+    if not isinstance(value, str):
+        return None
+    said = re.sub(r"[\s.]+", " ", value.casefold()).strip(" .")
+    if said not in NOTHING_STATED_READINGS:
+        return None
+    allowed = B.allowed_values(path) if path else None
+    if allowed and value.strip().casefold() in {str(a).casefold() for a in allowed}:
+        return None
+    return (f"{value!r} says the files state no value, so it is not recorded as a reading: it would be shown to the "
+            "scientist as an AI suggestion of a value. When the files state none, record nothing: the question stays "
+            "asked, and the scientist answers it. Say in your report that you found no statement of it.")
+
+
 def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id: str) -> dict:
     """Plan the AI interpretations for one findings file. Pure: writes nothing.
 
@@ -406,6 +432,10 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
         quote = f.get("quote")
         if not path or f.get("value") in (None, "") or not source.get("path") or not source.get("locator") or not quote:
             skipped.append({"finding": fid, "field_path": path, "reason": "a finding needs field_path, value, source.path, source.locator and quote"})
+            continue
+        if (nothing := nothing_stated_reason(f.get("value"), path)) is not None:
+            # r6 review M3: as `annotate --target` refuses it (mutations.nothing_stated_refusal), never a suggestion
+            skipped.append({"finding": fid, "field_path": path, "reason": nothing})
             continue
         absorber = path in ABSORBER_FIELDS
         path_note = ""

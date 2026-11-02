@@ -83,6 +83,11 @@ START_TIME_WARNING = "start_time_left_out"
 #: ``select_athena_version`` names (a version approved before another was chosen, or ISAAC's own result approved before
 #: a version was chosen): the record would carry a curve that is not the result of record. A warning, never a refusal.
 ATHENA_NOT_CHOSEN_WARNING = "athena_version_no_longer_chosen"
+#: r6h H2: a member run's ``macro_setpoint_disagrees`` conflict (a macro and the file name state other set-points for
+#: one measurement) is unanswered: the record goes out with the file's set-point (or none) while that is open.
+MACRO_SETPOINT_WARNING = "macro_setpoint_unanswered"
+#: r6h H3: an in-situ record carries no electrolyte, cell type or control mode (what it was measured in).
+IN_SITU_WARNING = "in_situ_conditions_not_in_record"
 START_TIME_LEFT_OUT = "start time left out: instrument clock zone deferred (question {question})"
 #: c16-r L6: the same, while the clock question has no answer at all (neither a zone nor a defer)
 START_TIME_LEFT_OUT_UNANSWERED = "start time left out: instrument clock zone not answered yet (question {question})"
@@ -90,6 +95,12 @@ START_TIME_LEFT_OUT_UNANSWERED = "start time left out: instrument clock zone not
 #: nobody has settled it: the UTC reading the files give is offered only inside that question
 START_TIME_LEFT_OUT_CONFLICT = ("start time left out: the start-time disagreement is unanswered (question {question}; it "
                                 "offers the UTC reading the files give, e.g. a scan's #E epoch)")
+#: r6 review L3: ...while the beamtime-wide start-time question (questions.STATED_UTC_START_QUESTION_ID) reaches it too
+START_TIME_LEFT_OUT_AT_ONCE = " Or answer every such group at once: question {beamtime}."
+#: r6 review M2: a record that carries no start time because its runs were given DIFFERENT start times (a merged group,
+#: each run its own): the composer fills nothing, and the record says so
+START_TIME_LEFT_OUT_DIFFER = ("start time left out: this group's runs were given different start times ({values}); say "
+                              "which run's start the record takes{question}")
 
 
 @functools.lru_cache(maxsize=512)
@@ -450,8 +461,10 @@ def composition_index(bundle: Mapping, decision_of: Mapping[tuple[str, str], Map
         "required_by_mode": {},
         # read from the WHOLE bundle here, never lazily inside compose_group: a group is composed from its own
         # values only, so a lazy read would keep the first group's view for every group
-        "memo": {"local_clock_runs": local_clock_runs(bundle), "open_start_conflicts": open_start_conflicts(bundle),
-                 "athena_choices": athena_choices(bundle)},
+        "memo": {"local_clock_runs": local_clock_runs(bundle), "open_start_conflicts": (opened := open_start_conflicts(bundle)),
+                 "athena_choices": athena_choices(bundle),
+                 # r6 review L3: which open start-time disagreements the beamtime-wide question reaches (whole bundle)
+                 "beamtime_start_reach": _beamtime_start_reach(bundle, opened) if opened else set()},
     }
 
 
@@ -966,6 +979,19 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
                 if subset:
                     generated_by["notes"] += " " + plain_record_note(subset, r.get("group_id"))
                     used["scan_selection"] = subset
+                tie = r.get("athena_match_tie") if isinstance(r.get("athena_match_tie"), Mapping) else None
+                if tie:
+                    # r6 review M1: an Athena curve the SCIENTIST tied to its group (params athena_match), not one its
+                    # name matched: said in the record (the project's file name only) and the params file that records
+                    # the tie is evidence (sidecar)
+                    tied_in = PurePosixPath(str(tie.get("project") or "")).name or "its project"
+                    generated_by["notes"] += (f" The scientist tied Athena group '{tie.get('athena_label') or tie.get('athena_group')}'"
+                                              f" in {tied_in} to this group by their params file (athena_match); its "
+                                              "name is not the group's scan name.")
+                    if tie.get("params_file"):
+                        evidence.append({"source_type": "document", "source_file": tie["params_file"],
+                                         "locator": "athena_match",
+                                         "quote": f"{tie.get('project')} / {tie.get('athena_group')}"})
                 if ref.get("relative_path"):
                     named = groups or ([str(ref["athena_group"])] if ref.get("athena_group") else [])
                     evidence.append({"source_type": "document", "source_file": ref["relative_path"],
@@ -1120,12 +1146,19 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
     # (questions._companions_missing, the same entry and why). Appended last, so the questions read the same list.
     report["missing_required"] += Q._companions_missing(report)
 
+    # r6h H2: the control mode the record carries (``questions`` says a set-point's why from it); nothing is read here
+    report["control_mode"] = (fields[B.CONTROL_MODE_PATH].get("value") if _present(fields, B.CONTROL_MODE_PATH) is not None
+                              else None)
     # the conditions a run's names or headers state, of the MEASUREMENT runs only (a context run is asked nothing)
     report["warnings"] = (_stated_potential_warnings(bundle, group, measured_ids, fields, proposals,
                                                      held_by_scale=held_by_companion.get(SETPOINT_PATH, (None,))[0] == SCALE_PATH)
                           + _potential_sources_warnings(bundle, group, measured_ids, fields)
+                          + _macro_setpoint_warnings(bundle, group, measured_ids, fields, index["memo"])
                           + Q.open_circuit_warnings(bundle, group, measured_ids, fields)
-                          + _start_time_warnings(bundle, group, measured_ids, fields, index["memo"]))
+                          + _in_situ_warnings(bundle, group, [r for r in member_runs if r["run_id"] in measured_ids], fields,
+                                              index["memo"])
+                          + _start_time_warnings(bundle, group, measured_ids, fields, index["memo"],
+                                                 disagreements=report["disagreements"]))
     if chose_other is not None:
         # r5c C1: the record carries an approved result that is not the version the scientist chose last: said at
         # build-records, validate and export (on the record's row), never silent
@@ -1442,7 +1475,7 @@ def local_clock_runs(bundle: Mapping) -> set[str]:
 
 
 def _start_time_warnings(bundle: Mapping, group: Mapping, member_ids: set, fields: Mapping,
-                         memo: dict | None = None) -> list[dict]:
+                         memo: dict | None = None, disagreements: Sequence[Mapping] = ()) -> list[dict]:
     """A :data:`START_TIME_WARNING` for a record that carries no start time while a member run's scan headers write
     one (``bundle.XDC_START_RULE_ID``) and the latest answer to the clock question is ``defer``: the record goes out
     without it, and says so. c16-r L6: so does one while the clock question has no answer yet (no zone, no defer),
@@ -1453,6 +1486,9 @@ def _start_time_warnings(bundle: Mapping, group: Mapping, member_ids: set, field
     if _present(fields, B.XDC_START_PATH) is not None:
         return []
     memo = {} if memo is None else memo
+    differ = next((d for d in disagreements if d.get("path") == B.XDC_START_PATH), None)
+    if differ is not None:
+        return _start_time_differ_warnings(bundle, group, member_ids, differ)
     if "local_clock_runs" not in memo:  # r4-c: read once per composition, never once per group
         memo["local_clock_runs"] = local_clock_runs(bundle)
     if not memo["local_clock_runs"] & set(member_ids):
@@ -1467,6 +1503,36 @@ def _start_time_warnings(bundle: Mapping, group: Mapping, member_ids: set, field
     return [{"code": START_TIME_WARNING, "group_id": group["group_id"], "path": B.XDC_START_PATH,
              "needs": B.XDC_START_PATH, "targets": [], "question_id": Q.CLOCK_QUESTION_ID, "text": text,
              "command": B.CLOCK_ZONE_COMMAND, **({"unanswered": True} if unanswered else {})}]
+
+
+def _start_time_differ_warnings(bundle: Mapping, group: Mapping, member_ids: set, differ: Mapping) -> list[dict]:
+    """r6 review M2: a :data:`START_TIME_WARNING` for a record whose runs were given different start times (the
+    composer's disagreement: it fills nothing), named by the group's first start-time question when it has one."""
+    from . import questions as Q
+
+    start = {c["candidate_id"] for c in bundle.get("candidates") or () if c.get("target_field_path") == B.XDC_START_PATH}
+    cf = next((cf for cf in bundle.get("conflicts") or () if cf.get("run_ids") and cf["run_ids"][0] in member_ids
+               and (cf.get("candidate_id") or "") in start), None)
+    qid = Q._qid(f"group:{group['group_id']}", "resolve_conflict", cf["conflict_id"]) if cf is not None else None
+    values = list(dict.fromkeys(str(v) for v in differ.get("values") or ()))
+    w = {"code": START_TIME_WARNING, "group_id": group["group_id"], "path": B.XDC_START_PATH,
+         "needs": B.XDC_START_PATH, "targets": list(differ.get("from") or ()), "question_id": qid, "differ": True,
+         "values": values[:5]}
+    if qid:
+        w["command"] = f"isaac bundle show question <bundle_dir> {qid}"
+    return [{**w, "text": start_time_text(w)}]
+
+
+def start_time_text(w: Mapping) -> str:
+    """The plain sentence of a :data:`START_TIME_WARNING` (each of its cases)."""
+    if w.get("differ"):
+        return START_TIME_LEFT_OUT_DIFFER.format(values=", ".join(w.get("values") or ()),
+                                                 question=f" (question {w['question_id']})" if w.get("question_id") else "")
+    text = (START_TIME_LEFT_OUT_CONFLICT if w.get("conflict") else START_TIME_LEFT_OUT_UNANSWERED if w.get("unanswered")
+            else START_TIME_LEFT_OUT).format(question=w["question_id"])
+    if w.get("beamtime_question_id"):
+        text += START_TIME_LEFT_OUT_AT_ONCE.format(beamtime=w["beamtime_question_id"])
+    return text
 
 
 def open_start_conflicts(bundle: Mapping) -> list[Mapping]:
@@ -1490,11 +1556,174 @@ def _start_time_conflict_warnings(bundle: Mapping, group: Mapping, member_ids: s
     for cf in memo["open_start_conflicts"]:
         if cf["run_ids"][0] in member_ids:
             qid = Q._qid(f"group:{group['group_id']}", "resolve_conflict", cf["conflict_id"])
-            return [{"code": START_TIME_WARNING, "group_id": group["group_id"], "path": B.XDC_START_PATH,
-                     "needs": B.XDC_START_PATH, "targets": [cf["conflict_id"]], "question_id": qid,
-                     "text": START_TIME_LEFT_OUT_CONFLICT.format(question=qid), "conflict": True,
-                     "command": f"isaac bundle show question <bundle_dir> {qid}"}]
+            if "beamtime_start_reach" not in memo:
+                memo["beamtime_start_reach"] = _beamtime_start_reach(bundle, memo["open_start_conflicts"])
+            w = {"code": START_TIME_WARNING, "group_id": group["group_id"], "path": B.XDC_START_PATH,
+                 "needs": B.XDC_START_PATH, "targets": [cf["conflict_id"]], "question_id": qid, "conflict": True,
+                 "command": f"isaac bundle show question <bundle_dir> {qid}",
+                 **({"beamtime_question_id": Q.STATED_UTC_START_QUESTION_ID}
+                    if cf["conflict_id"] in memo["beamtime_start_reach"] else {})}
+            return [{**w, "text": start_time_text(w)}]
     return []
+
+
+def _macro_setpoint_warnings(bundle: Mapping, group: Mapping, member_ids: set, fields: Mapping,
+                             memo: dict | None = None) -> list[dict]:
+    """r6h H2: a :data:`MACRO_SETPOINT_WARNING` (never a refusal) for a record whose member run has an OPEN
+    ``macro_setpoint_disagrees`` conflict (a macro names the measurement with another set-point than its file name):
+    the record carries whatever set-point the run's own answers give (or none), while which one is right is the
+    scientist's open question. Said at build-records, validate and export until the conflict's own question is
+    answered; no value is read from either side here. ``memo``: the composition index's, so the open conflicts are
+    found once per bundle, not once per group."""
+    from . import questions as Q
+
+    memo = {} if memo is None else memo
+    if "open_macro_conflicts" not in memo:
+        memo["open_macro_conflicts"] = [
+            cf for cf in bundle.get("conflicts") or () if cf.get("kind") == B.MACRO_SETPOINT_CONFLICT_KIND
+            and cf.get("run_ids") and cf.get("value_state") in (B.STATE_CONFLICTING, B.STATE_NEEDS_REVIEW)]
+    out = []
+    carried = (fields.get(SETPOINT_PATH) or {}).get("value") if _present(fields, SETPOINT_PATH) is not None else None
+    for cf in memo["open_macro_conflicts"]:
+        if cf["run_ids"][0] not in member_ids or len(cf.get("readings") or ()) < 2:
+            continue
+        qid = Q._qid(f"group:{group['group_id']}", "resolve_conflict", cf["conflict_id"])
+        file_r, macro_r = cf["readings"][0], cf["readings"][1]
+        out.append({"code": MACRO_SETPOINT_WARNING, "group_id": group["group_id"], "path": SETPOINT_PATH,
+                    "needs": SETPOINT_PATH, "targets": [], "conflict_id": cf["conflict_id"], "run_id": cf["run_ids"][0],
+                    "question_id": qid, "file_name_V": file_r.get("value"), "macro_V": macro_r.get("value"),
+                    "file_name": ((file_r.get("witnesses") or [{}])[0] or {}).get("relative_path"),
+                    "macro": ((macro_r.get("witnesses") or [{}])[0] or {}).get("relative_path"), "carried_V": carried,
+                    "command": (f"isaac bundle decide <bundle_dir> --question {qid} --decision confirm --value "
+                                f"<{file_r.get('value')} or {macro_r.get('value')}> --json --by \"<your name>\"")})
+    return [{**w, "text": macro_setpoint_text(w)} for w in out]
+
+
+def macro_setpoint_text(w: Mapping) -> str:
+    """The plain sentence for a :data:`MACRO_SETPOINT_WARNING`, ending with its command (a template: the scientist's
+    answer is the value)."""
+    carried = w.get("carried_V")
+    now = (f"the record carries {_said(carried, SETPOINT_PATH)} now" if isinstance(carried, (int, float))
+           and not isinstance(carried, bool) else "the record carries no set-point now")
+    return (f"the macro {w.get('macro')} states {w.get('macro_V')} V for this "
+            f"measurement and the file name {w.get('file_name')} states {w.get('file_name_V')} V; {now}, and which one is "
+            f"right is unanswered (question {w['question_id']}). Ask the scientist, then: {w['command']}")
+
+
+#: r6h H3: what an in-situ record is measured IN, with the words a sentence names each by.
+IN_SITU_FIELDS = (("context.electrochemistry.electrolyte.name", "electrolyte"),
+                  ("context.electrochemistry.cell_type", "cell type"),
+                  (B.CONTROL_MODE_PATH, "control mode"))
+IN_SITU_PH = ("context.electrochemistry.pH", "pH")
+#: r6h review LOW 2: the environments a measurement is done IN (``operando`` too).
+IN_SITU_ENVIRONMENTS = ("in_situ", "operando")
+#: A file-name token that STATES an in-situ condition: a concentration written onto its electrolyte (``10MNaOH``,
+#: ``100mMHClO4``: the formula checked by ``template.electrolyte_formula``), a pH (``pH12``) or open circuit (``OCV``).
+#: Quoted in the warning only; never read as a value.
+_IN_SITU_NAME_TOKENS = (re.compile(r"\d+(?:[p.]\d+)?(?:mM|uM|\u00b5M|M)(?P<formula>[A-Z][A-Za-z0-9()]{2,})"),
+                        re.compile(r"pH\d+(?:[p.]\d+)?", re.IGNORECASE), re.compile(r"OC[VP]", re.IGNORECASE))
+
+
+def _in_situ_statements(member_runs: Sequence[Mapping]) -> list[dict]:
+    """Each in-situ condition a member run's FILE NAME states (:data:`_IN_SITU_NAME_TOKENS`), once per literal, in run
+    order: ``{literal, relative_path, run_id}``. Quoted only."""
+    from . import questions as Q
+    from .template import electrolyte_formula
+
+    out, seen = [], set()
+    for r in member_runs:
+        first = next((sc.get("relative_path") for sc in r.get("scans") or () if sc.get("relative_path")), None) or r.get("stem")
+        for tok in Q._name_tokens(r):
+            m = next((m for p in _IN_SITU_NAME_TOKENS if (m := p.fullmatch(tok))), None)
+            if m is None or tok in seen or ("formula" in m.groupdict() and not electrolyte_formula(m.group("formula"))):
+                continue
+            seen.add(tok)
+            out.append({"literal": tok, "relative_path": first, "run_id": r["run_id"]})
+    return out
+
+
+def _in_situ_warnings(bundle: Mapping, group: Mapping, member_runs: Sequence[Mapping], fields: Mapping,
+                      memo: dict | None = None) -> list[dict]:
+    """r6h H3: an :data:`IN_SITU_WARNING` (never a refusal) for a record whose confirmed environment is ``in_situ`` or
+    ``operando``, of an electrochemical measurement (an electrochemistry field, or a file name stating a condition or a
+    potential), while it carries no electrolyte, cell type or control mode (any of :data:`IN_SITU_FIELDS`; its pH is named too
+    when it carries none): what the measurement was done in would be silently absent. It quotes what the member runs'
+    file names state (``10MNaOH``), never reads a value from them, and names, per field, the open targets whose
+    question asks it (``fields``: ``{path, targets, command}``; ``records.with_question_commands`` makes each command
+    the question's, and the questions' minimum recommends them). ``memo``: the open targets per run and field, read
+    once per composition."""
+    env = _present(fields, "context.environment")
+    if env is None or env.get("value") not in IN_SITU_ENVIRONMENTS:
+        return []
+    lacking = [(p, word) for p, word in IN_SITU_FIELDS if _present(fields, p) is None]
+    if not lacking:
+        return []
+    # r6h review LOW 2: only for an ELECTROCHEMICAL measurement: the record carries an electrochemistry field, or a
+    # member run's file name states a condition or a potential (an in-situ gas or heating cell asks none of these)
+    from . import questions as Q
+
+    stated = _in_situ_statements(member_runs)
+    if not (stated or any(k.startswith("context.electrochemistry.") and _present(fields, k) is not None for k in fields)
+            or any(_POTENTIAL_TOKEN.match(t) for r in member_runs for t in Q._name_tokens(r))):
+        return []
+    if _present(fields, IN_SITU_PH[0]) is None:
+        lacking.append(IN_SITU_PH)
+    memo = {} if memo is None else memo
+    cands, missing = bundle.get("candidates") or [], bundle.get("missing_values") or []
+    held = memo.get("in_situ_open_targets")
+    # read once per LIST composed from: the whole bundle (validate, export) once; questions.compositions' per-group
+    # view (only its members' rows) once per group. The lists are kept with the index, so an identity is never reused.
+    if held is None or held[0] is not cands or held[1] is not missing:
+        wanted = {p for p, _ in IN_SITU_FIELDS} | {IN_SITU_PH[0]}
+        by: dict[tuple, list[str]] = {}
+        for o in [*cands, *missing]:
+            if o.get("target_field_path") in wanted and o.get("value_state") in (
+                    B.STATE_MISSING, B.STATE_NEEDS_REVIEW, B.STATE_CANDIDATE_EXTRACTED):
+                by.setdefault((o.get("run_id"), o["target_field_path"]), []).append(o.get("candidate_id") or o.get("value_id"))
+        held = memo["in_situ_open_targets"] = (cands, missing, by)
+    by = held[2]
+    rids = [r["run_id"] for r in member_runs]
+    each = []
+    for path, word in lacking:
+        targets = [t for rid in [*rids, None] for t in by.get((rid, path), ())]
+        each.append({"path": path, "word": word, "targets": targets,
+                     "command": f"isaac bundle questions <bundle_dir> --scope group:{group['group_id']}   # answer {path} there"})
+    w = {"code": IN_SITU_WARNING, "group_id": group["group_id"], "path": lacking[0][0], "needs": lacking[0][0],
+         "targets": each[0]["targets"], "command": each[0]["command"], "fields": each,
+         "stated": stated, "environment": env.get("value")}
+    return [{**w, "text": in_situ_text(w)}]
+
+
+def in_situ_text(w: Mapping) -> str:
+    """The plain sentence for an :data:`IN_SITU_WARNING`, ending with the command(s) that ask each field."""
+    words = [f["word"] for f in w.get("fields") or ()]
+    named = ", ".join(words[:-1]) + f" or {words[-1]}" if len(words) > 1 else (words[0] if words else "")
+    stated = w.get("stated") or ()
+    said = ("; the file names state " + ", ".join(f"{s['literal']} ({s['relative_path']})" for s in stated[:3])
+            + (f" and {len(stated) - 3} more" if len(stated) > 3 else "") + " (quoted, never read as a value)"
+            if stated else "; no file name states them")
+    # each question once, with the fields it asks here (the commands differ only in --field), then the first command
+    asked: dict[str, list[str]] = {}
+    for f in w.get("fields") or ():
+        m = re.search(r"--question (Q-[0-9a-f]+)", f["command"])
+        asked.setdefault(m.group(1) if m else f["command"], []).append(f["word"])
+    where = "; ".join(f"question {k} ({', '.join(v)})" if k.startswith("Q-") else f"{', '.join(v)}: {k}"
+                      for k, v in asked.items())
+    first = (w.get("fields") or [{}])[0].get("command") or w.get("command")
+    kind = "an operando" if w.get("environment") == "operando" else "an in-situ"
+    return (f"{kind} record that carries no {named}: what it was measured in would be absent from the record{said}. "
+            f"Ask the scientist ({where}), e.g. {first}")
+
+
+def _beamtime_start_reach(bundle: Mapping, open_conflicts: Sequence[Mapping]) -> set[str]:
+    """r6 review L3: the OPEN start-time disagreements the beamtime-wide start-time question reaches while it is asked
+    (``questions.stated_utc_reach``, two or more groups), else none: a warning on one of them names that question too."""
+    from . import questions as Q
+
+    reach = Q.stated_utc_reach(bundle)
+    open_ids = {cf["conflict_id"] for cf in open_conflicts}
+    reached = {cid: r["group_id"] for cid, r in reach.items() if cid in open_ids and r["reading"] is not None}
+    return set(reached) if len(set(reached.values())) >= Q._STATED_UTC_MIN_GROUPS else set()
 
 
 def potential_sources_text(w: Mapping) -> str:
@@ -1575,11 +1804,14 @@ def potential_warning_text(w: Mapping) -> str:
 
     if w.get("code") == POTENTIAL_SOURCES_WARNING:
         return potential_sources_text(w)
+    if w.get("code") == MACRO_SETPOINT_WARNING:
+        return macro_setpoint_text(w)
+    if w.get("code") == IN_SITU_WARNING:
+        return in_situ_text(w)
     if w.get("code") == ATHENA_NOT_CHOSEN_WARNING:
         return athena_choice_text(w, w["group_id"])
     if w.get("code") == START_TIME_WARNING:
-        return (START_TIME_LEFT_OUT_CONFLICT if w.get("conflict") else START_TIME_LEFT_OUT_UNANSWERED if w.get("unanswered")
-                else START_TIME_LEFT_OUT).format(question=w["question_id"])
+        return start_time_text(w)
     if w.get("open_circuit"):
         return Q.open_circuit_text(w)
     extra = Q.stated_potential_notes(w)
@@ -1620,6 +1852,10 @@ def with_question_commands(bundle: Mapping, warnings: list[dict], payload: Mappi
     for w in warnings:
         cmd = Q.command_for_targets(payload, w.get("targets") or (), w["needs"], w["group_id"]) or w["command"]
         w = {**w, "command": cmd}
+        if w.get("fields"):
+            # r6h H3: one command per field the warning names (an in-situ record's electrolyte, cell type, ...)
+            w["fields"] = [{**f, "command": Q.command_for_targets(payload, f.get("targets") or (), f["path"], w["group_id"])
+                            or f["command"]} for f in w["fields"]]
         if w.get("also_needs"):
             w["also_command"] = (Q.command_for_targets(payload, w.get("also_targets") or (), w["also_needs"], w["group_id"])
                                  or w["also_command"])
@@ -2183,10 +2419,12 @@ WARNINGS_SHOWN = 5
 
 def warning_rank(code: str | None) -> int:
     """r5f M6: how much a warning matters when only the first few are printed: 0 = a stated value left out of the
-    record, or a value its sources disagree about, or a portal warning; 1 = anything else; 2 = the routine start-time
-    note. Only ORDERS the short list: nothing is dropped, and ``--full`` keeps the original order."""
+    record, or a value its sources disagree about (r6h H2: a macro's set-point too), or a portal warning; 1 = anything
+    else; 2 = the routine start-time note. Only ORDERS the short list: nothing is dropped, and ``--full`` keeps the
+    original order."""
     code = str(code or "")
-    if code in (STATED_POTENTIAL_WARNING, POTENTIAL_SOURCES_WARNING, ATHENA_NOT_CHOSEN_WARNING) or code.startswith("portal:"):
+    if code in (STATED_POTENTIAL_WARNING, POTENTIAL_SOURCES_WARNING, ATHENA_NOT_CHOSEN_WARNING,
+                MACRO_SETPOINT_WARNING) or code.startswith("portal:"):
         return 0
     return 2 if code == START_TIME_WARNING else 1
 
@@ -2305,6 +2543,10 @@ def written_without(w: Mapping) -> str:
         return f"Written with a potential its files disagree about: {w['text']}"
     if w.get("code") == START_TIME_WARNING:
         return f"Written without the start time: {w['text']}"
+    if w.get("code") == MACRO_SETPOINT_WARNING:
+        return f"Written with a set-point its macro disagrees about: {w['text']}"
+    if w.get("code") == IN_SITU_WARNING:
+        return f"Written without what it was measured in: {w['text']}"
     if w.get("code") == ATHENA_NOT_CHOSEN_WARNING:
         return f"Written with an approved curve that is not the chosen Athena version: {w['text']}"
     name = WRITTEN_WITHOUT_NAMES.get(w.get("path"), w.get("path") or "a stated condition")
@@ -2910,6 +3152,8 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         result["outcome"] += (" The portal validator warned on the records ready: "
                               + "; ".join(f"{w['code']} ({w['records']} record(s))" for w in result["portal_warnings"])
                               + " (`portal_warnings`).")
+    name_partial_groups([r["group_id"] for r in exported], said_each_record, result.get("warnings_by_text") or [],
+                        portal_warned, result.get("portal_warnings") or [])
     if not exported:
         # SAID PLAINLY: with nothing written there is nothing for `upload --dry-run` to show
         result["statement"] = (
@@ -2917,6 +3161,23 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
              f"Nothing was exported by this run; `upload --dry-run` on {out} lists only records an earlier export left there.")
             + " `isaac bundle validate <bundle_dir>` says what each group still needs.")
     return result
+
+
+def name_partial_groups(group_ids: Sequence[str], said_each_record: Sequence[Sequence[str]], by_text: list[dict],
+                        portal_warned: Mapping[str, Sequence[Mapping]], portal_rows: list[dict]) -> None:
+    """r6h review LOW 1: a warning on SOME of the ready records (not all) names EVERY one of their groups
+    (``group_ids``), in ``warnings_by_text`` and ``portal_warnings`` alike: the default ``export`` reply lists only the
+    first few repeated rows, so a count alone would not say which records lack the condition. ``group_ids`` and
+    ``said_each_record``: the exported rows' groups and their warning texts, in the same order."""
+    n = len(group_ids)
+    for row in by_text:
+        if row["records"] < n:
+            row["group_ids"] = [g for g, texts in zip(group_ids, said_each_record)
+                                if row["text"] in {_QUESTION_ID_IN_TEXT.sub("<question id>", str(t)) for t in texts}]
+    for row in portal_rows:
+        if row["records"] < n:
+            row["group_ids"] = [g for g, ws in portal_warned.items()
+                                if any((w["code"], w["message"]) == (row["code"], row["message"]) for w in ws)]
 
 
 def export_outcome(written: int, refused: int, withdrawn: int, out: Path, *, warned: int = 0, unchanged: int = 0,

@@ -287,12 +287,53 @@ def scan_exclusions(overrides: Mapping | None) -> dict[str, list[str]]:
     return out
 
 
+#: r6 G1: the params-file section in which the SCIENTIST names an Athena group as a record group's own, by its project
+#: and Athena group, ``{"athena_match": {"<group id>": [{"project": "<relative path or file name>", "athena_group":
+#: "<Athena group name or label>"}]}}``. For a merge of theirs whose name matches no group (``athena.unmatched_merges``):
+#: ISAAC never ties one by a near name. Kept OUT of the resolved params like :data:`EXCLUDE_SCANS_SECTION` (no other
+#: result id moves); only a group it names records it (``params.json`` ``athena_match``).
+ATHENA_MATCH_SECTION = "athena_match"
+#: review LOW 4: the scientist's "no": the same shape, naming an Athena group that is NOT that record group's. It only
+#: stops the near-name hint (and its question) for that group; nothing is matched, no curve or id changes.
+ATHENA_MATCH_NOT_SECTION = "athena_match_not"
+
+
+def athena_match_ties(overrides: Mapping | None, section: str = ATHENA_MATCH_SECTION) -> dict[str, list[dict]]:
+    """``{group_id: [{"project", "athena_group"}, ...]}`` from a params file's :data:`ATHENA_MATCH_SECTION` (or
+    ``section``, e.g. :data:`ATHENA_MATCH_NOT_SECTION`; ``{}`` when absent). Refused (``ValueError``) when it is not
+    that shape, as an unknown parameter is."""
+    raw = (overrides or {}).get(section) if isinstance(overrides, Mapping) else None
+    if raw is None:
+        return {}
+    shape = (f'{section} must be {{"<group id>": [{{"project": "<project file>", '
+             '"athena_group": "<Athena group or label>"}, ...]}')
+    if not isinstance(raw, Mapping):
+        raise ValueError(shape)
+    out: dict[str, list[dict]] = {}
+    for gid, items in raw.items():
+        items = [items] if isinstance(items, Mapping) else items
+        ok = isinstance(items, (list, tuple)) and items and all(
+            isinstance(i, Mapping) and set(i) == {"project", "athena_group"}
+            and all(isinstance(i[k], str) and i[k].strip() for k in i) for i in items)
+        if not ok:
+            raise ValueError(f"{shape}; {gid!r} names {items!r}")
+        out[str(gid)] = [{"project": i["project"].strip(), "athena_group": i["athena_group"].strip()} for i in items]
+    return out
+
+
+#: the params-file sections read apart from the protocol's parameters (never in the resolved params)
+_APART_SECTIONS = (EXCLUDE_SCANS_SECTION, ATHENA_MATCH_SECTION, ATHENA_MATCH_NOT_SECTION)
+
+
 def resolve_params(overrides: Mapping | None = None) -> dict:
     """DEFAULT_PARAMS with ``overrides`` (``{section: {key: value}}``) applied. Unknown keys refused. The
-    :data:`EXCLUDE_SCANS_SECTION` is checked and left out (:func:`scan_exclusions` reads it)."""
+    :data:`EXCLUDE_SCANS_SECTION` and :data:`ATHENA_MATCH_SECTION` are checked and left out (:func:`scan_exclusions`
+    and :func:`athena_match_ties` read them)."""
     params = copy.deepcopy(DEFAULT_PARAMS)
     scan_exclusions(overrides)
-    overrides = {k: v for k, v in copy.deepcopy(dict(overrides or {})).items() if k != EXCLUDE_SCANS_SECTION}
+    athena_match_ties(overrides)
+    athena_match_ties(overrides, ATHENA_MATCH_NOT_SECTION)
+    overrides = {k: v for k, v in copy.deepcopy(dict(overrides or {})).items() if k not in _APART_SECTIONS}
     cal = overrides.get("calibration")
     if isinstance(cal, Mapping) and "confirmed_reference" in cal:
         # v0 name. A params file cannot confirm anything: it is read as a PROPOSAL.
