@@ -4613,7 +4613,8 @@ def process(
 
 def decided_results_with_a_new_all_zero_skip(bundle: Mapping, keep: Sequence[Mapping], fresh: Sequence[Mapping]) -> list[dict]:
     """c11-r: one line per DECIDED ISAAC result kept as it was whose group's fresh result (this build) now leaves out a
-    scan the decided one merged, because its signal is zero at every point (``signal_all_zero``). The fresh curve has
+    scan the decided one merged, because its signal is zero at every point (``signal_all_zero``) or (r5 A5) it is an
+    aborted fragment (``aborted_scan_fragment``). The fresh curve has
     a new id; the decision still stands on the old id until the scientist changes it. ``[]`` when there is none."""
     decisions = B.processing_state_decisions(bundle)
     out = []
@@ -4629,15 +4630,21 @@ def decided_results_with_a_new_all_zero_skip(bundle: Mapping, keep: Sequence[Map
             if new.get("group_id") != old.get("group_id") or new.get("source") != "isaac_protocol":
                 continue
             left = [i for i in new.get("inputs") or ()
-                    if i.get("skip_reason") == C_SIGNAL_ALL_ZERO and i.get("source_id") in merged]
+                    if i.get("skip_reason") in _NEW_SKIPS and i.get("source_id") in merged]
             if not left:
                 continue
             nid = B.processing_id(new)
-            names = ", ".join(PurePosixPath(str(i.get("relative_path") or i.get("source_id"))).name for i in left)
+            # r5 A5: a stopped (aborted) scan fragment left out is said the same way, in its own words
+            whys = []
+            for reason, (one, several) in _NEW_SKIPS.items():
+                named = [PurePosixPath(str(i.get("relative_path") or i.get("source_id"))).name for i in left
+                         if i.get("skip_reason") == reason]
+                if named:
+                    whys.append(f"{', '.join(named)}, {one if len(named) == 1 else several}")
             what = d.get("decision")
             stands = "The old approval still stands" if what == "approve" else f"The earlier decision ({what}) still stands"
             said = (f"Group {old.get('group_id')}: {pid} ({what} by {(d.get('decided_by') or {}).get('name')}) merged "
-                    f"{names}, whose signal is zero at every point; this build leaves {'it' if len(left) == 1 else 'them'} "
+                    f"{'; and '.join(whys)}; this build leaves {'it' if len(left) == 1 else 'them'} "
                     f"out, so the fresh curve is a new result, {nid}. The scientist can approve the new curve "
                     f'(`isaac bundle decide <bundle_dir> --target {nid} --decision approve --qc-status <value> --by '
                     f'"<your name>"`). {stands} on {pid} until they change it.')
@@ -4648,6 +4655,12 @@ def decided_results_with_a_new_all_zero_skip(bundle: Mapping, keep: Sequence[Map
 
 #: ``processing.core.SIGNAL_ALL_ZERO`` (not imported: processing is an optional extra).
 C_SIGNAL_ALL_ZERO = "signal_all_zero"
+#: ``processing.run.FRAGMENT_REASON`` (r5 A5; not imported, as above).
+C_ABORTED_FRAGMENT = "aborted_scan_fragment"
+#: the skip reasons a fresh build gives a scan a decided result merged, and how each is said
+_NEW_SKIPS = {C_SIGNAL_ALL_ZERO: ("whose signal is zero at every point", "whose signal is zero at every point"),
+              C_ABORTED_FRAGMENT: ("a scan that stopped after too few points to merge (an aborted fragment)",
+                                   "scans that stopped after too few points to merge (aborted fragments)")}
 
 
 def _say_athena_choice_not_carried_over(result: dict, decision: Mapping) -> None:
@@ -4767,7 +4780,7 @@ def calibration_shift_said(bundle: Mapping, group_id: str, element: str, edge: s
     # c12-r (REF.STRICTER_ONLY_RULE_ID): never a params file's higher warning level
     warn = REF.effective_warn_eV(((qc or {}).get("params") or {}).get("warn_energy_shift_eV") or warn)
     w = REF.would_apply(cal, element, edge, warn_eV=warn, accepted=accepted)  # r3 L8: a confirmed size is said as such
-    if not REF.reading(cal)["reference_proposed"]:
+    if not REF.reading(cal)["reference_edge_usable"]:  # r5 A7: a disagreeing one is approvable with --accept-shift
         # c12-r: a DECIDED result approved under an older build may carry a shift from this reference: confirming
         # its exact size (--accept-shift) is the scientist keeping that curve; nothing else can be approved
         carried = _carried_shifts(bundle, group_id, warn)

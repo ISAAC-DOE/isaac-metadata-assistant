@@ -44,6 +44,7 @@ RULE_VERSIONS_SINCE_PROTOCOL_VERSION: dict[str, Any] = {
         "isaac.xas.reference_edges_agree.v0",
         "isaac.xas.reference_noise_not_degenerate.v0",
         "isaac.xas.reference_not_at_sample_e0.v0",
+        "isaac.xas.skip_aborted_scan_fragment.v0",
         "isaac.xas.skip_signal_all_zero.v0",
         "isaac.xas.stored_normalized_plausible.v0",
         "isaac.xas.zero_signal_runs.v0",

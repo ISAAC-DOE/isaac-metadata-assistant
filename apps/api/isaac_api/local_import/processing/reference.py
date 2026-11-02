@@ -215,7 +215,9 @@ def near_sample(outcome: Mapping, measured: float | None) -> float | None:
 
 
 def _degenerate_sentence(k: int) -> str:
-    return (f"{_n(k, 'scan')}' reference {'channel has' if k == 1 else 'channels have'} an edge step more than "
+    # r5 A7: "1 scan's", "2 scans'" (was "1 scan' reference channel")
+    whose = "1 scan's" if k == 1 else f"{k} scans'"
+    return (f"{whose} reference {'channel has' if k == 1 else 'channels have'} an edge step more than "
             f"{MAX_PLAUSIBLE_EDGE_SNR:,.0f} times {'its' if k == 1 else 'their'} pre-edge noise: that noise is about zero, "
             "a channel that is constant or not counting, not a measured edge, so "
             f"{'it is' if k == 1 else 'they are'} not counted as usable. ")
@@ -416,7 +418,8 @@ def _confirmed(outcome: Mapping) -> bool:
 def reading(step: Mapping) -> dict:
     """The reference a calibration step read: ``reference_source``, ``reference_scans_usable`` / ``_listed``,
     ``measured_reference_e0_eV`` (median of the usable scans), ``reference_e0_spread_eV`` (null with fewer than two
-    usable scans: one scan has no spread), ``reference_proposed`` (a usable reference edge was read),
+    usable scans: one scan has no spread), ``reference_proposed`` (a usable reference edge was read in enough scans and,
+    r5 A7, the usable edges agree), ``reference_edge_usable`` (the same, whether or not they agree),
     ``calibration_proposed`` (ISAAC offers it as the energy calibration: a group's own edge only when its names clearly
     say one pure element, and even then it is applied only with ``--accept-shift``, :data:`CALIBRANT_RULE_ID`) and
     ``reference_statement`` (one plain sentence)."""
@@ -460,7 +463,8 @@ def reading(step: Mapping) -> dict:
             said += " " + own_signal_sentence(calibrant, _hinted_shift(o, calibrant, measured))
             if calibrant.get("read_from"):
                 said += " Names read: " + ", ".join(f"'{t}'" for t in calibrant["read_from"]) + "."
-        else:
+        elif not j["disagree"]:
+            # r5 A7: never beside the spread sentence, which says ISAAC does not propose it as the reference
             said += " Naming its element and edge gives the shift: the tabulated edge minus this energy."
         if sample is not None:
             said += _near_sample_sentence(measured, sample)
@@ -482,7 +486,13 @@ def reading(step: Mapping) -> dict:
         # a usable reference edge was read (approve_calibration is possible); calibration_proposed says whether ISAAC
         # offers it as the energy calibration (CALIBRANT_RULE_ID: a group's own edge only when its names clearly say a
         # pure element, never a compound, a mixture or an unknown; applying it needs --accept-shift either way)
-        "reference_proposed": proposed,
+        # r5 A7: NOT proposed when the usable edges disagree (SPREAD_RULE_ID): the agent asks for an element and edge
+        # whenever this is true, and the sentence says ISAAC does not propose it. Measured on a real BL15-2 beamtime:
+        # usable edges 5-20 eV apart (scatter, not an edge) carried reference_proposed: true.
+        "reference_proposed": proposed and not j["disagree"],
+        # a usable reference edge was read in enough scans, whether or not the edges agree: what approve_calibration
+        # and would_apply work from (a disagreeing reference is approved only with --accept-shift)
+        "reference_edge_usable": proposed,
         "calibration_proposed": (proposed and not j["disagree"]
                                  and (calibrant is None or named_element(calibrant) is not None)),
         "reference_statement": said,
@@ -568,7 +578,7 @@ def would_apply(step: Mapping, element: str, edge: str, *, warn_eV: float | None
            "measured_reference_e0_eV": r["measured_reference_e0_eV"], "shift_eV": None, "shown": None,
            "warn_energy_shift_eV": warn, "needs_size_confirmation": False, "needs_calibrant_confirmation": False,
            "implausible": False}
-    if not r["reference_proposed"]:
+    if not r["reference_edge_usable"]:
         return {**out, "statement": r["reference_statement"]}
     tab, src = edge_energy(element, edge)
     if tab is None:
@@ -660,12 +670,12 @@ def carried_shift(step: Mapping, approval: Mapping | None = None, *, warn_eV: An
     reason = None
     # a step that lists no per-scan reference reading cannot be re-judged by the scan rule: only the size rule applies
     judged = "reference_snr_per_scan" in o
-    if not size_confirmed and judged and r["reference_proposed"] and r.get("reference_edges_disagree"):
+    if not size_confirmed and judged and r["reference_edge_usable"] and r.get("reference_edges_disagree"):
         # r4-a (SPREAD_RULE_ID)
         reason = (f"it was approved from reference edges that spread over {r['reference_e0_spread_eV']:.2f} eV, more "
                   f"than the {r['reference_max_spread_eV']:g} eV they may differ by, and its size was never confirmed "
                   "(such a reference is applied only with --accept-shift)")
-    elif not size_confirmed and judged and not r["reference_proposed"]:
+    elif not size_confirmed and judged and not r["reference_edge_usable"]:
         degenerate = (f" ({_n(r['reference_scans_degenerate'], 'scan')} set aside for a pre-edge noise of about zero)"
                       if r.get("reference_scans_degenerate") else "")
         reason = (f"it was approved from a reference edge usable in {r['reference_scans_usable']} of "
@@ -713,7 +723,7 @@ def approval_not_applied(step: Mapping, warn_eV: Any = None) -> str | None:
     named = (f"The calibration approval {ref.get('decision_id') or ''} ({ref.get('element')} {ref.get('edge')}, "
              f"by {ref.get('decided_by')})").replace("approval  (", "approval (")
     r4 = reading(step)
-    if not o.get("applied") and not r4["reference_proposed"] and DEGENERATE_FLAG in flags and TOO_FEW_FLAG not in flags:
+    if not o.get("applied") and not r4["reference_edge_usable"] and DEGENERATE_FLAG in flags and TOO_FEW_FLAG not in flags:
         # r4-a: a reference the current rules do not read (its scans' pre-edge noise is about zero)
         return (f"{named} is not applied: {r4['reference_statement']} So no shift is computed for it and this curve "
                 "carries no calibration shift. A result approved earlier keeps the curve it has (`bundle show "

@@ -555,12 +555,18 @@ def _few_scan_glitch_statement(n_scans: int, flagged: int, params: Mapping) -> s
 
 
 def _glitch_points_on_edge(points: Sequence[tuple[int, float, bool]], e0, names: Sequence[str], *,
-                           one_scan: int = 0) -> dict | None:
+                           one_scan: int = 0, few_scans: bool = False) -> dict | None:
     """r2-a: the flagged points on the edge (:func:`core.glitch_points_on_edge`), listed apart and said, or ``None``
     when no flagged point is on the edge (an unaffected result is unchanged). ``names`` are the used scans' file
     names by scan position. The stored count, flag and verdict are not changed (qc.json is hashed). r4-a:
     ``one_scan`` of the points given as off the edge lie on it but are one scan's glitches
-    (:func:`core.glitch_points_from_one_scan`): said as counted glitches, never as off the edge."""
+    (:func:`core.glitch_points_from_one_scan`): said as counted glitches, never as off the edge.
+
+    r5 A6: with ``few_scans`` (fewer than ``deglitch.min_scans_for_cross_scan`` scans: the check compares neighbouring
+    points, ``glitch_check_few_scans``) NO flagged point is counted as a glitch, off the edge either: the sentence says
+    every flag is unjudged, ``off_edge`` is ``None`` and ``unjudged`` counts them all. Measured on a real BL6-2c
+    beamtime: the few-scan sentence said the flags were no evidence of glitches while this one counted the points off
+    the edge as glitches, and ``glitch_points_off_edge`` gave that count."""
     edge = [(s, e) for s, e, on in points if on]
     if not edge:
         return None
@@ -572,8 +578,14 @@ def _glitch_points_on_edge(points: Sequence[tuple[int, float, bool]], e0, names:
     if one_scan:
         off_said += (f" {one_scan} more on the edge {'is' if one_scan == 1 else 'are'} from one scan alone, far beyond "
                      "the other scans there, and counted as glitches (glitch_points_from_one_scan).")
+    if few_scans:
+        off_said = ((f"The other {off} flagged point{'' if off == 1 else 's'} {'is' if off == 1 else 'are'} off the "
+                     "edge, but with this few scans the check cannot judge those either (glitch_check_few_scans): none "
+                     f"of the {len(points)} flagged points is counted as a glitch.") if off else
+                    "No point off the edge is flagged.")
     return {
-        "on_edge": len(edge), "off_edge": off,
+        "on_edge": len(edge), "off_edge": None if few_scans else off,
+        **({"unjudged": len(points)} if few_scans else {}),
         "listed": [{"scan_position": s, "energy_eV": e} for s, e in edge[:200]],
         "statement": (f"{len(edge)} of the {len(points)} flagged point{'' if len(points) == 1 else 's'} "
                       f"{'lies' if len(edge) == 1 else 'lie'} on the edge "
@@ -1327,6 +1339,99 @@ def _one_scan_ends_statement(grid, n_per_point, used_entries: Sequence[Mapping],
     return " ".join(parts) + " Everywhere else at least 2 scans are averaged; read the curve's ends with that in mind."
 
 
+#: r5 A5: THE ABORTED FRAGMENT (``isaac.xas.skip_aborted_scan_fragment.v0``). A usable scan with fewer points than
+#: ``merge.min_points``, in a group where another usable scan has at least that many, is a scan that stopped early: it
+#: is left out of the merge (skip reason :data:`FRAGMENT_REASON`), counted (metric and warn
+#: ``scans_skipped_aborted_fragment``) and named. Measured on a real BL15-2 beamtime: a 6-point scan beside two of 222
+#: was merged into the curve (one of eight such scans of 6 to 18 points in 610). When no scan has enough points nothing
+#: is left out (the merge then fails as before).
+FRAGMENT_RULE_ID = "isaac.xas.skip_aborted_scan_fragment.v0"
+FRAGMENT_REASON = "aborted_scan_fragment"
+
+
+def _aborted_fragments(arrays: Sequence[Mapping], min_points: int) -> set[int]:
+    """The positions (in ``arrays``, the usable scans) of the aborted fragments (:data:`FRAGMENT_RULE_ID`)."""
+    sizes = [int(sa["energy"].size) for sa in arrays]
+    if not sizes or max(sizes) < min_points:
+        return set()
+    return {k for k, n in enumerate(sizes) if n < min_points}
+
+
+def _fragments_statement(inputs: Sequence[Mapping], used: int, min_points: int) -> str | None:
+    """r5 A5: the sentence for the scans left out as aborted fragments (``None`` when there is none)."""
+    frags = [i for i in inputs if i.get("skip_reason") == FRAGMENT_REASON]
+    if not frags:
+        return None
+    sizes = [int((i.get("diagnostics") or {}).get("points_used") or 0) for i in frags]
+    full = [int((i.get("diagnostics") or {}).get("points_used") or 0) for i in inputs if i.get("used")]
+    k = len(frags)
+    named = ", ".join(f"{_file_name(i)} ({_n_points(n)})" for i, n in list(zip(frags, sizes))[:10])
+    named += f" and {k - 10} more" if k > 10 else ""
+    others = (f"{min(full)}" if min(full) == max(full) else f"{min(full)} to {max(full)}") if full else "more"
+    return (f"{used} of {len(inputs)} listed scans were merged. {k} {'scan' if k == 1 else 'scans'} stopped early and "
+            f"{'was' if k == 1 else 'were'} left out of the merge as {'an aborted fragment' if k == 1 else 'aborted fragments'}: "
+            f"{named}. A merge needs at least {min_points} points, and the merged scans have {others}. A person checks "
+            f"that {'the scan was' if k == 1 else 'these scans were'} stopped, not a short scan meant to be kept.")
+
+
+#: r5 A5: the points a scan skipped as ``too_few_points`` read and kept (on its input entry)
+TOO_FEW_POINTS_KEY = "too_few_points"
+
+#: r5 A5: how a SPEC file's scan line names its scan (``#S 3  ascan  Sz -23.7 -19.7  30 0.3`` -> ``ascan Sz``).
+_SPEC_SCAN_LINE = re.compile(r"^#S\s+\d+\s+(\w+)\s+([^\s]+)")
+
+
+def _scan_command(header_lines: Sequence[str]) -> str | None:
+    """The scan command and its first argument a SPEC ``#S`` line states (``ascan Sz``), or ``None``."""
+    for line in header_lines or ():
+        m = _SPEC_SCAN_LINE.match(str(line).strip())
+        if m:
+            return f"{m.group(1)} {m.group(2)}"
+    return None
+
+
+def _too_few_points_statement(inputs: Sequence[Mapping], used: int, energy: str | None,
+                              header_of: Mapping[int, Sequence[str]]) -> str | None:
+    """r5 A5: one plain sentence on the scans skipped as ``too_few_points`` (``None`` when none was): which are NOT
+    ENERGY SCANS (at least :data:`core.MIN_SCAN_POINTS` points read, but the energy column holds fewer distinct values:
+    something else was scanned, e.g. a motor or the emission energy; the SPEC scan line is quoted when there is one) and
+    which stopped after too few points. Said after the run id (no id moves). Measured on a real BL15-2 beamtime: 30
+    scans, most of them sample-motor and emission ``ascan``s whose energy column held one value, were skipped with no
+    word on what they were."""
+    few = [i for i in inputs if i.get("skip_reason") == "too_few_points"]
+    if not few:
+        return None
+    flat, short = [], []
+    for i in few:
+        d = i.get(TOO_FEW_POINTS_KEY) or {}
+        read, kept = int(d.get("points_read") or 0), int(d.get("points_used") or 0)
+        (flat if read >= C.MIN_SCAN_POINTS and kept < C.MIN_SCAN_POINTS else short).append((i, read, kept))
+    parts = []
+    col = f"the energy column ({energy})" if energy else "the energy column"
+    if flat:
+        k = len(flat)
+        kept = sorted({x[2] for x in flat})
+        read = sorted({x[1] for x in flat})
+        cmds = sorted({c for c in (_scan_command(header_of.get(id(x[0])) or ()) for x in flat) if c})
+        values = f"{kept[0]}" if len(kept) == 1 else f"{kept[0]} to {kept[-1]}"
+        points = f"{read[0]}" if len(read) == 1 else f"{read[0]} to {read[-1]}"
+        names = ", ".join(_file_name(x[0]) for x in flat[:10]) + (f" and {k - 10} more" if k > 10 else "")
+        parts.append(f"{k} {'is not an energy scan' if k == 1 else 'are not energy scans'}: {col} holds only {values} "
+                     f"distinct value{'' if values == '1' else 's'} over {points} points, so something else was scanned"
+                     + (f" (the file{'' if k == 1 else 's'} say{'s' if k == 1 else ''}: {', '.join(cmds[:6])})" if cmds else "")
+                     + f": {names}")
+    if short:
+        k = len(short)
+        names = ", ".join(f"{_file_name(x[0])} ({_n_points(x[2])})" for x in short[:10]) + (f" and {k - 10} more" if k > 10 else "")
+        parts.append(f"{k} stopped after fewer than {C.MIN_SCAN_POINTS} usable points "
+                     f"({'an aborted scan' if k == 1 else 'aborted scans'}): {names}")
+    k = len(few)
+    lead = (f"{used} of {len(inputs)} listed scans were used; {k} {'was' if k == 1 else 'were'} left out because "
+            f"{'it has' if k == 1 else 'they have'} too few points.")
+    return (f"{lead} " + "; ".join(parts) + f". A person confirms {'it does' if k == 1 else 'they do'} not belong in "
+            "this record.")
+
+
 def _skipped_scans_statement(inputs: Sequence[Mapping], choice, used: int) -> str | None:
     """One plain sentence when readable scans of the group were left out because they lack the chosen
     columns (``None`` otherwise): how many of the listed scans were used, which were not, and why. Added to
@@ -1641,14 +1746,27 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     res["review_flags"] += choice.flags
     scans_data, used_entries, headers = [], [], []
     too_few: list[int] = []  # the usable points of each scan skipped as too_few_points (said if no scan is left)
+    usable: list[tuple] = []
+    header_of: dict[int, Sequence[str]] = {id(entry): table.header_lines for entry, table, _, _ in attempts}
     for entry, table, sa, code in attempts:
         code = code or C.unusable_reason(sa)
         if code:
             entry["skip_reason"] = code
             if code == "too_few_points" and sa is not None:
                 too_few.append(int(sa["energy"].size))
+                # r5 A5: points read and kept, so the sentence can say what the scan is (not an energy scan / stopped);
+                # its own key: ``diagnostics`` on a skipped scan means signal_not_finite / signal_all_zero
+                entry[TOO_FEW_POINTS_KEY] = {k: sa["diagnostics"][k] for k in ("points_read", "points_used")}
             if code in (C.SIGNAL_NOT_FINITE, C.SIGNAL_ALL_ZERO):
                 entry["diagnostics"] = sa["diagnostics"]  # points_read, nonfinite_dropped / signal_all_zero: why
+            continue
+        usable.append((entry, table, sa))
+    # r5 A5 (FRAGMENT_RULE_ID): a scan with fewer points than a merge needs, beside a scan with enough, is a stopped
+    # (aborted) fragment: left out of the merge, counted and said
+    fragments = _aborted_fragments([sa for _, _, sa in usable], int(params["merge"]["min_points"]))
+    for k, (entry, table, sa) in enumerate(usable):
+        if k in fragments:
+            entry.update(skip_reason=FRAGMENT_REASON, diagnostics=sa["diagnostics"])
             continue
         entry.update(used=True, channel=choice.signal_name, diagnostics=sa["diagnostics"])
         scans_data.append(sa)
@@ -1667,6 +1785,9 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
                                          transmission=choice.mode == MODE_TRANSMISSION)
         if said:
             out["qc"]["statements"] = {"no_usable_scan": said}
+        few_said = _too_few_points_statement(res["inputs"], 0, choice.energy, header_of)
+        if few_said:
+            out["qc"].setdefault("statements", {})["scans_skipped_too_few_points"] = few_said
         return [out]
 
     calibrant = REF.calibrant_identity(identity_texts(group, stems)) if role == "reference" else None
@@ -1788,6 +1909,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         **({"scans_skipped_signal_all_zero": zero_skipped} if zero_skipped else {}),
         # r4-a M6: only when the params file left scans out (absent otherwise, as above)
         **({"scans_excluded_by_params_file": len(excluded)} if excluded else {}),
+        # r5 A5: only when aborted fragments were left out of the merge (absent otherwise, as above)
+        **({"scans_skipped_aborted_fragment": len(fragments)} if fragments else {}),
     }
     verdict, reasons = C.qc_verdict(metrics, params)
     res["qc"] = {"metrics": metrics, "verdict": verdict, "reasons": reasons}
@@ -1851,6 +1974,10 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
             listed = {"version_id": f"{group['group_id']}-v{n:02d}", "provenance": A.version_provenance(v, stems), "comparison": cmp_}
             if not A.plausible(v):
                 listed["flags"] = [A.EDGE_STEP_IMPLAUSIBLE_FLAG]
+            elif athena_post_edge_level(v, np):
+                # r5 A1: the version's post-edge level fails: flagged where the scientist chooses (its own QC, once
+                # chosen, fails post_edge_not_at_1)
+                listed["flags"] = [ATHENA_POST_EDGE_FLAG]
             if A.frame_known(v):
                 name = f"athena_version_{n:02d}.csv"
                 _csv(gdir / name, ["energy_eV", "norm", "flat"], [v["energy"], v["norm"], v["flat"]], np)
@@ -1946,6 +2073,14 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     skipped_said = _skipped_scans_statement(res["inputs"], choice, len(scans_data))
     if skipped_said:
         res["qc"].setdefault("statements", {})["scans_skipped_lacking_chosen_columns"] = skipped_said
+    # r5 A5: scans left out for too few points (not energy scans, or stopped) and aborted fragments are said
+    few_points_said = _too_few_points_statement(res["inputs"], len(scans_data), choice.energy, header_of)
+    if few_points_said:
+        res["qc"].setdefault("statements", {})["scans_skipped_too_few_points"] = few_points_said
+    fragments_said = _fragments_statement(res["inputs"], len(scans_data), int(params["merge"]["min_points"]))
+    if fragments_said:
+        res["qc"].setdefault("statements", {})[FRAGMENT_REASON] = fragments_said
+        res["review_flags"].append(FRAGMENT_REASON)
     # c11-r: a merged scan whose signal is exactly zero where another's is not: merged unchanged, said and flagged
     # (after run_id: qc.json is hashed, so no result id moves)
     # c12-cal: with fewer scans than the cross-scan check needs, the glitch check compares each point with its
@@ -1977,7 +2112,7 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     one = C.glitch_points_from_one_scan(dg["point_flags"], grid, M, np)
     one_on_edge = [(sp, en) for sp, en, at in where if at and (sp, en) in one]
     on_edge = _glitch_points_on_edge([(sp, en, at and (sp, en) not in one) for sp, en, at in where], nm["e0_eV"], names,
-                                     one_scan=len(one_on_edge))
+                                     one_scan=len(one_on_edge), few_scans=few_said is not None)
     if one_on_edge:
         res["qc"]["metrics"]["glitch_points_from_one_scan_on_edge"] = len(one_on_edge)
         res["qc"].setdefault("statements", {})["glitch_points_from_one_scan"] = _one_scan_glitch_statement(
@@ -1994,7 +2129,11 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         res["review_flags"].append(ONLY_EDGE_FLAG)
         res["qc"].setdefault("statements", {})[ONLY_EDGE_FLAG] = _only_edge_statement(only_edge, names)
     if on_edge:
-        res["qc"]["metrics"].update(glitch_points_on_edge=on_edge["on_edge"], glitch_points_off_edge=on_edge["off_edge"])
+        if on_edge["off_edge"] is None:
+            # r5 A6: with fewer than 3 scans no flag is counted as a glitch: every flagged point is unjudged
+            res["qc"]["metrics"].update(glitch_points_on_edge=on_edge["on_edge"], glitch_points_unjudged=on_edge["unjudged"])
+        else:
+            res["qc"]["metrics"].update(glitch_points_on_edge=on_edge["on_edge"], glitch_points_off_edge=on_edge["off_edge"])
         res["qc"].setdefault("statements", {})["glitch_points_on_edge"] = on_edge["statement"]
         dg_step = next(s_ for s_ in res["steps"] if s_.get("step") == "deglitch")
         dg_step["outcome"]["flagged_points_on_edge"] = [{"source_id": pos_sid[p["scan_position"]], "energy_eV": p["energy_eV"]}
@@ -2049,7 +2188,9 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         # nor is a curve whose edge step failed the sanity bound (its QC fails edge_step_implausible), nor (c8-a) a
         # curve of only some of a merged group's runs: it does not describe the group (its statement says so)
         athena_res["preferred_for_record"] = (A.frame_known(athena_entry) and A.plausible(athena_entry)
-                                              and not (coverage or {}).get("partial"))
+                                              and not (coverage or {}).get("partial")
+                                              # r5 A1: nor a curve whose post-edge level fails (its QC fails too)
+                                              and ATHENA_POST_EDGE_FLAG not in athena_res["review_flags"])
         athena_res["run_id"] = run_id
         athena_res["result_id"] = f"proc-{group['group_id']}-{run_id}-athena"
         # r3-d: the per-scan sets set aside beside the scientist's merge are listed and said, and a merge that differs
@@ -2090,7 +2231,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
                               numbered_from_file_names=numbering == B.SCAN_NUMBERS_FROM_FILE_NAME)
         vres["comparison"] = listed["comparison"]
         vres["preferred_for_record"] = (A.frame_known(v) and A.plausible(v)
-                                        and not (version_coverage[n - 1] or {}).get("partial"))
+                                        and not (version_coverage[n - 1] or {}).get("partial")
+                                        and ATHENA_POST_EDGE_FLAG not in vres["review_flags"])
         vres["run_id"] = run_id
         vres["result_id"] = f"proc-{group['group_id']}-{run_id}-athena-v{n:02d}"
         said = _version_chosen_statement(listed, decision, vres, res)
@@ -2301,6 +2443,41 @@ def _diagnose(comparison: dict, entry: Mapping, stems: Sequence[str], used_entri
     return coverage
 
 
+#: r5 A1: the review flag of a scientist's Athena curve whose post-edge level fails (:func:`athena_post_edge_level`)
+ATHENA_POST_EDGE_FLAG = "athena_post_edge_not_at_1"
+
+
+def athena_post_edge_level(entry: Mapping, np) -> dict | None:
+    """r5 A1: :func:`core.post_edge_level_implausible` on the scientist's Athena curve, over the project's own post-edge
+    window (``nor1`` to ``nor2`` above its E0), in its frame (stored energy + ``bkg_eshift``). ``None`` when the level
+    is plausible or cannot be judged (no E0 or window, too few points, a scan ending under 50 eV above E0), for a curve
+    in an unknown energy frame, and for an already-normalised curve (it has its own check,
+    ``core.stored_normalized_implausible``). Larch's ``norm`` is ``(mu - pre-edge line) / edge step``, so the line is
+    ``mu - norm * step``: the rule is the one ISAAC's own curve is judged by. A SET of per-scan groups is a mean of
+    the scientist's normalised curves: it is judged on that mean (line 0, step 1). Measured on a real BL4-3 beamtime:
+    two Athena curves whose normalised spectrum reached 116 (post-edge level near 94) passed QC and were exported."""
+    if not A.frame_known(entry) or A.already_normalized(entry):
+        return None
+    p = entry.get("params") or {}
+    e, norm = np.asarray(entry["energy"], dtype=float), np.asarray(entry["norm"], dtype=float)
+    if entry.get("_match_kind") == "per_scan_set" or e.size != np.asarray(entry["mu"]).size:
+        mu, line, step = norm, np.zeros_like(norm), 1.0
+    else:
+        step = C._f(entry.get("edge_step"))
+        if step is None or step <= 0:
+            return None
+        mu = np.asarray(entry["mu"], dtype=float)
+        line = mu - norm * step
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        found = C.post_edge_level_implausible(e, mu, line, entry.get("e0_eV"), step, np, norm1=p.get("nor1"),
+                                              norm2=p.get("nor2"))
+    if not found:
+        return None
+    return {**found, "statement": ("This is the scientist's Athena curve, judged over the project's own post-edge range "
+                                   "(nor1 to nor2). " + found["statement"])}
+
+
 def _athena_result(group: Mapping, entry: Mapping, files: Sequence[Mapping], params: Mapping, np, ctx: _Ctx, *,
                    stems: Sequence[str] = (), isaac_counts: tuple[int, int] | None = None,
                    coverage: Mapping | None = None, isaac_scans: Sequence[int] | None = None,
@@ -2392,12 +2569,19 @@ def _athena_result(group: Mapping, entry: Mapping, files: Sequence[Mapping], par
     bad = entry.get("edge_step_implausible")
     if bad:
         metrics["edge_step_implausible"] = bad["ratio"] if "ratio" in bad else bad.get("post_edge_mean")
+    level = None if bad else athena_post_edge_level(entry, np)
+    if level:
+        # r5 A1: only when the check fails (absent otherwise, as for ISAAC's own curve): the QC fails post_edge_not_at_1
+        metrics["post_edge_level"] = level["level"]
     verdict, reasons = C.qc_verdict(metrics, params)
     res["qc"] = {"metrics": metrics, "verdict": verdict, "reasons": reasons}
     res["qc"]["statements"] = {"scans_used": scans_used["statement"]}
     if bad:
         res["qc"]["statements"]["edge_step_implausible"] = bad["statement"]
         res["review_flags"].append("edge_step_implausible")
+    if level:
+        res["qc"]["statements"]["post_edge_not_at_1"] = level["statement"]
+        res["review_flags"].append(ATHENA_POST_EDGE_FLAG)
     res["steps"].append({"step": "qc", "params": dict(params["qc"]), "outcome": {"verdict": verdict, "reasons": reasons}, "flags": []})
     ath = [f for f in files if f["role"] in ("athena_normalized", "plot")]
     res["outputs"] = {"files": ath, "e0_eV": entry["e0_eV"], "edge_step": entry["edge_step"], "points": int(e.size)}
@@ -2437,8 +2621,9 @@ def process_bundle(
     """Process every (or the selected) record group of the bundle in ``bundle_dir``.
 
     ``skip_group_ids``: record groups NOT processed (``isaac process`` passes the groups that are no
-    longer live: rejected, merged, split). They still take part in the Athena name match, exactly as
-    before, so no live group's match — and so no live group's result id — moves because of them.
+    longer live: rejected, merged, split). A rejected one still takes part in the Athena name match; a group
+    merged away (``merged``/``split``) does not (r5 A2, :func:`athena.takes_part`): its runs are a live group's,
+    and its stems made that live group's Athena groups ambiguous.
 
     ``generic_runs``: runs from a non-engine reader (duck-typed, see
     :func:`grouping.groups_from_generic_runs`); when given they REPLACE the unread-file

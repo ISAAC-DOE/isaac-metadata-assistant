@@ -267,11 +267,7 @@ def load_project(path: Path, rel_path: str, source_id: str | None, np) -> tuple[
             non_finite.append("e0_eV")
         if step_raw is None:
             non_finite.append("edge_step")
-        is_merge = False
-        try:
-            is_merge = bool(int(getattr(ap, "is_merge", 0) or 0))
-        except (TypeError, ValueError):
-            pass
+        is_merge = merge_flag(getattr(ap, "is_merge", None))
         # r3-b M3: where this group's OWN data puts its edge (larch find_e0, ISAAC's method), in the scientist's frame:
         # an Athena E0 far from it is evidence of a fixed setting (run.possibly_fixed_athena_e0); never compared or kept.
         # r3-d L-1: looked for only near the group's Athena E0 (DATA_E0_WINDOW_EV), so a glitch far away is never its edge
@@ -336,6 +332,23 @@ def _data_e0(energy, mu, e0, np) -> float | None:
             return _finite(find_e0(e[sel], m[sel]))
     except Exception:  # noqa: BLE001 - an edge that cannot be found is no evidence either way
         return None
+
+
+def merge_flag(value) -> bool:
+    """r5 A4: an Athena group's ``is_merge`` value as a bool. Athena (Demeter) writes the SPACE the group was merged
+    in (``'e'`` mu(E), ``'n'`` normalised, ``'k'`` chi(k)) and ``''`` for a group that is no merge; older projects
+    write ``1`` / ``0``. Measured on the projects of five real SSRL beamtimes: only ``''``, ``'e'`` and ``'n'``
+    occur, and reading the value as a number made every merge ``False``. True for a number other than 0 and for any other non-empty text."""
+    if value is None or isinstance(value, bool):
+        return bool(value)
+    text = str(value).strip()
+    if not text:
+        return False
+    try:
+        number = float(text)
+    except ValueError:
+        return text.casefold() not in ("false", "no", "none")
+    return math.isfinite(number) and number != 0.0
 
 
 def _flag(ap, name: str) -> bool:
@@ -577,6 +590,19 @@ def version_provenance(entry: Mapping, stems: Sequence[str]) -> dict:
     }
 
 
+#: r5 A2: record-group statuses whose runs another (live) group now holds: such a group takes no part in the match.
+MERGED_AWAY_STATUSES = frozenset({"merged", "split"})
+
+
+def takes_part(group: Mapping) -> bool:
+    """Whether a record group takes part in the name match: it has scans, and (r5 A2) it was not MERGED AWAY (status
+    ``merged`` or ``split``: another live group holds its runs). Measured on a real BL4-3 beamtime: two one-run groups
+    merged into one two-run group stayed in the match, so the Athena groups of the dead run matched it as well as the
+    live group, were ambiguous, and the live group lost the scientist's merge to the dead one. A rejected group still
+    takes part: its runs are in no live group, so an Athena group naming them is not the live group's."""
+    return bool(group.get("_has_scans", True)) and group.get("status") not in MERGED_AWAY_STATUSES
+
+
 def match(groups: Sequence[Mapping], entries: Sequence[Mapping], np=None) -> tuple[dict[str, dict], list[dict]]:
     return match_with_versions(groups, entries, np)[:2]
 
@@ -585,9 +611,10 @@ def match_with_versions(groups: Sequence[Mapping], entries: Sequence[Mapping], n
     """group_id -> athena entry (unambiguous matches only), and notes on every ambiguity.
 
     Record groups with no scans take no part (measured: a scientist's exported ``x.dat``
-    became a zero-scan run named like the real run, which made every match ambiguous).
+    became a zero-scan run named like the real run, which made every match ambiguous), nor (r5 A2) groups MERGED AWAY
+    (:func:`takes_part`).
     """
-    stems = {g["group_id"]: [normalise_name(s) for s in g.get("_stems") or ()] for g in groups if g.get("_has_scans", True)}
+    stems = {g["group_id"]: [normalise_name(s) for s in g.get("_stems") or ()] for g in groups if takes_part(g)}
     raw_stems = {g["group_id"]: list(g.get("_stems") or ()) for g in groups}
     bases = {gid: base_names(gstems) for gid, gstems in stems.items()}
     notes: list[dict] = []
@@ -623,6 +650,7 @@ def match_with_versions(groups: Sequence[Mapping], entries: Sequence[Mapping], n
             uniq.setdefault(_curve_key(c) if several else c["data_hash"], c)
         pool = list(uniq.values())
         aside: list[dict] = []
+        settled = False
         if len(pool) > 1:
             # one merged candidate is the scientist's result (r3-b H3: a ``merge_<base>`` group too, so it is preferred
             # over the per-scan groups beside it, which ISAAC would otherwise average)
@@ -631,7 +659,12 @@ def match_with_versions(groups: Sequence[Mapping], entries: Sequence[Mapping], n
                 # r3-d: the per-scan sets beside it are kept (set aside, said, and compared with it in run.process_group)
                 aside = _sets_beside([c for c in pool if c is not merged[0]], raw_stems.get(gid) or (), np)
                 pool = merged
-        if len(pool) > 1:
+            elif 1 < len(merged) < len(pool):
+                # r5 A3: SEVERAL merges beside per-scan groups: the merges are versions, and the per-scan groups of
+                # each project are one version, a set (_per_scan_set), never a version per scan
+                pool, settled = _merges_and_sets(merged, [c for c in pool if not is_scientist_merge(c)],
+                                                 raw_stems.get(gid) or (), np)
+        if len(pool) > 1 and not settled:
             if several:
                 # c10-m/c10-r: per-scan groups in several projects are a set PER PROJECT (split first), never a
                 # version per scan, and never one project's set standing for another's
@@ -652,6 +685,22 @@ def match_with_versions(groups: Sequence[Mapping], entries: Sequence[Mapping], n
             )
             versions[gid] = [{**c, "_match_kind": c.get("_match_kind")} for c in sorted(pool, key=lambda c: (c["prj_relative_path"], c["group_name"]))][:MAX_VERSIONS]
     return matched, notes, versions
+
+
+def _merges_and_sets(merged: Sequence[Mapping], rest: Sequence[Mapping], stems: Sequence[str],
+                     np) -> tuple[list[dict], bool]:
+    """r5 A3: the versions of a record group whose candidates hold SEVERAL scientist merges and per-scan groups:
+    every merge, each per-scan SET the per-scan groups form (:func:`_sets_beside`, one per project) and the per-scan
+    groups that are in no set (never dropped). ``(pool, True)`` when a set formed, else ``(merged + rest, False)``:
+    the pool stands and is handled as before. Measured on a real BL4-3 beamtime: a two-run group had the scientist's
+    merge in two projects (other post-edge ranges) and four per-scan groups in one of them, and all six were listed as
+    versions, every scan one of them."""
+    sets = _sets_beside(rest, stems, np)
+    if not sets:
+        return list(merged) + list(rest), False
+    in_set = {(s["prj_relative_path"], k) for s in sets for k in s["per_scan_set"]["member_keys"]}
+    loose = [c for c in rest if (c["prj_relative_path"], _curve_key(c)) not in in_set]
+    return list(merged) + sets + loose, True
 
 
 def _sets_beside(rest: Sequence[Mapping], stems: Sequence[str], np) -> list[dict]:
@@ -700,7 +749,7 @@ def _hits(entry: Mapping, stems: Mapping[str, Sequence[str]], bases: Mapping[str
 def entry_groups(groups: Sequence[Mapping], entries: Sequence[Mapping]) -> dict[int, str]:
     """``{entry index: group_id}`` for every Athena entry that matches exactly ONE record group (an exact match winning,
     as :func:`match_with_versions` decides), whether or not that group then uses it."""
-    stems = {g["group_id"]: [normalise_name(s) for s in g.get("_stems") or ()] for g in groups if g.get("_has_scans", True)}
+    stems = {g["group_id"]: [normalise_name(s) for s in g.get("_stems") or ()] for g in groups if takes_part(g)}
     bases = {gid: base_names(gstems) for gid, gstems in stems.items()}
     out = {}
     for idx, entry in enumerate(entries):

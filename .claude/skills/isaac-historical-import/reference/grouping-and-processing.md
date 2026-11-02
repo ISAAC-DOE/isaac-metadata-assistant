@@ -79,7 +79,8 @@ it finds one. Show per group, in words:
   the count as glitches (with one or two scans the check compares neighbouring points and also flags the
   white line and the oscillations); never call those points glitches yourself. **Points on the edge**:
   when `qc.statements.glitch_points_on_edge` is present (metrics `glitch_points_on_edge` /
-  `glitch_points_off_edge`), say that sentence; only the off-edge count is glitches (flagged points within
+  `glitch_points_off_edge`), say that sentence; only the off-edge count is glitches. With fewer than 3 scans
+  none is: `glitch_points_unjudged` counts every flagged point, so never call any a glitch (flagged points within
   5 eV of E0 or in the steep stretch of the edge are unjudged, not cleared: say to look at the plot near E0;
   the stored verdict is unchanged). A point from ONE scan alone, far beyond the other scans there, is never
   "unjudged": `qc.statements.glitch_points_from_one_scan` names the scan and counts those points as glitches.
@@ -89,6 +90,11 @@ it finds one. Show per group, in words:
   curve, and ask whether the scan belongs in the merge. **The only scan with an edge** (flag and
   `qc.statements.only_scan_with_edge`, never a fail): the other scans are dead, dark or out of the beam; say it
   and ask about those scans, never offer to leave the good one out;
+- **scans left out for too few points** (`qc.statements.scans_skipped_too_few_points`): say the sentence; it
+  says which are not energy scans (a motor or emission `ascan`, the energy column one value) and which
+  stopped early. **Aborted fragments** (`warn` `scans_skipped_aborted_fragment`, `qc.statements.aborted_scan_fragment`):
+  a scan with fewer than 20 points beside full scans was left out of the merge; say it and ask whether it was
+  stopped, never offer to put it back without the scientist saying so;
 - **when scans were skipped** (reason `scans_skipped_lacking_chosen_columns`; flag
   `channel_from_a_later_scan` when the first scan was one of them): the used / readable / skipped
   counts in plain words — "14 of 165 scans were used; 150 had different columns (they may be motor
@@ -137,7 +143,9 @@ it finds one. Show per group, in words:
 - **a curve that is not a usable spectrum** (`fail` with `no_edge`: the edge is not distinguishable from
   the pre-edge scatter; or `post_edge_not_at_1`: the normalised level after the edge is far from 1, so
   the normalisation did not work): say the sentence in `statements` and what the plot shows; offer
-  reject or `needs_changes`, never approval;
+  reject or `needs_changes`, never approval. A scientist's Athena curve is judged the same way, over its
+  project's own post-edge range (flag `athena_post_edge_not_at_1`, not preferred; a listed version that
+  fails carries the flag: say it when asking which version is the result of record);
 - **a short scan** (`warn` with `post_edge_window_too_short`: the scan ends soon after the edge, so its
   normalised level cannot be checked): say that its edge position is still usable but its normalised
   curve is not checked; the scientist decides whether that is enough for this record;
@@ -274,7 +282,8 @@ an element/edge already named for the group: approved, proposed, or the group's 
   ask for an element or edge: no shift can be approved, and `approve_calibration` is refused. A scan whose
   reference edge stands more than 1,000,000 times its pre-edge noise is a channel that is not counting, never
   usable (flag `reference_noise_degenerate`), and is said the same way.
-- **Usable edges that disagree** (flag `reference_edges_disagree`, `calibration_proposed: false`: they spread
+- **Usable edges that disagree** (flag `reference_edges_disagree`, `reference_proposed: false`,
+  `calibration_proposed: false`: they spread
   over more than 0.5 eV, `qc.warn_reference_e0_spread_eV`, stricter only): not proposed. Say the sentence ("its
   usable edges spread 6.10 eV (… median 11216.2 eV of 2 scans) …") and ask about the channel (a missing foil, a
   channel seeing the sample, drift). Only if the scientist says the reference is what they name (a foil drifting

@@ -857,6 +857,9 @@ def qc_verdict(metrics: Mapping, params: Mapping) -> tuple[str, list[str]]:
         # c11-a: a scan whose signal is zero at every point was left out of the merge: a person checks why it
         # recorded nothing (the plain sentence is in qc.statements)
         warn.append("scans_skipped_signal_all_zero")
+    if metrics.get("scans_skipped_aborted_fragment"):
+        # r5 A5: a scan that stopped early was left out of the merge (run.FRAGMENT_RULE_ID): a person checks it
+        warn.append("scans_skipped_aborted_fragment")
     if metrics.get("scans_skipped_lacking_chosen_columns"):
         # readable scans of the group that lack the chosen columns were left out: a person
         # confirms they belong elsewhere (e.g. motor/alignment scans), so never a pass

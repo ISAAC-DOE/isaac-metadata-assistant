@@ -172,7 +172,11 @@ scan, erasing the chemical shift the study measures (also 1 of 4 and 1 of 6 scan
 groups). A reference group's own signal still needs one scan. The result says
 `reference_scans_usable` of `reference_scans_listed`, `reference_proposed` and
 `reference_statement`; `reference_e0_spread_eV` is null with fewer than 2 usable scans (one scan
-has no spread).
+has no spread). r5: when the usable edges spread more than 0.5 eV (flag `reference_edges_disagree`),
+`reference_proposed` is false and the sentence no longer says "naming its element and edge gives the
+shift". An approval is still possible, only with `--accept-shift`. Measured on a real BL15-2 beamtime:
+4 results had usable edges 5–20 eV apart (scatter, not an edge) and said `reference_proposed: true`.
+Neither key is in `qc.json` or `params.json`, so no id moves.
 
 *Why one scan for a reference group and two for an in-scan channel.* A reference group is a scan
 of the reference itself (a foil run on its own): its signal is the reference's absorption in the
@@ -250,6 +254,15 @@ stderr = std/√N (`merged.csv`). Scans covering < 90 % of the grid are flagged
 sentence it was first written with, naming source ids). The params key `merge.grid` keeps its
 historical value `first_scan_points_within_common_overlap` although the grid is the WIDEST scan's
 points: the params are hashed into every run id, so renaming it would move every result id.
+
+**Aborted fragments** (r5, `isaac.xas.skip_aborted_scan_fragment.v0`). A usable scan with fewer
+points than `merge.min_points` (20), in a group where another usable scan has at least that many,
+stopped early: it is left out of the merge (skip reason `aborted_scan_fragment`, metric and warn
+`scans_skipped_aborted_fragment`, `qc.statements.aborted_scan_fragment` names it). When no scan has
+20 points nothing is left out. Measured on the real beamtimes: 26 fragments of 6–18 points, each
+beside a scan of 222 points or more (BL15-2 2025-04: 6 groups; 2021-11: 1; BL6-2c: 17; BL4-3 MOF-Co:
+2); they had been merged into the curves. The shortest scan still merged has 21 points. Those groups get new result ids
+(their merged curve changes); no other id moves.
 When the merged curve's first or last point comes from one scan alone whose signal is zero there
 (the merged value is 0), `qc.statements.merged_curve_end_from_one_scan` says so; the grid is not
 trimmed (that would change those curves and their ids). Measured on a real BL15-2 beamtime: a
@@ -346,7 +359,11 @@ early (`scans_truncated`, flag `scan_range_truncated`, with the overlap range), 
 transmission to fluorescence (`channel_fallback_transmission_not_positive`: transmission was chosen but
 every scan kept fewer than 20 finite points; the statement in `qc.json` says what was tried). Else pass.
 A scan whose signal is non-finite at most points is skipped as `signal_not_finite` (with `points_read`
-and `nonfinite_dropped`), never as `too_few_points`. A scan whose signal is zero at every point is skipped
+and `nonfinite_dropped`), never as `too_few_points`. r5: scans skipped as `too_few_points` are said in
+`qc.statements.scans_skipped_too_few_points` (after the run id): a scan with 5 or more points whose
+energy column holds fewer than 5 values is not an energy scan (a motor or emission `ascan`; the SPEC
+`#S` line is quoted), any other is a scan that stopped (aborted). Measured on BL15-2 2025-04: 30 such
+scans, most of them `ascan`s of a sample motor or the emission energy, were skipped with no word. A scan whose signal is zero at every point is skipped
 as `signal_all_zero` (c11-a; measured on BL15-2 2021: the last of 8 scans recorded no counts and pulled the
 merged curve to 0 at its end) and the other scans are merged: warn `scans_skipped_signal_all_zero`, metric
 `scans_skipped_signal_all_zero`, and a statement naming the scan. Only a scan that would otherwise be used
@@ -367,7 +384,11 @@ Whether to leave such a scan out is the scientist's call: nothing is dropped for
   spike. Measured on real BL4-3 standards: a CoSO4 standard in sucrose, 32 of 303 points flagged; a
   0.8 wt% TiO2 anatase, 31 of 173. `glitches_flagged` therefore warns on most curves of those
   beamtimes. The detector is unchanged (flags never drop points; `exclude_flagged` is false); its
-  thresholds are for the scientist to approve. With fewer than `min_scans_for_cross_scan` (3) scans
+  thresholds are for the scientist to approve. r5: with fewer than 3 scans no flagged point is counted as
+  a glitch, on the edge or off it: `qc.metrics.glitch_points_unjudged` counts them all and
+  `glitch_points_off_edge` is absent (measured on BL6-2c: the on-edge sentence had counted the off-edge
+  points as glitches beside the few-scan sentence saying they were no evidence). With fewer than
+  `min_scans_for_cross_scan` (3) scans
   a result with flagged points carries `qc.statements.glitch_check_few_scans` ("with N scan(s), the
   glitch check compares neighbouring points and also flags real features such as the white line and
   oscillations; these N flags are not by themselves evidence of glitches"); measured on a real BL4-3
@@ -407,7 +428,13 @@ Whether to leave such a scan out is the scientist's call: nothing is dropped for
 stored (edge step 1, no re-normalisation), and believed only when it looks normalised: pre-edge mean
 within 0.25 of 0 and post-edge mean within 0.25 of 1 (20 eV below / 50 eV above E0). Otherwise, and for
 any Athena group whose reproduced edge step is implausible, the curve is not compared, not plotted
-and not preferred, and its QC fails with the plain sentence. **Thresholds need approval.**
+and not preferred, and its QC fails with the plain sentence. r5: every other Athena curve is judged by
+the §7 post-edge level (`isaac.xas.post_edge_level.v1`) over the project's own nor1–nor2 window, the
+pre-edge line being `mu − norm·step`; a per-scan set is judged on its mean normalised curve. Failing
+both ways, its QC fails `post_edge_not_at_1` (so `decide` refuses to approve it), it is flagged
+`athena_post_edge_not_at_1` and not preferred; a listed version that fails carries the flag. Measured
+on BL4-3 MOF-Co: two Athena curves with an edge step of 1 sat 82 steps above the line (normalised
+maximum 116), one 2.7, and all three had passed. **Thresholds need approval.**
 `qc.json` records metrics, reasons and thresholds. **Thresholds need approval.**
 
 **Not applicable is not a verdict.** A group listing no scan (`no_scans`), or none of whose readable
@@ -439,7 +466,14 @@ more list several versions) and TiON 10 (2 agree, 8 differ), and for 12 + 9 of t
 normalised with the scientist's parameters reproduces the scientist's curve (rms < 0.01). Nothing
 looser: no other letter, no prefix or substring matching; a name fitting two record groups matches
 neither and is noted. Exact beats suffix; zero-scan groups take no part; identical data
-count once; one merged group wins; one-group-per-scan in one project is compared as a set
+count once; one merged group wins (r5: Athena's `is_merge` is read as written, `'e'`/`'n'`/`'k'` for the
+space it merged in, `''` for none; reading it as a number made every merge false on five real
+beamtimes); several merged groups beside per-scan groups are listed as versions with the per-scan
+groups of each project as ONE set version, never a version per scan (measured on BL4-3 TiON: a
+two-run group listed 6 versions, now 3); a group merged away (status `merged` or `split`) takes no
+part in the match (measured: on BL4-3 MOF-Co 16 Athena groups and on TiON 4 were ambiguous between a
+dead group and the live one holding its runs; a rejected group still takes part);
+one-group-per-scan in one project is compared as a set
 (mean of the scientist's per-scan normalisations, labelled derived); anything else
 anything else is **several versions**: each is listed in `athena_versions[]` with what its
 own files state (project path and file name, years in the path, label, merge flag, scan
