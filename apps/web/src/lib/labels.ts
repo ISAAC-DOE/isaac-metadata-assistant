@@ -1888,6 +1888,20 @@ export const LABELS = {
   newProposalValueJson: 'The value, as JSON',
   newProposalRuleHeading: 'How This Proposal Will Be Explained',
 
+  /*
+   * Schema Proposals — drafts from a local import. The chips are Register 1 (Title Case, `chip*`
+   * keys, so §1 of `casing-registers.test.tsx` checks them); the two lead-ins are the start of a
+   * sentence and a field label, Register 2, and are keyed outside the Register-1 prefixes on purpose.
+   */
+  chipDraftNeedsDescription: 'Needs Your Description',
+  chipDraftCannotPropose: 'Cannot Be Proposed',
+  chipDraftAnswered: 'Answered',
+  chipDraftNoLongerInBundle: 'No Longer in the Bundle',
+  chipDraftBeingProposed: 'Being Proposed Below',
+  chipDraftSaved: 'Saved as a Draft',
+  draftFactSinceAsked: 'Since it was asked for',
+  draftFilingLead: 'Proposing:',
+
   // Export artifacts
   officialRecord: 'Official Record',
   sidecarConvention: 'sidecar · assistant convention, not an official ISAAC standard',
