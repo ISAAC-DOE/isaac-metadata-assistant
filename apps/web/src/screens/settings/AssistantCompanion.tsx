@@ -70,7 +70,7 @@
  * sibling panel follows, for the same reason.
  */
 import type { ReactNode } from 'react';
-import { Compass, ChevronRight, ExternalLink } from '../../components/icons';
+import { Compass, ExternalLink } from '../../components/icons';
 import { api } from '../../lib/api';
 import { useFetch } from '../../lib/useFetch';
 import type { ApiAssistantCompanion } from '../../lib/types';
@@ -144,9 +144,6 @@ function readableText(value: unknown, fallback: string): string {
 const UNREADABLE_FIELD = 'This deployment sent a value here that could not be displayed.';
 
 export function AssistantCompanionSection({
-  /** Opens the Endpoint Explorer, so a reader can check every claim here
-   *  against the operation's own published description. */
-  onOpenExplorer,
   /**
    * Render the section's body without its own drawer (2026-10-12). Inside the
    * Connect Your Agent widget the section is a VIEW the reader chose, so a
@@ -156,7 +153,6 @@ export function AssistantCompanionSection({
    */
   bare = false,
 }: {
-  onOpenExplorer: () => void;
   bare?: boolean;
 }) {
   const companion = useFetch(() => api.getAssistantCompanion(), []);
@@ -222,13 +218,6 @@ export function AssistantCompanionSection({
               <h4 className="api-connect-heading">{label}</h4>
               <p className="api-keys-lead">{detail}</p>
 
-              {/* The operator's next step, rendered ONLY where nothing is set.
-                  It is not an instruction to the scientist reading it, and it
-                  names no value. */}
-              {state === 'unconfigured' && (
-                <p className="api-keys-note">{COPY.unconfiguredOperator}</p>
-              )}
-
               {/* THE RELAYED REFUSAL. The server's own sentence, which names a
                   category and never repeats what was pasted. It is rendered
                   verbatim rather than re-worded, so a category added on the
@@ -237,7 +226,6 @@ export function AssistantCompanionSection({
                 <>
                   <h4 className="api-connect-heading">{COPY.refusedReasonHeading}</h4>
                   <p className="api-keys-note">{readableText(data.reason, UNREADABLE_FIELD)}</p>
-                  <p className="api-keys-note">{COPY.refusedScientistNote}</p>
                 </>
               )}
             </>
@@ -276,22 +264,6 @@ export function AssistantCompanionSection({
         </>
       )}
 
-      <h4 className="api-connect-heading">{COPY.notSystemOfRecordHeading}</h4>
-      <p className="api-keys-note">{COPY.notSystemOfRecord}</p>
-
-      {/* THE LIMITS, in every state including the failed read. They are
-          properties of what this section CAN establish, not of what it happened
-          to find, so they do not belong inside a branch. */}
-      <h4 className="api-connect-heading">{COPY.limitsHeading}</h4>
-      <dl className="api-keys-rows">
-        {COPY.limits.map((limit) => (
-          <div className="api-keys-row" key={limit.id}>
-            <dt>{limit.claim}</dt>
-            <dd>{limit.detail}</dd>
-          </div>
-        ))}
-      </dl>
-
       {/* The two machine-readable facts — the NAME of the setting and the
           document — rendered only once the server has told us what they are.
           Neither is hard-coded here, so a rename on the server cannot leave a
@@ -318,11 +290,6 @@ export function AssistantCompanionSection({
         </>
       )}
 
-      <p className="api-keys-note">{COPY.verifyNote}</p>
-      <button type="button" className="settings-jump-btn" onClick={onOpenExplorer}>
-        {COPY.verifyAction}
-        <ChevronRight size={13} strokeWidth={2.2} aria-hidden="true" />
-      </button>
     </Shell>
   );
 }

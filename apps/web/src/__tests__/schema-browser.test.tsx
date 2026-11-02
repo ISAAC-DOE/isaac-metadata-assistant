@@ -268,18 +268,20 @@ describe('SchemaBrowser — Fields master list', () => {
     expect(document.querySelectorAll('.schema-field-detail')).toHaveLength(1);
   });
 
-  it('renders the schema title, version, and read-only source line', async () => {
+  it('renders the schema title, version, and source line — once, in sans', async () => {
     stubSchema();
     render(<SchemaBrowser />);
     await findRow('record_id');
     // The title already carries its version, so it is stated ONCE (2026-10-12):
     // the line used to read "… v1.05 (fixture) — v1.05".
     const lines = screen.getAllByText(/ISAAC AI-Ready Scientific Record v1\.05 \(fixture\)/);
-    expect(lines.length).toBeGreaterThan(0);
-    for (const line of lines) expect(line.textContent?.match(/v1\.05/g)).toHaveLength(1);
-    expect(
-      screen.getAllByText(/vendored official schema \(read-only reference\)/).length,
-    ).toBeGreaterThan(0);
+    // 2026-11-02: the line is shown ONCE (the field detail's copy went), in sans,
+    // without the "(read-only reference)" hedge.
+    expect(lines).toHaveLength(1);
+    expect(lines[0].textContent?.match(/v1\.05/g)).toHaveLength(1);
+    expect(lines[0]).not.toHaveClass('mono');
+    expect(lines[0].textContent).toMatch(/vendored official schema$/);
+    expect(screen.queryByText(/read-only reference/)).toBeNull();
   });
 
   it('never renders any propose/review/approve/edit control', async () => {
@@ -322,7 +324,7 @@ describe('SchemaBrowser — Fields master list keyboard model', () => {
     expect(second).not.toHaveAttribute('aria-current');
     expect(first).toHaveAttribute('aria-current', 'true');
     expect(
-      within(detail()).getByText('isaac_record_version', { selector: '.schema-fielddetail-path' }),
+      within(detail()).getByText('isaac_record_version', { selector: '.schema-fielddetail-name' }),
     ).toBeInTheDocument();
 
     fireEvent.keyDown(second, { key: 'End' });
@@ -334,7 +336,7 @@ describe('SchemaBrowser — Fields master list keyboard model', () => {
     // Still exactly one selected row, and it is still the original one.
     expect(document.querySelectorAll('[aria-current="true"]')).toHaveLength(1);
     expect(
-      within(detail()).getByText('isaac_record_version', { selector: '.schema-fielddetail-path' }),
+      within(detail()).getByText('isaac_record_version', { selector: '.schema-fielddetail-name' }),
     ).toBeInTheDocument();
   });
 
@@ -425,7 +427,7 @@ describe('SchemaBrowser — Fields detail panel', () => {
 
     const pane = within(detail());
     expect(pane.getByRole('heading', { name: 'record_id', level: 3 })).toBeInTheDocument();
-    expect(pane.getByText('record_id', { selector: '.schema-fielddetail-path' })).toBeInTheDocument();
+    expect(pane.getByText('record_id', { selector: '.schema-fielddetail-name' })).toBeInTheDocument();
     // Description read VERBATIM from the schema.
     expect(pane.getByText('ULID identifier for the record.')).toBeInTheDocument();
     expect(pane.getByText('string', { selector: '.schema-field-type' })).toBeInTheDocument();
@@ -487,7 +489,7 @@ describe('SchemaBrowser — Fields detail panel', () => {
     // …and back up via the parent link.
     fireEvent.click(within(detail()).getByRole('button', { name: 'sample' }));
     expect(
-      within(detail()).getByText('sample', { selector: '.schema-fielddetail-path' }),
+      within(detail()).getByText('sample', { selector: '.schema-fielddetail-name' }),
     ).toBeInTheDocument();
   });
 
@@ -537,15 +539,15 @@ describe('SchemaBrowser — Fields detail panel', () => {
     expect(pane.queryByRole('heading', { name: /Rules that name this field/i })).toBeNull();
   });
 
-  it('says so honestly when no conditional rule names the field', async () => {
+  // ~~"says so honestly when no conditional rule names the field"~~ — 2026-11-02 an
+  // empty related-rules section is left out rather than narrated; what is pinned is
+  // that no rule is attributed to a field that has none.
+  it('leaves out the related-rules section when no conditional rule names the field', async () => {
     stubSchema();
     render(<SchemaBrowser />);
     fireEvent.click(rowButton(await findRow('tags')));
-    expect(
-      within(detail()).getByText(
-        /No conditional rule in this schema names this field, or any field nested inside it\./i,
-      ),
-    ).toBeInTheDocument();
+    expect(within(detail()).queryByRole('heading', { name: /Related conditional rules/i })).toBeNull();
+    expect(within(detail()).queryByRole('button', { name: 'Open in Conditional Rules' })).toBeNull();
   });
 
   it('never attributes a rule to a field it only ENCLOSES (sample.material.formula)', async () => {
@@ -557,11 +559,9 @@ describe('SchemaBrowser — Fields detail panel', () => {
       pane.getByText('sample.material.formula', { selector: '.schema-fielddetail-path' }),
     ).toBeInTheDocument();
     // `sample.material` is named by a rule; `sample.material.formula` is not.
-    expect(
-      pane.getByRole('heading', { name: /Related conditional rules \(0\)/i, level: 4 }),
-    ).toBeInTheDocument();
+    // No related rule → no section at all (2026-11-02), and nothing attributed.
+    expect(pane.queryByRole('heading', { name: /Related conditional rules/i })).toBeNull();
     expect(pane.queryByText(/sample\.material is required/)).toBeNull();
-    expect(pane.getByText(/or any field nested inside it/i)).toBeInTheDocument();
   });
 
   it('the real electrochemistry rule is not attributed to a sibling notes field', async () => {
@@ -574,9 +574,7 @@ describe('SchemaBrowser — Fields detail panel', () => {
         selector: '.schema-fielddetail-path',
       }),
     ).toBeInTheDocument();
-    expect(
-      pane.getByRole('heading', { name: /Related conditional rules \(0\)/i, level: 4 }),
-    ).toBeInTheDocument();
+    expect(pane.queryByRole('heading', { name: /Related conditional rules/i })).toBeNull();
     expect(pane.queryByText(/control_mode is required/)).toBeNull();
     expect(pane.queryByRole('button', { name: /open in conditional rules/i })).toBeNull();
   });
@@ -604,12 +602,13 @@ describe('SchemaBrowser — Fields detail panel', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows the source and version the field was read from', async () => {
+  // ~~"shows the source and version the field was read from"~~ — the field detail's
+  // second copy of the source line was cut 2026-11-02; it is stated once, above.
+  it('does not repeat the source line inside the field detail', async () => {
     stubSchema();
     render(<SchemaBrowser />);
     fireEvent.click(rowButton(await findRow('record_id')));
-    const line = within(detail()).getByText(/ISAAC AI-Ready Scientific Record v1\.05 \(fixture\)/);
-    expect(line.textContent?.match(/v1\.05/g)).toHaveLength(1);
+    expect(within(detail()).queryByText(/vendored official schema/)).toBeNull();
   });
 });
 
@@ -703,7 +702,7 @@ describe('SchemaBrowser — Conditional Rules', () => {
 
     expect(screen.getByRole('tab', { name: 'Fields' })).toHaveAttribute('aria-selected', 'true');
     expect(
-      within(detail()).getByText('descriptors', { selector: '.schema-fielddetail-path' }),
+      within(detail()).getByText('descriptors', { selector: '.schema-fielddetail-name' }),
     ).toBeInTheDocument();
   });
 
@@ -824,8 +823,9 @@ describe('SchemaBrowser — Vocabulary', () => {
     expect(
       screen.getByText(/No controlled-vocabulary file is bundled with this deployment\./i),
     ).toBeInTheDocument();
-    // It must not pretend the schema lost its authority.
-    expect(screen.getByText(/The official schema remains the authority on allowed values/i)).toBeInTheDocument();
+    // It still points at where allowed values ARE shown, and claims nothing else.
+    expect(screen.getByText(/Allowed values/i)).toBeInTheDocument();
+    expect(screen.queryByText(/never a validation gate|remains the authority/i)).toBeNull();
   });
 });
 
@@ -937,21 +937,22 @@ describe('SchemaBrowser — loading + backend-down', () => {
 describe('SchemaBrowser — the source line', () => {
   it('does not repeat a version the title already carries', () => {
     expect(sourceLineFor('ISAAC AI-Ready Scientific Record v1.05', '1.05')).toBe(
-      'ISAAC AI-Ready Scientific Record v1.05 — vendored official schema (read-only reference)',
+      'ISAAC AI-Ready Scientific Record v1.05 — vendored official schema',
     );
   });
   it('still names the version when the title does not', () => {
     expect(sourceLineFor('ISAAC record', '1.05')).toBe(
-      'ISAAC record — v1.05 — vendored official schema (read-only reference)',
+      'ISAAC record — v1.05 — vendored official schema',
     );
     expect(sourceLineFor(null, '1.05')).toBe(
-      'ISAAC official schema — v1.05 — vendored official schema (read-only reference)',
+      'ISAAC official schema — v1.05 — vendored official schema',
     );
   });
-  it('keeps the long description in the DOM behind the info toggle, one line visible', async () => {
+  it('keeps the long description in the DOM behind the info toggle, with no card sub', async () => {
     stubFetchRoutes({ 'GET /api/schema': { body: schemaBrowserFixture } });
-    render(<SchemaBrowser />);
-    expect(screen.getByText('A read-only reference for the canonical official ISAAC schema.')).toBeVisible();
+    const { container } = render(<SchemaBrowser />);
+    // 2026-11-02: the sub ("A read-only reference for …") repeated the title; cut.
+    expect(container.querySelector('#schema-browser-heading')?.closest('section')?.querySelector('.widget-sub')).toBeNull();
     const info = screen.getByText(/not the portal Ontology system/i);
     expect(info.closest('[hidden]')).not.toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'About Schema Reference' }));

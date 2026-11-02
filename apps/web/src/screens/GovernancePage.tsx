@@ -147,7 +147,7 @@ export function GovernancePage() {
       width="wide"
     >
       <div className="placeholder">
-        <span className="eyebrow">Data Governance</span>
+        {/* ~~"Data Governance" eyebrow~~ — cut 2026-11-02. */}
         <h1>{LABELS.navGovernance}</h1>
 
         <GovernanceSectionTabs active={activeTab} onSelect={selectTab} />

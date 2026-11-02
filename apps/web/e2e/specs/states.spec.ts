@@ -124,41 +124,21 @@ test('@interaction NOT FOUND: an unknown record id says so inside a worked-examp
   await expect(alert).toContainText(/Record Not Found/i);
 });
 
-test('@interaction REFUSED: Load Materials refuses uploads and explains the boundary', async ({ page, app }) => {
+test('@interaction Load Materials offers the walkthrough, and no upload control at all', async ({ page, app }) => {
   await app.goto('/load');
 
-  // Since 2026-10-12 the answer is a STATE in the "Can I Load My Own Files?"
-  // widget, and the control that asks the server is a plain "Try an Upload"
-  // button whose DESCRIPTION (read on focus) says it opens no picker and sends no
-  // file — it was a full-width drop-target styled button carrying that sentence
-  // as its visible label.
-  await expect(page.getByText('Not in this build — uploads are refused')).toBeVisible();
-  await expect(
-    page.getByText(/operator's responsibility, not a check this software performs/i)
-  ).toBeVisible();
-  const refusal = page.getByRole('button', { name: 'Try an Upload' });
-  await expect(refusal).toBeVisible();
-  await expect(refusal).toHaveAccessibleDescription(/opens no file picker, takes no dropped file and sends no file/i);
-
-  // Deliberately ENABLED, not disabled: the control opens no picker and takes no
-  // dropped file, and activating it makes the server state the refusal.
-  // Asserting `toBeDisabled()` here would have been a test asserting a design the
-  // app does not have.
-  await expect(refusal).toBeEnabled();
+  // ~~The "Can I Load My Own Files?" widget, its caveat and "Try an Upload"~~ —
+  // retired 2026-11-02 (owner's direction: no standing disclaimers). The screen is
+  // one card, "Guided Walkthrough", with one Start control.
+  await expect(page.getByRole('heading', { name: 'Guided Walkthrough' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Try an Upload' })).toHaveCount(0);
+  await expect(page.getByText(/Can I Load My Own Files/i)).toHaveCount(0);
 
   // There is genuinely no file input anywhere on the surface.
   await expect(page.locator('input[type="file"]')).toHaveCount(0);
 
-  await refusal.click();
-
-  // The refusal comes back as a note, not an error — the app is behaving as
-  // designed, and it says so in words.
-  const blocked = page.locator('.upload-blocked[role="note"]');
-  await expect(blocked).toBeVisible({ timeout: 20_000 });
-  await expect(blocked).toContainText(/Blocked by governance/i);
-
-  // The offered alternative is present and enabled. Outside a worked example it is the
-  // guided demo (B-05): the run button is only offered where the server would accept it.
+  // The one action is present and enabled. Its visible verb is "Start"; its name is
+  // the full "Start Guided Walkthrough" (WCAG 2.5.3: it opens with the visible word).
   await expect(page.getByRole('button', { name: 'Start Guided Walkthrough' })).toBeEnabled();
 });
 

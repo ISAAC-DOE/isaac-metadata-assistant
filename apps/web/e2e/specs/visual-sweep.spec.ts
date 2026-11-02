@@ -614,7 +614,7 @@ const STATES: readonly VisualState[] = [
   },
   {
     id: 'settings',
-    what: 'Settings → Overview — Data Safety, This Build, Guided Walkthrough',
+    what: 'Settings → Overview — Data, This Build, Guided Walkthrough',
     async reach({ page, app }) {
       await app.goto('/settings');
       await settled(page);
@@ -678,13 +678,13 @@ const STATES: readonly VisualState[] = [
     async reach({ page, app }) {
       await app.goto('/settings?tab=mcp');
       await settled(page);
-      /* The Connect Your Agent widget's headline — THIS BUILD'S REAL STATE
-         (`MCP_ENDPOINT` is `null`). The day a deployment publishes an address the
-         widget renders a different headline, and this must be revisited rather
-         than loosened into a regex that matches both. */
-      const heading = page
-        .getByRole('heading', { name: 'Requires Organization Configuration' })
-        .first();
+      /* The Connect Your Agent widget, whose one state line is THIS BUILD'S REAL
+         STATE (`MCP_ENDPOINT` is `null`). ~~The "Requires Organization
+         Configuration" heading~~ was retired 2026-11-02 (owner's direction). */
+      const heading = page.getByRole('region', { name: 'Connect Your Agent' }).first();
+      await expect(
+        heading.getByText('Not set up on this server. An administrator connects it in the deployment settings.'),
+      ).toBeVisible({ timeout: 20_000 });
       await expect(heading).toBeVisible({ timeout: 20_000 });
       return heading;
     },

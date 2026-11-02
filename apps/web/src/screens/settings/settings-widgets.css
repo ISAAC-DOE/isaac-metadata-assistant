@@ -35,37 +35,32 @@
 
 @container settings-panel (min-width: 720px) {
   .settings-grid-overview,
-  .settings-grid-privacy,
-  .settings-grid-integrations,
-  .settings-grid-advanced {
+  .settings-grid-integrations {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .settings-grid-overview > .settings-widget-safety {
+  .settings-grid-overview > .settings-widget-data {
     grid-column: 1 / -1;
   }
 }
 
 @container settings-panel (min-width: 1080px) {
-  /* Overview: the safety question takes the left two thirds, the walkthrough
-     sits under it, and This Build — the tallest of the three, with its views and
-     Copy Diagnostics — holds the right third across both rows. */
+  /* Overview: Data takes the left two thirds, the walkthrough sits under it, and
+     This Build — the tallest of the three, with Copy Diagnostics — holds the
+     right third across both rows. */
   .settings-grid-overview {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     grid-template-areas:
-      'safety safety build'
+      'data data build'
       'walk walk build';
   }
-  .settings-grid-overview > .settings-widget-safety {
-    grid-area: safety;
+  .settings-grid-overview > .settings-widget-data {
+    grid-area: data;
   }
   .settings-grid-overview > .settings-widget-build {
     grid-area: build;
   }
   .settings-grid-overview > .settings-widget-walkthrough {
     grid-area: walk;
-  }
-  .settings-grid-advanced {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
@@ -292,6 +287,65 @@
   gap: var(--space-2xs);
 }
 
+/* Advanced → Related Tools (2026-11-02): one link list instead of three launcher
+   cards, with Technical Details as a bare `<details>` beneath it. */
+.settings-related {
+  display: grid;
+  gap: var(--space-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.settings-related-item {
+  display: grid;
+  gap: var(--space-2xs);
+}
+.settings-related-sub {
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+}
+
+/* The quiet native disclosures this page uses for secondary detail: This Build's
+   Runtime rows and Advanced's Technical Details. */
+.settings-runtime,
+.settings-technical {
+  margin-top: var(--space-md);
+  font-size: var(--font-size-body);
+}
+.settings-runtime > summary,
+.settings-technical > summary {
+  cursor: pointer;
+  color: var(--action);
+  font-weight: var(--font-weight-medium);
+}
+.settings-runtime > summary:focus-visible,
+.settings-technical > summary:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-control);
+}
+.settings-runtime[open] > dl,
+.settings-technical[open] > dl {
+  margin-top: var(--space-sm);
+}
+
+/* Integrations: the reference sections, in sequence inside one disclosure. */
+.settings-sequence {
+  display: grid;
+  gap: var(--space-lg);
+}
+.settings-sequence-item > :first-child {
+  margin-top: 0;
+}
+.settings-sequence-anchor:focus {
+  outline: none;
+}
+.settings-agent-endpoint {
+  margin: var(--space-2xs) 0 0;
+  overflow-wrap: anywhere;
+}
+
 /* ---- the Endpoint Explorer, full width ----------------------------------------
    THE TWO PANES SCROLL INDEPENDENTLY, each no taller than the viewport. The list
    used to be a 520px inner scroll beside a detail pane that grew to the length of
@@ -412,15 +466,8 @@
     display: inline;
   }
 }
-@media (max-width: 440px) {
-  .settings-section-tabs {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .settings-section-tabs .section-tab {
-    text-align: left;
-  }
-}
+/* ~~≤440px: a 2 x 2 grid~~ — retired 2026-11-02 with the fourth tab: three short
+   labels fit one row at 320px, so the row is one line at every width. */
 
 /* ---- the Endpoint Explorer's detail pane ---------------------------------- */
 

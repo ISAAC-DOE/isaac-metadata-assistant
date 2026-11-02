@@ -332,8 +332,11 @@ describe('every demoted destination is still reachable', () => {
     stubFetchRoutes(settingsRoutes());
     renderAt(ROUTES.settingsTab('advanced'));
 
-    const group = await screen.findByRole('region', { name: 'Project Memory' });
-    const links = Array.from(group.querySelectorAll<HTMLAnchorElement>('a'));
+    // 2026-11-02: one Related Tools list replaced the three launcher cards.
+    const group = await screen.findByRole('region', { name: 'Related Tools' });
+    const links = Array.from(group.querySelectorAll<HTMLAnchorElement>('a')).filter(
+      (a) => a.textContent === 'Project Memory',
+    );
 
     expect(links.map((a) => a.getAttribute('href'))).toEqual([ROUTES.memory]);
     for (const link of links) {
@@ -417,11 +420,12 @@ describe('the Settings destination reads "Settings"', () => {
     ).toBeInTheDocument();
   });
 
-  it('keeps the About This Build eyebrow, and the tab labels, unchanged', async () => {
+  it('keeps the tab labels unchanged (the "About This Build" eyebrow was cut 2026-11-02)', async () => {
     stubFetchRoutes(settingsRoutes());
     renderAt(ROUTES.settings);
 
-    expect(await screen.findByText('About This Build')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Settings', level: 1 })).toBeInTheDocument();
+    expect(document.querySelector('.placeholder .eyebrow')).toBeNull();
     /* R0 appended Help & Tutorial, and Connect Your Agent was later inserted
        before it. The FIVE tabs this guard was written for are unchanged in
        LABEL, which is the whole point of it: this test belongs to the `Settings`
@@ -451,12 +455,8 @@ describe('the Settings destination reads "Settings"', () => {
     /* FOUR TABS SINCE 2026-10-12 (`DEC-28`'s regroup). This guard belongs to the
        `Settings` rename slice; the rename still has not reached the strip, and the
        strip is now the four tabs `DEC-28` named. An equality, as before. */
-    expect(screen.getAllByRole('tab').map(accessibleText)).toEqual([
-      'Overview',
-      'Privacy & Governance',
-      'Integrations',
-      'Advanced',
-    ]);
+    // THREE since 2026-11-02: Privacy & Governance was retired (owner's direction).
+    expect(screen.getAllByRole('tab').map(accessibleText)).toEqual(['Overview', 'Integrations', 'Advanced']);
   });
 });
 

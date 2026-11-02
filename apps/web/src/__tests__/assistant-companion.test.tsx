@@ -76,7 +76,7 @@ const ROUTE = 'GET /api/runtime/assistant-companion';
 /** Mount the section with one server body, and wait for the read to settle. */
 async function renderWith(body: unknown, status = 200) {
   stubFetchRoutes({ [ROUTE]: { body, status } });
-  const view = render(<AssistantCompanionSection onOpenExplorer={() => {}} />);
+  const view = render(<AssistantCompanionSection />);
   await waitFor(() =>
     expect(screen.queryByText(COPY.loadingLabel)).not.toBeInTheDocument(),
   );
@@ -86,7 +86,7 @@ async function renderWith(body: unknown, status = 200) {
 /** Mount with a route that fails, so the read never produces a body. */
 async function renderUnreadable() {
   stubFetchRoutes({ [ROUTE]: { status: 503, body: { detail: 'no' } } });
-  const view = render(<AssistantCompanionSection onOpenExplorer={() => {}} />);
+  const view = render(<AssistantCompanionSection />);
   await waitFor(() => expect(screen.getByText(COPY.unknownLabel)).toBeInTheDocument());
   return view;
 }
@@ -215,7 +215,8 @@ describe('the section is mounted on a real tab, not merely written', () => {
        chosen — which is what a reader does, so it is what this does. */
     const panel = await screen.findByRole('tabpanel', { name: 'Integrations' });
     const agent = within(panel).getByRole('region', { name: 'Connect Your Agent' });
-    fireEvent.click(within(agent).getByRole('button', { name: 'Open in Claude' }));
+    // 2026-11-02: the section is the last part of the widget's one disclosure.
+    fireEvent.click(within(agent).getByRole('button', { name: 'Setup and Reference' }));
     expect(
       within(panel).getByRole('heading', { name: COPY.heading }),
     ).toBeInTheDocument();
@@ -684,19 +685,18 @@ describe('deep link only, with the prerequisite beside it', () => {
     }
   });
 
-  it('states the limits in EVERY state, including the failed read', async () => {
-    // The limits are properties of what this section can establish, not of what
-    // it happened to find, so they may not live inside a branch.
-    for (const render_ of [
-      () => renderWith(assistantCompanionUnconfigured),
-      () => renderWith(assistantCompanionConfigured),
-      () => renderWith(assistantCompanionRefused),
-      () => renderUnreadable(),
-    ]) {
-      await render_();
-      for (const limit of COPY.limits) {
-        expect(screen.getByText(limit.claim)).toBeInTheDocument();
-      }
+  /* ~~"states the limits in EVERY state" (COPY.limits)~~ — the three limit sentences
+     were retired 2026-11-02 (owner's direction). What they guarded is still pinned
+     by state: no state shows a link it was not given, and none claims a connection. */
+  it('shows a link only in the configured state, in EVERY state including the failed read', async () => {
+    for (const [render_, expectLink] of [
+      [() => renderWith(assistantCompanionUnconfigured), false],
+      [() => renderWith(assistantCompanionConfigured), true],
+      [() => renderWith(assistantCompanionRefused), false],
+      [() => renderUnreadable(), false],
+    ] as const) {
+      const { container } = await render_();
+      expect(container.querySelectorAll('a[href]').length > 0, String(expectLink)).toBe(expectLink);
       cleanup();
       vi.unstubAllGlobals();
     }
@@ -797,15 +797,11 @@ describe('accessibility', () => {
     expect(link).toHaveAttribute('target', '_blank');
   });
 
-  it('offers the verify control as a real, keyboard-operable button', async () => {
+  // ~~"offers the verify control"~~ — the Endpoint Explorer jump was retired with its
+  // "every claim above comes from this build's contract" note (2026-11-02).
+  it('offers no control other than the link it was given', async () => {
     const { container } = await renderWith(assistantCompanionUnconfigured);
-    const button = within(container).getByRole('button', {
-      name: new RegExp(COPY.verifyAction, 'i'),
-    });
-    expect(button.tagName).toBe('BUTTON');
-    expect(button).toHaveAttribute('type', 'button');
-    expect(button).not.toBeDisabled();
-    expect(button).not.toHaveAttribute('tabindex', '-1');
+    expect(within(container).queryAllByRole('button')).toHaveLength(0);
   });
 
   it('keeps a gapless heading outline, in every state', async () => {

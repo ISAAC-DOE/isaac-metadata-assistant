@@ -448,7 +448,18 @@ For this project, the risk-tiered orchestration policy is:
     `backend-down-state.test.tsx` ("error copy — the retired prototype sentence does not
     return": every branch of the error table, hosted and local, plus the FetchStates source,
     with a control on the exact retired sentence), `reset-demo.test.tsx` (no whole-content
-    claim).
+    claim);
+  - Settings → Privacy & Governance (the twelve concept cards, the governance-policy rows),
+    the Overview "Data Safety" card, "No API Keys in This Build" and its rows, Connect Your
+    Agent's "Requires Organization Configuration" and its endpoint/activity/revocation
+    paragraphs, the companion's limits, the Load Materials "Can I Load My Own Files?"
+    widget, "Try an Upload" and the GovernanceBanner: `db-recon-truthfulness.test.tsx`
+    §7–§13 (bans over `?tab=privacy`, now Overview, and over the Data card's rows on every
+    persistence arm), `upload-claim-parity.test.tsx` (§2 all-or-nothing over the same
+    sites), `hosted-truthfulness.test.tsx` (verified-edge and content-classification bans
+    over every source), `connect-your-agent.test.tsx` and `settings-api.test.tsx` (no
+    connected state, no key, no disabled control), `reset-claim-parity.test.tsx` (the
+    categorical ban over the Data card). `?tab=privacy` is an alias of Overview.
   The backend contract, `mode: synthetic-only`, and `apps/api/tests/test_backend_copy_truthfulness.py`'s
   mirror of `FLAT_WHOLE_APP_CLAIM` / `DIAGNOSTIC_CLAIMS` / `QUALIFICATION` / `CAPABILITY_STATEMENT`
   are unchanged. Do not restore a retired sentence to satisfy an older note below.

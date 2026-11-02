@@ -88,174 +88,41 @@ export function isAssistantCompanionState(value: unknown): value is AssistantCom
   );
 }
 
+/**
+ * The Claude companion section (inside Connect Your Agent). One plain state line
+ * per state (2026-11-02, owner's direction: no standing disclaimers).
+ * ~~`notSystemOfRecord`, `limits` ("What This Section Checked, and What It Did
+ * Not"), `verifyNote`, `refusedScientistNote`, `unconfiguredOperator`~~ — retired.
+ * It still never shows a link it was not given, and never the setting's value.
+ */
 export const ASSISTANT_COMPANION_COPY = {
-  /** The section heading. Names the thing, not a status. */
   heading: 'Open ISAAC Assistant in Claude',
 
-  /**
-   * What the section is, said before any state is reported. Present tense about
-   * what the companion IS, and deliberately silent about whether it works —
-   * that is the state's job, one paragraph down.
-   *
-   * CORRECTED 2026-09-02. The prior sentence claimed "nothing you do there
-   * changes a record here unless you come back and change it yourself" — an
-   * unqualified denial that was FALSE the day it shipped. The companion's own
-   * permitted tool set (`apps/api/isaac_api/mcp/policy.py::PERMITTED_TOOL_NAMES`,
-   * requested in `artifacts/isaac-assistant/tool-permission-manifest.json` as
-   * `isaac:draft.write` and `isaac:proposals.write`) includes
-   * `isaac_answer_questions` and `isaac_create_run`, which write directly into a
-   * record's draft the moment a scientist confirms them in Claude — no separate
-   * trip back to this website is needed for that write to happen — and
-   * `isaac_propose_field_value`, which attaches a reviewable suggestion instead.
-   * What stays true, and is why this is a correction rather than a rewrite, is
-   * the boundary one line down: nothing is exported or made official except by
-   * finishing that separately, here.
-   */
-  lead: 'An optional companion page, opened in Claude, that a scientist can ask about their ISAAC work. It is a separate place you open, never a part of this website. Some actions there write directly into this record’s draft once you confirm them — closing an open question, adding a run — and others leave a suggestion attached to the record for review instead; nothing is exported or made official except separately, here.',
+  lead: 'An optional companion page, opened in Claude, for asking about your ISAAC work. Some actions there write directly into this record’s draft once you confirm them; others leave a suggestion attached to the record for review. Exports happen here.',
 
-  /**
-   * THE HEADLINE BOUNDARY, rendered in every state including the one with a
-   * link. This website is the system of record; the companion is not, and
-   * cannot become one by being configured.
-   */
-  notSystemOfRecordHeading: 'This Website Remains the System of Record',
-  notSystemOfRecord:
-    'Every record, every piece of evidence and every export lives here and only here. The companion holds none of it and decides none of it. This website works exactly the same whether or not a companion link is set, and no part of the record workflow needs one.',
+  unconfiguredLabel: 'Not set up on this server',
+  unconfiguredDetail: 'An administrator sets it up in the deployment settings.',
 
-  /* ---------------------------------------------------------------------- *
-   * The three states. Each pair is a LABEL (what this deployment is) and a
-   * DETAIL (what that means for the reader). Neither ever depends on a colour.
-   * ---------------------------------------------------------------------- */
+  configuredLabel: 'A companion link is set',
+  configuredDetail: 'Open it to check that the page is still there and shared with you.',
 
-  /**
-   * `unconfigured` — the DEFAULT, and the wording carries no fault at all.
-   *
-   * The label deliberately does not say "not set up", "unavailable", "disabled"
-   * or "coming soon". The first three read as a broken deployment; the fourth
-   * is a promise nobody has authorized. It says what is true and stops.
-   */
-  unconfiguredLabel: 'No companion link is set for this deployment',
-  /*
-   * NOT ONE WORD OF ERROR VOCABULARY, and this is enforced rather than intended:
-   * `assistant-companion.test.tsx` ratchets the whole `unconfigured` render
-   * against the words a reader reads as a fault. So this sentence says what is
-   * true and what follows from it, and never reaches for "nothing is missing" or
-   * "nothing is broken" — a denial still puts the word on the page, and a reader
-   * skimming takes the word rather than the negation.
-   */
-  unconfiguredDetail:
-    'That is the normal, documented default, and it is the state most deployments are in. Whether to publish a companion and share it is an organization decision; a deployment that never makes one behaves exactly as this one does now.',
-  unconfiguredOperator:
-    'An operator who has decided to publish one sets a single environment variable on this deployment. That decision, and the steps it takes, are written down in the repository — see the reference below.',
+  configuredPrerequisiteHeading: 'Before You Open It',
 
-  /**
-   * `configured` — and every sentence here is scoped to what was actually
-   * checked. The route checked a SHAPE. It did not fetch the link, did not
-   * confirm the artifact exists, and did not confirm anyone can see it.
-   */
-  configuredLabel: 'A companion link is set for this deployment',
-  configuredDetail:
-    'An operator supplied a link and it passed the checks this application makes on its shape. Those checks are all that has happened: this application has not opened the link, so it cannot tell you whether the page is still there, whether it has moved, or whether it has been shared with you. Opening it is how you find out.',
-
-  /** Sits immediately beside the link, never in a footnote. */
-  configuredPrerequisiteHeading: 'Before the link will be useful to you',
-
-  /** The visible text of the one link this surface can render. */
   openLinkText: 'Open the companion in Claude',
 
-  /**
-   * Named for what it is. The link leaves this website, and a reader is told so
-   * before they follow it rather than after.
-   */
-  leavesSiteNote:
-    'The link opens in a new tab, outside this website. Nothing about your workspace is sent with it.',
+  leavesSiteNote: 'The link opens in a new tab, outside this website.',
 
-  /**
-   * `refused` — an operator mistake worth surfacing, addressed to the operator
-   * and written so a scientist reading it is not alarmed about their data.
-   */
-  refusedLabel: 'A companion link was supplied and this application will not use it',
-  refusedDetail:
-    'Something was set, and it did not pass the checks this application makes before it will offer a link to anyone. The reason below names which check it failed. The value itself is deliberately not shown here or written to any log, because a value pasted into the wrong place must not be copied back out of it.',
-  refusedReasonHeading: 'Why it was not used',
-  refusedScientistNote:
-    'No record, export or evidence is affected by this. Nothing that a scientist does on this website depends on a companion link, so the workflow is unchanged while this is sorted out.',
+  refusedLabel: 'The companion link set for this deployment was not accepted',
+  refusedDetail: 'The reason below names the check it failed.',
+  refusedReasonHeading: 'Why It Was Not Used',
 
-  /* ---------------------------------------------------------------------- *
-   * Limits and provenance, rendered in every state.
-   * ---------------------------------------------------------------------- */
-
-  limitsHeading: 'What This Section Checked, and What It Did Not',
-
-  /**
-   * The three named limits, each mapped to the field of the response that
-   * publishes it. They are rendered as a list because they are separable
-   * claims, and a reader who stops after the first must not have skipped one.
-   */
-  limits: [
-    {
-      id: 'reachable',
-      claim: 'It did not open the link.',
-      detail:
-        'This application makes no outbound request of any kind here. A link that is set may still point at a page that has moved, been removed, or was never shared with you.',
-    },
-    {
-      id: 'embed',
-      claim: 'It offers a link and nothing else.',
-      detail:
-        'The companion is never displayed inside this website, and there is no setting here that would let it be. Embedding is documented by the vendor only for pages published to the public, which this companion is not.',
-    },
-    {
-      id: 'connector',
-      claim: 'It cannot see your own Claude settings.',
-      /*
-       * WRITTEN AROUND THE RATCHET, NOT THE RATCHET AROUND THIS SENTENCE. It
-       * used to say "whether you have ENABLED the ISAAC connector … nothing
-       * here can ENABLE it for you". Both readings are honest, but `enabled` is
-       * also the adjective a fake connected state wears — "the companion is
-       * live, active and enabled" was measured to pass every control in this
-       * slice — so the word joined the ratchet and this sentence moved to
-       * "turned on". The file's own rule, stated three times in the test: the
-       * page is written to the ratchet, never the ratchet loosened to the page.
-       */
-      detail:
-        'Whether you have turned on the ISAAC connector is yours to know. Nothing here can turn it on for you and nothing here can check it, so this section never reports on it — it only tells you it is a step you take yourself.',
-    },
-  ],
-
-  /**
-   * How the reader can check every claim above against the contract. The same
-   * affordance Connect Your Agent offers for its own claim, and for the same
-   * reason: a boundary a reader cannot verify is a boundary they have to take
-   * on faith.
-   */
-  verifyNote:
-    'Every claim above comes from this build’s own published contract. The Endpoint Explorer lists the operation this section reads and its full description.',
-
-  /** The label of the button that opens the Endpoint Explorer tab. */
-  verifyAction: 'Endpoint Explorer',
-
-  /** Introduces the machine-readable facts, above the two `code` values. */
   configurationHeading: 'Deployment Configuration',
-  configurationNote:
-    'The name of the setting an operator changes, and the document that records the steps and who owns them. The value of that setting is never shown here, in any state.',
+  configurationNote: 'The setting an administrator changes, and where the steps are written down.',
   configuredByLabel: 'Setting',
   referenceLabel: 'Written down in',
 
-  /* ---------------------------------------------------------------------- *
-   * Fetch states. This section reads live configuration, so it has the two
-   * states any live read has, and it says what each means rather than showing
-   * a bare spinner or a bare failure.
-   * ---------------------------------------------------------------------- */
-
   loadingLabel: 'Reading this deployment’s configuration…',
 
-  /**
-   * A FAILED READ IS NOT AN ABSENT LINK, and conflating them is the defect this
-   * sentence exists to prevent. "We could not ask" must never render as "there
-   * is none" — the first is unknown, the second is a fact about the deployment.
-   */
-  unknownLabel: 'This deployment’s companion configuration could not be read',
-  unknownDetail:
-    'This section asked the server and did not get an answer, so it does not know whether a companion link is set. That is different from knowing there is none, and it is reported as its own outcome rather than shown as an empty result. Nothing else on this website is affected.',
+  unknownLabel: 'The companion setting could not be read',
+  unknownDetail: 'Reload the page to read it again.',
 } as const;

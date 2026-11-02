@@ -90,10 +90,9 @@ import { fireEvent, render, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import { TopBar } from '../components/TopBar';
-import { GovernanceBanner } from '../components/GovernanceBanner';
 import { HelpPanel } from '../components/HelpPanel';
 import { SettingsPage } from '../screens/SettingsPage';
-import { API_ACCESS_COPY, settingsConcepts, type SettingsConcept } from '../lib/settingsContent';
+import { API_ACCESS_COPY, SETTINGS_WIDGET_COPY, dataRows } from '../lib/settingsContent';
 import { __resetHealthCache } from '../lib/useHealth';
 import { __resetTutorialStore, startTutorial } from '../lib/tutorialController';
 import { stubFetchDown, stubFetchRoutes, tutorialSessionRoutes } from '../test/apiFixtures';
@@ -354,55 +353,30 @@ const FORBIDDEN_CLAIMS: [string, RegExp][] = [
   ...FORBIDDEN_CLAIMS_SHARED,
 ];
 
-describe('GovernanceBanner copy — scoped to the workspace, so it owes the diagnostic nothing', () => {
-  function bannerText(): string {
-    render(<GovernanceBanner />);
-    return document.querySelector('.gov-body')!.textContent ?? '';
-  }
-
-  /*
-   * INVERTED 2026-10-12, AND THE RULE IT ENFORCES IS UNCHANGED.
-   *
-   * This used to require `REQUIRED_CLAIMS` — the workspace half AND all seven
-   * diagnostic bounds — because the banner NAMED the diagnostic, and a surface
-   * that names it must bound it. The clutter audit made the banner one line
-   * scoped to the workspace a reader sees (the diagnostic was stated on five
-   * surfaces). So the banner now states the WORKSPACE half, and is proven to make
-   * no capability statement at all — which is what makes the missing bounds
-   * correct rather than an under-disclosure. `missingBounds` is asserted vacuous
-   * rather than assumed so, so that re-adding "may run …" here without its bounds
-   * fails loudly. ~~The capability, with every bound, is still stated by the Help
-   * popover and the policy page this banner links to (both asserted in this file).~~
-   * Since 2026-11-02 neither is required to state it; both are asserted to make no
-   * unqualified claim and to bound it if they do.
-   */
-  it('makes no statement about the diagnostic, so it owes none of its bounds', () => {
-    const text = bannerText();
-    expect(CAPABILITY_STATEMENT.test(text)).toBe(false);
-    expect(text).not.toMatch(/diagnostic|test database|production-derived/i);
-    expect(missingBounds(text)).toEqual([]);
-  });
-
-  it.each(FORBIDDEN_CLAIMS)('never claims %s', (_what, pattern) => {
-    expect(bannerText()).not.toMatch(pattern);
-  });
-
-  it('no longer leads with the unqualified "Synthetic mode." headline', () => {
-    expect(bannerText()).not.toMatch(/^Synthetic mode\./);
-  });
-
-  it('makes no unqualified whole-application claim', () => {
-    expect(unqualifiedClaims(bannerText())).toEqual([]);
-  });
-});
-
-/* The policy moved to Settings → Privacy & Governance on 2026-10-12, verbatim
-   apart from two recorded corrections (`GOVERNANCE_POLICY`), and this suite
-   follows it: the same required and forbidden claims, over the same three
-   paragraphs, rendered where a reader now meets them. */
-describe('Settings → Privacy & Governance → the governance policy — same distinction, full paragraph', () => {
-  function policyText(): string {
-    render(
+/*
+ * ~~GovernanceBanner~~ (retired 2026-11-02 with the Load Materials caveats) and
+ * ~~Settings → Privacy & Governance → the governance policy~~ (the tab was retired the
+ * same day; `?tab=privacy` now lands on Overview's Data card). What stays pinned is
+ * that the page a reader now meets at that address makes no over-claim of any kind.
+ */
+describe('Settings at ?tab=privacy (now Overview) — no over-claim anywhere on the page', () => {
+  async function settingsText(): Promise<string> {
+    stubFetchRoutes({
+      'GET /api/about': {
+        body: {
+          app_version: '0.1.0',
+          build_commit: null,
+          record_schema_version: '1.05',
+          runtime_mode: 'synthetic-only',
+          data_regime: 'synthetic-only',
+          persistence: 'durable',
+          core: 'isaac_records',
+        },
+      },
+      'GET /api/openapi': { body: { openapi: '3.1.0', info: { title: 'x', version: '0' }, paths: {} } },
+      'GET /api/graph/status': { status: 503, body: {} },
+    } as never);
+    const view = render(
       <MemoryRouter
         initialEntries={['/settings?tab=privacy']}
         future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
@@ -410,17 +384,18 @@ describe('Settings → Privacy & Governance → the governance policy — same d
         <SettingsPage />
       </MemoryRouter>,
     );
-    return Array.from(document.querySelectorAll('.gov-policy-section'))
-      .map((el) => el.textContent ?? '')
-      .join(' ');
+    await waitFor(() => expect(view.container.querySelector('.settings-rows')).not.toBeNull());
+    return view.container.querySelector('.settings-panel')!.textContent ?? '';
   }
 
-  it.each(FORBIDDEN_CLAIMS)('never claims %s', (_what, pattern) => {
-    expect(policyText()).not.toMatch(pattern);
+  /* `FORBIDDEN_CLAIMS_SHARED`: This Build's Runtime rows print the reported mode
+     value (`synthetic-only`) as data, which is the mode's real name, not a claim. */
+  it.each(FORBIDDEN_CLAIMS_SHARED)('never claims %s', async (_what, pattern) => {
+    expect(await settingsText()).not.toMatch(pattern);
   });
 
-  it('makes no unqualified whole-application claim, and bounds the capability if it states it', () => {
-    const text = policyText();
+  it('makes no unqualified whole-application claim, and bounds the capability if it states it', async () => {
+    const text = await settingsText();
     expect(unqualifiedClaims(text)).toEqual([]);
     expect(missingBounds(text)).toEqual([]);
   });
@@ -475,17 +450,14 @@ describe('Help popover copy — no whole-application data claim anywhere in it',
   });
 });
 
-// --- 10–12: Settings → Data & Privacy — the concept cards ------------------------
+// --- 10–12: Settings → Overview → the Data card ------------------------------
 
 /*
- * `settingsContent.ts` is the single source for every Settings claim, so this scans the
- * concept objects rather than a rendering of them. Since 2026-11-02 the PRESENCE
- * requirements (each card must carry the qualification, the seven bounds, the
- * capability paragraph exactly once, the storage card's three clauses) are deleted:
- * those cards are being retired with the Privacy tab, and a guard that requires a
- * disclaimer to exist would block its removal. Every "no false claim" half is kept,
- * per card and over the set, so whatever remains of these cards — and whatever replaces
- * them — still cannot over-claim. §13(a) runs the pairing rule over every unit too.
+ * The twelve Privacy & Governance concept cards were retired 2026-11-02. Their
+ * replacement is four plain rows (`dataRows`), written from the reported
+ * persistence. Every "no false claim" half that held over the cards is run over the
+ * rows, on every persistence arm — including an unrecognised value, which must be
+ * NAMED rather than narrowed into a branch that asserts something unreported.
  */
 
 const SETTINGS_FACTS = {
@@ -494,89 +466,47 @@ const SETTINGS_FACTS = {
   recordSchemaVersion: '1.05',
 };
 
-function conceptById(id: string, persistence = SETTINGS_FACTS.persistence): SettingsConcept | undefined {
-  return settingsConcepts({ ...SETTINGS_FACTS, persistence }).find((c) => c.id === id);
+const PERSISTENCE_ARMS = ['ephemeral', 'durable', 'unavailable', 'not-a-known-state'];
+
+function dataText(persistence: string): string {
+  return dataRows({ ...SETTINGS_FACTS, persistence })
+    .map((r) => `${r.label} ${r.text}`)
+    .join('\n');
 }
 
-const conceptText = (c: SettingsConcept) =>
-  `${c.heading} ${c.summary} ${c.detail} ${c.more?.label ?? ''} ${c.more?.text ?? ''}`;
-
-describe('Settings copy — the real-experiment-data concept, if present, over-claims in neither direction', () => {
-  const concept = conceptById('no-real-experiment-data');
-
-  it('never heads a card with the unqualified whole-deployment promise', () => {
-    if (!concept) return;
-    expect(concept.heading).not.toBe('No Real Experiment Data');
-    expect(concept.detail).not.toMatch(/out of scope for this prototype/i);
+describe('Settings → Data — no row over-claims, on any persistence arm', () => {
+  it.each(PERSISTENCE_ARMS)('persistence %s: none of the forbidden claims', (persistence) => {
+    const text = dataText(persistence);
+    for (const [what, pattern] of FORBIDDEN_CLAIMS) {
+      expect(text, `the Data card claims ${what}`).not.toMatch(pattern);
+    }
+    expect(unqualifiedClaims(text)).toEqual([]);
+    expect(missingBounds(text)).toEqual([]);
   });
-
-  it.each(FORBIDDEN_CLAIMS)('never claims %s', (_what, pattern) => {
-    if (!concept) return;
-    expect(conceptText(concept)).not.toMatch(pattern);
-  });
-});
-
-describe('Settings copy — the synthetic-only concept, if present, is never a flat whole-build claim', () => {
-  const concept = conceptById('synthetic-data-only');
-
-  it('never heads the card with a flat whole-build scope claim', () => {
-    if (!concept) return;
-    expect(concept.heading).not.toBe('Synthetic Data Only');
-    expect(concept.heading).not.toMatch(/\bsynthetic\s+data\s+only\b/i);
-  });
-
-  it('never claims that only synthetic data is in scope', () => {
-    if (!concept) return;
-    expect(concept.detail).not.toMatch(/only unmistakably synthetic data is in scope/i);
-    expect(concept.detail).not.toMatch(/\b(data|records?|artifacts?)\b[^.!?]{0,40}\b(is|are) in scope\b/i);
-  });
-
-  it('never leaves the mode token unqualified', () => {
-    if (!concept) return;
-    expect(unqualifiedClaims(concept.detail)).toEqual([]);
-    expect(missingBounds(concept.detail)).toEqual([]);
-  });
-
-  /* `FORBIDDEN_CLAIMS_SHARED`, not `FORBIDDEN_CLAIMS`: this card keeps the mode token
-     `synthetic-only` on purpose — it is the mode's real name. */
-  it.each(FORBIDDEN_CLAIMS_SHARED)('never claims %s', (_what, pattern) => {
-    if (!concept) return;
-    expect(conceptText(concept)).not.toMatch(pattern);
-  });
-});
-
-describe('Settings → Data & Privacy — no card contradicts another, or the database facts', () => {
-  const tab = settingsConcepts(SETTINGS_FACTS).map(conceptText).join('\n');
 
   it.each([
     ['denies that any database exists', /there is no database/i],
     ['promises the build takes synthetic data only', /\bsynthetic\s+(demo\s+)?data\s+only\b/i],
     ['puts real data out of scope for the whole build', /out of scope for (this|the) (prototype|build|deployment|app|application)/i],
-    ['calls the whole thing a synthetic build', /\bthis\s+synthetic\s+(build|prototype|deployment|app|application|preview)\b/i],
-  ])('no card %s', (_what, pattern) => {
-    expect(tab).not.toMatch(pattern);
+    ['claims a live database connection', /is (currently )?(connected|reachable|online)/i],
+  ])('no arm %s', (_what, pattern) => {
+    for (const persistence of PERSISTENCE_ARMS) expect(dataText(persistence)).not.toMatch(pattern);
   });
 
-  /*
-   * The storage card's two corrected falsehoods (2026-10-18): the diagnostic does NOT
-   * read a separate database, and it does NOT read only the records table. Kept as bans,
-   * on every persistence arm, for as long as the card exists.
-   */
-  it.each(['ephemeral', 'durable', 'unavailable'])(
-    'the storage card (if present) repeats neither corrected falsehood when persistence is %s',
-    (persistence) => {
-      const resets = conceptById('what-resets', persistence);
-      if (!resets) return;
-      expect(resets.detail).not.toMatch(/not where your experiment records go/i);
-      expect(resets.detail).not.toMatch(/not the database this state is about/i);
-      expect(resets.detail).not.toMatch(/reads only (its|the) production-derived records table/i);
-      expect(resets.summary).not.toMatch(/there is no database|^no database/i);
-    },
-  );
+  it('an unrecognised persistence value is named, never narrowed into a claim', () => {
+    const text = dataText('not-a-known-state');
+    expect(text).toContain('not-a-known-state');
+    expect(text).not.toMatch(/survive a restart|stored as files/i);
+  });
+
+  it('the unavailable arm does not claim liveness it did not measure', () => {
+    // `/api/health` does zero I/O: the arm reports what the server RECORDED.
+    expect(dataText('unavailable')).not.toMatch(/right now|currently|is down|is offline/i);
+  });
 
   // PRECONDITION: the reads the copy has described are the reads `db_recon` makes. If
-  // this moves, any surviving description of the diagnostic has to move with it.
-  it('the reads db_recon makes are the ones the copy has described, and no app table is among them', () => {
+  // this moves, any future description of the diagnostic has to move with it.
+  it('the reads db_recon makes are known, and no app table is among them', () => {
     const candidates = [
       join(process.cwd(), '..', 'api', 'isaac_api', 'db_recon.py'),
       join(process.cwd(), 'apps', 'api', 'isaac_api', 'db_recon.py'),
@@ -587,7 +517,6 @@ describe('Settings → Data & Privacy — no card contradicts another, or the da
     expect(src).toMatch(/FROM records\b/);
     expect(src).toMatch(/FROM vocabulary_cache\b/);
     expect(src).toMatch(/information_schema\.tables/);
-    // No query reads the content of an application-owned table.
     expect(src).not.toMatch(/FROM isaac_[a-z_]+/);
   });
 });
@@ -720,20 +649,20 @@ interface CopyUnit {
  * whole-application claim would land. `unavailable` and an unrecognised value are
  * included for the same reason: every arm that can render is scanned.
  */
-const PERSISTENCE_STATES = ['ephemeral', 'durable', 'unavailable', 'not-a-known-state'];
+const PERSISTENCE_STATES = PERSISTENCE_ARMS;
 
 function settingsCopyUnits(): CopyUnit[] {
   const units: CopyUnit[] = [];
   for (const persistence of PERSISTENCE_STATES) {
-    for (const c of settingsConcepts({ ...SETTINGS_FACTS, persistence })) {
-      units.push({
-        where: `concept "${c.id}" [persistence=${persistence}]`,
-        text: [c.heading, c.summary, c.detail, c.more?.label ?? '', c.more?.text ?? ''].join(' '),
-      });
+    for (const row of dataRows({ ...SETTINGS_FACTS, persistence })) {
+      units.push({ where: `data row "${row.label}" [persistence=${persistence}]`, text: `${row.label} ${row.text}` });
     }
   }
   for (const [key, value] of Object.entries(API_ACCESS_COPY)) {
     if (typeof value === 'string') units.push({ where: `API_ACCESS_COPY.${key}`, text: value });
+  }
+  for (const [key, value] of Object.entries(SETTINGS_WIDGET_COPY)) {
+    if (typeof value === 'string') units.push({ where: `SETTINGS_WIDGET_COPY.${key}`, text: value });
   }
   return units;
 }
@@ -741,16 +670,13 @@ function settingsCopyUnits(): CopyUnit[] {
 describe('sweep guard — every settingsContent copy unit, one at a time', () => {
   const units = settingsCopyUnits();
 
-  it('scans every concept and every API-access string, not a hand-picked subset', () => {
-    // 9 concepts per state (the module has more), plus the API-access strings,
-    // which are state-independent and so are collected once rather than N times.
-    expect(units.length).toBeGreaterThanOrEqual(9 * PERSISTENCE_STATES.length + 5);
-    for (const id of ['synthetic-data-only', 'no-real-experiment-data', 'what-resets']) {
-      for (const persistence of PERSISTENCE_STATES) {
-        expect(units.map((u) => u.where)).toContain(`concept "${id}" [persistence=${persistence}]`);
-      }
+  it('scans every Data row on every arm, and every API-access and widget string', () => {
+    expect(units.length).toBeGreaterThanOrEqual(4 * PERSISTENCE_STATES.length + 10);
+    for (const persistence of PERSISTENCE_STATES) {
+      expect(units.map((u) => u.where)).toContain(`data row "Experiment Records" [persistence=${persistence}]`);
     }
-    expect(units.map((u) => u.where)).toContain('API_ACCESS_COPY.statusHeading');
+    expect(units.map((u) => u.where)).toContain('API_ACCESS_COPY.stateLine');
+    expect(units.map((u) => u.where)).toContain('SETTINGS_WIDGET_COPY.dataTitle');
   });
 
   it.each(units.map((u) => [u.where, u.text]))(
@@ -827,7 +753,6 @@ describe('sweep guard — no unqualified whole-application claim in any frontend
   it('scans the real string sources, not a duplicate of them', () => {
     expect(files.length).toBeGreaterThan(40);
     for (const covered of [
-      'components/GovernanceBanner.tsx',
       'components/HelpPanel.tsx',
       'components/TopBar.tsx',
       'lib/labels.ts',

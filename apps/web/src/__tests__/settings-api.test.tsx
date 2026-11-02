@@ -9,7 +9,7 @@ import {
   splitPurpose,
 } from '../screens/settings/ApiDocs';
 import { flattenOpenApi, quickStartFacts } from '../lib/apiDocsModel';
-import { API_ACCESS_COPY, API_ACCESS_ROWS, API_KEY_REQUIREMENTS } from '../lib/settingsContent';
+import { API_ACCESS_COPY } from '../lib/settingsContent';
 import { ROUTES } from '../lib/routes';
 import type { ApiOpenApiResponse } from '../lib/types';
 import {
@@ -138,16 +138,12 @@ const apiAccessPanel = keysRegion;
 const explorerPanel = () => document.getElementById('settings-tabpanel-advanced') as HTMLElement;
 const detailPane = () => document.getElementById('settings-api-detail') as HTMLElement;
 
-/** Press one of the widget's two view toggles, by its visible label. */
-function openView(label: 'Quick Start' | 'Program an Agent') {
-  /* By the toggle's own id: Quick Start's "next" nav also carries a
-     "Program an Agent" button, which switches to the same view. */
-  const toggle = document.getElementById(
-    label === 'Quick Start'
-      ? 'settings-apiaccess-heading-tab-quick-start'
-      : 'settings-apiaccess-heading-tab-program',
-  ) as HTMLButtonElement;
-  if (toggle.getAttribute('aria-pressed') !== 'true') fireEvent.click(toggle);
+/** Open the widget's one disclosure, which holds Quick Start then Program an Agent
+ *  in sequence (2026-11-02: the two view toggles were retired). Idempotent. */
+function openView(_label: 'Quick Start' | 'Program an Agent') {
+  const region = screen.getByRole('region', { name: 'API Access' });
+  const trigger = within(region).getByRole('button', { name: 'Setup and Reference' });
+  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger);
 }
 
 /** Open Settings by the retired `?tab=api` link a reader may hold, and open the
@@ -232,10 +228,7 @@ describe('Settings → the two API surfaces', () => {
   it('the key state needs no data, so it renders while the contract is still loading', () => {
     stubFetchRoutes(routes());
     renderSettings(ROUTES.settingsTab('api'));
-    // Synchronously, before any fetch resolves:
-    expect(within(keysRegion()).getByText(API_ACCESS_COPY.statusHeading)).toBeInTheDocument();
-    expect(within(keysRegion()).getByText(API_ACCESS_COPY.credentialLine)).toBeInTheDocument();
-    // ...and each contract-derived view honestly says it is still loading.
+    expect(within(keysRegion()).getAllByText(API_ACCESS_COPY.stateLine).length).toBeGreaterThan(0);
     expect(within(keysRegion()).getAllByText('Loading the API contract…')).toHaveLength(2);
   });
 
@@ -250,178 +243,76 @@ describe('Settings → the two API surfaces', () => {
 
 // --- API Access: the honest unavailable state ---------------------------------
 
-describe('Settings → API Access — an honest unavailable state', () => {
-  it('is one widget: a state, one line, two views and Details — complete rather than broken', async () => {
+/*
+ * 2026-11-02 (owner's direction: no standing disclaimers). API Access is ONE plain
+ * state line and ONE disclosure ("Setup and Reference") holding Quick Start then
+ * Program an Agent. ~~"No API Keys in This Build", its proof paragraph, the five
+ * "How Access Works Today" rows and the five key requirements~~ are retired. What
+ * stays pinned is everything that would make the widget FALSE: a key, a mask, a
+ * reveal or copy of a credential, a Create control, a disabled control, storage
+ * writes, an error dressed as a state, or a claim that something is connected.
+ */
+describe('Settings → API Access — an honest state', () => {
+  it('is one widget: a state line and one disclosure — complete rather than broken', async () => {
     await openApiAccess();
     const widget = keysRegion();
     expect(widget.tagName).toBe('SECTION');
     expect(within(widget).getByRole('heading', { level: 2 }).textContent).toBe('API Access');
-    // The state is a heading in the outline, so it is reachable by heading
-    // navigation, and it is the headline — nothing above it but the title.
-    const state = widget.querySelector('.widget-headline h3') as HTMLElement;
-    expect(state.textContent).toBe(API_ACCESS_COPY.statusHeading);
-    expect(within(widget).getByText(API_ACCESS_COPY.credentialLine)).toBeInTheDocument();
-    expect(
-      within(widget).getByRole('group', { name: 'API Access Views' }),
-    ).toBeInTheDocument();
-    expect(within(widget).getByRole('button', { name: 'How Access Works Today' })).toHaveAttribute(
-      'aria-expanded',
-      'false',
+    expect(widget.querySelector('.widget-headline .settings-state-line')?.textContent).toBe(
+      API_ACCESS_COPY.stateLine,
     );
-    // Not an error state and not a fake loading failure.
+    expect(within(widget).queryByRole('group', { name: 'API Access Views' })).toBeNull();
+    expect(within(widget).getByRole('button', { name: 'Setup and Reference' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
     expect(within(widget).queryByRole('alert')).not.toBeInTheDocument();
-    const outsideViews = Array.from(widget.childNodes)
-      .filter((n) => !(n as HTMLElement).classList?.contains('widget-views-wrap'))
-      .map((n) => n.textContent ?? '')
-      .join(' ');
-    expect(outsideViews).not.toMatch(
+    expect(widget.querySelector('.widget-headline')?.textContent ?? '').not.toMatch(
       /something went wrong|could not load|try again|retry|temporarily unavailable/i,
     );
   });
 
-  /**
-   * The status is stated ONCE. The retired tab said "no keys / not available"
-   * six times — a heading and its paragraph, a disabled button's reason, and an
-   * empty list's title and body. The count assertions are what stop that coming
-   * back; `settings-page.test.tsx` counts every string across all four tabs.
-   */
-  it('states the absence once, as the headline, with its proof behind the info toggle', async () => {
-    await openApiAccess();
-    const widget = keysRegion();
-    const info = widget.querySelector('.widget-info') as HTMLElement;
-    expect(info.textContent).toBe(API_ACCESS_COPY.statusBody);
-    expect(info).toHaveAttribute('hidden');
-    fireEvent.click(within(widget).getByRole('button', { name: 'About API Access' }));
-    expect(info).not.toHaveAttribute('hidden');
-
-    const text = norm(widget.textContent ?? '');
-    expect(countOccurrences(text, norm(API_ACCESS_COPY.statusHeading))).toBe(1);
-    expect(countOccurrences(text, norm(API_ACCESS_COPY.statusBody))).toBe(1);
-    // The retired restatements are gone from the widget, not just moved.
-    expect(text).not.toMatch(/Unavailable\. This API has no operation that creates/i);
-    expect(text).not.toMatch(/No key can be issued from this app/i);
-    expect(text).not.toMatch(/API keys are unavailable here/i);
-    expect(text).not.toMatch(/see API Keys/i);
-    expect(text).not.toMatch(/No keys to show/i);
-    expect(text).not.toMatch(/empty by design, not by circumstance/i);
-    expect(text).not.toMatch(/Disabled: there is no operation for this button to call/i);
+  it('the state line says who sets access up, and overstates nothing', () => {
+    expect(API_ACCESS_COPY.stateLine).toMatch(/not set up on this server/i);
+    expect(API_ACCESS_COPY.stateLine).toMatch(/administrator/i);
+    expect(API_ACCESS_COPY.stateLine).not.toMatch(/\bconnected\b|coming soon|available soon|enabled/i);
   });
 
-  it('answers the capability questions once each, in Details', async () => {
+  it('none of the retired standing caveats comes back', async () => {
     await openApiAccess();
-    const widget = keysRegion();
-    expect(
-      Array.from(widget.querySelectorAll('.widget-details .settings-def dt')).map((dt) => dt.textContent),
-    ).toEqual([
-      'Current Access Model',
-      'What an API Key Would Enable',
-      'External Agent Access',
-      // Added when the client-side bearer seam was removed: every row above says
-      // what the DEPLOYMENT may require; this one says what this page sends.
-      'What This Interface Sends',
-      'Hosted Authentication Boundary',
-    ]);
-    const text = norm(widget.textContent ?? '');
-    for (const row of API_ACCESS_ROWS) {
-      expect(within(widget).getByText(row.detail)).toBeInTheDocument();
-      expect(countOccurrences(text, norm(row.detail)), `${row.term} duplicated`).toBe(1);
-    }
-    expect(
-      within(widget).getByText(/One credential belonging to the whole deployment/i),
-    ).toBeInTheDocument();
-    expect(within(widget).getByText(/Not through anything you can obtain here/i)).toBeInTheDocument();
-    expect(
-      within(widget).getByText(
-        /Signing in through a deployment's identity layer with a browser is not the same thing as headless authentication/i,
-      ),
-    ).toBeInTheDocument();
-    // It never claims keys are available.
-    expect(text).not.toMatch(/your key is|key created|copy your key/i);
-    // Provider-neutral wherever that boundary is stated: no vendor, no protocol.
-    const lower = (widget.textContent ?? '').toLowerCase();
-    for (const needle of ['authentik', 'ingress', 'k8s', 'kubernetes', 'vercel', 'railway', 'oauth', 'saml', 'sso']) {
-      expect(lower.includes(needle), `named provider or protocol: ${needle}`).toBe(false);
+    const text = norm(keysRegion().textContent ?? '');
+    for (const retired of [
+      /No API Keys in This Build/i,
+      /there is never a key here to reveal, copy, or store/i,
+      /At most one credential exists/i,
+      /What would have to exist before a key could be issued/i,
+      /How Access Works Today/i,
+      /this prototype/i,
+    ]) {
+      expect(text, String(retired)).not.toMatch(retired);
     }
   });
 
-  /**
-   * INVERTED 2026-10-12 — this test required a really-`disabled` "Create API
-   * Key" button with an associated reason. The cross-page rule the redesign
-   * follows is that an absent capability is a STATE, never a disabled button:
-   * a control a reader cannot press still says "this exists here". So the
-   * button, and every other disabled control, must be ABSENT — and the claim
-   * the button's reason made is still made, by the headline.
-   */
   it('offers no control that cannot function — no Create button, no disabled control', async () => {
     await openApiAccess();
-    openView('Program an Agent');
     expect(screen.queryByRole('button', { name: /Create API Key/i })).toBeNull();
     for (const button of Array.from(keysRegion().querySelectorAll('button'))) {
       expect(button.disabled, `disabled control: ${button.textContent}`).toBe(false);
     }
-    expect(within(keysRegion()).getByText(API_ACCESS_COPY.statusHeading)).toBeInTheDocument();
   });
 
-  /**
-   * "What Would Be Required" stays collapsed — in the widget's Details now —
-   * and loses none of its five requirements.
-   */
-  it('keeps the backend/security requirements collapsed, and loses none of them', async () => {
+  it('generates no key, masks no key, and offers nothing to reveal or copy but the sample', async () => {
     await openApiAccess();
     const widget = keysRegion();
-    const trigger = within(widget).getByRole('button', { name: 'How Access Works Today' });
-    const body = document.getElementById(trigger.getAttribute('aria-controls') as string) as HTMLElement;
-    expect(body).toHaveAttribute('hidden');
-    expect(within(body).getByRole('heading', { name: 'Technical Requirements', hidden: true })).toBeInTheDocument();
-    const items = Array.from(body.querySelectorAll('.settings-steps li')).map((li) => li.textContent ?? '');
-    expect(items).toEqual([...API_KEY_REQUIREMENTS]);
-    expect(items).toHaveLength(5);
-    expect(items.join(' ')).toMatch(/holding a hash rather than the value/i);
-    expect(items.join(' ')).toMatch(/Per-key identity/i);
-    expect(items.join(' ')).toMatch(/Revocation and expiry/i);
-    expect(items.join(' ')).toMatch(/Scopes/i);
-    expect(within(body).getByText(/belong to a later, separately authorized phase/i)).toBeInTheDocument();
-
-    fireEvent.click(trigger);
-    expect(body).not.toHaveAttribute('hidden');
-  });
-
-  it('generates no key, masks no key, and offers nothing to reveal or copy', async () => {
-    await openApiAccess();
-    openView('Program an Agent');
-    const widget = keysRegion();
-    // The key/access half — everything outside the two contract-derived views —
-    // carries no key-shaped string, mask, or credential value.
-    const keyHalf = Array.from(widget.querySelectorAll('.widget-head, .widget-info, .widget-headline, .settings-state-line, .widget-details'))
-      .map((el) => el.textContent ?? '')
-      .join(' ');
-    expect(keyHalf).not.toMatch(/[A-Za-z0-9_-]{24,}/);
-    expect(keyHalf).not.toMatch(/[•*·]{4,}/);
-    expect(keyHalf).not.toMatch(/sk-|\bBearer\s+\S/);
-    // Nothing anywhere in the widget can reveal, regenerate, rotate or revoke a
-    // credential, and nothing accepts typing.
+    const all = widget.textContent ?? '';
+    expect(all).not.toMatch(/[•*·]{4,}/);
+    expect(all).not.toMatch(/sk-|\bBearer\s+[A-Za-z0-9]/);
     expect(widget.querySelectorAll('input, textarea, select')).toHaveLength(0);
     expect(
       within(widget).queryByRole('button', { name: /reveal|show key|regenerate|rotate|revoke/i }),
     ).not.toBeInTheDocument();
-    /* The widget's own controls, outside its views, are EXACTLY these — asserted as
-       an equality so a sixth control that could reveal or copy a credential fails
-       here. The one copy control in the widget is Quick Start's sample copy, which
-       copies a command reading `$ISAAC_API_CREDENTIAL` from the environment —
-       never a value. */
-    const own = Array.from(widget.querySelectorAll('button')).filter(
-      (b) => !b.closest('.widget-view-panel'),
-    );
-    expect(own.map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim())).toEqual([
-      'About API Access',
-      'Quick Start',
-      'Program an Agent',
-      'How Access Works Today',
-      'Endpoint Explorer',
-    ]);
-    const all = widget.textContent ?? '';
-    expect(all).not.toMatch(/[•*·]{4,}/);
-    expect(all).not.toMatch(/sk-/);
+    // The one copy control copies a command that reads the credential from the
+    // environment, never a value.
     expect(all).toContain('$ISAAC_API_CREDENTIAL');
   });
 
@@ -431,10 +322,7 @@ describe('Settings → API Access — an honest unavailable state', () => {
     const cookieBefore = document.cookie;
 
     await openApiAccess();
-    // ...and after interacting with everything interactive on the widget.
-    openView('Program an Agent');
-    fireEvent.click(within(keysRegion()).getByRole('button', { name: 'About API Access' }));
-    fireEvent.click(within(keysRegion()).getByRole('button', { name: 'How Access Works Today' }));
+    fireEvent.click(within(keysRegion()).getByRole('button', { name: 'Setup and Reference' }));
 
     expect(setItem).not.toHaveBeenCalled();
     expect(removeItem).not.toHaveBeenCalled();
@@ -443,31 +331,16 @@ describe('Settings → API Access — an honest unavailable state', () => {
     expect(document.cookie).toBe(cookieBefore);
   });
 
-  /**
-   * INVERTED 2026-10-12 — this test required "a polished empty state that says
-   * the list is empty BY DESIGN". A list that can never hold an item is the
-   * same absence stated a fifth and sixth time; the state is the headline now.
-   * What the retired paragraph claimed — there is never a key here to reveal,
-   * copy, or store — is still stated, once, in the info proof.
-   */
-  it('renders no empty key list: the absence is the headline, not a list with nothing in it', async () => {
+  it('renders no empty key list', async () => {
     await openApiAccess();
     const widget = keysRegion();
     expect(within(widget).queryByRole('heading', { name: 'Your API Keys' })).toBeNull();
     expect(widget.querySelector('table, ul.api-keys-list, .api-keys-empty')).toBeNull();
-    expect(
-      within(widget).getByText(/there is never a key here to reveal, copy, or store/i),
-    ).toBeInTheDocument();
   });
 
-  it('links into the Endpoint Explorer from the widget footer', async () => {
+  it('has no second Endpoint Explorer entry in its footer — the explorer lives on Advanced', async () => {
     await openApiAccess();
-    const foot = keysRegion().querySelector('.widget-foot') as HTMLElement;
-    fireEvent.click(within(foot).getByRole('button', { name: 'Endpoint Explorer' }));
-    expect(screen.getByRole('tab', { name: 'Advanced' })).toHaveAttribute('aria-selected', 'true');
-    expect(
-      await screen.findByRole('heading', { name: 'Browse Endpoints', level: 3 }),
-    ).toBeInTheDocument();
+    expect(keysRegion().querySelector('.widget-foot')).toBeNull();
   });
 });
 
@@ -622,19 +495,15 @@ describe('Settings → API Access — Quick Start', () => {
       'Browse Every Endpoint',
       'Program an Agent',
     ]);
-    // No stale link to a surface that is no longer a destination.
     expect(within(nav).queryByRole('button', { name: 'API Keys' })).toBeNull();
 
-    // The guide is the widget's other VIEW now: the jump switches to it in place
-    // and moves focus to the toggle that says which view is open.
-    const guideToggle = document.getElementById('settings-apiaccess-heading-tab-program') as HTMLButtonElement;
-    expect(guideToggle).toHaveAttribute('aria-pressed', 'false');
+    // Program an Agent is the next section in the same disclosure: the jump moves
+    // focus to it.
     fireEvent.click(within(nav).getByRole('button', { name: 'Program an Agent' }));
-    expect(guideToggle).toHaveAttribute('aria-pressed', 'true');
-    expect(guideToggle).toHaveFocus();
-    expect((document.querySelector('.api-connect-bare') as HTMLElement).closest('[hidden]')).toBeNull();
+    const guide = document.querySelector('.api-connect-bare') as HTMLElement;
+    expect(guide.closest('[hidden]')).toBeNull();
+    expect(document.activeElement?.contains(guide)).toBe(true);
 
-    openView('Quick Start');
     fireEvent.click(
       within(screen.getByRole('navigation', { name: 'More API detail' })).getByRole('button', {
         name: 'Browse Every Endpoint',
@@ -3184,19 +3053,17 @@ describe('Settings → API Access — Program an Agent (was Connect an Agent)', 
      which describes a different mechanism and now sits in the widget beside it.
      It is the API Access widget's Program an Agent view: closed until chosen,
      mounted throughout, and its heading still opens the guide. */
-  it('is a view of the widget, closed until chosen, whose heading names it', async () => {
+  it('is a section of the widget’s one disclosure, whose heading names it', async () => {
     await openApiAccess();
     const guide = document.querySelector('.api-connect-bare') as HTMLElement;
-    expect(guide.closest('[hidden]')).not.toBeNull();
-    expect(document.querySelector('details.api-connect')).toBeNull();
-    openView('Program an Agent');
     expect(guide.closest('[hidden]')).toBeNull();
+    expect(document.querySelector('details.api-connect')).toBeNull();
     const heading = screen.getByRole('heading', { name: 'Program an Agent' });
     expect(heading.tagName).toBe('H3');
     expect(screen.queryByRole('heading', { name: 'Connect an Agent' })).toBeNull();
   });
 
-  it('carries exactly the eight required sections, in order', async () => {
+  it('carries exactly the seven required sections, in order', async () => {
     const connect = await openConnect();
     expect(
       Array.from(connect.querySelectorAll('h4')).map((h) => h.textContent),
@@ -3206,7 +3073,8 @@ describe('Settings → API Access — Program an Agent (was Connect an Agent)', 
       'Configure Authentication',
       'Send Structured Requests',
       'Respect Read and Write Boundaries',
-      'Validate Responses',
+      // ~~'Validate Responses'~~ — retired 2026-11-02 (its one paragraph was the
+      // "only authority / advisory" disclaimer, inventory row 85).
       'Handle Errors',
       'Protect Credentials',
     ]);
@@ -3233,13 +3101,12 @@ describe('Settings → API Access — Program an Agent (was Connect an Agent)', 
     ).toBeInTheDocument();
   });
 
-  it('states the advisory / authoritative / memory boundaries accurately', async () => {
+  it('keeps the write boundary, and claims no authority it does not have', async () => {
     const connect = await openConnect();
     const text = norm(connect.textContent ?? '');
-    expect(text).toMatch(/official ISAAC schema and the deterministic validators are the only authority/i);
-    expect(text).toMatch(/Assistant operations are advisory/i);
-    expect(text).toMatch(/Project Memory returns leads to confirm against the cited files, and is not record truth/i);
     expect(text).toMatch(/Writes change a record and require explicit user intent/i);
+    expect(text).not.toMatch(/assistant (operations )?(validate|decide|authori[sz]e)/i);
+    expect(text).not.toMatch(/Project Memory (is|returns) record truth/i);
   });
 
   it('states the credential-hygiene rules', async () => {
@@ -3247,10 +3114,6 @@ describe('Settings → API Access — Program an Agent (was Connect an Agent)', 
     const text = norm(connect.textContent ?? '');
     expect(text).toMatch(/Never place it in a prompt, in source control, in a log line, or in a screenshot/i);
     expect(text).toMatch(/never echo it back in output/i);
-    // This guide is the ONE canonical home of the hygiene rules; the reason keys
-    // are unavailable belongs to the status banner, and this guide points there
-    // instead of restating it (slice 13).
-    expect(text).toMatch(/This app never displays a credential, and this screen has none to give/i);
     expect(text).not.toMatch(/API keys are unavailable here/i);
   });
 
@@ -3260,17 +3123,12 @@ describe('Settings → API Access — Program an Agent (was Connect an Agent)', 
    * row's, ONE tab-level home instead of two — and this pins the guide's side of
    * that move, which the old test could not.
    */
-  it('does not restate the hosted-access caveat the access rows own', async () => {
+  it('names no retired section and restates no hosted-access caveat', async () => {
     const connect = await openConnect();
     const text = norm(connect.textContent ?? '');
+    expect(text).not.toMatch(/How Access Works Today/i);
     expect(text).not.toMatch(/Signing in through a deployment's identity layer/i);
-    expect(text).not.toMatch(/an interactive session, not a credential a program can present/i);
-    // It routes the reader to where that boundary IS stated, in this same widget.
-    expect(text).toMatch(/How Access Works Today says what that one credential is and is not/i);
-    // ...and the caveat is genuinely there, exactly once on the tab.
-    const tabText = norm(apiAccessPanel().textContent ?? '');
-    const caveat = API_ACCESS_ROWS.find((r) => r.term === 'Hosted Authentication Boundary')!.detail;
-    expect(countOccurrences(tabText, norm(caveat))).toBe(1);
+    expect(text).not.toMatch(/answers only browser sessions/i);
   });
 
   it('derives its error and media-type facts from the contract', async () => {
@@ -3372,19 +3230,11 @@ describe('Settings → the API tabs — accessibility', () => {
      made TWO landmarks with ONE name (axe `landmark-unique`). The inner section
      is now unnamed; the panel is the one named region per view, and no two
      landmarks inside the widget share a name. */
-  it('does not inflate landmarks: one named region per view, no two with one name', async () => {
+  it('does not inflate landmarks: no named region inside the widget', async () => {
     await openApiAccess();
     const widget = keysRegion();
-    const inner = Array.from(widget.querySelectorAll('section[aria-labelledby]'));
+    const inner = Array.from(widget.querySelectorAll('section[aria-labelledby], [role="region"]'));
     expect(inner, 'no section inside the widget names itself').toEqual([]);
-    const panels = Array.from(widget.querySelectorAll('[role="region"]'));
-    const names = panels.map((p) =>
-      document.getElementById(p.getAttribute('aria-labelledby') ?? '')?.textContent?.trim(),
-    );
-    expect(names).toEqual(['Quick Start', 'Program an Agent']);
-    expect(new Set(names).size).toBe(names.length);
-    // The headings survive: a name change, not a structure loss.
-    expect(within(widget).getByRole('heading', { level: 3, name: API_ACCESS_COPY.statusHeading })).toBeInTheDocument();
   });
 
   /** No meaning is carried by colour alone: the method, the auth flag and the
@@ -3418,11 +3268,10 @@ describe('Settings → the API tabs — accessibility', () => {
    *  discoverable and to explain itself. It is gone — an absent capability is a
    *  state — and what stays discoverable is the STATE: a named heading in the
    *  widget's outline, reachable by heading navigation. */
-  it('the absence of keys is discoverable as a heading, and no Create control exists', async () => {
+  it('the state is discoverable as the widget headline, and no Create control exists', async () => {
     await openApiAccess();
     expect(screen.queryByRole('button', { name: /Create API Key/i })).toBeNull();
-    const state = within(keysRegion()).getByRole('heading', { name: API_ACCESS_COPY.statusHeading });
-    expect(state.tagName).toBe('H3');
+    expect(keysRegion().querySelector('.widget-headline')?.textContent).toBe(API_ACCESS_COPY.stateLine);
   });
 });
 
@@ -3450,103 +3299,12 @@ describe('Settings → the API tabs — accessibility', () => {
  * does answer a program directly. "This API cannot be called" would be as
  * wrong as "a key would let you call it".
  */
-describe('Settings → API Access — the deployment condition is carried, both ways', () => {
-  const row = (term: string) => API_ACCESS_ROWS.find((r) => r.term === term)!.detail;
-
-  /** FINDING C. */
-  it('Current Access Model states BOTH branches, and neither unconditionally', async () => {
-    const detail = row('Current Access Model');
-    // The unconditional form is gone: "…before the app starts AND required on
-    // every operation" was the exact shape that made this false in production.
-    expect(detail).not.toMatch(/before the app starts and required on every operation/i);
-    // Branch 1 — a deployment that sets one.
-    expect(detail).toMatch(
-      /sets one requires it on every operation except the liveness check/i,
-    );
-    // Branch 2 — a deployment that sets none. This is the deployed build.
-    expect(detail).toMatch(/sets none requires it on no operation at all/i);
-    // The epistemic limit was not dropped while the modality was fixed.
-    expect(detail).toMatch(/this screen cannot see which/i);
-    await openApiAccess();
-    expect(within(keysRegion()).getByText(detail)).toBeInTheDocument();
-  });
-
-  /** FINDING A. */
-  it('What an API Key Would Enable names the deployment it would NOT enable', async () => {
-    const detail = row('What an API Key Would Enable');
-    // The capability is still stated — this must not become a flat denial.
-    expect(detail).toMatch(/could call the operations listed in the Endpoint Explorer/i);
-    // …but no longer as the first clause of the sentence, unqualified.
-    expect(detail).toMatch(/^On a deployment that answers a program directly,/);
-    // And the other branch is stated, in the same row, not one component away.
-    expect(detail).toMatch(/answers only browser sessions/i);
-    expect(detail).toMatch(/a key would enable none of that/i);
-    expect(detail).toMatch(/whether or not it carries a credential/i);
-    await openApiAccess();
-    expect(within(keysRegion()).getByText(detail)).toBeInTheDocument();
-  });
-
-  /** FINDING B — the precondition is INSIDE the guide it disqualifies. */
-  it('Program an Agent states the precondition before its eight steps', async () => {
-    const connect = await openGuide();
-
-    const prerequisite = within(connect).getByText(API_ACCESS_COPY.connectPrerequisite);
-    expect(prerequisite).toBeInTheDocument();
-    // Reading order: it precedes every step, so it cannot be read as a footnote
-    // to instructions already followed.
-    const firstStep = connect.querySelector('.api-connect-heading') as HTMLElement;
-    expect(
-      prerequisite.compareDocumentPosition(firstStep) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    // The disqualifying fact itself, in the guide — the audit's finding was that
-    // it lived only in a sibling component this disclosure can be opened without.
-    const text = norm(connect.textContent ?? '');
-    expect(text).toMatch(/answers only browser sessions/i);
-    expect(text).toMatch(/no agent can connect to it/i);
-    // Not the inverted over-claim: the steps still apply somewhere real.
-    expect(text).toMatch(/does answer a program directly, such as one run locally/i);
-    // Still exactly eight sections — the precondition is a lead, not a ninth step.
-    expect(connect.querySelectorAll('h4')).toHaveLength(8);
-    // Said once on the tab, like every other canonical string here.
-    expect(
-      countOccurrences(
-        norm(apiAccessPanel().textContent ?? ''),
-        norm(API_ACCESS_COPY.connectPrerequisite),
-      ),
-    ).toBe(1);
-  });
-
-  /** FINDING D — Quick Start's auth row hedges the way the Explorer legend does. */
-  it("Quick Start's authentication row no longer asserts the credential is always sent", async () => {
-    await openApiAccess();
-    const rows = Array.from(document.querySelectorAll('.api-quickstart-row')).map((r) =>
-      norm(r.textContent ?? ''),
-    );
-    const auth = rows.find((r) => r.includes('Authorization: Bearer'))!;
-    expect(auth).toMatch(/sent on every call that needs it — where a deployment sets one/i);
-    expect(auth).toMatch(/Where none is set, no operation refuses a call for want of it/i);
-    // The contract-derived count is untouched: it was always honest, because it
-    // reports what the DOCUMENT says, not what a deployment does.
-    expect(auth).toMatch(/\d+ of \d+ operations document a 401/);
-  });
-
-  /** FINDING E — the requirement that is not the application's to build. */
-  it('Technical Requirements says the five app-owned items are not sufficient', async () => {
-    await openApiAccess();
-    const drawer = keysRegion().querySelector('.widget-details') as HTMLElement;
-    const boundary = within(drawer).getByText(API_ACCESS_COPY.requirementsBoundary);
-    expect(boundary).toBeInTheDocument();
-    // It is a note, not a sixth requirement: the list is still the five
-    // app-owned contracts and nothing else.
-    expect(drawer.querySelectorAll('.settings-steps li')).toHaveLength(
-      API_KEY_REQUIREMENTS.length,
-    );
-    expect(API_ACCESS_COPY.requirementsBoundary).toMatch(/One requirement is not ours/i);
-    expect(API_ACCESS_COPY.requirementsBoundary).toMatch(/answers only browser sessions/i);
-  });
-
-  /** The overcorrection guard. None of the five may claim the API is unusable
-   *  everywhere, or that the bearer seam is fake. */
+/*
+ * ~~The deployment condition, carried both ways~~ — the rows that carried it ("Current
+ * Access Model", "What an API Key Would Enable", the Technical Requirements boundary,
+ * the guide's precondition) were retired 2026-11-02. The over-correction bans stay.
+ */
+describe('Settings → API Access — no over-correction, and no infrastructure named', () => {
   it('never claims the API itself is unreachable or the credential mechanism unreal', async () => {
     await openGuide();
     const text = norm(apiAccessPanel().textContent ?? '');
@@ -3558,17 +3316,10 @@ describe('Settings → API Access — the deployment condition is carried, both 
     ]) {
       expect(text, `overcorrected: ${pattern}`).not.toMatch(pattern);
     }
-    // The conditional is genuinely conditional: the enabling branch survives.
-    expect(text).toMatch(/On a deployment that answers a program directly/i);
   });
 
-  /** Still provider-neutral after all six edits — the same withheld list the
-   *  backend enforces on `GET /api/about`. Re-asserted here because every one of
-   *  these fixes is about the identity layer, which is the thing this copy may
-   *  never name. */
-  it('names no identity product or protocol while saying all of this', async () => {
+  it('names no identity product or protocol', async () => {
     await openGuide();
-    fireEvent.click(within(keysRegion()).getByRole('button', { name: 'How Access Works Today' }));
     const lower = (apiAccessPanel().textContent ?? '').toLowerCase();
     for (const needle of [
       'authentik',

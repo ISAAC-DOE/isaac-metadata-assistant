@@ -100,11 +100,7 @@ function renderSettings(entry = ROUTES.settingsTab('mcp')) {
 /** The panel alone, so the endpoint branch can be driven without a deployment. */
 function renderPanel(endpoint?: string | null, options: { withCompanion?: boolean } = {}) {
   return render(
-    <ConnectYourAgentPanel
-      endpoint={endpoint}
-      onOpenExplorer={() => {}}
-      withCompanion={options.withCompanion}
-    />,
+    <ConnectYourAgentPanel endpoint={endpoint} withCompanion={options.withCompanion} />,
   );
 }
 
@@ -165,7 +161,7 @@ describe('Connect Your Agent — the tab', () => {
     expect(panel).toHaveAttribute('id', 'settings-tabpanel-integrations');
     expect(panel).toHaveAttribute('aria-labelledby', 'settings-tab-integrations');
     const widget = within(panel).getByRole('region', { name: TAB_LABEL });
-    expect(within(widget).getByText(MCP_CONNECT_COPY.statusLabel)).toBeInTheDocument();
+    expect(within(widget).getByText(MCP_CONNECT_COPY.stateLine)).toBeInTheDocument();
   });
 
   it('the deep link helper builds the URL the page actually reads', () => {
@@ -181,11 +177,16 @@ describe('Connect Your Agent — the unconfigured state', () => {
     expect(mcpDeploymentState(MCP_ENDPOINT)).toBe('requires-configuration');
   });
 
-  it('states the configuration requirement as its heading and explains who owns it', () => {
+  /*
+   * 2026-11-02 (owner's direction: no standing disclaimers): the state is ONE plain
+   * line — what an administrator sets up — instead of "Requires Organization
+   * Configuration" plus two paragraphs of reasons. It still overstates nothing.
+   */
+  it('states the unconfigured state as one plain line about who sets it up', () => {
     const { container } = renderPanel();
-    expect(screen.getByRole('heading', { name: MCP_CONNECT_COPY.statusLabel })).toBeInTheDocument();
-    expect(norm(visibleText(container))).toContain(norm(MCP_CONNECT_COPY.statusDetail));
-    expect(norm(visibleText(container))).toContain(norm(MCP_CONNECT_COPY.statusOwner));
+    expect(norm(visibleText(container))).toContain(norm(MCP_CONNECT_COPY.stateLine));
+    expect(MCP_CONNECT_COPY.stateLine).toMatch(/administrator/i);
+    expect(MCP_CONNECT_COPY.stateLine).not.toMatch(/\bconnected\b|coming soon|available soon/i);
   });
 
   it('conveys the state as text inside a live region, not as colour', () => {
@@ -193,17 +194,17 @@ describe('Connect Your Agent — the unconfigured state', () => {
     // The state is announced if it ever changes, and reads identically to a
     // screen reader, a monochrome display and a sighted user.
     const status = screen.getByRole('status');
-    expect(within(status).getByText(MCP_CONNECT_COPY.statusLabel)).toBeInTheDocument();
+    expect(within(status).getByText(MCP_CONNECT_COPY.stateLine)).toBeInTheDocument();
     // Nothing anywhere on the tab leans on a colour word to carry the state.
     expect(visibleText(container)).not.toMatch(/\b(green|amber|red|yellow)\b/i);
   });
 
-  it('says there is no endpoint rather than showing a placeholder address', () => {
+  it('shows no placeholder address while unconfigured', () => {
     const { container } = renderPanel();
-    // The endpoint answer is in the widget's Details since 2026-10-12: one press.
     fireEvent.click(screen.getByRole('button', { name: MCP_WIDGET_COPY.detailsSummary }));
-    expect(screen.getByRole('heading', { name: MCP_CONNECT_COPY.endpointHeading })).toBeInTheDocument();
-    expect(norm(visibleText(container))).toContain(norm(MCP_CONNECT_COPY.endpointNone));
+    expect(container.querySelector('.settings-agent-endpoint')).toBeNull();
+    // The only address-shaped text is the inert `<address>` placeholder in a command.
+    expect(visibleText(container)).not.toMatch(/https?:\/\//i);
   });
 });
 
@@ -259,39 +260,27 @@ describe('Connect Your Agent — negative controls', () => {
     }
   });
 
-  it('renders no last-activity value — absent is the honest value, and it says why', () => {
+  it('renders no last-activity value — absent is the honest value', () => {
     const { container } = renderPanel();
     const text = visibleText(container);
-    expect(norm(text)).toContain(norm(MCP_CONNECT_COPY.activityNone));
-
-    /*
-     * THE DATE ASSERTION IS AN ALLOWLIST, NOT A BAN, and the difference is the
-     * point. The tab legitimately carries ONE date — 2026-08-12, when the two
-     * infrastructure decisions were deferred. That is a fact about a decision,
-     * not a timestamp of anything an agent did. A blanket "no dates" rule would
-     * have forced that fact off the page; an allowlist keeps it while making any
-     * *second* date fail here until somebody writes down what it is.
-     */
+    // ~~"and it says why" (activityNone)~~ — the sentence was retired 2026-11-02;
+    // what is pinned is that no activity value is ever rendered.
     const dates = text.match(/\d{4}-\d{2}-\d{2}/g) ?? [];
-    expect(dates, 'an unexplained date appeared on the tab').toEqual(['2026-08-12']);
-
-    // No clock time, no relative time, no labelled activity value, no `<time>`.
+    expect(dates.every((d) => d === '2026-08-12'), `an unexplained date: ${dates.join(', ')}`).toBe(true);
     expect(text).not.toMatch(/\b\d{1,2}:\d{2}\b/);
     expect(text).not.toMatch(/\b\d+\s*(second|minute|hour|day|week|month)s?\s+ago\b/i);
     expect(text).not.toMatch(/\blast\s+(activity|seen|used|call|request|connection)\b/i);
     expect(container.querySelector('time')).toBeNull();
   });
 
-  it('offers no Revoke or Disconnect control, and says why there is none', () => {
-    const { container } = renderPanel();
+  it('offers no Revoke or Disconnect control', () => {
+    renderPanel();
     for (const button of screen.queryAllByRole('button')) {
       expect(
         button.textContent ?? '',
         `a control that could revoke nothing: ${button.textContent}`,
       ).not.toMatch(/\b(revoke|disconnect|sign out|remove access|deauthori[sz]e)\b/i);
     }
-    // The absence is explained rather than silent.
-    expect(norm(visibleText(container))).toContain(norm(MCP_CONNECT_COPY.revocationNone));
   });
 
   /** Every element that accepts typing, by tag, by role, and by editability. */
@@ -346,7 +335,7 @@ describe('Connect Your Agent — what it tells a scientist', () => {
     const { container } = renderPanel();
     const text = norm(visibleText(container));
     expect(
-      screen.getByRole('heading', { name: MCP_CONNECT_COPY.neverSubmitHeading }),
+      screen.getByRole('heading', { name: MCP_CONNECT_COPY.neverSubmitHeading, hidden: true }),
     ).toBeInTheDocument();
     expect(text).toContain(norm(MCP_CONNECT_COPY.neverSubmitDetail));
     const noSubmit = MCP_CAPABILITIES_REFUSED.find((c) => c.id === 'no-submit');
@@ -381,49 +370,31 @@ describe('Connect Your Agent — what it tells a scientist', () => {
     expect(text).toContain(norm(MCP_CONNECT_COPY.permissionsDetail));
   });
 
-  it('renders the setup steps, with the blocking precondition above them', () => {
+  it('renders the setup steps, in order', () => {
     const { container } = renderPanel();
     const text = norm(visibleText(container));
-    expect(text).toContain(norm(MCP_CONNECT_COPY.setupPrerequisite));
+    let last = -1;
     for (const step of MCP_SETUP_STEPS) {
-      expect(text, `missing step: ${step.title}`).toContain(norm(step.title));
+      const at = text.indexOf(norm(step.title));
+      expect(at, `missing step: ${step.title}`).toBeGreaterThan(last);
+      last = at;
     }
-    // The precondition precedes the first step, so a reader cannot start the
-    // procedure before being told it cannot be completed.
-    const prerequisiteAt = text.indexOf(norm(MCP_CONNECT_COPY.setupPrerequisite));
-    const firstStepAt = text.indexOf(norm(MCP_SETUP_STEPS[0].title));
-    expect(prerequisiteAt).toBeGreaterThanOrEqual(0);
-    expect(prerequisiteAt).toBeLessThan(firstStepAt);
   });
 
-  it('qualifies the capability material as defined rather than running', () => {
+  it('never presents the capability material as running or connected', () => {
     const { container } = renderPanel();
-    expect(norm(visibleText(container))).toContain(norm(MCP_CONNECT_COPY.provenanceNote));
+    expect(visibleText(container)).not.toMatch(/\b(is running|is live|connected|online now)\b/i);
   });
 
-  it('states the one-way direction, so nobody reads this as ISAAC gaining an AI', () => {
+  it('never implies ISAAC gains a model of its own', () => {
     const { container } = renderPanel();
-    expect(norm(visibleText(container))).toContain(norm(MCP_CONNECT_COPY.oneWayDetail));
+    expect(visibleText(container)).not.toMatch(/\b(ai-powered|powered by (an? )?(ai|model)|isaac'?s (own )?(ai|model))\b/i);
   });
 
-  it('points at the HTTP API as a separate mechanism, so neither tab is read alone', () => {
-    /*
-     * Two controls one word and two tabs apart. API Access → Connect an Agent
-     * says a call carries a credential in a header where a deployment enables
-     * authentication; this tab says there is no configured way to authenticate
-     * a caller. Both true of their own path, and a reader who meets only one of
-     * them concludes either that the agent story works or that ISAAC has no
-     * program access at all. The pointer is what stops that, so it is pinned —
-     * and it is pinned in BOTH endpoint branches, because the distinction does
-     * not lapse the day an address is published.
-     */
-    expect(norm(visibleText(renderPanel().container))).toContain(
-      norm(MCP_CONNECT_COPY.restApiPointer),
-    );
-    cleanup();
-    expect(norm(visibleText(renderPanel('https://agent.example.invalid/mcp').container))).toContain(
-      norm(MCP_CONNECT_COPY.restApiPointer),
-    );
+  it('the widget sits beside API Access on the same tab, so neither mechanism is read alone', () => {
+    renderSettings(ROUTES.settingsTab('integrations'));
+    expect(screen.getByRole('region', { name: TAB_LABEL })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'API Access' })).toBeInTheDocument();
   });
 });
 
@@ -583,21 +554,16 @@ describe('Connect Your Agent — accessibility', () => {
      inside Details — the Endpoint Explorer jump. None acts on anything outside
      this page; each is a real, named, keyboard-operable native button. */
   it('every control on the widget is a real, keyboard-operable button with a name', () => {
+    /* 2026-11-02: one Details trigger ("Setup and Reference") holds every section in
+       sequence — no info toggle, no view buttons, no Endpoint Explorer jump. */
     renderPanel(undefined, { withCompanion: false });
     const buttons = screen.getAllByRole('button', { hidden: true });
     expect(buttons.map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim())).toEqual([
-      'About Connect Your Agent',
-      MCP_WIDGET_COPY.viewCanDo,
-      MCP_WIDGET_COPY.viewPermissions,
-      MCP_WIDGET_COPY.viewSetup,
       MCP_WIDGET_COPY.detailsSummary,
-      'Endpoint Explorer',
     ]);
     for (const button of buttons) {
       expect(button).toHaveAttribute('type', 'button');
       expect(button).not.toBeDisabled();
-      // A native button: reachable and activatable by keyboard without a
-      // hand-rolled key handler.
       expect(button.tagName).toBe('BUTTON');
       expect(button).not.toHaveAttribute('tabindex', '-1');
     }
@@ -623,12 +589,8 @@ describe('Connect Your Agent — when a deployment does publish an address', () 
   it('shows the address the deployment supplied, and still claims no connection', () => {
     const { container } = renderPanel(ADDRESS);
     expect(screen.getByText(ADDRESS)).toBeInTheDocument();
-    expect(norm(visibleText(container))).toContain(
-      norm(MCP_CONNECT_COPY.endpointPublishedNote),
-    );
-    // The ratchet holds in this branch too — an address is not a connection.
+    expect(norm(visibleText(container))).toContain(norm(MCP_CONNECT_COPY.stateLinePublished));
     expect(visibleText(container)).not.toMatch(/\bconnected\b/i);
-    // …and it is inert text, never a link.
     expect(container.querySelector(`a[href="${ADDRESS}"]`)).toBeNull();
   });
 
@@ -637,35 +599,18 @@ describe('Connect Your Agent — when a deployment does publish an address', () 
     expect(mcpDeploymentState(ADDRESS)).toBe('endpoint-published');
   });
 
-  it('does NOT deny the endpoint it is displaying — the banner follows the branch', () => {
-    /*
-     * The defect this pins: the banner rendered the unconfigured sentences
-     * unconditionally, so this branch showed the address and, immediately above
-     * it, "There is no endpoint address to connect to". A page that contradicts
-     * itself on its one subject is worse than one that says nothing, and no
-     * assertion in this file caught it — the address test only looked for the
-     * address.
-     */
+  it('does NOT deny the endpoint it is displaying — the state line follows the branch', () => {
     const { container } = renderPanel(ADDRESS);
     const text = norm(visibleText(container));
-
-    expect(text).toContain(norm(MCP_CONNECT_COPY.statusDetailPublished));
-    expect(text).not.toContain(norm(MCP_CONNECT_COPY.statusDetail));
-    // The `Requires organization configuration` heading is a claim about a
-    // deployment with no address; it must not survive into a branch that has one.
-    expect(text).not.toContain(norm(MCP_CONNECT_COPY.statusLabel));
-    // Nor may it keep asserting the two decisions are outstanding — an address
-    // existing is evidence that at least one of them moved.
-    expect(text).not.toContain(norm(MCP_CONNECT_COPY.statusOwner));
-    // And the published status still is not a connection claim.
+    expect(text).toContain(norm(MCP_CONNECT_COPY.stateLinePublished));
+    expect(text).not.toContain(norm(MCP_CONNECT_COPY.stateLine));
     expect(visibleText(container)).not.toMatch(/\bconnected\b/i);
   });
 
-  it('the unconfigured branch is unaffected — it keeps its own two sentences', () => {
+  it('the unconfigured branch is unaffected — it keeps its own line', () => {
     const text = norm(visibleText(renderPanel().container));
-    expect(text).toContain(norm(MCP_CONNECT_COPY.statusDetail));
-    expect(text).toContain(norm(MCP_CONNECT_COPY.statusOwner));
-    expect(text).not.toContain(norm(MCP_CONNECT_COPY.statusDetailPublished));
+    expect(text).toContain(norm(MCP_CONNECT_COPY.stateLine));
+    expect(text).not.toContain(norm(MCP_CONNECT_COPY.stateLinePublished));
   });
 });
 
@@ -1394,8 +1339,11 @@ describe('Connect Your Agent — parity with the backend it describes', () => {
     // The audit prescribes the WORDS. Since 2026-10-18 the page renders them in its
     // Title Case heading register, so the pin compares the words, and asserts the
     // casing separately rather than letting either drift.
-    expect(MCP_CONNECT_COPY.statusLabel.toLowerCase()).toBe('requires organization configuration');
-    expect(MCP_CONNECT_COPY.statusLabel).toBe('Requires Organization Configuration');
+    // ~~The page's heading quoted the audit's phrase verbatim~~ — 2026-11-02 the state
+    // became one plain line (owner's direction). It must still agree with the audit:
+    // nothing is set up, and nothing claims otherwise.
+    expect(MCP_CONNECT_COPY.stateLine).toMatch(/not set up/i);
+    expect(MCP_CONNECT_COPY.stateLine).not.toMatch(/\bconnected\b|approved|available/i);
   });
 });
 

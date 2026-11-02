@@ -150,7 +150,9 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { AssistantPanel } from '../components/AssistantPanel';
 import { ASSISTANT_COMPOSER_HELPER, ASSISTANT_COMPOSER_HELPER_MEMORY } from '../lib/assistant';
 import { CAPABILITIES_BOUNDARY } from '../lib/assistantCapabilities';
-import { settingsConcepts } from '../lib/settingsContent';
+import { API_ACCESS_COPY, SETTINGS_WIDGET_COPY, dataRows } from '../lib/settingsContent';
+import { MCP_CONNECT_COPY, MCP_WIDGET_COPY } from '../lib/mcpConnectContent';
+import { ASSISTANT_COMPANION_COPY } from '../lib/assistantCompanionContent';
 import type { AssistantMessage } from '../lib/types';
 
 afterEach(cleanup);
@@ -264,12 +266,26 @@ const SETTINGS_FACTS = {
   recordSchemaVersion: '1.05',
 };
 
-/** Settings → AI & Automation → `no-external-model-calls`, summary + detail. */
+/**
+ * ~~Settings → AI & Automation → `no-external-model-calls`~~ — that card was retired
+ * 2026-11-02 with the Privacy & Governance tab. The Settings site is now EVERY string
+ * the Settings copy modules author (Data rows on every persistence arm, API Access,
+ * the widget titles, Connect Your Agent and the companion), so no Settings sentence
+ * can imply a model either.
+ */
 function settingsModelClaim(): string {
-  // Tolerant: the Settings card is retired with the Privacy tab (shell Task 2). While it
-  // exists it is a site every ban below applies to; once gone it says nothing false.
-  const found = settingsConcepts(SETTINGS_FACTS).find((c) => c.id === 'no-external-model-calls');
-  return found ? `${found.heading} ${found.summary} ${found.detail}` : '';
+  const strings = (o: Record<string, unknown>) =>
+    Object.values(o).filter((v): v is string => typeof v === 'string');
+  return [
+    ...['ephemeral', 'durable', 'unavailable'].flatMap((persistence) =>
+      dataRows({ ...SETTINGS_FACTS, persistence }).map((r) => `${r.label}. ${r.text}`),
+    ),
+    ...strings(API_ACCESS_COPY),
+    ...strings(SETTINGS_WIDGET_COPY),
+    ...strings(MCP_CONNECT_COPY),
+    ...strings(MCP_WIDGET_COPY),
+    ...strings(ASSISTANT_COMPANION_COPY),
+  ].join(' ');
 }
 
 /** Everything a reader meets on one mount of the panel, as rendered text. */
@@ -283,7 +299,7 @@ function panelText(extra: Record<string, unknown> = {}): string {
 const SITES: [string, () => string][] = [
   ['the Assistant panel (record mount)', () => panelText()],
   ['the Assistant panel (Project Memory mount)', () => panelText({ queryScope: 'memory' })],
-  ['Settings → AI & Automation → no-external-model-calls', settingsModelClaim],
+  ['Settings — every authored copy string', settingsModelClaim],
 ];
 
 /** The two sentences retired from the dock on 2026-11-02, verbatim — negative controls. */

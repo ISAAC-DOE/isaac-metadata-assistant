@@ -35,10 +35,10 @@ describe('router-level smoke: each surface renders without error', () => {
   });
 
   it('S2 · Load Materials (/load)', () => {
-    const { getByText } = renderAt('/load');
-    // Renamed 2026-10-12: the on-ramp is two widgets, each titled by its question.
-    expect(getByText('Try a Worked Example')).toBeInTheDocument();
-    expect(getByText('Can I Load My Own Files?')).toBeInTheDocument();
+    const { getByText, queryByText } = renderAt('/load');
+    // 2026-11-02: one widget, one name for one feature; the upload widget is retired.
+    expect(getByText('Guided Walkthrough')).toBeInTheDocument();
+    expect(queryByText('Can I Load My Own Files?')).toBeNull();
   });
 
   it('S3 · Review Record (/record/:id) — live bundle', async () => {

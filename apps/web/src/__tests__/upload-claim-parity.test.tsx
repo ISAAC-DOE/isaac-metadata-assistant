@@ -138,7 +138,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { cleanup, render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -147,12 +147,16 @@ import { SettingsPage } from '../screens/SettingsPage';
 import { LoadMaterials } from '../screens/LoadMaterials';
 import { ConnectAnAgent, type ConnectAnAgentFacts } from '../screens/settings/ConnectAnAgent';
 import { ConnectYourAgentPanel } from '../screens/settings/ConnectYourAgent';
-import { settingsConcepts } from '../lib/settingsContent';
+import { dataRows } from '../lib/settingsContent';
+import { aboutResponse, stubFetchRoutes } from '../test/apiFixtures';
 import { MCP_CAPABILITIES_REFUSED } from '../lib/mcpConnectContent';
 import { CAPTURE_COPY } from '../lib/transcriptCaptureContent';
 import { IMPORT_COPY } from '../lib/historicalImportContent';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 // --- locating and reading the real sources -----------------------------------
 
@@ -189,10 +193,16 @@ const SETTINGS_FACTS = {
   recordSchemaVersion: '1.05',
 };
 
+/*
+ * ~~`no-real-experiment-data` and `synthetic-data-only` concept cards~~ — retired
+ * 2026-11-02 with the Privacy & Governance tab. Their replacement, the Overview Data
+ * card, is the site now: every row on every persistence arm.
+ */
 function noRealDataDetail(): string {
-  const found = settingsConcepts(SETTINGS_FACTS).find((c) => c.id === 'no-real-experiment-data');
-  if (!found) throw new Error('no such concept: no-real-experiment-data');
-  return `${found.heading} ${found.summary} ${found.detail}`;
+  return ['ephemeral', 'durable', 'unavailable', 'not-a-known-state']
+    .flatMap((persistence) => dataRows({ ...SETTINGS_FACTS, persistence }))
+    .map((r) => `${r.label} ${r.text}`)
+    .join(' ');
 }
 
 /**
@@ -205,9 +215,7 @@ function noRealDataDetail(): string {
  * unscoped claim and a guard over one of them would have missed the other.
  */
 function syntheticModeCard(): string {
-  const found = settingsConcepts(SETTINGS_FACTS).find((c) => c.id === 'synthetic-data-only');
-  if (!found) throw new Error('no such concept: synthetic-data-only');
-  return `${found.heading} ${found.summary} ${found.detail}`;
+  return noRealDataDetail();
 }
 
 /**
@@ -236,7 +244,14 @@ function syntheticModeCard(): string {
  * cannot supply half the claim and count as parity.
  */
 function policyTabText(): string {
-  render(
+  /* `?tab=privacy` lands on Overview since 2026-11-02 (the policy paragraphs were
+     retired with the tab). What a reader meets at that address is the site now. */
+  stubFetchRoutes({
+    'GET /api/about': { body: aboutResponse },
+    'GET /api/openapi': { status: 503, body: {} },
+    'GET /api/graph/status': { status: 503, body: {} },
+  } as never);
+  const { container } = render(
     <MemoryRouter
       initialEntries={['/settings?tab=privacy']}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
@@ -244,19 +259,12 @@ function policyTabText(): string {
       <SettingsPage />
     </MemoryRouter>,
   );
-  /* Since 2026-10-18 the tab shows two policy paragraphs as VISIBLE ONE-LINE rows
-     and keeps all three paragraphs, verbatim, in Details. Both layers are this
-     site's claim, so both are read: the three full paragraphs AND the two lines a
-     reader sees first — a one-line form that overstated the claim would be the
-     defect this file exists for, in the most-read place. */
-  const full = Array.from(document.querySelectorAll('.settings-definition.gov-policy-section'));
-  const lines = Array.from(document.querySelectorAll('.settings-point.gov-policy-section'));
-  if (full.length !== 3) throw new Error(`expected the three policy paragraphs, found ${full.length}`);
-  if (lines.length !== 2) throw new Error(`expected the two one-line policy rows, found ${lines.length}`);
-  return [...lines, ...full].map((el) => el.textContent ?? '').join(' ');
+  return container.querySelector('.settings-panel')?.textContent ?? '';
 }
 
 function loadMaterialsWarnText(): string {
+  /* ~~The "Can I Load My Own Files?" widget's `.onramp-warn`~~ — retired 2026-11-02.
+     The whole Load Materials page is the site now. */
   const { container } = render(
     <MemoryRouter
       initialEntries={['/load']}
@@ -265,9 +273,7 @@ function loadMaterialsWarnText(): string {
       <LoadMaterials />
     </MemoryRouter>,
   );
-  const warn = container.querySelector('.onramp-warn');
-  if (warn === null) throw new Error('the on-ramp governance warning is not rendered');
-  return warn.textContent ?? '';
+  return container.querySelector('.load-page')?.textContent ?? '';
 }
 
 /**
@@ -287,7 +293,7 @@ function loadMaterialsWarnText(): string {
 function mcpNoUploadRow(): string {
   const row = MCP_CAPABILITIES_REFUSED.find((c) => c.id === 'no-upload');
   if (!row) throw new Error('no such refused capability: no-upload');
-  render(<ConnectYourAgentPanel onOpenExplorer={() => {}} />);
+  render(<ConnectYourAgentPanel />);
   screen.getByText(row.detail);
   return `${row.action} ${row.detail}`;
 }
@@ -1442,8 +1448,8 @@ const RETIRED_SETTINGS_MODE_DETAIL_OPENING =
   'This deployment runs in synthetic-only mode: file upload is refused outright, and the ' +
   'records in this workspace are synthetic.';
 
-describe('R1b §7 · the Settings synthetic-only MODE card scopes its refusal', () => {
-  it('scopes every upload refusal to the route, in both summary and detail', () => {
+describe('R1b §7 · the Settings Data card (successor of the synthetic-only MODE card) scopes any refusal', () => {
+  it('scopes every upload refusal to the route, in every row', () => {
     expect(
       unscopedUploadRefusals(syntheticModeCard()),
       'the Settings → Data & Privacy synthetic-only card refuses an upload without ' +
@@ -1611,17 +1617,18 @@ describe('R1b §8 · the Connect an Agent guide scopes every upload refusal', ()
     );
   });
 
-  it('the scoped replacement is the in-repo form, not a newly coined one', () => {
-    // §3b's lesson: a guard that fires on true copy teaches the next reader to
-    // weaken it. The inverse also holds — a correction that coins its own
-    // phrasing is a seventh wording for one claim. This pins that the guide now
-    // uses the same words two other modules already use.
-    const shared = /the upload route refuses every request outright/;
-    expect(connectAnAgentGuide()).toMatch(shared);
+  it('if the guide mentions uploads at all, it uses the in-repo scoped form', () => {
+    // 2026-11-02: the guide's upload clause was retired (owner's direction), so it
+    // need not mention uploads. If one returns, it must be the scoped form.
+    const guide = connectAnAgentGuide();
+    if (!/\buploads?\b/i.test(guide)) return;
+    expect(guide).toMatch(/the upload route refuses every request outright/);
+  });
+
+  it('the scoped form still exists in-repo for any surface that needs it', () => {
     expect(rawSource('lib/transcriptCaptureContent.ts')).toMatch(
       /upload route refuses every request outright/,
     );
-    expect(rawSource('lib/settingsContent.ts')).toMatch(shared);
   });
 });
 
@@ -1634,7 +1641,7 @@ describe('R1b §8 · the Connect an Agent guide scopes every upload refusal', ()
 // So the table is a TEST rather than a comment: it fails if the split moves,
 // instead of quietly describing a tree that has changed.
 describe('R1b §8c · which surfaces the unscoped ban would fire on, measured', () => {
-  it('fires on exactly the four SITES members, and on none of the other three', () => {
+  it('fires on no surface: none states an unscoped refusal (2026-11-02: the SITES no longer state the claim at all)', () => {
     // `cleanup()` BETWEEN accessors, not between tests. Four of the seven
     // render, and `afterEach` is too late: two mounted surfaces in one document
     // trip `screen.getByRole`/`getByText`'s "multiple elements found" as a
@@ -1653,6 +1660,6 @@ describe('R1b §8c · which surfaces the unscoped ban would fire on, measured', 
         'NON-SITES member entered it, that surface has shipped an unscoped refusal ' +
         'and needs scoping, not a narrower ban: §3b records that widening the loop ' +
         'to fire on the four correct-copy SITES is worse than the gap it closes.',
-    ).toEqual(SITES.map(([site]) => site));
+    ).toEqual([]);
   });
 });

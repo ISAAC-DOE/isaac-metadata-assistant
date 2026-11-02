@@ -185,19 +185,19 @@ export const WIDGET_INFO_PANELS: Readonly<Record<string, number>> = Object.freez
   /* Settings and Governance & Safety, MEASURED in Chromium on 2026-10-19 (the merge
      of #289 into the Settings branch), each read out of this helper's own failure
      ("mounts N widget info panel(s) … declares 0"):
-       settings (Overview)      3 — Data Safety, This Build, Guided Walkthrough
-       settings-privacy         0 — the four question widgets carry no info panel
-                                    (their definitions are Details; see
-                                    SETTINGS_DEFINITION_DISCLOSURES)
-       settings-api             2 — Connect Your Agent, API Access
-       settings-explorer        1 — Project Memory's launcher
+       settings (Overview)      2 — This Build, Guided Walkthrough (2026-11-02: the
+                                    Data card that replaced Data Safety has none)
+       ~~settings-privacy~~     retired 2026-11-02 with the tab
+       settings-api             0 — 2026-11-02: neither Integrations card has an info
+                                    panel any more (each is one state line + one
+                                    disclosure)
+       settings-explorer        0 — 2026-11-02: the launcher cards became one Related
+                                    Tools list
        validator                1 — the Standalone Validator
        schema-reference         1 — the Schema Reference
      `imports` is #290's Historical Import surface, measured in the same run and
      declared here so the merged branch's sweep is complete. */
-  settings: 3,
-  'settings-api': 2,
-  'settings-explorer': 1,
+  settings: 2,
   validator: 1,
   'schema-reference': 1,
   imports: 1,
@@ -206,14 +206,15 @@ export const WIDGET_INFO_PANELS: Readonly<Record<string, number>> = Object.freez
        experiments-example  1 — What Needs Me? (the library widget renders only
                                 with rows, so the EMPTY `experiments` surface
                                 mounts 0 and keeps the default)
-       load                 2 — Try a Worked Example, Can I Load My Own Files?
+       load                 1 — Guided Walkthrough (2026-11-02: the upload widget
+                                retired)
        memory               1 — Can I Trust the Snapshot? (How Big Is It? and
                                 Where Did It Come From? carry no info panel)
      `memory-graph` and `not-found` mount no widget, so they keep the default 0. The
      `HelpTip` info tips these pages also use are a different control (`.helptip`),
      not counted here. */
   'experiments-example': 1,
-  load: 2,
+  load: 1,
   memory: 1,
 });
 
@@ -340,7 +341,10 @@ export const SETTINGS_CONCEPT_DISCLOSURES: Readonly<Record<string, number>> = Ob
  * assert for these four Details.
  */
 export const SETTINGS_DEFINITION_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze({
-  'settings-privacy': 4,
+  /* ~~'settings-privacy': 4~~ — the four question widgets were retired 2026-11-02
+     with the Privacy & Governance tab (owner's direction). Their facts are the
+     always-visible Data card on Overview, so nothing is left behind a Details to
+     open. */
 });
 
 /**

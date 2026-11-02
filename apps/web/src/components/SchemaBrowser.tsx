@@ -59,12 +59,13 @@ import type { ApiSchemaResponse } from '../lib/types';
  * propose/review/approve/edit/role/persistence affordance anywhere in this
  * component, and it computes no verdict of its own.
  */
-/** "<title> — v<version> — vendored official schema (read-only reference)",
- *  with the version stated once whether or not the title already carries it. */
+/** "<title> — v<version> — vendored official schema", with the version stated once
+ *  whether or not the title already carries it. (2026-11-02: "(read-only
+ *  reference)" dropped — inventory row 236.) */
 export function sourceLineFor(title: string | null | undefined, version: string): string {
   const name = title ?? 'ISAAC official schema';
   const versioned = name.includes(`v${version}`) ? name : `${name} — v${version}`;
-  return `${versioned} — vendored official schema (read-only reference)`;
+  return `${versioned} — vendored official schema`;
 }
 
 export function SchemaBrowser() {
@@ -79,7 +80,6 @@ export function SchemaBrowser() {
       className="schema-browser"
       title="Schema Reference"
       icon={<LayoutList size={18} strokeWidth={2} />}
-      sub="A read-only reference for the canonical official ISAAC schema."
       info={
         <p>
           Every field, type, requirement, allowed value, rule, and term below is read verbatim from
@@ -229,7 +229,8 @@ function SchemaBrowserBody({ data }: { data: ApiSchemaResponse }) {
 
   return (
     <>
-      <p className="schema-browser-source-line mono">{sourceLine}</p>
+      {/* The source line, ONCE, in sans: it is a sentence, not an identifier. */}
+      <p className="schema-browser-source-line">{sourceLine}</p>
 
       <SchemaViewTabs active={view} onSelect={setView} />
 
@@ -258,7 +259,6 @@ function SchemaBrowserBody({ data }: { data: ApiSchemaResponse }) {
             focusIndex={focusIndex}
             onFocusIndex={setFocusIndex}
             rules={rules}
-            sourceLine={sourceLine}
             onOpenField={openField}
             onOpenRules={openRulesFor}
           />
@@ -358,7 +358,6 @@ function FieldsView({
   focusIndex,
   onFocusIndex,
   rules,
-  sourceLine,
   onOpenField,
   onOpenRules,
 }: {
@@ -371,7 +370,6 @@ function FieldsView({
   focusIndex: number;
   onFocusIndex: (next: number) => void;
   rules: SchemaRelationship[];
-  sourceLine: string;
   onOpenField: (path: string) => void;
   onOpenRules: (path: string) => void;
 }) {
@@ -448,7 +446,6 @@ function FieldsView({
             <SchemaFieldDetail
               node={selected}
               rules={rules}
-              sourceLine={sourceLine}
               onOpenField={onOpenField}
               onOpenRules={onOpenRules}
             />
@@ -523,13 +520,11 @@ function RequirementBadge({ required }: { required: boolean }) {
 function SchemaFieldDetail({
   node,
   rules,
-  sourceLine,
   onOpenField,
   onOpenRules,
 }: {
   node: SchemaFieldNode;
   rules: SchemaRelationship[];
-  sourceLine: string;
   onOpenField: (path: string) => void;
   onOpenRules: (path: string) => void;
 }) {
@@ -547,7 +542,8 @@ function SchemaFieldDetail({
       <h3 id={FIELD_DETAIL_NAME_ID} className="schema-fielddetail-name mono">
         {node.name}
       </h3>
-      <p className="schema-fielddetail-path mono">{node.path}</p>
+      {/* The path only when it says something the name does not. */}
+      {node.path !== node.name && <p className="schema-fielddetail-path mono">{node.path}</p>}
 
       <p className="schema-fielddetail-meta">
         <span className="schema-field-type mono">{node.typeLabel}</span>
@@ -555,11 +551,8 @@ function SchemaFieldDetail({
         {node.format && <span className="schema-fielddetail-chip mono">format: {node.format}</span>}
       </p>
 
-      {node.description ? (
-        <p className="schema-field-desc">{node.description}</p>
-      ) : (
-        <p className="schema-fielddetail-nodesc">The schema declares no description for this field.</p>
-      )}
+      {/* An empty description section is left out (2026-11-02), not narrated. */}
+      {node.description && <p className="schema-field-desc">{node.description}</p>}
 
       {parent && (
         <p className="schema-fielddetail-parent">
@@ -638,13 +631,9 @@ function SchemaFieldDetail({
         </div>
       )}
 
-      <div className="schema-fielddetail-section">
-        <h4 className="schema-fielddetail-heading">Related conditional rules ({relatedCount})</h4>
-        {relatedCount === 0 ? (
-          <p className="schema-fielddetail-note">
-            No conditional rule in this schema names this field, or any field nested inside it.
-          </p>
-        ) : (
+      {relatedCount > 0 && (
+        <div className="schema-fielddetail-section">
+          <h4 className="schema-fielddetail-heading">Related conditional rules ({relatedCount})</h4>
           <>
             {naming.length > 0 && (
               <>
@@ -678,10 +667,8 @@ function SchemaFieldDetail({
               Open in Conditional Rules
             </button>
           </>
-        )}
-      </div>
-
-      <p className="schema-fielddetail-source mono">{sourceLine}</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -854,9 +841,8 @@ function VocabularyView({
           Controlled vocabulary
         </h3>
         <p className="schema-browser-empty">
-          No controlled-vocabulary file is bundled with this deployment. The official schema remains
-          the authority on allowed values — fields that enumerate their values inline show them under
-          Fields &rarr; Allowed values.
+          No controlled-vocabulary file is bundled with this deployment. Fields that enumerate their
+          values inline show them under Fields &rarr; Allowed values.
         </p>
       </>
     );
@@ -872,8 +858,7 @@ function VocabularyView({
       </h3>
       <p className="schema-browser-section-note">
         Vocabulary files vendored alongside the schema, shown exactly as they are written — including
-        each file&rsquo;s own provenance note. The official schema and the portal validator remain
-        authoritative; a vocabulary file is an authoring aid, never a validation gate.
+        each file&rsquo;s own provenance note.
       </p>
 
       <SearchField

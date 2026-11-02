@@ -1047,7 +1047,7 @@ const HARDCODED_LABEL_SLOT_CEILING: Readonly<Record<string, number>> = {
   'components/ValidateReview.tsx': 1,
   'screens/ExperimentsHome.tsx': 4,
   'screens/ExportReadiness.tsx': 1,
-  'screens/GovernancePage.tsx': 1,
+  // 'screens/GovernancePage.tsx' was 1: its one literal, the "Data Governance" eyebrow, was cut 2026-11-02.
   'screens/GuidedCompletion.tsx': 2,
   'screens/HistoricalImport.tsx': 22,
   // `screens/LoadMaterials.tsx` dropped 2026-10-12: its last hardcoded label-slot
@@ -1055,7 +1055,7 @@ const HARDCODED_LABEL_SLOT_CEILING: Readonly<Record<string, number>> = {
   'screens/MemoryGraphCard.tsx': 3,
   'screens/ProjectMemory.tsx': 4,
   'screens/RecordWorkbench.tsx': 1,
-  'screens/SettingsPage.tsx': 1,
+  // 'screens/SettingsPage.tsx' was 1: its one literal, the "About This Build" eyebrow, was cut 2026-11-02.
   'screens/graph/EvidenceGraphPanel.tsx': 6,
   'screens/graph/ExperimentGraphPanel.tsx': 4,
   'screens/graph/GraphCommandBar.tsx': 1,

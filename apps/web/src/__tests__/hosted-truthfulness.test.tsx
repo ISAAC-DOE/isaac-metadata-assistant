@@ -5,7 +5,6 @@ import { render } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { StatusBar } from '../components/StatusBar';
 import { LeftNav } from '../components/LeftNav';
-import { settingsConcepts, settingsFactsFrom } from '../lib/settingsContent';
 
 /*
  * The hosted-environment TRUTHFULNESS guard.
@@ -126,85 +125,30 @@ describe('runtime environment — the retired badges, proven against the ban (ne
 
 // --- claims the frontend may never make --------------------------------------
 
-/** The concepts are pure functions of the `GET /api/about` facts, so the copy is
- *  asserted directly rather than through five tab renders (which
- *  `settings-page.test.tsx` already does for placement and duplication). */
-const concepts = settingsConcepts(
-  settingsFactsFrom({
-    data_regime: 'synthetic-only',
-    persistence: 'ephemeral',
-    record_schema_version: '1.05',
-  }),
-);
-
 /** A claim that the frontend (or ISAAC) verified the access edge or a sign-in. */
 const VERIFIED_EDGE =
   /(this app|the app|ISAAC|it)\s+(has\s+)?(verified|confirmed|checked)\s+(the\s+|your\s+)?(sign-?in|edge|access|identity)|\bverified to sit behind\b/i;
 
 /*
- * The Settings concept cards are being retired with the Privacy tab (shell Task 2), so
- * each block below runs only while its card exists, and pins only "no false claim".
- * Presence of the cards' own disclaimers ("never something this app verified", "cannot
- * tell real data from synthetic", "real mode intentionally refuses to start") is no
- * longer required (2026-11-02).
+ * ~~The Settings Authentication Boundary and synthetic-only concept cards~~ — retired
+ * 2026-11-02 with the Privacy & Governance tab. Their bans now run over EVERY frontend
+ * source below (`never claims the edge was verified`, alongside the content-
+ * classification scan), so a sentence like theirs cannot come back anywhere.
  */
-describe('Settings copy — the authentication boundary over-claims in neither direction', () => {
-  const auth: { summary: string; detail: string; more?: { text: string } } = concepts.find(
-    (c) => c.id === 'authentication-boundary',
-  ) ?? { summary: '', detail: '' };
-  const text = `${auth.summary} ${auth.detail} ${auth.more?.text ?? ''}`;
-
-  it('never says there is no sign-in or no authentication', () => {
-    // The old summary read "No sign-in and no accounts", which reads as "this
-    // deployment is open". It is not: it is reached through an authenticating
-    // edge. ISAAC having no ACCOUNT SYSTEM is a different fact.
-    expect(text).not.toMatch(/no sign-?in/i);
-    expect(text).not.toMatch(/no authentication/i);
-    expect(text).not.toMatch(/\bunauthenticated\b/i);
-  });
-
-  it('never claims the edge, or a sign-in, was verified by this app', () => {
-    // FINDING F: "single sign-on" pinned a claim nothing observed supports, and the
-    // frontend cannot see the edge at all. The retired phrase stays banned, and so does
-    // any claim that this app verified access.
-    expect(auth.detail).not.toMatch(/single sign-on/i);
-    expect(text).not.toMatch(VERIFIED_EDGE);
-  });
-
-  it('the verified-edge ban is proven on the claims it exists to stop', () => {
-    for (const claim of [
-      'This app verified the sign-in edge.',
-      'ISAAC confirmed your sign-in.',
-      'The deployment is verified to sit behind single sign-on.',
-    ]) {
-      expect(claim).toMatch(VERIFIED_EDGE);
-    }
-  });
-
-  it('names no identity product, host or infrastructure component', () => {
-    // The same withheld list `settings-page.test.tsx` and the backend enforce.
-    for (const needle of ['authentik', 'ingress', 'k8s', 'kubernetes', 'localhost', '127.0.0.1']) {
-      expect(text.toLowerCase()).not.toContain(needle);
-    }
-  });
-});
-
-describe('Settings copy — synthetic-only is a MODE claim, never a content claim', () => {
-  it('claims no content-based real/synthetic classification anywhere', () => {
-    const all = concepts
-      .flatMap((c) => [c.heading, c.summary, c.detail, c.more?.text ?? ''])
-      .join(' ');
-    expect(all).not.toMatch(/detects? real data/i);
-    expect(all).not.toMatch(/scans? (the )?(file|content)/i);
-    expect(all).not.toMatch(/inspects? (the )?(file|upload)s? (content|to (prove|verify))/i);
-    expect(all).not.toMatch(/real-looking .* (intercepted|rejected|refused)/i);
+describe('the verified-edge ban is proven on the claims it exists to stop', () => {
+  it.each([
+    'This app verified the sign-in edge.',
+    'ISAAC confirmed your sign-in.',
+    'The deployment is verified to sit behind single sign-on.',
+  ])('fires on %s', (claim) => {
+    expect(claim).toMatch(VERIFIED_EDGE);
   });
 });
 
 // --- the same claim class, across EVERY frontend source file -----------------
 
 /*
- * WHY THIS EXISTS. The assertion above scanned `settingsConcepts` ONLY, so it
+ * WHY THIS EXISTS. An earlier assertion scanned `settingsConcepts` ONLY, so it
  * passed while `screens/LoadMaterials.tsx` shipped "A file that looks real or
  * private is intercepted and routed to governance" and `screens/GovernancePage.tsx`
  * shipped "a real-looking file is intercepted here" — the identical false claim,
@@ -291,6 +235,16 @@ describe('user-facing copy — no content-based real/synthetic classification, a
     }
     // Tests are excluded — this very file names the retired strings on purpose.
     expect(files.some((f) => f.startsWith('__tests__/'))).toBe(false);
+  });
+
+  it('never claims the access edge or a sign-in was verified', () => {
+    const offenders = files.filter((path) => VERIFIED_EDGE.test(renderedCopy(path)));
+    expect(offenders).toEqual([]);
+  });
+
+  it('never names the retired "single sign-on" claim', () => {
+    const offenders = files.filter((path) => /single sign-on/i.test(renderedCopy(path)));
+    expect(offenders).toEqual([]);
   });
 
   it.each(CONTENT_CLASSIFICATION_CLAIM)('never claims %s', (_label, pattern) => {

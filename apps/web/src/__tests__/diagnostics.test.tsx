@@ -743,7 +743,8 @@ describe('hosted truthfulness — the standalone validator scope note', () => {
     // The true half of the old sentence is preserved (now sentence-initial, so
     // matched case-insensitively rather than as a mid-sentence substring).
     expect(note!.textContent).toMatch(/the record is checked in memory and discarded/i);
-    expect(note!.textContent).toContain('Nothing here is uploaded to a model, indexed, or stored');
+    // ~~'Nothing here is uploaded to a model, indexed, or stored'~~ — retired 2026-11-02.
+    expect(note!.textContent).not.toMatch(/uploaded to a model/i);
     // Nothing here inspects a record to decide whether it is real, and the copy no
     // longer implies a mode claim that would suggest otherwise.
     expect(note!.textContent).not.toMatch(/synthetic/i);

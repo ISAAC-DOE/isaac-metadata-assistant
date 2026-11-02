@@ -1002,6 +1002,7 @@ export const LABELS = {
   actionViewJson: 'View JSON',
   actionView: 'View',
   actionOpenSource: 'Open Source File',
+  // Kept only for the unmounted GovernanceBanner (see that file's header).
   actionReadPolicy: 'Read Policy',
   actionBackToComplete: 'Back to Complete',
   actionLoadLocal: 'Load Local Structured Files',
@@ -1010,28 +1011,16 @@ export const LABELS = {
    * one question a reader arrives with. The detail each card used to print in full
    * moved into its widget's info panel and is unchanged there.
    */
-  loadExampleTitle: 'Try a Worked Example',
-  loadExampleSub: 'A fictional year-2099 CuO / Cu K-edge XANES session — a complete example run, ~10s.',
+  // 2026-11-02: one name for one feature (was "Try a Worked Example").
+  loadExampleTitle: SETTINGS_WALKTHROUGH,
+  loadExampleSub: 'A worked example: a fictional year-2099 CuO / Cu K-edge XANES session.',
   loadExampleInfoLabel: 'About the Worked Example',
   loadExampleBody:
     "It assembles the evidenced draft, holds back the fields it won't guess, and — once you " +
     'confirm them — validates against ISAAC v1.05.',
-  loadOwnFilesTitle: 'Can I Load My Own Files?',
-  loadOwnFilesInfoLabel: 'About File Uploads',
-  loadOwnFilesState: 'Not in this build — uploads are refused',
-  // VISIBLE, always: a security/privacy state (`DEC-35`). It is the one caveat a
-  // reader must not have to open anything to meet.
-  loadOperatorResponsibility:
-    "Keeping real or private artifacts out is the operator's responsibility, not a check this " +
-    'software performs.',
-  // Says what it does: it TRIES an upload, and the server's refusal comes back.
-  actionAskServer: 'Try an Upload',
-  loadAskServerHint:
-    'It opens no file picker, takes no dropped file and sends no file — it asks the upload route, and ' +
-    'shows the refusal it gives.',
-  loadGovernanceApproval:
-    'Real SLAC/SSRL or private artifacts require written data-governance approval before they can be ' +
-    'read, indexed, or sent to any model.',
+  // ~~loadOwnFiles*, actionAskServer ("Try an Upload"), loadAskServerHint,
+  // loadGovernanceApproval, loadOperatorResponsibility~~ — retired
+  // 2026-11-02 with the Load Materials upload widget and the GovernanceBanner.
   actionDontKnow: "I don't know — leave honestly missing",
 
   // Evidence / preview
@@ -1094,6 +1083,8 @@ export const LABELS = {
   actionStartTutorial: `Start ${SETTINGS_WALKTHROUGH}`,
   // The strip's visible verb; its accessible name is `actionStartTutorial`.
   actionStart: 'Start',
+  // The Load Materials card's visible verb once this browser has finished it.
+  actionReplay: 'Replay',
   actionSkipForNow: 'Not Now',
   actionSkipTutorial: 'Skip Walkthrough',
   actionTutorialBack: 'Back',

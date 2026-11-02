@@ -1,4 +1,3 @@
-import { CAPTURE_COPY } from './transcriptCaptureContent';
 /**
  * Settings → Connect Your Agent — every sentence the tab renders, authored once.
  *
@@ -90,122 +89,28 @@ export function mcpDeploymentState(endpoint: string | null): McpDeploymentState 
   return endpoint === null ? 'requires-configuration' : 'endpoint-published';
 }
 
+/**
+ * Connect Your Agent copy. ONE plain state line per state, then the reference
+ * sections in sequence inside one disclosure (2026-11-02, owner's direction: no
+ * standing disclaimers). ~~`statusLabel` "Requires Organization Configuration",
+ * `statusDetail`, `statusOwner`, `endpointNone`, `endpointVerify`, `restApiPointer`,
+ * `activityNone`, `revocationNone`, `revocationFuture`, `provenanceNote`,
+ * `oneWayDetail`, `neverSubmitEnforcement`, `setupPrerequisite`, `setupBilling`~~ —
+ * retired. Nothing here may show a connected state the app has not verified
+ * (`connect-your-agent.test.tsx`).
+ */
 export const MCP_CONNECT_COPY = {
-  /** The card subtitle. Says what the tab is before it says anything else. */
-  cardSub:
-    "How a scientist's own Claude would call ISAAC's tools — what it will be allowed to do, and what this deployment has to settle first.",
-
-  /** The status, stated as a sentence so it never depends on a colour. */
-  /* THE WIDGET'S HEADLINE since 2026-10-12, and deliberately UNCHANGED in the move.
-     The redesign brief proposed "Not available — needs organization configuration";
-     `docs/mcp-capability-audit.md` (per capture-brief §33) prescribes THIS phrase for
-     exactly this state, and `connect-your-agent.test.tsx` pins the two together. A
-     committed decision document outranks a layout brief, so the words stay and only
-     their placement changed. It is true in every posture this build can report: with
-     no published address (`MCP_ENDPOINT` is `null`) no remote agent can be pointed at
-     this deployment, whatever `/api/health` says about the mount. What the posture
-     changes is the REASON, which the widget states beneath it. */
-  /* 2026-10-18: the audit's WORDS, in the page's Title Case for a heading (the
-     independent review asked for one casing register across Settings). The pin in
-     `connect-your-agent.test.tsx` compares the words, not the casing. */
-  statusLabel: 'Requires Organization Configuration',
-  statusDetail:
-    'No agent can connect to this deployment. There is no endpoint address to connect to and no configured way to authenticate a caller, so there is no live connection for this page to report, and nothing for it to revoke.',
-
-  /*
-   * THE SAME TWO LINES FOR THE DAY AN ADDRESS EXISTS, and they are here because
-   * the two above would otherwise be rendered beside one.
-   *
-   * The published branch used to show the address and, in the same banner, the
-   * sentence "There is no endpoint address to connect to" — a page contradicting
-   * itself on the one fact it exists to report. The label had the same problem:
-   * an address being published is not evidence that the deployment is still
-   * unconfigured, so asserting it would be a status claim nothing had checked.
-   *
-   * What replaces it claims strictly less. It reports what this build can see —
-   * that an address is published — and is explicit that the authentication
-   * decision is a separate question this screen cannot observe. It deliberately
-   * does not say the deployment is ready, and it deliberately does not say it is
-   * unready. Note the wording avoids the bare word the ratchet forbids, for the
-   * reason given at the top of `ConnectYourAgent.tsx`: an honest negation that
-   * happens to contain it would still have to defeat the guard.
-   */
-  statusLabelPublished: 'An address is published; this screen has not verified it',
-  statusDetailPublished:
-    'This deployment publishes an address for its agent interface. This screen has not contacted it, and reports nothing about whether it answers, whether you are authorized to call it, or whether any agent has ever reached it. Whether a caller can authenticate is a separate decision, and this screen cannot observe it.',
-  statusOwner:
-    'Two decisions settle it, and both sit with whoever runs this deployment rather than with this application: whether the agent path may be reached from a scientist’s own machine over the public internet, and what authenticates that caller once it can be. Both were deferred on 2026-08-12 and neither has been narrowed since.',
-
-  /** The endpoint, when there is not one. */
-  endpointHeading: 'Endpoint',
-  endpointNone:
-    'None. This screen will not show a placeholder address, because a scientist who copied one would be pointing their Claude at something that does not answer. Ask whoever runs this deployment whether an address exists yet.',
-  endpointVerify:
-    'You can check the claim rather than take it: the Endpoint Explorer, under Advanced, lists every operation this build exposes, generated from the app’s own contract, and no agent interface is among them.',
-  /**
-   * THE OTHER MECHANISM, named — because two tabs apart, one word apart, this
-   * page and API Access make auth claims that do not reconcile on their own.
-   *
-   * API Access → Connect an Agent says every call carries a credential in a
-   * header when a deployment enables authentication. This page says there is no
-   * configured way to authenticate a caller. Both are true OF THEIR OWN PATH —
-   * that one is REST over HTTP against the published contract, this one is the
-   * machine-callable tool interface — and neither said which path it meant
-   * relative to the other. A reader who met only this tab could conclude ISAAC
-   * has no program access at all; a reader who met only that one could conclude
-   * the agent story works. One sentence each way, rather than a restructure.
-   *
-   * Rendered in BOTH endpoint branches: the distinction does not stop being
-   * worth drawing on the day an address is published.
-   */
-  restApiPointer:
-    'This page is about the agent interface only. This build does serve an HTTP API, and the API Access widget’s “Program an Agent” guide covers what a program you write has to get right to call it — a different mechanism, with its own separate answer about authentication.',
-
-  /** The endpoint, when a deployment publishes one. Still not a connection. */
-  endpointPublishedNote:
-    'This is the address the deployment publishes. This screen has not contacted it and reports nothing about whether it is reachable, whether you are authorized to call it, or whether any agent has ever reached it.',
-
-  /** Last activity — the honest absence, and why it is an absence. */
-  activityHeading: 'Activity',
-  activityNone:
-    'Nothing is shown here because nothing is measured. No agent interface is running in this build, so no call has been made, and no record of one exists for this screen to read. A date in this space would be invented.',
-
-  /** Revocation — the honest absence of a control, and where it will live. */
-  revocationHeading: 'Access and Revocation',
-  revocationNone:
-    'There is no Revoke control on this page, because no access has been granted to anything. Offering a button whose only possible outcome is nothing would tell you an authorization exists.',
-  revocationFuture:
-    'Where revocation will live follows from the authentication decision. If ISAAC runs its own authorization server, access is granted and withdrawn here. If instead the organization issues each scientist a credential for this path, it is withdrawn wherever the organization issues it — and this page will link there rather than pretend to own it.',
-
-  /** The provenance qualifier, rendered beside the capability and permission
-   *  material rather than tucked away from it. */
-  provenanceNote:
-    'The capability boundary below is settled in this repository’s committed capability audit and is what the agent interface is being built to. None of it is running in this build: there is no agent interface here to grant a permission or refuse one.',
-
-  /** The one-way fact, which is the most commonly misunderstood thing about
-   *  this whole feature and is worth a scientist’s attention. */
-  oneWayHeading: 'Which Direction This Runs',
-  oneWayDetail:
-    'Connecting is one-way: your Claude calls ISAAC. It does not give ISAAC an AI of its own, and nothing about it makes the assistant inside this app generative. The work your Claude does on your behalf is billed to your own Claude subscription or key, not to ISAAC.',
-
-  /** The headline capability boundary, called out on its own. */
+  stateLine:
+    'Not set up on this server. An administrator connects it in the deployment settings.',
+  stateLinePublished: 'This deployment publishes an address for its agent interface:',
   neverSubmitHeading: 'No Agent Can Submit a Record',
   neverSubmitDetail:
-    'Submitting is the step that mints an official ISAAC record, and no agent will be able to take it — not with your permission, not with an administrator’s. The tool that would do it is not built, and the audit that governs this interface forbids building one. An agent can bring a draft all the way to the point of submission and then has to hand it back to you.',
-  neverSubmitEnforcement:
-    'That is a structural refusal rather than a setting: the capability is absent, so there is no switch that turns it on. Advisory hints a tool can carry about its own behaviour are, by the protocol’s own specification, hints and not enforcement — so they are not what this rests on.',
-
-  /** Setup — the precondition first, before any step. */
-  setupHeading: 'Setting It Up',
-  setupPrerequisite:
-    'None of this can be done yet, and the reason is the first step: there is no address to enter. What follows describes what connecting will involve once this deployment publishes one — it is not a procedure you can complete today.',
-  setupBilling:
-    'Every step happens in your own Claude client, on your own machine. ISAAC does not install anything and cannot connect on your behalf.',
-
-  /** Permissions. */
-  permissionsHeading: 'Permissions an Agent Will Hold',
+    'Submitting is the step that mints an official ISAAC record, and no agent can take it — with your permission or an administrator’s. An agent can read and draft; you submit.',
+  canDoHeading: 'What an Agent Can Do',
+  permissionsHeading: 'Permissions an Agent Holds',
   permissionsDetail:
-    'Three permissions, and none of them is a superset of another — each is granted explicitly, and read is the base. Both write permissions are additive only: they are granted on top of read, never instead of it, because every tool also returns something the record says. So an agent granted either write permission by itself can call nothing at all, not even the write, and would sit completely inert. Grant read for an agent that should only look, read plus draft-write for one that should fill in drafts, and read plus proposals-write for one that should suggest values for you to review. The two writes are separate on purpose and neither includes the other: an agent that may suggest values cannot change them, and an agent that may change them cannot suggest. No permission means “may finalize”, and there is no fourth permission that does.',
+    'Three permissions, each granted explicitly. Read is the base; both write permissions are granted on top of it.',
+  setupHeading: 'Setting It Up',
 } as const;
 
 /** One capability row: what an agent will be able to do, in a scientist's terms. */
@@ -599,7 +504,7 @@ export const MCP_CAPABILITIES_REFUSED: readonly McpCapability[] = [
     id: 'no-upload',
     action: 'Upload or ingest a file',
     detail:
-      'File upload is refused outright for this whole deployment, agent or not, and no agent tool sends a file. That refusal is the upload route: inside the app the record validator and campaign-sheet CSV reconciliation do read a file you paste or pick — in memory, never stored, recording only the outcome and never the content — and an agent has no tool that reaches either of them.',
+      'No agent tool sends a file, and none reaches the in-app tools that read one.',
   },
   {
     id: 'no-governance',
@@ -694,7 +599,7 @@ export const MCP_SETUP_STEPS: readonly McpSetupStep[] = [
     id: 'address',
     title: 'Get the address',
     detail:
-      'Ask whoever runs this deployment for the agent interface’s address. There is none today, so this is where the procedure stops. Nothing below can be done until it changes.',
+      'Ask whoever runs this deployment for the agent interface’s address.',
   },
   {
     id: 'add',
@@ -707,7 +612,7 @@ export const MCP_SETUP_STEPS: readonly McpSetupStep[] = [
     id: 'authenticate',
     title: 'Sign in as yourself',
     detail:
-      'What this looks like is the second undecided question. Either ISAAC runs its own authorization server and your client is sent to it to sign in, or the organization issues you a credential for this path and your client presents it. Which of the two has not been decided, so this page cannot tell you what you will see.',
+      'Your client either signs you in through the deployment, or presents a credential your organization issues for this path. Whoever runs the deployment tells you which.',
   },
   {
     id: 'scope',
@@ -733,37 +638,9 @@ export const MCP_AUDIT_DOC = 'docs/mcp-capability-audit.md';
 
 // --- the Connect Your Agent WIDGET (2026-10-12) -------------------------------
 
-/** The widget's structural labels. The claims are all in `MCP_CONNECT_COPY`. */
 export const MCP_WIDGET_COPY = {
   title: 'Connect Your Agent',
-  /** The widget's one-line description. `MCP_CONNECT_COPY.cardSub`, the longer
-   *  version, is in the widget's info. */
-  sub: "How your own Claude would call ISAAC's tools.",
-  viewCanDo: 'Can Do',
-  viewPermissions: 'Permissions',
-  viewSetup: 'Setup',
-  viewClaude: 'Open in Claude',
-  refusedHeading: 'And What It Will Not',
-  detailsSummary: 'Endpoint, Activity and Access',
+  refusedHeading: 'What an Agent Cannot Do',
+  detailsSummary: 'Setup and Reference',
 } as const;
 
-/**
- * THE REASON LINE under the unconfigured headline, chosen by the deployment's
- * own posture (`/api/health` → `mcp.posture`, `mcp/deployment.py::posture`).
- *
- * The two posture-specific sentences are the voice-capture view's, imported
- * rather than re-authored, so Settings and Record → Capture cannot give two
- * different reasons for the same deployment. Every other value — `unmounted`,
- * an unread or unrecognised posture, a read still in flight — keeps the
- * sentence this tab has always shown, which is the build's own fact (no address
- * is published, and nothing here can authenticate a caller).
- *
- * Only called on the UNCONFIGURED branch: with no published address none of
- * these postures makes an agent reachable, so none of them may change the
- * headline above it.
- */
-export function mcpReasonLine(posture: string | null): string {
-  if (posture === 'local-only') return CAPTURE_COPY.claudeLocalOnly;
-  if (posture === 'oauth-mounted' || posture === 'remote-ready') return CAPTURE_COPY.claudeNoAddress;
-  return MCP_CONNECT_COPY.statusDetail;
-}
