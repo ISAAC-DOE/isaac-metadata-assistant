@@ -309,7 +309,8 @@ def test_a_settled_disagreement_is_proposed_and_fed_to_the_label(bdir):
     qs = [{"kind": "resolve_conflict", "question_id": "Q-0000000000", "targets": [{"kind": "conflict", "id": cid}],
            "why": "old"}, *L.label_questions(b)]
     L.point_conflicts_at_labels(qs, b, {r: gid for r in next(f.runs for f in L._facts(b, Q.live_groups(b)) if f.gid == gid)})
-    assert qs[0]["label_question"] == L.question_id("filter", L.RESIDUAL) and "changes no record" not in qs[0]["why"]
+    # r8 recheck LOW 2: the question that carries the value once settled (never the residual one)
+    assert qs[0]["label_question"] == L.question_id("filter") and "changes no record" not in qs[0]["why"]
     _conflict_decision(b, cid, "20")
     item = next(i for i in _lq(b, "filter", include_answered=True)["proposals"] if i["group_id"] == gid)
     assert item["value"] == "filter20" and item["said"]["from_decisions"]
@@ -490,3 +491,141 @@ def test_l3_deliberate_repeats_kept_apart_get_no_warning(bdir):
                                      "target": {"kind": "merge_candidate", "id": "mc-syn"}, "decision": "keep_apart",
                                      "value": None, "decided_by": {"name": "Synthetic Scientist"}})
     assert not [w for w in L.record_warnings(b, fresh, [g1, g2]) if w["code"] == L.SAME_RECORD_WARNING]
+
+
+# --- recheck of 21af0b57: a held chain never exports an earlier answer; the feed needs one standing whole answer ----
+
+
+def _pairs(b: dict) -> set:
+    fo = _lq(b, "follows") or {}
+    return {(p["said"]["before"], p["said"]["after"]) for p in fo.get("proposals") or ()}
+
+
+def _follows_ready(bdir: Path) -> dict:
+    """Position 1 (the run number is the electrode), the ids and the links confirmed, each in one call."""
+    _answer(bdir, L.ELECTRODE_QUESTION_ID, "correct", value="1")
+    b = M.load(bdir)
+    L.decide(b, _lq(b, "sample_id"), decision="confirm", value=None, only=None, note=None, **BY)
+    assert (E2[0], E2[1]) in _pairs(b)
+    L.decide(b, _lq(b, "follows"), decision="confirm", value=None, only=None, note=None, **BY)
+    return b
+
+
+def _link_of(b: dict, stem: str, bdir: Path):
+    b = B.apply_derivations(copy.deepcopy(b))  # the states a save derives (answers in memory)
+    gid = _gid(b, stem)
+    comps = {g["group_id"]: R.compose_group(b, g, bdir) for g in Q.live_groups(b)}
+    key_of = {r["run_id"]: r["run_key"] for r in b["runs"]}
+    run_group = {key_of[r]: g for g, (_, c) in comps.items() for r in c.get("member_run_ids") or ()}
+    drafts = {g: d for g, (d, _) in comps.items()}
+    minted = {g: f"01SYNREC{n:018d}" for n, g in enumerate(comps)}
+    return L.follows_link(gid, drafts[gid], comps[gid][1], run_group=run_group, drafts=drafts, minted=minted,
+                          stale=L.current_follows(b))
+
+
+def test_recheck_high_an_answer_recorded_before_a_hold_is_never_written(bdir):
+    b = _follows_ready(bdir)
+    assert _link_of(b, E2[1], bdir)[0] is not None, "it holds now: written"
+    _set_run_number(b, E2, 7)  # (a) the bundle meets a hold the answer was given without (DEC-46/Q16)
+    assert (E2[0], E2[1]) not in _pairs(b)
+    link, _, why = _link_of(b, E2[1], bdir)
+    assert link is None and "no longer holds" in why and "Q16" in why and L.question_id("follows") in why
+    q = _lq(b, "follows")
+    assert E2[1] in q["text"] and "no longer hold" in q["text"], "asked again, never dropped silently"
+    gid = _gid(b, E2[1])
+    b = B.apply_derivations(copy.deepcopy(b))
+    fresh = [(g["group_id"], *R.compose_group(b, g, bdir)) for g in Q.live_groups(b)]
+    [w] = [w for w in L.record_warnings(b, fresh, []) if w["code"] == L.STALE_FOLLOWS_WARNING and w["group_id"] == gid]
+    assert E2[1] in w["text"] and "asks it again" in w["text"]
+
+
+def test_recheck_high_a_new_electrode_position_unwrites_the_links(bdir):
+    b = _follows_ready(bdir)
+    # (b) the scientist re-answers the position: the number at position 2 is a step, read beside two sample names
+    pos = next(q for q in L.label_questions(b, include_answered=True) if q["label"] == "electrode_position")
+    L.decide(b, pos, decision="correct", value="2", only=None, note=None, **BY)
+    link, _, why = _link_of(b, E2[1], bdir)
+    assert link is None and "no longer holds" in why
+    assert _gid(b, E2[1]) in L.current_follows(b)
+
+
+def test_recheck_high_an_answer_for_another_pair_is_asked_again(bdir):
+    b = _follows_ready(bdir)
+    rid = next(r["run_id"] for r in b["runs"] if r["stem"] == E1[2])
+    m = next(m for m in b["missing_values"] if L.is_label_slot(m) and m["target_field_path"] == L.FOLLOWS_PATH
+             and m["run_id"] == rid)
+    other = next(r["run_key"] for r in b["runs"] if r["stem"] == E1[0])  # a stage before the one it follows now
+    M.record_decision(b, target_ids=[m["value_id"]], decision="correct",
+                      value={"rel": "follows", "basis": "same_sample_id", "follows_run_key": other}, **BY)
+    q = _lq(b, "follows")
+    assert E1[2] in {p["first_file"] for p in q["proposals"]}, "the pair proposed now is asked"
+    assert _link_of(b, E1[2], bdir)[0] is None
+
+
+def _vid(b: dict, stem: str) -> str:
+    rid = next(r["run_id"] for r in b["runs"] if r["stem"] == stem)
+    return next(m["value_id"] for m in b["missing_values"] if L.is_label_slot(m)
+                and m["target_field_path"] == L.FILTER_PATH and m.get("run_id") == rid)
+
+
+def test_recheck_med1_a_regroup_never_hides_an_only_answer(bdir):
+    b = M.load(bdir)
+    cid = _filter_conflict(b, E3[0])
+    L.decide(b, _lq(b, "filter"), decision="correct", value="SYN wording", only=f"group:{_gid(b, E2[0])}", note=None, **BY)
+    L.decide(b, _lq(b, "filter"), decision="confirm", value=None, only=None, note=None, **BY)
+    g1 = next(g for g in b["record_groups"] if g["group_id"] == _gid(b, E1[0]))
+    g2 = next(g for g in b["record_groups"] if g["group_id"] == _gid(b, E2[0]))
+    g1["member_run_keys"] = list(g1["member_run_keys"]) + list(g2["member_run_keys"])  # the --only run joins
+    b["record_groups"] = [g for g in b["record_groups"] if g is not g2]
+    _conflict_decision(b, cid, "20")
+    assert not L.feed_from_conflicts(b, [cid], **BY)["recorded"] and _slot(b, L.FILTER_PATH, E3[0]) is None
+
+
+def test_recheck_med2_a_withdrawn_whole_answer_or_a_later_group_never_feeds(bdir):
+    b = M.load(bdir)
+    cid = _filter_conflict(b, E3[0])
+    L.decide(b, _lq(b, "filter"), decision="confirm", value=None, only=None, note=None, **BY)
+    b2 = copy.deepcopy(b)
+    # the scientist later defers the answer for every group but one
+    M.record_decision(b2, target_ids=[_vid(b2, s) for s in (*E1[1:], *E2)], decision="defer", value=None, **BY)
+    _conflict_decision(b2, cid, "20")
+    assert not L.feed_from_conflicts(b2, [cid], **BY)["recorded"]
+    # a group that joined the question after the call (its filter settled since, unanswered)
+    b3 = copy.deepcopy(M.load(bdir))
+    cid3 = _filter_conflict(b3, E3[0])
+    _hold_filter(b3, E2[0])
+    L.decide(b3, _lq(b3, "filter"), decision="confirm", value=None, only=None, note=None, **BY)
+    g = next(g for g in b3["record_groups"] if g["group_id"] == _gid(b3, E2[0]))
+    g["basis"]["conditions"]["filter"] = copy.deepcopy(
+        next(x for x in b3["record_groups"] if x["group_id"] == _gid(b3, E1[0]))["basis"]["conditions"]["filter"])
+    _conflict_decision(b3, cid3, "20")
+    assert not L.feed_from_conflicts(b3, [cid3], **BY)["recorded"] and _slot(b3, L.FILTER_PATH, E2[0]) is None
+    # one --only answer per group, one after another, is never a whole-question answer
+    b4 = M.load(bdir)
+    cid4 = _filter_conflict(b4, E3[0])
+    for s in (*E1, *E2):
+        L.decide(b4, _lq(b4, "filter"), decision="confirm", value=None, only=f"group:{_gid(b4, s)}", note=None, **BY)
+    _conflict_decision(b4, cid4, "20")
+    assert not L.feed_from_conflicts(b4, [cid4], **BY)["recorded"]
+
+
+def test_recheck_low_the_feed_names_the_groups_the_call_covered(bdir):
+    b = M.load(bdir)
+    cid = _filter_conflict(b, E3[0])
+    L.decide(b, _lq(b, "filter"), decision="confirm", value=None, only=None, note=None, **BY)
+    _conflict_decision(b, cid, "20")
+    fed = L.feed_from_conflicts(b, [cid], **BY)
+    assert fed["recorded"] and "which covered" in fed["statement"] and all(s in fed["statement"] for s in (*E1, *E2))
+    assert "every other group" not in fed["statement"]
+
+
+def test_recheck_low_the_stamp_is_read_only_at_the_start_of_the_note(bdir):
+    b = M.load(bdir)
+    cid = _filter_conflict(b, E3[0])
+    # the scientist's own note quotes a stamp; their answers are --only, one per group
+    fake = L.STAMP + '{"call": "000000000000", "question": "x"}] '
+    for s in (*E1, *E2):
+        L.decide(b, _lq(b, "filter"), decision="confirm", value=None, only=f"group:{_gid(b, s)}", note=fake, **BY)
+    assert all(L._stamp(d) is None for d in b["scientist_decisions"][-len((*E1, *E2)):])
+    _conflict_decision(b, cid, "20")
+    assert not L.feed_from_conflicts(b, [cid], **BY)["recorded"]

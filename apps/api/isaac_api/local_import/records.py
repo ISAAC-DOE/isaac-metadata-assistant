@@ -3055,6 +3055,8 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
                  if rid in key_of_run}
     fresh = L.order_by_follows(fresh, run_group)
     drafts_by_gid = {gid: d for gid, d, _ in fresh}
+    # r8 recheck HIGH: every recorded follows answer is checked against the CURRENT holds and order, once
+    stale_follows = L.current_follows(bundle) if any(comp.get("follows") for _, _, comp in fresh) else {}
     minted: dict[str, str] = {}
     withdrawn: list[dict] = []
     # c11-a: a record written while a warning still applies says so on its row ("Written without …"), never silent
@@ -3082,7 +3084,7 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     ) if (bundle_dir / DRAFTS_DIR).is_dir() else []
     for group_id, draft, composition in fresh:
         link, link_evidence, link_left_out = L.follows_link(group_id, draft, composition, run_group=run_group,
-                                                            drafts=drafts_by_gid, minted=minted)
+                                                            drafts=drafts_by_gid, minted=minted, stale=stale_follows)
         if link is not None:
             draft = L.with_link(draft, link, link_evidence)
         report = validate_draft_file(draft, run_portal=run_portal, composition=composition)

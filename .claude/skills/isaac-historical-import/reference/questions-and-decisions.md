@@ -278,7 +278,9 @@ experiment scope. Nothing is written until the scientist answers. Most take one 
   when run numbers are missing. Two stages that share a run number that is not their electrode are held: which came
   first is Q16 (DEC-46), for the beamline scientist. Every chain ISAAC could not order is listed with its reason (`not_proposed`); with no
   link to propose, the question is informational and says why. Read every pair back. Confirm or reject; there is
-  no correct. The export writes a link only when both records carry the same sample id.
+  no correct. The export writes a link only when both records carry the same sample id, and only while the
+  current files and answers still put the two groups in that order: an answer that no longer holds (a hold since,
+  or a new electrode position) is not written, `validate` and `export` say why, and the question asks again.
 - **Tag** (`tags`). One tag for the beamtime, from the folder name, lowercase and hyphenated (at most 64 characters).
 
 The question text lists every sample id and every link. For the filter and history it gives examples:
@@ -298,9 +300,10 @@ writes only runs with no answer, and a group whose runs already hold another val
 
 A disagreement question on one of these readings (filter, cycling token, electrode number) says which label
 question writes the field for its group. Settling it there feeds that label: ISAAC proposes the value from the
-answer. It also records it for the group only when the scientist answered that label question once for all its
-groups (no `--only`), and then only in that answer's form (a confirm, or their own stored pattern). An answer given
-with `--only` is never repeated for another group. The reply says which happened. The workbook and the template have no column for these.
+answer, in the label's own question. It also records it for the group only when the scientist answered that
+question once for all its groups (no `--only`), that answer still stands on every run of every other group, and
+no group joined since; then only in that answer's form (a confirm, or their own stamped pattern). An answer given
+with `--only`, deferred or changed is never repeated for another group. The reply names the groups the answer covered. The workbook and the template have no column for these.
 
 ## Recording
 

@@ -127,12 +127,27 @@ SLOT_REASON = SLOT_LEAD + "{question}, rule " + RULE_ID + "): {what}."
 _SLOT_QUESTION = re.compile(re.escape(SLOT_LEAD) + r"(Q-[0-9a-f]{10})")
 
 NOT_WRITTEN_FOLLOWS = "Written without its follows link: {why}."
-#: The note of a label decision made by ONE answer to a whole question (no --only), with its call token.
-WHOLE_QUESTION = "One answer for the whole question"
-_WHOLE = re.compile(re.escape(WHOLE_QUESTION) + r" \(call ([0-9a-f]{8})\)")
-_PATTERN = re.compile(r'Pattern ("(?:[^"\\]|\\.)*")\.')
-#: The note of a label decision a disagreement answer recorded (:func:`feed_from_conflicts`).
-FED = "Recorded from the scientist's answer to the files' disagreement on this reading"
+#: r8 recheck LOW 3: ISAAC's own stamp on a label decision, FIRST in its note (before any text of the scientist's):
+#: ``[ISAAC label stamp {"call": <token>, ...}] ...``. ``call``: ONE answer to a whole question (no --only), with the
+#: scientist's ``pattern`` as they gave it; ``fed``: recorded from a disagreement answer in that call's form.
+STAMP = "[ISAAC label stamp "
+
+
+def _stamped(stamp: Mapping | None, said: str, note: str | None) -> str:
+    head = (STAMP + json.dumps(dict(stamp), sort_keys=True) + "] ") if stamp else ""
+    return head + said + (f" {note}" if note else "")
+
+
+def _stamp(d: Mapping | None) -> dict | None:
+    """The stamp at the START of a decision's note (only there: text after it is never read), or ``None``."""
+    n = str((d or {}).get("note") or "")
+    if not n.startswith(STAMP):
+        return None
+    try:
+        obj, end = json.JSONDecoder().raw_decode(n, len(STAMP))
+    except ValueError:
+        return None
+    return obj if isinstance(obj, dict) and n[end:end + 1] == "]" else None
 #: How many groups or files a sentence names before it counts the rest (the question's lists hold every one).
 NAMED = 12
 
@@ -1026,10 +1041,12 @@ def proposals(bundle: Mapping, groups: Sequence[Mapping] | None = None) -> list[
                                                "after_interval": list(_interval(after, basis)),
                                                "stages_from": sorted({m.stage_from for m in (before, after)})},
                           "first_file": after.stems[0]})
-    if items or held_c:
-        # HIGH 2 (r8): asked whenever a chain was held too, so every reason is said
+    stale = _stale_follows(ctx, facts, items, held_c)
+    if items or held_c or stale:
+        # HIGH 2 (r8): asked whenever a chain was held too, so every reason is said; and (r8 recheck) whenever a
+        # follows answer recorded earlier no longer holds, so it is asked again, never written silently
         out.append({"label": "follows", "partition": None, "items": items, "not_proposed": held_c,
-                    "chains": [[m.gid for m in c] for c in chains]})
+                    "chains": [[m.gid for m in c] for c in chains], "stale": stale})
     tag = proposed_tag(beamtime)
     if tag and facts:
         out.append({"label": "tag", "partition": None, "not_proposed": [],
@@ -1039,6 +1056,39 @@ def proposals(bundle: Mapping, groups: Sequence[Mapping] | None = None) -> list[
         p["path"] = LABELS[p["label"]]
         p["question_id"] = question_id(p["label"], p["partition"])
     return out
+
+
+def _stale_follows(ctx: _Ctx, facts: Sequence[_Facts], items: Sequence[Mapping], held: Sequence[Mapping]) -> list[dict]:
+    """r8 recheck HIGH: each group whose recorded follows answer names a run the CURRENT chains do not put right before
+    it (a hold since: a shared run number, DEC-46/Q16; a tie; a before after an after; or another order), with why.
+    Such an answer is never written (:func:`follows_link`) and the follows question asks again."""
+    now = {i["group_id"]: i["value"]["follows_run_key"] for i in items}
+    held_why = {g: h["reason"] for h in held for g in h.get("group_ids") or ()}
+    group_of_key = {k: f.gid for f in facts for k in f.keys}
+    out = []
+    for f in facts:
+        got = {json.dumps(d.get("value"), sort_keys=True) for r in f.runs
+               if (d := ctx.answer(FOLLOWS_PATH, r)) is not None and d.get("decision") != "reject"}
+        if len(got) != 1:
+            continue
+        value = json.loads(next(iter(got)))
+        key = value.get("follows_run_key") if isinstance(value, Mapping) else None
+        if key is None or now.get(f.gid) == key:
+            continue
+        before = str(key).split("@", 1)[0]
+        why = (held_why.get(f.gid) or
+               ("the files and answers now put it after another group" if f.gid in now else
+                "the files and answers no longer put it in a chain") + f" (it was answered to follow {before})")
+        out.append({"group_id": f.gid, "run_ids": list(f.runs), "first_file": f.stems[0], "follows": before,
+                    "follows_group_id": group_of_key.get(key), "reason": why})
+    return out
+
+
+def current_follows(bundle: Mapping) -> dict[str, str]:
+    """``{group id: why its recorded follows answer no longer holds}`` against the CURRENT holds and order (r8
+    recheck HIGH): what :func:`follows_link` checks before it writes a link. Read once per export or validate."""
+    p = next((x for x in proposals(bundle) if x["label"] == "follows"), None)
+    return {s["group_id"]: s["reason"] for s in (p or {}).get("stale") or ()}
 
 
 def _said_not_counter(bundle: Mapping, facts: Sequence[_Facts], items: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -1240,15 +1290,26 @@ def _position_question(p: Mapping, include_answered: bool) -> dict | None:
     return q
 
 
+def _stale_text(p: Mapping) -> str:
+    stale = p.get("stale") or ()
+    if not stale:
+        return ""
+    return (f" {len(stale)} follows answer(s) recorded earlier no longer hold and are not written at export: "
+            + "; ".join(f"{x['first_file']}: {x['reason']}" for x in stale) + ". Where a link is proposed for that group "
+            "now, it is asked again here; answer it with --only group:<id> (a bulk confirm never overwrites an answer).")
+
+
 def _held_chains_question(p: Mapping, include_answered: bool) -> dict:
     qid = p["question_id"]
     held = p["not_proposed"]
-    text = (f"No follows link is proposed: ISAAC could not order {len(held)} set(s) of groups of one sample under "
-            "otherwise equal conditions. " + _held_text(held, qid, every=True)
-            + ". Settle what each reason names and the links are proposed here.")
+    text = ((f"No follows link is proposed now: ISAAC could not order {len(held)} set(s) of groups of one sample under "
+             "otherwise equal conditions. " + _held_text(held, qid, every=True)
+             + ". Settle what each reason names and the links are proposed here." if held else
+             "No follows link is proposed now.") + _stale_text(p))
     q = _base_question(qid, p, text=text, applies_to={"groups": len({g for h in held for g in h["group_ids"]}),
                                                       "runs": 0, "targets": 0},
                        targets=[], per_scope_targets={f"group:{g}": [] for h in held for g in h["group_ids"]},
+                       stale_answers=[dict(x) for x in p.get("stale") or ()],
                        proposals=[], not_proposed=[dict(h) for h in held], hints=[], allowed_decisions=[],
                        informational=True, lands_in_record=False,
                        answer_command="# nothing to answer here: settle what each reason names, then the links are asked")
@@ -1271,6 +1332,11 @@ def label_questions(bundle: Mapping, *, decisions: Mapping | None = None, groups
     slots = _slot_index(bundle)
 
     def answered(path: str, item: Mapping) -> bool:
+        if path == FOLLOWS_PATH:
+            # r8 recheck: an answer for another pair than the one proposed now is asked again
+            ds = [_answered(slots.get((path, r)), decisions) for r in _runs_of(path, item)]
+            return all(d is not None and (d.get("decision") == "reject" or (d.get("value") or {}).get("follows_run_key")
+                                          == item["value"]["follows_run_key"]) for d in ds)
         return all(_answered(slots.get((path, r)), decisions) is not None for r in _runs_of(path, item))
 
     out = []
@@ -1280,9 +1346,12 @@ def label_questions(bundle: Mapping, *, decisions: Mapping | None = None, groups
             if (q := _position_question(p, include_answered)) is not None:
                 out.append(q)
             continue
-        if p["label"] == "follows" and not p["items"]:
+        if p["label"] == "follows" and (not p["items"] or (
+                p.get("stale") and not include_answered and all(answered(path, i) for i in p["items"]))):
+            # nothing to propose, or every proposed link answered while an earlier answer no longer holds: said
             out.append(_held_chains_question(p, include_answered))
             continue
+        stale_text = _stale_text(p)
         open_items = [i for i in p["items"] if not answered(path, i)]
         open_held = [h for h in p["not_proposed"] if h.get("run_ids") and not answered(path, h)]
         is_open = bool(open_items) or (not p["items"] and bool(open_held))
@@ -1311,6 +1380,7 @@ def label_questions(bundle: Mapping, *, decisions: Mapping | None = None, groups
                     "--value \"<value>\" (several --only in one call), or reject it.")
         if done and not include_answered:
             text += f" {done} group(s) hold an answer already and are not asked again."
+        text += stale_text
         if held:
             text += (f" Not proposed for {len(held)} " + ("set(s) of groups" if p["label"] == "follows" else "group(s)")
                      + ": " + _held_text(held, qid, every=p["label"] == "follows") + " (not_proposed)."
@@ -1603,7 +1673,7 @@ def _file_of_run(bundle: Mapping) -> dict[str, str]:
 
 
 def decide(bundle: dict, asked: Mapping, *, decision: str, value: Any, only: Any, by: str,
-           orcid: str | None, note: str | None, same_sample: bool = False) -> dict:
+           orcid: str | None, note: str | None, same_sample: bool = False, stamp: Mapping | None = None) -> dict:
     """``decide --question`` on a label question, under the caller's lock, on ``bundle`` in memory (the caller
     saves). ``confirm`` records the proposed values; ``correct`` records the scientist's value (for ids and filters a
     pattern, ``{electrode}`` / ``{filter}``); ``reject`` records that the label is not written.
@@ -1796,12 +1866,11 @@ def decide(bundle: dict, asked: Mapping, *, decision: str, value: Any, only: Any
             targets.setdefault(key, []).append(slot["value_id"])
     recorded, unchanged = 0, 0
     said = f"Answered with question {qid} ({KIND}, {RULE_ID})."
-    if onlys is None:
+    if onlys is None and stamp is None:
         # r8 review H2: what a later disagreement answer may repeat for a new group: ONE answer to the whole question,
-        # and, for the scientist's own wording, the pattern exactly as they gave it
-        said += f" {WHOLE_QUESTION} (call {uuid.uuid4().hex[:8]})."
-        if decision == "correct" and isinstance(value, str):
-            said += f" Pattern {json.dumps(value)}."
+        # and, for the scientist's own wording, the pattern exactly as they gave it (stamped first, LOW 3)
+        stamp = {"call": uuid.uuid4().hex[:12], "question": qid,
+                 **({"pattern": value} if decision == "correct" and isinstance(value, str) else {})}
     if joined:
         said += (" The scientist stated this group is the same physical sample as "
                  + ", ".join(sorted({j["with_file"] for j in joined})) + " (--same-sample).")
@@ -1810,7 +1879,7 @@ def decide(bundle: dict, asked: Mapping, *, decision: str, value: Any, only: Any
     try:
         for key, ids in targets.items():
             r = M.record_decision(bundle, target_ids=ids, decision=decision, value=value_of[key], by=by, orcid=orcid,
-                                  note=f"{note} {said}" if note else said)
+                                  note=_stamped(stamp, said, note))
             recorded += len(r.get("recorded") or ())
             unchanged += len(r.get("unchanged") or ())
     finally:
@@ -1910,69 +1979,93 @@ def point_conflicts_at_labels(questions: list[dict], bundle: Mapping, group_of: 
         if not gids:
             continue
         gid = gids[0]
-        lq = labels_by_group.get((label, gid)) or question_id(label, "history=unsettled" if label == "history" else None)
+        # r8 recheck LOW 2: the question that will CARRY the value once settled: the label's own (never its residual,
+        # which takes only --only answers); for the history, the group's own token question, else the unsettled one
+        lq = (question_id(label) if label != "history" else
+              labels_by_group.get((label, gid)) or question_id(label, "history=unsettled"))
         q["label_question"] = lq
         generic = str(q.get("why") or "").startswith("The sources disagree")
         if q.get("no_record_field"):
             # the classification (and so the counts) is unchanged; its words are true again
             q["no_record_field"] = f"the {_WHAT[label]} reading, which only the condition-label question {lq} writes"
+        carry = (f"Once you settle it, question {lq} proposes the value from your answer for this group; confirm it "
+                 f"there with --only group:{gid}" if label != "history" else
+                 f"Once you settle it, the history question of the token you choose proposes it for this group (until "
+                 f"then, question {lq} takes your own sentence with --only group:{gid})")
         said = (f"The sources disagree about the {_WHAT[label]} reading of this group. Settling it here records which "
-                    f"reading is right. It does not write {LABELS[label]} by itself: the condition-label question {lq} "
-                    f"does, for this group (`--question {lq} --only group:{gid}`). Once you settle it, that question "
-                    "proposes the value from your answer. Only if you answered that label question once for all its "
-                    "groups (no --only) does your answer here also record it for this group, the same way; the reply "
-                    "says which.")
+                f"reading is right. It does not write {LABELS[label]} by itself. {carry}. Only when you answered that "
+                "question once for all its groups (no --only), and that answer still stands for every one of them, "
+                "does your answer here also record it for this group, in that answer's form; the reply says which.")
         # a why that says something of its own (e.g. "Already decided: ...") is kept, and this is added after it
         q["why"] = said if generic else f"{q.get('why')} {said}"
 
 
-def _form_of(label: str, answered: Sequence[tuple[Mapping, Mapping]]) -> tuple[str, Any, str] | None:
-    """r8 review H2 (§5): what a new group may be given from the scientist's earlier answers to ``label``, or ``None``.
-    Only ONE answer that covered the whole question (no ``--only``: :data:`WHOLE_QUESTION`, one call) counts, and
-    every other group answered since must hold it (a group answered on its own, ``--only``, makes it ``None``):
-    ``("proposal", None, decision_id)`` when it confirmed ISAAC's proposals; ``("pattern", <their pattern>, id)``
-    when it gave their own wording with a placeholder, as STORED with the decision; ``("literal", <sentence>, id)``
-    for one history sentence (every group of a history question writes one file-name token). Never a pattern
-    rebuilt from a value. ``answered``: ``(item, decision)``."""
-    calls, first = set(), None
-    for i, d in answered:
-        note = str(d.get("note") or "")
-        if FED in note:
-            continue  # recorded by this route itself from an earlier whole-question answer
-        hit = _WHOLE.search(note)
-        if hit is None or d.get("decision") == "reject":
-            return None
-        calls.add(hit.group(1))
-        first = first or d
-    if len(calls) != 1 or first is None:
+def _whole_call(bundle: Mapping, q: Mapping, mine: Sequence[Mapping], decisions: Mapping,
+                slots: Mapping) -> tuple[str, Mapping, list[Mapping]] | None:
+    """r8 recheck MED 1 + 2 (§5): ``(call token, its first decision, the groups it covers)`` when EVERY other group of
+    question ``q`` (all but ``mine``) holds, on EVERY run's slot, the CURRENT answer of one whole-question call (or a
+    label this route recorded from it), and that call is still the current answer on every slot it wrote; else
+    ``None``. A group answered on its own (--only), a group that joined later, a run a regroup added, or a withdrawn
+    or deferred answer all make it ``None``."""
+    path = q["target_field_path"]
+    others = [i for i in q["proposals"] if i not in mine]
+    if not others:
         return None
-    if first.get("decision") == "confirm":
-        return ("proposal", None, first.get("decision_id"))
-    stored = _PATTERN.search(str(first.get("note") or ""))
-    pattern = json.loads(stored.group(1)) if stored else None
-    if label == "history" and isinstance(first.get("value"), str):
-        return ("literal", first["value"], first.get("decision_id"))
+    token = None
+    for i in others:
+        for r in _runs_of(path, i):
+            m = slots.get((path, r))
+            d = decisions.get(("missing_value", m["value_id"])) if m else None
+            st = _stamp(d)
+            if d is None or st is None or d.get("decision") in B.NEUTRAL_DECISIONS or d.get("decision") == "reject":
+                return None
+            t = st.get("call") or st.get("fed")
+            if not t or (token is not None and t != token):
+                return None
+            token = t
+    calls = [d for d in bundle.get("scientist_decisions") or () if (_stamp(d) or {}).get("call") == token]
+    if not calls:
+        return None
+    for d0 in calls:
+        now = decisions.get(((d0.get("target") or {}).get("kind"), (d0.get("target") or {}).get("id")))
+        st = _stamp(now)
+        if now is None or st is None or (st.get("call") or st.get("fed")) != token or \
+                now.get("decision") in B.NEUTRAL_DECISIONS:
+            return None
+    return token, calls[0], others
+
+
+def _form_of(label: str, call: Mapping) -> tuple[str, Any] | None:
+    """What a new group may be given from ONE whole-question call (:func:`_whole_call`), or ``None``:
+    ``("proposal", None)`` when it confirmed ISAAC's proposals; ``("pattern", <their pattern>)`` when it gave their
+    own wording with a placeholder, as STAMPED on the decision; ``("literal", <sentence>)`` for one history sentence
+    (every group of a history question writes one file-name token). Never a pattern rebuilt from a value."""
+    if call.get("decision") == "confirm":
+        return ("proposal", None)
+    if call.get("decision") != "correct":
+        return None
+    if label == "history" and isinstance(call.get("value"), str):
+        return ("literal", call["value"])
+    pattern = (_stamp(call) or {}).get("pattern")
     names = SAMPLE_ID_PLACEHOLDERS if label == "sample_id" else FILTER_PLACEHOLDERS
     if isinstance(pattern, str) and any("{" + n + "}" in pattern for n in names):
-        return ("pattern", pattern, first.get("decision_id"))
+        return ("pattern", pattern)
     return None
 
 
 def feed_from_conflicts(bundle: dict, conflict_ids: Sequence[str], *, by: str, orcid: str | None,
                         note: str | None = None) -> dict | None:
     """MED 5 (r8): after a scientist settled a disagreement on a label's reading, record that label for the group
-    through :func:`decide` (``--only group:<id>``), as the scientist's own earlier answers to that label question
-    were given: only when the group now has a proposal, holds no label answer, and the scientist answered that label
-    for other groups in one form (they confirmed the proposals, or gave one wording). Otherwise nothing is recorded
-    and the reply says where the label is now proposed. ``{statement, recorded: [...]}`` or ``None``."""
+    through :func:`decide` (``--only group:<id>``) ONLY when the scientist answered that label question with one
+    whole-question call that is still the current answer of every other group (:func:`_whole_call`), and only in
+    that call's form (:func:`_form_of`). Otherwise nothing is recorded and the reply says where the label is now
+    proposed. ``{statement, recorded: [...]}`` or ``None``."""
     cfs = [cf for cf in bundle.get("conflicts") or () if cf.get("conflict_id") in set(conflict_ids)
            and _conflict_key(cf) in FEED_KEYS]
     if not cfs:
         return None
     runs = {r for cf in cfs for r in cf.get("run_ids") or ()}
     labels = {FEED_KEYS[_conflict_key(cf)] for cf in cfs}
-    decisions = B._decisions_by_target(bundle.get("scientist_decisions") or ())
-    slots = _slot_index(bundle)
     said, recorded = [], []
     for q in label_questions(bundle, include_answered=True):
         if q["label"] not in labels or not q.get("proposals"):
@@ -1981,33 +2074,38 @@ def feed_from_conflicts(bundle: dict, conflict_ids: Sequence[str], *, by: str, o
         mine = [i for i in q["proposals"] if set(i["run_ids"]) & runs]
         if not mine:
             continue
-        answered = [(i, d) for i in q["proposals"] if i not in mine and i["run_ids"]
-                    and (d := _answered(slots.get((path, i["run_ids"][0])), decisions)) is not None]
+        decisions = B._decisions_by_target(bundle.get("scientist_decisions") or ())
+        slots = _slot_index(bundle)
+        call = _whole_call(bundle, q, mine, decisions, slots)
         for i in mine:
             if any(_answered(slots.get((path, r)), decisions) is not None for r in i["run_ids"]):
                 continue
-            form = _form_of(q["label"], answered) if answered else None
+            form = _form_of(q["label"], call[1]) if call else None
             if form is None:
                 said.append(f"{i['first_file']}: question {q['question_id']} now proposes {i['value']!r} for {path}; "
                             "answer it there")
                 continue
             value = (None if form[0] == "proposal" else form[1] if form[0] == "literal" else
                      _fill_sample_id(form[1], i.get("fill") or {}))
+            covered = [x["first_file"] for x in call[2]]
+            named = ", ".join(covered[:NAMED]) + (f" and {len(covered) - NAMED} more" if len(covered) > NAMED else "")
             try:
                 r = decide(bundle, q, decision="confirm" if form[0] == "proposal" else "correct", value=value,
                            only=f"group:{i['group_id']}", by=by, orcid=orcid,
-                           note=((note + " ") if note else "") + FED + " ("
-                           + ", ".join(i["said"].get("from_decisions") or ()) + "), as their one answer to the whole "
-                           f"question ({form[2]}) gave every other group.")
+                           stamp={"fed": call[0], "from": list(i["said"].get("from_decisions") or ())},
+                           note=(f"Recorded from the scientist's answer to the files' disagreement on this reading, "
+                                 f"in the form of their one answer to the whole question ({call[1].get('decision_id')})."
+                                 + (f" {note}" if note else "")))
             except LabelRefused as exc:
                 said.append(f"{i['first_file']}: {path} not recorded ({exc})")
                 continue
             if r.get("slots_recorded"):
                 recorded.append({"group_id": i["group_id"], "first_file": i["first_file"], "path": path,
-                                 "question_id": q["question_id"], "value": value if value is not None else i["value"]})
+                                 "question_id": q["question_id"], "value": value if value is not None else i["value"],
+                                 "covered_by": call[1].get("decision_id"), "covered_groups": covered})
                 said.append(f"{i['first_file']}: also recorded {path} = {recorded[-1]['value']!r} (question "
-                            f"{q['question_id']}), the way your one answer to that whole question ({form[2]}) gave "
-                            "every other group")
+                            f"{q['question_id']}), in the form of your one answer to that whole question "
+                            f"({call[1].get('decision_id')}), which covered {named}")
     if not said:
         return None
     return {"statement": "Condition labels: " + "; ".join(said) + ".", "recorded": recorded}
@@ -2018,6 +2116,7 @@ def feed_from_conflicts(bundle: dict, conflict_ids: Sequence[str], *, by: str, o
 
 SAME_RECORD_WARNING = "same_sample_and_conditions"
 UNPROPOSED_WARNING = "label_not_proposed"
+STALE_FOLLOWS_WARNING = "follows_answer_no_longer_holds"
 
 
 def record_warnings(bundle: Mapping, fresh: Sequence[tuple[str, Mapping, Mapping]], exportable: Sequence[str]) -> list[dict]:
@@ -2025,9 +2124,20 @@ def record_warnings(bundle: Mapping, fresh: Sequence[tuple[str, Mapping, Mapping
 
     * two ready records that carry one sample id and every condition the same (a repeat ``SYN_01`` and ``SYN_01a``,
       say): the portal would hold two records it cannot tell apart;
-    * a ready record without a label ISAAC could not propose (``not_proposed``), while nobody answered it."""
+    * a ready record without a label ISAAC could not propose (``not_proposed``), while nobody answered it;
+    * r8 recheck HIGH: a record whose recorded follows answer the current holds and order no longer support: written
+      without the link, and the follows question asks again."""
     ready = set(exportable)
     out: list[dict] = []
+    stale = current_follows(bundle) if any(comp.get("follows") for _, _, comp in fresh) else {}
+    first_file = {g["group_id"]: g["member_run_keys"][0].split("@", 1)[0] for g in bundle.get("record_groups") or ()
+                  if g.get("member_run_keys")}
+    for gid, _, comp in fresh:
+        if comp.get("follows") and gid in stale:
+            out.append({"code": STALE_FOLLOWS_WARNING, "group_id": gid, "path": FOLLOWS_PATH, "needs": FOLLOWS_PATH,
+                        "targets": [], "command": f"isaac bundle show <bundle_dir> question {question_id('follows')}",
+                        "text": (f"{first_file.get(gid, gid)} is written without its follows link: its recorded answer no "
+                                 f"longer holds ({stale[gid]}). Question {question_id('follows')} asks it again.")})
     seen: dict[str, list[tuple[str, Mapping]]] = {}
     for gid, draft, _ in fresh:
         fields = draft.get("fields") or {}
@@ -2134,13 +2244,19 @@ def order_by_follows(fresh: Sequence[tuple[str, dict, dict]], run_group: Mapping
 
 
 def follows_link(gid: str, draft: Mapping, composition: Mapping, *, run_group: Mapping[str, str],
-                 drafts: Mapping[str, Mapping], minted: Mapping[str, str]) -> tuple[dict | None, list | None, str | None]:
+                 drafts: Mapping[str, Mapping], minted: Mapping[str, str],
+                 stale: Mapping[str, str] | None = None) -> tuple[dict | None, list | None, str | None]:
     """``(link, evidence, why_not)`` for group ``gid``'s follows label: the link to the record of the group that
     holds the run it names, minted earlier in this export (``minted``: group -> record id). ``(None, None, why)``
-    when it cannot be written; ``(None, None, None)`` when the group has no follows label."""
+    when it cannot be written; ``(None, None, None)`` when the group has no follows label. ``stale``
+    (:func:`current_follows`): the groups whose recorded answer the CURRENT holds and order no longer support; their
+    link is never written (r8 recheck HIGH: an answer given before a hold, or before the electrode position changed)."""
     f = composition.get("follows")
     if not f:
         return None, None, None
+    if stale and gid in stale:
+        return None, None, (f"its recorded follows answer no longer holds: {stale[gid]}; question "
+                            f"{question_id('follows')} asks it again")
     target_gid = run_group.get(f.get("follows_run_key"))
     if target_gid is None or target_gid == gid:
         return None, None, "the run it follows is in no scientist-confirmed record group now"
