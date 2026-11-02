@@ -843,6 +843,8 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
             # approved before `decide` refused it: a result with NO CURVE. Re-processing with the same
             # parameters gives the same result, so the remedy must not say "re-run and approve"
             used["no_curve"] = no_curve_cause(r)
+            if reprocess_cannot_help(r):
+                used["no_retry"] = True  # r5f L1: (a key only when true)
         bound = d.get("approved_files")
         current = [{"role": f.get("role"), "relative_path": f.get("relative_path"), "sha256": f.get("sha256")} for f in files]
         if bound is not None and json.dumps(bound, sort_keys=True) != json.dumps(current, sort_keys=True):
@@ -1022,6 +1024,14 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
                                                      if r.get("state") in B.PROCESSING_UNDECIDED_STATES
                                                      and not B.processing_not_applicable(r)
                                                      and not (r.get("outputs") or {}).get("files")},
+                                # r5f L1: those of them whose group processing again cannot help
+                                # (a key only when there is one, so a draft's processing section stays what it was)
+                                **({"no_retry_results": ids} if (ids := [
+                                    B.processing_id(r) for r in mine
+                                    if r.get("state") in B.PROCESSING_UNDECIDED_STATES
+                                    and not B.processing_not_applicable(r)
+                                    and not (r.get("outputs") or {}).get("files")
+                                    and reprocess_cannot_help(r)]) else {}),
                                 # a result a scientist REJECTED exists: "none exists" would send them to re-run
                                 "rejected": [B.processing_id(r) for r in mine if r.get("state") == B.STATE_REJECTED]}
 
@@ -2015,6 +2025,13 @@ def validate_draft_file(draft: Mapping, *, run_portal, composition: Mapping | No
     }
 
 
+def reprocess_cannot_help(result: Mapping) -> bool:
+    """:func:`mutations.reprocess_cannot_help` (imported here lazily, as this module imports mutations)."""
+    from .mutations import reprocess_cannot_help as cannot
+
+    return cannot(result)
+
+
 def no_curve_cause(result: Mapping) -> str:
     """:func:`mutations.no_curve_cause` (imported here lazily, as this module imports mutations)."""
     from .mutations import no_curve_cause as cause
@@ -2082,6 +2099,12 @@ def processing_remedy(processing: Mapping) -> str:
         said = processing["calibration_unconfirmed"]
         return (f"the approved result {pid} is not used: {said[0].lower() + said[1:]} Until one of these is done the "
                 "record has no series, QC status or E0 and is not exported.")
+    if processing.get("result") and processing.get("no_curve") and processing.get("no_retry"):
+        # r5f L1: its scans share too few points: processing again cannot add any, so only withdraw or leave out
+        pid = processing["result"]
+        return (f"the approved result {pid} has no curve ({processing['no_curve']}): its scans share too few points to "
+                "merge, and processing again cannot add points the scans do not have. Withdraw the approval "
+                f'(`isaac bundle decide <bundle_dir> --target {pid} --decision reject --by "<your name>"`), or {leave_out}.')
     if processing.get("result") and processing.get("no_curve"):
         # NEVER "re-run and approve the new result": the same parameters give the same no-curve result
         pid = processing["result"]
@@ -2122,6 +2145,15 @@ def processing_remedy(processing: Mapping) -> str:
                 f"needs_changes (`--target {ids[0]} --decision needs_changes`) and re-process the group with a setting "
                 f"the scientist chooses ({reprocess_command(gid)}), then approve the new result if its curve is usable; "
                 f"or {leave_out}.")
+    if no_curve and set(no_curve) <= set(processing.get("no_retry_results") or ()):
+        # r5f L1: the scans share too few points; no params file adds any
+        ids = list(no_curve)
+        said = "; ".join(f"{pid} ({cause})" for pid, cause in list(no_curve.items())[:3]) + (" …" if len(ids) > 3 else "")
+        return (f"its processing result has no curve, so there is nothing to approve: {said}. Its scans share too few "
+                "points to merge, and processing again, with these or other parameters, cannot add points the scans do "
+                "not have. Reject the result "
+                f'(`isaac bundle decide <bundle_dir> --target {ids[0]} --decision reject --by "<your name>"`), and {leave_out} '
+                "unless a scientist knows these scans belong with others.")
     if no_curve:
         ids = list(no_curve)
         said = "; ".join(f"{pid} ({cause})" for pid, cause in list(no_curve.items())[:3]) + (" …" if len(ids) > 3 else "")
@@ -2149,6 +2181,16 @@ _BOILERPLATE_PREFIXES = ("Website schema (vendored", "This is NOT an official re
 WARNINGS_SHOWN = 5
 
 
+def warning_rank(code: str | None) -> int:
+    """r5f M6: how much a warning matters when only the first few are printed: 0 = a stated value left out of the
+    record, or a value its sources disagree about, or a portal warning; 1 = anything else; 2 = the routine start-time
+    note. Only ORDERS the short list: nothing is dropped, and ``--full`` keeps the original order."""
+    code = str(code or "")
+    if code in (STATED_POTENTIAL_WARNING, POTENTIAL_SOURCES_WARNING, ATHENA_NOT_CHOSEN_WARNING) or code.startswith("portal:"):
+        return 0
+    return 2 if code == START_TIME_WARNING else 1
+
+
 def warning_summary(warned: Sequence[Mapping], *, first: Iterable[str] | None = None, full: bool = False,
                     marked: str = "group_exportable", where: str | None = None) -> dict:
     """``{"warnings": [{group_id, code, text, command}, ...], "warnings_total": n}`` for the reply, or ``{}``.
@@ -2161,6 +2203,11 @@ def warning_summary(warned: Sequence[Mapping], *, first: Iterable[str] | None = 
     lead = set(first) if first is not None else None
     ordered = ([w for w in warned if w["group_id"] in lead] + [w for w in warned if w["group_id"] not in lead]
                if lead is not None else list(warned))
+    if not full:
+        # r5f M6: SEVERITY first (a stated value left out of a record before the routine start-time note), so the five
+        # shown are never five copies of the note while a stated value is left out; at equal severity the exportable
+        # groups' warnings (``first``) still lead (c11-a)
+        ordered = sorted(ordered, key=lambda w: (warning_rank(w.get("code")), lead is not None and w["group_id"] not in lead))
     shown = ordered if full else ordered[:WARNINGS_SHOWN]
     # r5c C6: a warning that names two steps keeps the second (``also_needs``, ``also_command``): SKILL.md Step 8 and
     # records-and-validation.md tell the agent to read them
@@ -2172,6 +2219,46 @@ def warning_summary(warned: Sequence[Mapping], *, first: Iterable[str] | None = 
         out["warnings_omitted"] = len(warned) - len(shown)
         out["warnings_full_list"] = ("Pass --full to print every warning" + (f"; {where}" if where else "") + ".")
     return out
+
+
+#: A question id as the warnings print it (``Q-`` and ten hex digits): the one part of a start-time note that differs
+#: between records.
+_QUESTION_ID_IN_TEXT = re.compile(r"\bQ-[0-9a-f]{6,}\b")
+
+
+def group_by_text(per_record: Iterable[Iterable[str]]) -> list[dict]:
+    """r5f L3: the same warning on many records, said ONCE: ``[{text, records, example_question}]`` over the lists of
+    warning texts of each record (a text counts once per record). Two texts are the same when they differ only in the
+    question id they name; ``text`` shows the first with its id as ``<question id>``, and ``example_question`` is that
+    first id (``None`` when the text names none). Most records first, ties in first-seen order."""
+    per_record = [list(texts) for texts in per_record]
+    seen: dict[str, dict] = {}
+    for texts in per_record:
+        for key in dict.fromkeys(_QUESTION_ID_IN_TEXT.sub("<question id>", str(t)) for t in texts):
+            row = seen.setdefault(key, {"text": key, "records": 0, "example_question": None})
+            row["records"] += 1
+    # the example id: the first one a text names, in the order the records were given
+    for texts in per_record:
+        for t in texts:
+            m = _QUESTION_ID_IN_TEXT.search(str(t))
+            row = seen.get(_QUESTION_ID_IN_TEXT.sub("<question id>", str(t)))
+            if m and row is not None and row["example_question"] is None:
+                row["example_question"] = m.group(0)
+    return sorted(seen.values(), key=lambda r: -r["records"])
+
+
+def grouped_sentence(rows: Sequence[Mapping]) -> str:
+    """One sentence for :func:`group_by_text` rows: each text once, with how many records carry it and one example."""
+    return "; ".join(f"{r['text']} ({r['records']} record(s)" + (f", e.g. question {r['example_question']}" if r["example_question"] else "") + ")"
+                     for r in rows)
+
+
+def warnings_outcome_sentence(rows: Sequence[Mapping]) -> str:
+    """The sentence ``export``'s ``outcome`` adds for :func:`group_by_text` rows: at most :data:`WARNINGS_SHOWN` kinds,
+    then how many more there are (the structured ``warnings_by_text`` keeps every one)."""
+    more = len(rows) - WARNINGS_SHOWN
+    return (" Warnings that apply, each said once: " + grouped_sentence(rows[:WARNINGS_SHOWN])
+            + (f"; and {more} more kind{'' if more == 1 else 's'}" if more > 0 else "") + " (`warnings_by_text`).")
 
 
 def portal_warnings_of(report: Mapping) -> list[dict]:
@@ -2310,10 +2397,23 @@ def validate_records(bundle_dir: Path, *, run_portal=None, full: bool = False) -
         # validation/<group>.json, "publish (0 error(s), 2 warning(s))", and never said here)
         said = portal_warning_summary(portal_warned)
         out["portal_warnings"] = said
-        out["warnings"] = list(out.get("warnings") or ()) + [
-            {"group_id": None, "code": f"portal:{w['code']}", "text": w["text"], "command": None, "records": w["records"]}
-            for w in said]
-        out["warnings_total"] = int(out.get("warnings_total") or 0) + len(said)
+        portal_rows = [{"group_id": None, "code": f"portal:{w['code']}", "text": w["text"], "command": None,
+                        "records": w["records"]} for w in said]
+        rows = list(out.get("warnings") or ())
+        total = int(out.get("warnings_total") or 0) + len(portal_rows)
+        if full:
+            rows += portal_rows
+        else:
+            # r5f M6: a portal warning ranks with the severe ones, ahead of the routine start-time note
+            rows = sorted(rows + portal_rows, key=lambda w: warning_rank(w.get("code")))[:WARNINGS_SHOWN]
+        out["warnings"] = rows
+        out["warnings_total"] = total
+        if len(rows) < total:
+            out["warnings_omitted"] = total - len(rows)
+            out.setdefault("warnings_full_list", "Pass --full to print every warning; "
+                           f"{VALIDATION_DIR}/<group_id>.json lists each group's.")
+        else:
+            out.pop("warnings_omitted", None), out.pop("warnings_full_list", None)
     from .propose_terms import pending_vocabulary
 
     pending = pending_vocabulary(bundle, fresh, verdicts)
@@ -2594,6 +2694,7 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     bundle_dir, out = Path(bundle_dir), Path(out)
     bundle = load_validated(bundle_dir)
     exported, refused = [], []
+    said_each_record: list[list[str]] = []
     portal_warned: dict[str, list[dict]] = {}
     index = _read_export_index(out) if out.is_dir() else {"format": EXPORT_INDEX_FORMAT, "records": []}
     bundle_id = bundle.get("bundle_id")
@@ -2714,7 +2815,9 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         row = {"group_id": group_id, "record_id": rid, "record": record_path.name, "sidecar": sidecar_path.name,
                "artifacts": artifacts, "schemas_used": report["schemas_used"], "export": status,
                "statement": "Valid for the portal's pinned schema; NOT claimed valid for the website."}
-        still = [written_without(w) for w in warned if w["group_id"] == group_id]
+        still = [written_without(w) for w in sorted((w for w in warned if w["group_id"] == group_id),
+                                                    key=lambda w: warning_rank(w.get("code")))]
+        said_each_record.append(list(still))  # r5f L3: grouped by text for the summary below (rows keep their own)
         if pw := portal_warnings_of(report):
             # r4-b M7: a record the portal validator warns about says so on its row
             portal_warned[group_id] = pw
@@ -2755,7 +2858,10 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         entry = {"bundle_id": bundle_id, "group_id": group_id, "record_id": rid, "content_sha256": digest,
                  "body_sha256": body, "exported_utc": at, "sidecar_generated_utc": sidecar["generated_utc"],
                  "replaced_record_ids": ([*(prior.get("replaced_record_ids") or []), prior.get("record_id")]
-                                         if status == "replaced" else list((prior or {}).get("replaced_record_ids") or []))}
+                                         if status == "replaced" else list((prior or {}).get("replaced_record_ids") or [])),
+                 # r5f L3: what the portal validator warned about this record, kept so the dry run can say it once
+                 **({"portal_warnings": [{"code": w["code"], "path": w["path"], "message": w["message"]} for w in pw]}
+                    if (pw := portal_warnings_of(report)) else {})}
         index["records"] = [r for r in index["records"]
                             if not (isinstance(r, Mapping) and (r.get("bundle_id"), r.get("group_id")) == (bundle_id, group_id))]
         index["records"].append(entry)
@@ -2793,6 +2899,11 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         "on_disk_drafts_ignored_because_they_differ": stale,
         "on_disk_drafts_ignored_with_no_confirmed_group": orphans,
     }
+    if (said_once := group_by_text(said_each_record)):
+        # r5f L3: the same warning on every record is said once here, with its record count and one example question;
+        # each row of `exported` keeps its own `warnings`
+        result["warnings_by_text"] = said_once
+        result["outcome"] += warnings_outcome_sentence(said_once)
     if portal_warned:
         # r4-b M7: each portal warning once, with how many of the records written carry it
         result["portal_warnings"] = portal_warning_summary(portal_warned)
@@ -2881,6 +2992,49 @@ def upload_plan(records_dir: Path, portal_url: str | None) -> list[dict]:
                 + f". If {'any of them was' if many else 'it was'} already uploaded, the portal still holds it, and "
                 "uploading this one adds a second record for the same group.")
     return plan
+
+
+def upload_summary(plan: Sequence[Mapping], records_dir: Path, portal_url: str | None) -> dict:
+    """r5f L3: what the dry run says ONCE about every record in ``plan``: ``{statement, notes_by_text,
+    portal_warnings}``. The statement leads with how many records, how many requests each and where to
+    (``74 records, 2 requests each, to <portal>``), says that nothing was sent, then each distinct note (the
+    start-time note, which differs between records only in its question id) once, with its record count and one
+    example question, and each portal warning once. A record's own ``notes`` stay in ``plan``. Reads files only."""
+    base = (portal_url or "<portal-url>").rstrip("/")
+    n = len(plan)
+    per_request = {len(p.get("requests") or ()) for p in plan}
+    each = f"{next(iter(per_request))} request{'' if per_request == {1} else 's'} each" if len(per_request) == 1 else None
+    lead = f"{n} record{'' if n == 1 else 's'}" + (f", {each}" if each else "") + f", to {base}."
+    notes = group_by_text(p.get("notes") or () for p in plan)
+    ids = {Path(p["record"]).stem for p in plan}
+    portal = _portal_warnings_in_index(Path(records_dir), ids)
+    statement = lead + " Nothing was sent. The token is never read or printed."
+    if notes:
+        statement += " What these records are written without, each said once: " + grouped_sentence(notes) + " (records[].notes)."
+    if portal:
+        statement += (" The portal validator warned, each said once: "
+                      + "; ".join(f"{w['code']}" + (f" at {w['path']}" if w.get("path") else "") + f": {w['message']} ({w['records']} record(s))"
+                                  for w in portal) + " (portal_warnings).")
+    return {"statement": statement, "notes_by_text": notes, **({"portal_warnings": portal} if portal else {})}
+
+
+def _portal_warnings_in_index(records_dir: Path, record_ids: set[str]) -> list[dict]:
+    """The portal validator's warnings the export recorded for ``record_ids`` (:data:`EXPORT_INDEX`), each distinct one
+    once with how many of those records carry it; ``[]`` when the index is missing or says none."""
+    try:
+        index = json.loads((records_dir / EXPORT_INDEX).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    seen: dict[tuple, dict] = {}
+    for r in (index.get("records") if isinstance(index, Mapping) else None) or ():
+        if not (isinstance(r, Mapping) and r.get("record_id") in record_ids and isinstance(r.get("portal_warnings"), list)):
+            continue
+        for w in r["portal_warnings"]:
+            if isinstance(w, Mapping):
+                row = seen.setdefault((w.get("code"), w.get("path"), w.get("message")),
+                                      {"code": w.get("code"), "path": w.get("path"), "message": w.get("message"), "records": set()})
+                row["records"].add(r["record_id"])
+    return [{**r, "records": len(r["records"])} for r in sorted(seen.values(), key=lambda r: (-len(r["records"]), str(r["code"])))]
 
 
 def _sidecar_notes(path: Path) -> list[str]:

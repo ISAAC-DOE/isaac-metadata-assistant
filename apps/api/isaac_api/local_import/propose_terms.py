@@ -915,6 +915,19 @@ def propose_terms(bundle: Mapping, sources: Mapping) -> dict:
                     "draft": draft,
                 }
             )
+        # r5f L4: a spaced request ("cathodic corrosion") whose one-word form the scientist then gave ("cathodic_corrosion":
+        # a vocabulary request of theirs on this field) or that is already on the field's lists is answered: nothing more
+        # is asked for it. A one-word reading nobody asked for (a parser or AI reading) answers nothing.
+        asked = {t["term"] for t in terms if t["by_origin"].get(ORIGIN_REQUEST)}
+        listed = set(lists["portal"] or ()) | set(lists["schema"] or ())
+        for t in terms:
+            d = t["draft"]
+            form = _SEPARATORS.sub("_", t["term"].strip())
+            if not d["drafted"] and d.get("ask") and form != t["term"] and (form in asked or form in listed):
+                said = ("The scientist has given this term as one word, `%s` (see its own entry)" % form if form in asked
+                        else "Its one-word form, `%s`, is on the field's list" % form)
+                t["draft"] = {**{k: v for k, v in d.items() if k != "ask"}, "one_word_form_given": form,
+                              "reason": f"{said}, so nothing more is asked for the spaced form."}
         fields.append(
             {
                 "field_path": path,

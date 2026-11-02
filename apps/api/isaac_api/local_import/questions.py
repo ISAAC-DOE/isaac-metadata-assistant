@@ -519,6 +519,8 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     ``answered_out``, when given (with ``include_answered``), receives the id of each value target that is in the
     payload ONLY because it was answered (the plain payload does not ask it): what a caller that needs both payloads
     reads instead of consolidating twice (r4-c HIGH-1, ``template._question_command``)."""
+    from .template import deprecated_terms
+
     schema, basis = _target_schema()
     # THE SET-POINT A CONTROL MODE NEEDS (1.5.0): the target schema's conditional rules make the
     # set-point required for some modes, so a run whose mode a file states or a scientist confirmed
@@ -647,6 +649,27 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     for c in bundle["candidates"]:
         if c["target_field_path"]:
             related.setdefault(c["target_field_path"], []).append(c)
+    # r5e M1: a sample field's related readings by the sample reading of the group their run is in (None: no group, or
+    # a group that records no sample reading), each list in bundle order; built once per sample field, on first use
+    related_by_sample: dict[str, dict[str | None, list[tuple[int, dict]]]] = {}
+
+    def related_hints(path: str, partition: str | None, runs: set[str]) -> list[dict]:
+        """The related readings a question shows (the first :data:`_HINTS_PER_QUESTION`). r5e M1: for a sample field,
+        never another sample's: a reading made for a group whose own sample reading differs from the question's is
+        left out (``CC1`` beside a question about the groups of another sample)."""
+        if not path.startswith("sample."):
+            return related.get(path, [])[:_HINTS_PER_QUESTION]
+        if path not in related_by_sample:
+            by_key: dict[str | None, list[tuple[int, dict]]] = {}
+            for i, c in enumerate(related.get(path, [])):
+                by_key.setdefault(sample_key_of_group.get(group_of.get(c["run_id"])), []).append((i, c))
+            related_by_sample[path] = by_key
+        own = {sample_key_of_group.get(group_of.get(r)) for r in runs}
+        if partition and partition.startswith("sample=") and partition != "sample=unrecorded":
+            own.add(partition[len("sample="):])
+        by_key = related_by_sample[path]
+        kept = sorted((x for k in own | {None} for x in by_key.get(k, ())[:_HINTS_PER_QUESTION]), key=lambda x: x[0])
+        return [c for _, c in kept[:_HINTS_PER_QUESTION]]
 
     buckets: dict[tuple, dict] = {}
 
@@ -838,7 +861,9 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         # a missing value does (a beamtime-scope one blocks every record).
         required = required_for(path, rids[0] if rids else None) if path else None
         affects = any(r in group_of for r in rids) or (not group_of and bool(rids)) or (required and not rids)
-        if path and rids:
+        if path and rids and cf["kind"] != B.MACRO_SETPOINT_CONFLICT_KIND:
+            # r5f M7: never for a macro-versus-file-name set-point conflict: a decision on the set-point candidate (the file
+            # name's reading, confirmed) is no answer to "macro or file name?", so it does not cover it
             # a decision that IS this conflict's own answer settles it already (it is then not open): not counted here
             own = {"kind": "conflict", "id": cf["conflict_id"]}
             by_run = [[(d, v) for d, v in held(r, path) if d.get("target") != own] for r in rids]
@@ -894,6 +919,10 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                     # bundle.allowed_values — the one list `decide` and eligibility (bundle.value_problem)
                     # refuse outside of and the export validates against — for each field it closes
                     "field_allowed_values": {f: a for f in sorted(q["fields"]) if (a := _eligible_values(f))},
+                    # r5e M5: the deprecated terms those lists still hold (allowed; never offered), per field
+                    **({"field_deprecated_values": dv} if (dv := {f: d for f in sorted(q["fields"])
+                                                                  if (d := deprecated_terms(f, _eligible_values(f)))})
+                       else {}),
                     "hints": [],
                     "field_hints": fh,
                     "allowed_values": None,
@@ -999,7 +1028,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 # (exactly the candidates `confirm_value_shown` names, so each value printed is recorded as an exposure)
                 confirmable = _confirmable_candidates(q["targets"], cand_by_id, writable)
                 text = (f"Is the extracted {_label(path)} ({path}) right?" + _confirmed_value_text(path, confirmable)
-                        + " Confirm it, or correct it.")
+                        + " Confirm it, or correct it." + _macro_reading_note(bundle, q["targets"], scope_of_run))
                 if valueless:
                     text += (f" {len(valueless)} of its {len(q['targets'])} target(s) carry no value ({', '.join(valueless[:5])}"
                              f"{'…' if len(valueless) > 5 else ''}): confirm refuses them; answer those with correct --value, "
@@ -1023,7 +1052,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             text += _ai_sentence(ai)
         mine = {t["id"] for t in q["targets"]}
         shown_own = {h.get("candidate_id") for h in own_literals}
-        for c in related.get(path, [])[:_HINTS_PER_QUESTION]:
+        for c in related_hints(path, partition, q["runs"]):
             if c["observed_literals"] and c["candidate_id"] not in shown_own:
                 ev = next((e for e in c["evidence"] if e["method"] != "ai_interpretation"), None)
                 hints.append({"kind": "related_reading", "candidate_id": c["candidate_id"], "literal": c["observed_literals"][0],
@@ -1071,6 +1100,8 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             "per_scope_targets": q["per_scope_targets"],
             "hints": hints,
             "allowed_values": enum,
+            # r5e M5: the deprecated terms the list still holds (allowed; never offered)
+            **({"deprecated_values": dv} if (dv := deprecated_terms(path, enum)) else {}),
             # L2: the answers already given for this field differ — an agent following
             # answer_command should answer per group (--only), not once for all
             "answers_differ": answers_differ,
@@ -1130,6 +1161,8 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 "scope": scope,
                 "target_field_path": path,
                 "text": (f"The sources disagree ({cf['kind']}{', ' + str(cf['subject']) if cf['subject'] else ''}). "
+                         # r5f M7: a macro-versus-file-name set-point conflict says what it found (names, run, time slot)
+                         + (f"{cf['explanation']} " if cf["kind"] == B.MACRO_SETPOINT_CONFLICT_KIND and cf.get("explanation") else "")
                          + answer["text"] + _asked_again_text(again, {path: enum} if path else {})),
                 "applies_to": applies,
                 "targets": [{"kind": "conflict", "id": cf["conflict_id"]}],
@@ -1374,6 +1407,8 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     reading_said = _note_shared_evidence(questions, cand_by_id, bundle)
     _note_same_reading_groups(questions, cand_by_id, bundle)
     _note_shared_reading_groups(questions, cand_by_id, bundle, reading_said)
+    _note_shared_sample_tokens(questions, bundle)
+    _note_agreeing_field_hints(questions, bundle)
     _mark_deferred(questions, decisions)
     _covered_by_run_decisions(questions, covered_conflicts, beamtime_decision_ids)
     _say_the_one_group(questions)
@@ -1836,6 +1871,23 @@ def _first_witness(reading: Mapping) -> Mapping:
     return (reading.get("witnesses") or [{}])[0] or {}
 
 
+def _macro_reading_note(bundle: Mapping, targets: Sequence[Mapping], scope_of_run) -> str:
+    """r5f M7: the macro's reading, in the question of the candidate it disagrees with: while a
+    ``macro_setpoint_disagrees`` conflict on one of ``targets`` is open, the question says what the macro states and
+    names the question that settles it (confirming the candidate does not)."""
+    ids = {t["id"] for t in targets if t.get("kind") == "candidate"}
+    notes = []
+    for cf in bundle["conflicts"]:
+        if (cf.get("kind") == B.MACRO_SETPOINT_CONFLICT_KIND and cf.get("candidate_id") in ids
+                and cf["value_state"] in (B.STATE_CONFLICTING, B.STATE_NEEDS_REVIEW) and cf.get("run_ids")):
+            file_reading, macro_reading = cf["readings"][0], cf["readings"][1]
+            where = macro_reading["witnesses"][0].get("relative_path")
+            qid = _qid(scope_of_run(cf["run_ids"][0]), "resolve_conflict", cf["conflict_id"])
+            notes.append(f" The macro {where} states {macro_reading['value']} V for this measurement; the file name states "
+                         f"{file_reading['value']} V. Confirming the value here does not settle that: answer {qid}.")
+    return "".join(notes)
+
+
 def _conflict_answer(qid: str, cf: Mapping, path: str | None, enum: list | None, writable: frozenset[str],
                      related: Mapping[str, Sequence[Mapping]], source_path_of: Mapping[str, Any], numeric: bool) -> dict:
     """What a conflict question asks, the hints it shows and the answer it offers: ``{"text", "hints", "fields",
@@ -2249,6 +2301,163 @@ def _note_shared_reading_groups(questions: list[dict], cand_by_id: Mapping[str, 
                         f"together with {command} if it is the same thing for all of them, or each on its own if not.")
             before = reading_said.get(q["question_id"])
             q["text"] = q["text"].replace(before, said, 1) if before and before in q["text"] else q["text"] + said
+
+
+#: r5e M1: a sample question partitioned by the run's own file name (grouping's ``sample_name_stem``: no source states
+#: the sample, so each group's whole name, condition tokens and all, is its partition)
+_STEM_PARTITION_KEYS = frozenset({"sample_name_stem"})
+#: r5e M1: the sample fields batched by the sample tokens of the names: what the MATERIAL is, which a bare number in
+#: the name (an electrode, a step) does not change. Never an identifier such as ``sample.sample_id``.
+SAMPLE_TOKEN_FIELDS = ("sample.material.name", "sample.sample_form")
+
+
+def _stem_partition(partition: str | None) -> bool:
+    if not partition or not partition.startswith("sample=") or partition == "sample=unrecorded":
+        return False
+    try:
+        key = json.loads(partition[len("sample="):])
+    except ValueError:
+        return False
+    return isinstance(key, Mapping) and set(key) == _STEM_PARTITION_KEYS
+
+
+def _note_shared_sample_tokens(questions: list[dict], bundle: Mapping) -> None:
+    """r5e M1: per-group ``missing_value`` questions about the material's name or form (:data:`SAMPLE_TOKEN_FIELDS`)
+    whose partition is the group's whole file name (``sample_name_stem``) share a ``same_reading_group`` when their
+    file names share every SAMPLE token
+    (``grouping.sample_name_tokens``: ``Q4`` ``SYNcat`` ``5wp`` of ``Q4_06_SYNcat_5wp_pH2_000mV``; never a counter, a
+    set-point, a pH, an electrolyte or another condition, nor a token the run's parser read as one). Then
+    ``decide --question <id> --same-reading`` answers them together. Ids, scopes, kinds and targets are unchanged;
+    only ``same_reading_group``, ``same_reading_count``, ``same_reading_members``, ``same_reading_command``,
+    ``shared_sample_tokens`` and the text are added. Names whose sample tokens differ in any way (``Q4`` beside
+    ``Q5``, ``5wt`` beside ``5wp``) never share a group: the scientist joins those by answering each."""
+    from . import grouping as G
+
+    asked = [q for q in questions if q["kind"] == "missing_value" and q.get("target_field_path") in SAMPLE_TOKEN_FIELDS
+             and not q.get("same_reading_group") and _stem_partition(q.get("partition")) and q["targets"]]
+    if len(asked) < 2:
+        return
+    runs = {r.get("run_id"): r for r in bundle.get("runs") or ()}
+    run_of = {m["value_id"]: m["run_id"] for m in bundle["missing_values"]}
+    # what each run's own parser read, from its file name, as a condition or as bookkeeping: never a sample token
+    read_as: dict[str, set[str]] = {}
+    for c in bundle["candidates"]:
+        key = c.get("statement_key")
+        if not c.get("run_id") or not key or key in G.SAMPLE_KEYS or G.classify_key(key) == G.CLASS_UNKNOWN:
+            continue
+        for e in c.get("evidence") or ():
+            if str(e.get("locator") or "").startswith("filename token") and isinstance(e.get("literal_value"), str):
+                read_as.setdefault(c["run_id"], set()).add(e["literal_value"].strip().casefold())
+    tokens_of: dict[str, list[str]] = {}
+
+    def tokens(rid: str) -> list[str]:
+        if rid not in tokens_of:
+            tokens_of[rid] = G.sample_name_tokens(str((runs.get(rid) or {}).get("stem") or ""),
+                                                  read_as_condition=read_as.get(rid, ()))
+        return tokens_of[rid]
+
+    shared: dict[tuple, list[tuple[dict, list[str]]]] = {}
+    for q in asked:
+        rids = sorted({rid for t in q["targets"] if (rid := run_of.get(t["id"]))})
+        written = [tokens(r) for r in rids]
+        if not rids or not all(written):
+            continue
+        key = frozenset(tuple(t.casefold() for t in w) for w in written)
+        shared.setdefault((q["target_field_path"], key, bool(q.get("outside_live_groups"))), []).append((q, rids))
+    for (path, _key, _outside), members in shared.items():
+        if len(members) < 2:
+            continue
+        ids = sorted(q["question_id"] for q, _ in members)
+        group = "SR-" + hashlib.sha256("\n".join(ids).encode()).hexdigest()[:10]
+        named = [{"question_id": q["question_id"], "run_id": rid, "file_name": (runs.get(rid) or {}).get("stem")}
+                 for q, rids in sorted(members, key=lambda m: m[0]["question_id"]) for rid in rids]
+        files = list(dict.fromkeys(str(m["file_name"]) for m in named if m["file_name"]))
+        shown = ", ".join(files[:SAME_READING_NAMES_SHOWN]) + (
+            f", and {len(files) - SAME_READING_NAMES_SHOWN} more" if len(files) > SAME_READING_NAMES_SHOWN else "")
+        sample = list(dict.fromkeys(t for _, rids in members for r in rids for t in tokens(r)))
+        said_tokens = " ".join(_quoted(t) for t in sample[:6]) + (" …" if len(sample) > 6 else "")
+        for q, _rids in members:
+            command = q["answer_command"].replace(f"--question {q['question_id']} ",
+                                                  f"--question {q['question_id']} {SAME_READING_FLAG} ", 1)
+            q["same_reading_group"], q["same_reading_count"] = group, len(members)
+            q["same_reading_members"], q["same_reading_command"] = named, command
+            q["shared_sample_tokens"] = sample
+            q["text"] += (f" {len(members)} questions ask the {_label(path)} of groups whose file names share the same "
+                          f"sample tokens ({said_tokens}; every part of the name that is no counter, set-point, pH, "
+                          f"electrolyte or other condition; no parser read them as a sample), one per group "
+                          f"(same_reading_group {group}; the files: {shown}). If the {_label(path)} is the same for all "
+                          f"of them, answer them together: {command}. If not, answer each on its own.")
+
+
+#: r5e H1: the per-group optional fields (asked per record group, never once for the beamtime: DEC-90) whose groups
+#: are batched when their own AI readings of the field agree
+AGREEING_HINT_FIELDS = ("context.electrochemistry.potential_scale", "context.electrochemistry.control_mode")
+
+
+def _note_agreeing_field_hints(questions: list[dict], bundle: Mapping) -> None:
+    """r5e H1: per-group optional questions keep their ids and stay one per group (DEC-90: one beamtime can hold
+    open-circuit references, potential holds and dry samples), but for each field of :data:`AGREEING_HINT_FIELDS` the
+    groups whose OWN AI readings of that field agree are batched: ``same_reading_by_field[field]`` names one group key,
+    answered together with ``decide --question <id> --field <field> --same-reading``. A group is batched only when every
+    hint it has for the field is an AI reading of one value, read for all its runs. It stays apart when its hints
+    differ, when it has none, when it is a reference or alignment group or recorded ex situ
+    (``mutations.misfit_groups``), and an open-circuit group (an ``OCV``/``OCP`` name token) is never batched with
+    one that is not. Runs whose file names read the field differently (:func:`file_name_readings`) never share one."""
+    from . import mutations as M
+
+    asked = [q for q in questions if q["kind"] == "optional_values" and str(q.get("scope") or "").startswith("group:")
+             and not q.get("outside_live_groups") and any(f in (q.get("fields") or {}) for f in AGREEING_HINT_FIELDS)
+             and any((q.get("field_hints") or {}).get(f) for f in AGREEING_HINT_FIELDS)]
+    if len(asked) < 2:
+        return
+    runs = {r.get("run_id"): r for r in bundle.get("runs") or ()}
+    run_of = {m["value_id"]: m["run_id"] for m in bundle["missing_values"]}
+    index = M.reach_index(bundle)
+    # the groups no cell word describes (a standard, a foil, a run recorded ex situ): never batched in
+    misfit = {x["group_id"] for x in M.misfit_groups(bundle, CONTROL_MODE_PATH, [q["scope"][len("group:"):] for q in asked],
+                                                     index)}
+    from .template import run_names
+
+    def open_circuit(rids: Sequence[str]) -> bool:
+        return any(_OPEN_CIRCUIT_TOKEN.match(t) for rid in rids if rid in runs
+                   for name in run_names(bundle, runs[rid]) for t in re.split(r"[_\s.\-]+", name or ""))
+
+    batches: dict[tuple, list[tuple[dict, list[str]]]] = {}
+    for q in asked:
+        if q["scope"][len("group:"):] in misfit:
+            continue
+        for f in AGREEING_HINT_FIELDS:
+            hints = (q.get("field_hints") or {}).get(f) or ()
+            ids = (q.get("fields") or {}).get(f) or ()
+            if not hints or not ids or any(h.get("kind") != "ai_suggestion" or h.get("read_for") for h in hints):
+                continue
+            values = {json.dumps(h.get("literal"), sort_keys=True, default=str) for h in hints}
+            if len(values) != 1:
+                continue  # the group's own readings differ: asked on its own
+            rids = sorted({rid for t in ids if (rid := run_of.get(t))})
+            if not rids:
+                continue
+            names = tuple(sorted({repr(r["value"]) for rid in rids for r in file_name_readings(bundle, runs[rid], f)}))
+            batches.setdefault((f, next(iter(values)), names, open_circuit(rids)), []).append((q, rids))
+    for (f, value, _names, _ocv), members in batches.items():
+        if len(members) < 2:
+            continue
+        ids = sorted(q["question_id"] for q, _ in members)
+        group = "SR-" + hashlib.sha256((f + "\n" + "\n".join(ids)).encode()).hexdigest()[:10]
+        named = [{"question_id": q["question_id"], "run_id": rid, "file_name": (runs.get(rid) or {}).get("stem")}
+                 for q, rids in sorted(members, key=lambda m: m[0]["question_id"]) for rid in rids]
+        files = list(dict.fromkeys(str(m["file_name"]) for m in named if m["file_name"]))
+        shown = ", ".join(files[:SAME_READING_NAMES_SHOWN]) + (
+            f", and {len(files) - SAME_READING_NAMES_SHOWN} more" if len(files) > SAME_READING_NAMES_SHOWN else "")
+        for q, _rids in members:
+            command = (f"isaac bundle decide <bundle_dir> --question {q['question_id']} {SAME_READING_FLAG} --field {f} "
+                       f'--decision correct --value <one of its allowed values> --by "<your name>"')
+            q.setdefault("same_reading_by_field", {})[f] = {
+                "same_reading_group": group, "same_reading_count": len(members), "same_reading_members": named,
+                "same_reading_command": command}
+            q["text"] += (f" For the {_label(f)}, {len(members)} groups' own AI readings all suggest {json.loads(value)!r} "
+                          f"(not file evidence; same_reading_group {group}; the files: {shown}). If the {_label(f)} is "
+                          f"the same for all of them, answer them together: {command}. If not, answer each on its own.")
 
 
 def _optional_field_reach(bundle: Mapping, fields: Mapping[str, Sequence[str]], index: dict | None = None) -> dict[str, dict]:
@@ -2828,7 +3037,7 @@ def _curve(bundle: Mapping, gid: str) -> dict:
     ``unusable`` (c8-r): every undecided result with a curve fails QC as NOT A USABLE SPECTRUM
     (:data:`mutations.UNUSABLE_CURVE_REASONS`), which ``decide`` refuses to approve — or the one approved result is
     such a curve (an older build's approval, ``approved: True``), which composes nothing."""
-    from .mutations import unusable_curve_reasons
+    from .mutations import reprocess_cannot_help, unusable_curve_reasons
     from .records import SPECTRUM_ROLES
 
     def unusable(r: Mapping) -> list[str]:
@@ -2857,7 +3066,7 @@ def _curve(bundle: Mapping, gid: str) -> dict:
     roles = ("athena_normalized",) + SPECTRUM_ROLES
     qc = latest.get("qc") or {}
     return {"state": "curve" if any(f.get("role") in roles for f in files) else "no_curve", "result_id": B.processing_id(latest),
-            "no_output_file": not files, "verdict": qc.get("verdict"),
+            "no_output_file": not files, "no_retry": reprocess_cannot_help(latest), "verdict": qc.get("verdict"),
             "reasons": list(qc.get("reasons") or ()) or sorted({i.get("skip_reason") for i in latest.get("inputs") or () if i.get("skip_reason")})}
 
 
@@ -3098,13 +3307,19 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
             # never "approve its processing result": with no output file `decide` refuses that approval, and without a
             # normalised spectrum it would supply no series. The real steps are named instead.
             pid = curve["result_id"]
+            no_retry = curve.get("no_retry", False)  # r5f L1: its scans share too few points and no other scan has more
             hard.append(f"its processing result {pid} has no curve ("
                         + ("no output file" if curve["no_output_file"] else "no normalised spectrum")
                         + f"; QC {curve['verdict'] or 'not run'}{': ' + ', '.join(curve['reasons']) if curve['reasons'] else ''}), "
-                        "so there is nothing to approve: reject the result or mark it needs_changes "
-                        f'(`isaac bundle decide <bundle_dir> --target {pid} --decision reject|needs_changes --by "<your name>"`) '
-                        "and re-run `isaac process`, or reject the group if it is not a measurement "
-                        f'(`isaac bundle decide <bundle_dir> --target {gid} --decision reject --by "<your name>"`)')
+                        "so there is nothing to approve: "
+                        + ("reject the result "
+                           f'(`isaac bundle decide <bundle_dir> --target {pid} --decision reject --by "<your name>"`); '
+                           "processing again cannot add points the scans do not have; or reject the group if it is not a measurement "
+                           if no_retry else
+                           "reject the result or mark it needs_changes "
+                           f'(`isaac bundle decide <bundle_dir> --target {pid} --decision reject|needs_changes --by "<your name>"`) '
+                           "and re-run `isaac process`, or reject the group if it is not a measurement ")
+                        + f'(`isaac bundle decide <bundle_dir> --target {gid} --decision reject --by "<your name>"`)')
         elif curve["state"] == "unusable":
             # c8-r: never "approve its processing result": `decide` refuses to approve a curve that is not a usable
             # spectrum (and an older approval of one composes nothing). The steps records.processing_remedy names.

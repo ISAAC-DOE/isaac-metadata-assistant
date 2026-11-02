@@ -81,7 +81,7 @@ def test_a_skipped_scan_gets_a_sentence_and_no_result_id_moves(tmp_path):
     r = NA._one(tmp_path, scans)
     said = r["qc"]["statements"]["scans_skipped_lacking_chosen_columns"]
     assert said.startswith("2 of 3 listed scans were used. 1 was left out because it lacks the columns chosen for this group")
-    assert "energy energy" in said and r["inputs"][0]["source_id"] in said and "motor or alignment" in said
+    assert "energy energy" in said and r["inputs"][0]["relative_path"] in said and r["inputs"][0]["source_id"] not in said and "motor or alignment" in said  # r5f L2: the file, not the id
     # qc.json is hashed into the run id, so the sentence is NOT in it: the result id is what it was before
     qc_file = next(f for f in r["outputs"]["files"] if f["role"] == "qc")
     root = Path(tmp_path)

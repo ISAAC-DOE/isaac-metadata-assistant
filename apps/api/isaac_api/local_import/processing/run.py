@@ -1068,6 +1068,48 @@ def _scan_name(entry: Mapping) -> str:
     return f"{entry.get('source_id')} (scan {entry['scan']})" if entry.get("scan") is not None else str(entry.get("source_id"))
 
 
+def _scan_file(entry: Mapping) -> str:
+    """r5f L2: a scan as a person knows it: the file's path in the beamtime folder (the source id only when no path is
+    recorded), with ``(scan N)`` when the file holds more than one."""
+    name = str(entry.get("relative_path") or entry.get("source_id"))
+    return f"{name} (scan {entry['scan']})" if entry.get("scan") is not None else name
+
+
+def _more_points_elsewhere(res: Mapping, points: int) -> int:
+    """How many scans left OUT of the merge have more than ``points`` points (read): processing again might use them."""
+    return sum(1 for i in res.get("inputs") or () if not i.get("used")
+               and int((i.get("diagnostics") or {}).get("points_read") or 0) > points)
+
+
+def _too_few_common_statement(res: Mapping, scans_used: int, points: int, minimum: int) -> str:
+    """r5f L1: one plain sentence for a group whose scans share too few points to merge: how many scans it lists and
+    used, how many points they have, and (only when it is true) that processing again cannot add points. It is true
+    when one scan is used, or when no scan left out has more points than these; else the scans left out are named."""
+    listed = len(res.get("inputs") or ())
+    lead = f"{scans_used} of {listed} listed scan{'' if listed == 1 else 's'} {'was' if scans_used == 1 else 'were'} used"
+    have = (f"it has {points} usable point{'' if points == 1 else 's'}" if scans_used == 1
+            else f"they share {points} point{'' if points == 1 else 's'} on a common energy grid")
+    more = _more_points_elsewhere(res, points)
+    tail = ("Processing the group again with other parameters cannot add points the scans do not have."
+            if scans_used == 1 or not more else
+            f"{more} scan{' left' if more == 1 else 's left'} out of the merge ha{'s' if more == 1 else 've'} more points (see "
+            "inputs): processing again with other parameters might use them.")
+    return (f"{lead}, and {have}; the merge needs at least {minimum}. No merged curve was made, so there is nothing "
+            f"to approve. {tail}")
+
+
+def _fail_too_few_common(res: dict, scans_used: int, points: int, minimum: int) -> dict:
+    """:func:`_fail` ``too_few_common_points`` plus its statement and scan counts (said after the id is fixed: the id
+    of a failure comes from its code and detail only, so none moves). ``reprocess_cannot_help`` (a metric) is what the
+    remedies read: they offer re-processing unless it is true."""
+    out = _fail(res, "too_few_common_points", str(points))
+    out["qc"]["metrics"] = {**out["qc"].get("metrics", {}), "scans_listed": len(res.get("inputs") or ()),
+                            "scans_used": scans_used, "common_points": points,
+                            "reprocess_cannot_help": scans_used == 1 or not _more_points_elsewhere(res, points)}
+    out["qc"]["statements"] = {"too_few_common_points": _too_few_common_statement(res, scans_used, points, minimum)}
+    return out
+
+
 def _scans_phrase(scans: Sequence[int]) -> str:
     """[1, 3, 4, 5, 8] -> "1, 3-5, 8"."""
     nums = sorted({int(n) for n in scans})
@@ -1440,7 +1482,8 @@ def _skipped_scans_statement(inputs: Sequence[Mapping], choice, used: int) -> st
     if not lacking:
         return None
     k = len(lacking)
-    names = ", ".join(_scan_name(i) for i in lacking[:10]) + (f" and {k - 10} more" if k > 10 else "")
+    # r5f L2: the file, as the other statements name it (never the source id): its path in the beamtime folder
+    names = ", ".join(_scan_file(i) for i in lacking[:10]) + (f" and {k - 10} more" if k > 10 else "")
     other = len(inputs) - used - k
     return (
         f"{used} of {len(inputs)} listed scans were used. {k} {'was' if k == 1 else 'were'} left out because "
@@ -1814,7 +1857,7 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     except C.StepError as exc:
         return [_fail(res, exc.code, exc.detail)]
     if grid.size < int(params["merge"]["min_points"]):
-        return [_fail(res, "too_few_common_points", str(grid.size))]
+        return [_fail_too_few_common(res, len(scans_data), int(grid.size), int(params["merge"]["min_points"]))]
     M = C.interpolate(scans_data, grid, np)
     dg = C.deglitch(M, grid, params, np)
     excl = bool(params["deglitch"]["exclude_flagged"])
@@ -1847,7 +1890,7 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     ok = np.isfinite(mg["mean"])
     g2, mean = grid[ok], mg["mean"][ok]
     if g2.size < int(params["merge"]["min_points"]):
-        return [_fail(res, "too_few_common_points", str(g2.size))]
+        return [_fail_too_few_common(res, len(scans_data), int(g2.size), int(params["merge"]["min_points"]))]
     res["steps"].append(
         {
             "step": "merge",

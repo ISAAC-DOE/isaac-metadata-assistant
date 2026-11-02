@@ -90,6 +90,7 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   `<isaac> bundle decide <bundle> --question <Q> --same-reading --decision correct --value <v> --by "<name>"`
   answers every open one (its `same_reading_command`). For many runs (30 runs all `1M KOH`), the template's
   File List columns are the easy path: `<isaac> bundle template export <bundle> --out <file.xlsx>`.
+- **A macro and a file name that state different set-points** (`macro_setpoint_disagrees`; `affects_record: true`, on the potential set-point): a macro `run<N>.mac` named a file `…_800mV` that was never acquired, and the file acquired in its place (between run N-1 and run N+1 in time, the only undeclared one there, its name equal but for the potential) is `…_700mV`. Read both aloud with the files; the scientist says which is right (`confirm --value <one reading> --json`). Only this question's answer settles it: confirming the set-point value on its own leaves it open (its question names this one), and a bare confirm of the value later does not undo an answer given here; a correction with a value does. Nothing is raised when the run number or the time does not tie them, or when more than one file could be the one; then the macro's own conflict (`affects_record: false`) is all there is. A bundle imported before this check has none: re-import to get it.
 - **A conflict with `affects_record: false`** (`no_record_field`): the readings differ, but no record
   field carries them (a comment line, a unit spelling). Say how many there are; do not ask each.
 - **A conflict with `covered_by_decisions`** (also `affects_record: false`; counted in
@@ -138,6 +139,15 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   file names read the field differently never share one; answer the others on their own. A confirm is batched by the
   value it records, not by how the file writes it: `0p8V` and `800mV` are one batch, "N questions share this value
   (`0.8` V; the files write it '0p8V', '800mV')". Say the value back, and the spellings.
+- **Material name and form asked per group because no source states the sample** (the partition is each group's
+  whole file name, `sample_name_stem`): groups whose names share every sample token share a `same_reading_group`. A sample
+  token is a part of the name with a letter in it that is no counter, set-point, pH, concentration or open-circuit
+  word (`Q4`, `SYNcat` and `5wp` of `Q4_06_SYNcat_5wp_pH2_000mV`; `shared_sample_tokens`). A temperature, time, gas or
+  state word (`400C`, `2h`, `H2`, `fresh`) counts as a sample token unless the parser read it as a condition. The text names the
+  tokens and the files. A bare number (an electrode, a step) is no sample token, so two electrodes of one material
+  share a batch. Ask once ("is the material the same for all N?"); on a yes, run its `same_reading_command`.
+  Names that differ in any sample token (`Q4` and `Q5`, `5wt` and `5wp`) are never batched: ask those apart. A
+  reading made for another sample's group (its own sample name) is never a hint on these questions.
 - **No value to confirm.** Text like "What is the technique? The files hold text for it … but no
   value this build can carry", with no `confirm` in `allowed_decisions`, means there is nothing to
   accept. Never invent a value and never confirm one. Ask "What is X?", show the file's text (the
@@ -183,6 +193,12 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   groups and runs an answer there lands on; the reply to `--field` says the same. Say those groups, not "the whole
   beamtime". When it says "careful: it would put a cell type on …" (a standard, or a run recorded ex situ), do not
   answer it there: answer only the groups it fits (`--only group:<id>`).
+- **Potential scale and control mode are asked per group** (DEC-90: one beamtime can hold open-circuit references,
+  potential holds and dry samples). Groups whose own AI readings of the field all agree share a batch for that field
+  (`same_reading_by_field.<field>`: its group key, count, members and `same_reading_command`). Say the suggested value,
+  that it is an AI reading, and the groups; on a yes, run `decide --question <Q> --field <path> --same-reading`. Groups
+  whose readings differ or that have none stay apart. An open-circuit run is never batched with a potential hold, and
+  a reference or ex-situ group is never batched in. Each group's own question id still answers it with `--field`.
 
 ## Recording
 
@@ -226,7 +242,7 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   (while the question is not answered at all: "… not answered yet (question <Q>)"; on a SPEC beamtime, with no
   clock question, a run whose start-time readings disagree and are unsettled: "start time left out: the start-time
   disagreement is unanswered (question <Q>; …)", whose question offers the `#E` epoch's UTC reading),
-  the record's evidence file keeps that line under `notes`, and `upload --dry-run` repeats it; tell the
+  the record's evidence file keeps that line under `notes`, and `upload --dry-run` says it once with a count; tell the
   scientist before they export. Once a zone is recorded, `defer` is refused (it would not withdraw the
   zone); to change the zone, state it again.
 - **QC status** is asked when approving processing, not here (Step 6).
@@ -248,7 +264,7 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
 - **Not on the list at all.** When the scientist's answer is a real value the closed list lacks, say so
   and record no decision. If no allowed value fits and they keep their own word, run
   `decide … --value "<their exact word>" --as-said` once: it records no decision but keeps their word as
-  a vocabulary request, in the `--by` name, with the field, runs and where it was said. Never pass a word
+  a vocabulary request, in the `--by` name, with the field, runs and where it was said. The command exits 0 and its reply starts with that (`vocabulary_request_kept`, `decision_recorded: false`). Never pass a word
   they did not say: without `--as-said` an off-list value keeps nothing (the reply says "if this is the
   scientist's own word, repeat with --as-said"), so a value you try while working out a mapping is never
   put in their name. `template import --apply` keeps their own off-list cells the same way, and `template
@@ -278,7 +294,7 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   (which hold `surface_oxidation` from before it); the request answered since (vr-…, from their own sheet, 139
   run(s)) is not part of this draft"). Say that sentence; never the answered request's runs as the draft's.
   A term with a space is not drafted (the `--out` summary counts them: "N term(s) need a one-word form (ask)"); its `ask` says what to ask for (one word, e.g. `cathodic_corrosion`):
-  record their one-word answer again, never rewrite it yourself. They write each description themselves on
+  record their one-word answer again, never rewrite it yourself. Once the one-word form is kept too, the spaced request is answered (`one_word_form_given`) and no longer counted. They write each description themselves on
   the Schema Proposals page (Propose a Change → Load drafts from a local import), never in the file and
   never by you. Nothing is sent until they save a proposal; saving one sends the term, its counts and
   its file-name citations to the ISAAC server that page uses (the hosted server when they use the
@@ -310,8 +326,14 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   `ISAAC Suggestions` shows that run's own extracted values, hints and AI readings with file and
   locator. Campaign Info also holds "Your group" and "Your organization (who produced the data)"
   (distinct from "Facility organization") and "Domain"; File List ends with "Reaction Drive" and
-  "Reaction Catalysis" (dropdowns of their allowed values). A sheet exported by an older build (the old
-  "Organization" label) still imports.
+  "Reaction Catalysis" (dropdowns of their allowed values), then "Temperature" and "Gas Atmosphere" (template
+  1.5.0). A sheet exported by an older build (the old "Organization" label) still imports.
+- Temperature is typed with its unit: `298.15 K` or `25 °C` (`℃` too). A bare number is an invalid cell: ISAAC never
+  guesses the unit. A °F value and a range (`25-30 °C`) are invalid too, each with its own reason: ask for one value
+  in K or °C. A °C value is converted to kelvin and listed in the preview under "Would convert to kelvin". Read each
+  one back before `--apply`.
+- A deprecated term typed (`three_electrode` for Cell Type) is still recorded as typed. The preview lists it under
+  "Deprecated terms" with what to use instead. Say it, and ask whether they meant the cell body (e.g. `beaker_cell`).
 - Import: `<isaac> bundle template import <bundle> <file.xlsx> --by "<name>"` previews compactly
   (one line per cell or column; `--full` for every decision); add `--apply` only after the scientist has seen the preview. Each cell becomes decisions; each note
   cites its cell. Invalid cells (not an allowed value exactly, not a number) record nothing.
@@ -359,7 +381,9 @@ and to use it (a sheet you found in the folder is not that; ask first). Never re
    compared. A Campaign Info value that differs from an answer already RECORDED for the runs it reaches (`SLAC
    National Accelerator Laboratory` beside a recorded `SLAC`) is a whole-beamtime row too, kind `recorded`: one ruling
    settles it for every run. A beamline is compared as the hints are, so `SSRL BL15-2` beside a recorded `BL15-2` agrees.
-2. Say the summary: rows matched, cells adopted, their columns not read, unmatched rows and runs (those
+2. Say the summary: rows matched, cells adopted, their columns not read (File List and Configurations; the
+   Configurations line lists what each column holds, e.g. `Primary Signal Channel` `FF1`: no field holds it, so it
+   stays in their sheet), unmatched rows and runs (those
    runs get nothing from their File List rows; when it says "Campaign Info still applies to them", their
    Campaign Info answers do reach those runs: say so), and the rows that reach more than one run, with the count (a scan
    and its `_dir` calibration file are two runs; one value of theirs goes to each). Then read **every** disagreement back, one by one, in plain words:
@@ -368,6 +392,12 @@ and to use it (a sheet you found in the folder is not that; ask first). Never re
    their yes; for an electrolyte with a concentration, ask for the name and the concentration
    separately. A not-allowed row may carry a hint from a column adopt does not read ("your sheet's column I
    'Environment mode' says 'insitu' (= `in_situ`)"): say it as their own sheet's words, never as the answer.
+   An allowed list marks a deprecated term ("three_electrode (deprecated: use …)"): never offer it.
+   A temperature column is read only when its header states the unit (`Temperature (°C)`, `Temperature (K)`); the
+   cell keeps the unit and the import converts it. `Temperature ©` states none and is not read: ask them to type
+   the values with their unit. "Channel hints" lines show the channel their Configurations row states beside a
+   processing result that chose its channel by name (`channel_choice_needs_review`): say both. It is a hint, never
+   the answer; another channel is used only on their word, with a params file.
    Rows count runs ("for 77 run(s), from 38 of your cell(s)"). When a reaction is adopted or on a row, the
    summary says it makes Reaction Drive and Reaction Catalysis required for N groups: ask those too. Never
    pick a side, and never suggest a ruling. "N row(s) name only runs in no live record group": those rows give

@@ -1819,9 +1819,12 @@ adopt`, kept nowhere, and `bundle propose-terms` drafted nothing (0 terms).
   request per field and word, with its cells and runs; a preview keeps nothing and says "would be kept")
   and `template adopt` (their sheet's not-allowed values, ONLY with `--by`, passed once the scientist says the sheet is
   theirs, recorded before the workbook is written; without it nothing is kept and the summary says
-  "Off-list values were not kept as requests: no name given") keep the word when it is refused ONLY for being off the list. The refusal is
-  unchanged (exit 2, no decision, the allowed values listed) and adds: "kept as a vocabulary request;
-  `isaac bundle propose-terms` can draft it". The same answer by the same person from the same place
+  "Off-list values were not kept as requests: no name given") keep the word when it is refused ONLY for being off the list. The word is
+  kept and the command did what was asked: `decide --as-said` exits 0 and prints `vocabulary_request_kept`,
+  `decision_recorded: false` and a statement that begins "'<word>' is kept as a vocabulary request;
+  `isaac bundle propose-terms` can draft it" (r5f), then says no decision and no value was recorded, and why
+  (the allowed values listed). The library call still raises `OffListRefused` (with `kept`). Without `--as-said` the
+  refusal is as before (exit 2, nothing kept). The same answer by the same person from the same place
   keeps nothing new and writes nothing. Any other refusal (a word in a number field, a local time with no
   zone) keeps nothing. Per-run answer slots a refused `--only group:<id>` answer made are dropped; the
   request names their runs.

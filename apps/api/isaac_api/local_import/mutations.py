@@ -85,11 +85,22 @@ class OffListRefused(MutationRefused):
     vocabulary request (:func:`keep_vocabulary_request`) and say so; otherwise NOTHING is kept and the refusal says
     how to keep it (:data:`AS_SAID_HINT`). ``problem``: the refusal's own sentence, without what was or was not kept."""
 
-    def __init__(self, message: str, *, field_path: str, term: str, code: int = 2, problem: str | None = None):
+    def __init__(self, message: str, *, field_path: str, term: str, code: int = 2, problem: str | None = None,
+                 kept: Mapping | None = None):
         super().__init__(message, code=code)
         self.field_path = field_path
         self.term = term
         self.problem = problem if problem is not None else message
+        #: r5f L6: ``{"request_id", "sentence", "new"}`` when ``--as-said`` KEPT the word as a vocabulary request: the
+        #: command did what it was asked (it exits 0 and says the request was kept first); ``None`` when nothing was kept
+        self.kept = dict(kept) if kept else None
+
+    def kept_statement(self, extra: str = "") -> str:
+        """The sentence the CLI leads with when the word was kept: the kept request first, then that the answer itself
+        was not recorded as a decision or a value (and why), then ``extra`` (who the request is for)."""
+        sentence = (self.kept or {}).get("sentence", "")
+        return (f"{sentence} No decision and no value was recorded for it: {self.problem.strip()}"
+                + (f" {extra}" if extra else ""))
 
 
 #: c10-d H1: an off-list answer is kept as a vocabulary request ONLY when the scientist says it is their own word
@@ -286,7 +297,8 @@ def save_bundle(bundle_dir: Path, bundle: dict) -> None:
             raise MutationRefused(
                 "The change would add a non-finite number (NaN or infinity), which is not standard JSON and no field "
                 f"takes, so nothing was written: {', '.join(added[:10])}", code=5)
-    errors = B.validate_bundle(bundle)
+    encoded = B.encode(bundle)  # r5f: once: the size check and the write share it (it is the slow part on a big bundle)
+    errors = B.validate_bundle(bundle, encoded=encoded)
     if errors:
         raise MutationRefused(
             "The change would leave the bundle invalid, so nothing was written:\n  - "
@@ -294,7 +306,7 @@ def save_bundle(bundle_dir: Path, bundle: dict) -> None:
             code=5,
         )
     bundle_dir = Path(bundle_dir)
-    cli._atomic_write(bundle_dir / B.BUNDLE_FILE, B.encode(bundle))
+    cli._atomic_write(bundle_dir / B.BUNDLE_FILE, encoded)
     for name, data in cli.section_payloads(bundle).items():
         cli._atomic_write(bundle_dir / name, data)
     if held_now:
@@ -749,6 +761,19 @@ def no_curve_cause(result: Mapping) -> str:
     return f"{code}: {detail}" if detail else str(code)
 
 
+#: r5f L1: failure codes where processing the group again can be said not to help: the scans share too few points and
+#: (the result's metric) no scan left out has more. A remedy for such a result never offers re-processing.
+NO_REPROCESS_FAILURES = ("too_few_common_points",)
+
+
+def reprocess_cannot_help(result: Mapping) -> bool:
+    """``True`` when processing this result's group again cannot make a curve: it failed for a code in
+    :data:`NO_REPROCESS_FAILURES` AND its own metrics say so (``reprocess_cannot_help``: one scan used, or no scan left
+    out has more points). A result stored without that metric, or with other scans that might be used, is not one."""
+    code = ((result.get("failure") or {}).get("code")) or ""
+    return code in NO_REPROCESS_FAILURES and ((result.get("qc") or {}).get("metrics") or {}).get("reprocess_cannot_help") is True
+
+
 def reprocess_command(group_id: str) -> str:
     """Re-processing ONE group with other parameters: the only way to a different result."""
     return (f"`isaac process <bundle_dir> --source <the beamtime folder you imported> --group {group_id} "
@@ -765,9 +790,11 @@ def no_curve_refusal(result: Mapping) -> str:
         f"{no_curve_cause(result)}), so an approval would state a QC status for a spectrum that does not exist. "
         "Re-running `isaac process` with the same parameters gives the same result. The options: "
         f'reject it (`isaac bundle decide <bundle_dir> --target {pid} --decision reject --by "<your name>"`); '
-        f"or mark it needs_changes (`--target {pid} --decision needs_changes`) and re-process the group with "
-        f"other parameters ({reprocess_command(gid)}), which adds a new result to review; "
-        "or leave the group out of the records "
+        + ("(re-processing with other parameters cannot add points the scans do not have) "
+           if reprocess_cannot_help(result) else
+           f"or mark it needs_changes (`--target {pid} --decision needs_changes`) and re-process the group with "
+           f"other parameters ({reprocess_command(gid)}), which adds a new result to review; ")
+        + "or leave the group out of the records "
         f'(`isaac bundle decide <bundle_dir> --target {gid} --decision reject --by "<your name>"`). Nothing was recorded.'
     )
 
@@ -1554,8 +1581,10 @@ def _keep_refused_answer(bundle_dir: Path, bundle: dict, exc: "OffListRefused", 
     reaffirmed = not new and request["source"].get("as_said") is True  # keep_vocabulary_request stamped reaffirmed_utc
     if new or reaffirmed:
         save_bundle(bundle_dir, bundle)
-    return OffListRefused(f"{exc} {vocabulary_kept_sentence(request, new, reaffirmed, bundle)}", field_path=exc.field_path, term=exc.term,
-                          code=exc.code, problem=exc.problem)
+    sentence = vocabulary_kept_sentence(request, new, reaffirmed, bundle)
+    return OffListRefused(f"{exc} {sentence}", field_path=exc.field_path, term=exc.term,
+                          code=exc.code, problem=exc.problem,
+                          kept={"request_id": request["request_id"], "sentence": sentence, "new": new, "reaffirmed": reaffirmed})
 
 
 #: c8-a: the ``value`` a ``defer`` on the experiment carries when it answers the CLOCK question ("I don't know the
@@ -2192,7 +2221,8 @@ def decide_question(
                                                     "question_id": question_id, "as_said": True})
             if where:
                 kept_exc = OffListRefused(f"{kept_exc} {where}",
-                                          field_path=exc.field_path, term=exc.term, code=exc.code, problem=exc.problem)
+                                          field_path=exc.field_path, term=exc.term, code=exc.code, problem=exc.problem,
+                                          kept={**(kept_exc.kept or {}), "reach": where})
             raise kept_exc from None
         result = _said_on_list(_with_answered(_with_kept(kept_overrides, reached(bundle, recorded)), bundle, before), as_said)
         if same_members:
@@ -2266,12 +2296,24 @@ def _same_reading_targets(bundle: Mapping, question_id: str, only: str | None, f
                               f"its answer, decide it again without {Q.SAME_READING_FLAG} (isaac bundle show question "
                               f"<bundle_dir> {question_id} shows what was recorded). Nothing was recorded.")
     group = asked.get("same_reading_group")
-    if not group:
-        raise MutationRefused(f"Question {question_id} names no same_reading_group (it is open, and no other open "
-                              f"question quotes its comment line for this field), so {Q.SAME_READING_FLAG} has nothing "
-                              "more to answer. Nothing was recorded.")
-    members = [q for q in payload["questions"] if q.get("same_reading_group") == group]
-    named = list(asked.get("same_reading_members") or ())
+    by_field = asked.get("same_reading_by_field") or {}
+    path = asked.get("target_field_path")
+    if not group and field and field in by_field:
+        # r5e H1: a per-group optional question batched for ONE field (questions._note_agreeing_field_hints)
+        group, path = by_field[field]["same_reading_group"], field
+        members = [q for q in payload["questions"]
+                   if ((q.get("same_reading_by_field") or {}).get(field) or {}).get("same_reading_group") == group]
+        named = list(by_field[field].get("same_reading_members") or ())
+    elif not group:
+        batched = sorted(by_field)
+        raise MutationRefused(f"Question {question_id} names no same_reading_group"
+                              + (f" for {field}" if field and batched else "")
+                              + (f" (it is batched only for {', '.join(batched)}: give --field <one of them>)" if batched
+                                 else " (it is open, and no other open question quotes its comment line for this field)")
+                              + f", so {Q.SAME_READING_FLAG} has nothing more to answer. Nothing was recorded.")
+    else:
+        members = [q for q in payload["questions"] if q.get("same_reading_group") == group]
+        named = list(asked.get("same_reading_members") or ())
     if value is not None and decision in _VALUE_DECISIONS_SAID:
         said = value
         if isinstance(said, str) and re.fullmatch(r"\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?\s*", said):
@@ -2280,7 +2322,6 @@ def _same_reading_targets(bundle: Mapping, question_id: str, only: str | None, f
         against = []
         for m in named:
             run = runs.get(m["run_id"])
-            path = asked["target_field_path"]
             for r in Q.file_name_readings(bundle, run, path) if run is not None else ():
                 if not _agrees(r["value"], said):
                     against.append(f"{m['file_name']} ({m['run_id']}: its file name writes {r['token']}, "

@@ -335,7 +335,7 @@ def test_a_value_off_the_list_is_refused_where_the_cli_would_store_it_ineligible
                      "--value", "outdoors", "--by", BY]) == 2
     assert (root / "beta" / "bundle.json").read_bytes() == beta_bytes
     assert cli.main(["bundle", "decide", str(root / "beta"), "--question", q["question_id"], "--decision", "correct",
-                     "--value", "outdoors", "--by", BY, "--as-said"]) == 2
+                     "--value", "outdoors", "--by", BY, "--as-said"]) == 0  # r5f L6: kept, so it exits 0
     beta_after = json.loads((root / "beta" / "bundle.json").read_bytes())
     assert [r["term"] for r in beta_after.pop("vocabulary_requests")] == ["outdoors"]
     assert beta_after == beta_before

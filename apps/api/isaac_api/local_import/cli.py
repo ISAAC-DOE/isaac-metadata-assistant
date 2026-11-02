@@ -1556,6 +1556,15 @@ def _mutation(fn) -> int:
 
     try:
         result = fn()
+    except M.OffListRefused as exc:
+        if exc.kept is None:
+            _err(str(exc))
+            return exc.code
+        # r5f L6: `--as-said` KEPT the scientist's word as a vocabulary request: that is what was asked, so it exits 0
+        # and says so FIRST. No decision and no value was recorded, and the statement says that too.
+        _print({"vocabulary_request_kept": exc.kept["request_id"], "decision_recorded": False,
+                "statement": exc.kept_statement(exc.kept.get("reach") or "")})
+        return EXIT_OK
     except (M.MutationRefused, R.RecordsRefused) as exc:
         _err(str(exc))
         return exc.code
@@ -1693,6 +1702,7 @@ def _compact_page(page: Sequence[Mapping]) -> dict:
         return out
 
     by_field: dict[str, list] = {}
+    deprecated: dict[str, dict] = {}  # r5e M5: each field's deprecated terms, once, beside its allowed values
     by_kind = {q["kind"]: list(Q.ALLOWED_DECISIONS.get(q["kind"], ())) for q in page}
     out = []
     for q in page:
@@ -1701,6 +1711,9 @@ def _compact_page(page: Sequence[Mapping]) -> dict:
             by_field[c["target_field_path"]] = c.pop("allowed_values")
         for f, values in (c.pop("field_allowed_values", None) or {}).items():
             by_field[f] = values
+        if c.get("deprecated_values") and c.get("target_field_path"):
+            deprecated[c["target_field_path"]] = c.pop("deprecated_values")
+        deprecated.update(c.pop("field_deprecated_values", None) or {})
         if c.get("allowed_decisions") == by_kind.get(c["kind"]):
             del c["allowed_decisions"]
         if c.get("hints"):
@@ -1710,9 +1723,12 @@ def _compact_page(page: Sequence[Mapping]) -> dict:
         out.append(c)
     return {"targets": ("counted: each question's targets_count, scopes_count and groups_count (--with-targets lists "
                         "them; `decide --question` resolves them itself); allowed values are listed once per field "
-                        "in allowed_values_by_field, allowed decisions once per kind in allowed_decisions_by_kind, and "
+                        "in allowed_values_by_field (a deprecated one is named in deprecated_values_by_field: still allowed, "
+                        "never offered), allowed decisions once per kind in allowed_decisions_by_kind, and "
                         "each hint kind's note once in hint_notes"),
-            "allowed_values_by_field": dict(sorted(by_field.items())), "allowed_decisions_by_kind": by_kind,
+            "allowed_values_by_field": dict(sorted(by_field.items())),
+            **({"deprecated_values_by_field": dict(sorted(deprecated.items()))} if deprecated else {}),
+            "allowed_decisions_by_kind": by_kind,
             "hint_notes": notes, "questions": out}
 
 
@@ -1974,12 +1990,11 @@ def cmd_bundle_upload(args) -> int:
         _err(f"No records directory at {args.records_dir}.")
         return EXIT_NOT_FOUND
     plan = R.upload_plan(Path(args.records_dir), args.portal_url)
-    noted = [line for p in plan for line in p.get("notes") or ()]
-    _print({"dry_run": True, "network_calls": 0, "records": plan,
-            "statement": "Nothing was sent. The token is never read or printed."
-            # c16d: what a record would go out without (its evidence file's notes), said once more before an upload
-            + "".join(f" {line} ({n} record(s); records[].notes)." for line, n in
-                      {x: noted.count(x) for x in dict.fromkeys(noted)}.items())})
+    # r5f L3: the statement leads ("N records, 2 requests each, to <portal>") and says each distinct note and each
+    # portal warning once (a note differing only in its question id is one note); a record's own notes stay in `records`
+    summary = R.upload_summary(plan, Path(args.records_dir), args.portal_url)
+    _print({"dry_run": True, "network_calls": 0, "statement": summary["statement"],
+            **{k: v for k, v in summary.items() if k != "statement"}, "records": plan})
     return EXIT_OK
 
 

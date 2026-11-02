@@ -41,7 +41,7 @@ def _reading(bdir: Path, run_id: str, word: str) -> None:
 
 def test_an_older_open_request_and_a_newer_answered_one_are_named_by_what_they_are(grouped, capsys, tmp_path, ticking):
     _env_sheet(grouped, tmp_path)  # vr-00001 on run-001 and run-002, never answered
-    assert _said(grouped, capsys, "--target", _vid(grouped, "run-003"), "--decision", "correct", "--value", WORD)[0] == 2
+    assert _said(grouped, capsys, "--target", _vid(grouped, "run-003"), "--decision", "correct", "--value", WORD)[0] == 0
     reply = _out(grouped, capsys, "--target", _vid(grouped, "run-003"), "--decision", "correct", "--value", "in_situ")
     assert (f"This answers your request for '{WORD}' (vr-00002); your other request(s) for it (vr-00001) are still "
             "drafted.") in reply["statement"]
@@ -55,7 +55,7 @@ def test_an_older_open_request_and_a_newer_answered_one_are_named_by_what_they_a
 
 def test_decide_says_the_word_is_still_drafted_for_the_readings_propose_terms_counts(grouped, capsys, ticking):
     _reading(grouped, "run-002", WORD)
-    assert _said(grouped, capsys, "--target", _vid(grouped, "run-001"), "--decision", "correct", "--value", WORD)[0] == 2
+    assert _said(grouped, capsys, "--target", _vid(grouped, "run-001"), "--decision", "correct", "--value", WORD)[0] == 0
     reply = _out(grouped, capsys, "--target", _vid(grouped, "run-001"), "--decision", "correct", "--value", "in_situ")
     t = _term(_report(grouped, capsys), ENV, WORD)
     assert t["draft"]["drafted"] is True and t["by_origin"]["ai_reading"] == 1
@@ -66,7 +66,7 @@ def test_decide_says_the_word_is_still_drafted_for_the_readings_propose_terms_co
 def test_decide_never_says_drafted_for_a_term_propose_terms_does_not_draft(grouped, capsys, ticking):
     word = "ZZ aqueous phase"  # a space: the website refuses it as a term, so it is never drafted
     _reading(grouped, "run-002", word)
-    assert _said(grouped, capsys, "--target", _vid(grouped, "run-001"), "--decision", "correct", "--value", word)[0] == 2
+    assert _said(grouped, capsys, "--target", _vid(grouped, "run-001"), "--decision", "correct", "--value", word)[0] == 0
     reply = _out(grouped, capsys, "--target", _vid(grouped, "run-001"), "--decision", "correct", "--value", "in_situ")
     draft = _term(_report(grouped, capsys), ENV, word)["draft"]
     assert draft["drafted"] is False and draft.get("answered") is not True and draft["ask"]

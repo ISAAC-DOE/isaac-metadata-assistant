@@ -26,7 +26,8 @@ already answered; its question blocks that group and the minimum names it with i
 A set-point nobody answered lists its potential scale as missing too (`required_because` says why), in
 `build-records`, `validate` (`missing_required_by_field`) and the questions alike: ask both at once.
 Both replies also carry `warnings` (`warnings_total`; only the first 5 are printed, the warnings of exportable
-groups first, each row marked `group_exportable`; `warnings_omitted` counts the rest and `warnings_full_list`
+groups first, each row marked `group_exportable`; inside each part the serious ones come first: a stated value left out of the
+record, a value its sources disagree about, a portal warning, then the routine start-time note; `warnings_omitted` counts the rest and `warnings_full_list`
 says how to see them: `validate --full` (or `build-records --full`) lists every one): a group whose file names state a potential
 (`400mV`, `m800mV`) that its record will not carry until the potential scale (or the set-point) is
 confirmed, with the command that lets it in. When no set-point was read from the names (an unread token
@@ -101,9 +102,11 @@ in `exported[].warnings` ("Written without the potential set-point: …"; the fi
 record with one; the outcome says unchanged ones apart): say each one, since the record lacks that condition. The portal
 validator's own warnings (a deprecated `three_electrode` cell type, no data owner) never change a verdict, but are said:
 `portal_warnings` in `validate` and `export` (each once, with its record count; also a `portal:<CODE>` row of
-`warnings`), and "Written with a portal validator warning (…)" on each record. The template keeps a term the validator
-warns is deprecated out of its dropdown and marks it on the Vocabulary sheet ("deprecated: use …"). Its index is
-`<records>/isaac-export/index.json`. Exporting again into the same `--out` reuses each unchanged record's id (`export: unchanged`: the record body is the same; with `evidence_refreshed` when only its evidence file was rewritten, e.g. the same value confirmed again, by someone else, or read from another file — `evidence_changed` says what changed; say so, the record is the same); a record whose body changed gets a new id and the old one is moved to `isaac-export/superseded/` (`export: replaced`); a record whose group is now refused or no longer confirmed is moved to `isaac-export/withdrawn/` (listed under `withdrawn`; if it was uploaded already, the portal still holds it) — say which. Then `upload <records> --dry-run`: summarise records, target
+`warnings`, ranked with the serious ones), `export` also says each other warning once in `warnings_by_text` and in its `outcome` (the same text on many records, with the record count and one example question; a start-time note differs between records only in its question id), and "Written with a portal validator warning (…)" on each record. The template keeps a term the validator
+warns is deprecated out of its dropdown and marks it on the Vocabulary sheet ("deprecated: use …"). Adopt's allowed
+lists, the Disagreements sheet and `bundle questions` (`deprecated_values_by_field`) mark it too, and the import
+preview warns under "Deprecated terms". Its index is
+`<records>/isaac-export/index.json`. Exporting again into the same `--out` reuses each unchanged record's id (`export: unchanged`: the record body is the same; with `evidence_refreshed` when only its evidence file was rewritten, e.g. the same value confirmed again, by someone else, or read from another file — `evidence_changed` says what changed; say so, the record is the same); a record whose body changed gets a new id and the old one is moved to `isaac-export/superseded/` (`export: replaced`); a record whose group is now refused or no longer confirmed is moved to `isaac-export/withdrawn/` (listed under `withdrawn`; if it was uploaded already, the portal still holds it) — say which. Then `upload <records> --dry-run`: its `statement` leads with "N records, 2 requests each, to <portal>", then says each note and each portal warning once (`notes_by_text`, `portal_warnings`, read from the export's index; an older export has none). Summarise records, target
 endpoints and body sizes, and name each record's `replaces_record_ids` (read its `replaces_statement`: it says where each earlier record is now; one already uploaded stays on the portal). State plainly: nothing was sent, this build cannot send, the key was not
 read. Never ask for or print a portal key. Tell the scientist the records are in `<records>` and
 the portal upload is theirs to do.

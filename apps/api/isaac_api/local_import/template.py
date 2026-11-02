@@ -70,7 +70,10 @@ FORMAT_ID = "isaac.metadata_template"
 #: reaction), appended after the current set-point. Campaign Info's "Organization" was always the
 #: FACILITY's (``system.facility.organization``) and now says so; a 1.3.0 workbook, which still reads
 #: "Organization" and has five rows, imports as it did (:func:`campaign_fields_of`).
-FORMAT_VERSION = "1.4.0"
+#: 1.5.0 (r5e M4): File List gains "Temperature" (``context.temperature_K``; typed with its unit, K or °C, and a °C
+#: value converted to kelvin and shown in the import preview) and "Gas Atmosphere" (``context.thermodynamics.atmosphere``),
+#: appended after Reaction Catalysis. A 1.4.0 workbook is read up to Reaction Catalysis.
+FORMAT_VERSION = "1.5.0"
 
 SHEET_CAMPAIGN = "Campaign Info"
 SHEET_CONFIG = "Configurations"
@@ -210,12 +213,21 @@ FILE_COLUMNS: tuple[Column, ...] = (
     Column("Reaction Catalysis", "context.reaction.catalysis", isaac_added=True,
            note=("Added by ISAAC (not in ISAAC's base template). For a run that states a reaction: its catalysis, "
                  "exactly as one of the listed values (e.g. heterogeneous). Leave it blank otherwise.")),
+    # r5e M4: optional fields the schema has, appended (1.5.0)
+    Column("Temperature", "context.temperature_K", isaac_added=True,
+           note=("Added by ISAAC (not in ISAAC's base template). The temperature during the run, WITH its unit: "
+                 "298.15 K, or 25 °C (ISAAC converts °C to kelvin and shows each conversion in the import preview "
+                 "before anything is recorded). A number without its unit is refused: ISAAC never guesses the unit.")),
+    Column("Gas Atmosphere", "context.thermodynamics.atmosphere", isaac_added=True,
+           note=("Added by ISAAC (not in ISAAC's base template). The gas over the sample or around the cell during "
+                 "the run (e.g. Ar), as you would write it. The gas fed to a flow cell is 'Gas Feed'.")),
 )
 #: File List columns a later template version added: ``header -> version``. A workbook of an older
 #: version does not have them; its import reads only the columns that version wrote. Such a
 #: column is only ever APPENDED: cells are read by position, so one inserted mid-sheet would shift them.
 COLUMNS_ADDED_IN: Mapping[str, str] = {"Control Mode": "1.2.0", "Current Set-point (mA/cm2)": "1.3.0",
-                                       "Reaction Drive": "1.4.0", "Reaction Catalysis": "1.4.0"}
+                                       "Reaction Drive": "1.4.0", "Reaction Catalysis": "1.4.0",
+                                       "Temperature": "1.5.0", "Gas Atmosphere": "1.5.0"}
 
 
 def _version_key(version: Any) -> tuple[int, ...] | None:
@@ -255,6 +267,17 @@ def deprecated_note(path: str | None, term: Any) -> str | None:
     """``deprecated: use …`` for a term :data:`DEPRECATED_TERMS` names, else ``None``."""
     got = (DEPRECATED_TERMS.get(path or "") or {}).get(term) if isinstance(term, str) else None
     return f"deprecated: use {got[1]} (the portal validator warns {got[0]})" if got else None
+
+
+def deprecated_terms(path: str | None, values: Sequence[Any] | None) -> dict[str, str]:
+    """r5e M5: ``{term: note}`` for each of ``values`` that :data:`DEPRECATED_TERMS` marks for ``path``."""
+    return {v: note for v in values or () if (note := deprecated_note(path, v))}
+
+
+def allowed_shown(path: str | None, values: Sequence[Any]) -> str:
+    """r5e M5: a field's allowed values as one line for a person, a deprecated one marked where it is listed
+    (``three_electrode (deprecated: use …)``). The values themselves are unchanged: still allowed, never offered."""
+    return ", ".join(f"{v} ({note})" if (note := deprecated_note(path, v)) else str(v) for v in values)
 
 
 VOCAB_COLUMNS: tuple[tuple[str, str], ...] = (
@@ -325,6 +348,61 @@ def rule_for_path(path: str, *, schema: Mapping | None = None) -> dict:
         "integer": "integer" in types and "number" not in types,
         "in_schema": node is not None,
     }
+
+
+TEMPERATURE_PATH = "context.temperature_K"
+#: r5e M4: a temperature as typed: a plain decimal and its unit, kelvin or degrees Celsius (``°C``, ``ºC``, ``degC``,
+#: ``C``, and the one-character ``℃``). Nothing else is read: no unit, no guess.
+_TEMPERATURE_TEXT = re.compile(r"\s*(?P<num>[+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*(?P<unit>K|(?:\u00b0|\u00ba|\u02da)\s?C|deg\s?C|C|\u2103)\s*",
+                               re.IGNORECASE)
+#: r5e L2: a Fahrenheit value (``77 °F``, ``77 F``, ``℉``) and a range (``25-30 °C``) each get their own refusal
+_FAHRENHEIT = re.compile(r".*\d\s*(?:(?:\u00b0|\u00ba|\u02da)\s?F|deg\s?F|F|\u2109)\s*", re.IGNORECASE)
+_TEMPERATURE_RANGE = re.compile(r"\s*[+-]?[\d.]+\s*(?:\S*\s*)?(?:-|\u2013|\u2014|~|to)\s*[+-]?[\d.]+.*", re.IGNORECASE)
+TEMPERATURE_FAHRENHEIT_REFUSAL = ("a temperature in °F, which this field does not read: give it in K or °C (ISAAC never "
+                                  "converts °F for you)")
+TEMPERATURE_RANGE_REFUSAL = ("a range, not one temperature: give the one value held during the run, with its unit "
+                             "(e.g. 25 °C)")
+_ZERO_CELSIUS_K = Decimal("273.15")
+TEMPERATURE_UNIT_REFUSAL = ("a number without its unit: write it with its unit, e.g. 298.15 K or 25 °C (ISAAC never "
+                            "guesses the unit)")
+
+
+def parse_temperature(raw: Any) -> tuple[Any, str | None, dict | None]:
+    """r5e M4: ``(kelvin, None, conversion)`` or ``(None, why, None)`` for one typed temperature. Kelvin is taken as
+    typed; degrees Celsius are converted (``25 °C`` -> ``298.15``) and ``conversion`` says so (``{typed, celsius,
+    kelvin}``), for the import preview to show before anything is recorded. A bare number is refused, never read as
+    either unit."""
+    if isinstance(raw, bool) or isinstance(raw, datetime):
+        return None, "this field takes a temperature with its unit, e.g. 298.15 K or 25 °C", None
+    if isinstance(raw, (int, float)):
+        return None, TEMPERATURE_UNIT_REFUSAL, None
+    if not isinstance(raw, str) or not raw.strip():
+        return None, None, None
+    m = _TEMPERATURE_TEXT.fullmatch(raw)
+    if m is None:
+        if _TEMPERATURE_RANGE.fullmatch(raw):
+            return None, TEMPERATURE_RANGE_REFUSAL, None
+        if _FAHRENHEIT.fullmatch(raw):
+            return None, TEMPERATURE_FAHRENHEIT_REFUSAL, None
+        if _NUMBER_RE.match(raw.strip()):
+            return None, TEMPERATURE_UNIT_REFUSAL, None
+        return None, f"not a temperature with its unit (e.g. 298.15 K or 25 °C): {raw!r}", None
+    number = Decimal(m.group("num"))
+    celsius = m.group("unit").upper() != "K"
+    kelvin = number + _ZERO_CELSIUS_K if celsius else number
+    if kelvin <= 0:
+        return None, f"{raw.strip()!r} is at or below absolute zero", None
+    value = int(kelvin) if kelvin == kelvin.to_integral_value() and not celsius and "." not in m.group("num") else float(kelvin)
+    conversion = {"typed": raw.strip(), "celsius": float(number), "kelvin": float(kelvin)} if celsius else None
+    return value, None, conversion
+
+
+def _parse_for(raw: Any, rule: Mapping | None, path: str | None) -> tuple[Any, str | None]:
+    """:func:`_parse`, except a temperature (:func:`parse_temperature`: its unit typed, °C converted to kelvin)."""
+    if path == TEMPERATURE_PATH:
+        value, why, _conversion = parse_temperature(raw)
+        return value, why
+    return _parse(raw, rule)
 
 
 def parse_answer(raw: Any, rule: Mapping | None) -> tuple[Any, str | None]:
@@ -1464,7 +1542,9 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
              because: str | None = None, ruling: tuple[str, str, Any] | None = None,
              against: Sequence[str] | None = None, adopt_id: str | None = None, shown: bool = False):
         rule = rules.get(col.path or "")
-        value, why = _parse(raw, rule)
+        value, why = _parse_for(raw, rule, col.path)
+        # r5e M4: a temperature typed in °C is recorded in kelvin, the conversion shown in the preview
+        converted = parse_temperature(raw)[2] if col.path == TEMPERATURE_PATH and not why else None
         if not why and col.path == ELECTROLYTE_NAME_PATH:
             why = electrolyte_name_problem(value)
         if why:
@@ -1493,6 +1573,7 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
         out["cells"].append({"cell": _cell_ref(sheet, ref) + (f" via {via}" if via else ""), "sheet": sheet,
                              "header": col.header, "path": col.path, "value": value, "scope": scope,
                              "run_id": run["run_id"] if run else None, "note": note,
+                             **({"converted": converted} if converted else {}),
                              # c14i MED-1: a Disagreements ruling's (their file, their cells, their value)
                              **({"ruling": ruling} if ruling else {}),
                              # c14j MED-1: the decisions its row was ruled against (absent: adopted before they were kept)
@@ -3477,6 +3558,11 @@ def import_template(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None 
         # c15b H2: rulings a Disagreements row asked for ("… rule which"), recorded over the value recorded now
         "rulings_over_the_value_recorded": report["over_recorded"],
         "invalid_cells": cells["invalid"],
+        # r5e M4: each temperature typed in °C, and the kelvin value recorded for it (read each back before --apply)
+        "unit_conversions": [{"cell": c["cell"], "run_id": c.get("run_id"), "header": c["header"], **c["converted"]}
+                             for c in cells["cells"] if c.get("converted")],
+        # r5e M5: a deprecated term typed (still allowed, recorded as typed; the portal validator warns)
+        "deprecated_terms": _deprecated_cells(cells["cells"]),
         # an invalid cell refused ONLY because its word is not on the field's list: kept as a vocabulary request
         "vocabulary_requests": requests,
         "clashes": report["clashes"],
@@ -3502,6 +3588,19 @@ def import_template(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None 
                       "Nothing new recorded: no scientist decision" + (
                           "; the vocabulary request(s) above were kept." if any(r.get("new") for r in requests) else ".")),
     })
+
+
+def _deprecated_cells(cells: Sequence[Mapping]) -> list[dict]:
+    """r5e M5: ``[{header, path, value, note, cells}]``: each deprecated term the template's cells hold, once."""
+    out: dict[tuple, dict] = {}
+    for c in cells:
+        note = deprecated_note(c.get("path"), c.get("value"))
+        if note:
+            e = out.setdefault((c["path"], c["value"]), {"header": c["header"], "path": c["path"], "value": c["value"],
+                                                         "note": note, "cells": []})
+            if c["cell"] not in e["cells"]:
+                e["cells"].append(c["cell"])
+    return list(out.values())
 
 
 #: How many cells a compact report names per column before it says how many more.
@@ -3687,6 +3786,23 @@ def render_report(rep: Mapping, *, full: bool = False) -> str:
         lines += _decision_lines(rep)
     if not rep["decisions"]:
         add("  (none)")
+    if rep.get("unit_conversions"):
+        add("")
+        # r5e M4: °C is recorded in kelvin only through this preview: the scientist reads each back before --apply
+        add(("Converted" if rep["applied"] else "Would convert") + " to kelvin (you typed °C; read each back before "
+            "--apply):")
+        for x in (rep["unit_conversions"] if full else rep["unit_conversions"][:_CELLS_SHOWN]):
+            run = f" {x['run_id']}" if x.get("run_id") else ""
+            add(f"  {x['cell']}{run} {x['header']}: {x['typed']!r} -> {x['kelvin']:g} K")
+        if not full and len(rep["unit_conversions"]) > _CELLS_SHOWN:
+            add(f"  … and {len(rep['unit_conversions']) - _CELLS_SHOWN} more (--full or --json lists every one)")
+    if rep.get("deprecated_terms"):
+        add("")
+        # r5e M5: still allowed, so recorded as typed; the portal validator warns about it
+        add("Deprecated terms (" + ("recorded" if rep["applied"] else "would be recorded") + " as you typed them; the "
+            "portal warns about each):")
+        for x in rep["deprecated_terms"]:
+            add(f"  {x['header']} {x['value']!r} in {len(x['cells'])} cell(s) ({_refs_shown(x['cells'])}): {x['note']}")
     if rep.get("replaces_or_contradicts_a_file_reading"):
         add("")
         add("Replaces or contradicts a file reading (one line each; read each back before --apply):")
@@ -3990,6 +4106,87 @@ def _match_runs(bundle: Mapping, their_name: str) -> list[str]:
     return out
 
 
+#: r5e M4: a temperature header that states its unit, as their sheet writes it (``Temperature (°C)``, ``Temp [K]``)
+_THEIR_TEMPERATURE_HEADER = re.compile(
+    r"temp(?:erature)?\s*[(\[]\s*(?P<unit>(?:\u00b0|\u00ba|\u02da)\s?c|deg\s?c|c|k|\u2103)\s*[)\]]")
+TEMPERATURE_NO_UNIT_REASON = (
+    "a temperature column whose header states no unit ISAAC reads (K or °C; '©' is not read as °C, though a spreadsheet "
+    "may turn '(C)' into '©'). ISAAC never guesses the unit: type each value with its unit in the Temperature column "
+    "(e.g. 25 °C), and the import preview shows it in kelvin")
+
+
+#: r5e M3: the channel columns of their Configurations sheet, by header (whitespace-collapsed, case-folded)
+_THEIR_CHANNEL_HEADERS = (("primary signal channel", "primary_signal_channel"),
+                          ("normalization channel", "normalization_channel"), ("mode", "mode"))
+_ISAAC_CHOSE = re.compile(r"ISAAC chose the (?P<mode>\S+) channel (?P<channel>.+?) by column name")
+CHANNEL_HINT_NOTE = ("a hint beside the flag, never an answer: ask the scientist which channel the measurement used; "
+                     "another channel is chosen only on their word, with a params file "
+                     "(channels.fluorescence_candidates or channels.transmission_after_sample)")
+
+
+def channel_hints(bundle: Mapping, config_of_run: Mapping[str, str],
+                  config_stated: Mapping[str, Mapping[str, tuple[str, Any]]]) -> list[dict]:
+    """r5e M3: for each live group whose processing result chose its channel by column name
+    (``channel_choice_needs_review``), the channel the scientist's own Configurations sheet states for its runs (the
+    Config ID their File List rows chose). ``[{group_id, result_id, isaac_chose, config_id, primary_signal_channel?,
+    normalization_channel?, mode?, their_cells, note}]``. Only when every run of the group chose ONE Config ID that
+    states a channel. A hint shown beside the flag: nothing is recorded, nothing is processed again."""
+    if not config_of_run or not any(config_stated.values()):
+        return []
+    from . import questions as Q
+
+    run_of_key = {r["run_key"]: r["run_id"] for r in bundle.get("runs") or ()}
+    live = {g["group_id"]: g for g in Q.live_groups(bundle)}
+    out = []
+    for res in bundle.get("processing_results") or ():
+        g = live.get(res.get("group_id"))
+        if (g is None or res.get("state") == B.STATE_REJECTED
+                or "channel_choice_needs_review" not in (res.get("review_flags") or ())):
+            continue
+        context = set(g.get("context_run_keys") or ())
+        rids = [run_of_key[k] for k in g.get("member_run_keys") or () if k in run_of_key and k not in context]
+        cids = {config_of_run.get(r) for r in rids}
+        if len(cids) != 1 or None in cids:
+            continue
+        (cid,) = cids
+        stated = {key: config_stated.get(cid, {}).get(h) for h, key in _THEIR_CHANNEL_HEADERS}
+        if not stated["primary_signal_channel"] and not stated["normalization_channel"]:
+            continue
+        said = ((res.get("qc") or {}).get("statements") or {}).get("channel_choice_needs_review") or ""
+        m = _ISAAC_CHOSE.search(said)
+        out.append({"group_id": g["group_id"], "result_id": res.get("result_id"),
+                    "isaac_chose": f"{m.group('mode')} {m.group('channel')}" if m else None, "config_id": cid,
+                    **{k: v[1] for k, v in stated.items() if v}, "their_cells": [v[0] for v in stated.values() if v],
+                    "note": CHANNEL_HINT_NOTE})
+    return out
+
+
+def _channel_hint_lines(hints: Sequence[Mapping]) -> list[str]:
+    """r5e M3: one line per (what ISAAC chose, what their sheet states), with its count of processing results."""
+    by: dict[tuple, list[Mapping]] = {}
+    for h in hints:
+        by.setdefault((h.get("isaac_chose"), h["config_id"], h.get("primary_signal_channel"),
+                       h.get("normalization_channel"), h.get("mode")), []).append(h)
+    lines = []
+    for (chose, cid, primary, norm, mode), hs in by.items():
+        stated = "; ".join(x for x in (f"Primary Signal Channel {_shown(primary)}" if primary else None,
+                                       f"Normalization Channel {_shown(norm)}" if norm else None,
+                                       f"Mode {_shown(mode)}" if mode else None) if x)
+        lines.append(f"  {len(hs)} processing result(s) chose {chose or 'a channel'} by column name "
+                     f"(channel_choice_needs_review); your Configurations {cid} states {stated} "
+                     f"({_refs_shown(hs[0]['their_cells'], 3)}) for their runs")
+    return lines
+
+
+def their_temperature_unit(header: Any) -> str | None:
+    """r5e M4: ``"°C"`` or ``"K"`` when their File List header names a temperature AND states its unit, else ``None``.
+    Nothing is guessed: ``Temperature`` alone, or ``Temperature ©``, states none."""
+    m = _THEIR_TEMPERATURE_HEADER.fullmatch(_norm_header(header))
+    if m is None:
+        return None
+    return "K" if m.group("unit") == "k" else "\u00b0C"
+
+
 class _Adopter:
     """Reads their sheet against one bundle. Every reading compared is a file's (a parser value, a
     file-name token, an AI reading of a file); an AI reading OF THEIR SHEET is their sheet, so it is
@@ -4145,7 +4342,8 @@ def _loose(text: Any) -> str:
 
 def _unread_hint_text(h: Mapping, runs: int) -> str:
     rows = f" on {h['rows']} of these {runs} run(s)" if runs and h["rows"] < runs else ""
-    return (f"your sheet's column {h['column']} ({h['header']!r}) says {h['value']!r} (= `{h['allowed_value']}`){rows} "
+    return (f"your sheet's column {h['column']} ({h['header']!r}) says {h['value']!r} (= `{h['allowed_value']}`"
+            + (f", {h['deprecated']}" if h.get("deprecated") else "") + f"){rows} "
             "— a hint from a column adopt does not read, never adopted")
 
 
@@ -4259,7 +4457,7 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
             if isinstance(raw, str) and raw.startswith("="):
                 value, why = None, "a formula, not a value"
             else:
-                value, why = _parse(raw, rule)
+                value, why = _parse_for(raw, rule, path)
             kind = None
             if not why and path == ELECTROLYTE_NAME_PATH:
                 why = _adopt_name_only_reason(value)
@@ -4306,7 +4504,8 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
                          _their_cells=[their_ref], _runs=[], _answer_cells=[target_cell])
                 return
             ws = wb[sheet]
-            ws[our_ref] = value
+            # r5e M4: a temperature is written as typed, with its unit: the import converts °C and shows it
+            ws[our_ref] = raw.strip() if path == TEMPERATURE_PATH and isinstance(raw, str) else value
             ws[our_ref].comment = Comment(f"From your sheet: {their_file} {their_ref}", "ISAAC")
             adopted_cells.append((target_cell, their_ref))
             if run_id is None:  # c15b M5: a Campaign Info answer reaches every File List run, on their rows or not
@@ -4351,6 +4550,32 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
                 tech = wcf.cell(row=r, column=cfg_header["technique"]).value if "technique" in cfg_header else None
                 configs[str(cid).strip()] = {"technique": tech,
                                              "ref": _cell_ref(SHEET_CONFIG, f"{_letter(cfg_header.get('technique', 2))}{r}")}
+        # r5e M3: every other column of their Configurations sheet is not read: said, with the values it holds
+        config_stated: dict[str, dict[str, tuple[str, Any]]] = {}  # Config ID -> {their header: (their cell, value)}
+        result["their_config_columns_not_read"] = []
+        if "config id" in cfg_header:
+            ours_by_header = {_norm_header(c.header): c for c in CONFIG_COLUMNS}
+            for j, c in enumerate(wcf[1], start=1):
+                nh = _norm_header(c.value)
+                if not nh or nh in ("config id", "technique"):
+                    continue
+                values = []
+                for r in range(2, wcf.max_row + 1):
+                    cid = wcf.cell(row=r, column=cfg_header["config id"]).value
+                    v = wcf.cell(row=r, column=j).value
+                    if cid is None or not str(cid).strip() or v is None or (isinstance(v, str) and not v.strip()):
+                        continue
+                    v = v.strip() if isinstance(v, str) else v
+                    ref = _cell_ref(SHEET_CONFIG, f"{_letter(j)}{r}")
+                    values.append({"config_id": str(cid).strip(), "cell": ref, "value": v})
+                    config_stated.setdefault(str(cid).strip(), {})[nh] = (ref, v)
+                if values:
+                    ours = ours_by_header.get(nh)
+                    result["their_config_columns_not_read"].append({
+                        "column": _letter(j), "header": str(c.value).strip(), "values": values,
+                        "reason": (f"no official field ({ours.why_none})" if ours is not None and ours.why_none
+                                   else "no column of this name in ISAAC's template")})
+        config_of_run: dict[str, str] = {}  # r5e M3: the Config ID their row chose for each run
         tech_col = next(c for c in CONFIG_COLUMNS if c.header == "Technique")
         wcfg = wb[SHEET_CONFIG]
         for i, (cid, cfg) in enumerate(configs.items(), start=2):
@@ -4359,6 +4584,7 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
 
         # File List: their columns -> ours
         mapped: dict[int, Column] = {}
+        their_unit: dict[int, str] = {}  # r5e M4: their column -> the temperature unit its header states
         seen_cols: dict[str, int] = {}
         for j, h in enumerate(theirs["header"], start=1):
             if j == 1 or h is None or not str(h).strip():
@@ -4369,9 +4595,15 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
             if target is None and nh in THEIR_FILE_HEADER_ALIASES:
                 target = next(c for c in FILE_COLUMNS if c.header == THEIR_FILE_HEADER_ALIASES[nh])
                 via_alias = True
+            if target is None and (unit := their_temperature_unit(h)):
+                # r5e M4: their header states the unit (``Temperature (°C)``): each number is read in it
+                target = next(c for c in FILE_COLUMNS if c.path == TEMPERATURE_PATH)
+                via_alias = True
+                their_unit[j] = unit
             if target is None or target.header == "File Name":
                 result["their_columns_not_read"].append({"column": _letter(j), "header": str(h).strip(),
-                                                         "reason": "no column of this name in ISAAC's template"})
+                                                         "reason": (TEMPERATURE_NO_UNIT_REASON if nh.startswith("temp")
+                                                                    else "no column of this name in ISAAC's template")})
                 continue
             if target.header in seen_cols:
                 result["their_columns_not_read"].append({"column": _letter(j), "header": str(h).strip(),
@@ -4436,6 +4668,7 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
                                      reason=f"your Configurations sheet has no Config ID {cid!r}",
                                      _their_cells=[their_ref], _runs=[rid], _answer_cells=[_cell_ref(SHEET_FILES, our_ref)])
                             continue
+                        config_of_run[rid] = cid
                         tech = cfg["technique"]
                         if tech is not None and str(tech).strip():
                             value, why = _parse(tech, rules.get(tech_col.path))
@@ -4468,9 +4701,13 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
                         result["not_adopted"].append({"cell": their_ref, "header": col.header, "value": raw, "run_id": rid,
                                                       "reason": index.status(col)[1]})
                         continue
+                    if j in their_unit and not isinstance(raw, bool) and (
+                            isinstance(raw, (int, float)) or (isinstance(raw, str) and _NUMBER_RE.match(raw.strip()))):
+                        raw = f"{raw.strip() if isinstance(raw, str) else raw} {their_unit[j]}"  # the unit their header states
                     judge(SHEET_FILES, f"{_letter(file_col[col.header])}{orow}", col, raw, their_ref, rid, their_row=r)
         matched_runs = {rid for rids in runs_of_row.values() for rid in rids if rid in live and rid not in several}
         result["runs_matched"] = len(matched_runs)
+        result["channel_hints"] = channel_hints(bundle, config_of_run, config_stated)
         result["unmatched_runs"] = [{"run_id": r["run_id"], "file_name": r["file_name"]} for r in rows if r["run_id"] not in matched_runs]
 
         # Disagreements: one row per disagreement; the answer cell stays EMPTY and says why
@@ -4518,7 +4755,8 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
             g["id"] = f"D{i}"
             row = 1 + i
             g["row"] = row
-            g["unread_hints"] = [{"column": c, "header": h, "value": v, "allowed_value": a, "rows": n}
+            g["unread_hints"] = [{"column": c, "header": h, "value": v, "allowed_value": a, "rows": n,
+                                  **({"deprecated": note} if (note := deprecated_note(g["path"], a)) else {})}
                                  for (c, h, v, a), n in g["unread_hints"].items()]
             said = what[g["kind"]] if g["kind"] in ("file_reading", "hint", "recorded") else what[g["kind"]] + g["reason"] + (
                 " (each field's allowed values are listed once, below)" if g["kind"] == "not_allowed" else "")
@@ -4553,12 +4791,14 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
                     f"Not adopted ({g['id']} on the {SHEET_DISAGREE} sheet): your {their_file} {_refs_shown(g['their_cells'], 2)} "
                     f"has {_shown(g['their_value'])}; " + ("; ".join(g["readings"]) if g["readings"] else g["reason"])
                     + ". Rule on it there; this cell stays empty.", "ISAAC")
+        path_of_header = {g["header"]: g["path"] for g in entries if g.get("allowed")}
         if allowed_once:
             r = len(entries) + 3
             wd.cell(row=r, column=1, value="Allowed values (each field's list, once)").font = Font(bold=True)
             for k, (header, allowed) in enumerate(allowed_once.items(), start=1):
                 wd.cell(row=r + k, column=1, value=header)
-                wd.cell(row=r + k, column=2, value=", ".join(map(str, allowed)))
+                # r5e M5: a deprecated term is marked where it is listed (still allowed; never offered in a dropdown)
+                wd.cell(row=r + k, column=2, value=allowed_shown(path_of_header.get(header), allowed))
         if not entries:
             wd.cell(row=2, column=1, value="(no disagreements: every value of your sheet that ISAAC read agrees with the files or the files state nothing)")
         wd.freeze_panes = "A2"
@@ -4619,6 +4859,9 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
                                       if g["kind"] == "name_only" else {})
                                    for g in entries]
         result["allowed_values"] = allowed_once
+        # r5e M5: the deprecated terms of those lists, by header, with what to use instead
+        result["deprecated_values"] = {h: got for h, allowed in allowed_once.items()
+                                       if (got := deprecated_terms(path_of_header.get(h), allowed))}
         # L3: a reaction (adopted, or to be ruled on its row) makes drive and catalysis required for its runs
         reaction_runs = [rid for rid, p in adopted_paths if p in REACTION_PATHS and rid] + [
             rid for g in entries if g["path"] in REACTION_PATHS for rid in g["runs"]]
@@ -4642,6 +4885,11 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
                              f"its cell in {their_file}. Nothing that contradicts a file is in an answer cell: rule on each "
                              f"row of the {SHEET_DISAGREE} sheet (Your ruling), then `template import`.")
     return exported
+
+
+def _clip(value: Any, n: int = 60) -> Any:
+    """A long text cut to ``n`` characters for a one-line summary (``--json`` keeps it whole)."""
+    return value[: n - 1] + "…" if isinstance(value, str) and len(value) > n else value
 
 
 def _await(n: int) -> str:
@@ -4673,6 +4921,20 @@ def render_adopt_summary(result: Mapping) -> str:
     if a["their_columns_not_read"]:
         lines.append(f"Your columns not read ({len(a['their_columns_not_read'])}): "
                      + ", ".join(f"{c['column']} {c['header']!r}" for c in a["their_columns_not_read"]) + ".")
+        lines += [f"  {c['column']} {c['header']!r}: {c['reason']}." for c in a["their_columns_not_read"]
+                  if c["reason"] == TEMPERATURE_NO_UNIT_REASON]
+    if a.get("their_config_columns_not_read"):
+        # r5e M3: their Configurations sheet beyond Config ID and Technique, with what each column holds
+        cols = a["their_config_columns_not_read"]
+        lines.append(f"Your Configurations columns not read ({len(cols)}; no official field holds them, so they stay in "
+                     "your sheet): " + "; ".join(
+                         f"{c['column']} {c['header']!r} ("
+                         + ", ".join(f"{v['config_id']} {_shown(_clip(v['value']))}" for v in c["values"][:3])
+                         + (f", and {len(c['values']) - 3} more" if len(c["values"]) > 3 else "") + ")"
+                         for c in cols) + ".")
+    if a.get("channel_hints"):
+        lines.append(f"Channel hints ({len(a['channel_hints'])}; {CHANNEL_HINT_NOTE}):")
+        lines += _channel_hint_lines(a["channel_hints"])
     file_ds = [d for d in a["disagreements"] if d["kind"] == "file_reading"]
     hint_ds = [d for d in a["disagreements"] if d["kind"] == "hint"]
     recorded_ds = [d for d in a["disagreements"] if d["kind"] == "recorded"]
@@ -4726,7 +4988,9 @@ def render_adopt_summary(result: Mapping) -> str:
             for h in d.get("unread_hints") or ():
                 lines.append(f"     hint: {_unread_hint_text(h, len(d['runs']))}")
         for header, allowed in a.get("allowed_values", {}).items():
-            lines.append(f"  allowed for {header}: {', '.join(map(str, allowed))}")
+            marked = (a.get("deprecated_values") or {}).get(header) or {}
+            lines.append(f"  allowed for {header}: "
+                         + ", ".join(f"{v} ({marked[v]})" if v in marked else str(v) for v in allowed))
     if a.get("vocabulary_requests"):
         lines += _request_sections(a["vocabulary_requests"], True, "Kept as vocabulary requests (not decisions, not "
                                    "values: each is a word its field's list lacks; `isaac bundle propose-terms` can draft it):")
