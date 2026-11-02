@@ -18,6 +18,7 @@ import {
   SCHEMA_PROPOSALS_COPY as COPY,
   canProposeTerm,
   categoryKeyOf,
+  portalSectionFor,
   proposeTermHref,
   type ApiSchemaChangeRequest,
   type ApiSchemaProposal,
@@ -269,9 +270,11 @@ describe('a new field (schema change request)', () => {
     renderAt(`${ROUTE}?tab=propose`);
     fireEvent.click(await screen.findByRole('radio', { name: COPY.kindField }));
     const panel = within(proposePanel());
-    // The server's sentence and the screen's own, once, as one quiet paragraph.
-    expect(panel.getByText(NOT_PORTAL)).toBeInTheDocument();
-    expect(panel.getByText(NOT_PORTAL).closest('p')).toHaveTextContent(COPY.schemaChangeLead);
+    // One quiet sentence says what the third kind produces; the server's longer explanation is not repeated,
+    // and the card's hint does not say it a second time.
+    expect(panel.getByText(COPY.schemaChangeLead)).toBeInTheDocument();
+    expect(panel.queryByText(NOT_PORTAL)).toBeNull();
+    expect(COPY.kindFieldHint).not.toContain('portal');
     // One choice: no separate Section for a field, and every block grouped by its section.
     expect(panel.queryByLabelText('Section')).toBeNull();
     const where = panel.getByLabelText('Where in the schema');
@@ -296,7 +299,7 @@ describe('a new field (schema change request)', () => {
     });
     fireEvent.click(panel.getByRole('button', { name: 'Save Proposal' }));
 
-    const status = await screen.findByText(/download the change-request document/);
+    const status = await screen.findByText(COPY.schemaChangeSaved);
     const notice = within(status.closest('[role="status"]') as HTMLElement);
     expect(notice.getByRole('button', { name: 'Copy Change Request' })).toBeInTheDocument();
     // NEVER a portal payload for a new field.
@@ -380,7 +383,9 @@ describe('a new field (schema change request)', () => {
     expect(row.getByText('1/h', { exact: false })).toBeInTheDocument();
     expect(row.queryByRole('button', { name: 'Copy Portal Payload' })).toBeNull();
     fireEvent.click(row.getByRole('button', { name: 'Download Markdown' }));
-    await row.findByText(/Downloaded the change request as Markdown\. ISAAC has not sent it anywhere\./);
+    // Says what was done, and claims nothing was sent.
+    const said = await row.findByText(/^Downloaded the change request as Markdown\.$/);
+    expect(said.textContent).not.toMatch(/\b(?:was|is|been) sent\b|\bsubmitted\b/i);
     expect(clicked).toEqual([`isaac-schema-change-${p.id}.md`]);
     expect(blobs).toHaveLength(1);
     expect(await readBlob(blobs[0])).toBe(MARKDOWN);
@@ -400,7 +405,8 @@ describe('opening the form from a link', () => {
     const panel = within(await screen.findByRole('region', { name: 'Propose a Change' }));
     const listSelect = (await panel.findByLabelText('List')) as HTMLSelectElement;
     await waitFor(() => expect(listSelect).toHaveValue('system.technique'));
-    // The section is the server's own for that list: the chosen option sits in its group.
+    // The section is the server's own for that list: the chosen option carries the section id the body sends.
+    expect(listSelect.selectedOptions[0].dataset.section).toBe(portalSectionFor(baseVocabulary, 'system.technique'));
     expect(listSelect.selectedOptions[0].closest('optgroup')?.label).toBe('System');
     expect(panel.getByLabelText('New term')).toHaveValue('XMCD');
     expect(panel.getByText(/Opened from the Validator/)).toBeInTheDocument();

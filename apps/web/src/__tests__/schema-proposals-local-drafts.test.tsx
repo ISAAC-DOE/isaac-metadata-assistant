@@ -246,7 +246,7 @@ async function chooseFile(content: string, name = 'drafts.json') {
 
 /** Wait until the file has been read and its summary line shown. */
 async function drafts(): Promise<HTMLElement> {
-  return within(loader()).findByText(/Reading the file sent nothing\.$/);
+  return within(loader()).findByText(/^From .*\.$/);
 }
 
 /** One group's list of terms, by its heading ("Ready to Propose (2)", "Nothing Needed From You"). */
@@ -282,7 +282,7 @@ function fileWithEveryKind() {
     draft: { drafted: false, answered: true, answered_with: ['XAS'], partly_answered: ANSWER_NOTE,
       reason: 'Answered since it was asked for: SYN reason, so the term is not drafted.' } });
   terms.push({ ...structuredClone(file.fields[0].terms[0]), term: 'ZZGONE', carried_over: true, current: false, count: 0,
-    // truncated, so the file states no run count and the "Runs: not stated" sentence follows the counts
+    // truncated, so the file states no run count
     citations: [], citations_total: 0, citations_truncated: true, scientist_notes: [] });
   return file;
 }
@@ -308,17 +308,18 @@ describe('Load drafts from a local import', () => {
     await chooseFile(JSON.stringify(DRAFTS_FILE));
     await drafts();
 
-    // The copy says where a saved proposal goes: this build talks to the local server.
-    expect(within(loader()).getByText(/the ISAAC server running on this computer/)).toBeInTheDocument();
-    expect(within(loader()).getByText(/Nothing leaves your computer/)).toBeInTheDocument();
+    // No standing where-sentence, and nothing claims the file was uploaded or sent anywhere.
+    expect(loader().textContent ?? '').not.toMatch(/\b(?:uploaded|was sent|were sent|has been sent|sent to)\b/i);
+    expect(within(loader()).queryByText(/your computer|running on this computer/)).toBeNull();
 
     const xmcd = draftItem('XMCD');
     // The term is the row's heading; its field follows it on the same line.
     expect(within(xmcd).getByRole('heading', { level: 4, name: 'XMCD' })).toBeInTheDocument();
     expect(xmcd.querySelector('.sp-draft-path')).toHaveTextContent('system.technique');
     expect(xmcd).toHaveTextContent('3 readings (1 confirmed by you, 2 AI readings)');
-    // One citation names no run (an AI reading points at a question), so runs are not counted.
-    expect(xmcd).toHaveTextContent('Runs: not stated in the file.');
+    // One citation names no run (an AI reading points at a question), so runs are not counted, and the row
+    // says nothing about it rather than a sentence that it is not stated.
+    expect(xmcd).not.toHaveTextContent('Runs');
     // Only their words are in quotation marks; who, when and where are outside them.
     expect(xmcd).toHaveTextContent(
       '“XMCD”, with the note “We logged it as XMCD on the synthetic beamline sheet.” (Synthetic Scientist, 2026-10-30, in an answer to isaac bundle decide)',
@@ -346,7 +347,7 @@ describe('Load drafts from a local import', () => {
     expect(within(phrase).queryByRole('button')).toBeNull();
 
     expect(within(loader()).getByRole('status')).toHaveTextContent(
-      'From the local import synthetic-bundle-0001: 2 need your description · 1 cannot be proposed. Reading the file sent nothing.',
+      'From the local import synthetic-bundle-0001: 2 need your description · 1 cannot be proposed.',
     );
     // the bundle id is an identifier, so it is set in mono
     expect(within(within(loader()).getByRole('status')).getByText('synthetic-bundle-0001', { selector: 'code' })).toBeInTheDocument();
@@ -364,6 +365,7 @@ describe('Load drafts from a local import', () => {
     const panel = screen.getByRole('region', { name: 'Propose a Change' });
     const listSelect = within(panel).getByLabelText('List') as HTMLSelectElement;
     await waitFor(() => expect(listSelect).toHaveValue('system.technique'));
+    expect(listSelect.selectedOptions[0].dataset.section).toBe('System');
     expect(listSelect.selectedOptions[0].closest('optgroup')?.label).toBe('System');
     expect(within(panel).getByLabelText('New term')).toHaveValue('XMCD');
     const description = within(panel).getByLabelText('Description (required)');
@@ -393,7 +395,7 @@ describe('Load drafts from a local import', () => {
 
     fireEvent.change(description, { target: { value: 'X-ray magnetic circular dichroism, as the synthetic sheet logs it.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Proposal' }));
-    await screen.findByText(/Saved as a draft on this server \u2014 not sent anywhere/);
+    await screen.findByText(/^Saved as a draft\. Copy or download it to send it to the ISAAC portal\.$/);
     expect(sent).toHaveLength(1);
     expect(sent[0]).toEqual({
       proposal_type: 'add_term',
@@ -470,7 +472,7 @@ describe('Load drafts from a local import', () => {
       target: { value: 'X-ray magnetic circular dichroism, typed by hand here.' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save Proposal' }));
-    await screen.findByText(/Saved as a draft on this server \u2014 not sent anywhere/);
+    await screen.findByText(/^Saved as a draft\. Copy or download it to send it to the ISAAC portal\.$/);
     expect(sent[0]).not.toHaveProperty('source');
   });
 
@@ -606,11 +608,11 @@ describe('the drafts, grouped', () => {
     expect(settled).toEqual(['ZZANSWERED', 'ZZGONE']);
     // The summary line's counts are the rows listed, group for group.
     expect(within(loader()).getByRole('status')).toHaveTextContent(
-      `From the local import synthetic-bundle-0001: ${ready.length} need your description · ${refused.length} cannot be proposed · ${settled.length} need nothing from you. Reading the file sent nothing.`,
+      `From the local import synthetic-bundle-0001: ${ready.length} need your description · ${refused.length} cannot be proposed · ${settled.length} need nothing from you.`,
     );
     expect(ready.length + refused.length + settled.length).toBe(loader().querySelectorAll('li.sp-draft').length);
-    // A counts sentence without a full stop of its own gets exactly one before "Runs".
-    expect(draftItem('XMCD')).toHaveTextContent('2 AI readings). Runs: not stated in the file.');
+    // The counts sentence gets exactly one full stop before the scientist's words follow it.
+    expect(draftItem('XMCD')).toHaveTextContent('2 AI readings). Your words:');
     expect(draftItem('XMCD').textContent).not.toContain('..');
     // A settled row is one compact block: the term, then why. No counts, no button.
     expect(draftItem('ZZGONE')).toHaveTextContent('Nothing to propose.');
@@ -619,6 +621,18 @@ describe('the drafts, grouped', () => {
     expect(within(loader()).getAllByRole('button', { name: 'Propose This Term' })).toHaveLength(2);
     expect(within(others()).queryAllByRole('button')).toEqual([]);
     expect(calls.filter((c) => !c.startsWith('GET '))).toEqual([]);
+  });
+
+  it('with nothing ready, the Other fold\'s groups take the Ready heading\'s level (no skipped level)', async () => {
+    stub();
+    const file = structuredClone(DRAFTS_FILE) as unknown as { fields: { terms: unknown[] }[] };
+    file.fields = [file.fields[0]];
+    file.fields[0].terms = [file.fields[0].terms[1]]; // only the refused phrase
+    renderAt(`${ROUTE}?tab=propose`);
+    await chooseFile(JSON.stringify(file));
+    await drafts();
+    expect(within(loader()).queryByText(/^Ready to Propose/)).toBeNull();
+    expect(within(others()).getByRole('heading', { level: 3, name: 'Cannot Be Proposed From Here' })).toBeInTheDocument();
   });
 
   it('the drafts file is folded until wanted, and stays open once a file has been read', async () => {
@@ -706,7 +720,7 @@ describe('the drafts, grouped', () => {
     expect(draftNote()).toHaveTextContent('synthetic-bundle-0001');
     // What Save does is said once, above it.
     expect(screen.getByRole('button', { name: 'Save Proposal' })).toHaveAccessibleDescription(
-      'Save keeps this proposal as a draft on this server. It does not send it to the ISAAC portal.',
+      'Saves a draft. You send it from Proposals.',
     );
 
     fireEvent.click(within(draftItem('simulated')).getByRole('button', { name: 'Propose This Term' }));
@@ -740,7 +754,7 @@ describe('the drafts, grouped', () => {
       target: { value: 'X-ray magnetic circular dichroism, as the synthetic sheet logs it.' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save Proposal' }));
-    await screen.findByText(/Saved as a draft on this server \u2014 not sent anywhere/);
+    await screen.findByText(/^Saved as a draft\. Copy or download it to send it to the ISAAC portal\.$/);
     expect(sent).toHaveLength(1);
 
     const xmcd = draftItem('XMCD');
@@ -751,7 +765,7 @@ describe('the drafts, grouped', () => {
     expect(rowsOf(groupList(/^Saved From This File$/))).toHaveLength(1);
     expect(rowsOf(groupList(/^Ready to Propose \(1\)/))).not.toContain(xmcd);
     expect(within(loader()).getByRole('status')).toHaveTextContent(
-      'From the local import synthetic-bundle-0001: 1 needs your description · 1 saved as a draft · 1 cannot be proposed. Reading the file sent nothing.',
+      'From the local import synthetic-bundle-0001: 1 needs your description · 1 saved as a draft · 1 cannot be proposed.',
     );
     expect(within(loader()).getAllByRole('button', { name: 'Propose This Term' })).toHaveLength(1);
 

@@ -21,7 +21,7 @@ import { BackendDown, LoadingPanel } from '../components/FetchStates';
 import { ChevronRight, Copy, Download } from '../components/icons';
 import { InlineCode } from '../components/InlineCode';
 import { LABELS, formatWhen } from '../lib/labels';
-import { api, isHostedBuild } from '../lib/api';
+import { api } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
 import { serverMessageOf } from '../lib/mutationErrors';
 import {
@@ -80,11 +80,11 @@ import {
  *      ISAAC portal and record any decision there. The two states shown are the
  *      server's own — Pending and Withdrawn — and Pending is worded to claim nothing
  *      about whether anyone has seen it.
- *   2. IT NAMES NOBODY. Who is using this server is not verified, so a proposal records
- *      no author and the list says so rather than showing a blank or a guess.
+ *   2. IT NAMES NOBODY IT CANNOT VERIFY. A proposal records no author unless the server
+ *      verified one, and then (only then) the row names them.
  *   3. IT DOES NOT PRETEND TO KEEP WHAT THE SERVER MAY LOSE. Every response carries the
- *      server's own statement of how long a proposal lasts, and the screen shows it
- *      beside the proposals and again after saving one.
+ *      server's own statement of how long a proposal lasts; its first sentence is shown
+ *      beside the proposals, and nothing on the page claims more.
  *   4. IT NEVER LOSES WHAT YOU TYPED. It is one page: the form, the proposals and the
  *      vocabulary are all mounted at once, so nothing you look at unmounts the form, and a
  *      refused submit leaves every box as it was, with the server's own sentence beside the
@@ -184,18 +184,24 @@ export function SchemaProposals() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the link, applied once per link
   }, [link?.key, vocabularyData]);
 
-  // An old `?tab=` link, honoured once the vocabulary (and so the page's height) is in.
+  // An old `?tab=` link, honoured once what moves the page has settled: the vocabulary for Browse; the
+  // vocabulary AND the first page of proposals for the list (both change the height above or around it).
+  const [proposalsSettled, setProposalsSettled] = useState(false);
   const legacyApplied = useRef(false);
   useEffect(() => {
     if (legacyApplied.current || vocabulary.status === 'loading') return;
-    legacyApplied.current = true;
     if (legacyTab === 'browse') {
+      legacyApplied.current = true;
       setBrowseOpen(true);
       window.setTimeout(() => browseRef.current?.scrollIntoView?.({ block: 'start' }), 0);
     } else if (legacyTab === 'proposals') {
+      if (!proposalsSettled) return;
+      legacyApplied.current = true;
       window.setTimeout(() => proposalsRef.current?.scrollIntoView?.({ block: 'start' }), 0);
+    } else {
+      legacyApplied.current = true;
     }
-  }, [legacyTab, vocabulary.status]);
+  }, [legacyTab, vocabulary.status, proposalsSettled]);
 
   return (
     <AppShell
@@ -246,7 +252,12 @@ export function SchemaProposals() {
             )}
           </div>
 
-          <ProposalsPanel version={listVersion} headingId={ids.proposals} sectionRef={proposalsRef} />
+          <ProposalsPanel
+            version={listVersion}
+            headingId={ids.proposals}
+            sectionRef={proposalsRef}
+            onSettled={() => setProposalsSettled(true)}
+          />
         </div>
       </div>
     </AppShell>
@@ -804,7 +815,7 @@ function ProposePanel({
       {from !== null && !isField && (
         <p className="sp-note" role="note">
           Opened from {PROPOSE_SOURCES[from]}, with the list and the value as they appeared there. Check the term
-          before saving: the portal takes one word, and nothing here has changed what you saw.
+          before saving: the portal takes one word.
         </p>
       )}
 
@@ -882,11 +893,7 @@ function ProposePanel({
           <FieldError id={`${ids.type}-err`} message={errorFor('proposal_type')} />
         </fieldset>
 
-        {isField && schemaChange && (
-          <p className="sp-note">
-            <span>{schemaChange.not_a_portal_proposal}</span> <span>{COPY.schemaChangeLead}</span>
-          </p>
-        )}
+        {isField && schemaChange && <p className="sp-note">{COPY.schemaChangeLead}</p>}
 
         {type === 'add_term' && (
           <>
@@ -1286,23 +1293,14 @@ function ProposePanel({
           )}
         </details>
 
-        {/* On a local draft, what Save does is said on its own line directly above it: one click, no second step. */}
-        <div className="sp-submit">
-          {fromLocalDraft && (
-            <p className="sp-hint" id={ids.saveHint}>
-              Save keeps this proposal as a draft on this server. It does not send it to the ISAAC portal.
-            </p>
-          )}
-          <div className="sp-actions">
-            <button type="submit" className="btn btn-primary" disabled={submitting} aria-describedby={ids.saveHint}>
-              {submitting ? 'Saving…' : 'Save Proposal'}
-            </button>
-            {!fromLocalDraft && (
-              <span className="sp-hint" id={ids.saveHint}>
-                Saving keeps a draft here. It does not send it to anyone.
-              </span>
-            )}
-          </div>
+        {/* What Save does, in one line beside it: one click, no second step. */}
+        <div className="sp-actions">
+          <button type="submit" className="btn btn-primary" disabled={submitting} aria-describedby={ids.saveHint}>
+            {submitting ? 'Saving…' : 'Save Proposal'}
+          </button>
+          <span className="sp-hint" id={ids.saveHint}>
+            {COPY.saveHint}
+          </span>
         </div>
       </form>
     </>
@@ -1391,9 +1389,8 @@ function groupDrafts(
 }
 
 /**
- * "2 need your description · 1 saved as a draft · 1 cannot be proposed. Reading the file sent nothing." — the
- * counts after "From …:". Zero counts are left out. The closing sentence is about READING the file, so it stays
- * true after a proposal is saved from it.
+ * "2 need your description · 1 saved as a draft · 1 cannot be proposed." — the counts after "From …:". Zero
+ * counts are left out.
  */
 function draftsCounts(groups: Record<DraftGroup, DraftRow[]>): string {
   const n = (g: DraftGroup) => groups[g].length;
@@ -1404,7 +1401,7 @@ function draftsCounts(groups: Record<DraftGroup, DraftRow[]>): string {
     n('refused') > 0 ? `${n('refused')} cannot be proposed` : null,
     n('settled') > 0 ? `${n('settled')} ${verb(n('settled'))} nothing from you` : null,
   ].filter((p): p is string => p !== null);
-  return `${parts.join(' · ')}. Reading the file sent nothing.`;
+  return `${parts.join(' · ')}.`;
 }
 
 function LocalDraftsLoader({
@@ -1450,7 +1447,7 @@ function LocalDraftsLoader({
     try {
       text = await readFileText(file);
     } catch {
-      setProblem('This browser could not read the file. Nothing was read and nothing was sent.');
+      setProblem('This browser could not read the file.');
       return;
     }
     const parsed = parseTermDraftsFile(text);
@@ -1485,6 +1482,8 @@ function LocalDraftsLoader({
   const ready = groups?.needs ?? [];
   const othersCount = groups ? groups.saved.length + groups.refused.length + groups.settled.length : 0;
   const readyHeadingId = `${ids.group}-needs`;
+  /* The Other fold's groups sit one step under "Ready to Propose" when it is there, and take its level when not. */
+  const GroupHeading = ready.length > 0 ? 'h4' : 'h3';
 
   return (
     <details className="sp-drafts sp-fold" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
@@ -1493,7 +1492,6 @@ function LocalDraftsLoader({
         {LABELS.headingSpDraftsFile}
       </summary>
       <div className="sp-drafts-body">
-        <p className="sp-note">{isHostedBuild ? COPY.localImportWhereHosted : COPY.localImportWhereLocal}</p>
         <div className="sp-field">
           <label htmlFor={ids.input}>Drafts file (JSON)</label>
           <input
@@ -1552,9 +1550,9 @@ function LocalDraftsLoader({
               const headingId = `${ids.group}-${g.id}`;
               return (
                 <div className="sp-draft-subgroup" key={g.id}>
-                  <h4 className="sp-h4" id={headingId}>
+                  <GroupHeading className="sp-h4" id={headingId}>
                     {g.title}
-                  </h4>
+                  </GroupHeading>
                   <ul className="sp-list sp-draft-list" aria-labelledby={headingId}>
                     {rows.map(({ draft, whyNot }) => (
                       <OtherDraftItem key={draft.key} draft={draft} whyNot={whyNot} group={g.id} />
@@ -1629,10 +1627,9 @@ function ReadyDraftItem({
         {lists.length > 0 ? `, which is not on ${lists.join(' or ')} today.` : '.'}
       </p>
       <p className="sp-draft-line sp-draft-muted">
-        {/* a counts sentence mostly has no full stop of its own (a carried-over one does); one is added before
-            the runs sentence follows it, never a second */}
-        {counts ? (draft.runs === null && !counts.endsWith('.') ? `${counts}.` : counts) : 'The file gives no count.'}
-        {draft.runs === null ? ' Runs: not stated in the file.' : ''}{' '}
+        {/* A ready draft's counts sentence never carries a full stop of its own (only a carried-over one does,
+            and a carried-over draft is never ready), so exactly one is added here. */}
+        {counts ? `${counts}.` : 'The file gives no count.'}{' '}
         {draft.scientistNotes.length > 0 ? (
           <>
             Your words:{' '}
@@ -1735,15 +1732,29 @@ function FieldError({ id, message }: { id: string; message: string | undefined }
 
 const PAGE_SIZE = 25;
 
+/** The server's persistence statement up to its first full stop: the fact, without the explanation after it. */
+function firstSentence(message: string): string {
+  const end = message.indexOf('. ');
+  return end === -1 ? message : message.slice(0, end + 1);
+}
+
+/** The capacity sentence earns its place only near the limit, when it changes what a person does. */
+function nearCapacity(capacity: { pending: number; max_pending: number }): boolean {
+  return capacity.max_pending > 0 && capacity.pending >= 0.8 * capacity.max_pending;
+}
+
 function ProposalsPanel({
   version,
   headingId,
   sectionRef,
+  onSettled,
 }: {
   version: number;
   headingId: string;
   /** The section itself, so an old `?tab=proposals` link can scroll to it. */
   sectionRef: RefObject<HTMLElement>;
+  /** The first page has arrived (or failed): the column's height is known. */
+  onSettled: () => void;
 }) {
   const first = useFetch(() => api.listSchemaProposals({ limit: PAGE_SIZE, offset: 0 }), [version]);
   const [more, setMore] = useState<ApiSchemaProposal[]>([]);
@@ -1754,6 +1765,12 @@ function ProposalsPanel({
   const [changed, setChanged] = useState<Record<string, ApiSchemaProposal>>({});
 
   const firstData = first.status === 'data' ? first.data : null;
+  const settledOnce = useRef(false);
+  useEffect(() => {
+    if (settledOnce.current || first.status === 'loading') return;
+    settledOnce.current = true;
+    onSettled();
+  }, [first.status, onSettled]);
   const firstRef = useRef(firstData);
   firstRef.current = firstData;
   useEffect(() => {
@@ -1792,23 +1809,28 @@ function ProposalsPanel({
         <h2 className="sp-h2" id={headingId}>
           {COPY.proposalsTitle}
         </h2>
-        {firstData && firstData.total > 0 && (
-          <span className="sp-count" role="status">
-            {firstData.total}
-            <span className="sr-only"> {firstData.total === 1 ? 'proposal' : 'proposals'}, newest first</span>
-          </span>
-        )}
+        {/* Always mounted, so a screen reader hears it fill; empty until there is a count to give. */}
+        <span className="sp-count" role="status">
+          {firstData && firstData.total > 0 && (
+            <>
+              {firstData.total}
+              <span className="sr-only"> {firstData.total === 1 ? 'proposal' : 'proposals'}, newest first</span>
+            </>
+          )}
+        </span>
       </div>
       {first.status === 'loading' && <LoadingPanel label="Loading proposals…" />}
       {first.status === 'error' && <BackendDown error={first.error} onRetry={first.reload} />}
       {firstData && (
         <>
           <div className="sp-proposals-facts">
-            <p>{firstData.persistence.message}</p>
-            <p>
-              {firstData.capacity.pending} of {firstData.capacity.max_pending} pending places used. {firstData.capacity.scope}{' '}
-              {COPY.unverifiedAuthor}
-            </p>
+            <p>{firstSentence(firstData.persistence.message)}</p>
+            {nearCapacity(firstData.capacity) && (
+              <p>
+                {firstData.capacity.pending} of {firstData.capacity.max_pending} pending places used.{' '}
+                {firstData.capacity.scope}
+              </p>
+            )}
           </div>
 
           {firstData.total === 0 ? (
@@ -1965,11 +1987,9 @@ function ProposalRow({
               )}
             </dl>
           )}
-          <p className="sp-item-meta">
-            {proposal.attribution === 'verified' && proposal.proposed_by
-              ? `Proposed by ${proposal.proposed_by}`
-              : 'Author not recorded (not verified).'}
-          </p>
+          {proposal.attribution === 'verified' && proposal.proposed_by && (
+            <p className="sp-item-meta">Proposed by {proposal.proposed_by}</p>
+          )}
 
           <div className="sp-actions">
             {proposal.proposal_type === 'schema_change' ? (
@@ -2115,9 +2135,9 @@ function ChangeRequestActions({ proposalId }: { proposalId: string }) {
       </button>
       <span className="sp-portal-status" role="status">
         {state.kind === 'copied' &&
-          'Copied the change request as Markdown. ISAAC has not sent it. It is for the standard\'s owners, not the portal.'}
+          'Copied the change request as Markdown. It is for the standard\'s owners, not the portal.'}
         {state.kind === 'downloaded' &&
-          `Downloaded the change request as ${state.what}. ISAAC has not sent it anywhere.`}
+          `Downloaded the change request as ${state.what}.`}
         {state.kind === 'failed' && 'The change request could not be prepared. Nothing was copied.'}
         {state.kind === 'manual' && 'Your browser did not allow copying. Select the text below and copy it.'}
       </span>
@@ -2224,8 +2244,8 @@ function PortalActions({ proposalId }: { proposalId: string }) {
         <Download size={14} strokeWidth={2} aria-hidden="true" /> Download JSON
       </button>
       <span className="sp-portal-status" role="status">
-        {state.kind === 'copied' && `Copied. ISAAC has not sent it. ${destination}`}
-        {state.kind === 'downloaded' && `Downloaded. ISAAC has not sent it anywhere. ${destination}`}
+        {state.kind === 'copied' && `Copied. ${destination}`}
+        {state.kind === 'downloaded' && `Downloaded. ${destination}`}
         {state.kind === 'failed' && 'The portal payload could not be prepared. Nothing was copied.'}
         {state.kind === 'manual' && 'Your browser did not allow copying. Select the text below and copy it.'}
       </span>

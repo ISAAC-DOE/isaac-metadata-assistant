@@ -159,10 +159,23 @@ function payloadFor(p: ApiSchemaProposal): ApiSchemaPortalPayload {
   };
 }
 
+/*
+ * NO FALSE CLAIM. The standing disclaimers are gone (owner's brief, 2026-11-02); what replaces a pinned
+ * disclaimer is a ban on the claim it guarded against: that the page sent, submitted or approved anything, or
+ * that a proposal is kept permanently. Run against the page text, never against a server-served note.
+ */
+const FALSE_CLAIM =
+  /\b(?:was|were|been|is|are) (?:sent|submitted|approved|accepted|applied)\b|\bsent to (?:the )?(?:ISAAC )?portal\b|\bpermanent(?:ly)?\b|\bkept (?:forever|for good)\b/i;
+
+/** The notice shown after a save, found by its own sentence (a saved draft row starts with the same words). */
+const SAVED_NOTICE = /^Saved as a draft\. Copy or download it to send it to the ISAAC portal\.$/;
+
+function listBody(proposals: ApiSchemaProposal[]) {
+  return { ...envelope, proposals, total: proposals.length, limit: 25, offset: 0, next_offset: null, statuses: ['pending', 'withdrawn'], capacity: CAPACITY };
+}
+
 function list(proposals: ApiSchemaProposal[]): RouteEntry {
-  return {
-    body: { ...envelope, proposals, total: proposals.length, limit: 25, offset: 0, next_offset: null, statuses: ['pending', 'withdrawn'], capacity: CAPACITY },
-  };
+  return { body: listBody(proposals) };
 }
 
 function renderAt(path: string) {
@@ -232,7 +245,7 @@ describe('the destination', () => {
     });
   });
 
-  it('says ISAAC drafts and the standard\'s owners review, and offers no approve, apply or send control', async () => {
+  it('says where a proposal goes from here, claims nothing it does not do, and offers no approve, apply or send control', async () => {
     stubFetchRoutes({
       'GET /api/schema-proposals/vocabulary': { body: vocabulary },
       'GET /api/schema-proposals': list([proposal()]),
@@ -240,7 +253,8 @@ describe('the destination', () => {
     renderAt(ROUTE);
     await screen.findByRole('combobox', { name: 'List' });
     await screen.findAllByRole('button', { name: 'Copy Portal Payload' });
-    expect(screen.getByText(/it does not approve, apply or send anything/)).toBeInTheDocument();
+    expect(screen.getByText(COPY.boundary)).toBeInTheDocument();
+    expect(document.body.textContent ?? '').not.toMatch(FALSE_CLAIM);
     // One page: the form, the proposals and the folded vocabulary are all in the document at once.
     const controls = screen
       .getAllByRole('button')
@@ -356,10 +370,11 @@ describe('Propose a Change', () => {
     fillPropose();
     fireEvent.click(screen.getByRole('button', { name: 'Save Proposal' }));
 
-    const status = await screen.findByText(/Saved as a draft on this server/);
+    const status = await screen.findByText(SAVED_NOTICE);
     expect(status.closest('[role="status"]')).not.toBeNull();
     const notice = within(status.closest('[role="status"]') as HTMLElement);
-    expect(notice.getByText(/not sent anywhere\. Drafts here are temporary; copy or download the portal payload/)).toBeInTheDocument();
+    // It says what to do next, and claims nothing was sent.
+    expect(status.closest('[role="status"]')?.textContent ?? '').not.toMatch(FALSE_CLAIM);
     expect(notice.getByRole('button', { name: 'Copy Portal Payload' })).toBeInTheDocument();
     expect(notice.getByRole('button', { name: 'Download JSON' })).toBeInTheDocument();
     // The list is beside the form, so the notice has no "View Proposals" button.
@@ -396,7 +411,7 @@ describe('Propose a Change', () => {
     });
     fireEvent.change(screen.getByLabelText('Records affected (estimate)'), { target: { value: 'about 40' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Proposal' }));
-    await screen.findByText(/Saved as a draft on this server/);
+    await screen.findByText(SAVED_NOTICE);
     expect(sent).toEqual({
       proposal_type: 'add_category',
       section: 'System',
@@ -542,7 +557,7 @@ describe('Propose a Change', () => {
       target: { value: 'A record that describes a simulation, not a measurement.' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save Proposal' }));
-    await screen.findByText(/Saved as a draft on this server/);
+    await screen.findByText(SAVED_NOTICE);
     expect(sent).toMatchObject({ proposal_type: 'add_term', section: 'Record Info', category: 'record_type' });
     expect((sent as unknown as { section: string }).section).toBe(portalSectionFor(vocabulary, 'record_type'));
   });
@@ -572,7 +587,7 @@ describe('Propose a Change', () => {
 });
 
 describe('Proposals', () => {
-  it('lists proposals with their status, states the temporary storage and that no author is recorded', async () => {
+  it('lists proposals with their status and the server\'s first sentence on storage, claiming no permanence and naming no unverified author', async () => {
     stubFetchRoutes({
       'GET /api/schema-proposals/vocabulary': { body: vocabulary },
       'GET /api/schema-proposals': list([
@@ -587,7 +602,32 @@ describe('Proposals', () => {
     expect(within(rows[0]).getByText('Pending')).toBeInTheDocument();
     expect(within(rows[1]).getByText('Withdrawn')).toBeInTheDocument();
     expect(screen.getAllByText(PERSISTENCE_TEXT).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Author not recorded/).length).toBeGreaterThan(0);
+    const column = screen.getByRole('region', { name: 'Proposals' });
+    expect(column.textContent ?? '').not.toMatch(FALSE_CLAIM);
+    // Unverified: nobody is named, and no stand-in sentence is put in the name's place.
+    expect(column.textContent ?? '').not.toMatch(/Proposed by|Author/);
+  });
+
+  it('shows only the first sentence of the server\'s storage statement', async () => {
+    const message = 'SERVER-SAID: proposals here are temporary. They live in a working folder. It is cleared on restart.';
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': {
+        body: { ...listBody([proposal()]), persistence: { ...envelope.persistence, message } },
+      },
+    });
+    renderAt(ROUTE);
+    expect(await screen.findByText('SERVER-SAID: proposals here are temporary.')).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('They live in a working folder');
+  });
+
+  it('names the author only when the server verified one', async () => {
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([proposal({ attribution: 'verified', proposed_by: 'SYN Scientist' })]),
+    });
+    renderAt(ROUTE);
+    expect(await screen.findByText('Proposed by SYN Scientist')).toBeInTheDocument();
   });
 
   it('offers Withdraw on a pending proposal only, behind a confirmation, and shows the result', async () => {
@@ -659,7 +699,9 @@ describe('Proposals', () => {
       },
     });
     renderAt(`${ROUTE}?tab=proposals`);
-    fireEvent.click(await screen.findByRole('button', { name: 'Show More' }));
+    // Scoped to the column: a role query over the whole one-page DOM is slow under a loaded machine.
+    const column = within(await screen.findByRole('region', { name: 'Proposals' }));
+    fireEvent.click(await column.findByRole('button', { name: 'Show More' }, { timeout: 4000 }));
     await screen.findByText(/second_page/);
     expect(document.querySelectorAll('.sp-item')).toHaveLength(2);
     expect(screen.queryByRole('button', { name: 'Show More' })).toBeNull();
@@ -677,7 +719,7 @@ describe('Copy and download the portal payload', () => {
     });
   }
 
-  it('copies the exact portal body and says ISAAC has not sent it', async () => {
+  it('copies the exact portal body and says where to paste it, claiming nothing was sent', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
     stubPayload();
@@ -685,7 +727,8 @@ describe('Copy and download the portal payload', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Copy Portal Payload' }));
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
     expect(JSON.parse(writeText.mock.calls[0][0])).toEqual(payloadFor(p).body);
-    expect(await screen.findByText(/ISAAC has not sent it/)).toBeInTheDocument();
+    const said = await screen.findByText(/^Copied\. Paste it into the ISAAC portal\.$/);
+    expect(said.textContent).not.toMatch(FALSE_CLAIM);
   });
 
   it('shows the text to copy by hand, and does not claim it was copied, when the browser refuses', async () => {
@@ -718,7 +761,8 @@ describe('Copy and download the portal payload', () => {
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:test');
     expect(blob).not.toBeNull();
     expect(JSON.parse(await readBlob(blob as unknown as Blob))).toEqual(payloadFor(p).body);
-    expect(await screen.findByText(/ISAAC has not sent it anywhere/)).toBeInTheDocument();
+    const said = await screen.findByText(/^Downloaded\. Paste it into the ISAAC portal\.$/);
+    expect(said.textContent).not.toMatch(FALSE_CLAIM);
   });
 
   it('says nothing was copied when the payload cannot be fetched', async () => {
@@ -813,7 +857,7 @@ describe('review fixes', () => {
       expect(within(body).getByRole('button', { name })).toBeInTheDocument();
     }
     expect(body).toHaveTextContent('X-ray magnetic circular dichroism, measured at SSRL.');
-    expect(body).toHaveTextContent('Author not recorded (not verified).');
+    expect(body).not.toHaveTextContent(/Author|Proposed by/);
   });
 
   it('says a new list goes into the portal Ontology Editor, not the web endpoint, and shows the server notes', async () => {
@@ -834,7 +878,8 @@ describe('review fixes', () => {
     renderAt(`${ROUTE}?tab=proposals`);
     fireEvent.click(await screen.findByRole('button', { name: 'Copy Portal Payload' }));
     const status = await screen.findByText(/Ontology Editor/);
-    expect(status.textContent).toMatch(/ISAAC has not sent it/);
+    expect(status.textContent).toMatch(/^Copied\. /);
+    expect(status.textContent).not.toMatch(FALSE_CLAIM);
     expect(status.textContent).not.toMatch(/Paste it into the ISAAC portal/);
     expect(screen.getByText('SERVER-NOTE: the web endpoint takes new terms only.')).toBeInTheDocument();
   });
@@ -853,18 +898,33 @@ describe('review fixes', () => {
     expect(await screen.findByText(/Paste it into the ISAAC portal/)).toBeInTheDocument();
   });
 
-  it('shows how many pending places are used and who shares them', async () => {
+  it('shows how many pending places are used, and who shares them, only near the limit', async () => {
     stubFetchRoutes({
       'GET /api/schema-proposals/vocabulary': { body: vocabulary },
       'GET /api/schema-proposals': list([proposal()]),
     });
-    renderAt(`${ROUTE}?tab=proposals`);
-    expect(await screen.findByText(/2 of 50 pending places used\. SERVER-SAID: shared by everyone/)).toBeInTheDocument();
+    const far = renderAt(`${ROUTE}?tab=proposals`);
+    await screen.findByText(PERSISTENCE_TEXT);
+    expect(screen.queryByText(/pending places used/)).toBeNull();
+    far.unmount();
+    for (const [pending, shown] of [[39, false], [40, true], [50, true]] as const) {
+      stubFetchRoutes({
+        'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+        'GET /api/schema-proposals': {
+          body: { ...listBody([proposal()]), capacity: { ...CAPACITY, pending } },
+        },
+      });
+      const r = renderAt(ROUTE);
+      await screen.findByText(PERSISTENCE_TEXT);
+      const line = screen.queryByText(new RegExp(`^${pending} of 50 pending places used\\. SERVER-SAID: shared by everyone`));
+      expect(line !== null).toBe(shown);
+      r.unmount();
+    }
   });
 });
 
 describe('the boundary is stated once', () => {
-  const statement = /does not approve/g;
+  const statement = new RegExp(COPY.boundary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
   const count = () => (document.body.textContent?.match(statement) ?? []).length;
 
   it('appears exactly once on the page, before and after saving, with the proposals listed', async () => {
@@ -879,9 +939,9 @@ describe('the boundary is stated once', () => {
     expect(count()).toBe(1);
     fillPropose();
     fireEvent.click(screen.getByRole('button', { name: 'Save Proposal' }));
-    await screen.findByText(/Saved as a draft on this server/);
+    await screen.findByText(SAVED_NOTICE);
     expect(count()).toBe(1);
-    await screen.findByText(/pending places used/);
+    await screen.findByText(PERSISTENCE_TEXT);
     expect(count()).toBe(1);
     // The server's own review note is never rendered a second time.
     expect(document.body.textContent).not.toContain(REVIEW_TEXT);

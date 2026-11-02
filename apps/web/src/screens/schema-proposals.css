@@ -88,9 +88,15 @@
 
 /* --- disclosures ---------------------------------------------------------------------- */
 
-/* Every summary on the page draws the same drawn chevron, turned a quarter when open, in place of the
-   browser's triangle (which sits badly beside a multi-line summary). */
-.sp-screen summary {
+/* THIS SCREEN'S OWN DISCLOSURES draw a chevron icon, turned a quarter when open, in place of the browser's
+   triangle, which sits badly beside the proposal rows' two-line summaries; the drafts, notes and vocabulary
+   folds use the same mark so the page has one. A deliberate, scoped exception to the app's native-marker
+   convention (`statistics.css`): every rule here names these classes, so a summary this screen does not own
+   (FetchStates' "Technical Details" inside a BackendDown panel) keeps its native marker. */
+.sp-fold > summary,
+.sp-why > summary,
+.sp-proposal > summary,
+.sp-draft-cites > summary {
   display: flex;
   align-items: baseline;
   gap: var(--space-xs);
@@ -99,7 +105,10 @@
   width: fit-content;
   max-width: 100%;
 }
-.sp-screen summary::-webkit-details-marker { display: none; }
+.sp-fold > summary::-webkit-details-marker,
+.sp-why > summary::-webkit-details-marker,
+.sp-proposal > summary::-webkit-details-marker,
+.sp-draft-cites > summary::-webkit-details-marker { display: none; }
 .sp-chevron {
   flex: none;
   align-self: center;
@@ -110,7 +119,10 @@ details[open] > summary > .sp-chevron { transform: rotate(90deg); }
 @media (prefers-reduced-motion: reduce) {
   .sp-chevron { transition: none; }
 }
-.sp-screen summary:focus-visible {
+.sp-fold > summary:focus-visible,
+.sp-why > summary:focus-visible,
+.sp-proposal > summary:focus-visible,
+.sp-draft-cites > summary:focus-visible {
   outline: 2px solid var(--action);
   outline-offset: 2px;
   border-radius: var(--radius-token);
@@ -212,15 +224,13 @@ details[open] > summary > .sp-chevron { transform: rotate(90deg); }
   accent-color: var(--action);
 }
 
-/* The kind chooser: three option cards, side by side while each keeps ~13rem, stacked below that. The
-   last one on a short row stretches to the full width rather than leaving a hole. */
+/* The kind chooser: three equal option rows, stacked at every width, title over a one-line hint. */
 .sp-kinds {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-sm);
+  flex-direction: column;
+  gap: var(--space-xs);
 }
 .sp-kind {
-  flex: 1 1 13rem;
   display: flex;
   align-items: flex-start;
   gap: var(--space-sm);
@@ -269,7 +279,6 @@ details[open] > summary > .sp-chevron { transform: rotate(90deg); }
 /* A long label in the narrow proposals column ("Copy Change Request") wraps at a narrow width instead of
    pushing the page sideways (.btn is nowrap by default). */
 .sp-actions .btn { white-space: normal; overflow-wrap: anywhere; text-align: left; max-width: 100%; }
-.sp-submit { display: flex; flex-direction: column; gap: var(--space-xs); }
 
 /* --- messages -------------------------------------------------------------------------- */
 
@@ -490,7 +499,7 @@ details[open] > summary > .sp-chevron { transform: rotate(90deg); }
 .sp-count {
   font-size: var(--font-size-body);
   font-variant-numeric: tabular-nums;
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 .sp-proposals-facts p {
   margin: 0 0 var(--space-2xs);

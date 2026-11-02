@@ -478,23 +478,20 @@ export const SCHEMA_PROPOSALS_COPY = {
   title: 'Schema Proposals',
   lead: 'Is a term, a list or a field you need missing from the ISAAC standard? Propose it here.',
   /*
-   * THE ONE STATEMENT of what ISAAC does and does not do with a proposal. It appears once, in the
-   * page lead, and nowhere else on the screen (`schema-proposals.test.tsx` counts occurrences).
-   * The server's own `review_note` is deliberately not rendered a second time.
+   * THE ONE SENTENCE on where a proposal goes from here: functional guidance, in the page lead, once and
+   * nowhere else on the screen (`schema-proposals.test.tsx` counts occurrences). It claims nothing this page
+   * does not do: the person sends a proposal to the portal; this page keeps the draft. The server's own
+   * `review_note` is deliberately not rendered a second time.
    */
-  boundary:
-    'ISAAC only keeps your draft and the text to send: it does not approve, apply or send anything, ' +
-    'and the standard\'s owners decide in the ISAAC portal.',
-  savedNotice:
-    'Saved as a draft on this server \u2014 not sent anywhere. Drafts here are temporary; copy or ' +
-    'download the portal payload to send it.',
+  boundary: "Save a proposal here, then send it to the ISAAC portal, where the standard's owners decide.",
+  savedNotice: 'Saved as a draft. Copy or download it to send it to the ISAAC portal.',
   /** The page's three parts: the form's heading, the list's heading, and the folded vocabulary's summary. */
   proposeTitle: 'Propose a Change',
   proposalsTitle: 'Proposals',
   browseTitle: 'Browse the Whole Vocabulary',
   browseLead:
     'The portal\'s vocabulary is a copy taken at one point in time, the record schema\'s fixed lists are ' +
-    'what this build validates records against, and the two overlap only in part.',
+    'what records are validated against, and the two overlap only in part.',
   /*
    * THE KIND CHOOSER. Each option's title is its accessible name and its hint is its description, so the
    * hint says what the kind is for in one line and the title stays short. The third is offered only when
@@ -505,25 +502,12 @@ export const SCHEMA_PROPOSALS_COPY = {
   kindList: 'A new list of allowed terms',
   kindListHint: 'A field that should take a fixed set of words.',
   kindField: 'A new field in the ISAAC schema',
-  kindFieldHint: 'A change to the schema itself; you get a document for the standard\'s owners, not a portal proposal.',
-  /*
-   * THE ONE STATEMENT, on the form, that the third type is not a portal proposal. The server's own
-   * `schema_change.not_a_portal_proposal` sentence is shown beside it; this says what the export is.
-   */
-  schemaChangeLead:
-    'A new field is a change to the ISAAC schema itself. You get a change-request document for the ' +
-    'standard\'s owners to read (Markdown or JSON), not something to paste into the portal.',
-  schemaChangeSaved:
-    'Saved as a draft on this server \u2014 not sent anywhere. Drafts here are temporary; copy or ' +
-    'download the change-request document to share it with the standard\'s owners.',
+  kindFieldHint: 'A change to the schema itself.',
+  /* What the third kind produces, said once under the cards when it is chosen. */
+  schemaChangeLead: "You get a change-request document for the standard's owners, not a portal proposal.",
+  schemaChangeSaved: "Saved as a draft. Copy or download the change request to share it with the standard's owners.",
   readyLead: 'Propose one to open it in the form, with the description left to you. Nothing is sent until you save.',
-  localImportWhereLocal:
-    'Nothing leaves your computer: this page talks to the ISAAC server running on this computer, and a ' +
-    'proposal you save is kept there as a draft, not sent anywhere.',
-  localImportWhereHosted:
-    'The file stays on your computer. Only a proposal you save is sent, to the hosted ISAAC server this ' +
-    'page came from, where it is kept as a temporary draft and sent nowhere else.',
+  /** The one hint beside Save, for a plain proposal and for one opened from a local draft alike. */
+  saveHint: 'Saves a draft. You send it from Proposals.',
   localImportFiledFrom: 'From a local import’s drafts file',
-  unverifiedAuthor:
-    'Author not recorded: who is using this server is not verified, so nobody is named on a proposal.',
 } as const;
