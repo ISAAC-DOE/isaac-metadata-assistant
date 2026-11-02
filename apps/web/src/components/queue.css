@@ -292,14 +292,6 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
-
-.exp-sub {
-  margin-top: 5px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
 .exp-tag {
   font-size: 11px;
   font-weight: 500;
@@ -431,13 +423,6 @@
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--text-heading);
-}
-
-.queue-empty-body {
-  margin: 0 0 10px;
-  font-size: 13.5px;
-  line-height: 1.6;
-  color: var(--text-secondary);
 }
 
 /* Labels the two action cards without adding a heading level. `--text-strong`

@@ -594,7 +594,8 @@ describe('§5 · a convention reads sources; a person is provenance only', () =>
       f.textContent?.includes(C.peopleTitle),
     )!;
     expect(people.textContent).toContain('Z. Fakename');
-    expect(people.textContent).toContain('never the actor');
+    // SHORTENED 2026-11-02 to the fact: "Recorded as provenance only."
+    expect(people.textContent).toContain('Recorded as provenance only.');
     expect(conventions.textContent).not.toContain('Z. Fakename');
   });
 });

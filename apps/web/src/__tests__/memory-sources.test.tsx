@@ -80,11 +80,11 @@ describe('P24.4 · Source Index — list', () => {
     // on_disk:false row marker
     expect(getByText('not on disk')).toBeInTheDocument();
 
-    // standing caption + metadata-only subtitle
+    // standing caption + subtitle. The metadata-only scope is stated ONCE on the route
+    // since 2026-11-02 (final review Minor 8), on the Overview's provenance widget.
     expect(getByText('project knowledge — not scientific evidence')).toBeInTheDocument();
-    expect(
-      getByText(/metadata and provenance only, never file contents/i),
-    ).toBeInTheDocument();
+    expect(getByText('Files Graphify indexed for project memory.')).toBeInTheDocument();
+    expect(document.body.textContent ?? '').not.toMatch(/never file contents/i);
   });
 });
 

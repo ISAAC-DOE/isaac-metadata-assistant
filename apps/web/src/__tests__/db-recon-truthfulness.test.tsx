@@ -86,7 +86,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import { TopBar } from '../components/TopBar';
@@ -148,6 +148,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  /* UNMOUNT FIRST (final review I-4). Resetting the tutorial store notifies every
+     subscriber, and vitest runs this hook BEFORE Testing Library's own cleanup — so a
+     still-mounted HelpPanel / chip took that update outside act(). */
+  cleanup();
   vi.unstubAllGlobals();
   __resetTutorialStore();
   sessionStorage.clear();
@@ -170,6 +174,15 @@ function renderTopBar() {
  * the leak scan below opens a session first: that is the scope where the chip exists
  * for every health state, including a failed one.
  */
+/** Let every read a render started land INSIDE `act` (final review I-4): the chip,
+ *  the Help popover and Settings are scanned in their settled state, and no state
+ *  update escapes the test as an act() warning. */
+async function settle(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+}
+
 async function renderChip(health: ApiHealth | 'down'): Promise<HTMLElement> {
   const healthRoute =
     health === 'down'
@@ -180,13 +193,18 @@ async function renderChip(health: ApiHealth | 'down'): Promise<HTMLElement> {
     ...healthRoute,
     'GET /api/experiments': { body: { experiments: [] } },
   } as never);
-  await startTutorial(null);
+  await act(async () => {
+    await startTutorial(null);
+  });
   const { container } = renderTopBar();
-  return waitFor(() => {
+  const chip = await waitFor(() => {
     const found = container.querySelector<HTMLElement>('.mode-chip');
     expect(found).not.toBeNull();
     return found!;
   });
+  // The chip appears from session scope before health settles; wait for that too.
+  await settle();
+  return chip;
 }
 
 // --- 1–5: the chip makes no database claim in any state ------------------------
@@ -216,7 +234,7 @@ describe('mode chip — no database claim in any health state, on the ordinary s
     if (health === 'down') stubFetchDown();
     else stubFetchRoutes({ 'GET /api/health': { body: health } });
     const { container } = renderTopBar();
-    await new Promise((r) => setTimeout(r, 20));
+    await settle();
     expect(container.querySelector('.mode-chip')).toBeNull();
     const bar = container.querySelector('header.topbar')!;
     const attrs = Array.from(bar.querySelectorAll('*')).flatMap((el) =>
@@ -231,6 +249,7 @@ describe('mode chip — no database claim in any health state, on the ordinary s
       stubFetchRoutes({ 'GET /api/health': { body: health } });
       const { container, unmount } = renderTopBar();
       await waitFor(() => expect(container.querySelector('.mode-chip')?.textContent).toBe('Production'));
+      await settle();
       expect(container.querySelector('.mode-chip')!.textContent).not.toMatch(/synthetic|workspace/i);
       unmount();
       vi.unstubAllGlobals();
@@ -287,6 +306,7 @@ describe('mode chip — exposes no record content and no connection detail', () 
   // its visible text is its name; if one is ever re-added it must open with that text.
   it('if the chip carries an accessible name, it opens with its exact visible text', async () => {
     for (const health of [healthNoBlock, healthConfigured(null), healthConfigured({ status: 'error', at: AT })]) {
+      cleanup(); // unmount the previous round before its stores are reset
       __resetHealthCache();
       __resetTutorialStore();
       sessionStorage.clear();
@@ -385,6 +405,7 @@ describe('Settings at ?tab=privacy (now Overview) — no over-claim anywhere on 
       </MemoryRouter>,
     );
     await waitFor(() => expect(view.container.querySelector('.settings-rows')).not.toBeNull());
+    await settle();
     return view.container.querySelector('.settings-panel')!.textContent ?? '';
   }
 
@@ -411,39 +432,41 @@ describe('Settings at ?tab=privacy (now Overview) — no over-claim anywhere on 
  */
 
 /** The whole rendered popover body, so a forbidden claim cannot hide in any section. */
-function helpBodyText(): string {
+async function helpBodyText(): Promise<string> {
   const view = render(
     <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <HelpPanel />
     </MemoryRouter>,
   );
   fireEvent.click(view.getByRole('button', { name: 'Help' }));
+  await settle();
   return view.container.querySelector('.help-panel-body')!.textContent ?? '';
 }
 
 describe('Help popover copy — no whole-application data claim anywhere in it', () => {
-  it.each(FORBIDDEN_CLAIMS_SHARED)('never claims %s, anywhere in the popover', (_what, pattern) => {
-    expect(helpBodyText()).not.toMatch(pattern);
+  it.each(FORBIDDEN_CLAIMS_SHARED)('never claims %s, anywhere in the popover', async (_what, pattern) => {
+    expect(await helpBodyText()).not.toMatch(pattern);
   });
 
-  it('makes no unqualified whole-application claim, and bounds the capability if it states it', () => {
-    const text = helpBodyText();
+  it('makes no unqualified whole-application claim, and bounds the capability if it states it', async () => {
+    const text = await helpBodyText();
     expect(unqualifiedClaims(text)).toEqual([]);
     expect(missingBounds(text)).toEqual([]);
   });
 
-  it('never states the mode token as a description of the deployment', () => {
+  it('never states the mode token as a description of the deployment', async () => {
     // With the qualifying paragraph gone, the token may not stand alone either.
-    expect(helpBodyText()).not.toMatch(/synthetic-only/i);
+    expect(await helpBodyText()).not.toMatch(/synthetic-only/i);
   });
 
-  it('neither the retired "Synthetic mode" nor "Synthetic workspace" section comes back', () => {
+  it('neither the retired "Synthetic mode" nor "Synthetic workspace" section comes back', async () => {
     const view = render(
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <HelpPanel />
       </MemoryRouter>,
     );
     fireEvent.click(view.getByRole('button', { name: 'Help' }));
+    await settle();
     const headings = [...view.container.querySelectorAll('.help-section h3')].map((h) => h.textContent);
     expect(headings).not.toContain('Synthetic mode');
     expect(headings).not.toContain('Synthetic workspace');

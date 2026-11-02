@@ -260,7 +260,19 @@ a:hover {
  * 2026-11-02), so the control keeps its outline and its footprint but reads as
  * inactive; fill, ink and cursor change too.
  */
-.btn-secondary:disabled {
+/*
+ * REFUSED SECONDARY (`aria-disabled="true"`, 2026-11-02 final review I-1). A
+ * control that must stay focusable so its stated reason is reachable (Previous/Next
+ * on Runs) takes `aria-disabled` rather than `disabled`. It gets the SAME look as
+ * `:disabled`, at rest and under the pointer: the `[aria-disabled]:hover` and
+ * `:active` members are (0,3,0), so they beat `.btn-secondary:hover`/`:active`
+ * (0,2,0) and a refused control never reacts to hover or press. One rule here
+ * replaces the per-screen resets that went stale when `.btn-secondary` was re-tinted.
+ */
+.btn-secondary:disabled,
+.btn-secondary[aria-disabled='true'],
+.btn-secondary[aria-disabled='true']:hover,
+.btn-secondary[aria-disabled='true']:active {
   background: var(--border-faint);
   border-color: var(--border-strong);
   color: var(--text-inactive);

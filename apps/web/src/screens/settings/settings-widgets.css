@@ -79,10 +79,6 @@
    its pill variant are retired. */
 
 /* ---- state lines ----------------------------------------------------------- */
-
-.settings-state-heading {
-  margin: 0;
-}
 .settings-state-line {
   margin: 0;
   max-width: 68ch;
@@ -101,22 +97,6 @@
 /* The one boundary the agent widget keeps visible. A STATEMENT, not a control
    (2026-10-18, review: the hairline box with a shield read as a button): no box,
    no fill — a shield beside a bold line, at the body's own measure. */
-.settings-boundary {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-}
-.settings-boundary-icon {
-  flex: none;
-  color: var(--text-slate);
-}
-.settings-boundary-heading {
-  margin: 0;
-  font-size: var(--font-size-body);
-  font-weight: var(--font-weight-semibold);
-  line-height: var(--line-height-snug);
-  color: var(--text-strong);
-}
 
 /* ---- rows: the Data card's four facts --------------------------------------
    Two by two from 700px (review Minor 8, 2026-11-02): an auto-fit row put three
@@ -178,41 +158,7 @@
 
 /* ---- rows: a boundary's state, visible ------------------------------------- */
 
-.settings-points {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-md);
-}
-.settings-point + .settings-point {
-  padding-top: var(--space-md);
-  border-top: 1px solid var(--border-faint);
-}
-.settings-point-heading {
-  margin: 0;
-  font-size: var(--font-size-body);
-  font-weight: var(--font-weight-semibold);
-  line-height: var(--line-height-snug);
-  color: var(--text-heading);
-}
-.settings-point-text {
-  margin: var(--space-xs) 0 0;
-  max-width: 72ch;
-  font-size: var(--font-size-body);
-  line-height: var(--line-height-normal);
-  color: var(--text-secondary);
-}
-
 /* ---- Details: definitions, Q&A, capability lists --------------------------- */
-
-.settings-definitions,
-.settings-qa {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-lg);
-  padding-top: var(--space-sm);
-}
-.settings-definition-heading,
-.settings-qa-heading,
 .settings-view-heading {
   margin: 0;
   font-size: var(--font-size-body);
@@ -220,10 +166,7 @@
   line-height: var(--line-height-snug);
   color: var(--text-heading);
 }
-.settings-definition-text,
-.settings-qa-item p,
-.settings-view-lead,
-.settings-view-note {
+.settings-view-lead {
   margin: var(--space-xs) 0 0;
   max-width: 72ch;
   font-size: var(--font-size-body);
@@ -240,9 +183,6 @@
 .settings-companion > .settings-view-heading:first-child,
 .api-connect-bare > .settings-view-heading:first-child {
   margin-top: 0;
-}
-.settings-qa-item .settings-jump-btn {
-  margin-top: var(--space-sm);
 }
 
 .settings-defs {
@@ -427,7 +367,6 @@
   display: none;
 }
 
-
 /* The Guided Walkthrough: the state and the replay control on one row. */
 .settings-walkthrough-action {
   margin: 0 0 0 auto;
@@ -471,6 +410,7 @@
   flex-wrap: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
+
   scrollbar-width: thin;
   border-bottom: 0;
   box-shadow: inset 0 -1px 0 var(--border-faint);
@@ -479,6 +419,14 @@
   flex: none;
   margin-bottom: 0;
   white-space: nowrap;
+}
+/* THE FOCUS RING STAYS INSIDE THE ROW (final review I-3). A scroll container clips
+   at its padding box, and the shared `:focus-visible` outline sits 2px OUTSIDE the
+   tab, so the ring was cut on all four sides of the row. Inset by its own width it
+   is drawn wholly within the tab — visible at every width, with no padding that
+   would push the active underline off the row's rule or widen the row at 320px. */
+.settings-section-tabs .section-tab:focus-visible {
+  outline-offset: -2px;
 }
 @media (max-width: 600px) {
   .settings-section-tabs {

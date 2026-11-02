@@ -635,12 +635,6 @@
   color: var(--text-heading);
   line-height: 1.5;
 }
-.memory-unavailable-text {
-  margin-top: 8px;
-  font-size: 12.5px;
-  color: var(--text-secondary);
-  line-height: 1.55;
-}
 
 /* ---- Source Index card (P24.4) — metadata/provenance file explorer -- */
 /* A provenance navigator, not a file browser: no content, no search input. */
@@ -1154,12 +1148,6 @@
   font-size: 12.5px;
   color: var(--text-secondary);
   line-height: 1.55;
-}
-.concept-lookup-boundary {
-  margin-top: 6px;
-  font-size: 11.5px;
-  color: var(--text-tertiary);
-  line-height: 1.5;
 }
 /* `source_file` opens the SOURCE INDEX row for that file — provenance
    navigation only. Nothing here fetches, downloads or renders file bytes. */
@@ -1949,26 +1937,6 @@
 /* Data & Privacy edge cases: the quietest thing in a definition card, so the
    always-visible sentence above stays the one that is read. Same native
    `<details>` treatment as the Concepts Technical Details drawer. */
-.settings-more {
-  margin-top: 8px;
-  font-size: 11.5px;
-  color: var(--text-secondary);
-}
-.settings-more > summary {
-  cursor: pointer;
-  color: var(--action);
-}
-.settings-more > summary:focus-visible {
-  outline: 2px solid var(--action);
-  outline-offset: 2px;
-  border-radius: var(--radius-inner, 8px);
-}
-.settings-more p {
-  margin-top: 6px;
-  font-size: 11.5px;
-  line-height: 1.55;
-  overflow-wrap: anywhere;
-}
 
 /* ~~Boundary statements — `ul.settings-points`, its `li` cards, `h3` and `p`~~ —
    RETIRED 2026-10-12 with Data & Privacy's twelve-card list. The class name now
@@ -3191,26 +3159,7 @@ a.settings-jump-btn {
 .load-widget-cta {
   align-self: flex-start;
 }
-.load-widget-caveat {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-sm);
-  margin: 0;
-  font-size: var(--font-size-body);
-  line-height: var(--line-height-normal);
-  color: var(--advisory-text);
-}
-.load-widget-caveat svg {
-  flex: none;
-  margin-top: var(--space-2xs);
-}
 /* In the info panel the refusal statement is ordinary info prose. */
-.widget-info .onramp-warn {
-  display: block;
-  margin-top: 0;
-  font-size: inherit;
-  color: inherit;
-}
 .load-page .onramps {
   margin-top: 0;
   align-items: start;

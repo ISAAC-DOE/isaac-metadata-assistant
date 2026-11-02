@@ -36,8 +36,7 @@ export function hasVerdictLanguage(text: string): boolean {
 }
 
 // Copy shown beneath a routed truth question (never a verdict itself).
-export const ROUTE_TO_CLI_NOTE =
-  'Truth questions route to the CLI — the assistant never renders a verdict.';
+export const ROUTE_TO_CLI_NOTE = 'Truth questions are answered by the validation CLI.';
 
 // P24.10: the assistant surfaces the PRIMARY memory axis (availability). When
 // memory is unavailable there is no graph to draw leads from.

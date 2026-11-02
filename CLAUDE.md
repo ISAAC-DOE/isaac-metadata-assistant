@@ -460,6 +460,23 @@ For this project, the risk-tiered orchestration policy is:
     over every source), `connect-your-agent.test.tsx` and `settings-api.test.tsx` (no
     connected state, no key, no disabled control), `reset-claim-parity.test.tsx` (the
     categorical ban over the Data card). `?tab=privacy` is an alias of Overview.
+  - Home, Historical Import, Memory and the walkthrough: My Experiments' storage footer
+    ("…saved in this deployment's database…" / "…cleared when the server restarts"; only
+    the failure state still speaks): `create-experiment.test.tsx` (`DURABILITY_PROMISE`,
+    with a control on both retired lines) and `e2e/specs/workspace-scope.spec.ts`; the
+    tutorial banner's "New here?" lead and pitch line; Historical Import's
+    `filesNotReadableHelp`, "deterministic and offline: no language model is involved",
+    "not sent to ISAAC" and the other §9 "this build" caveats: `historical-import.test.tsx`
+    (`MODEL_IMPLIED`, with an AI-sentence control), `import-file-staging.test.tsx`,
+    `upload-claim-parity.test.tsx` §1; Memory's "Graphify is a memory plane…", the long
+    intro, "Project Memory is advisory … never a verdict", the graph's `:853` "Navigation
+    leads to verify…" line and the unavailable panel's two-conditions and "Future path"
+    paragraphs: `memory-graph.test.tsx` (exactly one "leads to verify" on the route),
+    `graph-help-concision.test.tsx`, `memory-status.test.tsx`, `diagnostics.test.tsx`; the
+    walkthrough steps' "nothing here is a score…", "nothing you do here reaches an
+    institutional system", "it says so plainly" (false once Settings stopped saying it) and
+    "there is no account behind it": `tutorial-flow.test.tsx` (bans, with a control on each
+    retired sentence).
   The backend contract, `mode: synthetic-only`, and `apps/api/tests/test_backend_copy_truthfulness.py`'s
   mirror of `FLAT_WHOLE_APP_CLAIM` / `DIAGNOSTIC_CLAIMS` / `QUALIFICATION` / `CAPABILITY_STATEMENT`
   are unchanged. Do not restore a retired sentence to satisfy an older note below.

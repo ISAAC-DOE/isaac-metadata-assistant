@@ -468,7 +468,7 @@ function MemoryOriginWidget({ data }: { data: ApiGraphStatus }) {
       <MemoryFigures rows={rows} />
       <p className="memory-indexed-note">
         Project memory indexes this project's source code, docs, schema, and test fixtures via
-        Graphify — metadata and provenance only, never file contents.
+        Graphify — metadata and provenance, not file contents.
       </p>
     </Widget>
   );
@@ -721,8 +721,7 @@ function SourceIndexCard({ focusFilePath }: { focusFilePath?: string | null }) {
     <div className="card placeholder-card source-index-card">
       <h2 className="source-index-heading">Source Index</h2>
       <p className="source-index-subtitle">
-        Files Graphify indexed for project memory — metadata and provenance only, never file
-        contents.
+        Files Graphify indexed for project memory.
       </p>
       {list.status === 'loading' && <LoadingPanel label="Loading source index…" />}
       {list.status === 'error' && <BackendDown error={list.error} onRetry={list.reload} />}

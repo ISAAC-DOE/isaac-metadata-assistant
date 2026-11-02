@@ -108,8 +108,10 @@ test.describe('@interaction the ordinary workspace', () => {
     await expect(page.locator('.exp-row')).toHaveCount(0);
     await expect(page.getByRole('heading', { name: /Needs Attention|Ready to Export/i })).toHaveCount(0);
 
-    // The subcount states zero rather than being omitted.
-    await expect(page.locator('.page-subcount')).toContainText(/0 experiments/i);
+    // ~~The subcount states zero rather than being omitted.~~ — cut 2026-11-02: "0
+    // experiments · 0 ready to export" sat above "Start Your First Experiment",
+    // stating zero twice. The empty state itself says there is nothing yet.
+    await expect(page.locator('.page-subcount')).toHaveCount(0);
 
     // The two things a reader CAN do instead are offered and operable.
     await expect(page.getByRole('button', { name: 'Open Validator' })).toBeEnabled();

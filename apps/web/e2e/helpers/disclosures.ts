@@ -323,29 +323,9 @@ export const SETTINGS_CONCEPT_DISCLOSURES: Readonly<Record<string, number>> = Ob
    */
 });
 
-/**
- * How many widget Details disclosures holding the Privacy & Governance
- * DEFINITIONS each surface mounts — the successor of `SETTINGS_CONCEPT_DISCLOSURES`.
- *
- * The four question widgets each keep their concepts' full definitions (and the
- * governance policy's paragraphs) behind one `Full Definitions` Details, a
- * `button[aria-expanded]` over a `hidden` body. The nested `details.settings-more`
- * drawers stay CLOSED, unchanged — they were closed before too.
- *
- * ~~Opened here … Other widget Details, info panels and collapsible views on the
- * Settings tabs are NOT opened~~ — SUPERSEDED BY THE MERGE WITH #289 (2026-10-19):
- * `openWidgetInfoAndViews` now opens every widget info panel, every widget Details
- * and reveals every widget view on EVERY surface, Settings included, so the
- * coverage gap the struck sentence named is closed rather than merely named. This
- * map stays as a COUNT declaration only — the one thing that helper does not
- * assert for these four Details.
- */
-export const SETTINGS_DEFINITION_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze({
-  /* ~~'settings-privacy': 4~~ — the four question widgets were retired 2026-11-02
-     with the Privacy & Governance tab (owner's direction). Their facts are the
-     always-visible Data card on Overview, so nothing is left behind a Details to
-     open. */
-});
+/* ~~SETTINGS_DEFINITION_DISCLOSURES~~ — removed 2026-11-02 (final review Minor 3): it
+   counted `.settings-grid-privacy` Details, which nothing renders since the Privacy &
+   Governance tab was retired, and so asserted 0 everywhere. */
 
 /**
  * How many of Settings' own secondary disclosures each surface mounts: This Build's
@@ -532,22 +512,6 @@ export async function openUnreachableDisclosures(page: Page, surfaceId: string):
     await expect(one).toHaveAttribute('open', '');
   }
 
-  /* The Privacy & Governance definitions — the four widget Details that replaced
-     the twelve rows above. DECLARED here, OPENED by `openWidgetInfoAndViews` below
-     (which presses every `.widget-details` trigger on every surface), so they are
-     not handled twice: this block only asserts the declared count, which is the
-     part that helper does not check — a definition widget that stopped mounting
-     would otherwise leave the scan without moving a number. */
-  const definitions = page.locator('.settings-grid-privacy .widget-details .disclosure-trigger');
-  const expectedDefinitions = SETTINGS_DEFINITION_DISCLOSURES[surfaceId] ?? 0;
-  const definitionCount = await definitions.count();
-  expect(
-    definitionCount,
-    `surface "${surfaceId}" mounts ${definitionCount} Privacy & Governance definition ` +
-      `disclosures; SETTINGS_DEFINITION_DISCLOSURES in e2e/helpers/disclosures.ts declares ` +
-      `${expectedDefinitions}. A definition left closed here is exempt from every axe scan.`
-  ).toBe(expectedDefinitions);
-
   /* Settings' own secondary disclosures — see `SETTINGS_PAGE_DISCLOSURES`. Declared
      count, opened by index, asserted open. */
   const settingsDisclosures = page.locator(
@@ -605,9 +569,6 @@ export async function openUnreachableDisclosures(page: Page, surfaceId: string):
   }
 
   await openWidgetInfoAndViews(page, surfaceId);
-  for (let i = 0; i < definitionCount; i++) {
-    await expect(definitions.nth(i)).toHaveAttribute('aria-expanded', 'true');
-  }
   await openDraftBlocks(page, surfaceId);
   await openAssetReferences(page, surfaceId);
   await openExtendedContext(page, surfaceId);

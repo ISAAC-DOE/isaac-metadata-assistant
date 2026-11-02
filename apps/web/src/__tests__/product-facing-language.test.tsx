@@ -657,7 +657,7 @@ describe("R0 · the guided walkthrough's copy uses no harness vocabulary", () =>
       'Where the Standalone Validator Lives',
       'Where Settings and API Access Live',
       'Replaying This Walkthrough',
-      'The records here are worked examples rebuilt from reference files committed to this build',
+      'The records here are worked examples, so you can read them and work through them as you would your own.',
       'Example workspace',
     ]) {
       const harness = HARNESS_VOCABULARY.filter(([, p]) => p.test(shipped)).map(([l]) => l);

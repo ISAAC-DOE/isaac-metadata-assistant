@@ -156,8 +156,7 @@ export const TUTORIAL_STEPS: readonly TutorialStep[] = [
     title: 'What My Experiments Contains',
     body:
       'Every record in this workspace is listed here, grouped by what it needs next — needs ' +
-      'attention, in review, ready to export, or done. Each group is derived from the record’s own ' +
-      'state, so nothing here is a score, a trend, or a health rating.',
+      'attention, in review, ready to export, or done. Each group comes from the record’s own state.',
     anchor: TUTORIAL_ANCHORS.experimentsQueue,
     target: 'none',
     path: () => '/experiments',
@@ -167,9 +166,8 @@ export const TUTORIAL_STEPS: readonly TutorialStep[] = [
     id: 'open-example',
     title: 'Opening a Worked Example',
     body:
-      'Each row opens one record. The records here are worked examples rebuilt from reference ' +
-      'files committed to this build — you can read them and work through them, and nothing you do ' +
-      'here reaches an institutional system.',
+      'Each row opens one record. The records here are worked examples, so you can read them and ' +
+      'work through them as you would your own.',
     anchor: TUTORIAL_ANCHORS.experimentRow,
     target: 'anyRecord',
     path: () => '/experiments',
@@ -324,9 +322,12 @@ export const TUTORIAL_STEPS: readonly TutorialStep[] = [
     id: 'settings-and-api',
     title: 'Where Settings and API Access Live',
     body:
-      `${LABELS.navSettings} reports what this build actually is — its version, where its records come ` +
-      'from, what it refuses, and how to reach it as a program. Nothing on it is adjustable; it is ' +
-      'a readout, and it says so plainly.',
+      /* 2026-11-02 (final review I-2): only what Settings shows now — the Data card
+         and This Build on Overview, and API Access under Integrations. ~~"Nothing on
+         it is adjustable; it is a readout, and it says so plainly."~~ became false when
+         the "no user-adjustable settings" line was retired. */
+      `${LABELS.navSettings} shows where your work is kept and which version of ISAAC you are ` +
+      'using, and Integrations shows how to reach it as a program.',
     anchor: TUTORIAL_ANCHORS.settingsSections,
     target: 'none',
     path: () => '/settings',
@@ -336,9 +337,8 @@ export const TUTORIAL_STEPS: readonly TutorialStep[] = [
     id: 'replay',
     title: 'Replaying This Walkthrough',
     body:
-      'This walkthrough can be reopened here whenever you want it. Finishing it is remembered by ' +
-      'this browser only — there is no account behind it, so another browser or another device ' +
-      'will be offered it again.',
+      'This walkthrough can be reopened here whenever you want it. Finishing it is remembered in ' +
+      'this browser, so another browser or device will offer it again.',
     anchor: TUTORIAL_ANCHORS.tutorialReplay,
     target: 'none',
     path: () => '/settings?tab=help',

@@ -1,4 +1,5 @@
 import './chrome.css';
+import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { BarChart3, FilePenLine, Inbox, Laptop, LayoutList, Settings } from './icons';
 import { LABELS } from '../lib/labels';
@@ -209,8 +210,24 @@ export function LeftNav({ active }: LeftNavProps) {
   const items = localImports
     ? ITEMS.flatMap((item) => (item.key === 'imports' ? [item, LOCAL_IMPORTS_ITEM] : [item]))
     : ITEMS;
+  /* THE ACTIVE (OR ANCESTOR) DESTINATION IS KEPT IN VIEW on the narrow one-row nav
+     (final review Minor 6): the row scrolls sideways, and at 375px "Settings" or
+     "Schema Proposals" sat off to the right. Scrolls the ROW only (not the page),
+     and only when it actually overflows — at desktop widths this is a column and
+     nothing happens. Same approach as the Settings tab row. */
+  const navRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav || nav.scrollWidth <= nav.clientWidth) return;
+    const item = nav.querySelector<HTMLElement>('.nav-item.active, .nav-item.ancestor');
+    if (!item) return;
+    const left = item.offsetParent === nav ? item.offsetLeft : item.offsetLeft - nav.offsetLeft;
+    const right = left + item.offsetWidth;
+    if (left < nav.scrollLeft) nav.scrollLeft = left;
+    else if (right > nav.scrollLeft + nav.clientWidth) nav.scrollLeft = right - nav.clientWidth;
+  }, [active, localImports]);
   return (
-    <nav className="leftnav" aria-label="Primary">
+    <nav ref={navRef} className="leftnav" aria-label="Primary">
       {items.map(({ key, label, icon: Icon, to }) => {
         const isActive = key === active;
         const isAncestor = !isActive && key === ancestor;

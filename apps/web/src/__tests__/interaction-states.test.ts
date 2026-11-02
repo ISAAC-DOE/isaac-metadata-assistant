@@ -117,6 +117,57 @@ describe('P22C · primary/secondary buttons have real pressed states', () => {
   });
 });
 
+/*
+ * FINAL REVIEW I-1 (2026-11-02) — a REFUSED secondary does not react to the pointer.
+ * Previous/Next on Runs are `btn btn-secondary` with `aria-disabled` (they stay
+ * focusable so their reason is reachable). Review finding I-7 made them not change
+ * on hover; the global re-tint of `.btn-secondary` broke that through a local reset
+ * that restored the old resting look. Pinned at the source: one base rule gives the
+ * refused control the `:disabled` look at rest, on hover and on press, and no other
+ * stylesheet re-styles a refused button's hover with different values.
+ */
+describe('a refused (aria-disabled) secondary button looks the same at rest, on hover and on press', () => {
+  const decls = (body: string) =>
+    Object.fromEntries(
+      body
+        .split(';')
+        .map((d) => d.split(':').map((x) => x.trim()))
+        .filter(([k, v]) => k && v)
+        .map(([k, v]) => [k, v]),
+    );
+  it('one base rule covers rest, :hover and :active with identical declarations', () => {
+    const rest = exactSelector(".btn-secondary[aria-disabled='true']");
+    const hover = exactSelector(".btn-secondary[aria-disabled='true']:hover");
+    const active = exactSelector(".btn-secondary[aria-disabled='true']:active");
+    expect(rest.length).toBe(1);
+    expect(hover.map((r) => r.rule)).toEqual(rest.map((r) => r.rule));
+    expect(active.map((r) => r.rule)).toEqual(rest.map((r) => r.rule));
+    // ...and it is the same look as `:disabled`.
+    expect(exactSelector('.btn-secondary:disabled').map((r) => r.rule)).toEqual(rest.map((r) => r.rule));
+    const d = decls(rest[0].rule.body);
+    expect(d.background).toBe('var(--border-faint)');
+    expect(d['border-color']).toBe('var(--border-strong)');
+  });
+
+  it('no stylesheet re-styles a refused button on hover with different values (the Runs I-7 regression)', () => {
+    const base = decls(exactSelector(".btn-secondary[aria-disabled='true']")[0].rule.body);
+    const overrides = allRules.filter(
+      ({ rule }) => /\[aria-disabled=['"]true['"]\]:hover/.test(rule.selector) && /\.btn\b/.test(rule.selector),
+    );
+    for (const { path, rule } of overrides) {
+      const d = decls(rule.body);
+      for (const prop of ['background', 'border-color', 'color'] as const) {
+        if (d[prop] !== undefined) {
+          expect(d[prop], `${path} ${rule.selector} sets ${prop}`).toBe(base[prop]);
+        }
+      }
+    }
+    // NEGATIVE CONTROL: the retired runs.css reset would have been caught.
+    const retired = decls('border-color: var(--border-strong); background: var(--surface); color: var(--text-muted)');
+    expect(retired.background).not.toBe(base.background);
+  });
+});
+
 describe('P22C · "I don\'t know" is a safe, amber-tinted action', () => {
   it('.guided-dontknow hover/active/focus rules exist and use advisory (amber) tokens only', () => {
     const stateRules = containingSelector('.guided-dontknow').filter(({ rule }) =>

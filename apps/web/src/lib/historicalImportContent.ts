@@ -560,7 +560,7 @@ export const IMPORT_STAGE_COPY = {
   temperatureWhy: 'Why no temperature is filled in',
   peopleTitle: 'People Named in the Notes',
   peopleHelp:
-    'Recorded as provenance only. A person is never the reason a file is read one way or another, and is never the actor of anything in ISAAC.',
+    'Recorded as provenance only.',
   signalTitle: 'HERFD Signal',
   signalHelp:
     'Per run, ISAAC suggests a primary channel only when exactly one carries live signal and one element is established. A suggestion is never a decision.',

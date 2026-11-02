@@ -139,7 +139,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { cleanup, render, screen, fireEvent } from '@testing-library/react';
+import { act, cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import { HelpPanel } from '../components/HelpPanel';
@@ -148,13 +148,15 @@ import { LoadMaterials } from '../screens/LoadMaterials';
 import { ConnectAnAgent, type ConnectAnAgentFacts } from '../screens/settings/ConnectAnAgent';
 import { ConnectYourAgentPanel } from '../screens/settings/ConnectYourAgent';
 import { dataRows } from '../lib/settingsContent';
-import { aboutResponse, stubFetchRoutes } from '../test/apiFixtures';
-import { MCP_CAPABILITIES_REFUSED } from '../lib/mcpConnectContent';
+import { aboutResponse, assistantCompanionUnconfigured, healthSynthetic, stubFetchRoutes } from '../test/apiFixtures';
+import { __resetHealthCache } from '../lib/useHealth';
+import { MCP_CAPABILITIES_REFUSED, MCP_CONNECT_COPY } from '../lib/mcpConnectContent';
 import { CAPTURE_COPY } from '../lib/transcriptCaptureContent';
 import { IMPORT_COPY } from '../lib/historicalImportContent';
 
 afterEach(() => {
   cleanup();
+  __resetHealthCache();
   vi.unstubAllGlobals();
 });
 
@@ -205,18 +207,8 @@ function noRealDataDetail(): string {
     .join(' ');
 }
 
-/**
- * The Settings → Data & Privacy synthetic-only MODE card, heading + summary +
- * detail. Read off the content module exactly as `noRealDataDetail` is, and for
- * the same reason: the claim is authored there, and `settings-page.test.tsx`
- * already proves every concept `detail` is rendered on the tab under its own
- * heading, so re-mounting the page here would duplicate that proof rather than
- * add one. BOTH `summary` and `detail` are read, because both shipped the
- * unscoped claim and a guard over one of them would have missed the other.
- */
-function syntheticModeCard(): string {
-  return noRealDataDetail();
-}
+/* ~~`syntheticModeCard`~~ — removed 2026-11-02: it had become `noRealDataDetail()`
+   under a second name; the Data card is scanned once, as a `SITES` member. */
 
 /**
  * The four sites, as the text a reader actually meets.
@@ -243,7 +235,15 @@ function syntheticModeCard(): string {
  * policy's own paragraphs, not the whole tab, so a neighbouring concept card
  * cannot supply half the claim and count as parity.
  */
-function policyTabText(): string {
+/** Let every stubbed read the render started land INSIDE `act`, so a site is read
+ *  in its settled state and no update escapes the test (final review I-4). */
+async function settle(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+async function policyTabText(): Promise<string> {
   /* `?tab=privacy` lands on Overview since 2026-11-02 (the policy paragraphs were
      retired with the tab). What a reader meets at that address is the site now. */
   stubFetchRoutes({
@@ -259,10 +259,14 @@ function policyTabText(): string {
       <SettingsPage />
     </MemoryRouter>,
   );
+  /* SETTLED, not "Loading app info…" (final review I-4 / Task 2 Minor 2): the Data
+     rows only exist once `/api/about` has answered, so the site is read after them. */
+  await waitFor(() => expect(container.querySelector('.settings-rows')).not.toBeNull());
+  await settle();
   return container.querySelector('.settings-panel')?.textContent ?? '';
 }
 
-function loadMaterialsWarnText(): string {
+async function loadMaterialsWarnText(): Promise<string> {
   /* ~~The "Can I Load My Own Files?" widget's `.onramp-warn`~~ — retired 2026-11-02.
      The whole Load Materials page is the site now. */
   const { container } = render(
@@ -273,6 +277,7 @@ function loadMaterialsWarnText(): string {
       <LoadMaterials />
     </MemoryRouter>,
   );
+  await settle();
   return container.querySelector('.load-page')?.textContent ?? '';
 }
 
@@ -290,10 +295,20 @@ function loadMaterialsWarnText(): string {
  * not shown. `getByText` throws when it is not found, so the render is a real
  * assertion rather than a decoration.
  */
-function mcpNoUploadRow(): string {
+async function mcpNoUploadRow(): Promise<string> {
   const row = MCP_CAPABILITIES_REFUSED.find((c) => c.id === 'no-upload');
   if (!row) throw new Error('no such refused capability: no-upload');
+  // A fresh health read for THIS render: a site read earlier in the same test may
+  // have cached a body with no `mcp` block.
+  __resetHealthCache();
+  stubFetchRoutes({
+    'GET /api/health': { body: { ...healthSynthetic, mcp: { posture: 'unmounted' } } },
+    'GET /api/runtime/assistant-companion': { body: assistantCompanionUnconfigured },
+  } as never);
   render(<ConnectYourAgentPanel />);
+  // Settled: the posture line has arrived, so no update escapes the test.
+  await screen.findByText(MCP_CONNECT_COPY.stateLine);
+  await settle();
   screen.getByText(row.detail);
   return `${row.action} ${row.detail}`;
 }
@@ -345,10 +360,16 @@ function connectAnAgentGuide(): string {
   return connectAnAgentGuideEl().textContent ?? '';
 }
 
-const SITES: [string, () => string][] = [
-  ['Settings → Privacy & Governance → the governance policy', policyTabText],
-  ['the Load Materials on-ramp warning', loadMaterialsWarnText],
-  ['Settings → Data & Privacy → no-real-experiment-data', noRealDataDetail],
+type Site = [string, () => Promise<string>];
+/** A synchronous accessor (a module read, or a render that fetches nothing), lifted. */
+const lift = (fn: () => string) => async () => fn();
+
+const SITES: Site[] = [
+  /* Labels renamed 2026-11-02 (final review Minor 4) to the surfaces that exist now,
+     so a failure message sends the reader to a real screen. */
+  ['Settings → Overview (the ?tab=privacy address)', policyTabText],
+  ['the Load Materials page', loadMaterialsWarnText],
+  ['Settings → Overview → Data card', lift(noRealDataDetail)],
   ['Settings → Connect Your Agent → the no-upload capability row', mcpNoUploadRow],
 ];
 
@@ -393,12 +414,14 @@ function historicalImportCopy(): string {
     .join(' ');
 }
 
-const ALL_BAN_SURFACES: [string, () => string][] = [
+const ALL_BAN_SURFACES: Site[] = [
   ...SITES,
-  ['transcript capture: voiceAudioHandling', captureVoiceAudioHandling],
-  ['Settings → Data & Privacy → synthetic-data-only', syntheticModeCard],
-  ['Settings → API Access → Connect an Agent (the guide)', connectAnAgentGuide],
-  ['Historical Import: every authored string', historicalImportCopy],
+  ['transcript capture: voiceAudioHandling', lift(captureVoiceAudioHandling)],
+  /* ~~'Settings → Data & Privacy → synthetic-data-only'~~ — dropped 2026-11-02: since
+     the tab was retired it scanned the SAME Data-card text as the SITES member above,
+     under a second name. */
+  ['Settings → API Access → Connect an Agent (the guide)', lift(connectAnAgentGuide)],
+  ['Historical Import: every authored string', lift(historicalImportCopy)],
 ];
 
 // --- §1 the readers this ban is justified by ---------------------------------
@@ -620,8 +643,8 @@ const STATES_A_REFUSAL =
 
 describe('R1b §2 · a site that states the refusal states all of it (no half-disclosure)', () => {
   for (const [site, text] of SITES) {
-    it(`${site}: all or nothing`, () => {
-      const copy = text();
+    it(`${site}: all or nothing`, async () => {
+      const copy = await text();
       if (!STATES_A_REFUSAL.test(copy)) return;
       for (const [what, pattern] of SHARED_CLAIM) expect(copy, `${site} omits: ${what}`).toMatch(pattern);
     });
@@ -729,16 +752,16 @@ describe('R1b §3 · no site claims the absolute "no file is read"', () => {
   // capture disclosure and the Settings mode card were outside it for no reason
   // other than that nobody widened the loop when they were added.
   for (const [site, text] of ALL_BAN_SURFACES) {
-    it.each(ABSOLUTE_NO_READ)(`${site} never claims %s`, (_what, pattern) => {
-      expect(text()).not.toMatch(pattern);
+    it.each(ABSOLUTE_NO_READ)(`${site} never claims %s`, async (_what, pattern) => {
+      expect(await text()).not.toMatch(pattern);
     });
   }
 });
 
 describe('R1b §3b · no site denies that the two review tools read', () => {
   for (const [site, text] of ALL_BAN_SURFACES) {
-    it.each(NEGATED_READER)(`${site} never states %s`, (_what, pattern) => {
-      expect(text()).not.toMatch(pattern);
+    it.each(NEGATED_READER)(`${site} never states %s`, async (_what, pattern) => {
+      expect(await text()).not.toMatch(pattern);
     });
   }
 });
@@ -764,11 +787,11 @@ describe('R1b §4b · the polarity pattern is proven on the string that defeated
   // tabpanels. That is a harness artefact, not a copy defect, and it is easy to
   // misread as one.
   for (const [site, text] of ALL_BAN_SURFACES) {
-    it(`does NOT fire on the correct copy of ${site}`, () => {
+    it(`does NOT fire on the correct copy of ${site}`, async () => {
       // Hoisted: `text()` RENDERS, and `.filter` would call it once per pattern —
       // two renders in one test, which the by-role query reports as an ambiguous
       // match rather than as the copy defect it is not.
-      const rendered = text();
+      const rendered = await text();
       const fired = NEGATED_READER.filter(([, p]) => p.test(rendered)).map(([label]) => label);
       expect(
         fired,
@@ -1005,14 +1028,14 @@ describe('R1b §5 · no upload-claim site, and no CAPTURE_COPY string, claims th
   // §5 and §7 at once rather than by whichever the author remembered.
   describe('applies to every upload-claim surface, not just the capture site', () => {
     for (const [site, text] of ALL_BAN_SURFACES) {
-      it(`${site} does not claim the route does not exist`, () => {
+      it(`${site} does not claim the route does not exist`, async () => {
         // Hoisted to ONE call: `text()` renders for three of the five sites,
         // and `cleanup` runs between TESTS, not between calls — a second call
         // in the same test (e.g. as a would-be assertion message) renders the
         // site twice with no cleanup in between, which trips `getByRole`/
         // `getByText`'s "multiple elements found" as a false failure. Same
         // harness artefact §4b already documents for `policyTabText`.
-        const rendered = text();
+        const rendered = await text();
         expect(noEndpointClaims(rendered), rendered).toEqual([]);
       });
     }
@@ -1458,7 +1481,7 @@ const RETIRED_SETTINGS_MODE_DETAIL_OPENING =
 describe('R1b §7 · the Settings Data card (successor of the synthetic-only MODE card) scopes any refusal', () => {
   it('scopes every upload refusal to the route, in every row', () => {
     expect(
-      unscopedUploadRefusals(syntheticModeCard()),
+      unscopedUploadRefusals(noRealDataDetail()),
       'the Settings → Data & Privacy synthetic-only card refuses an upload without ' +
         'scoping the refusal to the upload ROUTE. CLAUDE.md §11 records that claim as ' +
         'true of POST /api/uploads ONLY, and this build ships two controls that read a ' +
@@ -1481,26 +1504,13 @@ describe('R1b §7 · the Settings Data card (successor of the synthetic-only MOD
     ]);
   });
 
-  it('the card is inside ALL_BAN_SURFACES, so §3, §3b and §5 hold it too', () => {
-    // The gap that let this card ship unscoped was not a missing pattern — every
-    // pattern needed already existed — it was that no list named the card. This
-    // asserts the membership rather than the patterns, because membership is
-    // what was missing.
-    expect(ALL_BAN_SURFACES.map(([site]) => site)).toContain(
-      'Settings → Data & Privacy → synthetic-data-only',
-    );
-  });
-
-  it('and the sibling card on the same tab is the one that states the claim in full', () => {
-    // The de-duplication split this card sits on, asserted so that a future
-    // slice cannot "fix" §7 by copying the four-part claim onto this card —
-    // which `db-recon-truthfulness.test.tsx` §12 would then fail.
-    expect(SITES.map(([site]) => site)).toContain(
-      'Settings → Data & Privacy → no-real-experiment-data',
-    );
-    expect(SITES.map(([site]) => site)).not.toContain(
-      'Settings → Data & Privacy → synthetic-data-only',
-    );
+  it('the Data card is inside ALL_BAN_SURFACES exactly once, so §3, §3b and §5 hold it', () => {
+    // Membership is what was missing when the original card shipped unscoped. It is
+    // now a `SITES` member, so it is in ALL_BAN_SURFACES once — not twice under two
+    // names, which is what the retired synthetic-data-only entry had become.
+    const names = ALL_BAN_SURFACES.map(([site]) => site);
+    expect(names.filter((n) => n === 'Settings → Overview → Data card')).toHaveLength(1);
+    expect(names.some((n) => /Data & Privacy|Privacy & Governance|on-ramp warning/.test(n))).toBe(false);
   });
 });
 
@@ -1648,7 +1658,7 @@ describe('R1b §8 · the Connect an Agent guide scopes every upload refusal', ()
 // So the table is a TEST rather than a comment: it fails if the split moves,
 // instead of quietly describing a tree that has changed.
 describe('R1b §8c · which surfaces the unscoped ban would fire on, measured', () => {
-  it('fires on no surface: none states an unscoped refusal (2026-11-02: the SITES no longer state the claim at all)', () => {
+  it('fires on no surface: none states an unscoped refusal (2026-11-02: the SITES no longer state the claim at all)', async () => {
     // `cleanup()` BETWEEN accessors, not between tests. Four of the seven
     // render, and `afterEach` is too late: two mounted surfaces in one document
     // trip `screen.getByRole`/`getByText`'s "multiple elements found" as a
@@ -1656,7 +1666,7 @@ describe('R1b §8c · which surfaces the unscoped ban would fire on, measured', 
     // `policyTabText` and the reason it loops one-test-per-site.
     const firing: string[] = [];
     for (const [site, text] of ALL_BAN_SURFACES) {
-      const rendered = text();
+      const rendered = await text();
       cleanup();
       if (unscopedUploadRefusals(rendered).length > 0) firing.push(site);
     }

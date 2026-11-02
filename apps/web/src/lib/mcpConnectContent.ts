@@ -635,13 +635,7 @@ export const MCP_SETUP_STEPS: readonly McpSetupStep[] = [
   },
 ];
 
-/**
- * A pointer to the committed document that settles the capability boundary, so
- * a reader can go and check rather than take the page's word. Rendered as inert
- * text — it is a repository path, not a link, and this build serves no
- * documentation route.
- */
-export const MCP_AUDIT_DOC = 'docs/mcp-capability-audit.md';
+/* ~~MCP_AUDIT_DOC~~ — removed 2026-11-02: no consumer since the Connect Your Agent copy was cut. */
 
 // --- the Connect Your Agent WIDGET (2026-10-12) -------------------------------
 

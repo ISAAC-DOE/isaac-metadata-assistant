@@ -716,6 +716,7 @@
      sideways inside its own box when the destinations do not fit, and the page
      itself never scrolls with it (`ALLOW-LEFTNAV-SCROLL` in e2e/layout-allowlist.ts). */
   .leftnav {
+    position: relative; /* the offset parent of its items, for keep-in-view */
     width: 100%;
     flex-direction: row;
     flex-wrap: nowrap;

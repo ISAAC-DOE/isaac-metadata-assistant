@@ -850,3 +850,41 @@ describe('R0 · the walkthrough changes nothing but its own scope', () => {
     localSetItem.mockRestore();
   }, 30000);
 });
+
+// --- the walkthrough's copy makes no standing disclaimer and no false claim -----
+
+/*
+ * FINAL REVIEW I-2 (2026-11-02). The Settings step said Settings "is a readout, and it
+ * says so plainly" after the line that said so was retired — a claim about the screen
+ * that the screen no longer made. Inventory rows #118–#121 retired the standing
+ * disclaimers in the steps too. Pinned as "no false claim": no step says Settings
+ * states something it does not, and none carries the retired disclaimer phrasing.
+ * NEGATIVE CONTROL: every ban matches the exact retired sentence it replaced.
+ */
+describe('the walkthrough steps carry no retired disclaimer and no false claim about a screen', () => {
+  const BANS: Array<[string, RegExp, string]> = [
+    ['claims Settings says something', /says so plainly|it is a readout/i,
+      'Nothing on it is adjustable; it is a readout, and it says so plainly.'],
+    ['not-a-score disclaimer', /nothing here is a score|health rating/i,
+      'so nothing here is a score, a trend, or a health rating.'],
+    ['institutional-system disclaimer', /reaches an institutional system/i,
+      'nothing you do here reaches an institutional system.'],
+    ['build-provenance narration', /committed to this build|what this build actually is/i,
+      'reference files committed to this build'],
+    ['no-account narration', /no account behind it/i,
+      'there is no account behind it, so another browser or another device will be offered it again.'],
+  ];
+  it('no step body matches a ban', () => {
+    for (const step of TUTORIAL_STEPS) {
+      for (const [what, ban] of BANS) expect(step.body, `${step.id}: ${what}`).not.toMatch(ban);
+    }
+  });
+  it('NEGATIVE CONTROL — each ban matches the sentence it retired', () => {
+    for (const [what, ban, retired] of BANS) expect(retired, what).toMatch(ban);
+  });
+  it('the Settings step names only what Settings shows', () => {
+    const step = TUTORIAL_STEPS.find((s) => s.id === 'settings-and-api')!;
+    expect(step.body).toMatch(/where your work is kept/);
+    expect(step.body).toMatch(/Integrations/);
+  });
+});
