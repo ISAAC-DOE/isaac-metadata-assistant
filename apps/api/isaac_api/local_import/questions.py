@@ -861,7 +861,9 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         # a missing value does (a beamtime-scope one blocks every record).
         required = required_for(path, rids[0] if rids else None) if path else None
         affects = any(r in group_of for r in rids) or (not group_of and bool(rids)) or (required and not rids)
-        if path and rids:
+        if path and rids and cf["kind"] != B.MACRO_SETPOINT_CONFLICT_KIND:
+            # r5f M7: never for a macro-versus-file-name set-point conflict: a decision on the set-point candidate (the file
+            # name's reading, confirmed) is no answer to "macro or file name?", so it does not cover it
             # a decision that IS this conflict's own answer settles it already (it is then not open): not counted here
             own = {"kind": "conflict", "id": cf["conflict_id"]}
             by_run = [[(d, v) for d, v in held(r, path) if d.get("target") != own] for r in rids]
@@ -1026,7 +1028,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 # (exactly the candidates `confirm_value_shown` names, so each value printed is recorded as an exposure)
                 confirmable = _confirmable_candidates(q["targets"], cand_by_id, writable)
                 text = (f"Is the extracted {_label(path)} ({path}) right?" + _confirmed_value_text(path, confirmable)
-                        + " Confirm it, or correct it.")
+                        + " Confirm it, or correct it." + _macro_reading_note(bundle, q["targets"], scope_of_run))
                 if valueless:
                     text += (f" {len(valueless)} of its {len(q['targets'])} target(s) carry no value ({', '.join(valueless[:5])}"
                              f"{'…' if len(valueless) > 5 else ''}): confirm refuses them; answer those with correct --value, "
@@ -1867,6 +1869,23 @@ def _asked_again_text(again: Sequence[Mapping], allowed_by_path: Mapping[str, li
 
 def _first_witness(reading: Mapping) -> Mapping:
     return (reading.get("witnesses") or [{}])[0] or {}
+
+
+def _macro_reading_note(bundle: Mapping, targets: Sequence[Mapping], scope_of_run) -> str:
+    """r5f M7: the macro's reading, in the question of the candidate it disagrees with: while a
+    ``macro_setpoint_disagrees`` conflict on one of ``targets`` is open, the question says what the macro states and
+    names the question that settles it (confirming the candidate does not)."""
+    ids = {t["id"] for t in targets if t.get("kind") == "candidate"}
+    notes = []
+    for cf in bundle["conflicts"]:
+        if (cf.get("kind") == B.MACRO_SETPOINT_CONFLICT_KIND and cf.get("candidate_id") in ids
+                and cf["value_state"] in (B.STATE_CONFLICTING, B.STATE_NEEDS_REVIEW) and cf.get("run_ids")):
+            file_reading, macro_reading = cf["readings"][0], cf["readings"][1]
+            where = macro_reading["witnesses"][0].get("relative_path")
+            qid = _qid(scope_of_run(cf["run_ids"][0]), "resolve_conflict", cf["conflict_id"])
+            notes.append(f" The macro {where} states {macro_reading['value']} V for this measurement; the file name states "
+                         f"{file_reading['value']} V. Confirming the value here does not settle that: answer {qid}.")
+    return "".join(notes)
 
 
 def _conflict_answer(qid: str, cf: Mapping, path: str | None, enum: list | None, writable: frozenset[str],
@@ -3018,7 +3037,7 @@ def _curve(bundle: Mapping, gid: str) -> dict:
     ``unusable`` (c8-r): every undecided result with a curve fails QC as NOT A USABLE SPECTRUM
     (:data:`mutations.UNUSABLE_CURVE_REASONS`), which ``decide`` refuses to approve — or the one approved result is
     such a curve (an older build's approval, ``approved: True``), which composes nothing."""
-    from .mutations import unusable_curve_reasons
+    from .mutations import reprocess_cannot_help, unusable_curve_reasons
     from .records import SPECTRUM_ROLES
 
     def unusable(r: Mapping) -> list[str]:
@@ -3047,7 +3066,7 @@ def _curve(bundle: Mapping, gid: str) -> dict:
     roles = ("athena_normalized",) + SPECTRUM_ROLES
     qc = latest.get("qc") or {}
     return {"state": "curve" if any(f.get("role") in roles for f in files) else "no_curve", "result_id": B.processing_id(latest),
-            "no_output_file": not files, "verdict": qc.get("verdict"),
+            "no_output_file": not files, "no_retry": reprocess_cannot_help(latest), "verdict": qc.get("verdict"),
             "reasons": list(qc.get("reasons") or ()) or sorted({i.get("skip_reason") for i in latest.get("inputs") or () if i.get("skip_reason")})}
 
 
@@ -3288,9 +3307,7 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
             # never "approve its processing result": with no output file `decide` refuses that approval, and without a
             # normalised spectrum it would supply no series. The real steps are named instead.
             pid = curve["result_id"]
-            from .mutations import reprocess_cannot_help
-
-            no_retry = reprocess_cannot_help(curve["reasons"])  # r5f L1: its scans share too few points: re-running adds none
+            no_retry = curve.get("no_retry", False)  # r5f L1: its scans share too few points and no other scan has more
             hard.append(f"its processing result {pid} has no curve ("
                         + ("no output file" if curve["no_output_file"] else "no normalised spectrum")
                         + f"; QC {curve['verdict'] or 'not run'}{': ' + ', '.join(curve['reasons']) if curve['reasons'] else ''}), "

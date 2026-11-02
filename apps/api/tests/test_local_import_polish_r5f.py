@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import shutil
 from pathlib import Path
@@ -194,11 +195,150 @@ def test_answering_the_set_point_disagreement_is_the_scientists_and_the_bundle_s
     assert B.check_bundle(out) == []
 
 
+# --- M7, the review: order of answers, macros that declare several files, folders, provenance -------------
+
+
+def _imported(tmp_path: Path):
+    out = tmp_path / "bundle"
+    assert cli.main(["import", str(_corpus(tmp_path)), "--out", str(out)]) == 0
+    b = M.load(out)
+    [cf] = _links(b)
+    qs = Q.consolidate(b)["questions"]
+    qm = next(x for x in qs if {"kind": "conflict", "id": cf["conflict_id"]} in x["targets"])
+    qv = next(x for x in qs if x["kind"] == "confirm_value" and cf["candidate_id"] in json.dumps(x["targets"]))
+    return out, cf, qm, qv
+
+
+def _macro_question(out: Path, cf: dict) -> list[dict]:
+    return [x for x in Q.consolidate(M.load(out))["questions"] if {"kind": "conflict", "id": cf["conflict_id"]} in x["targets"]]
+
+
+def _governing(out: Path, cf: dict):
+    b = M.load(out)
+    cand = next(c for c in b["candidates"] if c["candidate_id"] == cf["candidate_id"])
+    return B.candidate_decision(b, cand)
+
+
+def test_confirming_the_file_name_value_first_leaves_the_macro_question_open(tmp_path):
+    out, cf, qm, qv = _imported(tmp_path)
+    assert cli.main(["bundle", "decide", str(out), "--question", qv["question_id"], "--decision", "confirm", "--by", WHO]) == 0
+    [open_q] = _macro_question(out, cf)
+    assert open_q["affects_record"] is True and open_q["tier"] == qm["tier"] and not open_q.get("covered_by_decisions")
+
+
+def test_the_macro_answer_wins_over_a_later_bare_confirm_of_the_candidate(tmp_path):
+    out, cf, qm, qv = _imported(tmp_path)
+    assert cli.main(["bundle", "decide", str(out), "--question", qm["question_id"], "--decision", "confirm", "--value", "0.8",
+                     "--json", "--by", WHO]) == 0
+    assert cli.main(["bundle", "decide", str(out), "--question", qv["question_id"], "--decision", "confirm", "--by", WHO]) == 0
+    d = _governing(out, cf)
+    assert d["target"] == {"kind": "conflict", "id": cf["conflict_id"]} and d["value"] == 0.8
+    assert B.check_bundle(out) == []
+
+
+def test_a_later_correction_with_a_value_on_the_candidate_is_the_scientists_new_word(tmp_path):
+    out, cf, qm, qv = _imported(tmp_path)
+    assert cli.main(["bundle", "decide", str(out), "--question", qm["question_id"], "--decision", "confirm", "--value", "0.8",
+                     "--json", "--by", WHO]) == 0
+    assert cli.main(["bundle", "decide", str(out), "--target", cf["candidate_id"], "--decision", "correct", "--value", "0.75",
+                     "--json", "--by", WHO]) == 0
+    assert _governing(out, cf)["value"] == 0.75
+
+
+def test_the_candidates_question_says_what_the_macro_states_and_names_the_question_that_settles_it(tmp_path):
+    out, cf, qm, qv = _imported(tmp_path)
+    assert "run2.mac states 0.8 V" in qv["text"] and "the file name states 0.7 V" in qv["text"] and qm["question_id"] in qv["text"]
+
+
+def _multi(tmp_path: Path, acquired, macros, name="multi") -> Path:
+    root = tmp_path / name
+    root.mkdir()
+    shutil.copy(FIXTURE / "Zz_XAS.mac", root / "Zz_XAS.mac")
+    for stem, epoch in acquired:
+        _write_run(root, stem, epoch)
+    for fn, stems in macros.items():
+        (root / fn).write_text("# SYNTHETIC FIXTURE -- read as TEXT, never executed.\nqdo Zz_XAS.mac\n" + "".join(f"newfile {x}\n" for x in stems))
+    return root
+
+
+P = "ZZ1_acid_fresh_filter10"
+
+
+def test_a_neighbour_macro_that_declares_two_files_sets_no_window(tmp_path):
+    root = _multi(tmp_path, [(f"01_01_{P}_100mV", 4102445400), (f"03_01_{P}_400mV", 4102446600), (f"02_01_{P}_700mV", 4102447200),
+                             (f"03_02_{P}_500mV", 4102447800)],
+                  {"run1.mac": [f"01_01_{P}_100mV"], "run2.mac": [f"02_01_{P}_800mV"],
+                   "run3.mac": [f"03_01_{P}_400mV", f"03_02_{P}_500mV"]})
+    assert _links(_build(root)) == []  # run3.mac declares two files: its start is not one time, and the 700mV file is inside it
+
+
+def test_a_macro_that_declares_two_names_is_not_linked_either(tmp_path):
+    root = _multi(tmp_path, [(f"01_01_{P}_100mV", 4102445400), (f"02_01_{P}_700mV", 4102446000), (f"03_01_{P}_400mV", 4102446600)],
+                  {"run1.mac": [f"01_01_{P}_100mV"], "run2.mac": [f"02_01_{P}_800mV", f"02_01_{P}_900mV"], "run3.mac": [f"03_01_{P}_400mV"]})
+    assert _links(_build(root)) == []
+
+
+def test_run_numbers_of_different_folders_are_not_mixed(tmp_path):
+    root = tmp_path / "twofolders"
+    root.mkdir()
+    shutil.copy(FIXTURE / "Zz_XAS.mac", root / "Zz_XAS.mac")
+    (root / "day1").mkdir()
+    (root / "day2").mkdir()
+    for stem, ep in [(f"01_01_{P}_100mV", 4102445400), (f"03_01_{P}_400mV", 4102446600)]:
+        _write_run(root / "day1", stem, ep)
+    for stem, ep in [("01_01_B_100mV", 4102535400), (f"02_01_{P}_700mV", 4102446000), ("03_01_B_400mV", 4102536600)]:
+        _write_run(root / "day2", stem, ep)
+    for folder, n, stem in [("day1", 1, f"01_01_{P}_100mV"), ("day1", 3, f"03_01_{P}_400mV"), ("day2", 1, "01_01_B_100mV"),
+                            ("day2", 2, f"02_01_{P}_800mV"), ("day2", 3, "03_01_B_400mV")]:
+        (root / folder / f"run{n}.mac").write_text(f"qdo Zz_XAS.mac\nnewfile {stem}\n")
+    assert _links(_build(root)) == []  # day2's neighbours are 1.2 days away from the 700mV file's own folder slot
+
+
+def test_the_same_run_number_twice_in_one_folder_links_nothing(tmp_path):
+    root = _corpus(tmp_path)
+    (root / "run01.mac").write_text(f"qdo Zz_XAS.mac\nnewfile 01_01_ZZ1_acid_fresh_filter10_100mV\n")  # a second "run 1"
+    assert _links(_build(root)) == []
+
+
+def test_the_files_own_reading_must_be_what_the_candidate_holds(tmp_path):
+    root = _corpus(tmp_path)
+    ev: dict = {}
+    reading, candidates = hist.read_local_archive(root, source_id="S", evidence_sink=ev)
+    bundle = B.build_bundle(reading, candidates, evidence_by_source=ev, source_kind="folder", created_utc=NOW)
+    [cf] = _links(bundle)
+    assert "Same run number" not in cf["explanation"] and "tie the two to one measurement" in cf["explanation"]
+    bad = [dict(c, value=0.65) if c["candidate_id"] == cf["candidate_id"] else c for c in bundle["candidates"]]
+    assert B._macro_setpoint_conflicts(bundle["runs"], [c for c in bundle["conflicts"] if c["kind"] != B.MACRO_SETPOINT_CONFLICT_KIND],
+                                       bad, bundle["sources"]) == []
+
+
+def test_the_unknown_candidate_check_holds_for_every_kind_and_the_exemption_is_the_set_point_only(tmp_path):
+    b = _build(_corpus(tmp_path))
+    [cf] = _links(b)
+    x = copy.deepcopy(b)
+    next(c for c in x["conflicts"] if c["conflict_id"] == cf["conflict_id"])["candidate_id"] = "cand-9999"
+    assert any("unknown candidate cand-9999" in e for e in B.validate_bundle(x))
+    x = copy.deepcopy(b)
+    cand = next(c for c in x["candidates"] if c["value"] is not None and c["target_field_path"] not in (None, SETPOINT) and c["run_id"]
+                and c["state_basis"]["unresolved_reason"] is None)
+    fake = {**copy.deepcopy(cf), "conflict_id": f"conf-{len(x['conflicts']) + 1:03d}", "candidate_id": cand["candidate_id"]}
+    x["conflicts"].append(fake)
+    assert any("records no disagreement" in e for e in B.validate_bundle(x))
+    assert B.validate_bundle(b) == []
+
+
+def test_no_older_legacy_question_id_moves(tmp_path):
+    b = _build(_corpus(tmp_path))
+    ids = [q["target"]["id"] for q in b["questions"]]
+    assert b["questions"][-1]["target"]["id"] == _links(b)[0]["conflict_id"] and len(ids) == len(set(ids))
+
+
 # --- L1, L2 -----------------------------------------------------------------------------------------
 
 
-def _failed_result():
-    res = {"group_id": "rg-synthetic", "inputs": [{"source_id": "src-1"}, {"source_id": "src-2"}], "qc": {}, "steps": []}
+def _failed_result(extra_inputs=()):
+    res = {"group_id": "rg-synthetic", "inputs": [{"source_id": "src-1", "used": True}, {"source_id": "src-2", "used": True}, *extra_inputs],
+           "qc": {}, "steps": []}
     return PR._fail_too_few_common(res, 2, 14, 20)
 
 
@@ -209,13 +349,25 @@ def test_too_few_common_points_has_a_statement_and_the_scan_counts():
     assert "2 of 2 listed scans were used" in said and "share 14 points" in said and "at least 20" in said
     assert "cannot add points" in said
     assert out["qc"]["metrics"]["scans_listed"] == 2 and out["qc"]["metrics"]["scans_used"] == 2
+    assert out["qc"]["metrics"]["reprocess_cannot_help"] is True
     assert cli._scans_line(out) == "2 of 2 scans used"
 
 
 def test_a_single_short_scan_says_its_own_points():
-    res = {"group_id": "rg-synthetic", "inputs": [{"source_id": "src-1"}], "qc": {}, "steps": []}
-    said = PR._fail_too_few_common(res, 1, 14, 20)["qc"]["statements"]["too_few_common_points"]
-    assert said.startswith("1 of 1 listed scan was used, and it has 14 usable points; the merge needs at least 20.")
+    res = {"group_id": "rg-synthetic", "inputs": [{"source_id": "src-1", "used": True}], "qc": {}, "steps": []}
+    out = PR._fail_too_few_common(res, 1, 14, 20)
+    assert out["qc"]["statements"]["too_few_common_points"].startswith("1 of 1 listed scan was used, and it has 14 usable points; the merge needs at least 20.")
+    assert out["qc"]["metrics"]["reprocess_cannot_help"] is True
+
+
+def test_cannot_help_is_not_said_when_a_scan_left_out_has_more_points():
+    out = _failed_result([{"source_id": "src-3", "used": False, "skip_reason": "scan_lacks_chosen_columns", "diagnostics": {"points_read": 90}}])
+    said = out["qc"]["statements"]["too_few_common_points"]
+    assert "cannot add points" not in said and "1 scan left out of the merge has more points" in said
+    assert out["qc"]["metrics"]["reprocess_cannot_help"] is False
+    assert not M.reprocess_cannot_help(out)
+    smaller = _failed_result([{"source_id": "src-3", "used": False, "skip_reason": "too_few_points", "diagnostics": {"points_read": 5}}])
+    assert smaller["qc"]["metrics"]["reprocess_cannot_help"] is True
 
 
 def test_the_failure_id_does_not_move_with_the_statement():
@@ -223,18 +375,18 @@ def test_the_failure_id_does_not_move_with_the_statement():
     assert _failed_result()["result_id"] == plain["result_id"]
 
 
-def test_no_remedy_offers_re_processing_a_group_whose_scans_share_too_few_points():
-    from isaac_api.local_import.mutations import reprocess_cannot_help
-
-    assert reprocess_cannot_help("too_few_common_points: 14") and reprocess_cannot_help(["too_few_common_points"])
-    assert not reprocess_cannot_help("no_edge") and not reprocess_cannot_help([])
-    said = R.processing_remedy({"group_id": "rg-synthetic", "no_curve_results": {"proc-x": "too_few_common_points: 14"}})
+def test_no_remedy_offers_re_processing_only_when_it_cannot_help():
+    stuck, open_ = _failed_result(), _failed_result([{"source_id": "src-3", "used": False, "diagnostics": {"points_read": 90}}])
+    assert M.reprocess_cannot_help(stuck) and not M.reprocess_cannot_help(open_)
+    assert not M.reprocess_cannot_help({"failure": {"code": "no_edge"}, "qc": {"metrics": {"reprocess_cannot_help": True}}})
+    assert not M.reprocess_cannot_help({"failure": {"code": "too_few_common_points"}, "qc": {"metrics": {}}})  # an older result
+    said = R.processing_remedy({"group_id": "rg-synthetic", "no_curve_results": {"proc-x": "too_few_common_points: 14"}, "no_retry_results": ["proc-x"]})
     assert "--params-file" not in said and "cannot add points" in said and "--decision reject" in said
-    other = R.processing_remedy({"group_id": "rg-synthetic", "no_curve_results": {"proc-x": "no_output_file"}})
-    assert "--params-file" in other
-    refusal = M.no_curve_refusal({"result_id": "proc-x", "group_id": "rg-synthetic", "failure": {"code": "too_few_common_points", "detail": "14"},
-                                  "qc": {"verdict": "fail"}})
+    assert "--params-file" in R.processing_remedy({"group_id": "rg-synthetic", "no_curve_results": {"proc-x": "too_few_common_points: 14"}})
+    assert "--params-file" in R.processing_remedy({"group_id": "rg-synthetic", "no_curve_results": {"proc-x": "no_output_file"}})
+    refusal = M.no_curve_refusal({**stuck, "result_id": "proc-x"})
     assert "--params-file" not in refusal and "cannot add points" in refusal and "--decision reject" in refusal
+    assert "--params-file" in M.no_curve_refusal({**open_, "result_id": "proc-x"})
 
 
 def test_the_skipped_scan_sentence_names_the_file_not_the_source_id():
@@ -335,6 +487,23 @@ def test_merge_after_the_one_word_form_no_longer_says_a_term_needs_one(b, capsys
     merged = json.loads(out.read_text(encoding="utf-8"))
     assert merged["totals"]["need_one_word"] == 0
     assert _term(merged, REACTION, "cathodic corrosion")["draft"]["one_word_form_given"] == "cathodic_corrosion"
+
+
+def test_a_spaced_request_whose_one_word_form_is_on_the_list_says_it_is_on_the_list(b, capsys):
+    from isaac_api.local_import import propose_terms as P
+
+    env = "context.environment"
+    assert _said(b, capsys, "--target", _miss(b, env)["value_id"], "--decision", "correct", "--value", "ex situ")[0] == 0
+    entry = _term(_report(b, capsys), env, "ex situ")
+    assert "ask" not in entry["draft"] and entry["draft"]["one_word_form_given"] == "ex_situ"
+    assert "on the field's list" in entry["draft"]["reason"] and "scientist has given" not in entry["draft"]["reason"]
+
+
+def test_the_export_outcome_names_at_most_five_warning_kinds_and_counts_the_rest():
+    rows = [{"text": f"w{i}", "records": 3, "example_question": None} for i in range(8)]
+    said = R.warnings_outcome_sentence(rows)
+    assert said.count("record(s)") == R.WARNINGS_SHOWN and "w4" in said and "w5" not in said and "and 3 more kinds" in said
+    assert "more kind" not in R.warnings_outcome_sentence(rows[:5])
 
 
 def test_a_spaced_request_with_no_one_word_form_still_asks(b, capsys):

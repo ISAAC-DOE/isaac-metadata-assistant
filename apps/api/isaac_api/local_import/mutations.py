@@ -761,16 +761,17 @@ def no_curve_cause(result: Mapping) -> str:
     return f"{code}: {detail}" if detail else str(code)
 
 
-#: r5f L1: failure codes where processing the group again cannot help: its scans share too few points, and a
-#: params file cannot add points the scans do not have. A remedy for such a result never offers re-processing.
+#: r5f L1: failure codes where processing the group again can be said not to help: the scans share too few points and
+#: (the result's metric) no scan left out has more. A remedy for such a result never offers re-processing.
 NO_REPROCESS_FAILURES = ("too_few_common_points",)
 
 
-def reprocess_cannot_help(causes: Any) -> bool:
-    """``True`` when every cause (a failure ``code`` or ``code: detail``, or a list of them) is one that re-processing
-    cannot change (:data:`NO_REPROCESS_FAILURES`)."""
-    items = [causes] if isinstance(causes, str) else list(causes or ())
-    return bool(items) and all(str(c).split(":")[0].strip() in NO_REPROCESS_FAILURES for c in items)
+def reprocess_cannot_help(result: Mapping) -> bool:
+    """``True`` when processing this result's group again cannot make a curve: it failed for a code in
+    :data:`NO_REPROCESS_FAILURES` AND its own metrics say so (``reprocess_cannot_help``: one scan used, or no scan left
+    out has more points). A result stored without that metric, or with other scans that might be used, is not one."""
+    code = ((result.get("failure") or {}).get("code")) or ""
+    return code in NO_REPROCESS_FAILURES and ((result.get("qc") or {}).get("metrics") or {}).get("reprocess_cannot_help") is True
 
 
 def reprocess_command(group_id: str) -> str:
@@ -790,7 +791,7 @@ def no_curve_refusal(result: Mapping) -> str:
         "Re-running `isaac process` with the same parameters gives the same result. The options: "
         f'reject it (`isaac bundle decide <bundle_dir> --target {pid} --decision reject --by "<your name>"`); '
         + ("(re-processing with other parameters cannot add points the scans do not have) "
-           if reprocess_cannot_help(no_curve_cause(result)) else
+           if reprocess_cannot_help(result) else
            f"or mark it needs_changes (`--target {pid} --decision needs_changes`) and re-process the group with "
            f"other parameters ({reprocess_command(gid)}), which adds a new result to review; ")
         + "or leave the group out of the records "

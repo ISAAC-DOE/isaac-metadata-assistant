@@ -1075,23 +1075,37 @@ def _scan_file(entry: Mapping) -> str:
     return f"{name} (scan {entry['scan']})" if entry.get("scan") is not None else name
 
 
+def _more_points_elsewhere(res: Mapping, points: int) -> int:
+    """How many scans left OUT of the merge have more than ``points`` points (read): processing again might use them."""
+    return sum(1 for i in res.get("inputs") or () if not i.get("used")
+               and int((i.get("diagnostics") or {}).get("points_read") or 0) > points)
+
+
 def _too_few_common_statement(res: Mapping, scans_used: int, points: int, minimum: int) -> str:
     """r5f L1: one plain sentence for a group whose scans share too few points to merge: how many scans it lists and
-    used, how many points they have in common, and that processing again cannot add points."""
+    used, how many points they have, and (only when it is true) that processing again cannot add points. It is true
+    when one scan is used, or when no scan left out has more points than these; else the scans left out are named."""
     listed = len(res.get("inputs") or ())
     lead = f"{scans_used} of {listed} listed scan{'' if listed == 1 else 's'} {'was' if scans_used == 1 else 'were'} used"
     have = (f"it has {points} usable point{'' if points == 1 else 's'}" if scans_used == 1
             else f"they share {points} point{'' if points == 1 else 's'} on a common energy grid")
+    more = _more_points_elsewhere(res, points)
+    tail = ("Processing the group again with other parameters cannot add points the scans do not have."
+            if scans_used == 1 or not more else
+            f"{more} scan{' left' if more == 1 else 's left'} out of the merge ha{'s' if more == 1 else 've'} more points (see "
+            "inputs): processing again with other parameters might use them.")
     return (f"{lead}, and {have}; the merge needs at least {minimum}. No merged curve was made, so there is nothing "
-            "to approve. Processing the group again with other parameters cannot add points the scans do not have.")
+            f"to approve. {tail}")
 
 
 def _fail_too_few_common(res: dict, scans_used: int, points: int, minimum: int) -> dict:
     """:func:`_fail` ``too_few_common_points`` plus its statement and scan counts (said after the id is fixed: the id
-    of a failure comes from its code and detail only, so none moves)."""
+    of a failure comes from its code and detail only, so none moves). ``reprocess_cannot_help`` (a metric) is what the
+    remedies read: they offer re-processing unless it is true."""
     out = _fail(res, "too_few_common_points", str(points))
     out["qc"]["metrics"] = {**out["qc"].get("metrics", {}), "scans_listed": len(res.get("inputs") or ()),
-                            "scans_used": scans_used, "common_points": points}
+                            "scans_used": scans_used, "common_points": points,
+                            "reprocess_cannot_help": scans_used == 1 or not _more_points_elsewhere(res, points)}
     out["qc"]["statements"] = {"too_few_common_points": _too_few_common_statement(res, scans_used, points, minimum)}
     return out
 

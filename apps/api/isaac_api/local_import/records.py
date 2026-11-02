@@ -843,6 +843,8 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
             # approved before `decide` refused it: a result with NO CURVE. Re-processing with the same
             # parameters gives the same result, so the remedy must not say "re-run and approve"
             used["no_curve"] = no_curve_cause(r)
+            if reprocess_cannot_help(r):
+                used["no_retry"] = True  # r5f L1: (a key only when true)
         bound = d.get("approved_files")
         current = [{"role": f.get("role"), "relative_path": f.get("relative_path"), "sha256": f.get("sha256")} for f in files]
         if bound is not None and json.dumps(bound, sort_keys=True) != json.dumps(current, sort_keys=True):
@@ -1022,6 +1024,14 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
                                                      if r.get("state") in B.PROCESSING_UNDECIDED_STATES
                                                      and not B.processing_not_applicable(r)
                                                      and not (r.get("outputs") or {}).get("files")},
+                                # r5f L1: those of them whose group processing again cannot help
+                                # (a key only when there is one, so a draft's processing section stays what it was)
+                                **({"no_retry_results": ids} if (ids := [
+                                    B.processing_id(r) for r in mine
+                                    if r.get("state") in B.PROCESSING_UNDECIDED_STATES
+                                    and not B.processing_not_applicable(r)
+                                    and not (r.get("outputs") or {}).get("files")
+                                    and reprocess_cannot_help(r)]) else {}),
                                 # a result a scientist REJECTED exists: "none exists" would send them to re-run
                                 "rejected": [B.processing_id(r) for r in mine if r.get("state") == B.STATE_REJECTED]}
 
@@ -2015,6 +2025,13 @@ def validate_draft_file(draft: Mapping, *, run_portal, composition: Mapping | No
     }
 
 
+def reprocess_cannot_help(result: Mapping) -> bool:
+    """:func:`mutations.reprocess_cannot_help` (imported here lazily, as this module imports mutations)."""
+    from .mutations import reprocess_cannot_help as cannot
+
+    return cannot(result)
+
+
 def no_curve_cause(result: Mapping) -> str:
     """:func:`mutations.no_curve_cause` (imported here lazily, as this module imports mutations)."""
     from .mutations import no_curve_cause as cause
@@ -2054,7 +2071,7 @@ def processing_blocker(processing: Mapping) -> str:
 
 def processing_remedy(processing: Mapping) -> str:
     """The sentence saying how a group's processing-derived values get into its record."""
-    from .mutations import reprocess_cannot_help, reprocess_command
+    from .mutations import reprocess_command
 
     waiting = list(processing.get("awaiting_approval") or ())
     rejected = list(processing.get("rejected") or ())
@@ -2082,7 +2099,7 @@ def processing_remedy(processing: Mapping) -> str:
         said = processing["calibration_unconfirmed"]
         return (f"the approved result {pid} is not used: {said[0].lower() + said[1:]} Until one of these is done the "
                 "record has no series, QC status or E0 and is not exported.")
-    if processing.get("result") and processing.get("no_curve") and reprocess_cannot_help(processing["no_curve"]):
+    if processing.get("result") and processing.get("no_curve") and processing.get("no_retry"):
         # r5f L1: its scans share too few points: processing again cannot add any, so only withdraw or leave out
         pid = processing["result"]
         return (f"the approved result {pid} has no curve ({processing['no_curve']}): its scans share too few points to "
@@ -2128,7 +2145,7 @@ def processing_remedy(processing: Mapping) -> str:
                 f"needs_changes (`--target {ids[0]} --decision needs_changes`) and re-process the group with a setting "
                 f"the scientist chooses ({reprocess_command(gid)}), then approve the new result if its curve is usable; "
                 f"or {leave_out}.")
-    if no_curve and reprocess_cannot_help(list(no_curve.values())):
+    if no_curve and set(no_curve) <= set(processing.get("no_retry_results") or ()):
         # r5f L1: the scans share too few points; no params file adds any
         ids = list(no_curve)
         said = "; ".join(f"{pid} ({cause})" for pid, cause in list(no_curve.items())[:3]) + (" …" if len(ids) > 3 else "")
@@ -2234,6 +2251,14 @@ def grouped_sentence(rows: Sequence[Mapping]) -> str:
     """One sentence for :func:`group_by_text` rows: each text once, with how many records carry it and one example."""
     return "; ".join(f"{r['text']} ({r['records']} record(s)" + (f", e.g. question {r['example_question']}" if r["example_question"] else "") + ")"
                      for r in rows)
+
+
+def warnings_outcome_sentence(rows: Sequence[Mapping]) -> str:
+    """The sentence ``export``'s ``outcome`` adds for :func:`group_by_text` rows: at most :data:`WARNINGS_SHOWN` kinds,
+    then how many more there are (the structured ``warnings_by_text`` keeps every one)."""
+    more = len(rows) - WARNINGS_SHOWN
+    return (" Warnings that apply, each said once: " + grouped_sentence(rows[:WARNINGS_SHOWN])
+            + (f"; and {more} more kind{'' if more == 1 else 's'}" if more > 0 else "") + " (`warnings_by_text`).")
 
 
 def portal_warnings_of(report: Mapping) -> list[dict]:
@@ -2878,7 +2903,7 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         # r5f L3: the same warning on every record is said once here, with its record count and one example question;
         # each row of `exported` keeps its own `warnings`
         result["warnings_by_text"] = said_once
-        result["outcome"] += " Warnings that apply, each said once: " + grouped_sentence(said_once) + " (`warnings_by_text`)."
+        result["outcome"] += warnings_outcome_sentence(said_once)
     if portal_warned:
         # r4-b M7: each portal warning once, with how many of the records written carry it
         result["portal_warnings"] = portal_warning_summary(portal_warned)
