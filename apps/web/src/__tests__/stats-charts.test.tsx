@@ -13,6 +13,7 @@ import {
   StatsColumnChart,
   StatsComparisonRows,
   StatsLineChart,
+  StatsTrendChart,
   StatsStackedBar,
   TechnicalDetails,
   estimateTextWidth,
@@ -189,6 +190,24 @@ const ALL_FORMS: [string, string, () => void][] = [
           ]}
           unit="records"
           xAxisLabel="Week"
+        />,
+      ),
+  ],
+  [
+    'StatsTrendChart',
+    'Changes per day',
+    () =>
+      render(
+        <StatsTrendChart
+          caption="Changes per day"
+          rows={[
+            { key: 'd1', label: 'Jul 1', value: 0 },
+            { key: 'd2', label: 'Jul 2', value: 3 },
+            { key: 'd3', label: 'Jul 3', value: 1 },
+          ]}
+          axisLabels={{ first: 'Jul 1', last: 'Jul 3' }}
+          unit="changes"
+          periodHeader="Day (UTC)"
         />,
       ),
   ],
@@ -881,6 +900,8 @@ describe('the chart palette declared on .statistics', () => {
     'border-collapse',
     'border-radius',
     'display',
+    // An opacity, never a colour: the trend area's `fill` carries the token.
+    'fill-opacity',
     'flex',
     'flex-direction',
     'flex-wrap',
@@ -1172,9 +1193,11 @@ describe('the chart palette declared on .statistics', () => {
      * · +1 to each since 2026-10-18: Record Verification's compact validator row
      *   fills its passing share with `background: var(--stats-series)` on a
      *   `.stats-chart-bar` span — a data mark, under the data-ink policy.
+     * · +1 since 2026-11-02: the trend chart's area, `fill: var(--stats-series)`
+     *   on `.stats-chart-series`.
      */
-    expect(seen.length, 'the colour scan found almost nothing — it is broken').toBe(52);
-    expect(scanned.length, 'the literal-colour tier read almost nothing — it is broken').toBe(55);
+    expect(seen.length, 'the colour scan found almost nothing — it is broken').toBe(53);
+    expect(scanned.length, 'the literal-colour tier read almost nothing — it is broken').toBe(56);
     expect(LITERAL_COLOUR_EXCEPTIONS, 'the exception list has grown').toHaveLength(1);
     expect(seen, 'the ramp fills must be covered').toContain(
       'stats-chart-segment fill var(--stats-ramp-3)',
@@ -1264,8 +1287,9 @@ describe('the chart palette declared on .statistics', () => {
     // the line rule and on the unslotted tooltip key, and the bar/marker rule,
     // which is one declaration counted once per class in its group. 20 since
     // 2026-10-18: Record Verification's compact validator rows fill their
-    // passing share with the series colour, on a `stats-chart-bar` span.
-    expect(references.length, 'no data-ink reference was inspected').toBe(20);
+    // passing share with the series colour, on a `stats-chart-bar` span. 21 since
+    // 2026-11-02: the trend chart's area wears the series colour, as data ink.
+    expect(references.length, 'no data-ink reference was inspected').toBe(21);
   });
 });
 
@@ -1360,6 +1384,9 @@ describe('the components emit no inline colour', () => {
     'Share of fields by class': 4,
     'Exports per week': 7,
     'Operations by group': 0,
+    // The y-tick positions, the band's height and gutter, and the axis row's
+    // gutter: geometry only.
+    'Changes per day': 8,
   };
 
   it.each(ALL_FORMS)('%s emits no colour attribute and no colour in style', (_name, caption, mount) => {
@@ -1394,7 +1421,7 @@ describe('the components emit no inline colour', () => {
     // polyline must not be filled — and is the ONLY presentation attribute any
     // form emits. Any other value is a colour the stylesheet cannot govern.
     expect([...new Set(attributes)].sort()).toEqual(
-      caption === 'Exports per week' ? ['fill="none"'] : [],
+      caption === 'Exports per week' || caption === 'Changes per day' ? ['fill="none"'] : [],
     );
   });
 

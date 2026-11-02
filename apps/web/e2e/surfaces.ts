@@ -482,27 +482,6 @@ export const SURFACES: readonly Surface[] = [
   },
   {
     /*
-     * The My Stats tab — a NEW surface, added with the tab restructure because it
-     * is genuinely new markup that no existing entry reaches: `statistics` and
-     * `statistics-example` both open the default `general` tab, so nothing here
-     * would have scanned the personal tab's gate, its eight planned-view cards, or
-     * their headings.
-     *
-     * ORDINARY scope on purpose, and it is the honest one for this surface: the
-     * tab renders identically in a worked-example session, because it reads
-     * nothing at all. Opening it in a session would scan the same DOM twice.
-     *
-     * `ready` waits on the gate's own title rather than on the page `h1`, so the
-     * scan cannot race a tab that has not painted its panel yet.
-     */
-    id: 'statistics-mine',
-    name: 'Statistics — My Stats',
-    path: '/statistics?tab=mine',
-    scope: 'ordinary',
-    ready: { role: 'heading', name: 'Personal Statistics' },
-  },
-  {
-    /*
      * *** ADDED 2026-09-15 TO STOP A COVERAGE LOSS, not to add coverage that
      * never existed. ***
      *
@@ -734,8 +713,10 @@ export const TABBED_SURFACES = [
     /* `General ISAAC` -> `Overview`, and a THIRD tab added, 2026-09-15: the
        Statistics redesign moved the engineering content onto
        `Build & Verification` so a scientist does not land on it. Measured in
-       Chrome — the tablist reads exactly these three, in this order. */
-    tabs: ['Overview', 'My Stats', 'Build & Verification'],
+       Chrome — the tablist reads exactly these three, in this order.
+       TWO since 2026-11-02: My Stats is not offered while no personal source
+       can return data. */
+    tabs: ['Overview', 'Build & Verification'],
     panelIdPrefix: 'statistics-tabpanel-',
   },
   {

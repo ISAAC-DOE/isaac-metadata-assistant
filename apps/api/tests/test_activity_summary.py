@@ -547,3 +547,59 @@ def test_the_module_exposes_no_mutator():
         "instant",
         "summarize",
     }
+
+
+def test_by_day_is_one_zero_filled_bucket_per_utc_day_and_sums_to_the_window():
+    """The trend series the Statistics dashboard draws: oldest first, every day of the
+    window present, and the buckets add up to `events_in_window` exactly."""
+    from datetime import datetime, timezone
+
+    from isaac_api import activity_summary
+
+    now = datetime(2099, 1, 10, 12, 0, tzinfo=timezone.utc)
+
+    class _Exp:
+        id = "SYNTHETIC-1"
+        title = "Synthetic"
+        unreadable_activity: list = []
+
+        def __init__(self, events):
+            self.activity = events
+
+    def _event(stamp: str, seq: int):
+        return activity.ActivityEvent(
+            id=f"evt-{seq}",
+            experiment_id="SYNTHETIC-1",
+            seq=seq,
+            recorded_utc=stamp,
+            actor=activity.ACTOR_UNATTRIBUTED,
+            actor_trust_basis=activity.TRUST_BASIS_UNATTRIBUTED,
+            channel=activity.CHANNEL_WEB,
+            action=activity.ACTION_EXPERIMENT_RENAMED,
+            object_type=activity.OBJECT_EXPERIMENT,
+            object_id="SYNTHETIC-1",
+        )
+
+    events = [
+        _event("2099-01-03T11:00:00Z", 1),  # before the window: not counted
+        _event("2099-01-03T13:00:00Z", 2),  # first, partial day
+        _event("2099-01-04T00:00:00Z", 6),
+        _event("2099-01-09T08:00:00Z", 3),
+        _event("2099-01-09T23:59:59Z", 4),
+        _event("2099-01-10T11:00:00Z", 5),  # today
+    ]
+    body = activity_summary.summarize(
+        [_Exp(events)],
+        now=now,
+        window_days=7,
+        hydration_complete=True,
+    )
+    days = body["by_day"]
+    assert [d["date"] for d in days] == [f"2099-01-{n:02d}" for n in range(3, 11)]
+    assert sum(d["count"] for d in days) == body["totals"]["events_in_window"] == 5
+    counts = {d["date"]: d["count"] for d in days}
+    assert counts["2099-01-03"] == 1
+    assert counts["2099-01-04"] == 1
+    assert counts["2099-01-09"] == 2
+    assert counts["2099-01-10"] == 1
+    assert counts["2099-01-05"] == 0

@@ -347,6 +347,13 @@ def summarize(
     unattributed_events = 0
     attributed_names: set[str] = set()
     changed: list[dict] = []
+    # ONE BUCKET PER UTC CALENDAR DAY the window touches, zero-filled, oldest first.
+    # Keyed by the event's own UTC date, so the buckets sum to `events_in_window`
+    # exactly — an event with an unreadable timestamp is in no bucket, as it is in
+    # no window total.
+    first_day = since.date()
+    day_count = (computed_at.date() - first_day).days + 1
+    by_day = [0] * day_count
 
     for exp in summarized:
         events = list(getattr(exp, "activity", []) or [])
@@ -362,6 +369,11 @@ def summarize(
             if recorded < since:
                 continue
             window_events.append(event)
+            # An event stamped after `computed_at` (clock skew) is in the window,
+            # which has no upper bound, so it lands in the last day rather than
+            # vanishing from the series.
+            offset = min((recorded.date() - first_day).days, day_count - 1)
+            by_day[offset] += 1
 
         for event in window_events:
             events_in_window += 1
@@ -446,6 +458,14 @@ def summarize(
             # `activity_history.activity_page` counts them, never rendered.
             "unreadable_entries": unreadable_entries,
         },
+        # ---- WHEN, one count per UTC day of the window, oldest first --------------
+        # Sums to `totals.events_in_window`. The first and last days are partial
+        # (the window starts at `since_utc`, not at midnight), which is why each
+        # bucket names its date rather than a span.
+        "by_day": [
+            {"date": (first_day + timedelta(days=i)).isoformat(), "count": n}
+            for i, n in enumerate(by_day)
+        ],
         # ---- WHAT changed, and through which surface ----------------------------
         # Complete maps over the server's own bounded vocabularies, plus the ranked
         # nonzero slices. `*_with_events` is the TRUE number of distinct kinds seen,

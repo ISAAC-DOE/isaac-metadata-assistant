@@ -2470,3 +2470,122 @@
      two-sentence disclosure does not stack into a narrow column. */
   max-width: 100ch;
 }
+
+/* ---- the Overview dashboard (2026-11-02) ------------------------------ */
+
+/* Three tracks on a wide screen, two on a laptop, one on a phone. A
+   `stats-w2` widget spans two tracks and falls back to the full row when only
+   two exist, so the rows always pair one wide widget with one narrow one. */
+.statistics .stats-dashboard {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-lg);
+  align-items: stretch;
+}
+.statistics .stats-dashboard > .widget {
+  min-width: 0;
+}
+.statistics .stats-dashboard > .stats-w2 {
+  grid-column: span 2;
+}
+/* Two tracks: wide widgets take the whole row, and `dense` lets the next narrow
+   widget fill the gap beside a narrow one instead of leaving it empty. Five
+   narrow widgets leave one over, so the last takes the full row. */
+@media (max-width: 1100px) {
+  .statistics .stats-dashboard {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-flow: row dense;
+  }
+  .statistics .stats-dashboard > .widget:last-child {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 720px) {
+  .statistics .stats-dashboard {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .statistics .stats-dashboard > .stats-w2,
+  .statistics .stats-dashboard > .widget:last-child {
+    grid-column: auto;
+  }
+}
+
+/* Two headline figures side by side, the second one quieter by position only. */
+.statistics .stats-headline-pair {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md) var(--space-xl);
+  align-items: flex-end;
+}
+
+/* ---- trend chart ---------------------------------------------------------- */
+
+/* The area under the trend line: the series colour at low opacity, so it reads
+   as the line's own extent rather than as a second series. It carries the
+   series class because it is data ink, and the colour policy keys on it. */
+.statistics .stats-trend-area.stats-chart-series {
+  fill: var(--stats-series);
+  fill-opacity: 0.1;
+}
+.statistics .stats-trend-crosshair {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+.statistics .stats-trend-axis {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.statistics .stats-trend-tick {
+  left: 0;
+  transform: translateY(-50%);
+}
+
+/* The Records widget's status figures: each carries the swatch of its segment
+   in the bar below, so identity never rests on colour alone or on position. */
+.statistics .stats-keyed-figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+  gap: var(--space-md);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.statistics .stats-keyed-figures li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+.statistics .stats-keyed-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+}
+.statistics .stats-keyed-value {
+  font-size: var(--font-size-heading-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+
+/* A widget with a range control (Activity) has the widest header. On a narrow
+   screen the title keeps a floor and the controls drop to their own line,
+   rather than the chips sliding over the title. */
+.statistics .stats-dashboard .widget-head {
+  flex-wrap: wrap;
+}
+.statistics .stats-dashboard .widget-titles {
+  min-width: min(100%, 9rem);
+}
+/* The latest-period marker sits on the plot's right edge; let its ring show. */
+.statistics .stats-trend .stats-chart-line {
+  overflow: visible;
+}

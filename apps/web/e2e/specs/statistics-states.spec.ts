@@ -211,7 +211,8 @@ const EXPECTED_STATE_IDS = [
      widget's info panel opened from the keyboard. */
   'build-facts-widgets-real-public-reference',
   'widget-info-open-real-public-reference',
-  'my-stats-no-attribution-unavailable-state',
+  /* ~~'my-stats-no-attribution-unavailable-state'~~ — the My Stats tab is not
+     offered while no personal source can return data (2026-11-02). */
 ] as const;
 
 type StateId = (typeof EXPECTED_STATE_IDS)[number];
@@ -984,46 +985,6 @@ const STATES: readonly VerificationState[] = [
       return panel;
     },
   },
-  {
-    id: 'my-stats-no-attribution-unavailable-state',
-    what:
-      'My Stats — the truthful unavailable gate. Not a zero, not an error, not a skeleton: ' +
-      'the tab states that this build cannot attribute any record to any reader.',
-    async reach({ page }) {
-      await open(page, '/statistics?tab=mine');
-      const panel = page.locator('div.statistics[role="tabpanel"]');
-      await expect(panel).toBeVisible({ timeout: 20_000 });
-      await expect(panel.getByRole('heading', { name: 'Personal Statistics' })).toBeVisible();
-      await expect(panel.getByText('Not Available in This Preview').first()).toBeVisible();
-      await expect(panel).toContainText(/It is not showing zero/i);
-      await expect(panel).toContainText(
-        /none of the figures below are zero — they are absent/i
-      );
-      // NOTHING is drawn: no chart, no stat card, no figure of any kind.
-      await expect(panel.locator('figure.stats-chart')).toHaveCount(0);
-      await expect(panel.locator('.stats-cards')).toHaveCount(0);
-      /*
-       * `MyStats` issues no request at all — stated in `MyStats.tsx`'s own
-       * header as rule 2, and TRUSTED HERE RATHER THAN PROVED.
-       *
-       * The previous sentence claimed "the whole-test request log below is what
-       * proves it". It does not, and an independent review demonstrated the gap
-       * by making `MyStats` fetch `/api/runtime/records` on mount: all eleven
-       * tests still passed. The log allowlists ORIGINS (Vite and the API), so a
-       * same-origin request is invisible to it — including, as the review also
-       * showed, a hypothetical `127.0.0.1/api/portal/metrics`, which the
-       * portal-telemetry check cannot see either because that check matches
-       * HOSTNAMES.
-       *
-       * What IS enforced here is structural: `.stats-cards` and
-       * `figure.stats-chart` must not appear inside the personal panel, which
-       * catches corpus figures arriving in the shapes they are actually drawn
-       * in. A relabelled workspace count in a bare paragraph would still pass —
-       * so this is a real guard with a known edge, not a proof.
-       */
-      return panel;
-    },
-  },
 ];
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -1068,7 +1029,7 @@ interface Finding {
  *  so one broken state cannot hide the other twelve. */
 async function commonAssertions(
   page: Page,
-  state: { id: string },
+  _state: { id: string },
   push: (detail: string) => void
 ): Promise<void> {
   // ── 1. the document never scrolls sideways ────────────────────────────────
@@ -1173,7 +1134,9 @@ async function commonAssertions(
      * noticing. It is the same reason `charts.spec.ts` asserts its caption set
      * by equality rather than by containment.
      */
-    if (items.length !== 3) push(`expected 3 tabs, found ${items.length}`);
+    /* TWO again since 2026-11-02: My Stats is not offered while no personal
+       source can return data. Still asserted EXACTLY, for the reason above. */
+    if (items.length !== 2) push(`expected 2 tabs, found ${items.length}`);
     const selected = items.filter((t) => t.selected === 'true');
     if (selected.length !== 1) push(`exactly one tab must be selected; ${selected.length} are`);
     for (const t of selected) {
@@ -1193,7 +1156,7 @@ async function commonAssertions(
   }
 
   // ── 6. the section's live region exists before it has anything to say ─────
-  if (state.id !== 'my-stats-no-attribution-unavailable-state') {
+  {
     const live = await page.locator('p.stats-verify-live[role="status"]').count();
     // The live region is inside the report branch only — it must exist wherever
     // a refresh control could be pressed, and it is asserted directly by the two

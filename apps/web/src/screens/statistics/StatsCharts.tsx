@@ -4,6 +4,7 @@ import {
   useEffect,
   useId,
   useState,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
 
@@ -459,6 +460,8 @@ const ROW_BAND = 26;
 
 export interface StatsBarChartProps {
   caption: string;
+  /** Keep the caption for assistive technology only, when the widget title already names the chart. */
+  captionHidden?: boolean;
   rows: readonly ChartRow[];
   /** The noun the values count — "records", "fields", "operations". */
   unit: string;
@@ -507,6 +510,7 @@ export interface StatsBarChartProps {
  */
 export function StatsBarChart({
   caption,
+  captionHidden = false,
   rows,
   unit,
   total,
@@ -522,6 +526,7 @@ export function StatsBarChart({
   return (
     <ChartFrame
       caption={caption}
+      captionHidden={captionHidden}
       summary={summary}
       note={note}
       tableRowHeader={categoryHeader}
@@ -626,6 +631,8 @@ function singular(unit: string): string {
 
 export interface StatsColumnChartProps {
   caption: string;
+  /** Keep the caption for assistive technology only, when the widget title already names the chart. */
+  captionHidden?: boolean;
   rows: readonly ChartRow[];
   unit: string;
   total: number | null;
@@ -650,6 +657,7 @@ export interface StatsColumnChartProps {
  */
 export function StatsColumnChart({
   caption,
+  captionHidden = false,
   rows,
   unit,
   total,
@@ -669,6 +677,7 @@ export function StatsColumnChart({
   return (
     <ChartFrame
       caption={caption}
+      captionHidden={captionHidden}
       summary={chartSummary(caption, rows, unit, total)}
       note={note}
       tableRowHeader={categoryHeader}
@@ -802,6 +811,10 @@ export function StatsColumnChart({
 
 export interface StatsStackedBarProps {
   caption: string;
+  /** The caller renders its own keyed figures beside the bar (each with its swatch). */
+  hideLegend?: boolean;
+  /** Keep the caption for assistive technology only, when the widget title already names the chart. */
+  captionHidden?: boolean;
   rows: readonly ChartRow[];
   /** The caller's OWN whole. Never re-derived from the segments. */
   total: number;
@@ -841,6 +854,8 @@ const STACK_HEIGHT = 22;
  */
 export function StatsStackedBar({
   caption,
+  hideLegend = false,
+  captionHidden = false,
   rows,
   total,
   unit,
@@ -855,9 +870,11 @@ export function StatsStackedBar({
   return (
     <ChartFrame
       caption={caption}
+      captionHidden={captionHidden}
       summary={chartSummary(caption, rows, unit, total)}
       note={note}
       legend={
+        hideLegend ? undefined : (
         <ChartLegend
           items={rows.map((row, i) => ({
             key: row.key,
@@ -866,6 +883,7 @@ export function StatsStackedBar({
             detail: legendDetail(row.value, total, unit),
           }))}
         />
+        )
       }
       tableRowHeader={categoryHeader}
       tableColumns={[unit.replace(/^./, (c) => c.toUpperCase()), 'Share']}
@@ -1258,6 +1276,180 @@ export function StatsLineChart({
 }
 
 /* ---- chart states ------------------------------------------------------ */
+
+/* ---- trend (area + line over evenly spaced periods) ------------------- */
+
+export interface StatsTrendChartProps {
+  /** Names the series for assistive technology; hidden when the widget title says it. */
+  caption: string;
+  captionHidden?: boolean;
+  /** Oldest first. Each row is one equal period; `label` names it in full. */
+  rows: readonly ChartRow[];
+  /** Short labels for the first, middle and last period on the x axis. */
+  axisLabels: { first: string; middle?: string; last: string };
+  unit: string;
+  periodHeader: string;
+}
+
+/**
+ * A single-series trend: a soft area under a 2px line, recessive grid, a marker
+ * only on the latest period and on the one under the pointer, and a crosshair.
+ * Built for dense series (a day per point over a month), where a marker on every
+ * point would be noise. The periods are evenly spaced by construction — the
+ * caller buckets them — so the x axis is a true time axis.
+ */
+export function StatsTrendChart({
+  caption,
+  captionHidden = false,
+  rows,
+  axisLabels,
+  unit,
+  periodHeader,
+}: StatsTrendChartProps) {
+  const [attach, measured] = useChartWidth();
+  /* The y labels live in their own gutter, so the line never starts underneath one. */
+  const GUTTER = 28;
+  const width = Math.max(CHART_MIN_WIDTH, measured - GUTTER);
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const PLOT_HEIGHT = 120;
+  const max = Math.max(0, ...rows.map((r) => finiteOrNull(r.value) ?? 0));
+  const domainMax = niceMax(max === 0 ? 1 : max);
+  const ticks = axisTicks(domainMax);
+  const points = linePoints(rows, domainMax, { width, height: PLOT_HEIGHT });
+  const last = points.length > 0 ? points[points.length - 1] : null;
+  const hovered = hoverIndex !== null ? (points[hoverIndex] ?? null) : null;
+  const area =
+    points.length > 1
+      ? `M${round(points[0].x)},${PLOT_HEIGHT} L${polylinePoints(points).replace(/ /g, ' L')} L${round(points[points.length - 1].x)},${PLOT_HEIGHT} Z`
+      : '';
+
+  function onMove(event: ReactPointerEvent<SVGRectElement>) {
+    if (points.length === 0) return;
+    const box = event.currentTarget.getBoundingClientRect();
+    const x = ((event.clientX - box.left) / Math.max(1, box.width)) * width;
+    let nearest = 0;
+    for (let k = 1; k < points.length; k += 1) {
+      if (Math.abs(points[k].x - x) < Math.abs(points[nearest].x - x)) nearest = k;
+    }
+    setHoverIndex(nearest);
+  }
+
+  const tooltip: HoverState | null =
+    hovered === null
+      ? null
+      : {
+          key: hovered.key,
+          x: round(GUTTER + Math.min(Math.max(hovered.x, 60), Math.max(60, width - 60))),
+          y: round(Math.max(0, hovered.y - 10)),
+          label: hovered.label,
+          value: `${hovered.value} ${hovered.value === 1 ? singular(unit) : unit}`,
+          slot: 1,
+        };
+
+  return (
+    <ChartFrame
+      caption={caption}
+      captionHidden={captionHidden}
+      summary={chartSummary(caption, rows, unit, null)}
+      tableRowHeader={periodHeader}
+      tableColumns={[unit.replace(/^./, (c) => c.toUpperCase())]}
+      tableRows={rows.map((row) => ({
+        key: row.key,
+        label: row.label,
+        cells: [finiteOrNull(row.value) === null ? 'Not Available' : String(row.value)],
+      }))}
+    >
+      <div className="stats-chart-plot stats-trend" ref={attach}>
+        <div
+          className="stats-chart-band stats-trend-band"
+          style={{ height: `${PLOT_HEIGHT}px`, paddingLeft: `${GUTTER}px` }}
+        >
+          <svg
+            className="stats-chart-line"
+            width={width}
+            height={PLOT_HEIGHT}
+            viewBox={`0 0 ${width} ${PLOT_HEIGHT}`}
+            aria-hidden="true"
+            focusable="false"
+          >
+            {ticks.map((tick) => {
+              const y = round(PLOT_HEIGHT - (tick / domainMax) * PLOT_HEIGHT);
+              return <line key={tick} className="stats-chart-grid" x1={0} x2={width} y1={y} y2={y} />;
+            })}
+            <line
+              className="stats-chart-axis-rule"
+              x1={0}
+              x2={width}
+              y1={PLOT_HEIGHT - 0.5}
+              y2={PLOT_HEIGHT - 0.5}
+            />
+            {area !== '' && <path className="stats-trend-area stats-chart-series" d={area} />}
+            {points.length > 1 && (
+              <polyline
+                className="stats-chart-series"
+                data-slot="1"
+                points={polylinePoints(points)}
+                fill="none"
+                strokeWidth={LINE_WIDTH}
+              />
+            )}
+            {hovered !== null && (
+              <line
+                className="stats-trend-crosshair"
+                x1={round(hovered.x)}
+                x2={round(hovered.x)}
+                y1={0}
+                y2={PLOT_HEIGHT}
+              />
+            )}
+            {[hovered ?? last].filter((p): p is NonNullable<typeof p> => p !== null).map((point) => (
+              <g key={point.key}>
+                <circle
+                  className="stats-chart-marker-ring"
+                  cx={round(point.x)}
+                  cy={round(point.y)}
+                  r={MARKER_RADIUS + MARKER_RING}
+                />
+                <circle
+                  className="stats-chart-marker"
+                  data-slot="1"
+                  cx={round(point.x)}
+                  cy={round(point.y)}
+                  r={MARKER_RADIUS}
+                />
+              </g>
+            ))}
+            <rect
+              className="stats-chart-hit"
+              x={0}
+              y={0}
+              width={Math.max(0, width)}
+              height={PLOT_HEIGHT}
+              onPointerMove={onMove}
+              onPointerLeave={() => setHoverIndex(null)}
+            />
+          </svg>
+          {ticks.map((tick) => (
+            <span
+              className="stats-chart-tick stats-trend-tick"
+              key={tick}
+              aria-hidden="true"
+              style={{ top: `${round(PLOT_HEIGHT - (tick / domainMax) * PLOT_HEIGHT)}px` }}
+            >
+              {tick}
+            </span>
+          ))}
+        </div>
+        <div className="stats-trend-axis" aria-hidden="true" style={{ paddingLeft: `${GUTTER}px` }}>
+          <span>{axisLabels.first}</span>
+          {axisLabels.middle ? <span>{axisLabels.middle}</span> : null}
+          <span>{axisLabels.last}</span>
+        </div>
+        <ChartTooltip hover={tooltip} />
+      </div>
+    </ChartFrame>
+  );
+}
 
 /**
  * Loading — the app's existing `LoadingPanel`, REUSED rather than restyled.

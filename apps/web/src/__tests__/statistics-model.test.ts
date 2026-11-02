@@ -7,8 +7,10 @@ import {
   deriveApiSurface,
   deriveEvidenceTotals,
   deriveExportGate,
+  deriveImportSteps,
   deriveImportTotals,
   deriveMemoryFacts,
+  deriveOpenQuestionDistribution,
   deriveOpenQuestions,
   deriveRecentWork,
   deriveSchemaFacts,
@@ -993,5 +995,72 @@ describe('deriveImportTotals', () => {
     });
     expect(totals.summariesReceived).toBe(3);
     expect(totals.sessionsWithSources).toBe(1);
+  });
+});
+
+describe('deriveOpenQuestionDistribution', () => {
+  it('counts records per open-question count, zero-filled between, capped at 5+', () => {
+    const rows = deriveOpenQuestionDistribution([
+      rec({ experiment_id: 'A', pending_count: 0 }),
+      rec({ experiment_id: 'B', pending_count: 0 }),
+      rec({ experiment_id: 'C', pending_count: 2 }),
+      rec({ experiment_id: 'D', pending_count: 9 }),
+      rec({ experiment_id: 'E', pending_count: 5 }),
+    ]);
+    expect(rows.map((r) => [r.label, r.value])).toEqual([
+      ['0', 2],
+      ['1', 0],
+      ['2', 1],
+      ['3', 0],
+      ['4', 0],
+      ['5+', 2],
+    ]);
+  });
+
+  it('leaves an unreadable count out rather than placing it at zero', () => {
+    const rows = deriveOpenQuestionDistribution([
+      rec({ experiment_id: 'A', pending_count: null as unknown as number }),
+      rec({ experiment_id: 'B', pending_count: 1 }),
+    ]);
+    expect(rows.map((r) => [r.label, r.value])).toEqual([
+      ['0', 0],
+      ['1', 1],
+    ]);
+  });
+
+  it('draws nothing for no readable record', () => {
+    expect(deriveOpenQuestionDistribution([])).toEqual([]);
+  });
+});
+
+describe('deriveImportSteps', () => {
+  const workflow = [
+    { id: 'new_import', label: 'New Import' },
+    { id: 'sources', label: 'Sources' },
+    { id: 'parse', label: 'Parse' },
+  ];
+
+  it('counts sessions at their furthest step, in the served step order and wording', () => {
+    const steps = deriveImportSteps({
+      total: 3,
+      workflow,
+      imports: [{ furthest_step: 'parse' }, { furthest_step: 'new_import' }, { furthest_step: 'parse' }],
+    });
+    expect(steps.sessions).toBe(3);
+    expect(steps.received).toBe(3);
+    expect(steps.rows.map((r) => [r.label, r.value])).toEqual([
+      ['New Import', 1],
+      ['Sources', 0],
+      ['Parse', 2],
+    ]);
+  });
+
+  it('counts a step the list does not name under its own id, never dropping the session', () => {
+    const steps = deriveImportSteps({ total: 1, workflow, imports: [{ furthest_step: 'add_to_experiments' }] });
+    expect(steps.rows[steps.rows.length - 1]).toEqual({ key: 'add_to_experiments', label: 'Add To Experiments', value: 1 });
+  });
+
+  it('reads a malformed body as nothing received, and the total as unknown', () => {
+    expect(deriveImportSteps(null)).toEqual({ sessions: null, received: 0, rows: [] });
   });
 });
