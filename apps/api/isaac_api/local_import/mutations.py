@@ -4741,6 +4741,7 @@ def process(
             if r.get("state") not in B.PROCESSING_UNDECIDED_STATES:
                 r["state"] = B.STATE_NEEDS_REVIEW
             fresh.append(r)
+        before = list(bundle.get("processing_results") or ())  # r5 M2: what the group's results were before this run
         bundle["processing_results"] = keep + fresh
         kept_decided = sum(B.processing_id(r) in decided or r.get("group_id") in superseded for r in keep)
         out = {
@@ -4767,6 +4768,13 @@ def process(
             if isinstance(out.get("summary"), Mapping):
                 out["summary"] = {**out["summary"],
                                   "lines": [*(out["summary"].get("lines") or ()), *(x["statement"] for x in new_curve)]}
+        moved = decided_results_on_an_older_run(bundle, before, keep, fresh,
+                                                said={x["decided_result_id"] for x in new_curve})
+        if moved:
+            out["decided_results_on_an_older_run"] = moved
+            if isinstance(out.get("summary"), Mapping):
+                out["summary"] = {**out["summary"],
+                                  "lines": [*(out["summary"].get("lines") or ()), *(x["statement"] for x in moved)]}
         if not_live:
             by_status: dict[str, int] = {}
             for g in not_live:
@@ -4826,6 +4834,65 @@ def decided_results_with_a_new_all_zero_skip(bundle: Mapping, keep: Sequence[Map
     return out
 
 
+def _athena_match_of(results: Sequence[Mapping], group_id: str, run_id: str | None) -> tuple:
+    """r5 M2: what a group's run says of the scientist's Athena curve: the matched Athena input(s) and how many versions
+    the ISAAC result lists."""
+    mine = [r for r in results if r.get("group_id") == group_id and (run_id is None or r.get("run_id") == run_id)]
+    matched = sorted(tuple(str((r.get("inputs") or [{}])[0].get(k)) for k in ("relative_path", "athena_group"))
+                     for r in mine if r.get("source") == "scientist_athena" and not r.get("athena_version_id"))
+    versions = max((len(r.get("athena_versions") or ()) for r in mine if r.get("source") == "isaac_protocol"), default=0)
+    return tuple(matched), versions
+
+
+def decided_results_on_an_older_run(bundle: Mapping, before: Sequence[Mapping], keep: Sequence[Mapping],
+                                    fresh: Sequence[Mapping], *, said: set | frozenset = frozenset()) -> list[dict]:
+    """r5 M2: one line per DECIDED result kept on its old id whose group this build gives fresh results under ANOTHER
+    run id, saying why the id moved (the Athena match changed; the scientist's Athena curve is now rebuilt from its
+    project's stored step; else the curve or the files its id is made from changed) and that the decision stands on
+    the old curve. A result already said (``said``: a scan now left out) is not said twice. ``[]`` when none."""
+    decisions = B.processing_state_decisions(bundle)
+    out = []
+    for old in keep:
+        pid = B.processing_id(old)
+        d = decisions.get(("processing_result", pid))
+        if d is None or pid in said:
+            continue
+        gid = old.get("group_id")
+        new = [r for r in fresh if r.get("group_id") == gid and r.get("run_id") and r.get("run_id") != old.get("run_id")]
+        if not new:
+            continue
+        why = []
+        was, now = _athena_match_of(before, gid, old.get("run_id")), _athena_match_of(new, gid, None)
+        if was != now:
+            why.append("the scientist's Athena curve it is compared with is matched differently now "
+                       f"({_said_match(was)} before, {_said_match(now)} now)")
+        rebuilt_before = any(C_ATHENA_RENORM in (r.get("review_flags") or ()) for r in before
+                             if r.get("group_id") == gid and r.get("run_id") == old.get("run_id"))
+        if not rebuilt_before and any(C_ATHENA_RENORM in (r.get("review_flags") or ()) for r in new):
+            why.append("the scientist's Athena curve is now rebuilt from its project's stored edge step "
+                       f"({C_ATHENA_RENORM})")
+        if not why:
+            why.append("its curve, or a file its id is made from, changed with this build")
+        nid = next((B.processing_id(r) for r in new if r.get("source") == old.get("source")), B.processing_id(new[0]))
+        what = d.get("decision")
+        stands = "The approval still stands" if what == "approve" else f"The decision ({what}) still stands"
+        out.append({"group_id": gid, "decided_result_id": pid, "new_result_id": nid, "reasons": why,
+                    "statement": (f"Group {gid}: {pid} ({what} by {(d.get('decided_by') or {}).get('name')}) is kept on "
+                                  f"its old curve; this build gives the group new results ({nid}) because "
+                                  f"{'; and '.join(why)}. {stands} on the old curve until the scientist changes it; "
+                                  f"the new result is undecided.")})
+    return out
+
+
+def _said_match(m: tuple) -> str:
+    matched, versions = m
+    if matched:
+        return "matched to " + ", ".join(f"{g} in {p}" for p, g in matched)
+    return f"{versions} versions listed" if versions else "no Athena curve"
+
+
+#: ``processing.athena.ATHENA_RENORM_FLAG`` (r5 H1; not imported: processing is an optional extra).
+C_ATHENA_RENORM = "athena_renormalisation_differs"
 #: ``processing.core.SIGNAL_ALL_ZERO`` (not imported: processing is an optional extra).
 C_SIGNAL_ALL_ZERO = "signal_all_zero"
 #: ``processing.run.FRAGMENT_REASON`` (r5 A5; not imported, as above).

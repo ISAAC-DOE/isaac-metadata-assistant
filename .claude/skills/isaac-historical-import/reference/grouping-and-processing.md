@@ -82,7 +82,8 @@ it finds one. Show per group, in words:
   white line and the oscillations); never call those points glitches yourself. **Points on the edge**:
   when `qc.statements.glitch_points_on_edge` is present (metrics `glitch_points_on_edge` /
   `glitch_points_off_edge`), say that sentence; only the off-edge count is glitches. With fewer than 3 scans
-  none is: `glitch_points_unjudged` counts every flagged point, so never call any a glitch (flagged points within
+  none is: whenever `glitch_check_few_scans` is said, `glitch_points_unjudged` counts every flagged point, so
+  never call any a glitch (flagged points within
   5 eV of E0 or in the steep stretch of the edge are unjudged, not cleared: say to look at the plot near E0;
   the stored verdict is unchanged). A point from ONE scan alone, far beyond the other scans there, is never
   "unjudged": `qc.statements.glitch_points_from_one_scan` names the scan and counts those points as glitches.
@@ -147,7 +148,12 @@ it finds one. Show per group, in words:
   the normalisation did not work): say the sentence in `statements` and what the plot shows; offer
   reject or `needs_changes`, never approval. A scientist's Athena curve is judged the same way, over its
   project's own post-edge range (flag `athena_post_edge_not_at_1`, not preferred; a listed version that
-  fails carries the flag: say it when asking which version is the result of record);
+  fails carries the flag: say it when asking which version is the result of record). **A rebuilt Athena
+  curve** (flag `athena_renormalisation_differs`): larch's re-run of the project gave another edge step, so ISAAC
+  used the step the project stores; say that sentence plainly and never present it as the scientist's error.
+  **A decided result kept on its old curve** (`process` reply `decided_results_on_an_older_run`): say the line
+  (why the group has new results, and that the approval stands on the old curve) and ask whether the scientist
+  wants to review the new result;
 - **a short scan** (`warn` with `post_edge_window_too_short`: the scan ends soon after the edge, so its
   normalised level cannot be checked): say that its edge position is still usable but its normalised
   curve is not checked; the scientist decides whether that is enough for this record;
@@ -280,8 +286,9 @@ Processing never shifts the energy axis on its own. Before any calibration quest
 `reference_scans_listed`, `reference_proposed`, `reference_statement`, and `would_apply` (the shift for
 an element/edge already named for the group: approved, proposed, or the group's absorber).
 
-- **No reference proposed** (`reference_proposed: false`; flags `reference_edge_not_found`,
-  `reference_edge_in_too_few_scans` or `no_reference_available`): say the `reference_statement` ("only 1 of
+- **No reference proposed** (flags `reference_edge_not_found`, `reference_edge_in_too_few_scans`,
+  `reference_noise_degenerate` or `no_reference_available`; `reference_proposed` is false then, but it is false
+  for disagreeing edges too, the next bullet, so go by the flags): say the `reference_statement` ("only 1 of
   16 scans shows a usable reference edge; an in-scan reference needs one in at least 2 scans") and do NOT
   ask for an element or edge: no shift can be approved, and `approve_calibration` is refused. A scan whose
   reference edge stands more than 1,000,000 times its pre-edge noise is a channel that is not counting, never

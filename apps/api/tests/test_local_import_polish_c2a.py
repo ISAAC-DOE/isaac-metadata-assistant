@@ -116,7 +116,8 @@ def test_an_athena_group_imported_as_normalised_data_is_used_as_stored(tmp_path)
 
 
 def test_an_implausible_athena_edge_step_is_a_fail_never_compared(tmp_path):
-    bdir, root = _case(tmp_path, DEGENERATE)  # not flagged as normalised: larch's re-fit is all there is
+    # not flagged as normalised, and (r5 review H1) no positive stored step: larch's re-fit is all there is
+    bdir, root = _case(tmp_path, {**DEGENERATE, "bkg_step": "0", "bkg_fitted_step": "0"})
     isa, sci = _results(run_process(bdir, source_root=root))
     assert sci["qc"]["metrics"]["edge_step"] > 1000
     assert sci["qc"]["verdict"] == "fail" and "edge_step_implausible" in sci["qc"]["reasons"]

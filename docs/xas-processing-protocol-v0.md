@@ -385,7 +385,8 @@ Whether to leave such a scan out is the scientist's call: nothing is dropped for
   0.8 wt% TiO2 anatase, 31 of 173. `glitches_flagged` therefore warns on most curves of those
   beamtimes. The detector is unchanged (flags never drop points; `exclude_flagged` is false); its
   thresholds are for the scientist to approve. r5: with fewer than 3 scans no flagged point is counted as
-  a glitch, on the edge or off it: `qc.metrics.glitch_points_unjudged` counts them all and
+  a glitch, on the edge or off it: whenever `glitch_check_few_scans` is said,
+  `qc.metrics.glitch_points_unjudged` counts them all (with or without points on the edge) and
   `glitch_points_off_edge` is absent (measured on BL6-2c: the on-edge sentence had counted the off-edge
   points as glitches beside the few-scan sentence saying they were no evidence). With fewer than
   `min_scans_for_cross_scan` (3) scans
@@ -432,9 +433,33 @@ and not preferred, and its QC fails with the plain sentence. r5: every other Ath
 the §7 post-edge level (`isaac.xas.post_edge_level.v1`) over the project's own nor1–nor2 window, the
 pre-edge line being `mu − norm·step`; a per-scan set is judged on its mean normalised curve. Failing
 both ways, its QC fails `post_edge_not_at_1` (so `decide` refuses to approve it), it is flagged
-`athena_post_edge_not_at_1` and not preferred; a listed version that fails carries the flag. Measured
-on BL4-3 MOF-Co: two Athena curves with an edge step of 1 sat 82 steps above the line (normalised
-maximum 116), one 2.7, and all three had passed. **Thresholds need approval.**
+`athena_post_edge_not_at_1` and not preferred; a listed version that fails carries the flag. A result
+decided before this check is kept as it was, with the flag and the sentence added (its stored verdict
+is not rewritten).
+
+**The scientist's own normalisation** (r5 review, `isaac.athena.project_normalisation.v0`). larch's
+`AthenaProject.read(do_preedge=True)` re-runs the pre-edge fit with the project's ranges but ignores the
+edge step the project stores (`bkg_step`, fitted or fixed with `bkg_fixstep`) and its stored lines. When
+larch's step differs from the stored one by more than 1 %, ISAAC rebuilds the curve as Athena made it:
+`(mu − pre-edge line) / bkg_step`, with the project's pre-edge line (`bkg_slope`, `bkg_int`) when the
+curve made with it averages within 0.1 of 0 before the edge, else larch's line; flattened with the
+project's post-edge curve (`bkg_nc0`–`nc3`) when it gives the stored step at E0 within 5 %, else larch's
+flat scaled by the two steps. A per-scan set is the mean of its members, each rebuilt first. This curve
+is what `athena_normalized.csv` (and so a record) carries, what is compared and what A1 judges. The
+result is flagged `athena_renormalisation_differs` and says ISAAC used the project's stored step; that
+is larch's reproduction, never a fault of the scientist. Measured on the projects of five real
+beamtimes (1,406 Athena groups; 904 not already normalised and with a positive stored step): larch's
+step differed by more than 1 % in 853 and by more than 50 % in 199. On BL4-3 MOF-Co, larch gave 0.0058
+where the project stores 1.566: the three curves that failed the post-edge check above (levels near 82
+and 2.7) were per-scan sets holding such members, and rebuilt they pass and agree with ISAAC's curves.
+Over all 1,406 groups the post-edge check failed 36 sample groups judged on larch's curve; on the
+rebuilt curves 21 of them pass and 15 still fail, all difference spectra (`diff …` groups, levels −3.3
+to 122, no positive stored step to rebuild with). Of 108 reference-channel groups (`Ref …`), 72 fail
+on Athena's own curve (29 on larch's): Athena's normalised reference channel sits 2 to 5 steps above
+its pre-edge line over the window (its flattened curve near 1); one is listed as a version, none is
+matched. Every result whose Athena curve (or a version's) is rebuilt has a new id: 34 on MOF-Co, 9 on
+TiON, 144 on BL15-2 2021-11, 23 on BL6-2c, 0 on BL15-2 2025-04 (no projects). **Thresholds need
+approval.**
 `qc.json` records metrics, reasons and thresholds. **Thresholds need approval.**
 
 **Not applicable is not a verdict.** A group listing no scan (`no_scans`), or none of whose readable

@@ -1988,6 +1988,10 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
                 # r5 A1: the version's post-edge level fails: flagged where the scientist chooses (its own QC, once
                 # chosen, fails post_edge_not_at_1)
                 listed["flags"] = [ATHENA_POST_EDGE_FLAG]
+            if v.get(A.RENORMALISED_KEY):
+                # r5 H1: the version's curve is rebuilt from its project's stored step (said, not a fault)
+                listed["flags"] = [*(listed.get("flags") or ()), A.ATHENA_RENORM_FLAG]
+                listed["renormalised_statement"] = v[A.RENORMALISED_KEY]["statement"]
             if A.frame_known(v):
                 name = f"athena_version_{n:02d}.csv"
                 _csv(gdir / name, ["energy_eV", "norm", "flat"], [v["energy"], v["norm"], v["flat"]], np)
@@ -2108,6 +2112,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     few_said = _few_scan_glitch_statement(len(scans_data), dg["flagged_points_total"], params)
     if few_said:
         res["qc"].setdefault("statements", {})["glitch_check_few_scans"] = few_said
+        # r5 A6/L3: with fewer than 3 scans every flagged point is unjudged, on the edge or not (after the run id)
+        res["qc"]["metrics"]["glitch_points_unjudged"] = int(dg["flagged_points_total"])
     # r4-a L6: a channel chosen by column-name priority (no selection ISAAC can check) is said, not only flagged
     if "channel_choice_needs_review" in choice.flags:
         res["qc"].setdefault("statements", {})["channel_choice_needs_review"] = needs_review_statement(choice)
@@ -2140,8 +2146,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         res["qc"].setdefault("statements", {})[ONLY_EDGE_FLAG] = _only_edge_statement(only_edge, names)
     if on_edge:
         if on_edge["off_edge"] is None:
-            # r5 A6: with fewer than 3 scans no flag is counted as a glitch: every flagged point is unjudged
-            res["qc"]["metrics"].update(glitch_points_on_edge=on_edge["on_edge"], glitch_points_unjudged=on_edge["unjudged"])
+            # r5 A6: with fewer than 3 scans no flag is counted as a glitch (glitch_points_unjudged, set above)
+            res["qc"]["metrics"].update(glitch_points_on_edge=on_edge["on_edge"])
         else:
             res["qc"]["metrics"].update(glitch_points_on_edge=on_edge["on_edge"], glitch_points_off_edge=on_edge["off_edge"])
         res["qc"].setdefault("statements", {})["glitch_points_on_edge"] = on_edge["statement"]
@@ -2538,9 +2544,14 @@ def _athena_result(group: Mapping, entry: Mapping, files: Sequence[Mapping], par
             "reason": ("the scientist's Athena project gives these as non-finite numbers (NaN or infinity), which "
                        "are not JSON numbers; each is recorded as null, never as a number ISAAC made up"),
         }
+    renorm = entry.get(A.RENORMALISED_KEY)
     if A.already_normalized(entry):
         reproduced = (f"none: the group is already normalised (Athena is_nor), so its stored spectrum is used as stored, "
                       f"edge step 1 by definition ({A.ALREADY_NORMALIZED_RULE_ID})")
+    elif renorm:
+        # r5 H1: rebuilt from the project's stored step and lines (larch's own re-fit gave another step)
+        reproduced = (f"the project's stored edge step and lines ({A.ATHENA_RENORM_RULE_ID}); larch "
+                      "AthenaProject.read(do_preedge=True) gave another step")
     else:
         reproduced = "larch AthenaProject.read(do_preedge=True)"
     res["steps"] = [
@@ -2592,6 +2603,11 @@ def _athena_result(group: Mapping, entry: Mapping, files: Sequence[Mapping], par
     if level:
         res["qc"]["statements"]["post_edge_not_at_1"] = level["statement"]
         res["review_flags"].append(ATHENA_POST_EDGE_FLAG)
+    if renorm:
+        # r5 H1: said, never a fault of the scientist's: ISAAC used the project's own stored step
+        res["qc"]["statements"][A.ATHENA_RENORM_FLAG] = renorm["statement"]
+        res["review_flags"].append(A.ATHENA_RENORM_FLAG)
+        res[A.RENORMALISED_KEY] = {k: v for k, v in renorm.items() if k != "statement"}
     res["steps"].append({"step": "qc", "params": dict(params["qc"]), "outcome": {"verdict": verdict, "reasons": reasons}, "flags": []})
     ath = [f for f in files if f["role"] in ("athena_normalized", "plot")]
     res["outputs"] = {"files": ath, "e0_eV": entry["e0_eV"], "edge_step": entry["edge_step"], "points": int(e.size)}
@@ -2772,6 +2788,16 @@ def process_bundle(
                                "fields": {"athena_version_selected": {**sel, "statement": said,
                                                                       "superseded_by_decision_id": x["latest_decision_id"],
                                                                       "superseded_by_result_id": x["new_result_id"]}}})
+    for r in results:
+        if r.get("source") == "scientist_athena" and ATHENA_POST_EDGE_FLAG in (r.get("review_flags") or ()):
+            # r5 M1: a result of this id decided before the check is KEPT as it was (mutations.process): it carries
+            # the flag and the sentence (outside the hashed files; its stored verdict is not rewritten)
+            said = ((r.get("qc") or {}).get("statements") or {}).get("post_edge_not_at_1") or ""
+            kept_notes.append({"result_id": r["result_id"], "add_review_flags": [ATHENA_POST_EDGE_FLAG],
+                               "statements": {"post_edge_not_at_1": (
+                                   f"{said} This result was decided before this check, so its stored QC verdict stays "
+                                   "as it was recorded; the curve fails it now. A person reviews the decision: reject "
+                                   "it, or mark it needs_changes.").strip()}})
     not_carried = [r for r in results if isinstance(r.get(B.ATHENA_NOT_CARRIED_OVER), Mapping)]
     if not_carried:
         # r1-a M2: a choice made on another ISAAC result of the group that names no version listed now
