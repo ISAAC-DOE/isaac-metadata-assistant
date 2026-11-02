@@ -33,6 +33,7 @@ import {
   isAnswerablePendingItem,
   pendingItemToBlocker,
   pendingSummary,
+  stripLifecycleSuffix,
 } from '../lib/adapt';
 import type {
   ApiAnswerablePendingItem,
@@ -986,7 +987,7 @@ function LoadedCompletion({
       topBar={
         <TopBar
           variant="record"
-          title={detail.title}
+          title={stripLifecycleSuffix(detail.title)}
           filename={`draft · ${detail.id}`}
           recordId={id}
           surface={LABELS.screenComplete}

@@ -41,6 +41,7 @@ import {
   evidenceEntriesToTrail,
   primarySourceFile,
   provenanceFor,
+  stripLifecycleSuffix,
 } from '../lib/adapt';
 import type { ApiRevisionHistory, EvidenceBundle } from '../lib/types';
 import { readRevisionHistory } from '../lib/revisionHistory';
@@ -224,7 +225,7 @@ function LoadedEvidence({
         topBar={
           <TopBar
             variant="record"
-            title={detail.title}
+            title={stripLifecycleSuffix(detail.title)}
             recordId={id}
             surface={LABELS.screenEvidence}
           />
@@ -291,7 +292,7 @@ function LoadedEvidence({
         topBar={
           <TopBar
             variant="record"
-            title={detail.title}
+            title={stripLifecycleSuffix(detail.title)}
             recordId={id}
             surface={LABELS.screenEvidence}
           />
@@ -345,7 +346,7 @@ function LoadedEvidence({
       topBar={
         <TopBar
           variant="record"
-          title={detail.title}
+          title={stripLifecycleSuffix(detail.title)}
           /* Three states, not two. There IS a sidecar filename; there is an
              exported record with no singular sidecar (a fan-out), where the id is
              the only true thing to show; and there is a draft. Collapsing the

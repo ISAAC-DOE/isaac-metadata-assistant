@@ -379,10 +379,6 @@ export function NewProposalForm({
           >
             {LABELS.newProposalAction}
           </button>
-          <p className="new-proposal-lede">
-            Suggest a value for one field, citing the note it was read from. It is
-            stored for review and writes nothing.
-          </p>
         </div>
       </div>
     );
@@ -401,10 +397,6 @@ export function NewProposalForm({
         >
           {LABELS.newProposalAction}
         </button>
-        <p className="new-proposal-lede">
-          Suggest a value for one field, citing the note it was read from. It is
-          stored for review and writes nothing.
-        </p>
       </div>
 
       <div className="proposal-form new-proposal-form" id={fieldId}>

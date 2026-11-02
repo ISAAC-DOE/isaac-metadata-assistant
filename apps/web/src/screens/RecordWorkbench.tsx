@@ -1,4 +1,5 @@
 import './screens.css';
+import './record-workbench.css';
 import '../components/evidence.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -1219,10 +1220,15 @@ function LoadedWorkbench({
         reasoning next to `.record-page-title`. The loading branch above keeps the
         `sr-only` form, because with no bundle there is no record title to name.
       */}
-      <h1 className="record-page-title">
-        <span className="eyebrow record-page-title-view">{workspaceLabel(activeView)}</span>
-        <span className="record-page-title-name">{stripLifecycleSuffix(detail.title)}</span>
-      </h1>
+      <div className="record-page-head">
+        <h1 className="record-page-title">
+          <span className="eyebrow record-page-title-view">{workspaceLabel(activeView)}</span>
+          <span className="record-page-title-name">{stripLifecycleSuffix(detail.title)}</span>
+        </h1>
+        {/* THE ONE REMOVAL (B-08), behind a small "More" button beside the title
+            (declutter, 2026-11-02). Same silent refresh as the rename and the folder. */}
+        <DiscardExperimentPanel detail={detail} onSaved={onAgentRefresh} />
+      </div>
       <RecordActivityNote activity={activity} onRefresh={onManualRefresh} />
       <LiveSyncNote
         degraded={degraded}
@@ -1449,10 +1455,14 @@ function LoadedWorkbench({
             would silently re-point that selector at a section those specs know
             nothing about.
           */}
-          <div className="record-identity">
-            <div className="record-identity-eyebrow eyebrow">
+          {/* ONE "RECORD DETAILS" GROUP (declutter, 2026-11-02): Name, Folder,
+              Description, Info, Links and Assets read as one flat list of rows, each
+              keeping its own edit affordance, instead of seven separate cards. */}
+          <div className="record-identity record-details">
+            <div className="record-identity-eyebrow record-details-title" id="record-details-title">
               {LABELS.recordIdentityEyebrow}
             </div>
+            <div className="record-details-list" role="group" aria-labelledby="record-details-title">
             {/* THE RENAME. `onAgentRefresh` AND NOT `onManualRefresh`, deliberately.
                 The second is `bundle.reload`, which flips this screen back to its
                 loading state — and `RecordWorkbench` unmounts the entire loaded body
@@ -1500,12 +1510,6 @@ function LoadedWorkbench({
             />
             <RecordInfoPanel detail={detail} groups={bundle.groups} artifacts={bundle.artifacts} />
             <RecordLinksPanel artifacts={bundle.artifacts} />
-            {/* THE ONE REMOVAL (B-08). Last in the identity column on purpose: it is the
-                only control here with no undo, so it follows everything a reader is
-                likely to want and nothing is placed after it. Same silent refresh as the
-                rename and the folder, for the identical reason given above. */}
-            <DiscardExperimentPanel detail={detail} onSaved={onAgentRefresh} />
-          </div>
 
           {/*
             ASSET REFERENCES CLOSE THIS WORKSPACE, and the placement is an ORCHESTRATOR
@@ -1525,6 +1529,8 @@ function LoadedWorkbench({
             collapsedByDefault
             openSignal={assetsOpenSignal}
           />
+            </div>
+          </div>
         </section>
       )}
 
@@ -1594,7 +1600,11 @@ function LoadedWorkbench({
             onMirroredRun={setMirrorRun}
             onCheck={setMirrorCheck}
           />
-          <RunSchemaMirror run={mirrorRun} check={mirrorCheck} />
+          <RunSchemaMirror
+            run={mirrorRun}
+            check={mirrorCheck}
+            emptyText={detail.run_count === 0 ? CAPTURE_COPY.mapNoRuns : undefined}
+          />
           </div>
 
           {/*
@@ -1981,8 +1991,11 @@ function NeedsYouBanner({
      them would be the scale cost this screen has already been caught paying once. */
   const shownGroups: { group: PendingGroup; questions: PendingGroup['questions'] }[] = [];
   let budget = NEEDSYOU_VISIBLE;
+  let ownerGroups = 0;
   if (listed) {
-    for (const group of groupPending(pending)) {
+    const groups = groupPending(pending);
+    ownerGroups = groups.length;
+    for (const group of groups) {
       if (shownGroups.length >= NEEDSYOU_VISIBLE_GROUPS || budget <= 0) break;
       const questions = group.questions.slice(0, budget);
       budget -= questions.length;
@@ -2018,11 +2031,11 @@ function NeedsYouBanner({
       />
       <div className="needsyou-body">
         <div className="needsyou-title">{pendingTotal} Fields Need Your Confirmation</div>
-        <p className="needsyou-text">
-          {compact
-            ? 'Values the system refuses to guess — expected, not a failure.'
-            : 'These are values the system refuses to guess. Confirm each before this record can export — expected, not a failure.'}
-        </p>
+        {/* The full banner says it once; the compact reminder is the count and the
+            action only (declutter, 2026-11-02). */}
+        {!compact && (
+          <p className="needsyou-text">Confirm each before this record can export.</p>
+        )}
         {listed && (
         <>
         {/*
@@ -2043,7 +2056,8 @@ function NeedsYouBanner({
                  question's `id` is its KIND — `series`, `qc`, `descriptor` — so a
                  record with two runs used to produce two `<li key="series">`. */
               <li key={group.runId ?? ''} className="needsyou-group">
-                <span className="needsyou-owner">{group.owner}</span>
+                {/* The owner label separates groups; with one group it names nothing. */}
+                {ownerGroups > 1 && <span className="needsyou-owner">{group.owner}</span>}
                 <ul className="needsyou-questions">
                   {questions.map((q, i) => (
                     <li key={`${q.label}-${i}`} className="needsyou-item">
@@ -2090,7 +2104,14 @@ function NeedsYouBanner({
         )}
         {proposalsLine}
       </div>
-      <button type="button" className="btn btn-primary needsyou-action" onClick={onReviewAnswer}>
+      {/* PRIMARY ONLY WHERE IT IS THE VIEW'S ACTION. Record Fields itemises the
+          fields, so Review & Answer is its one primary; every other workspace has
+          its own primary, and this is a reminder beside it (declutter, 2026-11-02). */}
+      <button
+        type="button"
+        className={`btn ${compact ? 'btn-secondary' : 'btn-primary'} needsyou-action`}
+        onClick={onReviewAnswer}
+      >
         {LABELS.actionReviewAnswer} →
       </button>
     </div>

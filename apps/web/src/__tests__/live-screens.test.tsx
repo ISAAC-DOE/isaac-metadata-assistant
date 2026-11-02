@@ -257,10 +257,9 @@ describe('S3 · Review Record (live bundle)', () => {
     expect(list).not.toBeNull();
     expect(list!.querySelectorAll(':scope > li.needsyou-group')).toHaveLength(1);
     expect(list!.querySelectorAll('.needsyou-item')).toHaveLength(5);
-    // ...and the owner is NAMED, which is the whole point of the grouping.
-    expect(
-      [...list!.querySelectorAll('.needsyou-owner')].map((el) => el.textContent),
-    ).toEqual(['This record']);
+    // ...and with ONE owner group the owner label names nothing, so it is not shown
+    // (declutter, 2026-11-02). Several groups name their owners (below).
+    expect(list!.querySelectorAll('.needsyou-owner')).toHaveLength(0);
 
     // concise structured labels are the primary line (3 asset blockers, plus the
     // structured series + descriptor) — never the verbose question echo

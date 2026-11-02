@@ -219,9 +219,9 @@ describe('New Proposal · the creation door exists and is real', () => {
     // The defect the owner reported was that the proposals surface offered no way in
     // at all. The trigger must be present on first paint of a loaded panel.
     await screen.findByRole('button', { name: 'New Proposal' });
-    expect(
-      screen.getByText(/Suggest a value for one field, citing the note it was read from/),
-    ).toBeTruthy();
+    // The lede under it was retired (declutter, 2026-11-02): the button and the
+    // form say what it does.
+    expect(document.querySelector('.new-proposal-lede')).toBeNull();
   });
 });
 

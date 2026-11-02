@@ -39,7 +39,12 @@ import { api, ApiError } from '../lib/api';
 import { useRecordSession } from '../lib/useRecordSession';
 import { useWorkspaceScopeChanged } from '../lib/workspaceScope';
 import { useSettledErrorTitle } from '../lib/useSettledErrorTitle';
-import { toAdvisoryResult, toAuditResult, toValidationResult } from '../lib/adapt';
+import {
+  stripLifecycleSuffix,
+  toAdvisoryResult,
+  toAuditResult,
+  toValidationResult,
+} from '../lib/adapt';
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 import type {
   ApiExportResponse,
@@ -632,7 +637,7 @@ function LoadedExport({
       topBar={
         <TopBar
           variant="record"
-          title={detail.title}
+          title={stripLifecycleSuffix(detail.title)}
           filename={exported ? recordFilename : `draft · ${detail.id}`}
           stateChip={exported ? 'exported' : undefined}
           recordId={id}

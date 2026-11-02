@@ -156,10 +156,9 @@ describe('the empty state', () => {
     renderPanel();
 
     await screen.findByText(/No unmapped notes on this record/);
-    // The claim that carries the meaning: this panel does not manufacture notes.
-    expect(
-      screen.getByText(/nothing is created\s+automatically, and nothing is inferred/),
-    ).toBeTruthy();
+    // One line (declutter, 2026-11-02), and no controls over an empty record.
+    expect(screen.queryByLabelText('Show')).toBeNull();
+    expect(document.querySelector('.notes-count')).toBeNull();
     // An empty record must NOT offer a "show all" escape hatch — there is nothing
     // being filtered out, and offering one would imply there is.
     expect(screen.queryByRole('button', { name: 'Show All Notes' })).toBeNull();
@@ -167,7 +166,7 @@ describe('the empty state', () => {
 
   it('distinguishes "no notes" from "none in this state", and never conflates them', async () => {
     stubFetchRoutes({
-      [NOTES]: { body: notesEmpty },
+      [NOTES]: { body: notesPage([noteFixture()], { total: 3 }) },
       [`${NOTES}?state=dismissed`]: {
         body: notesPage([], {
           total: 3,
@@ -176,7 +175,7 @@ describe('the empty state', () => {
       },
     });
     renderPanel();
-    await screen.findByText(/No unmapped notes on this record/);
+    await screen.findByLabelText('Show');
 
     fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'dismissed' } });
 
@@ -208,7 +207,7 @@ describe('dismissal is a state, not a deletion', () => {
 
   it("a filtered page still states the record's true total, never the page size", async () => {
     stubFetchRoutes({
-      [NOTES]: { body: notesEmpty },
+      [NOTES]: { body: notesPage([noteFixture()], { total: 4 }) },
       [`${NOTES}?state=unreviewed`]: {
         body: notesPage([noteFixture()], {
           total: 4,
@@ -217,7 +216,7 @@ describe('dismissal is a state, not a deletion', () => {
       },
     });
     renderPanel();
-    await screen.findByText(/No unmapped notes/);
+    await screen.findByLabelText('Show');
 
     fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'unreviewed' } });
 
@@ -624,13 +623,13 @@ describe('what this build could not read is disclosed, not hidden', () => {
 
   it('the filtered empty state does not call a partial count the record’s total', async () => {
     stubFetchRoutes({
-      [NOTES]: { body: notesPage([], { total: 0 }) },
+      [NOTES]: { body: notesPage([noteFixture()], { total: 3 }) },
       [`${NOTES}?state=dismissed`]: {
         body: notesPage([], { total: 3, unreadable_entries: 2 }),
       },
     });
     renderPanel();
-    await screen.findByText(/No unmapped notes on this record/);
+    await screen.findByLabelText('Show');
 
     fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'dismissed' } });
 

@@ -549,23 +549,27 @@ describe('the needs-you banner across the four workspaces', () => {
       ).toBeInTheDocument();
       v.unmount();
     }
-  });
+  }, 30_000);
 
-  it('carries the count on all four, and the sentence that stops it reading as a failure', async () => {
+  it('carries the count on all four; only Record Fields carries the sentence and the primary', async () => {
+    /* Declutter (2026-11-02): the compact reminder is the count and the action.
+       The one primary on a workspace is that workspace's own action, so Review &
+       Answer is primary only on Record Fields, where the fields are itemised. */
     for (const view of WORKSPACE_VIEWS) {
       const v = renderAt(`/record/${ID}?view=${view}`);
       await screen.findByText(`${SEEDED_PENDING} Fields Need Your Confirmation`);
-      /* The refusal sentence survives the fold. Without it the compact form is a
-         number and a button, and a scientist meeting "6 Fields Need Your
-         Confirmation" with no explanation reads it as an error. */
-      /* Case-insensitive since owner QA G (2026-09-22): the one-line form on the
-         other workspaces opens the clause with a capital. What is asserted is
-         unchanged — the refusal clause and "not a failure" survive the fold. */
-      expect(screen.getByText(/values the system refuses to guess/i), view).toBeInTheDocument();
-      expect(screen.getByText(/expected, not a failure/), view).toBeInTheDocument();
+      const action = document.querySelector('.needsyou-action') as HTMLElement;
+      if (view === 'fields') {
+        expect(screen.getByText('Confirm each before this record can export.'), view).toBeInTheDocument();
+        expect(action.classList.contains('btn-primary'), view).toBe(true);
+      } else {
+        expect(document.querySelector('.needsyou-text'), view).toBeNull();
+        expect(action.classList.contains('btn-secondary'), view).toBe(true);
+        expect(action.classList.contains('btn-primary'), view).toBe(false);
+      }
       v.unmount();
     }
-  });
+  }, 30_000);
 
   it('lists the questions on Record Fields and on NOTHING ELSE — both polarities', async () => {
     /*
@@ -591,7 +595,7 @@ describe('the needs-you banner across the four workspaces', () => {
       expect(document.querySelector('.needsyou-more'), `${view} overflow line`).toBeNull();
       v.unmount();
     }
-  });
+  }, 30_000);
 });
 
 /*

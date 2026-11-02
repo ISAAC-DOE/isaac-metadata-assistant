@@ -219,16 +219,52 @@ export function ConfirmedAnswersPanel({
   }
 
   const { page, units } = state;
+  /* CONFIRMED ROWS ONLY (declutter, 2026-11-02). An open question is already named
+     by the needs-you banner with the same destination, so it is COUNTED here in one
+     line rather than given a row of its own. The row currently being edited is
+     always kept, so a save in flight never unmounts its editor. */
+  const shownKeys = (unit: (typeof units)[number]) =>
+    ORDER.filter(
+      (key) => unit.answers[key]?.state === 'confirmed' || editing === rowKey(unit, key),
+    );
+  const confirmedTotal = units.reduce((n, unit) => n + shownKeys(unit).length, 0);
+  const openTotal = units.reduce(
+    (n, unit) => n + ORDER.filter((key) => unit.answers[key]?.state === 'open').length,
+    0,
+  );
   return (
     <section className="confirmed-answers" aria-labelledby="confirmed-answers-heading">
       <Heading className="confirmed-answers-title" id="confirmed-answers-heading">
         {LABELS.confirmedAnswersHeading}
       </Heading>
-      <p className="confirmed-answers-lead">
-        The reduced spectrum, QC verdict and scientific descriptor this record holds
-        {page.level === 'run' ? ', run by run' : ''}. Each stored one can be corrected here
-        unless it holds something this form cannot carry back; nothing is filled in for you.
-      </p>
+      {confirmedTotal > 0 && (
+        <p className="confirmed-answers-lead">
+          Values you confirmed. Each can be corrected here unless it holds something this
+          form cannot carry back.
+        </p>
+      )}
+      {confirmedTotal === 0 && (
+        <p className="confirmed-answers-none">
+          Nothing confirmed yet.
+          {openTotal > 0 &&
+            (page.level === 'run' ? (
+              <>
+                {' '}
+                {openTotal === 1 ? 'One field is' : `${openTotal} fields are`} still open —{' '}
+                <Link className="confirmed-answer-link" to={ROUTES.complete(experimentId)}>
+                  answer in {LABELS.screenComplete}
+                </Link>
+                .
+              </>
+            ) : (
+              <>
+                {' '}
+                The {openTotal === 1 ? 'field' : `${openTotal} fields`} still open{' '}
+                {openTotal === 1 ? 'is' : 'are'} listed above.
+              </>
+            ))}
+        </p>
+      )}
       {refreshFailed && (
         <div className="completion-submit-error" role="alert">
           Your correction was saved, but this panel could not re-read it — the values shown
@@ -238,7 +274,7 @@ export function ConfirmedAnswersPanel({
           </button>
         </div>
       )}
-      {units.map((unit) => (
+      {units.filter((unit) => shownKeys(unit).length > 0).map((unit) => (
         <div className="confirmed-unit" key={unit.run_id ?? 'record'}>
           {unit.run_label !== null && (
             <div className="confirmed-unit-label">{unit.run_label}</div>
@@ -258,7 +294,7 @@ export function ConfirmedAnswersPanel({
             </p>
           )}
           <ul className="confirmed-list">
-            {ORDER.map((key) => {
+            {shownKeys(unit).map((key) => {
               const row = rowKey(unit, key);
               return (
                 <AnswerRow

@@ -857,6 +857,14 @@ function NotesBrowser({
 
   return (
     <div className="notes-browser">
+      {/* AN EMPTY RECORD SHOWS NO CONTROLS (declutter, 2026-11-02): with no note and
+          no filter applied there is nothing to filter or count. */}
+      {!(
+        loaded !== null &&
+        loaded.total === 0 &&
+        loaded.unreadable_entries === 0 &&
+        filter === 'all'
+      ) && (
       <div className="notes-toolbar">
         <div className="notes-control">
           <label className="notes-control-label" htmlFor={filterId}>
@@ -908,6 +916,7 @@ function NotesBrowser({
           {list.status === 'loading' ? '' : countLine}
         </p>
       </div>
+      )}
 
       {/*
         THE ACT ANNOUNCEMENT, separate from the counts. A screen-reader user who
@@ -1095,9 +1104,8 @@ function EmptyNotes({
   return (
     <div className="notes-empty">
       <p>
-        No unmapped notes on this record{disclosure}. Notes appear here when
-        something is captured that cannot be placed in a schema field — nothing is
-        created automatically, and nothing is inferred from the record's contents.
+        No unmapped notes on this record{disclosure}. Notes appear here when a capture
+        holds something no schema field can take.
       </p>
     </div>
   );

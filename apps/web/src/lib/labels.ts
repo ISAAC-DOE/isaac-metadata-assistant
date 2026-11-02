@@ -699,7 +699,7 @@ export const LABELS = {
   // The eyebrow that separates the record's own identity/reference sections
   // from the scientific draft blocks above them (audit P2: eight structurally
   // different rows read as one undifferentiated list).
-  recordIdentityEyebrow: 'Record Identity',
+  recordIdentityEyebrow: 'Record Details',
 
   /*
    * EXTENDED CONTEXT — the `DEC-41` level-4 companion, on the record screen. `CTX-004`.
@@ -1217,11 +1217,9 @@ export const LABELS = {
    * "KEEP" IS THE SAFE DEFAULT and takes focus on open; the destructive button is the
    * second of the two, named for what it does rather than "OK" or "Yes".
    */
-  discardSectionLabel: 'Discard',
-  discardSectionSummary: 'Remove this record',
-  discardIntro:
-    'Removes this record from the workspace entirely. Only a record that has never been submitted ' +
-    'and never exported can be discarded — ISAAC refuses anything that has published or declared something.',
+  /* The record page's "More" button (declutter, 2026-11-02): Discard lives behind
+     it, beside the page title, rather than as a peer of Folder. */
+  recordMoreActions: 'More Record Actions',
   discardAction: 'Discard This Record',
   discardDialogTitle: 'Discard This Record?',
   discardWhatGoes:

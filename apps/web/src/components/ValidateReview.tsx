@@ -277,9 +277,9 @@ type Detail =
   | { status: 'error'; message: string }
   | { status: 'data'; data: ApiRunCheckResponse };
 
-const IDLE_TEXT =
-  'No check has been run here yet, so nothing on this record has been checked on this screen. ' +
-  'That is not the same as “no findings”.';
+/* Short, and still a statement about COVERAGE rather than findings: "not checked"
+   is not "no findings" (declutter, 2026-11-02). */
+const IDLE_TEXT = 'Not checked yet.';
 
 export function ValidateReview({ experimentId }: { experimentId: string }) {
   const headingId = useId();
@@ -350,8 +350,10 @@ export function ValidateReview({ experimentId }: { experimentId: string }) {
 
   return (
     <section className="validate-review card" aria-labelledby={headingId}>
+      {/* Named for what it is rather than repeating the button below it
+          (declutter, 2026-11-02). */}
       <h2 id={headingId} className="vr-title">
-        Validate &amp; Review
+        Validation
       </h2>
       {/*
         THE SUB-LINE SAYS "EVERY RUN" ONLY WHERE THERE ARE RUNS. A record with no
@@ -388,9 +390,10 @@ export function ValidateReview({ experimentId }: { experimentId: string }) {
       </Disclosure>
 
       <div className="vr-actions">
+        {/* SECONDARY: the Runs workspace's one primary is Add Run. */}
         <button
           type="button"
-          className="btn btn-primary"
+          className="btn btn-secondary"
           onClick={runReview}
           disabled={review.status === 'checking'}
         >

@@ -147,7 +147,9 @@ export function CaptureIntake({ captureSummary, claudeEndpoint = MCP_ENDPOINT }:
         })}
       </ul>
 
-      {summaryLine !== null && (
+      {/* Only when the record holds something: an empty fact is not a card of its
+          own (declutter, 2026-11-02). */}
+      {summaryLine !== null && hasSomethingToReview && (
         <p className="capture-home-summary">
           <span className="capture-home-summary-label">{CAPTURE_COPY.homeSummaryLabel}</span>
           <span className="capture-home-summary-counts">{summaryLine}</span>

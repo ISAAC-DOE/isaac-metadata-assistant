@@ -1952,6 +1952,15 @@ function ProposalsBrowser({
           }}
         />
       )}
+      {/* AN EMPTY QUEUE SHOWS NO CONTROLS (declutter, 2026-11-02): with nothing on
+          the record and no filter applied there is nothing to filter, order or
+          count, so the toolbar and the count line wait for the first proposal. */}
+      {!(
+        loaded !== null &&
+        loaded.total === 0 &&
+        loaded.unreadable_entries === 0 &&
+        filter === 'all'
+      ) && (
       <div className="proposals-toolbar">
         <div className="proposals-control">
           <label className="proposals-control-label" htmlFor={filterId}>
@@ -2015,6 +2024,7 @@ function ProposalsBrowser({
           {list.status === 'loading' ? '' : countLine}
         </p>
       </div>
+      )}
 
       {/* The ACT announcement, separate from the counts. A screen-reader user who
           activates Withdraw needs to hear that the proposal was withdrawn AND KEPT;
@@ -2527,11 +2537,17 @@ function EmptyProposals({
           is explicitly agent documentation (Settings → Connect Your Agent); here the
           three ways in are said plainly, and the facts are unchanged.
         */}
-        No proposals yet. A proposal is a value suggested for a field, waiting for your
-        review. One is created three ways: finishing a transcript capture adds one for
-        each value it can store, proposing a value from a note in Unmapped Notes adds
-        one, and a connected AI agent can propose one from a note it cites. Nothing is
-        ever inferred from this record&rsquo;s contents on its own{disclosure}.
+        No proposals yet. They appear when you finish a capture or propose from a
+        note{disclosure}.{' '}
+        <HelpTip subject="Proposals" label="How Proposals Are Made">
+          <span>
+            A proposal is a value suggested for a field, waiting for your review. One is
+            created three ways: finishing a transcript capture adds one for each value it
+            can store, proposing a value from a note in Unmapped Notes adds one, and a
+            connected AI agent can propose one from a note it cites. Nothing is inferred
+            from this record&rsquo;s contents on its own.
+          </span>
+        </HelpTip>
       </p>
     </div>
   );

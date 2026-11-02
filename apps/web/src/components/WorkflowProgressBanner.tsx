@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { CircleAlert, Check, type LucideIcon } from './icons';
 import { ROUTES } from '../lib/routes';
 import type { ApiWorkflow } from '../lib/types';
+import { LABELS } from '../lib/labels';
 
 interface WorkflowProgressBannerProps {
   /** The backend-derived workflow. `null` (or a `null` current_step — every
@@ -35,7 +36,8 @@ interface BannerContent {
   tone: Tone;
   Icon: LucideIcon;
   heading: string;
-  body: string;
+  /** `null` renders no body line. */
+  body: string | null;
   actionLabel: string;
 }
 
@@ -59,9 +61,12 @@ function contentFor(step: string, pendingCount: number): BannerContent | null {
       return {
         tone: 'attention',
         Icon: CircleAlert,
-        heading: `${n} item${n === 1 ? '' : 's'} need${n === 1 ? 's' : ''} your attention`,
-        body: `Confirm or complete the remaining ${n === 1 ? 'item' : 'items'} before this record can be exported.`,
-        actionLabel: 'Review Items',
+        /* THE RECORD WORKSPACES' WORDING, so one fact reads one way everywhere
+           (declutter, 2026-11-02): the needs-you banner's heading and action, and
+           no body sentence. */
+        heading: `${n} ${n === 1 ? 'Field Needs' : 'Fields Need'} Your Confirmation`,
+        body: null,
+        actionLabel: LABELS.actionReviewAnswer,
       };
     }
     case 'review_evidence':
@@ -147,7 +152,7 @@ export function WorkflowProgressBanner({
         <Icon className="wf-progress-icon" size={20} strokeWidth={2.2} aria-hidden="true" />
         <div className="wf-progress-body">
           <div className="wf-progress-heading">{heading}</div>
-          <p className="wf-progress-text">{body}</p>
+          {body !== null && <p className="wf-progress-text">{body}</p>}
         </div>
       </div>
       <button

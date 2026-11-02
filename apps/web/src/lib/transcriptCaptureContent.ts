@@ -698,7 +698,7 @@ export const CAPTURE_COPY = {
    * and typed from — every transcription provider answers 501. Neither line claims
    * a connection exists; the voice view reads the deployment's own posture.
    */
-  homeIntro: 'Choose a way in. You can use more than one on the same record.',
+  homeIntro: 'You can use more than one on the same record.',
   homeWriteLine: 'Type or paste your notes. ISAAC proposes values for you to review.',
   /*
    * WHAT IS TRUE TODAY (review #277, I-4; decision packet §9 — "build nothing that

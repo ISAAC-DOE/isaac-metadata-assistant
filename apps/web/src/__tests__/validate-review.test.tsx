@@ -289,7 +289,8 @@ describe('the triggering model is explicit, and bounded when it fires', () => {
     });
     expect(calls).toHaveLength(0);
     // And the idle text is a statement about coverage, not about findings.
-    expect(screen.getByRole('status')).toHaveTextContent(/No check has been run here yet/);
+    expect(screen.getByRole('status')).toHaveTextContent(/^Not checked yet\.$/);
+    expect(screen.getByRole('status')).not.toHaveTextContent(/no findings|passed|clean/i);
   });
 
   it('a 200-run record costs THREE requests, not 200', async () => {
@@ -930,7 +931,7 @@ describe('headings, live region and severity without colour', () => {
     });
     press();
     await screen.findByText(/2 runs checked/);
-    expect(screen.getByRole('heading', { level: 2, name: 'Validate & Review' })).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 2, name: 'Validation' })).toBeTruthy();
     const runHeadings = screen.getAllByRole('heading', { level: 3 });
     expect(runHeadings.map((h) => h.textContent)).toEqual(
       expect.arrayContaining([expect.stringContaining('Run 1'), expect.stringContaining('Run 2')]),

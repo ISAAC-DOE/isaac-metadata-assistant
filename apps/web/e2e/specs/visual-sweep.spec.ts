@@ -936,7 +936,7 @@ const STATES: readonly VisualState[] = [
       // It sits directly below the run list, on the Runs workspace.
       await app.gotoExample(`/record/${SEED.partial}?view=runs`);
       await settled(page);
-      const heading = page.getByRole('heading', { name: 'Validate & Review' }).first();
+      const heading = page.getByRole('heading', { name: 'Validation' }).first();
       await expect(heading).toBeVisible({ timeout: 20_000 });
       await expect(page.locator('.validate-review .vr-status').first()).toBeVisible();
       return heading;
