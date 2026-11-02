@@ -423,6 +423,9 @@ Whether to leave such a scan out is the scientist's call: nothing is dropped for
     relative path | file name, "athena_group": Athena group name | label}]}`) ties one Athena group to one
     group, exactly. It is for a merge whose name matches no group (§8). Recorded in that group's params.json.
     `athena_match_not` (same shape) is the scientist's "no": that merge is not that group's.
+    `athena_ignore` (r7; `[{"project": …, "athena_group": …}]`) sets aside a merge that is no group's: it is no
+    longer listed. It is said once, in the run that passes it. Nothing is matched and no id moves. One that names
+    no Athena group, several, or a merge that matches a group sets nothing aside and says so.
   - **Bulk approval.** A bulk `decide --decision approve` is refused for any result whose curve carries a sentence
     the scientist must hear: one scan's glitch, an outlier scan, or the only scan with an edge. Plain points on the
     edge the glitch check cannot judge do not stop it: they are common on any sharp edge.
@@ -548,12 +551,32 @@ copy of it in another project is no longer listed. A tie that names no Athena gr
 group ties nothing and says so; a tie that takes an Athena group from the group its name matched says so.
 To say no, name it in `athena_match_not`: it is no longer hinted for that group (nothing else changes).
 
+r7 changes (`isaac.athena.unmatched_merge_hint.run_numbers.v0`, `isaac.athena.reference_channel.v0`):
+
+- A hint never crosses run numbers. When both names start with numbers (electrode and run, `01_05_…`), they must
+  be the same numbers in the same order. A single number may be one the other names (a merge `03_05_…` of runs
+  03 and 05 still hints group `05_…`). The same numbers rank first. `differs_in` names the run numbers that differ.
+  A leading `Ref` word is no part of the name.
+- Athena names the reference channel it reads beside a sample `"  Ref <name>"`. Such a group is a reference foil,
+  not a sample merge. It is never listed, hinted or asked about; the summary line counts it. Measured on a real
+  BL15-2 beamtime: 77 of 79 "merges that match no group" were reference channels, and their hints sat on 116 of
+  153 results. After: 2 merges, hints on 3 results.
+- Every unmatched merge is named. The summary line names the ones with no near name too: label, project, and the
+  groups whose Athena groups share that project (`groups_in_project`). The `process` reply lists the first 10
+  (`athena_unmatched_merges`). `isaac bundle list <bundle_dir> athena-merges` pages them all.
+- An Athena group whose name matches several groups is used for none. It is said in one summary line, with the
+  groups. When they are live, the line says they may be one sample measured in several runs, and names a proposed
+  merge candidate between them. A hint only: ISAAC never merges groups. The scientist decides.
+
 A tie is no decision kind of its own. The tied Athena result says it (`athena_match_tie`: project, Athena
 group, the run's params.json; flag `athena_named_by_scientist`). A bulk approval refuses it. Its approval's
 note records the tie, the record's `generated_by.notes` says it, and the params.json is evidence in the
 sidecar. Once a group's merge is tied (now, or in its decided result), the group is not hinted or asked
 again, and kept results lose the sentence. A later `process` without that params file says "the params
-file's athena_match for this group was not passed this time". Measured on BL4-3 MOF-Co: 46 of the
+file's athena_match for this group was not passed this time". r7: when a params file made the new run, the line on a
+decided result says so: "the params file's exclude_scans leaves X out of the merge", "… athena_match ties …", "a
+params file sets other protocol parameters than that run had (…)", or that one of these was not passed this time.
+"This build" is said only when none of these explains the new id. Measured on BL4-3 MOF-Co: 46 of the
 scientists' 56 merges (27 distinct) matched no group, with typed-short names (`spt2` for `spot2`, `sugar`
 for `sucrose`, `0V` for `m0V`, `postXA`); 12 have near-name hints, naming 13 groups. ISAAC said nothing
 of them before.
@@ -575,7 +598,8 @@ bundle directory and never contain `..`.
 `<bundle_dir>/record_groups.json`; `<bundle_dir>/processing/processing_results.json`
 (`processing_results[]` in the bundle-v1.1 shape, `unread_acquisition_results[]`);
 per group `merged.csv`, `normalized.csv`, `qc.json`, `params.json`, `plot.png`
-(`athena_normalized.csv` when matched) — paths relative to the bundle dir, each with sha256.
+(`athena_normalized.csv` when matched; r7: `plot_athena_v<n>.png` for a chosen Athena version, its curve over
+ISAAC's, named in that result's `athena_version_plot`; never hashed, so no id moves) — paths relative to the bundle dir, each with sha256.
 Without numpy/xraylarch: `processing/status.json` with `processing_unavailable`, no results.
 
 ## 10. What a scientist must approve before any of this is relied on

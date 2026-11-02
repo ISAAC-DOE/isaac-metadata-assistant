@@ -4929,6 +4929,9 @@ def process(
         if group_ids:
             # the groups NOT named keep their results as stored (`new` counts only the named groups')
             out["kept_other_groups"] = len(keep) - kept_decided
+        merges = unmatched_merges_reply(payload.get("athena") or {})
+        if merges:
+            out["athena_unmatched_merges"] = merges
         if not_carried:
             line = _athena_choices_not_carried_over_line(not_carried)
             out["athena_selections_not_carried_over"] = {
@@ -4944,7 +4947,7 @@ def process(
                 out["summary"] = {**out["summary"],
                                   "lines": [*(out["summary"].get("lines") or ()), *(x["statement"] for x in new_curve)]}
         moved = decided_results_on_an_older_run(bundle, before, keep, fresh,
-                                                said={x["decided_result_id"] for x in new_curve})
+                                                said={x["decided_result_id"] for x in new_curve}, bundle_dir=bundle_dir)
         if moved:
             out["decided_results_on_an_older_run"] = moved
             if isinstance(out.get("summary"), Mapping):
@@ -4965,6 +4968,40 @@ def process(
         return out
 
     return mutate(bundle_dir, change)
+
+
+#: r7 K1: how many of the scientist's unmatched merges the process reply lists (the rest are paged by
+#: ``isaac bundle list <bundle_dir> athena-merges``)
+UNMATCHED_MERGES_IN_REPLY = 10
+
+
+def unmatched_merge_row(item: Mapping) -> dict:
+    """r7 K1: one compact row for a scientist's merge that matches no group (``athena.unmatched_merges``): its Athena
+    label, its projects, the near-name hints (never matched) and the groups whose Athena groups share its project."""
+    return {
+        "athena_label": str(item.get("athena_label") or "").strip(),
+        "projects": [x.get("prj_relative_path") for x in item.get("in") or ()][:5],
+        "athena_group": ((item.get("in") or [{}])[0] or {}).get("athena_group"),
+        "near_groups": [{"group_id": c.get("group_id"), "group_name": c.get("group_name"),
+                         "differs_in": c.get("differs_in")} for c in item.get("candidates") or ()],
+        "groups_in_project": list(item.get("groups_in_project") or ()),
+        **({"groups_in_project_more": item["groups_in_project_more"]} if item.get("groups_in_project_more") else {}),
+        **({"not_this_group": list(item["not_this_group"])} if item.get("not_this_group") else {}),
+    }
+
+
+def unmatched_merges_reply(athena: Mapping) -> dict | None:
+    """r7 K1: the process reply's ``athena_unmatched_merges``: the first :data:`UNMATCHED_MERGES_IN_REPLY` merges that
+    match no group (compact rows), how many there are, and the command that pages them all. ``None`` when none."""
+    items = [i for i in athena.get("unmatched_merges") or () if isinstance(i, Mapping)]
+    if not items:
+        return None
+    rows = [unmatched_merge_row(i) for i in items[:UNMATCHED_MERGES_IN_REPLY]]
+    left = len(items) - len(rows)
+    return {"total": len(items), "merges": rows,
+            **({"more": f"{left} more: `isaac bundle list <bundle_dir> athena-merges --offset {len(rows)}`"} if left > 0 else {}),
+            "statement": ("The scientist's Athena merges whose name matches no group: ISAAC used none of them. Ask which "
+                          "group each is for, if any; never pick a near name.")}
 
 
 def decided_results_with_a_new_all_zero_skip(bundle: Mapping, keep: Sequence[Mapping], fresh: Sequence[Mapping]) -> list[dict]:
@@ -5026,7 +5063,8 @@ OLDER_RUN_SAID_KEY = "older_run_said_for"
 
 
 def decided_results_on_an_older_run(bundle: Mapping, before: Sequence[Mapping], keep: Sequence[Mapping],
-                                    fresh: Sequence[Mapping], *, said: set | frozenset = frozenset()) -> list[dict]:
+                                    fresh: Sequence[Mapping], *, said: set | frozenset = frozenset(),
+                                    bundle_dir: Path | None = None) -> list[dict]:
     """r5 M2: one line per DECIDED result kept on its old id whose group this build gives fresh results under ANOTHER
     run id, saying why the id moved (the Athena match changed; the scientist's Athena curve is now made from the
     project as Athena makes it; else the curve or the files its id is made from changed) and that the decision stands
@@ -5036,7 +5074,11 @@ def decided_results_on_an_older_run(bundle: Mapping, before: Sequence[Mapping], 
     (:data:`CURVE_WHEN_DECIDED_KEY`) the first time its line is said, while its run's other results are still in the
     bundle (only a run under a new id replaces them), and read from there afterwards (a later run no longer has them, which made every later line say the match had
     changed). The line is said ONCE per new run id (:data:`OLDER_RUN_SAID_KEY`), never again on an identical re-run.
-    The recorded fields are outside every hashed file. ``[]`` when none."""
+    The recorded fields are outside every hashed file. ``[]`` when none.
+
+    r7 K2: when a params file made the new run (it leaves scans out, ties an Athena group, or sets a protocol
+    parameter; or one that did was not passed this time), the line says so in those words. "This build" is said only
+    when nothing the params file does explains it. ``bundle_dir`` lets the line read each run's params.json."""
     decisions = B.processing_state_decisions(bundle)
     out = []
     for old in keep:
@@ -5068,17 +5110,27 @@ def decided_results_on_an_older_run(bundle: Mapping, before: Sequence[Mapping], 
         # earlier, e.g. rejected): reading the fresh ones alone said "no Athena curve now" while one was kept
         now_run = [r for r in [*fresh, *keep] if r.get("group_id") == gid and str(r.get("run_id")) == new_run]
         now = _athena_match_of(now_run, gid, None)
-        if was != now:
+        old_run = [r for r in [old, *before] if r.get("group_id") == gid and r.get("run_id") == run]
+        # r7 K2: what the params file did, read from the two runs (their ISAAC results and params.json)
+        by_params = _params_file_reasons(old_run, now_run, gid, run, new_run, bundle_dir)
+        was_tied = _tied(old) or bool(seen.get("tied")) or any(_tied(r) for r in old_run)
+        tie_now = [r for r in now_run if _tied(r)]
+        tied_now = bool(tie_now) and not was_tied
+        if tied_now:
+            ref = (tie_now[0].get("inputs") or [{}])[0] or {}
+            by_params.append(f"the params file's athena_match ties the scientist's Athena group "
+                             f"{ref.get('athena_group')} in {ref.get('relative_path')} to this group "
+                             f"({_said_match(was)} before)")
+        elif was != now:
             why.append("the scientist's Athena curve it is compared with is matched differently now "
                        f"({_said_match(was)} before, {_said_match(now)} now)")
-        was_tied = _tied(old) or bool(seen.get("tied")) or any(
-            _tied(r) for r in before if r.get("group_id") == gid and r.get("run_id") == run)
-        if was_tied and not any(_tied(r) for r in now_run):
-            why.append("the params file's athena_match for this group was not passed this time, so the Athena curve "
-                       "the scientist tied to it is not matched now (pass the same params file to keep the tie)")
-        if not seen.get("rebuilt") and any(_rebuilt(r) for r in new):
-            why.append("the scientist's Athena curve is now made from the project as Athena makes it "
-                       f"({C_ATHENA_RENORM})")
+        if was_tied and not tie_now:
+            by_params.append("the params file's athena_match for this group was not passed this time, so the Athena "
+                             "curve the scientist tied to it is not matched now (pass the same params file to keep the tie)")
+        why = by_params + why
+        if not seen.get("rebuilt") and any(_rebuilt(r) for r in new) and not tied_now:
+            # r7 K2: said in words; the flag it once carried is gone (r6 G4)
+            why.append("the scientist's Athena curve is now made from the project as Athena makes it")
         if not why:
             why.append("its curve, or a file its id is made from, changed with this build")
         nid = next((B.processing_id(r) for r in new if r.get("source") == old.get("source")), B.processing_id(new[0]))
@@ -5091,9 +5143,69 @@ def decided_results_on_an_older_run(bundle: Mapping, before: Sequence[Mapping], 
             old[OLDER_RUN_SAID_KEY] = [*(old.get(OLDER_RUN_SAID_KEY) or ()), new_run]
         out.append({"group_id": gid, "decided_result_id": pid, "new_result_id": nid, "reasons": why,
                     "statement": (f"Group {gid}: {pid} ({what} by {(d.get('decided_by') or {}).get('name')}) is kept on "
-                                  f"its old curve; this build gives the group new results ({nid}) because "
+                                  f"its old curve; the group has new results ({nid}) because "
                                   f"{'; and '.join(why)}. {stands} on the old curve until the scientist changes it; "
                                   f"the new result is undecided.")})
+    return out
+
+
+#: ``processing.run.EXCLUDED_REASON`` (r4-a M6; not imported: processing is an optional extra).
+C_EXCLUDED = "scans_excluded_by_params_file"
+
+
+def _excluded_by_params(results: Sequence[Mapping]) -> list[str]:
+    """r7 K2: the scans a run's ISAAC result left out by the params file's exclude_scans, by file name (and scan
+    number when the params file named one)."""
+    isaac = next((r for r in results if r.get("source") == "isaac_protocol"), None)
+    out = []
+    for i in (isaac or {}).get("inputs") or ():
+        if i.get("skip_reason") != C_EXCLUDED:
+            continue
+        name = PurePosixPath(str(i.get("relative_path") or i.get("source_id"))).name
+        out.append(f"{name} scan {i['scan']}" if "#" in str(i.get("excluded_as") or "") else name)
+    return out
+
+
+def _run_params_json(bundle_dir: Path | None, results: Sequence[Mapping], gid: str, run_id: str | None) -> Mapping | None:
+    """r7 K2: a run's params.json (its ISAAC result's ``params`` file, else ``processing/<group>/<run>/params.json``), or
+    ``None`` when it cannot be read."""
+    if bundle_dir is None or not run_id:
+        return None
+    rels = [f.get("relative_path") for r in results for f in (r.get("outputs") or {}).get("files") or ()
+            if f.get("role") == "params" and f.get("relative_path")]
+    for rel in [*rels, f"processing/{gid}/{run_id}/params.json"]:
+        try:
+            got = json.loads((Path(bundle_dir) / rel).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(got, Mapping):
+            return got
+    return None
+
+
+def _params_file_reasons(old_run: Sequence[Mapping], now_run: Sequence[Mapping], gid: str, run: str | None,
+                         new_run: str, bundle_dir: Path | None) -> list[str]:
+    """r7 K2: why the params file gives a group a new run: the scans it leaves out now (or left out before and not
+    now) and the protocol parameters that differ between the two runs' params.json. ``[]`` when it did nothing."""
+    out = []
+    was, now = _excluded_by_params(old_run), _excluded_by_params(now_run)
+    added, dropped = [x for x in now if x not in was], [x for x in was if x not in now]
+    if added:
+        out.append(f"the params file's exclude_scans leaves {', '.join(added[:5])}"
+                   + (f" and {len(added) - 5} more" if len(added) > 5 else "") + " out of the merge")
+    if dropped:
+        out.append(f"the params file's exclude_scans that left {', '.join(dropped[:5])}"
+                   + (f" and {len(dropped) - 5} more" if len(dropped) > 5 else "")
+                   + " out was not passed this time (pass the same params file to keep them out)")
+    a, b = _run_params_json(bundle_dir, old_run, gid, run), _run_params_json(bundle_dir, now_run, gid, new_run)
+    pa, pb = (a or {}).get("params"), (b or {}).get("params")
+    if isinstance(pa, Mapping) and isinstance(pb, Mapping):
+        keys = sorted(f"{sec}.{k}" for sec in set(pa) | set(pb)
+                      for k in set(pa.get(sec) or {}) | set(pb.get(sec) or {})
+                      if (pa.get(sec) or {}).get(k) != (pb.get(sec) or {}).get(k))
+        if keys:
+            out.append("a params file sets other protocol parameters than that run had ("
+                       + ", ".join(keys[:6]) + (f" and {len(keys) - 6} more" if len(keys) > 6 else "") + ")")
     return out
 
 

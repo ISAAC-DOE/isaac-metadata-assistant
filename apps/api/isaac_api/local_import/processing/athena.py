@@ -886,6 +886,41 @@ def resolve_ties(ties: Mapping[str, Sequence[Mapping]], entries: Sequence[Mappin
     return by_entry, said
 
 
+def resolve_ignores(items: Sequence[Mapping], entries: Sequence[Mapping], groups: Sequence[Mapping]) -> tuple[set[int], list[dict]]:
+    """r7 K5: ``({entry index}, what was done with each)`` for a params file's ``athena_ignore``
+    (``protocol.athena_ignores``): the scientist's merges that are no group's, set aside so they are no longer listed
+    as unmatched. Each names ONE Athena group exactly (project and Athena group name or label, as a tie does); one
+    that names none, several, or a group that is not an unmatched merge sets nothing aside, and says so."""
+    stems = {g["group_id"]: [normalise_name(s) for s in g.get("_stems") or ()] for g in groups if takes_part(g)}
+    bases = {gid: base_names(gstems) for gid, gstems in stems.items()}
+    out: set[int] = set()
+    rows: list[dict] = []
+    for item in items:
+        prj, grp = item["project"], item["athena_group"]
+        hit = [i for i, e in enumerate(entries)
+               if prj in (e["prj_relative_path"], PurePosixPath(e["prj_relative_path"]).name)
+               and grp in (e["group_name"], e["label"])]
+        row = {"project": prj, "athena_group": grp}
+        if not hit:
+            row.update(status="not_found", statement=(
+                f"The params file's athena_ignore names {grp!r} in {prj}, but no Athena group read has that project "
+                "and that name or label: nothing was set aside. Check both."))
+        elif len(hit) > 1:
+            row.update(status="several", statement=(
+                f"The params file's athena_ignore names {grp!r} in {prj}, which fits {len(hit)} Athena groups read: "
+                "nothing was set aside. Name the project by its relative path and the group by its Athena group name."))
+        elif _hits(entries[hit[0]], stems, bases) or not is_scientist_merge(entries[hit[0]]):
+            row.update(status="not_unmatched", statement=(
+                f"The params file's athena_ignore names {grp!r} in {prj}, which is no merge that matches no group: "
+                "nothing was set aside (it is matched by name, or it is no merge)."))
+        else:
+            out.add(hit[0])
+            row.update(status="ignored", label=entries[hit[0]]["label"],
+                       prj_relative_path=entries[hit[0]]["prj_relative_path"])
+        rows.append(row)
+    return out, rows
+
+
 def match_with_versions(groups: Sequence[Mapping], entries: Sequence[Mapping], np=None, *,
                         ties: Mapping[int, Sequence[str]] | None = None) -> tuple[dict[str, dict], list[dict], dict[str, list[dict]]]:
     """group_id -> athena entry (unambiguous matches only), and notes on every ambiguity.
@@ -1084,9 +1119,31 @@ def entry_groups(groups: Sequence[Mapping], entries: Sequence[Mapping], *,
 #: otherwise than the scan files (``spt2`` for ``spot2``, ``sugar`` for ``sucrose``, ``0V`` for ``m0V``, ``postXA``),
 #: and ISAAC said nothing of them.
 UNMATCHED_HINT_RULE_ID = "isaac.athena.unmatched_merge_hint.v0"
+#: r7 K3: a hint never crosses run numbers. When both names START with whole numbers (electrode, run: ``01_05_…``)
+#: and neither set of them holds the other, the names are other runs (``01_05`` / ``03_04``), never a hint, however
+#: alike the rest is. A group whose leading numbers are the merge's own is ranked first. A leading ``Ref`` word is
+#: no part of the name. The run numbers that differ are named in ``differs_in``.
+UNMATCHED_HINT_RUN_NUMBERS_RULE_ID = "isaac.athena.unmatched_merge_hint.run_numbers.v0"
+#: r7 K3: Athena names the REFERENCE CHANNEL it reads beside a sample ``"  Ref <name>"``. Such a group is the
+#: reference foil of a scan, not the scientist's merge of a sample: it is never listed as an unmatched merge, never
+#: hinted and never asked about; it is counted in the summary line. Measured on a real BL15-2 beamtime: 77 of the 79
+#: "merges that match no group" were these, and their hints sat on 116 of 153 results.
+REFERENCE_CHANNEL_RULE_ID = "isaac.athena.reference_channel.v0"
+_REFERENCE_CHANNEL = re.compile(r"^\s*ref\s+\S", re.IGNORECASE)
 UNMATCHED_HINT_MIN_RATIO = 0.85
 UNMATCHED_HINT_MAX = 3
 _MERGE_TOKEN = re.compile(r"^" + _MERGE_WORD + r"\d*$")
+
+
+def is_reference_channel(entry: Mapping) -> bool:
+    """r7 K3 (:data:`REFERENCE_CHANNEL_RULE_ID`): an Athena group whose label is Athena's name for a reference channel
+    (``"  Ref <name>"``): the reference read beside a sample, never a sample merge."""
+    return bool(_REFERENCE_CHANNEL.match(str(entry.get("label") or "")))
+
+
+def _without_ref(name: str) -> str:
+    """r7 K3: a normalised name without a leading ``ref`` word (``ref_01_05_x`` -> ``01_05_x``)."""
+    return name[4:] if name.startswith("ref_") else name
 
 
 def merge_own_name(entry: Mapping) -> str:
@@ -1114,18 +1171,44 @@ def _without_lead_numbers(name: str) -> str:
     return "_".join(toks)
 
 
-def _lead_numbers(name: str) -> set[int]:
-    """The whole numbers a name STARTS with (``03_05_x`` -> {3, 5}); none when it starts with a word."""
-    out = set()
+def _lead_tokens(name: str) -> list[str]:
+    """The whole-number tokens a name STARTS with, as written (``03_05_x`` -> ["03", "05"])."""
+    out = []
     for t in name.split("_"):
         if not _WHOLE.match(t):
             break
-        out.add(int(t))
+        out.append(t)
     return out
 
 
+def _lead_numbers(name: str) -> set[int]:
+    """The whole numbers a name STARTS with (``03_05_x`` -> {3, 5}); none when it starts with a word."""
+    return {int(t) for t in _lead_tokens(name)}
+
+
+def _run_numbers_compatible(a: Sequence[int], b: Sequence[int]) -> bool:
+    """r7 K3: whether two names' leading numbers (in order) can name the same run: either has none; one has a single
+    number that the other names (a merge ``03_05_…`` of runs 03 and 05, a group ``05_…``); or both name the same
+    numbers in the same order (``01_05`` is never ``03_04``, nor ``04_11`` ``04_04``)."""
+    if not a or not b:
+        return True
+    if len(a) == 1 or len(b) == 1:
+        return a[0] in b if len(a) == 1 else b[0] in a
+    return list(a) == list(b)
+
+
 def _differs_in(a: str, b: str) -> dict:
-    """The tokens only in ``a`` (the merge's name) and only in ``b`` (the group's), each without its leading numbers."""
+    """The tokens only in ``a`` (the merge's name) and only in ``b`` (the group's): first (r7 K3) the leading run
+    numbers one names and the other does not, then the other tokens without their leading numbers."""
+    na, nb = _lead_numbers(a), _lead_numbers(b)
+    runs_a = [t for t in _lead_tokens(a) if int(t) not in nb] if nb else []
+    runs_b = [t for t in _lead_tokens(b) if int(t) not in na] if na else []
+    words = _word_diff(a, b)
+    return {"merge": runs_a + words["merge"], "group": runs_b + words["group"]}
+
+
+def _word_diff(a: str, b: str) -> dict:
+    """The tokens only in ``a`` and only in ``b``, each name without its leading numbers."""
     ta, tb = _without_lead_numbers(a).split("_"), _without_lead_numbers(b).split("_")
     return {"merge": [t for t in ta if t and t not in tb], "group": [t for t in tb if t and t not in ta]}
 
@@ -1150,11 +1233,14 @@ def near_name_candidates(entry: Mapping, groups: Sequence[Mapping]) -> list[dict
     ``differs_in``). Hints only: nothing is matched."""
     import difflib
 
-    own = merge_own_name(entry)
+    if is_reference_channel(entry):
+        return []
+    own = _without_ref(merge_own_name(entry))
     if not own:
         return []
     toks = set(own.split("_")) - {""}
     numbers = _lead_numbers(own)
+    seq = [int(t) for t in _lead_tokens(own)]
     words = {t for t in toks if not _WHOLE.match(t)}
     bare = _without_lead_numbers(own)
     out = []
@@ -1169,42 +1255,69 @@ def near_name_candidates(entry: Mapping, groups: Sequence[Mapping]) -> list[dict
             gtoks = set(name.split("_")) - {""}
             shared = sorted(words & {t for t in gtoks if not _WHOLE.match(t)})
             lead = _lead_number(name)
+            gseq = [int(t) for t in _lead_tokens(name)]
+            if not _run_numbers_compatible(seq, gseq):
+                continue  # r7 K3: other run numbers (``01_05`` / ``03_04``): another run, never a hint
+            same_numbers = bool(seq) and seq == gseq
             by_number = lead is not None and lead in numbers and bool(shared)
             ratio = difflib.SequenceMatcher(None, bare, _without_lead_numbers(name)).ratio() if bare else 0.0
             diff = _differs_in(own, name)
-            alike = ratio >= UNMATCHED_HINT_MIN_RATIO and not _digits_only_difference(diff)
+            alike = ratio >= UNMATCHED_HINT_MIN_RATIO and not _digits_only_difference(_word_diff(own, name))
             if not (by_number or alike):
                 continue
-            key = (by_number, round(ratio, 3), len(shared))
+            key = (same_numbers, by_number, round(ratio, 3), len(shared))
             if best is None or key > best[0]:
                 best = (key, {"group_id": g["group_id"], "group_name": name, "shares_run_number": by_number,
-                              "shared_tokens": shared, "similarity": round(ratio, 3), "differs_in": diff})
+                              "same_run_numbers": same_numbers, "shared_tokens": shared, "similarity": round(ratio, 3),
+                              "differs_in": diff})
         if best is not None:
             out.append(best)
-    out.sort(key=lambda kv: (not kv[0][0], -kv[0][1], -kv[0][2], kv[1]["group_id"]))
+    out.sort(key=lambda kv: (not kv[0][0], not kv[0][1], -kv[0][2], -kv[0][3], kv[1]["group_id"]))
     return [c for _, c in out[:UNMATCHED_HINT_MAX]]
 
 
+def _merge_key(e: Mapping) -> tuple:
+    """One merge's identity across projects: its normalised label and its data (the same in several projects is one)."""
+    return normalise_name(str(e.get("label") or "")), e.get("data_hash")
+
+
+def unmatched_reference_channels(groups: Sequence[Mapping], entries: Sequence[Mapping], *,
+                                 tied: Iterable[int] = ()) -> list[dict]:
+    """r7 K3: the reference-channel groups (:func:`is_reference_channel`) that match no record group and that no params
+    file ties: ``[{"athena_label", "in": [project, ...]}]``, one per label and data. Counted, never hinted."""
+    stems = {g["group_id"]: [normalise_name(s) for s in g.get("_stems") or ()] for g in groups if takes_part(g)}
+    bases = {gid: base_names(gstems) for gid, gstems in stems.items()}
+    tied = set(tied)
+    items: dict[tuple, dict] = {}
+    for idx, e in enumerate(entries):
+        if idx in tied or not is_reference_channel(e) or not is_scientist_merge(e) or _hits(e, stems, bases):
+            continue
+        item = items.setdefault(_merge_key(e), {"athena_label": str(e.get("label") or "").strip(), "in": []})
+        item["in"].append(e["prj_relative_path"])
+    return list(items.values())
+
+
 def unmatched_merges(groups: Sequence[Mapping], entries: Sequence[Mapping], *, tied: Iterable[int] = (),
-                     not_this: Mapping[int, Sequence[str]] | None = None) -> list[dict]:
+                     not_this: Mapping[int, Sequence[str]] | None = None, ignored: Iterable[int] = ()) -> list[dict]:
     """r6 G1: the scientist's merges (:func:`is_scientist_merge`) that match NO record group by name (no hit at all;
     one that matches several groups has its own note) and that no params file ties to a group (``tied``: entry
     indexes). One item per merge: the same label with the same data in several projects is ONE merge, naming every
     project. Each item lists its near-name candidates (:func:`near_name_candidates`: hints only, never matched), less
     the groups the scientist said it is not (``not_this``: {entry index: [group ids]}, params ``athena_match_not``,
-    any copy of it)."""
+    any copy of it). r7 K3: a reference channel (:func:`is_reference_channel`) is no sample merge: never listed
+    (:func:`unmatched_reference_channels` counts them). r7 K5: a merge the scientist set aside (``ignored``: entry
+    indexes, params ``athena_ignore``), and any copy of it, is not listed."""
     stems = {g["group_id"]: [normalise_name(s) for s in g.get("_stems") or ()] for g in groups if takes_part(g)}
     bases = {gid: base_names(gstems) for gid, gstems in stems.items()}
-    tied = set(tied)
-
-    def _key(e):
-        return normalise_name(str(e.get("label") or "")), e.get("data_hash")
+    tied = set(tied) | set(ignored)
+    _key = _merge_key
 
     # a copy of a tied merge (the same label and data in another project) is the same merge: tied too
     tied_keys = {_key(entries[i]) for i in tied if 0 <= i < len(entries)}
     items: dict[tuple, dict] = {}
     for idx, e in enumerate(entries):
-        if idx in tied or _key(e) in tied_keys or not is_scientist_merge(e) or _hits(e, stems, bases):
+        if (idx in tied or _key(e) in tied_keys or not is_scientist_merge(e) or is_reference_channel(e)
+                or _hits(e, stems, bases)):
             continue
         key = _key(e)
         item = items.get(key)
