@@ -218,6 +218,11 @@ def _reading(candidate: Mapping, run: Mapping) -> dict | None:
         return {"kind": "literal", "value": toks} if toks else None
     if candidate.get("value") is not None:
         return {"kind": "value", "value": candidate["value"]}
+    from .bundle import passing_reading_value
+
+    if (passing := passing_reading_value(candidate)) is not None:
+        # r5 B1: a cell named only in passing gives no value locally; the runs are partitioned as the import read them
+        return {"kind": "value", "value": passing}
     lits = _literals(candidate)
     if not lits:
         return None
@@ -230,13 +235,16 @@ def _reading(candidate: Mapping, run: Mapping) -> dict | None:
 def _scan_file_indexes(run: Mapping) -> dict[str, int]:
     out = {}
     for s in run.get("scans") or ():
+        if s.get("source_id") and s.get("source_id") == run.get("acquisition_source_id"):
+            continue  # r5d: a scan inside the SPEC acquisition file itself: that file has no index of its own
         idx = s.get("scan_index")
         if idx is None:
             m = _SCAN_FILE_INDEX.search(str(s.get("relative_path") or ""))
             idx = int(m.group(1)) if m else None
         if s.get("source_id") and idx is not None:
-            out[s["source_id"]] = int(idx)
-    return out
+            # r5d H1: a file holding several of the run's scans has no one index of its own
+            out[s["source_id"]] = None if s["source_id"] in out else int(idx)
+    return {sid: i for sid, i in out.items() if i is not None}
 
 
 def _scan_index_misread(c: Mapping, run: Mapping) -> dict | None:

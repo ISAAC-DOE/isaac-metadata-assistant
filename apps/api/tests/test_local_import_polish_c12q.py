@@ -90,7 +90,9 @@ def test_negative_control_an_unanswered_setpoint_is_still_the_missing_item(bdir)
     draft, report = R.compose_group(M.load(bdir), next(g for g in M.load(bdir)["record_groups"] if g["group_id"] == "g1"),
                                     bdir)
     paths = [m["path"] for m in report["missing_required"]]
-    assert POT in paths and SCALE not in paths
+    # r5c C6: the unanswered set-point is still the missing item, and its scale is listed beside it (asked with it)
+    assert paths.index(POT) < paths.index(SCALE)
+    assert next(m for m in report["missing_required"] if m["path"] == SCALE)["asked_with"] == POT
     assert draft["fields"][POT]["status"] == "missing"
 
 

@@ -28,8 +28,9 @@ from test_local_import_records import BY, SEMANTICS
 CELL = "context.electrochemistry.cell_type"
 SETPOINT = "context.electrochemistry.potential_setpoint_V"
 NOTES = "2099 SYNTHETIC semantics notes.txt"
-#: Before any sample section: about the whole beamtime, and not about any measurement's cell.
-BEAMTIME_SENTENCE = "SYNTHETIC: the spare grids are kept on the bench beside the flow cell."
+#: Before any sample section: about the whole beamtime. r5 B1: a sentence that names the cell only in passing gives no
+#: value at all (test_local_import_polish_r5b), so the beamtime-wide hold is tested on one that states the cell.
+BEAMTIME_SENTENCE = "SYNTHETIC: every spectrum was measured in a flow cell."
 #: Inside the `Sample 2` section: that section's own statement.
 SECTION_SENTENCE = "SYNTHETIC: measured in an H-cell."
 

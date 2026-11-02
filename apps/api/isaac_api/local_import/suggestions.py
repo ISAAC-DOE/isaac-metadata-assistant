@@ -206,7 +206,25 @@ def facility_hints(bundle: Mapping) -> list[dict]:
     detector column names, and the locator says literally what was seen."""
     hints = []
     system = (bundle.get("experiment") or {}).get("acquisition_system") or {}
+    # r5d H2: the SPEC headers' own fingerprint (account and column names) first, beside the folder's name
+    fp = system.get("fingerprint") or {}
+    folder_disagrees = fp.get("disagrees_with_folder_name")
     runs, names = _acquisition_system_observed(bundle, system) if system.get("display_name") else (0, [])
+    for m in fp.get("matches") or ():
+        if runs and m.get("system_id") == system.get("system_id"):
+            continue  # the acquisition-system hint below already names this system, from the same columns
+        note = ("The SPEC account and column names these files' headers state, nothing more: they match data measured at "
+                "this beamline, which is not proof of where these were taken. A HINT, never an answer.")
+        if folder_disagrees:
+            note += (f" The folder's name '{folder_disagrees['folder_name']}' names '{folder_disagrees['beamline']}': "
+                     "the two hints disagree, so ask the scientist which beamline it was.")
+        hints.append({
+            "kind": "acquisition_fingerprint",
+            "literal": f"{m['facility']} {m['beamline']}",
+            "locator": B.fingerprint_said(m),
+            "branch_stated": bool(m.get("branch_stated")),
+            "note": note,
+        })
     if runs:
         hints.append({
             "kind": "acquisition_system",
@@ -216,13 +234,38 @@ def facility_hints(bundle: Mapping) -> list[dict]:
             "note": ("Column names in the scan headers, nothing more: they match this acquisition system's naming, which is "
                      "not proof of the beamline. A HINT about where the data were taken, never an answer."),
         })
+    folder_note = "A facility or beamline in a folder name is a HINT to ask about, never an answer."
+    if folder_disagrees:
+        folder_note += (" The SPEC headers' own fingerprint names another beamline: the two hints disagree, so ask the "
+                        "scientist which beamline it was.")
     hints.append({
         "kind": "folder_name",
         "literal": bundle["source_root"]["label"],
         "locator": "the imported folder's name",
-        "note": "A facility or beamline in a folder name is a HINT to ask about, never an answer.",
+        "note": folder_note,
     })
     return hints
+
+
+def beamline_hints_sentence(bundle: Mapping) -> str:
+    """r5d H2: one plain sentence for the beamline question when the SPEC headers' fingerprint disagrees with the
+    folder's name, matches several beamlines, or is not the build's default system; ``""`` otherwise."""
+    fp = ((bundle.get("experiment") or {}).get("acquisition_system") or {}).get("fingerprint") or {}
+    matches = fp.get("matches") or ()
+    if not matches:
+        return ""
+    said = "; ".join(B.fingerprint_said(m) for m in matches)
+    ask = ": ask the scientist which beamline it was (system.facility.beamline)."
+    folder = fp.get("disagrees_with_folder_name")
+    if folder:
+        return (f" The files' beamline hints disagree: the folder's name '{folder['folder_name']}' names "
+                f"'{folder['beamline']}', while the SPEC headers state {said}. Neither is an answer" + ask)
+    if len({m["beamline"] for m in matches}) > 1:
+        return f" The SPEC headers match more than one beamline: {said}. Hints, never answers" + ask
+    if fp.get("contradicts_build_default"):
+        return (f" The SPEC headers state {said}; this build reads every import as BL15-2 data by default, "
+                "which these headers do not match. A hint, never an answer" + ask)
+    return ""
 
 
 # --- a Claude reading pass's findings -> AI interpretations ------------------------------------

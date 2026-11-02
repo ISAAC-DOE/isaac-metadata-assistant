@@ -59,7 +59,9 @@ def test_usable_edges_that_disagree_are_not_proposed_and_need_accept_shift():
     step = _step([11213.1, 11219.2, 11220.0, 11221.0], [10.4, 11.0, 2.0, 1.5])
     r = REF.reading(step)
     # the edge is read (approvable), but ISAAC does not offer it as the calibration
-    assert r["reference_proposed"] is True and r["calibration_proposed"] is False and r["reference_edges_disagree"]
+    # r5 A7: not proposed (the agent would ask for an element and edge), still approvable with --accept-shift
+    assert r["reference_proposed"] is False and r["reference_edge_usable"] is True
+    assert r["calibration_proposed"] is False and r["reference_edges_disagree"]
     assert r["reference_e0_spread_eV"] == pytest.approx(6.1) and r["reference_max_spread_eV"] == 0.5
     said = r["reference_statement"]
     assert "2 of 4 scans show a usable reference edge" in said
@@ -271,7 +273,7 @@ def test_processing_reference_edges_that_disagree_apply_only_with_their_size_con
     bdir, root, _ = T.make_case(tmp_path, [("01_SYN_ZZ1", scans, {"sample_name": "ZZ1"})])
     r = T.isaac(T.run_process(bdir, source_root=root))
     o = _cal(r)["outcome"]
-    assert o["reference_proposed"] is True and o["calibration_proposed"] is False and o["reference_edges_disagree"]
+    assert o["reference_proposed"] is False and o["calibration_proposed"] is False and o["reference_edges_disagree"]
     assert REF.SPREAD_FLAG in r["review_flags"] and "calibration_shift_awaiting_approval" not in r["review_flags"]
     assert "Its usable edges spread 1.00 eV" in o["reference_statement"]
     e0 = r["outputs"]["e0_eV"]

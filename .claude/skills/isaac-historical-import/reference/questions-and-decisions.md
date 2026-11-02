@@ -32,8 +32,9 @@ required only because of another, `required_because` and the `command` that answ
 `plus_decisions` names only the decisions not yet made (an empty list once the group is
 confirmed and its result approved); for a group with scans but no processing result yet it says "run
 `isaac process` first", and for one whose only results were rejected, "re-process it". It never names a group that cannot export while another exists: no
-ISAAC protocol covers its data, its result has no curve, or none of its runs lists a scan (`no_scans`, the
-`cannot_export_reason` of `bundle list <bundle> groups`). When only such groups are left, `blocked` says why
+ISAAC protocol covers its data, its result has no curve, none of its runs lists a scan (`no_scans`, the
+`cannot_export_reason` of `bundle list <bundle> groups`), or every run is a reference standard or alignment
+scan whose record needs a field nothing can hold (`not_a_measurement_run`). When only such groups are left, `blocked` says why
 in words and `plus_decisions` never says "approve its processing result" for them. `recommended[]` (never blocking, not counted) names a question
 worth answering for that group, with the warning that explains it (`warnings`): today, a potential the
 file names state that the record will not carry until its scale is confirmed. Pages hold at most 200 (`--limit` above that is refused). The older fine-grained list (`bundle list <bundle> questions`)
@@ -61,7 +62,8 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   stretch a word (a metal foil is none of the sample forms). If they keep their own word, see "Not on
   the list at all" below. Use `defer` only if they say they don't know. `decide` refuses a value the field's schema rejects (not on the list, wrong
   type, a time not in UTC), lists the allowed values and records nothing; when one target of a bulk
-  answer is refused, nothing is recorded for any.
+  answer is refused, nothing is recorded for any. The refusal names EVERY refused target with its reason: say
+  them all, then run the call again without them and decide each refused one on its own.
 - Ask `produced_by` ("who made these measurements?") once, per beamtime; offer a folder-name hint
   as a question, not an answer. `--by` is the name the scientist gave in Step 1; do not ask again.
 
@@ -118,6 +120,14 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   once per group, with the sentence.
   Show the sentence and ask whether it applies to these runs; a sentence that only mentions the thing in
   passing is usually a `reject` or a `correct`. Answer all groups at once only when they say it applies to all.
+- **A cell named only in passing** ("What is the cell type? … The notes name a cell only in passing, in a
+  sentence about something else: '…'"): a notes line that names a cell but is about something else gives no
+  cell type. That is a to-do or reminder ("TODO: flow cell needs a gasket"), handling or storing it ("kept with
+  the flow cell", "rinse the flow cell"), or any line not shaped like a statement of the cell. The question quotes the line and asks; it offers no `confirm` and no
+  `--same-reading` batch. Ask "What cell was used for these runs?" per group (or in the template's Cell Type
+  column) and record `correct --value <their answer>`. A record cites such a line as `context`, never as
+  support. A line about the cell is read as before: a short header ("PEEK flow cell", "In situ flow cell,
+  5 ml/min"), a label ("Cell: H-cell"), "is a flow cell", or "measured in a flow cell".
 - **Sample questions asked once for several groups** name the shared sample reading as the files write it
   ("with the same sample reading (sample name 'ZZ1', sample or electrode number '01', as the files write
   it)"). Say that reading when you ask.
@@ -125,7 +135,9 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   kept one per group (each record carries its own answer; their ids never change), but share a `same_reading_group`
   (`same_reading_count` of them), and the text says "N questions share this reading (…); answer them together with
   … --same-reading …". Ask once ("are all N the same thing?"); on a yes, run its `same_reading_command`. Runs whose
-  file names read the field differently never share one; answer the others on their own.
+  file names read the field differently never share one; answer the others on their own. A confirm is batched by the
+  value it records, not by how the file writes it: `0p8V` and `800mV` are one batch, "N questions share this value
+  (`0.8` V; the files write it '0p8V', '800mV')". Say the value back, and the spellings.
 - **No value to confirm.** Text like "What is the technique? The files hold text for it … but no
   value this build can carry", with no `confirm` in `allowed_decisions`, means there is nothing to
   accept. Never invent a value and never confirm one. Ask "What is X?", show the file's text (the
@@ -156,7 +168,9 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
 - **The counter question** (`naming_counter_positions`): its text shows real file names of this
   bundle with the asked token in brackets (`SYNnp_on_Au_[12]_1500mV` vs `SYNnp_on_Au_[2]_1500mV`;
   also `example_names`), and one name where that token is not a number (`SYNfilm_on_Au_[OCV]`). Show
-  them as they are; ask whether that number marks repeats of one measurement.
+  them as they are; ask whether that number marks repeats of one measurement. When no two names differ only
+  there, it shows one real name with the token marked ("[03]_01_SYN… (no two names here differ only there)");
+  it never shows a pattern like `XX_02_…`.
 - **Control mode** (`context.electrochemistry.control_mode`) is an ordinary value among a group's
   optional fields: `--field context.electrochemistry.control_mode --decision correct --value <one of
   its allowed values>`. A potentiostatic mode makes the potential set-point required; a galvanostatic
@@ -336,8 +350,11 @@ and to use it (a sheet you found in the folder is not that; ask first). Never re
    `Disagreements` sheet with their value, EVERY reading of that field for those runs with its source (each
    marked `differs:` or `agrees:`; read both kinds back), and an empty "Your ruling". A Campaign Info
    beamline (or a one-word facility acronym) that names another one than a facility HINT (the folder's name,
-   or the acquisition system the scan headers match: what `ISAAC Suggestions` shows) is a row too, kind
+   the SPEC headers' fingerprint (their SPEC account and column names), or the acquisition system the scan
+   headers match: what `ISAAC Suggestions` shows) is a row too, kind
    `hint`: compared without `BL` and separators, so `BL15-2`, `BL152` and `15-2` agree and `62b` does not. A
+   fingerprint that states no branch (`BL6-2`) agrees with any branch (`62b`). When the hints disagree with each
+   other, the row says so first and marks each hint `differs from` or `agrees with`: read every one back. A
    hint is not a reading; say both and let them rule. The facility's organization is in no hint and is not
    compared. A Campaign Info value that differs from an answer already RECORDED for the runs it reaches (`SLAC
    National Accelerator Laboratory` beside a recorded `SLAC`) is a whole-beamtime row too, kind `recorded`: one ruling

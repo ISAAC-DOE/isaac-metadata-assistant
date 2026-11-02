@@ -59,7 +59,7 @@ def _follow(b: Path, commands, capsys) -> None:
     """Run each command a refusal named, with only its placeholders filled in."""
     assert commands
     for command in commands:
-        argv = shlex.split(command.replace("<bundle_dir>", str(b)).replace("<your name>", BY).replace("<the sample>", SAMPLE))
+        argv = shlex.split(command.replace("<bundle_dir>", str(b)).replace("<your name>", BY).replace("<the material name the record carries>", SAMPLE))
         assert argv[0] == "isaac", command
         assert cli.main(argv[1:]) == 0, command
     capsys.readouterr()

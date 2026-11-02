@@ -27,7 +27,7 @@ import math
 import re
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Container, Iterable, Mapping, Sequence
 
 FORMAT_ID = "isaac.local-import-bundle"
 #: 1.2.0 (additive): ``processed_outputs[]`` — the scientists' own Athena/Demeter outputs,
@@ -501,6 +501,106 @@ def all_scan_numbers_known(numbers: Sequence[int | None]) -> bool:
     """True only when every input's scan number is known (:func:`input_scan_numbers`): the one rule under which a
     scan may be said merged, not merged, or absent."""
     return bool(numbers) and all(n is not None for n in numbers)
+
+
+# --- scans kept inside the SPEC file itself (r5d H1) ---------------------------------------------
+#
+# The engine takes a SPEC run's scans from its `<stem>_dir/` folder of one-scan exports. Some runs have
+# no such folder: their scans exist only as `#S` blocks of the SPEC acquisition file. Such a run's scans
+# are then those blocks: each energy scan (`gscan`, the command `bl15.spec.gscan_grid` reads as an energy
+# grid) with at least one data row and a `#S` number used once in the file, listed as
+# `{relative_path: <the SPEC file>, scan_index: <its #S number>}`. Every other block is named and left out.
+
+#: The rule that lists a SPEC file's own `#S` blocks as its run's scans.
+SPEC_FILE_SCANS_RULE_ID = "spec_file_energy_scans_v1"
+#: A `#S` command that is an energy scan (its first word).
+SPEC_ENERGY_SCAN_COMMANDS = frozenset({"gscan"})
+_SPEC_S_LINE = re.compile(r"^#S[ \t]+(\S+)[ \t]*(.*)$")
+#: A `#S` number: ASCII digits only (``str.isdigit`` accepts ``²``, which ``int`` refuses).
+_ASCII_NUMBER = re.compile(r"[0-9]+")
+
+
+def spec_file_scans(text: str) -> tuple[list[int], list[dict]]:
+    """``(scan numbers, left out)`` of one SPEC file's own ``#S`` blocks (:data:`SPEC_FILE_SCANS_RULE_ID`).
+
+    A scan is an energy scan (:data:`SPEC_ENERGY_SCAN_COMMANDS`) with at least one data row whose ``#S``
+    number appears once. Each other block is in ``left out`` as ``{scan, command, why}``."""
+    blocks: list[dict] = []
+    for line in text.lstrip("﻿").splitlines():
+        m = _SPEC_S_LINE.match(line)
+        if m:
+            blocks.append({"literal": m.group(1), "command": m.group(2).strip(), "rows": 0})
+        elif blocks and line.strip() and not line.startswith("#"):
+            blocks[-1]["rows"] += 1
+    numbers = [int(b["literal"]) if _ASCII_NUMBER.fullmatch(b["literal"]) else None for b in blocks]
+    seen: dict[int, int] = {}
+    for n in numbers:
+        if n is not None:
+            seen[n] = seen.get(n, 0) + 1
+    scans: list[int] = []
+    left_out: list[dict] = []
+    for b, n in zip(blocks, numbers):
+        word = b["command"].split()[0] if b["command"] else ""
+        if n is None:
+            why = "its #S number is not a number"
+        elif seen[n] > 1:
+            why = "its #S number appears more than once in the file, so it names no single scan"
+        elif word not in SPEC_ENERGY_SCAN_COMMANDS:
+            why = f"not an energy scan ({word or 'no command'})"
+        elif not b["rows"]:
+            why = "no data rows"
+        else:
+            scans.append(n)
+            continue
+        left_out.append({"scan": b["literal"], "command": word or None, "why": why})
+    return scans, left_out
+
+
+def _spec_file_scan_rows(root: Path | None, row: Mapping | None) -> tuple[tuple[list[int], list[dict]] | None, str | None]:
+    """``((scan numbers, left out), None)`` for the SPEC file the walk listed as ``row``, or ``(None, why)``.
+
+    Read through the engine's own reader (``bl15.archive.read_source_text``), so a folder, a ZIP with or without
+    its "compress this folder" wrapper, and a ZIP inside the folder are read exactly as the walk read them, with
+    its refusals and its sha256 check."""
+    if root is None or not row:
+        return None, "the imported folder or ZIP was not given to this build"
+    from ..bl15 import archive
+    from ..bl15.inventory import ArchiveInventory, SourceRecord
+
+    try:
+        record = SourceRecord(archive_path=row["archive_path"], basename=row.get("basename") or "",
+                              extension=row.get("extension") or "", size_bytes=int(row.get("size_bytes") or 0),
+                              content_sha256=str(row.get("content_sha256") or ""), parent_dir=row.get("parent_dir") or "",
+                              depth=int(row.get("depth") or 0))
+        text, refusal = archive.read_source_text(ArchiveInventory(root_label="", entries=(record,)), record.archive_path,
+                                                 source_root=root)
+    except Exception as exc:  # never let one unreadable file stop the import
+        return None, f"it could not be read ({type(exc).__name__})"
+    if text is None:
+        return None, f"it could not be read as the walk read it ({refusal})"
+    return spec_file_scans(text), None
+
+
+def _exported_copy_of(stem: str, stems: Container[str]) -> str | None:
+    """The run ``stem`` names an exported copy of (``SYN_A.dat`` beside a run ``SYN_A``: grouping's
+    ``exported_file_read_as_acquisition`` rule), else ``None``. Such a copy lists no in-file scans of its own."""
+    from .grouping import _EXPORT_EXT  # local: grouping imports bundle
+
+    m = _EXPORT_EXT.match(str(stem or ""))
+    return m.group("base") if m and m.group("base") in stems and m.group("base") != stem else None
+
+
+def spec_file_scans_statement(numbers: Sequence[int], left_out: Sequence[Mapping], why: str | None = None) -> str:
+    """What :data:`SPEC_FILE_SCANS_RULE_ID` did for one run, in words (``why``: its SPEC file was not read)."""
+    if why:
+        return f"No scan file was found in a `<stem>_dir` folder, and its SPEC file was not read for its own scans: {why}."
+    said = (f"No scan file was found in a `<stem>_dir` folder, so this run's scans are the {len(numbers)} energy "
+            f"scan(s) inside its SPEC file: #S {', '.join(str(n) for n in numbers)}.") if numbers else (
+            "No scan file was found in a `<stem>_dir` folder, and its SPEC file holds no energy scan with data rows.")
+    if left_out:
+        said += " Left out: " + "; ".join(f"#S {x['scan']} ({x['why']})" for x in left_out[:20]) + (
+            f"; and {len(left_out) - 20} more" if len(left_out) > 20 else "") + "."
+    return said
 
 
 def _selection_numbers(sel: str) -> set[int] | None:
@@ -2436,12 +2536,204 @@ def _hold_for_review(candidate: dict) -> None:
             writable_paths=frozenset())
 
 
+# --- a cell named only in passing is not the cell type (r5 B1) ------------------------------------------------
+#
+# The logbook rule (`bl15.notes`, the truth plane, untouched) reads ANY prose line that names a cell option as a
+# cell-type statement. Measured on a real beamtime: a line saying where some unrelated items were kept "with the flow
+# cell" became the cell type of every run, offered as one bulk confirm and cited as the record's evidence, while the
+# line that states the cell ("Flow cell = <rate>") sat in a section with no file numbers. Locally a sentence that names the
+# cell only IN PASSING (it is about something else) gives no value: the candidate keeps the sentence and its reading
+# (the evidence is unchanged) and carries `value: null`, so the question quotes the sentence and asks (no confirm),
+# and a scientist's answer is cited as theirs, never as the sentence's. A sentence ABOUT the cell or the measurement
+# ("Flow cell = 5 ml/min", "Cell: H-cell", "measured in a flow cell", "we used a beaker cell") is read as before.
+# Only an undecided value is cleared (a confirm already recorded keeps the value it confirmed). Applied where the
+# beamtime-wide hold is: at import (`_candidate_record`) and in memory on every read (`hold_beamtime_wide_statements`).
+
+@lru_cache(maxsize=1)
+def _cell_type_rule_id() -> str | None:
+    """The logbook cell-type rule's id (``bl15.notes.cell_type_statement.v1``), read from the conditions table."""
+    from ..bl15 import conditions as cond  # local: bl15 imports historical_import
+
+    return next((rule for path, rule, _name in cond.FIELDS.values() if path == "context.electrochemistry.cell_type"), None)
+
+
+# THE RULE (r5 review M1/M2): a line names the cell IN PASSING when a POSITIVE marker says it is about something else;
+# a line shaped like a statement of the cell is read; anything else is asked (no value), never guessed.
+
+#: A to-do or reminder line: "TODO: flow cell needs a gasket", "Note: flow cell leaked", "Remember to fill the flow cell".
+_PASSING_LEAD = re.compile(r"^[\W_]*(?:to\s?-?do|note|n\.?b\.?|remember|reminder|ask|check|fixme|tbd)\b", re.IGNORECASE)
+#: A verb of handling the apparatus, not of measuring in it: kept, stored, rinsed, cleaned, replaced, leaked, needs ...
+_PASSING_VERB = re.compile(r"\b(?:kept|keep|keeps|keeping|stored|store|stores|storing|rinse\w*|clean\w*|replac\w*|broke|"
+                           r"broken|leak\w*|bring|brought|fill|fills|filling|filled(?!\s+with)|needs?|repair\w*|borrow\w*|"
+                           r"return\w*|order\w*|lost|ship\w*|pack\w*|wash\w*|dismantl\w*|disassembl\w*|clog\w*|crack\w*)\b",
+                           re.IGNORECASE)
+#: The cell is the object of a place word: "... kept with the flow cell", "beside the H-cell", "old data from the flow cell".
+_PLACE_BEFORE = re.compile(r"\b(?:with|beside|next\s+to|near|by|behind|beneath|under|from)\s+"
+                           r"(?:(?:the|a|an|our|this|that)\s+)?(?:[\w'’-]+\s+){0,2}$", re.IGNORECASE)
+#: ...or of a storage place anywhere in the line: "in the drawer", "on the shelf", "on the USB stick".
+_STORAGE = re.compile(r"\b(?:drawer|box|cabinet|cupboard|shelf|fridge|freezer|bag|usb|stick|hard\s+drive|folder)\b",
+                      re.IGNORECASE)
+#: The line is a label for the cell: "Cell: H-cell", "Cell type = flow cell", "Setup - beaker cell".
+_CELL_LABEL = re.compile(r"^[\W_]*(?:electrochemical\s+|echem\s+)?(?:cell(?:\s+type)?|set-?up|configuration|apparatus|reactor)"
+                         r"\s*[:=–—-]", re.IGNORECASE)
+_MEASURE_WORDS = (r"measur\w*|collect\w*|record\w*|acquir\w*|perform\w*|conduct\w*|carried\s+out|done|run|ran|runs|"
+                  r"operat\w*|experiment\w*|spectr\w*|scans?|scanned|xas|xanes|exafs|herfd|electrochem\w*|in[\s-]situ|"
+                  r"operando|samples?|electrodes?|cycl\w*|polari[sz]\w*|held|tested")
+#: "... measured in a flow cell", "spectra collected with the H-cell", "samples were run in a beaker cell".
+_MEASURED_IN = re.compile(rf"\b(?:{_MEASURE_WORDS})\b(?:\s+[\w'’-]+){{0,3}}?\s+(?:in|into|inside|with|using|via|on)\s+"
+                          rf"(?:(?:a|an|the|our|same|this|that)\s+)?(?:[\w-]+\s+)?$", re.IGNORECASE)
+#: "we used a flow cell", "using an H-cell", "assembled the beaker cell".
+_USED = re.compile(r"\b(?:use[ds]?|using|assembl\w*|mount\w*|load\w*|built|installed|switched\s+to|chang\w*\s+to)"
+                   r"\s+(?:(?:a|an|the|our|same|this|that|new)\s+)?(?:[\w-]+\s+)?$", re.IGNORECASE)
+#: "The cell is a flow cell", "Cell was a flow cell".
+_COPULA = re.compile(r"\b(?:is|was|were|are)\s+(?:(?:a|an|the)\s+)?(?:[\w-]+\s+){0,2}$", re.IGNORECASE)
+#: a leading label ("Electrolyte:", "SYNTHETIC:") before a short header
+_LEAD_LABEL = re.compile(r"^[\W_]*(?:[A-Za-z][\w ]{0,24}:\s*)?")
+#: words that do not count toward a short header's modifiers
+_FREE_WORDS = frozenset({"a", "an", "the", "our", "one", "this", "same", "in", "at", "inside", "into", "of", "for"})
+#: how many modifier words a one-line header may put before the cell ("Custom PEEK flow cell", "0.1 M KOH in flow cell")
+HEADER_MODIFIERS = 3
+
+
+def _states_the_cell(sentence: str, before: str) -> bool:
+    """The line is shaped like a statement of the cell: a label for it, a measurement made in or with it, "used a
+    ...", "is a ...", or a short header that opens with at most :data:`HEADER_MODIFIERS` modifier words before it."""
+    if _CELL_LABEL.match(sentence) or _MEASURED_IN.search(before) or _USED.search(before) or _COPULA.search(before):
+        return True
+    words = [w for w in re.findall(r"[\w.'’+/-]+", before[_LEAD_LABEL.match(before).end():])
+             if w.casefold() not in _FREE_WORDS]
+    return len(words) <= HEADER_MODIFIERS
+
+
+def cell_named_in_passing(sentence: Any, term: Any) -> bool:
+    """True when ``sentence`` (a logbook line the cell-type rule read) names the cell ``term`` only IN PASSING. Decided
+    from POSITIVE markers first: a to-do or reminder lead, a verb of handling (kept, stored, rinsed, leaked, needs ...),
+    or the cell as the object of a place word ("kept with the flow cell", "in the drawer"); then a line shaped like a
+    statement of the cell (:func:`_states_the_cell`) is read; anything else is asked (``True``: no value, never a guess).
+    When the term is not found in the line, nothing is judged (``False``)."""
+    if not isinstance(sentence, str) or not isinstance(term, str) or not term.strip():
+        return False
+    at = sentence.casefold().find(term.casefold())
+    if at < 0:
+        return False
+    before = sentence[:at]
+    if _PASSING_LEAD.match(sentence) or _PASSING_VERB.search(sentence) or _STORAGE.search(sentence):
+        return True
+    if _PLACE_BEFORE.search(before) and not _MEASURED_IN.search(before):
+        return True
+    return not _states_the_cell(sentence, before)
+
+
+def _passing_readings(candidate: Mapping) -> list[tuple[str, str]]:
+    """``[(sentence, term)]`` of every file witness of ``candidate`` when EACH is a logbook cell-type reading that
+    names the cell only in passing (:func:`cell_named_in_passing`); ``[]`` otherwise (one witness that states the
+    cell is enough to keep the value). An AI interpretation is not file evidence and is not counted either way."""
+    if candidate.get("target_field_path") != "context.electrochemistry.cell_type" or candidate.get("kind") != "field":
+        return []
+    witnesses = [e for e in candidate.get("evidence") or () if e.get("method") != "ai_interpretation"]
+    out = []
+    for e in witnesses:
+        term = passing_witness_term(candidate, e)
+        if term is None:
+            return []
+        out.append((str(e.get("literal_value")), term))
+    return out
+
+
+def passing_witness_term(candidate: Mapping, e: Mapping) -> str | None:
+    """The cell term ONE witness of a cell-type candidate names only in passing (:func:`cell_named_in_passing`),
+    or ``None`` when it is not a logbook cell-type reading or the sentence is about the cell. ``records`` cites such a
+    witness as context, never as support for the value of record."""
+    if candidate.get("target_field_path") != "context.electrochemistry.cell_type" or e.get("method") == "ai_interpretation":
+        return None
+    rule = _cell_type_rule_id()
+    reading = next((n.get("to") for n in e.get("normalization") or ()
+                    if n.get("rule_id") == rule and n.get("step") == "normalize" and isinstance(n.get("to"), Mapping)), None)
+    if reading is None or not cell_named_in_passing(e.get("literal_value"), reading.get("term")):
+        return None
+    return str(reading.get("term"))
+
+
+def passing_reading_value(candidate: Mapping) -> Any:
+    """The value the logbook rule read from a sentence that names the cell only in passing (its ``derive`` step),
+    for a candidate :func:`clear_passing_cell_mentions` cleared — what the IMPORT recorded, so a question's scope
+    (DEC-91: read only from what the import recorded) and a regroup's partition do not move with this local hold.
+    ``None`` for any other candidate."""
+    if (candidate.get("state_basis") or {}).get("not_proposable_reason") != PASSING_MENTION_REASON:
+        return None
+    rule = _cell_type_rule_id()
+    for e in candidate.get("evidence") or ():
+        for n in e.get("normalization") or ():
+            if n.get("rule_id") == rule and n.get("step") == "derive" and isinstance(n.get("to"), str):
+                return n["to"]
+    return None
+
+
+#: the parser states a passing mention's value may be cleared from (never a conflict: that is the scientist's to settle)
+_PASSING_CLEARABLE = (STATE_CANDIDATE_EXTRACTED, STATE_NEEDS_REVIEW)
+
+PASSING_MENTION_REASON = (
+    "The notes name this cell only in passing, in a sentence about something else (a to-do or a reminder, handling or "
+    "storing the apparatus, or a line not shaped like a statement of the cell). It is not read as the cell type: "
+    "it is kept as evidence and quoted, and no value is read from it (the engine proposed one; this local build does not)."
+)
+
+
+def passing_mention_summary(readings: Sequence[tuple[str, str]]) -> str:
+    """The one-line ``not_proposable_summary`` of a cleared cell-type candidate: the sentence, quoted."""
+    sentence, term = readings[0]
+    shown = sentence if len(sentence) <= 160 else sentence[:159] + "…"
+    return (f"the notes name a {term.strip().lower()} only in passing, in a sentence about something else ('{shown}'): "
+            "no value is read from it.")
+
+
+def clear_passing_cell_mentions(bundle: dict) -> list[str]:
+    """Clear the value of every UNDECIDED cell-type candidate whose every file witness names the cell only in
+    passing (:func:`_passing_readings`), in place; the ids cleared. The candidate keeps its evidence and literal;
+    ``value`` becomes ``None``, held for review with :data:`PASSING_MENTION_REASON`. A candidate a scientist decided
+    (confirmed, corrected, rejected) is never touched. Idempotent. Counts do not move (it was already held for
+    review, or moves exactly as :func:`hold_beamtime_wide_statements` counts it)."""
+    decision_of = conflict_ids_of = None
+    cleared = []
+    for c in bundle.get("candidates") or ():
+        if (c.get("value") is None or c.get("target_field_path") != "context.electrochemistry.cell_type"
+                or c.get("extracted_state") not in _PASSING_CLEARABLE):
+            continue
+        readings = _passing_readings(c)
+        if not readings:
+            continue
+        if decision_of is None:  # built once, and only when a candidate needs them
+            decision_of = _decisions_by_target(bundle.get("scientist_decisions") or ())
+            conflict_ids_of = conflict_ids_by_candidate(bundle)
+        d = candidate_decision(bundle, c, decision_of, conflict_ids_of)
+        if d is not None and d.get("decision") not in NEUTRAL_DECISIONS:
+            continue
+        _clear_passing_mention(c, readings)
+        cleared.append(c["candidate_id"])
+    return cleared
+
+
+def _clear_passing_mention(candidate: dict, readings: Sequence[tuple[str, str]]) -> None:
+    sb = candidate["state_basis"]
+    sb.update(review_status="needs_review", proposable=False, not_proposable_reason=PASSING_MENTION_REASON,
+              not_proposable_summary=passing_mention_summary(readings))
+    candidate["value"] = None
+    candidate["extracted_state"] = STATE_NEEDS_REVIEW
+    if candidate.get("value_state") == STATE_CANDIDATE_EXTRACTED:
+        candidate["value_state"] = STATE_NEEDS_REVIEW
+    candidate["eligibility_for_official_record"] = eligibility_for_official_record(
+        candidate.get("value_state") or STATE_NEEDS_REVIEW, target_field_path=candidate.get("target_field_path"),
+        value=None, writable_paths=frozenset())
+
+
 def hold_beamtime_wide_statements(bundle: dict) -> list[str]:
     """Hold every extracted candidate :func:`beamtime_wide_statement` finds for review, in place; the ids
     held. Idempotent (a held candidate is no longer proposable). The counts a held value moves
     (``counts.candidate_extracted`` / ``needs_review``, ``readiness.blocking.needs_review``) move with it, so a
     READ-ONLY command that holds in memory (``cli``'s list/show/check, ``local_bundles.read_bundle``) shows
-    what :func:`apply_derivations` would store, and the held bundle validates as the stored one does."""
+    what :func:`apply_derivations` would store, and the held bundle validates as the stored one does.
+    r5 B1: then clears the value a sentence that names the cell only in passing gave
+    (:func:`clear_passing_cell_mentions`), counted the same way."""
     held, moved = [], 0
     for c in bundle.get("candidates") or ():
         if c.get("extracted_state") == STATE_CANDIDATE_EXTRACTED and beamtime_wide_statement(c):
@@ -2449,6 +2741,10 @@ def hold_beamtime_wide_statements(bundle: dict) -> list[str]:
             _hold_for_review(c)
             moved += was == STATE_CANDIDATE_EXTRACTED and c.get("value_state") == STATE_NEEDS_REVIEW
             held.append(c["candidate_id"])
+    was_extracted = {c["candidate_id"] for c in bundle.get("candidates") or ()
+                     if c.get("value_state") == STATE_CANDIDATE_EXTRACTED}
+    for cid in clear_passing_cell_mentions(bundle):
+        moved += cid in was_extracted  # the ids returned stay the beamtime-wide holds (`held_statement` counts those)
     counts = bundle.get("counts")
     if moved and isinstance(counts, dict) and isinstance(counts.get("candidate_extracted"), int):
         counts["candidate_extracted"] -= moved
@@ -2459,8 +2755,14 @@ def hold_beamtime_wide_statements(bundle: dict) -> list[str]:
     return held
 
 
+#: the reasons a value is held for review by this local build, not by the engine (c6-a, r5 B1)
+HELD_REASONS = frozenset({BEAMTIME_WIDE_REASON, PASSING_MENTION_REASON})
+
 #: ``eligibility_rederived[].reason`` for a value a save HOLDS that the stored file gave as extracted (M2, c6-r).
 BEAMTIME_WIDE_REDERIVED_REASON = "Held for review by this build; an older build stored it as an extracted value. " + BEAMTIME_WIDE_REASON
+#: ...and for a cell-type value read from a sentence that names the cell only in passing (r5 B1)
+PASSING_MENTION_REDERIVED_REASON = ("No value is read by this build; an older build stored it as an extracted value. "
+                                    + PASSING_MENTION_REASON)
 
 
 def held_statement(n: int) -> str:
@@ -2478,7 +2780,7 @@ def log_beamtime_wide_holds(bundle: dict, stored: Mapping | None, *, to_version:
     if not stored:
         return []
     was = {c.get("candidate_id"): c for c in stored.get("candidates") or () if isinstance(c, Mapping)
-           and c.get("extracted_state") == STATE_CANDIDATE_EXTRACTED and beamtime_wide_statement(c)}
+           and c.get("extracted_state") == STATE_CANDIDATE_EXTRACTED and (beamtime_wide_statement(c) or _passing_readings(c))}
     if not was:
         return []
     from datetime import datetime, timezone
@@ -2489,7 +2791,7 @@ def log_beamtime_wide_holds(bundle: dict, stored: Mapping | None, *, to_version:
     logged = []
     for c in bundle.get("candidates") or ():
         before = was.get(c["candidate_id"])
-        if before is None or (c.get("state_basis") or {}).get("not_proposable_reason") != BEAMTIME_WIDE_REASON:
+        if before is None or (c.get("state_basis") or {}).get("not_proposable_reason") not in HELD_REASONS:
             continue
         d = candidate_decision(bundle, c, decision_of)
         log.append({"kind": "candidate", "id": c["candidate_id"], "target_field_path": c.get("target_field_path") or "",
@@ -2497,7 +2799,9 @@ def log_beamtime_wide_holds(bundle: dict, stored: Mapping | None, *, to_version:
                     "rederived_utc": at, "value_state": c["value_state"],
                     "eligible_before": bool((before.get("eligibility_for_official_record") or {}).get("eligible")),
                     "eligible_now": bool(c["eligibility_for_official_record"]["eligible"]),
-                    "decision_id": (d or {}).get("decision_id"), "reason": BEAMTIME_WIDE_REDERIVED_REASON})
+                    "decision_id": (d or {}).get("decision_id"),
+                    "reason": (PASSING_MENTION_REDERIVED_REASON if c["state_basis"]["not_proposable_reason"] == PASSING_MENTION_REASON
+                               else BEAMTIME_WIDE_REDERIVED_REASON)})
         logged.append(c["candidate_id"])
     return logged
 
@@ -2832,6 +3136,8 @@ def _candidate_record(c, *, bundle_cid: str, run_id: str | None, key: str, evide
     }
     if extracted == STATE_CANDIDATE_EXTRACTED and beamtime_wide_statement(record):
         _hold_for_review(record)  # a beamtime-wide notes statement is context, not this run's value
+    if record["value"] is not None and record["extracted_state"] in _PASSING_CLEARABLE and (readings := _passing_readings(record)):
+        _clear_passing_mention(record, readings)  # r5 B1: a cell named only in passing gives no value
     return record
 
 
@@ -2899,6 +3205,139 @@ def _acquisition_system_section(engine_system: Mapping, runs_seen: int, columns:
         "statement": statement,
     })
     return system
+
+
+# --- the acquisition fingerprint: a beamline HINT from the SPEC headers (r5d H2) -------------------
+#
+# A folder's name is one hint about the beamline. The SPEC headers give another: the account the SPEC
+# session ran under (`#C spec  User = <account>`) and the detector column names (`#L`). Each known
+# fingerprint below was measured on SPEC files of that beamline (account and column names only). A match
+# is a HINT, never an answer: an account or a column name can move between beamlines. The build still
+# applies its one default acquisition system; when the fingerprint names another beamline, the bundle says
+# so plainly and the beamline question quotes both hints. The scientist says which beamline it was.
+
+ACQUISITION_FINGERPRINT_RULE_ID = "spec_acquisition_fingerprint_v1"
+#: ``(fingerprint_id, facility, beamline, SPEC accounts, detector columns, system_id of the build's system
+#: it describes or None)``. Accounts are compared case-folded, after any ``DOMAIN\\`` prefix.
+ACQUISITION_FINGERPRINTS: tuple[dict, ...] = (
+    {"fingerprint_id": "ssrl_bl152_spec", "facility": "SSRL", "beamline": "BL15-2", "branch_stated": True,
+     "spec_accounts": ("specadm", "fifteen"), "channels": ("vortDT", "vortDT2", "vortDT3", "vortDT4"),
+     "system_id": "ssrl_bl152_spec_vortex_channels"},
+    {"fingerprint_id": "ssrl_bl62_spec", "facility": "SSRL", "beamline": "BL6-2", "branch_stated": False,
+     "spec_accounts": ("b_user62",), "channels": ("FF1", "FF2", "FF3", "DTC_FF1", "DTC_FF2", "DTC_FF3"),
+     "system_id": None},
+)
+_SPEC_USER_LITERAL = re.compile(r"(?i)^\s*spec\s+user\s*=\s*(.*?)\s*$")
+_MAX_FINGERPRINT_ACCOUNTS = 20
+
+
+def spec_account(literal: Any) -> str | None:
+    """The account a ``#C spec  User = <account>`` literal names, as written (``None`` for another literal)."""
+    m = _SPEC_USER_LITERAL.match(str(literal or ""))
+    return (m.group(1) or None) if m else None
+
+
+def _account_key(account: str) -> str:
+    return account.replace("/", "\\").rsplit("\\", 1)[-1].strip().casefold()
+
+
+def acquisition_fingerprint(evidence_by_source: Mapping[str, Sequence]) -> dict | None:
+    """``experiment.acquisition_system.fingerprint``: the SPEC accounts and the known fingerprints' detector
+    columns the SPEC headers state, and each known fingerprint they match (:data:`ACQUISITION_FINGERPRINTS`).
+    ``None`` when no SPEC header states an account or a known column."""
+    accounts: dict[str, set[str]] = {}
+    channels: dict[str, set[str]] = {}
+    known = {ch for fp in ACQUISITION_FINGERPRINTS for ch in fp["channels"]}
+    for path, items in evidence_by_source.items():
+        for item in items:
+            concept = getattr(item, "concept", None)
+            if concept == "spec_user_string":
+                account = spec_account(getattr(item, "raw_literal", None))
+                if account:
+                    accounts.setdefault(account, set()).add(path)
+            elif concept == "detector_column" and getattr(item, "raw_literal", None) in known:
+                channels.setdefault(item.raw_literal, set()).add(path)
+    if not accounts and not channels:
+        return None
+    matches = []
+    for fp in ACQUISITION_FINGERPRINTS:
+        wanted = {a.casefold() for a in fp["spec_accounts"]}
+        seen_accounts = sorted(a for a in accounts if _account_key(a) in wanted)
+        seen_channels = [c for c in fp["channels"] if c in channels]
+        if not seen_accounts and not seen_channels:
+            continue
+        matches.append({
+            "fingerprint_id": fp["fingerprint_id"], "facility": fp["facility"], "beamline": fp["beamline"],
+            "branch_stated": fp["branch_stated"], "system_id": fp["system_id"],
+            "accounts_seen": seen_accounts, "account_files": len(set().union(*(accounts[a] for a in seen_accounts))),
+            "channels_seen": seen_channels, "channel_files": len(set().union(*(channels[c] for c in seen_channels))),
+        })
+    return {
+        "rule_id": ACQUISITION_FINGERPRINT_RULE_ID,
+        "spec_accounts": [{"literal": a, "files": len(p)} for a, p in sorted(accounts.items(), key=lambda kv: (-len(kv[1]), kv[0]))][
+            :_MAX_FINGERPRINT_ACCOUNTS],
+        "channels_seen": sorted(channels),
+        "matches": matches,
+    }
+
+
+def fingerprint_said(m: Mapping) -> str:
+    """One match in words: what the SPEC headers state, and whose data it was measured on."""
+    parts = []
+    if m.get("accounts_seen"):
+        parts.append("the SPEC account " + " / ".join(f"'{a}'" for a in m["accounts_seen"])
+                     + f" in {m.get('account_files')} file(s)")
+    if m.get("channels_seen"):
+        parts.append("the detector columns " + ", ".join(m["channels_seen"]) + f" in {m.get('channel_files')} file(s)")
+    where = f"{m['facility']} {m['beamline']} data" + ("" if m.get("branch_stated") else " (branch not stated)")
+    return f"{' and '.join(parts)}, as in {where}"
+
+
+def _fingerprint_section(fp: dict, system: Mapping, folder_label: str | None) -> dict:
+    """``fp`` with whether it agrees with the build's default system, and a plain statement."""
+    from .template import beamline_form  # local: template imports bundle
+
+    ids = {m["system_id"] for m in fp["matches"]}
+    fp["contradicts_build_default"] = bool(fp["matches"]) and system.get("system_id") not in ids
+    names = sorted({m["beamline"] for m in fp["matches"]})
+    said = "; ".join(fingerprint_said(m) for m in fp["matches"])
+    if not fp["matches"]:
+        fp["statement"] = ("The SPEC headers name no account or column of a known beamline fingerprint, so they give "
+                           "no beamline hint.")
+        return fp
+    statement = f"The SPEC headers state {said}."
+    if len(names) > 1:
+        statement += f" They match more than one beamline ({', '.join(names)})."
+    folder_beamline = _folder_beamline(folder_label)
+    if folder_beamline and not any(_beamline_agrees(m, folder_beamline) for m in fp["matches"]):
+        fp["disagrees_with_folder_name"] = {"folder_name": folder_label, "beamline": folder_beamline,
+                                            "compared_as": beamline_form(folder_beamline)}
+        statement += f" The folder's name '{folder_label}' names '{folder_beamline}': the two hints disagree."
+    if fp["contradicts_build_default"]:
+        statement += (" This build still reads every import with its default BL15-2 acquisition system and naming "
+                      "convention, which these headers do not match.")
+    fp["statement"] = statement + (" Both are hints, never answers: the scientist says which beamline it was "
+                                   "(the beamline question).")
+    return fp
+
+
+_FOLDER_BEAMLINE = re.compile(r"(?i)(?<![a-z0-9])BL[-.]?\d+(?:[-.]\d+)?[a-z]?(?![a-z0-9])")
+
+
+def _folder_beamline(label: str | None) -> str | None:
+    """The first ``BL…`` token of a folder's name (``SSRL_BL152_2019`` -> ``BL152``), else ``None``."""
+    from .template import join_split_beamline
+
+    m = _FOLDER_BEAMLINE.search(join_split_beamline(str(label or "")).replace("_", " "))
+    return m.group(0) if m else None
+
+
+def _beamline_agrees(match: Mapping, value: str) -> bool:
+    """A fingerprint names ``value``'s beamline: the same one, or (its branch not stated) any branch of it."""
+    from .template import same_beamline, without_branch
+
+    return same_beamline(match["beamline"], value) or (
+        not match.get("branch_stated") and same_beamline(match["beamline"], without_branch(value)))
 
 
 def _naming_profile_shown(entry: dict, acquisition_system_seen: bool) -> dict:
@@ -2972,11 +3411,14 @@ def build_bundle(
     isaac_commit: str | None = None,
     tool_version: str = "0.1.0",
     generic: Any = None,
+    source_root: str | Path | None = None,
 ) -> dict:
     """Build a v1 bundle from ONE :func:`historical_import.read_local_archive` result.
 
     Deterministic given its inputs (``bundle_id`` and ``created_utc`` aside). Raises
     :class:`BundleBoundsExceeded` rather than silently dropping runs or candidates.
+    ``source_root`` (the folder or ZIP read): a SPEC run with no scan file in a ``<stem>_dir`` folder
+    lists the energy scans inside its SPEC file (:data:`SPEC_FILE_SCANS_RULE_ID`); without it, it lists none.
     """
     from isaac_records.ids import new_record_id
 
@@ -3224,6 +3666,9 @@ def build_bundle(
 
     runs: list[dict] = []
     conflicts_of_run: dict[str, list] = {}
+    spec_root = Path(source_root) if source_root is not None else None
+    row_of = {row["archive_path"]: row for row in manifest}
+    unit_stems = {u.stem for u in reading.units}
     for ui, u in enumerate(reading.units):
         run_id = run_ids[ui]
         rel = rel_by_path.get(u.acquisition_path) or (rel_list[ui] if ui < len(rel_list) else {})
@@ -3243,6 +3688,38 @@ def build_bundle(
             for key in ("duplicate_copies", "suppressed_duplicate_acquisitions", "processed_products", "internal_declaration")
             if rel.get(key)
         }
+        scans = [
+            {
+                "source_id": sid_of.get(s.get("path")),
+                "relative_path": s.get("path"),
+                "scan_index": s.get("scan_index"),
+            }
+            for s in rel.get("scans") or ()
+            if isinstance(s, Mapping) and _safe_relative(s.get("path"))
+        ]
+        scan_count = u.scan_count
+        if (not scans and not scan_count and u.run_candidate and u.source_type == "spec_acquisition"
+                and _safe_relative(u.acquisition_path) and u.acquisition_path in sid_of):
+            # r5d H1: no `<stem>_dir` scan file: the energy scans inside the SPEC file are the run's scans
+            copy_of = _exported_copy_of(u.stem, unit_stems)
+            found, why = ((None, f"it is named like run {copy_of!r} plus a data-file extension, so it is read as that "
+                                 "run's exported copy (its scans are not listed again)")
+                          if copy_of else _spec_file_scan_rows(spec_root, row_of.get(u.acquisition_path)))
+            if found is not None:
+                numbers, left_out = found
+                scans = [{"source_id": sid_of[u.acquisition_path], "relative_path": u.acquisition_path, "scan_index": n}
+                         for n in numbers]
+                scan_count = len(scans)
+            else:
+                numbers, left_out = [], []
+            if found is not None or spec_root is not None:
+                other["scans_in_spec_file"] = {
+                    "rule_id": SPEC_FILE_SCANS_RULE_ID,
+                    "scans": list(numbers),
+                    "left_out": left_out[:50],
+                    **({"why": why} if why else {}),
+                    "statement": spec_file_scans_statement(numbers, left_out, why),
+                }
         runs.append(
             {
                 "run_id": run_id,
@@ -3259,16 +3736,8 @@ def build_bundle(
                 "group_token": u.group_token,
                 "sample_id": sample_of_stem.get(u.stem),
                 "acquisition_source_id": sid_of.get(u.acquisition_path),
-                "scans": [
-                    {
-                        "source_id": sid_of.get(s.get("path")),
-                        "relative_path": s.get("path"),
-                        "scan_index": s.get("scan_index"),
-                    }
-                    for s in rel.get("scans") or ()
-                    if isinstance(s, Mapping) and _safe_relative(s.get("path"))
-                ],
-                "scan_count": u.scan_count,
+                "scans": scans,
+                "scan_count": scan_count,
                 "declared_by": [
                     {
                         "macro_source_id": sid_of.get(d.get("macro_path")),
@@ -3757,6 +4226,9 @@ def build_bundle(
         {"candidates": out_candidates, "runs": runs}, dict(reading.acquisition_system)
     )
     acquisition_system = _acquisition_system_section(reading.acquisition_system, acq_runs, acq_columns)
+    fingerprint = acquisition_fingerprint(evidence_by_source)
+    if fingerprint is not None:  # r5d H2: the SPEC headers' own beamline hint, beside the folder's name
+        acquisition_system["fingerprint"] = _fingerprint_section(fingerprint, acquisition_system, reading.root_label)
 
     # -- naming profiles ---------------------------------------------------------------
     naming = [

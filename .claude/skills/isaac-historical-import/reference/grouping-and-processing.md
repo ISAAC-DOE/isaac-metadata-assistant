@@ -41,7 +41,8 @@ Get the groups with `bundle list <bundle> groups` and one in full with `bundle s
   shows it as an `answered_before_split` hint and says so; ask the scientist to confirm it per part.
 - merge → three steps: `<isaac> bundle decide <bundle> --target <group id> --decision merge --merge-with <other group ids> --by "<name>"`
   (refused unless `--merge-with` names another live record group of this bundle), then
-  `bundle group <bundle> --regroup`, then confirm the ONE combined group it proposes. The regroup
+  `bundle group <bundle> --regroup`, then confirm the ONE combined group it proposes. The combined group's id
+  follows its runs only, so the same merges in another order give the same group (an id stored before r5 stays). The regroup
   combines them when the names differ only at positions the scientist declared counters, or only in a
   repeat marker (`again`, `repeat`, `redo`; a glued `Rep1`/`rep2` is a replicate, another sample), or
   when the names differ in words the scientist says are labels: the same sample confirmed for every
@@ -52,8 +53,9 @@ Get the groups with `bundle list <bundle> groups` and one in full with `bundle s
   conditions differ, or whose names differ in a quantity or any letters-and-digits token (`400mV`, `0p5wt`, `T300K`, `spot2`), are never
   combined. Tell the scientist which happened. When it could not combine them, nothing changes: the
   groups keep their ids and stay proposed, the merge stays pending (each regroup tries it again), and
-  it is listed in `merge_decisions_not_combined`, with a reason and `next_commands` (the counter answer; or one sample
-  confirmation per run and the merge again with `--same-conditions`; or, when the names differ in a
+  it is listed in `merge_decisions_not_combined`, with a reason and `next_commands` (the counter answer; or one
+  material-name answer per run and the merge again with `--same-conditions`: that answer is the record's material
+  name, so ask for it in full, as for the other runs of the sample, never the file-name word; or, when the names differ in a
   quantity, plain `confirm` of each group to keep them as separate records): say the reason in words and
   offer exactly those steps, asking the scientist for any value they need; then regroup again.
 - a merge candidate with `caution` (its file names state different samples or conditions, or the build
@@ -79,7 +81,9 @@ it finds one. Show per group, in words:
   the count as glitches (with one or two scans the check compares neighbouring points and also flags the
   white line and the oscillations); never call those points glitches yourself. **Points on the edge**:
   when `qc.statements.glitch_points_on_edge` is present (metrics `glitch_points_on_edge` /
-  `glitch_points_off_edge`), say that sentence; only the off-edge count is glitches (flagged points within
+  `glitch_points_off_edge`), say that sentence; only the off-edge count is glitches. With fewer than 3 scans
+  none is: whenever `glitch_check_few_scans` is said, `glitch_points_unjudged` counts every flagged point, so
+  never call any a glitch (flagged points within
   5 eV of E0 or in the steep stretch of the edge are unjudged, not cleared: say to look at the plot near E0;
   the stored verdict is unchanged). A point from ONE scan alone, far beyond the other scans there, is never
   "unjudged": `qc.statements.glitch_points_from_one_scan` names the scan and counts those points as glitches.
@@ -89,6 +93,11 @@ it finds one. Show per group, in words:
   curve, and ask whether the scan belongs in the merge. **The only scan with an edge** (flag and
   `qc.statements.only_scan_with_edge`, never a fail): the other scans are dead, dark or out of the beam; say it
   and ask about those scans, never offer to leave the good one out;
+- **scans left out for too few points** (`qc.statements.scans_skipped_too_few_points`): say the sentence; it
+  says which are not energy scans (a motor or emission `ascan`, the energy column one value) and which
+  stopped early. **Aborted fragments** (`warn` `scans_skipped_aborted_fragment`, `qc.statements.aborted_scan_fragment`):
+  a scan with fewer than 20 points beside full scans was left out of the merge; say it and ask whether it was
+  stopped, never offer to put it back without the scientist saying so;
 - **when scans were skipped** (reason `scans_skipped_lacking_chosen_columns`; flag
   `channel_from_a_later_scan` when the first scan was one of them): the used / readable / skipped
   counts in plain words — "14 of 165 scans were used; 150 had different columns (they may be motor
@@ -137,7 +146,15 @@ it finds one. Show per group, in words:
 - **a curve that is not a usable spectrum** (`fail` with `no_edge`: the edge is not distinguishable from
   the pre-edge scatter; or `post_edge_not_at_1`: the normalised level after the edge is far from 1, so
   the normalisation did not work): say the sentence in `statements` and what the plot shows; offer
-  reject or `needs_changes`, never approval;
+  reject or `needs_changes`, never approval. A scientist's Athena curve is judged the same way, over its
+  project's own post-edge range (flag `athena_post_edge_not_at_1`, not preferred; a listed version that
+  fails carries the flag: say it when asking which version is the result of record). **A rebuilt Athena
+  curve** (flag `athena_renormalisation_differs`): larch's reading of the project gives another curve than Athena
+  shows, so ISAAC made it as Athena does (the project's stored values where they still fit the data, else Athena's
+  own re-fit; `reproduced_with` says which); say that sentence plainly and never present it as the scientist's error.
+  **A decided result kept on its old curve** (`process` reply `decided_results_on_an_older_run`): say the line
+  (why the group has new results, and that the approval stands on the old curve) and ask whether the scientist
+  wants to review the new result;
 - **a short scan** (`warn` with `post_edge_window_too_short`: the scan ends soon after the edge, so its
   normalised level cannot be checked): say that its edge position is still usable but its normalised
   curve is not checked; the scientist decides whether that is enough for this record;
@@ -250,8 +267,10 @@ Ask: approve, reject, or needs changes (with a note):
   as usual: the record carries the E0 and curve of the ONE approved result (ISAAC's, if that is the one approved),
   never of a version that was only chosen. The choice carries over when ISAAC's own result id changes (a params
   file, a calibration): it is matched by the version's project file, Athena group and data hash. If they choose
-  another version after one was approved, the reply says "reject <old id> first, then approve <new id>": ask
-  before each step. When `isaac process` replies `athena_selections_not_carried_over` (or a summary line says
+  another version after one was approved (or after ISAAC's own curve was approved), the `select_athena_version`
+  reply says so at once (`approved_result_not_chosen`: the record still carries the approved curve, and the
+  steps: `process` for the chosen version if needed, reject the old result, approve the new one), and `validate`
+  and `export` warn `athena_version_no_longer_chosen` until that is done: ask before each step. When `isaac process` replies `athena_selections_not_carried_over` (or a summary line says
   so), say its statement in plain words: their earlier choice no longer
   matches a version ISAAC lists (the files, or how ISAAC reads them, changed), nothing is selected now,
   and ask the question again. A version that is a set of per-scan groups names any project holding the
@@ -268,13 +287,15 @@ Processing never shifts the energy axis on its own. Before any calibration quest
 `reference_scans_listed`, `reference_proposed`, `reference_statement`, and `would_apply` (the shift for
 an element/edge already named for the group: approved, proposed, or the group's absorber).
 
-- **No reference proposed** (`reference_proposed: false`; flags `reference_edge_not_found`,
-  `reference_edge_in_too_few_scans` or `no_reference_available`): say the `reference_statement` ("only 1 of
+- **No reference proposed** (flags `reference_edge_not_found`, `reference_edge_in_too_few_scans`,
+  `reference_noise_degenerate` or `no_reference_available`; `reference_proposed` is false then, but it is false
+  for disagreeing edges too, the next bullet, so go by the flags): say the `reference_statement` ("only 1 of
   16 scans shows a usable reference edge; an in-scan reference needs one in at least 2 scans") and do NOT
   ask for an element or edge: no shift can be approved, and `approve_calibration` is refused. A scan whose
   reference edge stands more than 1,000,000 times its pre-edge noise is a channel that is not counting, never
   usable (flag `reference_noise_degenerate`), and is said the same way.
-- **Usable edges that disagree** (flag `reference_edges_disagree`, `calibration_proposed: false`: they spread
+- **Usable edges that disagree** (flag `reference_edges_disagree`, `reference_proposed: false`,
+  `calibration_proposed: false`: they spread
   over more than 0.5 eV, `qc.warn_reference_e0_spread_eV`, stricter only): not proposed. Say the sentence ("its
   usable edges spread 6.10 eV (… median 11216.2 eV of 2 scans) …") and ask about the channel (a missing foil, a
   channel seeing the sample, drift). Only if the scientist says the reference is what they name (a foil drifting
@@ -330,6 +351,10 @@ an element/edge already named for the group: approved, proposed, or the group's 
 
 ## Groups that need an explanation
 
+- A SPEC run with no `<stem>_dir` folder lists the energy scans (`gscan`) inside its SPEC file. Its
+  `other_relationships.scans_in_spec_file` names the `#S` blocks used and each one left out, with why (an
+  alignment scan, no data rows, a repeated number). When its SPEC file could not be read, or the run is an
+  exported copy of another run (`SYN_A.dat` beside `SYN_A`), its `why` says so. Say so when you present the group.
 - `merged_despite_engine_reading`: more than one run was proposed as one group although the importer read
   something that differs. Say what differs in words and ask; confirming is the scientist's call.
 - `sample_key_basis: name_stem`: no file states the sample, so runs were grouped by the stem of their file
@@ -337,10 +362,19 @@ an element/edge already named for the group: approved, proposed, or the group's 
 - **A groups row** (`bundle list <bundle> groups`) has `files` (the first 3 member stems; `files_more`
   counts the rest), `scans`, `reader` (the runs' source type), `exported_file` when a member is the
   scientist's exported/processed file of a run (kept as context, its data not merged: say so), and, when known, `cannot_export_reason`:
-  `no_scans` (no run lists a scan) or `processing_not_applicable:<code>` (e.g. an `.mca` or `xes` file:
-  no ISAAC protocol covers it). The page's `cannot_export` counts them over the whole list. Such a group
+  `no_scans` (no run lists a scan: no scan file in a `_dir` folder and no energy scan with data in its SPEC
+  file), `processing_not_applicable:<code>` (e.g. an `.mca` or `xes` file:
+  no ISAAC protocol covers it), or `not_a_measurement_run` (every run is a reference standard, an alignment
+  or a calibration scan: the import asks nothing about its sample or conditions, so the fields in
+  `cannot_export_fields`, e.g. sample form and environment, have nowhere to hold an answer; its curve can be
+  approved, but it is not a record). `bundle group` says the last one when it makes the groups. The page's
+  `cannot_export` counts them over the whole list. Such a group
   can never become an exportable record as it stands: present it as such, leave it out of a bulk confirm,
   and offer `reject` (it is kept as decision history) or leaving it unconfirmed.
+- **A run kept as context** (`exported_file`): it is not a measurement run. No question asks about it, no
+  count, `applies_to` or reach includes it, and its values fill nothing in the record. `--only group:<id>`
+  answers the group's measurement runs, which is enough to fill the field. The template's File List shows its row in grey with a note;
+  anything typed on that row is recorded nowhere (`rows_refused`).
 - `naming_counter_positions` (an experiment-scope question): which positions of the file name are running
   counters, not sample identity. Ask once, before any group is confirmed. Answer with
   `<isaac> bundle decide <bundle> --target experiment --decision set_counter_positions --positions 2,3 --by "<name>"` (`--positions last` when the counter is

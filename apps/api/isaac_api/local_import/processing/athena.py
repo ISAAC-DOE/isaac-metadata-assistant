@@ -255,6 +255,7 @@ def load_project(path: Path, rel_path: str, source_id: str | None, np) -> tuple[
         norm = np.asarray(g.norm, dtype=float)
         flat = np.asarray(getattr(g, "flat", g.norm), dtype=float)
         implausible = None
+        renormalised, basis = None, None
         if already_normalized:
             # the stored spectrum is the scientist's normalised curve: used as stored, step 1 by definition
             # (larch's re-fit of it is not the scientist's processing and is discarded)
@@ -262,16 +263,19 @@ def load_project(path: Path, rel_path: str, source_id: str | None, np) -> tuple[
             # ... believed only when it looks normalised (review): else handled as an implausible step
             implausible = C.stored_normalized_implausible(e, m, e0_raw, np)
         else:
+            # r5 H1: larch's reading is not Athena's curve: made as Athena makes it (ATHENA_RENORM_RULE_ID)
+            # (only where larch placed the curve: a non-finite E0 or step stays named as it is)
+            rebuilt = (athena_normalisation(e, m, norm, step_raw, bkg, params, np, refits=_flag(ap, "update_norm"))
+                       if e0_raw is not None and step_raw is not None else None)
+            if rebuilt is not None:
+                norm, flat, step_raw = rebuilt["norm"], rebuilt["flat"], rebuilt["edge_step"]
+                renormalised, basis = rebuilt["said"], rebuilt["basis"]
             implausible = C.edge_step_implausible(step_raw, m, np, post_edge=_post_edge(params))
         if e0_raw is None:
             non_finite.append("e0_eV")
         if step_raw is None:
             non_finite.append("edge_step")
-        is_merge = False
-        try:
-            is_merge = bool(int(getattr(ap, "is_merge", 0) or 0))
-        except (TypeError, ValueError):
-            pass
+        is_merge = merge_flag(getattr(ap, "is_merge", None))
         # r3-b M3: where this group's OWN data puts its edge (larch find_e0, ISAAC's method), in the scientist's frame:
         # an Athena E0 far from it is evidence of a fixed setting (run.possibly_fixed_athena_e0); never compared or kept.
         # r3-d L-1: looked for only near the group's Athena E0 (DATA_E0_WINDOW_EV), so a glitch far away is never its edge
@@ -300,9 +304,151 @@ def load_project(path: Path, rel_path: str, source_id: str | None, np) -> tuple[
                 # present only when true / found, so an entry without them is exactly as before
                 **({"already_normalized": True} if already_normalized else {}),
                 **({"edge_step_implausible": implausible} if implausible else {}),
+                **({RENORMALISED_KEY: renormalised} if renormalised else {}),
+                **({BASIS_KEY: basis} if basis else {}),
             }
         )
     return out, notes
+
+
+#: r5 H1: THE SCIENTIST'S OWN NORMALISATION (``isaac.athena.project_normalisation.v1``). larch's
+#: ``AthenaProject.read(do_preedge=True)`` is not Athena's curve: it passes ``bkg_nnorm`` to ``pre_edge`` unchanged,
+#: while Athena (Ifeffit) counts coefficients (2 is a line, 3 a quadratic), and it ignores what the project stores.
+#: Athena's definitions, with X = stored energy + ``bkg_eshift`` (``bkg_e0`` is in that frame, as Demeter has it),
+#: L = ``bkg_int`` + ``bkg_slope``·X (absolute X) and P = sum ``bkg_nc<k>``·X^k (a fit to mu itself):
+#: ``norm = (mu - L) / bkg_step``; ``flat = norm`` below E0 and, at and above E0,
+#: ``norm - [(P - L)(X) - (P - L)(E0)] / bkg_step`` (``bkg_fixstep`` too).
+#:
+#: The STORED values are used only when they are CURRENT (:func:`_stored_current`): a fresh least-squares line over
+#: the stored pre-edge window matches L within :data:`STORED_LINE_TOL` of a step, a fresh polynomial of the stored
+#: curve's own degree over the stored normalisation window matches P within :data:`STORED_POST_TOL` of a step (a
+#: window with too few points to fit is not judged), and, unless the step is fixed, P - L at E0 is the stored step
+#: within :data:`STORED_STEP_TOL`. Measured on those projects (largest deviation over the window, in steps): sample
+#: groups' lines 0.0002 (median) to 0.009 (95th percentile) and their post-edge curves 0.002 to 0.022; the stale
+#: reference-channel groups' lines 0.1 (median) and up to 26. The tolerances sit between the two. Otherwise Athena
+#: re-fits on display (``update_norm``), and so does ISAAC: larch ``pre_edge`` on X with the project's ranges,
+#: ``nnorm = bkg_nnorm - 1`` and the stored step only when ``bkg_fixstep``. A stored line is never mixed with a
+#: re-fitted step, nor the reverse. Measured on the projects of five real SSRL beamtimes (1,406 groups): the stored
+#: formula is Athena's curve exactly on 788 of 799 sample groups whose values are current; 104 of 105 reference-channel
+#: groups and 11 sample groups hold stale values (Athena re-fits them). larch's own reading differed from Athena's curve
+#: in most groups (its step by more than 1 % in 853 of 904; 0.0058 for a stored 1.566 on a BL4-3 project, which put
+#: the curve 328 steps above its pre-edge line), and by up to 0.065 even where the steps agreed.
+#: A result says which way its curve was made (``normalisation_basis``) and, when the curve differs from larch's
+#: reading by more than :data:`ATHENA_CURVE_TOL` (or its step by more than :data:`ATHENA_STEP_RTOL`), carries
+#: :data:`ATHENA_RENORM_FLAG` and a sentence: larch's reproduction, never the scientist's fault.
+ATHENA_RENORM_RULE_ID = "isaac.athena.project_normalisation.v1"
+ATHENA_RENORM_FLAG = "athena_renormalisation_differs"
+RENORMALISED_KEY = "renormalised_from_project"
+BASIS_KEY = "normalisation_basis"
+BASIS_STORED = "stored"
+BASIS_REFIT = "athena_refit"
+ATHENA_STEP_RTOL = 0.01
+ATHENA_CURVE_TOL = 0.01
+STORED_LINE_TOL = 0.02
+STORED_POST_TOL = 0.03
+STORED_STEP_TOL = 0.01
+
+
+def _poly(coeffs, x, np):
+    return sum(c * x ** k for k, c in enumerate(coeffs))
+
+
+def _stored_current(X, m, e0: float, S, bkg, params: Mapping, np, *, refits: bool = False) -> tuple | None:
+    """``(L, P coefficients)`` when the project's stored line, post-edge curve and step are CURRENT for this data
+    (:data:`ATHENA_RENORM_RULE_ID`), else ``None``. ``refits``: Athena marks the group for re-normalisation on display
+    (``update_norm``); a window too short to judge then counts as not current (Athena's re-fit is what it shows)."""
+    slope, intercept = _finite(getattr(bkg, "slope", None)), _finite(getattr(bkg, "int", None))
+    nc = [_finite(getattr(bkg, f"nc{k}", None)) for k in range(4)]
+    if S is None or S <= 0 or slope is None or intercept is None or nc[0] is None or nc[1] is None:
+        return None
+    nc = [c or 0.0 for c in nc]
+    lims = [_finite(params.get(k)) for k in ("pre1", "pre2", "nor1", "nor2")]
+    if any(v is None for v in lims):
+        return None
+    pre = (X >= e0 + lims[0]) & (X <= e0 + lims[1])
+    post = (X >= e0 + lims[2]) & (X <= e0 + lims[3])
+    # the stored curve's own degree (Athena lowers it on a short window); a window too short to fit is not judged
+    deg = max([k for k in range(4) if nc[k] != 0] or [0])
+    L = intercept + slope * X
+    with np.errstate(all="ignore"):
+        if int(pre.sum()) >= 2:
+            fresh = np.polyval(np.polyfit(X[pre], m[pre], 1), X[pre])
+            if not np.max(np.abs(fresh - L[pre])) / S <= STORED_LINE_TOL:
+                return None
+        elif refits:
+            return None
+        if int(post.sum()) >= deg + 1:
+            fresh_p = np.polyval(np.polyfit(X[post], m[post], deg), X[post])
+            if not np.max(np.abs(fresh_p - _poly(nc, X[post], np))) / S <= STORED_POST_TOL:
+                return None
+        elif refits:
+            return None
+    if not _finite(params.get("fixstep")):
+        at = float(_poly(nc, e0, np) - (intercept + slope * e0))
+        if not abs(at / S - 1.0) <= STORED_STEP_TOL:
+            return None
+    return L, nc, intercept + slope * e0
+
+
+def athena_normalisation(energy, mu, larch_norm, larch_step, bkg, params: Mapping, np, *,
+                         refits: bool = False) -> dict | None:
+    """r5 H1 (:data:`ATHENA_RENORM_RULE_ID`): the scientist's normalised curve as Athena makes it: from the stored
+    values when they are current, else Athena's re-fit. ``None`` when neither can be made (no E0, a fit that fails):
+    larch's reading is then used as it is. ``said`` is what the result states."""
+    e0, S = _finite(params.get("e0")), _finite(params.get("step"))
+    if e0 is None:
+        return None
+    es = _finite(params.get("eshift")) or 0.0
+    e, m = np.asarray(energy, dtype=float), np.asarray(mu, dtype=float)
+    X = e + es
+    fixed = bool(_finite(params.get("fixstep"))) and S is not None and S > 0
+    flatten = bool(_finite(params.get("flatten")))
+    current = _stored_current(X, m, e0, S, bkg, params, np, refits=refits)
+    if current is not None:
+        L, nc, L0 = current
+        norm = (m - L) / S
+        PL, PL0 = _poly(nc, X, np) - L, float(_poly(nc, e0, np) - L0)
+        flat = np.where(X >= e0, norm - (PL - PL0) / S, norm) if flatten else norm.copy()
+        step, basis = S, BASIS_STORED
+    else:
+        try:
+            from larch import Group
+            from larch.xafs import pre_edge
+
+            g = Group(energy=X.copy(), mu=m.copy())
+            nn = max(0, min(3, int(_finite(params.get("nnorm")) or 2) - 1))
+            kw = {k: _finite(params.get(src)) for k, src in (("pre1", "pre1"), ("pre2", "pre2"), ("norm1", "nor1"), ("norm2", "nor2"))}
+            with open(os.devnull, "w") as sink, contextlib.redirect_stdout(sink):
+                pre_edge(g, e0=e0, nnorm=nn, nvict=int(_finite(getattr(bkg, "nvict", 0)) or 0),
+                         step=S if fixed else None, make_flat=flatten, **{k: v for k, v in kw.items() if v is not None})
+            norm = np.asarray(g.norm, dtype=float)
+            flat = np.asarray(g.flat, dtype=float) if flatten else norm.copy()
+            step = _finite(g.edge_step)
+        except Exception:  # noqa: BLE001 - a re-fit that cannot be made leaves larch's reading as it is
+            return None
+        if step is None or step == 0:
+            return None
+        basis = BASIS_REFIT
+    s = _finite(larch_step)
+    ln = np.asarray(larch_norm, dtype=float)
+    ok = np.isfinite(ln) & np.isfinite(norm)
+    gap = float(np.max(np.abs(norm[ok] - ln[ok]))) if ok.any() else None
+    differs = (gap is None or gap > ATHENA_CURVE_TOL or s is None or abs(s / step - 1.0) > ATHENA_STEP_RTOL)
+    said = None
+    if differs:
+        how = ("the project's stored normalisation, which still fits the data (its stored pre-edge line, post-edge "
+               f"curve and edge step {step:.4g})" if basis == BASIS_STORED else
+               "Athena's own re-fit of the project's ranges (the project's stored line or post-edge curve no longer "
+               "fits the data, so Athena re-fits it on display; ISAAC re-ran that fit the way Athena does, counting "
+               f"bkg_nnorm as coefficients{', with the fixed step' if fixed else ''}), edge step {step:.4g}")
+        said = {"rule_id": ATHENA_RENORM_RULE_ID, "basis": basis, "larch_edge_step": s, "project_edge_step": S,
+                "edge_step": step, "max_difference_from_larch": gap,
+                "statement": (f"larch's reading of this Athena group gives another curve (edge step "
+                              f"{'unknown' if s is None else f'{s:.4g}'}, up to {'?' if gap is None else f'{gap:.3g}'} "
+                              f"from the curve Athena shows). ISAAC used {how}, so the curve is the scientist's as "
+                              "Athena makes it. The difference is larch's reproduction, not the scientist's "
+                              "processing.")}
+    return {"norm": norm, "flat": flat, "edge_step": step, "basis": basis, "said": said}
 
 
 #: The rule that uses an ``is_nor`` group's stored spectrum as its normalised curve (module docstring).
@@ -336,6 +482,23 @@ def _data_e0(energy, mu, e0, np) -> float | None:
             return _finite(find_e0(e[sel], m[sel]))
     except Exception:  # noqa: BLE001 - an edge that cannot be found is no evidence either way
         return None
+
+
+def merge_flag(value) -> bool:
+    """r5 A4: an Athena group's ``is_merge`` value as a bool. Athena (Demeter) writes the SPACE the group was merged
+    in (``'e'`` mu(E), ``'n'`` normalised, ``'k'`` chi(k)) and ``''`` for a group that is no merge; older projects
+    write ``1`` / ``0``. Measured on the projects of five real SSRL beamtimes: only ``''``, ``'e'`` and ``'n'``
+    occur, and reading the value as a number made every merge ``False``. True for a number other than 0 and for any other non-empty text."""
+    if value is None or isinstance(value, bool):
+        return bool(value)
+    text = str(value).strip()
+    if not text:
+        return False
+    try:
+        number = float(text)
+    except ValueError:
+        return text.casefold() not in ("false", "no", "none")
+    return math.isfinite(number) and number != 0.0
 
 
 def _flag(ap, name: str) -> bool:
@@ -463,6 +626,23 @@ def _per_scan_set(pool: Sequence[Mapping], stems: Sequence[str], np) -> dict | N
     bad = next((pool[i]["edge_step_implausible"] for i in order if not plausible(pool[i])), None)
     if bad is not None:
         out["edge_step_implausible"] = bad
+    # r5 H1: each member was made as Athena makes it before the mean (load_project); the set says how and how many
+    out.pop(RENORMALISED_KEY, None)
+    out.pop(BASIS_KEY, None)
+    bases = sorted({pool[i][BASIS_KEY] for i in order if pool[i].get(BASIS_KEY)})
+    if bases:
+        out[BASIS_KEY] = "+".join(bases)
+    rebuilt = [pool[i][RENORMALISED_KEY] for i in order if pool[i].get(RENORMALISED_KEY)]
+    if rebuilt:
+        out[RENORMALISED_KEY] = {
+            "rule_id": ATHENA_RENORM_RULE_ID, "members_rebuilt": len(rebuilt), "members": len(order),
+            "larch_edge_step": [r["larch_edge_step"] for r in rebuilt],
+            "project_edge_step": [r["project_edge_step"] for r in rebuilt],
+            "statement": (f"For {len(rebuilt)} of the {len(order)} per-scan groups, larch's reading gives another curve "
+                          "than Athena shows; ISAAC made each of them as Athena does (from the project's stored "
+                          "values where they still fit the data, else Athena's own re-fit) before taking the mean, "
+                          "so the set is the scientist's curves as Athena makes them. The difference is larch's "
+                          "reproduction, not the scientist's processing.")}
     return out
 
 
@@ -577,6 +757,19 @@ def version_provenance(entry: Mapping, stems: Sequence[str]) -> dict:
     }
 
 
+#: r5 A2: record-group statuses whose runs another (live) group now holds: such a group takes no part in the match.
+MERGED_AWAY_STATUSES = frozenset({"merged", "split"})
+
+
+def takes_part(group: Mapping) -> bool:
+    """Whether a record group takes part in the name match: it has scans, and (r5 A2) it was not MERGED AWAY (status
+    ``merged`` or ``split``: another live group holds its runs). Measured on a real BL4-3 beamtime: two one-run groups
+    merged into one two-run group stayed in the match, so the Athena groups of the dead run matched it as well as the
+    live group, were ambiguous, and the live group lost the scientist's merge to the dead one. A rejected group still
+    takes part: its runs are in no live group, so an Athena group naming them is not the live group's."""
+    return bool(group.get("_has_scans", True)) and group.get("status") not in MERGED_AWAY_STATUSES
+
+
 def match(groups: Sequence[Mapping], entries: Sequence[Mapping], np=None) -> tuple[dict[str, dict], list[dict]]:
     return match_with_versions(groups, entries, np)[:2]
 
@@ -585,9 +778,10 @@ def match_with_versions(groups: Sequence[Mapping], entries: Sequence[Mapping], n
     """group_id -> athena entry (unambiguous matches only), and notes on every ambiguity.
 
     Record groups with no scans take no part (measured: a scientist's exported ``x.dat``
-    became a zero-scan run named like the real run, which made every match ambiguous).
+    became a zero-scan run named like the real run, which made every match ambiguous), nor (r5 A2) groups MERGED AWAY
+    (:func:`takes_part`).
     """
-    stems = {g["group_id"]: [normalise_name(s) for s in g.get("_stems") or ()] for g in groups if g.get("_has_scans", True)}
+    stems = {g["group_id"]: [normalise_name(s) for s in g.get("_stems") or ()] for g in groups if takes_part(g)}
     raw_stems = {g["group_id"]: list(g.get("_stems") or ()) for g in groups}
     bases = {gid: base_names(gstems) for gid, gstems in stems.items()}
     notes: list[dict] = []
@@ -623,6 +817,7 @@ def match_with_versions(groups: Sequence[Mapping], entries: Sequence[Mapping], n
             uniq.setdefault(_curve_key(c) if several else c["data_hash"], c)
         pool = list(uniq.values())
         aside: list[dict] = []
+        settled = False
         if len(pool) > 1:
             # one merged candidate is the scientist's result (r3-b H3: a ``merge_<base>`` group too, so it is preferred
             # over the per-scan groups beside it, which ISAAC would otherwise average)
@@ -631,7 +826,13 @@ def match_with_versions(groups: Sequence[Mapping], entries: Sequence[Mapping], n
                 # r3-d: the per-scan sets beside it are kept (set aside, said, and compared with it in run.process_group)
                 aside = _sets_beside([c for c in pool if c is not merged[0]], raw_stems.get(gid) or (), np)
                 pool = merged
-        if len(pool) > 1:
+            elif 1 < len(merged) < len(pool):
+                # r5 A3: SEVERAL merges beside per-scan groups: the merges are versions, and the per-scan groups of
+                # each project are one version, a set (_per_scan_set), never a version per scan
+                pool, settled = _merges_and_sets(merged, [c for c in pool if not is_scientist_merge(c)],
+                                                 [c for c in cands if not is_scientist_merge(c)],
+                                                 raw_stems.get(gid) or (), np)
+        if len(pool) > 1 and not settled:
             if several:
                 # c10-m/c10-r: per-scan groups in several projects are a set PER PROJECT (split first), never a
                 # version per scan, and never one project's set standing for another's
@@ -652,6 +853,32 @@ def match_with_versions(groups: Sequence[Mapping], entries: Sequence[Mapping], n
             )
             versions[gid] = [{**c, "_match_kind": c.get("_match_kind")} for c in sorted(pool, key=lambda c: (c["prj_relative_path"], c["group_name"]))][:MAX_VERSIONS]
     return matched, notes, versions
+
+
+def _merges_and_sets(merged: Sequence[Mapping], rest: Sequence[Mapping], every: Sequence[Mapping],
+                     stems: Sequence[str], np) -> tuple[list[dict], bool]:
+    """r5 A3: the versions of a record group whose candidates hold SEVERAL scientist merges and per-scan groups:
+    every merge, each per-scan SET the per-scan groups form (:func:`_sets_beside`, one per project, built from EVERY
+    non-merge candidate of that project, ``every``, as :func:`_per_scan_sets_by_project` builds them; a set identical
+    to another project's, the same curves and parameters, is one), and the per-scan groups of ``rest`` (the deduped
+    pool) that are in no set (never dropped). ``(pool, True)`` when a set formed, else ``(merged + rest, False)``: the
+    pool stands and is handled as before. Measured on a real BL4-3 beamtime: a two-run group had the scientist's merge
+    in two projects (other post-edge ranges) and four per-scan groups in one of them, and all six were listed as
+    versions, every scan one of them."""
+    by_prj: dict[str, dict[str, Mapping]] = {}
+    for c in every:
+        by_prj.setdefault(c["prj_relative_path"], {}).setdefault(c["data_hash"], c)
+    sets, seen = [], set()
+    for st in _sets_beside([c for d in by_prj.values() for c in d.values()], stems, np):
+        key = tuple(st["per_scan_set"]["member_keys"])
+        if key not in seen:
+            seen.add(key)
+            sets.append(st)
+    if not sets:
+        return list(merged) + list(rest), False
+    in_set = {k for st in sets for k in st["per_scan_set"]["member_keys"]}
+    loose = [c for c in rest if _curve_key(c) not in in_set]
+    return list(merged) + sets + loose, True
 
 
 def _sets_beside(rest: Sequence[Mapping], stems: Sequence[str], np) -> list[dict]:
@@ -700,7 +927,7 @@ def _hits(entry: Mapping, stems: Mapping[str, Sequence[str]], bases: Mapping[str
 def entry_groups(groups: Sequence[Mapping], entries: Sequence[Mapping]) -> dict[int, str]:
     """``{entry index: group_id}`` for every Athena entry that matches exactly ONE record group (an exact match winning,
     as :func:`match_with_versions` decides), whether or not that group then uses it."""
-    stems = {g["group_id"]: [normalise_name(s) for s in g.get("_stems") or ()] for g in groups if g.get("_has_scans", True)}
+    stems = {g["group_id"]: [normalise_name(s) for s in g.get("_stems") or ()] for g in groups if takes_part(g)}
     bases = {gid: base_names(gstems) for gid, gstems in stems.items()}
     out = {}
     for idx, entry in enumerate(entries):

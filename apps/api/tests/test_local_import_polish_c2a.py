@@ -116,9 +116,12 @@ def test_an_athena_group_imported_as_normalised_data_is_used_as_stored(tmp_path)
 
 
 def test_an_implausible_athena_edge_step_is_a_fail_never_compared(tmp_path):
-    bdir, root = _case(tmp_path, DEGENERATE)  # not flagged as normalised: larch's re-fit is all there is
+    # not flagged as normalised, and (r5 review H1) no positive stored step: a re-fit is all there is. Athena's re-fit
+    # (nnorm counted as coefficients) gives about 34 for a spectrum spanning about 1, larch's own reading over 1000:
+    # implausible either way
+    bdir, root = _case(tmp_path, {**DEGENERATE, "bkg_step": "0", "bkg_fitted_step": "0"})
     isa, sci = _results(run_process(bdir, source_root=root))
-    assert sci["qc"]["metrics"]["edge_step"] > 1000
+    assert sci["qc"]["metrics"]["edge_step"] > 10
     assert sci["qc"]["verdict"] == "fail" and "edge_step_implausible" in sci["qc"]["reasons"]
     said = sci["qc"]["statements"]["edge_step_implausible"]
     assert "times the spectrum's whole range" in said and "nor1" in said

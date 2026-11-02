@@ -581,7 +581,8 @@ _FACILITY_TOKEN = re.compile(r"[A-Z][A-Za-z]{1,9}(?:-[A-Z0-9]{1,4})?")
 
 
 _HINT_WHERE = {"folder_name": "the imported folder's name",
-               "acquisition_system": "the acquisition system the scan headers' column names match"}
+               "acquisition_system": "the acquisition system the scan headers' column names match",
+               "acquisition_fingerprint": "the SPEC headers' fingerprint"}
 
 
 #: Every Unicode dash a scientist's sheet may hold (en and em dash, minus sign, hyphen variants): read as ``-``.
@@ -618,6 +619,23 @@ def beamline_form(value: Any) -> str | None:
     return digits if sep is None else f"{digits[:sep]}-{digits[sep:]}"
 
 
+def without_branch(value: Any) -> Any:
+    """``value``'s first beamline-shaped token without its branch letter (``62b`` -> ``62``, ``BL6-2c`` -> ``6-2``);
+    ``value`` itself when it holds none or has no letter."""
+    parts = _beamline_parts(value)
+    if parts is None or not parts[0][-1:].isalpha():
+        return value
+    digits, sep = parts[0][:-1], parts[1]
+    return digits if sep is None else f"{digits[:sep]}-{digits[sep:]}"
+
+
+def _hint_agrees(reading: Mapping, value: Any) -> bool:
+    """r5d H2: a beamline hint agrees with ``value`` when it names the same beamline; a hint that states no
+    branch (``BL6-2`` from the SPEC headers) agrees with any branch of it (``62b``, ``BL6-2c``)."""
+    return same_beamline(reading["value"], value) or (
+        reading.get("branch_stated") is False and same_beamline(reading["value"], without_branch(value)))
+
+
 def same_beamline(a: Any, b: Any) -> bool:
     """One beamline: the same digits and letter, split at the same place — or one of them written with no
     separator, which says nothing about where it splits (``BL152`` is ``BL15-2``; ``BL11-2`` is never ``BL1-12``,
@@ -627,6 +645,16 @@ def same_beamline(a: Any, b: Any) -> bool:
         fa, fb = beamline_form(a), beamline_form(b)
         return fa is not None and fa == fb
     return pa[0] == pb[0] and (pa[1] is None or pb[1] is None or pa[1] == pb[1])
+
+
+#: r5d: a beamline written with a space or underscore before its branch number (``BL6_2``, ``BL15 2``): one
+#: beamline, read as ``BL6-2``. Only a 1-2 digit number on each side, so ``BL152_2019`` stays ``BL152``.
+_SPLIT_BEAMLINE = re.compile(r"(?i)(?<![a-z0-9])(BL\d{1,2})[ _](\d{1,2}[a-z]?)(?![a-z0-9])")
+
+
+def join_split_beamline(text: str) -> str:
+    """``SSRL_BL6_2_2019`` -> ``SSRL_BL6-2_2019`` (:data:`_SPLIT_BEAMLINE`); any other text unchanged."""
+    return _SPLIT_BEAMLINE.sub(r"\1-\2", text)
 
 
 def facility_hint_readings(bundle: Mapping, path: str) -> list[dict]:
@@ -640,7 +668,7 @@ def facility_hint_readings(bundle: Mapping, path: str) -> list[dict]:
     out: dict[tuple, dict] = {}
     for h in S.facility_hints(bundle):
         literal = str(h.get("literal") or "")
-        tokens = [t for t in re.split(r"[_\s/,;()]+", _DASHES.sub("-", literal)) if t]
+        tokens = [t for t in re.split(r"[_\s/,;()]+", join_split_beamline(_DASHES.sub("-", literal))) if t]
         for i, tok in enumerate(tokens):
             if not _BEAMLINE_TOKEN.fullmatch(tok):
                 continue
@@ -649,8 +677,11 @@ def facility_hint_readings(bundle: Mapping, path: str) -> list[dict]:
                 continue
             form = beamline_form(value) if path == BEAMLINE_PATH else value.casefold()
             where = _HINT_WHERE.get(str(h.get("kind")), str(h.get("kind")))
-            out.setdefault((form, literal), {"value": value, "form": form, "kind": "hint",
-                                             "source": f"{where} {literal!r}"})
+            # r5d H2: the SPEC headers' hint is quoted by what the headers state, not by a name it was given
+            source = (f"{where} ({h.get('locator')})" if h.get("kind") == "acquisition_fingerprint"
+                      else f"{where} {literal!r}")
+            out.setdefault((form, literal), {"value": value, "form": form, "kind": "hint", "source": source,
+                                             **({"branch_stated": h["branch_stated"]} if "branch_stated" in h else {})})
     return list(out.values())
 
 
@@ -668,10 +699,26 @@ def facility_hint_lines(bundle: Mapping, path: str, value: Any) -> list[str]:
     if not mine:
         return []
     what = "beamline" if path == BEAMLINE_PATH else "facility"
-    return [f"differs from a hint: {r['source']} names {what} {r['value']!r}"
-            + (f" (compared as {r['form']!r}, yours {mine!r})" if path == BEAMLINE_PATH else "")
-            + "; a hint, never an answer" for r in readings
-            if (not same_beamline(r["value"], value) if path == BEAMLINE_PATH else r["form"] != mine)]
+
+    def agrees(r):
+        return _hint_agrees(r, value) if path == BEAMLINE_PATH else r["form"] == mine
+
+    def named(r):
+        return (f"{r['source']} names {what} {r['value']!r}"
+                + (f" (compared as {r['form']!r}, yours {mine!r})" if path == BEAMLINE_PATH else ""))
+
+    differ = [r for r in readings if not agrees(r)]
+    if not differ:
+        return []
+    agree = [r for r in readings if agrees(r)]
+    among = (path == BEAMLINE_PATH and any(not (_hint_agrees(a, b["value"]) or _hint_agrees(b, a["value"]))
+                                           for a in readings for b in readings)) or (
+        path != BEAMLINE_PATH and len({r["form"] for r in readings}) > 1)
+    if not among:
+        return [f"differs from a hint: {named(r)}; a hint, never an answer" for r in differ]
+    # r5d H2: the files' own hints disagree (the folder's name and the SPEC headers): said plainly, every hint quoted
+    return ([f"the files' hints disagree with each other about the {what}; each is quoted, none is an answer, you rule"]
+            + [f"differs from a hint: {named(r)}" for r in differ] + [f"agrees with a hint: {named(r)}" for r in agree])
 
 
 def agrees_for(path: str | None, a: Any, b: Any) -> bool:
@@ -713,6 +760,16 @@ def live_run_ids(bundle: Mapping) -> set[str]:
     return {r["run_id"] for r in bundle["runs"] if r["run_key"] in group_of}
 
 
+#: r5 B5: the note on a File List row of a run kept as context, and why its cells are recorded nowhere
+CONTEXT_ROW_NOTE = ("Kept by its record group as context: the scientist's exported or processed file of a run, its data "
+                    "not merged. It is not a measurement run and goes into no record; leave this row blank.")
+CAMPAIGN_CONTEXT_REASON = ("these runs are kept by their record group as context (an exported or processed file of a "
+                           "run, its data not merged): they are not measurement runs and go into no record, so a "
+                           "Campaign Info answer does not reach them; nothing was recorded for them")
+CONTEXT_ROW_REASON = ("this row is a run its record group keeps as context (an exported or processed file of a run, its "
+                      "data not merged): it is not a measurement run and goes into no record, so its cells are recorded nowhere")
+
+
 def live_rows(bundle: Mapping) -> list[dict]:
     """One row per run that belongs to a live record group (proposed or confirmed), in run order.
 
@@ -721,6 +778,7 @@ def live_rows(bundle: Mapping) -> list[dict]:
     still share that path (one file holding two acquisitions), the run's label is added. If the
     names still repeat, the export is refused: a scientist could not tell the rows apart."""
     group_of = _live_group_of(bundle)
+    context = B.context_run_ids(bundle)
     sources = {s["source_id"]: s for s in bundle["sources"]}
     rows = []
     for run in bundle["runs"]:
@@ -735,6 +793,8 @@ def live_rows(bundle: Mapping) -> list[dict]:
             "file_name": rel or str(run.get("stem") or run["run_id"]),
             "label": run.get("label"),
             "relative_path": rel,
+            # r5 B5: kept by its group as CONTEXT (an exported file of a run): marked on its row, never answered
+            **({"context": True} if run["run_id"] in context else {}),
         })
     counts: dict[str, int] = {}
     for r in rows:
@@ -1030,7 +1090,10 @@ def export_template(bundle_dir: Path, out: Path, *, suggestions: bool = True, fo
         wf.column_dimensions[_letter(j)].width = 18
     wf.column_dimensions["A"].width = 48
     for i, row in enumerate(rows, start=2):
-        wf.cell(row=i, column=1, value=row["file_name"])
+        name = wf.cell(row=i, column=1, value=row["file_name"])
+        if row.get("context"):
+            name.font = Font(italic=True, color="808080")
+            name.comment = Comment(CONTEXT_ROW_NOTE, "ISAAC")
         for j, col in enumerate(FILE_COLUMNS[1:], start=2):
             rule = rules.get(col.path or "")
             if not (rule and rule["numeric"]):
@@ -1228,6 +1291,8 @@ def export_template(bundle_dir: Path, out: Path, *, suggestions: bool = True, fo
         "bundle_id": bundle["bundle_id"],
         "exported_utc": exported,
         "file_list_rows": len(rows),
+        # r5 B5: rows of runs a group keeps as context (grey, with a note): not measurement runs, never answered
+        **({"file_list_context_rows": n_context} if (n_context := sum(1 for r in rows if r.get("context"))) else {}),
         "sheets": list(wb.sheetnames),
         "hidden_sheets": [n for n in wb.sheetnames if wb[n].sheet_state == "hidden"],
         "bundle_dir": str(bundle_dir),
@@ -1516,7 +1581,8 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
             seen[v] = rnum
     row_of_name = {str(e.get("file_name")): rnum for rnum, e in rows.items()}
     # the runs a Campaign Info answer reaches: the File List's runs that are still in a live group
-    out["file_list_run_ids"] = {str(e.get("run_id")) for e in rows.values()} & live_run_ids(bundle)
+    context = B.context_run_ids(bundle)  # r5 B5: a run kept as context is reached by no answer
+    out["file_list_run_ids"] = ({str(e.get("run_id")) for e in rows.values()} & live_run_ids(bundle)) - context
     max_row = max([wfl.max_row, *rows]) if rows else wfl.max_row
     for r in range(2, max_row + 1):
         entry = rows.get(r)
@@ -1556,6 +1622,12 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
                     if run is not None else f"the run {entry.get('run_id')!r} is not in this bundle",
                     "cells": [_cell_ref(SHEET_FILES, ref) for _, ref, _, _ in answered],
                 })
+            continue
+        if run["run_id"] in context:
+            # r5 B5: after the row's identity is checked, so a reordered row is said to be reordered
+            if answered:
+                out["rows_refused"].append({"row": r, "reason": CONTEXT_ROW_REASON,
+                                            "cells": [_cell_ref(SHEET_FILES, ref) for _, ref, _, _ in answered]})
             continue
         for col, ref, raw, why in values[1:]:
             if why:
@@ -2650,6 +2722,7 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
         return found
 
     file_list_runs = cells.get("file_list_run_ids") or set()  # c14p LOW-5: the runs the File List names
+    context_runs = B.context_run_ids(bundle)  # r5 B5: on the File List, but no measurement run
     planned: list[tuple[dict, str, str, Mapping, str]] = []  # (cell, decision, kind, obj, target_id)
     # H1: a Campaign Info beamline (or facility acronym) naming another one than a facility hint — named once per
     # cell (never once per run it fills); held back when adopt copied it, recorded when the scientist typed it
@@ -2668,13 +2741,18 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                     targets.append(("correct", "missing_value", m, m["value_id"]))
                 else:
                     outside.append(m)
-            if outside:
-                report["campaign_not_filled"].append({
-                    "cell": cell["cell"], "target_field_path": path, "targets": len(outside),
-                    "run_ids": sorted({m["run_id"] for m in outside})[:20], "runs": len({m["run_id"] for m in outside}),
-                    "reason": "these runs are not in the template's File List or no longer in a live record group, so a "
-                              "Campaign Info answer does not reach them; nothing was recorded for them",
-                })
+            # r5 review LOW: a run kept as context is said apart (it IS on the File List, and in a live group)
+            kept = [m for m in outside if m["run_id"] in context_runs]
+            for part, reason in (([m for m in outside if m["run_id"] not in context_runs],
+                                  "these runs are not in the template's File List or no longer in a live record group, so "
+                                  "a Campaign Info answer does not reach them; nothing was recorded for them"),
+                                 (kept, CAMPAIGN_CONTEXT_REASON)):
+                if part:
+                    report["campaign_not_filled"].append({
+                        "cell": cell["cell"], "target_field_path": path, "targets": len(part),
+                        "run_ids": sorted({m["run_id"] for m in part})[:20], "runs": len({m["run_id"] for m in part}),
+                        "reason": reason,
+                    })
             extracted = [c for c in index.cands_by_path.get(path, [])]
             if extracted:
                 report["left_alone"].append({
@@ -4430,7 +4508,7 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
             "(e.g. 0.01 for 0.01 M). It is recorded as Electrolyte Concentration (M) for exactly the runs of that row; the "
             "name goes in 'Your ruling'. Leave it blank on every other row.", "ISAAC")
         what = {"file_reading": "your value contradicts a file reading",
-                "hint": "your value names another one than a hint (the folder's or the acquisition system's name; a hint, "
+                "hint": "your value names another one than a hint (the folder's name, the SPEC headers' fingerprint or the acquisition system's name; a hint, "
                         "not a file reading)",
                 "recorded": "your value differs from the value already recorded for the runs it reaches (whole "
                             "beamtime: one ruling here settles it)",

@@ -263,7 +263,7 @@ def save_bundle(bundle_dir: Path, bundle: dict) -> None:
     # once the write succeeds. Read only when this bundle holds such a value (a fresh import's are held already:
     # the stored file then gives them held, and nothing is logged).
     held_now: list = []
-    if any((c.get("state_basis") or {}).get("not_proposable_reason") == B.BEAMTIME_WIDE_REASON for c in bundle["candidates"]):
+    if any((c.get("state_basis") or {}).get("not_proposable_reason") in B.HELD_REASONS for c in bundle["candidates"]):
         stored_h = None
         if B.bundle_path(Path(bundle_dir)).is_file():
             try:
@@ -798,6 +798,53 @@ def bulk_approve_problem(obj: Mapping) -> str | None:
         if key in said or key in flags or (key == "outlier_scans" and "outlier_scans_flagged" in flags):
             sentence = said.get(key) if isinstance(said.get(key), str) else ""
             return f"{B.processing_id(obj)} carries {what}" + (f": {sentence}" if sentence else ".")
+    return None
+
+
+#: r5c C4: how many refused targets a bulk refusal names, each with its reason (the rest are counted)
+BULK_REFUSALS_SHOWN = 20
+_NOTHING_RECORDED = re.compile(r"\s*Nothing (?:was|is) recorded\.?\s*$|\s*nothing was recorded\.?\s*$")
+
+
+def bulk_refusal(held: Sequence[tuple[str, str]], total: int, decision: str) -> str:
+    """r5c C4: ONE refusal for a bulk ``decide`` that names EVERY target it refuses, each with its own reason; one
+    refused target keeps its own sentence, as before. Nothing is recorded for any target. r5c review MED-1: targets
+    refused for the same reason (their own id aside) share one line ("p1, p2: <reason>"), and when every target is
+    refused no "others" are offered."""
+    if len(held) == 1:
+        return held[0][1]
+    reasons: dict[str, list[str]] = {}
+    for tid, why in held:
+        reasons.setdefault(_NOTHING_RECORDED.sub("", why).strip().replace(tid, "<this target>"), []).append(tid)
+    lines = list(reasons.items())
+    shown = lines[:BULK_REFUSALS_SHOWN]
+    items = " ".join(f"({i}) " + (f"{', '.join(tids)}: {why}" if len(tids) > 1 else why.replace("<this target>", tids[0]))
+                     for i, (why, tids) in enumerate(shown, 1))
+    more = f" And {sum(len(t) for _, t in lines[len(shown):])} more." if len(lines) > len(shown) else ""
+    ids = ", ".join(tid for tid, _ in held)
+    head = (f"{len(held)} of the {total} targets of this {decision} cannot be recorded in one call, so nothing was "
+            f"recorded. {'Each one' if len(lines) > 1 else 'Why'}: {items}{more}")
+    if len(held) >= total:
+        return head + " Decide each of them as its reason says."
+    return (head + f" The others are not refused: to record them now, run the same call without these {len(held)} "
+            f"({ids}), then decide each of these on its own as its reason says.")
+
+
+def _bulk_call_problem(planned: Sequence[tuple[str, Mapping]], decision: str, qc_status: str | None,
+                       e0_measured: bool) -> str | None:
+    """r5c review MED-1: why a bulk ``decide`` is refused as a CALL (a flag missing, or given where nothing takes it),
+    said once, before any target is held; ``None`` when it may go on. Each target is still checked after."""
+    kinds = {kind for kind, _ in planned}
+    if decision == "approve" and qc_status is None and "processing_result" in kinds:
+        return ("Approving a processing result needs --qc-status (one of " + ", ".join(qc_status_vocabulary())
+                + "): the QC status is a person's statement. Nothing was recorded.")
+    if qc_status is not None and kinds and "processing_result" not in kinds:
+        return "--qc-status applies to a processing result only, and no target of this call is one. Nothing was recorded."
+    if e0_measured and not any(kind == "processing_result" and "athena_e0_possibly_fixed" in (obj.get("review_flags") or ())
+                               for kind, obj in planned):
+        return ("--e0-measured applies only to a processing result flagged athena_e0_possibly_fixed, and no target of "
+                "this call carries that flag: there is no fixed-E0 question to answer. Decide without --e0-measured. "
+                "Nothing was recorded.")
     return None
 
 
@@ -1669,7 +1716,9 @@ def _live_reach(bundle: Mapping) -> tuple[int, int]:
     from . import questions as Q
 
     groups = Q.live_groups(bundle)
-    return len(groups), len({k for g in groups for k in g.get("member_run_keys") or ()})
+    # r5 B5: a run kept as context (an exported file of a run) is no measurement run: never counted as reached
+    context = {k for g in groups for k in g.get("context_run_keys") or ()}
+    return len(groups), len({k for g in groups for k in g.get("member_run_keys") or () if k not in context})
 
 
 def _count(n: int, noun: str) -> str:
@@ -1689,7 +1738,9 @@ def reach_index(bundle: Mapping) -> dict:
     from . import questions as Q
 
     run_of_key = {r["run_key"]: r["run_id"] for r in bundle.get("runs") or ()}
-    live = [(g["group_id"], [run_of_key[k] for k in g.get("member_run_keys") or () if k in run_of_key])
+    # r5 B5: a group's runs kept as context are no measurement runs: an answer never reaches them, and they are not counted
+    live = [(g["group_id"], [run_of_key[k] for k in g.get("member_run_keys") or ()
+                             if k in run_of_key and k not in set(g.get("context_run_keys") or ())])
             for g in Q.live_groups(bundle)]
     groups_of_run: dict[str, list[int]] = {}
     for i, (_gid, members) in enumerate(live):
@@ -1831,9 +1882,10 @@ def group_answer_targets(bundle: dict, asked: Mapping, only: str, field: str | N
         group = next((g for g in Q.live_groups(bundle) if g["group_id"] == gid), None)
         if group is None:
             raise MutationRefused(f"No live record group {gid!r} in this bundle; nothing was recorded.", code=6)
-        runs = [run_of_key[k] for k in group.get("member_run_keys") or () if k in run_of_key]
+        context = set(group.get("context_run_keys") or ())  # r5 B5: never answered for a run kept as context
+        runs = [run_of_key[k] for k in group.get("member_run_keys") or () if k in run_of_key and k not in context]
         if not runs:
-            raise MutationRefused(f"Record group {gid} holds no run; nothing was recorded.", code=6)
+            raise MutationRefused(f"Record group {gid} holds no measurement run; nothing was recorded.", code=6)
     ids, added = run_answer_targets(bundle, path, runs, question_id=asked["question_id"],
                                     how=f"decide --question {asked['question_id']} --only {only}")
     groups, _runs = _live_reach(bundle)
@@ -2560,67 +2612,92 @@ def record_decision(
         acknowledged: dict[str, list[str]] = {}
         calibration_said: dict[str, str] = {}
         off_list: OffListRefused | None = None
+        held: list[tuple[str, MutationRefused]] = []  # r5c C4: (target, refusal) of each target a bulk call refuses
+        resolved: list[tuple[str, str, dict]] = []
         for tid in target_ids:
-            kind, obj = resolve_target(bundle, tid)
             try:
-                _check_decision(bundle, kind, obj, decision, value, bulk=bulk, merge_with=merge_with, split_into=split_into)
-            except OffListRefused as exc:
-                # EVERY TARGET IS CHECKED FIRST: an off-list refusal is raised (and kept as a vocabulary request) only
-                # when no target is refused for any other reason, whatever order the targets came in
-                off_list = off_list or exc
-            if kind == "processing_result" and decision == "approve":
-                problem = approved_sibling_problem(bundle, obj, [o for k, o in planned if k == "processing_result"])
-                if problem is not None:
-                    raise MutationRefused(problem)
-                if bulk and (why := bulk_approve_problem(obj)) is not None:
-                    raise MutationRefused(f"{why} Approve this one on its own, after its sentence is read to the "
-                                          "scientist; a bulk approval does not. Nothing was recorded.")
-                if "athena_e0_possibly_fixed" in (obj.get("review_flags") or ()) and not e0_measured:
-                    # r1 M5: an Athena E0 shared by groups whose own edges differ may be a fixed setting, not a measure
-                    said = next((s for s in (((obj.get("qc") or {}).get("statements") or {}).values())
-                                 if isinstance(s, str) and "Athena" in s and "E0" in s), "")
-                    raise MutationRefused(
-                        f"{tid} carries a possibly fixed Athena E0 (athena_e0_possibly_fixed){': ' + said if said else '.'} "
-                        "Ask the scientist whether this E0 was measured from this group's edge; only if they say it "
-                        "was, approve again with --e0-measured. Nothing was recorded.")
-            if e0_measured and not (kind == "processing_result" and "athena_e0_possibly_fixed" in (obj.get("review_flags") or ())):
-                # r2-a L1: the statement answers that flag's question only; on any other target it would be kept as
-                # evidence of nothing (accepted silently before)
-                raise MutationRefused(
-                    f"--e0-measured applies only to a processing result flagged athena_e0_possibly_fixed, and {tid} "
-                    "does not carry that flag: there is no fixed-E0 question to answer. Approve it without "
-                    "--e0-measured. Nothing was recorded.")
-            if same_conditions:
-                acknowledged[tid] = _same_conditions_tokens(bundle, kind, obj, merge_with)
-            if qc_status is not None and kind != "processing_result":
-                raise MutationRefused("--qc-status applies to a processing result only.")
-            if kind == "processing_result" and decision == "approve" and qc_status is None:
-                # I4: the QC status is never guessed from the protocol's verdict.
-                raise MutationRefused(
-                    "Approving a processing result needs --qc-status (one of "
-                    + ", ".join(qc_status_vocabulary()) + "): the QC status is a person's statement."
-                )
-            if kind == "record_group" and decision == "approve_calibration":
-                calibration_said[tid] = calibration_shift_said(bundle, tid, element, edge, accepted)
-            if kind == "record_group" and decision == "confirm":
-                # R-4: a group whose runs now sit in ANOTHER live group cannot be confirmed
-                # (e.g. a rejected group after a regroup re-proposed its runs)
-                mine = set(obj.get("member_run_keys") or ())
-                for other in bundle.get("record_groups") or ():
-                    if other["group_id"] != tid and other.get("status") in B.LIVE_GROUP_STATUSES and mine & set(other.get("member_run_keys") or ()):
+                resolved.append((tid, *resolve_target(bundle, tid)))
+            except MutationRefused as exc:
+                if not bulk:
+                    raise
+                held.append((tid, exc))  # r5c review LOW-3: an unknown id is named with the other refused targets
+        if bulk:
+            # r5c review MED-1: A REFUSAL OF THE CALL ITSELF is said once, never once per target
+            call_level = _bulk_call_problem([(kind, obj) for _, kind, obj in resolved], decision, qc_status, e0_measured)
+            if call_level is not None:
+                raise MutationRefused(call_level)
+        for tid, kind, obj in resolved:
+            try:
+                try:
+                    _check_decision(bundle, kind, obj, decision, value, bulk=bulk, merge_with=merge_with, split_into=split_into)
+                except OffListRefused as exc:
+                    # EVERY TARGET IS CHECKED FIRST: an off-list refusal is raised (and kept as a vocabulary request) only
+                    # when no target is refused for any other reason, whatever order the targets came in
+                    off_list = off_list or exc
+                if kind == "processing_result" and decision == "approve":
+                    problem = approved_sibling_problem(bundle, obj, [o for k, o in planned if k == "processing_result"])
+                    if problem is not None:
+                        raise MutationRefused(problem)
+                    if bulk and (why := bulk_approve_problem(obj)) is not None:
+                        raise MutationRefused(f"{why} Approve this one on its own, after its sentence is read to the "
+                                              "scientist; a bulk approval does not. Nothing was recorded.")
+                    if "athena_e0_possibly_fixed" in (obj.get("review_flags") or ()) and not e0_measured:
+                        # r1 M5: an Athena E0 shared by groups whose own edges differ may be a fixed setting, not a measure
+                        said = next((s for s in (((obj.get("qc") or {}).get("statements") or {}).values())
+                                     if isinstance(s, str) and "Athena" in s and "E0" in s), "")
                         raise MutationRefused(
-                            f"This group's run is now in proposal {other['group_id']}; confirm or reject that proposal instead."
-                        )
-            if decision == B.NOT_COUNTER_DECISION:
-                counters = set(counter_positions(bundle) or ())
-                clash = sorted(set(positions or ()) & counters)
-                if clash:
+                            f"{tid} carries a possibly fixed Athena E0 (athena_e0_possibly_fixed){': ' + said if said else '.'} "
+                            "Ask the scientist whether this E0 was measured from this group's edge; only if they say it "
+                            "was, approve again with --e0-measured. Nothing was recorded.")
+                if e0_measured and not (kind == "processing_result" and "athena_e0_possibly_fixed" in (obj.get("review_flags") or ())):
+                    # r2-a L1: the statement answers that flag's question only; on any other target it would be kept as
+                    # evidence of nothing (accepted silently before)
                     raise MutationRefused(
-                        f"Position(s) {', '.join(map(str, clash))} are recorded as run counters by the latest "
-                        "set_counter_positions answer. To say otherwise, record set_counter_positions without them; "
-                        "nothing was recorded."
+                        f"--e0-measured applies only to a processing result flagged athena_e0_possibly_fixed, and {tid} "
+                        "does not carry that flag: there is no fixed-E0 question to answer. Approve it without "
+                        "--e0-measured. Nothing was recorded.")
+                if same_conditions:
+                    acknowledged[tid] = _same_conditions_tokens(bundle, kind, obj, merge_with)
+                if qc_status is not None and kind != "processing_result":
+                    raise MutationRefused("--qc-status applies to a processing result only.")
+                if kind == "processing_result" and decision == "approve" and qc_status is None:
+                    # I4: the QC status is never guessed from the protocol's verdict.
+                    raise MutationRefused(
+                        "Approving a processing result needs --qc-status (one of "
+                        + ", ".join(qc_status_vocabulary()) + "): the QC status is a person's statement."
                     )
-            planned.append((kind, obj))
+                if kind == "record_group" and decision == "approve_calibration":
+                    calibration_said[tid] = calibration_shift_said(bundle, tid, element, edge, accepted)
+                if kind == "record_group" and decision == "confirm":
+                    # R-4: a group whose runs now sit in ANOTHER live group cannot be confirmed
+                    # (e.g. a rejected group after a regroup re-proposed its runs)
+                    mine = set(obj.get("member_run_keys") or ())
+                    for other in bundle.get("record_groups") or ():
+                        if other["group_id"] != tid and other.get("status") in B.LIVE_GROUP_STATUSES and mine & set(other.get("member_run_keys") or ()):
+                            raise MutationRefused(
+                                f"This group's run is now in proposal {other['group_id']}; confirm or reject that proposal instead."
+                            )
+                if decision == B.NOT_COUNTER_DECISION:
+                    counters = set(counter_positions(bundle) or ())
+                    clash = sorted(set(positions or ()) & counters)
+                    if clash:
+                        raise MutationRefused(
+                            f"Position(s) {', '.join(map(str, clash))} are recorded as run counters by the latest "
+                            "set_counter_positions answer. To say otherwise, record set_counter_positions without them; "
+                            "nothing was recorded."
+                        )
+                planned.append((kind, obj))
+            except MutationRefused as exc:
+                if not bulk or isinstance(exc, OffListRefused):
+                    raise
+                # r5c C4: A BULK CALL NAMES EVERY TARGET IT REFUSES, in one refusal (before: only the first, so four
+                # held results took four round trips); the others are still checked, and nothing is recorded
+                held.append((tid, exc))
+        if len(held) == 1:
+            raise held[0][1]  # one refused target: its own refusal, as before
+        if held:
+            raise MutationRefused(bulk_refusal([(t, str(e)) for t, e in held], len(target_ids), decision),
+                                  code=max(e.code for _, e in held))
         if off_list is not None:
             raise off_list
         decided_by = {
@@ -2782,6 +2859,29 @@ def record_decision(
         statement = CAPTURE_STATEMENTS.get(decision)
         if statement:
             result["statement"] = statement.format(value=value, positions=", ".join(map(str, positions or ())))
+        if decision == B.ATHENA_SELECT_DECISION and recorded:
+            # r5c C1: A CHOICE THAT IS NOT WHAT THE RECORD CARRIES IS SAID NOW (before: only a later `isaac process`
+            # said it, and validate and export were silent): the group's approved result is another curve
+            from . import records as R
+
+            said_now = []
+            # r5c review MED-2: the bundle is read ONCE for every target of the call
+            choices, state = R.athena_choices(bundle), B.processing_state_decisions(bundle)
+            approved_of: dict[str, list] = {}
+            for r in bundle.get("processing_results") or ():
+                if r.get("state") == B.STATE_SCIENTIST_CONFIRMED and not B.processing_not_applicable(r):
+                    approved_of.setdefault(r.get("group_id"), []).append(r)
+            for kind, obj in planned:
+                if kind != "processing_result" or B.processing_id(obj) not in recorded:
+                    continue
+                approved = approved_of.get(obj.get("group_id")) or []
+                if len(approved) == 1 and (m := R.athena_choice_mismatch(bundle, obj["group_id"], approved[0],
+                                                                         choices, state)):
+                    said_now.append({"group_id": obj["group_id"], **m, "text": R.athena_choice_text(m, obj["group_id"])})
+            if said_now:
+                result["approved_result_not_chosen"] = said_now
+                result["statement"] += " " + " ".join(x["text"] for x in said_now[:3]) + (
+                    f" (and {len(said_now) - 3} more: approved_result_not_chosen)" if len(said_now) > 3 else "")
         kept = [t for kind, t in planned if kind == "merge_candidate"] if decision == B.KEEP_APART_DECISION else []
         if len(kept) > 1:
             # r4-b M2: a batch is said as a batch (before: "this merge candidate" for 25 of them)
@@ -3427,7 +3527,7 @@ def group(bundle_dir: Path, *, regroup: bool = False) -> dict:
     return result
 
 
-def _regroup(bundle: dict, *, regroup: bool = True) -> dict:
+def _regroup(bundle: dict, *, regroup: bool = True, preview: bool = False) -> dict:
     """:func:`group` applied to an ALREADY-LOADED bundle (the caller's lock, or a copy: the counter answer's
     preview runs it on one). Saves nothing and writes no mirror."""
     try:
@@ -3529,6 +3629,11 @@ def _regroup(bundle: dict, *, regroup: bool = True) -> dict:
         mbd = g.get("merged_by_decision")
         if isinstance(mbd, Mapping) and mbd.get("decision_id"):
             combined_runs_of.setdefault(mbd["decision_id"], []).extend(g.get("member_run_keys") or ())
+    # r5c C2: the id a regroup already gave a decision's combined group is kept (a group made before r5c hashed the
+    # decision id; a new one hashes its runs only)
+    stored_merge_ids = {(g["merged_by_decision"]["decision_id"], frozenset(g.get("member_run_keys") or ())): g["group_id"]
+                        for g in [*(bundle.get("superseded_record_groups") or ()), *existing]
+                        if isinstance(g.get("merged_by_decision"), Mapping) and g["merged_by_decision"].get("decision_id")}
     combined_by: list[dict] = []
     not_combined: list[dict] = []
     runs_by_key = {r["run_key"]: r for r in bundle.get("runs") or ()}
@@ -3556,7 +3661,7 @@ def _regroup(bundle: dict, *, regroup: bool = True) -> dict:
         if why is None:
             order = {g["group_id"]: i for i, g in enumerate(fresh)}
             holders.sort(key=lambda h: order[h["group_id"]])
-            combined = _combine_for_merge(holders, d, gid, exp_key)
+            combined = _combine_for_merge(holders, d, gid, exp_key, stored=stored_merge_ids, taken=kept_by_id)
             prior = kept_by_id.get(combined["group_id"])
             if prior is not None:
                 # H1: the combined group was itself decided (rejected, split or merged): that is the
@@ -3727,6 +3832,18 @@ def _regroup(bundle: dict, *, regroup: bool = True) -> dict:
             "isaac bundle list <bundle_dir> merge-candidates",
         ],
     }
+    from . import questions as Q
+
+    # a preview (counter_answer_preview) throws the groups away: it is not told this (r5 review M3)
+    not_records = {} if preview else Q.not_a_measurement_groups(bundle)
+    if not_records:
+        # r5 B4: said when the groups are made, not only after the curve of one is approved
+        shown = ", ".join(sorted(not_records)[:5]) + ("…" if len(not_records) > 5 else "")
+        out["not_a_measurement_groups"] = sorted(not_records)
+        out["statement"] += (f" {len(not_records)} group(s) hold only runs that are not measurement runs (a reference "
+                             f"standard, an alignment or a calibration scan: {shown}). The import asks nothing about "
+                             "their sample or conditions, so they never become records as they stand "
+                             "(cannot_export_reason: not_a_measurement_run in `bundle list <bundle_dir> groups`).")
     if split_decision:
         # each split in force: the groups it holds (kept as named), and, said plainly, one applied only now (an older
         # build recorded the split without making them) or one whose lists cannot make groups
@@ -3880,8 +3997,8 @@ def _merge_blocker_details(bundle: Mapping, payload: Mapping, holders: Sequence[
     if off_names and sample is None:
         steps = [] if sample_conflict else _sample_commands(bundle, holders)
         unknown_reason = (f"the files state different {', '.join(off_names)} for them, which this build does not classify"
-                          + (" — if these runs measured the same sample, confirm it for each run, with the same name each time: "
-                             + _cmds(steps) if steps else ""), steps)
+                          + (" — if these runs measured the same sample, " + SAMPLE_STEP_SAID
+                             + material_name_hint(bundle, holders) + ": " + _cmds(steps) if steps else ""), steps)
     out: list[tuple[str, list[str]]] = [(r + _NEVER_COMBINED + _cmds(keep_apart), keep_apart) for r in never]
     for text, steps in [x for x in (names_reason, unknown_reason) if x is not None]:
         if never:  # a counter or sample answer cannot combine runs whose conditions differ: none is offered
@@ -4008,7 +4125,7 @@ def _names_differ(bundle: Mapping, kept: Sequence[Sequence[tuple]], stems: Seque
         text += (("; or, " if steps else " — ") + f"same sample AND same conditions? the names differ in: {' / '.join(differ)}. "
                  "Only if these runs measured the same sample under the same conditions (those words are labels, not a "
                  "treatment, state, temperature or other condition): "
-                 + ("confirm the sample for each run, with the same name each time" if sample_steps else "")
+                 + (SAMPLE_STEP_SAID + material_name_hint(bundle, holders) if sample_steps else "")
                  + (", and " if sample_steps and ack else "")
                  + ("record the merge again saying so (--same-conditions)" if ack else "") + ": " + _cmds(same))
         steps = steps + same
@@ -4077,7 +4194,7 @@ def _merges_combined(bundle: Mapping) -> dict[str, dict]:
     if not bundle.get("record_groups"):
         return {}
     try:
-        out = _regroup(copy.deepcopy(dict(bundle)), regroup=True)
+        out = _regroup(copy.deepcopy(dict(bundle)), regroup=True, preview=True)
     except MutationRefused:
         return {}
     return {x["decision_id"]: x for x in out["combined_by_merge_decision"]}
@@ -4177,8 +4294,40 @@ def _sample_commands(bundle: Mapping, holders: Sequence[Mapping]) -> list[str]:
                                      if m.get("run_id") == rid and m.get("target_field_path") == MERGE_SAMPLE_PATH), None)
             if target is None:
                 return []
-            out.append(f'isaac bundle decide <bundle_dir> --target {target} --decision correct --value "<the sample>" --by "<your name>"')
+            out.append(f'isaac bundle decide <bundle_dir> --target {target} --decision correct --value '
+                       f'"{MATERIAL_NAME_PLACEHOLDER}" --by "<your name>"')
     return out
+
+
+#: r5c C3: the sample a merge needs confirmed IS the record's material name (:data:`MERGE_SAMPLE_PATH`): the value given
+#: there is what the record carries, so the command and its sentence say so (before: "<the sample>", and a short label
+#: typed for it, e.g. the file-name word, became the record's material name while its sibling runs carried the full one)
+MATERIAL_NAME_PLACEHOLDER = "<the material name the record carries>"
+SAMPLE_STEP_SAID = ("give each run's material name (sample.material.name: the name its record carries, so give it in "
+                    "full, as for any other run of this sample), the same each time")
+
+
+def material_name_hint(bundle: Mapping, holders: Sequence[Mapping]) -> str:
+    """r5c C3: `` (other runs whose files name this sample (ZZ3) carry 'SYN full name (ZZ3)')`` when runs OUTSIDE ``holders``
+    whose material-name reading quotes the same words have ONE confirmed material name; else ``""``. Said, never
+    recorded: the scientist gives the name."""
+    mine = {k for h in holders for k in h.get("member_run_keys") or ()}
+    run_of_key = {r["run_key"]: r.get("run_id") for r in bundle.get("runs") or ()}
+    own_ids = {run_of_key.get(k) for k in mine}
+    literal_of: dict[str, set[str]] = {}
+    for c in bundle.get("candidates") or ():
+        if c.get("target_field_path") == MERGE_SAMPLE_PATH and c.get("run_id"):
+            lits = {str(e.get("literal_value")) for e in c.get("evidence") or () if e.get("literal_value")}
+            literal_of.setdefault(c["run_id"], set()).update(lits)
+    said = set().union(*(literal_of.get(r, set()) for r in own_ids)) if own_ids else set()
+    if not said:
+        return ""
+    others = {r for r, lits in literal_of.items() if r not in own_ids and lits & said}
+    names = (_confirmed_run_answers(bundle, others).get(MERGE_SAMPLE_PATH) or set()) - {"null"} if others else set()
+    if len(names) != 1:
+        return ""
+    name = json.loads(next(iter(names)))
+    return f" (other runs whose files name this sample ({' / '.join(sorted(said))}) carry {name!r})"
 
 
 def _merge_stems(bundle: Mapping, groups: Sequence[Mapping]) -> list[str]:
@@ -4205,15 +4354,39 @@ def _confirmed_run_answers(bundle: Mapping, run_ids: set) -> dict[str, set[str]]
     return out
 
 
-def _combine_for_merge(holders: Sequence[Mapping], decision: Mapping, merged_group_id: str, exp_key: str) -> dict:
-    """ONE proposed group holding every run of ``holders`` (the fresh groups now holding a merge
-    decision's runs), in their order. Its id is new (the runs plus the decision id), so it is never
-    mistaken for a group the rule proposed. What the holders agree on is kept in its basis; a key they
-    differ on is left out of it and named in ``merged_by_decision.basis_keys_dropped``."""
+#: r5c C2: what a merged group's id is hashed with beside its runs, so it is never a group id the rule proposes
+MERGED_ID_MARKER = "merged-by-scientist"
+
+
+def merge_group_id_for(exp_key: str, members: Sequence[str], decision: Mapping, *, stored: Mapping | None = None,
+                    taken: Mapping | None = None) -> str:
+    """The id of the group a merge decision combines ``members`` into. r5c C2: it depends on the runs ONLY (sorted,
+    with :data:`MERGED_ID_MARKER`), so the same answers given in another order give the same group and the same record
+    body (its ``series_id`` names the group). Kept as stored: a group a regroup already made for THIS decision with
+    THESE runs keeps its id (``stored``: ``(decision id, runs) -> id``; before r5c the id hashed the decision id).
+    ``taken``: ``{group id: group}`` of the kept, decided groups; when the runs-only id is a group decided under
+    ANOTHER merge decision (a scientist's later merge of the same runs), the decision's own id is used, as before r5c,
+    so the newer merge is proposed and the earlier ruling is not read as this one's."""
     from . import grouping as G
 
+    key = (decision["decision_id"], frozenset(members))
+    if stored and key in stored:
+        return stored[key]
+    gid = G.group_id_for(exp_key, list(members) + [MERGED_ID_MARKER])
+    prior = (taken or {}).get(gid)
+    if prior is not None and ((prior.get("merged_by_decision") or {}).get("decision_id") != decision["decision_id"]):
+        return G.group_id_for(exp_key, list(members) + [f"merged-by:{decision['decision_id']}"])
+    return gid
+
+
+def _combine_for_merge(holders: Sequence[Mapping], decision: Mapping, merged_group_id: str, exp_key: str, *,
+                       stored: Mapping | None = None, taken: Mapping | None = None) -> dict:
+    """ONE proposed group holding every run of ``holders`` (the fresh groups now holding a merge
+    decision's runs), in their order. Its id (:func:`merge_group_id_for`) follows its runs, so it is never
+    mistaken for a group the rule proposed. What the holders agree on is kept in its basis; a key they
+    differ on is left out of it and named in ``merged_by_decision.basis_keys_dropped``."""
     members = [k for h in holders for k in h.get("member_run_keys") or ()]
-    combined, dropped = _combine_groups(holders, G.group_id_for(exp_key, members + [f"merged-by:{decision['decision_id']}"]),
+    combined, dropped = _combine_groups(holders, merge_group_id_for(exp_key, members, decision, stored=stored, taken=taken),
                                         "merged_by_scientist_decision")
     combined["merged_by_decision"] = {
         "decision_id": decision["decision_id"],
@@ -4568,6 +4741,7 @@ def process(
             if r.get("state") not in B.PROCESSING_UNDECIDED_STATES:
                 r["state"] = B.STATE_NEEDS_REVIEW
             fresh.append(r)
+        before = list(bundle.get("processing_results") or ())  # r5 M2: what the group's results were before this run
         bundle["processing_results"] = keep + fresh
         kept_decided = sum(B.processing_id(r) in decided or r.get("group_id") in superseded for r in keep)
         out = {
@@ -4594,6 +4768,13 @@ def process(
             if isinstance(out.get("summary"), Mapping):
                 out["summary"] = {**out["summary"],
                                   "lines": [*(out["summary"].get("lines") or ()), *(x["statement"] for x in new_curve)]}
+        moved = decided_results_on_an_older_run(bundle, before, keep, fresh,
+                                                said={x["decided_result_id"] for x in new_curve})
+        if moved:
+            out["decided_results_on_an_older_run"] = moved
+            if isinstance(out.get("summary"), Mapping):
+                out["summary"] = {**out["summary"],
+                                  "lines": [*(out["summary"].get("lines") or ()), *(x["statement"] for x in moved)]}
         if not_live:
             by_status: dict[str, int] = {}
             for g in not_live:
@@ -4613,7 +4794,8 @@ def process(
 
 def decided_results_with_a_new_all_zero_skip(bundle: Mapping, keep: Sequence[Mapping], fresh: Sequence[Mapping]) -> list[dict]:
     """c11-r: one line per DECIDED ISAAC result kept as it was whose group's fresh result (this build) now leaves out a
-    scan the decided one merged, because its signal is zero at every point (``signal_all_zero``). The fresh curve has
+    scan the decided one merged, because its signal is zero at every point (``signal_all_zero``) or (r5 A5) it is an
+    aborted fragment (``aborted_scan_fragment``). The fresh curve has
     a new id; the decision still stands on the old id until the scientist changes it. ``[]`` when there is none."""
     decisions = B.processing_state_decisions(bundle)
     out = []
@@ -4629,15 +4811,21 @@ def decided_results_with_a_new_all_zero_skip(bundle: Mapping, keep: Sequence[Map
             if new.get("group_id") != old.get("group_id") or new.get("source") != "isaac_protocol":
                 continue
             left = [i for i in new.get("inputs") or ()
-                    if i.get("skip_reason") == C_SIGNAL_ALL_ZERO and i.get("source_id") in merged]
+                    if i.get("skip_reason") in _NEW_SKIPS and i.get("source_id") in merged]
             if not left:
                 continue
             nid = B.processing_id(new)
-            names = ", ".join(PurePosixPath(str(i.get("relative_path") or i.get("source_id"))).name for i in left)
+            # r5 A5: a stopped (aborted) scan fragment left out is said the same way, in its own words
+            whys = []
+            for reason, (one, several) in _NEW_SKIPS.items():
+                named = [PurePosixPath(str(i.get("relative_path") or i.get("source_id"))).name for i in left
+                         if i.get("skip_reason") == reason]
+                if named:
+                    whys.append(f"{', '.join(named)}, {one if len(named) == 1 else several}")
             what = d.get("decision")
             stands = "The old approval still stands" if what == "approve" else f"The earlier decision ({what}) still stands"
             said = (f"Group {old.get('group_id')}: {pid} ({what} by {(d.get('decided_by') or {}).get('name')}) merged "
-                    f"{names}, whose signal is zero at every point; this build leaves {'it' if len(left) == 1 else 'them'} "
+                    f"{'; and '.join(whys)}; this build leaves {'it' if len(left) == 1 else 'them'} "
                     f"out, so the fresh curve is a new result, {nid}. The scientist can approve the new curve "
                     f'(`isaac bundle decide <bundle_dir> --target {nid} --decision approve --qc-status <value> --by '
                     f'"<your name>"`). {stands} on {pid} until they change it.')
@@ -4646,8 +4834,103 @@ def decided_results_with_a_new_all_zero_skip(bundle: Mapping, keep: Sequence[Map
     return out
 
 
+def _athena_match_of(results: Sequence[Mapping], group_id: str, run_id: str | None) -> tuple:
+    """r5 M2: what a group's run says of the scientist's Athena curve: the matched Athena input(s) and how many versions
+    the ISAAC result lists."""
+    mine = [r for r in results if r.get("group_id") == group_id and (run_id is None or r.get("run_id") == run_id)]
+    matched = sorted(tuple(str((r.get("inputs") or [{}])[0].get(k)) for k in ("relative_path", "athena_group"))
+                     for r in mine if r.get("source") == "scientist_athena" and not r.get("athena_version_id"))
+    versions = max((len(r.get("athena_versions") or ()) for r in mine if r.get("source") == "isaac_protocol"), default=0)
+    return tuple(matched), versions
+
+
+#: r5 M2 (review MED 4): on a DECIDED result, what its own run said of the scientist's Athena curve, recorded the first
+#: time ``process`` keeps it (its run's other results are still in the bundle then), and the run ids already said
+CURVE_WHEN_DECIDED_KEY = "athena_curve_when_decided"
+OLDER_RUN_SAID_KEY = "older_run_said_for"
+
+
+def decided_results_on_an_older_run(bundle: Mapping, before: Sequence[Mapping], keep: Sequence[Mapping],
+                                    fresh: Sequence[Mapping], *, said: set | frozenset = frozenset()) -> list[dict]:
+    """r5 M2: one line per DECIDED result kept on its old id whose group this build gives fresh results under ANOTHER
+    run id, saying why the id moved (the Athena match changed; the scientist's Athena curve is now made from the
+    project as Athena makes it; else the curve or the files its id is made from changed) and that the decision stands
+    on the old curve. A result already said (``said``: a scan now left out) is not said twice.
+
+    Review MED 4: what the decided result's own run said of the Athena curve is RECORDED on it
+    (:data:`CURVE_WHEN_DECIDED_KEY`) the first time its line is said, while its run's other results are still in the
+    bundle (only a run under a new id replaces them), and read from there afterwards (a later run no longer has them, which made every later line say the match had
+    changed). The line is said ONCE per new run id (:data:`OLDER_RUN_SAID_KEY`), never again on an identical re-run.
+    The recorded fields are outside every hashed file. ``[]`` when none."""
+    decisions = B.processing_state_decisions(bundle)
+    out = []
+    for old in keep:
+        pid = B.processing_id(old)
+        d = decisions.get(("processing_result", pid))
+        if d is None:
+            continue
+        gid, run = old.get("group_id"), old.get("run_id")
+        seen = old.get(CURVE_WHEN_DECIDED_KEY)
+        if not isinstance(seen, Mapping):
+            match, versions = _athena_match_of(before, gid, run)
+            seen = {"athena_match": [list(x) for x in match], "athena_versions": versions,
+                    "rebuilt": any(C_ATHENA_RENORM in (r.get("review_flags") or ()) for r in before
+                                   if r.get("group_id") == gid and r.get("run_id") == run)}
+        new = [r for r in fresh if r.get("group_id") == gid and r.get("run_id") and r.get("run_id") != run]
+        if not new:
+            continue
+        new_run = str(new[0].get("run_id"))
+        if new_run in (old.get(OLDER_RUN_SAID_KEY) or ()):
+            continue
+        if pid in said:  # said already (a scan now left out): recorded the same way, so a later run reads it
+            if isinstance(old, dict):
+                old.setdefault(CURVE_WHEN_DECIDED_KEY, seen)
+                old[OLDER_RUN_SAID_KEY] = [*(old.get(OLDER_RUN_SAID_KEY) or ()), new_run]
+            continue
+        why = []
+        was = (tuple(tuple(x) for x in seen.get("athena_match") or ()), int(seen.get("athena_versions") or 0))
+        now = _athena_match_of(new, gid, None)
+        if was != now:
+            why.append("the scientist's Athena curve it is compared with is matched differently now "
+                       f"({_said_match(was)} before, {_said_match(now)} now)")
+        if not seen.get("rebuilt") and any(C_ATHENA_RENORM in (r.get("review_flags") or ()) for r in new):
+            why.append("the scientist's Athena curve is now made from the project as Athena makes it "
+                       f"({C_ATHENA_RENORM})")
+        if not why:
+            why.append("its curve, or a file its id is made from, changed with this build")
+        nid = next((B.processing_id(r) for r in new if r.get("source") == old.get("source")), B.processing_id(new[0]))
+        what = d.get("decision")
+        stands = "The approval still stands" if what == "approve" else f"The decision ({what}) still stands"
+        if isinstance(old, dict):
+            # recorded only when the line is said (a kept result is otherwise left exactly as it was); its run's other
+            # results are still in the bundle until then, since only a run under a new id replaces them
+            old.setdefault(CURVE_WHEN_DECIDED_KEY, seen)
+            old[OLDER_RUN_SAID_KEY] = [*(old.get(OLDER_RUN_SAID_KEY) or ()), new_run]
+        out.append({"group_id": gid, "decided_result_id": pid, "new_result_id": nid, "reasons": why,
+                    "statement": (f"Group {gid}: {pid} ({what} by {(d.get('decided_by') or {}).get('name')}) is kept on "
+                                  f"its old curve; this build gives the group new results ({nid}) because "
+                                  f"{'; and '.join(why)}. {stands} on the old curve until the scientist changes it; "
+                                  f"the new result is undecided.")})
+    return out
+
+
+def _said_match(m: tuple) -> str:
+    matched, versions = m
+    if matched:
+        return "matched to " + ", ".join(f"{g} in {p}" for p, g in matched)
+    return f"{versions} versions listed" if versions else "no Athena curve"
+
+
+#: ``processing.athena.ATHENA_RENORM_FLAG`` (r5 H1; not imported: processing is an optional extra).
+C_ATHENA_RENORM = "athena_renormalisation_differs"
 #: ``processing.core.SIGNAL_ALL_ZERO`` (not imported: processing is an optional extra).
 C_SIGNAL_ALL_ZERO = "signal_all_zero"
+#: ``processing.run.FRAGMENT_REASON`` (r5 A5; not imported, as above).
+C_ABORTED_FRAGMENT = "aborted_scan_fragment"
+#: the skip reasons a fresh build gives a scan a decided result merged, and how each is said
+_NEW_SKIPS = {C_SIGNAL_ALL_ZERO: ("whose signal is zero at every point", "whose signal is zero at every point"),
+              C_ABORTED_FRAGMENT: ("a scan that stopped after too few points to merge (an aborted fragment)",
+                                   "scans that stopped after too few points to merge (aborted fragments)")}
 
 
 def _say_athena_choice_not_carried_over(result: dict, decision: Mapping) -> None:
@@ -4767,7 +5050,7 @@ def calibration_shift_said(bundle: Mapping, group_id: str, element: str, edge: s
     # c12-r (REF.STRICTER_ONLY_RULE_ID): never a params file's higher warning level
     warn = REF.effective_warn_eV(((qc or {}).get("params") or {}).get("warn_energy_shift_eV") or warn)
     w = REF.would_apply(cal, element, edge, warn_eV=warn, accepted=accepted)  # r3 L8: a confirmed size is said as such
-    if not REF.reading(cal)["reference_proposed"]:
+    if not REF.reading(cal)["reference_edge_usable"]:  # r5 A7: a disagreeing one is approvable with --accept-shift
         # c12-r: a DECIDED result approved under an older build may carry a shift from this reference: confirming
         # its exact size (--accept-shift) is the scientist keeping that curve; nothing else can be approved
         carried = _carried_shifts(bundle, group_id, warn)

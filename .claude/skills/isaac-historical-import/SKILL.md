@@ -140,8 +140,8 @@ If `<isaac> bundle group --help` fails, say "grouping is not in this build", ski
 5. Ask the scientist to **confirm, split or merge** each, in batches, with progress. A group that is
    not a result (alignment, a reference foil, a test scan) can be **left out** with `reject`; say it is
    never exported. Several accepted as shown: list each back, then one `--targets-file` confirm; never
-   include a group with a `cannot_export_reason`: say why (no curve can ever be made for it) and offer
-   `reject` or leaving it unconfirmed. A `--same-conditions` merge needs a yes to "same sample AND same
+   include a group with a `cannot_export_reason`: say why (`no_scans`: no scan in a `_dir` folder or its SPEC
+   file; else no ISAAC protocol covers that data yet) and offer `reject` or leaving it unconfirmed. A `--same-conditions` merge needs a yes to "same sample AND same
    conditions? the names differ in: …"; `pristine`/`cycled` are conditions, not labels. After a
    regroup, say any `merge_decisions_not_combined` in words and offer its `next_commands`.
 
@@ -219,28 +219,28 @@ empty; `ISAAC Suggestions` shows what each run's own files say; every `--out` of
 cell, clash, replaced or contradicted file reading, beamtime-wide cell and unread column, and add
 `--apply` only on their yes. Never fill the sheet for them; never import ISAAC's blank template. **They already filled ISAAC's template and say to use it:**
 `<isaac> bundle template adopt` (see "The scientist's own filled sheet" in the reference).
-They may also answer on the local-only *Local Imports* page (see the reference); run `bundle questions` again after.
+They may also answer on the local-only *Local Imports* page (see the reference); run `bundle questions` again after. If the beamline question says "The files' beamline hints disagree", read both hints back and ask; never pick one.
 
 ## Step 8 · Build and validate
 
 `<isaac> bundle build-records <bundle>` (counts and the first 3 drafts; `--full` prints all) then
-`<isaac> bundle validate <bundle>`. If it reports `nothing_validated`, no group is confirmed yet: go
-back to Step 5. Read `reference/records-and-validation.md`; explain the verdicts from validate's
-`by_reason`, `missing_required_by_field` and `not_exportable_first` in plain words with the exact fix
-(open `validation/<group_id>.json` only for a group those leave unexplained), then go back to the
-step that fixes it (a `processing_fix` means its curve needs approval in Step 6). Say each `warnings`
-item in words (only 5 warnings show by default; `validate --full` lists all), and ask the scale question it
-names (and the set-point if `also_needs`); run its command only with their answer. Never edit a draft or relax a check.
+`<isaac> bundle validate <bundle>`. If it reports `nothing_validated`, no group is confirmed yet: go back to Step 5.
+Read `reference/records-and-validation.md`; explain the verdicts from validate's `by_reason`,
+`missing_required_by_field` and `not_exportable_first` in plain words with the exact fix (open
+`validation/<group_id>.json` only for a group those leave unexplained), then go back to the step that fixes it (a
+`processing_fix` means its curve needs approval in Step 6). Say each `warnings` item in words
+(only 5 warnings show by default; `validate --full` lists all), and ask the scale question it names (and the set-point
+if `also_needs`, with `also_command`; a missing set-point lists its scale as missing too). `athena_version_no_longer_chosen`: the
+approved curve is not the version they chose last; say its steps. Run a command only with their answer. Never edit a draft or relax a check.
 
 ## Step 9 · Export and dry run
 
 `<isaac> bundle export <bundle> --out <records>` writes only `exportable` records. Read its `outcome`
 ("N record(s) ready (U unchanged…, W written), refused M group(s)"), not its exit code (see `reference/records-and-validation.md`),
-then its refusal counts. **If nothing is exportable**, export writes nothing: skip the dry run, say
-"no record is ready yet", name what blocks the nearest group (from Step 8), and go to Step 10.
-`<isaac> bundle upload <records> --dry-run` shows what *would* be sent: summarise it (how many
-records, where to) and say **nothing was sent and this build cannot send**. The scientist uploads
-through the ISAAC portal themselves.
+then its refusal counts (`records_ready` = N; `records_written` = W, new or replacing records only).
+**If nothing is exportable**, export writes nothing: skip the dry run, say "no record is ready yet", name what
+blocks the nearest group (from Step 8), and go to Step 10. `<isaac> bundle upload <records> --dry-run` shows what
+*would* be sent: summarise it (how many records, where to) and say **nothing was sent and this build cannot send**. The scientist uploads through the ISAAC portal themselves.
 
 ## Step 10 · Final summary
 
