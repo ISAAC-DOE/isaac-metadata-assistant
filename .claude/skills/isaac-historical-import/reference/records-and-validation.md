@@ -102,7 +102,9 @@ record with one; the outcome says unchanged ones apart): say each one, since the
 validator's own warnings (a deprecated `three_electrode` cell type, no data owner) never change a verdict, but are said:
 `portal_warnings` in `validate` and `export` (each once, with its record count; also a `portal:<CODE>` row of
 `warnings`), and "Written with a portal validator warning (…)" on each record. The template keeps a term the validator
-warns is deprecated out of its dropdown and marks it on the Vocabulary sheet ("deprecated: use …"). Its index is
+warns is deprecated out of its dropdown and marks it on the Vocabulary sheet ("deprecated: use …"). Adopt's allowed
+lists, the Disagreements sheet and `bundle questions` (`deprecated_values_by_field`) mark it too, and the import
+preview warns under "Deprecated terms". Its index is
 `<records>/isaac-export/index.json`. Exporting again into the same `--out` reuses each unchanged record's id (`export: unchanged`: the record body is the same; with `evidence_refreshed` when only its evidence file was rewritten, e.g. the same value confirmed again, by someone else, or read from another file — `evidence_changed` says what changed; say so, the record is the same); a record whose body changed gets a new id and the old one is moved to `isaac-export/superseded/` (`export: replaced`); a record whose group is now refused or no longer confirmed is moved to `isaac-export/withdrawn/` (listed under `withdrawn`; if it was uploaded already, the portal still holds it) — say which. Then `upload <records> --dry-run`: summarise records, target
 endpoints and body sizes, and name each record's `replaces_record_ids` (read its `replaces_statement`: it says where each earlier record is now; one already uploaded stays on the portal). State plainly: nothing was sent, this build cannot send, the key was not
 read. Never ask for or print a portal key. Tell the scientist the records are in `<records>` and

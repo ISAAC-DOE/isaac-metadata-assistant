@@ -1726,7 +1726,9 @@ def _count(n: int, noun: str) -> str:
 
 
 #: r4-b M4: the words for an electrochemical cell or its control, which do not describe a run measured outside one
-CELL_FIELDS = frozenset({"context.electrochemistry.cell_type", "context.electrochemistry.control_mode"})
+#: (r5e M2: and the potential's reference scale, now asked beside them once for the beamtime)
+CELL_FIELDS = frozenset({"context.electrochemistry.cell_type", "context.electrochemistry.control_mode",
+                         "context.electrochemistry.potential_scale"})
 _GROUP_IDS_SHOWN = 8
 
 

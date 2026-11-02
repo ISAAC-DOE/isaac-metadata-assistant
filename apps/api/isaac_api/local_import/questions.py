@@ -80,6 +80,9 @@ SHARED_PATHS = (
     "context.reaction.",
     "context.electrochemistry.reaction",
     "context.electrochemistry.cell_type",
+    # r5e M2: asked once for the beamtime beside the cell type (each run's own answer is still recorded per run)
+    "context.electrochemistry.potential_scale",
+    "context.electrochemistry.control_mode",
     "context.electrochemistry.electrolyte",
 )
 TIER_BLOCKING, TIER_CONFLICT, TIER_OPTIONAL = 1, 2, 3
@@ -519,6 +522,8 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     ``answered_out``, when given (with ``include_answered``), receives the id of each value target that is in the
     payload ONLY because it was answered (the plain payload does not ask it): what a caller that needs both payloads
     reads instead of consolidating twice (r4-c HIGH-1, ``template._question_command``)."""
+    from .template import deprecated_terms
+
     schema, basis = _target_schema()
     # THE SET-POINT A CONTROL MODE NEEDS (1.5.0): the target schema's conditional rules make the
     # set-point required for some modes, so a run whose mode a file states or a scientist confirmed
@@ -647,6 +652,27 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     for c in bundle["candidates"]:
         if c["target_field_path"]:
             related.setdefault(c["target_field_path"], []).append(c)
+    # r5e M1: a sample field's related readings by the sample reading of the group their run is in (None: no group, or
+    # a group that records no sample reading), each list in bundle order; built once per sample field, on first use
+    related_by_sample: dict[str, dict[str | None, list[tuple[int, dict]]]] = {}
+
+    def related_hints(path: str, partition: str | None, runs: set[str]) -> list[dict]:
+        """The related readings a question shows (the first :data:`_HINTS_PER_QUESTION`). r5e M1: for a sample field,
+        never another sample's: a reading made for a group whose own sample reading differs from the question's is
+        left out (``CC1`` beside a question about the groups of another sample)."""
+        if not path.startswith("sample."):
+            return related.get(path, [])[:_HINTS_PER_QUESTION]
+        if path not in related_by_sample:
+            by_key: dict[str | None, list[tuple[int, dict]]] = {}
+            for i, c in enumerate(related.get(path, [])):
+                by_key.setdefault(sample_key_of_group.get(group_of.get(c["run_id"])), []).append((i, c))
+            related_by_sample[path] = by_key
+        own = {sample_key_of_group.get(group_of.get(r)) for r in runs}
+        if partition and partition.startswith("sample=") and partition != "sample=unrecorded":
+            own.add(partition[len("sample="):])
+        by_key = related_by_sample[path]
+        kept = sorted((x for k in own | {None} for x in by_key.get(k, ())[:_HINTS_PER_QUESTION]), key=lambda x: x[0])
+        return [c for _, c in kept[:_HINTS_PER_QUESTION]]
 
     buckets: dict[tuple, dict] = {}
 
@@ -894,6 +920,10 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                     # bundle.allowed_values — the one list `decide` and eligibility (bundle.value_problem)
                     # refuse outside of and the export validates against — for each field it closes
                     "field_allowed_values": {f: a for f in sorted(q["fields"]) if (a := _eligible_values(f))},
+                    # r5e M5: the deprecated terms those lists still hold (allowed; never offered), per field
+                    **({"field_deprecated_values": dv} if (dv := {f: d for f in sorted(q["fields"])
+                                                                  if (d := deprecated_terms(f, _eligible_values(f)))})
+                       else {}),
                     "hints": [],
                     "field_hints": fh,
                     "allowed_values": None,
@@ -1023,7 +1053,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             text += _ai_sentence(ai)
         mine = {t["id"] for t in q["targets"]}
         shown_own = {h.get("candidate_id") for h in own_literals}
-        for c in related.get(path, [])[:_HINTS_PER_QUESTION]:
+        for c in related_hints(path, partition, q["runs"]):
             if c["observed_literals"] and c["candidate_id"] not in shown_own:
                 ev = next((e for e in c["evidence"] if e["method"] != "ai_interpretation"), None)
                 hints.append({"kind": "related_reading", "candidate_id": c["candidate_id"], "literal": c["observed_literals"][0],
@@ -1071,6 +1101,8 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             "per_scope_targets": q["per_scope_targets"],
             "hints": hints,
             "allowed_values": enum,
+            # r5e M5: the deprecated terms the list still holds (allowed; never offered)
+            **({"deprecated_values": dv} if (dv := deprecated_terms(path, enum)) else {}),
             # L2: the answers already given for this field differ — an agent following
             # answer_command should answer per group (--only), not once for all
             "answers_differ": answers_differ,
@@ -1374,6 +1406,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     reading_said = _note_shared_evidence(questions, cand_by_id, bundle)
     _note_same_reading_groups(questions, cand_by_id, bundle)
     _note_shared_reading_groups(questions, cand_by_id, bundle, reading_said)
+    _note_shared_sample_tokens(questions, bundle)
     _mark_deferred(questions, decisions)
     _covered_by_run_decisions(questions, covered_conflicts, beamtime_decision_ids)
     _say_the_one_group(questions)
@@ -2249,6 +2282,92 @@ def _note_shared_reading_groups(questions: list[dict], cand_by_id: Mapping[str, 
                         f"together with {command} if it is the same thing for all of them, or each on its own if not.")
             before = reading_said.get(q["question_id"])
             q["text"] = q["text"].replace(before, said, 1) if before and before in q["text"] else q["text"] + said
+
+
+#: r5e M1: a sample question partitioned by the run's own file name (grouping's ``sample_name_stem``: no source states
+#: the sample, so each group's whole name, condition tokens and all, is its partition)
+_STEM_PARTITION_KEYS = frozenset({"sample_name_stem"})
+#: r5e M1: the sample fields batched by the sample tokens of the names: what the MATERIAL is, which a bare number in
+#: the name (an electrode, a step) does not change. Never an identifier such as ``sample.sample_id``.
+SAMPLE_TOKEN_FIELDS = ("sample.material.name", "sample.sample_form")
+
+
+def _stem_partition(partition: str | None) -> bool:
+    if not partition or not partition.startswith("sample=") or partition == "sample=unrecorded":
+        return False
+    try:
+        key = json.loads(partition[len("sample="):])
+    except ValueError:
+        return False
+    return isinstance(key, Mapping) and set(key) == _STEM_PARTITION_KEYS
+
+
+def _note_shared_sample_tokens(questions: list[dict], bundle: Mapping) -> None:
+    """r5e M1: per-group ``missing_value`` questions about the material's name or form (:data:`SAMPLE_TOKEN_FIELDS`)
+    whose partition is the group's whole file name (``sample_name_stem``) share a ``same_reading_group`` when their
+    file names share every SAMPLE token
+    (``grouping.sample_name_tokens``: ``O4`` ``PtCNPs`` ``5wp`` of ``O4_06_PtCNPs_5wp_pH2_000mV``; never a counter, a
+    set-point, a pH, an electrolyte or another condition, nor a token the run's parser read as one). Then
+    ``decide --question <id> --same-reading`` answers them together. Ids, scopes, kinds and targets are unchanged;
+    only ``same_reading_group``, ``same_reading_count``, ``same_reading_members``, ``same_reading_command``,
+    ``shared_sample_tokens`` and the text are added. Names whose sample tokens differ in any way (``O4`` beside
+    ``O5``, ``5wt`` beside ``5wp``) never share a group: the scientist joins those by answering each."""
+    from . import grouping as G
+
+    asked = [q for q in questions if q["kind"] == "missing_value" and q.get("target_field_path") in SAMPLE_TOKEN_FIELDS
+             and not q.get("same_reading_group") and _stem_partition(q.get("partition")) and q["targets"]]
+    if len(asked) < 2:
+        return
+    runs = {r.get("run_id"): r for r in bundle.get("runs") or ()}
+    run_of = {m["value_id"]: m["run_id"] for m in bundle["missing_values"]}
+    # what each run's own parser read, from its file name, as a condition or as bookkeeping: never a sample token
+    read_as: dict[str, set[str]] = {}
+    for c in bundle["candidates"]:
+        key = c.get("statement_key")
+        if not c.get("run_id") or not key or key in G.SAMPLE_KEYS or G.classify_key(key) == G.CLASS_UNKNOWN:
+            continue
+        for e in c.get("evidence") or ():
+            if str(e.get("locator") or "").startswith("filename token") and isinstance(e.get("literal_value"), str):
+                read_as.setdefault(c["run_id"], set()).add(e["literal_value"].strip().casefold())
+    tokens_of: dict[str, list[str]] = {}
+
+    def tokens(rid: str) -> list[str]:
+        if rid not in tokens_of:
+            tokens_of[rid] = G.sample_name_tokens(str((runs.get(rid) or {}).get("stem") or ""),
+                                                  read_as_condition=read_as.get(rid, ()))
+        return tokens_of[rid]
+
+    shared: dict[tuple, list[tuple[dict, list[str]]]] = {}
+    for q in asked:
+        rids = sorted({rid for t in q["targets"] if (rid := run_of.get(t["id"]))})
+        written = [tokens(r) for r in rids]
+        if not rids or not all(written):
+            continue
+        key = frozenset(tuple(t.casefold() for t in w) for w in written)
+        shared.setdefault((q["target_field_path"], key, bool(q.get("outside_live_groups"))), []).append((q, rids))
+    for (path, _key, _outside), members in shared.items():
+        if len(members) < 2:
+            continue
+        ids = sorted(q["question_id"] for q, _ in members)
+        group = "SR-" + hashlib.sha256("\n".join(ids).encode()).hexdigest()[:10]
+        named = [{"question_id": q["question_id"], "run_id": rid, "file_name": (runs.get(rid) or {}).get("stem")}
+                 for q, rids in sorted(members, key=lambda m: m[0]["question_id"]) for rid in rids]
+        files = list(dict.fromkeys(str(m["file_name"]) for m in named if m["file_name"]))
+        shown = ", ".join(files[:SAME_READING_NAMES_SHOWN]) + (
+            f", and {len(files) - SAME_READING_NAMES_SHOWN} more" if len(files) > SAME_READING_NAMES_SHOWN else "")
+        sample = list(dict.fromkeys(t for _, rids in members for r in rids for t in tokens(r)))
+        said_tokens = " ".join(_quoted(t) for t in sample[:6]) + (" …" if len(sample) > 6 else "")
+        for q, _rids in members:
+            command = q["answer_command"].replace(f"--question {q['question_id']} ",
+                                                  f"--question {q['question_id']} {SAME_READING_FLAG} ", 1)
+            q["same_reading_group"], q["same_reading_count"] = group, len(members)
+            q["same_reading_members"], q["same_reading_command"] = named, command
+            q["shared_sample_tokens"] = sample
+            q["text"] += (f" {len(members)} questions ask the {_label(path)} of groups whose file names share the same "
+                          f"sample tokens ({said_tokens}; every part of the name that is no counter, set-point, pH, "
+                          f"electrolyte or other condition; no parser read them as a sample), one per group "
+                          f"(same_reading_group {group}; the files: {shown}). If the {_label(path)} is the same for all "
+                          f"of them, answer them together: {command}. If not, answer each on its own.")
 
 
 def _optional_field_reach(bundle: Mapping, fields: Mapping[str, Sequence[str]], index: dict | None = None) -> dict[str, dict]:

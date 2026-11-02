@@ -1693,6 +1693,7 @@ def _compact_page(page: Sequence[Mapping]) -> dict:
         return out
 
     by_field: dict[str, list] = {}
+    deprecated: dict[str, dict] = {}  # r5e M5: each field's deprecated terms, once, beside its allowed values
     by_kind = {q["kind"]: list(Q.ALLOWED_DECISIONS.get(q["kind"], ())) for q in page}
     out = []
     for q in page:
@@ -1701,6 +1702,9 @@ def _compact_page(page: Sequence[Mapping]) -> dict:
             by_field[c["target_field_path"]] = c.pop("allowed_values")
         for f, values in (c.pop("field_allowed_values", None) or {}).items():
             by_field[f] = values
+        if c.get("deprecated_values") and c.get("target_field_path"):
+            deprecated[c["target_field_path"]] = c.pop("deprecated_values")
+        deprecated.update(c.pop("field_deprecated_values", None) or {})
         if c.get("allowed_decisions") == by_kind.get(c["kind"]):
             del c["allowed_decisions"]
         if c.get("hints"):
@@ -1710,9 +1714,12 @@ def _compact_page(page: Sequence[Mapping]) -> dict:
         out.append(c)
     return {"targets": ("counted: each question's targets_count, scopes_count and groups_count (--with-targets lists "
                         "them; `decide --question` resolves them itself); allowed values are listed once per field "
-                        "in allowed_values_by_field, allowed decisions once per kind in allowed_decisions_by_kind, and "
+                        "in allowed_values_by_field (a deprecated one is named in deprecated_values_by_field: still allowed, "
+                        "never offered), allowed decisions once per kind in allowed_decisions_by_kind, and "
                         "each hint kind's note once in hint_notes"),
-            "allowed_values_by_field": dict(sorted(by_field.items())), "allowed_decisions_by_kind": by_kind,
+            "allowed_values_by_field": dict(sorted(by_field.items())),
+            **({"deprecated_values_by_field": dict(sorted(deprecated.items()))} if deprecated else {}),
+            "allowed_decisions_by_kind": by_kind,
             "hint_notes": notes, "questions": out}
 
 

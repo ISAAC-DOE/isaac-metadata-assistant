@@ -111,7 +111,9 @@ it finds one. Show per group, in words:
   curve. `scans_used: null` in its metrics means exactly that, not zero scans;
 - **a channel chosen by name** (flag `channel_choice_needs_review`, `qc.statements.channel_choice_needs_review`): the
   protocol's column-name order chose it, not the BL15-2 selector; say the sentence (the channel, why, the other
-  channels the scan has) and ask the scientist to confirm it is the channel the measurement used;
+  channels the scan has) and ask the scientist to confirm it is the channel the measurement used. After `template
+  adopt`, its "Channel hints" line shows the channel their own Configurations row states: say it beside the flag,
+  as a hint, never as the answer;
 - **when the channel fell back** (reason and flag `channel_fallback_transmission_not_positive`: a
   group named as a reference or standard takes transmission first, but I0 or I1 was not positive in
   every scan, so fluorescence was used): say the sentence in `qc.json` → `statements` and ask the

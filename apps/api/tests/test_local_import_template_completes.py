@@ -101,7 +101,7 @@ def _mapping(xlsx):
 
 
 def test_the_template_has_a_cell_for_every_field_the_record_needs_from_a_scientist(grouped, tmp_path):
-    assert T.FORMAT_VERSION == "1.4.0"
+    assert T.FORMAT_VERSION == "1.5.0"  # r5e M4: 1.5.0 appends Temperature and Gas Atmosphere
     xlsx = _export(grouped, tmp_path)
     mapping = _mapping(xlsx)
     # beamtime-wide (record scope): Campaign Info, appended after the template's own five rows
@@ -110,7 +110,8 @@ def test_the_template_has_a_cell_for_every_field_the_record_needs_from_a_scienti
     assert mapping[("Campaign Info", DOMAIN)] == ("B10", "system.domain")
     # per run: File List columns, appended after the 1.3.0 ones (cells are read by position)
     headers = [c.header for c in T.FILE_COLUMNS]
-    assert headers[-4:] == ["Control Mode", "Current Set-point (mA/cm2)", "Reaction Drive", "Reaction Catalysis"]
+    assert headers[-6:] == ["Control Mode", "Current Set-point (mA/cm2)", "Reaction Drive", "Reaction Catalysis",
+                            "Temperature", "Gas Atmosphere"]  # r5e M4: 1.5.0 appends two
     assert T.COLUMNS_ADDED_IN["Reaction Drive"] == T.COLUMNS_ADDED_IN["Reaction Catalysis"] == "1.4.0"
     assert mapping[("File List", "Reaction Drive")] == (_col("Reaction Drive"), "context.reaction.drive")
     assert mapping[("File List", "Reaction Catalysis")] == (_col("Reaction Catalysis"), "context.reaction.catalysis")
