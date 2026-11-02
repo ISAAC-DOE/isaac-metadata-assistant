@@ -1,9 +1,8 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-import { AppRoutes } from '../App';
-import { ROUTES, STATISTICS_TAB_IDS, isStatisticsTab } from '../lib/routes';
+import { ROUTES } from '../lib/routes';
 import {
   MY_STATS_PENDING_COPY,
   MY_STATS_PENDING_LABEL,
@@ -47,22 +46,33 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderAt(path: string) {
-  return render(
-    <MemoryRouter
-      initialEntries={[path]}
-      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-    >
-      <AppRoutes />
-    </MemoryRouter>,
-  );
-}
 
-const MINE = `${ROUTES.statistics}?tab=mine`;
 
+/**
+ * THE PANEL, MOUNTED ON ITS OWN (2026-11-02). The Statistics page no longer
+ * offers a My Stats tab while no personal-statistics source can return data —
+ * which is every deployment of this build — so `?tab=mine` resolves to Overview.
+ * These tests pin the panel the tab will show once a source exists, so they mount
+ * `MyStats` directly, inside the same `.statistics` panel wrapper the page uses.
+ * The fetch stub stays so trap 2 ("issues NO request") is still measured.
+ */
 async function renderMineTab() {
   const calls = stubFetchRoutes(statisticsRoutes());
-  const view = renderAt(MINE);
+  const view = render(
+    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <div className="placeholder">
+        <h1>Statistics</h1>
+      </div>
+      <div
+        className="statistics"
+        id="statistics-tabpanel-mine"
+        role="tabpanel"
+        aria-labelledby="statistics-tab-mine"
+      >
+        <MyStats />
+      </div>
+    </MemoryRouter>,
+  );
   await view.findByText('Not Available in This Preview');
   return { ...view, calls };
 }
@@ -174,14 +184,11 @@ function soleElement(container: HTMLElement, selector: string): HTMLElement {
 
 /* >>> SHARED-EMPTINESS-MATCHER-START >>>
  *
- * THIS BLOCK EXISTS TWICE, BYTE FOR BYTE, between these two sentinels:
- * `src/__tests__/my-stats.test.tsx` (the authority) and
- * `e2e/specs/charts.spec.ts`. The two cannot share a module —
- * `tsconfig.app.json` includes only `src`, `e2e/tsconfig.json` is a separate
- * standalone project, and the production build must not depend on Playwright
- * types — so the lockstep is ASSERTED by `the two copies are byte-identical` in
- * `my-stats.test.tsx` rather than asked for in a comment. Edit both, or the
- * assertion fails.
+ * ~~THIS BLOCK EXISTS TWICE, BYTE FOR BYTE~~ — ONCE since 2026-11-02. Its browser
+ * copy lived in `e2e/specs/charts.spec.ts` for the My Stats browser tests, and
+ * those left with the tab: the page no longer offers My Stats while no personal
+ * source can return data, so there is no browser surface for the copy to guard.
+ * The lockstep test went with it. This file is the only copy and the authority.
  */
 
 /* ══ LAYER 1 · THE APPROVED SENTENCES ═══════════════════════════════════════
@@ -704,192 +711,7 @@ function assertsEmptiness(sentence: string): boolean {
 
 // --- the tablist ------------------------------------------------------------
 
-/*
- * ~~'the two top-level tabs'~~ — THREE since 2026-09-15. `build` joined
- * `general` and `mine` when the redesign moved the engineering material off the
- * tab a scientist lands on; see `lib/routes.ts` and `StatisticsPage.tsx`'s
- * header for the measurement behind it. Every property below (order, default,
- * roving tabindex, panel wiring, deep-linkability) is unchanged in kind — the
- * expectations are widened to three rather than loosened.
- */
-describe('the top-level tabs', () => {
-  const tablist = () => screen.getByRole('tablist', { name: 'Statistics sections' });
-
-  it('exposes exactly three tabs, in order, with Overview selected by default', async () => {
-    stubFetchRoutes(statisticsRoutes());
-    renderAt(ROUTES.statistics);
-    await screen.findByRole('heading', { name: 'Records' });
-
-    const tabs = within(tablist()).getAllByRole('tab');
-    /* ~~['General ISAAC', 'My Stats']~~ — the first label was renamed with the
-       redesign: `General ISAAC` named the SUBJECT (ISAAC in general) on the tab
-       a scientist lands on, which is the mixing the split undoes. The tab ID is
-       untouched, so every `?tab=general` link still resolves. */
-    expect(tabs.map((t) => t.textContent)).toEqual([
-      'Overview',
-      'My Stats',
-      'Build & Verification',
-    ]);
-    expect(tabs[0]).toHaveAttribute('aria-selected', 'true');
-    expect(tabs[1]).toHaveAttribute('aria-selected', 'false');
-    expect(tabs[2]).toHaveAttribute('aria-selected', 'false');
-  });
-
-  it('uses a roving tabindex — exactly one tab is in the tab order', async () => {
-    stubFetchRoutes(statisticsRoutes());
-    renderAt(ROUTES.statistics);
-    await screen.findByRole('heading', { name: 'Records' });
-
-    const tabs = within(tablist()).getAllByRole('tab');
-    expect(tabs.map((t) => t.tabIndex)).toEqual([0, -1, -1]);
-  });
-
-  it('wires the selected tab to a rendered tabpanel, and the panel back to it', async () => {
-    stubFetchRoutes(statisticsRoutes());
-    renderAt(ROUTES.statistics);
-    await screen.findByRole('heading', { name: 'Records' });
-
-    const selected = within(tablist()).getAllByRole('tab')[0];
-    const panelId = selected.getAttribute('aria-controls');
-    expect(panelId).toBe('statistics-tabpanel-general');
-    const panel = document.getElementById(panelId!);
-    expect(panel).toHaveAttribute('role', 'tabpanel');
-    expect(panel).toHaveAttribute('aria-labelledby', selected.id);
-    // `aria-controls` only on the SELECTED tab, matching the app's other tablists.
-    for (const unselected of within(tablist()).getAllByRole('tab').slice(1)) {
-      expect(unselected.getAttribute('aria-controls')).toBeNull();
-    }
-  });
-
-  it('switches on ArrowRight and moves focus with the selection', async () => {
-    stubFetchRoutes(statisticsRoutes());
-    renderAt(ROUTES.statistics);
-    await screen.findByRole('heading', { name: 'Records' });
-
-    const first = within(tablist()).getAllByRole('tab')[0];
-    first.focus();
-    fireEvent.keyDown(first, { key: 'ArrowRight' });
-
-    const tabs = within(tablist()).getAllByRole('tab');
-    expect(tabs[1]).toHaveAttribute('aria-selected', 'true');
-    expect(tabs[1]).toHaveFocus();
-    await screen.findByRole('heading', { name: 'Personal Statistics' });
-  });
-
-  /*
-   * DEEP-LINKING IS THE POINT, not a nicety. A tab held only in `useState` cannot
-   * be linked to, bookmarked, or reloaded back into — and that exact defect
-   * shipped once on Governance & Safety, where the Validator tab was unreachable
-   * by link. Both directions are asserted: the URL selects the tab, and activating
-   * the tab writes the URL.
-   */
-  it('is deep-linkable: ?tab=mine selects My Stats on arrival', async () => {
-    await renderMineTab();
-    const tabs = within(tablist()).getAllByRole('tab');
-    expect(tabs[1]).toHaveAttribute('aria-selected', 'true');
-    expect(tabs[0]).toHaveAttribute('aria-selected', 'false');
-  });
-
-  it('an unrecognised ?tab= value falls back to General ISAAC without throwing', async () => {
-    stubFetchRoutes(statisticsRoutes());
-    renderAt(`${ROUTES.statistics}?tab=not-a-tab`);
-    await screen.findByRole('heading', { name: 'Records' });
-    expect(within(tablist()).getAllByRole('tab')[0]).toHaveAttribute('aria-selected', 'true');
-  });
-
-  it('activating a tab writes the ?tab= value the route helper builds', async () => {
-    stubFetchRoutes(statisticsRoutes());
-    renderAt(ROUTES.statistics);
-    await screen.findByRole('heading', { name: 'Records' });
-
-    fireEvent.click(within(tablist()).getAllByRole('tab', { name: 'My Stats' })[0]);
-    await screen.findByRole('heading', { name: 'Personal Statistics' });
-    expect(ROUTES.statisticsTab('mine')).toBe('/statistics?tab=mine');
-  });
-
-  it('declares its ids in one place, and the type guard agrees with them', () => {
-    expect([...STATISTICS_TAB_IDS]).toEqual(['general', 'mine', 'build']);
-    expect(isStatisticsTab('general')).toBe(true);
-    expect(isStatisticsTab('mine')).toBe(true);
-    expect(isStatisticsTab('build')).toBe(true);
-    for (const bad of ['General', 'Build', '', null, undefined, 'general ']) {
-      expect(isStatisticsTab(bad as string | null)).toBe(false);
-    }
-  });
-});
-
 // --- what belongs in which tab ---------------------------------------------
-
-describe('the General ISAAC tab keeps the workspace material', () => {
-  it('holds the three workspace sections and the privacy claim, and NOT the personal gate', async () => {
-    stubFetchRoutes(statisticsRoutes());
-    renderAt(ROUTES.statistics);
-    await screen.findByRole('heading', { name: 'Records' });
-
-    /* ~~'Workspace at a Glance', 'Workflow Distribution', 'Evidence and
-       Validation'~~ — the 2026-10-12 widget redesign merged the first two (and
-       the export-gate half of the third) into the `Records` widget, whose Status,
-       Workflow and Export Gate views carry exactly what they did, and renamed the
-       evidence half `Evidence Support`. The property is unchanged: the workspace
-       material and the privacy claim are here, the personal gate is not. */
-    for (const name of [
-      'Records',
-      'Evidence Support',
-      'This Application Collects No Analytics',
-    ]) {
-      expect(screen.getByRole('region', { name })).toBeInTheDocument();
-    }
-    expect(screen.queryByRole('heading', { name: 'Personal Statistics' })).toBeNull();
-  });
-
-  /*
-   * THE PRIVACY CLAIM STAYS UNCOLLAPSED. Project Memory and the API surface moved
-   * into a collapsed disclosure; this section did not, because it is a governance
-   * claim about what the application measures, and a claim behind a disclosure is
-   * a weaker claim.
-   */
-  it('leaves the no-analytics claim outside the collapsed region', async () => {
-    stubFetchRoutes(statisticsRoutes());
-    const { container } = renderAt(ROUTES.statistics);
-    await screen.findByRole('heading', { name: 'Records' });
-
-    const section = container.querySelector('section[aria-labelledby="stats-no-analytics"]');
-    expect(section).not.toBeNull();
-    expect(section!.closest('details')).toBeNull();
-  });
-
-  /*
-   * ── INVERTED 2026-10-12: THE BUILD INTERNALS ARE NO LONGER COLLAPSED ─────
-   *
-   * ~~'collapses the build internals — runtime, Project Memory and the API
-   * surface — by default'~~ — they sat inside one closed `Technical Details`
-   * region on `?tab=build`. The widget redesign made each a small widget that
-   * states its own headline, so the region is gone and they are visible on
-   * arrival. What this case still pins is the half that mattered for a
-   * SCIENTIST: they are on the Build tab and NOT on the one a scientist lands on.
-   */
-  it('shows the build internals — runtime, Project Memory and the API surface — on the Build tab, uncollapsed', async () => {
-    stubFetchRoutes(statisticsRoutes());
-    const { container } = renderAt(ROUTES.statisticsTab('build'));
-    await screen.findByText('Synthetic-Only');
-
-    expect(container.querySelector('details.stats-technical')).toBeNull();
-    for (const name of ['Runtime', 'Project Memory', 'API Surface']) {
-      const region = screen.getByRole('region', { name });
-      expect(region.closest('details')).toBeNull();
-      expect(region.closest('[hidden]')).toBeNull();
-    }
-  });
-
-  it('keeps the build internals off the Overview tab', async () => {
-    stubFetchRoutes(statisticsRoutes());
-    renderAt(ROUTES.statistics);
-    await screen.findByRole('heading', { name: 'Records' });
-    for (const name of ['Runtime', 'Project Memory', 'API Surface', 'Record Schema']) {
-      expect(screen.queryByRole('region', { name })).toBeNull();
-    }
-  });
-});
 
 // --- the six traps ----------------------------------------------------------
 
@@ -960,30 +782,9 @@ describe('My Stats invents no personal figure — the six traps', () => {
      * WHICH calls and HOW MANY, not about mount order, which React may legally
      * change.
      */
-    expect([...calls].sort()).toEqual(
-      [
-        'GET /api/about',
-        'GET /api/graph/status',
-        'GET /api/openapi',
-        'GET /api/runtime/records',
-        'GET /api/schema',
-        'GET /api/imports',
-        /*
-         * `ACT-004`'s workspace activity summary. It is read on mount because the
-         * page's reads are not tab-keyed, and it is listed here rather than being
-         * treated as an intrusion — but the reason it is SAFE for this tab is the
-         * thing worth pinning: the summary contains no per-person figure of any
-         * kind. Every event in this build is `unattributed`, its payload carries
-         * event counts and an empty `attributed_actors`, and there is no
-         * collaborator count anywhere in it. So nothing this request returns could
-         * be relabelled as personal, which is trap 1 of the six above.
-         */
-        'GET /api/activity/summary',
-        // Record Verification's read. A Build-tab section, not tab-keyed, so
-        // it fires here too — and it is a GET, so this tab still cannot mutate.
-        'GET /api/runtime/verification',
-      ].sort(),
-    );
+    // Mounted on its own, the panel issues NOTHING: every request the page makes
+    // belongs to the Overview and Build tabs, never to this one.
+    expect([...calls]).toEqual([]);
     expect(calls.filter((c) => c.includes('/api/experiments'))).toEqual([]);
     expect(calls.filter((c) => c.includes('/api/demo'))).toEqual([]);
   });
@@ -1283,14 +1084,6 @@ describe('the approved-sentence allowlist', () => {
     ).toEqual([...APPROVED_PANEL_SENTENCES].sort());
   });
 
-  it('the page lead renders exactly the approved lead sentence', async () => {
-    const { container } = await renderMineTab();
-    // `soleElement`, not `querySelector`: a SECOND `.placeholder > p` used to leave
-    // the extracted lead set unchanged — see the note on `soleElement`.
-    const lead = soleElement(container, '.placeholder > p');
-    expect(sentenceSet(copyUnitsOf(lead))).toEqual([...APPROVED_MINE_LEAD_SENTENCES].sort());
-  });
-
   /*
    * THE DESIGN, DEMONSTRATED. Every one of the fourteen measured evasions is
    * rejected by set difference — and so is a sentence that is perfectly TRUE.
@@ -1452,26 +1245,6 @@ describe('the approved-sentence allowlist', () => {
       }),
     );
     expect(offenders).toEqual(['h2 aria-labelledby="evil"']);
-  });
-
-  /*
-   * …and the OTHER half of that plant: the second `.placeholder > p`, which used to
-   * be swallowed by `querySelector`. `soleElement` is what fails now.
-   */
-  it('refuses to extract the page lead when there is more than one', async () => {
-    const { container } = await renderMineTab();
-    const placeholder = soleElement(container, '.placeholder');
-    const second = document.createElement('p');
-    second.textContent = 'You have no records.';
-    placeholder.appendChild(second);
-
-    expect(container.querySelectorAll('.placeholder > p')).toHaveLength(2);
-    // The old `querySelector` returned the FIRST one and the false sentence was
-    // never compared against anything: proved, not asserted.
-    expect(
-      sentenceSet(copyUnitsOf(container.querySelector('.placeholder > p') as HTMLElement)),
-    ).toEqual([...APPROVED_MINE_LEAD_SENTENCES].sort());
-    expect(() => soleElement(container, '.placeholder > p')).toThrow();
   });
 
   it('carries no duplicate entry, so the sorted comparison is well defined', () => {
@@ -1716,51 +1489,6 @@ describe('the emptiness matcher', () => {
       expect(assertsEmptiness(sentence)).toBe(true);
     },
   );
-
-  /*
-   * THE LOCKSTEP, TESTED RATHER THAN REQUESTED.
-   *
-   * `e2e/specs/charts.spec.ts` carries the same matcher, because the two suites
-   * cannot share a module (`tsconfig.app.json` includes only `src`;
-   * `e2e/tsconfig.json` is a separate standalone project; the production build
-   * must not depend on Playwright types). That file used to say "Keep them in
-   * lockstep" in a comment — and they then drifted in the way this whole
-   * describe-block exists to prevent, because a comment cannot fail.
-   *
-   * Both copies are delimited by the same sentinels and compared byte for byte.
-   */
-  it('the two copies are byte-identical — the browser suite is in lockstep', async () => {
-    const START = '/* >>> SHARED-EMPTINESS-MATCHER-START >>>';
-    const END = '/* <<< SHARED-EMPTINESS-MATCHER-END <<< */';
-
-    function sharedBlock(raw: string, where: string): string {
-      const from = raw.indexOf(START);
-      const to = raw.indexOf(END);
-      expect(from, `${where} must carry the start sentinel`).toBeGreaterThanOrEqual(0);
-      expect(to, `${where} must carry the end sentinel after the start`).toBeGreaterThan(from);
-      return raw.slice(from, to + END.length);
-    }
-
-    const here = sharedBlock(
-      String((await import('./my-stats.test.tsx?raw')).default),
-      'my-stats.test.tsx',
-    );
-    const there = sharedBlock(
-      String((await import('../../e2e/specs/charts.spec.ts?raw')).default),
-      'e2e/specs/charts.spec.ts',
-    );
-
-    // Vacuity guard: the block must be the real thing, not two empty slices —
-    // and it must carry BOTH layers, since layer 1 is what the browser copy is
-    // now mostly for.
-    expect(here).toContain('function emptinessClaims');
-    expect(here).toContain('SUBJECTLESS_EMPTINESS');
-    expect(here).toContain('const APPROVED_PANEL_SENTENCES');
-    expect(here).toContain('const APPROVED_MINE_LEAD_SENTENCES');
-    expect(here).toContain('function sentenceSet');
-    expect(here.length).toBeGreaterThan(2000);
-    expect(there, 'the browser copy of the emptiness matcher has drifted').toBe(here);
-  });
 });
 
 // --- the gate itself --------------------------------------------------------
@@ -1870,71 +1598,6 @@ describe('the gated state', () => {
     expect(container.querySelector('figure.stats-chart')).toBeNull();
     // The payload's own figure never reaches the DOM.
     expect(textOf(container)).not.toContain('Export 3');
-  });
-
-  /*
-   * THE PAGE LEAD IS PART OF THIS TAB'S CLAIM SURFACE, even though it renders
-   * outside the panel.
-   *
-   * It sits directly above the tablist, so on `?tab=mine` it was reading as a
-   * promise about the panel below it while naming four sections that are on the
-   * OTHER tab — workflow readiness, evidence, Project Memory and the API surface.
-   * `StatisticsPage.tsx` recorded that as deliberate; it is now tab-scoped, and
-   * this is the assertion that keeps it so.
-   *
-   * The emptiness rule is applied here too, because the lead is the one piece of
-   * copy on this tab that trap 4's panel-scoped guard cannot see.
-   */
-  it('the page lead describes THIS tab, not the sections on the other one', async () => {
-    const { container } = await renderMineTab();
-    const lead = soleElement(container, '.placeholder > p');
-    expect(lead, 'the page lead must exist').not.toBeNull();
-    const text = textOf(lead);
-
-    for (const promise of ['workflow readiness', 'evidence', 'Project Memory', 'API surface']) {
-      expect(text, `the My Stats lead must not promise ${promise}`).not.toContain(promise);
-    }
-    // …nor name a workspace: this tab reads nothing in either scope, so a
-    // workspace clause would imply the gate depends on which one is open.
-    expect(text).not.toMatch(/workspace/i);
-    expect(text).toContain('cannot tell whose records these are');
-    expect(emptinessClaims(text)).toEqual([]);
-    expect(text).not.toMatch(/\b\d+\b/);
-  });
-
-  /*
-   * …AND IT DOES NOT REPEAT A SECTION SUBTITLE.
-   *
-   * The lead's first sentence used to be byte-identical to the `stats-mine-gate`
-   * section's `sub`, which renders a few lines below it in the same viewport —
-   * the same sentence twice, which is not emphasis. The duplicate was removed
-   * from the LEAD, because the subtitle is the component's own self-description
-   * and is the only place that sentence appears when `MyStats` is mounted alone.
-   *
-   * Compared per SENTENCE rather than as whole strings, so a lead that merely
-   * embeds the subtitle inside a longer paragraph is caught too.
-   */
-  it('the page lead does not repeat a section subtitle', async () => {
-    const { container } = await renderMineTab();
-    const sentencesOf = (el: HTMLElement) =>
-      textOf(el)
-        .split(/(?<=[.;])\s+/)
-        .map((s) => s.trim())
-        .filter((s) => s.length > 12);
-
-    const lead = sentencesOf(soleElement(container, '.placeholder > p'));
-    expect(lead.length, 'the lead must have at least one sentence').toBeGreaterThan(0);
-
-    const subs = [...container.querySelectorAll('p.widget-sub')] as HTMLElement[];
-    expect(subs.length, 'the panel must render section subtitles to compare against').toBe(2);
-
-    for (const sub of subs) {
-      for (const sentence of sentencesOf(sub)) {
-        expect(lead, `the page lead repeats a section subtitle: "${sentence}"`).not.toContain(
-          sentence,
-        );
-      }
-    }
   });
 
   it('offers a route back to the workspace figures and to the privacy settings', async () => {
@@ -2159,25 +1822,3 @@ describe('unconfiguredMyStatsSource', () => {
 });
 
 // --- switching tabs does not re-read --------------------------------------
-
-describe('switching tabs is free', () => {
-  /* WALKED ACROSS ALL THREE TABS since 2026-09-15, which is what keeps the
-     claim honest: the reads are deliberately NOT keyed on the tab, so a third
-     panel that fetched on mount would be invisible to a two-tab walk. */
-  it('issues no additional request when the reader moves between tabs', async () => {
-    const calls = stubFetchRoutes(statisticsRoutes());
-    renderAt(ROUTES.statistics);
-    await screen.findByRole('heading', { name: 'Records' });
-    const afterLoad = calls.length;
-
-    const tablist = screen.getByRole('tablist', { name: 'Statistics sections' });
-    fireEvent.click(within(tablist).getByRole('tab', { name: 'My Stats' }));
-    await screen.findByRole('heading', { name: 'Personal Statistics' });
-    fireEvent.click(within(tablist).getByRole('tab', { name: 'Build & Verification' }));
-    await screen.findByRole('heading', { name: 'Record Verification' });
-    fireEvent.click(within(tablist).getByRole('tab', { name: 'Overview' }));
-    await screen.findByRole('heading', { name: 'Records' });
-
-    await waitFor(() => expect(calls.length).toBe(afterLoad));
-  });
-});

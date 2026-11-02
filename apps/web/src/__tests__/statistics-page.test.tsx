@@ -103,18 +103,6 @@ const WORKFLOW_BARS: [string, string][] = [
   ['All Steps Complete', '1'],
 ];
 
-/** The six evidence classes in SEVERITY precedence (not by count).
- *  `Evidence Unreadable` is a read failure, never folded into `Unknown` — and it
- *  is listed at 0 here because these fixtures carry no unreadable entry; the
- *  non-zero exercise of the class lives in `statistics-model.test.ts`. */
-const EVIDENCE_CHIPS: [string, string][] = [
-  ['Supported', '30'],
-  ['Inferred Candidate', '3'],
-  ['Insufficient Evidence', '2'],
-  ['Conflicting Evidence', '2'],
-  ['Unknown', '3'],
-  ['Evidence Unreadable', '0'],
-];
 
 /* `openApiFixture` documents 7 operations across 6 groups: 4 GET
    (health, about, experiments/{id}, search) and 3 POST (answers, uploads,
@@ -311,16 +299,11 @@ function chartTableRows(region: string | HTMLElement, caption: string): [string,
 
 /** The screen-reader summary sentence a chart figure carries. */
 function chartSummaryText(region: string | HTMLElement, caption: string): string {
-  return chartFigure(region, caption).querySelector('.sr-only')?.textContent?.trim() ?? '';
+  // `p.sr-only`, not the first `.sr-only`: a widget-titled chart hides its
+  // figcaption with the same class, and that is the caption, not the summary.
+  return chartFigure(region, caption).querySelector('p.sr-only')?.textContent?.trim() ?? '';
 }
 
-/** The chip + count pairs of a `MiniBreakdown`, in DOM order. */
-function chipRows(region: string | HTMLElement): [string, string][] {
-  return [...scopeOf(region).querySelectorAll('.stats-mini-item')].map((item) => [
-    item.querySelector('.chip span')?.textContent?.trim() ?? '',
-    item.querySelector('.stats-mini-n')?.textContent?.trim() ?? '',
-  ]);
-}
 
 /**
  * The rendered text of a subtree, with every text NODE separated by a space.
@@ -770,37 +753,6 @@ describe('Workspace at a Glance', () => {
    * by hand per choice 2 at the head of this file), and `Historical Imports` is
    * `importListFixture.total`.
    */
-  /*
-   * ── RE-POINTED 2026-10-12, AND EVERY FIGURE IS STILL ASSERTED AT ITS OWN LABEL ─
-   *
-   * ~~'the six headline cards state the counts the fixture implies'~~ — the six
-   * tiles of `Workspace at a Glance` are now spread across the widgets whose
-   * question each one answers: `Total Records` is the `Records` widget's
-   * headline, the three status cells are its `Status` view, and the two tiles
-   * that were RESTATEMENTS (`Open Questions`, `Historical Imports`) are the
-   * headlines of their own widgets — which is where the tiles always pointed.
-   * The literals are unchanged and each is still read from its own labelled
-   * slot; what the case pins — that no figure lands under another's label — is
-   * the same property over the new layout.
-   */
-  it('the headline figures state the counts the fixture implies, each at its own label', async () => {
-    renderStatistics(statisticsRoutes());
-    await settled();
-
-    expect(cardValue('Records', 'Total Records')).toBe(String(RECORD_COUNT));
-    const status = viewOf('Records', 'Status');
-    expect(cardValue(status, 'Needs Attention')).toBe('2');
-    expect(cardValue(status, 'Ready to Export')).toBe('1');
-    expect(cardValue(status, 'Exported')).toBe('1');
-    expect(cardValue('Open Questions', 'Total Open Questions')).toBe('7');
-    expect(cardValue('Historical Imports', 'Import Sessions')).toBe('2');
-
-    // Every row's status is one of the four, so the surfaced-unknown card must
-    // NOT appear — it is emitted only when a record carries an unplaceable status.
-    expect(within(regionOf('Records')).queryByText('Unrecognized Status')).toBeNull();
-    // …and nothing claims the page saw fewer records than the API reported.
-    expect(screen.queryByText(/This page received/)).toBeNull();
-  });
 
   /*
    * THESE TWO CARDS MOVED, and the assertion moved with them rather than being
@@ -888,7 +840,7 @@ describe('Workspace at a Glance', () => {
       }),
     );
     await settled();
-    for (const region of ['Records', 'Evidence Support', NO_ANALYTICS_HEADING]) {
+    for (const region of ['Records', 'Evidence Support', 'Activity']) {
       expect(regionOf(region), `${region} must still render`).toBeInTheDocument();
     }
     expect(cardValue('Records', 'Total Records')).toBe(String(RECORD_COUNT));
@@ -897,133 +849,7 @@ describe('Workspace at a Glance', () => {
 
 // --- Workflow Distribution ------------------------------------------------
 
-/*
- * THE WORKFLOW DISTRIBUTION IS THE `Records` WIDGET'S `Workflow` VIEW since
- * 2026-10-12. Every assertion below is the one it was, scoped to that view
- * rather than to the section it used to be — and the view is reached through its
- * own tab, so this also pins that the chart is one click away and not gone.
- */
-describe('Workflow Distribution (the Records widget\'s Workflow view)', () => {
-  it('renders every canonical bucket with its count as real text, zeros included, in canonical order', async () => {
-    renderStatistics(statisticsRoutes());
-    await settled();
-    fireEvent.click(within(regionOf('Records')).getByRole('tab', { name: 'Workflow' }));
-    const workflow = viewOf('Records', 'Workflow');
-    expect(workflow).not.toHaveAttribute('hidden');
-
-    // ONE ordered read of the visible spans. `Record Created` is at zero in this
-    // fixture and must still draw its row: a distribution that silently omits
-    // an empty bucket reshapes its own axis as records move.
-    const caption = `Records by current workflow step, out of ${RECORD_COUNT} counted`;
-    expect(chartRows(workflow, caption)).toEqual(WORKFLOW_BARS);
-
-    // The counts are VISIBLE, not only spoken: strip every aria-hidden subtree —
-    // which is the whole drawn SVG — and the labels and numbers are still there.
-    const visible = pageTextWithout(workflow, '[aria-hidden="true"]');
-    for (const [label, count] of WORKFLOW_BARS) {
-      expect(visible).toContain(label);
-      expect(new RegExp(`${label}\\s*${count}`).test(visible)).toBe(true);
-    }
-
-    /*
-     * TWO TEXT EQUIVALENTS, not one, and they are asserted separately because
-     * they do different jobs. The summary sentence is a real `<p>` present on
-     * every render — never an `aria-label`, and never inside the collapsed
-     * disclosure — so a screen reader gets the whole distribution without walking
-     * a grid. The data table then carries every figure for everyone.
-     */
-    const summary = chartSummaryText(workflow, caption);
-    for (const [label, count] of WORKFLOW_BARS) {
-      expect(summary).toContain(`${label}: ${count}`);
-    }
-    expect(summary).toContain(`Total ${RECORD_COUNT} records.`);
-    expect(chartTableRows(workflow, caption)).toEqual(WORKFLOW_BARS);
-
-    // The picture itself claims nothing: the SVG is hidden from assistive
-    // technology, so it cannot state a figure the text equivalents do not.
-    const svg = chartFigure(workflow, caption).querySelector('svg');
-    expect(svg).toHaveAttribute('aria-hidden', 'true');
-  });
-});
-
 // --- Evidence Support, and the Export Gate view --------------------------------
-
-/*
- * `Evidence and Validation` WAS TWO READINGS IN ONE SECTION, and since 2026-10-12
- * it is two places: the evidence half is the `Evidence Support` widget (chips in
- * its `Counts` view, the composition in its `Composition` view) and the
- * export-gate half is the `Records` widget's `Export Gate` view. Every literal
- * and every property below is the one it was; only the scope moved.
- */
-describe('Evidence Support and the Export Gate', () => {
-  it('renders the six evidence classes in severity precedence, NOT sorted by count', async () => {
-    renderStatistics(statisticsRoutes());
-    await settled();
-
-    expect(chipRows(viewOf('Evidence Support', 'Counts'))).toEqual(EVIDENCE_CHIPS);
-
-    // The discriminator: this fixture's counts (30,3,2,2,3,0) are NOT in
-    // descending order, so a page that re-sorted by count would read
-    // 30,3,3,2,2,0 and fail the list comparison above. Stated explicitly so the
-    // property is not an accident of the numbers.
-    const counts = EVIDENCE_CHIPS.map(([, n]) => Number(n));
-    expect([...counts].sort((a, b) => b - a)).not.toEqual(counts);
-  });
-
-  it('labels every evidence count in FIELDS, never in records', async () => {
-    renderStatistics(statisticsRoutes());
-    await settled();
-    const region = regionOf('Evidence Support');
-    const counts = viewOf('Evidence Support', 'Counts');
-
-    expect(within(counts).getByText('Fields by Evidence-Support Class')).toBeInTheDocument();
-    // Each chip's count carries its unit for a screen reader, so the badge is
-    // never a bare number.
-    const nouns = [...counts.querySelectorAll('.stats-mini-item .sr-only')].map((n) =>
-      n.textContent?.trim(),
-    );
-    expect(nouns).toHaveLength(EVIDENCE_CHIPS.length);
-    for (const noun of nouns) expect(['field', 'fields']).toContain(noun);
-
-    // The total is the widget's HEADLINE now; the record count sits beside it.
-    expect(cardValue('Evidence Support', 'Total Fields Counted')).toBe('40');
-    expect(figureValue('Evidence Support', 'Records Counted')).toBe(String(RECORD_COUNT));
-    // …and the fields-not-records line is VISIBLE, beside them, not in the info.
-    const line = within(region).getByText(/counts FIELDS across the records counted, not records/);
-    expect(line.closest('.widget-info')).toBeNull();
-  });
-
-  it('renders the export-gate rows, in the Records widget\'s Export Gate view', async () => {
-    renderStatistics(statisticsRoutes());
-    await settled();
-    const gate = viewOf('Records', 'Export Gate');
-
-    expect(figureValue(gate, 'Exported')).toBe('1');
-    expect(figureValue(gate, 'Ready Now')).toBe('1');
-    expect(figureValue(gate, 'Blocked by the Export Gate')).toBe('1');
-    expect(figureValue(gate, 'Blocked by Open Questions')).toBe('2');
-    expect(figureValue(gate, 'Stale Artifacts')).toBe('1');
-    // The SUBSET caveat stays beside the rows it qualifies, visible in the view.
-    expect(
-      within(gate).getByText(/Stale Artifacts is a subset of Exported, not a fifth bucket/),
-    ).toBeInTheDocument();
-  });
-
-  it('states that evidence support and schema validation are separate signals', async () => {
-    renderStatistics(statisticsRoutes());
-    await settled();
-
-    /* In the widget's info panel since 2026-10-12, and reached through the info
-       toggle — the sentence is prose, and prose is what an info panel holds. */
-    const region = regionOf('Evidence Support');
-    const toggle = within(region).getByRole('button', { name: 'About Evidence Support' });
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(
-      within(region).getByText(/^Evidence support and schema validation are separate signals\./),
-    ).toBeVisible();
-  });
-});
 
 // --- Project Memory (inside the collapsed Technical Details region) ----------
 
@@ -1295,123 +1121,6 @@ describe('API Surface', () => {
 
 // --- No analytics (kept in the MAIN flow, uncollapsed) ----------------------
 
-describe('analytics are not collected', () => {
-  it('renders the no-telemetry disclosure as information, not as a failure', async () => {
-    renderStatistics(statisticsRoutes());
-    await settled();
-    const region = regionOf(NO_ANALYTICS_HEADING);
-
-    const sentence = within(region).getByText(
-      /ships no analytics SDK, no tracking pixel, and makes no third-party network request/,
-    );
-    expect(sentence).toBeInTheDocument();
-
-    // Absence of telemetry is a privacy FEATURE: it must not be announced as an
-    // alert, nor carry the app's error styling, nor sit inside anything that does.
-    expect(within(region).queryByRole('alert')).toBeNull();
-    expect(sentence.closest('[role="alert"]')).toBeNull();
-    expect(sentence.className).not.toMatch(/error|warn|danger/);
-    expect(region.className).not.toMatch(/error|warn|danger/);
-    expect(region.querySelector('.fetch-state.error')).toBeNull();
-
-    // …and it still explains why the page shows no traffic figures.
-    expect(within(region).getByText(/no such figure exists in this app to read/)).toBeInTheDocument();
-  });
-
-  /**
-   * The scope guard. The sentence this section used to render — "This preview
-   * does not track visits, users, source IPs, request history, or behavioral
-   * analytics" — was false for the deployment: `Dockerfile` starts `uvicorn`
-   * with default settings, so an access line carrying the client address,
-   * method, path and status is written for EVERY request, and
-   * `apps/api/isaac_api/routes.py` writes ~16 metadata-only per-operation
-   * outcome lines. Neither is the app's to deny, and the identity gateway in
-   * front of a hosted deployment is not even visible to the browser.
-   *
-   * So this pins BOTH halves: every claim is scoped to the application, and the
-   * server-side logging the app cannot deny is named rather than denied.
-   *
-   * ── THE SECOND HALF MOVED, AND THIS TEST MOVED WITH IT ────────────────────
-   *
-   * The visual-first reorganisation reduced this section to ONE sentence plus the
-   * Settings link: Statistics is not where this app's privacy policy is
-   * explained, and the owner's brief was to stop repeating it here. The
-   * server-side-logging paragraph is the one thing that could NOT simply be cut,
-   * because it is the correction of a claim this section shipped falsely — so it
-   * is relocated, verbatim, into the `Known Limitations` disclosure.
-   *
-   * THE ASSERTIONS ARE THEREFORE SPLIT RATHER THAN DELETED, and the split is the
-   * point: this test now checks the paragraph is IN Known Limitations AND that
-   * the no-analytics section points there. Deleting these four patterns — the
-   * cheap way to make a reorganisation pass — would have left the narrow claim
-   * standing on a page with nothing to scope it, which is the state the original
-   * defect was corrected out of.
-   */
-  it('scopes every claim to the app, and denies neither the access log nor the operation log', async () => {
-    renderStatistics(statisticsRoutes());
-    await settled();
-    const text = pageText(regionOf(NO_ANALYTICS_HEADING));
-
-    // The retracted claims, in the wordings that made them false.
-    expect(text).not.toMatch(/source IPs?/i);
-    expect(text).not.toMatch(/request history/i);
-    expect(text).not.toMatch(/does not track/i);
-
-    // What is actually true of the application.
-    expect(text).toMatch(/ships no analytics SDK/);
-    expect(text).toMatch(/no tracking pixel/);
-    expect(text).toMatch(/no third-party network request/);
-    expect(text).toMatch(/stores no per-user or per-operation metric/);
-
-    // ONE sentence of body copy, which is the reduction the brief asked for.
-    // Counted on the widget's own `.stats-note` paragraphs, so the supporting
-    // line and the footer link are not mistaken for body prose.
-    expect(regionOf(NO_ANALYTICS_HEADING).querySelectorAll('p.stats-note')).toHaveLength(1);
-
-    // …and the scope is still disclosed AT the claim, in the widget's own
-    // visible supporting line.
-    expect(text).toMatch(/Server-side logs belong to whoever operates the deployment/);
-    const sub = regionOf(NO_ANALYTICS_HEADING).querySelector('p.widget-sub');
-    expect(pageText(sub as HTMLElement)).toMatch(
-      /Server-side logs belong to whoever operates the deployment/,
-    );
-
-    // The vetted Settings wording is linked rather than re-authored.
-    expect(
-      within(regionOf(NO_ANALYTICS_HEADING)).getByRole('link', {
-        name: 'Open Privacy Settings',
-      }),
-    ).toHaveAttribute('href', ROUTES.settingsTab('privacy'));
-
-    /*
-     * ── THE CORRECTION MOVED BACK BESIDE THE CLAIM, AND THIS IS A STRENGTHENING ─
-     *
-     * ~~`Read Known Limitations` → `?tab=build`, and the paragraph read inside
-     * `#stats-limitations`'s `<details>` on the Build tab~~ — the 2026-10-12
-     * widget redesign retired the free-standing `Known Limitations` disclosure
-     * and put this paragraph in THIS widget's info panel. So the scope of the
-     * Overview's privacy claim no longer lives on a different tab behind a link;
-     * it is one press of the claim's own info toggle away. Asserted through that
-     * control, so a rename of the toggle or the panel cannot make this vacuous.
-     */
-    const toggle = within(regionOf(NO_ANALYTICS_HEADING)).getByRole('button', {
-      name: `About ${NO_ANALYTICS_HEADING}`,
-    });
-    const panel = document.getElementById(toggle.getAttribute('aria-controls') ?? '');
-    expect(panel, 'the info toggle must control a panel').not.toBeNull();
-    expect(panel).toHaveAttribute('hidden');
-    fireEvent.click(toggle);
-    expect(panel).not.toHaveAttribute('hidden');
-    const limitationsText = pageText(panel as HTMLElement);
-    expect(limitationsText).toMatch(/outcome line per operation/);
-    expect(limitationsText).toMatch(/access line per request/);
-    expect(limitationsText).toMatch(/identity gateway/);
-    expect(limitationsText).toMatch(/the browser cannot see them/);
-    // …and the cross-tab pointer it replaces is gone, not left dangling.
-    expect(within(regionOf(NO_ANALYTICS_HEADING)).queryByRole('link', { name: 'Read Known Limitations' })).toBeNull();
-  });
-});
-
 describe('the visual-first order', () => {
   /** Every section element, in document order, by its accessible name. */
   function sectionNames(container: HTMLElement): string[] {
@@ -1511,7 +1220,7 @@ describe('the visual-first order', () => {
     await settled();
     /* 7 since the 2026-10-18 density round: Runtime and Project Memory gained
        info panels for the sentences that left their bodies. */
-    assertNoMeasurementInInfo(build.container, 7);
+    assertNoMeasurementInInfo(build.container, 6);
     cleanup();
 
     const overview = renderStatistics(statisticsRoutes());
@@ -1539,7 +1248,7 @@ describe('the visual-first order', () => {
       container.querySelectorAll(
         '.stat-card, .stats-figure, figure.stats-chart, .stats-verify-safeguard, .stats-mini-item',
       ).length,
-    ).toBeGreaterThan(20);
+    ).toBeGreaterThan(10);
   }
 
   /*
@@ -1676,14 +1385,6 @@ describe('truthfulness — the page states nothing it cannot know', () => {
     }
   }
 
-  it('the only mention of telemetry vocabulary is the disclosure that denies collecting it', async () => {
-    const { container } = renderStatistics(statisticsRoutes());
-    await settled();
-
-    const whole = pageText(container);
-    expect(whole.match(/\bvisits\b/g)).toHaveLength(1);
-    expect(pageText(regionOf(NO_ANALYTICS_HEADING))).toMatch(/\bvisits\b/);
-  });
 });
 
 // --- fetch states -------------------------------------------------------------
@@ -1701,11 +1402,12 @@ describe('loading', () => {
       /* `Workflow Distribution` is a view of `Records` since 2026-10-12 and has
          no loading state of its own: the widget's one loading state covers it.
          `Recent Work`'s is in the Activity widget's `Latest Updates` view. */
-      ['Records', 'Loading the workspace summary…'],
-      ['Open Questions', 'Loading the open-question counts…'],
+      ['Records', 'Loading the records…'],
+      ['Open Questions', 'Loading the open questions…'],
+      ['Activity', 'Loading the activity…'],
+      ['Kinds of Change', 'Loading the kinds of change…'],
+      ['Workflow', 'Loading the workflow…'],
       ['Evidence Support', 'Loading the evidence counts…'],
-      ['Workspace Activity', 'Loading the recorded activity…'],
-      ['Workspace Activity', 'Loading the most recent updates…'],
       ['Historical Imports', 'Loading the import sessions…'],
     ];
     for (const [region, label] of onOverview) {
@@ -1739,34 +1441,24 @@ describe('loading', () => {
 describe('partial failure — one dead source degrades only what reads it', () => {
   const dead: RouteEntry = { status: 500, body: { detail: 'synthetic failure' } };
 
-  it('runtime/records down — Project Memory, API Surface and the privacy note still render', async () => {
+  it('runtime/records down — Activity, Imports and the whole Build tab still render', async () => {
     renderStatistics(statisticsRoutes({ records: dead }));
     await settled();
 
-    expect(
-      within(regionOf(NO_ANALYTICS_HEADING)).getByText(/ships no analytics SDK/),
-    ).toBeInTheDocument();
     // The import figures read /api/imports, which is still alive.
     expect(cardValue('Historical Imports', 'Import Sessions')).toBe('2');
     // No record figure is substituted for the ones that were not received.
     expect(screen.queryByText('Total Records')).toBeNull();
 
-    // Every widget that reads the dead source offers the recourse — the three
-    // whose body reads it, and the Activity widget's `Latest Updates` view, which
-    // is where Recent Work's read lives now (reached through its own tab, so the
-    // Retry is asserted on the view a reader actually opens).
-    for (const region of ['Records', 'Open Questions', 'Evidence Support']) {
+    // Every widget that reads the dead source offers the recourse.
+    for (const region of ['Records', 'Open Questions', 'Workflow', 'Evidence Support']) {
       expect(
         within(regionOf(region)).getByRole('button', { name: 'Retry' }),
         `${region} must offer a Retry`,
       ).toBeInTheDocument();
     }
-    fireEvent.click(within(regionOf('Workspace Activity')).getByRole('tab', { name: 'Latest Updates' }));
-    expect(
-      within(viewOf('Workspace Activity', 'Latest Updates')).getByRole('button', { name: 'Retry' }),
-    ).toBeInTheDocument();
     // …while the activity figures, which read a DIFFERENT source, are unharmed.
-    expect(cardValue('Workspace Activity', 'Changes in the Last 7 Days')).toBe(
+    expect(cardValue('Activity', 'Changes, Last 7 Days')).toBe(
       String(activitySummaryFixture.totals.events_in_window),
     );
 
@@ -1776,7 +1468,6 @@ describe('partial failure — one dead source degrades only what reads it', () =
     await settled();
     expect(figureValue('Project Memory', 'Nodes')).toBe(String(graphStatusAvailable.node_count));
     expect(cardValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
-    // The two runtime cards read /api/about, which is still alive.
     expect(cardValue('Runtime', 'Runtime Mode')).toBe('Synthetic-Only');
   });
 
@@ -1810,7 +1501,9 @@ describe('partial failure — one dead source degrades only what reads it', () =
     await settled();
 
     expect(cardValue('Records', 'Total Records')).toBe(String(RECORD_COUNT));
-    expect(cardValue('Records', 'Needs Attention')).toBe('2');
+    expect(
+      chartTableRows('Records', `Records by status, out of ${RECORD_COUNT}`)[0],
+    ).toEqual(['Needs Attention', '2']);
 
     cleanup();
     renderStatisticsBuild(statisticsRoutes({ about: dead }));
@@ -1828,10 +1521,10 @@ describe('partial failure — one dead source degrades only what reads it', () =
     await settled();
 
     expect(cardValue('Records', 'Total Records')).toBe(String(RECORD_COUNT));
-    expect(chartRows(viewOf('Records', 'Workflow'), `Records by current workflow step, out of ${RECORD_COUNT} counted`)).toEqual(
+    expect(chartRows('Workflow', `Records by current workflow step, out of ${RECORD_COUNT}`)).toEqual(
       WORKFLOW_BARS,
     );
-    expect(chipRows('Evidence Support')).toEqual(EVIDENCE_CHIPS);
+    expect(cardValue('Evidence Support', 'Fields Classified')).toBe('40');
 
     cleanup();
     renderStatisticsBuild(statisticsRoutes({ graph: dead }));
@@ -1847,10 +1540,10 @@ describe('partial failure — one dead source degrades only what reads it', () =
     await settled();
 
     expect(cardValue('Records', 'Total Records')).toBe(String(RECORD_COUNT));
-    expect(chartRows(viewOf('Records', 'Workflow'), `Records by current workflow step, out of ${RECORD_COUNT} counted`)).toEqual(
+    expect(chartRows('Workflow', `Records by current workflow step, out of ${RECORD_COUNT}`)).toEqual(
       WORKFLOW_BARS,
     );
-    expect(cardValue('Evidence Support', 'Total Fields Counted')).toBe('40');
+    expect(cardValue('Evidence Support', 'Fields Classified')).toBe('40');
 
     cleanup();
     renderStatisticsBuild(statisticsRoutes({ openapi: dead }));
@@ -1889,31 +1582,20 @@ describe('partial failure — one dead source degrades only what reads it', () =
     // exactly one alarm — not one per reading section (records is read by five).
     expect(screen.getAllByRole('alert')).toHaveLength(1);
 
-    // The records alarm is at the FIRST section that reads records; every other
-    // section reading it gets the compact, neutral note instead.
-    // (`Workflow Distribution` is a view of `Records` since 2026-10-12, so it
-    // shares that widget's one alarm rather than needing a note of its own; and
-    // `Recent Work` is the Activity widget's `Latest Updates` view.)
+    // The records alarm is at the FIRST widget that reads records; every other
+    // widget reading it gets the compact, neutral note instead.
     expect(within(regionOf('Records')).getByRole('alert')).toBeInTheDocument();
-    for (const region of ['Open Questions', 'Evidence Support', 'Workspace Activity']) {
+    for (const region of ['Open Questions', 'Workflow', 'Evidence Support']) {
       expect(within(regionOf(region)).queryByRole('alert'), `${region} must not re-alarm`).toBeNull();
       expect(regionOf(region).querySelector('.stats-unavailable')).not.toBeNull();
     }
-    expect(
-      viewOf('Workspace Activity', 'Latest Updates').querySelector('.stats-unavailable'),
-    ).not.toBeNull();
 
     // Every affected widget still offers the recourse.
-    for (const region of ['Records', 'Open Questions', 'Evidence Support']) {
+    for (const region of ['Records', 'Open Questions', 'Workflow', 'Evidence Support']) {
       expect(
         within(regionOf(region)).getAllByRole('button', { name: 'Retry' }).length,
       ).toBeGreaterThan(0);
     }
-    fireEvent.click(within(regionOf('Workspace Activity')).getByRole('tab', { name: 'Latest Updates' }));
-    expect(
-      within(viewOf('Workspace Activity', 'Latest Updates')).getAllByRole('button', { name: 'Retry' })
-        .length,
-    ).toBeGreaterThan(0);
 
     // On Build the other two dead sources each have a single reader, so each
     // alarms there exactly once — two alarms, not one and not three.
@@ -1974,55 +1656,6 @@ describe('total failure', () => {
   });
 });
 
-describe('empty workspace', () => {
-  it('says so plainly, links to My Experiments, and draws NO zero-filled rows', async () => {
-    renderStatistics(statisticsRoutes({ records: { body: { records: [], total: 0 } } }));
-    await settled();
-
-    expect(within(regionOf('Records')).getByText('No Records Yet')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Go to My Experiments' })).toHaveAttribute(
-      'href',
-      ROUTES.experiments,
-    );
-
-    // No grid of zeros, no zero-height bars, no five-chip zero row. The Records
-    // widget holds NO figure at all in this state — no headline and no status
-    // cell. A zero here would be a figure nobody measured.
-    expect(regionOf('Records').querySelectorAll('dl.stat-card')).toHaveLength(0);
-    /* ~~the `Workflow Distribution` section states "No bar is drawn rather than a
-       row of zeros" and draws no row, figure, svg or table~~ — since 2026-10-12
-       the distribution is a VIEW of `Records`, and with no record received the
-       widget offers NO VIEW AT ALL: no Workflow tab, no Export Gate tab, and so
-       no chart, axis, table or zero row anywhere inside it. That is the
-       stronger form of the old assertion — nothing to draw is not drawn, and
-       there is no switcher leading to an empty panel. */
-    expect(within(regionOf('Records')).queryByRole('tablist')).toBeNull();
-    expect(regionOf('Records').querySelectorAll('.stats-chart-row')).toHaveLength(0);
-    expect(regionOf('Records').querySelectorAll('figure.stats-chart')).toHaveLength(0);
-    expect(regionOf('Records').querySelectorAll('.stats-chart svg')).toHaveLength(0);
-    expect(regionOf('Records').querySelectorAll('table')).toHaveLength(0);
-    expect(regionOf('Records').querySelectorAll('.stats-figure')).toHaveLength(0);
-    expect(chipRows('Evidence Support')).toEqual([]);
-    expect(figuresIn('Evidence Support')).toEqual({});
-    expect(
-      within(regionOf('Evidence Support')).getByText(/no fields were classified and no count is stated/),
-    ).toBeInTheDocument();
-    // The Recent Work list states the absence too, and draws no zero row.
-    const latest = viewOf('Workspace Activity', 'Latest Updates');
-    expect(
-      within(latest).getByText(/No records were returned, so there is nothing recent to list\./),
-    ).toBeInTheDocument();
-    expect(latest.querySelectorAll('.stats-recent-row')).toHaveLength(0);
-
-    // …and the two /api/about cards it used to keep are in the `Runtime` region
-    // on the Build tab, which still has them: the move is real, not a deletion.
-    cleanup();
-    renderStatisticsBuild(statisticsRoutes({ records: { body: { records: [], total: 0 } } }));
-    await settled();
-    expect(regionOf('Runtime').querySelectorAll('dl.stat-card')).toHaveLength(2);
-  });
-});
-
 describe('truncated body', () => {
   const truncated = () =>
     statisticsRoutes({ records: { body: { records: statisticsRuntimeRecords, total: 9 } } });
@@ -2031,78 +1664,25 @@ describe('truncated body', () => {
     renderStatistics(truncated());
     await settled();
 
-    // The server's own denominator is shown as the total…
+    // The headline is the API's own total; the breakdowns describe what arrived.
     expect(cardValue('Records', 'Total Records')).toBe('9');
-    // …and the page says which counts are the subset, naming the ONE that is not.
     expect(
-      screen.getByText(
-        /This page received 5 of the 9 records the API reports\. Total Records below is the API’s own workspace total; every other count on this page — the cards beside it and every breakdown further down — describes only the 5 records received\./,
+      within(regionOf('Records')).getByText(
+        'Showing 5 of 9 records; the breakdown describes only the 5 received.',
       ),
     ).toBeInTheDocument();
-    // The breakdowns keep counting what actually arrived — 5, not 9.
-    expect(figureValue('Evidence Support', 'Records Counted')).toBe('5');
-    expect(chartRows(viewOf('Records', 'Workflow'), 'Records by current workflow step, out of 5 counted')).toEqual(
-      WORKFLOW_BARS,
-    );
+    expect(chartRows('Workflow', 'Records by current workflow step, out of 5')).toEqual(WORKFLOW_BARS);
   });
 
-  /*
-   * The caveat must cover the CARDS, not just the sections further down.
-   *
-   * `Need Attention`, `Ready to Export` and `Exported` are subset counts sitting
-   * in the same grid as a workspace-wide `Total Records`. The note used to render
-   * AFTER that grid and to say "every breakdown below" — wording that excluded
-   * the three counts most likely to be misread, and that pointed past them. Both
-   * halves are asserted: the note now precedes the grid in document order, and
-   * it does not word itself as applying only to what follows it.
-   */
-  it('places the caveat BEFORE the cards it qualifies, and words it to include them', async () => {
-    const { container } = renderStatistics(truncated());
+  it('places the caveat BEFORE the figures it qualifies', async () => {
+    renderStatistics(truncated());
     await settled();
-
-    const note = container.querySelector('.stats-block-lead .stats-unavailable');
-    /*
-     * SCOPED TO THE GLANCE REGION, not to the first `.stats-cards` on the page.
-     *
-     * It used to be `container.querySelector('.statistics .stats-cards')`, which
-     * was the glance grid ONLY because that section happened to be first. Record
-     * Verification now opens the tab and draws its own four-card KPI row, so the
-     * unscoped query resolves to a grid this caveat says nothing about.
-     *
-     * BE PRECISE ABOUT WHAT THAT DID, because an earlier version of this comment
-     * was not, and a review caught it. It claimed the stale assertion was "both
-     * true and worthless" — i.e. that the rescope merely tightened something
-     * already passing. That is FALSE and the flattering version of events. The
-     * Record Verification grid renders BEFORE this caveat, so
-     * `note.compareDocumentPosition(rvGrid) & DOCUMENT_POSITION_FOLLOWING` is 0:
-     * the old assertion would have gone RED, and the rescope was REQUIRED to make
-     * the reorganisation pass.
-     *
-     * That distinction is the whole point of writing these comments. "I tightened
-     * a weak assertion" and "I changed an assertion that my change broke" carry
-     * very different burdens of proof, and only the second one obliges the author
-     * to show the new assertion is as strong as the old. It is: the old form
-     * pinned the caveat against whichever grid came first, which after this
-     * change is a grid in another section; this form pins it against the grid it
-     * actually qualifies, resolved from the same region.
-     */
-    const grid = viewOf('Records', 'Status').querySelector('.stats-cards');
+    const region = regionOf('Records');
+    const note = region.querySelector('.stats-unavailable');
+    const figures = region.querySelector('.stats-keyed-figures');
     expect(note, 'the truncation caveat must render').not.toBeNull();
-    expect(grid, 'the glance grid must render').not.toBeNull();
-    // Node.DOCUMENT_POSITION_FOLLOWING === 4: the grid follows the note.
-    expect(note!.compareDocumentPosition(grid!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-
-    const text = textOf(note as HTMLElement);
-    // Names the exception rather than excluding the cards it sits above.
-    expect(text).toContain('Total Records below is the API’s own workspace total');
-    expect(text).toContain('the cards beside it');
-    expect(text).not.toMatch(/every breakdown below describes only/);
-
-    // The three subset cards really are inside the grid the note precedes, which
-    // is what makes the wording load-bearing rather than decorative.
-    for (const label of ['Needs Attention', 'Ready to Export', 'Exported']) {
-      expect(within(grid as HTMLElement).getByText(label)).toBeInTheDocument();
-    }
+    expect(figures, 'the status figures must render').not.toBeNull();
+    expect(note!.compareDocumentPosition(figures!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 
@@ -2395,11 +1975,13 @@ describe('privacy — nothing identifying reaches the DOM', () => {
    * `.stats-recent`, so a title appearing in the glance grid, a chart, a figure
    * list or a caveat still fails — which is the leak this guard was written for.
    */
-  it('renders no address, no credential, and no record content outside Recent Work', async () => {
+  it('renders no address, no credential, and no record content at all', async () => {
     const { container } = renderStatistics(statisticsRoutes());
     await settled();
     const text = pageText(container);
-    const aggregates = pageTextWithout(container, '.stats-recent');
+    // Every figure on the Overview is an aggregate since the 2026-11-02 dashboard
+    // retired Recent Work, so the record-content ban now covers the whole page.
+    const aggregates = text;
 
     expect(text).not.toMatch(/\b\d{1,3}(\.\d{1,3}){3}\b/); // no IP-shaped string
     expect(text).not.toMatch(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/); // no email
@@ -2457,9 +2039,7 @@ describe('privacy — nothing identifying reaches the DOM', () => {
        rendered in the exempted home, so an empty exclusion would be caught
        rather than read as a clean pass. */
     expect(/\bimport sessions?\b/i.test(textOf(regionOf('Historical Imports')))).toBe(true);
-    expect(container.querySelector('.stats-cards-glance .stat-card-label')?.textContent).not.toMatch(
-      /session/i,
-    );
+    expect(container.querySelector('.stats-keyed-figures')?.textContent).not.toMatch(/session/i);
 
     // No record content in the AGGREGATE sections: not a title, not an id, not
     // a per-record value. This is the clause the narrowing scopes, and the
@@ -2469,22 +2049,8 @@ describe('privacy — nothing identifying reaches the DOM', () => {
       expect(aggregates).not.toContain(record.experiment_id);
       expect(aggregates).not.toContain(record.navigate_to);
     }
-    // Scientific vocabulary is forbidden EVERYWHERE, Recent Work included: a
-    // title is a name the reader gave, a value is a measurement.
+    // Scientific vocabulary is forbidden everywhere: a value is a measurement.
     expect(text).not.toMatch(/CuO|K-edge|\.xdi/);
-
-    /* The positive half. Recent Work renders a title, a status word and a time,
-       and nothing else about a record — no pending count, no evidence class, no
-       revision, no artifact state, no export verdict. Asserted as an allowlist
-       over each row's own text, so a field added to the row fails here. */
-    const rows = [...container.querySelectorAll('.stats-recent-row')];
-    expect(rows.length, 'no Recent Work row rendered, so this asserts nothing').toBeGreaterThan(0);
-    for (const row of rows) {
-      const title = row.querySelector('.stats-recent-title')?.textContent ?? '';
-      const state = row.querySelector('.stats-recent-state')?.textContent ?? '';
-      const when = row.querySelector('.stats-recent-when')?.textContent ?? '';
-      expect(textOf(row as HTMLElement)).toBe([title, state, when].join(' ').trim());
-    }
   });
 
   /*
@@ -2502,124 +2068,159 @@ describe('privacy — nothing identifying reaches the DOM', () => {
   });
 });
 
-// --- the metrics wired from already-available reads ---------------------------
+// --- the Overview dashboard (2026-11-02) -----------------------------------------
 
 /*
- * `statisticsRuntimeRecords` carries pending_count 5 · 0 · 0 · 0 · 2 and
- * workflow flags blocked on the first row, reopened on the third. Transcribed
- * by hand from the fixture, per choice 2 at the head of this file.
+ * ONE WIDGET PER QUESTION, EACH IN THE FORM ITS METRIC NEEDS. Every figure below
+ * is transcribed from the fixture by hand (see the derivation at the head of this
+ * file) and read from the chart's TEXT equivalents — its data table and summary
+ * sentence — never from the drawing, which is `aria-hidden`.
  */
-describe('Open Questions', () => {
-  it('states the question total, the record tallies, and the maximum', async () => {
+describe('the Overview dashboard', () => {
+  it('Records: the total, and the four statuses as one stacked bar', async () => {
     renderStatistics(statisticsRoutes());
     await settled();
+    expect(cardValue('Records', 'Total Records')).toBe(String(RECORD_COUNT));
+    const caption = `Records by status, out of ${RECORD_COUNT}`;
+    expect(chartTableRows('Records', caption)).toEqual([
+      ['Needs Attention', '2'],
+      ['In Review', '1'],
+      ['Ready to Export', '1'],
+      ['Exported', '1'],
+    ]);
+    // The statuses are also VISIBLE text beside the bar, each with its swatch.
+    const visible = pageTextWithout(regionOf('Records'), 'figure');
+    for (const [label, n] of [['Needs Attention', '2'], ['In Review', '1'], ['Exported', '1']]) {
+      expect(new RegExp(`${label}\\s*${n}`).test(visible)).toBe(true);
+    }
+    // The exported row's artifact no longer matches its draft: said once, plainly.
+    expect(within(regionOf('Records')).getByText('1 exported record has changed since its export.')).toBeTruthy();
+    expect(within(regionOf('Records')).queryByText('Unrecognized Status')).toBeNull();
+    expect(screen.queryByText(/Showing \d+ of \d+ records/)).toBeNull();
+  });
 
-    /* The question total is the widget's HEADLINE since 2026-10-12, and the
-       four record tallies are the figures beneath it — asserted as the full set,
-       so a fifth row or a moved label still fails. */
+  it('Open Questions: the total, and records by how many questions each owes', async () => {
+    renderStatistics(statisticsRoutes());
+    await settled();
     expect(cardValue('Open Questions', 'Total Open Questions')).toBe('7');
-    expect(figuresIn('Open Questions')).toEqual({
-      'Records With Open Questions': '2',
-      'Most on One Record': '5',
-      'Records With a Blocked Step': '1',
-      'Records With a Reopened Step': '1',
-    });
-  });
-
-  /*
-   * ── THE CAVEAT IS NOW IN TWO PLACES, AND BOTH ARE ASSERTED ───────────────
-   *
-   * The 2026-09-15 distillation left the OPERATIVE sentence visible and moved
-   * the restatement into a disclosure. This case is widened rather than
-   * re-pointed, and the widening is the point: it asserts (a) that the
-   * non-addability caveat is readable WITHOUT opening anything, because a
-   * caveat behind a `<summary>` leaves the visible figures reading as
-   * complete, and (b) that the full explanation is still present, verbatim,
-   * one activation away. Dropping either half would let the next distillation
-   * hide the caveat entirely and still pass.
-   *
-   * ~~'counts QUESTIONS across the 5 records received'~~ — the disclosure
-   * deliberately no longer carries that FIGURE, because a closed `<details>` is
-   * not scanned by axe and is skipped by a reader, so a measurement inside one
-   * is a hidden measurement (the rule `puts NO measurement inside a prose
-   * disclosure` enforces). The unit claim survives without the number.
-   */
-  it('keeps the non-addability caveat VISIBLE, with the full explanation one press away', async () => {
-    renderStatistics(statisticsRoutes());
-    await settled();
-
-    const region = regionOf('Open Questions');
-    /* ~~`details.stats-disclosure`~~ — the restatement is the widget's INFO
-       panel since 2026-10-12. Same two halves, same strength. */
-    const toggle = within(region).getByRole('button', { name: 'About Open Questions' });
-    const info = document.getElementById(toggle.getAttribute('aria-controls') ?? '');
-    expect(info, 'the reading-rules panel must render').not.toBeNull();
-    expect(info).toHaveAttribute('hidden');
-
-    // (a) the operative caveat, outside the info panel — read from a clone with
-    // the panel removed, so this cannot pass on the disclosed copy.
-    const visible = pageTextWithout(region, '.widget-info');
-    /* ~~`Total Open Questions counts QUESTIONS; …` / `None of the five may be
-       added together`~~ — the 2026-10-18 density round shortened the visible
-       caveat to one line. BOTH HALVES ARE STILL ASSERTED: which figure counts
-       questions and which count records, and the prohibition on adding them. */
-    expect(visible).toMatch(/The total counts QUESTIONS; the other four count RECORDS/);
-    expect(visible).toMatch(/Never add them/);
-
-    // (b) the full explanation, inside it, unchanged — and reachable.
-    fireEvent.click(toggle);
-    expect(info).not.toHaveAttribute('hidden');
-    const disclosed = textOf(info as HTMLElement);
-    expect(disclosed).toMatch(/counts QUESTIONS across the records received/);
-    /* The three record-counting rows are NAMED rather than referred to by
-       position: "the three beneath it" was true and unreadable, because a
-       maximum sits among them. */
-    expect(disclosed).toMatch(
-      /Records With Open Questions, Records With a Blocked Step and Records With a Reopened Step count RECORDS/,
-    );
-    expect(disclosed).toMatch(/Most on One Record is the largest single record’s question count/);
-    expect(disclosed).toMatch(/none of these five may be added together/);
-  });
-
-  it('reads no question text, field name or answer — no record string reaches the page', async () => {
-    const { container } = renderStatistics(statisticsRoutes());
-    await settled();
-
+    // 5 · 0 · 0 · 0 · 2 → three records owe none, one owes two, one owes five.
+    expect(chartTableRows('Open Questions', 'Records by number of open questions')).toEqual([
+      ['0', '3'],
+      ['1', '0'],
+      ['2', '1'],
+      ['3', '0'],
+      ['4', '0'],
+      ['5+', '1'],
+    ]);
     const text = textOf(regionOf('Open Questions'));
     for (const record of statisticsRuntimeRecords) {
       expect(text).not.toContain(record.title);
       expect(text).not.toContain(record.experiment_id);
     }
-    // …and the section adds no link into a record from a question count.
-    expect(regionOf('Open Questions').querySelectorAll('a')).toHaveLength(0);
-    expect(pageText(container)).toContain('Total Open Questions');
   });
 
-  it('an empty workspace states that there is nothing to count, and no zero', async () => {
-    renderStatistics(statisticsRoutes({ records: { body: { records: [], total: 0 } } }));
-    await settled();
-
-    const text = textOf(regionOf('Open Questions'));
-    expect(text).toContain('No records were returned, so there is no open-question count to state.');
-    expect(text).not.toMatch(/\b\d+\b/);
-  });
-
-  it('discloses records whose question count could not be read, rather than zeroing them', async () => {
+  it('Open Questions: a record with no readable count is left out and said so, never charted as zero', async () => {
     const broken = statisticsRuntimeRecords.map((r, i) =>
       i === 0 ? { ...r, pending_count: null as unknown as number } : r,
     );
     renderStatistics(statisticsRoutes({ records: { body: { records: broken, total: broken.length } } }));
     await settled();
-
-    // The 5 that row carried is gone from the total, and the shortfall is stated.
     expect(cardValue('Open Questions', 'Total Open Questions')).toBe('2');
     expect(
       within(regionOf('Open Questions')).getByText(
-        /1 of the 5 records received carried no usable question count/,
+        '1 record reported no readable question count and is not charted.',
       ),
-    ).toBeInTheDocument();
+    ).toBeTruthy();
+    const rows = chartTableRows('Open Questions', 'Records by number of open questions');
+    expect(rows.reduce((sum, [, n]) => sum + Number(n), 0)).toBe(RECORD_COUNT - 1);
+  });
+
+  it('Workflow: every canonical step in order, zeros included, as visible text', async () => {
+    renderStatistics(statisticsRoutes());
+    await settled();
+    const caption = `Records by current workflow step, out of ${RECORD_COUNT}`;
+    expect(chartRows('Workflow', caption)).toEqual(WORKFLOW_BARS);
+    expect(chartTableRows('Workflow', caption)).toEqual(WORKFLOW_BARS);
+    const summary = chartSummaryText('Workflow', caption);
+    for (const [label, n] of WORKFLOW_BARS) expect(summary).toContain(`${label}: ${n}`);
+    expect(chartFigure('Workflow', caption).querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('Evidence Support: fields by class in precedence order, NOT sorted by count', async () => {
+    renderStatistics(statisticsRoutes());
+    await settled();
+    expect(cardValue('Evidence Support', 'Fields Classified')).toBe('40');
+    const rows = chartTableRows('Evidence Support', 'Classified fields by evidence-support class');
+    expect(rows).toEqual([
+      ['Supported', '30'],
+      ['Inferred Candidate', '3'],
+      ['Insufficient Evidence', '2'],
+      ['Conflicting Evidence', '2'],
+      ['Unknown', '3'],
+      ['Unreadable', '0'],
+    ]);
+    const counts = rows.map(([, n]) => Number(n));
+    expect([...counts].sort((a, b) => b - a)).not.toEqual(counts);
+  });
+
+  it('Historical Imports: sessions by the furthest step each has reached', async () => {
+    renderStatistics(statisticsRoutes());
+    await settled();
+    expect(cardValue('Historical Imports', 'Import Sessions')).toBe(String(importListFixture.total));
+    const rows = chartTableRows('Historical Imports', 'Import sessions by furthest step, out of 2');
+    expect(rows.reduce((sum, [, n]) => sum + Number(n), 0)).toBe(2);
+    expect(rows.map(([label]) => label).sort()).toEqual(['New Import', 'Reconstructed']);
+  });
+
+  it('offers two tabs, and an old My Stats link lands on Overview', async () => {
+    stubFetchRoutes(statisticsRoutes());
+    render(
+      <MemoryRouter
+        initialEntries={[ROUTES.statisticsTab('mine')]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <AppRoutes />
+      </MemoryRouter>,
+    );
+    await settled();
+    const tabs = within(screen.getByRole('tablist', { name: 'Statistics sections' })).getAllByRole('tab');
+    expect(tabs.map((t) => t.textContent)).toEqual(['Overview', 'Build & Verification']);
+    expect(tabs[0]).toHaveAttribute('aria-selected', 'true');
+    expect(regionOf('Records')).toBeTruthy();
+  });
+
+  it('reads as a finished product: no placeholder, preview or not-connected copy on either tab', async () => {
+    for (const mount of [renderStatistics, renderStatisticsBuild]) {
+      const { container } = mount(statisticsRoutes());
+      await settled();
+      const text = pageText(container);
+      expect(text.length, 'the page rendered no text').toBeGreaterThan(200);
+      for (const pattern of [/\bdemo\b/i, /local-first/i, /not connected/i, /this build never/i, /Platform Metrics/, /Collects No Analytics/]) {
+        expect(pattern.test(text), `${pattern} appeared`).toBe(false);
+      }
+      cleanup();
+    }
+  });
+
+  it('an empty workspace collapses the record widgets into one plain empty state', async () => {
+    renderStatistics(statisticsRoutes({ records: { body: { records: [], total: 0 } } }));
+    await settled();
+    const records = regionOf('Records');
+    expect(within(records).getByText('No Records Yet')).toBeTruthy();
+    expect(within(records).getByRole('link', { name: 'Go to My Experiments' })).toHaveAttribute(
+      'href',
+      ROUTES.experiments,
+    );
+    for (const gone of ['Open Questions', 'Activity', 'Kinds of Change', 'Workflow', 'Evidence Support']) {
+      expect(screen.queryByRole('region', { name: gone }), `${gone} must not render`).toBeNull();
+    }
+    // No chart and no zero-filled row anywhere on the record side.
+    expect(records.querySelector('figure.stats-chart')).toBeNull();
+    expect(regionOf('Historical Imports')).toBeTruthy();
   });
 });
+
+// --- the metrics wired from already-available reads ---------------------------
 
 /*
  * `schemaBrowserFixture` — the SAME document the Schema Reference suite browses.
@@ -2808,72 +2409,6 @@ describe('Record Schema (a widget on the Build tab)', () => {
   });
 });
 
-describe('Platform Metrics — the inactive adapter boundary', () => {
-  it('states that it is not connected, and states no figure at all', async () => {
-    renderStatisticsBuild(statisticsRoutes());
-    await settled();
-
-    const region = regionOf('Platform Metrics');
-    expect(within(region).getByText('Not Connected')).toBeInTheDocument();
-    expect(
-      within(region).getByText(/Platform-wide record figures are not connected for this deployment/),
-    ).toBeInTheDocument();
-    // No digit anywhere in the section: not a total, not a zero, not a date.
-    expect(textOf(region)).not.toMatch(/\d/);
-  });
-
-  it('says the absence is an absence, not a withholding and not a zero', async () => {
-    renderStatisticsBuild(statisticsRoutes());
-    await settled();
-
-    const text = textOf(regionOf('Platform Metrics'));
-    expect(text).toMatch(/Nothing is being hidden and no figure is zero/);
-    expect(text).toMatch(/this application has no source to read one from/);
-    // It must not blame a decision, a permission, or a person.
-    expect(text).not.toMatch(/permission|denied|governance|approval|administrator|Dean/i);
-  });
-
-  it('lists the six planned views, each naming what it would count', async () => {
-    renderStatisticsBuild(statisticsRoutes());
-    await settled();
-
-    const titles = [...regionOf('Platform Metrics').querySelectorAll('.stats-plan-title')].map(
-      (n) => n.textContent?.trim() ?? '',
-    );
-    expect(titles).toEqual([
-      'Records Across the Platform',
-      'Records by Scientific Domain',
-      'Records by Experiment Type',
-      'Records by Schema Version',
-      'Schema Validation Outcomes',
-      'Records Added Over Time',
-    ]);
-  });
-
-  it('adds NO request to the page — the mount reads are unchanged by its presence', async () => {
-    const { calls } = renderStatisticsBuild(statisticsRoutes());
-    await settled();
-
-    // The five tracked reads plus Record Verification's, and nothing else. The
-    // verification read belongs to a different section; it is listed here so the
-    // set stays EXACT rather than being relaxed to a subset check.
-    expect([...calls].sort()).toEqual(
-      [...STATISTICS_ROUTE_KEYS, STATISTICS_VERIFICATION_ROUTE_KEY].sort(),
-    );
-    expect(calls.filter((c) => /portal|metrics|platform/i.test(c))).toEqual([]);
-  });
-
-  it('draws no chart, no axis and no empty plot', async () => {
-    renderStatisticsBuild(statisticsRoutes());
-    await settled();
-
-    const panel = regionOf('Platform Metrics');
-    expect(panel.querySelector('figure.stats-chart')).toBeNull();
-    expect(panel.querySelector('.stats-chart-track')).toBeNull();
-    expect(panel.querySelector('.stats-chart-grid')).toBeNull();
-  });
-});
-
 /* ── REVIEW FIXES, 2026-10-18 (independent review of the density round) ──────
  *
  * Each test below pins a defect the review found and the round's own suite
@@ -2902,58 +2437,4 @@ describe('review fixes — density round', () => {
     );
   });
 
-  /*
-   * 2 · A FALSE COUNT. The Evidence Support info said "The five classes are
-   * mutually exclusive … so they sum to the total" — there are SIX, and the
-   * total is the sum of all six (`EVIDENCE_CLASSES`, Unreadable included). The
-   * sentence now names no count, and names the class a reader would miss.
-   */
-  it('states no false class count, and names the Unreadable class the total includes', async () => {
-    renderStatistics(statisticsRoutes());
-    await settled();
-    const toggle = within(regionOf('Evidence Support')).getByRole('button', {
-      name: 'About Evidence Support',
-    });
-    const info = document.getElementById(toggle.getAttribute('aria-controls') ?? '') as HTMLElement;
-    const text = textOf(info);
-    expect(text).not.toMatch(/\b(two|three|four|five|seven|eight|nine|ten) classes\b/i);
-    expect(text).toMatch(/sum to the total/);
-    expect(text).toContain(LABELS.chipEvUnreadable);
-  });
-
-  /*
-   * 3 · DEC-35 WAS VISIBLE ON THE BASE AND THE ROUND HID IT. "Entries are not
-   * attributed to a person…" moved into Workspace Activity's closed info panel.
-   * A disclosure about who is NOT named is part of what every count in the
-   * widget means, so it is visible again — asserted outside every `[hidden]`
-   * ancestor, which is what "visible" means in jsdom.
-   */
-  it('keeps the unattributed-actor sentence VISIBLE in Workspace Activity', async () => {
-    renderStatistics(statisticsRoutes());
-    await settled();
-    const region = regionOf('Workspace Activity');
-    const holders = [...region.querySelectorAll('*')].filter(
-      (el) =>
-        [...el.childNodes].some(
-          (n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? '').includes(LABELS.activityActorUnattributed),
-        ),
-    );
-    expect(holders.length, 'the sentence must render exactly once').toBe(1);
-    expect(holders[0].closest('[hidden]'), 'it must not sit inside anything hidden').toBeNull();
-    expect(holders[0].closest('.widget-info'), 'it must not sit inside the info panel').toBeNull();
-  });
-
-  /*
-   * 5 · THE SETTINGS LINK NAMES NO TAB. "Open Privacy & Governance Settings"
-   * named a tab label that is being renamed; "Open Privacy Settings" is true
-   * under the current and the coming one. Same target.
-   */
-  it('links to the privacy settings without naming a tab label', async () => {
-    renderStatistics(statisticsRoutes());
-    await settled();
-    expect(
-      within(regionOf(NO_ANALYTICS_HEADING)).getByRole('link', { name: 'Open Privacy Settings' }),
-    ).toHaveAttribute('href', ROUTES.settingsTab('privacy'));
-    expect(screen.queryByRole('link', { name: /Governance Settings|Data & Privacy Settings/ })).toBeNull();
-  });
 });

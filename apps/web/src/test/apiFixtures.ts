@@ -3870,6 +3870,16 @@ export const activitySummaryFixture = {
   },
   by_channel: { web: 7, mcp: 2, historical_import: 0, system: 0 },
   by_object_type: { field: 5, run: 2, proposal: 1, note: 1 },
+  by_day: [
+    { date: '2099-07-01', count: 0 },
+    { date: '2099-07-02', count: 1 },
+    { date: '2099-07-03', count: 0 },
+    { date: '2099-07-04', count: 2 },
+    { date: '2099-07-05', count: 3 },
+    { date: '2099-07-06', count: 0 },
+    { date: '2099-07-07', count: 3 },
+    { date: '2099-07-08', count: 0 },
+  ],
   ranked_actions: [
     { name: 'field_answered', count: 5 },
     { name: 'run_added', count: 2 },

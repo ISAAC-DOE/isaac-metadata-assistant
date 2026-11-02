@@ -241,12 +241,14 @@ describe('A11Y — heading levels never skip a level or go backwards', () => {
        outline is flatter and still never skips a level. */
     expect(found).toEqual([
       1,
+      /* The 2026-11-02 dashboard: one h2 per widget, in grid order. */
       2 /* Records */,
       2 /* Open Questions */,
+      2 /* Activity */,
+      2 /* Kinds of Change */,
+      2 /* Workflow */,
       2 /* Evidence Support */,
-      2 /* Workspace Activity */,
       2 /* Historical Imports */,
-      2 /* This Application Collects No Analytics */,
     ]);
     assertMonotonic(found, 'Statistics page · Overview');
   });
@@ -283,32 +285,24 @@ describe('A11Y — heading levels never skip a level or go backwards', () => {
       2 /* Record Schema */,
       2 /* API Surface */,
       2 /* Runtime */,
-      2 /* Platform Metrics */,
-      3,
-      3,
-      3,
-      3,
-      3,
-      3,
+      /* Platform Metrics, and its six planned-view h3s, left on 2026-11-02:
+         the widget stated only that no platform source exists. */
     ]);
     assertMonotonic(found, 'Statistics page · Build & Verification');
   });
 
   /*
-   * ...AND THE MY STATS TAB, which has its own outline and would otherwise be
-   * checked by nothing: it is a `?tab=` deep link, so a page-level render at
-   * `/statistics` never reaches it. h1 → h2 `Personal Statistics` → h2 `Views
-   * Prepared for Your Account` → one h3 per planned view.
+   * The My Stats tab is not offered while no personal source can return data
+   * (2026-11-02), so `?tab=mine` lands on Overview and shares its outline. The
+   * panel's own outline is pinned in `my-stats.test.tsx`, where it is mounted.
    */
-  it('Statistics · My Stats', async () => {
+  it('Statistics · ?tab=mine lands on the Overview outline', async () => {
     stubFetchRoutes(statisticsRoutes());
     const view = renderAt('/statistics?tab=mine');
-    await view.findByText('Not Available in This Preview');
-
+    await view.findByText('Total Records');
     const found = levels(view.container);
-    expect(found.slice(0, 3)).toEqual([1, 2, 2]);
-    expect(found.slice(3)).toEqual([3, 3, 3, 3, 3, 3, 3, 3]);
-    assertMonotonic(found, 'Statistics page · My Stats');
+    expect(found.slice(0, 2)).toEqual([1, 2]);
+    assertMonotonic(found, 'Statistics page · ?tab=mine');
   });
 
   it('Project Memory · Graph · About This Graph drawer', async () => {

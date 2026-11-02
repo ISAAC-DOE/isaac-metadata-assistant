@@ -3108,6 +3108,11 @@ export interface ApiActivitySummary {
   by_action: Record<string, number>;
   by_channel: Record<string, number>;
   by_object_type: Record<string, number>;
+  /**
+   * One count per UTC calendar day of the window, oldest first, zero-filled; sums to
+   * `totals.events_in_window`. Optional so a server that predates it still reads.
+   */
+  by_day?: { date: string; count: number }[];
   /** The nonzero slices, ordered by the server: descending count, then name. */
   ranked_actions: ApiActivityRanked[];
   ranked_channels: ApiActivityRanked[];

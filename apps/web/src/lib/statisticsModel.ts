@@ -854,3 +854,84 @@ export function deriveImportTotals(body: unknown): ImportTotals {
     sessionsWithProposals,
   };
 }
+
+/* ---- distributions for the Overview dashboard (2026-11-02) -------------- */
+
+/** The highest open-question count given its own column; larger counts share the last one. */
+export const OPEN_QUESTION_BUCKETS = 5;
+
+/**
+ * How many records owe 0, 1, 2 … open questions — one column per count up to the
+ * largest seen, capped at {@link OPEN_QUESTION_BUCKETS}, with a `5+` column for
+ * the rest. A record with an unreadable count is left out (and counted by
+ * `deriveOpenQuestions`), never placed in the zero column.
+ */
+export function deriveOpenQuestionDistribution(
+  records: readonly RuntimeRecord[],
+): { key: string; label: string; value: number }[] {
+  const counts: number[] = [];
+  for (const record of records) {
+    const pending = numberOrNull(record.pending_count);
+    if (pending === null || pending < 0) continue;
+    const slot = Math.min(Math.floor(pending), OPEN_QUESTION_BUCKETS);
+    counts[slot] = (counts[slot] ?? 0) + 1;
+  }
+  if (counts.length === 0) return [];
+  const rows: { key: string; label: string; value: number }[] = [];
+  for (let n = 0; n < counts.length; n += 1) {
+    const label = n === OPEN_QUESTION_BUCKETS ? `${n}+` : String(n);
+    rows.push({ key: `q${n}`, label, value: counts[n] ?? 0 });
+  }
+  return rows;
+}
+
+export interface ImportSteps {
+  /** The API's own session total, or `null` when it sent none usable. */
+  sessions: number | null;
+  /** Session summaries this page received. */
+  received: number;
+  /** One row per import step, in the server's own order and wording. */
+  rows: { key: string; label: string; value: number }[];
+}
+
+/**
+ * Import sessions by the furthest step each has reached, over the step list the
+ * import list itself serves. A step id the list does not name is counted under
+ * its own humanised id rather than dropped.
+ */
+export function deriveImportSteps(body: unknown): ImportSteps {
+  const object = typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
+  const imports = Array.isArray(object.imports) ? (object.imports as unknown[]) : [];
+  const workflow = Array.isArray(object.workflow) ? (object.workflow as unknown[]) : [];
+  const rows: { key: string; label: string; value: number }[] = [];
+  const index = new Map<string, number>();
+  for (const step of workflow) {
+    if (typeof step !== 'object' || step === null) continue;
+    const id = stringOrNull((step as Record<string, unknown>).id);
+    const label = stringOrNull((step as Record<string, unknown>).label);
+    if (id === null || index.has(id)) continue;
+    index.set(id, rows.length);
+    rows.push({ key: id, label: label ?? id, value: 0 });
+  }
+  let received = 0;
+  for (const entry of imports) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    received += 1;
+    const step = stringOrNull((entry as Record<string, unknown>).furthest_step) ?? 'unknown';
+    let at = index.get(step);
+    if (at === undefined) {
+      at = rows.length;
+      index.set(step, at);
+      rows.push({
+        key: step,
+        label: step
+          .split('_')
+          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(' '),
+        value: 0,
+      });
+    }
+    rows[at].value += 1;
+  }
+  return { sessions: numberOrNull(object.total), received, rows };
+}

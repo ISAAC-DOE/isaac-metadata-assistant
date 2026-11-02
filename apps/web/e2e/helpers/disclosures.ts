@@ -171,11 +171,17 @@ export const PROSE_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze
  * counts are scope-INDEPENDENT on purpose: a widget renders its info toggle even
  * when its data is empty, so the empty ordinary workspace mounts the same seven.
  */
+/* RE-DERIVED 2026-11-02 for the Overview dashboard. Overview with records: the
+   page panel plus Records, Open Questions, Activity, Workflow, Evidence Support
+   and Historical Imports = 7 (Kinds of Change carries none). The EMPTY ordinary
+   workspace collapses the record widgets into one empty state with no panel, so
+   it mounts the page panel and Historical Imports = 2 — the count is no longer
+   scope-independent, by design. Build lost Platform Metrics: 6. The My Stats
+   surface is retired while no personal source can return data. */
 export const WIDGET_INFO_PANELS: Readonly<Record<string, number>> = Object.freeze({
-  statistics: 7,
+  statistics: 2,
   'statistics-example': 7,
-  'statistics-mine': 2,
-  'statistics-build': 7,
+  'statistics-build': 6,
   /* Settings and Governance & Safety, MEASURED in Chromium on 2026-10-19 (the merge
      of #289 into the Settings branch), each read out of this helper's own failure
      ("mounts N widget info panel(s) … declares 0"):

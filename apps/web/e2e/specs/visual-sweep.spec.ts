@@ -280,7 +280,6 @@ const EXPECTED_STATE_IDS = [
   'endpoint-explorer',
   'settings-connect',
   'statistics-general',
-  'statistics-mine',
   'validator',
   'schema-proposals-browse',
   'schema-proposals-propose',
@@ -698,17 +697,6 @@ const STATES: readonly VisualState[] = [
       await settled(page);
       // `Records` is the widget that replaced `Workspace at a Glance` (2026-10-12).
       const heading = page.getByRole('heading', { name: 'Records', exact: true });
-      await expect(heading).toBeVisible({ timeout: 20_000 });
-      return heading;
-    },
-  },
-  {
-    id: 'statistics-mine',
-    what: 'Statistics → My Stats — the honest UNAVAILABLE gate, no figure invented',
-    async reach({ page, app }) {
-      await app.goto('/statistics?tab=mine');
-      await settled(page);
-      const heading = page.getByRole('heading', { name: 'Personal Statistics' });
       await expect(heading).toBeVisible({ timeout: 20_000 });
       return heading;
     },
