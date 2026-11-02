@@ -45,7 +45,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { AssistantPanel, type StageFieldOption } from '../components/AssistantPanel';
 import { AppRoutes } from '../App';
 import { api } from '../lib/api';
-import { SOURCE_LABELS, SUBORDINATE_CAPTION } from '../lib/assistant';
+import { SOURCE_LABELS } from '../lib/assistant';
 import { appendMessage, clearAllSessions } from '../lib/assistantSession';
 import type { AgentContext, Proposal } from '../lib/assistantAgent';
 import {
@@ -613,7 +613,9 @@ describe('P36V S-A · panel order', () => {
     const head = container.querySelector('.assistant-head')!;
     const log = container.querySelector('.assistant-log')!;
     const composer = container.querySelector('.assistant-composer')!;
-    const caption = container.querySelector('.assistant-caption')!;
+    // The dock note is the panel's last block (the advisory caption it ended with was
+    // retired 2026-11-02).
+    const caption = container.querySelector('.assistant-dock-note')!;
 
     expect(precedes(head, log)).toBe(true);
     expect(precedes(log, composer)).toBe(true);
@@ -662,7 +664,9 @@ describe('P36V S-A · panel order', () => {
     const head = container.querySelector('.assistant-head')!;
     const guidance = container.querySelector('.assistant-empty-note')!;
     const composer = container.querySelector('.assistant-composer')!;
-    const caption = container.querySelector('.assistant-caption')!;
+    // The dock note is the panel's last block (the advisory caption it ended with was
+    // retired 2026-11-02).
+    const caption = container.querySelector('.assistant-dock-note')!;
 
     expect(precedes(head, guidance)).toBe(true);
     expect(precedes(guidance, composer)).toBe(true);
@@ -698,41 +702,24 @@ describe('P36V S-A · panel order', () => {
     expect(dialog.querySelectorAll('.assistant-agent-prompt').length).toBeGreaterThan(0);
   });
 
-  it('the advisory footer is the single, last, italicised caption with the approved copy', () => {
-    const { container } = panel({ availability: 'available' });
-    const captions = container.querySelectorAll('.assistant-caption');
-    expect(captions.length).toBe(1);
-    const caption = captions[0] as HTMLElement;
-    expect(caption.textContent).toBe(
-      'The Assistant is advisory: it explains artifacts and points to sources. ' +
-        'It never validates — deterministic validation remains authoritative.',
-    );
-    expect(caption.textContent).toBe(SUBORDINATE_CAPTION);
-    // the explicit negative capability claim is part of the footer (P36V review,
-    // I2 — it was dropped in the same slice that added an Open Validator button
-    // and a Deterministic Schema Check card to this very panel)
-    expect(caption.textContent).toMatch(/never validates/i);
+  it('the dock note is the last thing in the panel, and the retired caption is gone', () => {
     /*
-     * It is the LAST THING IN THE PANEL — asserted in three links now rather
-     * than two, because UX-022 merged the dock's three strips of fine print into
-     * ONE `.assistant-dock-note` paragraph and the caption is that paragraph's
-     * last element instead of the foot's last child.
-     *
-     * ~~`expect(foot.lastElementChild).toBe(caption)`~~ is kept struck rather
-     * than deleted because "the caption is last" is exactly the property a
-     * merge could have quietly dropped. The chain below is strictly stronger
-     * than the single link it replaces: the old assertion would have passed with
-     * the caption FIRST inside a last-positioned wrapper.
+     * ~~The advisory footer was the single, last caption with the approved copy
+     * ("The Assistant is advisory … It never validates …")~~ — retired 2026-11-02 at the
+     * owner's direction (standing disclaimers removed). What stays pinned is the order
+     * (the note is still the last thing in the panel) and that nothing in it states a
+     * verdict, and that the retired caption does not come back.
      */
+    const { container } = panel({ availability: 'available' });
+    expect(container.querySelectorAll('.assistant-caption').length).toBe(0);
+    expect(container.textContent).not.toMatch(/never validates/i);
     const panelEl = container.querySelector('.assistant') as HTMLElement;
     const foot = container.querySelector('.assistant-foot') as HTMLElement;
     const note = container.querySelector('.assistant-dock-note') as HTMLElement;
     expect(note).not.toBeNull();
-    expect(note.lastElementChild).toBe(caption);
     expect(foot.lastElementChild).toBe(note);
     expect(panelEl.lastElementChild).toBe(foot);
-    // it never states a verdict
-    expect(caption.textContent).not.toMatch(/\b(PASS|FAIL)\b/);
+    expect(note.textContent).not.toMatch(/\b(PASS|FAIL)\b/);
   });
 });
 
@@ -749,7 +736,7 @@ describe('P36V S-A · the contract holds on every mount surface', () => {
   ];
 
   for (const [name, path, sentinel, knowsAvailability] of RECORD_SURFACES) {
-    it(`${name}: header block, one status claim (or none), bubble-capable transcript, docked composer, one caption`, async () => {
+    it(`${name}: header block, one status claim (or none), bubble-capable transcript, docked composer, one dock note`, async () => {
       stubFetchRoutes({
         ...bundleRoutes('demo'),
         'GET /api/graph/status': { body: graphStatusAvailable },
@@ -782,10 +769,10 @@ describe('P36V S-A · the contract holds on every mount surface', () => {
       const log = assistant.querySelector('.assistant-log')!;
       const composer = assistant.querySelector('.assistant-composer')!;
       expect(precedes(log, composer)).toBe(true);
-      // exactly one advisory caption, and it is the approved copy
-      const captions = assistant.querySelectorAll('.assistant-caption');
-      expect(captions.length).toBe(1);
-      expect(captions[0].textContent).toBe(SUBORDINATE_CAPTION);
+      // exactly one dock note, and no retired advisory caption (2026-11-02)
+      expect(assistant.querySelectorAll('.assistant-dock-note').length).toBe(1);
+      expect(assistant.querySelectorAll('.assistant-caption').length).toBe(0);
+      expect(assistant.textContent).not.toMatch(/never validates|there is no language model/i);
       // the retired provenance wording appears nowhere on the surface
       expect(assistant.textContent).not.toMatch(/answered from:/i);
     });
@@ -804,7 +791,8 @@ describe('P36V S-A · the contract holds on every mount surface', () => {
     // the rest of the presentation contract is unchanged on this surface
     expect(assistant.querySelector('.assistant-head-titles')).not.toBeNull();
     expect(assistant.querySelector('.assistant-answer')).not.toBeNull();
-    expect(assistant.querySelectorAll('.assistant-caption').length).toBe(1);
+    expect(assistant.querySelectorAll('.assistant-dock-note').length).toBe(1);
+    expect(assistant.querySelectorAll('.assistant-caption').length).toBe(0);
     expect(assistant.textContent).not.toMatch(/answered from:/i);
   });
 
@@ -818,7 +806,8 @@ describe('P36V S-A · the contract holds on every mount surface', () => {
     expect(assistant.querySelector('.assistant-head-titles')).not.toBeNull();
     const log = assistant.querySelector('.assistant-log')!;
     expect(precedes(log, assistant.querySelector('.assistant-composer')!)).toBe(true);
-    expect(assistant.querySelectorAll('.assistant-caption').length).toBe(1);
+    expect(assistant.querySelectorAll('.assistant-dock-note').length).toBe(1);
+    expect(assistant.querySelectorAll('.assistant-caption').length).toBe(0);
     expect(assistant.textContent).not.toMatch(/answered from:/i);
   });
 });
@@ -946,12 +935,11 @@ describe('P36V S-A · long values wrap; nothing forces horizontal overflow', () 
      * verbatim by the three `.assistant-caption` text assertions elsewhere in
      * this file — style is all this case has ever been about.
      */
-    const caption = ruleBody(assistantCss, '.assistant-caption');
-    expect(caption).toMatch(/color:\s*var\(--text-secondary\)/);
-    expect(caption).not.toMatch(/font-style:\s*italic/);
-    expect(caption).not.toMatch(/border-top:/);
+    // `.assistant-caption` was retired 2026-11-02; the note carries the register now.
     const note = ruleBody(assistantCss, '.assistant-dock-note');
     expect(note).toMatch(/color:\s*var\(--text-secondary\)/);
+    expect(note).not.toMatch(/font-style:\s*italic/);
+    expect(note).not.toMatch(/border-top:/);
     const size = /font-size:\s*(\d+(?:\.\d+)?)px/.exec(note);
     expect(size, 'the dock note must declare its own size — it is the panel\'s last paragraph').not.toBeNull();
     expect(Number(size![1])).toBeGreaterThanOrEqual(11.5);

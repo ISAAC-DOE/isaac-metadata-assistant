@@ -101,7 +101,6 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { ASSISTANT_NO_MODEL_CLAIM } from '../lib/assistant';
 
 const cssFiles = import.meta.glob('../**/*.css', {
   query: '?raw',
@@ -322,12 +321,13 @@ describe('the composer dock un-sticks on a short, narrow viewport', () => {
    * The three alternatives the review refused. None of them is a thing this fix
    * could have quietly done instead, and each has a mechanical signature.
    */
-  it('the claim was not shortened and the dock did not gain a height cap', () => {
-    expect(ASSISTANT_NO_MODEL_CLAIM.length).toBe(92);
+  it('the dock did not gain a height cap', () => {
+    // ~~the no-model claim was not shortened (92 characters)~~ — the claim was retired
+    // 2026-11-02; the cap/hide ban on the dock itself stands.
 
     const block = mediaBlocks(assistantCss).find((b) => b.query === SHORT_AND_NARROW)!;
     // no rule in the band caps or hides the disclosure or the dock
-    for (const sel of ['.assistant-foot', '.assistant-no-model']) {
+    for (const sel of ['.assistant-foot', '.assistant-dock-note']) {
       const body = ruleBody(block.body, sel);
       expect(body).not.toMatch(/max-height/);
       expect(body).not.toMatch(/display:\s*none/);

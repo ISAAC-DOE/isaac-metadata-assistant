@@ -547,8 +547,8 @@ const RENDER_ALLOWLIST: Readonly<Record<string, string>> = {
   '1 advisory · non-gating':
     'product-truth copy, casing-and-copy.md:62 ("1 advisory warning (non-gating) …"); ' +
     'reached only because `.statusbar-advisory` matches [class*=status] by the BAR\'s name',
-  'local dev · no telemetry':
-    'runtime meta line, not a label; same [class*=status] accident as the row above',
+  /* 'local dev · no telemetry' was here: the status-bar environment badge was retired
+     2026-11-02, so the exemption is stale and goes with it. */
 
   /* ── (5) UNBRIEFED RESIDUE OF THE SAME CLASS, INVENTORIED NOT HIDDEN. Every
      one is a real Register 1 violation in a file this slice could have edited.

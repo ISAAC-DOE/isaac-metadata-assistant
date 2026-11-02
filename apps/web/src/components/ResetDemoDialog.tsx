@@ -378,9 +378,7 @@ export function ResetDemoDialog() {
                 walkthrough alone. Resetting discards the current progress on the built-in
                 examples in it and restores all five to their original state. The rows on My
                 Experiments are this walkthrough&rsquo;s own copies, so they are what is reset; the
-                ordinary workspace is not in this scope and this control cannot reach it. Real
-                data is unaffected — this workspace runs in synthetic-only mode: the examples
-                come from committed files and every upload is refused.
+                ordinary workspace is not in this scope and this control cannot reach it.
               </p>
 
               {preview.status === 'error' && (

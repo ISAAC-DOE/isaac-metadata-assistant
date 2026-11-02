@@ -359,7 +359,8 @@
   background: var(--screen-base);
 }
 
-/* Mode chip (Synthetic) — persistent, load-bearing. */
+/* Mode chip — shown only inside a worked-example session, or for an anomalous
+   `health.mode` (see `WorkspaceChip` in TopBar.tsx). */
 .mode-chip {
   display: inline-flex;
   align-items: center;
@@ -371,52 +372,6 @@
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 500;
-}
-
-/* B-22 — the chip's claims, shown on focus and on hover. The wrapper is what the pointer
-   hovers, so the popover is reachable without it closing under the cursor. `position:
-   absolute` against the wrapper takes no space in the top bar, so no layout measurement of
-   the bar moves. Existing tokens only; the text colour is `--text-primary` (13.3:1 on the
-   surface), not a muted tone, because this is the reading surface for a disclosure. */
-.mode-chip-wrap {
-  position: relative;
-  display: inline-flex;
-}
-.mode-chip-popover {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 60;
-  box-sizing: border-box;
-  width: min(340px, calc(100vw - 32px));
-  padding: var(--space-sm) var(--space-md);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  box-shadow: var(--shadow-screen);
-  color: var(--text-primary);
-  font-size: 12px;
-  font-weight: 400;
-  line-height: var(--line-height-normal);
-  text-align: left;
-  white-space: normal;
-}
-/* The claims are a continuation of "Workspace —" in the accessible name, so they start
-   lower-case. As a standalone block that reads as a typo; the capital is presentation only
-   and the text node is unchanged (the test compares it to the accessible name). */
-/* HOVER BRIDGE (WCAG 1.4.13 "hoverable"): the popover sits 6px below the chip, outside the
-   hover wrapper, so a pointer moving down onto it crossed a gap and closed it. This invisible
-   strip is part of the popover (a child), so the pointer is never outside both. */
-.mode-chip-popover::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: -8px;
-  height: 8px;
-}
-.mode-chip-popover::first-letter {
-  text-transform: uppercase;
 }
 
 /* ---- LeftNav (230px) ----------------------------------------------- */
@@ -452,6 +407,11 @@
 /*
  * A DEMOTED DESTINATION'S PARENT SLOT — weaker than `.active`, deliberately.
  *
+ * OUTLINED, NOT FILLED (2026-11-02). It used `.active`'s tint at a lower weight,
+ * which read as a second active item — worst on the phone's one-row nav, where the
+ * two sit side by side. A border with no fill says "the section you are inside"
+ * without competing with the page you are on.
+ *
  * Project Memory and Statistics left the primary list (2026-09-13) and are now
  * reached from `Settings & API`. A reader standing on one of them would
  * otherwise see a navigation list with nothing marked in it at all. This marks
@@ -464,7 +424,8 @@
  * affordance and it must stay visually distinguishable from `.active`.
  */
 .nav-item.ancestor {
-  background: var(--action-tint);
+  background: transparent;
+  border-color: var(--border-strong);
   color: var(--text-secondary);
   /* The SAME rung `.nav-item` already rests at — the ancestor is distinguished
      by tint alone, not by weight, which is what keeps it visibly weaker than
@@ -474,18 +435,6 @@
 }
 .nav-item svg { flex: none; color: var(--text-tertiary); }
 .nav-item.active svg { color: var(--action-hover); }
-.nav-footer {
-  margin-top: auto;
-  padding: 12px 11px 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.nav-version {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--text-quaternary);
-}
 
 /* ---- StatusBar (52px) ---------------------------------------------- */
 .statusbar {
@@ -654,12 +603,6 @@
   display: inline-flex;
   align-items: center;
   gap: 14px;
-}
-/* 2.46:1 -> 5.32:1. See the note above `.statusbar-pending`. */
-.statusbar-right {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--text-slate);
 }
 
 /* ---- GraphStatusChip (memory plane · advisory, never a validator) --- */
@@ -895,24 +838,25 @@
   /* Panes stack vertically instead of sitting in a fixed-width row. */
   .screen-body { flex-direction: column; }
 
-  /* LeftNav collapses from a 230px column into a compact, wrapping top nav
-     (a simple layout collapse — no new nav paradigm). */
+  /* LeftNav collapses from a 230px column into ONE top row (2026-11-02). It used
+     to wrap, which cost a phone two rows of chrome on every screen; it now scrolls
+     sideways inside its own box when the destinations do not fit, and the page
+     itself never scrolls with it (`ALLOW-LEFTNAV-SCROLL` in e2e/layout-allowlist.ts). */
   .leftnav {
     width: 100%;
     flex-direction: row;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
     gap: 4px;
     padding: 8px 10px;
     border-right: none;
     border-bottom: 1px solid var(--border);
   }
-  .nav-item { width: auto; }
-  .nav-footer {
-    margin-top: 0;
-    margin-left: auto;
-    padding: 0 6px;
-    flex-direction: row;
-    align-items: center;
+  .nav-item {
+    flex: none;
+    width: auto;
+    white-space: nowrap;
   }
 
   /* The bar wraps from here down: identity + controls keep row 1, the record
@@ -1133,11 +1077,6 @@
   /* Trim the search trigger to its icon at phone widths. */
   .topbar-search-label,
   .topbar-search-kbd { display: none; }
-  /* The build label leaves the collapsed nav at phone width (2026-10-18): it
-     took a row of its own under the four destinations on every screen. The same
-     version is stated in Settings (App Version) and in Copy Diagnostics, and the
-     label stays in the DOM for every non-phone width. */
-  .nav-footer { display: none; }
   /* PHONE ONLY: the supplementary mono filename is dropped. Between 641 and
      1024px it stays visible — the crumb has its own row there and the filename
      fits on it: at 768 that second row runs 29→485.4, i.e. 456.4px of a 710px

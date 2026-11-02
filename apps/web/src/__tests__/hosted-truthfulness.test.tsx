@@ -2,9 +2,9 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { StatusBar } from '../components/StatusBar';
-import { LABELS } from '../lib/labels';
-import { ENVIRONMENT_LABEL, RUNTIME_BADGE, VERSION_BADGE } from '../lib/runtimeContext';
+import { LeftNav } from '../components/LeftNav';
 import { settingsConcepts, settingsFactsFrom } from '../lib/settingsContent';
 
 /*
@@ -12,15 +12,18 @@ import { settingsConcepts, settingsFactsFrom } from '../lib/settingsContent';
  *
  * Hosted QA found the always-visible chrome asserting local-development facts on
  * the SLAC-hosted deployment: the left-nav badge read `isaac v0.1.0 · local` and
- * the status-bar footer read `local · offline · no telemetry`. Both were
- * literals, so neither could ever have been right in both places.
+ * the status-bar footer read `local · offline · no telemetry`. They were then
+ * derived (`isaac v0.1.0 · local dev` / `hosted preview · no telemetry`).
  *
- * These tests pin BOTH halves of the rule, because the fix must not swap one
- * false confident string for another:
- *   · a HOSTED build must claim no local-development fact;
- *   · a LOCAL build must still say, truthfully, that it is local.
+ * 2026-11-02 — BOTH BADGES RETIRED at the owner's direction (standing disclaimers
+ * removed; the version is shown in Settings → This Build). A build with no
+ * environment label in its chrome cannot be wrong about it, so this file now pins
+ * "no false claim" instead of "the right label is present":
+ *   · neither the hosted nor the local chrome renders an environment label, a
+ *     telemetry claim or a local-development fact;
+ *   · no frontend source carries either retired literal (negative-controlled below).
  *
- * They also pin the claims the frontend is NOT allowed to make at all: that it
+ * It still pins the claims the frontend is NOT allowed to make at all: that it
  * verified the deployment's access edge, or that it classified data as synthetic
  * by looking at content. Neither is observable from the browser, and no
  * real-vs-synthetic detector exists anywhere in the backend
@@ -28,25 +31,25 @@ import { settingsConcepts, settingsFactsFrom } from '../lib/settingsContent';
  */
 
 /**
- * Load the derived labels as a HOSTED build. `isHostedBuild` is a comparison of
- * two compile-time literals that Vite folds at build time, so the only faithful
- * way to exercise the hosted branch is a fresh module registry with the env
- * stubbed — the same technique `backend-down-state.test.tsx` uses.
+ * Load the chrome as a HOSTED build. `isHostedBuild` is a comparison of two
+ * compile-time literals that Vite folds at build time, so the only faithful way to
+ * exercise the hosted branch is a fresh module registry with the env stubbed — the
+ * same technique `backend-down-state.test.tsx` uses.
  */
 async function loadHosted() {
   vi.resetModules();
   vi.stubEnv('VITE_API_BASE', '/krish/api');
-  const [api, runtimeContext, labels, statusBar] = await Promise.all([
+  const [api, runtimeContext, statusBar, leftNav] = await Promise.all([
     import('../lib/api'),
     import('../lib/runtimeContext'),
-    import('../lib/labels'),
     import('../components/StatusBar'),
+    import('../components/LeftNav'),
   ]);
   return {
     isHostedBuild: api.isHostedBuild,
     ...runtimeContext,
-    LABELS: labels.LABELS,
     StatusBar: statusBar.StatusBar,
+    LeftNav: leftNav.LeftNav,
   };
 }
 
@@ -64,56 +67,60 @@ afterEach(() => {
 const LOCAL_DEV_CLAIM =
   /\blocal\b|\blocally\b|localhost|127\.0\.0\.1|uvicorn|\boffline\b|your (own )?(machine|laptop|computer)/i;
 
-describe('runtime environment label — hosted build (VITE_API_BASE=/krish/api)', () => {
+/** Any environment label or telemetry claim in chrome — the retired badge class. */
+const ENVIRONMENT_BADGE =
+  /no telemetry|hosted preview|local dev|isaac v\d+\.\d+\.\d+\s*·|·\s*local\b/i;
+
+const RETIRED_BADGES = [
+  'isaac v0.1.0 · local',
+  'local · offline · no telemetry',
+  'isaac v0.1.0 · local dev',
+  'local dev · no telemetry',
+  'isaac v0.1.0 · hosted preview',
+  'hosted preview · no telemetry',
+];
+
+function chromeText(StatusBarC: typeof StatusBar, LeftNavC: typeof LeftNav): string {
+  const footer = render(<StatusBarC note="a note" />).getByRole('contentinfo');
+  const nav = render(
+    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <LeftNavC active="experiments" />
+    </MemoryRouter>,
+  ).getByRole('navigation', { name: 'Primary' });
+  return `${footer.textContent} ${nav.textContent}`;
+}
+
+describe('runtime environment — hosted build (VITE_API_BASE=/krish/api)', () => {
   it('is decided by the one existing mechanism, not a second one', async () => {
     const hosted = await loadHosted();
     expect(hosted.isHostedBuild).toBe(true);
+    // Still used, by Copy Diagnostics only.
     expect(hosted.ENVIRONMENT_LABEL).toBe('hosted preview');
   });
 
-  it('names the version badge without any local-development claim', async () => {
+  it('renders footer and nav with no local-development claim and no environment badge', async () => {
     const hosted = await loadHosted();
-    expect(hosted.LABELS.version).toBe('isaac v0.1.0 · hosted preview');
-    expect(hosted.LABELS.version).not.toMatch(LOCAL_DEV_CLAIM);
-    // The version itself is still stated — the fix removed a false claim, not a
-    // useful one.
-    expect(hosted.LABELS.version).toContain('isaac v0.1.0');
-  });
-
-  it('renders a status-bar footer with no local-development claim', async () => {
-    const hosted = await loadHosted();
-    expect(hosted.RUNTIME_BADGE).toBe('hosted preview · no telemetry');
-    const view = render(<hosted.StatusBar note="a note" />);
-    const footer = view.getByRole('contentinfo');
-    expect(footer.textContent).toContain('hosted preview · no telemetry');
-    expect(footer.textContent).not.toMatch(LOCAL_DEV_CLAIM);
-  });
-
-  it('names no deployment, host, cluster or identity product in the chrome', async () => {
-    const hosted = await loadHosted();
-    // `isHostedBuild` only reports "a non-default API base was compiled in". It
-    // does not identify WHICH deployment, so the badges must not pretend to.
-    for (const badge of [hosted.VERSION_BADGE, hosted.RUNTIME_BADGE]) {
-      expect(badge).not.toMatch(/authentik|ingress|kubernetes|k8s|s3df|slac|krish/i);
-    }
+    const text = chromeText(hosted.StatusBar, hosted.LeftNav);
+    expect(text).not.toMatch(LOCAL_DEV_CLAIM);
+    expect(text).not.toMatch(ENVIRONMENT_BADGE);
   });
 });
 
-describe('runtime environment label — local build (no VITE_API_BASE)', () => {
-  it('still says, truthfully, that it is a local development build', () => {
-    expect(ENVIRONMENT_LABEL).toBe('local dev');
-    expect(VERSION_BADGE).toBe('isaac v0.1.0 · local dev');
-    expect(RUNTIME_BADGE).toBe('local dev · no telemetry');
-    expect(LABELS.version).toBe(VERSION_BADGE);
+describe('runtime environment — local build (no VITE_API_BASE)', () => {
+  it('renders footer and nav with no environment badge either', () => {
+    expect(chromeText(StatusBar, LeftNav)).not.toMatch(ENVIRONMENT_BADGE);
+  });
+});
+
+describe('runtime environment — the retired badges, proven against the ban (negative control)', () => {
+  it.each(RETIRED_BADGES)('the ban rejects %s', (retired) => {
+    expect(retired).toMatch(ENVIRONMENT_BADGE);
   });
 
-  it('renders the local footer badge', () => {
-    const view = render(<StatusBar note="a note" />);
-    expect(view.getByRole('contentinfo').textContent).toContain('local dev · no telemetry');
-  });
-
-  it('drops `offline`, which was never true of a page talking to a backend', () => {
-    expect(RUNTIME_BADGE).not.toMatch(/\boffline\b/);
+  it('every retired HOSTED-false badge is also a local-development claim', () => {
+    for (const retired of ['isaac v0.1.0 · local', 'local · offline · no telemetry']) {
+      expect(retired).toMatch(LOCAL_DEV_CLAIM);
+    }
   });
 });
 
@@ -130,14 +137,21 @@ const concepts = settingsConcepts(
   }),
 );
 
-const concept = (id: string) => {
-  const found = concepts.find((c) => c.id === id);
-  if (!found) throw new Error(`no such concept: ${id}`);
-  return found;
-};
+/** A claim that the frontend (or ISAAC) verified the access edge or a sign-in. */
+const VERIFIED_EDGE =
+  /(this app|the app|ISAAC|it)\s+(has\s+)?(verified|confirmed|checked)\s+(the\s+|your\s+)?(sign-?in|edge|access|identity)|\bverified to sit behind\b/i;
 
-describe('Settings copy — the authentication boundary keeps four things separate', () => {
-  const auth = concept('authentication-boundary');
+/*
+ * The Settings concept cards are being retired with the Privacy tab (shell Task 2), so
+ * each block below runs only while its card exists, and pins only "no false claim".
+ * Presence of the cards' own disclaimers ("never something this app verified", "cannot
+ * tell real data from synthetic", "real mode intentionally refuses to start") is no
+ * longer required (2026-11-02).
+ */
+describe('Settings copy — the authentication boundary over-claims in neither direction', () => {
+  const auth: { summary: string; detail: string; more?: { text: string } } = concepts.find(
+    (c) => c.id === 'authentication-boundary',
+  ) ?? { summary: '', detail: '' };
   const text = `${auth.summary} ${auth.detail} ${auth.more?.text ?? ''}`;
 
   it('never says there is no sign-in or no authentication', () => {
@@ -149,42 +163,22 @@ describe('Settings copy — the authentication boundary keeps four things separa
     expect(text).not.toMatch(/\bunauthenticated\b/i);
   });
 
-  it('states edge access as how the deployment is operated, never as verified', () => {
-    /*
-     * FINDING F — this used to assert `/single sign-on/i`, which pinned a claim
-     * nothing observed supports. "Institutional single sign-on" reads plainest
-     * as "your institutional account signs you in"; the one unauthenticated
-     * observation of the deployment's login flow (`docs/developer-guide-k8s.md`,
-     * 2026-08-01) found only an Email-or-Username field and an ORCID button at
-     * the identification stage, with later stages UNOBSERVED. The copy was
-     * WEAKENED rather than specified, because naming the identity product is
-     * forbidden on every Settings tab (see the withheld list below, and the
-     * same list in `settings-page.test.tsx` and the backend's own guard).
-     *
-     * The assertion is inverted rather than deleted: the retired phrase must
-     * not come back, and the edge must still be described as a real sign-in
-     * step, so this does not drift into "no authentication" — which the test
-     * above it already forbids.
-     */
+  it('never claims the edge, or a sign-in, was verified by this app', () => {
+    // FINDING F: "single sign-on" pinned a claim nothing observed supports, and the
+    // frontend cannot see the edge at all. The retired phrase stays banned, and so does
+    // any claim that this app verified access.
     expect(auth.detail).not.toMatch(/single sign-on/i);
-    expect(auth.detail).toMatch(/sit behind an interactive sign-in step/i);
-    expect(auth.detail).toMatch(/a browser session is established there/i);
-    expect(auth.detail).toMatch(/how the deployment is operated/i);
-    expect(auth.detail).toMatch(/never something this app verified/i);
-    expect(auth.detail).toMatch(/the browser cannot see the edge/i);
+    expect(text).not.toMatch(VERIFIED_EDGE);
   });
 
-  it('states app-managed identity, the shared key, and key management separately', () => {
-    // (b) app-managed identity / roles
-    expect(auth.detail).toMatch(
-      /ISAAC itself does not manage user accounts, profiles, or application roles/i,
-    );
-    // (c) the optional shared bearer key
-    expect(auth.detail).toMatch(/one shared bearer key/i);
-    expect(auth.detail).toMatch(/no way to report whether either restriction is active/i);
-    // (d) per-user API-key management
-    expect(auth.detail).toMatch(/no per-user API-key management/i);
-    expect(auth.detail).toMatch(/no operation creates, lists, revokes, or rotates a credential/i);
+  it('the verified-edge ban is proven on the claims it exists to stop', () => {
+    for (const claim of [
+      'This app verified the sign-in edge.',
+      'ISAAC confirmed your sign-in.',
+      'The deployment is verified to sit behind single sign-on.',
+    ]) {
+      expect(claim).toMatch(VERIFIED_EDGE);
+    }
   });
 
   it('names no identity product, host or infrastructure component', () => {
@@ -196,19 +190,6 @@ describe('Settings copy — the authentication boundary keeps four things separa
 });
 
 describe('Settings copy — synthetic-only is a MODE claim, never a content claim', () => {
-  const synthetic = concept('synthetic-data-only');
-  const noReal = concept('no-real-experiment-data');
-
-  it('says the app cannot tell real data from synthetic', () => {
-    expect(synthetic.detail).toMatch(/cannot tell real data from synthetic/i);
-    expect(noReal.detail).toMatch(/nothing in the app inspects that text to judge whether it is real/i);
-  });
-
-  it('states that real mode intentionally refuses to start', () => {
-    expect(synthetic.detail).toMatch(/real mode intentionally refuses to start/i);
-    expect(synthetic.detail).toMatch(/guardrails it would need do not exist yet/i);
-  });
-
   it('claims no content-based real/synthetic classification anywhere', () => {
     const all = concepts
       .flatMap((c) => [c.heading, c.summary, c.detail, c.more?.text ?? ''])
@@ -314,6 +295,13 @@ describe('user-facing copy — no content-based real/synthetic classification, a
 
   it.each(CONTENT_CLASSIFICATION_CLAIM)('never claims %s', (_label, pattern) => {
     const offenders = files.filter((path) => pattern.test(renderedCopy(path)));
+    expect(offenders).toEqual([]);
+  });
+});
+
+describe('user-facing copy — no retired environment badge in any frontend source', () => {
+  it.each(RETIRED_BADGES)('no source carries %s', (retired) => {
+    const offenders = frontendSourceFiles().filter((path) => renderedCopy(path).includes(retired));
     expect(offenders).toEqual([]);
   });
 });

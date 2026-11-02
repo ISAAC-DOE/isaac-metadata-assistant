@@ -1683,7 +1683,10 @@ button.assistant-source-chip-nav:focus-visible {
 }
 /* ---- The dock's ONE note (UX-022) ----------------------------------- */
 /*
- * THREE STRIPS BECAME ONE PARAGRAPH. Measured before (real Chromium, 1280x800,
+ * ONE LINE (2026-11-02): only the grounded-scope helper remains; the no-model
+ * disclosure and the advisory caption that followed it were retired.
+ *
+ * THREE STRIPS BECAME ONE PARAGRAPH (UX-022, the history). Measured before (real Chromium, 1280x800,
  * the 308px record rail): `.assistant-composer-helper` 33px, then
  * `.assistant-no-model` 33px behind a 6px gap, then `.assistant-caption` 59.5px
  * behind a 10px margin, a 9px pad and a hair divider — 125.5px of fine print in
@@ -1737,35 +1740,9 @@ button.assistant-source-chip-nav:focus-visible {
   color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
-/* The no-model disclosure, immediately after the grounded-scope helper in the
- * same note.
- *
- * ~~It reads as a SECOND note in the same block rather than as a new region: a
- * 6px gap, no divider…~~ — UX-022 took the argument one step further than the
- * sentence it replaces did: the two "belong together" because one says what the
- * assistant can answer and the other says where the question goes, and a 6px
- * gap between two `<p>`s is still two blocks. They are now two sentences of one
- * paragraph, which is what the reasoning was reaching for.
- *
- * ~~NOT `font-style: italic`. `.assistant-caption` below owns the italic
- * advisory register; this is a checkable fact about the build, and the two
- * registers must stay distinguishable.~~ — WITHDRAWN, because the italic went:
- * see `.assistant-caption` below for the full reasoning. The distinction this
- * sentence protected is now carried by sentence order rather than by a second
- * font style in a 275px column.
- *
- * COLOUR IS `--text-secondary`, the same token `.assistant-composer-helper`
- * carries and for the same measured reason: 6.86:1 on the --assist-tint rail
- * (P33 S2 review). The tertiary token would have been the closer match to this
- * text's visual weight and does not clear AA here, so weight is carried by
- * position instead of by contrast. The size now comes from
- * `.assistant-dock-note` (11.5px), which is the paragraph this sentence is part
- * of — not from a per-sentence declaration. */
-.assistant-no-model {
-  margin: 0;
-  color: var(--text-secondary);
-  overflow-wrap: anywhere;
-}
+/* ~~`.assistant-no-model`~~ and ~~`.assistant-caption`~~ — the two standing claims
+ * that shared this note were retired 2026-11-02 (owner's direction: no standing
+ * disclaimers). The note now carries the grounded-scope helper alone. */
 .assistant-composer-notice {
   margin: 8px 0 0;
   padding: 8px 10px;
@@ -1776,29 +1753,6 @@ button.assistant-source-chip-nav:focus-visible {
   border: 1px solid var(--assist-border);
   border-radius: var(--radius-inner);
 }
-/* The advisory caption — still the last words in the panel, now the last
- * sentence of the note above rather than a fourth strip below it.
- *
- * ~~a subtle hair divider above, 11px, secondary colour — plus (P36V S-A)
- * ITALIC, so it is legibly a standing disclaimer rather than another line of
- * panel copy.~~ WITHDRAWN by UX-022, and the reasoning is kept because it was
- * sound for the layout it described. The italic register existed to mark this
- * sentence as a disclaimer DISTINCT from the two factual claims stacked above
- * it; merged into one note there is nothing left to distinguish it from, the
- * distinction is carried by sentence order, and a second font style in a 275px
- * column is the `overused-font` finding the in-browser detector reported on
- * this dock. The divider went with it: a hairline between two halves of one
- * paragraph is a rule drawn through a sentence.
- *
- * THE COPY IS UNTOUCHED. `SUBORDINATE_CAPTION` still asserts, verbatim, that
- * the Assistant is advisory, that it NEVER VALIDATES, and that deterministic
- * validation remains authoritative. Style changed; the claim did not. */
-.assistant-caption {
-  margin: 0;
-  color: var(--text-secondary);
-  overflow-wrap: anywhere;
-}
-
 /* ---- GuidedPrompt (S4) --------------------------------------------- */
 .guided {
   background: var(--surface);

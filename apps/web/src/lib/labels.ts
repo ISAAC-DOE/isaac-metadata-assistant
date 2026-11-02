@@ -10,7 +10,6 @@
  * technical token (XANES, sha256, JSON paths, v1.05) is never Title-Cased.
  */
 
-import { VERSION_BADGE } from './runtimeContext';
 import { canonicalStepLabel } from './workflowSteps';
 
 // Technical identifiers that must render exactly as written (never re-cased).
@@ -183,9 +182,8 @@ const SETTINGS_WALKTHROUGH = 'Guided Walkthrough';
 export const LABELS = {
   // App / brand
   brand: 'ISAAC',
-  // Derived, never a literal: the old `isaac v0.1.0 · local` rendered on the
-  // hosted deployment too, where "local" is false. See `lib/runtimeContext.ts`.
-  version: VERSION_BADGE,
+  // ~~`version`~~ — the left-nav build badge (`isaac v0.1.0 · local dev`) was retired
+  // 2026-11-02 with the nav footer; the version is shown in Settings → This Build.
 
   // Nav destinations
   navExperiments: 'My Experiments',
@@ -772,73 +770,15 @@ export const LABELS = {
   chipMentorReview: 'Mentor Review',
   chipDraft: 'Draft',
   /*
-   * The mode chip's base label in the ORDINARY workspace.
+   * The mode chip, shown ONLY while a worked-example session is open (or, in place
+   * of this, an anomalous `health.mode` — see `WorkspaceChip` in TopBar.tsx).
    *
-   * DELIBERATELY NEUTRAL, and this replaces "Example workspace" — which was a
-   * FALSE label here, not merely a stale one. The five built-in examples used to
-   * be materialised into the ordinary workspace on every read; they are created
-   * only inside a worked-example session, so on every ordinary screen "Example
-   * workspace" named this scope after content this build never puts there.
-   *
-   * PHRASED AS WHAT THE BUILD DOES, never as what the directory holds. "The
-   * ordinary workspace contains no examples at all" is what this comment used to
-   * say, and it is a claim about CONTENTS that nothing measures:
-   * `list_experiments(None)` enumerates whatever is on disk and there is no startup
-   * migration, so a workspace that already held the five still lists them. See
-   * `ORDINARY_ONLY` in `components/TopBar.tsx`, where two successive versions of
-   * that contents claim had to be retired, and note that the second was written by
-   * a reader of the first correction.
-   *
-   * A chip is still rendered rather than nothing, for two reasons that are about
-   * truth rather than decoration: it is the ONLY surface that reports an
-   * UNEXPECTED `health.mode` (see `anomalousMode` in `components/TopBar.tsx` — this
-   * cited `modeLabel`, which that file no longer has), and its
-   * accessible name is where this deployment's two unconditional claims — file
-   * upload is refused, no official institutional record is shown — are carried on
-   * every screen. Neither has anywhere else to go on a record surface.
-   *
-   * "workspace" scopes the claim to what the reader is looking at: since Slice 2A
-   * the deployment may additionally run a protected read-only diagnostic over an
-   * isolated test database, so an unqualified whole-deployment claim would
-   * over-claim. That scoping is why the word "workspace" is load-bearing and must
-   * survive any rewording.
-   *
-   * The full governance disclosure still lives in the Governance banner, the
-   * Governance & Safety policy tab and the Help panel, whose exact technical
-   * wording is deliberately UNCHANGED — a chip is not the place to make a
-   * governance guarantee, but it must not be the place a guarantee quietly
-   * disappears either.
-   */
-  modeOrdinaryWorkspace: 'Workspace',
-  /*
-   * Shown INSTEAD of `modeOrdinaryWorkspace` while a worked-example session is
-   * open — the one scope in which example records really are present.
-   *
-   * The temporariness of the scope (these records are discarded when the
-   * walkthrough ends) is stated in the accessible name rather than crammed into
-   * the label, and the persistent worked-example bar states it in visible text
-   * beside the controls that act on the scope.
+   * ~~`modeOrdinaryWorkspace: 'Workspace'`, `modeTestDbDiagnostics`,
+   * `modeTestDbCheckFailed`~~ — retired 2026-11-02 with the ordinary-scope chip and
+   * its accessible-name disclosure (owner's direction: no standing disclaimers). The
+   * retired "Example workspace" label stays banned by `mode-chip.test.tsx`.
    */
   modeWorkedExample: 'Worked Example',
-  // Deliberate register exception (see the header: register 1 is Title Case).
-  // "DB" is a generic word, not a database name; neither string names a host,
-  // database, user, or secret.
-  //
-  // THESE ARE NO LONGER APPENDED TO THE CHIP'S VISIBLE TEXT. They were, as
-  // "Example workspace · test DB diagnostics", which put an infrastructure
-  // disclosure in the primary header of every product screen. The disclosure did
-  // not move OUT of the chip — it is still derived from `health.database` and
-  // still stated in the chip's accessible name, alongside four other surfaces
-  // that already carry it at length (the Governance banner, Governance & Safety →
-  // Policy, the Help panel, and Settings → Data & Privacy). Only the visible
-  // suffix is gone. Retained as labels because the accessible name and the
-  // technical surfaces still read them, and because `product-facing-language`
-  // pins their exact wording.
-  modeTestDbDiagnostics: 'test DB diagnostics',
-  // NOT "unavailable": /api/health does zero I/O, so this reflects the last
-  // diagnostic RUN recorded in the server process, which may be stale. See the
-  // reasoning comment in components/TopBar.tsx before changing this wording.
-  modeTestDbCheckFailed: 'test DB check failed',
 
   // Evidence-support classes (P28.5) — a separate axis from the status chips above.
   chipEvSupported: 'Supported',
@@ -1728,12 +1668,11 @@ export const LABELS = {
   helpOnPageEvidence: 'The evidence this record holds, and the source each entry cites.',
   helpOnPageExport: 'A dry run: what would still refuse the export. Nothing is written here.',
   helpOnPageImports: 'Rebuild a past experiment; nothing becomes a value until you review it.',
-  // Two tabs with two scopes: the workspace's records, and this build's own checks.
-  helpOnPageStatistics: "Workspace record counts and this build's own checks; nothing here gates export.",
-  helpOnPageSettings: "This deployment's privacy boundaries, integrations and developer tools.",
-  helpOnPageGovernance: 'Check a record file against the official schema, or browse it. Nothing is stored.',
-  helpOnPageMemory: "A developer map of this project's own files and docs: leads to verify, never truth.",
-  helpOnPageLoad: 'The worked example, and why your own files cannot be loaded in this build.',
+  helpOnPageStatistics: 'Workspace record counts and checks.',
+  helpOnPageSettings: "This deployment's integrations and developer tools.",
+  helpOnPageGovernance: 'Check a record file against the official schema, or browse it.',
+  helpOnPageMemory: "A developer map of this project's own files and docs.",
+  helpOnPageLoad: 'The guided walkthrough and its worked example.',
   helpOnPageUnknown: 'This address matches no screen in ISAAC.',
   helpWalkthroughOpen: 'The Guided Walkthrough is open in this tab.',
 

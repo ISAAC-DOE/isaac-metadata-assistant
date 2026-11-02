@@ -621,9 +621,47 @@ const REQUIRED_CLAIMS: [string, RegExp][] = [
   ],
 ];
 
-describe('UX-003/UX-004 §2 · the Help panel states the replacement claims', () => {
-  it.each(REQUIRED_CLAIMS)('states %s', (_what, pattern) => {
-    expect(helpPanelText()).toMatch(pattern);
+/*
+ * 2026-11-02 — THE FILE-READER AND UPLOAD-ROUTE SENTENCES WERE RETIRED from "Where
+ * values come from" at the owner's direction (standing disclaimers removed). Their
+ * presence requirements are no longer asserted; the functional claims (who puts a value
+ * in, the three gates, where evidence lives, what dictation stores) still are. The
+ * "no false claim" half is unchanged: §5's three ban families still run over the whole
+ * popover, and `upload-claim-parity` §1/§3–§5 still forbid any absolute "no file is
+ * read" or "no upload route" claim anywhere in `src`.
+ */
+const RETIRED_REQUIREMENTS = new Set([
+  'no control reads one of your files and fills a field from it',
+  'the upload refusal is scoped to the upload ROUTE, not stated of the app',
+  'the record validator is named as one of the two file readers',
+  'the CSV / campaign-sheet comparison is named as the other',
+  'what those two do read is applied to no record',
+  'no control other than those four accepts a file',
+  'the Schema Proposals drafts loader is named as the fourth file reader',
+  'and the fourth is stated to send only a proposal the reader saves, never the file',
+  'the historical-import file staging is named as the third file reader',
+  'and the third is stated to send no part of the file',
+]);
+
+describe('UX-003/UX-004 §2 · the Help panel states the functional claims', () => {
+  it.each(REQUIRED_CLAIMS.filter(([what]) => !RETIRED_REQUIREMENTS.has(what)))(
+    'states %s',
+    (_what, pattern) => {
+      expect(helpPanelText()).toMatch(pattern);
+    },
+  );
+
+  it('every retired requirement names a real entry (the set cannot rot silently)', () => {
+    const labels = new Set(REQUIRED_CLAIMS.map(([what]) => what));
+    for (const retired of RETIRED_REQUIREMENTS) expect(labels.has(retired), retired).toBe(true);
+  });
+
+  it('if Help mentions reading a file again, it names every reader (no half-disclosure)', () => {
+    const text = helpPanelText();
+    if (!/\b(reads?|opens?)\b[^.]{0,30}\bfiles?\b|\bfile you pick\b/i.test(text)) return;
+    for (const pattern of [/validator/i, /(csv|campaign[- ]sheet)/i, /historical import|file staging/i, /schema proposals/i]) {
+      expect(text).toMatch(pattern);
+    }
   });
 });
 

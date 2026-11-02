@@ -105,6 +105,19 @@ export const OVERFLOW_ALLOWANCES: readonly OverflowAllowance[] = [
       '280px-tall box.',
     evidence: 'apps/web/src/screens/screens.css:2637-2648 — `.api-samples-code { overflow: auto; white-space: pre; }`',
   },
+  {
+    id: 'ALLOW-LEFTNAV-SCROLL',
+    match: '.leftnav',
+    // 2026-11-02: the collapsed (<=1024px) primary nav became ONE row that scrolls
+    // sideways instead of wrapping onto a second row. Shared chrome, so every surface.
+    surfaces: [ANY_SURFACE],
+    reason:
+      'The phone/tablet primary navigation is a single row of destinations. When they do not ' +
+      'fit, the row scrolls sideways INSIDE its own box (every item is a real link, reachable ' +
+      'by Tab, which scrolls it into view); the page itself never scrolls with it.',
+    evidence:
+      'apps/web/src/components/chrome.css — `@media (max-width: 1024px) .leftnav { flex-wrap: nowrap; overflow-x: auto; }`',
+  },
 ];
 
 /**
@@ -123,6 +136,15 @@ export const OVERFLOW_ALLOWANCES: readonly OverflowAllowance[] = [
  * name. Their text is never intended to be seen.
  */
 export const HIDDEN_TEXT_ALLOWANCES: readonly OverflowAllowance[] = [
+  {
+    // 2026-11-02: below 620px the floating Assistant pill is icon-only; its text label
+    // is clipped with the `.sr-only` pattern so it stays the button's accessible name.
+    id: 'ALLOW-ASSISTANT-TRIGGER-LABEL',
+    match: '.assistant-drawer-trigger-label',
+    surfaces: [ANY_SURFACE],
+    reason: 'Visually-hidden accessible name of the icon-only Assistant trigger at phone width.',
+    evidence: 'apps/web/src/components/assistant-drawer.css — `@media (max-width: 620px)`',
+  },
   {
     id: 'ALLOW-SR-ONLY',
     match: '.sr-only',

@@ -93,8 +93,9 @@ describe('every intent is indifferent to how much of the pending list it was giv
     const empty = { ...FULL, pending: [] };
     const r = runIntent('identify_next_missing_field', empty);
     expect(r.text).toContain('no pending fields');
-    // …and it still points at the deterministic audit rather than claiming completeness
-    // on its own authority.
-    expect(r.text).toContain('audit');
+    // …and it never claims completeness or readiness on its own authority. (It used to
+    // add "The deterministic audit remains the authority on completeness"; that caveat
+    // was shortened away 2026-11-02, so the no-false-claim half is what is pinned.)
+    expect(r.text).not.toMatch(/\b(complete|ready to export|can export|is ready)\b/i);
   });
 });

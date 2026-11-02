@@ -156,7 +156,7 @@ test.describe('@interaction the first-run offer', () => {
     // layer, so the tutorial store is untouched by construction — see `worked-example.ts`.
     // The claim under test is that DISMISSING opened nothing, and `sessionsCreated()`
     // above is the independent, wire-level form of it.)
-    await expect(chip(page)).toHaveText('Workspace');
+    await expect(chip(page)).toHaveCount(0); // no chip on the ordinary scope (2026-11-02)
 
     // And it is "not now", not "never": a fresh visit offers it again, because
     // dismissal is session-scoped and deliberately unpersisted.
@@ -287,22 +287,19 @@ test.describe('@interaction starting the walkthrough', () => {
     expect(((await ordinary.json()) as { experiments?: unknown[] }).experiments ?? []).toEqual([]);
   });
 
-  test('the mode chip names the scope, and its accessible name states what is in it', async ({ page, app }) => {
+  test('the mode chip appears only in the worked-example scope, and carries no disclaimer', async ({ page, app }) => {
     await app.open(experiments);
-    await expect(chip(page)).toHaveText('Workspace');
+    await expect(chip(page)).toHaveCount(0); // no chip on the ordinary scope (2026-11-02)
 
     await startFromEmptyState(page);
 
     await expect(chip(page)).toHaveText('Worked Example');
+    // ~~The accessible name carried the scope clauses plus "file upload is refused" and
+    // "no official institutional record is shown"~~ — retired 2026-11-02 (owner's
+    // direction). If a name is ever re-added it must open with the visible text.
     const name = await chip(page).getAttribute('aria-label');
-    expect(name!.startsWith('Worked Example')).toBe(true);
-    // In THIS scope there are records, and the chip says what they are and that
-    // they go away — the claims the ordinary branch must not make.
-    expect(name).toMatch(/belong to this walkthrough only/i);
-    expect(name).toMatch(/discarded when the walkthrough ends/i);
-    // The two unconditional claims survive in both scopes.
-    expect(name).toMatch(/file upload is refused/i);
-    expect(name).toMatch(/no official institutional record is shown/i);
+    if (name !== null) expect(name.startsWith('Worked Example')).toBe(true);
+    expect(name ?? '').not.toMatch(/file upload is refused|no official institutional record/i);
   });
 
   test('the worked-example bar states the scope and holds the two example controls', async ({ page, app }) => {
@@ -512,7 +509,7 @@ test.describe('@interaction leaving the walkthrough', () => {
     // The overlay and the chrome go.
     await expect(mark(page)).toHaveCount(0);
     await expect(bar(page)).toHaveCount(0);
-    await expect(chip(page)).toHaveText('Workspace');
+    await expect(chip(page)).toHaveCount(0); // no chip on the ordinary scope (2026-11-02)
 
     // The examples are gone from the screen, because the scope they lived in is
     // gone — the ordinary queue is empty again, on the same route.
@@ -668,7 +665,7 @@ test.describe('@interaction reloading', () => {
     await expect(page.getByRole('heading', { name: 'Start Your First Experiment' })).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('[data-tutorial-notice]')).toHaveCount(0);
     await expect(bar(page)).toHaveCount(0);
-    await expect(chip(page)).toHaveText('Workspace');
+    await expect(chip(page)).toHaveCount(0); // no chip on the ordinary scope (2026-11-02)
   });
 
   test('an EXPIRED session is recovered from honestly, not silently', async ({ page, app, tutorial }) => {
@@ -692,7 +689,7 @@ test.describe('@interaction reloading', () => {
     await expect(page.getByRole('heading', { name: 'Start Your First Experiment' })).toBeVisible();
     await expect(mark(page)).toHaveCount(0);
     await expect(bar(page)).toHaveCount(0);
-    await expect(chip(page)).toHaveText('Workspace');
+    await expect(chip(page)).toHaveCount(0); // no chip on the ordinary scope (2026-11-02)
 
     // The pointer is forgotten, so the notice does not recur on every navigation.
     expect(await page.evaluate(() => sessionStorage.getItem('isaac.tutorial.session.v1'))).toBeNull();
@@ -888,7 +885,7 @@ test.describe('@interaction the walkthrough is quiet', () => {
     // The walkthrough chrome goes, and the chip stops claiming the example scope.
     await expect(mark(page)).toHaveCount(0);
     await expect(bar(page)).toHaveCount(0);
-    await expect(chip(page)).toHaveText('Workspace');
+    await expect(chip(page)).toHaveCount(0); // no chip on the ordinary scope (2026-11-02)
 
     // The session really was discarded, checked at the API rather than inferred
     // from the screen — which is the point, since the screen is still showing it.

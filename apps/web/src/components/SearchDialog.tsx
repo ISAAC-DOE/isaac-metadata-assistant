@@ -493,8 +493,7 @@ function TriagePanel({ triage, headId, onRun, onSelect }: TriagePanelProps) {
         Cross-record triage
       </h3>
       <p className="search-group-sub">
-        Workspace-derived · current as of this fetch. A lead across all records — open
-        one to load the authoritative record. Never a verdict.
+        Workspace-derived · current as of this fetch. Open a record to see it in full.
       </p>
 
       <div className="search-triage-chips" role="group" aria-label="Cross-record triage filters">

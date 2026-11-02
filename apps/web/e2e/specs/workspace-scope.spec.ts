@@ -159,35 +159,14 @@ test.describe('@interaction the ordinary workspace', () => {
     await expect(page.getByRole('button', { name: 'Go to Guided Walkthrough' })).toHaveCount(0);
   });
 
-  test('names itself "Workspace" in the mode chip, and claims only what this build enforces', async ({ page, app }) => {
+  test('shows no mode chip on the ordinary scope, and so no disclaimer', async ({ page, app }) => {
     await app.open(ordinaryExperiments);
-
-    const chip = page.locator('span.mode-chip');
-    await expect(chip).toHaveCount(1);
-    // The visible text. `Example workspace` is GONE: it named this scope after content
-    // this build never puts there. A test that accepted either string would not have
-    // caught that, so this is exact.
-    await expect(chip).toHaveText('Workspace');
-
-    // WCAG 2.5.3: the accessible name opens with the visible text, and it still
-    // carries the two claims that hold unconditionally — plus, in this scope, the
-    // statement of what this build enforces about the built-in examples.
-    const name = await chip.getAttribute('aria-label');
-    expect(name, 'the mode chip must have an accessible name').toBeTruthy();
-    expect(name!.startsWith('Workspace'), `accessible name must open with the visible text: ${name}`).toBe(true);
-    // RE-POINTED TWICE, off two different EMPTINESS claims. The chip derives this branch
-    // from `sessionId === null` and reads no count, while `list_experiments(None)`
-    // enumerates whatever is on disk with no startup migration — so a workspace left
-    // holding the previously-seeded five lists them while the chip denies it. First
-    // `holds no records of its own`, then `the built-in example records are not in this
-    // workspace` (narrower, equally unmeasured). Now: what the build ENFORCES — the
-    // three canonical-seed entry points refuse a `None` session id. Argument in
-    // `src/components/TopBar.tsx`'s `ORDINARY_ONLY`.
-    expect(name).toMatch(/nothing in this build adds a built-in example record to this workspace/i);
-    expect(name).not.toMatch(/holds no records of its own/i);
-    expect(name).not.toMatch(/the built-in example records are not in this workspace/i);
-    expect(name).toMatch(/file upload is refused/i);
-    expect(name).toMatch(/no official institutional record is shown/i);
+    // 2026-11-02 (owner's direction): the ordinary-scope "Workspace" chip and its
+    // accessible-name disclosure were retired. The chip renders only inside a
+    // worked-example session or for an anomalous health.mode. The retired
+    // "Example workspace" label must not appear anywhere in the bar.
+    await expect(page.locator('span.mode-chip')).toHaveCount(0);
+    await expect(page.locator('header.topbar')).not.toContainText(/example workspace/i);
   });
 
   test('shows no worked-example chrome — not a disabled control, not a hint of one', async ({ page, app }) => {

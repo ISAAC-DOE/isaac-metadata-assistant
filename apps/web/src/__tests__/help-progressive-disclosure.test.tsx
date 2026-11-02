@@ -76,9 +76,11 @@ const BEHIND_THE_DISCLOSURE = [
   'Where evidence lives',
 ];
 
-const STAYS_OPEN = ['How it works', 'No guessing', 'Synthetic workspace'];
+// ~~'Synthetic workspace'~~ — the third open section was retired 2026-11-02 (owner's
+// direction: standing disclaimers removed).
+const STAYS_OPEN = ['How it works', 'No guessing'];
 
-describe('UX-021b · Help is four top-level items', () => {
+describe('UX-021b · Help is three top-level items', () => {
   /*
    * ~~"shows exactly four, and the fourth is the disclosure"~~ — SIX since
    * 2026-10-12, and the four it pinned are unchanged in order. Two rows were added
@@ -87,27 +89,31 @@ describe('UX-021b · Help is four top-level items', () => {
    * replaced a link to Settings inside "How it works"). Neither is a section of
    * explanation, which is why neither carries a `.help-section` heading.
    */
-  it('shows the four it always did, between "On This Page" and the walkthrough control', () => {
+  it('shows the three functional items, between "On This Page" and the walkthrough control', () => {
     const { container } = openHelp();
     const top = topLevelLabels(container);
-    expect(top).toHaveLength(6);
+    expect(top).toHaveLength(5);
     expect(top[0]).toBe('On This Page');
-    expect(top.slice(1, 4)).toEqual(STAYS_OPEN);
+    expect(top.slice(1, 3)).toEqual(STAYS_OPEN);
     // Named rather than matched loosely: the summary has to say what is behind
     // it, or the reduction hides the claims instead of deferring them.
-    expect(top[4]).toBe('How values, signals and gates work');
-    expect(top[5]).toBe('Guided Walkthrough');
+    expect(top[3]).toBe('How values, signals and gates work');
+    expect(top[4]).toBe('Guided Walkthrough');
+    // The retired section does not come back under either of its names.
+    expect(top).not.toContain('Synthetic workspace');
+    expect(top).not.toContain('Synthetic mode');
   });
 
-  // Eight since 2026-10-12 — "What each step checks" joined the disclosure.
-  it('deleted nothing: all eight sections are still in the DOM', () => {
+  // Seven since 2026-11-02 — "Synthetic workspace" was retired; every functional
+  // section (including the three gates) is still here.
+  it('deleted nothing functional: all seven sections are still in the DOM', () => {
     const { container } = openHelp();
     // The exact set, so removing a section fails here rather than quietly
     // shrinking a count nobody reads.
     expect(new Set(allHeadings(container))).toEqual(
       new Set([...STAYS_OPEN, ...BEHIND_THE_DISCLOSURE]),
     );
-    expect(allHeadings(container)).toHaveLength(8);
+    expect(allHeadings(container)).toHaveLength(7);
   });
 
   it('puts exactly the mechanism sections behind the disclosure', () => {
@@ -150,7 +156,13 @@ describe('UX-021b · Help is four top-level items', () => {
     const values = [...container.querySelectorAll('.help-section')].find(
       (el) => el.querySelector('h3')?.textContent === 'Where values come from',
     );
-    expect(values, 'upload-claim-parity §6 finds this section by exactly this query').toBeTruthy();
-    expect(values!.textContent).toMatch(/upload route\s+refuses every request/i);
+    expect(values, 'this section is found by exactly this query').toBeTruthy();
+    // The provenance sentence (the functional half; the upload/file-reader sentences
+    // were retired 2026-11-02).
+    expect(values!.textContent).toMatch(/because a person put it there/i);
+    const gates = [...container.querySelectorAll('.help-section')].find(
+      (el) => el.querySelector('h3')?.textContent === 'Three gates on export',
+    );
+    expect(gates!.textContent).toMatch(/Export runs three checks/);
   });
 });

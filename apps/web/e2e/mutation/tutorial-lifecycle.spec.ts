@@ -202,7 +202,7 @@ test.describe('worked-example session lifecycle', () => {
     await expect(page.getByRole('heading', { name: 'Start Your First Experiment' })).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('.exp-row'), 'no example record may survive completion').toHaveCount(0);
     await expect(bar(page)).toHaveCount(0);
-    await expect(page.locator('span.mode-chip')).toHaveText('Workspace');
+    await expect(page.locator('span.mode-chip')).toHaveCount(0); // no chip on the ordinary scope (2026-11-02)
 
     // And the offer is gone for good in this browser — the completion flag, not a
     // session-scoped dismissal.

@@ -550,9 +550,8 @@ describe('R1b §1 · the file-reading controls exist, so the absolute claim is f
     expect(
       declaring,
       'the set of components that accept a user-chosen file has changed. ' +
-        'components/HelpPanel.tsx tells the reader there are exactly two and names ' +
-        'them, and __tests__/help-claim-parity.test.tsx requires that section to name ' +
-        'BOTH readers — so a third control means that copy is now a half-disclosure, ' +
+        'any copy that names the readers (help-claim-parity / §6a here, conditionally) must ' +
+        'name every one — so a new control means that copy may now be a half-disclosure, ' +
         'and a removed one means the §3 ban rests on nothing (see §1 above).',
     ).toEqual([
       'components/CsvReconcilePanel.tsx',
@@ -600,14 +599,30 @@ const SHARED_CLAIM: [string, RegExp][] = [
   ],
 ];
 
-describe('R1b §2 · all four sites state the same claim', () => {
+/*
+ * 2026-11-02 — PRESENCE NO LONGER REQUIRED. The owner directed that standing disclaimers
+ * go, so a site may now say nothing about uploads at all. What §2 still forbids is the
+ * defect it was written for: a HALF-disclosure. If a site states the upload refusal, it
+ * must state the whole claim — both readers named, both retention bounds — because a
+ * refusal stated alone reads as "no file is read", which §1 proves false.
+ */
+const STATES_A_REFUSAL = /\bupload\b[^.]{0,40}\b(refus\w+|disabled|blocked)\b|\brefus\w+\b[^.]{0,40}\bupload/i;
+
+describe('R1b §2 · a site that states the refusal states all of it (no half-disclosure)', () => {
   for (const [site, text] of SITES) {
-    describe(site, () => {
-      it.each(SHARED_CLAIM)('states %s', (_what, pattern) => {
-        expect(text()).toMatch(pattern);
-      });
+    it(`${site}: all or nothing`, () => {
+      const copy = text();
+      if (!STATES_A_REFUSAL.test(copy)) return;
+      for (const [what, pattern] of SHARED_CLAIM) expect(copy, `${site} omits: ${what}`).toMatch(pattern);
     });
   }
+
+  it('the condition sees a bare refusal, so the all-or-nothing rule is not vacuous', () => {
+    expect('File upload is refused outright.').toMatch(STATES_A_REFUSAL);
+    expect('The upload route refuses every request.').toMatch(STATES_A_REFUSAL);
+    // ...and a bare refusal fails the full claim, which is the half-disclosure.
+    expect(SHARED_CLAIM.every(([, p]) => p.test('File upload is refused outright.'))).toBe(false);
+  });
 });
 
 // --- §3 the absolute form is banned -----------------------------------------
@@ -1176,9 +1191,23 @@ const RETIRED_HELP_VALUES_SENTENCE =
   'your files and fills a field from it: file upload is refused, and the campaign-sheet CSV ' +
   'comparison is read-only with no route that applies what it found.';
 
-describe('R1b §6a · the Help "Where values come from" section names BOTH readers', () => {
-  it.each(BOTH_READERS_NAMED)('names %s', (_what, pattern) => {
-    expect(helpValuesSection()).toMatch(pattern);
+/*
+ * 2026-11-02 — the section's file-reader sentence was retired (owner's direction), so
+ * "names every reader" is no longer required by PRESENCE. It is kept as a CONDITIONAL
+ * guard: if the section mentions reading a file again, it must name every reader —
+ * the half-disclosure the polarity fixture below records is still a failure.
+ */
+const MENTIONS_A_FILE_READ = /\b(reads?|opens?)\b[^.]{0,30}\b(your |a )?files?\b|\bfile you pick\b/i;
+
+describe('R1b §6a · the Help "Where values come from" section never half-discloses the readers', () => {
+  it('if it mentions reading a file, it names every reader', () => {
+    const text = helpValuesSection();
+    if (!MENTIONS_A_FILE_READ.test(text)) return;
+    for (const [what, pattern] of BOTH_READERS_NAMED) expect(text, what).toMatch(pattern);
+  });
+
+  it('the condition sees the retired sentence (so the guard is not vacuous)', () => {
+    expect(RETIRED_HELP_VALUES_SENTENCE).toMatch(MENTIONS_A_FILE_READ);
   });
 
   it('POLARITY: the sentence that shipped names only one of the two', () => {

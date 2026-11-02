@@ -179,7 +179,7 @@ export function ProjectMemory() {
   // loading → not shown; error → the Overview BackendDown carries the state.
   const rightPanel =
     graph.status === 'data' ? (
-      <AssistantDrawer railClassName="memory-right" label="Assistant (advisory)">
+      <AssistantDrawer railClassName="memory-right">
         <div className="card placeholder-card memory-assistant-card">
           <AssistantPanel
             {...compose({ context: 'memory', graph: graph.data })}

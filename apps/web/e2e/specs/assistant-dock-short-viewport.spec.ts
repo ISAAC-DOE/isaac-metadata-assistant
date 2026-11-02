@@ -210,40 +210,39 @@ test.describe('320x568 @200% zoom — the dock is released into normal flow', ()
     ).toEqual([0, 0]);
   });
 
-  test('@zoom the no-model claim is still rendered, unhidden, and still describes the composer', async ({
+  test('@zoom the dock note is still rendered, unhidden, and still describes the composer', async ({
     app,
     page,
   }) => {
     await app.gotoExample(`/record/${SEED.partial}`);
     await openAssistantDrawer(page);
 
-    // (4) The three properties the rejected alternatives would have broken:
-    // collapsing the claim behind a control, shortening it, or leaving it
-    // rendered but detached from the input it qualifies.
-    const claim = await page.evaluate(() => {
-      const el = document.querySelector('.assistant-no-model');
+    // ~~The no-model claim~~ was retired 2026-11-02 (owner's direction); the
+    // grounded-scope helper is what the dock note carries now, and the same three
+    // properties hold for it: not behind a disclosure, visible, and the composer's
+    // description with no dangling id. The retired claim must not come back.
+    const note = await page.evaluate(() => {
+      const el = document.querySelector('.assistant-composer-helper');
       const composer = document.querySelector('.assistant-composer-input');
       if (!el || !composer) return null;
       const described = (composer.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean);
       return {
-        text: (el.textContent ?? '').trim(),
         insideDetails: !!el.closest('details'),
         id: el.id,
         described,
         allDescriptorsResolve: described.every((id) => !!document.getElementById(id)),
         display: getComputedStyle(el).display,
         visibility: getComputedStyle(el).visibility,
+        retired: !!document.querySelector('.assistant-no-model'),
       };
     });
-    expect(claim).not.toBeNull();
-    expect(claim!.text).toBe(
-      'There is no language model in this build. Nothing you type here is sent to a model provider.',
-    );
-    expect(claim!.insideDetails, 'the claim must never sit behind a disclosure').toBe(false);
-    expect(claim!.display).not.toBe('none');
-    expect(claim!.visibility).toBe('visible');
-    expect(claim!.described).toContain(claim!.id);
-    expect(claim!.allDescriptorsResolve).toBe(true);
+    expect(note).not.toBeNull();
+    expect(note!.insideDetails, 'the note must never sit behind a disclosure').toBe(false);
+    expect(note!.display).not.toBe('none');
+    expect(note!.visibility).toBe('visible');
+    expect(note!.described).toContain(note!.id);
+    expect(note!.allDescriptorsResolve).toBe(true);
+    expect(note!.retired).toBe(false);
   });
 });
 

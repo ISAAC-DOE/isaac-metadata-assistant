@@ -638,8 +638,8 @@ export const SURFACES: readonly Surface[] = [
 
 /**
  * Every route the Assistant panel mounts on. Verified in the running app:
- * an `<aside>` with an accessible name of "Assistant" (record surfaces) or
- * "Assistant (advisory)" (Project Memory), containing `role="log"`.
+ * an `<aside>` with the accessible name "Assistant" on every mount (Project Memory's
+ * "Assistant (advisory)" was retired 2026-11-02), containing `role="log"`.
  *
  * Carries its own `scope` for the same reason `Surface` does: four of the five
  * mounts are record surfaces and exist only inside a worked-example session,

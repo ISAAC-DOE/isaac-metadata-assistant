@@ -128,25 +128,15 @@ describe('P36X · the What Can I Ask? control', () => {
     expect(trigger.closest('.assistant-foot')).not.toBeNull();
     expect(trigger.closest('.assistant-body')).toBeNull();
     /*
-     * …and the advisory caption is still the LAST WORDS in the panel.
-     *
-     * ~~`expect(foot.lastElementChild).toBe(the caption)`~~ — UX-022 merged the
-     * dock's three strips of fine print into ONE `.assistant-dock-note`
-     * paragraph, so the caption is that note's last element rather than the
-     * foot's last child. The property being protected is unchanged and is
-     * asserted in two halves rather than one, which is strictly stronger: the
-     * note is the last thing in the dock, AND the caption is the last thing in
-     * the note. The old one-liner would have passed with the caption first
-     * inside a last-positioned wrapper.
+     * …and the dock note is still the LAST thing in the dock, as visible text. ~~Its
+     * last element was the advisory caption~~ — retired 2026-11-02; the note now
+     * holds the grounded-scope helper alone.
      */
     const foot = container.querySelector('.assistant-foot') as HTMLElement;
     const note = container.querySelector('.assistant-dock-note') as HTMLElement;
-    const caption = container.querySelector('.assistant-caption') as HTMLElement;
     expect(foot.lastElementChild).toBe(note);
-    expect(note.lastElementChild).toBe(caption);
-    // and it is still visible text, not a tooltip or a collapsed disclosure
-    expect(caption.closest('details')).toBeNull();
-    expect(caption.getAttribute('hidden')).toBeNull();
+    expect(note.closest('details')).toBeNull();
+    expect(note.getAttribute('hidden')).toBeNull();
   });
 
   it('opens on click, names itself with its own visible label, and moves focus into the panel', () => {

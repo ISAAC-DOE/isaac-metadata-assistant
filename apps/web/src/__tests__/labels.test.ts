@@ -58,12 +58,11 @@ describe('LABELS vocabulary', () => {
     expect(LABELS.groupReady).toBe('Ready to Export');
   });
 
-  it('keeps the brand and technical version strings verbatim', () => {
+  it('keeps the brand verbatim, and no longer carries the retired nav version badge', () => {
     expect(LABELS.brand).toBe('ISAAC');
-    expect(LABELS.version).toContain('isaac v0.1.0');
-    // The environment half is DERIVED (see `lib/runtimeContext.ts`); under the
-    // default test env (no VITE_API_BASE) that derivation is the local build.
-    expect(LABELS.version).toBe('isaac v0.1.0 · local dev');
+    // The left-nav `isaac v0.1.0 · local dev` badge was retired 2026-11-02; the version
+    // is shown in Settings → This Build, read from GET /api/about.
+    expect('version' in LABELS).toBe(false);
   });
 });
 

@@ -226,10 +226,6 @@ export function LeftNav({ active }: LeftNavProps) {
           </Link>
         );
       })}
-
-      <div className="nav-footer">
-        <span className="nav-version">{LABELS.version}</span>
-      </div>
     </nav>
   );
 }

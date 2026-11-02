@@ -59,6 +59,17 @@
  * would leave the next reader believing the class is covered. An incomplete
  * detector that says so is worth more than one that looks complete.
  *
+ * 2026-11-02 — STANDING DISCLAIMERS RETIRED (owner's direction). The chip's
+ * accessible-name disclosure, the Help "Synthetic workspace" section and its
+ * "About this deployment" paragraph were removed, so the PRESENCE assertions that
+ * required each surface to carry the workspace claims, the QUALIFICATION and the
+ * capability paragraph (old §1–§5 chip clauses, §7–§12 "states …") are deleted.
+ * What stays is every "no false claim" half: the sweep guard (§13–§14), the bans on
+ * each surface that still renders, and "the chip exposes no record content and no
+ * connection detail" over every health state. The four things the backend mirror
+ * parses (`FLAT_WHOLE_APP_CLAIM`, `DIAGNOSTIC_CLAIMS`, `QUALIFICATION`,
+ * `CAPABILITY_STATEMENT`) are unchanged.
+ *
  * A HUMAN REVIEWER REMAINS THE BACKSTOP for any newly written data claim. What
  * CI guarantees is only this: no retired string comes back, and no near-variant
  * of a shipped shape lands unqualified.
@@ -67,7 +78,7 @@
  * sentences); this file carries none, so there is no fragment-exemption
  * mechanism here to get wrong. Sections 13(b)'s file-level scan does have a
  * coarser, long-disclosed exoneration — a file carrying the QUALIFICATION
- * anywhere is cleared wholesale — which is why §7-12 assert those five surfaces
+ * anywhere is cleared wholesale — which is why §7-12 run the bans on those surfaces
  * one at a time. See "THE BLIND SPOT, stated plainly" in §13.
  */
 
@@ -84,7 +95,8 @@ import { HelpPanel } from '../components/HelpPanel';
 import { SettingsPage } from '../screens/SettingsPage';
 import { API_ACCESS_COPY, settingsConcepts, type SettingsConcept } from '../lib/settingsContent';
 import { __resetHealthCache } from '../lib/useHealth';
-import { stubFetchDown, stubFetchRoutes } from '../test/apiFixtures';
+import { __resetTutorialStore, startTutorial } from '../lib/tutorialController';
+import { stubFetchDown, stubFetchRoutes, tutorialSessionRoutes } from '../test/apiFixtures';
 import type { ApiDbReconStatus, ApiHealth } from '../lib/types';
 
 // --- health bodies (built here, shape-faithful to routes.py `health()`) ------
@@ -138,216 +150,92 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  __resetTutorialStore();
+  sessionStorage.clear();
 });
 
-async function renderChip(health: ApiHealth | 'down'): Promise<HTMLElement> {
-  if (health === 'down') stubFetchDown();
-/* UX-021 — `MemoryRouter` IS REQUIRED here. `HelpPanel` renders a real `<Link>` to
- * Settings -> Help & Tutorial, and `Link` reads router context, so a bare render throws
- * `Cannot destructure property 'basename' of useContext(...) as it is null` and takes every
- * test in the file down with it. Wrapping is the right fix rather than downgrading the
- * `<Link>`: in production this panel is mounted inside `TopBar`, inside the router, so the
- * HARNESS was what did not match reality. */
-  else stubFetchRoutes({ 'GET /api/health': { body: health } });
-  const { container } = render(
+/* UX-021 — `MemoryRouter` IS REQUIRED here. `HelpPanel` renders a real `<Link>`, and
+ * `Link` reads router context, so a bare render throws. In production this panel is
+ * mounted inside `TopBar`, inside the router, so the HARNESS was what did not match. */
+function renderTopBar() {
+  return render(
     <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <TopBar variant="home" />
     </MemoryRouter>,
   );
-  const chip = await waitFor(() => {
+}
+
+/**
+ * The chip, in a scope where one renders. Since 2026-11-02 the ordinary scope has NO
+ * chip (it renders only inside a worked-example session, or for an anomalous mode), so
+ * the leak scan below opens a session first: that is the scope where the chip exists
+ * for every health state, including a failed one.
+ */
+async function renderChip(health: ApiHealth | 'down'): Promise<HTMLElement> {
+  const healthRoute =
+    health === 'down'
+      ? { 'GET /api/health': { status: 503, body: {} } }
+      : { 'GET /api/health': { body: health } };
+  stubFetchRoutes({
+    ...tutorialSessionRoutes(),
+    ...healthRoute,
+    'GET /api/experiments': { body: { experiments: [] } },
+  } as never);
+  await startTutorial(null);
+  const { container } = renderTopBar();
+  return waitFor(() => {
     const found = container.querySelector<HTMLElement>('.mode-chip');
     expect(found).not.toBeNull();
     return found!;
   });
-  return chip;
 }
 
-/** Settle the async health state so the assertion sees the resolved chip. */
-async function chipTextAfterHealth(health: ApiHealth | 'down', expected: string): Promise<HTMLElement> {
-  const chip = await renderChip(health);
-  await waitFor(() => expect(chip.textContent).toBe(expected));
-  return chip;
-}
+// --- 1–5: the chip makes no database claim in any state ------------------------
 
 /*
- * THE CHIP'S VISIBLE LABEL HAS NOW BEEN SHORTENED TWICE, and this block records both
- * so the next reader can tell a correction from an erosion.
- *
- * R0 renamed the BASE label "Synthetic workspace" -> "Example workspace" — one
- * product-facing word, with the runtime mode untouched on the wire.
- *
- * D3 changed two further things, and both are corrections of false or misplaced copy:
- *
- *   1. "Example workspace" was FALSE in the ordinary scope. The five built-in examples
- *      used to be materialised into the ordinary workspace on every read; they now
- *      exist only inside a worked-example session, so the ordinary workspace holds no
- *      examples at all and the chip names the SCOPE instead: "Workspace" ordinarily,
- *      "Worked Example" inside a session. `renderChip` below mounts the TopBar with no
- *      session open, so every case in this file is the ordinary scope.
- *
- *   2. The database qualifier is NO LONGER APPENDED TO THE VISIBLE TEXT. It put an
- *      infrastructure disclosure in the primary header of every product screen. It is
- *      NOT dropped: it is derived from the same `health.database` input and stated in
- *      the chip's ACCESSIBLE NAME, which is what §"the accessible name" cases below
- *      now assert per state — at the same strength, on the same three inputs, plus a
- *      new assertion that it is ABSENT from the visible text. Nothing this file guards
- *      was relaxed: the chip still refuses to claim reachability, liveness, or a
- *      completed check it has not observed, and still leaks nothing (§6 scans the
- *      visible text AND the accessible name together, unchanged).
+ * ~~The chip's accessible name disclosed the diagnostic per `health.database` state~~
+ * (D3, Slice 2A) — RETIRED 2026-11-02 with the rest of its disclosure. What survives is
+ * the direction this file exists to watch: in EVERY health state, on the ordinary
+ * scope, the top bar renders no chip and claims nothing about a database, a
+ * connection, or reachability; and an anomalous mode is still surfaced, never masked.
  */
-const SYNTHETIC = 'Workspace';
+const DATABASE_TALK = /test DB|diagnostic|database|connected|reachable|unavailable|unreachable/i;
 
-/** The accessible-name clause the `diagnostics` state must state, and the `failed`
- *  state must not. */
-const DIAGNOSTICS_CLAUSE =
-  /configured to run a protected, read-only diagnostic against an isolated test database/i;
-/** The accessible-name clause the `failed` state must state, and `diagnostics` must not. */
-const FAILED_CLAUSE =
-  /most recent protected, read-only test-database diagnostic recorded by this deployment did not complete/i;
+describe('mode chip — no database claim in any health state, on the ordinary scope', () => {
+  const states: [string, ApiHealth | 'down'][] = [
+    ['no block', healthNoBlock],
+    ['unconfigured', healthUnconfigured],
+    ['configured, no scan', healthConfigured(null)],
+    ['configured, ok', healthConfigured({ status: 'ok', at: AT })],
+    ['configured, busy', healthConfigured({ status: 'busy', at: AT })],
+    ['configured, refused', healthConfigured({ status: 'refused', at: AT })],
+    ['configured, error', healthConfigured({ status: 'error', at: AT })],
+    ['health down', 'down'],
+  ];
 
-// --- 1/2/3: the three chip states -------------------------------------------
-
-describe('mode chip — no database configured', () => {
-  it('renders the plain scope label with no database disclosure at all (block absent)', async () => {
-    const chip = await chipTextAfterHealth(healthNoBlock, SYNTHETIC);
-    expect(chip.textContent).not.toMatch(/test DB|diagnostic|database/i);
-    // and nothing is claimed about a database in the accessible name either
-    const name = chip.getAttribute('aria-label') ?? '';
-    expect(name).not.toMatch(DIAGNOSTICS_CLAUSE);
-    expect(name).not.toMatch(FAILED_CLAUSE);
-  });
-
-  it('renders the plain scope label when the block says configured:false', async () => {
-    const chip = await chipTextAfterHealth(healthUnconfigured, SYNTHETIC);
-    expect(chip.textContent).not.toMatch(/test DB|diagnostic|database/i);
-    const name = chip.getAttribute('aria-label') ?? '';
-    expect(name).not.toMatch(DIAGNOSTICS_CLAUSE);
-    expect(name).not.toMatch(FAILED_CLAUSE);
-  });
-});
-
-describe('mode chip — database configured, diagnostics not known to have failed', () => {
-  it.each<[string, { status: ApiDbReconStatus; at: string | null } | null]>([
-    ['no scan has run in this process', null],
-    ['the last scan succeeded', { status: 'ok', at: AT }],
-    ['a scan is in flight', { status: 'busy', at: AT }],
-  ])('discloses the test-DB diagnostics status when %s', async (_case, last) => {
-    const chip = await chipTextAfterHealth(healthConfigured(last), SYNTHETIC);
-    // RE-POINTED, NOT WEAKENED. The same three inputs must still produce the
-    // diagnostics disclosure and not the failed one; it is now read in the accessible
-    // name rather than in the visible suffix, and its ABSENCE from the visible text is
-    // additionally required.
-    const name = chip.getAttribute('aria-label') ?? '';
-    expect(name).toMatch(DIAGNOSTICS_CLAUSE);
-    expect(name).not.toMatch(FAILED_CLAUSE);
-    expect(chip.textContent).not.toMatch(/test DB|diagnostic|database/i);
-    // The disclosure is a CAPABILITY statement. It must not claim the diagnostic
-    // is running now, nor that a database is reachable — health does zero I/O.
-    expect(chip.textContent).not.toMatch(/running|connected|reachable|online|live/i);
-    expect(name).not.toMatch(/currently (running|connected|reachable|online)/i);
-  });
-});
-
-describe('mode chip — the last recorded diagnostic did not complete', () => {
-  it.each<ApiDbReconStatus>(['refused', 'error'])(
-    'discloses the truthful failed-check status for %s',
-    async (status) => {
-      const chip = await chipTextAfterHealth(healthConfigured({ status, at: AT }), SYNTHETIC);
-      const name = chip.getAttribute('aria-label') ?? '';
-      expect(name).toMatch(FAILED_CLAUSE);
-      expect(name).not.toMatch(DIAGNOSTICS_CLAUSE);
-      expect(chip.textContent).not.toMatch(/test DB|diagnostic|database/i);
-      // NOT "unavailable": /api/health performs no I/O, so nothing here measured
-      // present unreachability. Only the last recorded CHECK is being reported.
-      expect(chip.textContent).not.toMatch(/unavailable|unreachable|down|offline/i);
-      expect(name).not.toMatch(/unavailable|unreachable|offline/i);
-    },
-  );
-});
-
-// --- 4: absent / failed health ------------------------------------------------
-
-describe('mode chip — health absent or failed', () => {
-  it('still shows the workspace indicator and never implies otherwise', async () => {
-    const chip = await chipTextAfterHealth('down', SYNTHETIC);
-    expect(chip.textContent).toContain(SYNTHETIC);
-    expect(chip.textContent).not.toMatch(/production|real data|non-synthetic/i);
-    // We know nothing about the database, so we claim nothing about it either —
-    // neither disclosure may be guessed into existence.
-    expect(chip.textContent).not.toMatch(/test DB/i);
-    expect(chip.getAttribute('aria-label')).not.toMatch(/test.database|diagnostic/i);
-  });
-});
-
-// --- 4b: the shortening did not drop a claim ----------------------------------
-
-/*
- * WHY THIS TEST EXISTS. The visible label used to carry the word "Synthetic",
- * which did a lot of work in a very small space. R0 replaced it with product
- * language and D3 shortened it again, and the failure mode of that kind of change —
- * in this repository, repeatedly — is that the true claim leaves with the jargon. So
- * the claims are pinned where they now live: the accessible name. If a later slice
- * simplifies the accessible name back down, this fails.
- *
- * ONE CLAUSE MOVED SCOPE RATHER THAN BEING DROPPED. "the records are rebuilt from
- * reference files committed to this build" is required of the WORKED-EXAMPLE scope,
- * where it is true, and is FORBIDDEN in the ordinary scope, which this build never
- * materialises an example into. Both halves are asserted, in `__tests__/mode-chip.test.tsx`, which
- * can mount both scopes; here the ordinary half is pinned, including the negative.
- */
-describe('mode chip — the shortening moved claims rather than dropping them', () => {
-  it('the accessible name carries the claims the visible label no longer spells out', async () => {
-    const chip = await chipTextAfterHealth(healthNoBlock, SYNTHETIC);
-    const name = chip.getAttribute('aria-label') ?? '';
-    // WCAG 2.5.3: the accessible name still OPENS with the exact visible text.
-    expect(name.startsWith(chip.textContent ?? '')).toBe(true);
-    // The two claims that hold unconditionally, in EVERY scope.
-    expect(name).toMatch(/file upload is refused/i);
-    expect(name).toMatch(/no official institutional record is shown/i);
-    // The scope-specific claim, RE-POINTED TWICE — each time off an emptiness claim the
-    // chip never measured. It derives this branch from `sessionId === null` alone and
-    // reads no count, while `list_experiments(None)` enumerates whatever is on disk with
-    // no startup migration; a workspace left holding the previously-seeded five lists
-    // them while the chip denies it. `holds no records of its own` went first, then
-    // `the built-in example records are not in this workspace` — narrower, still an
-    // assertion about contents. What is asserted now is what the build ENFORCES: the
-    // three canonical-seed entry points refuse a `None` session id. The full argument is
-    // in `components/TopBar.tsx`'s `ORDINARY_ONLY`; read it before editing this string.
-    expect(name).toMatch(/nothing in this build adds a built-in example record to this workspace/i);
-    expect(name).not.toMatch(/holds no records of its own/i);
-    expect(name).not.toMatch(/the built-in example records are not in this workspace/i);
-    // Still forbidden here: this scope has no walkthrough copy to rebuild from anything.
-    expect(name).not.toMatch(/reference files committed to this build/i);
-  });
-});
-
-// --- 5: an unexpected mode is still surfaced truthfully -----------------------
-
-describe('mode chip — unexpected health.mode', () => {
-  it('surfaces the anomalous mode rather than masking it as synthetic', async () => {
-    const chip = await chipTextAfterHealth({ ...HEALTH_BASE, mode: 'production' }, 'Production');
-    expect(chip.textContent).not.toContain('Synthetic');
-  });
-
-  /*
-   * RE-POINTED. This asserted the composed visible string
-   * `'Production · test DB diagnostics'`. The database disclosure left the visible text
-   * (D3), so the composition it pinned no longer exists — but the property it was
-   * protecting does, and it is asserted in full: the anomalous mode still WINS the
-   * visible label (it is not masked by the scope name), and the database disclosure is
-   * still made, in the accessible name, in the same state. Neither half is dropped.
-   */
-  it('surfaces the anomalous mode AND the database disclosure together', async () => {
-    const chip = await chipTextAfterHealth(
-      { ...healthConfigured(null), mode: 'production' },
-      'Production',
+  it.each(states)('state %s: no chip, and no database talk in the top bar', async (_label, health) => {
+    if (health === 'down') stubFetchDown();
+    else stubFetchRoutes({ 'GET /api/health': { body: health } });
+    const { container } = renderTopBar();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(container.querySelector('.mode-chip')).toBeNull();
+    const bar = container.querySelector('header.topbar')!;
+    const attrs = Array.from(bar.querySelectorAll('*')).flatMap((el) =>
+      Array.from(el.attributes).map((a) => a.value),
     );
-    expect(chip.textContent).not.toContain('Synthetic');
-    // the scope name must not have displaced the anomaly
-    expect(chip.textContent).not.toContain(SYNTHETIC);
-    const name = chip.getAttribute('aria-label') ?? '';
-    expect(name.startsWith('Production')).toBe(true);
-    expect(name).toMatch(DIAGNOSTICS_CLAUSE);
+    expect(`${bar.textContent} ${attrs.join(' ')}`).not.toMatch(DATABASE_TALK);
+  });
+
+  it('surfaces an anomalous mode rather than masking it, with or without a database block', async () => {
+    for (const health of [{ ...HEALTH_BASE, mode: 'production' }, { ...healthConfigured(null), mode: 'production' }]) {
+      __resetHealthCache();
+      stubFetchRoutes({ 'GET /api/health': { body: health } });
+      const { container, unmount } = renderTopBar();
+      await waitFor(() => expect(container.querySelector('.mode-chip')?.textContent).toBe('Production'));
+      expect(container.querySelector('.mode-chip')!.textContent).not.toMatch(/synthetic|workspace/i);
+      unmount();
+      vi.unstubAllGlobals();
+    }
   });
 });
 
@@ -396,42 +284,26 @@ describe('mode chip — exposes no record content and no connection detail', () 
     }
   });
 
-  it('gives the chip an accessible name that opens with its exact visible text', async () => {
+  // WCAG 2.5.3, kept as a CONDITIONAL guard: the chip carries no `aria-label` now, so
+  // its visible text is its name; if one is ever re-added it must open with that text.
+  it('if the chip carries an accessible name, it opens with its exact visible text', async () => {
     for (const health of [healthNoBlock, healthConfigured(null), healthConfigured({ status: 'error', at: AT })]) {
       __resetHealthCache();
+      __resetTutorialStore();
+      sessionStorage.clear();
       const chip = await renderChip(health);
       await waitFor(() => {
         const visible = chip.textContent ?? '';
-        const accessible = chip.getAttribute('aria-label') ?? '';
         expect(visible.length).toBeGreaterThan(0);
-        expect(accessible.startsWith(visible)).toBe(true);
+        const accessible = chip.getAttribute('aria-label');
+        if (accessible !== null) expect(accessible.startsWith(visible)).toBe(true);
       });
       vi.unstubAllGlobals();
     }
   });
-
-  // Retitled only: since D3 the accessible name is the ONLY place this distinction is
-  // stated, so "the same distinction as the visible qualifier" named a comparison that
-  // no longer has two sides. The assertions are unchanged.
-  it('states the database distinction in the accessible name', async () => {
-    const diagnostics = await renderChip(healthConfigured(null));
-    await waitFor(() =>
-      expect(diagnostics.getAttribute('aria-label')).toMatch(
-        /protected, read-only diagnostic against an isolated test database/i,
-      ),
-    );
-    expect(diagnostics.getAttribute('aria-label')).toMatch(/no database records are displayed/i);
-  });
 });
 
 // --- 7/8: governance copy -----------------------------------------------------
-
-/** The workspace half of the distinction: what the reader SEES is synthetic.
- *  Stated by the surfaces that describe the workspace itself. */
-const WORKSPACE_CLAIMS: [string, RegExp][] = [
-  ['the visible workspace is synthetic', /(records shown here are synthetic|visible workspace remains synthetic)/i],
-  ['uploads are disabled', /uploads (are|remain) disabled/i],
-];
 
 /** The diagnostic half, and its bounds. EVERY surface that mentions the
  *  read-only database diagnostic at all must state all of these — naming the
@@ -451,32 +323,6 @@ const DIAGNOSTIC_CLAIMS: [string, RegExp][] = [
     /(record display|display) remains disabled pending an explicit visibility decision/i,
   ],
 ];
-
-/** What the banner and the Governance → Policy paragraph must both state. Kept
- *  as one exported list so those two describes are unchanged by the split. */
-const REQUIRED_CLAIMS: [string, RegExp][] = [...WORKSPACE_CLAIMS, ...DIAGNOSTIC_CLAIMS];
-
-/**
- * The capability paragraph, verbatim, as the ONE Settings card that owns it
- * states it.
- *
- * A literal rather than a pattern, on purpose: this is the string §12 counts,
- * and a count is only meaningful against an exact thing. It is duplicated here
- * from `settingsContent.ts` deliberately — a test that imported the string it
- * checks would pass whatever that string became.
- *
- * Two other frontend surfaces (`components/GovernanceBanner.tsx`,
- * `components/TopBar.tsx`) still carry this claim in their own words, and one
- * (`components/HelpPanel.tsx`) carries this wording. That is out of scope here:
- * §12 counts occurrences across the Data & Privacy CARD SET, which is the one
- * surface that showed a reader the same sentence twice in one screenful.
- */
-const CAPABILITY_PARAGRAPH =
-  'Separately, this deployment may run a protected, read-only diagnostic against an isolated ' +
-  'SLAC test database containing production-derived records: those records are processed ' +
-  'transiently in pod memory, only sanitized aggregate results are returned, no record is ' +
-  'modified, no per-record content is displayed, and nothing is sent to any model. ' +
-  'Database-backed record display remains disabled pending an explicit visibility decision.';
 
 /**
  * Each entry is one way the copy could OVER-claim — the ways that hold on EVERY
@@ -528,10 +374,6 @@ describe('GovernanceBanner copy — scoped to the workspace, so it owes the diag
    * fails loudly. The capability, with every bound, is still stated by the Help
    * popover and the policy page this banner links to (both asserted in this file).
    */
-  it.each(WORKSPACE_CLAIMS)('states %s', (_what, pattern) => {
-    expect(bannerText()).toMatch(pattern);
-  });
-
   it('makes no statement about the diagnostic, so it owes none of its bounds', () => {
     const text = bannerText();
     expect(CAPABILITY_STATEMENT.test(text)).toBe(false);
@@ -544,9 +386,11 @@ describe('GovernanceBanner copy — scoped to the workspace, so it owes the diag
   });
 
   it('no longer leads with the unqualified "Synthetic mode." headline', () => {
-    const text = bannerText();
-    expect(text).not.toMatch(/^Synthetic mode\./);
-    expect(text).toMatch(/^Synthetic workspace\./);
+    expect(bannerText()).not.toMatch(/^Synthetic mode\./);
+  });
+
+  it('makes no unqualified whole-application claim', () => {
+    expect(unqualifiedClaims(bannerText())).toEqual([]);
   });
 });
 
@@ -569,41 +413,27 @@ describe('Settings → Privacy & Governance → the governance policy — same d
       .join(' ');
   }
 
-  it.each(REQUIRED_CLAIMS)('states %s', (_what, pattern) => {
-    expect(policyText()).toMatch(pattern);
-  });
-
   it.each(FORBIDDEN_CLAIMS)('never claims %s', (_what, pattern) => {
     expect(policyText()).not.toMatch(pattern);
   });
 
-  it('names exactly what is withheld from display', () => {
-    expect(policyText()).toMatch(
-      /No record ids, titles, scientific values, evidence, full JSON, or per-record results are displayed/i,
-    );
-  });
-
-  it('keeps the pre-existing upload-refusal guarantee intact', () => {
+  it('makes no unqualified whole-application claim, and bounds the capability if it states it', () => {
     const text = policyText();
-    expect(text).toMatch(/every file upload is refused outright/i);
-    expect(text).toMatch(/written data-governance approval/i);
+    expect(unqualifiedClaims(text)).toEqual([]);
+    expect(missingBounds(text)).toEqual([]);
   });
 });
 
 // --- 9: the Help popover ------------------------------------------------------
 
 /*
- * The Help popover's synthetic section was the third whole-application claim.
- * Every sentence in it was TRUE — the deployment really is configured for
- * synthetic-only operation, real mode really does refuse to start, and the app
- * really does gate on mode rather than contents — but a reader met it as the
- * app's answer to "is any real data involved here?", and the answer was
- * incomplete. The fix is additive: the mode paragraph is preserved word for
- * word in substance, and the diagnostic is stated beside it.
+ * The Help popover's synthetic section was the third whole-application claim, then a
+ * correctly qualified one; on 2026-11-02 it was removed (owner's direction). What is
+ * pinned now is that NO part of the popover makes the claim this file exists to stop,
+ * and that the retired section does not come back.
  */
 
-/** The whole rendered popover body — deliberately broader than the one section,
- *  so a forbidden claim cannot be smuggled into a neighbouring section. */
+/** The whole rendered popover body, so a forbidden claim cannot hide in any section. */
 function helpBodyText(): string {
   const view = render(
     <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -614,82 +444,46 @@ function helpBodyText(): string {
   return view.container.querySelector('.help-panel-body')!.textContent ?? '';
 }
 
-/** Just the synthetic section, located by its own heading, so the REQUIRED
- *  claims are proven to sit together under it rather than scattered. */
-function helpSyntheticSection(): string {
-  const view = render(
-    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <HelpPanel />
-    </MemoryRouter>,
-  );
-  fireEvent.click(view.getByRole('button', { name: 'Help' }));
-  const section = [...view.container.querySelectorAll('.help-section')].find(
-    (el) => el.querySelector('h3')?.textContent === 'Synthetic workspace',
-  );
-  expect(section, 'no "Synthetic workspace" section in the Help popover').toBeTruthy();
-  return section!.textContent ?? '';
-}
-
-describe('Help popover copy — distinguishes the synthetic workspace from the diagnostic', () => {
-  it.each(REQUIRED_CLAIMS)('states %s', (_what, pattern) => {
-    expect(helpSyntheticSection()).toMatch(pattern);
-  });
-
+describe('Help popover copy — no whole-application data claim anywhere in it', () => {
   it.each(FORBIDDEN_CLAIMS_SHARED)('never claims %s, anywhere in the popover', (_what, pattern) => {
     expect(helpBodyText()).not.toMatch(pattern);
   });
 
-  it('retitles the section from the unqualified "Synthetic mode"', () => {
+  it('makes no unqualified whole-application claim, and bounds the capability if it states it', () => {
+    const text = helpBodyText();
+    expect(unqualifiedClaims(text)).toEqual([]);
+    expect(missingBounds(text)).toEqual([]);
+  });
+
+  it('never states the mode token as a description of the deployment', () => {
+    // With the qualifying paragraph gone, the token may not stand alone either.
+    expect(helpBodyText()).not.toMatch(/synthetic-only/i);
+  });
+
+  it('neither the retired "Synthetic mode" nor "Synthetic workspace" section comes back', () => {
     const view = render(
-    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <HelpPanel />
-    </MemoryRouter>,
-  );
-    fireEvent.click(view.getByRole('button', { name: 'Help' }));
-    const headings = [...view.container.querySelectorAll('.help-section h3')].map(
-      (h) => h.textContent,
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <HelpPanel />
+      </MemoryRouter>,
     );
-    expect(headings).toContain('Synthetic workspace');
+    fireEvent.click(view.getByRole('button', { name: 'Help' }));
+    const headings = [...view.container.querySelectorAll('.help-section h3')].map((h) => h.textContent);
     expect(headings).not.toContain('Synthetic mode');
-  });
-
-  it('keeps the mode token but never leaves it as a whole-deployment claim', () => {
-    const text = helpSyntheticSection();
-    // The runtime mode's real name is kept: it is what `GET /api/health` reports
-    // and what the operator configured. Dropping it would make the section
-    // vaguer, not more honest.
-    expect(text).toMatch(/configured for synthetic-only operation/i);
-    // ...and it never stands alone. Deleting the diagnostic paragraph while
-    // leaving the mode sentence — precisely the state this slice corrected —
-    // fails here, because every bound has to be on the same surface as the token.
-    for (const [what, pattern] of DIAGNOSTIC_CLAIMS) {
-      expect(text, `"synthetic-only" is unqualified: the copy no longer states ${what}`).toMatch(
-        pattern,
-      );
-    }
-  });
-
-  it('keeps the pre-existing mode-vs-contents honesty note intact', () => {
-    // The note records a correction: an earlier build promised "no real
-    // experiment data", which no code enforces — there is no real-vs-synthetic
-    // detector anywhere in the backend. Requalifying the section must not
-    // quietly undo it.
-    const text = helpSyntheticSection();
-    expect(text).toMatch(/real mode intentionally refuses to start/i);
-    expect(text).toMatch(/not the contents of what it is handed/i);
+    expect(headings).not.toContain('Synthetic workspace');
   });
 });
 
-// --- 10: Settings → Data & Privacy → the real-experiment-data concept ---------
+// --- 10–12: Settings → Data & Privacy — the concept cards ------------------------
 
 /*
- * `settingsContent.ts` is the single source for every Settings claim, so this
- * scans the concept object rather than a rendering of it: the string is the
- * artifact under test, and Overview/Data & Privacy each render part of it.
- *
- * The heading was the sharpest over-claim on any surface — a bare "No Real
- * Experiment Data" is read as a guarantee about the deployment, and the
- * deployment may now read production-derived records (never displaying one).
+ * `settingsContent.ts` is the single source for every Settings claim, so this scans the
+ * concept objects rather than a rendering of them. Since 2026-11-02 the PRESENCE
+ * requirements (each card must carry the qualification, the seven bounds, the
+ * capability paragraph exactly once, the storage card's three clauses) are deleted:
+ * those cards are being retired with the Privacy tab, and a guard that requires a
+ * disclaimer to exist would block its removal. Every "no false claim" half is kept,
+ * per card and over the set, so whatever remains of these cards — and whatever replaces
+ * them — still cannot over-claim. §13(a) runs the pairing rule over every unit too.
  */
 
 const SETTINGS_FACTS = {
@@ -698,201 +492,59 @@ const SETTINGS_FACTS = {
   recordSchemaVersion: '1.05',
 };
 
-function noRealDataConcept(): SettingsConcept {
-  const found = settingsConcepts(SETTINGS_FACTS).find((c) => c.id === 'no-real-experiment-data');
-  if (!found) throw new Error('no such concept: no-real-experiment-data');
-  return found;
+function conceptById(id: string, persistence = SETTINGS_FACTS.persistence): SettingsConcept | undefined {
+  return settingsConcepts({ ...SETTINGS_FACTS, persistence }).find((c) => c.id === id);
 }
 
-describe('Settings copy — the real-experiment-data concept states a scope it can keep', () => {
-  const concept = noRealDataConcept();
-  const text = `${concept.heading} ${concept.summary} ${concept.detail}`;
+const conceptText = (c: SettingsConcept) =>
+  `${c.heading} ${c.summary} ${c.detail} ${c.more?.label ?? ''} ${c.more?.text ?? ''}`;
 
-  it('keeps the concept id, which other surfaces and tests refer to', () => {
-    expect(concept.id).toBe('no-real-experiment-data');
-  });
+describe('Settings copy — the real-experiment-data concept, if present, over-claims in neither direction', () => {
+  const concept = conceptById('no-real-experiment-data');
 
-  it('no longer heads the card with an unqualified whole-deployment promise', () => {
+  it('never heads a card with the unqualified whole-deployment promise', () => {
+    if (!concept) return;
     expect(concept.heading).not.toBe('No Real Experiment Data');
-    // The heading has to carry the scope itself: it is what a reader skimming
-    // Data & Privacy takes away without opening anything.
-    expect(concept.heading).toMatch(/workspace/i);
-  });
-
-  it('scopes the out-of-scope claim to the workspace, not to the prototype', () => {
-    expect(concept.detail).toMatch(/out of scope for this workspace/i);
     expect(concept.detail).not.toMatch(/out of scope for this prototype/i);
   });
 
-  it.each(DIAGNOSTIC_CLAIMS)('states %s', (_what, pattern) => {
-    expect(concept.detail).toMatch(pattern);
-  });
-
   it.each(FORBIDDEN_CLAIMS)('never claims %s', (_what, pattern) => {
-    expect(text).not.toMatch(pattern);
-  });
-
-  it('keeps the pre-existing upload-block honesty intact, and in the visible text', () => {
-    // All three survived the rewrite, and none of them moved behind the
-    // collapsed `more` disclosure — `detail` is always rendered.
-    expect(concept.detail).toMatch(/file upload is refused outright, with no file parsed at all/i);
-    expect(concept.detail).toMatch(/nothing in the app inspects that text to judge whether it is real/i);
-    expect(concept.detail).toMatch(/written data-governance approval/i);
-    expect(concept.more).toBeUndefined();
-  });
-
-  it('still points at the upload block from the one-line summary', () => {
-    expect(concept.summary).toMatch(/never checks whether what it blocked was real/i);
-    // A summary is a pointer, never a second copy of the definition.
-    expect(concept.summary).not.toBe(concept.detail);
-    expect(concept.detail).not.toContain(concept.summary);
+    if (!concept) return;
+    expect(conceptText(concept)).not.toMatch(pattern);
   });
 });
 
-// --- 11: the FOURTH instance — Settings → Data & Privacy → synthetic-only mode -
-
-/*
- * The `synthetic-data-only` concept rendered DIRECTLY ABOVE the concept above,
- * on the same tab, and still read:
- *
- *   heading  "Synthetic Data Only"
- *   detail   "Only unmistakably synthetic data is in scope, and this build runs
- *             in synthetic-only mode: …"
- *
- * So Data & Privacy contradicted itself in one screenful: card 1 promised the
- * whole build takes only synthetic data, card 2 described a read-only diagnostic
- * over production-derived records. Three earlier passes each corrected one
- * surface and missed this one, which is why section 13 below stops scanning
- * hand-listed surfaces and scans the sources instead.
- *
- * The rest of the old detail was NOT the defect and had to survive verbatim in
- * substance: mode-not-content enforcement, "it cannot tell real data from
- * synthetic", real mode refusing to start with its guardrail reason, and
- * operator responsibility. Each is pinned below.
- *
- * ── RE-POINTED (de-duplication slice), AND WHAT THAT DID AND DID NOT CHANGE ─
- *
- * This describe used to require all seven `DIAGNOSTIC_CLAIMS` inside THIS
- * card's `detail`, twice over — once directly, once through "never leaves the
- * mode token standing as a whole-deployment claim". It passed, and the way it
- * passed was that this card carried the full 55-word capability paragraph
- * character-for-character identically to the card rendered beside it. At 1440px
- * Data & Privacy is a multi-column grid, so the tab whose whole purpose is
- * consolidation showed a reader the same paragraph twice, adjacent. A guard
- * that can only be satisfied by duplicating a paragraph is a guard that
- * mandates the defect.
- *
- * THE RULE IT ENFORCED IS UNCHANGED AND IS STILL ENFORCED, in `missingBounds`:
- * a unit that makes the CAPABILITY statement ("may run a protected, read-only
- * diagnostic") must state every bound of it. That predicate runs over every
- * copy unit in §13(a) and over every frontend source file in §13(b), and it did
- * not move. What changed is which card MAKES the statement:
- * `no-real-experiment-data` does, and §10 above still requires all seven bounds
- * there. This card now REFERS to the diagnostic instead — the same position
- * `what-resets` has held since Slice 2A and which `settingsContent.ts` documents
- * as correct — which is what keeps its mode token from ever standing
- * unqualified.
- *
- * So three assertions replace the two that were dropped, and together they are
- * strictly stronger than what they replace:
- *
- *   · this card must still carry the QUALIFICATION, so the token is never bare;
- *   · it must NAME the card that holds the full statement, so the pointer
- *     cannot decay into a dangling reference;
- *   · §12 must find the paragraph on the tab EXACTLY ONCE — which neither
- *     re-duplication nor deletion can satisfy.
- */
-
-function conceptById(id: string): SettingsConcept {
-  const found = settingsConcepts(SETTINGS_FACTS).find((c) => c.id === id);
-  if (!found) throw new Error(`no such concept: ${id}`);
-  return found;
-}
-
-describe('Settings copy — the synthetic-only concept is a MODE claim, fully bounded', () => {
+describe('Settings copy — the synthetic-only concept, if present, is never a flat whole-build claim', () => {
   const concept = conceptById('synthetic-data-only');
-  const text = `${concept.heading} ${concept.summary} ${concept.detail}`;
 
-  it('keeps the concept id, which other surfaces and tests refer to', () => {
-    expect(concept.id).toBe('synthetic-data-only');
-  });
-
-  it('no longer heads the card with a flat whole-build scope claim', () => {
+  it('never heads the card with a flat whole-build scope claim', () => {
+    if (!concept) return;
     expect(concept.heading).not.toBe('Synthetic Data Only');
     expect(concept.heading).not.toMatch(/\bsynthetic\s+data\s+only\b/i);
-    // What the card is actually about is the runtime MODE — a claim the app can
-    // keep, because `GET /api/health` reports it.
-    expect(concept.heading).toMatch(/mode/i);
   });
 
-  it('drops the "only synthetic data is in scope" claim entirely', () => {
+  it('never claims that only synthetic data is in scope', () => {
+    if (!concept) return;
     expect(concept.detail).not.toMatch(/only unmistakably synthetic data is in scope/i);
     expect(concept.detail).not.toMatch(/\b(data|records?|artifacts?)\b[^.!?]{0,40}\b(is|are) in scope\b/i);
   });
 
-  it('keeps every pre-existing honesty statement in the always-visible detail', () => {
-    expect(concept.detail).toMatch(/not the contents of what it is handed/i);
-    expect(concept.detail).toMatch(/cannot tell real data from synthetic/i);
-    expect(concept.detail).toMatch(/real mode intentionally refuses to start/i);
-    expect(concept.detail).toMatch(/guardrails it would need do not exist yet/i);
-    expect(concept.detail).toMatch(/responsibility of whoever operates it/i);
-    expect(concept.detail).toMatch(/not a check the software performs/i);
-    // None of it moved behind a collapsed disclosure.
-    expect(concept.more).toBeUndefined();
-  });
-
-  it('names the diagnostic, so the mode token never stands unqualified', () => {
-    // The exact predicate §13 exonerates a unit by. Deleting the diagnostic
-    // sentence while leaving the mode sentence — the state this sweep
-    // corrected — fails here, and fails in §13(a) too.
-    expect(QUALIFICATION.test(concept.detail)).toBe(true);
+  it('never leaves the mode token unqualified', () => {
+    if (!concept) return;
     expect(unqualifiedClaims(concept.detail)).toEqual([]);
-  });
-
-  it('points at the card that states the capability in full', () => {
-    // A pointer that does not name its target decays into "somewhere on this
-    // tab", which is how the second copy got written in the first place.
-    const home = conceptById('no-real-experiment-data');
-    expect(concept.detail).toContain(home.heading);
-  });
-
-  it('does not make the capability statement itself, so it owes no bounds', () => {
-    // The split this card now sits on: it REFERS to the diagnostic without
-    // claiming the capability, exactly as `what-resets` does. `missingBounds`
-    // is therefore vacuous here — and is asserted so, rather than assumed, so
-    // that re-adding "may run …" without its bounds fails loudly.
-    expect(CAPABILITY_STATEMENT.test(concept.detail)).toBe(false);
     expect(missingBounds(concept.detail)).toEqual([]);
   });
 
-  /* `FORBIDDEN_CLAIMS_SHARED`, not `FORBIDDEN_CLAIMS`: this card keeps the mode
-     token `synthetic-only` on purpose, for the same reason the Help popover
-     does — it is the mode's real name and dropping it would make the card
-     vaguer, not more honest. The bans that still apply are the ones about
-     over-claiming in the other direction. */
+  /* `FORBIDDEN_CLAIMS_SHARED`, not `FORBIDDEN_CLAIMS`: this card keeps the mode token
+     `synthetic-only` on purpose — it is the mode's real name. */
   it.each(FORBIDDEN_CLAIMS_SHARED)('never claims %s', (_what, pattern) => {
-    expect(text).not.toMatch(pattern);
+    if (!concept) return;
+    expect(conceptText(concept)).not.toMatch(pattern);
   });
 });
 
-// --- 12: the tab as a whole no longer contradicts itself ----------------------
-
-/*
- * `settingsContent.ts` is the single source for the Data & Privacy tab, and
- * `settings-page.test.tsx` already proves every `detail` is rendered there under
- * its own heading. So the absence of a self-contradiction is asserted here over
- * the concept set — the artifact the tab is built from — rather than by mounting
- * the page a second time.
- */
-describe('Settings → Data & Privacy — no two cards contradict each other', () => {
-  const concepts = settingsConcepts(SETTINGS_FACTS);
-  const tab = concepts
-    .map((c) => `${c.heading} ${c.summary} ${c.detail} ${c.more?.label ?? ''} ${c.more?.text ?? ''}`)
-    .join('\n');
-
-  it('names the isolated test database once the tab is read as a whole', () => {
-    expect(tab).toMatch(/isolated SLAC test database containing production-derived records/i);
-  });
+describe('Settings → Data & Privacy — no card contradicts another, or the database facts', () => {
+  const tab = settingsConcepts(SETTINGS_FACTS).map(conceptText).join('\n');
 
   it.each([
     ['denies that any database exists', /there is no database/i],
@@ -904,117 +556,25 @@ describe('Settings → Data & Privacy — no two cards contradict each other', (
   });
 
   /*
-   * ── THE DE-DUPLICATION GUARD ──────────────────────────────────────────────
-   *
-   * The capability paragraph is honesty-critical, so the failure mode this tab
-   * has is not that it goes missing — every guard above would fire — but that
-   * it gets stated twice, which is what shipped: `synthetic-data-only` and
-   * `no-real-experiment-data` ended with the identical 55 words, and Data &
-   * Privacy renders them as adjacent columns at 1440px.
-   *
-   * EXACTLY ONE, asserted in both directions and at two granularities: the
-   * capability SENTENCE (the wire-level marker every other guard keys off) and
-   * the whole paragraph verbatim. A single count of 1 catches deletion and
-   * duplication with the same assertion, which is the property that makes it
-   * safe to leave in place — a future editor cannot satisfy it by removing the
-   * claim.
-   *
-   * The bounds themselves are deliberately NOT counted. `what-resets`
-   * legitimately restates two of them ("only sanitized aggregate results are
-   * returned", "no record is modified") in the narrower storage context, and
-   * requiring uniqueness of a bound would force that card to go vaguer.
+   * The storage card's two corrected falsehoods (2026-10-18): the diagnostic does NOT
+   * read a separate database, and it does NOT read only the records table. Kept as bans,
+   * on every persistence arm, for as long as the card exists.
    */
-  it('makes the capability statement on exactly one card', () => {
-    const carriers = concepts.filter((c) => CAPABILITY_STATEMENT.test(c.detail));
-    expect(carriers.map((c) => c.id)).toEqual(['no-real-experiment-data']);
-  });
-
-  it('states the full capability paragraph exactly once across the tab', () => {
-    const occurrences = concepts.filter((c) => c.detail.includes(CAPABILITY_PARAGRAPH)).length;
-    expect(occurrences, 'the capability paragraph must appear once — not twice, not zero').toBe(1);
-  });
-
-  it('leaves the other card pointing at it rather than repeating it', () => {
-    const mode = conceptById('synthetic-data-only');
-    expect(mode.detail).not.toContain(CAPABILITY_PARAGRAPH);
-    // ...but it still names the diagnostic, so its mode token is qualified.
-    expect(QUALIFICATION.test(mode.detail)).toBe(true);
-  });
-
-  it('keeps the storage card truthful about what the test database is not', () => {
-    const resets = conceptById('what-resets');
-    expect(resets.detail).toMatch(/the workspace is not stored in a database/i);
-    expect(resets.detail).toMatch(/is not the workspace's storage/i);
-    expect(resets.detail).toMatch(/nothing from it is written here/i);
-    expect(resets.summary).not.toMatch(/there is no database|^no database/i);
-  });
-
-  /*
-   * THE SAME GUARANTEE ON THE ARM WHERE IT IS HARDEST TO KEEP. `conceptById`
-   * above reads the `ephemeral` fixture. On a `durable` deployment there are now
-   * TWO databases a reader could be thinking of — the one their experiment
-   * records go into, and the isolated SLAC test database the read-only
-   * diagnostic may read — and the card has to separate them by name rather than
-   * rely on there being only one. A card that said "your records are in a
-   * database" while leaving that clause implicit would be the diagnostic defect
-   * re-created by the persistence fix, which is precisely the direction this
-   * whole file exists to watch.
-   */
-  it.each(['durable', 'unavailable'])(
-    'keeps that clause when persistence is %s and a second database is in play',
+  it.each(['ephemeral', 'durable', 'unavailable'])(
+    'the storage card (if present) repeats neither corrected falsehood when persistence is %s',
     (persistence) => {
-      const resets = settingsConcepts({ ...SETTINGS_FACTS, persistence }).find(
-        (c) => c.id === 'what-resets',
-      )!;
-      expect(resets.detail).toMatch(/the workspace is not stored in a database/i);
-      expect(resets.detail).toMatch(/is not the workspace's storage/i);
-      expect(resets.detail).toMatch(/nothing from it is written here/i);
-      expect(resets.detail).toMatch(/only sanitized aggregate results are returned/i);
+      const resets = conceptById('what-resets', persistence);
+      if (!resets) return;
+      expect(resets.detail).not.toMatch(/not where your experiment records go/i);
+      expect(resets.detail).not.toMatch(/not the database this state is about/i);
+      expect(resets.detail).not.toMatch(/reads only (its|the) production-derived records table/i);
       expect(resets.summary).not.toMatch(/there is no database|^no database/i);
     },
   );
 
-  /*
-   * ~~"there are now TWO databases a reader could be thinking of"~~ — CORRECTED
-   * 2026-10-18 (independent review of the Settings redesign). There is ONE. The
-   * durable experiment store (`db_write.py`) and the read-only diagnostic
-   * (`db_recon.py`) both gate on `PGDATABASE` being exactly
-   * `metadata_assistant`, pin the name from the same constant
-   * (`db_recon.EXPECTED_DATABASE`), and re-check `current_database()`. So the
-   * `durable` arm's "it is not where your experiment records go" and the
-   * `unavailable` arm's "is not the database this state is about" were false:
-   * it is the same database. What IS separate is the TABLE — the diagnostic
-   * reads the production-derived `records` table, which the write path refuses
-   * by identifier (`db_write._FORBIDDEN_TABLES`), while experiment records go
-   * into this application's own tables beside it. The comment above is kept
-   * because the clause it protects is still right; the premise it gave was not.
-   */
-  it.each(['durable', 'unavailable'])(
-    'says the diagnostic reads the SAME database as the experiment store when persistence is %s',
-    (persistence) => {
-      const resets = settingsConcepts({ ...SETTINGS_FACTS, persistence }).find(
-        (c) => c.id === 'what-resets',
-      )!;
-      expect(resets.detail).not.toMatch(/not where your experiment records go/i);
-      expect(resets.detail).not.toMatch(/not the database this state is about/i);
-      expect(resets.detail).not.toMatch(/neither of these/i);
-      expect(resets.detail).toMatch(/same configured database/i);
-      expect(resets.detail).toMatch(/this application never writes/i);
-      /* THE SCOPE OF WHAT IT READS, pinned (2026-10-18, re-review). The first
-         correction said the diagnostic "reads only the production-derived records
-         table" — also false: `db_recon.run_recon` reads `records`, the
-         `vocabulary_cache` table (a row count and up to 200 grouped values per
-         allowlisted column) and the database's table catalog
-         (`information_schema` / `pg_tables`). What it never reads is the CONTENT
-         of this application's own tables — no query in `db_recon.py` names one. */
-      expect(resets.detail).not.toMatch(/reads only (its|the) production-derived records table/i);
-      expect(resets.detail).toMatch(/production-derived records and vocabulary_cache tables/i);
-      expect(resets.detail).toMatch(/table catalog/i);
-      expect(resets.detail).toMatch(/never the contents of this application.s own tables/i);
-    },
-  );
-
-  it('the reads that what-resets names are the reads db_recon makes, and no app table is among them', () => {
+  // PRECONDITION: the reads the copy has described are the reads `db_recon` makes. If
+  // this moves, any surviving description of the diagnostic has to move with it.
+  it('the reads db_recon makes are the ones the copy has described, and no app table is among them', () => {
     const candidates = [
       join(process.cwd(), '..', 'api', 'isaac_api', 'db_recon.py'),
       join(process.cwd(), 'apps', 'api', 'isaac_api', 'db_recon.py'),
@@ -1062,11 +622,11 @@ describe('Settings → Data & Privacy — no two cards contradict each other', (
  * claim is wrong when it is unqualified, not when the words appear — so the
  * guard encodes the pairing rather than banning vocabulary.
  *
- * THE BLIND SPOT, stated plainly: at file granularity, the five surfaces that
- * carry the qualification (TopBar, GovernanceBanner, GovernancePage, HelpPanel,
- * settingsContent) are exonerated wholesale. That is why sections 7–12 above
- * assert those five surface by surface, and why (a) exists for the one of them
- * that holds many independent cards.
+ * THE BLIND SPOT, stated plainly: at file granularity, a file that carries the
+ * qualification is exonerated wholesale (since 2026-11-02 TopBar and HelpPanel no
+ * longer do; settingsContent and GovernancePage still may). That is why sections 7–12
+ * above run the bans surface by surface, and why (a) exists for the one of them that
+ * holds many independent cards.
  */
 
 /** Each entry is one way of claiming the whole application/build/deployment
@@ -1284,14 +844,16 @@ describe('sweep guard — no unqualified whole-application claim in any frontend
      wraps it. Without this the two paragraph surfaces silently look unbounded
      and the bounds test below becomes a false alarm rather than a guard. */
   it('reads wrapped JSX prose as one sentence', () => {
+    // Re-pointed 2026-11-02: the capability paragraph this used to read left Help. The
+    // property is the same — a sentence the source wraps over three lines is matched as
+    // the one sentence the browser renders.
     const help = renderedCopy('components/HelpPanel.tsx');
     expect(help).toContain(
-      'Separately, this deployment may run a protected, read-only diagnostic against an isolated SLAC test database containing production-derived records',
+      'a record can be valid against that schema and still be refused here, and no screen reports such a refusal as a schema error.',
     );
-    expect(help).toContain('nothing is sent to any model');
-    // ...and the comments explaining the retired copy are gone, so a note about
-    // the defect is never counted as the defect.
-    expect(help).not.toContain('This prototype runs on synthetic demo data only');
+    // ...and the comments explaining the retired copy are gone, so a note about the
+    // defect is never counted as the defect.
+    expect(help).not.toContain('"Synthetic workspace" section');
   });
 
   it.each(FLAT_WHOLE_APP_CLAIM)('no file claims %s without the qualification', (_label, pattern) => {

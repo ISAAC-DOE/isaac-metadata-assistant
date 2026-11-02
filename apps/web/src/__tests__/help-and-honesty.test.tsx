@@ -91,7 +91,7 @@ describe('P22D · Help is a real, working popover', () => {
   });
 
   it('content explains the no-guessing policy and separates validation from advisory', () => {
-    const { getByRole, getByText } = renderTopBar();
+    const { getByRole, getByText, queryByText } = renderTopBar();
     fireEvent.click(getByRole('button', { name: 'Help' }));
 
     expect(getByText(/filled only from evidence or your explicit confirmation/i)).toBeInTheDocument();
@@ -117,12 +117,13 @@ describe('P22D · Help is a real, working popover', () => {
     // guarantee the app cannot make: it enforces the runtime MODE, and there is
     // no real-vs-synthetic detector anywhere in the backend. Help now says what
     // the code actually does, and this assertion pins both halves.
-    expect(
-      getByText(/configured for synthetic-only operation/i),
-    ).toBeInTheDocument();
-    expect(
-      getByText(/not the contents of what it is handed/i),
-    ).toBeInTheDocument();
+    //
+    // 2026-11-02: that mode paragraph was retired with the Help "Synthetic workspace"
+    // section (owner's direction). What stays pinned is the false guarantee it once
+    // replaced: Help never says the app runs on synthetic data only.
+    expect(queryByText(/synthetic demo data only/i)).toBeNull();
+    expect(queryByText(/no real experiment data/i)).toBeNull();
+    expect(queryByText(/configured for synthetic-only operation/i)).toBeNull();
   });
 
   it('closes on Escape and returns focus to the Help button', () => {

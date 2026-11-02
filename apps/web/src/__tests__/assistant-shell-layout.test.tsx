@@ -639,7 +639,8 @@ describe('P36V.1 S5 · active conversation order and legibility', () => {
     const clear = container.querySelector('.assistant-clear')!;
     const log = container.querySelector('.assistant-log')!;
     const composer = container.querySelector('.assistant-composer')!;
-    const caption = container.querySelector('.assistant-caption')!;
+    // The dock note is last (the advisory caption it ended with was retired 2026-11-02).
+    const caption = container.querySelector('.assistant-dock-note')!;
 
     expect(precedes(row, clear)).toBe(true);
     expect(precedes(clear, log)).toBe(true);
@@ -756,7 +757,7 @@ describe('P36V.1 S5 · active conversation order and legibility', () => {
       '.answered-from',
       '.assistant-composer-helper',
       '.agent-stage-note',
-      '.assistant-caption',
+      '.assistant-dock-note',
     ]) {
       expect(ruleBody(assistantCss, sel), `${sel} must wrap long content`).toMatch(
         /overflow-wrap:\s*anywhere/,
