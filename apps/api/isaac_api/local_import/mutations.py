@@ -2144,6 +2144,7 @@ def decide_question(
     same_conditions: bool = False,
     as_said: bool = False,
     same_reading: bool = False,
+    same_sample: bool = False,
 ) -> Any:
     """``isaac bundle decide --question`` — the CLI and the local questions screen both call this.
 
@@ -2187,7 +2188,7 @@ def decide_question(
             on = copy.deepcopy(bundle) if dry_run else bundle
             try:
                 result = L.decide(on, asked_label, decision=decision, value=value, only=only, by=by, orcid=orcid,
-                                  note=note)
+                                  note=note, same_sample=same_sample)
             except L.LabelRefused as exc:
                 raise MutationRefused(str(exc)) from None
             if dry_run:
@@ -2196,6 +2197,9 @@ def decide_question(
             if result.get("slots_recorded"):
                 save_bundle(bundle_dir, bundle)
             return (result, bundle_version(bundle_dir)) if with_version else result
+        if same_sample:
+            raise MutationRefused(f"--same-sample answers the sample-id question (a condition label) only; question "
+                                  f"{question_id} is not one. Nothing was recorded.")
         resolve = dict(decision=decision, only=only, field=field, positions=positions, only_scopes=only_scopes)
         override = None
         slots_added: list[str] = []

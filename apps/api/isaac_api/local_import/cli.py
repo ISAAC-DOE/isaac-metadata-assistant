@@ -1841,6 +1841,9 @@ def cmd_bundle_decide(args) -> int:
         if args.question and getattr(args, "accept_shift", None) is not None:
             raise M.MutationRefused("--accept-shift goes with --target <group id> --decision approve_calibration. "
                                     "Nothing was recorded.")
+        if args.same_sample and not args.question:
+            raise M.MutationRefused("--same-sample goes with --question <the sample-id question> --only group:<id>. "
+                                    "Nothing was recorded.")
         if args.same_reading and not args.question:
             raise M.MutationRefused("--same-reading goes with --question <id> (a question that names a "
                                     "same_reading_group). Nothing was recorded.")
@@ -1854,6 +1857,7 @@ def cmd_bundle_decide(args) -> int:
                 field=args.field,
                 extra_targets=targets,
                 same_reading=args.same_reading,
+                same_sample=args.same_sample,
                 decision=args.decision,
                 value=M.parse_value(args.value, args.json),
                 by=args.by,
@@ -2389,6 +2393,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--same-reading", action="store_true",
                    help="with --question on a question that names a same_reading_group: answer every open question of "
                         "that group with the same decision and value (one decision per target, each listed)")
+    q.add_argument("--same-sample", action="store_true",
+                   help="with --question on the sample-id question and --only group:<id>: the scientist states this "
+                        "group is the same physical sample as the runs that already hold (or are proposed) that id")
     q.add_argument("--decision", required=True,
                    help="candidate / missing value / conflict: confirm correct reject defer; record group: confirm split merge "
                         "reject defer approve_calibration set_absorber; processing result: approve reject needs_changes defer, "

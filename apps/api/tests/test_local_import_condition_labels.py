@@ -9,6 +9,7 @@ changes id, kind, scope or targets.
 
 from __future__ import annotations
 
+import copy
 import json
 import shutil
 from pathlib import Path
@@ -349,3 +350,137 @@ def test_a_group_isaac_proposed_nothing_for_is_answered_on_its_own(bdir):
     assert _draft(bdir, TEMPLATE)[0]["fields"][L.FILTER_PATH]["value"] == "SYN filter 20"
     # the proposed groups are still asked
     assert _questions(bdir)["filter"]["proposals"]
+
+
+# --- review of 7a94d23e: M1-M3, L1-L6 (in memory: the bundle a scientist's answers would leave) ----------------------
+
+
+def _group(b: dict, stem: str) -> dict:
+    return _group_of(b, stem)
+
+
+def _sid_q(b: dict) -> dict:
+    return next(q for q in L.label_questions(b, include_answered=True) if q["label"] == "sample_id")
+
+
+def _decide(b: dict, label: str, decision: str = "confirm", **kw) -> dict:
+    q = next(q for q in L.label_questions(b, include_answered=True) if q["label"] == label
+             and (label != "history" or q["partition"] == kw.pop("partition", q["partition"])))
+    return L.decide(b, q, decision=decision, value=kw.pop("value", None), only=kw.pop("only", None),
+                    by="Synthetic Scientist", orcid=None, note=None, **kw)
+
+
+def _slot_value(b: dict, path: str, stem: str):
+    rid = next(r["run_id"] for r in b["runs"] if r["stem"] == stem)
+    m = next(m for m in b["missing_values"] if L.is_label_slot(m) and m["target_field_path"] == path and m["run_id"] == rid)
+    return B._decisions_by_target(b["scientist_decisions"])[("missing_value", m["value_id"])]["value"]
+
+
+def _hold_electrode(b: dict, stem: str) -> str:
+    g = _group(b, stem)
+    g["basis"]["sample"]["sample_or_electrode_number"] = {"kind": "conflicting", "readings": ["05", "55"],
+                                                          "candidate_ids": []}
+    return g["group_id"]
+
+
+def test_m1_a_group_isaac_could_not_place_joins_an_electrode_id_only_when_the_scientist_says_so(bdir):
+    b = M.load(bdir)
+    held = _hold_electrode(b, OTHER)
+    q = _sid_q(b)
+    assert {h["group_id"]: h["reason"] for h in q["not_proposed"]}[held] == "the files' electrode readings disagree"
+    target = f"{FOLDER}:ZZ4-04"
+    with pytest.raises(L.LabelRefused, match="--same-sample"):
+        _decide(b, "sample_id", "correct", value=target, only=f"group:{held}")
+    out = _decide(b, "sample_id", "correct", value=target, only=f"group:{held}", same_sample=True)
+    assert out["same_sample"] and "same physical sample" in out["statement"]
+    assert "--same-sample" in b["scientist_decisions"][-1]["note"]
+    # the reverse order: the bulk confirm that follows is recorded, and names the held answer
+    out = _decide(b, "sample_id")
+    assert out["shares_id_with"] and out["shares_id_with"][0]["value"] == target
+    assert {_slot_value(b, L.SAMPLE_ID_PATH, s) for s in (*CHAIN, OTHER)} == {target}
+
+
+def test_m1_after_a_bulk_confirm_a_held_group_still_needs_the_statement(bdir):
+    b = M.load(bdir)
+    held = _hold_electrode(b, OTHER)
+    _decide(b, "sample_id")
+    with pytest.raises(L.LabelRefused, match="--same-sample"):
+        _decide(b, "sample_id", "correct", value=f"{FOLDER}:ZZ4-04", only=f"group:{held}")
+    _decide(b, "sample_id", "correct", value="SYN-own-id", only=f"group:{held}")  # an id of its own needs nothing
+    with pytest.raises(L.LabelRefused, match="--same-sample goes with"):
+        _decide(b, "sample_id", same_sample=True)
+
+
+def test_m2_a_bulk_answer_never_overwrites_an_earlier_answer_in_a_partly_answered_group(bdir):
+    b = M.load(bdir)
+    other = _group(b, OTHER)
+    _decide(b, "filter", "correct", value="SYN own filter", only=f"group:{other['group_id']}")
+    # the scientist then merges OTHER's run into the first chain group (a partly answered group)
+    first = _group(b, CHAIN[0])
+    first["member_run_keys"] = first["member_run_keys"] + other["member_run_keys"]
+    other["status"] = "rejected"
+    out = _decide(b, "filter")
+    assert [k["group_id"] for k in out["kept"]] == [first["group_id"]] and "never overwritten" in out["statement"]
+    assert _slot_value(b, L.FILTER_PATH, OTHER) == "SYN own filter"
+    rid = next(r["run_id"] for r in b["runs"] if r["stem"] == CHAIN[0])
+    assert not any(L.is_label_slot(m) and m["run_id"] == rid and m["target_field_path"] == L.FILTER_PATH
+                   for m in b["missing_values"]), "the unanswered run of that group is left too"
+    # naming the group replaces its answers: the scientist said which group
+    _decide(b, "filter", only=f"group:{first['group_id']}")
+    assert _slot_value(b, L.FILTER_PATH, OTHER) == "filter10"
+
+
+def test_m3_chains_compare_normalised_conditions(bdir):
+    b = M.load(bdir)
+    _group(b, CHAIN[1])["basis"]["conditions"]["filter"]["value"] = ["10", "filter10"]
+    fo = next(p for p in L.proposals(b) if p["label"] == "follows")
+    pairs = {(i["said"]["after"], i["said"]["before"]) for i in fo["items"]}
+    assert pairs >= {(CHAIN[1], CHAIN[0]), (CHAIN[2], CHAIN[1])} and (CHAIN[2], CHAIN[0]) not in pairs
+
+
+def test_m3_a_stage_with_no_settled_history_holds_the_chain(bdir):
+    b = M.load(bdir)
+    _group(b, CHAIN[1])["basis"]["conditions"]["cycling_state"]["kind"] = "conflicting"
+    assert not any(p["label"] == "follows" for p in L.proposals(b)), "17 never follows 11 over an unsettled stage"
+    chains, held = L._chains(L._facts(b, Q.live_groups(b)))
+    assert not chains and any("no settled history stage" in h["reason"] for h in held)
+
+
+def test_l2_an_archive_suffix_is_not_part_of_the_folder_label():
+    assert L.beamtime_label({"source_root": {"label": "SYN_Beamtime_2099.zip"}}) == "SYN_Beamtime_2099"
+    assert L.beamtime_label({"source_root": {"label": "SYN_Beamtime_2099.tar.gz"}}) == "SYN_Beamtime_2099"
+    assert L.proposed_tag(L.beamtime_label({"source_root": {"label": "SYN_B.ZIP"}})) == "syn-b"
+
+
+def test_l3_the_electrode_position_is_the_one_grouping_counts():
+    # the engine splits on underscores, grouping also on hyphens: `SYN-A_04_x` puts `04` at grouping position 3
+    assert L._grouping_position("SYN-A_04_x", 1, 6) == 3
+    assert L._grouping_position("11_04_ZZ4", 1, 3) == 2
+    assert L._grouping_position("11_04_ZZ4", 1, None) == 2
+
+
+def test_l4_groups_under_one_condition_that_differ_at_a_not_counter_position_get_no_shared_id(bdir):
+    b = M.load(bdir)
+    _group(b, CHAIN[2])["basis"] = copy.deepcopy(_group(b, CHAIN[0])["basis"])
+    assert not _sid_q(b)["not_proposed"] or all(h["first_file"] not in CHAIN for h in _sid_q(b)["not_proposed"])
+    b["scientist_decisions"].append({
+        "decision_id": f"d-{len(b['scientist_decisions']) + 1:05d}", "target": {"kind": "experiment", "id": "experiment"},
+        "decision": B.NOT_COUNTER_DECISION, "value": None, "chosen_reading_index": None,
+        "decided_by": {"name": "Synthetic Scientist", "basis": "self_reported_local_user", "identity": "local_unverified",
+                       "orcid_claimed": None},
+        "decided_utc": "2099-01-01T00:00:00Z", "method": "scientist_answer", "note": None, "batch_id": None,
+        "not_counter_positions": [1]})
+    held = {h["first_file"]: h["reason"] for h in _sid_q(b)["not_proposed"]}
+    assert "not a run counter" in held[CHAIN[0]] and "not a run counter" in held[CHAIN[2]]
+    assert CHAIN[1] not in held, "a different condition: the number may name that condition"
+
+
+def test_l5_l6_wording():
+    assert L.history_words("after100Cycles") == "after 100 cycles"
+    assert L.history_words("after1Cycle") == "after 1 cycle"
+
+
+def test_l6_the_filter_question_says_where_each_number_was_read(bdir):
+    text = _questions(bdir)["filter"]["text"]
+    assert "(file name and scan header)" in text and "filter motor" in text
+    assert "mV" not in _questions(bdir)["history=after1500cycling"]["text"]

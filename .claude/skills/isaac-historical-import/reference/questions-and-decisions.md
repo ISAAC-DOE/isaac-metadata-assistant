@@ -248,22 +248,32 @@ scope. Nothing is written until the scientist answers. Each answer is one
   (the second file-name number on BL15-2). Proposed as `<folder>:<sample>-<electrode>`. A sample id names one
   physical object, on every record of it. Their own convention: `--decision correct --value "{sample}-e{electrode}"`
   (also `{beamtime}`). One electrode's own id: add `--only group:<id>`; it goes on every group of that electrode.
-  Two electrodes never get one id: that is refused. Not proposed when a counter answer names that position, when
-  the grouping set the number aside, or when one number sits beside two sample names (`not_proposed` says which).
+  Two electrodes never get one id: that is refused. Not proposed when the files' electrode readings disagree, when a
+  counter answer names that position, when the grouping set the number aside, when one number sits beside two sample
+  names, or when groups of one condition differ at a position the scientist said is not a counter (`not_proposed`
+  says which). A group in `not_proposed` takes an id that other runs hold, or are proposed, only when the scientist
+  says it is the same physical sample: add `--same-sample` to its `--only group:<id> --decision correct --value <id>`.
+  Say that back to them first. The reply says it was recorded as the same sample.
 - **Filter** (`system.configuration.beam_attenuator`, the portal vocabulary's key). Proposed as `filter<n>`, the
-  number the file name and the scan header's `filter` motor state. Their own form: `--value "Al filter {filter}"`.
+  number a file name or the scan header's `filter` motor states. Each example says where it was read; a number read
+  only from the header says "the scan header's filter motor reads N". Their own form: `--value "Al filter {filter}"`.
 - **History** (`context.electrochemistry.notes`). One question per file-name token (`beforeCycling`,
-  `after1500Cycling`). The proposal only splits the token into words ("after 1500 cycling"). Never say what the
+  `after1500Cycling`). The proposal only splits the token into words ("after 1500 cycling", "after 100 cycles"). Never say what the
   number means (mV or cycles): ask them, and record their sentence with `--decision correct --value "<sentence>"`.
   Not `sample.material.provenance`: the portal's list makes that commercial, synthesized, and so on.
   Groups whose files disagree are asked on their own (`history=unsettled`, `--only group:<id>`).
 - **Follows** (`links`, rel `follows`, basis `same_sample_id`). For one electrode under otherwise equal conditions,
-  each later stage follows the one before, by run number (or by the file-creation instant). Read the pairs back.
+  each later stage follows the one before, by run number (or by the file-creation instant). Conditions are compared
+  as the grouping compares them (`filter10` and `10` are one filter). A chain is held when a group of the same
+  electrode and conditions has no settled stage, or a group whose electrode is not settled sits between. Read the
+  pairs back.
   Confirm or reject; there is no correct. The export writes a link only when both records carry the same sample id.
 - **Tag** (`tags`). One tag for the beamtime, from the folder name, lowercase and hyphenated (at most 64 characters).
 
 A group ISAAC proposed nothing for is in `not_proposed`. Answer it with `--only group:<id> --decision correct
---value <value>`, or leave it. `reject` records that the label is not written. The answers are kept as per-run
+--value <value>`, or leave it. `reject` records that the label is not written. Without `--only`, an answer never
+changes an earlier one: it writes only runs with no answer, and a group whose runs already hold another value is
+left out and named (`kept`). To change a group, answer it with `--only group:<id>`. The answers are kept as per-run
 slots in `missing_values` (their `reason` names the question); they are never shown as other questions.
 The workbook and the template have no column for these: one decide call answers each question.
 
