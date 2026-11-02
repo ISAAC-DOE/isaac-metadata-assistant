@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from isaac_api.local_import import bundle as B
+from isaac_api.local_import import labels as L
 from isaac_api.local_import import cli
 from isaac_api.local_import import mutations as M
 from isaac_api.local_import import questions as Q
@@ -58,6 +59,21 @@ def _answer(bundle: dict, payload: dict, q: dict, *, partial: bool) -> tuple[str
         decision, value, kw = B.NOT_COUNTER_DECISION, None, {"positions": q["positions"]}
     elif q["kind"] == "clock_time_zone":
         decision, value = B.CLOCK_ZONE_DECISION, "UTC"
+    elif q["kind"] == L.KIND:
+        # a condition label (labels.py): answered through its own route, per-run slots; a group ISAAC proposed
+        # nothing for is answered on its own
+        asked = L.question_by_id(bundle, q["question_id"])
+        if not asked["proposals"]:
+            only = only or scopes[0]
+        decision = "confirm" if asked["proposals"] and (only is None or only[len("group:"):] in
+                                                        {p["group_id"] for p in asked["proposals"]}) else "correct"
+        value = None if decision == "confirm" else ["synthetic-test"] if asked["label"] == "tag" else "SYNTHETIC TEST VALUE"
+        if asked["label"] == "follows" and decision == "correct":
+            decision, value = "reject", None
+        L.decide(bundle, asked, decision=decision, value=value[0] if isinstance(value, list) else value, only=only,
+                 by=BY, orcid=None, note=None)
+        B.apply_derivations(bundle)
+        return None, only is not None
     else:  # pragma: no cover - a new kind must be added here
         raise AssertionError(f"unhandled question kind {q['kind']}")
     targets = Q.targets_for(payload, q["question_id"], only, field)

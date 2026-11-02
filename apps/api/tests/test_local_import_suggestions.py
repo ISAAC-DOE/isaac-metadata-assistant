@@ -24,6 +24,7 @@ from pathlib import Path
 
 import pytest
 
+from isaac_api.local_import import labels as L
 from isaac_api.local_import import bundle as B
 from isaac_api.local_import import cli
 from isaac_api.local_import import mutations as M
@@ -299,6 +300,9 @@ def test_every_question_names_the_decisions_that_answer_it(grouped):
     payload = Q.consolidate(_load(grouped()))
     assert payload["questions"]
     for q in payload["questions"]:
+        if q["kind"] == L.KIND:  # a condition label offers what its label takes, less confirm when it proposes nothing
+            assert q["allowed_decisions"] in (list(L.DECISIONS[q["label"]]), ["correct", "reject"]), q["label"]
+            continue
         assert q["allowed_decisions"] == list(Q.ALLOWED_DECISIONS[q["kind"]]), q["kind"]
 
 

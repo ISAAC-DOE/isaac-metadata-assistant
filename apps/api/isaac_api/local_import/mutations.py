@@ -2144,6 +2144,7 @@ def decide_question(
     same_conditions: bool = False,
     as_said: bool = False,
     same_reading: bool = False,
+    same_sample: bool = False,
 ) -> Any:
     """``isaac bundle decide --question`` — the CLI and the local questions screen both call this.
 
@@ -2171,6 +2172,34 @@ def decide_question(
         _require_version(Path(bundle_dir), expected_version)
         version = bundle_version(bundle_dir)
         bundle = load(bundle_dir)
+        from . import labels as L
+
+        if (asked_label := L.question_by_id(bundle, question_id)) is not None:
+            # a condition label's question (labels.py): one answer for the beamtime, one slot per run
+            given = [flag for flag, v in (("--field", field), ("--split-into", split_into), ("--merge-with", merge_with),
+                                          ("--qc-status", qc_status), ("--element", element), ("--edge", edge),
+                                          ("--positions", positions), ("--target", list(extra_targets)),
+                                          ("--same-conditions", same_conditions), ("--as-said", as_said),
+                                          ("--same-reading", same_reading), ("--only (several scopes)", only_scopes)) if v]
+            if given:
+                raise MutationRefused(f"Question {question_id} is answered with --decision (and --value for correct, "
+                                      f"--only group:<id> for one group); {', '.join(given)} is refused. Nothing was "
+                                      "recorded.")
+            on = copy.deepcopy(bundle) if dry_run else bundle
+            try:
+                result = L.decide(on, asked_label, decision=decision, value=value, only=only, by=by, orcid=orcid,
+                                  note=note, same_sample=same_sample)
+            except L.LabelRefused as exc:
+                raise MutationRefused(str(exc)) from None
+            if dry_run:
+                return {"dry_run": True, "bundle_version": version, **result,
+                        "statement": _would_say(result.get("statement"))}
+            if result.get("slots_recorded"):
+                save_bundle(bundle_dir, bundle)
+            return (result, bundle_version(bundle_dir)) if with_version else result
+        if same_sample:
+            raise MutationRefused(f"--same-sample answers the sample-id question (a condition label) only; question "
+                                  f"{question_id} is not one. Nothing was recorded.")
         resolve = dict(decision=decision, only=only, field=field, positions=positions, only_scopes=only_scopes)
         override = None
         slots_added: list[str] = []

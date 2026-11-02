@@ -2155,17 +2155,23 @@ def apply_derivations(bundle: dict) -> dict:
             if problem is not None:
                 c["eligibility_for_official_record"] = {"eligible": False, "reason": problem}
         eligible += c["eligibility_for_official_record"]["eligible"]
+    from .labels import is_label_slot, slot_eligibility
+
     for m in bundle["missing_values"]:
         key = ("missing_value", m["value_id"])
         d = decision_of.get(key)
         state = derive_value_state(STATE_MISSING, decision=d, interpreted=key in interpreted)
         m["value_state"] = state
-        m["eligibility_for_official_record"] = eligibility_for_official_record(
-            state,
-            target_field_path=m["target_field_path"],
-            value=final_value(None, d),
-            writable_paths=writable,
-        )
+        if is_label_slot(m):
+            # a condition label's slot (labels.py): its own write route and value check, never the writable set
+            m["eligibility_for_official_record"] = slot_eligibility(state, m, final_value(None, d))
+        else:
+            m["eligibility_for_official_record"] = eligibility_for_official_record(
+                state,
+                target_field_path=m["target_field_path"],
+                value=final_value(None, d),
+                writable_paths=writable,
+            )
         eligible += m["eligibility_for_official_record"]["eligible"]
     for conflict in bundle["conflicts"]:
         d = decision_of.get(("conflict", conflict["conflict_id"]))

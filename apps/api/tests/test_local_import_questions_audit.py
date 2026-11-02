@@ -27,6 +27,7 @@ import time
 import pytest
 
 from isaac_api import local_bundles as LB
+from isaac_api.local_import import labels as L
 from isaac_api.local_import import bundle as B
 from isaac_api.local_import import mutations as M
 from isaac_api.local_import import questions as Q
@@ -75,7 +76,10 @@ def _store_unfit_answer(bdir, target_ids, good, bad):
 
 def test_question_ids_of_the_grouped_corpus_are_pinned(grouped):
     p = Q.consolidate(M.load(grouped))
-    ids = sorted(q["question_id"] for q in p["questions"])
+    # the condition labels (labels.py) are NEW questions beside these; every id here is unchanged
+    ids = sorted(q["question_id"] for q in p["questions"] if q["kind"] != L.KIND)
+    assert sorted(q["label"] for q in p["questions"] if q["kind"] == L.KIND) == ["filter", "history", "history",
+                                                                                "sample_id", "tag"]
     assert len(ids) == 114
     assert hashlib.sha1("\n".join(ids).encode()).hexdigest() == "b23cc1074f8eff80bbb9c2b886300d9ebe993405"
     expected = {

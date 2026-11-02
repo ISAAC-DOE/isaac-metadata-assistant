@@ -116,6 +116,12 @@ Each `exported[]`, `refused[]` and dry-run `records[]` row has a `label`: the gr
 to name the record to the scientist. In the evidence file, a `#D` local clock time with no zone beside the UTC
 start of record has `relation: not_comparable` (not comparable until the clock's zone is stated), never
 `contradicts`. Once the zone is confirmed, a converted `#D` reading is compared as an instant.
+A confirmed follows label becomes a link in the later record. The link names the earlier record's id, so the
+export writes the earlier record first and `upload --dry-run` lists it first. The id is part of the later record's
+body: when the earlier record gets a new id, the later one gets one too. A row with `follows` names the link. When
+the earlier record is not exported, or the two records do not carry the same sample id, the later record is written
+without the link and says so ("Written without its follows link: …"). Adding a condition label changes a record's
+body, so that record gets a new id (`export: replaced`).
 It exits 1 whenever any group is refused, **even when it wrote records**: read `outcome`, never the exit
 code alone, before telling the scientist what is ready. A record written while a warning still applies lists it
 in `exported[].warnings` ("Written without the potential set-point: …"; the first 5, with `warnings_total`), and

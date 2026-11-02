@@ -41,6 +41,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Mapping, Sequence
 
 from . import bundle as B
+from . import labels as L
 
 DRAFTS_DIR = "drafts"
 VALIDATION_DIR = "validation"
@@ -748,8 +749,9 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
             continue
         d = decisions[("missing_value", m["value_id"])]
         value = B.final_value(None, d)
+        asked = L.slot_question_text(m) if L.is_label_slot(m) else f"What is {m['target_field_path']}?"
         proposals.setdefault(FIELD_REMAP.get(m["target_field_path"], m["target_field_path"]), []).append(
-            (value, [_confirmation(d, f"What is {m['target_field_path']}?")], m["value_id"])
+            (value, [_confirmation(d, asked)], m["value_id"])
         )
 
     run_of = index["run_of"]
@@ -774,14 +776,16 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
     obj_of_any = index["obj_of"]
     held_by_slots: dict[str, str] = {}
     for f in list(report["filled"]):
+        # a condition label's slot (labels.py) belongs to its run the same way
         slots = [i for i in f["from"] if obj_of_any.get(i, (None, None))[0] == "missing_value"
-                 and B.is_answer_slot(obj_of_any[i][1])]
+                 and (B.is_answer_slot(obj_of_any[i][1]) or L.is_label_slot(obj_of_any[i][1]))]
         covered = {run_of.get(i) for i in f["from"]}
         if not slots or None in covered or not (measured_ids - covered):
             continue
         path = f["path"]
         lacking = sorted(measured_ids - covered)
-        qid = next((q for i in slots if (q := B.answer_slot_question(obj_of_any[i][1]))), None)
+        qid = next((q for i in slots if (q := B.answer_slot_question(obj_of_any[i][1]) or L.slot_question(obj_of_any[i][1]))),
+                   None)
         how = (f"`isaac bundle decide <bundle_dir> --question {qid} --only group:{group['group_id']} --decision correct "
                '--value <value> --by "<your name>"` (it records every run of this group), or answer that question for '
                "the whole beamtime" if qid else
@@ -838,6 +842,9 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
                                "the confirmation was about the value, so it composes now"),
                 })
 
+    # THE CONDITION LABELS that are no scalar field (labels.py): the beamtime tag goes into the draft's tags; the
+    # follows label names a run, so its link is resolved to that run's record id at export (export_records)
+    taken = L.take_from_fields(fields, report)
     draft: dict[str, Any] = {
         "meta": dict(META),
         "fields": fields,
@@ -847,6 +854,11 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
         "implicit": [],
         "block_evidence": {},
     }
+    if taken.get("tags"):
+        draft["tags"] = taken["tags"]
+        draft["block_evidence"]["tags"] = taken["tags_evidence"]
+    if taken.get("follows"):
+        report["follows"] = taken["follows"]
 
     # THE ABSORBER (sidecar only: the official schema has no field for it). A scientist's
     # set_absorber decision gives the value; otherwise the files' suggestion is carried with
@@ -3007,6 +3019,15 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     prior_of = {(r.get("bundle_id"), r.get("group_id")): r for r in index["records"] if isinstance(r, Mapping)}
     fresh = fresh_compositions(bundle_dir, bundle, test_marker=_was_marked(bundle))
     confirmed = {gid for gid, _, _ in fresh}
+    # FOLLOWS LINKS (labels.py): a link names its target's record id, so the record a group follows is exported
+    # first, and the link is resolved to the id that export gave it (or keeps). The id is part of the later record's
+    # body: when the earlier record gets a new id, so does the later one.
+    key_of_run = {r["run_id"]: r["run_key"] for r in bundle.get("runs") or ()}
+    run_group = {key_of_run[rid]: gid for gid, _, comp in fresh for rid in comp.get("member_run_ids") or ()
+                 if rid in key_of_run}
+    fresh = L.order_by_follows(fresh, run_group)
+    drafts_by_gid = {gid: d for gid, d, _ in fresh}
+    minted: dict[str, str] = {}
     withdrawn: list[dict] = []
     # c11-a: a record written while a warning still applies says so on its row ("Written without …"), never silent
     warned = with_question_commands(bundle, [w for _, _, comp in fresh for w in comp.get("warnings") or ()])
@@ -3032,6 +3053,10 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         if p.name[: -len(".draft.json")] not in confirmed
     ) if (bundle_dir / DRAFTS_DIR).is_dir() else []
     for group_id, draft, composition in fresh:
+        link, link_evidence, link_left_out = L.follows_link(group_id, draft, composition, run_group=run_group,
+                                                            drafts=drafts_by_gid, minted=minted)
+        if link is not None:
+            draft = L.with_link(draft, link, link_evidence)
         report = validate_draft_file(draft, run_portal=run_portal, composition=composition)
         if report["verdict"] != "exportable":
             row = {"group_id": group_id, **_label(label_of, group_id), "verdict": report["verdict"],
@@ -3076,6 +3101,8 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         sidecar["schemas_used"] = report["schemas_used"]
         left_out = [w["text"] for w in warned if w["group_id"] == group_id
                     and w.get("code") in (START_TIME_WARNING, IN_SITU_WARNING)]
+        if link_left_out:
+            left_out.append(L.NOT_WRITTEN_FOLLOWS.format(why=link_left_out))
         if left_out:
             # c16d: what the record is written WITHOUT, said in its evidence file in plain words (never silently);
             # r7 J5: an in-situ record's missing conditions too, so `upload --dry-run` lists them
@@ -3127,6 +3154,10 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
                "statement": "Valid for the portal's pinned schema; NOT claimed valid for the website."}
         still = [written_without(w) for w in sorted((w for w in warned if w["group_id"] == group_id),
                                                     key=lambda w: warning_rank(w.get("code")))]
+        if link_left_out:
+            still.append(L.NOT_WRITTEN_FOLLOWS.format(why=link_left_out))
+        if link is not None:
+            row["follows"] = {"target": link["target"], "basis": link["basis"]}
         said_each_record.append(list(still))  # r5f L3: grouped by text for the summary below (rows keep their own)
         if pw := portal_warnings_of(report):
             # r4-b M7: a record the portal validator warns about says so on its row
@@ -3165,6 +3196,7 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
                                        f"new record; the old one was moved to {SUPERSEDED_DIR}/ (kept, never in an upload "
                                        "plan). If the old record was already uploaded, the portal still holds it.")
         exported.append(row)
+        minted[group_id] = rid
         entry = {"bundle_id": bundle_id, "group_id": group_id, **_label(label_of, group_id), "record_id": rid,
                  "content_sha256": digest,
                  "body_sha256": body, "exported_utc": at, "sidecar_generated_utc": sidecar["generated_utc"],
@@ -3289,9 +3321,8 @@ def upload_plan(records_dir: Path, portal_url: str | None) -> list[dict]:
     replaces = _replaced_by(Path(records_dir))
     labels = _labels_in_index(Path(records_dir))
     plan = []
-    for path in sorted(Path(records_dir).glob("*.json")):
-        if path.name.endswith(".evidence.json"):
-            continue
+    paths = [p for p in sorted(Path(records_dir).glob("*.json")) if not p.name.endswith(".evidence.json")]
+    for path in L.order_records_by_links(paths, _link_targets(paths)):
         body = path.read_bytes()
         headers = {
             "Content-Type": "application/json",
@@ -3325,6 +3356,22 @@ def upload_plan(records_dir: Path, portal_url: str | None) -> list[dict]:
                 + f". If {'any of them was' if many else 'it was'} already uploaded, the portal still holds it, and "
                 "uploading this one adds a second record for the same group.")
     return plan
+
+
+def _link_targets(paths: Sequence[Path]) -> dict[str, list[str]]:
+    """``{record id: [the record ids its links name]}``, read from the record files (an unreadable one names none)."""
+    out: dict[str, list[str]] = {}
+    for path in paths:
+        try:
+            record = json.loads(path.read_bytes())
+        except (OSError, ValueError):
+            continue
+        links = record.get("links") if isinstance(record, Mapping) else None
+        targets = [x["target"] for x in links or () if isinstance(x, Mapping) and isinstance(x.get("target"), str)] \
+            if isinstance(links, list) else []
+        if targets:
+            out[path.name[: -len(".json")]] = targets
+    return out
 
 
 def upload_summary(plan: Sequence[Mapping], records_dir: Path, portal_url: str | None) -> dict:
