@@ -492,7 +492,7 @@ describe('cited support is described and counted, never judged', () => {
     expect(row.a.support).toHaveLength(3);
     expect(row.a.undescribableSupport).toBe(3);
     expect(row.a.evidenceCount).toBe(3);
-    expect(supportWord(row.a.support[0])).toBe('an entry this build could not read');
+    expect(supportWord(row.a.support[0])).toBe('an entry that could not be read');
     /*
      * ...AND A PAYLOAD THIS BUILD COULD NOT FULLY READ IS NEVER `supported`.
      *

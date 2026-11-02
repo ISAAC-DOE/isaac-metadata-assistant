@@ -46,7 +46,6 @@ import {
   SIDE_NOW,
   SIDE_REVISION,
   SUBMITTED_REVISION_HEADING,
-  HISTORY_NOT_KEPT_LINE,
   readRevisionHistory,
   submittedRevisionText,
   WORKING_CHANGES_HEADING,
@@ -100,6 +99,11 @@ type SelectionState =
     };
 
 export function RevisionHistoryPanel({ experimentId }: { experimentId: string }) {
+  /* HIDDEN WHEN THE DEPLOYMENT KEEPS NO HISTORY (declutter, 2026-11-02): a heading,
+     a `?` and a paragraph saying there is nothing to show was an empty section.
+     The section appears wherever a history is kept. Reset when the record changes. */
+  const [notKept, setNotKept] = useState<string | null>(null);
+  if (notKept === experimentId) return null;
   return (
     <section className="revhist-section" aria-labelledby="revision-history-heading">
       <div className="revhist-head">
@@ -118,12 +122,22 @@ export function RevisionHistoryPanel({ experimentId }: { experimentId: string })
       </div>
       {/* Keyed on the record so switching records rebuilds this panel's state rather
           than showing one record's history under another's heading. */}
-      <RevisionHistoryBrowser key={experimentId} experimentId={experimentId} />
+      <RevisionHistoryBrowser
+        key={experimentId}
+        experimentId={experimentId}
+        onNotKept={() => setNotKept(experimentId)}
+      />
     </section>
   );
 }
 
-function RevisionHistoryBrowser({ experimentId }: { experimentId: string }) {
+function RevisionHistoryBrowser({
+  experimentId,
+  onNotKept,
+}: {
+  experimentId: string;
+  onNotKept: () => void;
+}) {
   const [list, setList] = useState<ListState>({ status: 'loading' });
   const [selection, setSelection] = useState<SelectionState>({ status: 'idle' });
 
@@ -142,6 +156,9 @@ function RevisionHistoryBrowser({ experimentId }: { experimentId: string }) {
   }, [experimentId]);
 
   useEffect(load, [load]);
+  useEffect(() => {
+    if (list.status === 'not_kept') onNotKept();
+  }, [list.status, onNotKept]);
 
   // The last revision clicked is the one shown: an earlier click's answer arriving later is dropped.
   const selectSeq = useRef(0);
@@ -166,13 +183,7 @@ function RevisionHistoryBrowser({ experimentId }: { experimentId: string }) {
   if (list.status === 'error') {
     return <BackendDown error={list.error} onRetry={load} />;
   }
-  if (list.status === 'not_kept') {
-    return (
-      <p className="revhist-status" role="note">
-        <span className="revhist-status-text">{HISTORY_NOT_KEPT_LINE}</span>
-      </p>
-    );
-  }
+  if (list.status === 'not_kept') return null;
 
   const { history } = list;
   return (

@@ -769,22 +769,17 @@ function LoadedExport({
                 ) : (
                   <div className="coverage-loading card">Coverage loading…</div>
                 )}
-                {/* Was "A clean local run": on the hosted deployment the run
-                    happens on the server, not the reader's machine. The claim
-                    that matters is "here, not upstream" — which is what it now
-                    says. */}
-                <AdvisoryChip
-                  advisory={advisory}
-                  explain="A clean run here is not portal sign-off — the upstream validator isn't vendored here."
-                />
+                {/* No standing "not portal sign-off" caveat (declutter, 2026-11-02):
+                    the card names the advisories and nothing on it claims a sign-off. */}
+                <AdvisoryChip advisory={advisory} />
               </div>
 
+              {/* THE DONE STATE SAYS WHAT HAPPENED (declutter, 2026-11-02): the record
+                  is written, so the heading reads "Exported" rather than repeating
+                  the pre-export gate. */}
               <div className="ready-heading">
                 <span className="dot dot-ready" aria-hidden="true" />
-                <span className="ready-label">{LABELS.groupReady}</span>
-                <span className="ready-note">
-                  — doubly gated: no-guessing checks passed, then official schema.
-                </span>
+                <span className="ready-label">{LABELS.chipExported}</span>
               </div>
 
               {/* No singular pair to card. The reason is authored server-side
@@ -840,8 +835,7 @@ function LoadedExport({
                   style={{ flex: 'none', color: 'var(--text-slate)' }}
                 />
                 <span>
-                  <strong>Review the sidecar before sharing.</strong> It can carry source
-                  paths, URIs and hashes.
+                  <strong>Review the sidecar before sharing.</strong>
                 </span>
               </div>
 
@@ -1025,17 +1019,11 @@ function LoadedExport({
           {/* BLOCKERS BEFORE ADVISORIES (review #277, I-7). */}
           {runFindingsNode}
 
-          <div className="signal-row" style={{ marginTop: 16 }}>
-            <div className="preexport-coverage card" role="note">
-              <div className="preexport-coverage-title">{LABELS.evidenceAudit}</div>
-              <p className="preexport-text">
-                Evidence coverage is counted from the written record — it runs after export.
-              </p>
-            </div>
-            <AdvisoryChip
-              advisory={advisory}
-              explain="Advisory is non-gating — it never changes the verdict or blocks export."
-            />
+          {/* The empty Evidence Audit card is gone (the status bar already says
+              coverage runs after export), so the advisory card has the row; its own
+              "non-gating" tag says the rest (declutter, 2026-11-02). */}
+          <div className="signal-row signal-row-single" style={{ marginTop: 16 }}>
+            <AdvisoryChip advisory={advisory} />
           </div>
         </>
       )}

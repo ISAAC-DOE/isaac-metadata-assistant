@@ -1483,8 +1483,8 @@ describe('the expanded detail describes support without weighing it', () => {
     expect(detail.textContent).toContain('Supported');
     // Run 2's one entry records no source kind, and is described as exactly that
     // rather than being dropped or given a plausible one.
-    expect(detail.textContent).toContain('an entry this build could not read');
-    expect(detail.textContent).toContain('could not be read by this build');
+    expect(detail.textContent).toContain('an entry that could not be read');
+    expect(detail.textContent).toContain('of the entries above could not be read.');
   });
 
   it('the disclosure is a real one, and the table keeps four columns', async () => {
@@ -1735,7 +1735,7 @@ describe('no causal or evaluative language in the widened states', () => {
     // Unreadable content is disclosed rather than dropped, and says so plainly.
     expect(view.container.textContent).toContain('2 stored decisions could not be read');
     expect(view.container.textContent).toContain(
-      'An entry this build could not read — a shape this build does not recognise',
+      'An entry that could not be read — a shape this build does not recognise',
     );
     expect(view.container.textContent).toContain(
       'names an address this run carries no conflict at',

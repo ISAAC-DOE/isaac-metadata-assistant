@@ -1273,7 +1273,7 @@ describe('B-25 · no submission history store, by configuration', () => {
     body: { status: 'ok', mode: 'synthetic-only', core: 'isaac_records', version: '0', experiment_storage },
   });
 
-  it('makes NO history request and says so calmly when the deployment has no database', async () => {
+  it('makes NO history request and renders NO section when the deployment has no database', async () => {
     const calls = stubFetchRoutes({
       'GET /api/health': healthWith({
         configured: false,
@@ -1285,8 +1285,10 @@ describe('B-25 · no submission history store, by configuration', () => {
       // request not being made at all, not on a failure being swallowed.
       [LIST]: { body: history() },
     });
-    render(<RevisionHistoryPanel experimentId={EXP} />);
-    expect(await screen.findByText(HISTORY_NOT_KEPT_LINE)).toBeTruthy();
+    const { container } = render(<RevisionHistoryPanel experimentId={EXP} />);
+    // Declutter (2026-11-02): an empty section is not rendered at all.
+    await waitFor(() => expect(container.querySelector('.revhist-section')).toBeNull());
+    expect(screen.queryByText(HISTORY_NOT_KEPT_LINE)).toBeNull();
     expect(calls).not.toContain(LIST);
     expect(screen.queryByRole('alert')).toBeNull();
     expect(document.body.textContent).not.toMatch(/could not be read/i);

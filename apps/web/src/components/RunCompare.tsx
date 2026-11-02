@@ -878,7 +878,7 @@ function ContextSide({ run, side }: { run: ApiRunView; side: SideContext }) {
               {side.pending.map((item, index) => (
                 <li key={item.blocker_key ?? `${item.id ?? 'entry'}#${index}`}>
                   {item.unavailable === true
-                    ? `An entry this build could not read${item.unavailable_reason ? ` — ${item.unavailable_reason}` : ''}`
+                    ? `An entry that could not be read${item.unavailable_reason ? ` — ${item.unavailable_reason}` : ''}`
                     : (item.question ??
                       blockerDisplayName(item.about) ??
                       item.kind ??
@@ -917,9 +917,8 @@ function ContextSide({ run, side }: { run: ApiRunView; side: SideContext }) {
           {side.conflicts !== null && side.conflicts.unreadable_resolution_entries > 0 && (
             <p className="rc-context-fail">
               {side.conflicts.unreadable_resolution_entries} stored decision
-              {side.conflicts.unreadable_resolution_entries === 1 ? '' : 's'} could not be read by
-              this build. They are counted rather than described: saying what one contains would
-              mean inventing it.
+              {side.conflicts.unreadable_resolution_entries === 1 ? '' : 's'} could not be read.
+              They are counted, not described.
             </p>
           )}
           {side.conflicts !== null && side.conflicts.resolutions_without_conflict.length > 0 && (
@@ -1569,8 +1568,8 @@ function SideDetail({
           )}
           {side.undescribableSupport > 0 && (
             <p className="rc-detail-fail">
-              {side.undescribableSupport} of the entries above could not be read by this build.
-              They are counted rather than described.
+              {side.undescribableSupport} of the entries above could not be read.
+              They are counted, not described.
             </p>
           )}
         </>
@@ -1615,8 +1614,8 @@ function SideDetail({
           )}
           {side.undescribableSupport > 0 && (
             <p className="rc-detail-fail">
-              {side.undescribableSupport} of the entries above could not be read by this build.
-              They are counted rather than described.
+              {side.undescribableSupport} of the entries above could not be read.
+              They are counted, not described.
             </p>
           )}
         </>
@@ -2053,13 +2052,13 @@ function FindingsResult({
       {(fa.opaque > 0 || fb.opaque > 0) && (
         <p className="rc-note">
           {fa.opaque + fb.opaque} finding{fa.opaque + fb.opaque === 1 ? '' : 's'} could not be
-          described by this build ({labelA}: {fa.opaque}; {labelB}: {fb.opaque}) and{' '}
+          described ({labelA}: {fa.opaque}; {labelB}: {fb.opaque}) and{' '}
           {fa.opaque + fb.opaque === 1 ? 'is' : 'are'} not matched between the two runs.
         </p>
       )}
       {both.length === 0 && onlyA.length === 0 && onlyB.length === 0 && (
         <p className="rc-note">
-          Neither check reported a finding this build can describe.
+          Neither check reported a finding that can be described.
         </p>
       )}
     </>

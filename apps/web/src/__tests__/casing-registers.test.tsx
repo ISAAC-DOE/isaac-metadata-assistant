@@ -1024,7 +1024,6 @@ const HARDCODED_LABEL_SLOT_CEILING: Readonly<Record<string, number>> = {
   'components/AssistantDrawer.tsx': 1,
   'components/AssistantPanel.tsx': 2,
   'components/ConflictResolutionPanel.tsx': 5,
-  'components/CsvReconcilePanel.tsx': 1,
   'components/EvidenceClassificationPanel.tsx': 1,
   'components/FieldCaptureControl.tsx': 1,
   'components/HelpPanel.tsx': 1,

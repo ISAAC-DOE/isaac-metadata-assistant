@@ -2871,9 +2871,8 @@ export function buildEvidenceGraph(
 
 // ---------------------------------------------------------------- findings
 
-/** What a finding the server sent but this build cannot describe is called. */
-export const UNDESCRIBABLE_FINDING =
-  'The server reported a finding this build cannot describe.';
+/** What a finding the server sent with no known description is called. */
+export const UNDESCRIBABLE_FINDING = 'The server reported an unrecognised finding.';
 
 /**
  * The three finding channels of `POST …/runs/{id}/check`, in render order.

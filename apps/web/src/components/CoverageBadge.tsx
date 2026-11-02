@@ -1,5 +1,6 @@
 import './signals.css';
 import { FileText } from './icons';
+import { HelpTip } from './HelpTip';
 import { LABELS } from '../lib/labels';
 import { NO_SERIES_COVERAGE_NOTE, carriesNoMeasurementSeries } from '../lib/adapt';
 import type { AdvisoryResult, AuditResult } from '../lib/types';
@@ -62,6 +63,19 @@ export function CoverageBadge({ audit, advisory }: CoverageBadgeProps) {
         <span className="coverage-title">
           <FileText size={15} strokeWidth={2} aria-hidden="true" />
           {LABELS.evidenceAudit}
+          {/* THE DENOMINATOR, ONE `?` AWAY (declutter, 2026-11-02): both static
+              sentences are unchanged and still in the DOM; the live figure and
+              its "paths resolve" line stay on the card. */}
+          <HelpTip subject={LABELS.evidenceAudit} label="What Is Counted">
+            <span className="coverage-sub">
+              Counted from what this record contains: fields, assets, descriptors, series, QC, links,
+              and attribution.
+            </span>{' '}
+            <span className="coverage-sub">
+              A full count means every target this record has is evidenced — not that any particular
+              target exists.
+            </span>
+          </HelpTip>
         </span>
         <span className="coverage-note">coverage · not a verdict</span>
       </div>
@@ -83,14 +97,6 @@ export function CoverageBadge({ audit, advisory }: CoverageBadgeProps) {
           denominator shrank and the figure still read as full coverage. So the
           scope is now stated as scope, and the second line says what a full count
           does and does not mean. Neither line classifies anything. */}
-      <div className="coverage-sub">
-        Counted from what this record contains: fields, assets, descriptors, series, QC, links,
-        and attribution.
-      </div>
-      <div className="coverage-sub">
-        A full count means every target this record has is evidenced — not that any particular
-        target exists.
-      </div>
       {/* The record-specific half. Keyed on the backend advisory code (see
           `lib/adapt.ts`), never re-derived here from record content the badge does
           not receive. */}

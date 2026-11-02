@@ -114,12 +114,13 @@ export function VerdictCard({ result, onRevalidate, onBackToComplete }: VerdictC
               </p>
             </div>
             {pass && onRevalidate && (
-              <button type="button" className="btn btn-secondary" onClick={onRevalidate}>
+              /* TERTIARY (declutter, 2026-11-02): the written record is fixed, so a
+                 re-check is a quiet link-style action, not a peer of Download. */
+              <button type="button" className="btn btn-ghost verdict-revalidate" onClick={onRevalidate}>
                 {LABELS.actionRevalidate}
               </button>
             )}
           </div>
-          {pass && <p className="verdict-hint">This is the same gate that backs export.</p>}
         </div>
       </section>
 

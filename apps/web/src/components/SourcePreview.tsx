@@ -41,14 +41,16 @@ export function SourcePreview({
 }: SourcePreviewProps) {
   const [tab, setTab] = useState<Tab>('source');
   const cited = new Set(citedLines);
+  const keyNode =
+    entry.key !== entry.label ? <span className="preview-prov-key">{entry.key}</span> : null;
 
   return (
     <section className="preview" aria-label="Source preview">
+      {/* The title shows the key only when it adds something: with no human label
+          the two are the same string (declutter, 2026-11-02). */}
       <h2 className="preview-prov-title">
         {entry.label}
-        {/* The key only when it adds something: with no human label the two are
-            the same string (declutter, 2026-11-02). */}
-        {entry.key !== entry.label && <span className="preview-prov-key">{entry.key}</span>}
+        {keyNode}
       </h2>
       <p className="preview-prov-text">{provenance}</p>
 
