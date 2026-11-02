@@ -414,3 +414,101 @@ def test_keeping_isaacs_approved_curve_after_choosing_a_version_is_reject_then_a
     doc = (SKILL / "reference" / "records-and-validation.md").read_text()
     assert "reject it\nand then approve it again" in doc and "approving it again alone records nothing new" in doc
     assert "approve it again, or choose its version again" not in doc
+
+
+# --- r6h review: LOW 1-4 --------------------------------------------------------------------------------------
+
+
+def test_a_warning_on_some_ready_records_names_every_one_of_their_groups():
+    gids = [f"g{i}" for i in range(6)]
+    said = [[f"Written without the start time: {NOTE.format(q=f'Q-{i + 1:010x}')}"]
+            + (["Written without the potential set-point: SYNTHETIC"] if i in (1, 4, 5) else []) for i in range(6)]
+    by_text = R.group_by_text(said)
+    pw = {g: [{"code": "SYN_WARN", "path": "x", "message": "SYNTHETIC portal warning"}] for g in ("g0", "g2", "g3", "g5")}
+    portal = R.portal_warning_summary(pw)
+    assert portal[0]["group_ids"] == ["g0", "g2", "g3"]  # the summary's own cap
+    R.name_partial_groups(gids, said, by_text, pw, portal)
+    every, some = by_text
+    assert "group_ids" not in every and some["records"] == 3 and some["group_ids"] == ["g1", "g4", "g5"]
+    assert portal[0]["group_ids"] == ["g0", "g2", "g3", "g5"]  # every group, not the first 3
+
+
+def test_a_warning_on_every_ready_record_names_no_groups():
+    pw = {g: [{"code": "SYN_WARN", "path": None, "message": "m"}] for g in ("g0", "g1")}
+    portal = R.portal_warning_summary(pw)
+    R.name_partial_groups(["g0", "g1"], [["t"], ["t"]], R.group_by_text([["t"], ["t"]]), pw, portal)
+    assert portal[0]["group_ids"] == ["g0", "g1"] and portal[0]["records"] == 2  # unchanged: the summary's own
+
+
+def test_export_says_which_groups_a_partial_warning_is_on(bdir, tmp_path):
+    _decide_everything(bdir)
+    res = R.export_records(bdir, tmp_path / "records", run_portal=_portal("publish", warnings=[
+        {"code": "SYN_WARN", "path": "x", "message": "SYNTHETIC portal warning"}]))
+    [row] = res["portal_warnings"]
+    assert row["records"] == len(res["exported"]) == 1 and row["group_ids"] == ["g1"]
+
+
+def test_the_in_situ_minimum_still_recommends_cell_type_and_control_mode_when_the_electrolyte_is_required(bdir):
+    _decide_everything(bdir, sample_form=False)
+    b = M.load(bdir)
+    M.decide(bdir, target_ids=[_miss(b, "context.environment", "run-001")], decision="correct", value="in_situ", **BY)
+    real = Q._answer_missing
+    # the electrolyte name (the warning's first field) required: the others are still recommended
+    Q_answer = lambda report: [*real(report), "context.electrochemistry.electrolyte.name"]  # noqa: E731
+    try:
+        Q._answer_missing = Q_answer
+        minimum = _minimum(bdir)
+    finally:
+        Q._answer_missing = real
+    fields = {f for r in minimum.get("recommended") or () for f in r["fields"]}
+    assert {"context.electrochemistry.cell_type", B.CONTROL_MODE_PATH} <= fields
+    assert "context.electrochemistry.electrolyte.name" not in fields
+
+
+def test_an_operando_record_warns_and_a_non_electrochemical_in_situ_one_does_not():
+    fields = {"context.environment": {"value": "operando", "status": "verified", "evidence": []}}
+    runs = [{"run_id": "run-1", "stem": "ZZ9_01_SYNTH_10MNaOH"}]
+    [w] = R._in_situ_warnings({"candidates": [], "missing_values": []}, {"group_id": "gz"}, runs, fields, {})
+    assert w["text"].startswith("an operando record that carries no")
+    plain = [{"run_id": "run-1", "stem": "ZZ9_01_SYNTH_heated_cell"}]
+    gas = {"context.environment": {"value": "in_situ", "status": "verified", "evidence": []}}
+    assert R._in_situ_warnings({"candidates": [], "missing_values": []}, {"group_id": "gz"}, plain, gas, {}) == []
+    # an electrochemistry field the record carries is evidence enough
+    echem = {**gas, "context.electrochemistry.potential_scale": {"value": "RHE", "status": "verified", "evidence": []}}
+    assert R._in_situ_warnings({"candidates": [], "missing_values": []}, {"group_id": "gz"}, plain, echem, {})
+    # and so is a potential in the file name
+    named = [{"run_id": "run-1", "stem": "ZZ9_01_SYNTH_500mV"}]
+    assert R._in_situ_warnings({"candidates": [], "missing_values": []}, {"group_id": "gz"}, named, gas, {})
+
+
+def _why_for(modes: list[str], *, filled: bool = False) -> dict:
+    """``_agree_with_composer`` on one synthetic set-point question reaching groups with these control modes."""
+    path = "context.electrochemistry.potential_setpoint_V"
+    gids = [f"g{i}" for i in range(len(modes))]
+    q = {"question_id": "Q-0000000000", "kind": "missing_value", "informational": False, "blocking": True, "tier": 1,
+         "target_field_path": path, "targets": [{"kind": "missing_value", "id": f"m{i}"} for i in range(len(modes))],
+         "applies_to": {"groups": len(modes)}}
+    bundle = {"missing_values": [{"value_id": f"m{i}", "run_id": f"r{i}"} for i in range(len(modes))], "conflicts": [],
+              "scientist_decisions": [], "candidates": []}
+    reports = {g: {"missing_required": [], "filled": [{"path": path}] if filled else [], "control_mode": m if m != "-" else None}
+               for g, m in zip(gids, modes)}
+    Q._agree_with_composer([q], bundle, {f"r{i}": g for i, g in enumerate(gids)}, {}, reports)
+    return q
+
+
+def test_a_set_point_why_with_groups_of_different_control_modes_takes_the_required_when_branch():
+    mixed = _why_for(["potentiostatic", "-"])
+    assert mixed["required_when"] and "not every record group this question reaches has that yet" in mixed["why"]
+    assert mixed["why"].count("none confirmed, potentiostatic") == 1
+    none = _why_for(["-", "-"])
+    assert "and no record group this question reaches has that yet" in none["why"]
+    every = _why_for(["potentiostatic", "potentiostatic"])
+    assert "required_when" not in every and "does not require" in every["why"]
+    assert "already has" in _why_for(["potentiostatic", "-"], filled=True)["why"]
+
+
+def test_the_docs_say_the_partial_warning_groups_and_full():
+    doc = (SKILL / "reference" / "records-and-validation.md").read_text()
+    assert "lists every one of their `group_ids`" in doc and "`export --full` names every row" in doc
+    assert "on each record. The template" not in doc
+    assert "in-situ or operando electrochemical record" in doc

@@ -47,7 +47,8 @@ decisions and a filled workbook do not carry over, and ids printed for the old b
 circuit (`OCV`) warns until the control mode is confirmed. `macro_setpoint_unanswered` (ranked with a value its
 sources disagree about) warns while a macro and a run's file name state other set-points for one measurement and
 nobody has said which is right: the record carries the file's set-point (or none) meanwhile; ask the question the
-warning names (`question_id`). `in_situ_conditions_not_in_record` warns for an in-situ record that carries no
+warning names (`question_id`). `in_situ_conditions_not_in_record` warns for an in-situ or operando electrochemical record (an electrochemistry field, or a
+file name stating a condition or a potential) that carries no
 electrolyte, cell type or control mode (and names its pH when it has none), quoting what the file names state
 (`10MNaOH`): ask each field with its command (`fields`); nothing is filled from a name. `athena_version_no_longer_chosen` warns when the
 approved curve is not the Athena version the scientist chose last (a version approved before they chose
@@ -116,7 +117,7 @@ in `exported[].warnings` ("Written without the potential set-point: …"; the fi
 record with one; the outcome says unchanged ones apart): say each one, since the record lacks that condition. The portal
 validator's own warnings (a deprecated `three_electrode` cell type, no data owner) never change a verdict, but are said:
 `portal_warnings` in `validate` and `export` (each once, with its record count; also a `portal:<CODE>` row of
-`warnings`, ranked with the serious ones), `export` also says each other warning once in `warnings_by_text` and in its `outcome` (the same text on many records, with the record count and one example question; a start-time note differs between records only in its question id), and "Written with a portal validator warning (…)" on each record. The template keeps a term the validator
+`warnings`, ranked with the serious ones), `export` also says each other warning once in `warnings_by_text` and in its `outcome` (the same text on many records, with the record count and one example question; a start-time note differs between records only in its question id; a warning on SOME of the ready records lists every one of their `group_ids`, in `warnings_by_text` and `portal_warnings` alike), and "Written with a portal validator warning (…)" on each row the reply lists (the default lists repeated rows only in part; `export --full` names every row). The template keeps a term the validator
 warns is deprecated out of its dropdown and marks it on the Vocabulary sheet ("deprecated: use …"). Adopt's allowed
 lists, the Disagreements sheet and `bundle questions` (`deprecated_values_by_field`) mark it too, and the import
 preview warns under "Deprecated terms". Its index is

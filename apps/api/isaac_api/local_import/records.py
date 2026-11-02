@@ -1556,6 +1556,8 @@ IN_SITU_FIELDS = (("context.electrochemistry.electrolyte.name", "electrolyte"),
                   ("context.electrochemistry.cell_type", "cell type"),
                   (B.CONTROL_MODE_PATH, "control mode"))
 IN_SITU_PH = ("context.electrochemistry.pH", "pH")
+#: r6h review LOW 2: the environments a measurement is done IN (``operando`` too).
+IN_SITU_ENVIRONMENTS = ("in_situ", "operando")
 #: A file-name token that STATES an in-situ condition: a concentration written onto its electrolyte (``10MNaOH``,
 #: ``100mMHClO4``: the formula checked by ``template.electrolyte_formula``), a pH (``pH12``) or open circuit (``OCV``).
 #: Quoted in the warning only; never read as a value.
@@ -1583,18 +1585,27 @@ def _in_situ_statements(member_runs: Sequence[Mapping]) -> list[dict]:
 
 def _in_situ_warnings(bundle: Mapping, group: Mapping, member_runs: Sequence[Mapping], fields: Mapping,
                       memo: dict | None = None) -> list[dict]:
-    """r6h H3: an :data:`IN_SITU_WARNING` (never a refusal) for a record whose confirmed environment is ``in_situ``
-    while it carries no electrolyte, cell type or control mode (any of :data:`IN_SITU_FIELDS`; its pH is named too
+    """r6h H3: an :data:`IN_SITU_WARNING` (never a refusal) for a record whose confirmed environment is ``in_situ`` or
+    ``operando``, of an electrochemical measurement (an electrochemistry field, or a file name stating a condition or a
+    potential), while it carries no electrolyte, cell type or control mode (any of :data:`IN_SITU_FIELDS`; its pH is named too
     when it carries none): what the measurement was done in would be silently absent. It quotes what the member runs'
     file names state (``10MNaOH``), never reads a value from them, and names, per field, the open targets whose
     question asks it (``fields``: ``{path, targets, command}``; ``records.with_question_commands`` makes each command
     the question's, and the questions' minimum recommends them). ``memo``: the open targets per run and field, read
     once per composition."""
     env = _present(fields, "context.environment")
-    if env is None or env.get("value") != "in_situ":
+    if env is None or env.get("value") not in IN_SITU_ENVIRONMENTS:
         return []
     lacking = [(p, word) for p, word in IN_SITU_FIELDS if _present(fields, p) is None]
     if not lacking:
+        return []
+    # r6h review LOW 2: only for an ELECTROCHEMICAL measurement: the record carries an electrochemistry field, or a
+    # member run's file name states a condition or a potential (an in-situ gas or heating cell asks none of these)
+    from . import questions as Q
+
+    stated = _in_situ_statements(member_runs)
+    if not (stated or any(k.startswith("context.electrochemistry.") and _present(fields, k) is not None for k in fields)
+            or any(_POTENTIAL_TOKEN.match(t) for r in member_runs for t in Q._name_tokens(r))):
         return []
     if _present(fields, IN_SITU_PH[0]) is None:
         lacking.append(IN_SITU_PH)
@@ -1620,7 +1631,7 @@ def _in_situ_warnings(bundle: Mapping, group: Mapping, member_runs: Sequence[Map
                      "command": f"isaac bundle questions <bundle_dir> --scope group:{group['group_id']}   # answer {path} there"})
     w = {"code": IN_SITU_WARNING, "group_id": group["group_id"], "path": lacking[0][0], "needs": lacking[0][0],
          "targets": each[0]["targets"], "command": each[0]["command"], "fields": each,
-         "stated": _in_situ_statements(member_runs)}
+         "stated": stated, "environment": env.get("value")}
     return [{**w, "text": in_situ_text(w)}]
 
 
@@ -1640,7 +1651,8 @@ def in_situ_text(w: Mapping) -> str:
     where = "; ".join(f"question {k} ({', '.join(v)})" if k.startswith("Q-") else f"{', '.join(v)}: {k}"
                       for k, v in asked.items())
     first = (w.get("fields") or [{}])[0].get("command") or w.get("command")
-    return (f"an in-situ record that carries no {named}: what it was measured in would be absent from the record{said}. "
+    kind = "an operando" if w.get("environment") == "operando" else "an in-situ"
+    return (f"{kind} record that carries no {named}: what it was measured in would be absent from the record{said}. "
             f"Ask the scientist ({where}), e.g. {first}")
 
 
@@ -3071,6 +3083,8 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         result["outcome"] += (" The portal validator warned on the records ready: "
                               + "; ".join(f"{w['code']} ({w['records']} record(s))" for w in result["portal_warnings"])
                               + " (`portal_warnings`).")
+    name_partial_groups([r["group_id"] for r in exported], said_each_record, result.get("warnings_by_text") or [],
+                        portal_warned, result.get("portal_warnings") or [])
     if not exported:
         # SAID PLAINLY: with nothing written there is nothing for `upload --dry-run` to show
         result["statement"] = (
@@ -3078,6 +3092,23 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
              f"Nothing was exported by this run; `upload --dry-run` on {out} lists only records an earlier export left there.")
             + " `isaac bundle validate <bundle_dir>` says what each group still needs.")
     return result
+
+
+def name_partial_groups(group_ids: Sequence[str], said_each_record: Sequence[Sequence[str]], by_text: list[dict],
+                        portal_warned: Mapping[str, Sequence[Mapping]], portal_rows: list[dict]) -> None:
+    """r6h review LOW 1: a warning on SOME of the ready records (not all) names EVERY one of their groups
+    (``group_ids``), in ``warnings_by_text`` and ``portal_warnings`` alike: the default ``export`` reply lists only the
+    first few repeated rows, so a count alone would not say which records lack the condition. ``group_ids`` and
+    ``said_each_record``: the exported rows' groups and their warning texts, in the same order."""
+    n = len(group_ids)
+    for row in by_text:
+        if row["records"] < n:
+            row["group_ids"] = [g for g, texts in zip(group_ids, said_each_record)
+                                if row["text"] in {_QUESTION_ID_IN_TEXT.sub("<question id>", str(t)) for t in texts}]
+    for row in portal_rows:
+        if row["records"] < n:
+            row["group_ids"] = [g for g, ws in portal_warned.items()
+                                if any((w["code"], w["message"]) == (row["code"], row["message"]) for w in ws)]
 
 
 def export_outcome(written: int, refused: int, withdrawn: int, out: Path, *, warned: int = 0, unchanged: int = 0,

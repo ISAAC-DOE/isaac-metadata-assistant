@@ -1625,11 +1625,15 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
                                else "composed for it now (from another answer, e.g. a beamtime-wide one, or a source). Answer "
                                "here only with the same thing: two confirmed values that differ fill nothing.")
                             + _modes_said(modes))
-            elif (when := _required_when(path)) and _MODE_REQUIRING.get(path) not in modes:
+            elif (when := _required_when(path)) and (path not in _MODE_REQUIRING
+                                                       or any(m != _MODE_REQUIRING[path] for m in modes)):
+                # r6h review LOW 4: groups whose control modes differ: any group without the mode takes this branch
                 q["required_when"] = when
-                q["why"] = (f"Not blocking now: a record requires {path} only once {when}, and no record "
-                            "group this question reaches has that yet (what `build-records` and `validate` check)."
-                            + _modes_said(modes) + " Answer it if you know it; it blocks once that is so.")
+                some = path in _MODE_REQUIRING and _MODE_REQUIRING[path] in modes
+                q["why"] = (f"Not blocking now: a record requires {path} only once {when}, and "
+                            + ("not every" if some else "no") + " record group this question reaches has that yet (what "
+                            "`build-records` and `validate` check)." + _modes_said(modes)
+                            + " Answer it if you know it; it blocks once that is so.")
             else:
                 q["why"] = (f"Not blocking: the record composer (what `build-records` and `validate` check) does not "
                             f"require {path} for any record group this question reaches." + _modes_said(modes))
@@ -3185,7 +3189,11 @@ def _recommended(report: Mapping, usable: Sequence[tuple], gid: str) -> list[dic
     # the minimum's blocking ``questions``, never also recommended as "not blocking"
     required = set(_answer_missing(report))
     for w in report.get("warnings") or ():
-        if w.get("code") not in (STATED_POTENTIAL_WARNING, IN_SITU_WARNING) or w["needs"] in required:
+        # r6h review LOW 3: an in-situ warning's fields are filtered one by one (``each``): a required electrolyte name
+        # never hides the cell type and control mode it also names
+        if w.get("code") not in (STATED_POTENTIAL_WARNING, IN_SITU_WARNING) or (not w.get("fields") and w["needs"] in required):
+            continue
+        if w.get("fields") and not [f for f in w["fields"] if f["path"] not in required]:
             continue
         # BOTH STEPS when the warning names two (no set-point read and no scale): one recommendation each, the
         # warning's text (with both commands made the questions') as the why of each. r6h H3: an in-situ record's
