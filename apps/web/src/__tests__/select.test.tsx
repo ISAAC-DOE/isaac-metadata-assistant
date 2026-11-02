@@ -153,6 +153,69 @@ describe('Select', () => {
     }
   });
 
+  it('one letter typed again quickly cycles through the options starting with it', () => {
+    vi.useFakeTimers();
+    try {
+      render(<Harness />);
+      key('ArrowDown');
+      key('a');
+      expect(activeText()).toBe('Apricot'); // starts after Apple, the active option
+      act(() => void vi.advanceTimersByTime(100));
+      key('a');
+      expect(activeText()).toBe('Apple'); // "aa" within the window: cycles on, wrapping
+      act(() => void vi.advanceTimersByTime(100));
+      key('a');
+      expect(activeText()).toBe('Apricot');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('Escape closing the picker does not reach a dialog around it; closed, Escape passes through', () => {
+    const outer = vi.fn();
+    render(
+      <div onKeyDown={(e) => outer(e.key)}>
+        <Harness />
+      </div>,
+    );
+    key('ArrowDown');
+    key('Escape');
+    expect(combo()).toHaveAttribute('aria-expanded', 'false');
+    expect(outer).not.toHaveBeenCalledWith('Escape');
+    key('Escape'); // closed: the picker has nothing to close, so the dialog may
+    expect(outer).toHaveBeenCalledWith('Escape');
+  });
+
+  it('Space is handled on keydown only: its keyup is prevented, so a browser cannot toggle it back', () => {
+    render(<Harness />);
+    key(' ');
+    expect(combo()).toHaveAttribute('aria-expanded', 'true');
+    const up = fireEvent.keyUp(combo(), { key: ' ' });
+    expect(up).toBe(false); // default prevented
+    expect(combo()).toHaveAttribute('aria-expanded', 'true');
+    key(' '); // chooses and closes
+    expect(fireEvent.keyUp(combo(), { key: ' ' })).toBe(false);
+    expect(combo()).toHaveAttribute('aria-expanded', 'false');
+    // other keys' keyup is left alone
+    expect(fireEvent.keyUp(combo(), { key: 'Enter' })).toBe(true);
+  });
+
+  it('passes focus and blur through to the trigger', () => {
+    const onFocus = vi.fn();
+    const onBlur = vi.fn();
+    render(
+      <>
+        <label htmlFor="f">F</label>
+        <Select id="f" value="" options={FRUIT} onChange={() => {}} onFocus={onFocus} onBlur={onBlur} />
+      </>,
+    );
+    const c = screen.getByRole('combobox', { name: 'F' });
+    fireEvent.focus(c);
+    fireEvent.blur(c);
+    expect(onFocus).toHaveBeenCalledTimes(1);
+    expect(onBlur).toHaveBeenCalledTimes(1);
+  });
+
   it('Escape closes and keeps the value', () => {
     const onChange = vi.fn();
     render(<Harness initial="apple" onChange={onChange} />);

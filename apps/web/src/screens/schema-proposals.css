@@ -652,7 +652,8 @@ details[open] > summary > .sp-chevron { transform: rotate(90deg); }
 .sp-file:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
 
 /* A tertiary action on this screen: blue text, no box until hovered (Stop Using This Draft, Keep It, the
-   section actions in the vocabulary). Scoped here until a shared `.btn-quiet` lands in base.css. */
+   section actions in the vocabulary). Deliberately NOT `.btn-quiet`, which no stylesheet defines yet: when a
+   shared `.btn-quiet` lands, switch these to it and delete this rule, rather than stacking the two. */
 .sp-text-btn {
   padding: 5px var(--space-xs);
   border-color: transparent;

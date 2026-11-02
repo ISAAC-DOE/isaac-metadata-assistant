@@ -507,6 +507,6 @@ export const SCHEMA_PROPOSALS_COPY = {
   schemaChangeSaved: "Saved as a draft. Copy or download the change request to share it with the standard's owners.",
   readyLead: 'Propose one to open it in the form, with the description left to you. Nothing is sent until you save.',
   /** The one hint beside Save, for a plain proposal and for one opened from a local draft alike. */
-  saveHint: 'Saves a draft. You send it from Proposals.',
+  saveHint: 'Saves a draft. Copy or download it from Proposals to send it.',
   localImportFiledFrom: 'From a local import’s drafts file',
 } as const;

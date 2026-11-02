@@ -720,7 +720,7 @@ describe('the drafts, grouped', () => {
     expect(draftNote()).toHaveTextContent('synthetic-bundle-0001');
     // What Save does is said once, above it.
     expect(screen.getByRole('button', { name: 'Save Proposal' })).toHaveAccessibleDescription(
-      'Saves a draft. You send it from Proposals.',
+      'Saves a draft. Copy or download it from Proposals to send it.',
     );
 
     fireEvent.click(within(draftItem('simulated')).getByRole('button', { name: 'Propose This Term' }));

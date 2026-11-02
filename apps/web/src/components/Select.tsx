@@ -9,6 +9,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type FocusEvent,
   type KeyboardEvent,
   type ReactNode,
 } from 'react';
@@ -60,10 +61,17 @@ export interface SelectProps {
   /** For a picker with no `<label htmlFor>`: its accessible name. */
   'aria-label'?: string;
   'aria-labelledby'?: string;
+  /** Passed to the trigger, for forms that validate when a field is left. */
+  onFocus?: (e: FocusEvent<HTMLButtonElement>) => void;
+  onBlur?: (e: FocusEvent<HTMLButtonElement>) => void;
 }
 
 /** How long typed letters accumulate into one search, as the APG example does. */
 const TYPEAHEAD_MS = 500;
+/** The room the popup keeps from the viewport's right edge (the page's own gutter at a phone width). */
+const EDGE_GUTTER = 16;
+/** The popup's widest, however much room there is. */
+const POPUP_MAX = 512;
 const PAGE_STEP = 10;
 
 export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select(
@@ -81,6 +89,8 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
     'aria-required': required,
     'aria-label': ariaLabel,
     'aria-labelledby': labelledBy,
+    onFocus,
+    onBlur,
   },
   ref,
 ) {
@@ -173,12 +183,10 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
   const findByText = useCallback(
     (text: string, from: number) => {
       const lower = text.toLowerCase();
-      const allSame = lower.split('').every((c) => c === lower[0]);
       const start = order.indexOf(from);
       const rotated = [...order.slice(start + 1), ...order.slice(0, start + 1)];
       const match = (q: string) => rotated.find((i) => enabled(i) && options[i].label.toLowerCase().startsWith(q));
-      // Typing one letter again cycles through the options starting with it.
-      return match(lower) ?? (allSame ? match(lower[0]) : undefined) ?? -1;
+      return match(lower) ?? -1;
     },
     [order, enabled, options],
   );
@@ -190,6 +198,9 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
     s.at = now;
     // A fresh one-letter search starts AFTER the current option, so the same letter moves on; a longer search
     // starts AT it (searching after the option before it), so "ca" can stay on "cathode" once "c" found it.
+    // The same letter typed again, however fast, cycles through the options starting with it (APG): the search
+    // is that one letter, starting after the current option.
+    if (s.text.length > 1 && s.text.split('').every((c) => c === s.text[0])) return findByText(s.text[0], from);
     const pos = order.indexOf(from);
     const base = s.text.length === 1 || pos < 0 ? from : order[(pos - 1 + order.length) % order.length];
     return findByText(s.text, base);
@@ -249,7 +260,9 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
         setActive(lastEnabled());
         return;
       case 'Escape':
+        // Escape here belongs to the picker: a dialog or drawer around it must not close too.
         e.preventDefault();
+        e.stopPropagation();
         close();
         return;
       case 'Enter':
@@ -288,15 +301,29 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
     return () => document.removeEventListener('mousedown', onDown);
   }, [open, close]);
 
-  // Open below; flip above when there is no room below and more above.
+  // Open below, and flip above when there is no room below and more above. Never wider than the room from the
+  // trigger's left edge to the viewport's right gutter (so an indented trigger at a phone width cannot push the
+  // page sideways), and never narrower than the trigger. Measured again while open if the window changes.
+  const [maxWidth, setMaxWidth] = useState<number | undefined>(undefined);
   useLayoutEffect(() => {
     if (!open) return;
-    const trigger = buttonRef.current?.getBoundingClientRect();
-    const list = listRef.current;
-    if (!trigger || !list) return;
-    const wanted = Math.min(list.scrollHeight, list.offsetHeight || list.scrollHeight) || 0;
-    const below = window.innerHeight - trigger.bottom;
-    setAbove(below < wanted + 8 && trigger.top > below);
+    function place() {
+      const trigger = buttonRef.current?.getBoundingClientRect();
+      const list = listRef.current;
+      if (!trigger || !list) return;
+      const wanted = Math.min(list.scrollHeight, list.offsetHeight || list.scrollHeight) || 0;
+      const below = window.innerHeight - trigger.bottom;
+      setAbove(below < wanted + 8 && trigger.top > below);
+      const room = window.innerWidth - trigger.left - EDGE_GUTTER;
+      setMaxWidth(Math.max(trigger.width, Math.min(POPUP_MAX, room)));
+    }
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
   }, [open]);
 
   // Keep the active option in view as it moves.
@@ -366,7 +393,16 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
         disabled={disabled}
         onClick={() => (open ? close() : openWith(selectedIndex >= 0 ? selectedIndex : firstEnabled()))}
         onKeyDown={onKeyDown}
-        onBlur={() => open && close()}
+        onKeyUp={(e) => {
+          // A button activates on Space at keyup (Firefox does so even when the keydown was prevented), which
+          // would toggle the popup straight back. Space is handled at keydown, so its keyup does nothing here.
+          if (e.key === ' ') e.preventDefault();
+        }}
+        onFocus={onFocus}
+        onBlur={(e) => {
+          if (open) close();
+          onBlur?.(e);
+        }}
       >
         <span className="select-value">{selected ? selected.label : (placeholder ?? '')}</span>
         <ChevronDown className="select-chevron" size={16} strokeWidth={2} aria-hidden="true" />
@@ -381,6 +417,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
         aria-label={open ? listName : undefined}
         aria-labelledby={open && listName === undefined ? (labelledBy ?? id) : undefined}
         className={`select-popup${above ? ' is-above' : ''}`}
+        style={maxWidth !== undefined ? { maxWidth } : undefined}
         hidden={!open}
         tabIndex={-1}
         // A press inside the popup must not take focus from the trigger.

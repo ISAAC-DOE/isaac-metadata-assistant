@@ -353,12 +353,12 @@ function BrowsePanel({
   const sectionActions = section && (canAddList || canAddField) && (
     <div className="sp-browse-actions">
       {canAddList && (
-        <button type="button" className="btn btn-quiet sp-text-btn" onClick={() => onPropose('add_category', section.id, '')}>
+        <button type="button" className="btn sp-text-btn" onClick={() => onPropose('add_category', section.id, '')}>
           <Plus size={14} strokeWidth={2.25} aria-hidden="true" /> New List in {shortSection}
         </button>
       )}
       {canAddField && (
-        <button type="button" className="btn btn-quiet sp-text-btn" onClick={() => onPropose('schema_change', section.id, '')}>
+        <button type="button" className="btn sp-text-btn" onClick={() => onPropose('schema_change', section.id, '')}>
           <Plus size={14} strokeWidth={2.25} aria-hidden="true" /> New Field in {shortSection}
         </button>
       )}
@@ -594,6 +594,8 @@ function ProposePanel({
   const [scope, setScope] = useState<SchemaChangeScope | ''>('');
   const [migration, setMigration] = useState('');
 
+  /** Whether the reviewer notes are open: the reader's own choice, except that they open when they become needed. */
+  const [notesOpen, setNotesOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<SchemaFieldError[]>([]);
   const [topMessage, setTopMessage] = useState<string | null>(null);
@@ -850,6 +852,11 @@ function ProposePanel({
   const savedIsField = saved?.proposal.proposal_type === 'schema_change';
   const sectionError = errorFor('section');
   const reviewerNotesRequired = isField || fromLocalDraft;
+  const notesWanted = reviewerNotesRequired || from !== null;
+  // On the rising edge only: becoming needed opens the notes; no longer needed leaves them as they are.
+  useEffect(() => {
+    if (notesWanted) setNotesOpen(true);
+  }, [notesWanted]);
   /** The kinds a reader can choose, in the order they are offered; the third only when the server describes it. */
   const kinds: { type: SchemaProposalType; title: string; hint: string }[] = [
     { type: 'add_term', title: COPY.kindTerm, hint: COPY.kindTermHint },
@@ -951,7 +958,7 @@ function ProposePanel({
             </p>
           )}
           <div className="sp-actions">
-            <button type="button" className="btn btn-quiet sp-text-btn" onClick={stopUsingDraft}>
+            <button type="button" className="btn sp-text-btn" onClick={stopUsingDraft}>
               Stop Using This Draft
             </button>
           </div>
@@ -1045,7 +1052,7 @@ function ProposePanel({
                 {listGroups.length > 0 && (
                   <button
                     type="button"
-                    className="btn btn-quiet sp-text-btn sp-hint-action"
+                    className="btn sp-text-btn sp-hint-action"
                     onClick={() => onBrowseLists(category !== '' ? sectionId : null, category !== '' ? category : null)}
                   >
                     Browse All Lists
@@ -1302,8 +1309,9 @@ function ProposePanel({
           <FieldError id={`${ids.description}-err`} message={errorFor('description')} />
         </div>
 
-        {/* Open when something in it is required, or when a link already filled part of it in. */}
-        <details className="sp-why" open={reviewerNotesRequired || from !== null ? true : undefined}>
+        {/* Opened when something in it becomes required, or a link fills part of it in; never closed for the
+            reader (a change of kind keeps it as they left it). */}
+        <details className="sp-why" open={notesOpen} onToggle={(e) => setNotesOpen(e.currentTarget.open)}>
           <summary>
             <ChevronRight className="sp-chevron" size={16} strokeWidth={2} aria-hidden="true" />
             {LABELS.headingSpReviewerNotes}
@@ -2086,7 +2094,7 @@ function ProposalRow({
                 <button type="button" className="btn btn-danger" ref={confirmRef} onClick={withdraw} disabled={busy}>
                   {busy ? 'Withdrawing…' : 'Confirm Withdraw'}
                 </button>
-                <button type="button" className="btn btn-quiet sp-text-btn" onClick={keep} disabled={busy}>
+                <button type="button" className="btn sp-text-btn" onClick={keep} disabled={busy}>
                   Keep It
                 </button>
               </span>

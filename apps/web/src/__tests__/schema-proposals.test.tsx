@@ -575,6 +575,22 @@ describe('Propose a Change', () => {
     expect(screen.getByLabelText('Description (required)')).toHaveValue('Half a description.');
   });
 
+  it('Notes for Reviewers stay as the reader left them across a change of kind', async () => {
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([]),
+    });
+    renderAt(ROUTE);
+    await screen.findByRole('combobox', { name: 'List' });
+    const notes = screen.getByText(LABELS.headingSpReviewerNotes).closest('details') as HTMLDetailsElement;
+    expect(notes).not.toHaveAttribute('open');
+    fireEvent.click(notes.querySelector('summary') as HTMLElement); // the reader opens them
+    await waitFor(() => expect(notes).toHaveAttribute('open'));
+    fireEvent.click(screen.getByRole('radio', { name: COPY.kindList }));
+    fireEvent.click(screen.getByRole('radio', { name: COPY.kindTerm }));
+    expect(notes).toHaveAttribute('open');
+  });
+
   it('names each kind by its title alone, with its one-line hint as the description', async () => {
     stubFetchRoutes({
       'GET /api/schema-proposals/vocabulary': { body: vocabulary },
@@ -760,6 +776,28 @@ describe('Proposals', () => {
     renderAt(`${ROUTE}?tab=proposals`);
     expect(await screen.findByText(/No proposals on this server yet/)).toBeInTheDocument();
     expect(document.querySelector('.sp-item')).toBeNull();
+  });
+
+  it('lists a proposal once when a save elsewhere shifted it onto the next page (the paging dedupe)', async () => {
+    const first = proposal({ id: '01M61TASK3DFS5VX1C7X1RZJS5', term: 'page_one' });
+    const shifted = proposal({ id: '01M61TASK3DFS5VX1C7X1RZJS6', term: 'shifted_row' });
+    const fresh = proposal({ id: '01M61TASK3DFS5VX1C7X1RZJS7', term: 'page_two' });
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals?limit=25&offset=0': {
+        body: { ...listBody([first, shifted]), total: 3, next_offset: 2 },
+      },
+      // page 2 repeats a page-1 row, as it does when a newer proposal was saved meanwhile
+      'GET /api/schema-proposals?limit=25&offset=2': {
+        body: { ...listBody([shifted, fresh]), total: 3, offset: 2, next_offset: null },
+      },
+    });
+    renderAt(ROUTE);
+    const column = within(await screen.findByRole('region', { name: 'Proposals' }));
+    fireEvent.click(await column.findByRole('button', { name: 'Show More' }, { timeout: 4000 }));
+    await screen.findByText(/page_two/);
+    expect(document.querySelectorAll('.sp-item')).toHaveLength(3);
+    expect(screen.getAllByText(/shifted_row/)).toHaveLength(1);
   });
 
   it('loads further pages on request and appends them', async () => {
