@@ -1,0 +1,128 @@
+/*
+ * SELECT — the themed select-only combobox (`Select.tsx`).
+ *
+ * The trigger matches `.input` (same height, fill, border, radius and padding), so a form mixing text boxes
+ * and pickers reads as one family. The popup uses the app's surface, border, control radius and emphasis
+ * shadow. Existing tokens only: no new hue, radius or custom property.
+ */
+
+.select {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  width: 100%;
+  min-height: 42px;
+  padding: 0 11px 0 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--screen-base);
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
+}
+.select-trigger:hover:not(:disabled) { border-color: var(--text-tertiary); }
+.select-trigger[aria-expanded="true"] { border-color: var(--action); }
+.select-trigger:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+.select-trigger[aria-invalid="true"] {
+  border-color: var(--text-heading);
+  border-width: 2px;
+  padding-left: 12px;
+  padding-right: 10px;
+}
+.select-trigger:disabled {
+  background: var(--border-faint);
+  color: var(--text-tertiary);
+  cursor: not-allowed;
+}
+.select-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The placeholder reaches the same contrast as `.input::placeholder`. */
+.select-trigger.is-empty .select-value { color: var(--text-tertiary); }
+.select-chevron {
+  flex: none;
+  color: var(--text-secondary);
+  transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.select-trigger[aria-expanded="true"] .select-chevron { transform: rotate(180deg); color: var(--action); }
+
+/* --- the popup ------------------------------------------------------------------------- */
+
+.select-popup {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  width: max-content;
+  /* Never wider than the page's own gutters allow, so it never makes the page scroll sideways. */
+  max-width: min(32rem, calc(100vw - 2 * var(--space-md)));
+  max-height: 18rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-2xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  box-shadow: var(--shadow-card), var(--shadow-emphasis);
+}
+.select-popup[hidden] { display: none; }
+.select-popup.is-above { top: auto; bottom: calc(100% + 4px); }
+
+.select-group + .select-group,
+.select-option + .select-group,
+.select-group + .select-option { margin-top: var(--space-2xs); padding-top: var(--space-2xs); border-top: 1px solid var(--border-faint); }
+.select-group-name {
+  padding: var(--space-xs) var(--space-sm) var(--space-2xs);
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+}
+
+.select-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-token);
+  color: var(--text-primary);
+  line-height: var(--line-height-normal);
+  cursor: pointer;
+}
+.select-option.is-active { background: var(--action-tint); color: var(--text-heading); }
+.select-option[aria-disabled="true"] { color: var(--text-tertiary); cursor: not-allowed; }
+.select-check {
+  flex: none;
+  margin-top: 0.25em;
+  color: var(--action);
+  visibility: hidden;
+}
+.select-option.is-selected .select-check { visibility: visible; }
+.select-option.is-selected .select-option-name { font-weight: var(--font-weight-semibold); }
+.select-option-text { display: flex; flex-direction: column; min-width: 0; }
+.select-option-name { overflow-wrap: anywhere; }
+.select-option-detail {
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .select-trigger,
+  .select-chevron { transition: none; }
+}

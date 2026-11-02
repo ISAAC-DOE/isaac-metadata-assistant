@@ -1,0 +1,57 @@
+/*
+ * SEGMENTED CONTROL (`SegmentedControl.tsx`). The track is `--action-tint`; the chosen segment is a raised
+ * `--surface` with `--action-hover` text. Existing tokens only: no new hue, radius or custom property.
+ */
+
+.segmented {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+.segmented-label {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-strong);
+}
+.segmented-track {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-self: flex-start;
+  max-width: 100%;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--action-selected-border);
+  border-radius: var(--radius-control);
+  background: var(--action-tint);
+}
+.segmented-option {
+  min-height: 34px;
+  padding: 0 var(--space-md);
+  border: 1px solid transparent;
+  border-radius: var(--radius-token);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out, box-shadow 120ms ease-out;
+}
+.segmented-option:hover:not(:disabled):not(.is-checked) { color: var(--action-hover); }
+.segmented-option.is-checked {
+  background: var(--surface);
+  border-color: var(--action-selected-border);
+  color: var(--action-hover);
+  font-weight: var(--font-weight-semibold);
+  box-shadow: var(--shadow-card);
+}
+.segmented-option:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+.segmented-option:disabled { color: var(--text-tertiary); cursor: not-allowed; }
+.segmented-track[aria-invalid="true"] { border-color: var(--text-heading); border-width: 2px; padding: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .segmented-option { transition: none; }
+}
