@@ -255,7 +255,7 @@ function sideLabel(side: Side): string {
  * THE INLINE THRESHOLD, AND WHY IT IS 40 — with the one thing it is NOT.
  *
  * `activityHistory.css` declares this panel's reading measure as `68ch`
- * (`.activity-lead`, `.activity-actor-note`). An inline change is two values plus a
+ * (`.activity-lead`). An inline change is two values plus a
  * three-character arrow on one line, so 40 characters on ONE side already exceeds
  * half that measure: the second value starts on a new line and the arrow lands at
  * the end of a paragraph, where it reads as punctuation rather than as a relation
@@ -590,27 +590,9 @@ function readableTimeOfDay(iso: string): string {
  * qualification is rendered exactly when the basis is one a reader would otherwise
  * take at face value.
  *
- * ── THE STANDING DISCLOSURE MOVES WITH THIS, AND DID NOT AT FIRST ───────────
  *
- * INDEPENDENT REVIEW, Important 1: this argument spends four paragraphs on why the
- * suppression must be conditional on the value, and then left its COUNTERPART hard
- * coded — the `<details>` rendered unconditionally. A history with one attributed
- * act therefore showed a row naming a person directly beneath a sentence reading
- * *"Entries are not attributed to a person. This deployment has no verified sign-in
- * boundary…"*: two contradictory claims about the deployment on one screen. Not
- * reachable in a default build, reachable under `ISAAC_EDGE_TRUST_VERIFIER=
- * test_fixture` — which is exactly the future the conditional exists for. The
- * reviewer reproduced it by adding ONE assertion to my own mixed-history test,
- * whose fixture already built the state; the test simply never looked.
- *
- * `attributionNote` is the fix, and it is derived from the loaded events rather
- * than from a belief about the deployment, which is the property the old sentence
- * lacked:
- *
- *   nothing named   -> the original sentence, unchanged
- *   some named      -> a sentence about THOSE entries, asserting nothing about the
- *                      deployment as a whole
- *   all named       -> no disclosure; there is nothing to explain
+ * There is no standing attribution sentence: a row says who acted only when the
+ * loaded history names someone, and the sentinel says "Unattributed" in words.
  */
 /* THE TWO SERVER CONSTANTS, TRANSCRIBED — and now guarded rather than trusted.
    `activity.ACTOR_UNATTRIBUTED` and `identity.TRUST_BASIS_TEST_FIXTURE` are the
@@ -657,37 +639,6 @@ function actorDisplay(actor: string): string {
 function actorBasisNote(event: ApiActivityEvent): string | null {
   if (event.actor === ACTOR_UNATTRIBUTED) return null;
   if (event.actor_trust_basis === TRUST_BASIS_TEST_FIXTURE) return LABELS.activityTrustFixture;
-  return null;
-}
-
-/**
- * WHICH STANDING ATTRIBUTION SENTENCE IS TRUE OF WHAT IS ON SCREEN, if any.
- *
- * Derived from the loaded events. See `PER_ROW_ACTOR`'s note for the defect this
- * closes: the old code rendered the "no verified sign-in boundary" sentence
- * unconditionally, including beside a row that named somebody.
- *
- * THE `nothing named` BRANCH ALSO COVERS AN EMPTY, LOADING OR FAILED LIST, and that
- * is deliberate rather than incidental: with nothing loaded the panel knows nothing
- * that contradicts the sentence, and dropping the standing explanation from the
- * empty state would remove the one place a reader meets it before there is any
- * history to read.
- */
-function attributionNote(events: readonly ApiActivityEvent[]): { summary: string; body: string } | null {
-  const named = events.some((e) => e.actor !== ACTOR_UNATTRIBUTED);
-  const unnamed = events.some((e) => e.actor === ACTOR_UNATTRIBUTED);
-  if (!named) {
-    return {
-      summary: LABELS.activityWhyUnattributed,
-      body: LABELS.activityActorUnattributed,
-    };
-  }
-  if (unnamed) {
-    return {
-      summary: LABELS.activityWhySomeUnattributed,
-      body: LABELS.activityActorSomeUnattributed,
-    };
-  }
   return null;
 }
 
@@ -1005,10 +956,6 @@ export function ActivityHistoryPanel({ experimentId }: { experimentId: string })
      does NOT rescue an idle tab; that claim was withdrawn, and the note says why. */
   const groups = groupByDay(rendered, new Date());
   const showActor = PER_ROW_ACTOR(rendered);
-  /* The standing attribution sentence, chosen from what is LOADED — see
-     `attributionNote`. Computed beside `showActor` from the same array, so the two
-     cannot disagree about the same history, which is the defect they had. */
-  const attribution = attributionNote(rendered);
 
   return (
     <section className="activity-panel" aria-labelledby="activity-heading">
@@ -1016,31 +963,6 @@ export function ActivityHistoryPanel({ experimentId }: { experimentId: string })
         {LABELS.activityTitle}
       </h2>
       <p className="activity-lead">{LABELS.activityLead}</p>
-      {/* THE ACTOR DISCLOSURE, BEHIND A NATIVE `<details>` — the repo idiom
-          (`HelpPanel`, `AssistantPanel`, `FetchStates`, `SchemaBrowser`):
-          keyboard-operable with no ARIA and announced as a disclosure.
-          `ACT-003`'s requirement is that `unattributed` be rendered HONESTLY, and
-          the sentence behind this is UNCHANGED and still in the DOM — a closed
-          `<details>` is reachable by `querySelectorAll`, by find-in-page and by a
-          screen reader. What changed is that ~40 words of standing explanation
-          stop being permanent furniture for a reader who has met them once, which
-          is the owner's own direction: honest prose goes behind a collapsible
-          rather than being capped or deleted. The SUMMARY still states the fact,
-          so nothing is hidden behind a neutral label.
-
-          CONDITIONAL SINCE THE `ACT-003b` REVIEW (Important 1). It used to render
-          unconditionally, so a history containing one attributed act showed a row
-          naming a person above a sentence saying nobody can be named. Which
-          sentence appears — or whether any does — is now derived from the loaded
-          events by `attributionNote`, from the same array `showActor` reads. */}
-      {attribution !== null && (
-        <Disclosure
-          summary={<span className="activity-actor-summary">{attribution.summary}</span>}
-          className="activity-actor-details"
-        >
-          <p className="activity-actor-note">{attribution.body}</p>
-        </Disclosure>
-      )}
       {/* The only live region on this panel. Without it a screen-reader user hears
           nothing when a read finishes or an older page arrives, because the status
           text below is static. */}

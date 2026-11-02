@@ -96,19 +96,20 @@ function typeInto(label: string | RegExp, value: string) {
 // --- 1. the honest empty state ------------------------------------------------
 
 describe('the empty state', () => {
-  it('says the record has none AND that nothing is created or read to make one', async () => {
+  it('says the record has none, and says what an asset reference is', async () => {
     stubFetchRoutes({ [ASSETS]: { body: assetsEmpty } });
     renderPanel();
     const empty = await screen.findByText(/No asset references on this record/);
-    expect(empty.textContent).toContain('Nothing is created automatically');
-    expect(empty.textContent).toContain('no file is read to produce one');
+    expect(empty.textContent).toContain('records where a file is and the sha256 you have for it');
+    // The standing "no file is read" caveat was retired (declutter, 2026-11-02).
+    expect(empty.textContent).not.toMatch(/no file is read/i);
   });
 
   it('discloses stored entries it cannot show rather than reporting a clean zero', async () => {
     stubFetchRoutes({ [ASSETS]: { body: assetsPage([], { unreadable_entries: 2 }) } });
     renderPanel();
     const empty = await screen.findByText(/No asset references on this record/);
-    expect(empty.textContent).toContain('2 stored entries this version cannot show');
+    expect(empty.textContent).toContain('2 stored entries that cannot be shown');
     expect(empty.textContent).toContain('kept unchanged on the record');
   });
 });
@@ -288,15 +289,13 @@ describe('the digest field', () => {
     expect(writes()).toEqual([]);
   });
 
-  it('says the digest is required BECAUSE nothing can compute one here', async () => {
+  it('says the digest is required', async () => {
     stubFetchRoutes({ [ASSETS]: { body: assetsEmpty } });
     renderPanel();
     await openCreateForm();
     typeInto(/^Name/, 'a');
     fireEvent.click(screen.getByRole('button', { name: 'Record This Reference' }));
-    expect(
-      screen.getByText(/ISAAC does not read the file, so it cannot compute one/),
-    ).toBeInTheDocument();
+    expect(screen.getByText('A sha256 is required.')).toBeInTheDocument();
   });
 
   it('what is typed is what is sent — the digest is never trimmed or lower-cased', async () => {

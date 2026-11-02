@@ -376,7 +376,7 @@ function LoadedEvidence({
         <StatusBar
           phase={LABELS.evidenceTrail}
           phaseDot="idle"
-          note={`sidecar · assistant convention, not an official ISAAC standard · ${directTotal} direct paths counted in coverage`}
+          note={`${directTotal} direct paths counted in coverage`}
           graph={<GraphStatusChip availability={graph.availability} note={graph.note} />}
         />
       }

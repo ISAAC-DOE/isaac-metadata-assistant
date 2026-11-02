@@ -43,7 +43,7 @@ export function SourcePreview({
   const cited = new Set(citedLines);
 
   return (
-    <section className="preview" aria-label="Source preview (read-only)">
+    <section className="preview" aria-label="Source preview">
       <h2 className="preview-prov-title">
         {entry.label}
         <span className="preview-prov-key">{entry.key}</span>
@@ -169,8 +169,7 @@ function PreviewTab({
 /**
  * The raw sidecar entry for the selected field, rendered faithfully. Any sha256 /
  * long-hex value (the entry value, or a user_confirmation answer) gets a
- * horizontally-scrollable mono field + copy button. The sidecar is labeled an
- * assistant convention, never an official ISAAC standard.
+ * horizontally-scrollable mono field + copy button.
  */
 function SidecarEntryDetails({ entry }: { entry: EvidenceTrailEntry }) {
   return (
@@ -179,9 +178,6 @@ function SidecarEntryDetails({ entry }: { entry: EvidenceTrailEntry }) {
         Sidecar Entry
         <span className="sidecar-entry-tag mono">{entry.key}</span>
       </div>
-      <p className="sidecar-convention" role="note">
-        {LABELS.sidecarConvention}
-      </p>
 
       {isHash(entry.value) && <HashField k="value" value={entry.value} />}
 

@@ -835,19 +835,11 @@ function LoadedExport({
                   style={{ flex: 'none', color: 'var(--text-slate)' }}
                 />
                 <span>
-                  <strong>Review the sidecar before sharing.</strong> It is an assistant
-                  convention — not an official ISAAC standard — and can carry source paths, URIs and
-                  hashes. Records are written once, immutable via the CLI: no hand-edit, no
-                  overwrite, no portal submission from here.
+                  <strong>Review the sidecar before sharing.</strong> It can carry source
+                  paths, URIs and hashes.
                 </span>
               </div>
 
-              {!inSession && viewArtifacts && (
-                <p className="artifact-hint">
-                  Loaded from the immutable record + sidecar on disk (read-only) — View and
-                  Download show the exact written content.
-                </p>
-              )}
               {/* `!fanOut` — there are no "paths above" for a fan-out, and nothing
                   failed to read. `viewArtifacts` is null there simply because the
                   singular pair does not exist, so this sentence was a second false
@@ -940,8 +932,8 @@ function LoadedExport({
                   officialFindingSource(validate),
                   officialCheckedDocument(validate),
                 )}{' '}
-                Exporting runs the real, gated validation and writes the official record +
-                evidence sidecar. There is no override and no portal submission.
+                Exporting runs the gated validation and writes the official record +
+                evidence sidecar.
               </p>
               <button
                 type="button"
@@ -1172,9 +1164,6 @@ function LoadedExport({
                 {viewing.kind === 'record' ? LABELS.officialRecord : LABELS.evidenceTrail}
                 {viewing.runLabel !== undefined && (
                   <span className="artifact-modal-sub"> · {viewing.runLabel}</span>
-                )}
-                {viewing.kind === 'sidecar' && (
-                  <span className="artifact-modal-sub"> · {LABELS.sidecarNotOfficial}</span>
                 )}
               </span>
               <button type="button" className="btn btn-secondary" onClick={closeViewer}>

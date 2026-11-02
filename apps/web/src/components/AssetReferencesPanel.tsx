@@ -443,7 +443,7 @@ function AssetsBrowser({
         // Adopted from this write's own response, not left to arrive with the refetch.
         setVersion(written.experiment_version);
         setAnnouncement(
-          `Recorded the asset reference ${written.asset.asset_id}. The digest was stored as entered; no file was read.`,
+          `Recorded the asset reference ${written.asset.asset_id}. The digest was stored as entered.`,
         );
         reload(true);
       } catch (err: unknown) {
@@ -528,7 +528,7 @@ function AssetsBrowser({
     if (loaded.unreadable_entries <= 0) return total;
     const n = loaded.unreadable_entries;
     return (
-      `${total} · ${n} stored ${n === 1 ? 'entry' : 'entries'} this version cannot show` +
+      `${total} · ${n} stored ${n === 1 ? 'entry' : 'entries'} that cannot be shown` +
       ' — kept unchanged on the record'
     );
   }, [loaded]);
@@ -642,10 +642,9 @@ function EmptyAssets({ unreadable }: { unreadable: number }) {
       <p>
         No asset references on this record
         {unreadable > 0
-          ? `, and ${unreadable} stored ${unreadable === 1 ? 'entry' : 'entries'} this version cannot show — kept unchanged on the record`
+          ? `, and ${unreadable} stored ${unreadable === 1 ? 'entry' : 'entries'} that cannot be shown — kept unchanged on the record`
           : ''}
         . An asset reference records where a file is and the sha256 you have for it.
-        Nothing is created automatically, and no file is read to produce one.
       </p>
     </div>
   );
@@ -834,7 +833,7 @@ function AssetCard({
                 asset,
                 fields,
                 runIds,
-                `Saved ${asset.asset_id}. Any digest you changed was stored as entered; no file was read.`,
+                `Saved ${asset.asset_id}. Any digest you changed was stored as entered.`,
               );
               // Recorded, so the draft is consumed; the card now reads from the server.
               editDraft.current = null;
@@ -1026,7 +1025,7 @@ function AssetForm({
   const shape = sha256Shape(values.sha256);
   const digestProblem =
     shape === 'empty'
-      ? 'A sha256 is required. ISAAC does not read the file, so it cannot compute one — paste the digest you have.'
+      ? 'A sha256 is required.'
       : shape === 'malformed'
         ? sha256Problem(values.sha256)
         : null;
@@ -1135,7 +1134,7 @@ function AssetForm({
       <Field
         id={`${base}-uri`}
         label="Location"
-        hint="Where the file is — a path, an archive URI, a DOI. ISAAC does not visit it."
+        hint="Where the file is — a path, an archive URI, a DOI."
         value={values.uri}
         onChange={(v) => set('uri', v)}
         problem={showProblems ? uriProblem : null}
@@ -1146,7 +1145,7 @@ function AssetForm({
       <Field
         id={`${base}-sha`}
         label="sha256"
-        hint="64 lowercase hexadecimal characters, as you have them. ISAAC does not read the file, so it cannot compute or check this — and it will not tidy what you paste."
+        hint="64 lowercase hexadecimal characters, as you have them. It is stored exactly as pasted."
         value={values.sha256}
         onChange={(v) => set('sha256', v)}
         problem={showProblems ? digestProblem : null}

@@ -2471,10 +2471,9 @@ describe('Check Run', () => {
     expect(within(result).getByText('Acquisition start is not recorded.')).toBeInTheDocument();
     expect(within(result).getByText('no evidence')).toBeInTheDocument();
     expect(within(result).getByText("'acquired_start_utc' is required")).toBeInTheDocument();
-    expect(within(result).getByText(/Read-only check of run version ra\.0/)).toBeInTheDocument();
+    expect(within(result).getByText(/Checked run version ra\.0/)).toBeInTheDocument();
 
     // It never claims the record went anywhere.
-    expect(result.textContent ?? '').toMatch(/Nothing was written, submitted or exported/);
     expect(result.textContent ?? '').not.toMatch(/submitted successfully|exported successfully/i);
 
     // And it mutated nothing: the only write-shaped call in the whole session is

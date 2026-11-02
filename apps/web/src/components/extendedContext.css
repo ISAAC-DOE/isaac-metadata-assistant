@@ -55,16 +55,9 @@
   max-width: 68ch;
 }
 
-/* THE ARTIFACT'S OWN DENIAL, SET APART — structurally, not by hue. It is the one
-   sentence on this panel a reader must not skim, and it is the SERVER's sentence
-   rendered verbatim (`not_official`), never re-authored here. The left stroke is
-   `activityHistory.css`'s actor-note form, for the same reason: a rung rather
-   than a hand-authored width. */
+/* The `?` that carries the server's own `not_official` sentence, verbatim. */
 .extctx-not-official {
   margin: 0;
-  padding: var(--space-sm);
-  border-left: var(--space-2xs) solid var(--border-strong);
-  background: var(--surface-subtle);
   font-size: var(--font-size-body);
   line-height: var(--line-height-normal);
   color: var(--text-secondary);

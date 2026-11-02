@@ -146,7 +146,7 @@ function unreadableClause(count: number): string {
   const noun = count === 1 ? 'entry' : 'entries';
   const asNote = count === 1 ? 'as a note' : 'as notes';
   return (
-    ` · ${count} stored ${noun} this version cannot show ${asNote}` +
+    ` · ${count} stored ${noun} that cannot be shown ${asNote}` +
     ' — either unreadable, or repeating an id another note already holds' +
     ' — kept unchanged on the record'
   );

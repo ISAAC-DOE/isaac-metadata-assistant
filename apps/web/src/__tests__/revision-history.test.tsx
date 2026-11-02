@@ -28,7 +28,6 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { RevisionHistoryPanel } from '../components/RevisionHistoryPanel';
 import {
   NO_ACTOR_TEXT,
-  SUBMITTED_IMMUTABLE_NOTE,
   SUBMITTED_REVISION_HEADING,
   WORKING_CHANGES_HEADING,
   actorBasisNote,
@@ -418,7 +417,7 @@ describe('the lifecycle', () => {
     expect(screen.queryByText('Ready to Submit')).toBeNull();
     // ...and the deployment fact is its own block with its own heading.
     const block = screen.getByRole('note', {
-      name: /Submitting is unavailable in this deployment/i,
+      name: /^Submitting is unavailable$/i,
     });
     expect(within(block).getByText(/says nothing about whether this record is ready/i)).toBeTruthy();
     expect(within(block).getByText(/No attributable person can be established/i)).toBeTruthy();
@@ -968,7 +967,9 @@ describe('REV-002 · Last Submitted Revision versus Current Working Changes', ()
     });
     expect(within(card).getByText(SUBMITTED_REVISION_HEADING)).toBeInTheDocument();
     expect(within(card).getByText(WORKING_CHANGES_HEADING)).toBeInTheDocument();
-    expect(within(card).getByText(SUBMITTED_IMMUTABLE_NOTE)).toBeInTheDocument();
+    // The standing immutability note was retired (declutter, 2026-11-02); nothing on
+    // the card may claim a submitted revision can be edited, reverted or restored.
+    expect(card.textContent ?? '').not.toMatch(/\b(can be|may be) (edited|reverted|restored)\b/i);
     // FROM THE RESPONSE — and now in WORDS (QA A-15), the identifier itself kept in
     // `title`. This used to assert the raw token as the visible text, which pinned the
     // defect; it is inverted rather than deleted. The words come from an EXACT-match
@@ -1244,7 +1245,7 @@ describe('the collapsed submission history', () => {
     // test above. Beside, not instead of: the record's ready state is still on the line.
     expect(statusLine().textContent).not.toContain('Ready to Submit');
     expect(statusLine().querySelector('.revhist-chip')?.textContent).toBe('Ready');
-    expect(statusLine().textContent).toContain('Submitting is unavailable in this deployment');
+    expect(statusLine().textContent).toContain('Submitting is unavailable');
   });
 
   it('CONTROL — a deployment that CAN submit still shows the server label verbatim', async () => {

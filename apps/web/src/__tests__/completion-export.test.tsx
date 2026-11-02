@@ -6,6 +6,7 @@ import {
 import { render, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
+import { LABELS } from '../lib/labels';
 import { MEMORY_UNAVAILABLE_CAVEAT, ROUTE_TO_CLI_NOTE } from '../lib/assistant';
 import {
   answersAfterNotebook,
@@ -438,8 +439,10 @@ describe('S6 · Ready to Export (live)', () => {
     // Evidence Trail row on this screen too, as it does on every record screen, so the
     // words appear twice — once as the sidecar card's title, once as a navigation link.
     expect(within(cards[1] as HTMLElement).getByText('Evidence Trail')).toBeInTheDocument();
-    expect(getByText('assistant convention — not official')).toBeInTheDocument();
+    expect(within(cards[1] as HTMLElement).getByText(LABELS.sidecarNotOfficial)).toBeInTheDocument();
     expect(getByText(/Review the sidecar before sharing/)).toBeInTheDocument();
+    // The standing hedges were retired (declutter, 2026-11-02); none may come back.
+    expect(container.textContent).not.toMatch(/assistant convention|no portal submission/);
 
     // three signals, three distinct root components, never merged
     await waitFor(() => expect(container.querySelector('.coverage')).not.toBeNull());
@@ -519,7 +522,6 @@ describe('S6 · Ready to Export (live)', () => {
     // View/Download are live from the fetched content, not disabled with a "session" hint
     const viewJson = getByText('View JSON').closest('button')!;
     expect(viewJson).not.toBeDisabled();
-    expect(getByText(/Loaded from the immutable record \+ sidecar on disk/)).toBeInTheDocument();
 
     // View opens the real fetched record JSON
     fireEvent.click(viewJson);

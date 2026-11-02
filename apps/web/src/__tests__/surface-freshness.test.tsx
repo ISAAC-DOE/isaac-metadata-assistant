@@ -521,7 +521,7 @@ describe("Compare Runs never shows one pair's verdicts as another's", () => {
     fireEvent.click(screen.getByRole('button', { name: 'Check both runs' }));
     expect(await screen.findByText(/Reported for both runs|Reported for Run 2 only/)).toBeInTheDocument();
     expect(view.container.textContent).toContain('run two finding');
-    expect(view.container.textContent).toContain('Read-only check of run version r2.0');
+    expect(view.container.textContent).toContain('Checked run version r2.0');
 
     // Swap Run 2 out for Run 3. Nothing has been checked for Run 3.
     rerenderWith(['RUN001', 'RUN003'], runs);
@@ -533,7 +533,7 @@ describe("Compare Runs never shows one pair's verdicts as another's", () => {
      * statements about a run the reader is looking at.
      */
     expect(view.container.textContent).not.toContain('run two finding');
-    expect(view.container.textContent).not.toContain('Read-only check of run version r2.0');
+    expect(view.container.textContent).not.toContain('Checked run version r2.0');
     expect(screen.getByRole('button', { name: 'Check both runs' })).toBeInTheDocument();
   });
 
@@ -547,7 +547,7 @@ describe("Compare Runs never shows one pair's verdicts as another's", () => {
     const { view, rerenderWith } = mountCompare(['RUN001', 'RUN002'], before);
 
     fireEvent.click(screen.getByRole('button', { name: 'Check both runs' }));
-    expect(await screen.findByText(/Read-only check of run version r1\.0/)).toBeInTheDocument();
+    expect(await screen.findByText(/Checked run version r1\.0/)).toBeInTheDocument();
 
     /*
      * A card save: `RunsSection.replaceRun` substitutes a NEW run object with a
@@ -559,7 +559,7 @@ describe("Compare Runs never shows one pair's verdicts as another's", () => {
     const saved = [{ ...runOne(), version: 'r1.1', rev: 1 }, runTwo()] as unknown as ApiRunView[];
     rerenderWith(['RUN001', 'RUN002'], saved);
 
-    expect(view.container.textContent).not.toContain('Read-only check of run version r1.0');
+    expect(view.container.textContent).not.toContain('Checked run version r1.0');
     expect(view.container.textContent).not.toContain('run one finding');
     expect(screen.getByRole('button', { name: 'Check both runs' })).toBeInTheDocument();
   });

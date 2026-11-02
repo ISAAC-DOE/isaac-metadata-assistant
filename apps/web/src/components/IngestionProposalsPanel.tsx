@@ -894,7 +894,7 @@ function unreadableClause(count: number): string {
   const noun = count === 1 ? 'entry' : 'entries';
   const asOne = count === 1 ? 'as a proposal' : 'as proposals';
   return (
-    ` · ${count} stored ${noun} this version cannot show ${asOne}` +
+    ` · ${count} stored ${noun} that cannot be shown ${asOne}` +
     ' — either unreadable, or repeating an id another proposal already holds' +
     ' — kept unchanged on the record'
   );

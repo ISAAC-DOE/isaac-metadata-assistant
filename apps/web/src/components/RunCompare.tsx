@@ -497,9 +497,7 @@ export function RunCompare({
               opinion about which run is right.
             */}
             <p className="rc-scope">
-              A read-only side-by-side of what each run records. Nothing here changes
-              either run, and nothing here says which value is correct — that is what
-              Check Run and the official-schema gate are for.
+              A side-by-side of what each run records.
             </p>
             <button
               type="button"
@@ -1654,14 +1652,11 @@ function ConflictDetail({ conflict }: { conflict: CompareConflict }) {
         </p>
       )}
       {/*
-        WHERE IT IS DECIDED, AND WHY NOT HERE. This panel is read-only. Showing the
-        competing answers would invite a choice it cannot record, and recording one
-        needs the record's own version token.
+        WHERE IT IS DECIDED, AND WHY NOT HERE. Showing the competing answers would
+        invite a choice this panel cannot record; a decision is recorded on the
+        record's own conflict surface. The standing note saying so was retired
+        (declutter, 2026-11-02).
       */}
-      <p className="rc-detail-line">
-        The competing answers are not listed here. This panel is read-only; a decision is
-        recorded on the record&rsquo;s own conflict surface.
-      </p>
     </div>
   );
 }
@@ -1953,9 +1948,8 @@ function CompareFindings({
       </h4>
       {check.status === 'idle' && (
         <p className="rc-note">
-          Each run can be read against the deterministic validators. The two checks are separate
-          reads of two runs; this panel lists what each one reported and which findings both
-          reported. Nothing is written, submitted or exported.
+          Check each run against the validators to list what each one reported and which
+          findings both reported.
         </p>
       )}
       {check.status === 'error' && (
@@ -2085,8 +2079,7 @@ function Verdict({ res, label }: { res: ApiRunCheckResponse; label: string }) {
         <StatusChip kind="fail" label="Check Failed" />
       )}
       <span className="rc-verdict-scope">
-        Read-only check of run version {res.checked_run_version}. Nothing was written, submitted
-        or exported.
+        Checked run version {res.checked_run_version}.
       </span>
     </p>
   );

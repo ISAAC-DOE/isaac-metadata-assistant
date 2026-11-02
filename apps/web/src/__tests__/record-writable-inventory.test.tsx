@@ -512,7 +512,7 @@ describe('what must never be offered', () => {
     await open(draftWithCapture(none));
     for (const path of RECORD_WRITABLE) expect(controlForPath(path)).toBeUndefined();
     expect(
-      screen.getByText(/reports no record-level field it will accept a value at/i),
+      screen.getByText(/No record-level field accepts a value here/i),
     ).toBeInTheDocument();
     // AND NO EMPTY SECTION IS LEFT STANDING OVER NOTHING.
     expect(screen.queryByRole('group', { name: 'Facility' })).toBeNull();

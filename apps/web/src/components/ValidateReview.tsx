@@ -383,8 +383,7 @@ export function ValidateReview({ experimentId }: { experimentId: string }) {
           ? 'Checks this record against the same deterministic validators the export gate uses — each run separately if it has runs — and lists what was found, so you can decide what to fix. '
           : hasRuns
             ? 'Checks every run against the same deterministic validators the export gate uses, and lists what each one found, so you can decide what to fix. '
-            : 'Checks this record against the same deterministic validators the export gate uses, and lists what they found, so you can decide what to fix. '}
-        Read-only: nothing here is written, exported, submitted, or repaired for you.
+            : 'Checks this record against the same deterministic validators the export gate uses, and lists what they found, so you can decide what to fix.'}
       </p>
       </Disclosure>
 
@@ -896,8 +895,7 @@ function UnitDetail({
   return (
     <div className="vr-detail">
       <p className="vr-detail-scope">
-        Read-only detail for run version {data.checked_run_version}. Nothing was written,
-        submitted or exported.
+        Detail for run version {data.checked_run_version}.
       </p>
 
       {disagrees && (

@@ -401,14 +401,14 @@ describe('Relationships — the links block, read from the record', () => {
     expect(section.textContent).not.toMatch(/declares no relationship to another record\./);
   });
 
-  it('offers no add / remove / edit control, and says why', async () => {
+  it('offers no add / remove / edit control', async () => {
     stubFetchRoutes(workspaceRoutes);
     renderLinks({ links: [{ rel: 'derived_from', target: ID_B, basis: 'unspecified' }] });
     const section = open('Relationships');
     await within(section).findByText(/Points at/);
-    expect(
-      within(section).getByText(/no operation in this API writes a record’s/),
-    ).toBeInTheDocument();
+    // The standing "cannot be authored in this build" note was retired (declutter,
+    // 2026-11-02); the absence of any authoring control is what is pinned.
+    expect(section.textContent).not.toMatch(/in this build|no operation in this API/);
     // The section header is the only button, and there are no dead controls.
     const buttons = within(section).getAllByRole('button');
     expect(buttons).toHaveLength(1);

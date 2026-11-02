@@ -1289,7 +1289,7 @@ test('the panel discloses stored entries it cannot show, and still shows the one
    * rather than asserting the one that is wrong half the time.
    */
   await expect(page.locator('.proposals-count')).toContainText(
-    '1 stored entry this version cannot show as a proposal'
+    '1 stored entry that cannot be shown as a proposal'
   );
   await expect(page.locator('.proposals-count')).toContainText(
     'either unreadable, or repeating an id another proposal already holds'

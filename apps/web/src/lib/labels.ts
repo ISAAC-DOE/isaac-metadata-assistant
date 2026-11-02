@@ -532,8 +532,7 @@ export const LABELS = {
      vocabulary of its own: the actions, channels and object types come from the
      server and are humanized from their own segments, never re-authored. */
   activityTitle: 'Activity History',
-  activityLead:
-    'Every recorded change to this record, newest first. This history is read-only: an entry is written by the act it describes, and nothing here can edit or remove one.',
+  activityLead: 'Every recorded change to this record, newest first.',
   /* `ACT-003` requires `unattributed` be rendered HONESTLY rather than hidden. It is
      said once, in words, instead of printing an uninterpretable token on every row —
      and it names the reason, because "unattributed" alone reads like a fault. */
@@ -554,12 +553,9 @@ export const LABELS = {
   activityShowOlder: 'Show Older Entries',
   activityLoadingOlder: 'Reading older entries\u2026',
   activityAllShown: 'That is the whole history for this record.',
-  /* The disclosure summary. The sentence behind it is unchanged and still honest —
-     it simply stops being permanent furniture for a reader who has met it once. */
-  activityWhyUnattributed: 'Why are entries not attributed to a person?',
   /* COUNTED, never rendered: saying what an unreadable entry contains would mean
      inventing it. Disclosed rather than silently dropped. */
-  activityUnreadable: '\u00b7 entries this build could not read:',
+  activityUnreadable: '\u00b7 entries that could not be read:',
   /* The two halves of the server's `{present, value}` envelope, which carries two
      DIFFERENT facts. Collapsing them would lose the distinction it exists for. */
   activityAbsent: 'was not set',
@@ -629,7 +625,7 @@ export const LABELS = {
      qualification appears exactly when the basis is one a reader would otherwise
      take at face value. A fixture-verified deployment mints a subject from its own
      process environment, which is not proof anybody authenticated. */
-  activityTrustFixture: 'recorded on a test-fixture basis — not proof anyone authenticated',
+  activityTrustFixture: 'unverified test sign-in',
 
   /* ── ACT-003b, ROUND 2: THREE FINDINGS FROM AN INDEPENDENT REVIEW ──────────
 
@@ -644,18 +640,6 @@ export const LABELS = {
      It is NOT "System", NOT "Unknown user" and NOT "—", for the reason
      `revisionHistory.NO_ACTOR_TEXT` already gives: each of those reads as a party. */
   activityActorSentinel: 'Unattributed',
-
-  /* THE MIXED-HISTORY DISCLOSURE. The review's Important 1: the panel rendered
-     `activityActorUnattributed` — which asserts "This deployment has no verified
-     sign-in boundary" — unconditionally, so a history containing one attributed act
-     showed a row naming a person directly beneath a sentence saying nobody can be
-     named. This pair says the same true thing about THOSE ENTRIES and asserts
-     nothing about the deployment as a whole, because a deployment that attributed
-     one act plainly does have a boundary for some requests. When every loaded entry
-     is attributed, NEITHER disclosure renders: there is nothing left to explain. */
-  activityWhySomeUnattributed: 'Why are some entries not attributed to a person?',
-  activityActorSomeUnattributed:
-    'Some entries below are not attributed to a person. An entry carries a name only when the act that wrote it arrived through a verified sign-in; when nothing verified who was acting, the entry says so rather than recording a name that could not be trusted.',
 
   /* A FAILED OLDER-PAGE READ, SAID WHERE A SIGHTED READER CAN SEE IT. The review's
      Important 3: the `.catch` announced this into the `sr-only` live region and
@@ -1813,8 +1797,8 @@ export const LABELS = {
 
   // Export artifacts
   officialRecord: 'Official Record',
-  sidecarConvention: 'sidecar · assistant convention, not an official ISAAC standard',
-  sidecarNotOfficial: 'assistant convention — not official',
+  sidecarConvention: 'evidence sidecar',
+  sidecarNotOfficial: 'evidence sidecar',
 } as const;
 
 export type LabelKey = keyof typeof LABELS;

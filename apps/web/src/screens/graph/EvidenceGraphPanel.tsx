@@ -1499,44 +1499,9 @@ function NodeDetail({
         </ul>
       )}
 
-      <details className="evgraph-legend">
-        <summary>What this graph will not draw</summary>
-        <p>{EVIDENCE_GRAPH_DISCLOSURE}</p>
-        <p>
-          No relationship is inferred from resemblance or from time. Two runs are{' '}
-          <strong>not</strong> joined because they share a formula, a sample id, a beamline or a
-          proposal — a matching string is not an entity. Nothing is ordered into cause and
-          effect: <code>created_utc</code> orders records in time, which is not causation. No
-          similarity is computed, and no scientific interpretation of any value is drawn,
-          because nothing in this application computes one.
-        </p>
-        {/*
-          THE EXPANSION GREW WITH THE VOCABULARY. Five kinds of node and five
-          kinds of relationship were added when this view began reading the
-          conflicts, notes, provenance and asset routes, and each of them brings
-          a line somebody could reasonably expect to see drawn. The sentence
-          above is unchanged — it is rendered from the exported constant and
-          cannot be paraphrased — and this paragraph names what the new
-          vocabulary specifically does not assert.
-        */}
-        <p>
-          A <strong>competing answer is not chosen</strong> by anything here, and no line
-          marks one as the one a decision picked: matching a recorded decision’s value back
-          to an answer would need this application to reproduce the server’s own
-          canonicalisation, which is a second definition of “the same value”. A{' '}
-          <strong>note is placed only where a person placed it</strong> — a deterministic
-          proposal is shown as a proposal and never drawn as a line, because on a diagram a
-          line reads as a fact. No relationship is drawn from a value’s <em>origin</em>:
-          where a value came from is shown on the node that owns the address, and it is
-          never joined to another node, because two values sharing an origin are not
-          related by it. And <strong>no earlier revision is drawn at all</strong> — this is
-          the record as it is now, and a superseded value shown beside a current one would
-          read as one the record still holds.
-        </p>
-        <p className="evgraph-legend-kinds">
-          {EVIDENCE_NODE_KINDS.map((k) => NODE_KIND_LABELS[k]).join(' · ')}
-        </p>
-      </details>
+      <p className="evgraph-legend-kinds">
+        {EVIDENCE_NODE_KINDS.map((k) => NODE_KIND_LABELS[k]).join(' · ')}
+      </p>
     </div>
   );
 }

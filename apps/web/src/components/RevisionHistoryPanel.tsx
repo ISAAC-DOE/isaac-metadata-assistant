@@ -45,7 +45,6 @@ import {
   LIFECYCLE_UNKNOWN_NOTE,
   SIDE_NOW,
   SIDE_REVISION,
-  SUBMITTED_IMMUTABLE_NOTE,
   SUBMITTED_REVISION_HEADING,
   HISTORY_NOT_KEPT_LINE,
   readRevisionHistory,
@@ -257,7 +256,7 @@ function historyStatusText(history: ApiRevisionHistory): string {
     );
   }
   if (history.lifecycle.submission_blocked_by_deployment.blocked) {
-    clauses.push('Submitting is unavailable in this deployment');
+    clauses.push('Submitting is unavailable');
   }
   return clauses.join(' · ');
 }
@@ -315,7 +314,6 @@ function SubmittedVersusWorking({ history }: { history: ApiRevisionHistory }) {
               the reasoning; `None` survives for the one state where it is a fact.
             */}
             {submittedRevisionText(state)}
-            <span className="revhist-working-note">{SUBMITTED_IMMUTABLE_NOTE}</span>
           </dd>
         </div>
         <div className="revhist-working-row">
@@ -427,7 +425,7 @@ function DeploymentBlockNote({ lifecycle }: { lifecycle: ApiLifecycle }) {
   return (
     <section className="revhist-deployment" role="note" aria-labelledby="revhist-deployment-heading">
       <h3 className="revhist-card-title" id="revhist-deployment-heading">
-        Submitting is unavailable in this deployment
+        Submitting is unavailable
       </h3>
       <p className="revhist-deployment-text">{blocked.message}</p>
       <ul className="revhist-blockers">
@@ -450,7 +448,7 @@ const DEPLOYMENT_BLOCKER_TEXT: Readonly<Record<string, string>> = {
     'No attributable person can be established for a request here, and a submission ' +
     'is a declaration by a person. This is a server configuration matter.',
   no_durable_storage:
-    'This deployment has no application database to record a durable submission in.',
+    'There is no database to record a submission in.',
 };
 
 /* ── availability ──────────────────────────────────────────────────────────── */

@@ -307,7 +307,7 @@ describe('the read states', () => {
     // BOTH surfaces carry it: an empty state is where a reader stops looking, so it
     // cannot be the one place the number is left out.
     const disclosures = screen.getAllByText(
-      /2 stored entries this version cannot show as proposals/,
+      /2 stored entries that cannot be shown as proposals/,
     );
     expect(disclosures.length).toBeGreaterThanOrEqual(2);
     // And it names BOTH causes rather than asserting the one that is wrong half the time.

@@ -156,7 +156,7 @@ const ABSENT_TEXT = new Map<RecordInfoSource, string>([
   ['no_single_value', 'no single value for this experiment'],
 ]);
 
-const ABSENT_FALLBACK = 'not shown, and this build does not describe why';
+const ABSENT_FALLBACK = 'not shown';
 
 function RecordInfoRowView({ row }: { row: RecordInfoRow }) {
   const absent = ABSENT_TEXT.get(row.source) ?? ABSENT_FALLBACK;
@@ -424,28 +424,6 @@ function LinkItem({ link }: { link: LinkView }) {
   );
 }
 
-/**
- * The authoring disclosure.
- *
- * It is shown in every state, including the one where links exist, because the
- * question "how do I add one" is asked from both. It states the measured fact
- * and the one exception, and it is deliberately not a disabled button: a control
- * whose only outcome is a refusal teaches a reader to distrust the controls that
- * work.
- */
-function LinksAuthoringNote() {
-  return (
-    <p className="record-info-note record-info-note-quiet">
-      <Lock size={12} strokeWidth={2} aria-hidden="true" />
-      Relationships cannot be added or removed in this build: no operation in this API
-      writes a record’s <code>links</code>. The only links ISAAC writes are automatic — when
-      two runs of one experiment record the same <code>sample.sample_id</code>, the export
-      links their records with <code>same_sample_as</code> on the basis{' '}
-      <code>same_sample_id</code>.
-    </p>
-  );
-}
-
 export function RecordLinksPanel({ artifacts }: { artifacts: ApiArtifactsResponse }) {
   const record = artifacts.record;
   const links = readLinks(record);
@@ -483,7 +461,6 @@ export function RecordLinksPanel({ artifacts }: { artifacts: ApiArtifactsRespons
           ))}
         </ol>
       )}
-      <LinksAuthoringNote />
     </Section>
   );
 }

@@ -992,20 +992,9 @@ function NodeDetail({
         </ul>
       )}
 
-      <details className="expgraph-legend">
-        <summary>What this graph will not draw</summary>
-        <p>
-          No relationship is inferred from resemblance. Two records that share a formula, a
-          sample id, a beamline, a proposal or a contributor name are <strong>not</strong>{' '}
-          joined here — a matching string is not an entity, and a link is an author’s
-          assertion, read only from the record’s own <code>links[]</code>. No similarity, no
-          timestamp-derived causality, and no scientific interpretation is drawn: nothing in
-          this application computes any of them.
-        </p>
-        <p className="expgraph-legend-kinds">
-          {EXPERIMENT_NODE_KINDS.map((k) => NODE_KIND_LABELS[k]).join(' · ')}
-        </p>
-      </details>
+      <p className="expgraph-legend-kinds">
+        {EXPERIMENT_NODE_KINDS.map((k) => NODE_KIND_LABELS[k]).join(' · ')}
+      </p>
     </div>
   );
 }

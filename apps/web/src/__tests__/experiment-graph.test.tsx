@@ -391,10 +391,7 @@ describe('the graph draws an experiment, and explains itself', () => {
 
   it('states that no links are declared instead of drawing one', async () => {
     const view = await openGraph();
-    expect(view.getByText(/This record declares no links/)).toBeInTheDocument();
-    expect(
-      view.getByText(/a shared formula, sample id, beamline or proposal is not a relationship/),
-    ).toBeInTheDocument();
+    expect(view.getByText('This record declares no links.')).toBeInTheDocument();
   });
 
   it('draws a DECLARED link with its relationship and its basis', async () => {

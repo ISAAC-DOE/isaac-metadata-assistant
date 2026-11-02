@@ -573,7 +573,7 @@ describe('what this build could not read is disclosed, not hidden', () => {
     });
     renderPanel();
 
-    const count = await screen.findByText(/stored entries this version cannot show/);
+    const count = await screen.findByText(/stored entries that cannot be shown/);
     expect(count.textContent).toContain('2 stored entries');
     expect(count.textContent).toContain('kept unchanged on the record');
   });
@@ -591,7 +591,7 @@ describe('what this build could not read is disclosed, not hidden', () => {
     });
     renderPanel();
 
-    const count = await screen.findByText(/stored entries this version cannot show/);
+    const count = await screen.findByText(/stored entries that cannot be shown/);
     expect(count.textContent).toContain('either unreadable, or repeating an id');
     // The old wording asserted unreadability of every one of them.
     expect(count.textContent).not.toContain('cannot read');
@@ -618,7 +618,7 @@ describe('what this build could not read is disclosed, not hidden', () => {
     renderPanel();
 
     const empty = await screen.findByText(/No unmapped notes on this record/);
-    expect(empty.textContent).toContain('1 stored entry this version cannot show');
+    expect(empty.textContent).toContain('1 stored entry that cannot be shown');
     expect(empty.textContent).toContain('kept unchanged on the record');
   });
 
@@ -637,7 +637,7 @@ describe('what this build could not read is disclosed, not hidden', () => {
     const empty = await screen.findByText(/No notes are in this state/);
     expect(empty.textContent).toContain('This record holds 3 notes in total');
     // "in total" is only true if what sits outside that total is said in the same breath.
-    expect(empty.textContent).toContain('2 stored entries this version cannot show');
+    expect(empty.textContent).toContain('2 stored entries that cannot be shown');
   });
 });
 

@@ -104,7 +104,7 @@ test('@interaction a draft says what is not written yet without claiming anythin
   );
 });
 
-test('@interaction Relationships states what it can see, and that links cannot be authored here', async ({
+test('@interaction Relationships states what it can see, and offers no authoring control', async ({
   page,
   app,
 }) => {
@@ -120,9 +120,7 @@ test('@interaction Relationships states what it can see, and that links cannot b
   // unknown — never as "this record declares none".
   await expect(card).toContainText('not the same as the record declaring none');
 
-  // The authoring boundary is stated in words, and there is no dead control
-  // beside it: the header is the only button in the card.
-  await expect(card).toContainText('no operation in this API writes a record’s');
+  // No dead authoring control: the header is the only button in the card.
   await expect(card.getByRole('button')).toHaveCount(1);
   await expect(card.locator('input, textarea, select')).toHaveCount(0);
 });

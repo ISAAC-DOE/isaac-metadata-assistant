@@ -743,13 +743,14 @@ describe('a difference links back to where it was read', () => {
 /* ── the panel is honest about what it is ──────────────────────────────────── */
 
 describe('scope', () => {
-  it('says it is read-only and that it does not adjudicate', async () => {
+  it('says what it is, and never claims to adjudicate', async () => {
     mount([runA(), runB()]);
     await selectTwo();
     const scope = document.querySelector('.rc-scope')?.textContent ?? '';
-    expect(scope).toContain('read-only');
-    expect(scope).toContain('Nothing here changes either run');
-    expect(scope).toContain('nothing here says which value is correct');
+    expect(scope).toContain('side-by-side of what each run records');
+    // The standing read-only caveat was retired (declutter, 2026-11-02). What must
+    // not appear is the opposite claim: that the panel decides which run is right.
+    expect(scope).not.toMatch(/\b(correct|right|better) (value|run)\b|recommend/i);
   });
 
   it('is withheld while Focus Run owns the screen, but the live region stays mounted', async () => {
@@ -929,7 +930,7 @@ describe('no causal or evaluative language', () => {
     );
     // These findings are bare strings and name no address, so none is attached.
     expect(view.container.textContent).toContain('3 findings name no address');
-    expect(view.container.textContent).toContain('Read-only check of run version r1.0');
+    expect(view.container.textContent).toContain('Checked run version r1.0');
     expect(forbiddenIn(perceivableText(view.container))).toEqual([]);
   });
 });
@@ -1305,9 +1306,8 @@ describe('a recorded conflict and a value difference stay different things', () 
     expect(detail.textContent).toContain('2 different answers are cited here, across 3 entries');
     expect(detail.textContent).toContain('No decision is recorded');
     expect(detail.textContent).toContain('Two distinct answers are cited at this address.');
-    // READ-ONLY, AND IT SAYS SO. Showing the candidates would invite a choice this
-    // panel cannot record.
-    expect(detail.textContent).toContain('The competing answers are not listed here');
+    // READ-ONLY. Showing the candidates would invite a choice this panel cannot
+    // record (the standing note saying so was retired, declutter 2026-11-02).
     // NO COMPETING VALUE ANYWHERE IN THE DETAIL. The row above shows the run's own
     // value; nothing here reproduces an answer the reader would then be tempted to
     // choose between on a panel that cannot record a choice.
