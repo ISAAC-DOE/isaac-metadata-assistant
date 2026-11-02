@@ -335,15 +335,25 @@ def load_project(path: Path, rel_path: str, source_id: str | None, np) -> tuple[
 #: the curve 328 steps above its pre-edge line), and by up to 0.065 even where the steps agreed.
 #: A result says which way its curve was made (``normalisation_basis``) and, when the curve differs from larch's
 #: reading by more than :data:`ATHENA_CURVE_TOL` (or its step by more than :data:`ATHENA_STEP_RTOL`), carries
-#: :data:`ATHENA_RENORM_FLAG` and a sentence: larch's reproduction, never the scientist's fault.
+#: :data:`ATHENA_RENORM_FLAG` and a sentence: larch's reproduction, never the scientist's fault. r6 G4: no longer
+#: flagged on each result; recorded on it and said once for the bundle (:data:`ATHENA_RENORM_MATERIAL`).
 ATHENA_RENORM_RULE_ID = "isaac.athena.project_normalisation.v1"
 ATHENA_RENORM_FLAG = "athena_renormalisation_differs"
 RENORMALISED_KEY = "renormalised_from_project"
 BASIS_KEY = "normalisation_basis"
+#: r6 G3: a per-scan set's members by basis (``{basis: count}``); absent on one curve
+BASIS_COUNTS_KEY = "normalisation_basis_members"
 BASIS_STORED = "stored"
 BASIS_REFIT = "athena_refit"
 ATHENA_STEP_RTOL = 0.01
 ATHENA_CURVE_TOL = 0.01
+#: r6 G4: a difference from larch's reading is MATERIAL when the two normalised curves differ by more than this (a
+#: fraction of the edge step) over the project's post-edge range (``nor1`` to ``nor2`` above E0; over the whole curve
+#: when that range holds no point). Every difference is recorded on its result (``renormalised_from_project``, with
+#: ``post_edge_difference_from_larch`` and ``material``) and said ONCE for the bundle (``run.renormalisation_line``,
+#: which counts the material ones); it is no longer flagged on each result. Measured on a real BL4-3 beamtime: the
+#: flag was on 16 of 16 Athena results, and 16 of 18 differ by more than this (larch's step is a few percent off).
+ATHENA_RENORM_MATERIAL = 0.02
 STORED_LINE_TOL = 0.02
 STORED_POST_TOL = 0.03
 STORED_STEP_TOL = 0.01
@@ -436,6 +446,8 @@ def athena_normalisation(energy, mu, larch_norm, larch_step, bkg, params: Mappin
     differs = (gap is None or gap > ATHENA_CURVE_TOL or s is None or abs(s / step - 1.0) > ATHENA_STEP_RTOL)
     said = None
     if differs:
+        post_gap = _post_edge_gap(X, norm, ln, e0, params, np)
+        material = (post_gap > ATHENA_RENORM_MATERIAL) if post_gap is not None else (gap is None or gap > ATHENA_RENORM_MATERIAL)
         how = ("the project's stored normalisation, which still fits the data (its stored pre-edge line, post-edge "
                f"curve and edge step {step:.4g})" if basis == BASIS_STORED else
                "Athena's own re-fit of the project's ranges (the project's stored line or post-edge curve no longer "
@@ -443,12 +455,32 @@ def athena_normalisation(energy, mu, larch_norm, larch_step, bkg, params: Mappin
                f"bkg_nnorm as coefficients{', with the fixed step' if fixed else ''}), edge step {step:.4g}")
         said = {"rule_id": ATHENA_RENORM_RULE_ID, "basis": basis, "larch_edge_step": s, "project_edge_step": S,
                 "edge_step": step, "max_difference_from_larch": gap,
+                # r6 G4: over the post-edge range, and whether that is material (ATHENA_RENORM_MATERIAL)
+                "post_edge_difference_from_larch": post_gap, "material": bool(material),
                 "statement": (f"larch's reading of this Athena group gives another curve (edge step "
                               f"{'unknown' if s is None else f'{s:.4g}'}, up to {'?' if gap is None else f'{gap:.3g}'} "
                               f"from the curve Athena shows). ISAAC used {how}, so the curve is the scientist's as "
                               "Athena makes it. The difference is larch's reproduction, not the scientist's "
                               "processing.")}
     return {"norm": norm, "flat": flat, "edge_step": step, "basis": basis, "said": said}
+
+
+def _post_edge_gap(X, norm, larch_norm, e0: float, params: Mapping, np) -> float | None:
+    """r6 G4: the largest difference between ISAAC's curve and larch's reading over the project's post-edge range
+    (``nor1`` to ``nor2`` above ``e0``, in X's frame), or ``None`` when the range is unknown or holds no point."""
+    lo, hi = _finite(params.get("nor1")), _finite(params.get("nor2"))
+    if lo is None or hi is None or larch_norm.shape != norm.shape:
+        return None
+    win = (X >= e0 + lo) & (X <= e0 + hi) & np.isfinite(norm) & np.isfinite(larch_norm)
+    if not win.any():
+        return None
+    return float(np.max(np.abs(norm[win] - larch_norm[win])))
+
+
+def renorm_material(said: Mapping | None) -> bool:
+    """r6 G4: whether a ``renormalised_from_project`` record is a MATERIAL difference (:data:`ATHENA_RENORM_MATERIAL`).
+    A record made before r6 has no ``material`` key: it counts as material, as it was flagged."""
+    return bool(said) and bool(said.get("material", True))
 
 
 #: The rule that uses an ``is_nor`` group's stored spectrum as its normalised curve (module docstring).
@@ -632,17 +664,29 @@ def _per_scan_set(pool: Sequence[Mapping], stems: Sequence[str], np) -> dict | N
     bases = sorted({pool[i][BASIS_KEY] for i in order if pool[i].get(BASIS_KEY)})
     if bases:
         out[BASIS_KEY] = "+".join(bases)
+        # r6 G3: how many members were made each way, so the result names the basis of the set
+        out[BASIS_COUNTS_KEY] = {b: sum(1 for i in order if pool[i].get(BASIS_KEY) == b) for b in bases}
     rebuilt = [pool[i][RENORMALISED_KEY] for i in order if pool[i].get(RENORMALISED_KEY)]
     if rebuilt:
+        # r6 G3: the basis of each rebuilt member is named (stored values, or Athena's re-fit), never "one or the other"
+        n_by = {b: sum(1 for r in rebuilt if r.get("basis") == b) for b in (BASIS_STORED, BASIS_REFIT)}
+        how = " and ".join(x for x in (
+            f"{n_by[BASIS_STORED]} from the project's stored values, which still fit the data" if n_by[BASIS_STORED] else "",
+            f"{n_by[BASIS_REFIT]} by Athena's own re-fit of the project's ranges, the stored values no longer fitting "
+            "the data" if n_by[BASIS_REFIT] else "") if x)
+        post = [r.get("post_edge_difference_from_larch") for r in rebuilt]
         out[RENORMALISED_KEY] = {
             "rule_id": ATHENA_RENORM_RULE_ID, "members_rebuilt": len(rebuilt), "members": len(order),
             "larch_edge_step": [r["larch_edge_step"] for r in rebuilt],
             "project_edge_step": [r["project_edge_step"] for r in rebuilt],
+            "basis": [r.get("basis") for r in rebuilt],
+            # r6 G4: material when any member's difference is (renorm_material)
+            "post_edge_difference_from_larch": post,
+            "material": any(renorm_material(r) for r in rebuilt),
             "statement": (f"For {len(rebuilt)} of the {len(order)} per-scan groups, larch's reading gives another curve "
-                          "than Athena shows; ISAAC made each of them as Athena does (from the project's stored "
-                          "values where they still fit the data, else Athena's own re-fit) before taking the mean, "
-                          "so the set is the scientist's curves as Athena makes them. The difference is larch's "
-                          "reproduction, not the scientist's processing.")}
+                          f"than Athena shows. ISAAC made {'it' if len(rebuilt) == 1 else 'them'} as Athena does"
+                          f"{f' ({how})' if how else ''} before taking the mean, so the set is the scientist's curves as Athena makes them. "
+                          "The difference is larch's reproduction, not the scientist's processing.")}
     return out
 
 
@@ -774,19 +818,77 @@ def match(groups: Sequence[Mapping], entries: Sequence[Mapping], np=None) -> tup
     return match_with_versions(groups, entries, np)[:2]
 
 
-def match_with_versions(groups: Sequence[Mapping], entries: Sequence[Mapping], np=None) -> tuple[dict[str, dict], list[dict], dict[str, list[dict]]]:
+#: r6 G1: the match kind of an Athena group the SCIENTIST named for a record group (params ``athena_match``)
+TIED_KIND = "named_by_scientist"
+
+
+def resolve_ties(ties: Mapping[str, Sequence[Mapping]], entries: Sequence[Mapping],
+                 groups: Sequence[Mapping]) -> tuple[dict[int, list[str]], list[dict]]:
+    """r6 G1: ``({entry index: [group ids]}, what was done with each named tie)`` for a params file's ``athena_match``
+    (``protocol.athena_match_ties``). A tie names ONE Athena group exactly: its project (relative path, or file name)
+    AND its Athena group name or label. One that names no group read, several, or no live record group ties nothing,
+    and says so. Never a near name: the scientist's naming is the only way such a group is tied."""
+    live = {g["group_id"] for g in groups if takes_part(g)}
+    known = {g["group_id"] for g in groups}
+    by_entry: dict[int, list[str]] = {}
+    said: list[dict] = []
+    for gid, items in sorted(ties.items()):
+        for item in items:
+            prj, grp = item["project"], item["athena_group"]
+            hit = [i for i, e in enumerate(entries)
+                   if prj in (e["prj_relative_path"], PurePosixPath(e["prj_relative_path"]).name)
+                   and grp in (e["group_name"], e["label"])]
+            row = {"group_id": gid, "project": prj, "athena_group": grp}
+            if gid not in live:
+                row["status"] = "no_live_group"
+                row["statement"] = (f"The params file's athena_match names {grp!r} in {prj} for {gid}, which is "
+                                    f"{'no live record group (rejected, merged or split)' if gid in known else 'no record group of this bundle'}: nothing was tied.")
+            elif not hit:
+                row["status"] = "not_found"
+                row["statement"] = (f"The params file's athena_match names {grp!r} in {prj} for {gid}, but no Athena "
+                                    "group read has that project and that name or label: nothing was tied. Check both.")
+            elif len(hit) > 1:
+                row["status"] = "several"
+                row["statement"] = (f"The params file's athena_match names {grp!r} in {prj} for {gid}, which fits "
+                                    f"{len(hit)} Athena groups read: nothing was tied. Name the project by its relative "
+                                    "path and the group by its Athena group name.")
+            else:
+                row["status"] = "tied"
+                row["entry_index"] = hit[0]
+                lst = by_entry.setdefault(hit[0], [])
+                if gid not in lst:
+                    lst.append(gid)
+                row["statement"] = (f"The scientist named Athena group {entries[hit[0]]['label']!r} in "
+                                    f"{entries[hit[0]]['prj_relative_path']} as {gid}'s (params athena_match): it is "
+                                    "matched to that group by the scientist's naming, not by its name.")
+            said.append(row)
+    return by_entry, said
+
+
+def match_with_versions(groups: Sequence[Mapping], entries: Sequence[Mapping], np=None, *,
+                        ties: Mapping[int, Sequence[str]] | None = None) -> tuple[dict[str, dict], list[dict], dict[str, list[dict]]]:
     """group_id -> athena entry (unambiguous matches only), and notes on every ambiguity.
 
     Record groups with no scans take no part (measured: a scientist's exported ``x.dat``
     became a zero-scan run named like the real run, which made every match ambiguous), nor (r5 A2) groups MERGED AWAY
     (:func:`takes_part`).
+
+    r6 G1: ``ties`` (:func:`resolve_ties`) are the Athena groups the SCIENTIST named for a group: such an entry is that
+    group's candidate (:data:`TIED_KIND`) and no other group's, whatever its name says; it is then handled as any
+    candidate (a single merge is preferred, several are versions the scientist chooses between).
     """
     stems = {g["group_id"]: [normalise_name(s) for s in g.get("_stems") or ()] for g in groups if takes_part(g)}
     raw_stems = {g["group_id"]: list(g.get("_stems") or ()) for g in groups}
     bases = {gid: base_names(gstems) for gid, gstems in stems.items()}
     notes: list[dict] = []
     by_group: dict[str, list[dict]] = {}
+    ties = ties or {}
     for idx, entry in enumerate(entries):
+        if idx in ties:
+            for gid in ties[idx]:
+                by_group.setdefault(gid, []).append({**entry, "_match_kind": TIED_KIND, "_index": idx,
+                                                     "_merge_of": list(stems.get(gid) or ())})
+            continue
         hits = _hits(entry, stems, bases)
         if not hits:
             continue
@@ -924,17 +1026,143 @@ def _hits(entry: Mapping, stems: Mapping[str, Sequence[str]], bases: Mapping[str
     return hits
 
 
-def entry_groups(groups: Sequence[Mapping], entries: Sequence[Mapping]) -> dict[int, str]:
+def entry_groups(groups: Sequence[Mapping], entries: Sequence[Mapping], *,
+                 ties: Mapping[int, Sequence[str]] | None = None) -> dict[int, str]:
     """``{entry index: group_id}`` for every Athena entry that matches exactly ONE record group (an exact match winning,
-    as :func:`match_with_versions` decides), whether or not that group then uses it."""
+    as :func:`match_with_versions` decides), whether or not that group then uses it. r6 G1: an entry the scientist
+    tied (``ties``) is its (first) named group's."""
     stems = {g["group_id"]: [normalise_name(s) for s in g.get("_stems") or ()] for g in groups if takes_part(g)}
     bases = {gid: base_names(gstems) for gid, gstems in stems.items()}
     out = {}
+    ties = ties or {}
     for idx, entry in enumerate(entries):
+        if ties.get(idx):
+            out[idx] = ties[idx][0]
+            continue
         hits = _hits(entry, stems, bases)
         chosen = [h for h in hits if h[1] == "exact"] or hits
         if len(chosen) == 1:
             out[idx] = chosen[0][0]
+    return out
+
+
+# --- the scientist's merges that match no group (r6 G1) --------------------------------------------------------------
+
+#: r6 G1: NEAR-NAME HINTS for a scientist's merge that matches no record group (``isaac.athena.unmatched_merge_hint.v0``).
+#: A HINT ONLY: it never matches, never selects and never changes a result; the scientist says which group (if any) the
+#: merge is, and ties it by name in a params file (:data:`protocol.ATHENA_MATCH_SECTION`). The merge's own name is its
+#: normalised label (or file name) after its merge word and counter (``merge4_``, ``truncated_merge2_``). A live record
+#: group is a candidate when (a) the leading run number of its base name (``07`` of ``07_x_m300mv``) is one of the
+#: merge name's whole-number tokens AND they share at least one other token, or (b) the two names without their
+#: leading run numbers are at least :data:`UNMATCHED_HINT_MIN_RATIO` alike (difflib ratio, an edit distance). Measured
+#: on a real BL4-3 beamtime: 46 of the scientists' 56 Athena merges matched no group, their names typed shorter or
+#: otherwise than the scan files (``spt2`` for ``spot2``, ``sugar`` for ``sucrose``, ``0V`` for ``m0V``, ``postXA``),
+#: and ISAAC said nothing of them. When any group qualifies by (a), only those are listed (a run number the merge names
+#: is a far stronger hint than a name alike).
+UNMATCHED_HINT_RULE_ID = "isaac.athena.unmatched_merge_hint.v0"
+UNMATCHED_HINT_MIN_RATIO = 0.85
+UNMATCHED_HINT_MAX = 3
+_MERGE_TOKEN = re.compile(r"^" + _MERGE_WORD + r"\d*$")
+
+
+def merge_own_name(entry: Mapping) -> str:
+    """The name a scientist's merge gives what it merged: its normalised label (else file name) after the first merge
+    word (+ counter) token, or the whole name when it has none (an ``is_merge`` flag only)."""
+    names = [n for n in entry.get("names") or () if n]
+    label = normalise_name(str(entry.get("label") or ""))
+    for n in ([label] if label else []) + names:
+        toks = n.split("_")
+        at = next((i for i, t in enumerate(toks) if _MERGE_TOKEN.match(t)), None)
+        if at is not None:
+            return "_".join(toks[at + 1:])  # "" when the merge word is all it says (``merge16``)
+    return label or (names[0] if names else "")
+
+
+def _lead_number(name: str) -> int | None:
+    tok = name.split("_", 1)[0]
+    return int(tok) if _WHOLE.match(tok) else None
+
+
+def _without_lead_numbers(name: str) -> str:
+    toks = name.split("_")
+    while toks and _WHOLE.match(toks[0]):
+        toks = toks[1:]
+    return "_".join(toks)
+
+
+def near_name_candidates(entry: Mapping, groups: Sequence[Mapping]) -> list[dict]:
+    """r6 G1 (:data:`UNMATCHED_HINT_RULE_ID`): the live record groups whose names are NEAR the merge's own name, best
+    first, at most :data:`UNMATCHED_HINT_MAX`. Each says why (``shares_run_number``, ``shared_tokens``, ``similarity``).
+    Hints only: nothing is matched."""
+    import difflib
+
+    own = merge_own_name(entry)
+    if not own:
+        return []
+    toks = set(own.split("_")) - {""}
+    numbers = {int(t) for t in toks if _WHOLE.match(t)}
+    words = {t for t in toks if not _WHOLE.match(t)}
+    bare = _without_lead_numbers(own)
+    out = []
+    for g in groups:
+        if not takes_part(g):
+            continue
+        stems = [normalise_name(x) for x in g.get("_stems") or () if x]
+        if not stems:
+            continue
+        best = None
+        for name in sorted(base_names(stems) | set(stems)):
+            gtoks = set(name.split("_")) - {""}
+            shared = sorted(words & {t for t in gtoks if not _WHOLE.match(t)})
+            lead = _lead_number(name)
+            by_number = lead is not None and lead in numbers and bool(shared)
+            ratio = difflib.SequenceMatcher(None, bare, _without_lead_numbers(name)).ratio() if bare else 0.0
+            if not (by_number or ratio >= UNMATCHED_HINT_MIN_RATIO):
+                continue
+            key = (by_number, round(ratio, 3), len(shared))
+            if best is None or key > best[0]:
+                best = (key, {"group_id": g["group_id"], "group_name": name, "shares_run_number": by_number,
+                              "shared_tokens": shared, "similarity": round(ratio, 3)})
+        if best is not None:
+            out.append(best)
+    if any(key[0] for key, _ in out):
+        # a group whose run number the merge names is a far stronger hint than a name alike: only those are listed
+        out = [kv for kv in out if kv[0][0]]
+    out.sort(key=lambda kv: (not kv[0][0], -kv[0][1], -kv[0][2], kv[1]["group_id"]))
+    return [c for _, c in out[:UNMATCHED_HINT_MAX]]
+
+
+def unmatched_merges(groups: Sequence[Mapping], entries: Sequence[Mapping], *, tied: Iterable[int] = ()) -> list[dict]:
+    """r6 G1: the scientist's merges (:func:`is_scientist_merge`) that match NO record group by name (no hit at all;
+    one that matches several groups has its own note) and that no params file ties to a group (``tied``: entry
+    indexes). One item per merge: the same label with the same data in several projects is ONE merge, naming every
+    project. Each item lists its near-name candidates (:func:`near_name_candidates`: hints only, never matched)."""
+    stems = {g["group_id"]: [normalise_name(s) for s in g.get("_stems") or ()] for g in groups if takes_part(g)}
+    bases = {gid: base_names(gstems) for gid, gstems in stems.items()}
+    tied = set(tied)
+
+    def _key(e):
+        return normalise_name(str(e.get("label") or "")), e.get("data_hash")
+
+    # a copy of a tied merge (the same label and data in another project) is the same merge: tied too
+    tied_keys = {_key(entries[i]) for i in tied if 0 <= i < len(entries)}
+    items: dict[tuple, dict] = {}
+    for idx, e in enumerate(entries):
+        if idx in tied or _key(e) in tied_keys or not is_scientist_merge(e) or _hits(e, stems, bases):
+            continue
+        key = _key(e)
+        item = items.get(key)
+        if item is None:
+            item = items[key] = {"athena_label": str(e.get("label") or ""), "is_merge": bool(e.get("is_merge")),
+                                 "merge_name": merge_own_name(e), "in": [], "_entry": e}
+        item["in"].append({"prj_relative_path": e["prj_relative_path"], "athena_group": e["group_name"]})
+    out = []
+    for item in items.values():
+        e = item.pop("_entry")
+        item["candidates"] = near_name_candidates(e, groups)
+        item["hint_rule"] = UNMATCHED_HINT_RULE_ID
+        out.append(item)
+    out.sort(key=lambda i: (not i["candidates"], i["athena_label"].casefold(), i["in"][0]["prj_relative_path"]))
     return out
 
 
@@ -999,6 +1227,8 @@ def compare(isaac: Mapping, entry: Mapping, params: Mapping, np) -> dict:
         "match_rule": MATCH_RULE_ID,
         "match_kind": entry.get("_match_kind"),
         **({"merge_rule": SCIENTIST_MERGE_RULE_ID} if entry.get("_match_kind") == "scientist_merge" else {}),
+        # r6 G1: named for this group by the scientist (params athena_match), never by a near name
+        **({"named_by": "params athena_match"} if entry.get("_match_kind") == TIED_KIND else {}),
         **({"athena_data": "already_normalized", "athena_data_rule": ALREADY_NORMALIZED_RULE_ID} if already_normalized(entry) else {}),
     }
     out = {"athena_ref": ref, "rule_id": COMPARE_RULE_ID, "metrics": {}, "verdict": "not_comparable", "flags": [], "tolerances": dict(tol)}

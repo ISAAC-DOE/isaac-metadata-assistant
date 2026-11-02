@@ -161,7 +161,7 @@ agreement with their own Athena output, and the plot (open the PNG with Read and
   approving, ask for the QC status: map their words to one of the four
   (`--qc-status valid|compromised|failed|pending`), say it back, record on yes; never derive it from the verdict.
 - **Two results for one group**: ISAAC's curve (`…-isaac`) and their own Athena curve (`…-athena`).
-  Show both, say which scans each used, ask which is the record's, approve exactly one.
+  Show both, say which scans each used, ask which is the record's, approve exactly one. "A merge exists but was not matched": ask which group it is for; never pick a near name (reference: `athena_match`).
 - A `not_applicable` result is not a fail; never ask to approve it ("no ISAAC processing protocol
   covers this data yet"). A result with **no curve** cannot be approved; offer: reject the result,
   `needs_changes`, or leave the group out.

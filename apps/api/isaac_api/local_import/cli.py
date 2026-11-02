@@ -1200,6 +1200,14 @@ def _scans_line(r: Mapping) -> str | None:
             # facts from its comparison, which has always carried the label's selection
             scans = comparison["athena_scan_selection"]
             basis = "label" if scans else "not_stated"
+        runs = ((ref.get("per_scan_set") or {}).get("runs") or []) if isinstance(ref.get("per_scan_set"), Mapping) else []
+        if basis == "per_scan_set" and scans and len(runs) == len(scans) and len(set(runs)) > 1:
+            # r6 G2: members of several runs (scan numbers restart in each run): each run's scans named apart
+            by_run: dict[str, list] = {}
+            for run_, n in zip(runs, scans):
+                by_run.setdefault(str(run_), []).append(n)
+            each = "; ".join(f"scan{'s' if len(set(v)) > 1 else ''} {_scan_ranges(v)} of run {k}" for k, v in by_run.items())
+            return f"{len(scans)} per-scan groups from {len(by_run)} runs: {each} (averaged by ISAAC)"
         if basis == "per_scan_set" and scans:
             return f"scans {_scan_ranges(scans)} (the scientist's per-scan groups, averaged by ISAAC)"
         if basis == "label" and scans:
@@ -1343,7 +1351,11 @@ def _processing_result_view(bundle: Mapping, r: Mapping) -> dict:
         "scans": _scans_line(r),
         **({"scans_note": note} if note else {}),
         **({"calibration": calibration} if calibration else {}),
-        "steps": [{"step": s.get("step"), "flags": list(s.get("flags") or ()), "outcome": s.get("outcome")} for s in r.get("steps") or ()],
+        "steps": [{"step": s.get("step"), "flags": list(s.get("flags") or ()), "outcome": s.get("outcome"),
+                   # r6 G3: how the scientist's Athena curve was made (stored values, Athena's re-fit, as stored)
+                   **({"reproduced_with": s["params"]["reproduced_with"]}
+                      if isinstance(s.get("params"), Mapping) and s["params"].get("reproduced_with") else {})}
+                  for s in r.get("steps") or ()],
         "outputs": {"e0_eV": (r.get("outputs") or {}).get("e0_eV"), "edge_step": (r.get("outputs") or {}).get("edge_step"),
                     "points": (r.get("outputs") or {}).get("points"),
                     "files": [{"role": f.get("role"), "relative_path": f.get("relative_path")} for f in files]},

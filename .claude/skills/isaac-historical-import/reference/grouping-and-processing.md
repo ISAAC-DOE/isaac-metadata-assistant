@@ -109,7 +109,8 @@ it finds one. Show per group, in words:
   `qc.statements.scans_used`): either the scans its Athena label names, the per-scan groups of a set, or
   "the project does not say which scans". An Athena project does not list the scan files it merged, so
   say which of the three it is and, when it is the last, ask the scientist; never infer scans from the
-  curve. `scans_used: null` in its metrics means exactly that, not zero scans;
+  curve. `scans_used: null` in its metrics means exactly that, not zero scans. A set over several runs names
+  each run's scans ("6 per-scan groups from 2 runs: scans 1-2 of run …; scans 1-4 of run …");
 - **a channel chosen by name** (flag `channel_choice_needs_review`, `qc.statements.channel_choice_needs_review`): the
   protocol's column-name order chose it, not the BL15-2 selector; say the sentence (the channel, why, the other
   channels the scan has) and ask the scientist to confirm it is the channel the measurement used. After `template
@@ -152,9 +153,11 @@ it finds one. Show per group, in words:
   reject or `needs_changes`, never approval. A scientist's Athena curve is judged the same way, over its
   project's own post-edge range (flag `athena_post_edge_not_at_1`, not preferred; a listed version that
   fails carries the flag: say it when asking which version is the result of record). **A rebuilt Athena
-  curve** (flag `athena_renormalisation_differs`): larch's reading of the project gives another curve than Athena
-  shows, so ISAAC made it as Athena does (the project's stored values where they still fit the data, else Athena's
-  own re-fit; `reproduced_with` says which); say that sentence plainly and never present it as the scientist's error.
+  curve**: larch's reading of the project gives another curve than Athena shows, so ISAAC made it as Athena does
+  (the project's stored values where they still fit the data, else Athena's own re-fit). r6: `process` says this
+  once, in one summary line; results no longer carry the flag `athena_renormalisation_differs` (older decided
+  results still do). `bundle show processing-result` prints `reproduced_with` on the normalize step: say which way
+  the curve was made if asked. Never present it as the scientist's error.
   **A decided result kept on its old curve** (`process` reply `decided_results_on_an_older_run`): say the line
   (why the group has new results, and that the approval stands on the old curve) and ask whether the scientist
   wants to review the new result;
@@ -182,6 +185,16 @@ it finds one. Show per group, in words:
   result compactly (QC with its `statements`, each step's outcome, the Athena comparison and every
   version's comparison; long lists are counted, not printed); its `result_file` (`result.json`) is the result as the run first wrote it and is never rewritten, so
   the current sentences are in this output, not necessarily in that file.
+- **a merge that matches no group** (r6; summary line "A merge exists but was not matched", list
+  `athena.unmatched_merges`; on each near group's results `qc.statements.athena_merge_not_matched`, flag
+  `athena_merge_not_matched`, question `athena_unmatched_merge_for_group`): the scientist merged in Athena, but the
+  merge's name is not a group's scan name, so ISAAC did not use it. Say the line. The near names are hints only:
+  never pick one yourself. Ask the scientist, one merge at a time, which group it is for, if any. Only on their
+  answer, write `{"athena_match": {"<group id>": [{"project": "<project file>", "athena_group": "<Athena label>"}]}}`
+  to a params file (the sentence gives the exact snippet) and run
+  `<isaac> process <bundle> --source <folder> --params-file <file>`. The merge is then compared and listed for
+  approval like any Athena curve; the group's result id changes. Keep the params file and pass it on every later
+  `process`, or the tie is gone. A tie that names nothing says so in the summary;
 - when `process` says why none of the scientist's Athena groups matched (`athena.statement`), say it
   in those words. After `process --group`, it speaks of the groups processed now ("none of the 2 group(s) processed
   now has an Athena match"), counting the project's Athena groups that match other groups (stored results too).

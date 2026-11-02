@@ -5026,8 +5026,7 @@ def decided_results_on_an_older_run(bundle: Mapping, before: Sequence[Mapping], 
         if not isinstance(seen, Mapping):
             match, versions = _athena_match_of(before, gid, run)
             seen = {"athena_match": [list(x) for x in match], "athena_versions": versions,
-                    "rebuilt": any(C_ATHENA_RENORM in (r.get("review_flags") or ()) for r in before
-                                   if r.get("group_id") == gid and r.get("run_id") == run)}
+                    "rebuilt": any(_rebuilt(r) for r in before if r.get("group_id") == gid and r.get("run_id") == run)}
         new = [r for r in fresh if r.get("group_id") == gid and r.get("run_id") and r.get("run_id") != run]
         if not new:
             continue
@@ -5045,7 +5044,7 @@ def decided_results_on_an_older_run(bundle: Mapping, before: Sequence[Mapping], 
         if was != now:
             why.append("the scientist's Athena curve it is compared with is matched differently now "
                        f"({_said_match(was)} before, {_said_match(now)} now)")
-        if not seen.get("rebuilt") and any(C_ATHENA_RENORM in (r.get("review_flags") or ()) for r in new):
+        if not seen.get("rebuilt") and any(_rebuilt(r) for r in new):
             why.append("the scientist's Athena curve is now made from the project as Athena makes it "
                        f"({C_ATHENA_RENORM})")
         if not why:
@@ -5075,6 +5074,12 @@ def _said_match(m: tuple) -> str:
 
 #: ``processing.athena.ATHENA_RENORM_FLAG`` (r5 H1; not imported: processing is an optional extra).
 C_ATHENA_RENORM = "athena_renormalisation_differs"
+
+
+def _rebuilt(r: Mapping) -> bool:
+    """Whether a result's Athena curve was made as Athena makes it (r5 H1): the flag (before r6) or, r6 G4, the
+    ``renormalised_from_project`` record the result keeps (``processing.athena.RENORMALISED_KEY``)."""
+    return C_ATHENA_RENORM in (r.get("review_flags") or ()) or bool(r.get("renormalised_from_project"))
 #: ``processing.core.SIGNAL_ALL_ZERO`` (not imported: processing is an optional extra).
 C_SIGNAL_ALL_ZERO = "signal_all_zero"
 #: ``processing.run.FRAGMENT_REASON`` (r5 A5; not imported, as above).
