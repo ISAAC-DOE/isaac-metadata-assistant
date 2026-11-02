@@ -2325,12 +2325,12 @@ def _note_shared_sample_tokens(questions: list[dict], bundle: Mapping) -> None:
     """r5e M1: per-group ``missing_value`` questions about the material's name or form (:data:`SAMPLE_TOKEN_FIELDS`)
     whose partition is the group's whole file name (``sample_name_stem``) share a ``same_reading_group`` when their
     file names share every SAMPLE token
-    (``grouping.sample_name_tokens``: ``O4`` ``PtCNPs`` ``5wp`` of ``O4_06_PtCNPs_5wp_pH2_000mV``; never a counter, a
+    (``grouping.sample_name_tokens``: ``Q4`` ``SYNcat`` ``5wp`` of ``Q4_06_SYNcat_5wp_pH2_000mV``; never a counter, a
     set-point, a pH, an electrolyte or another condition, nor a token the run's parser read as one). Then
     ``decide --question <id> --same-reading`` answers them together. Ids, scopes, kinds and targets are unchanged;
     only ``same_reading_group``, ``same_reading_count``, ``same_reading_members``, ``same_reading_command``,
-    ``shared_sample_tokens`` and the text are added. Names whose sample tokens differ in any way (``O4`` beside
-    ``O5``, ``5wt`` beside ``5wp``) never share a group: the scientist joins those by answering each."""
+    ``shared_sample_tokens`` and the text are added. Names whose sample tokens differ in any way (``Q4`` beside
+    ``Q5``, ``5wt`` beside ``5wp``) never share a group: the scientist joins those by answering each."""
     from . import grouping as G
 
     asked = [q for q in questions if q["kind"] == "missing_value" and q.get("target_field_path") in SAMPLE_TOKEN_FIELDS
