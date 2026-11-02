@@ -62,7 +62,8 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   stretch a word (a metal foil is none of the sample forms). If they keep their own word, see "Not on
   the list at all" below. Use `defer` only if they say they don't know. `decide` refuses a value the field's schema rejects (not on the list, wrong
   type, a time not in UTC), lists the allowed values and records nothing; when one target of a bulk
-  answer is refused, nothing is recorded for any.
+  answer is refused, nothing is recorded for any. The refusal names EVERY refused target with its reason: say
+  them all, then run the call again without them and decide each refused one on its own.
 - Ask `produced_by` ("who made these measurements?") once, per beamtime; offer a folder-name hint
   as a question, not an answer. `--by` is the name the scientist gave in Step 1; do not ask again.
 

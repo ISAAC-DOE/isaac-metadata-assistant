@@ -188,7 +188,8 @@ def _companions_missing(report: Mapping) -> list[dict]:
     composer already lists or the record already carries."""
     paths = {m["path"] for m in report.get("missing_required") or () if m.get("from") == FROM_AN_ANSWER}
     filled = {f["path"] for f in report.get("filled") or ()}
-    return [{"path": companion, "from": FROM_AN_ANSWER, "required_because": ASKED_WITH_COMPANION.format(path=path, companion=companion)}
+    return [{"path": companion, "from": FROM_AN_ANSWER, "asked_with": path,
+             "required_because": ASKED_WITH_COMPANION.format(path=path, companion=companion)}
             for path, companion in B.COMPOSES_ONLY_WITH.items()
             if path in paths and companion not in paths and companion not in filled]
 
@@ -1493,7 +1494,9 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
 
     missing = {gid: set(_answer_missing(rep)) for gid, rep in reports.items()}
     because_of = {gid: _required_because(rep) for gid, rep in reports.items()}
-    companion_of = {gid: {m["path"] for m in _companions_missing(rep)} for gid, rep in reports.items()}
+    # r5c C6: the composer lists the companion itself now (marked ``asked_with``); an older report does not
+    companion_of = {gid: {m["path"] for m in list(rep.get("missing_required") or ()) + _companions_missing(rep)
+                          if m.get("asked_with")} for gid, rep in reports.items()}
     filled = {gid: {f["path"] for f in rep.get("filled") or ()} for gid, rep in reports.items()}
     every = set(missing)
     order_of = {gid: i for i, gid in enumerate(missing)}

@@ -294,7 +294,8 @@ def test_an_export_of_unchanged_records_says_nothing_new_was_written(bdir, tmp_p
     assert n >= 1 and first["records_unchanged"] == 0
     assert first["outcome"].startswith(f"{n} record(s) ready (0 unchanged since their export, {n} written), refused ")
     again = R.export_records(bdir, out, run_portal=_portal("publish"))
-    assert again["records_written"] == n and again["records_unchanged"] == n
+    # r5c C5: an unchanged record is ready, not written again
+    assert again["records_ready"] == n and again["records_written"] == 0 and again["records_unchanged"] == n
     assert {row["export"] for row in again["exported"]} == {"unchanged"}
     assert again["outcome"].startswith(f"{n} record(s) ready ({n} unchanged since their export, 0 written), refused ")
     assert "Wrote" not in again["outcome"]

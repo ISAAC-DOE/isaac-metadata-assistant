@@ -79,6 +79,10 @@ POTENTIAL_SOURCES_WARNING = "potential_sources_disagree"
 #: scientist deferred the instrument clock's time zone ("I don't know"): said at validate, export, in the evidence
 #: sidecar and the upload dry run, never left for the reader to notice.
 START_TIME_WARNING = "start_time_left_out"
+#: r5c C1: the approved processing result a record carries is not the Athena version the scientist's LATEST
+#: ``select_athena_version`` names (a version approved before another was chosen, or ISAAC's own result approved before
+#: a version was chosen): the record would carry a curve that is not the result of record. A warning, never a refusal.
+ATHENA_NOT_CHOSEN_WARNING = "athena_version_no_longer_chosen"
 START_TIME_LEFT_OUT = "start time left out: instrument clock zone deferred (question {question})"
 #: c16-r L6: the same, while the clock question has no answer at all (neither a zone nor a defer)
 START_TIME_LEFT_OUT_UNANSWERED = "start time left out: instrument clock zone not answered yet (question {question})"
@@ -446,8 +450,96 @@ def composition_index(bundle: Mapping, decision_of: Mapping[tuple[str, str], Map
         "required_by_mode": {},
         # read from the WHOLE bundle here, never lazily inside compose_group: a group is composed from its own
         # values only, so a lazy read would keep the first group's view for every group
-        "memo": {"local_clock_runs": local_clock_runs(bundle), "open_start_conflicts": open_start_conflicts(bundle)},
+        "memo": {"local_clock_runs": local_clock_runs(bundle), "open_start_conflicts": open_start_conflicts(bundle),
+                 "athena_choices": athena_choices(bundle)},
     }
+
+
+_ISAAC_RESULT_ID = re.compile(r"^proc-(?P<group>.+)-r-[0-9a-f]{16}-isaac$")
+
+
+def athena_choices(bundle: Mapping) -> dict:
+    """r5c C1: ``{group_id: (latest select_athena_version decision, its position in the log)}``, the choice made on
+    any ISAAC result of the group (as ``isaac process`` reads it: by the result's group, or its id's), plus
+    ``"_position"``: every decision id's position. Read in one pass; ``{}`` when no version was ever chosen."""
+    decisions = bundle.get("scientist_decisions") or ()
+    if not any(d.get("decision") == B.ATHENA_SELECT_DECISION for d in decisions):
+        return {}
+    group_of = {B.processing_id(r): r.get("group_id") for r in bundle.get("processing_results") or ()
+                if r.get("source") == "isaac_protocol"}
+    out: dict = {"_position": {}}
+    for i, d in enumerate(decisions):
+        out["_position"][d.get("decision_id")] = i
+        t = d.get("target") or {}
+        if d.get("decision") != B.ATHENA_SELECT_DECISION or t.get("kind") != "processing_result":
+            continue
+        m = _ISAAC_RESULT_ID.match(str(t.get("id")))
+        gid = group_of.get(t.get("id")) or (m.group("group") if m else None)
+        if gid:
+            out[gid] = (d, i)
+    return out
+
+
+def _choice_identity(decision: Mapping | None) -> str | None:
+    """The version a ``select_athena_version`` names, by its own provenance (never its positional id)."""
+    if not isinstance(decision, Mapping):
+        return None
+    prov = decision.get("athena_version_provenance")
+    if isinstance(prov, Mapping):
+        return json.dumps({k: prov.get(k) for k in B.ATHENA_IDENTITY_KEYS}, sort_keys=True)
+    return json.dumps({"decision_id": decision.get("decision_id")})
+
+
+def athena_choice_mismatch(bundle: Mapping, group_id: str, approved: Mapping, choices: Mapping | None = None,
+                           state: Mapping | None = None) -> dict | None:
+    """r5c C1: what is wrong when the ONE approved result of ``group_id`` is not the Athena version the scientist's
+    latest choice names, else ``None``: ``{approved_result_id, approved_version_id, chosen_value, choice_decision_id,
+    chosen_result_id}``. An approved Athena-version result of ANOTHER version is always a mismatch; an approved result
+    that is no chosen version (ISAAC's own) only when the choice was recorded AFTER its approval (approving ISAAC's
+    own result after choosing a version is the scientist's later word, as the skill says)."""
+    choices = athena_choices(bundle) if choices is None else choices
+    got = choices.get(group_id)
+    if not got:
+        return None
+    latest, at = got
+    want = _choice_identity(latest)
+    pid = B.processing_id(approved)
+    by_id = {d.get("decision_id"): d for d in bundle.get("scientist_decisions") or ()
+             if d.get("decision") == B.ATHENA_SELECT_DECISION}
+    if approved.get("source") == "scientist_athena" and approved.get("athena_version_id"):
+        made = (approved.get("athena_version_selected") or {}).get("decision_id")
+        if made is not None and _choice_identity(by_id.get(made)) == want:
+            return None
+    else:
+        approval = (B.processing_state_decisions(bundle) if state is None else state).get(("processing_result", pid))
+        if approval is None or choices["_position"].get(approval.get("decision_id"), -1) > at:
+            return None
+    chosen = [r for r in bundle.get("processing_results") or ()
+              if r.get("group_id") == group_id and r.get("source") == "scientist_athena" and r.get("athena_version_id")
+              and _choice_identity(by_id.get((r.get("athena_version_selected") or {}).get("decision_id"))) == want
+              and r.get("state") != B.STATE_REJECTED]
+    return {"approved_result_id": pid, "approved_version_id": approved.get("athena_version_id"),
+            "chosen_value": latest.get("value"), "choice_decision_id": latest.get("decision_id"),
+            "chosen_result_id": B.processing_id(chosen[0]) if chosen else None}
+
+
+def athena_choice_text(m: Mapping, group_id: str) -> str:
+    """The plain sentences for :func:`athena_choice_mismatch`: what the record carries, and the steps that make it
+    carry the chosen version (each a command to run only with the scientist's answer)."""
+    what = (f"Athena version {m['approved_version_id']}" if m.get("approved_version_id") else "ISAAC's own curve")
+    reject = f'isaac bundle decide <bundle_dir> --target {m["approved_result_id"]} --decision reject --by "<your name>"'
+    if m.get("chosen_result_id"):
+        steps = (f"reject {m['approved_result_id']} (`{reject}`), then approve {m['chosen_result_id']} "
+                 f'(`isaac bundle decide <bundle_dir> --target {m["chosen_result_id"]} --decision approve --qc-status '
+                 '<status> --by "<your name>"`)')
+    else:
+        steps = (f"run `isaac process <bundle_dir> --source <the beamtime folder you imported> --group {group_id}` "
+                 f"(it builds the chosen version's own result), then reject {m['approved_result_id']} (`{reject}`), "
+                 "then approve the new result")
+    return (f"The approved result {m['approved_result_id']} is {what}. The scientist's latest choice of the result of "
+            f"record is {m['chosen_value']} ({m['choice_decision_id']}). The record carries the E0 and curve of "
+            f"{m['approved_result_id']}, not of {m['chosen_value']}. To carry the chosen version: {steps}. Ask the "
+            "scientist before each step.")
 
 
 def _processing_by_group(bundle: Mapping) -> dict[str, list]:
@@ -662,6 +754,7 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
                               "confirmed": absorber[0]["value"] is not None}
 
     # processing (series, qc, E0 descriptor) — ONLY an approved result
+    chose_other = None  # r5c C1: the approved result is not the scientist's latest Athena choice
     mine = list(index["processing_of"].get(group["group_id"], ()))
     approved = [r for r in mine if r["state"] == B.STATE_SCIENTIST_CONFIRMED and not B.processing_not_applicable(r)]
     # A group whose LATEST result says the protocol does not apply cannot get an approved
@@ -701,6 +794,8 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
     elif approved:
         r = approved[0]
         pid = B.processing_id(r)
+        chose_other = athena_choice_mismatch(bundle, group["group_id"], r, index["memo"].get("athena_choices") or {},
+                                             index["processing_state"])
         # the APPROVAL (latest state decision): a later select_athena_version never stands in for it
         d = index["processing_state"][("processing_result", pid)]
         conf = _confirmation({**d, "value": f"approved {pid}"}, f"Approve processing result {pid}")
@@ -972,11 +1067,24 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
         report["missing_required"].append(need)
     from . import questions as Q  # c8-b: the conditions generic runs' names and headers state (questions.py)
 
+    # r5c C6: A REQUIRED FIELD NOBODY ANSWERED THAT GOES IN ONLY BESIDE ITS COMPANION (a set-point with no confirmed
+    # potential scale): the companion is listed missing NOW, beside it, as the questions' minimum already asks it
+    # (questions._companions_missing, the same entry and why). Appended last, so the questions read the same list.
+    report["missing_required"] += Q._companions_missing(report)
+
     report["warnings"] = (_stated_potential_warnings(bundle, group, member_ids, fields, proposals,
                                                      held_by_scale=held_by_companion.get(SETPOINT_PATH, (None,))[0] == SCALE_PATH)
                           + _potential_sources_warnings(bundle, group, member_ids, fields)
                           + Q.open_circuit_warnings(bundle, group, member_ids, fields)
                           + _start_time_warnings(bundle, group, member_ids, fields, index["memo"]))
+    if chose_other is not None:
+        # r5c C1: the record carries an approved result that is not the version the scientist chose last: said at
+        # build-records, validate and export (on the record's row), never silent
+        report["warnings"].append({"code": ATHENA_NOT_CHOSEN_WARNING, "group_id": group["group_id"],
+                                   "path": "measurement.series", "needs": "measurement.series", "targets": [],
+                                   **chose_other, "command": f'isaac bundle decide <bundle_dir> --target '
+                                   f'{chose_other["approved_result_id"]} --decision reject --by "<your name>"',
+                                   "text": athena_choice_text(chose_other, group["group_id"])})
     return draft, report
 
 
@@ -1418,6 +1526,8 @@ def potential_warning_text(w: Mapping) -> str:
 
     if w.get("code") == POTENTIAL_SOURCES_WARNING:
         return potential_sources_text(w)
+    if w.get("code") == ATHENA_NOT_CHOSEN_WARNING:
+        return athena_choice_text(w, w["group_id"])
     if w.get("code") == START_TIME_WARNING:
         return (START_TIME_LEFT_OUT_CONFLICT if w.get("conflict") else START_TIME_LEFT_OUT_UNANSWERED if w.get("unanswered")
                 else START_TIME_LEFT_OUT).format(question=w["question_id"])
@@ -2013,7 +2123,10 @@ def warning_summary(warned: Sequence[Mapping], *, first: Iterable[str] | None = 
     ordered = ([w for w in warned if w["group_id"] in lead] + [w for w in warned if w["group_id"] not in lead]
                if lead is not None else list(warned))
     shown = ordered if full else ordered[:WARNINGS_SHOWN]
+    # r5c C6: a warning that names two steps keeps the second (``also_needs``, ``also_command``): SKILL.md Step 8 and
+    # records-and-validation.md tell the agent to read them
     rows = [{k: w[k] for k in ("group_id", "code", "text", "command")}
+            | {k: w[k] for k in ("also_needs", "also_command") if w.get(k)}
             | ({marked: w["group_id"] in lead} if lead is not None else {}) for w in shown]
     out: dict = {"warnings": rows, "warnings_total": len(warned)}
     if len(shown) < len(warned):
@@ -2066,6 +2179,8 @@ def written_without(w: Mapping) -> str:
         return f"Written with a potential its files disagree about: {w['text']}"
     if w.get("code") == START_TIME_WARNING:
         return f"Written without the start time: {w['text']}"
+    if w.get("code") == ATHENA_NOT_CHOSEN_WARNING:
+        return f"Written with an approved curve that is not the chosen Athena version: {w['text']}"
     name = WRITTEN_WITHOUT_NAMES.get(w.get("path"), w.get("path") or "a stated condition")
     return f"Written without {name}: {w['text']}"
 
@@ -2613,17 +2728,25 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     for (b_id, g_id), earlier in list(prior_of.items()):
         if b_id == bundle_id and g_id not in confirmed and earlier.get("record_id"):
             withdraw(earlier, "the group is no longer a scientist-confirmed record group of this bundle")
+    # r5c C5: a record is WRITTEN by this run only when it is new or replaces an earlier one; an unchanged record
+    # (the same id, rewritten byte for byte) is ready, not written. ``records_ready`` counts both.
+    written_now = [row for row in exported if row.get("export") != "unchanged"]
+    unchanged_rows = [row for row in exported if row.get("export") == "unchanged"]
     result = {
         # SAID PLAINLY FIRST (1.9.x polish): the exit code is 1 whenever any group is refused, even when records
         # were written, so a reader of the exit code alone would take "wrote 3, refused 75" for "nothing exported"
         "outcome": export_outcome(len(exported), len(refused), len(withdrawn), out,
-                                  warned=sum(1 for row in exported if row.get("warnings_total")),
-                                  unchanged=sum(1 for row in exported if row.get("export") == "unchanged"),
-                                  replaced=sum(1 for row in exported if row.get("export") == "replaced")),
-        "records_written": len(exported),
-        # r2-a L2: of those, the ones whose body is unchanged since their export (the same id, rewritten byte for byte)
-        "records_unchanged": sum(1 for row in exported if row.get("export") == "unchanged"),
-        **({"records_written_with_warnings": n} if (n := sum(1 for row in exported if row.get("warnings_total"))) else {}),
+                                  warned=sum(1 for row in written_now if row.get("warnings_total")),
+                                  unchanged=len(unchanged_rows),
+                                  replaced=sum(1 for row in exported if row.get("export") == "replaced"),
+                                  warned_unchanged=sum(1 for row in unchanged_rows if row.get("warnings_total"))),
+        "records_ready": len(exported),
+        "records_written": len(written_now),
+        # r2-a L2: of the ready ones, those whose body is unchanged since their export (the same id, rewritten byte
+        # for byte); they are not counted as written
+        "records_unchanged": len(unchanged_rows),
+        **({"records_written_with_warnings": n} if (n := sum(1 for row in written_now if row.get("warnings_total"))) else {}),
+        **({"records_ready_with_warnings": n} if (n := sum(1 for row in exported if row.get("warnings_total"))) else {}),
         "groups_refused": len(refused),
         "exported": exported,
         "refused": refused,
@@ -2634,7 +2757,7 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     if portal_warned:
         # r4-b M7: each portal warning once, with how many of the records written carry it
         result["portal_warnings"] = portal_warning_summary(portal_warned)
-        result["outcome"] += (" The portal validator warned on written records: "
+        result["outcome"] += (" The portal validator warned on the records ready: "
                               + "; ".join(f"{w['code']} ({w['records']} record(s))" for w in result["portal_warnings"])
                               + " (`portal_warnings`).")
     if not exported:
@@ -2647,12 +2770,13 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
 
 
 def export_outcome(written: int, refused: int, withdrawn: int, out: Path, *, warned: int = 0, unchanged: int = 0,
-                   replaced: int = 0) -> str:
+                   replaced: int = 0, warned_unchanged: int = 0) -> str:
     """One sentence: what ``export`` wrote and refused, and what its exit code means for that (and, c11-a, how many
     records were written with a warning that still applies: each row's ``warnings`` says what it lacks). ``written``
-    counts every record in ``--out`` from this run; r2-a L2: of them ``unchanged`` are the same record as at their
-    export (same id, rewritten byte for byte) and ``replaced`` replace an earlier record, so the sentence never says
-    "wrote 7" when nothing new was written."""
+    counts every record READY in ``--out`` from this run (the reply's ``records_ready``); r2-a L2: of them
+    ``unchanged`` are the same record as at their export (same id, rewritten byte for byte) and ``replaced`` replace an
+    earlier record, so the sentence never says "wrote 7" when nothing new was written. r5c C5: ``warned`` counts only
+    the records NEWLY written with a warning; ``warned_unchanged`` the unchanged ones that still carry one."""
     fresh = written - unchanged
     counts = (f" ({unchanged} unchanged since their export, {fresh} written"
               + (f", {replaced} of them replacing an earlier record" if replaced else "") + ")") if written else ""
@@ -2667,6 +2791,9 @@ def export_outcome(written: int, refused: int, withdrawn: int, out: Path, *, war
     if warned:
         text += (f" {warned} record(s) were written with a warning that still applies: each says what the record is "
                  "written without (`exported[].warnings`).")
+    if warned_unchanged:
+        text += (f" {warned_unchanged} unchanged record(s) still carry a warning that applies "
+                 "(`exported[].warnings`).")
     if withdrawn:
         text += f" {withdrawn} earlier record(s) were withdrawn (see `withdrawn`)."
     return text

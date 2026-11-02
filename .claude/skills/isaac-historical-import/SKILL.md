@@ -224,23 +224,23 @@ They may also answer on the local-only *Local Imports* page (see the reference);
 ## Step 8 · Build and validate
 
 `<isaac> bundle build-records <bundle>` (counts and the first 3 drafts; `--full` prints all) then
-`<isaac> bundle validate <bundle>`. If it reports `nothing_validated`, no group is confirmed yet: go
-back to Step 5. Read `reference/records-and-validation.md`; explain the verdicts from validate's
-`by_reason`, `missing_required_by_field` and `not_exportable_first` in plain words with the exact fix
-(open `validation/<group_id>.json` only for a group those leave unexplained), then go back to the
-step that fixes it (a `processing_fix` means its curve needs approval in Step 6). Say each `warnings`
-item in words (only 5 warnings show by default; `validate --full` lists all), and ask the scale question it
-names (and the set-point if `also_needs`); run its command only with their answer. Never edit a draft or relax a check.
+`<isaac> bundle validate <bundle>`. If it reports `nothing_validated`, no group is confirmed yet: go back to Step 5.
+Read `reference/records-and-validation.md`; explain the verdicts from validate's `by_reason`,
+`missing_required_by_field` and `not_exportable_first` in plain words with the exact fix (open
+`validation/<group_id>.json` only for a group those leave unexplained), then go back to the step that fixes it (a
+`processing_fix` means its curve needs approval in Step 6). Say each `warnings` item in words
+(only 5 warnings show by default; `validate --full` lists all), and ask the scale question it names (and the set-point
+if `also_needs`, with `also_command`; a missing set-point lists its scale as missing too). `athena_version_no_longer_chosen`: the
+approved curve is not the version they chose last; say its steps. Run a command only with their answer. Never edit a draft or relax a check.
 
 ## Step 9 · Export and dry run
 
 `<isaac> bundle export <bundle> --out <records>` writes only `exportable` records. Read its `outcome`
 ("N record(s) ready (U unchanged…, W written), refused M group(s)"), not its exit code (see `reference/records-and-validation.md`),
-then its refusal counts. **If nothing is exportable**, export writes nothing: skip the dry run, say
-"no record is ready yet", name what blocks the nearest group (from Step 8), and go to Step 10.
-`<isaac> bundle upload <records> --dry-run` shows what *would* be sent: summarise it (how many
-records, where to) and say **nothing was sent and this build cannot send**. The scientist uploads
-through the ISAAC portal themselves.
+then its refusal counts (`records_ready` = N; `records_written` = W, new or replacing records only).
+**If nothing is exportable**, export writes nothing: skip the dry run, say "no record is ready yet", name what
+blocks the nearest group (from Step 8), and go to Step 10. `<isaac> bundle upload <records> --dry-run` shows what
+*would* be sent: summarise it (how many records, where to) and say **nothing was sent and this build cannot send**. The scientist uploads through the ISAAC portal themselves.
 
 ## Step 10 · Final summary
 

@@ -452,7 +452,7 @@ def test_an_exported_record_says_the_portal_validators_warnings(bdir, tmp_path):
     assert "Written with a portal validator warning (DEPRECATED_CELL_TYPE): SYN: cell_type" in " ".join(row["warnings"])
     assert any(w.startswith("Written with a portal validator warning (NO_DATA_OWNER)") for w in row["warnings"])
     assert [(w["code"], w["records"]) for w in got["portal_warnings"]] == [("DEPRECATED_CELL_TYPE", 1), ("NO_DATA_OWNER", 1)]
-    assert "The portal validator warned on written records: DEPRECATED_CELL_TYPE (1 record(s)); NO_DATA_OWNER" in got["outcome"]
+    assert "The portal validator warned on the records ready: DEPRECATED_CELL_TYPE (1 record(s)); NO_DATA_OWNER" in got["outcome"]
 
 
 def test_a_portal_warning_on_many_records_is_counted_once():

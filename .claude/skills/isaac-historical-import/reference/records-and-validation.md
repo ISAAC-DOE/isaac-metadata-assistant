@@ -23,13 +23,15 @@ object the record carries requires (an electrolyte name makes `concentration_M` 
 A potentiostatic record whose set-point is confirmed but whose potential scale is not: the set-point goes in
 only beside its scale, so the scale is listed as missing (with `required_because`), never the set-point
 already answered; its question blocks that group and the minimum names it with its `command`.
+A set-point nobody answered lists its potential scale as missing too (`required_because` says why), in
+`build-records`, `validate` (`missing_required_by_field`) and the questions alike: ask both at once.
 Both replies also carry `warnings` (`warnings_total`; only the first 5 are printed, the warnings of exportable
 groups first, each row marked `group_exportable`; `warnings_omitted` counts the rest and `warnings_full_list`
 says how to see them: `validate --full` (or `build-records --full`) lists every one): a group whose file names state a potential
 (`400mV`, `m800mV`) that its record will not carry until the potential scale (or the set-point) is
 confirmed, with the command that lets it in. When no set-point was read from the names (an unread token
-such as `-500mV`) and no scale is confirmed, the warning names BOTH (`also_needs`, `also_command`): ask the
-set-point in volts and the scale together, so the scientist is not asked twice. A run a generic reader found
+such as `-500mV`) and no scale is confirmed, the warning names BOTH (`also_needs`, `also_command`, also on
+each row of `warnings`): ask the set-point in volts and the scale together, so the scientist is not asked twice. A run a generic reader found
 (SSRL XDC) warns too: from its file name (`500mV`, `m600mV`, `1800mV`) and from a scan-header comment
 line (a set-point written in the plain form, `0.5 V vs RHE`, with its scale spelled as written: `Hg/HgO`,
 `Ag/AgCl`; a line that only mentions a potential, such as `sample in 1M KOH 0.5Vrhe`, is named with no
@@ -41,7 +43,11 @@ a set-point while its run's name and header write different numbers warns `poten
 the scientist rules on the header's reading (in a bundle imported before header readings: by recording the
 record's set-point again, the warning's command). Re-importing instead starts with no answers: earlier
 decisions and a filled workbook do not carry over, and ids printed for the old bundle name other things. A name stating open
-circuit (`OCV`) warns until the control mode is confirmed. None of these is read as a value. It is not a refusal: the record can still be exportable,
+circuit (`OCV`) warns until the control mode is confirmed. `athena_version_no_longer_chosen` warns when the
+approved curve is not the Athena version the scientist chose last (a version approved before they chose
+another, or ISAAC's own curve approved before they chose a version): the record carries the approved curve.
+Its text gives the steps (`isaac process` for the chosen version if needed, reject the old result, approve the
+chosen one); ask before each. None of these is read as a value. It is not a refusal: the record can still be exportable,
 without the condition that defines it. Say each one to the scientist in words and ask the scale question it names (and the set-point when `also_needs` is set); its command is a template: run it only with their answer. Explain the counts first ("all 78 lack the producing group; 70 wait for a curve
 approval; 5 have no protocol"), then open `validation/<group id>.json` only for a group they leave
 unexplained.
@@ -84,12 +90,14 @@ After fixing, run `build-records` then `validate` again. Never hand-edit a draft
 `export --out <records>` writes `<ULID>.json`, `<ULID>.evidence.json` and a `<ULID>.artifacts/` folder
 (the processing files) for exportable drafts only and lists the rest with their verdicts. Its reply
 opens with `outcome` ("N record(s) ready (U unchanged since their export, W written), refused M group(s)": an
-unchanged record keeps its id and is not new; say "nothing new was written" when W is 0) and `records_written` /
-`records_unchanged` / `groups_refused`.
+unchanged record keeps its id and is not new; say "nothing new was written" when W is 0) and `records_ready` (N) /
+`records_written` (W: new or replacing records only; before r5 it counted unchanged ones too) /
+`records_unchanged` (U) / `groups_refused`.
 It exits 1 whenever any group is refused, **even when it wrote records**: read `outcome`, never the exit
 code alone, before telling the scientist what is ready. A record written while a warning still applies lists it
 in `exported[].warnings` ("Written without the potential set-point: …"; the first 5, with `warnings_total`), and
-`records_written_with_warnings` counts those records: say each one, since the record lacks that condition. The portal
+`records_written_with_warnings` counts those newly written (`records_ready_with_warnings` counts every ready
+record with one; the outcome says unchanged ones apart): say each one, since the record lacks that condition. The portal
 validator's own warnings (a deprecated `three_electrode` cell type, no data owner) never change a verdict, but are said:
 `portal_warnings` in `validate` and `export` (each once, with its record count; also a `portal:<CODE>` row of
 `warnings`), and "Written with a portal validator warning (…)" on each record. The template keeps a term the validator

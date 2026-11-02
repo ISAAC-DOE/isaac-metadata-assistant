@@ -41,7 +41,8 @@ Get the groups with `bundle list <bundle> groups` and one in full with `bundle s
   shows it as an `answered_before_split` hint and says so; ask the scientist to confirm it per part.
 - merge → three steps: `<isaac> bundle decide <bundle> --target <group id> --decision merge --merge-with <other group ids> --by "<name>"`
   (refused unless `--merge-with` names another live record group of this bundle), then
-  `bundle group <bundle> --regroup`, then confirm the ONE combined group it proposes. The regroup
+  `bundle group <bundle> --regroup`, then confirm the ONE combined group it proposes. The combined group's id
+  follows its runs only, so the same merges in another order give the same group (an id stored before r5 stays). The regroup
   combines them when the names differ only at positions the scientist declared counters, or only in a
   repeat marker (`again`, `repeat`, `redo`; a glued `Rep1`/`rep2` is a replicate, another sample), or
   when the names differ in words the scientist says are labels: the same sample confirmed for every
@@ -52,8 +53,9 @@ Get the groups with `bundle list <bundle> groups` and one in full with `bundle s
   conditions differ, or whose names differ in a quantity or any letters-and-digits token (`400mV`, `0p5wt`, `T300K`, `spot2`), are never
   combined. Tell the scientist which happened. When it could not combine them, nothing changes: the
   groups keep their ids and stay proposed, the merge stays pending (each regroup tries it again), and
-  it is listed in `merge_decisions_not_combined`, with a reason and `next_commands` (the counter answer; or one sample
-  confirmation per run and the merge again with `--same-conditions`; or, when the names differ in a
+  it is listed in `merge_decisions_not_combined`, with a reason and `next_commands` (the counter answer; or one
+  material-name answer per run and the merge again with `--same-conditions`: that answer is the record's material
+  name, so ask for it in full, as for the other runs of the sample, never the file-name word; or, when the names differ in a
   quantity, plain `confirm` of each group to keep them as separate records): say the reason in words and
   offer exactly those steps, asking the scientist for any value they need; then regroup again.
 - a merge candidate with `caution` (its file names state different samples or conditions, or the build
@@ -258,8 +260,10 @@ Ask: approve, reject, or needs changes (with a note):
   as usual: the record carries the E0 and curve of the ONE approved result (ISAAC's, if that is the one approved),
   never of a version that was only chosen. The choice carries over when ISAAC's own result id changes (a params
   file, a calibration): it is matched by the version's project file, Athena group and data hash. If they choose
-  another version after one was approved, the reply says "reject <old id> first, then approve <new id>": ask
-  before each step. When `isaac process` replies `athena_selections_not_carried_over` (or a summary line says
+  another version after one was approved (or after ISAAC's own curve was approved), the `select_athena_version`
+  reply says so at once (`approved_result_not_chosen`: the record still carries the approved curve, and the
+  steps: `process` for the chosen version if needed, reject the old result, approve the new one), and `validate`
+  and `export` warn `athena_version_no_longer_chosen` until that is done: ask before each step. When `isaac process` replies `athena_selections_not_carried_over` (or a summary line says
   so), say its statement in plain words: their earlier choice no longer
   matches a version ISAAC lists (the files, or how ISAAC reads them, changed), nothing is selected now,
   and ask the question again. A version that is a set of per-scan groups names any project holding the
