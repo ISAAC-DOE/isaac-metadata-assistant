@@ -218,6 +218,9 @@
 }
 .record-more-menu .discard-blocked {
   margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
   font-size: var(--font-size-meta);
   line-height: var(--line-height-normal);
   color: var(--text-secondary);
