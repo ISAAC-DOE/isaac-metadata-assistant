@@ -68,6 +68,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import uuid
 from pathlib import PurePosixPath
 from typing import Any, Mapping, Sequence
 
@@ -126,6 +127,12 @@ SLOT_REASON = SLOT_LEAD + "{question}, rule " + RULE_ID + "): {what}."
 _SLOT_QUESTION = re.compile(re.escape(SLOT_LEAD) + r"(Q-[0-9a-f]{10})")
 
 NOT_WRITTEN_FOLLOWS = "Written without its follows link: {why}."
+#: The note of a label decision made by ONE answer to a whole question (no --only), with its call token.
+WHOLE_QUESTION = "One answer for the whole question"
+_WHOLE = re.compile(re.escape(WHOLE_QUESTION) + r" \(call ([0-9a-f]{8})\)")
+_PATTERN = re.compile(r'Pattern ("(?:[^"\\]|\\.)*")\.')
+#: The note of a label decision a disagreement answer recorded (:func:`feed_from_conflicts`).
+FED = "Recorded from the scientist's answer to the files' disagreement on this reading"
 #: How many groups or files a sentence names before it counts the rest (the question's lists hold every one).
 NAMED = 12
 
@@ -759,6 +766,31 @@ def _order(members: Sequence[_Facts]) -> tuple[list[_Facts] | None, str | None]:
     return None, None
 
 
+def _run_number_is_electrode(f: _Facts) -> bool:
+    """The group's run number IS its electrode number: the first number of its file name is the electrode (the position
+    the scientist gave, or the one the grouping read), and the run number read from the name is that number (r8
+    review H1: then a run-number tie between stages of one electrode is no question; the file-creation instants order
+    them)."""
+    from . import grouping as G
+
+    if f.electrode is None or f.position is None or f.run_interval is None or not f.electrode.isdigit():
+        return False
+    toks = G._stem_tokens(f.stems[0])
+    first = next((i for i, t in enumerate(toks, start=1) if t.isdigit()), None)
+    return first == f.position and f.run_interval == (int(f.electrode), int(f.electrode))
+
+
+def _shared_run_numbers(members: Sequence[_Facts]) -> list[int]:
+    """The run numbers two of ``members`` share (their run-number intervals overlap)."""
+    out = set()
+    for a in members:
+        for b in members:
+            if a is not b and a.run_interval and b.run_interval and \
+                    a.run_interval[0] <= b.run_interval[1] and b.run_interval[0] <= a.run_interval[1]:
+                out |= set(range(max(a.run_interval[0], b.run_interval[0]), min(a.run_interval[1], b.run_interval[1]) + 1))
+    return sorted(out)
+
+
 def _interval(f: _Facts, basis: str | None) -> tuple | None:
     return f.run_interval if basis == "run_numbers" else f.time_interval if basis == "start_times" else None
 
@@ -797,6 +829,18 @@ def _chains(facts: Sequence[_Facts]) -> tuple[list[list[_Facts]], list[dict]]:
             hold(members, "two of these groups are at the same history stage ("
                  + "; ".join(" and ".join(m.stems[0] for m in ms) for ms in same) + ")")
             continue
+        shared = _shared_run_numbers(members)
+        if shared and not all(_run_number_is_electrode(m) for m in members):
+            # r8 review H1, DEC-46: two files of one run number at two stages: which came first is the beamline's
+            # question (Q16). Both files are kept and neither is preferred, so no file time decides it here.
+            tied = [m.stems[0] for m in members if m.run_interval and any(m.run_interval[0] <= n <= m.run_interval[1]
+                                                                          for n in shared)]
+            hold(members, f"{' and '.join(tied)} share run number {', '.join(map(str, shared))}, which is not their "
+                 "electrode number: which of them came first is an open question for the beamline scientist (Q16, "
+                 "DEC-46: both files are kept, and neither is preferred), so ISAAC proposes no order"
+                 + ("" if any(m.position for m in members) else
+                    f". If that number IS the electrode, answer question {ELECTRODE_QUESTION_ID}"))
+            continue
         ordered, basis = _order(members)
         if ordered is None:
             no_time = [m.stems[0] for m in members if m.time_interval is None]
@@ -806,7 +850,8 @@ def _chains(facts: Sequence[_Facts]) -> tuple[list[list[_Facts]], list[dict]]:
                               ", and their file-creation instants overlap")
                            + ", so ISAAC cannot put them in one order"))
             continue
-        sides = [m.stage.startswith("before") for m in ordered]
+        # r8 review L2: the side of a stage is the file-name token's where there is one, never the typed sentence's
+        sides = [(m.history_canon or m.stage).startswith("before") for m in ordered]
         if any(not a and b for a, b in zip(sides, sides[1:])):
             hold(members, "a 'before' measurement comes after an 'after' one in time")
             continue
@@ -1481,6 +1526,7 @@ def _decide_position(bundle: dict, asked: Mapping, *, decision: str, value: Any,
                      orcid: str | None, note: str | None) -> dict:
     """``decide --question`` on the electrode-position question: one beamtime-level slot."""
     from . import mutations as M
+    from . import questions as Q
 
     qid = asked["question_id"]
     if only is not None:
@@ -1498,6 +1544,8 @@ def _decide_position(bundle: dict, asked: Mapping, *, decision: str, value: Any,
                                "recorded.")
     elif value is not None:
         raise LabelRefused("`reject` takes no --value. Nothing was recorded.")
+    # r8 review L1: the groups whose electrode the files settled before this answer (it applies to them too)
+    settled_before = sum(1 for f in _facts(bundle, Q.live_groups(bundle)) if f.electrode is not None)
     slot = _slot_index(bundle).get((POSITION_PATH, None))
     added = []
     if slot is None:
@@ -1521,9 +1569,27 @@ def _decide_position(bundle: dict, asked: Mapping, *, decision: str, value: Any,
     if not recorded:
         statement = f"Nothing new recorded: question {qid} already holds that answer."
     elif p is not None:
-        statement = (f"Recorded: the electrode is file-name number {p} (question {qid}). The sample-id question {sid_q} "
-                     f"now proposes {len(objs)} id(s) for {len(now['items'])} group(s); "
-                     f"{len(now['not_proposed'])} group(s) still get none. Read them back and confirm there.")
+        statement = (f"Recorded: the electrode is file-name number {p} (question {qid}). It applies to every group of the "
+                     "beamtime" + (f", including the {settled_before} whose electrode the files had settled" if
+                                   settled_before else "")
+                     + f". The sample-id question {sid_q} now proposes {len(objs)} id(s) for {len(now['items'])} "
+                     f"group(s); {len(now['not_proposed'])} group(s) still get none. Read them back and confirm there.")
+        # r8 review L1: one id over groups with every condition the same is the sign of a wrong position (two
+        # electrodes that share a step number there): name them
+        key_of = {f.gid: f.full_key for f in _facts(bundle, Q.live_groups(bundle))}
+        same: list[str] = []
+        by_id: dict[str, list[Mapping]] = {}
+        for i in now["items"]:
+            by_id.setdefault(i["value"], []).append(i)
+        for v, its in by_id.items():
+            keys: dict[str, list[str]] = {}
+            for i in its:
+                keys.setdefault(key_of.get(i["group_id"], ""), []).append(i["first_file"])
+            same += [f"{v!r} would cover {' and '.join(fs)}, whose conditions are all the same" for fs in keys.values()
+                     if len(fs) > 1]
+        if same:
+            statement += (" Check this position: " + "; ".join(same[:NAMED]) + (" and more" if len(same) > NAMED else "")
+                          + ". If those are two physical samples, this is not the electrode number.")
     else:
         statement = (f"Recorded: no file-name number is the electrode (question {qid}). Give each group its id with "
                      f"question {sid_q} (--only group:<id> --decision correct --value <id>).")
@@ -1730,6 +1796,12 @@ def decide(bundle: dict, asked: Mapping, *, decision: str, value: Any, only: Any
             targets.setdefault(key, []).append(slot["value_id"])
     recorded, unchanged = 0, 0
     said = f"Answered with question {qid} ({KIND}, {RULE_ID})."
+    if onlys is None:
+        # r8 review H2: what a later disagreement answer may repeat for a new group: ONE answer to the whole question,
+        # and, for the scientist's own wording, the pattern exactly as they gave it
+        said += f" {WHOLE_QUESTION} (call {uuid.uuid4().hex[:8]})."
+        if decision == "correct" and isinstance(value, str):
+            said += f" Pattern {json.dumps(value)}."
     if joined:
         said += (" The scientist stated this group is the same physical sample as "
                  + ", ".join(sorted({j["with_file"] for j in joined})) + " (--same-sample).")
@@ -1847,33 +1919,43 @@ def point_conflicts_at_labels(questions: list[dict], bundle: Mapping, group_of: 
         said = (f"The sources disagree about the {_WHAT[label]} reading of this group. Settling it here records which "
                     f"reading is right. It does not write {LABELS[label]} by itself: the condition-label question {lq} "
                     f"does, for this group (`--question {lq} --only group:{gid}`). Once you settle it, that question "
-                    "proposes the value from your answer; if you answered that label for the other groups already, your "
-                    "answer here records it for this group the same way, and the reply says so.")
+                    "proposes the value from your answer. Only if you answered that label question once for all its "
+                    "groups (no --only) does your answer here also record it for this group, the same way; the reply "
+                    "says which.")
         # a why that says something of its own (e.g. "Already decided: ...") is kept, and this is added after it
         q["why"] = said if generic else f"{q.get('why')} {said}"
 
 
-def _form_of(label: str, answered: Sequence[tuple[Mapping, Mapping]]) -> tuple[str, Any] | None:
-    """How the scientist's answers to ``label`` for OTHER groups were given, so ISAAC can give a new group the same:
-    ``("proposal", None)`` (they confirmed what ISAAC proposed), ``("pattern", "<words with {filter}>")`` (their own
-    filter wording, the same for every group), ``("literal", value)`` (one history sentence for every group of the
-    token), or ``None`` when the answers do not show one form. ``answered``: ``(item, decision)``."""
-    forms = set()
+def _form_of(label: str, answered: Sequence[tuple[Mapping, Mapping]]) -> tuple[str, Any, str] | None:
+    """r8 review H2 (§5): what a new group may be given from the scientist's earlier answers to ``label``, or ``None``.
+    Only ONE answer that covered the whole question (no ``--only``: :data:`WHOLE_QUESTION`, one call) counts, and
+    every other group answered since must hold it (a group answered on its own, ``--only``, makes it ``None``):
+    ``("proposal", None, decision_id)`` when it confirmed ISAAC's proposals; ``("pattern", <their pattern>, id)``
+    when it gave their own wording with a placeholder, as STORED with the decision; ``("literal", <sentence>, id)``
+    for one history sentence (every group of a history question writes one file-name token). Never a pattern
+    rebuilt from a value. ``answered``: ``(item, decision)``."""
+    calls, first = set(), None
     for i, d in answered:
-        if d.get("decision") == "reject":
+        note = str(d.get("note") or "")
+        if FED in note:
+            continue  # recorded by this route itself from an earlier whole-question answer
+        hit = _WHOLE.search(note)
+        if hit is None or d.get("decision") == "reject":
             return None
-        v = d.get("value")
-        if json.dumps(v, sort_keys=True) == json.dumps(i.get("value"), sort_keys=True):
-            forms.add(("proposal", None))
-        elif label == "filter" and isinstance(v, str) and (i.get("fill") or {}).get("filter") is not None:
-            n = str(i["fill"]["filter"])
-            ok = v.count(n) == 1 and not re.search(r"\d", v.replace(n, "")) and "{" not in v
-            forms.add(("pattern", v.replace(n, "{filter}")) if ok else None)
-        elif label == "history" and isinstance(v, str):
-            forms.add(("literal", v))
-        else:
-            forms.add(None)
-    return next(iter(forms)) if len(forms) == 1 and None not in forms else None
+        calls.add(hit.group(1))
+        first = first or d
+    if len(calls) != 1 or first is None:
+        return None
+    if first.get("decision") == "confirm":
+        return ("proposal", None, first.get("decision_id"))
+    stored = _PATTERN.search(str(first.get("note") or ""))
+    pattern = json.loads(stored.group(1)) if stored else None
+    if label == "history" and isinstance(first.get("value"), str):
+        return ("literal", first["value"], first.get("decision_id"))
+    names = SAMPLE_ID_PLACEHOLDERS if label == "sample_id" else FILTER_PLACEHOLDERS
+    if isinstance(pattern, str) and any("{" + n + "}" in pattern for n in names):
+        return ("pattern", pattern, first.get("decision_id"))
+    return None
 
 
 def feed_from_conflicts(bundle: dict, conflict_ids: Sequence[str], *, by: str, orcid: str | None,
@@ -1904,8 +1986,7 @@ def feed_from_conflicts(bundle: dict, conflict_ids: Sequence[str], *, by: str, o
         for i in mine:
             if any(_answered(slots.get((path, r)), decisions) is not None for r in i["run_ids"]):
                 continue
-            form = (("proposal", None) if (i.get("said") or {}).get("as_given_for_this_electrode") else
-                    _form_of(q["label"], answered) if answered else None)
+            form = _form_of(q["label"], answered) if answered else None
             if form is None:
                 said.append(f"{i['first_file']}: question {q['question_id']} now proposes {i['value']!r} for {path}; "
                             "answer it there")
@@ -1915,17 +1996,18 @@ def feed_from_conflicts(bundle: dict, conflict_ids: Sequence[str], *, by: str, o
             try:
                 r = decide(bundle, q, decision="confirm" if form[0] == "proposal" else "correct", value=value,
                            only=f"group:{i['group_id']}", by=by, orcid=orcid,
-                           note=((note + " ") if note else "") + "Recorded from the scientist's answer to the files' "
-                           "disagreement on this reading (" + ", ".join(i["said"].get("from_decisions") or ()) + "), in "
-                           "the form of their earlier answers to this label question.")
+                           note=((note + " ") if note else "") + FED + " ("
+                           + ", ".join(i["said"].get("from_decisions") or ()) + "), as their one answer to the whole "
+                           f"question ({form[2]}) gave every other group.")
             except LabelRefused as exc:
                 said.append(f"{i['first_file']}: {path} not recorded ({exc})")
                 continue
             if r.get("slots_recorded"):
                 recorded.append({"group_id": i["group_id"], "first_file": i["first_file"], "path": path,
                                  "question_id": q["question_id"], "value": value if value is not None else i["value"]})
-                said.append(f"{i['first_file']}: also recorded {path} = "
-                            f"{recorded[-1]['value']!r} (question {q['question_id']}), as you answered it for the other groups")
+                said.append(f"{i['first_file']}: also recorded {path} = {recorded[-1]['value']!r} (question "
+                            f"{q['question_id']}), the way your one answer to that whole question ({form[2]}) gave "
+                            "every other group")
     if not said:
         return None
     return {"statement": "Condition labels: " + "; ".join(said) + ".", "recorded": recorded}
@@ -1959,8 +2041,14 @@ def record_warnings(bundle: Mapping, fresh: Sequence[tuple[str, Mapping, Mapping
     stem_of = {r["run_key"]: str(r.get("stem")) for r in bundle.get("runs") or ()}
     first = {g["group_id"]: stem_of.get(g["member_run_keys"][0], g["group_id"]) for g in Q.live_groups(bundle)
              if g.get("member_run_keys")}
+    # r8 review L3: groups a scientist kept apart (keep_apart on a merge candidate: a declined merge) are deliberate
+    kept = [set(mc.get("group_ids") or ()) for mc in bundle.get("merge_candidates") or ()
+            if (mc.get("merge_candidate_id") or mc.get("id")) in B.kept_apart(bundle)]
     for same in seen.values():
         if len(same) < 2:
+            continue
+        gids = {g for g, _ in same}
+        if any(gids <= k for k in kept):
             continue
         files = [first.get(g, g) for g, _ in same]
         sid = (same[0][1]["fields"][SAMPLE_ID_PATH] or {}).get("value")
@@ -1968,8 +2056,9 @@ def record_warnings(bundle: Mapping, fresh: Sequence[tuple[str, Mapping, Mapping
             out.append({"code": SAME_RECORD_WARNING, "group_id": gid, "path": SAMPLE_ID_PATH, "needs": SAMPLE_ID_PATH,
                         "targets": [], "command": f"isaac bundle show <bundle_dir> group {gid}",
                         "text": (f"{len(same)} ready records carry one sample id ({sid!r}) and every condition the same: "
-                                 + ", ".join(files) + ". The portal cannot tell them apart. If they are repeats of one "
-                                 "measurement, merge their groups; if not, give the one that differs its own label.")})
+                                 + ", ".join(files) + ". The portal cannot tell them apart. If these are intended "
+                                 "repeats, leave them. If they are one measurement, merge their groups; if one differs, "
+                                 "give it its own label.")})
     left: dict[str, list[tuple[str, str]]] = {}
     decisions = B._decisions_by_target(bundle.get("scientist_decisions") or ())
     slots = _slot_index(bundle)

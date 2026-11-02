@@ -173,13 +173,15 @@ def test_existing_questions_keep_their_ids_kinds_scopes_and_targets(bdir):
 def test_follows_come_from_the_scientists_sample_ids_ordered_by_start_times(bdir):
     b = M.load(bdir)
     assert not (_lq(b, "follows") or {}).get("proposals"), "no electrode, no id: nothing to chain"
+    _answer(bdir, L.ELECTRODE_QUESTION_ID, "correct", value="1")  # the run number is the electrode: no Q16 tie
     qid = _lq(b, "sample_id")["question_id"]
-    # the scientist names electrode 01 of ZZ1 on each of its groups (one physical sample)
+    # the scientist names electrode 01 of ZZ1 their own way, on its first group; the id is the electrode's
     _answer(bdir, qid, "correct", value="SYN-ZZ1-e1", only=f"group:{_gid(b, E1[0])}")
-    _answer(bdir, qid, "correct", value="SYN-ZZ1-e1", only=[f"group:{_gid(b, s)}" for s in E1[1:]], same_sample=True)
-    fo = _lq(M.load(bdir), "follows")
+    b = M.load(bdir)
+    assert {_slot(b, L.SAMPLE_ID_PATH, s) for s in E1} == {"SYN-ZZ1-e1"}
+    fo = _lq(b, "follows")
     pairs = {(p["said"]["after"], p["said"]["before"]) for p in fo["proposals"]}
-    assert pairs == {(E1[1], E1[0]), (E1[2], E1[1])}
+    assert pairs == {(E1[1], E1[0]), (E1[2], E1[1]), (E2[1], E2[0])}
     assert {p["said"]["order_basis"] for p in fo["proposals"]} == {"start_times"}, "the run numbers are the electrode"
     assert all(s in fo["text"] for s in E1), "every link is read back"
 
@@ -384,3 +386,107 @@ def test_the_group_list_flags_a_group_merging_scans_read_at_different_conditions
     row = cli.group_list_extras(b)[g["group_id"]]
     assert row["needs_care"]["conditions"] == ["filter"] and "different filter" in row["needs_care"]["note"]
     assert "0" not in json.dumps(row["needs_care"]["conditions"]), "no reading printed on a list row"
+
+
+# --- review of 9c10c878: H1, H2, L1-L3 --------------------------------------------------------------------------------
+
+
+def _set_run_number(b: dict, stems, n: int) -> None:
+    for r in b["runs"]:
+        if r["stem"] in stems:
+            r["legacy_number"] = n
+
+
+def test_h1_stages_sharing_a_run_number_that_is_not_their_electrode_are_held(bdir):
+    _answer(bdir, L.ELECTRODE_QUESTION_ID, "correct", value="1")
+    b = M.load(bdir)
+    pairs = {(p["said"]["after"], p["said"]["before"]) for p in _lq(b, "follows")["proposals"]}
+    assert (E2[1], E2[0]) in pairs, "the run number IS the electrode (01, 02): the file times order its stages"
+    _set_run_number(b, E2, 7)  # one run number, not the electrode's, on two stages: Q16 stays open (DEC-46)
+    fo = _lq(b, "follows")
+    assert (E2[1], E2[0]) not in {(p["said"]["after"], p["said"]["before"]) for p in fo["proposals"]}
+    held = next(h for h in fo["not_proposed"] if E2[0] in h["first_files"])
+    assert "share run number 7" in held["reason"] and "Q16" in held["reason"] and "DEC-46" in held["reason"]
+    assert {(p["said"]["after"], p["said"]["before"]) for p in fo["proposals"]} >= {(E1[1], E1[0])}
+
+
+def test_h1_without_an_electrode_position_a_shared_run_number_orders_nothing(bdir):
+    b = M.load(bdir)
+    qid = _lq(b, "sample_id")["question_id"]
+    _answer(bdir, qid, "correct", value="SYN-ZZ1-e1", only=f"group:{_gid(b, E1[0])}")
+    _answer(bdir, qid, "correct", value="SYN-ZZ1-e1", only=[f"group:{_gid(b, s)}" for s in E1[1:]], same_sample=True)
+    fo = _lq(M.load(bdir), "follows")
+    assert not fo["proposals"] and L.ELECTRODE_QUESTION_ID in fo["text"], "is the shared number the electrode? ask"
+
+
+def test_h2_an_only_answer_is_never_repeated_for_another_group(bdir):
+    b = M.load(bdir)
+    cid = _filter_conflict(b, E3[0])
+    # their own wording for ONE group, and a confirm for one other: neither is an answer for the whole question
+    L.decide(b, _lq(b, "filter"), decision="correct", value="10 um SYN foil", only=f"group:{_gid(b, E1[0])}", note=None, **BY)
+    L.decide(b, _lq(b, "filter"), decision="confirm", value=None, only=f"group:{_gid(b, E1[1])}", note=None, **BY)
+    _conflict_decision(b, cid, "20")
+    fed = L.feed_from_conflicts(b, [cid], **BY)
+    assert not fed["recorded"] and "now proposes 'filter20'" in fed["statement"] and "answer it there" in fed["statement"]
+    assert _slot(b, L.FILTER_PATH, E3[0]) is None, "no material, no thickness, nothing invented"
+
+
+def test_h2_a_whole_question_pattern_is_repeated_as_the_scientist_stored_it(bdir):
+    b = M.load(bdir)
+    cid = _filter_conflict(b, E3[0])
+    L.decide(b, _lq(b, "filter"), decision="correct", value="{filter} SYN filters", only=None, note=None, **BY)
+    _conflict_decision(b, cid, "20")
+    fed = L.feed_from_conflicts(b, [cid], **BY)
+    assert _slot(b, L.FILTER_PATH, E3[0]) == "20 SYN filters" and "your one answer to that whole question" in fed["statement"]
+
+
+def test_h2_a_group_specific_history_sentence_is_not_copied(bdir):
+    b = M.load(bdir)
+    stem = E2[1]
+    rid = next(r["run_id"] for r in b["runs"] if r["stem"] == stem)
+    g = next(g for g in b["record_groups"] if g["group_id"] == _gid(b, stem))
+    g["basis"]["conditions"]["cycling_state"] = {"kind": "conflicting", "readings": ["after1200cycling", "after1200cv"],
+                                                 "candidate_ids": []}
+    b["conflicts"].append({"conflict_id": "conf-991", "engine_conflict_id": f"{stem}::cycling_state",
+                           "kind": "field_disagreement", "subject": "cycling_state", "run_ids": [rid], "readings": [
+                               {"reading_index": 0, "value": "after1200Cycling", "witnesses": [
+                                   {"source_id": "s", "relative_path": stem, "locator": "filename token 5"}]},
+                               {"reading_index": 1, "value": "after1200CV", "witnesses": [
+                                   {"source_id": "s", "relative_path": "MERGE/SYN.txt", "locator": "filename token 5"}]}]})
+    q = _lq(b, "history", "history=after1200cycling")
+    L.decide(b, q, decision="correct", value="SYN sentence for one electrode", only=f"group:{_gid(b, E1[1])}", note=None, **BY)
+    _conflict_decision(b, "conf-991", "after1200Cycling")
+    assert not L.feed_from_conflicts(b, ["conf-991"], **BY)["recorded"] and _slot(b, L.HISTORY_PATH, stem) is None
+
+
+def test_l1_the_position_reply_says_it_applies_to_settled_groups_and_names_one_id_over_equal_conditions(bdir):
+    b = M.load(bdir)
+    # two groups of electrode 01 under the same conditions (a second step at the same stage, potential and filter)
+    g = next(g for g in b["record_groups"] if g["group_id"] == _gid(b, E1[2]))
+    g["basis"] = copy.deepcopy(next(x for x in b["record_groups"] if x["group_id"] == _gid(b, E1[0]))["basis"])
+    out = L.decide(b, _lq(b, "electrode_position"), decision="correct", value="1", only=None, note=None, **BY)
+    assert "applies to every group of the beamtime" in out["statement"]
+    assert "Check this position" in out["statement"] and E1[0] in out["statement"] and E1[2] in out["statement"]
+
+
+def test_l2_a_stage_s_side_is_its_file_token_not_the_typed_sentence(bdir):
+    _answer(bdir, L.ELECTRODE_QUESTION_ID, "correct", value="1")
+    b = M.load(bdir)
+    L.decide(b, _lq(b, "history", "history=after1500cycling"), decision="correct", value="before SYN third step",
+             only=None, note=None, **BY)
+    pairs = {(p["said"]["after"], p["said"]["before"]) for p in _lq(b, "follows")["proposals"]}
+    assert (E1[2], E1[1]) in pairs, "the file name says after1500: an 'after' stage, whatever the sentence says"
+
+
+def test_l3_deliberate_repeats_kept_apart_get_no_warning(bdir):
+    b = M.load(bdir)
+    g1, g2 = _gid(b, E1[0]), _gid(b, E3[0])
+    same = {"fields": {L.SAMPLE_ID_PATH: {"value": "SYN-1"}, "context.environment": {"value": "in_situ"}}}
+    fresh = [(g1, same, {}), (g2, copy.deepcopy(same), {})]
+    [w] = [w for w in L.record_warnings(b, fresh, [g1, g2]) if w["code"] == L.SAME_RECORD_WARNING][:1]
+    assert "If these are intended repeats, leave them" in w["text"]
+    b.setdefault("merge_candidates", []).append({"merge_candidate_id": "mc-syn", "group_ids": [g1, g2]})
+    b["scientist_decisions"].append({"decision_id": f"d-{len(b['scientist_decisions']) + 1:05d}",
+                                     "target": {"kind": "merge_candidate", "id": "mc-syn"}, "decision": "keep_apart",
+                                     "value": None, "decided_by": {"name": "Synthetic Scientist"}})
+    assert not [w for w in L.record_warnings(b, fresh, [g1, g2]) if w["code"] == L.SAME_RECORD_WARNING]

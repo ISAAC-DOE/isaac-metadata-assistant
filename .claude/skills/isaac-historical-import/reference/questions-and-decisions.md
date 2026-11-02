@@ -250,7 +250,8 @@ experiment scope. Nothing is written until the scientist answers. Most take one 
   sample?". It lists each position that writes a number, with examples and how many numbers sit beside more than
   one sample name. A "not a counter" answer is shown as evidence only; it never means "is the electrode". Ask the
   scientist. Record `--decision correct --value <position>` (or `reject` if no number is the electrode). The
-  sample-id question then proposes one id per electrode from that number.
+  sample-id question then proposes one id per electrode from that number. The answer applies to every group,
+  also those the files had settled; the reply names any id that would cover groups with every condition the same.
 - **Sample id** (`sample.sample_id`). One id per electrode. Proposed as `<folder>:<sample>-<electrode>`. A sample
   id names one physical object, on every record of it. Their own convention: `--decision correct --value
   "{sample}-e{electrode}"` (also `{beamtime}`). One electrode's own id: add `--only group:<id>`; it goes on every
@@ -272,8 +273,10 @@ experiment scope. Nothing is written until the scientist answers. Most take one 
   Groups whose files disagree are asked on their own (`history=unsettled`, `--only group:<id>`).
 - **Follows** (`links`, rel `follows`, basis `same_sample_id`). For one sample under otherwise equal conditions,
   each later stage follows the one before. The sample is its confirmed sample id, else its electrode. A stage is
-  the scientist's own history answer, else the file-name token. The order is the run numbers, else the
-  file-creation instants. Every chain ISAAC could not order is listed with its reason (`not_proposed`); with no
+  the scientist's own history answer, else the file-name token; its before or after side is the token's. The order
+  is the run numbers. The file-creation instants order stages only when the run number is the electrode number, or
+  when run numbers are missing. Two stages that share a run number that is not their electrode are held: which came
+  first is Q16 (DEC-46), for the beamline scientist. Every chain ISAAC could not order is listed with its reason (`not_proposed`); with no
   link to propose, the question is informational and says why. Read every pair back. Confirm or reject; there is
   no correct. The export writes a link only when both records carry the same sample id.
 - **Tag** (`tags`). One tag for the beamtime, from the folder name, lowercase and hyphenated (at most 64 characters).
@@ -286,7 +289,8 @@ A group ISAAC proposed nothing for is in `not_proposed`, with its reason and the
 `--only group:<id> --decision correct --value <value>`, or leave it. Several groups that take one value: give
 `--only` once per group. After a bulk confirm, the reply says "N group(s) still have no <label>: <files>", and a
 residual question (partition `not_proposed`, its own id) keeps asking them. `validate` warns when a ready record
-lacks a label ISAAC could not propose, and when two ready records carry one sample id and every condition the same.
+lacks a label ISAAC could not propose, and when two ready records carry one sample id and every condition the same
+(not when a scientist kept those groups apart; intended repeats can be left).
 `reject` records that the label is not written. Without `--only`, an answer never changes an earlier one: it
 writes only runs with no answer, and a group whose runs already hold another value is left out and named
 (`kept`). To change a group, answer it with `--only group:<id>`. The answers are kept as per-run slots in
@@ -294,8 +298,9 @@ writes only runs with no answer, and a group whose runs already hold another val
 
 A disagreement question on one of these readings (filter, cycling token, electrode number) says which label
 question writes the field for its group. Settling it there feeds that label: ISAAC proposes the value from the
-answer, and records it for the group when the scientist already answered that label for the other groups in one
-form. The reply says what it recorded. The workbook and the template have no column for these.
+answer. It also records it for the group only when the scientist answered that label question once for all its
+groups (no `--only`), and then only in that answer's form (a confirm, or their own stored pattern). An answer given
+with `--only` is never repeated for another group. The reply says which happened. The workbook and the template have no column for these.
 
 ## Recording
 
