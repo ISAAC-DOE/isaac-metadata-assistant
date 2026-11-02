@@ -9,10 +9,13 @@ import { LABELS, formatWhen } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { composeDocumentTitle } from '../lib/documentTitle';
 import { stubFetchRoutes, type RouteEntry } from '../test/apiFixtures';
-import type {
-  ApiSchemaPortalPayload,
-  ApiSchemaProposal,
-  ApiSchemaVocabulary,
+import { chooseIn, chooseOption, chooseSegment, getSelect, selectGroups, selectOptions, selectValue } from '../test/controls';
+import {
+  SCHEMA_PROPOSALS_COPY as COPY,
+  portalSectionFor,
+  type ApiSchemaPortalPayload,
+  type ApiSchemaProposal,
+  type ApiSchemaVocabulary,
 } from '../lib/schemaProposals';
 
 /**
@@ -157,10 +160,23 @@ function payloadFor(p: ApiSchemaProposal): ApiSchemaPortalPayload {
   };
 }
 
+/*
+ * NO FALSE CLAIM. The standing disclaimers are gone (owner's brief, 2026-11-02); what replaces a pinned
+ * disclaimer is a ban on the claim it guarded against: that the page sent, submitted or approved anything, or
+ * that a proposal is kept permanently. Run against the page text, never against a server-served note.
+ */
+const FALSE_CLAIM =
+  /\b(?:was|were|been|is|are) (?:sent|submitted|approved|accepted|applied)\b|\bsent to (?:the )?(?:ISAAC )?portal\b|\bpermanent(?:ly)?\b|\bkept (?:forever|for good)\b/i;
+
+/** The notice shown after a save, found by its own sentence (a saved draft row starts with the same words). */
+const SAVED_NOTICE = /^Saved as a draft\. Copy or download it to send it to the ISAAC portal\.$/;
+
+function listBody(proposals: ApiSchemaProposal[]) {
+  return { ...envelope, proposals, total: proposals.length, limit: 25, offset: 0, next_offset: null, statuses: ['pending', 'withdrawn'], capacity: CAPACITY };
+}
+
 function list(proposals: ApiSchemaProposal[]): RouteEntry {
-  return {
-    body: { ...envelope, proposals, total: proposals.length, limit: 25, offset: 0, next_offset: null, statuses: ['pending', 'withdrawn'], capacity: CAPACITY },
-  };
+  return { body: listBody(proposals) };
 }
 
 function renderAt(path: string) {
@@ -181,9 +197,24 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** The Section select INSIDE the Propose panel; Browse has one of the same name. */
+/** The form's own region; Browse (folded below it) has a Section select of the same name. */
+function proposeRegion(): HTMLElement {
+  return screen.getByRole('region', { name: 'Propose a Change' });
+}
+
+/** The Section select INSIDE the form (offered for a new list only); Browse has one of the same name. */
 function sectionSelect(): HTMLElement {
-  return within(screen.getByRole('tabpanel', { name: 'Propose a Change' })).getByLabelText('Section');
+  return getSelect('Section', proposeRegion());
+}
+
+/** Browse's own Section picker (the form has one of the same name for a new list). */
+function browseSection(): HTMLElement {
+  return getSelect('Section', browseDetails());
+}
+
+/** The folded vocabulary, by its summary. */
+function browseDetails(): HTMLDetailsElement {
+  return screen.getByText(COPY.browseTitle).closest('details') as HTMLDetailsElement;
 }
 
 function readBlob(blob: Blob): Promise<string> {
@@ -196,7 +227,7 @@ function readBlob(blob: Blob): Promise<string> {
 }
 
 function fillPropose() {
-  fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'system.technique' } });
+  chooseOption('List', 'Technique');
   fireEvent.change(screen.getByLabelText('New term'), { target: { value: 'xmcd_scan' } });
   fireEvent.change(screen.getByLabelText('Description (required)'), {
     target: { value: 'Magnetic dichroism measured with circular polarisation.' },
@@ -220,76 +251,167 @@ describe('the destination', () => {
     });
   });
 
-  it('says ISAAC drafts and the standard\'s owners review, and offers no approve, apply or send control', async () => {
+  it('says where a proposal goes from here, claims nothing it does not do, and offers no approve, apply or send control', async () => {
     stubFetchRoutes({
       'GET /api/schema-proposals/vocabulary': { body: vocabulary },
       'GET /api/schema-proposals': list([proposal()]),
     });
     renderAt(ROUTE);
-    await screen.findByRole('combobox', { name: 'Section' });
-    expect(screen.getByText(/it does not approve, apply or send anything/)).toBeInTheDocument();
-    for (const tab of ['Browse the Vocabulary', 'Propose a Change', 'Proposals']) {
-      fireEvent.click(screen.getByRole('tab', { name: tab }));
-      const controls = screen
-        .getAllByRole('button')
-        .map((b) => b.textContent ?? '')
-        .concat(screen.getAllByRole('link').map((a) => a.textContent ?? ''));
-      expect(controls.filter((c) => /approve|apply|accept|reject|send/i.test(c))).toEqual([]);
+    await screen.findByRole('combobox', { name: 'List' });
+    await screen.findAllByRole('button', { name: 'Copy Portal Payload' });
+    expect(screen.getByText(COPY.boundary)).toBeInTheDocument();
+    expect(document.body.textContent ?? '').not.toMatch(FALSE_CLAIM);
+    // One page: the form, the proposals and the folded vocabulary are all in the document at once.
+    const controls = screen
+      .getAllByRole('button')
+      .map((b) => b.textContent ?? '')
+      .concat(screen.getAllByRole('link').map((a) => a.textContent ?? ''));
+    expect(controls.filter((c) => /approve|apply|accept|reject|send/i.test(c))).toEqual([]);
+  });
+
+  it('is one page: no tab anywhere, the form and the proposals side by side, the vocabulary folded', async () => {
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([proposal()]),
+    });
+    renderAt(ROUTE);
+    await screen.findByRole('combobox', { name: 'List' });
+    expect(screen.queryAllByRole('tab')).toEqual([]);
+    expect(screen.queryAllByRole('tablist')).toEqual([]);
+    expect(screen.queryAllByRole('tabpanel')).toEqual([]);
+    expect(screen.getByRole('heading', { level: 2, name: 'Propose a Change' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Proposals' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Proposals' })).toBeInTheDocument();
+    expect(browseDetails()).not.toHaveAttribute('open');
+  });
+
+  it('?tab=browse opens the folded vocabulary; any other old tab link opens nothing and the page never writes one', async () => {
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([]),
+    });
+    const first = renderAt(`${ROUTE}?tab=browse`);
+    await screen.findByRole('radiogroup', { name: 'Source' });
+    await waitFor(() => expect(browseDetails()).toHaveAttribute('open'));
+    first.unmount();
+    for (const path of [`${ROUTE}?tab=propose`, `${ROUTE}?tab=proposals`, ROUTE]) {
+      const r = renderAt(path);
+      await screen.findByRole('combobox', { name: 'List' });
+      expect(browseDetails()).not.toHaveAttribute('open');
+      r.unmount();
     }
   });
 });
 
 describe('Browse', () => {
-  it('renders the sections, the categories of a section and the allowed terms of a category', async () => {
+  it('goes section -> list -> terms: lists by their human name with key and count, terms as a named set', async () => {
     stubFetchRoutes({
       'GET /api/schema-proposals/vocabulary': { body: vocabulary },
       'GET /api/schema-proposals': list([]),
     });
-    renderAt(ROUTE);
-    const select = await screen.findByRole('combobox', { name: 'Section' });
-    const options = within(select).getAllByRole('option').map((o) => o.textContent);
-    expect(options).toHaveLength(vocabulary.sources.portal.sections.length);
+    renderAt(`${ROUTE}?tab=browse`);
+    await screen.findByRole('radiogroup', { name: 'Source' });
+    expect(browseDetails().querySelector('summary')).toHaveTextContent(COPY.browseTitle);
+    expect(selectOptions(browseSection())).toHaveLength(vocabulary.sources.portal.sections.length);
 
-    fireEvent.change(select, { target: { value: 'System' } });
-    const categories = screen.getByRole('list', { name: 'Categories' });
-    expect(within(categories).getAllByRole('button').map((b) => b.textContent)).toEqual([
-      'system.technique3',
-      'system.domain1',
-    ]);
+    chooseIn(browseSection(), 'System');
+    const lists = within(browseDetails()).getByRole('list', { name: 'Lists in System' });
+    const rows = within(lists).getAllByRole('button');
+    expect(rows.map((b) => b.querySelector('.sp-cat-name')?.textContent)).toEqual(['Technique', 'Domain']);
+    expect(rows.map((b) => b.querySelector('.sp-cat-key')?.textContent)).toEqual(['system.technique', 'system.domain']);
+    expect(rows.map((b) => b.querySelector('.sp-cat-count')?.textContent)).toEqual(['3 terms', '1 term']);
+    expect(rows[0]).toHaveAttribute('aria-pressed', 'true');
 
-    const table = screen.getByRole('table', { name: 'Allowed terms for system.technique' });
-    expect(within(table).getAllByRole('row').slice(1).map((r) => r.textContent)).toEqual(['XAS', 'XPS', 'SAXS']);
+    const terms = within(browseDetails()).getByRole('list', { name: 'Allowed terms for system.technique' });
+    expect(within(terms).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['XAS', 'XPS', 'SAXS']);
+    expect(within(browseDetails()).getByRole('heading', { level: 3, name: 'Technique' })).toBeInTheDocument();
 
-    fireEvent.click(within(categories).getByRole('button', { name: /system\.domain/ }));
-    const second = screen.getByRole('table', { name: 'Allowed terms for system.domain' });
-    expect(within(second).getAllByRole('row').slice(1).map((r) => r.textContent)).toEqual(['experimental']);
+    fireEvent.click(rows[1]);
+    const second = within(browseDetails()).getByRole('list', { name: 'Allowed terms for system.domain' });
+    expect(within(second).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['experimental']);
+    expect(rows[1]).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('says so when a section has no fixed lists, and still offers a new list', async () => {
+  it('says so in one line when a section has no fixed lists, and offers a new list in it there', async () => {
     stubFetchRoutes({
       'GET /api/schema-proposals/vocabulary': { body: vocabulary },
       'GET /api/schema-proposals': list([]),
     });
-    renderAt(ROUTE);
-    const select = await screen.findByRole('combobox', { name: 'Section' });
-    fireEvent.change(select, { target: { value: 'Sample' } });
-    expect(screen.getByText(/no fixed lists of allowed terms/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Propose a New List in Sample/ })).toBeInTheDocument();
+    renderAt(`${ROUTE}?tab=browse`);
+    await screen.findByRole('radiogroup', { name: 'Source' });
+    chooseIn(browseSection(), 'Sample');
+    expect(screen.getByText('This section has no fixed lists of allowed terms in this source.')).toBeInTheDocument();
+    expect(within(browseDetails()).getByRole('button', { name: 'New List in Sample' })).toBeInTheDocument();
+    // This server describes no new-field kind, so none is offered here either.
+    expect(within(browseDetails()).queryByRole('button', { name: /New Field in/ })).toBeNull();
   });
 
-  it('opens the form on the chosen list', async () => {
+  it('"Propose a Term for This List" fills the form on that list and puts the cursor in "New term"', async () => {
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([]),
+    });
+    renderAt(`${ROUTE}?tab=browse`);
+    await screen.findByRole('radiogroup', { name: 'Source' });
+    chooseIn(browseSection(), 'System');
+    // The kind is switched back to a term even if another kind was chosen.
+    fireEvent.click(screen.getByRole('radio', { name: COPY.kindList }));
+    const propose = screen.getByRole('button', { name: 'Propose a Term for This List' });
+    expect(propose).toHaveClass('btn-primary');
+    fireEvent.click(propose);
+    await waitFor(() => expect(selectValue(getSelect('List'))).toBe('system.technique'));
+    expect(screen.getByRole('radio', { name: COPY.kindTerm })).toBeChecked();
+    await waitFor(() => expect(screen.getByLabelText('New term')).toHaveFocus());
+  });
+
+  it('"New List in <section>" opens the form on a new list in that section, cursor in "New list key"', async () => {
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([]),
+    });
+    renderAt(`${ROUTE}?tab=browse`);
+    await screen.findByRole('radiogroup', { name: 'Source' });
+    chooseIn(browseSection(), 'Record Info (root fields)');
+    // The section's human name, without its parenthetical, in the action's words.
+    fireEvent.click(within(browseDetails()).getByRole('button', { name: 'New List in Record Info' }));
+    expect(screen.getByRole('radio', { name: COPY.kindList })).toBeChecked();
+    expect(selectValue(sectionSelect())).toBe('Record Info');
+    await waitFor(() => expect(screen.getByLabelText('New list key')).toHaveFocus());
+  });
+});
+
+describe('Browse All Lists, from the form', () => {
+  it('opens Look Up on the chosen list\'s section and list, and puts focus on its Section picker', async () => {
     stubFetchRoutes({
       'GET /api/schema-proposals/vocabulary': { body: vocabulary },
       'GET /api/schema-proposals': list([]),
     });
     renderAt(ROUTE);
-    const select = await screen.findByRole('combobox', { name: 'Section' });
-    fireEvent.change(select, { target: { value: 'System' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Propose a New Term for This List' }));
-    expect(screen.getByRole('tab', { name: 'Propose a Change' })).toHaveAttribute('aria-selected', 'true');
-    await waitFor(() => {
-      expect(screen.getByLabelText('Category')).toHaveValue('system.technique');
+    await screen.findByRole('combobox', { name: 'List' });
+    chooseOption('List', 'Domain');
+    expect(browseDetails()).not.toHaveAttribute('open');
+    const action = within(proposeRegion()).getByRole('button', { name: 'Browse All Lists' });
+    expect(action).toHaveClass('sp-text-btn');
+    fireEvent.click(action);
+    await waitFor(() => expect(browseSection()).toHaveFocus());
+    expect(browseDetails()).toHaveAttribute('open');
+    expect(selectValue(browseSection())).toBe('System');
+    const lists = within(browseDetails()).getByRole('list', { name: 'Lists in System' });
+    expect(within(lists).getByRole('button', { name: /Domain/ })).toHaveAttribute('aria-pressed', 'true');
+    // The form was not touched.
+    expect(selectValue(getSelect('List'))).toBe('system.domain');
+  });
+
+  it('with no list chosen, it just opens Look Up and focuses its Section picker', async () => {
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([]),
     });
+    renderAt(ROUTE);
+    await screen.findByRole('combobox', { name: 'List' });
+    fireEvent.click(within(proposeRegion()).getByRole('button', { name: 'Browse All Lists' }));
+    await waitFor(() => expect(browseSection()).toHaveFocus());
+    expect(browseDetails()).toHaveAttribute('open');
   });
 });
 
@@ -306,17 +428,19 @@ describe('Propose a Change', () => {
       },
     });
     renderAt(`${ROUTE}?tab=propose`);
-    await screen.findByLabelText('Category');
-    fireEvent.change(sectionSelect(), { target: { value: 'System' } });
+    await screen.findByLabelText('List');
     fillPropose();
     fireEvent.click(screen.getByRole('button', { name: 'Save Proposal' }));
 
-    const status = await screen.findByText(/Saved as a draft on this server/);
+    const status = await screen.findByText(SAVED_NOTICE);
     expect(status.closest('[role="status"]')).not.toBeNull();
     const notice = within(status.closest('[role="status"]') as HTMLElement);
-    expect(notice.getByText(/not sent anywhere\. Drafts here are temporary; copy or download the portal payload/)).toBeInTheDocument();
+    // It says what to do next, and claims nothing was sent.
+    expect(status.closest('[role="status"]')?.textContent ?? '').not.toMatch(FALSE_CLAIM);
     expect(notice.getByRole('button', { name: 'Copy Portal Payload' })).toBeInTheDocument();
     expect(notice.getByRole('button', { name: 'Download JSON' })).toBeInTheDocument();
+    // The list is beside the form, so the notice has no "View Proposals" button.
+    expect(notice.queryByRole('button', { name: 'View Proposals' })).toBeNull();
     expect(sent).toEqual({
       proposal_type: 'add_term',
       section: 'System',
@@ -340,16 +464,16 @@ describe('Propose a Change', () => {
       },
     });
     renderAt(`${ROUTE}?tab=propose`);
-    await screen.findByLabelText('Category');
-    fireEvent.click(screen.getByRole('radio', { name: 'Add a new list of allowed terms' }));
-    fireEvent.change(sectionSelect(), { target: { value: 'System' } });
+    await screen.findByLabelText('List');
+    fireEvent.click(screen.getByRole('radio', { name: COPY.kindList }));
+    chooseIn(sectionSelect(), 'System');
     fireEvent.change(screen.getByLabelText('New list key'), { target: { value: 'system.viscosity' } });
     fireEvent.change(screen.getByLabelText('Description (required)'), {
       target: { value: 'Dynamic viscosity of the medium, needed for flow cells.' },
     });
     fireEvent.change(screen.getByLabelText('Records affected (estimate)'), { target: { value: 'about 40' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Proposal' }));
-    await screen.findByText(/Saved as a draft on this server/);
+    await screen.findByText(SAVED_NOTICE);
     expect(sent).toEqual({
       proposal_type: 'add_category',
       section: 'System',
@@ -376,9 +500,8 @@ describe('Propose a Change', () => {
       },
     });
     renderAt(`${ROUTE}?tab=propose`);
-    await screen.findByLabelText('Category');
-    fireEvent.change(sectionSelect(), { target: { value: 'System' } });
-    fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'system.technique' } });
+    await screen.findByLabelText('List');
+    chooseOption('List', 'Technique');
     fireEvent.change(screen.getByLabelText('New term'), { target: { value: 'bad term' } });
     fireEvent.change(screen.getByLabelText('Description (required)'), { target: { value: 'short' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Proposal' }));
@@ -407,8 +530,7 @@ describe('Propose a Change', () => {
       },
     });
     renderAt(`${ROUTE}?tab=propose`);
-    await screen.findByLabelText('Category');
-    fireEvent.change(sectionSelect(), { target: { value: 'System' } });
+    await screen.findByLabelText('List');
     fillPropose();
     fireEvent.click(screen.getByRole('button', { name: 'Save Proposal' }));
     expect(await screen.findByRole('alert')).toHaveTextContent("SERVER: 'XAS' is already an allowed term.");
@@ -424,15 +546,14 @@ describe('Propose a Change', () => {
       },
     });
     renderAt(`${ROUTE}?tab=propose`);
-    await screen.findByLabelText('Category');
-    fireEvent.change(sectionSelect(), { target: { value: 'System' } });
+    await screen.findByLabelText('List');
     fillPropose();
     fireEvent.click(screen.getByRole('button', { name: 'Save Proposal' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/nothing was written/i);
     expect(screen.queryByText(/Saved as a draft/)).toBeNull();
   });
 
-  it('keeps a half-written proposal when you look at another tab and come back', async () => {
+  it('keeps a half-written proposal while you browse the vocabulary, and across a change of kind', async () => {
     stubFetchRoutes({
       'GET /api/schema-proposals/vocabulary': { body: vocabulary },
       'GET /api/schema-proposals': list([]),
@@ -440,14 +561,124 @@ describe('Propose a Change', () => {
     renderAt(`${ROUTE}?tab=propose`);
     await screen.findByLabelText('New term');
     fireEvent.change(screen.getByLabelText('New term'), { target: { value: 'half_written' } });
-    fireEvent.click(screen.getByRole('tab', { name: 'Browse the Vocabulary' }));
-    fireEvent.click(screen.getByRole('tab', { name: 'Propose a Change' }));
+    fireEvent.change(screen.getByLabelText('Description (required)'), { target: { value: 'Half a description.' } });
+    fireEvent.change(screen.getByLabelText('Examples'), { target: { value: 'run 4' } });
+    // Looking around Browse does not touch the form.
+    fireEvent.click(screen.getByText(COPY.browseTitle));
+    chooseIn(browseSection(), 'System');
     expect(screen.getByLabelText('New term')).toHaveValue('half_written');
+    // The shared boxes survive a change of kind and back.
+    fireEvent.click(screen.getByRole('radio', { name: COPY.kindList }));
+    expect(screen.getByLabelText('Description (required)')).toHaveValue('Half a description.');
+    expect(screen.getByLabelText('Examples')).toHaveValue('run 4');
+    fireEvent.click(screen.getByRole('radio', { name: COPY.kindTerm }));
+    expect(screen.getByLabelText('Description (required)')).toHaveValue('Half a description.');
+  });
+
+  it('Notes for Reviewers stay as the reader left them across a change of kind', async () => {
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([]),
+    });
+    renderAt(ROUTE);
+    await screen.findByRole('combobox', { name: 'List' });
+    const notes = screen.getByText(LABELS.headingSpReviewerNotes).closest('details') as HTMLDetailsElement;
+    expect(notes).not.toHaveAttribute('open');
+    fireEvent.click(notes.querySelector('summary') as HTMLElement); // the reader opens them
+    await waitFor(() => expect(notes).toHaveAttribute('open'));
+    fireEvent.click(screen.getByRole('radio', { name: COPY.kindList }));
+    fireEvent.click(screen.getByRole('radio', { name: COPY.kindTerm }));
+    expect(notes).toHaveAttribute('open');
+  });
+
+  it('names each kind by its title alone, with its one-line hint as the description', async () => {
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([]),
+    });
+    renderAt(ROUTE);
+    const group = await screen.findByRole('group', { name: 'What do you want to propose?' });
+    const radios = within(group).getAllByRole('radio');
+    // This server does not describe the third kind, so two are offered.
+    expect(radios.map((r) => r.getAttribute('aria-describedby') !== null)).toEqual([true, true]);
+    expect(radios[0]).toHaveAccessibleName(COPY.kindTerm);
+    expect(radios[0]).toHaveAccessibleDescription(COPY.kindTermHint);
+    expect(radios[1]).toHaveAccessibleName(COPY.kindList);
+    expect(radios[1]).toHaveAccessibleDescription(COPY.kindListHint);
+    expect(radios[0]).toBeChecked();
+  });
+
+  it('offers one List choice grouped by section, and sends the section of the group the list is in', async () => {
+    let sent: Record<string, unknown> | null = null;
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([]),
+      'POST /api/schema-proposals': (init) => {
+        sent = JSON.parse(String(init?.body));
+        return { status: 201, body: { ...envelope, proposal: proposal({ category: 'record_type', section: 'Record Info', term: 'simulation' }), ignored_fields: [] } };
+      },
+    });
+    renderAt(ROUTE);
+    const select = await screen.findByRole('combobox', { name: 'List' });
+    // No separate Section choice for a term: the List carries it.
+    expect(within(proposeRegion()).queryByLabelText('Section')).toBeNull();
+    // Each list by the name a person uses, as Browse shows it, with its key as the option's description.
+    expect(selectGroups(select)).toEqual([
+      { group: 'Record Info (root fields)', options: ['Record type'] },
+      { group: 'System', options: ['Technique', 'Domain'] },
+    ]);
+    fireEvent.click(select);
+    for (const [name, key] of [['Record type', 'record_type'], ['Technique', 'system.technique'], ['Domain', 'system.domain']]) {
+      expect(screen.getByRole('option', { name })).toHaveAccessibleDescription(key);
+    }
+    fireEvent.keyDown(select, { key: 'Escape' });
+    // A themed picker, not the browser's: nothing chosen yet shows the placeholder.
+    expect(select.tagName).toBe('BUTTON');
+    expect(select).toHaveTextContent('Choose a list…');
+    chooseIn(select, 'Record type');
+    expect(select).toHaveTextContent('Record type');
+    // Type-ahead goes by the name too: "d" on the open picker lands on Domain.
+    fireEvent.keyDown(select, { key: 'ArrowDown' });
+    fireEvent.keyDown(select, { key: 'd' });
+    const active = document.getElementById(select.getAttribute('aria-activedescendant') ?? '');
+    expect(active?.querySelector('.select-option-name')?.textContent).toBe('Domain');
+    fireEvent.keyDown(select, { key: 'Escape' });
+    fireEvent.change(screen.getByLabelText('New term'), { target: { value: 'simulation' } });
+    fireEvent.change(screen.getByLabelText('Description (required)'), {
+      target: { value: 'A record that describes a simulation, not a measurement.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Proposal' }));
+    await screen.findByText(SAVED_NOTICE);
+    expect(sent).toMatchObject({ proposal_type: 'add_term', section: 'Record Info', category: 'record_type' });
+    expect((sent as unknown as { section: string }).section).toBe(portalSectionFor(vocabulary, 'record_type'));
+  });
+
+  it('says what the chosen list already holds, naming the first twelve and counting the rest', async () => {
+    const many = Array.from({ length: 15 }, (_, i) => `T${String(i + 1).padStart(2, '0')}`);
+    const big: ApiSchemaVocabulary = structuredClone(vocabulary);
+    big.sources.portal.sections[1].categories[0].terms = many;
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: big },
+      'GET /api/schema-proposals': list([]),
+    });
+    renderAt(ROUTE);
+    const select = await screen.findByRole('combobox', { name: 'List' });
+    expect(screen.queryByText(/Already on the list/)).toBeNull();
+    // The hint the picker is described by, as written (the description algorithm adds a space at the mono span).
+    const describedBy = () =>
+      (select.getAttribute('aria-describedby') ?? '')
+        .split(' ')
+        .map((id) => document.getElementById(id)?.textContent ?? '')
+        .join(' ');
+    chooseIn(select, 'Domain');
+    expect(describedBy()).toBe('Already on the list (1): experimental.');
+    chooseIn(select, 'Technique');
+    expect(describedBy()).toBe(`Already on the list (15): ${many.slice(0, 12).join(', ')} and 3 more.`);
   });
 });
 
 describe('Proposals', () => {
-  it('lists proposals with their status, states the temporary storage and that no author is recorded', async () => {
+  it('lists proposals with their status and the server\'s first sentence on storage, claiming no permanence and naming no unverified author', async () => {
     stubFetchRoutes({
       'GET /api/schema-proposals/vocabulary': { body: vocabulary },
       'GET /api/schema-proposals': list([
@@ -462,7 +693,32 @@ describe('Proposals', () => {
     expect(within(rows[0]).getByText('Pending')).toBeInTheDocument();
     expect(within(rows[1]).getByText('Withdrawn')).toBeInTheDocument();
     expect(screen.getAllByText(PERSISTENCE_TEXT).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Author not recorded/).length).toBeGreaterThan(0);
+    const column = screen.getByRole('region', { name: 'Proposals' });
+    expect(column.textContent ?? '').not.toMatch(FALSE_CLAIM);
+    // Unverified: nobody is named, and no stand-in sentence is put in the name's place.
+    expect(column.textContent ?? '').not.toMatch(/Proposed by|Author/);
+  });
+
+  it('shows only the first sentence of the server\'s storage statement', async () => {
+    const message = 'SERVER-SAID: proposals here are temporary. They live in a working folder. It is cleared on restart.';
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': {
+        body: { ...listBody([proposal()]), persistence: { ...envelope.persistence, message } },
+      },
+    });
+    renderAt(ROUTE);
+    expect(await screen.findByText('SERVER-SAID: proposals here are temporary.')).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('They live in a working folder');
+  });
+
+  it('names the author only when the server verified one', async () => {
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([proposal({ attribution: 'verified', proposed_by: 'SYN Scientist' })]),
+    });
+    renderAt(ROUTE);
+    expect(await screen.findByText('Proposed by SYN Scientist')).toBeInTheDocument();
   });
 
   it('offers Withdraw on a pending proposal only, behind a confirmation, and shows the result', async () => {
@@ -522,6 +778,28 @@ describe('Proposals', () => {
     expect(document.querySelector('.sp-item')).toBeNull();
   });
 
+  it('lists a proposal once when a save elsewhere shifted it onto the next page (the paging dedupe)', async () => {
+    const first = proposal({ id: '01M61TASK3DFS5VX1C7X1RZJS5', term: 'page_one' });
+    const shifted = proposal({ id: '01M61TASK3DFS5VX1C7X1RZJS6', term: 'shifted_row' });
+    const fresh = proposal({ id: '01M61TASK3DFS5VX1C7X1RZJS7', term: 'page_two' });
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals?limit=25&offset=0': {
+        body: { ...listBody([first, shifted]), total: 3, next_offset: 2 },
+      },
+      // page 2 repeats a page-1 row, as it does when a newer proposal was saved meanwhile
+      'GET /api/schema-proposals?limit=25&offset=2': {
+        body: { ...listBody([shifted, fresh]), total: 3, offset: 2, next_offset: null },
+      },
+    });
+    renderAt(ROUTE);
+    const column = within(await screen.findByRole('region', { name: 'Proposals' }));
+    fireEvent.click(await column.findByRole('button', { name: 'Show More' }, { timeout: 4000 }));
+    await screen.findByText(/page_two/);
+    expect(document.querySelectorAll('.sp-item')).toHaveLength(3);
+    expect(screen.getAllByText(/shifted_row/)).toHaveLength(1);
+  });
+
   it('loads further pages on request and appends them', async () => {
     const second = proposal({ id: '01M61TASK3DFS5VX1C7X1RZJS7', term: 'second_page' });
     stubFetchRoutes({
@@ -534,7 +812,9 @@ describe('Proposals', () => {
       },
     });
     renderAt(`${ROUTE}?tab=proposals`);
-    fireEvent.click(await screen.findByRole('button', { name: 'Show More' }));
+    // Scoped to the column: a role query over the whole one-page DOM is slow under a loaded machine.
+    const column = within(await screen.findByRole('region', { name: 'Proposals' }));
+    fireEvent.click(await column.findByRole('button', { name: 'Show More' }, { timeout: 4000 }));
     await screen.findByText(/second_page/);
     expect(document.querySelectorAll('.sp-item')).toHaveLength(2);
     expect(screen.queryByRole('button', { name: 'Show More' })).toBeNull();
@@ -552,7 +832,7 @@ describe('Copy and download the portal payload', () => {
     });
   }
 
-  it('copies the exact portal body and says ISAAC has not sent it', async () => {
+  it('copies the exact portal body and says where to paste it, claiming nothing was sent', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
     stubPayload();
@@ -560,7 +840,8 @@ describe('Copy and download the portal payload', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Copy Portal Payload' }));
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
     expect(JSON.parse(writeText.mock.calls[0][0])).toEqual(payloadFor(p).body);
-    expect(await screen.findByText(/ISAAC has not sent it/)).toBeInTheDocument();
+    const said = await screen.findByText(/^Copied\. Paste it into the ISAAC portal\.$/);
+    expect(said.textContent).not.toMatch(FALSE_CLAIM);
   });
 
   it('shows the text to copy by hand, and does not claim it was copied, when the browser refuses', async () => {
@@ -593,7 +874,8 @@ describe('Copy and download the portal payload', () => {
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:test');
     expect(blob).not.toBeNull();
     expect(JSON.parse(await readBlob(blob as unknown as Blob))).toEqual(payloadFor(p).body);
-    expect(await screen.findByText(/ISAAC has not sent it anywhere/)).toBeInTheDocument();
+    const said = await screen.findByText(/^Downloaded\. Paste it into the ISAAC portal\.$/);
+    expect(said.textContent).not.toMatch(FALSE_CLAIM);
   });
 
   it('says nothing was copied when the payload cannot be fetched', async () => {
@@ -612,53 +894,106 @@ describe('Copy and download the portal payload', () => {
 });
 
 describe('review fixes', () => {
-  it('Browse shows both vocabulary sources, labelled, and never calls either "the official vocabulary"', async () => {
+  it('Browse shows both vocabulary sources by short names, one quiet fact each, never "the official vocabulary"', async () => {
     stubFetchRoutes({
       'GET /api/schema-proposals/vocabulary': { body: vocabulary },
       'GET /api/schema-proposals': list([]),
     });
-    renderAt(ROUTE);
-    const portalRadio = await screen.findByRole('radio', { name: 'Portal vocabulary (snapshot a1cb1c8)' });
-    const schemaRadio = screen.getByRole('radio', { name: 'Schema enums (vendored v1.05)' });
-    expect(portalRadio).toBeChecked();
-    expect(screen.getByText(/DETAIL-PORTAL/)).toBeInTheDocument();
+    renderAt(`${ROUTE}?tab=browse`);
+    const source = await screen.findByRole('radiogroup', { name: 'Source' });
+    const portal = within(source).getByRole('radio', { name: 'Portal Vocabulary' });
+    expect(portal).toHaveAttribute('aria-checked', 'true');
+    expect(
+      within(browseDetails()).getByText(/The ISAAC portal's terms, snapshot a1cb1c8: 3 sections, 3 term lists, 6 terms\./),
+    ).toBeInTheDocument();
+    // The server's long source prose is not repeated on the page.
+    expect(screen.queryByText(/DETAIL-PORTAL/)).toBeNull();
 
-    fireEvent.click(schemaRadio);
-    expect(screen.getByText(/DETAIL-SCHEMA/)).toBeInTheDocument();
-    fireEvent.change(screen.getByRole('combobox', { name: 'Section' }), { target: { value: 'Context' } });
-    const table = screen.getByRole('table', { name: 'Allowed terms for context.environment' });
-    expect(within(table).getAllByRole('row').slice(1).map((r) => r.textContent)).toEqual(['ambient', 'vacuum']);
+    chooseSegment('Source', 'Schema Lists');
+    expect(within(source).getByRole('radio', { name: 'Schema Lists' })).toHaveAttribute('aria-checked', 'true');
+    expect(within(browseDetails()).getByText(/The record schema's fixed lists, version 1\.05/)).toBeInTheDocument();
+    chooseIn(browseSection(), 'Context');
+    const terms = within(browseDetails()).getByRole('list', { name: 'Allowed terms for context.environment' });
+    expect(within(terms).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['ambient', 'vacuum']);
     expect(document.body.textContent ?? '').not.toMatch(/official vocabulary/i);
   });
 
-  it('offers a new term only for a list the portal has, and says why for one it does not', async () => {
+  it('offers a new term only for a list the portal has, and says why in one line for one it does not', async () => {
     stubFetchRoutes({
       'GET /api/schema-proposals/vocabulary': { body: vocabulary },
       'GET /api/schema-proposals': list([]),
     });
-    renderAt(ROUTE);
-    fireEvent.click(await screen.findByRole('radio', { name: 'Schema enums (vendored v1.05)' }));
-    fireEvent.change(screen.getByRole('combobox', { name: 'Section' }), { target: { value: 'Context' } });
-    expect(screen.queryByRole('button', { name: 'Propose a New Term for This List' })).toBeNull();
-    expect(screen.getByText(/portal would\s+refuse a new term/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('radio', { name: 'Portal vocabulary (snapshot a1cb1c8)' }));
-    fireEvent.change(screen.getByRole('combobox', { name: 'Section' }), { target: { value: 'System' } });
-    expect(screen.getByRole('button', { name: 'Propose a New Term for This List' })).toBeInTheDocument();
+    renderAt(`${ROUTE}?tab=browse`);
+    await screen.findByRole('radiogroup', { name: 'Source' });
+    chooseSegment('Source', 'Schema Lists');
+    chooseIn(browseSection(), 'Context');
+    expect(screen.queryByRole('button', { name: 'Propose a Term for This List' })).toBeNull();
+    expect(screen.getByText(/it would refuse a new term for it/)).toBeInTheDocument();
+    chooseSegment('Source', 'Portal Vocabulary');
+    chooseIn(browseSection(), 'System');
+    expect(screen.getByRole('button', { name: 'Propose a Term for This List' })).toBeInTheDocument();
   });
 
-  it('the new-term form offers only the portal term lists of the chosen section', async () => {
+  it('every action on the page is themed blue: one primary, tinted actions, quiet text for the rest; none is white', async () => {
     stubFetchRoutes({
       'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([proposal()]),
+    });
+    renderAt(`${ROUTE}?tab=browse`);
+    await screen.findAllByRole('button', { name: 'Copy Portal Payload' });
+    await screen.findByRole('radiogroup', { name: 'Source' });
+    expect(document.querySelectorAll('.sp-screen .btn-secondary')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Save Proposal' })).toHaveClass('btn-primary');
+    expect(screen.getByRole('button', { name: 'Copy Portal Payload' })).toHaveClass('btn-action');
+    expect(screen.getByRole('button', { name: 'Download JSON' })).toHaveClass('btn-action');
+    expect(screen.getByRole('button', { name: 'Withdraw' })).toHaveClass('btn-danger-quiet');
+    // No browser-default <select> is left on the screen.
+    expect(document.querySelectorAll('.sp-screen select')).toHaveLength(0);
+  });
+
+  it('the new-term form offers only the portal term lists, and says so when there are none', async () => {
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([]),
+    });
+    const first = renderAt(`${ROUTE}?tab=propose`);
+    const options = selectOptions(await screen.findByLabelText('List'));
+    // Only the portal's term lists: the schema-only `context.environment` is not one.
+    expect(options).toEqual(['Record type', 'Technique', 'Domain']);
+    first.unmount();
+    const bare: ApiSchemaVocabulary = {
+      ...vocabulary,
+      proposal_sections: vocabulary.proposal_sections.map((s) => ({ ...s, term_lists: [] })),
+    };
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: bare },
       'GET /api/schema-proposals': list([]),
     });
     renderAt(`${ROUTE}?tab=propose`);
-    await screen.findByLabelText('Category');
-    fireEvent.change(sectionSelect(), { target: { value: 'System' } });
-    const options = within(screen.getByLabelText('Category')).getAllByRole('option').map((o) => o.textContent);
-    expect(options).toEqual(['Choose a list…', 'system.technique', 'system.domain']);
-    fireEvent.change(sectionSelect(), { target: { value: 'Context' } });
-    expect(within(screen.getByLabelText('Category')).getAllByRole('option').map((o) => o.textContent)).toEqual(['Choose a list…']);
-    expect(screen.getByText(/portal vocabulary snapshot has no term lists in this section/)).toBeInTheDocument();
+    expect(selectOptions(await screen.findByLabelText('List'))).toEqual([]);
+    expect(screen.getByText(/portal vocabulary snapshot has no term lists/)).toBeInTheDocument();
+  });
+
+  it('a proposal row is folded: its summary says what and where, and its details hold the actions', async () => {
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([proposal()]),
+    });
+    renderAt(ROUTE);
+    const row = (await screen.findByText('Pending', { selector: '.sp-status' })).closest('li') as HTMLElement;
+    const details = row.querySelector('details') as HTMLDetailsElement;
+    expect(details).not.toHaveAttribute('open');
+    const summary = details.querySelector('summary') as HTMLElement;
+    expect(summary).toHaveTextContent('Add the term XMCD to system.technique');
+    expect(within(summary).getByText('Pending')).toBeInTheDocument();
+    expect(summary.querySelector('time')).not.toBeNull();
+    expect(within(summary).queryByRole('button')).toBeNull();
+    const body = details.querySelector('.sp-proposal-body') as HTMLElement;
+    for (const name of ['Copy Portal Payload', 'Download JSON', 'Withdraw']) {
+      expect(within(body).getByRole('button', { name })).toBeInTheDocument();
+    }
+    expect(body).toHaveTextContent('X-ray magnetic circular dichroism, measured at SSRL.');
+    expect(body).not.toHaveTextContent(/Author|Proposed by/);
   });
 
   it('says a new list goes into the portal Ontology Editor, not the web endpoint, and shows the server notes', async () => {
@@ -679,7 +1014,8 @@ describe('review fixes', () => {
     renderAt(`${ROUTE}?tab=proposals`);
     fireEvent.click(await screen.findByRole('button', { name: 'Copy Portal Payload' }));
     const status = await screen.findByText(/Ontology Editor/);
-    expect(status.textContent).toMatch(/ISAAC has not sent it/);
+    expect(status.textContent).toMatch(/^Copied\. /);
+    expect(status.textContent).not.toMatch(FALSE_CLAIM);
     expect(status.textContent).not.toMatch(/Paste it into the ISAAC portal/);
     expect(screen.getByText('SERVER-NOTE: the web endpoint takes new terms only.')).toBeInTheDocument();
   });
@@ -698,21 +1034,36 @@ describe('review fixes', () => {
     expect(await screen.findByText(/Paste it into the ISAAC portal/)).toBeInTheDocument();
   });
 
-  it('shows how many pending places are used and who shares them', async () => {
+  it('shows how many pending places are used, and who shares them, only near the limit', async () => {
     stubFetchRoutes({
       'GET /api/schema-proposals/vocabulary': { body: vocabulary },
       'GET /api/schema-proposals': list([proposal()]),
     });
-    renderAt(`${ROUTE}?tab=proposals`);
-    expect(await screen.findByText(/2 of 50 pending places used\. SERVER-SAID: shared by everyone/)).toBeInTheDocument();
+    const far = renderAt(`${ROUTE}?tab=proposals`);
+    await screen.findByText(PERSISTENCE_TEXT);
+    expect(screen.queryByText(/pending places used/)).toBeNull();
+    far.unmount();
+    for (const [pending, shown] of [[39, false], [40, true], [50, true]] as const) {
+      stubFetchRoutes({
+        'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+        'GET /api/schema-proposals': {
+          body: { ...listBody([proposal()]), capacity: { ...CAPACITY, pending } },
+        },
+      });
+      const r = renderAt(ROUTE);
+      await screen.findByText(PERSISTENCE_TEXT);
+      const line = screen.queryByText(new RegExp(`^${pending} of 50 pending places used\\. SERVER-SAID: shared by everyone`));
+      expect(line !== null).toBe(shown);
+      r.unmount();
+    }
   });
 });
 
 describe('the boundary is stated once', () => {
-  const statement = /does not approve/g;
+  const statement = new RegExp(COPY.boundary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
   const count = () => (document.body.textContent?.match(statement) ?? []).length;
 
-  it('appears exactly once on the page, before and after saving and on the proposals tab', async () => {
+  it('appears exactly once on the page, before and after saving, with the proposals listed', async () => {
     const saved = proposal({ term: 'xmcd_scan' });
     stubFetchRoutes({
       'GET /api/schema-proposals/vocabulary': { body: vocabulary },
@@ -720,15 +1071,13 @@ describe('the boundary is stated once', () => {
       'POST /api/schema-proposals': { status: 201, body: { ...envelope, proposal: saved, ignored_fields: [] } },
     });
     renderAt(`${ROUTE}?tab=propose`);
-    await screen.findByLabelText('Category');
+    await screen.findByLabelText('List');
     expect(count()).toBe(1);
-    fireEvent.change(sectionSelect(), { target: { value: 'System' } });
     fillPropose();
     fireEvent.click(screen.getByRole('button', { name: 'Save Proposal' }));
-    await screen.findByText(/Saved as a draft on this server/);
+    await screen.findByText(SAVED_NOTICE);
     expect(count()).toBe(1);
-    fireEvent.click(screen.getByRole('tab', { name: 'Proposals' }));
-    await screen.findByText(/pending places used/);
+    await screen.findByText(PERSISTENCE_TEXT);
     expect(count()).toBe(1);
     // The server's own review note is never rendered a second time.
     expect(document.body.textContent).not.toContain(REVIEW_TEXT);
@@ -760,7 +1109,10 @@ describe('audit fixes', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Withdraw' }));
     fireEvent.click(screen.getByRole('button', { name: 'Confirm Withdraw' }));
     const row = (await screen.findByText('Withdrawn', { selector: '.sp-status' })).closest('li') as HTMLElement;
-    await waitFor(() => expect(within(row).getByRole('heading', { level: 2 })).toHaveFocus());
+    // The proposal itself takes focus: its summary, which now reads Withdrawn.
+    const summary = within(row).getByText('Add the term XMCD to system.technique').closest('summary') as HTMLElement;
+    await waitFor(() => expect(summary).toHaveFocus());
+    expect(summary).toHaveTextContent('Withdrawn');
     expect(within(row).getByTestId('sp-row-status')).toHaveTextContent('Withdrawn. The proposal is no longer pending.');
   });
 
@@ -787,19 +1139,18 @@ describe('audit fixes', () => {
       },
     });
     renderAt(`${ROUTE}?tab=propose`);
-    await screen.findByLabelText('Category');
-    fireEvent.change(sectionSelect(), { target: { value: 'System' } });
+    await screen.findByLabelText('List');
     fillPropose();
     fireEvent.click(screen.getByRole('button', { name: 'Save Proposal' }));
     await screen.findByText('SERVER: choose a list.');
-    const ids = (screen.getByLabelText('Category').getAttribute('aria-describedby') ?? '').split(' ');
+    const ids = (screen.getByLabelText('List').getAttribute('aria-describedby') ?? '').split(' ');
     expect(ids).toHaveLength(2);
     expect(ids[0]).toMatch(/-hint$/);
     expect(ids[1]).toMatch(/-err$/);
     for (const id of ids) expect(document.getElementById(id)).not.toBeNull();
   });
 
-  it('section-named buttons wrap instead of pushing the page sideways', () => {
+  it('a long button label in the narrow proposals column wraps instead of pushing the page sideways', () => {
     const css = readFileSync(join(process.cwd(), 'src', 'screens', 'schema-proposals.css'), 'utf8');
     expect(css).toMatch(/\.sp-actions \.btn\s*\{[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;/);
   });

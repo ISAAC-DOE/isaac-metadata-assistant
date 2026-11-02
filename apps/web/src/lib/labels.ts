@@ -1889,16 +1889,25 @@ export const LABELS = {
   newProposalRuleHeading: 'How This Proposal Will Be Explained',
 
   /*
-   * Schema Proposals — drafts from a local import. The chips are Register 1 (Title Case, `chip*`
-   * keys, so §1 of `casing-registers.test.tsx` checks them); the two lead-ins are the start of a
-   * sentence and a field label, Register 2, and are keyed outside the Register-1 prefixes on purpose.
+   * Schema Proposals. The headings and disclosure summaries are Register 1 (Title Case, `heading*`
+   * keys, so §1 of `casing-registers.test.tsx` checks them), as is the one chip a draft still carries
+   * (the row the form is open on). The two lead-ins are the start of a sentence and a field label,
+   * Register 2, and are keyed outside the Register-1 prefixes on purpose.
    */
-  chipDraftNeedsDescription: 'Needs Your Description',
-  chipDraftCannotPropose: 'Cannot Be Proposed',
-  chipDraftAnswered: 'Answered',
-  chipDraftNoLongerInBundle: 'No Longer in the Bundle',
+  headingSpDraftsFile: "Start From a Local Import's Drafts File",
+  headingSpReady: 'Ready to Propose',
+  headingSpOtherTerms: 'Other Terms in the File',
+  headingSpSavedFromFile: 'Saved From This File',
+  headingSpCannotPropose: 'Cannot Be Proposed From Here',
+  headingSpNothingNeeded: 'Nothing Needed From You',
+  headingSpWhereRead: 'Where It Was Read',
+  headingSpReviewerNotes: 'Notes for Reviewers',
   chipDraftBeingProposed: 'Being Proposed Below',
-  chipDraftSaved: 'Saved as a Draft',
+  /* Schema Proposals' segmented choices (Register 1, `action*` keys, so §1 checks their casing). */
+  actionSpSourcePortal: 'Portal Vocabulary',
+  actionSpSourceSchema: 'Schema Lists',
+  actionSpRequired: 'Required',
+  actionSpOptional: 'Optional',
   draftFactSinceAsked: 'Since it was asked for',
   draftFilingLead: 'Proposing:',
 

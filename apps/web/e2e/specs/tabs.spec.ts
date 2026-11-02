@@ -1,5 +1,5 @@
 /**
- * Tab-widget semantics — the three `role="tablist"` surfaces.
+ * Tab-widget semantics — the four `role="tablist"` surfaces in `TABBED_SURFACES`.
  * @interaction
  *
  * Asserts the WAI-ARIA APG tabs pattern: one selected tab, roving tabindex,
