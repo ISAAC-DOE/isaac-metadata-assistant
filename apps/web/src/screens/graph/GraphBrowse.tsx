@@ -167,9 +167,9 @@ export function GraphBrowse({
       )}
       {deep === null && deepStatus === 'unavailable' && (
         <p className="memory-graph-list-deepnote advisory">
-          Symbol-level detail is unavailable in this deployment
+          Symbol-level detail is unavailable
           {deepReason ? ` — ${describeDeepReason(deepReason)}` : ''}. The rows below stay at file
-          level; nothing was aggregated, estimated or stood in for the missing structure.
+          level.
         </p>
       )}
       {deepSummary && deepSummary.withStructure > 0 && (

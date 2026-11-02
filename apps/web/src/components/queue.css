@@ -317,15 +317,10 @@
   font-size: 11px;
   color: var(--text-tertiary);
 }
-/* P33 S1 — the neutral created-date badge next to the lifecycle chip. Reuses
- * the same token pair as the retired technique tag; no semantic color. */
+/* The date is plain text at the end of the meta line (2026-11-02); it was a
+ * badge beside the lifecycle chip. It inherits the meta line's size and colour. */
 .exp-date {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-slate);
-  background: var(--cover-bg);
-  border-radius: var(--radius-token);
-  padding: 2px 8px;
+  font-variant-numeric: tabular-nums;
 }
 .exp-trailing {
   display: flex;
@@ -393,8 +388,9 @@
    280px column beside a 172px button reads as cramped at every desktop width —
    while the lede PROSE still wants a readable line. So the container is sized for
    the cards and `.queue-empty-lede-text` re-narrows the paragraph. */
+/* UNCAPPED since 2026-11-02 ("use the width"): the cards fill the content area
+   like the queue rows they stand in for; only the lede prose keeps a measure. */
 .queue-empty-state {
-  max-width: 800px;
   padding: 30px 4px 12px;
 }
 
@@ -551,9 +547,7 @@
 .queue-empty-action-cta {
   flex: none;
   display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-  min-width: 172px;
+  align-items: center;
 }
 
 /* Slightly larger than a row-level `.btn`, because these are the screen's own
@@ -602,6 +596,22 @@
  * baseline, which is why the five `experiments@*` entries are unchanged. It
  * matches its sibling `.queue-empty-hint` exactly.
  */
+/* THE VALIDATOR, as a text link under the cards (2026-11-02): a utility, not a
+   way to begin, so it is a ghost button and a hint on one line, not a card. */
+.queue-empty-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2xs) var(--space-sm);
+  margin: var(--space-md) 0 0;
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+}
+.queue-empty-link {
+  padding-left: 0;
+  padding-right: 0;
+}
+
 .queue-empty-storage {
   margin: 18px 0 0;
   padding-top: 14px;

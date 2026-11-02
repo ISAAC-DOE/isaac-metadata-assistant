@@ -324,7 +324,8 @@ describe('C-16 · choosing your own files explains what can and cannot be read',
     await screen.findByRole('tablist', { name: C.stagesLabel });
     const files = screen.getByRole('region', { name: C.filesTitle });
     expect(files.textContent).toContain(C.filesNotReadable);
-    expect(files.textContent).toContain(C.filesNotReadableHelp);
+    // ~~filesNotReadableHelp~~ retired 2026-11-02: the one line above is the fact.
+    expect(files.textContent).not.toMatch(/staging area on the server|never receives/i);
     expect(within(files).getByRole('button', { name: C.filesTryExampleAction })).toBeTruthy();
   });
 });

@@ -1196,25 +1196,55 @@
   line-height: 1.5;
 }
 
-/* ---- Explore mode: toolbar ------------------------------------------- */
-.graph-explore-toolbar {
+/* ---- Explore mode: the viewport controls, on the canvas (2026-11-02) ---- */
+/* An icon cluster in the canvas's top-right corner, drawn in the canvas's own
+   dark tokens (declared on `.graph-canvas` below, which this sits inside). Each
+   button is named by `aria-label` and titled for a pointer. */
+.graph-viewport-controls {
+  position: absolute;
+  top: var(--space-sm);
+  right: var(--space-sm);
+  z-index: 2;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 8px;
+  gap: var(--space-2xs);
+  padding: var(--space-2xs);
+  background: var(--gc-panel);
+  border: 1px solid var(--gc-line);
+  border-radius: var(--radius-inner);
 }
-.graph-explore-toolbar .btn {
+.graph-viewport-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 6px 9px;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-token);
+  background: transparent;
+  color: var(--gc-text-dim);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
 }
-.graph-explore-toolbar-sep {
-  flex: none;
-  width: 1px;
-  height: 20px;
-  background: var(--border-input);
+.graph-viewport-btn:hover:not(:disabled) {
+  background: var(--gc-line);
+  color: var(--gc-text);
+}
+.graph-viewport-btn:focus-visible {
+  outline: 2px solid var(--gc-focus);
+  outline-offset: 1px;
+}
+.graph-viewport-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Which layer is drawn, and the how-to tip: one quiet line under the canvas. */
+.graph-canvas-caption-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-top: var(--space-xs);
 }
 
 /* ---- Explore mode: the ONE dark surface ------------------------------ */
@@ -1465,6 +1495,27 @@
    position hack at narrow widths. The swatch colours are the same fills used
    on the dark canvas; each is paired with its name, so colour is never the
    only carrier of meaning. */
+/* THE LEGEND, COLLAPSED (2026-11-02): the shared chevron `Disclosure`, drawn
+   without its own frame because it sits inside the graph card. */
+.memory-graph-legend.disclosure {
+  margin-top: var(--space-xs);
+  border: 0;
+  background: transparent;
+}
+.memory-graph-legend .disclosure-trigger {
+  width: auto;
+  min-height: 0;
+  padding: var(--space-2xs) 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-meta);
+}
+.memory-graph-legend .disclosure-trigger:hover {
+  background: transparent;
+  color: var(--text-primary);
+}
+.memory-graph-legend > .disclosure-body > .graph-legend {
+  margin-top: var(--space-xs);
+}
 .graph-legend {
   margin-top: 8px;
   display: flex;
@@ -1579,14 +1630,11 @@
   border: 1px solid var(--border-faint);
   border-radius: var(--radius-inner);
 }
+/* One plain line since 2026-11-02 — it was a dashed, italic box of instructions. */
 .memory-graph-detail-empty {
-  padding: 16px 14px;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-inner);
-  font-size: 12px;
-  font-style: italic;
-  color: var(--text-tertiary);
-  line-height: 1.55;
+  margin: 0;
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
 }
 .memory-graph-detail-title {
   font-size: 13px;
@@ -1996,7 +2044,7 @@
   .memory-graph-svg,
   .memory-graph-node,
   .memory-graph-edge,
-  .graph-explore-toolbar .btn,
+  .graph-viewport-btn,
   .graph-help-panel {
     transition: none !important;
     animation: none !important;
@@ -2014,10 +2062,19 @@
 }
 
 @media (max-width: 640px) {
-  .memory-graph-controls,
   .memory-graph-filters-grid {
     flex-direction: column;
     align-items: stretch;
+  }
+  /* The mode switch and search take a row each; the four disclosure toggles
+     (Filters, Find a Path, Query, About This Graph) share rows, so the canvas is
+     not pushed below six stacked controls (2026-11-02). */
+  .memory-graph-controls {
+    align-items: stretch;
+  }
+  .memory-graph-controls > .memory-graph-modeswitch,
+  .memory-graph-controls > .memory-graph-search-wrap {
+    flex: 1 1 100%;
   }
   .memory-graph-boundary {
     margin-left: 0;
@@ -2136,12 +2193,6 @@
 
 /* The outer-ring count, visible under the canvas (it is a figure, so it is not
    in the canvas's info tip). */
-.graph-canvas-isolated {
-  margin: var(--space-xs) 0 0;
-  font-size: var(--font-size-meta);
-  line-height: var(--line-height-normal);
-  color: var(--text-secondary);
-}
 /* With no title row and no truncation note above it, the controls row is the
    card's first line and takes no extra top margin. */
 .memory-graph-header:empty + .memory-graph-controls {

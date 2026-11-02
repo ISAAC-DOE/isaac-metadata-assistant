@@ -95,17 +95,12 @@ test.describe('@interaction the ordinary workspace', () => {
     await expect(create).toBeEnabled();
     await expect(create).toHaveClass(/btn-primary/);
     /*
-     * WHERE A NEW EXPERIMENT GOES, disclosed. This backend runs with no PGHOST, so
-     * the honest answer here is the ephemeral one — and it must never quietly become
-     * a durability promise on a deployment that has no database.
+     * WHERE A NEW EXPERIMENT GOES. This backend runs with no PGHOST (ephemeral), and
+     * since 2026-11-02 only the failure state speaks — so there is no storage line at
+     * all, and in particular no durability promise on a deployment with no database.
      */
-    await expect(page.locator('.queue-empty-storage')).toHaveAttribute(
-      'data-durability',
-      'ephemeral'
-    );
-    await expect(page.locator('.queue-empty-storage')).toContainText(
-      /cleared when the server restarts/i
-    );
+    await expect(page.locator('.queue-empty-storage')).toHaveCount(0);
+    await expect(page.getByText(/stay here across restarts/i)).toHaveCount(0);
 
     // Zero rows, and zero group headings. `.exp-row` is the queue's row element;
     // if a single one renders here, the seed has leaked back into the shared

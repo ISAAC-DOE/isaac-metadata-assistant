@@ -60,7 +60,8 @@ import { decodeDeepGraph, type DeepIndex } from '../lib/graphDeep';
 import type { ApiMemoryGraphResponse } from '../lib/types';
 import { GraphBrowse, type BrowseGrouping } from './graph/GraphBrowse';
 import { GraphCanvas, type DeepLayerState } from './graph/GraphCanvas';
-import { GraphCommandBar } from './graph/GraphCommandBar';
+import { GraphCommandBar, GraphQueryToggle } from './graph/GraphCommandBar';
+import { Disclosure } from '../components/Disclosure';
 import { GraphDeepDetail, GraphDetail, GraphPathResult } from './graph/GraphDetail';
 import {
   GraphActiveFilters,
@@ -233,12 +234,7 @@ function MemoryGraphBody({
     return (
       <div className="memory-graph-unavailable">
         <p className="memory-graph-unavailable-title">
-          The Graph tab is unavailable — no memory graph is loaded in this deployment (see Project
-          memory status on the Overview tab).
-        </p>
-        <p className="memory-graph-unavailable-text">
-          This is a quiet, advisory state, not an error — no nodes are shown while memory is
-          unavailable; this tab never fabricates a graph.
+          The Graph tab is unavailable — no memory graph is loaded. The Overview tab shows why.
         </p>
       </div>
     );
@@ -648,8 +644,14 @@ function MemoryGraphAvailable({
   // Filters panel from hiding the fact that the view is narrowed.
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [pathOpen, setPathOpen] = useState(false);
+  /* The command bar is behind a "Query" disclosure (2026-11-02), beside Filters and
+     Find a Path: about a quarter of the controls ahead of the canvas were the bar,
+     its Syntax and its Suggestions. History and outcomes live up here, so closing
+     the bar loses nothing that was run. */
+  const [queryOpen, setQueryOpen] = useState(false);
   const filtersId = useId();
   const pathId = useId();
+  const queryId = useId();
   // "Use as path start" in the detail panel writes into the path tool. With the
   // tool collapsed that was a click with no visible effect at all, so it opens
   // the tool it is filling in.
@@ -764,6 +766,7 @@ function MemoryGraphAvailable({
           buttonRef={filtersToggleRef}
         />
         <GraphPathToggle id={pathId} open={pathOpen} onToggle={() => setPathOpen((o) => !o)} />
+        <GraphQueryToggle id={queryId} open={queryOpen} onToggle={() => setQueryOpen((o) => !o)} />
         {helpTrigger}
       </div>
 
@@ -802,17 +805,21 @@ function MemoryGraphAvailable({
         />
       )}
 
-      {/* P36R S4 — the deterministic command bar. A bounded grammar over the
-          SAME actions the controls above dispatch; it adds no capability the
-          controls lack, only a keyboard-first way to reach them. */}
-      <GraphCommandBar
-        index={index}
-        history={history}
-        suggestions={suggestions}
-        onRun={runCommand}
-        onClearHistory={() => setHistory([])}
-        onOpenHelp={onOpenHelp}
-      />
+      {/* P36R S4 — the command bar. A bounded grammar over the SAME actions the
+          controls above dispatch; it adds no capability the controls lack, only a
+          keyboard-first way to reach them. Behind the Query disclosure. */}
+      {queryOpen && (
+        <div id={queryId} className="memory-graph-query">
+          <GraphCommandBar
+            index={index}
+            history={history}
+            suggestions={suggestions}
+            onRun={runCommand}
+            onClearHistory={() => setHistory([])}
+            onOpenHelp={onOpenHelp}
+          />
+        </div>
+      )}
 
       {/* The count line is deliberately NOT in the live region: it changes on
           every search keystroke, which announced "3 of 5 … 2 of 5 … 1 of 5"
@@ -844,14 +851,9 @@ function MemoryGraphAvailable({
             </button>
           </span>
         )}
-        {/* THE ONE VISIBLE BOUNDARY CLAUSE (re-review, 2026-10-18). The full
-            statements live in About This Graph, which stays in the DOM while
-            closed; this is the short form a reader meets without opening it. It
-            sits on the status line, which has the room, so the canvas does not
-            move down for it. */}
-        <p className="memory-graph-boundary">
-          Navigation leads to verify — it does not represent scientific truth or causality.
-        </p>
+        {/* ~~"Navigation leads to verify — it does not represent scientific truth or
+            causality."~~ — cut 2026-11-02: it restated the page lead, and About This
+            Graph states it in full. */}
       </div>
       {/* Exactly ONE polite live region on this surface. Always mounted (an
           empty container announces reliably; one created on demand does not).
@@ -1108,93 +1110,95 @@ function GraphLegend({ index }: { index: GraphIndex }) {
     coloured.length < index.communitiesBySize.length ||
     index.nodes.some((n) => !n.community_id);
   return (
-    <div className="graph-legend">
-      {/* <h3>, not <h4>: the card's own heading is the <h2> above, and the
-          detail pane beside this legend opens at <h3>. An <h4> here both skipped
-          a level and put a deeper heading BEFORE a shallower one in document
-          order, which is exactly what a screen-reader outline cannot recover
-          from. */}
-      <h3 className="graph-legend-heading">Legend</h3>
+    /* COLLAPSED BY DEFAULT (2026-11-02): node types, clusters and references sat
+       under the canvas on every visit. The shared chevron `Disclosure`, drawn
+       without its own frame. The trigger sits in an <h3>, not <h4>: the card's own
+       heading is the <h2> above, and the detail pane beside this legend opens at
+       <h3> — a deeper heading before a shallower one is what a screen-reader
+       outline cannot recover from. */
+    <Disclosure className="memory-graph-legend" summary="Legend" headingLevel={3}>
+      <div className="graph-legend">
 
-      <div className="graph-legend-group">
-        <p className="graph-legend-group-title">Node Types</p>
-        <div className="graph-legend-row">
-          <span className="graph-legend-item">
-            <span className="graph-legend-swatch shape-file-outline" aria-hidden="true" />
-            <span className="graph-legend-name">Files</span>
-          </span>
-          <span className="graph-legend-item">
-            <span className="graph-legend-swatch shape-concept shape-file-outline" aria-hidden="true" />
-            <span className="graph-legend-name">Concepts</span>
-          </span>
-        </div>
-      </div>
-
-      {coloured.length > 0 && (
         <div className="graph-legend-group">
-          <p className="graph-legend-group-title">Clusters</p>
+          <p className="graph-legend-group-title">Node Types</p>
           <div className="graph-legend-row">
-            {coloured.map(({ entry, slot }) => {
-              // `communityLabelAmong` is still the authority on WHICH text
-              // identifies this cluster (it appends `cluster <id>` when two
-              // clusters share a name) — but the file count is rendered as its
-              // own element rather than welded into the title.
-              const label = communityLabelAmong(entry, colouredEntries);
-              const suffix = ` · ${entry.file_count} file${entry.file_count === 1 ? '' : 's'}`;
-              const title = label.endsWith(suffix) ? label.slice(0, -suffix.length) : label;
-              return (
-                <span className="graph-legend-item" key={entry.id} title={`cluster ${entry.id}`}>
-                  <span className={`graph-legend-swatch c${slot}`} aria-hidden="true" />
-                  <span className="graph-legend-name">{title}</span>
-                  <span className="graph-legend-count">
-                    {entry.file_count} file{entry.file_count === 1 ? '' : 's'}
-                  </span>
-                </span>
-              );
-            })}
-            {neutralExists && (
-              <span className="graph-legend-item">
-                <span className="graph-legend-swatch" aria-hidden="true" />
-                <span className="graph-legend-name">Every Other Cluster, and Nodes in No Cluster</span>
-              </span>
-            )}
+            <span className="graph-legend-item">
+              <span className="graph-legend-swatch shape-file-outline" aria-hidden="true" />
+              <span className="graph-legend-name">Files</span>
+            </span>
+            <span className="graph-legend-item">
+              <span className="graph-legend-swatch shape-concept shape-file-outline" aria-hidden="true" />
+              <span className="graph-legend-name">Concepts</span>
+            </span>
           </div>
         </div>
-      )}
 
-      <div className="graph-legend-group">
-        <p className="graph-legend-group-title">References</p>
-        <div className="graph-legend-row">
-          <span className="graph-legend-item">
-            <span className="graph-legend-swatch graph-legend-line" aria-hidden="true" />
-            {/* Each relation is its OWN element carrying the backend's exact
-                value on `title`, exactly as a cluster entry carries
-                `cluster <id>`. This replaced a second visible copy of the whole
-                vocabulary — a `.graph-legend-raw` mono line printing
-                `calls · imports · imports_from · references · shares_data_with`
-                directly beneath the group that had just listed them in Title
-                Case. The raw token is already reachable at the three places
-                closer to the action (the filter checkbox's `title`,
-                GraphDetail's `title`, and About This Graph → Relationship
-                Types, which pairs each label with its value and says which of
-                the two the filter matches); an unlabelled row of context-free
-                mono tokens on the primary surface was the duplication this
-                slice exists to remove. */}
-            <span className="graph-legend-name">
-              {index.relationTypes.length > 0
-                ? index.relationTypes.map((rel, i) => (
-                    <span key={rel}>
-                      {i > 0 ? ' · ' : ''}
-                      <span className="graph-legend-relation" title={rel}>
-                        {relationDisplayLabel(rel)}
-                      </span>
+        {coloured.length > 0 && (
+          <div className="graph-legend-group">
+            <p className="graph-legend-group-title">Clusters</p>
+            <div className="graph-legend-row">
+              {coloured.map(({ entry, slot }) => {
+                // `communityLabelAmong` is still the authority on WHICH text
+                // identifies this cluster (it appends `cluster <id>` when two
+                // clusters share a name) — but the file count is rendered as its
+                // own element rather than welded into the title.
+                const label = communityLabelAmong(entry, colouredEntries);
+                const suffix = ` · ${entry.file_count} file${entry.file_count === 1 ? '' : 's'}`;
+                const title = label.endsWith(suffix) ? label.slice(0, -suffix.length) : label;
+                return (
+                  <span className="graph-legend-item" key={entry.id} title={`cluster ${entry.id}`}>
+                    <span className={`graph-legend-swatch c${slot}`} aria-hidden="true" />
+                    <span className="graph-legend-name">{title}</span>
+                    <span className="graph-legend-count">
+                      {entry.file_count} file{entry.file_count === 1 ? '' : 's'}
                     </span>
-                  ))
-                : 'No relationship values are present in this projection'}
+                  </span>
+                );
+              })}
+              {neutralExists && (
+                <span className="graph-legend-item">
+                  <span className="graph-legend-swatch" aria-hidden="true" />
+                  <span className="graph-legend-name">Every Other Cluster, and Nodes in No Cluster</span>
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="graph-legend-group">
+          <p className="graph-legend-group-title">References</p>
+          <div className="graph-legend-row">
+            <span className="graph-legend-item">
+              <span className="graph-legend-swatch graph-legend-line" aria-hidden="true" />
+              {/* Each relation is its OWN element carrying the backend's exact
+                  value on `title`, exactly as a cluster entry carries
+                  `cluster <id>`. This replaced a second visible copy of the whole
+                  vocabulary — a `.graph-legend-raw` mono line printing
+                  `calls · imports · imports_from · references · shares_data_with`
+                  directly beneath the group that had just listed them in Title
+                  Case. The raw token is already reachable at the three places
+                  closer to the action (the filter checkbox's `title`,
+                  GraphDetail's `title`, and About This Graph → Relationship
+                  Types, which pairs each label with its value and says which of
+                  the two the filter matches); an unlabelled row of context-free
+                  mono tokens on the primary surface was the duplication this
+                  slice exists to remove. */}
+              <span className="graph-legend-name">
+                {index.relationTypes.length > 0
+                  ? index.relationTypes.map((rel, i) => (
+                      <span key={rel}>
+                        {i > 0 ? ' · ' : ''}
+                        <span className="graph-legend-relation" title={rel}>
+                          {relationDisplayLabel(rel)}
+                        </span>
+                      </span>
+                    ))
+                  : 'No relationship values are present in this projection'}
+              </span>
             </span>
-          </span>
+          </div>
         </div>
       </div>
-    </div>
+    </Disclosure>
   );
 }

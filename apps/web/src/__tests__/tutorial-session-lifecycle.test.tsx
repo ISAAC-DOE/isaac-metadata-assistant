@@ -667,11 +667,17 @@ describe('ordinary workspace — no example record, and no promise of one', () =
      * than filled. It was the solid primary while the screen had no other action;
      * it does now.
      */
+    /*
+     * 2026-11-02 (owner direction: one primary, blue-tinted secondaries, tertiary
+     * as text): the walkthrough is the tinted `btn-secondary`, and Open Validator
+     * left its card for a ghost text button under the list. Still exactly one solid
+     * primary, and it is the create control.
+     */
     const validator = view.getByRole('button', { name: LABELS.actionOpenValidator });
-    expect(validator).toHaveClass('btn-secondary');
+    expect(validator).toHaveClass('btn-ghost');
     expect(validator).not.toHaveClass('btn-primary');
     const demo = view.getByRole('button', { name: LABELS.actionStartTutorial });
-    expect(demo).toHaveClass('btn-action');
+    expect(demo).toHaveClass('btn-secondary');
     expect(demo).not.toHaveClass('btn-primary');
     // Exactly one solid primary on the empty state, and it is the create control.
     expect(view.container.querySelectorAll('.btn-primary')).toHaveLength(1);

@@ -333,12 +333,6 @@ export function GraphCanvas({
    *  limit. Hover, focus and selection add their own on top. */
   const deepLabelIds = useMemo(() => new Set(plan?.labelIds ?? []), [plan]);
 
-  /** Visible nodes with no recorded reference at all — the outer-ring belt. */
-  const isolatedVisible = useMemo(
-    () => visibleIds.filter((id) => (index.adjacency.get(id)?.length ?? 0) === 0).length,
-    [visibleIds, index.adjacency],
-  );
-
   /** User units per CSS pixel, for the square viewBox under xMidYMid meet. */
   const unitsPerPx = useCallback(() => {
     const rect = svgRef.current?.getBoundingClientRect();
@@ -564,111 +558,72 @@ export function GraphCanvas({
   }, [announcement]);
 
   return (
-    <div className="graph-explore">
-      {/* P36V PR2 slice B — Fit and Reset already existed here as ICON-ONLY
-          buttons whose only name was an aria-label. They are now labelled in
-          Title Case, so the two viewport controls the redesign wants
-          "immediately visible" are legible rather than glyph-only. They are NOT
-          duplicated into the primary toolbar: one action, one control, and they
-          belong beside the viewport they act on (Browse has no viewport). Zoom
-          stays icon-only — a magnifier ± is unambiguous and the row must not
-          outgrow the canvas. */}
-      <div className="graph-explore-toolbar">
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={() => dispatch({ kind: 'fit' })}
-        >
-          <Maximize2 size={14} strokeWidth={2} aria-hidden="true" />
-          Fit to View
-        </button>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={() => dispatch({ kind: 'zoom', factor: 1.25 })}
-          aria-label="Zoom in"
-        >
-          <ZoomIn size={14} strokeWidth={2} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={() => dispatch({ kind: 'zoom', factor: 1 / 1.25 })}
-          aria-label="Zoom out"
-        >
-          <ZoomOut size={14} strokeWidth={2} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={() => dispatch({ kind: 'reset' })}
-        >
-          <RotateCcw size={14} strokeWidth={2} aria-hidden="true" />
-          Reset View
-        </button>
-        {/* P36V.1 F — one press lands exactly ON the next level-of-detail
-            threshold. Semantic zoom is otherwise six 1.25× presses away from
-            being discovered at all. Disabled (not hidden) at the deepest
-            level, so the control never disappears under the pointer. */}
-        <button
-          type="button"
-          className="btn btn-secondary"
-          disabled={nextScale === null}
-          onClick={revealDetail}
-        >
-          <Network size={14} strokeWidth={2} aria-hidden="true" />
-          Reveal Detail
-        </button>
-        <span className="graph-explore-toolbar-sep" aria-hidden="true" />
-        <span className="memory-graph-modenote">zoom {Math.round(scale * 100)}%</span>
-        <span className="memory-graph-modenote graph-lod-indicator">
-          {levelSummary(level, plan, focusSuspends, deep)}
-        </span>
-        {/* HOW TO MOVE THE CANVAS, AND WHAT THE OUTER RING IS (2026-10-12): the
-            caption under the canvas is now this toolbar's info tip. It is how-to
-            and where-from prose, not a qualifier of any figure, and `HelpTip`
-            keeps it in the DOM while closed — so the ring explanation is still
-            on the surface for every guard that reads it. */}
-        <HelpTip subject={LABELS.graphCanvasInfoLabel} label={LABELS.graphCanvasInfoLabel} kind="info">
-          <span className="graph-canvas-caption">
-            {/* WHAT EACH LEVEL ACTUALLY DRAWS. The previous copy said, for BOTH deep
-                levels, that "only the marks and the arrows come from the graph". At
-                the cluster level neither is a graph object — a mark is a
-                (file, community) GROUP and a line is a FOLD over the real edges
-                between two such groups — so the sentence asserted a provenance the
-                level does not have. Each level now says what it is drawing. */}
-            {plan?.level === 'cluster' ? (
-              <>
-                Drag the background to pan. Each mark here is a GROUP of symbols that share one file and
-                one recorded cluster; each dashed line SUMMARISES the references recorded between two
-                such groups, so one line can stand for several of different kinds — hover or focus a line
-                to read exactly what it summarises. Hover or focus a mark for its detail; Enter pins it.
-                Zoom in for the individual symbols, out for the file projection. Positions inside a file
-                are a deterministic layout, not a claim about the code's structure; the groups and the
-                counts come from the graph.
-              </>
-            ) : plan ? (
-              <>
-                Drag the background to pan. Each mark is ONE symbol recorded in the graph and each solid
-                arrow is ONE recorded reference, in the direction the payload recorded it. Hover or focus
-                a mark for its detail; Enter pins it. Zoom out to return to the file projection.
-                Positions inside a file are a deterministic layout, not a claim about the code's
-                structure — the marks and the arrows themselves come from the graph.
-              </>
-            ) : (
-              <>
-                Drag the background to pan, drag a node to move it. Every visible node is labelled once{' '}
-                {LABEL_LIMIT} or fewer are shown; above that up to {HUB_LABEL_COUNT} of the
-                most-connected nodes stay labelled as landmarks, along with the selected node and its
-                connections. Zoom in past {Math.round(LOD_CLUSTER_SCALE * 100)}% to open the clusters
-                and symbols inside these files.
-              </>
-            )}
-          </span>
-        </HelpTip>
-      </div>
-
+    /* `data-zoom` is the current scale as a whole percentage. The visible "zoom N%"
+       readout was dropped 2026-11-02 (declutter); the attribute keeps the scale
+       observable to the tests that drive the viewport, and says nothing to a reader. */
+    <div className="graph-explore" data-zoom={Math.round(scale * 100)}>
       <div className="graph-canvas">
+        {/*
+          THE VIEWPORT CONTROLS, AS AN ICON CLUSTER IN THE CANVAS CORNER (2026-11-02).
+          They were a toolbar row above the canvas — Fit to View, zoom in, zoom out,
+          Reset View, Reveal Detail, a zoom readout and an info tip — which on a phone
+          stacked into full-width rows before the canvas appeared at all. They act on
+          the viewport, so they sit on it. Each keeps its name as `aria-label` (and as
+          a `title` tooltip for a pointer), so every control is still reachable by the
+          same name. Reveal Detail is disabled (not hidden) at the deepest level, so
+          the control never disappears under the pointer.
+        */}
+        <div className="graph-viewport-controls" role="group" aria-label="Canvas view">
+          <button
+            type="button"
+            className="graph-viewport-btn"
+            onClick={() => dispatch({ kind: 'fit' })}
+            aria-label="Fit to View"
+            title="Fit to View"
+          >
+            <Maximize2 size={15} strokeWidth={2} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="graph-viewport-btn"
+            onClick={() => dispatch({ kind: 'zoom', factor: 1.25 })}
+            aria-label="Zoom in"
+            title="Zoom in"
+          >
+            <ZoomIn size={15} strokeWidth={2} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="graph-viewport-btn"
+            onClick={() => dispatch({ kind: 'zoom', factor: 1 / 1.25 })}
+            aria-label="Zoom out"
+            title="Zoom out"
+          >
+            <ZoomOut size={15} strokeWidth={2} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="graph-viewport-btn"
+            onClick={() => dispatch({ kind: 'reset' })}
+            aria-label="Reset View"
+            title="Reset View"
+          >
+            <RotateCcw size={15} strokeWidth={2} aria-hidden="true" />
+          </button>
+          {/* P36V.1 F — one press lands exactly ON the next level-of-detail
+              threshold. Semantic zoom is otherwise six 1.25× presses away from
+              being discovered at all. */}
+          <button
+            type="button"
+            className="graph-viewport-btn"
+            disabled={nextScale === null}
+            onClick={revealDetail}
+            aria-label="Reveal Detail"
+            title="Reveal Detail"
+          >
+            <Network size={15} strokeWidth={2} aria-hidden="true" />
+          </button>
+        </div>
         {visibleIds.length === 0 ? (
           <p className="graph-canvas-empty">
             No nodes match the current search, filters or focus — nothing is drawn rather than
@@ -912,6 +867,55 @@ export function GraphCanvas({
         {tooltip && <CanvasTooltip content={tooltip} />}
       </div>
 
+      {/* WHICH LAYER IS DRAWN, and how to move the canvas — one quiet line under it. */}
+      <div className="graph-canvas-caption-row">
+        <span className="memory-graph-modenote graph-lod-indicator">
+          {levelSummary(level, plan, focusSuspends, deep)}
+        </span>
+        {/* HOW TO MOVE THE CANVAS, AND WHAT THE OUTER RING IS (2026-10-12): the
+            caption under the canvas is now this toolbar's info tip. It is how-to
+            and where-from prose, not a qualifier of any figure, and `HelpTip`
+            keeps it in the DOM while closed — so the ring explanation is still
+            on the surface for every guard that reads it. */}
+        <HelpTip subject={LABELS.graphCanvasInfoLabel} label={LABELS.graphCanvasInfoLabel} kind="info">
+          <span className="graph-canvas-caption">
+            {/* WHAT EACH LEVEL ACTUALLY DRAWS. The previous copy said, for BOTH deep
+                levels, that "only the marks and the arrows come from the graph". At
+                the cluster level neither is a graph object — a mark is a
+                (file, community) GROUP and a line is a FOLD over the real edges
+                between two such groups — so the sentence asserted a provenance the
+                level does not have. Each level now says what it is drawing. */}
+            {plan?.level === 'cluster' ? (
+              <>
+                Drag the background to pan. Each mark here is a GROUP of symbols that share one file and
+                one recorded cluster; each dashed line SUMMARISES the references recorded between two
+                such groups, so one line can stand for several of different kinds — hover or focus a line
+                to read exactly what it summarises. Hover or focus a mark for its detail; Enter pins it.
+                Zoom in for the individual symbols, out for the file projection. Positions inside a file
+                are a deterministic layout, not a claim about the code's structure; the groups and the
+                counts come from the graph.
+              </>
+            ) : plan ? (
+              <>
+                Drag the background to pan. Each mark is ONE symbol recorded in the graph and each solid
+                arrow is ONE recorded reference, in the direction the payload recorded it. Hover or focus
+                a mark for its detail; Enter pins it. Zoom out to return to the file projection.
+                Positions inside a file are a deterministic layout, not a claim about the code's
+                structure — the marks and the arrows themselves come from the graph.
+              </>
+            ) : (
+              <>
+                Drag the background to pan, drag a node to move it. Every visible node is labelled once{' '}
+                {LABEL_LIMIT} or fewer are shown; above that up to {HUB_LABEL_COUNT} of the
+                most-connected nodes stay labelled as landmarks, along with the selected node and its
+                connections. Zoom in past {Math.round(LOD_CLUSTER_SCALE * 100)}% to open the clusters
+                and symbols inside these files.
+              </>
+            )}
+          </span>
+        </HelpTip>
+      </div>
+
       {/* STRUCTURAL STALENESS — on the surface, not buried in a dialog. The
           symbol layer reads as a map of the current code and it is not one: its
           structure is pinned to the snapshot's `built_at_commit`. Rendered from
@@ -946,9 +950,9 @@ export function GraphCanvas({
       )}
       {deep.status === 'unavailable' && (
         <p className="graph-deep-note advisory">
-          Symbol-level detail is unavailable in this deployment
+          Symbol-level detail is unavailable
           {deep.reason ? ` — ${describeDeepReason(deep.reason)}` : ''}. The canvas stays on the file
-          projection; nothing was aggregated, estimated or stood in for the missing structure.
+          projection.
         </p>
       )}
       {deepIndex && focusSuspends && level !== 'file' && (
@@ -980,15 +984,9 @@ export function GraphCanvas({
         </p>
       )}
 
-      {/* A FIGURE, SO IT IS VISIBLE (review, 2026-10-18). This sentence carries a
-          count, and an info tip holds prose, never a measurement — so it stays on
-          the surface under the canvas it describes rather than in the caption tip. */}
-      {!plan && isolatedVisible > 0 && (
-        <p className="graph-canvas-isolated">
-          {isolatedVisible} of the nodes drawn here have no recorded reference at all and sit on
-          the outer rings — the ring is where they are parked, not a relationship between them.
-        </p>
-      )}
+      {/* ~~The ring sentence ("N of the nodes drawn here have no recorded reference at
+          all and sit on the outer rings…")~~ moved 2026-11-02 into About This Graph,
+          which already says it (`GraphHelp.tsx`, Node Types). */}
     </div>
   );
 }
@@ -1042,7 +1040,7 @@ function levelAnnouncement(
 ): string {
   if (deep.status === 'loading') return 'Loading the symbol-level structure.';
   if (deep.status === 'unavailable') {
-    return 'Symbol-level detail is unavailable in this deployment. The canvas stays on the file projection.';
+    return 'Symbol-level detail is unavailable. The canvas stays on the file projection.';
   }
   if (level !== 'file' && focusSuspends) {
     return 'A neighbourhood or path focus is active, so the canvas keeps the file projection it was computed over.';

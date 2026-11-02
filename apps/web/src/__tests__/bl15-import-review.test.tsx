@@ -538,7 +538,7 @@ describe('BL15 review · §7 five outcomes, never a progress bar', () => {
       'Carried across by a named rule',
       'Needs a domain owner to choose',
       'The schema has no field for it',
-      'The schema has a field this build cannot reach',
+      'A schema field with no write route',
     ]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }

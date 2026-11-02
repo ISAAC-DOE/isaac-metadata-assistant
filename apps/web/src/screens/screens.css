@@ -3243,13 +3243,35 @@ a.settings-jump-btn {
   font-size: var(--font-size-body);
   color: var(--text-secondary);
 }
-.memory-size-view {
+/* "How Big Is It?" — three inline figures (2026-11-02), value above label, each
+   value a link to the tab that browses it. */
+.memory-figures.memory-size-figures {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-md);
+  flex-wrap: wrap;
+  gap: var(--space-md) var(--space-xl);
+  margin: 0;
 }
-.memory-size-view[hidden] {
-  display: none;
+.memory-size-figures .memory-figure {
+  flex-direction: column-reverse;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: var(--space-2xs);
+  padding: 0;
+  border-bottom: 0;
+}
+.memory-size-figures .memory-figure dt {
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+}
+.memory-size-figures .memory-figure dd {
+  text-align: left;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-heading-lg);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.memory-size-figures .memory-size-open {
+  font-size: inherit;
+  font-weight: var(--font-weight-semibold);
 }
 .memory-size-open {
   align-self: flex-start;
@@ -3281,21 +3303,4 @@ a.settings-jump-btn {
   margin: var(--space-2xs) 0 var(--space-sm);
   font-size: inherit;
   color: inherit;
-}
-/* Each size view leads with its own figure, value first. */
-.memory-figures-lead > .memory-figure:first-child {
-  justify-content: flex-start;
-  gap: var(--space-sm);
-  padding-top: 0;
-}
-.memory-figures-lead > .memory-figure:first-child dd {
-  order: -1;
-  text-align: left;
-  font-family: var(--font-ui);
-  font-size: var(--font-size-heading-lg);
-  font-variant-numeric: tabular-nums lining-nums;
-}
-.memory-figures-lead > .memory-figure:first-child dt {
-  font-size: var(--font-size-body);
-  color: var(--text-secondary);
 }

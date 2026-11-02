@@ -416,19 +416,13 @@ export const LABELS = {
    * makes no per-person claim: "me" is the reader at the screen, and the six
    * phrasings `experiment-library-screen.test.tsx` bans still do not match it.
    */
-  libraryOverviewHeading: 'What Needs Me?',
-  libraryOverviewInfoLabel: 'About This Summary',
-  // Inside a folder the totals are withheld (they are the workspace's, not the
-  // folder's); the widget keeps the filter and search under this title.
-  libraryFindHeading: 'Find an Experiment',
-  libraryFindInfoLabel: 'About This Search',
-  libraryOverviewTotal: 'Experiments',
-  libraryOverviewNeedsAttention: 'Needs Attention',
+  /* ~~'What Needs Me?'~~ and its info tip, the in-folder ~~'Find an Experiment'~~
+     title, and ~~libraryOverviewNote~~ ("Counts over the records in this workspace.
+     Summary figures only; nothing here gates export or changes a record.") — RETIRED
+     2026-11-02: the card became one row of filter chips beside search and sort, with
+     no heading and no info tip. The two sums keep their labels. */
   libraryOverviewRuns: 'Runs Recorded',
   libraryOverviewProposals: 'Proposals Waiting',
-  libraryOverviewNote:
-    'Counts over the records in this workspace. Summary figures only; nothing here gates ' +
-    'export or changes a record.',
 
   /*
    * THE SAME FOUR FIGURES WHEN THE SERVER SAYS THE READ WAS SHORT.
@@ -449,11 +443,9 @@ export const LABELS = {
    * Found by independent review (B-2). The reviewer also measured that NO test
    * covered the interaction — the strip never consulted `incomplete` at all.
    */
-  libraryOverviewHeadingPartial: 'Statistics From This Read',
   libraryOverviewNotePartial:
-    'Counts over the records this read returned, which is fewer than the workspace holds — ' +
-    'the notice above says why. Not a workspace total. Summary figures only; nothing here ' +
-    'gates export or changes a record.',
+    'Counts over the records this read returned, which is fewer than the workspace holds. ' +
+    'Not a workspace total.',
 
   /*
    * RETIRED — a SECOND five-step workflow vocabulary, deleted rather than
@@ -1085,6 +1077,9 @@ export const LABELS = {
   actionStart: 'Start',
   // The Load Materials card's visible verb once this browser has finished it.
   actionReplay: 'Replay',
+  // The My Experiments empty state's Historical Import card: the card title carries
+  // the noun, and the link's accessible name is `actionOpenHistoricalImport`.
+  actionOpen: 'Open',
   actionSkipForNow: 'Not Now',
   actionSkipTutorial: 'Skip Walkthrough',
   actionTutorialBack: 'Back',
@@ -1351,7 +1346,8 @@ export const LABELS = {
    * "bring in work you already have" is kept verbatim: it is the phrase
    * `historical-import.test.tsx` pins, for the reason given above.
    */
-  emptyExperimentsBody: 'Start fresh, or bring in work you already have.',
+  // ~~emptyExperimentsBody: 'Start fresh, or bring in work you already have.'~~ —
+  // cut 2026-11-02 (declutter): the cards under the title each carry their own verb.
   emptyExperimentsChoices: 'Ways to begin',
 
   /*
@@ -1372,19 +1368,14 @@ export const LABELS = {
    */
   historicalImportHint:
     'Rebuild a past experiment; nothing becomes a value unreviewed.',
-  // The empty state's validator card. "Never stored" stays VISIBLE: it is a
-  // privacy state (`DEC-35`), the route's documented contract for
-  // `POST /api/validate/record` — the body "is never written anywhere".
-  validatorCardTitle: 'Schema Validator',
-  validatorCardHint: 'Check a file against the official schema; it is never stored.',
-  validatorCardMore:
-    'It is the same deterministic check this app runs on an exported record, and it names every ' +
-    'failing path.',
+  /* The empty state's validator CARD is a text link now (2026-11-02): the button
+     reads `actionOpenValidator` and this hint follows it. ~~"Check a file against the
+     official schema; it is never stored."~~ and the info tip ~~"It is the same
+     deterministic check this app runs on an exported record…"~~ are retired. */
   actionOpenHistoricalImport: 'Open Historical Import',
 
   actionOpenValidator: 'Open Validator',
-  openValidatorHint:
-    'Check a record file you already have against the official ISAAC schema.',
+  openValidatorHint: 'Check a record file you already have against the official schema.',
 
   /*
    * WHERE A NEW EXPERIMENT GOES — one short line, and it is DERIVED, never assumed.
@@ -1406,12 +1397,8 @@ export const LABELS = {
    * `emptyDir`, pods and deployments are our vocabulary, not the reader's. The
    * consequence is the same and the consequence is the part they need.
    */
-  storageDurable:
-    'Experiments you create are saved in this deployment’s database and stay here across ' +
-    'restarts.',
-  storageEphemeral:
-    'Experiments you create live in this server’s workspace and are cleared when the server ' +
-    'restarts.',
+  /* ~~storageDurable~~ and ~~storageEphemeral~~ RETIRED 2026-11-02 (owner direction:
+     no standing reassurance or caveat prose). Only the failure state below speaks. */
   /*
    * THE THIRD SENTENCE, AND IT IS NOT A REASSURING ONE ON PURPOSE.
    *
@@ -1506,10 +1493,11 @@ export const LABELS = {
    * concatenation and no single-line grep reaches it. That is the second time
    * in this PR a text sweep has missed a site for a mechanical reason.
    */
+  // SHORTENED 2026-11-02: the failure reason only. It still names no location and
+  // no restart outcome, and states the failure as a recorded observation.
   storageUnavailable:
-    'A database is configured to hold experiments for this deployment, and the backend has ' +
-    'recorded that they were not reaching it. Creating one may fail outright, and nothing on ' +
-    'this screen establishes that a record created now is stored durably.',
+    'A database is configured to hold experiments, and the backend has recorded that they ' +
+    'were not reaching it. Creating one may fail.',
 
   // /load, outside a worked example (B-05). One sentence of cause, ahead of the audited
   // `launchGuidedDemoBody` it is always rendered with — so the screen says WHY the
@@ -1673,35 +1661,18 @@ export const LABELS = {
    */
   // Keeps the claim P24.8 pins — it surfaces related FILES and concepts, never
   // "related records" (`memory-honesty.test.tsx`).
-  // One line; the paragraph it replaced is `memoryIntroFull`, verbatim, behind the
-  // info tip beside it — including "it never validates, completes, or supplies a value".
-  memoryIntro: 'Related files and concepts from this project — leads to verify, never truth.',
+  // One line, and the page's ONE "verify, not truth" statement (2026-11-02). The info
+  // tip that held ~~memoryIntroFull~~ ("…it never validates, completes, or supplies a
+  // value") and the trust card's ~~memoryTrustSub~~ ("Graphify is a memory plane, not a
+  // truth plane…") are retired at the owner's direction.
+  memoryIntro: 'Related files and concepts from this project — leads to verify, not truth.',
   memoryTrustTitle: 'Can I Trust the Snapshot?',
-  memoryTrustSub:
-    'Graphify is a memory plane, not a truth plane — every lead points back to a cited file to confirm.',
-  /*
-   * THE FULL INTRODUCTION, behind the page's info tip (2026-10-12). The visible
-   * intro is one sentence (`DEC-35`); this is the paragraph it replaced, verbatim,
-   * plus the orientation line that used to sit under the Overview card — nothing
-   * in it was dropped, an independent review checked.
-   */
-  memoryIntroFull:
-    "Project Memory is the assistant's memory and navigation surface — Graphify plus project docs. It " +
-    'is deliberately separate from the experiment queue and never appears inside it. It surfaces ' +
-    'related files and concepts, prior documents, and "how is this connected?" answers as leads to ' +
-    'verify — it never validates, completes, or supplies a value.',
-  memoryAllTabsRead: 'Sources, Concepts and Graph all read the memory graph summarised above.',
-  memoryIntroInfoLabel: 'About Project Memory',
   historicalImportInfoLabel: 'How Rebuilding a Past Experiment Works',
   historicalImportHintMore:
     'Record where each file lives, see what ISAAC can read out of it, and review every candidate ' +
     'before any of it becomes a value.',
   memoryTrustInfoLabel: 'What Each Check Means',
   memorySizeTitle: 'How Big Is It?',
-  memorySizeViews: 'Counts to Show',
-  memoryOpenSources: 'Browse the sources',
-  memoryOpenGraph: 'Open the graph',
-  memoryOpenConcepts: 'Browse the concepts',
   memoryOriginTitle: 'Where Did It Come From?',
   // The graph command bar's disclosure for the hint and the suggested commands.
   graphCommandsToggle: 'Suggestions',
@@ -1735,7 +1706,6 @@ export const LABELS = {
    * reader's records are untouched, which is a statement about this button's reach.
    */
   tutorialOfferTitle: 'Guided Walkthrough',
-  tutorialOfferLead: 'New here?',
   tutorialOfferLine: 'A short tour of the real screens, on its own examples.',
   tutorialOfferBody:
     'A short guided tour of this app, pointing at the real controls on the real screens: what this ' +

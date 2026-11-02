@@ -114,14 +114,31 @@ afterEach(() => {
 
 // --- DOM helpers -------------------------------------------------------------
 
-const area = () => document.querySelector('.graph-cmd-suggest') as HTMLElement | null;
-const chips = () => [...document.querySelectorAll('.graph-cmd-suggest-btn')] as HTMLButtonElement[];
+const area = () => {
+  ensureQueryOpen();
+  return document.querySelector('.graph-cmd-suggest') as HTMLElement | null;
+};
+const chips = () => {
+  ensureQueryOpen();
+  return [...document.querySelectorAll('.graph-cmd-suggest-btn')] as HTMLButtonElement[];
+};
 const labels = () =>
   chips().map((b) => (b.querySelector('.graph-cmd-suggest-label')?.textContent ?? '').trim());
 const commands = () =>
   chips().map((b) => (b.querySelector('.graph-cmd-suggest-cmd')?.textContent ?? '').trim());
-const bar = (view: RenderResult) =>
-  view.getByRole('combobox', { name: 'Graph command' }) as HTMLInputElement;
+/** The command bar sits behind the graph's "Query" disclosure (2026-11-02). Every
+ *  helper that reaches the bar opens it first, exactly as a reader would. */
+function ensureQueryOpen(): void {
+  if (document.querySelector('.graph-cmd')) return;
+  const toggle = [...document.querySelectorAll<HTMLButtonElement>('button.memory-graph-disclosure-btn')].find(
+    (b) => b.textContent?.trim() === 'Query',
+  );
+  if (toggle) fireEvent.click(toggle);
+}
+const bar = (view: RenderResult) => {
+  ensureQueryOpen();
+  return view.getByRole('combobox', { name: 'Graph command' }) as HTMLInputElement;
+};
 const nodeCount = () => document.querySelectorAll('.memory-graph-node').length;
 const selected = () => document.querySelector('.memory-graph-node.selected');
 const live = () =>
@@ -636,6 +653,7 @@ describe('graph suggested commands — keyboard-operable and honestly named', ()
     // mounted while closed, so the DOM-reading tests in this file still reach it;
     // a role query only sees it once it is open, as a reader would). The toggle is
     // a real `aria-expanded` button, asserted here too.
+    ensureQueryOpen();
     const toggle = view.getByRole('button', { name: LABELS.graphCommandsToggle });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(toggle);
@@ -663,6 +681,7 @@ describe('graph suggested commands — keyboard-operable and honestly named', ()
   it('explains the insert-vs-run distinction in words, next to the row', async () => {
     const { view } = renderGraph();
     await view.findByText('Graph', { selector: 'h2' });
+    ensureQueryOpen();
     const note = document.querySelector('.graph-cmd-suggest-note') as HTMLElement;
     expect(note.textContent).toMatch(/puts its exact command in the bar above; you press Run/);
     expect(note.textContent).toMatch(/Only runs now acts on the click/);

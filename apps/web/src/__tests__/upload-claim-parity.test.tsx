@@ -477,8 +477,9 @@ describe('R1b §1 · the file-reading controls exist, so the absolute claim is f
     expect(src).not.toMatch(/\bfetch\s*\(/);
     expect(src).not.toMatch(/XMLHttpRequest/);
     expect(src).not.toMatch(/FormData/);
-    // ...and the reader is told so, in words, in the component itself.
-    expect(src).toMatch(/not sent to ISAAC/);
+    // ...and the reader is told so, in words, in the component itself (2026-11-02:
+    // one plain sentence, "the file itself stays on this computer").
+    expect(src).toMatch(/file itself stays on this computer/);
   });
 
   it('the Schema Proposals drafts loader reads the chosen file in the browser and parses it there', () => {

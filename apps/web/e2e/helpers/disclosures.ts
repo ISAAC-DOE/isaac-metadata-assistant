@@ -203,9 +203,10 @@ export const WIDGET_INFO_PANELS: Readonly<Record<string, number>> = Object.freez
   imports: 1,
   /* The pages slice (#291), MEASURED in Chromium on 2026-10-19 on the merged branch
      (`.widget-info` counted after load, the memory surfaces served a valid snapshot):
-       experiments-example  1 — What Needs Me? (the library widget renders only
-                                with rows, so the EMPTY `experiments` surface
-                                mounts 0 and keeps the default)
+       ~~experiments-example  1 — What Needs Me?~~ — 0 since 2026-11-02: the
+                                library card became one row of filter chips
+                                beside search and sort, with no info panel, so
+                                it keeps the default like `experiments`
        load                 1 — Guided Walkthrough (2026-11-02: the upload widget
                                 retired)
        memory               1 — Can I Trust the Snapshot? (How Big Is It? and
@@ -213,7 +214,6 @@ export const WIDGET_INFO_PANELS: Readonly<Record<string, number>> = Object.freez
      `memory-graph` and `not-found` mount no widget, so they keep the default 0. The
      `HelpTip` info tips these pages also use are a different control (`.helptip`),
      not counted here. */
-  'experiments-example': 1,
   load: 1,
   memory: 1,
 });

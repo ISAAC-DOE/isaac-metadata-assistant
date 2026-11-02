@@ -602,7 +602,10 @@ describe('R0 · a11y — axe over the walkthrough in the real app', () => {
 
     // Its supporting line is text next to the control, not the control's own name: the
     // accessible name stays short enough to be useful in a screen reader's control list.
-    expect(launch.textContent?.trim()).toBe(LABELS.actionStartTutorial);
+    // Since 2026-11-02 the visible word is "Start" (the card title carries the noun)
+    // and the name opens with it (WCAG 2.5.3).
+    expect(launch.textContent?.trim()).toBe(LABELS.actionStart);
+    expect(launch).toHaveAccessibleName(LABELS.actionStartTutorial);
 
     fireEvent.click(launch);
     const bubble = await waitFor(

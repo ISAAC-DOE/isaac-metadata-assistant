@@ -19,7 +19,7 @@ import { LibraryOverview } from '../components/LibraryOverview';
 import { TutorialPromotion } from '../components/TutorialPromotion';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { HelpTip } from '../components/HelpTip';
-import { Compass, Inbox, LayoutList, Plus, ShieldCheck } from '../components/icons';
+import { Compass, Inbox, LayoutList, Plus } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { api } from '../lib/api';
@@ -29,7 +29,7 @@ import { useFetch } from '../lib/useFetch';
 import { useHealth } from '../lib/useHealth';
 import { useWorkspaceScope } from '../lib/workspaceScope';
 import { subscribeWorkspaceRebuilt } from '../lib/workspaceInvalidation';
-import { libraryRows, queueSubcount, summariesToQueueGroups } from '../lib/adapt';
+import { libraryRows, summariesToQueueGroups } from '../lib/adapt';
 import {
   DEFAULT_LIBRARY_SORT,
   facetCounts,
@@ -113,10 +113,19 @@ function durabilityOf(
   }
 }
 
-/** The one short line about where a new experiment goes, or nothing at all. */
+/**
+ * The one short line about where a new experiment goes, or nothing at all.
+ *
+ * ONLY THE FAILURE STATE SPEAKS (2026-11-02, owner direction: no standing
+ * reassurance or caveat prose). ~~`durable` → "Experiments you create are saved in
+ * this deployment's database and stay here across restarts."~~ and ~~`ephemeral` →
+ * "Experiments you create live in this server's workspace and are cleared when the
+ * server restarts."~~ are retired: one was reassurance in the default case, the
+ * other a standing caveat about how an operator runs the server. Neither is a
+ * reason a reader acts differently on this screen. `create-experiment.test.tsx`
+ * pins that neither state renders a line, and that no state promises durability.
+ */
 function storageSentence(durability: Durability): string | null {
-  if (durability === 'durable') return LABELS.storageDurable;
-  if (durability === 'ephemeral') return LABELS.storageEphemeral;
   // NOT SILENCE. `unavailable` is the one bad state, and the reader is about to
   // press a button whose result is not durable — saying so before they press it
   // is the whole value of the line. It is deliberately not softened into "storage
@@ -373,7 +382,6 @@ export function ExperimentsHome() {
   const searchHintId = useId();
   const [folder, setFolder] = useState('');
 
-  let subcount = '';
   let body: ReactNode;
   /*
    * Whether the LOADED list rendered the empty state rather than a queue. Hoisted out
@@ -401,7 +409,6 @@ export function ExperimentsHome() {
      * Read here, beside `summaries`, so the two can never come from different reads.
      */
     const incompleteRead = result.data.incomplete !== null;
-    subcount = queueSubcount(summaries);
     /*
      * `queueIsEmpty` IS ABOUT THE WORKSPACE, NOT ABOUT THE VIEW, and the
      * distinction decides which of two very different screens a reader gets.
@@ -498,7 +505,7 @@ export function ExperimentsHome() {
           readIncomplete={incompleteRead}
           showTotals={folder === ''}
           searchHintId={searchHintId}
-          facets={<LibraryFacets facet={facet} onFacet={setFacet} counts={counts} variant="tiles" />}
+          facets={<LibraryFacets facet={facet} onFacet={setFacet} counts={counts} />}
         >
           <LibraryToolbar
             showFacets={false}
@@ -580,11 +587,10 @@ export function ExperimentsHome() {
       <div className="page-header">
         <div>
           <h1 className="page-title">{LABELS.screenExperiments}</h1>
-          {/* ON THE EMPTY STATE ONLY since 2026-10-18 (review: "5" appeared six times
-              above the first row). With rows on screen, the status filter's own
-              tiles state the total and how many are ready; the empty state keeps
-              the line because it states zero rather than omitting it. */}
-          {subcount && queueIsEmpty && <p className="page-subcount">{subcount}</p>}
+          {/* NO SUBCOUNT (2026-11-02). With rows on screen the status chips state
+              the total and how many are ready; on the empty state "0 experiments ·
+              0 ready to export" sat directly above "Start Your First Experiment",
+              stating zero twice. */}
         </div>
         {/*
          * TWO CONTROLS WERE REMOVED FROM HERE, and neither was a styling choice.
@@ -785,91 +791,42 @@ function EmptyExperiments({
           <LayoutList size={20} strokeWidth={1.75} />
         </span>
         <div className="queue-empty-lede-text">
+          {/* ~~`emptyExperimentsBody` ("Start fresh, or bring in work you already
+              have.")~~ — cut 2026-11-02 (declutter): the three cards below say it,
+              each with its own verb. */}
           <h2 className="queue-empty-title" id="queue-empty-title">
             {LABELS.emptyExperimentsTitle}
           </h2>
-          {/*
-            THE BODY CHANGED BECAUSE THE OLD ONE BECAME FALSE, not because it read
-            better. It said "This deployment cannot yet create or import a record,
-            so nothing has been added" — true when it was written, and untrue the
-            moment `POST /api/experiments` shipped. Leaving it would have been the
-            one failure this screen's whole comment history is about.
-
-            ~~What it does NOT claim: it does not promise import. There is still no
-            import path — `POST /api/uploads` refuses every upload by design — so
-            the sentence names creating, validating and the demo, which are the
-            three things a reader can actually do from here.~~
-
-            **CORRECTED 2026-09-13, and struck rather than deleted because "there
-            is still no import path" is exactly the kind of claim a future session
-            acts on — by deleting the card below.** There IS one now:
-            `HIST-001`/`HIST-004`/`HIST-003a` shipped nine operations over an
-            import session and a review surface over them, so the omission stopped
-            being honesty the moment they landed. This is `UX-016`'s import half: a
-            scientist with zero experiments who wants to RECOVER rather than CREATE
-            had nowhere to go from the one screen they land on.
-
-            WHAT IS STILL TRUE, and is why the copy says "bring in work you already
-            have" rather than "import your files": `POST /api/uploads` is
-            unchanged and still refuses every upload, and Historical Import does
-            not open a file you point it at. It records where the file is. The
-            destination says so itself, per source.
-          */}
-          <p className="queue-empty-body">{LABELS.emptyExperimentsBody}</p>
         </div>
       </div>
 
-      {/* ~~An eyebrow, not a heading: it labels the cards below without adding an
-          outline level~~ — REMOVED 2026-10-12 (clutter audit). "What you can do
-          here now" restated what four cards each carrying a verb already say, and
-          an eyebrow over a list is decoration rather than structure; the list is
-          named for assistive technology instead, which is the job it was doing. */}
+      {/* ONE PRIMARY, TWO QUIET PEERS (2026-11-02). Create Experiment is the solid
+          `btn-primary`. The walkthrough and Historical Import keep their cards but
+          their buttons are short ("Start", "Open") because the card title carries
+          the noun; each accessible name still opens with the visible word and
+          names the destination (WCAG 2.5.3). The Schema Validator is a utility,
+          not a way to begin, so it is a text link under the list. */}
       <ul className="queue-empty-list" aria-label={LABELS.emptyExperimentsChoices}>
         <CreateExperimentControl variant="card" onCreated={onCreated} />
 
         {/*
-          START GUIDED WALKTHROUGH (was "Launch Guided Demo") — behaviour
-          UNCHANGED, and every part of it is load-bearing.
-
-          It calls `startTutorial` directly, on exactly the contract
+          START GUIDED WALKTHROUGH — behaviour UNCHANGED, and every part of it is
+          load-bearing. It calls `startTutorial` directly, on exactly the contract
           `TutorialPromotion` uses: the live node from a ref, so
           `tutorialReturnFocusTarget` can hand focus back here when the overlay
-          closes, and so a node that has since unmounted is correctly refused.
-          `disabled={launchBusy}` is the double-submit guard documented at its
-          definition above. What stood here before either design was
-          `actionGoToHelpAndTutorial`, a secondary button whose entire behaviour
-          was to navigate somewhere else to press a different button; that is not
-          reintroduced.
-
-          NOT a duplicate of Settings → Help & Tutorial, which keeps the replay
-          control as the walkthrough's permanent home. This is an entry point,
-          not a second home. ~~It carries a third name so that no label in the
-          app addresses two controls~~ — withdrawn 2026-10-12: it now carries the
-          ONE name every start control carries ("Start Guided Walkthrough"),
-          because every one of them does the same thing; see `labels.ts` above
-          `actionStartTutorial` for why one name per thing replaced one name per
-          control.
-
-          WHAT CHANGED IS ONLY THE TREATMENT — `btn-primary` to `btn-action`. See
-          the hierarchy note above.
+          closes. `disabled={launchBusy}` is the double-submit guard documented at
+          its definition above.
         */}
         <li className="queue-empty-action">
           <span className="queue-empty-action-mark" aria-hidden="true">
             <Compass size={18} strokeWidth={1.75} />
           </span>
           <div className="queue-empty-action-main">
-            {/* ONE NAME (2026-10-12): the card was "Guided demo" over a button
-                reading "Launch Guided Demo", for the same tour the first-run strip
-                calls "Guided Walkthrough". It is one thing with one name now. */}
             <h3 className="queue-empty-action-title">{LABELS.tutorialOfferTitle}</h3>
             <p className="queue-empty-hint">
               {LABELS.tutorialOfferLine}{' '}
-              {/* The audited disclosure is still RENDERED, verbatim, and the button
-                  is still DESCRIBED BY it — it moved behind an info tip because it is
-                  a reassurance, not one of `DEC-35`'s always-visible classes.
-                  `HelpTip` keeps its panel in the DOM while closed, so
-                  `aria-describedby` still resolves to this text and
-                  `tutorial-flow.test.tsx`'s ratchet still reads it here. */}
+              {/* `HelpTip` keeps its panel in the DOM while closed, so
+                  `aria-describedby` still resolves to this text. */}
               <HelpTip subject={LABELS.tutorialOfferTitle} kind="info">
                 <span id="queue-empty-launch-hint">{LABELS.launchGuidedDemoBody}</span>
               </HelpTip>
@@ -879,44 +836,24 @@ function EmptyExperiments({
             <button
               ref={launchRef}
               type="button"
-              className="btn btn-action queue-empty-cta"
+              className="btn btn-secondary queue-empty-cta"
               disabled={launchBusy}
+              aria-label={
+                walkthroughCompleted ? LABELS.actionReplayTutorial : LABELS.actionStartTutorial
+              }
               aria-describedby="queue-empty-launch-hint"
               onClick={() => startTutorial(launchRef.current)}
             >
               {/* One name, two verbs: Replay for a browser that has finished it. */}
-              {walkthroughCompleted ? LABELS.actionReplayTutorial : LABELS.actionStartTutorial}
+              {walkthroughCompleted ? LABELS.actionReplay : LABELS.actionStart}
             </button>
           </div>
         </li>
 
         {/*
-          THE STANDALONE VALIDATOR. It used to be a bare secondary button with a
-          one-line caption trailing it in a list, under a lead-in that literally
-          read "Or, without starting the walkthrough:" — which framed it as a
-          footnote to the real actions. It gets the same card, the same
-          title-and-description shape and the same cta column as the other two, so
-          it is a peer; only the button variant separates them.
-
-          The description is checkable, not promotional. "Never stored" is the
-          route's documented contract — `POST /api/validate/record`: "the body is
-          never written anywhere (no workspace file, no temp file, no record
-          mutation), and nothing about its content is logged". "The same check" is
-          the same docstring's parity claim: it calls the same `validate_official`
-          over the same vendored schema that the per-experiment validation uses.
-        */}
-        {/*
-          HISTORICAL IMPORT — `UX-016`'s import half, and the second of the
-          product's two scientist-facing pillars.
-
-          It is a LINK and not a button, deliberately: it goes to a destination
-          that exists in the nav, and a button that navigates is a button a reader
-          cannot middle-click, bookmark or open in a new tab. The other three cards
-          act in place (create a record, launch the walkthrough, open a tab), which
-          is why they are buttons.
-
-          The description promises no upload. See the struck note above the lede
-          for what changed and what did not.
+          HISTORICAL IMPORT — a LINK and not a button, deliberately: it goes to a
+          destination that exists in the nav, and a button that navigates is a
+          button a reader cannot middle-click, bookmark or open in a new tab.
         */}
         <li className="queue-empty-action">
           <span className="queue-empty-action-mark" aria-hidden="true">
@@ -935,48 +872,36 @@ function EmptyExperiments({
             </p>
           </div>
           <div className="queue-empty-action-cta">
-            <Link className="btn btn-secondary queue-empty-cta" to={ROUTES.imports}>
-              {LABELS.actionOpenHistoricalImport}
-            </Link>
-          </div>
-        </li>
-
-        <li className="queue-empty-action">
-          <span className="queue-empty-action-mark" aria-hidden="true">
-            <ShieldCheck size={18} strokeWidth={1.75} />
-          </span>
-          <div className="queue-empty-action-main">
-            <h3 className="queue-empty-action-title">{LABELS.validatorCardTitle}</h3>
-            <p className="queue-empty-hint">
-              {LABELS.validatorCardHint}{' '}
-              <HelpTip subject={LABELS.validatorCardTitle} kind="info">
-                <span>{LABELS.validatorCardMore}</span>
-              </HelpTip>
-            </p>
-          </div>
-          <div className="queue-empty-action-cta">
-            <button
-              type="button"
+            <Link
               className="btn btn-secondary queue-empty-cta"
-              onClick={onOpenValidator}
+              to={ROUTES.imports}
+              aria-label={LABELS.actionOpenHistoricalImport}
             >
-              {LABELS.actionOpenValidator}
-            </button>
+              {LABELS.actionOpen}
+            </Link>
           </div>
         </li>
       </ul>
 
       {/*
-        WHERE A NEW EXPERIMENT GOES. One line, derived from `/api/health`, and
-        absent entirely when the answer is not known — see `storageSentence`. It
-        sits below the cards rather than in the lede because it is a consequence of
-        acting, not a reason to act, and the lede has one job.
+        WHERE A NEW EXPERIMENT GOES — only when something is wrong. Derived from
+        `/api/health`, and absent in every other state — see `storageSentence`.
       */}
       {storage !== null && (
         <p className="queue-empty-storage" data-durability={durability}>
           {storage}
         </p>
       )}
+
+      {/* THE STANDALONE VALIDATOR, as a text link (2026-11-02). It checks a file a
+          reader already has; it is not a way to start an experiment, so it does not
+          get a card of the same weight as the three that are. */}
+      <p className="queue-empty-more">
+        <button type="button" className="btn btn-ghost queue-empty-link" onClick={onOpenValidator}>
+          {LABELS.actionOpenValidator}
+        </button>
+        <span className="queue-empty-more-hint">{LABELS.openValidatorHint}</span>
+      </p>
     </section>
   );
 }

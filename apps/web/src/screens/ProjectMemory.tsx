@@ -18,7 +18,6 @@ import { AssistantDrawer } from '../components/AssistantDrawer';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { MemoryGraphCard } from './MemoryGraphCard';
 import { Widget } from '../components/Widget';
-import { HelpTip } from '../components/HelpTip';
 import { ChevronDown, ChevronRight, Search } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { conceptDisplayTitle, relationDisplayLabel } from '../lib/displayLabels';
@@ -225,13 +224,11 @@ export function ProjectMemory() {
             the two claims the paragraph existed to make: it is memory, not truth,
             and it never validates or supplies a value. */}
         <h1>{LABELS.navMemory}</h1>
-        <p className="memory-intro">
-          {LABELS.memoryIntro}{' '}
-          <HelpTip subject={LABELS.navMemory} label={LABELS.memoryIntroInfoLabel} kind="info">
-            <span>{LABELS.memoryIntroFull}</span>{' '}
-            <span>{LABELS.memoryAllTabsRead}</span>
-          </HelpTip>
-        </p>
+        {/* ONE SENTENCE, no info tip (2026-11-02): the tip held the long-form
+            introduction ("…it never validates, completes, or supplies a value"),
+            standing prose the owner asked to retire. The lead keeps the one
+            statement this page needs — leads to verify, not truth — once. */}
+        <p className="memory-intro">{LABELS.memoryIntro}</p>
 
         <SectionTabs active={activeTab} onSelect={selectTab} />
 
@@ -384,7 +381,6 @@ function MemoryStatusDetail({
       <Widget
         id="memory-trust-title"
         title={LABELS.memoryTrustTitle}
-        sub={LABELS.memoryTrustSub}
         infoLabel={LABELS.memoryTrustInfoLabel}
         headline={<GraphStatusChip availability={data.availability} note={data.note} />}
         info={
@@ -411,18 +407,15 @@ function MemoryStatusDetail({
 type SizeView = 'files' | 'graph' | 'concepts';
 
 /**
- * "How big is it?" — ONE VIEW PER SCALE, each with its own figures (corrected in
- * review, 2026-10-18: the first version kept the served-files figure as a widget
- * headline under every view and left the Files view empty, so the switcher
- * switched nothing). Each view now leads with its own figure — files served,
- * graph nodes, concepts — followed by the rest of that scale and a link to the tab
- * that browses it.
+ * "How big is it?" — THREE INLINE FIGURES, each a link to the tab that browses it
+ * (2026-11-02, declutter). It used to carry its own Files | Graph | Concepts
+ * switcher directly under the page tabs of the same names, one number per view.
  *
- * `viewSwitcher="buttons"`, not tabs: this widget sits inside the page's own
- * tabpanel, and a second tablist would put a "Graph" and a "Concepts" tab beside
- * the page tabs of the same names. Every figure stays MOUNTED in a hidden panel,
- * so each is still a `.memory-figure` row with its exact label
- * (`statistics-page.test.tsx` compares these labels with Statistics' own).
+ * Each figure is still a `.memory-figure` row with its exact label — the served
+ * path set keeps "Served Files (Path Set)", the one name `statistics-page.test.tsx`
+ * holds both screens to. The value is the link: its accessible name opens with the
+ * visible number and says where it goes. Edges and communities are graph detail;
+ * the Graph tab's About This Graph and Statistics state them.
  */
 function MemorySizeWidget({
   data,
@@ -431,32 +424,39 @@ function MemorySizeWidget({
   data: ApiGraphStatus;
   onOpenTab: (tab: MemoryTab) => void;
 }) {
-  const groups = memoryFigureGroups(data);
-  const views: { id: SizeView; label: string; tab: MemoryTab; open: string }[] = [
-    { id: 'files', label: 'Files', tab: 'sources', open: LABELS.memoryOpenSources },
-    { id: 'graph', label: 'Graph', tab: 'graph', open: LABELS.memoryOpenGraph },
-    { id: 'concepts', label: 'Concepts', tab: 'concepts', open: LABELS.memoryOpenConcepts },
-  ];
+  const figures: { label: string; value: number; tab: MemoryTab; name: string }[] = [];
+  if (data.file_count != null) {
+    figures.push({ label: 'Served Files (Path Set)', value: data.file_count, tab: 'sources', name: 'Sources' });
+  }
+  if (data.node_count != null) {
+    /* The SOURCE graph's node count — the Graph tab draws the smaller served-file
+       projection of it, and says so in About This Graph — so the label names the set. */
+    figures.push({ label: 'Source Graph Nodes', value: data.node_count, tab: 'graph', name: 'Graph' });
+  }
+  if (data.concept_count != null) {
+    figures.push({ label: 'Concepts', value: data.concept_count, tab: 'concepts', name: 'Concepts' });
+  }
+  if (figures.length === 0) return null;
   return (
-    <Widget
-      id="memory-size-title"
-      title={LABELS.memorySizeTitle}
-      viewSwitcher="buttons"
-      views={views
-        .filter((v) => groups[v.id].length > 0)
-        .map((v) => ({
-          id: v.id,
-          label: v.label,
-          content: (
-            <div className="memory-size-view">
-              <MemoryFigures rows={groups[v.id]} lead />
-              <button type="button" className="memory-size-open" onClick={() => onOpenTab(v.tab)}>
-                {v.open}
+    <Widget id="memory-size-title" title={LABELS.memorySizeTitle}>
+      <dl className="memory-figures memory-size-figures">
+        {figures.map((f) => (
+          <div className="memory-figure memory-size-figure" key={f.label}>
+            <dt>{f.label}</dt>
+            <dd className="mono">
+              <button
+                type="button"
+                className="memory-size-open"
+                aria-label={`${f.value} ${f.label} — open ${f.name}`}
+                onClick={() => onOpenTab(f.tab)}
+              >
+                {f.value}
               </button>
-            </div>
-          ),
-        }))}
-    />
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </Widget>
   );
 }
 
@@ -657,11 +657,7 @@ function MemoryUnavailablePanel({ integrity }: { integrity: SnapshotIntegrity })
     return (
       <div className="memory-unavailable">
         <p className="memory-unavailable-title">
-          Project memory is unavailable — {reason}, so no leads can be served.
-        </p>
-        <p className="memory-unavailable-text">
-          This is a quiet, advisory state, not an error — the memory plane is optional. Rebuild the
-          snapshot to restore leads and provenance.
+          Project memory is unavailable — {reason}. Rebuild the snapshot to restore it.
         </p>
       </div>
     );
@@ -699,26 +695,16 @@ function MemoryUnavailablePanel({ integrity }: { integrity: SnapshotIntegrity })
    * no verdict, validation result or export decision depends on memory, and that
    * the surfaces which do consume it report unavailability instead of guessing.
    */
+  /*
+   * ONE LINE SINCE 2026-11-02 (owner direction: no standing caveat or roadmap prose).
+   * ~~"…The memory plane is advisory and optional: no record verdict … depends on it"~~
+   * and the ~~"Future path: … ISAAC manages no accounts or roles of its own"~~ paragraph
+   * are retired. The line still names no cause it cannot know.
+   */
   return (
     <div className="memory-unavailable">
       <p className="memory-unavailable-title">
-        Project memory is unavailable in this deployment — no memory graph artifact was found where
-        this build reads it.
-      </p>
-      <p className="memory-unavailable-text">
-        ISAAC ships its memory artifacts with the application — a sanitized graph snapshot and a
-        symbol-level graph — so an absent artifact is not the expected state. This page cannot tell
-        which of two conditions applies: the artifacts were not included in this build, or this
-        deployment is configured to read a memory source that is not present. The memory plane is
-        advisory and optional: no record verdict, validation result, or export decision depends on
-        it. The surfaces that do draw on memory — the status-bar memory chip, and the assistant's
-        memory-sourced answers — report it as unavailable rather than inventing one.
-      </p>
-      <p className="memory-unavailable-text">
-        Future path: the memory source can later be pointed at a richer approved source — a broader
-        sanitized snapshot, or a database-backed memory index. Reaching any such source would be
-        controlled by the deployment where it is operated; ISAAC manages no accounts or roles of its
-        own.
+        Project memory is unavailable — no memory graph was found.
       </p>
     </div>
   );
@@ -814,8 +800,7 @@ function SourceIndexList({ available, files, focusFilePath }: SourceIndexListPro
     <>
       {noneOnDisk && (
         <p className="source-index-uniform-note">
-          This deployment does not carry any of the files listed below — open them in the project
-          to read them.
+          Open these files in the project to read them.
         </p>
       )}
       <div className="source-index-groups">
@@ -982,7 +967,7 @@ function SourceIndexDetail({
         // no claim about snapshot membership in either direction — this file IS
         // in the served snapshot, which is how its provenance is rendered above.
         <p className="source-index-local-ref source-index-local-ref-missing">
-          This deployment does not carry the file itself — open it in the project to read it.
+          Open this file in the project to read it.
         </p>
       )}
 
@@ -1446,8 +1431,7 @@ function ConceptLookupBrowser({ available, concepts, focusConceptId }: ConceptLo
           with no linked source cites no document at all. */}
       {onDiskSpread.allMissing && (
         <p className="concept-lookup-filter-note">
-          This deployment does not carry any of the documents cited below — open them in the
-          project to read them.
+          Open these documents in the project to read them.
         </p>
       )}
 
@@ -1686,15 +1670,10 @@ function ConceptLookupDetail({
         {conceptDisplayTitle(concept.label)}
       </h3>
       <p className="concept-lookup-description">{describeConcept(concept, leadCount)}</p>
-      {/* The one advisory note on this surface. The closing instruction is
-          conditional: with no citable source there is nothing to open, and
-          telling the reader to open one would be an instruction they cannot
-          follow. */}
-      <p className="concept-lookup-boundary">
-        A concept is a pointer into project documents — never a definition of the term, and never a
-        scientific conclusion.
-        {concept.source_file ? ' Open the cited source to judge it yourself.' : ''}
-      </p>
+      {/* ~~"A concept is a pointer into project documents — never a definition of the
+          term, and never a scientific conclusion."~~ — REMOVED 2026-11-02 (owner
+          direction: no standing "never" prose). The page lead says once that these
+          are leads to verify. */}
 
       {/* P36V S-A hierarchy: Anchor Source → Cluster → Related Leads → the graph
           action → Technical Details, each a labelled section under one heading
@@ -1733,7 +1712,7 @@ function ConceptLookupDetail({
             the file, never about the snapshot excluding it. */}
         {concept.source_file && !concept.on_disk && (
           <p className="concept-lookup-anchor-missing">
-            This deployment does not carry the file itself — open it in the project to read it.
+            Open this file in the project to read it.
           </p>
         )}
       </div>

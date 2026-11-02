@@ -16,7 +16,7 @@
  * MemoryGraphCard). Nothing here creates a second one.
  */
 import { useCallback, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { ChevronDown, CircleHelp, CornerDownRight, X } from '../../components/icons';
+import { ChevronDown, ChevronRight, CircleHelp, CornerDownRight, X } from '../../components/icons';
 import { LABELS } from '../../lib/labels';
 import {
   MAX_COMMAND_LENGTH,
@@ -336,5 +336,35 @@ export function GraphCommandBar({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * THE QUERY DISCLOSURE'S TRIGGER (2026-11-02) — the same control Filters and Find a
+ * Path use, so the three read as one row of "more here" toggles. The command bar
+ * it reveals carries its own Syntax and Suggestions.
+ */
+export function GraphQueryToggle({
+  id,
+  open,
+  onToggle,
+}: {
+  id: string;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const Chevron = open ? ChevronDown : ChevronRight;
+  return (
+    <button
+      type="button"
+      className="memory-graph-disclosure-btn"
+      aria-expanded={open}
+      /* Only while the region EXISTS: it is unmounted when closed. */
+      aria-controls={open ? id : undefined}
+      onClick={onToggle}
+    >
+      <Chevron size={13} strokeWidth={2} aria-hidden="true" />
+      Query
+    </button>
   );
 }

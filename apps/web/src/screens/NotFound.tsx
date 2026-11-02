@@ -88,6 +88,7 @@ export function NotFound() {
   const location = useLocation();
   const basename = useHref('/').replace(/\/+$/, '');
   const attempted = `${basename}${location.pathname}`;
+  const recordShaped = isRecordShapedPath(location.pathname);
 
   return (
     <AppShell
@@ -114,14 +115,19 @@ export function NotFound() {
           <p className="notfound-body">{LABELS.notFoundExplanation}</p>
           <p className="notfound-attempted">
             {LABELS.notFoundAttemptedLabel}{' '}
-            <span className="mono notfound-path">{attempted}</span>{' '}
-            {/* The small print moved behind an info tip beside the address it is
-                about (2026-10-12): "this is about the address, not your data" is a
-                reassurance, not one of `DEC-35`'s always-visible classes, and it
-                stays in the DOM, so every guard that reads it still does. */}
-            <HelpTip subject={LABELS.screenNotFound} label={LABELS.notFoundScopeInfoLabel} kind="info">
-              <span className="notfound-scope">{LABELS.notFoundRecordScope}</span>
-            </HelpTip>
+            <span className="mono notfound-path">{attempted}</span>
+            {/* The small print sits behind an info tip beside the address it is about
+                (2026-10-12), and since 2026-11-02 ONLY where it applies: an address
+                shaped like a record's. There a reader may fear the record is gone;
+                for `/no-such-place` the reassurance answers a question nobody asked. */}
+            {recordShaped && (
+              <>
+                {' '}
+                <HelpTip subject={LABELS.screenNotFound} label={LABELS.notFoundScopeInfoLabel} kind="info">
+                  <span className="notfound-scope">{LABELS.notFoundRecordScope}</span>
+                </HelpTip>
+              </>
+            )}
           </p>
           <Link className="btn btn-primary" to={ROUTES.experiments}>
             {LABELS.actionGoToExperiments}
@@ -130,4 +136,13 @@ export function NotFound() {
       </div>
     </AppShell>
   );
+}
+
+/**
+ * An address shaped like a record's — `/record/<id>/…`, `/records/<id>`,
+ * `/experiment(s)/<id>` — where a reader who followed a stale link may believe the
+ * record itself is gone. Only there does the scope note have something to answer.
+ */
+export function isRecordShapedPath(pathname: string): boolean {
+  return /^\/(record|records|experiment|experiments)\/[^/]+/i.test(pathname);
 }

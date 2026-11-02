@@ -176,6 +176,10 @@ describe('Assistant graph intents — propose, never apply', () => {
  */
 describe('Assistant graph intents — the stated count is the applied count', () => {
   const command = (view: RenderResult, text: string) => {
+    // The command bar is behind the graph's "Query" disclosure (2026-11-02).
+    if (!view.queryByRole('combobox', { name: 'Graph command' })) {
+      fireEvent.click(view.getByRole('button', { name: 'Query' }));
+    }
     const input = view.getByRole('combobox', { name: 'Graph command' });
     fireEvent.change(input, { target: { value: text } });
     fireEvent.keyDown(input, { key: 'Enter' });
@@ -285,7 +289,7 @@ describe('Assistant graph intents — honest failure', () => {
     ask(view, 'Show neighbors of nowhere/at/all.py');
     await waitFor(() => expect(proposal(view)).not.toBeNull());
     expect(view.container.textContent).toMatch(/No node in this projection matches/);
-    expect(view.container.textContent).toMatch(/no approximate match was substituted/);
+    expect(view.container.textContent).toMatch(/so nothing was changed/);
     expect(view.queryByRole('button', { name: /Apply to Graph/ })).toBeNull();
     expect(nodeCount()).toBe(5);
   });

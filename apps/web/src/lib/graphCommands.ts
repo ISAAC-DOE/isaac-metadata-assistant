@@ -975,8 +975,8 @@ function withNode(
   return unresolved(
     intent,
     `No node matches "${token}"`,
-    `No node in this projection matches "${token}". Nothing was changed and no approximate match was substituted. ` +
-      `Project Memory covers only the files this deployment serves, so the node may simply not be in it.`,
+    `No node in this projection matches "${token}", so nothing was changed. ` +
+      `It may not be among the files Project Memory covers.`,
   );
 }
 
@@ -1034,8 +1034,7 @@ function pathProposal(
     title: `Show the ${hops}-step route from ${from} to ${to}`,
     explanation:
       `A ${hops}-step route exists: ${shown}${route.length > 6 ? ' …' : ''}. ` +
-      `${applyOutcomeSentence(outcomeOf(actions, index, ctx), index.counts.total)} ` +
-      `A route means these files reference one another in the project source — a navigational lead, never a scientific relationship.`,
+      `${applyOutcomeSentence(outcomeOf(actions, index, ctx), index.counts.total)}`,
     choices: [],
   };
 }

@@ -328,8 +328,13 @@ const CEILING = {
    *
    * -> 2318, LOWERED 2026-10-12 for the same deletion as `fontSize` above (the
    * retired Settings and Policy layout rules), read from the counter.
+   *
+   * -> 2286, LOWERED 2026-11-02 (declutter, Home / Historical Import / Memory): the
+   * retired date badge, the graph toolbar row, the boxed import empty state and the
+   * dashed graph selection box went, and their replacements use `--space-*` rungs.
+   * Read from the counter.
    */
-  spacing: 2318,
+  spacing: 2286,
   /**
    * font-size declarations BELOW the 11px floor: 9.5px ×1, 10px ×14, 10.5px ×84.
    *

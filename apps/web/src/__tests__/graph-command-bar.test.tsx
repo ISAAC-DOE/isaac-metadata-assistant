@@ -8,6 +8,13 @@ import {
   memoryGraphAvailable,
 } from '../test/apiFixtures';
 
+/** The canvas scale, as the retired visible readout read ("zoom N%"). The readout
+ *  was dropped from the screen 2026-11-02; `.graph-explore` carries the scale as
+ *  `data-zoom`, so the viewport assertions below still measure the same thing. */
+const zoomReadout = (root: ParentNode) =>
+  `zoom ${root.querySelector('.graph-explore')?.getAttribute('data-zoom') ?? '?'}%`;
+
+
 /*
  * P36R Slice 4 — the graph command bar, mounted through the real screen.
  *
@@ -72,8 +79,19 @@ async function renderGraph(initialEntry = '/memory'): Promise<GraphView> {
   });
 }
 
-const bar = (view: RenderResult) =>
-  view.getByRole('combobox', { name: 'Graph command' }) as HTMLInputElement;
+/** The command bar sits behind the graph's "Query" disclosure (2026-11-02). Every
+ *  helper that reaches the bar opens it first, exactly as a reader would. */
+function ensureQueryOpen(): void {
+  if (document.querySelector('.graph-cmd')) return;
+  const toggle = [...document.querySelectorAll<HTMLButtonElement>('button.memory-graph-disclosure-btn')].find(
+    (b) => b.textContent?.trim() === 'Query',
+  );
+  if (toggle) fireEvent.click(toggle);
+}
+const bar = (view: RenderResult) => {
+  ensureQueryOpen();
+  return view.getByRole('combobox', { name: 'Graph command' }) as HTMLInputElement;
+};
 
 function type(view: RenderResult, text: string) {
   fireEvent.change(bar(view), { target: { value: text } });
@@ -159,9 +177,9 @@ describe('graph command bar — commands drive the canonical state', () => {
   it('`reset` returns the viewport to its default', async () => {
     const view = await renderGraph();
     fireEvent.click(view.getByRole('button', { name: 'Zoom in' }));
-    await waitFor(() => expect(view.container.textContent).toContain('zoom 125%'));
+    await waitFor(() => expect(zoomReadout(view.container)).toContain('zoom 125%'));
     submit(view, 'reset');
-    await waitFor(() => expect(view.container.textContent).toContain('zoom 100%'));
+    await waitFor(() => expect(zoomReadout(view.container)).toContain('zoom 100%'));
   });
 
   it('`help` opens the syntax panel, which documents the whole grammar', async () => {
@@ -184,6 +202,7 @@ describe('graph command bar — commands drive the canonical state', () => {
 
   it('the "Syntax" control opens the grammar expanded; "About This Graph" opens nothing expanded', async () => {
     const view = await renderGraph();
+    ensureQueryOpen();
     fireEvent.click(view.getByRole('button', { name: 'Graph command syntax' }));
     let dialog = await view.findByRole('dialog');
     expect((dialog.querySelector('.graph-help-sub-details') as HTMLDetailsElement).open).toBe(true);
@@ -397,6 +416,7 @@ describe('graph command bar — keyboard-first', () => {
     expect(document.activeElement).toBe(bar(view));
 
     // The "Syntax" button next to the bar returns to itself.
+    ensureQueryOpen();
     const syntax = view.getByRole('button', { name: 'Graph command syntax' });
     syntax.focus();
     fireEvent.click(syntax);

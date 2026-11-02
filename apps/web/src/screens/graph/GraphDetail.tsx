@@ -54,10 +54,7 @@ export function GraphDetail({
 }: GraphDetailProps) {
   if (!node) {
     return (
-      <p className="memory-graph-detail-empty">
-        No node is selected. Choose a file or concept — from the canvas, the list, or the search box
-        — to see its cluster, its recorded connections and its raw entry.
-      </p>
+      <p className="memory-graph-detail-empty">Select a node to see its connections.</p>
     );
   }
 
@@ -122,7 +119,7 @@ export function GraphDetail({
         </p>
       ) : (
         <p className="memory-graph-detail-ondisk-missing">
-          This deployment does not carry {fileSubject} — open it in the project to read it.
+          Open {node.kind === 'file' ? 'this file' : 'its source file'} in the project to read it.
         </p>
       )}
 

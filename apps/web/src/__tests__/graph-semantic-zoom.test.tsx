@@ -22,6 +22,13 @@ import {
   memoryGraphDetailUnavailable,
 } from '../test/graphDeepFixture';
 
+/** The canvas scale, as the retired visible readout read ("zoom N%"). The readout
+ *  was dropped from the screen 2026-11-02; `.graph-explore` carries the scale as
+ *  `data-zoom`, so the viewport assertions below still measure the same thing. */
+const zoomReadout = (root: ParentNode) =>
+  `zoom ${root.querySelector('.graph-explore')?.getAttribute('data-zoom') ?? '?'}%`;
+
+
 /*
  * P36V.1 Unit F — SEMANTIC ZOOM on the Project Memory graph, mounted.
  *
@@ -110,7 +117,7 @@ describe('semantic zoom — the deep layer costs nothing until it is asked for',
     await view.findByText('Graph', { selector: 'h2' });
     expect(calls).toContain('GET /api/memory/graph');
     expect(calls).not.toContain(deepRoute);
-    expect(view.container.textContent).toMatch(/zoom 100%/);
+    expect(zoomReadout(view.container)).toMatch(/zoom 100%/);
     expect(view.container.textContent).toMatch(/showing files/);
     expect(deepMarks()).toEqual([]);
   });
@@ -120,7 +127,7 @@ describe('semantic zoom — the deep layer costs nothing until it is asked for',
     await view.findByText('Graph', { selector: 'h2' });
     reveal(view);
     await waitFor(() => expect(deepMarks().length).toBeGreaterThan(0));
-    expect(view.container.textContent).toMatch(
+    expect(zoomReadout(view.container)).toMatch(
       new RegExp(`zoom ${Math.round(LOD_CLUSTER_SCALE * 100)}%`),
     );
     expect(calls.filter((c) => c === deepRoute).length).toBe(1);
@@ -129,7 +136,7 @@ describe('semantic zoom — the deep layer costs nothing until it is asked for',
     reveal(view);
     await waitFor(() => expect(view.container.textContent).toMatch(/showing symbols/));
     fireEvent.click(view.getByRole('button', { name: 'Reset View' }));
-    await waitFor(() => expect(view.container.textContent).toMatch(/zoom 100%/));
+    await waitFor(() => expect(zoomReadout(view.container)).toMatch(/zoom 100%/));
     reveal(view);
     await waitFor(() => expect(deepMarks().length).toBeGreaterThan(0));
     expect(calls.filter((c) => c === deepRoute).length).toBe(1);
@@ -279,7 +286,7 @@ describe('semantic zoom — nothing grows without bound', () => {
         expect(radius).toBeLessThanOrEqual(MAX_MARK_UNITS_AT_SCALE_1 + 1e-6);
       }
     }
-    expect(view.container.textContent).toMatch(/zoom 2400%/);
+    expect(zoomReadout(view.container)).toMatch(/zoom 2400%/);
   });
 
   it('bounds deep marks, labels and strokes the same way', async () => {
@@ -297,7 +304,7 @@ describe('semantic zoom — nothing grows without bound', () => {
     }
     // Deeper still: the same marks, the same rendered radii.
     fireEvent.click(view.getByRole('button', { name: 'Zoom in' }));
-    await waitFor(() => expect(view.container.textContent).toMatch(/zoom 500%/));
+    await waitFor(() => expect(zoomReadout(view.container)).toMatch(/zoom 500%/));
     const deeper = renderedSizes(LOD_SYMBOL_SCALE * 1.25);
     expect(deeper.radii.map((r) => Number(r.toFixed(6))).sort()).toEqual(
       measured.radii.map((r) => Number(r.toFixed(6))).sort(),
@@ -689,7 +696,7 @@ describe('semantic zoom — hover and keyboard focus are the same affordance', (
     const mark = deepMarks().find((m) => m.getAttribute('tabindex') === '0') as HTMLElement;
     act(() => mark.focus());
     fireEvent.keyDown(mark, { key: '+' }); // arms the request, stays at cluster level
-    await waitFor(() => expect(view.container.textContent).toMatch(/zoom 219%/));
+    await waitFor(() => expect(zoomReadout(view.container)).toMatch(/zoom 219%/));
     act(() => mark.blur());
     expect(active()).toBe(document.body);
     fireEvent.click(view.getByRole('button', { name: 'Zoom in' }));
@@ -710,7 +717,7 @@ describe('semantic zoom — hover and keyboard focus are the same affordance', (
     const file = baseMark(/^src\/fake_mod\.py, file/);
     act(() => file.focus());
     for (let i = 0; i < 3; i += 1) fireEvent.keyDown(active(), { key: '+' });
-    await waitFor(() => expect(view.container.textContent).toMatch(/showing clusters|zoom 195%/));
+    await waitFor(() => expect(`${view.container.textContent} ${zoomReadout(view.container)}`).toMatch(/showing clusters|zoom 195%/));
     await waitFor(() => expect(active()).not.toBe(document.body));
     expect(active() === (svgEl() as unknown as HTMLElement) || active().getAttribute('role') === 'button').toBe(
       true,
@@ -738,7 +745,7 @@ describe('semantic zoom — hover and keyboard focus are the same affordance', (
     expect((document.activeElement as HTMLElement).getAttribute('role')).toBe('button');
     // Zoom keys still work while a deep mark holds focus, as at the file level.
     fireEvent.keyDown(document.activeElement as HTMLElement, { key: '-' });
-    await waitFor(() => expect(view.container.textContent).toMatch(/zoom 320%/));
+    await waitFor(() => expect(zoomReadout(view.container)).toMatch(/zoom 320%/));
   });
 });
 
@@ -799,7 +806,7 @@ describe('semantic zoom — level changes reach a screen reader', () => {
     // are deliberately not in the region.)
     for (let i = 0; i < 3; i += 1) fireEvent.click(view.getByRole('button', { name: 'Zoom in' }));
     for (let i = 0; i < 2; i += 1) fireEvent.keyDown(svgEl(), { key: 'ArrowRight' });
-    await waitFor(() => expect(view.container.textContent).toMatch(/zoom 342%/));
+    await waitFor(() => expect(zoomReadout(view.container)).toMatch(/zoom 342%/));
     expect(deepMarks().length).toBeGreaterThan(0);
     expect(announced()).toBe(atCluster);
     expect(statusRegion().firstChild).toBe(node);
@@ -819,7 +826,8 @@ describe('semantic zoom — level changes reach a screen reader', () => {
     });
     await view.findByText('Graph', { selector: 'h2' });
     reveal(view);
-    await waitFor(() => expect(announced()).toMatch(/unavailable in this deployment/));
+    // "in this deployment" was cut 2026-11-02 (declutter); the state is announced.
+    await waitFor(() => expect(announced()).toMatch(/Symbol-level detail is unavailable/));
     expect(announced()).toContain('stays on the file projection');
     // There is exactly ONE status region on the canvas — the loading note's
     // separate `role="status"` was folded into this one — PLUS the Assistant
@@ -980,7 +988,10 @@ describe('semantic zoom — the deeper layers inherit the surface they sit under
     );
     const note = document.querySelector('.memory-graph-list-deepnote.advisory') as HTMLElement;
     expect(note.textContent).toContain('the deployment ships no symbol-level artifact');
-    expect(note.textContent).toMatch(/nothing was aggregated, estimated or stood in for/);
+    // ~~"nothing was aggregated, estimated or stood in for…"~~ — the standing caveat
+    // was retired 2026-11-02; the note still says the rows stay at file level, and no
+    // count stands in for the missing layer (asserted next).
+    expect(note.textContent).toMatch(/stay at file\s+level/);
     expect(document.querySelectorAll('.memory-graph-list-deepcount')).toHaveLength(0);
   });
 
@@ -1016,13 +1027,12 @@ describe('semantic zoom — honesty when the layer is missing or stale', () => {
     reveal(view);
     await waitFor(() =>
       expect(view.container.textContent).toMatch(
-        /Symbol-level detail is unavailable in this deployment/,
+        /Symbol-level detail is unavailable/,
       ),
     );
     expect(view.container.textContent).toMatch(/the deployment ships no symbol-level artifact/);
-    expect(view.container.textContent).toMatch(
-      /nothing was aggregated, estimated or stood in for the missing structure/,
-    );
+    // The retired "nothing was aggregated…" caveat; the canvas states the fallback.
+    expect(view.container.textContent).toMatch(/The canvas stays on the file\s+projection/);
     // The base projection is intact and still interactive.
     expect(deepMarks()).toEqual([]);
     expect(baseNodes().length).toBe(memoryGraphAvailable.nodes.length);
@@ -1193,13 +1203,13 @@ describe('semantic zoom — a bounded number of elements, and the same controls'
     await waitFor(() => expect(svgEl().getAttribute('viewBox')).not.toBe(before));
 
     fireEvent.click(view.getByRole('button', { name: 'Reset View' }));
-    await waitFor(() => expect(view.container.textContent).toMatch(/zoom 100%/));
+    await waitFor(() => expect(zoomReadout(view.container)).toMatch(/zoom 100%/));
     expect(baseNodes().length).toBe(memoryGraphAvailable.nodes.length);
     // Reveal Detail is disabled only at the deepest level, never hidden.
     expect(view.getByRole('button', { name: 'Reveal Detail' })).not.toBeDisabled();
     for (let i = 0; i < 2; i += 1) reveal(view);
     await waitFor(() =>
-      expect(view.container.textContent).toMatch(
+      expect(zoomReadout(view.container)).toMatch(
         new RegExp(`zoom ${Math.round(LOD_SYMBOL_SCALE * 100)}%`),
       ),
     );

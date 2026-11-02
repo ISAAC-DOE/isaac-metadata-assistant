@@ -153,7 +153,7 @@ export const BL15_STATUS_LABELS: Record<string, string> = {
   normalized: 'Carried across by a named rule',
   needs_domain_review: 'Needs a domain owner to choose',
   not_expressible: 'The schema has no field for it',
-  blocked_by_build: 'The schema has a field this build cannot reach',
+  blocked_by_build: 'A schema field with no write route',
 };
 
 /** Conflict kinds, in scientist words. The EXPLANATION always comes from the server. */

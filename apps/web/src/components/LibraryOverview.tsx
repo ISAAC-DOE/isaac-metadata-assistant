@@ -1,64 +1,49 @@
 import './library.css';
 import type { ReactNode } from 'react';
-import { Widget } from './Widget';
 import { LABELS } from '../lib/labels';
 import type { LibraryOverviewStats } from '../lib/library';
 
 interface LibraryOverviewProps {
   stats: LibraryOverviewStats;
   /** `true` when `GET /api/experiments` declared the list `incomplete`.
-   *  Scopes the heading and the note; see the note in the component. */
+   *  Scopes the figures with one visible line; see the note in the component. */
   readIncomplete?: boolean;
   /**
-   * `false` while browsing INSIDE a folder. The figures are workspace totals, and
+   * `false` while browsing INSIDE a folder. The sums are workspace totals, and
    * stated under a folder's contents they would read as describing that folder —
-   * so the widget keeps its filter and search there and drops the figures.
+   * so the bar keeps its filter and search there and drops the sums.
    */
   showTotals?: boolean;
-  /** The id the search box is described by; the hint paragraph lives in the
-   *  widget's info panel and carries it. */
+  /** The id the search box is described by. The hint is rendered here, for
+   *  assistive technology only. */
   searchHintId: string;
-  /** The status filter (`LibraryFacets`), rendered as the headline. */
+  /** The status filter (`LibraryFacets`), first on the row. */
   facets: ReactNode;
-  /** The library toolbar — search and sort. */
+  /** The library toolbar — search and sort, on the same row. */
   children: ReactNode;
 }
 
 /**
- * "WHAT NEEDS ME?" — ONE WIDGET FOR THE LIBRARY'S QUESTION (2026-10-12 clutter
- * audit, owner direction: one widget per question, with the controls that change
- * the view INSIDE it).
+ * THE LIBRARY BAR — one quiet row: the status filter, then search and sort.
  *
- * WHAT IT REPLACED. My Experiments stacked a "Workspace Statistics" card (four
- * figures and a two-line note), then the search box, a hint line under it, and a
- * row of filter chips — two blocks answering one question, with "5" printed three
- * times and "3 need attention" twice before the first row. Measured at 1510px the
- * first row sat at y≈658. This is that card and that toolbar as ONE widget: the
- * headline is the count that answers the question, the two genuine aggregates sit
- * beside it, and the status filter, search and sort are the widget's own body.
+ * 2026-11-02 (owner direction, "less text, fewer equal-weight things"): this was
+ * the "What Needs Me?" card — a heading, an info tip, six figure tiles, a line of
+ * sums and the toolbar, all inside a card frame, above a list whose group headers
+ * restated the same counts. It is now the filter chips on the same line as search
+ * and sort, with no heading, no info tip and no frame.
  *
- * WHAT MOVED, AND WHERE. `libraryOverviewNote` ("Counts over the records in this
- * workspace. Summary figures only…") and `librarySearchHint` ("Searches every
- * folder…") moved into the widget's info panel. Both are WHY/WHERE-FROM prose, not
- * qualifiers of the headline: they stay in the DOM (`Widget` renders the info
- * panel hidden), the search box is still described by the hint through
- * `aria-describedby`, and the claim-scanning guards read them where they always
- * did.
- *
- * WHAT DID NOT MOVE, AND WHY. When the server declares the read SHORT, the scoped
- * note is a qualifier that must be read BEFORE the figures — `Widget`'s `lead`
- * slot, visible. A caveat hidden behind an info toggle would leave three figures
- * reading as an inventory the data does not support (B-2).
- *
- * `Experiments` (the total) IS NO LONGER RESTATED HERE. The page header's
- * subcount ("5 experiments · 1 ready to export") and the `All Experiments` filter
- * chip already state it; a third copy was the repetition the audit measured.
- * `Runs Recorded` and `Proposals Waiting` stay because they are SUMS that no chip
- * states — see `lib/library.ts::libraryOverviewStats`.
- *
- * NOT `StatCard`/`StatsSection` FROM `screens/statistics/StatsPrimitives.tsx`:
- * those rules are scoped under an ancestor `.statistics`. The shared `Widget`
- * primitive is what both surfaces now build on.
+ * WHAT STAYS, AND WHY.
+ * - The chips are still the radiogroup `LibraryToolbar` documents (counts over the
+ *   whole list, only rendered when they would match something).
+ * - `Runs Recorded` and `Proposals Waiting` are SUMS that no chip states
+ *   (`lib/library.ts::libraryOverviewStats`), so they stay — but only when they are
+ *   above zero. "0 Runs Recorded" on a fresh workspace says nothing a reader can use.
+ * - B-2: when the server declares the read SHORT, the sums are not workspace totals,
+ *   and one visible line says so beside them. That is a qualifier of a figure, so it
+ *   is shown rather than tucked away.
+ * - The search box keeps its description ("Searches every folder…") through
+ *   `aria-describedby`; the sentence is for assistive technology, since a sighted
+ *   reader sees results from every folder in the list itself.
  */
 export function LibraryOverview({
   stats,
@@ -68,72 +53,41 @@ export function LibraryOverview({
   facets,
   children,
 }: LibraryOverviewProps) {
-  /*
-   * B-2 — WHEN THE READ WAS SHORT, THESE ARE NOT WORKSPACE TOTALS, AND THE WIDGET
-   * SAYS SO ITSELF. `libraryOverviewStats` computes from the list this read
-   * returned; `GET /api/experiments` may declare that list `incomplete`, and its own
-   * response description says to "treat a short list as evidence about this read,
-   * never as an inventory". Scoping the heading AND the note is what connects the
-   * screen's `IncompleteListNote` alert to these figures for a reader who is
-   * looking at the numbers rather than at the alert.
-   *
-   * INSIDE A FOLDER the widget is titled for what it still does there — find an
-   * experiment — because the question it answers at the root ("what needs me?")
-   * is a workspace question its figures can no longer state.
-   */
-  const title = !showTotals
-    ? LABELS.libraryFindHeading
-    : readIncomplete
-      ? LABELS.libraryOverviewHeadingPartial
-      : LABELS.libraryOverviewHeading;
+  const sums: Array<[string, number]> = showTotals
+    ? (
+        [
+          [LABELS.libraryOverviewRuns, stats.totalRuns],
+          [LABELS.libraryOverviewProposals, stats.openProposals],
+        ] as Array<[string, number]>
+      ).filter(([, value]) => value > 0)
+    : [];
 
   return (
-    <Widget
-      id="library-overview-heading"
-      className={showTotals ? 'library-overview' : 'library-find'}
-      title={title}
-      infoLabel={showTotals ? LABELS.libraryOverviewInfoLabel : LABELS.libraryFindInfoLabel}
-      info={
-        <>
-          {showTotals && !readIncomplete && (
-            <p className="library-overview-note">{LABELS.libraryOverviewNote}</p>
-          )}
-          <p className="library-search-hint" id={searchHintId}>
-            {LABELS.librarySearchHint}
-          </p>
-        </>
-      }
-      lead={
-        showTotals && readIncomplete ? (
-          <p className="library-overview-note library-overview-note-partial">
-            {LABELS.libraryOverviewNotePartial}
-          </p>
-        ) : undefined
-      }
-      headline={
-        <div className="library-overview-headline">
-          {/* THE STATUS FILTER IS THE HEADLINE (review, 2026-10-18; the spec's
-              "switcher = status filter"). The counts a reader comes for — how many
-              need attention, are ready, are drafts, are done — ARE the filter, so
-              they are stated once, as the control, instead of once as figures and
-              again as a chip row underneath. */}
+    <div className={`library-overview${showTotals ? '' : ' library-find'}`}>
+      <div className="library-bar">
+        <div className="library-bar-filters">
           {facets}
-          {showTotals && (
+          {sums.length > 0 && (
             <dl className="library-overview-grid">
-              <div className="library-overview-item">
-                <dt className="library-overview-label">{LABELS.libraryOverviewRuns}</dt>
-                <dd className="library-overview-value">{stats.totalRuns}</dd>
-              </div>
-              <div className="library-overview-item">
-                <dt className="library-overview-label">{LABELS.libraryOverviewProposals}</dt>
-                <dd className="library-overview-value">{stats.openProposals}</dd>
-              </div>
+              {sums.map(([label, value]) => (
+                <div className="library-overview-item" key={label}>
+                  <dt className="library-overview-label">{label}</dt>
+                  <dd className="library-overview-value">{value}</dd>
+                </div>
+              ))}
             </dl>
           )}
         </div>
-      }
-    >
-      {children}
-    </Widget>
+        {children}
+      </div>
+      <p className="sr-only" id={searchHintId}>
+        {LABELS.librarySearchHint}
+      </p>
+      {showTotals && readIncomplete && (
+        <p className="library-overview-note library-overview-note-partial">
+          {LABELS.libraryOverviewNotePartial}
+        </p>
+      )}
+    </div>
   );
 }

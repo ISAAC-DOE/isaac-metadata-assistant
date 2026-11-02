@@ -127,7 +127,7 @@ describe('B-44 · Source Index — "not on disk" only where it is known', () => 
     expect(queryByText('not on disk')).toBeNull();
     const note = container.querySelector('.source-index-uniform-note');
     expect(note?.textContent).toBe(
-      'This deployment does not carry any of the files listed below — open them in the project to read them.',
+      'Open these files in the project to read them.',
     );
     // it does NOT claim any file is missing from the project
     expect(note?.textContent).not.toMatch(/missing|not found|deleted|does not exist/i);
@@ -264,14 +264,14 @@ describe('P24.4 · Source Index — on_disk:false', () => {
 
     const row = getByRole('button', { name: /docs\/fake-note\.md/ });
     fireEvent.click(row);
-    await findByText('This deployment does not carry the file itself — open it in the project to read it.');
+    await findByText('Open this file in the project to read it.');
 
     const panel = panelFor(row);
     const scoped = within(panel);
 
     expect(
       scoped.getByText(
-        'This deployment does not carry the file itself — open it in the project to read it.',
+        'Open this file in the project to read it.',
       ),
     ).toBeInTheDocument();
     // the copy must not claim the snapshot excludes it — that is a different fact
