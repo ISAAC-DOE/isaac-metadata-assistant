@@ -160,7 +160,8 @@ it finds one. Show per group, in words:
   the curve was made if asked. Never present it as the scientist's error.
   **A decided result kept on its old curve** (`process` reply `decided_results_on_an_older_run`): say the line
   (why the group has new results, and that the approval stands on the old curve) and ask whether the scientist
-  wants to review the new result;
+  wants to review the new result. When a params file made it, the line says what the file did (a scan left out, a
+  tie, a parameter, or one of these not passed this time); "this build" means a rule changed;
 - **a short scan** (`warn` with `post_edge_window_too_short`: the scan ends soon after the edge, so its
   normalised level cannot be checked): say that its edge position is still usable but its normalised
   curve is not checked; the scientist decides whether that is enough for this record;
@@ -194,11 +195,20 @@ it finds one. Show per group, in words:
   `{"athena_match": {"<group id>": [{"project": "<project file>", "athena_group": "<Athena label>"}]}}`
   to a params file (the sentence gives the exact snippet) and run
   `<isaac> process <bundle> --source <folder> --params-file <file>`. On a "no", write the same under
-  `athena_match_not`, so the question does not come back. A tied merge is compared and listed for approval like any
+  `athena_match_not`, so the question does not come back. If it is no group's at all, write
+  `{"athena_ignore": [{"project": "<project file>", "athena_group": "<Athena label>"}]}`: it is no longer listed
+  (pass it on later runs too). `<isaac> bundle list <bundle> athena-merges` pages every unmatched merge (label,
+  projects, near groups, `groups_in_project`); the `process` reply lists the first 10 (`athena_unmatched_merges`).
+  A merge with no near name is named too: ask which group it is for, naming the groups that share its project.
+  Athena's reference channels ("Ref <name>") are no sample merges: the line counts them; never ask about them. A
+  hint never crosses run numbers (`01_05` is not `03_04`). A tied merge is compared and listed for approval like any
   Athena curve (flag `athena_named_by_scientist`); the group's result id changes. Approve it on its own, after the
   scientist confirms the tie: a bulk approval refuses it, and the approval's note records the tie. Keep the params
   file and pass it on every later `process`, or the tie is gone (`process` then says it was not passed). A tie that
   names nothing says so in the summary;
+- **an Athena group that matches several groups** (summary line "match several record groups by name, so ISAAC
+  used none"): say it. When it says the groups "may be one sample", ask the scientist; merge only on their yes
+  (step 5), never on the hint alone. Otherwise tie it to its group in `athena_match`;
 - when `process` says why none of the scientist's Athena groups matched (`athena.statement`), say it
   in those words. After `process --group`, it speaks of the groups processed now ("none of the 2 group(s) processed
   now has an Athena match"), counting the project's Athena groups that match other groups (stored results too).
@@ -284,7 +294,9 @@ Ask: approve, reject, or needs changes (with a note):
   `<isaac> bundle decide <bundle> --target <result_id> --decision select_athena_version --value <version_id> --by "<name>"`. It changes no QC
   status and no processed value, and it is not an approval. Then run `process --source <folder> --group <group id>`
   again: the chosen version gets its own Athena result (`…-athena-v02`, `athena_version_id`; its
-  `qc.statements.athena_version_selected` says it), built like any Athena result. Show it and ask for approval
+  `qc.statements.athena_version_selected` says it), built like any Athena result. Its plot is
+  `plot_athena_v<n>.png` (`athena_version_plot`): that version's curve over ISAAC's. Open that one, not
+  `plot.png` (drawn before the choice, ISAAC's curve only). Show it and ask for approval
   as usual: the record carries the E0 and curve of the ONE approved result (ISAAC's, if that is the one approved),
   never of a version that was only chosen. The choice carries over when ISAAC's own result id changes (a params
   file, a calibration): it is matched by the version's project file, Athena group and data hash. If they choose
@@ -384,7 +396,7 @@ an element/edge already named for the group: approved, proposed, or the group's 
   counts the rest), `scans`, `reader` (the runs' source type), `exported_file` when a member is the
   scientist's exported/processed file of a run (kept as context, its data not merged: say so), and, when known, `cannot_export_reason`:
   `no_scans` (no run lists a scan: no scan file in a `_dir` folder and no energy scan with data in its SPEC
-  file), `processing_not_applicable:<code>` (e.g. an `.mca` or `xes` file:
+  file; the same code before and after `isaac process`), `processing_not_applicable:<code>` (e.g. an `.mca` or `xes` file:
   no ISAAC protocol covers it), or `not_a_measurement_run` (every run is a reference standard, an alignment
   or a calibration scan: the import asks nothing about its sample or conditions, so the fields in
   `cannot_export_fields`, e.g. sample form and environment, have nowhere to hold an answer; its curve can be

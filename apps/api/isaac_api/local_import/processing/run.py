@@ -2293,7 +2293,10 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         n, decision = picked
         v, listed = athena_versions[n - 1], res["athena_versions"][n - 1]
         vfiles = [{**f, "role": "athena_normalized"} for f in files if f["role"] == f"athena_version_{n:02d}"]
-        vfiles += [f for f in files if f["role"] == "plot"]
+        # r7 K4: the chosen version's own plot, with its curve overlaid (the run's plot.png has no Athena curve: it was
+        # drawn before any version was chosen). PNGs are never hashed, so no id moves; one already there is kept.
+        vplot = _version_plot(gdir, n, v, group, stems, grid, M, mg, dg, nm, np, ctx.bundle_dir)
+        vfiles += [vplot] if vplot else [f for f in files if f["role"] == "plot"]
         vres = _athena_result(group, v, vfiles, params, np, ctx, stems=stems, isaac_counts=(len(scans_data), len(scans)),
                               coverage=version_coverage[n - 1],
                               isaac_scans=[number_of[id(e)] for e in used_entries] if listed_scans else None,
@@ -2338,6 +2341,54 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     if not record.exists():
         _write(record, _json_bytes({"results": out}))
     return out
+
+
+VERSION_PLOT_KEY = "athena_version_plot"
+
+
+def version_plot_notes(results: Sequence[dict], *, stored: Sequence[Mapping] = ()) -> list[dict]:
+    """r7 K4: on each result of a chosen Athena version, the path of its own plot (``plot_athena_v<n>.png``, its curve
+    overlaid) as a field and a sentence; and a kept note for a STORED result of that id that does not name it yet (a
+    version result decided before this build, kept as it was, its outputs unchanged). Outside the hashed files: no id
+    moves."""
+    named = {B.processing_id(r): r.get(VERSION_PLOT_KEY) for r in stored or () if isinstance(r, Mapping)}
+    notes = []
+    for r in results:
+        if not r.get("athena_version_id"):
+            continue
+        path = next((f["relative_path"] for f in (r.get("outputs") or {}).get("files") or ()
+                     if f.get("role") == "plot" and PurePosixPath(str(f.get("relative_path"))).name.startswith("plot_athena_v")), None)
+        if not path:
+            continue
+        said = (f"The plot of this version, with its Athena curve over ISAAC's: {path}. The run's plot.png shows ISAAC's "
+                "curve alone (it was drawn before a version was chosen).")
+        r[VERSION_PLOT_KEY] = path
+        r.setdefault("qc", {}).setdefault("statements", {})[VERSION_PLOT_KEY] = said
+        if r["result_id"] in named and named[r["result_id"]] != path:
+            notes.append({"result_id": r["result_id"], "fields": {VERSION_PLOT_KEY: path},
+                          "statements": {VERSION_PLOT_KEY: said}})
+    return notes
+
+
+def _version_plot(gdir: Path, n: int, v: Mapping, group: Mapping, stems, grid, M, mg, dg, nm, np, bundle_dir: Path) -> dict | None:
+    """r7 K4: ``plot_athena_v<n>.png`` in the run folder: the run's review plot with the chosen Athena version's curve
+    overlaid (never one in an unknown energy frame or with an implausible step). Written once: a run folder is never
+    rewritten. The file entry (role ``plot``), or ``None`` when no plot can be drawn."""
+    if not (A.frame_known(v) and A.plausible(v)):
+        return None
+    path = gdir / f"plot_athena_v{n:02d}.png"
+    if not path.is_file():
+        try:
+            from .plot import review_plot
+
+            if not review_plot(path, title=f"{group['group_id']} ({group.get('role')}) {', '.join(stems)[:50]} + Athena v{n:02d}",
+                               grid=grid, M=M, merged=mg["mean"], point_flags=dg["point_flags"],
+                               scan_flags=dg["scan_flags"], norm=nm["norm"], flat=nm["flat"], e0=nm["e0_eV"],
+                               athena=v, np=np):
+                return None
+        except Exception:  # noqa: BLE001 - a plot failure is never a processing failure
+            return None
+    return {"role": "plot", "relative_path": PurePosixPath(path.relative_to(bundle_dir)).as_posix(), "sha256": sha256_file(path)}
 
 
 #: review M1: an Athena result whose curve the SCIENTIST tied to its group (params athena_match): the review flag, the
@@ -2824,7 +2875,13 @@ def process_bundle(
                 {"project": entries[row["entry_index"]]["prj_relative_path"],
                  "athena_group": entries[row["entry_index"]]["group_name"]})
     matched, m_notes, versions = A.match_with_versions(all_groups, entries, np, ties=ties)
-    unmatched = A.unmatched_merges(all_groups, entries, tied=ties, not_this=nots)
+    # r7 K5: the scientist's merges set aside as no group's (params athena_ignore): no longer listed
+    ignored, ignore_rows = A.resolve_ignores(P.athena_ignores(params), entries, all_groups, tied=ties)
+    unmatched = A.unmatched_merges(all_groups, entries, tied=ties, not_this=nots, ignored=ignored)
+    # r7 K1: each names the live groups whose Athena groups are in the same project (where the merge was made)
+    project_groups(unmatched, all_groups, entries, ties=ties)
+    # r7 K3: reference channels ("  Ref <name>") are no sample merges: counted, never listed or hinted
+    ref_channels = A.unmatched_reference_channels(all_groups, entries, tied=ties)
 
     results, unread_results = [], []
     skipped = set(skip_group_ids or ())
@@ -2865,10 +2922,15 @@ def process_bundle(
                                                 processed=processed, stored=bundle.get("processing_results") or (),
                                                 ties=ties),
             # r6 G1: the scientist's merges that match no group by name, with near-name hints (never matched)
-            **({"unmatched_merges": unmatched[:500]} if unmatched else {}),
+            **({"unmatched_merges": unmatched[:UNMATCHED_STORED], "unmatched_merges_total": len(unmatched)}
+               if unmatched else {}),
             **({"athena_match": [{k: v for k, v in r.items() if k != "entry_index"} for r in tie_rows]} if tie_rows else {}),
             **({"athena_match_not": [{k: v for k, v in r.items() if k != "entry_index"} for r in not_rows]}
                if not_rows else {}),
+            **({"athena_ignore": ignore_rows} if ignore_rows else {}),
+            **({"unmatched_reference_channels": {"count": len(ref_channels), "rule": A.REFERENCE_CHANNEL_RULE_ID,
+                                                 "labels": [i["athena_label"] for i in ref_channels[:50]]}}
+               if ref_channels else {}),
         },
         "processing_results": results,
         "unread_acquisition_results": unread_results,
@@ -2885,11 +2947,18 @@ def process_bundle(
         r.get("group_id") for r in bundle.get("processing_results") or ()
         if r.get("source") == "scientist_athena" and B.processing_id(r) in decided
         and ((r.get("inputs") or [{}])[0] or {}).get("match_kind") == A.TIED_KIND}
-    if unmatched:
-        line = unmatched_merges_line(unmatched)
+    several_line = several_groups_line(m_notes, all_groups, bundle)
+    if several_line:
+        payload["summary"]["lines"].append(several_line)
+    if unmatched or ref_channels:
+        line = unmatched_merges_line(unmatched, reference_channels=len(ref_channels))
         payload["athena"]["unmatched_merges_statement"] = line
         payload["summary"]["lines"].append(line)
+    ignore_line = athena_ignore_line(ignore_rows)
+    if ignore_line:
+        payload["summary"]["lines"].append(ignore_line)
     kept_notes += say_unmatched_merges(results, unmatched, settled=settled, stored=bundle.get("processing_results") or ())
+    kept_notes += version_plot_notes(results, stored=bundle.get("processing_results") or ())
     renorm_line = renormalisation_line(results)
     if renorm_line:
         payload["summary"]["lines"].append(renorm_line)
@@ -3380,11 +3449,54 @@ def _why_near(c: Mapping) -> str:
     return "; ".join(why)
 
 
-def unmatched_merges_line(items: Sequence[Mapping]) -> str:
+#: how many unmatched merges processing_results.json keeps (review L5: the true count is stored beside it)
+UNMATCHED_STORED = 500
+#: r7 K1: how many live groups an unmatched merge names as sharing its project (``groups_in_project``)
+_PROJECT_GROUPS_SAID = 10
+
+
+def project_groups(items: Sequence[dict], groups: Sequence[Mapping], entries: Sequence[Mapping], *,
+                   ties: Mapping[int, Sequence[str]] | None = None) -> None:
+    """r7 K1: on each unmatched merge, ``groups_in_project``: the live record groups whose Athena groups (matched by
+    name, or tied) are in a project the merge is in. Where the scientist made the merge; a hint of where to look, never
+    a match."""
+    of_group = A.entry_groups(groups, entries, ties=ties)
+    live = {g["group_id"] for g in groups if A.hint_eligible(g)}
+    by_prj: dict[str, set] = {}
+    for i, gid in of_group.items():
+        if gid in live:
+            by_prj.setdefault(str(entries[i]["prj_relative_path"]), set()).add(gid)
+    for item in items:
+        got = sorted({g for x in item["in"] for g in by_prj.get(str(x["prj_relative_path"]), ())})
+        item["groups_in_project"] = got[:_PROJECT_GROUPS_SAID]
+        if len(got) > _PROJECT_GROUPS_SAID:
+            item["groups_in_project_more"] = len(got) - _PROJECT_GROUPS_SAID
+
+
+def _beside(item: Mapping) -> str:
+    gids = list(item.get("groups_in_project") or ())
+    if not gids:
+        return "no group's Athena groups are in that project"
+    more = int(item.get("groups_in_project_more") or 0) + max(0, len(gids) - 3)
+    return "beside the Athena groups of " + ", ".join(gids[:3]) + (f" and {more} more" if more else "")
+
+
+#: r7 K1: the command that pages every unmatched merge (the reply and the line show a few)
+ATHENA_MERGES_COMMAND = "`isaac bundle list <bundle_dir> athena-merges`"
+
+
+def unmatched_merges_line(items: Sequence[Mapping], *, reference_channels: int = 0) -> str:
     """r6 G1: ONE summary line for the scientist's merges that match no record group by name (athena.unmatched_merges):
-    how many, the near-name hints (never matched), and how the scientist ties one."""
+    how many, the near-name hints (never matched), and how the scientist ties one. r7 K1: the merges with no near name
+    are named too (label, project, the groups beside it), and the line says which command lists them all. r7 K3: the
+    reference channels (``reference_channels``) are counted, never listed."""
     groups_read = sum(len(i["in"]) for i in items)
     hinted = [i for i in items if i.get("candidates")]
+    refs = (f" {reference_channels}{' more' if items else ''} Athena group(s) that match no group are reference "
+            "channels (Athena's \"Ref <name>\": the reference read beside a sample), not sample merges, so they are "
+            "not listed or hinted." if reference_channels else "")
+    if not items:
+        return "Athena:" + refs
     line = (f"Athena: {len(items)} of the scientist's merges ({groups_read} Athena groups) match no record group by "
             "name, so ISAAC did not use them. A merge exists but was not matched.")
     if hinted:
@@ -3394,12 +3506,65 @@ def unmatched_merges_line(items: Sequence[Mapping]) -> str:
             for i in hinted[:_UNMATCHED_SAID])
         line += (f" {len(hinted)} have a near name, a hint only, never matched: {shown}"
                  + (" …" if len(hinted) > _UNMATCHED_SAID else "") + ".")
-    if len(items) > len(hinted):
-        line += f" {len(items) - len(hinted)} have no near name."
-    return (line + f" Ask the scientist which group each is for, if any. To use one, name it in a params file's "
-            f"{P.ATHENA_MATCH_SECTION} ({{\"<group id>\": [{{\"project\": \"<project file>\", \"athena_group\": "
-            "\"<Athena label>\"}]}) and run `isaac process --params-file <file>`. All are listed in "
-            "processing_results.json athena.unmatched_merges.")
+    bare = [i for i in items if not i.get("candidates")]
+    if bare:
+        shown = "; ".join(f"'{i['athena_label']}' ({_merge_where(i)}, {_beside(i)})" for i in bare[:_UNMATCHED_SAID])
+        line += (f" {len(bare)} have no near name: {shown}" + (" …" if len(bare) > _UNMATCHED_SAID else "") + ".")
+    return (line + refs + f" Ask the scientist which group each is for, if any. To use one, name it in a params "
+            f"file's {P.ATHENA_MATCH_SECTION} ({{\"<group id>\": [{{\"project\": \"<project file>\", \"athena_group\": "
+            "\"<Athena label>\"}]}) and run `isaac process --params-file <file>`. If it is no group's, name it in "
+            f"{P.ATHENA_IGNORE_SECTION} ([{{\"project\": …, \"athena_group\": …}}]) and it is no longer listed. "
+            f"{ATHENA_MERGES_COMMAND} lists every one.")
+
+
+def athena_ignore_line(rows: Sequence[Mapping]) -> str | None:
+    """r7 K5: ONE line for the params file's ``athena_ignore``: the merges set aside (no longer listed), and each item
+    that set nothing aside, in its own words. ``None`` when the params file has none."""
+    if not rows:
+        return None
+    done = [r for r in rows if r.get("status") == "ignored"]
+    parts = []
+    if done:
+        named = ", ".join(f"'{r['label']}' ({PurePosixPath(str(r['prj_relative_path'])).name})" for r in done[:_UNMATCHED_SAID])
+        parts.append(f"Athena: {len(done)} merge(s) the scientist set aside as no group's (params "
+                     f"{P.ATHENA_IGNORE_SECTION}) are no longer listed: {named}" + (" …" if len(done) > _UNMATCHED_SAID else "")
+                     + ". Nothing was matched and no result changed. Pass the same params file to keep them set aside.")
+    parts += [r["statement"] for r in rows if r.get("status") != "ignored"]
+    return " ".join(parts)
+
+
+def several_groups_line(notes: Sequence[Mapping], groups: Sequence[Mapping], bundle: Mapping | None = None) -> str | None:
+    """r7 K6: ONE line for the scientist's Athena groups whose name matches SEVERAL record groups
+    (``athena_group_matches_several_record_groups``), so ISAAC used none: each label (its projects) and the groups. When
+    the groups are live, it is a hint that they may be one sample in several runs: the scientist decides; ISAAC never
+    merges them. The proposed merge candidate between them is named when there is one. ``None`` when none."""
+    status = {g["group_id"]: g.get("status") for g in groups}
+    by_label: dict[tuple, dict] = {}
+    for n in notes:
+        if n.get("code") != "athena_group_matches_several_record_groups":
+            continue
+        gids = tuple(sorted(n.get("group_ids") or ()))
+        item = by_label.setdefault((str(n.get("athena_label")), gids), {"projects": []})
+        name = PurePosixPath(str(n.get("prj_relative_path"))).name
+        if name not in item["projects"]:
+            item["projects"].append(name)
+    if not by_label:
+        return None
+    mcs = [m for m in (bundle or {}).get("merge_candidates") or () if isinstance(m, Mapping) and m.get("status") == "proposed"]
+    shown = []
+    for (label, gids), item in list(by_label.items())[:_UNMATCHED_SAID]:
+        live = [g for g in gids if status.get(g) in B.LIVE_GROUP_STATUSES]
+        said = f"'{label}' ({', '.join(item['projects'][:3])}) matches {', '.join(gids)}"
+        if len(live) > 1:
+            mc = next((m.get("merge_candidate_id") for m in mcs if set(live) <= set(m.get("group_ids") or ())), None)
+            said += (f": they may be one sample in several runs (a hint only; ISAAC never merges groups"
+                     + (f"; merge candidate {mc} proposes it" if mc else "") + ")")
+        shown.append(said)
+    return (f"Athena: {len(by_label)} of the scientist's Athena group(s) match several record groups by name, so ISAAC "
+            "used none of them: " + "; ".join(shown) + (" …" if len(by_label) > _UNMATCHED_SAID else "")
+            + ". Ask the scientist whether the groups are one sample. Only on their yes, merge them (`isaac bundle "
+            "decide <bundle_dir> --target <group id> --decision merge --merge-with <other group id> --by \"<your "
+            f"name>\"`); if not, tie the Athena group to its group in a params file's {P.ATHENA_MATCH_SECTION}.")
 
 
 def say_unmatched_merges(results: Sequence[dict], items: Sequence[Mapping], *, settled: Iterable[str] = (),

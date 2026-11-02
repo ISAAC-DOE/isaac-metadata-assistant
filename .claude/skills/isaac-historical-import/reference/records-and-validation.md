@@ -50,7 +50,9 @@ nobody has said which is right: the record carries the file's set-point (or none
 warning names (`question_id`). `in_situ_conditions_not_in_record` warns for an in-situ or operando electrochemical record (an electrochemistry field, or a
 file name stating a condition or a potential) that carries no
 electrolyte, cell type or control mode (and names its pH when it has none), quoting what the file names state
-(`10MNaOH`): ask each field with its command (`fields`); nothing is filled from a name. `athena_version_no_longer_chosen` warns when the
+(`10MNaOH`): ask each field with its command (`fields`); nothing is filled from a name. It does not quote an
+open-circuit token (`OCV`) when the record's confirmed control mode is another one. It is kept in the record's
+evidence `notes`, so `upload --dry-run` says it too. `athena_version_no_longer_chosen` warns when the
 approved curve is not the Athena version the scientist chose last (a version approved before they chose
 another, or ISAAC's own curve approved before they chose a version): the record carries the approved curve.
 Its text gives the steps (`isaac process` for the chosen version if needed, reject the old result, approve the
@@ -110,6 +112,10 @@ every ready record carries, a refreshed evidence file, a refused artifact). Only
 the first 3 (`exported_shown`, `exported_omitted`, `exported_full_list`): what they carry is in the counts,
 `warnings_by_text` and `portal_warnings`. `schemas_used` and the rows' one statement (`records_statement`) are said
 once at the top. `export --full` prints every row; `<records>/isaac-export/index.json` lists every record id.
+Each `exported[]`, `refused[]` and dry-run `records[]` row has a `label`: the group's first member file. Use it
+to name the record to the scientist. In the evidence file, a `#D` local clock time with no zone beside the UTC
+start of record has `relation: not_comparable` (not comparable until the clock's zone is stated), never
+`contradicts`. Once the zone is confirmed, a converted `#D` reading is compared as an instant.
 It exits 1 whenever any group is refused, **even when it wrote records**: read `outcome`, never the exit
 code alone, before telling the scientist what is ready. A record written while a warning still applies lists it
 in `exported[].warnings` ("Written without the potential set-point: …"; the first 5, with `warnings_total`), and

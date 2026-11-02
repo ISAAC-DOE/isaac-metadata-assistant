@@ -312,9 +312,10 @@ def test_hints_count_a_run_number_only_at_the_start_and_veto_other_digits():
     [c] = A.near_name_candidates({"label": "merge_SYNmos2_spt2", "names": ["merge_synmos2_spt2"], "is_merge": True},
                                  [_group("rgJ", "09_SYNmos2_spot2")])
     assert c["differs_in"] == {"merge": ["spt2"], "group": ["spot2"]}
-    # a run-number hint never hides a likeness hint
-    got = _hint("merge_07_SYN_x_dry_spot3", _group("rg07", "07_SYN_x_wet"), _group("rg08", "08_SYN_x_dry_spot3"))
-    assert got[0] == "rg07" and "rg08" in got
+    # a run-number hint never hides a likeness hint (r7 K3: a likeness under ANOTHER run number is no hint)
+    got = _hint("merge_07_SYN_x_dry_spot3", _group("rg07", "07_SYN_x_wet"), _group("rg08", "SYN_x_dry_spot3"),
+                _group("rg09", "08_SYN_x_dry_spot3"))
+    assert got[0] == "rg07" and "rg08" in got and "rg09" not in got
     # a rejected group is never hinted
     assert _hint("merge_SYN_x_sample", _group("rgI", "01_SYN_x_sample", status="rejected")) == []
 

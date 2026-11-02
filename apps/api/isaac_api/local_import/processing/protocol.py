@@ -321,8 +321,31 @@ def athena_match_ties(overrides: Mapping | None, section: str = ATHENA_MATCH_SEC
     return out
 
 
+#: r7 K5: the params-file section in which the scientist sets aside a merge of theirs that is no group's, ``{"athena_ignore":
+#: [{"project": "<relative path or file name>", "athena_group": "<Athena group name or label>"}]}``: it is no longer
+#: listed as a merge that matches no group. Nothing is matched; no curve, file or id changes. Kept OUT of the resolved
+#: params (no params.json names it).
+ATHENA_IGNORE_SECTION = "athena_ignore"
+
+
+def athena_ignores(overrides: Mapping | None) -> list[dict]:
+    """``[{"project", "athena_group"}, ...]`` from a params file's :data:`ATHENA_IGNORE_SECTION` (``[]`` when absent).
+    One item may stand alone. Refused (``ValueError``) when it is not that shape."""
+    raw = (overrides or {}).get(ATHENA_IGNORE_SECTION) if isinstance(overrides, Mapping) else None
+    if raw is None:
+        return []
+    items = [raw] if isinstance(raw, Mapping) else raw
+    ok = isinstance(items, (list, tuple)) and items and all(
+        isinstance(i, Mapping) and set(i) == {"project", "athena_group"}
+        and all(isinstance(i[k], str) and i[k].strip() for k in i) for i in items)
+    if not ok:
+        raise ValueError(f'{ATHENA_IGNORE_SECTION} must be [{{"project": "<project file>", '
+                         f'"athena_group": "<Athena group or label>"}}, ...]; got {raw!r}')
+    return [{"project": i["project"].strip(), "athena_group": i["athena_group"].strip()} for i in items]
+
+
 #: the params-file sections read apart from the protocol's parameters (never in the resolved params)
-_APART_SECTIONS = (EXCLUDE_SCANS_SECTION, ATHENA_MATCH_SECTION, ATHENA_MATCH_NOT_SECTION)
+_APART_SECTIONS = (EXCLUDE_SCANS_SECTION, ATHENA_MATCH_SECTION, ATHENA_MATCH_NOT_SECTION, ATHENA_IGNORE_SECTION)
 
 
 def resolve_params(overrides: Mapping | None = None) -> dict:
@@ -333,6 +356,7 @@ def resolve_params(overrides: Mapping | None = None) -> dict:
     scan_exclusions(overrides)
     athena_match_ties(overrides)
     athena_match_ties(overrides, ATHENA_MATCH_NOT_SECTION)
+    athena_ignores(overrides)
     overrides = {k: v for k, v in copy.deepcopy(dict(overrides or {})).items() if k not in _APART_SECTIONS}
     cal = overrides.get("calibration")
     if isinstance(cal, Mapping) and "confirmed_reference" in cal:

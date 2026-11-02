@@ -17,7 +17,7 @@ COMMANDS
     files and deletes nothing). Refuses an ``--out`` inside the folder being read.
     The local path is never written into the bundle unless ``--record-local-root``.
 
-``isaac bundle list <dir> runs|conflicts|candidates|questions|unread|groups|merge-candidates|processed-outputs|processing-results [--limit N] [--offset M] [--state S]``
+``isaac bundle list <dir> runs|conflicts|candidates|questions|unread|groups|merge-candidates|processed-outputs|processing-results|athena-merges [--limit N] [--offset M] [--state S]``
     A bounded page as JSON, with ``total`` and how many were omitted before and after.
     Never truncates silently. ``processing-results``: one compact row per result (id, group, verdict,
     applicability, key QC flags and metrics, a ``scans`` line saying which scans were used, plot path, Athena
@@ -102,7 +102,7 @@ BUNDLE_FILES = (
 )
 
 LIST_KINDS = ("runs", "conflicts", "candidates", "questions", "unread", "groups", "merge-candidates", "processed-outputs",
-              "processing-results")
+              "processing-results", "athena-merges")
 SHOW_KINDS = ("run", "conflict", "candidate", "source", "question", "group", "merge-candidate", "processed-output",
               "processing-result")
 DEFAULT_LIMIT = 20
@@ -1022,6 +1022,8 @@ def cmd_bundle_list(args) -> int:
     bundle, code = _load(args.bundle_dir)
     if bundle is None:
         return code
+    if args.kind == "athena-merges":
+        return _list_athena_merges(args)
     rows = list(bundle.get(_LIST_SECTION[args.kind]) or [])
     not_listed: dict[str, int] = {}
     if args.kind == "groups" and not args.all:
@@ -1129,6 +1131,45 @@ def cmd_bundle_list(args) -> int:
     # ONE LINE PER ROW for groups and runs (1.9.x polish): a 10-group page with file names, scans and reader
     # stays near 4 KB, and a row reads as a table row. Still one JSON document.
     print(_dumps_rows_inline(payload) if args.kind in INLINE_ROW_KINDS else json.dumps(payload, indent=1, ensure_ascii=False))
+    return EXIT_OK
+
+
+def _list_athena_merges(args) -> int:
+    """r7 K1: ``bundle list <dir> athena-merges``: the scientist's Athena merges that match no group, as the last
+    ``isaac process`` found them (one compact row each: label, projects, near-name hints, the groups sharing its
+    project), paged. Read from ``processing/processing_results.json`` so nobody opens that file by hand."""
+    from . import mutations as M
+
+    if args.state or args.all:
+        _err("--state and --all do not apply to `athena-merges`.")
+        return EXIT_USAGE
+    path = Path(args.bundle_dir) / "processing" / "processing_results.json"
+    try:
+        athena = json.loads(path.read_text(encoding="utf-8")).get("athena")
+    except (OSError, ValueError, AttributeError):
+        athena = None
+    processed = isinstance(athena, Mapping)
+    athena = athena if processed else {}
+    rows = [i for i in athena.get("unmatched_merges") or () if isinstance(i, Mapping)]
+    found = int(athena.get("unmatched_merges_total") or len(rows))  # review L5: the list may be capped
+    page = rows[args.offset : args.offset + args.limit]
+    refs = athena.get("unmatched_reference_channels") or {}
+    payload = {
+        "kind": args.kind, "total": len(rows), "offset": args.offset, "limit": args.limit, "returned": len(page),
+        "omitted_before": min(args.offset, len(rows)), "omitted_after": max(0, len(rows) - args.offset - len(page)),
+        **_more(len(rows) - args.offset - len(page), args.offset + len(page)),
+        "statement": ("The scientist's Athena merges whose name matches no group, as the last `isaac process` found "
+                      "them. ISAAC used none. Near groups are hints only: ask the scientist which group each is for. "
+                      "Tie one in a params file's athena_match; set one that is no group's aside in athena_ignore."
+                      if processed else "Not processed yet, so no Athena project was read: run `isaac process "
+                      "<bundle_dir> --source <folder>` first."),
+        **({"capped": f"{found} merges match no group; the first {len(rows)} are kept and listed"}
+           if found > len(rows) else {}),
+        **({"reference_channels_not_listed": refs.get("count")} if refs.get("count") else {}),
+        **({"athena_ignore": athena["athena_ignore"]} if athena.get("athena_ignore") else {}),
+        "items": [M.unmatched_merge_row(i) for i in page],
+    }
+    print(json.dumps(payload, indent=1, ensure_ascii=False))
     return EXIT_OK
 
 

@@ -59,6 +59,7 @@ import hashlib
 import json
 import operator
 import re
+from collections import Counter
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Container, Iterable, Mapping, Sequence
@@ -1280,7 +1281,9 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 **({"last_token_positions": open_last or [p for p in last_at if p not in said_counter] or last_at}
                    if last_at and LAST_POSITION in asked_positions else {}),
                 **({"example_names": example_names} if example_names else {}),
-                "applies_to": {"groups": len(groups), "runs": len(bundle["runs"]), "targets": 1},
+                # r7 J7: a run kept as context (an exported copy of another run) is no run of its own here
+                "applies_to": {"groups": len(groups), "runs": sum(r["run_id"] not in context for r in bundle["runs"]),
+                               "targets": 1},
                 "targets": [{"kind": "experiment", "id": "experiment"}],
                 "per_scope_targets": {"experiment": ["experiment"]},
                 "hints": [{"kind": "grouping", "literal": ([n for names in example_names.values() for n in names] if example_names
@@ -1429,9 +1432,13 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         reports = compositions(bundle, decision_of=decisions)
         if compositions_out is not None:
             compositions_out.update(reports)
+        # r7 J2: EVERY live group that cannot become a record as it stands (processing_not_applicable:<code>, no_scans,
+        # not_a_measurement_run: the cannot_export_reason `bundle list <dir> groups` gives), not only the last kind
+        live_ids = {g["group_id"] for g in groups}
+        cannot_export = {gid: why for gid, why in cannot_export_reasons(
+            bundle, not_a_measurement_groups(bundle, groups, reports=reports)).items() if gid in live_ids}
         basis = {**basis, "record_composer": _agree_with_composer(
-            questions, bundle, group_of, cand_by_id, reports, decision_of=decisions,
-            cannot_export=not_a_measurement_groups(bundle, groups, reports=reports))}
+            questions, bundle, group_of, cand_by_id, reports, decision_of=decisions, cannot_export=cannot_export)}
     reading_said = _note_shared_evidence(questions, cand_by_id, bundle, passing_of)
     _note_same_reading_groups(questions, cand_by_id, bundle)
     _note_shared_reading_groups(questions, cand_by_id, bundle, reading_said)
@@ -1439,6 +1446,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     _note_agreeing_field_hints(questions, bundle)
     _mark_deferred(questions, decisions)
     _covered_by_run_decisions(questions, covered_conflicts, beamtime_decision_ids)
+    _fold_into_file_restart(questions, bundle, decisions)
     _say_the_one_group(questions)
     if has_groups:
         beamtime_start = _stated_utc_start_question(questions, bundle, group_of, run_by_id, decisions)
@@ -1568,7 +1576,7 @@ def stated_utc_reach(bundle: Mapping) -> dict[str, dict]:
                 and B.value_problem(B.XDC_START_PATH, c["value"]) is None):
             utc_by_run.setdefault(c["run_id"], []).append(c)
     out: dict[str, dict] = {}
-    per_group: dict[str, list[str]] = {}
+    per_group: dict[str, list[dict]] = {}
     for cf in bundle.get("conflicts") or ():
         rids = cf.get("run_ids") or ()
         if cf.get("candidate_id") not in starts or not rids or rids[0] not in group_of:
@@ -1581,14 +1589,60 @@ def stated_utc_reach(bundle: Mapping) -> dict[str, dict]:
         reading, why = stated_utc_reading(readings, runs, cf)
         gid = group_of[rids[0]]
         out[cf["conflict_id"]] = {"group_id": gid, "reading": reading, "reason": why}
-        per_group.setdefault(gid, []).append(cf["conflict_id"])
-    for gid, cids in per_group.items():
-        if len(cids) > 1:
-            for cid in cids:
-                out[cid] = {**out[cid], "reading": None,
-                            "reason": (f"the group has {len(cids)} runs, each with its own start-time disagreement: "
-                                       "say which run's start the record takes")}
+        per_group.setdefault(gid, []).append({**cf, "run_ids": runs})
+    for gid, cfs in per_group.items():
+        if len(cfs) < 2:
+            continue
+        # r7 J1: the RUNS are counted, not the disagreements: one run whose file was started several times holds two
+        # (its #E lines disagree, and so do its #D lines)
+        runs = {r for cf in cfs for r in cf["run_ids"]}
+        restart = next((said for cf in cfs if (said := file_restarts_said(cf))), None)
+        if len(runs) > 1:
+            why = (f"the group has {len(runs)} runs, each with its own start-time disagreement: say which run's start "
+                   "the record takes")
+        elif restart:
+            why = f"{restart}: say which is the start"
+        else:
+            why = f"its run has {len(cfs)} start-time disagreements: say which instant is the start"
+        for cf in cfs:
+            out[cf["conflict_id"]] = {**out[cf["conflict_id"]], "reading": None, "reason": why}
     return out
+
+
+def file_restarts(cf: Mapping) -> list[tuple[str, str]]:
+    """r7 J1: ``[(locator, UTC instant), ...]`` when a start-time disagreement is between the ``#E`` lines of ONE file
+    (the file was started again, in another session, and wrote another header), in line order; else ``[]``. Every
+    reading must be a UTC instant the field takes (:func:`bundle.value_problem`)."""
+    seen: list[tuple[str, str]] = []
+    sources = set()
+    for r in cf.get("readings") or ():
+        if B.value_problem(B.XDC_START_PATH, r.get("value")) is not None:
+            return []
+        for w in r.get("witnesses") or ():
+            loc = str(w.get("locator") or "")
+            if "#E" not in loc:
+                return []
+            sources.add(w.get("source_id"))
+            seen.append((loc, str(r.get("value"))))
+    if len(seen) < 2 or len(sources) != 1:
+        return []
+    line = re.compile(r"line (\d+)")
+    return sorted(seen, key=lambda x: int(m.group(1)) if (m := line.search(x[0])) else 0)
+
+
+def file_restarts_said(cf: Mapping) -> str | None:
+    """r7 J1: ``"its file was started 2 times (#E at line 2: …; line 152: …)"`` for :func:`file_restarts`, or ``None``.
+    r7 review: the STARTS are the distinct #E instants; two #E lines with the same epoch are one start."""
+    starts = file_restarts(cf)
+    if not starts:
+        return None
+    by_value: dict[str, list[str]] = {}
+    for loc, value in starts:
+        by_value.setdefault(value, []).append(loc.replace(" header #E", ""))
+    if len(by_value) < 2:
+        return None
+    return (f"its file was started {len(by_value)} times (#E at "
+            + "; ".join(f"{' and '.join(locs)}: {value}" for value, locs in by_value.items()) + ")")
 
 
 def _stated_utc_start_question(questions: list[dict], bundle: Mapping, group_of: Mapping[str, str],
@@ -1610,16 +1664,23 @@ def _stated_utc_start_question(questions: list[dict], bundle: Mapping, group_of:
     reach = stated_utc_reach(bundle)
     reached: list[tuple[dict, dict]] = []
     missed: dict[str, dict] = {}
+    no_record: set[str] = set()
     for q in questions:
         if (q.get("kind") != "resolve_conflict" or q.get("target_field_path") != B.XDC_START_PATH
-                or not q.get("affects_record") or q.get("covered_by_decisions")
-                or not str(q.get("scope") or "").startswith("group:")):
+                or not (q.get("affects_record") or q.get("all_groups_cannot_export")) or q.get("covered_by_decisions")
+                or q.get("asked_by_question") or not str(q.get("scope") or "").startswith("group:")):
             continue
         r = reach.get(q["targets"][0]["id"])
         if r is None:
             continue
         if r["reading"] is None:
             gid = q["scope"][len("group:"):]
+            if q.get("all_groups_cannot_export"):
+                # r7 J3: a group that cannot become a record is not asked about (nothing to answer), only counted
+                no_record.add(gid)
+                continue
+            if (d := decisions.get(("conflict", q["targets"][0]["id"]))) is not None and d.get("decision") not in B.NEUTRAL_DECISIONS:
+                continue  # answered already: not an open start-time question
             m = missed.setdefault(gid, {"group_id": gid, "question_id": q["question_id"], "question_ids": [],
                                         "conflict_ids": [], "reason": r["reason"]})
             m["question_ids"].append(q["question_id"])
@@ -1669,6 +1730,17 @@ def _stated_utc_start_question(questions: list[dict], bundle: Mapping, group_of:
             "records the #E instant its own file states. Each run keeps its own value. For example: "
             + "; ".join(examples) + (f"; and {len(reached) - len(examples)} more." if len(reached) > len(examples) else ".")
             + f" It reaches {n_groups} group(s) ({len(runs)} run(s)).")
+    held = {g for q, _ in reached for g in q.get("cannot_export_groups") or ()}
+    # r7 review: when NO group it reaches can become a record, it affects no record (optional, like each of them)
+    none_export = bool(held) and len(held) >= n_groups
+    if none_export:
+        text += (f" None of these {n_groups} groups can become a record as they stand "
+                 "(blocking_basis.record_composer.groups_that_cannot_export): nothing to answer unless one is to "
+                 "become a record.")
+    elif held:
+        # r7 J2: how many of them can become a record (the targets are unchanged)
+        text += (f" Only {n_groups - len(held)} of these {n_groups} groups can become a record; {len(held)} cannot "
+                 "export as they stand (blocking_basis.record_composer.groups_that_cannot_export).")
     if not_reached:
         text += (f" It does not reach {len(not_reached)} group(s) with an open start-time question: "
                  + "; ".join(f"{x['group_id']} ({x['question_id']}): {x['reason']}" for x in not_reached[:5])
@@ -1676,6 +1748,9 @@ def _stated_utc_start_question(questions: list[dict], bundle: Mapping, group_of:
                  + ". Answer those per group.")
     else:
         text += " Every group with an open start-time question is reached."
+    if no_record:
+        text += (f" It leaves out {len(no_record)} other group(s) that cannot become a record as they stand: "
+                 "nothing to answer for them.")
     if answered:
         text += (f" {answered} of them already hold an answer of their own: confirming here keeps it "
                  "(only an open group is recorded).")
@@ -1692,16 +1767,20 @@ def _stated_utc_start_question(questions: list[dict], bundle: Mapping, group_of:
     return {
         "question_id": qid,
         "partition": None,
-        "tier": TIER_BLOCKING if any(q.get("blocking") for q, _ in reached) else TIER_CONFLICT,
+        "tier": (TIER_BLOCKING if any(q.get("blocking") for q, _ in reached) else
+                 TIER_OPTIONAL if none_export else TIER_CONFLICT),
         "blocking": any(bool(q.get("blocking")) for q, _ in reached),
-        "affects_record": True,
-        "why": ("One scientist decision for the whole beamtime: a record built from these runs carries the start time "
+        "affects_record": not none_export,
+        "why": ("Not a record: no group it reaches can become a record as it stands. Nothing to answer unless one is "
+                "to become a record." if none_export else
+                "One scientist decision for the whole beamtime: a record built from these runs carries the start time "
                 "you choose, and each group would otherwise be asked on its own."),
         "kind": STATED_UTC_START_KIND,
         "scope": "experiment",
         "target_field_path": B.XDC_START_PATH,
         "text": text,
-        "applies_to": {"groups": n_groups, "runs": len(runs), "targets": len(targets)},
+        "applies_to": {"groups": n_groups, "runs": len(runs), "targets": len(targets),
+                       **({"groups_that_can_export": n_groups - len(held)} if held else {})},
         "targets": targets,
         "per_scope_targets": per_scope,
         "stated_utc_candidates": candidates,
@@ -1709,6 +1788,7 @@ def _stated_utc_start_question(questions: list[dict], bundle: Mapping, group_of:
         "largest_file_to_first_scan_s": largest_gap,
         "max_file_to_first_scan_s": MAX_FILE_TO_FIRST_SCAN_S,
         "not_reached": not_reached,
+        **({"not_a_record": sorted(no_record)} if no_record else {}),
         **({"answered_before": answered_before} if answered_before else {}),
         "hints": hints,
         "allowed_values": None,
@@ -1788,6 +1868,56 @@ def _covered_by_run_decisions(questions: list[dict], covered: Mapping[str, Seque
                     "that decision.")
 
 
+#: What a local-clock start-time question says when the bundle holds no UTC reading for its run (:func:`_conflict_answer`).
+_NO_UTC_HELD = " No UTC reading of this start is held in the bundle: give the UTC start yourself (correct)."
+
+
+def _fold_into_file_restart(questions: list[dict], bundle: Mapping, decisions: Mapping) -> None:
+    """r7 J1: a SPEC file started more than once (in several sessions) writes an ``#E`` line each time. Its run then
+    holds TWO start-time disagreements: its ``#E`` lines (UTC instants, :func:`file_restarts`) and its ``#D`` lines
+    (local clock times). The ``#E`` question asks it: "this file was started N times (#E at …), which is the start?".
+    The ``#D`` question said no UTC reading is held, which is false: it now names the ``#E`` question
+    (``asked_by_question``, listed or answered already) and, unless it blocks or a decision covers it, is optional and
+    affects no record on its own (answering the ``#E`` question gives the run its start). Ids, scopes and targets are
+    unchanged (DEC-91)."""
+    cands = {c["candidate_id"]: c for c in bundle.get("candidates") or ()}
+    restarts: dict[tuple, tuple[str, str]] = {}  # the run(s) -> (the #E conflict id, what it says)
+    for cf in bundle.get("conflicts") or ():
+        if (cands.get(cf.get("candidate_id")) or {}).get("target_field_path") == B.XDC_START_PATH:
+            if said := file_restarts_said(cf):
+                restarts[tuple(sorted(cf.get("run_ids") or ()))] = (cf["conflict_id"], said)
+    if not restarts:
+        return
+    run_ids = {cf["conflict_id"]: tuple(sorted(cf.get("run_ids") or ())) for cf in bundle.get("conflicts") or ()}
+    for q in questions:
+        if q["kind"] != "resolve_conflict" or not q["targets"] or q.get("target_field_path") != B.XDC_START_PATH:
+            continue
+        cid = q["targets"][0]["id"]
+        hit = restarts.get(run_ids.get(cid, ()))
+        if hit is None:
+            continue
+        restart_id, said = hit
+        if restart_id == cid:
+            ask = f"{said[0].upper()}{said[1:]}: which is the start? Confirm that one, or give the UTC start yourself (correct)."
+            q["text"] = (q["text"].replace("Which reading is right?", ask, 1) if "Which reading is right?" in q["text"]
+                         else f"{q['text']} {ask}")
+            continue
+        if _NO_UTC_HELD not in str(q.get("text") or ""):
+            continue
+        by = _qid(q["scope"], "resolve_conflict", restart_id)
+        answered = (d := decisions.get(("conflict", restart_id))) is not None and d.get("decision") not in B.NEUTRAL_DECISIONS
+        q["text"] = q["text"].replace(_NO_UTC_HELD, (
+            f" The bundle does hold UTC readings for this run: {said}. Question {by} asks which is the start"
+            + (" and is answered already" if answered else ": answer that one") + ", and this question needs no answer "
+            "of its own."))
+        q["asked_by_question"] = by
+        if not q["blocking"] and not q.get("covered_by_decisions"):
+            q.update(tier=TIER_OPTIONAL, affects_record=False)
+            q.pop("deferred", None)
+            q["why"] = (f"Asked by question {by}: the same run's #E lines give its UTC start, and the record takes the "
+                        "one answered there. These #D readings name no time zone, so they cannot be recorded.")
+
+
 def question_counts(questions: Sequence[Mapping], *, fine_grained_v1: int | None = None) -> dict:
     """The counts of a list of consolidated questions (the whole bundle's, or one scope's). The tier-3 ones are
     split so none is counted twice: informational > a conflict its runs' own decisions cover > a conflict no record
@@ -1851,7 +1981,7 @@ def _groups_keeping_own(bundle: Mapping, q: Mapping, groups: set[str], decision_
 
 def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mapping[str, str],
                          cand_by_id: Mapping[str, Mapping], reports: Mapping[str, Mapping],
-                         decision_of: Mapping | None = None, cannot_export: Mapping[str, Sequence[str]] | None = None) -> dict:
+                         decision_of: Mapping | None = None, cannot_export: Mapping[str, str] | None = None) -> dict:
     """BLOCKING IS WHAT THE RECORD COMPOSER REQUIRES (records.compose_group, the list ``build-records`` and
     ``validate`` report): a value question blocks exactly when, for at least one LIVE record group it reaches,
     the composer lists one of its fields as missing and only an answer can supply it. So a conditionally
@@ -1860,9 +1990,12 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
     never grouped) blocks nothing. Ids, scopes and targets are untouched (DEC-91): only ``blocking``, ``tier``
     and ``why`` change, and what was decided is stated in ``blocks_groups`` / ``required_fields``.
 
-    r6 I3: a group that cannot become a record as it stands (``cannot_export``: :func:`not_a_measurement_groups`, a
-    reference standard, an alignment or a calibration scan) is blocked by nothing: a question that would block only such
-    groups is not blocking, and the returned basis names them once (``groups_that_cannot_export``)."""
+    r6 I3: a group that cannot become a record as it stands is blocked by nothing: a question that would block only such
+    groups is not blocking, and the returned basis names them once (``groups_that_cannot_export``). r7 J2: ``cannot_export``
+    is every live group with a ``cannot_export_reason`` (:func:`cannot_export_reasons`: no processing protocol covers
+    its data, no scan, or not a measurement run), ``{group_id: reason}``. A question that reaches some of them says how
+    many of the groups it reaches can become a record (``applies_to.groups_that_can_export``). r7 J3: a disagreement
+    that reaches only such groups affects no record (optional, ``affects_record`` false)."""
     from .records import RUN_ONLY_PATHS
 
     held_back_groups = set(cannot_export or ())
@@ -1941,6 +2074,9 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
                 q["applies_to"]["groups_reached"] = len(groups_reached) - apart
         held_back = needing & held_back_groups
         needing -= held_back_groups
+        held_reached = groups_reached & held_back_groups
+        if held_reached and isinstance(q.get("applies_to"), dict):
+            _say_cannot_export(q, groups_reached, held_reached, cannot_export or {})
         if needing:
             # which groups it blocks (`--scope group:<id> --blocking-only` lists it only for those)
             q["blocks_groups"], q["blocks_group_ids"] = len(needing), sorted(needing, key=lambda g: order_of.get(g, 0))
@@ -1956,10 +2092,11 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
             if not groups_reached:
                 q["why"] = _OUTSIDE_LIVE_GROUPS
             elif held_back:
-                q["cannot_export_groups"] = sorted(held_back)
+                q.setdefault("cannot_export_groups", sorted(held_back))
                 q["why"] = (f"Not blocking: the only record group(s) it would block ({', '.join(sorted(held_back)[:3])}"
-                            + ("…" if len(held_back) > 3 else "") + ") cannot become a record as they stand: "
-                            "every run is not a measurement run (blocking_basis.record_composer names them once).")
+                            + ("…" if len(held_back) > 3 else "") + ") cannot become a record as they stand ("
+                            + _reasons_said(held_back, cannot_export or {}) + "; blocking_basis.record_composer "
+                            "names them once).")
             elif all(any(_fills(path, f) or _fills(f, _composer_path(path)) for f in filled[g]) for g in groups_reached):
                 q["why"] = (f"Not blocking: every record group this question reaches already has {path} in the record "
                             + ("composed for it now (from an answer or a source). The sources disagree about it: the "
@@ -1997,14 +2134,65 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
                 q["required_because"] = because
     out = {"basis": "records.compose_group: the missing-required list build-records and validate report",
            "live_groups": len(every), "blocking_changed_to_agree": changed}
+    for q in questions:
+        # r7 J3: a disagreement that reaches only groups that cannot become a record affects no record
+        held = q.get("cannot_export_groups")
+        if (held and q.get("all_groups_cannot_export") and q["kind"] == "resolve_conflict"
+                and q["tier"] == TIER_CONFLICT and not q["blocking"]):
+            q.update(tier=TIER_OPTIONAL, affects_record=False)
+            q["why"] = ("Not a record: every record group it reaches cannot become a record as it stands ("
+                        + _reasons_said(held, cannot_export or {}) + "). Nothing to answer unless such a group is to "
+                        "become a record.")
     if held_back_groups:
-        by_group, said = not_a_measurement_reasons(bundle, cannot_export or {})
-        out["groups_that_cannot_export"] = by_group
+        by_group = {gid: (cannot_export or {})[gid] for gid in sorted(held_back_groups)}
+        # bounded (r7 J2: a beamtime can hold a hundred such groups): the first few, the total and a count per reason
+        out["groups_that_cannot_export"] = dict(list(by_group.items())[:_CANNOT_EXPORT_SHOWN])
+        if len(by_group) > _CANNOT_EXPORT_SHOWN:
+            out["groups_that_cannot_export_total"] = len(by_group)
+        out["cannot_export_by_reason"] = dict(sorted(Counter(by_group.values()).items()))
         out["cannot_export_statement"] = (
-            f"{len(held_back_groups)} group(s) cannot become a record as they stand: every run is a reference standard, "
-            f"an alignment or a calibration scan, and a required field has nowhere to hold an answer. {said}. No "
-            "question counts as blocking for them; answer theirs only if such a group is to become a record.")
+            f"{len(held_back_groups)} of the {len(every)} live group(s) cannot become a record as they stand ("
+            + _reasons_said(held_back_groups, by_group) + "). `bundle list <bundle_dir> groups` gives each its "
+            "cannot_export_reason. No question counts as blocking for them; answer theirs only if such a group is to "
+            "become a record.")
     return out
+
+
+#: r7 J2: how many groups that cannot export ``blocking_basis.record_composer.groups_that_cannot_export`` names.
+_CANNOT_EXPORT_SHOWN = 20
+#: r7 J2: what each ``cannot_export_reason`` means, in a few words (:data:`cli.CANNOT_EXPORT_NOTE` says it in full).
+_CANNOT_EXPORT_WORDS = {"no_scans": "none of its runs lists a scan",
+                        "processing_not_applicable:no_xas_channel": (
+                            "no energy axis or absorption signal was found in its columns; re-processing with the "
+                            "channels named (`isaac process --params-file`, channels.*) can make it exportable"),
+                        "not_a_measurement_run": "every run is a reference standard, an alignment or a calibration scan"}
+
+
+def _reasons_said(gids: Iterable[str], reasons: Mapping[str, str]) -> str:
+    """r7 J2: ``"no_scans for 54, processing_not_applicable:no_xas_channel for 67"``: the groups' cannot_export_reasons,
+    counted, the commonest first."""
+    count: dict[str, int] = {}
+    for gid in gids:
+        why = reasons.get(gid) or "cannot_export"
+        count[why] = count.get(why, 0) + 1
+    return ", ".join(f"{why} for {n}" + (f" ({_CANNOT_EXPORT_WORDS[why]})" if why in _CANNOT_EXPORT_WORDS else "")
+                     for why, n in sorted(count.items(), key=lambda x: (-x[1], x[0])))
+
+
+def _say_cannot_export(q: dict, reached: set[str], held: set[str], reasons: Mapping[str, str]) -> None:
+    """r7 J2: a question that reaches groups that cannot become a record says how many of the groups it reaches can
+    (``applies_to.groups_that_can_export``), once, in its text. Its targets, scope and id are unchanged (DEC-91)."""
+    can = len(reached - held)
+    q["applies_to"]["groups_that_can_export"] = can
+    q["cannot_export_groups"] = sorted(held)
+    if can == 0:
+        q["all_groups_cannot_export"] = True
+        said = (f" Not a record as it stands: {'its group' if len(reached) == 1 else f'all {len(reached)} groups it reaches'}"
+                f" cannot export ({_reasons_said(held, reasons)}).")
+    else:
+        said = (f" Only {can} of the {len(reached)} groups it reaches can become a record; {len(held)} cannot export as "
+                f"they stand ({_reasons_said(held, reasons)}).")
+    q["text"] = str(q.get("text") or "") + said
 
 
 #: r6h H2: the control mode that makes a set-point field required (:data:`_REQUIRED_WHEN`).
@@ -3446,7 +3634,8 @@ def not_a_measurement_groups(bundle: Mapping, groups: Sequence[Mapping] | None =
 def cannot_export_reasons(bundle: Mapping, not_measured: Mapping[str, Sequence[str]] | None = None) -> dict[str, str]:
     """r6 I2: ``{group_id: cannot_export_reason}`` for every record group that can never export as it stands, in the ONE
     order ``bundle list <dir> groups`` and ``bundle group`` both say it: ``processing_not_applicable:<code>`` (no ISAAC
-    processing protocol covers its data), else ``no_scans`` (none of its runs lists a scan), else
+    processing protocol covers its data), else ``no_scans`` (none of its runs lists a scan; r7 J8: also once
+    ``isaac process`` has recorded it as not applicable for that reason, so the code is the same before and after), else
     ``not_a_measurement_run`` (:func:`not_a_measurement_groups`). ``not_measured``: that map, when the caller has it."""
     runs = {r["run_key"]: r for r in bundle.get("runs") or ()}
     blocked = B.processing_blocked_groups(bundle)
@@ -3456,9 +3645,12 @@ def cannot_export_reasons(bundle: Mapping, not_measured: Mapping[str, Sequence[s
     for g in bundle.get("record_groups") or ():
         members = [runs[k] for k in g.get("member_run_keys") or () if k in runs]
         na = blocked.get(g["group_id"])
-        if na is not None:
-            out[g["group_id"]] = f"processing_not_applicable:{(na.get('applicability') or {}).get('reason_code')}"
-        elif members and not sum(int(r.get("scan_count") or 0) for r in members):
+        code = (na.get("applicability") or {}).get("reason_code") if na is not None else None
+        if na is not None and code != B.NA_NO_SCANS:
+            out[g["group_id"]] = f"processing_not_applicable:{code}"
+        elif code == B.NA_NO_SCANS or (members and not sum(int(r.get("scan_count") or 0) for r in members)):
+            # r7 J8: ONE code for a group with no scan, before `isaac process` and after it (which records it as
+            # not applicable, no_scans)
             out[g["group_id"]] = "no_scans"
         elif g["group_id"] in not_measured:
             out[g["group_id"]] = "not_a_measurement_run"
