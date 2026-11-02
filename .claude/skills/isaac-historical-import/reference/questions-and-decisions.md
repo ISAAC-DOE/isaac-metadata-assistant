@@ -36,8 +36,11 @@ confirmed and its result approved); for a group with scans but no processing res
 ISAAC protocol covers its data, its result has no curve, none of its runs lists a scan (`no_scans`, the
 `cannot_export_reason` of `bundle list <bundle> groups`), or every run is a reference standard or alignment
 scan whose record needs a field nothing can hold (`not_a_measurement_run`). No question counts as blocking for a
-group whose runs are all not measurement runs; `blocking_basis.record_composer.groups_that_cannot_export` names those
-groups once, with each one's `cannot_export_reason`. When only such groups are left, `blocked` says why
+group with any `cannot_export_reason`; `blocking_basis.record_composer.groups_that_cannot_export` names those
+groups once, with each one's reason (the first 20; `cannot_export_by_reason` counts them all). A question that reaches some of them says how many of its groups can
+become a record (`applies_to.groups_that_can_export`, and a sentence in its text): say that number, not the reach.
+A disagreement that reaches only such groups affects no record: it is optional, with "Not a record" in its `why`.
+When only such groups are left, `blocked` says why
 in words and `plus_decisions` never says "approve its processing result" for them. `recommended[]` (never blocking, not counted) names a question
 worth answering for that group, with the warning that explains it (`warnings`): today, a potential the
 file names state that the record will not carry until its scale is confirmed. Pages hold at most 200 (`--limit` above that is refused). The older fine-grained list (`bundle list <bundle> questions`)
@@ -122,8 +125,12 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   group). Each run gets its own `#E` instant; nothing is shared between runs. Which instant a record's start
   should be (file creation or first scan) is open for the protocol review (DEC-89): say so. The reply says
   how many groups were recorded, which open groups it does not reach and why (`not_reached`, one entry per
-  group: no `#E` line, `#E` readings that disagree, a late first scan, or a group with two runs, where the
-  scientist says which run's start the record takes), and which groups keep an answer of their own. Answer
+  group: no `#E` line, `#E` readings that disagree, a late first scan, a group with two runs, where the
+  scientist says which run's start the record takes, or a file started more than once), and which groups keep an
+  answer of their own. A file started more than once (in several sessions) has two or more `#E` lines: "its file
+  was started N times (#E at line 2: …; line 152: …)". Its `#E` question asks which is the start. Its `#D`
+  question names that one (`asked_by_question`) and needs no answer of its own. A group that cannot become a
+  record is left out of `not_reached` (counted in `not_a_record`): nothing to answer for it. Answer
   the groups it does not reach one by one. A record whose runs were given different starts carries none and
   warns "start time left out: this group's runs were given different start times". While the question is
   open, each start-time warning names it too.

@@ -98,7 +98,8 @@ def test_no_protocol_and_no_scan_are_said_apart_as_bundle_list_groups_says_them(
     extras = cli.group_list_extras(b)
     assert extras[g1]["cannot_export_reason"] == "processing_not_applicable:no_xas_channel"
     assert extras[g2]["cannot_export_reason"] == "no_scans"
-    assert extras[g3]["cannot_export_reason"] == "processing_not_applicable:no_scans"
+    # r7 J8: one code for a group with no scan, before and after `isaac process` records it as not applicable
+    assert extras[g3]["cannot_export_reason"] == "no_scans"
     blocks = LB.progress(grouped, b, {"status": "VALID"})["blocks_export"]
     assert ("1 group(s) have no applicable processing protocol (no_xas_channel: 1), so they cannot become complete "
             "records yet.") in blocks, blocks

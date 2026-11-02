@@ -286,7 +286,8 @@ def _witnesses(candidate: Mapping, value: Any = None, decision: Mapping | None =
     recorded relation was about the parser's value, not this one: it is kept as
     ``relation_to_parser_value`` and ``relation`` says whether the quote states the value of record
     (``supports``) or another value (``contradicts``) — a quote of the old value is never presented
-    as support for the new one."""
+    as support for the new one. r7 J4: a local clock time with no zone beside a UTC value of record is
+    ``not_comparable`` (:data:`NOT_COMPARABLE`), never "contradicts"."""
     out = []
     path = candidate.get("target_field_path")
     # the SAME value (same_value: numerically, as an instant, or exactly) is not a replacement
@@ -311,11 +312,38 @@ def _witnesses(candidate: Mapping, value: Any = None, decision: Mapping | None =
         elif replaced:
             entry["relation_to_parser_value"] = e.get("relation")
             entry["relation"] = "supports" if _vouches_for(candidate, e, path, value) else "contradicts"
-            if entry["relation"] == "contradicts":
+            if entry["relation"] == "contradicts" and _zone_less_clock(path, e.get("literal_value"), value):
+                # r7 J4: a local clock time with no zone is not an instant: it neither supports nor contradicts one
+                entry["relation"] = NOT_COMPARABLE
+                entry["note"] = NOT_COMPARABLE_NOTE
+            elif entry["relation"] == "contradicts":
                 entry["note"] = ("the file states another value; the value of record is the scientist's decision, "
                                  "not this quote")
         out.append(entry)
     return out
+
+
+#: r7 J4: the ``relation`` of a witness that states a local clock time with no time zone, beside a UTC value of record.
+NOT_COMPARABLE = "not_comparable"
+NOT_COMPARABLE_NOTE = ("a local clock time with no time zone: not comparable with the UTC value of record until the "
+                       "clock's time zone is stated")
+
+
+def _zone_less_clock(path: str | None, literal: Any, value: Any) -> bool:
+    """r7 J4: whether ``literal`` is a date and time with NO zone (a SPEC ``#D`` line, ``Sat Nov 13 20:52:09 2021``) while
+    the value of record of the ``*_utc`` field at ``path`` is a zoned instant: the two cannot be compared."""
+    if not (path and path.endswith("_utc") and isinstance(literal, str)) or _instant(value) is None:
+        return False
+    if _instant(literal) is not None or literal.strip().isdigit():  # an instant, or an epoch: comparable
+        return False
+    if B.read_xdc_literal(" ".join(literal.split())) is not None:
+        return True
+    from datetime import datetime
+
+    try:
+        return datetime.fromisoformat(literal.strip()).tzinfo is None
+    except ValueError:
+        return False
 
 
 def _candidate_confirmation(candidate: Mapping, decision: Mapping, value: Any, path: str, witnesses: Sequence[Mapping]) -> dict:
@@ -1624,6 +1652,11 @@ _IN_SITU_NAME_TOKENS = (re.compile(r"\d+(?:[p.]\d+)?(?:mM|uM|\u00b5M|M)(?P<formu
                         re.compile(r"pH\d+(?:[p.]\d+)?", re.IGNORECASE), re.compile(r"OC[VP]", re.IGNORECASE))
 
 
+#: r7 J5: the control modes an open-circuit name token (``OCV``, ``OCP``) does not contradict.
+_OPEN_CIRCUIT_MODES = ("open_circuit", "mixed")
+_OPEN_CIRCUIT_TOKEN = _IN_SITU_NAME_TOKENS[2]
+
+
 def _in_situ_statements(member_runs: Sequence[Mapping]) -> list[dict]:
     """Each in-situ condition a member run's FILE NAME states (:data:`_IN_SITU_NAME_TOKENS`), once per literal, in run
     order: ``{literal, relative_path, run_id}``. Quoted only."""
@@ -1663,6 +1696,11 @@ def _in_situ_warnings(bundle: Mapping, group: Mapping, member_runs: Sequence[Map
     from . import questions as Q
 
     stated = _in_situ_statements(member_runs)
+    mode = _present(fields, B.CONTROL_MODE_PATH)
+    if mode is not None and mode.get("value") not in _OPEN_CIRCUIT_MODES:
+        # r7 J5: a series-name token that says open circuit (``OCV``) is not quoted when the record's confirmed control
+        # mode says otherwise (``potentiostatic``): the name is the sample series', not this measurement's
+        stated = [x for x in stated if not _OPEN_CIRCUIT_TOKEN.fullmatch(x["literal"])]
     if not (stated or any(k.startswith("context.electrochemistry.") and _present(fields, k) is not None for k in fields)
             or any(_POTENTIAL_TOKEN.match(t) for r in member_runs for t in Q._name_tokens(r))):
         return []
@@ -2935,6 +2973,7 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     run_portal = run_portal or P.run_portal_check
     bundle_dir, out = Path(bundle_dir), Path(out)
     bundle = load_validated(bundle_dir)
+    label_of = group_labels(bundle)  # r7 J6: each row names its first member file
     exported, refused = [], []
     said_each_record: list[list[str]] = []
     portal_warned: dict[str, list[dict]] = {}
@@ -2970,7 +3009,8 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     for group_id, draft, composition in fresh:
         report = validate_draft_file(draft, run_portal=run_portal, composition=composition)
         if report["verdict"] != "exportable":
-            row = {"group_id": group_id, "verdict": report["verdict"], "summary": report["plain_summary"],
+            row = {"group_id": group_id, **_label(label_of, group_id), "verdict": report["verdict"],
+                   "summary": report["plain_summary"],
                    "missing_required": report["missing_required"], "processing_blocker": report["processing_blocker"]}
             earlier = prior_of.get((bundle_id, group_id))
             if earlier is not None and earlier.get("record_id"):
@@ -3009,9 +3049,11 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
             continue
         sidecar = build_sidecar(dict(draft), record)
         sidecar["schemas_used"] = report["schemas_used"]
-        left_out = [w["text"] for w in warned if w["group_id"] == group_id and w.get("code") == START_TIME_WARNING]
+        left_out = [w["text"] for w in warned if w["group_id"] == group_id
+                    and w.get("code") in (START_TIME_WARNING, IN_SITU_WARNING)]
         if left_out:
-            # c16d: what the record is written WITHOUT, said in its evidence file in plain words (never silently)
+            # c16d: what the record is written WITHOUT, said in its evidence file in plain words (never silently);
+            # r7 J5: an in-situ record's missing conditions too, so `upload --dry-run` lists them
             sidecar["notes"] = left_out
         # when the sidecar was written: the record's export time, kept while its evidence is unchanged (so an
         # unchanged re-export is byte for byte), and now when the evidence file is rewritten (c15c LOW 1)
@@ -3054,7 +3096,8 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(src, dest)
             artifacts.append(f["relative_path"])
-        row = {"group_id": group_id, "record_id": rid, "record": record_path.name, "sidecar": sidecar_path.name,
+        row = {"group_id": group_id, **_label(label_of, group_id), "record_id": rid, "record": record_path.name,
+               "sidecar": sidecar_path.name,
                "artifacts": artifacts, "schemas_used": report["schemas_used"], "export": status,
                "statement": "Valid for the portal's pinned schema; NOT claimed valid for the website."}
         still = [written_without(w) for w in sorted((w for w in warned if w["group_id"] == group_id),
@@ -3097,7 +3140,8 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
                                        f"new record; the old one was moved to {SUPERSEDED_DIR}/ (kept, never in an upload "
                                        "plan). If the old record was already uploaded, the portal still holds it.")
         exported.append(row)
-        entry = {"bundle_id": bundle_id, "group_id": group_id, "record_id": rid, "content_sha256": digest,
+        entry = {"bundle_id": bundle_id, "group_id": group_id, **_label(label_of, group_id), "record_id": rid,
+                 "content_sha256": digest,
                  "body_sha256": body, "exported_utc": at, "sidecar_generated_utc": sidecar["generated_utc"],
                  "replaced_record_ids": ([*(prior.get("replaced_record_ids") or []), prior.get("record_id")]
                                          if status == "replaced" else list((prior or {}).get("replaced_record_ids") or [])),
@@ -3218,6 +3262,7 @@ def upload_plan(records_dir: Path, portal_url: str | None) -> list[dict]:
     reads the token (the Authorization header names where it would come from)."""
     base = (portal_url or "<portal-url>").rstrip("/")
     replaces = _replaced_by(Path(records_dir))
+    labels = _labels_in_index(Path(records_dir))
     plan = []
     for path in sorted(Path(records_dir).glob("*.json")):
         if path.name.endswith(".evidence.json"):
@@ -3231,6 +3276,8 @@ def upload_plan(records_dir: Path, portal_url: str | None) -> list[dict]:
         plan.append(
             {
                 "record": path.name,
+                # r7 J6: which sample or file the record is of, as the export index names it (first member file)
+                **_label(labels, path.name[: -len(".json")]),
                 "requests": [
                     {"method": "POST", "url": base + PORTAL_VALIDATE, "headers": headers, **meta},
                     {"method": "POST", "url": base + PORTAL_RECORDS, "headers": headers, **meta,
@@ -3296,6 +3343,36 @@ def _portal_warnings_in_index(records_dir: Path, record_ids: set[str]) -> list[d
                                       {"code": w.get("code"), "path": w.get("path"), "message": w.get("message"), "records": set()})
                 row["records"].add(r["record_id"])
     return [{**r, "records": len(r["records"])} for r in sorted(seen.values(), key=lambda r: (-len(r["records"]), str(r["code"])))]
+
+
+def group_labels(bundle: Mapping) -> dict[str, str]:
+    """r7 J6: ``{group_id: label}``: a short name a scientist knows each group by, its first member file (a run's
+    stem; a run kept as context only when the group has no other). Said on export and dry-run rows."""
+    runs = {r["run_key"]: r for r in bundle.get("runs") or ()}
+    context = B.context_run_ids(bundle)
+    out: dict[str, str] = {}
+    for g in bundle.get("record_groups") or ():
+        members = [runs[k] for k in g.get("member_run_keys") or () if k in runs]
+        first = next((r for r in members if r["run_id"] not in context), members[0] if members else None)
+        if first is not None:
+            out[g["group_id"]] = str(first.get("stem") or first["run_id"])
+    return out
+
+
+def _label(labels: Mapping[str, str], key: str) -> dict:
+    """``{"label": ...}`` for a row, or ``{}`` when none is known."""
+    return {"label": labels[key]} if labels.get(key) else {}
+
+
+def _labels_in_index(records_dir: Path) -> dict[str, str]:
+    """r7 J6: ``{record_id: label}`` from ``records_dir``'s :data:`EXPORT_INDEX` (``{}`` when it has none)."""
+    try:
+        index = json.loads((records_dir / EXPORT_INDEX).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    rows = index.get("records") if isinstance(index, Mapping) else None
+    return {r["record_id"]: r["label"] for r in rows or () if isinstance(r, Mapping)
+            and isinstance(r.get("record_id"), str) and isinstance(r.get("label"), str)}
 
 
 def _sidecar_notes(path: Path) -> list[str]:
