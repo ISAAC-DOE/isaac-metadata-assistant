@@ -103,6 +103,8 @@ ALLOWED_DECISIONS: Mapping[str, tuple[str, ...]] = {
     "naming_counter_positions": ("set_counter_positions", B.NOT_COUNTER_DECISION, "defer"),
     "clock_time_zone": (B.CLOCK_ZONE_DECISION, "defer"),  # c8-a: `defer` records "I don't know" (mutations.clock_zone_deferral)
     "confirm_absorber": ("set_absorber", "defer"),
+    # r6 I1: `confirm` records, for each group it reaches, the UTC instant that group's own file states
+    "stated_utc_start_times": ("confirm",),
 }
 #: A ``confirm_value`` question whose targets carry NO value (the files hold text, no value this
 #: build derives from it): there is nothing to confirm, so ``confirm`` is not offered. The kind —
@@ -119,7 +121,16 @@ _NO_WRITE_PATH_REASON = "this build has no write path for this official field, s
 VALUE_KINDS = ("missing_value", "optional_values", "confirm_value", "resolve_conflict")
 #: The kinds an ANSWERED question of is still found under its id (``consolidate(include_answered=True)``):
 #: ``decide --question`` re-answers it and ``bundle show question`` shows it with ``status`` and its answers.
-RESOLVABLE_WHEN_ANSWERED = VALUE_KINDS + ("confirm_absorber", "naming_counter_positions", "clock_time_zone")
+RESOLVABLE_WHEN_ANSWERED = VALUE_KINDS + ("confirm_absorber", "naming_counter_positions", "clock_time_zone",
+                                          "stated_utc_start_times")
+#: r6 I1: the beamtime-wide start-time question (:func:`_stated_utc_start_question`): one answer for every group whose
+#: start-time disagreement the files settle with an instant they state in UTC. Its targets are conflicts.
+STATED_UTC_START_KIND = "stated_utc_start_times"
+#: The rules whose value is an instant a FILE STATES in UTC or as an epoch (SPEC ``#E``). Never a local clock time
+#: converted with a zone a scientist gave (bundle.CLOCK_ZONE_RULE_ID: BL4-3 XDC, DEC-87..89).
+UTC_STATED_RULES = frozenset({"bl15.spec.epoch_to_utc_iso.v1"})
+#: The fewest groups the beamtime-wide start-time question is asked for (one group asks its own question).
+_STATED_UTC_MIN_GROUPS = 2
 #: The grouping step's one counter question id (grouping.counter_question): the consolidated id derives from it.
 _COUNTER_GQ_ID = "rgq-experiment-counter-positions"
 #: ``records.compose_group``'s ``from`` for a required value only an answer supplies (the others come from an
@@ -880,6 +891,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
 
     questions: list[dict] = []
     reach_index: dict | None = None
+    passing_of: dict[str, str] = {}  # r6 I5: {question id: the in-passing sentence(s) its text quotes}
     for (scope, kind, path, partition), q in buckets.items():
         if kind == "optional_values":
             qid = _qid(scope, kind, partition or "")
@@ -932,6 +944,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             )
             continue
         node = _node(schema, path)
+        passing_said = None
         # THE ONE LIST (H1): what is offered is exactly what `decide` accepts and the export validates
         # against (bundle.allowed_values) — a vocabulary-controlled field included (D4).
         enum = _eligible_values(path)
@@ -1010,6 +1023,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                         "give the value yourself (correct) if you know it, or reject or defer it.")
                 decision = "correct"
                 decisions_offered = list(VALUELESS_DECISIONS)
+                passing_said = passing
             elif len(valueless) == len(q["targets"]):
                 text = (f"What is the {_label(path)} ({path})? The files hold text for it (see the hints) but no value this "
                         "build can carry" + (f": {summary.rstrip('.')}" if summary else "")
@@ -1052,7 +1066,13 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             text += _ai_sentence(ai)
         mine = {t["id"] for t in q["targets"]}
         shown_own = {h.get("candidate_id") for h in own_literals}
+        # r6 I5: a sentence named in passing is quoted once: a related reading of that same sentence is not repeated
+        own_lines = {(h.get("literal"), h.get("source_id"), h.get("locator")) for h in own_literals} if passing_said else set()
         for c in related_hints(path, partition, q["runs"]):
+            ev0 = next((e for e in c["evidence"] if e["method"] != "ai_interpretation"), None) or {}
+            if own_lines and (c["observed_literals"] or [None])[0] and (
+                    (c["observed_literals"][0], ev0.get("source_id"), ev0.get("locator")) in own_lines):
+                continue
             if c["observed_literals"] and c["candidate_id"] not in shown_own:
                 ev = next((e for e in c["evidence"] if e["method"] != "ai_interpretation"), None)
                 hints.append({"kind": "related_reading", "candidate_id": c["candidate_id"], "literal": c["observed_literals"][0],
@@ -1063,6 +1083,8 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         text += _asked_again_text(q["asked_again"], {path: enum})
         value_arg = "<value>" + (" --json" if numeric else "")
         qid = _qid(scope, kind, path, partition or "")
+        if passing_said:
+            passing_of[qid] = passing_said
         blocking_here = bool(q["required_by"]) and not never
         per_group_note = ("   # answers given so far DIFFER: answer per group with --only group:<group_id>" if answers_differ
                           else "   # per group: add --only group:<group_id>" if len(q["per_scope_targets"]) > 1 else "")
@@ -1405,9 +1427,10 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         reports = compositions(bundle, decision_of=decisions)
         if compositions_out is not None:
             compositions_out.update(reports)
-        basis = {**basis, "record_composer": _agree_with_composer(questions, bundle, group_of, cand_by_id, reports,
-                                                                       decision_of=decisions)}
-    reading_said = _note_shared_evidence(questions, cand_by_id, bundle)
+        basis = {**basis, "record_composer": _agree_with_composer(
+            questions, bundle, group_of, cand_by_id, reports, decision_of=decisions,
+            cannot_export=not_a_measurement_groups(bundle, groups, reports=reports))}
+    reading_said = _note_shared_evidence(questions, cand_by_id, bundle, passing_of)
     _note_same_reading_groups(questions, cand_by_id, bundle)
     _note_shared_reading_groups(questions, cand_by_id, bundle, reading_said)
     _note_shared_sample_tokens(questions, bundle)
@@ -1415,7 +1438,12 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     _mark_deferred(questions, decisions)
     _covered_by_run_decisions(questions, covered_conflicts, beamtime_decision_ids)
     _say_the_one_group(questions)
+    if has_groups:
+        beamtime_start = _stated_utc_start_question(questions, bundle, group_of, run_by_id, decisions)
+        if beamtime_start is not None:
+            questions.append(beamtime_start)
     questions.sort(key=order)
+    _quote_passing_once(questions, passing_of)
     for q in questions:
         q.setdefault("allowed_decisions", list(ALLOWED_DECISIONS.get(q["kind"], ())))
     return {
@@ -1426,6 +1454,171 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         "counts": question_counts(questions, fine_grained_v1=len(bundle.get("questions") or ())),
         "questions": questions,
     }
+
+
+#: r6 I1: the question id of the beamtime-wide start-time question (DEC-91: from its kind and field only).
+STATED_UTC_START_QUESTION_ID = _qid("experiment", STATED_UTC_START_KIND, B.XDC_START_PATH)
+#: How many groups the beamtime-wide start-time question names as examples (the rest are counted).
+_STATED_UTC_EXAMPLES = 3
+#: The reading states a value it may still settle a start with (a rejected reading never does).
+_STATED_UTC_USABLE_STATES = (B.STATE_CANDIDATE_EXTRACTED, B.STATE_NEEDS_REVIEW, B.STATE_SCIENTIST_CONFIRMED)
+
+
+def stated_utc_reading(q: Mapping, runs: Sequence[str]) -> tuple[dict | None, str | None]:
+    """r6 I1: ``(the one UTC reading, None)`` that settles a per-group start-time disagreement ``q`` (a
+    ``resolve_conflict`` about :data:`bundle.XDC_START_PATH` for ONE run), or ``(None, why not)``. The reading must be an
+    instant the run's own file states in UTC or as an epoch (:data:`UTC_STATED_RULES`, SPEC ``#E``), and the only
+    distinct one held for the run. A local clock time converted with a zone is never one (DEC-87..89). ``runs``: the
+    conflict's runs (a run kept as context left out)."""
+    if len(runs) != 1:
+        return None, f"the disagreement spans {len(runs)} runs, so answer it per group"
+    held = [u for u in q.get("utc_readings") or () if u.get("value_state") in _STATED_UTC_USABLE_STATES]
+    stated = [u for u in held if u.get("rule_id") in UTC_STATED_RULES]
+    if not stated:
+        return None, ("its files state no UTC instant for this start (no #E line), so give the UTC start yourself"
+                      if not held else "its only UTC reading is not an instant a file states in UTC (#E)")
+    values = list(dict.fromkeys(str(u.get("value")) for u in stated))
+    if len(values) > 1:
+        return None, f"its files state {len(values)} different UTC instants for this run, so say which is the start"
+    return stated[0], None
+
+
+def _stated_utc_start_question(questions: list[dict], bundle: Mapping, group_of: Mapping[str, str],
+                               run_by_id: Mapping[str, Mapping], decisions: Mapping) -> dict | None:
+    """r6 I1: ONE beamtime-wide decision for the start time: "use the instant each run's own file states in UTC (#E)".
+
+    A BL15-2 SPEC run states its start twice: a local clock time with no zone (``#D``, on every scan) and a Unix epoch
+    (``#E``). Its ``#D`` lines disagree, so every group asked its own start-time question (~90 per beamtime), each
+    already offering the ``#E`` instant. This question asks it once: ``confirm`` records, for every group it reaches,
+    the instant that group's own file states (each run keeps its own value; :func:`mutations.decide_question`).
+
+    It reaches each live group's per-group start-time question that :func:`stated_utc_reading` settles; it names every
+    group with an open start-time question it does not reach, with why. The per-group questions keep their ids and
+    stay answerable (``answered_at_once_by`` names this one). Asked only for two or more groups; never for a local
+    clock start awaiting a clock zone (those are no conflict, and their readings are not stated in UTC)."""
+    reached: list[tuple[dict, dict]] = []
+    not_reached: list[dict] = []
+    context = B.context_run_ids(bundle)
+    runs_of = {cf["conflict_id"]: [r for r in cf.get("run_ids") or () if r not in context] for cf in bundle["conflicts"]}
+    for q in questions:
+        if (q.get("kind") != "resolve_conflict" or q.get("target_field_path") != B.XDC_START_PATH
+                or not q.get("affects_record") or q.get("covered_by_decisions")
+                or not str(q.get("scope") or "").startswith("group:")):
+            continue
+        reading, why = stated_utc_reading(q, runs_of.get(q["targets"][0]["id"]) or ())
+        if reading is None:
+            not_reached.append({"group_id": q["scope"][len("group:"):], "question_id": q["question_id"], "reason": why})
+        else:
+            reached.append((q, reading))
+    if len({q["scope"] for q, _ in reached}) < _STATED_UTC_MIN_GROUPS:
+        return None
+    qid = STATED_UTC_START_QUESTION_ID
+    # the live groups whose start-time disagreement is answered already (not asked here): each keeps its own answer
+    asked_ids = {q["targets"][0]["id"] for q, _ in reached} | {x["question_id"] for x in not_reached}
+    path_of = {c["candidate_id"]: c.get("target_field_path") for c in bundle["candidates"]}
+    answered_before = sorted({group_of[r] for cf in bundle["conflicts"]
+                              if path_of.get(cf.get("candidate_id")) == B.XDC_START_PATH and cf["conflict_id"] not in asked_ids
+                              and (d := decisions.get(("conflict", cf["conflict_id"]))) is not None
+                              and d.get("decision") not in B.NEUTRAL_DECISIONS
+                              for r in runs_of.get(cf["conflict_id"]) or () if r in group_of})
+    targets, per_scope, candidates, runs = [], {}, {}, set()
+    answered = 0
+    for q, u in reached:
+        cid = q["targets"][0]["id"]
+        targets.append({"kind": "conflict", "id": cid})
+        per_scope.setdefault(q["scope"], []).append(cid)
+        candidates[cid] = u["candidate_id"]
+        runs.update(runs_of.get(cid) or ())
+        q["answered_at_once_by"] = qid
+        q["text"] += f" Or answer every such group at once: question {qid}."
+        if decisions.get(("conflict", cid)) is not None:
+            answered += 1
+    n_groups = len(per_scope)
+    stem_of = {rid: str(r.get("stem") or rid) for rid, r in run_by_id.items()}
+    examples = []
+    for q, u in reached[:_STATED_UTC_EXAMPLES]:
+        rid = (runs_of.get(q["targets"][0]["id"]) or [None])[0]
+        examples.append(f"{stem_of.get(rid, rid)}: {u['value']} (from {u.get('observed_literal')!r} at {u.get('locator')})")
+    text = (f"One answer for the start time of {n_groups} groups. Each of their runs states its start twice: as a local "
+            "clock time with no time zone (#D) and as a UTC instant (#E, a Unix epoch converted exactly). The #D lines "
+            "disagree, so each group asks its own start-time question. Confirm here to record, for each of these groups, "
+            "the UTC instant its own file states (#E). Each run keeps its own value. For example: "
+            + "; ".join(examples) + (f"; and {len(reached) - len(examples)} more." if len(reached) > len(examples) else ".")
+            + f" It reaches {n_groups} group(s) ({len(runs)} run(s)).")
+    several = sorted(sc[len("group:"):] for sc, ids in per_scope.items() if len(ids) > 1)
+    if several:
+        text += (f" In {len(several)} of them more than one run is reached ({', '.join(several[:3])}"
+                 + ("…" if len(several) > 3 else "") + "): each run keeps its own start, and such a group's record "
+                 "carries none while they differ (which run's start a merged record takes is left to the protocol "
+                 "review, DEC-89).")
+    if not_reached:
+        text += (f" It does not reach {len(not_reached)} group(s) with an open start-time question: "
+                 + "; ".join(f"{x['group_id']} ({x['question_id']}): {x['reason']}" for x in not_reached[:5])
+                 + (f"; and {len(not_reached) - 5} more (not_reached)" if len(not_reached) > 5 else "")
+                 + ". Answer those per group.")
+    else:
+        text += " Every group with an open start-time question is reached."
+    if answered:
+        text += (f" {answered} of them already hold an answer of their own: confirming here keeps it "
+                 "(only an open group is recorded).")
+    if answered_before:
+        text += (f" {len(answered_before)} other group(s) already hold a start-time answer of their own and keep it "
+                 "(answered_before).")
+    text += (" Each per-group question keeps its id and stays answerable: answer one of them to give that group "
+             "another value, or add --only group:<id> here for one group.")
+    hints = [{"kind": "utc_reading", "literal": u["value"], "candidate_id": u["candidate_id"], "locator": u.get("locator"),
+              "source_id": u.get("source_id"), "relative_path": u.get("relative_path"),
+              "observed_literal": u.get("observed_literal"), "group_id": q["scope"][len("group:"):]}
+             for q, u in reached[:_STATED_UTC_EXAMPLES]]
+    return {
+        "question_id": qid,
+        "partition": None,
+        "tier": TIER_BLOCKING if any(q.get("blocking") for q, _ in reached) else TIER_CONFLICT,
+        "blocking": any(bool(q.get("blocking")) for q, _ in reached),
+        "affects_record": True,
+        "why": ("One scientist decision for the whole beamtime: a record built from these runs carries the start time "
+                "you choose, and each group would otherwise be asked on its own."),
+        "kind": STATED_UTC_START_KIND,
+        "scope": "experiment",
+        "target_field_path": B.XDC_START_PATH,
+        "text": text,
+        "applies_to": {"groups": n_groups, "runs": len(runs), "targets": len(targets)},
+        "targets": targets,
+        "per_scope_targets": per_scope,
+        "stated_utc_candidates": candidates,
+        "answers_at_once": len(reached),
+        "not_reached": not_reached,
+        **({"answered_before": answered_before} if answered_before else {}),
+        "hints": hints,
+        "allowed_values": None,
+        "allowed_decisions": list(ALLOWED_DECISIONS[STATED_UTC_START_KIND]),
+        "answer_command": (f'isaac bundle decide <bundle_dir> --question {qid} --decision confirm --by "<your name>"'
+                           "   # one group only: add --only group:<group_id>"),
+    }
+
+
+def fold_answered_at_once(questions: Sequence[Mapping], *, scope: str | None, include: bool) -> tuple[list, list]:
+    """r6 I1: ``(listed, folded)``: with no ``--scope``, a per-group question that a listed beamtime-wide question
+    answers at once (``answered_at_once_by``) is counted, not listed — unless ``include`` asks for each one. It keeps
+    its id and stays answerable (``decide --question``, ``bundle show question``, ``--scope group:<id>``)."""
+    if include or scope:
+        return list(questions), []
+    listed_ids = {q["question_id"] for q in questions if q.get("kind") == STATED_UTC_START_KIND}
+    folded = [q for q in questions if q.get("answered_at_once_by") in listed_ids]
+    gone = {q["question_id"] for q in folded}
+    return [q for q in questions if q["question_id"] not in gone], folded
+
+
+def folded_answered_at_once(folded: Sequence[Mapping], flag: str) -> dict:
+    """The count and statement of a page that folds per-group questions into a beamtime-wide one, or ``{}``."""
+    if not folded:
+        return {}
+    by = sorted({str(q.get("answered_at_once_by")) for q in folded})
+    return {"answered_at_once": len(folded),
+            "answered_at_once_statement": (
+                f"{len(folded)} per-group start-time question(s) are not listed: question {', '.join(by)} answers them "
+                f"all at once (each group keeps the UTC instant its own file states). Each keeps its id and stays "
+                f"answerable; {flag} lists them.")}
 
 
 def _covered_by_run_decisions(questions: list[dict], covered: Mapping[str, Sequence[str]],
@@ -1522,15 +1715,21 @@ def _groups_keeping_own(bundle: Mapping, q: Mapping, groups: set[str], decision_
 
 def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mapping[str, str],
                          cand_by_id: Mapping[str, Mapping], reports: Mapping[str, Mapping],
-                         decision_of: Mapping | None = None) -> dict:
+                         decision_of: Mapping | None = None, cannot_export: Mapping[str, Sequence[str]] | None = None) -> dict:
     """BLOCKING IS WHAT THE RECORD COMPOSER REQUIRES (records.compose_group, the list ``build-records`` and
     ``validate`` report): a value question blocks exactly when, for at least one LIVE record group it reaches,
     the composer lists one of its fields as missing and only an answer can supply it. So a conditionally
     required field (a reaction's drive and catalysis, a control mode's set-point) blocks only once the composer
     requires it, and a question whose targets are all in runs no live group holds (rejected, merged, split, or
     never grouped) blocks nothing. Ids, scopes and targets are untouched (DEC-91): only ``blocking``, ``tier``
-    and ``why`` change, and what was decided is stated in ``blocks_groups`` / ``required_fields``."""
+    and ``why`` change, and what was decided is stated in ``blocks_groups`` / ``required_fields``.
+
+    r6 I3: a group that cannot become a record as it stands (``cannot_export``: :func:`not_a_measurement_groups`, a
+    reference standard, an alignment or a calibration scan) is blocked by nothing: a question that would block only such
+    groups is not blocking, and the returned basis names them once (``groups_that_cannot_export``)."""
     from .records import RUN_ONLY_PATHS
+
+    held_back_groups = set(cannot_export or ())
 
     missing = {gid: set(_answer_missing(rep)) for gid, rep in reports.items()}
     because_of = {gid: _required_because(rep) for gid, rep in reports.items()}
@@ -1604,6 +1803,8 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
             apart = _groups_keeping_own(bundle, q, groups_reached, decision_of)
             if apart:
                 q["applies_to"]["groups_reached"] = len(groups_reached) - apart
+        held_back = needing & held_back_groups
+        needing -= held_back_groups
         if needing:
             # which groups it blocks (`--scope group:<id> --blocking-only` lists it only for those)
             q["blocks_groups"], q["blocks_group_ids"] = len(needing), sorted(needing, key=lambda g: order_of.get(g, 0))
@@ -1618,6 +1819,11 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
             modes = _control_modes(path, groups_reached, reports)
             if not groups_reached:
                 q["why"] = _OUTSIDE_LIVE_GROUPS
+            elif held_back:
+                q["cannot_export_groups"] = sorted(held_back)
+                q["why"] = (f"Not blocking: the only record group(s) it would block ({', '.join(sorted(held_back)[:3])}"
+                            + ("…" if len(held_back) > 3 else "") + ") cannot become a record as they stand: "
+                            "every run is not a measurement run (blocking_basis.record_composer names them once).")
             elif all(any(_fills(path, f) or _fills(f, _composer_path(path)) for f in filled[g]) for g in groups_reached):
                 q["why"] = (f"Not blocking: every record group this question reaches already has {path} in the record "
                             + ("composed for it now (from an answer or a source). The sources disagree about it: the "
@@ -1653,8 +1859,16 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
                             + (f" ({because})" if because else "") + ".")
             if because:
                 q["required_because"] = because
-    return {"basis": "records.compose_group: the missing-required list build-records and validate report",
-            "live_groups": len(every), "blocking_changed_to_agree": changed}
+    out = {"basis": "records.compose_group: the missing-required list build-records and validate report",
+           "live_groups": len(every), "blocking_changed_to_agree": changed}
+    if held_back_groups:
+        by_group, said = not_a_measurement_reasons(bundle, cannot_export or {})
+        out["groups_that_cannot_export"] = by_group
+        out["cannot_export_statement"] = (
+            f"{len(held_back_groups)} group(s) cannot become a record as they stand: every run is a reference standard, "
+            f"an alignment or a calibration scan, and a required field has nowhere to hold an answer. {said}. No "
+            "question counts as blocking for them; answer theirs only if such a group is to become a record.")
+    return out
 
 
 #: r6h H2: the control mode that makes a set-point field required (:data:`_REQUIRED_WHEN`).
@@ -2162,7 +2376,27 @@ def _note_same_reading_groups(questions: list[dict], cand_by_id: Mapping[str, Ma
                           "columns are the easy path (isaac bundle template export <bundle_dir> --out <file.xlsx>).")
 
 
-def _note_shared_evidence(questions: list[dict], cand_by_id: Mapping[str, Mapping], bundle: Mapping) -> dict[str, str]:
+def _quote_passing_once(questions: list[dict], passing_of: Mapping[str, str]) -> None:
+    """r6 I5: a sentence that names a cell only in passing, behind many per-group questions, is QUOTED ONCE: by the
+    first of them in list order. Each other one names that question instead (its own ``file_literal`` hint still holds
+    the words, for ``bundle show question``). Ids, scopes, targets and hints are unchanged; only the text."""
+    lead: dict[tuple, str] = {}
+    for q in questions:
+        said = passing_of.get(q["question_id"])
+        if not said:
+            continue
+        key = (q.get("target_field_path"), said)
+        first = lead.setdefault(key, q["question_id"])
+        if first == q["question_id"]:
+            continue
+        q["text"] = q["text"].replace(
+            f"in a sentence about something else: {said}.",
+            f"in a sentence about something else: the same sentence question {first} quotes (this question's "
+            "file_literal hint holds it too).", 1)
+
+
+def _note_shared_evidence(questions: list[dict], cand_by_id: Mapping[str, Mapping], bundle: Mapping,
+                          passing_of: Mapping[str, str] | None = None) -> dict[str, str]:
     """Per-group ``confirm_value`` questions about one field that rest on the SAME file statement (or the
     same literal reading) name each other (``same_statement_as`` / ``same_reading_as``), so one file line
     asked per group is visibly one statement. And where a BEAMTIME value for that field is open or already
@@ -2204,7 +2438,10 @@ def _note_shared_evidence(questions: list[dict], cand_by_id: Mapping[str, Mappin
         for q in qs:
             # bounded (never one list of every other group per question: that grows as groups squared)
             q["same_statement_as"] = [i for i in ids[:_CROSS_REFERENCES + 1] if i != q["question_id"]][:_CROSS_REFERENCES]
-            q["text"] += (f" The same file statement ({where} @ {loc}: {lit!r}) is behind {len(qs) - 1} other group "
+            # r6 I5: a sentence named in passing is quoted by the question's own text (once: _quote_passing_once)
+            q["text"] += (f" The same file statement ({where} @ {loc}"
+                          + ("" if q["question_id"] in (passing_of or {}) else f": {lit!r}")
+                          + f") is behind {len(qs) - 1} other group "
                           f"question(s) for this field (same_statement_as names up to {_CROSS_REFERENCES}): it is one statement in the files, asked per "
                           "group because each record carries its own answer.")
     for (path, lits), qs in by_reading.items():
@@ -2899,10 +3136,12 @@ def filter_questions(payload: Mapping, *, scope: str | None = None, blocking_onl
         if scope.startswith("group:"):
             # D5: an experiment-scope question belongs to a group's list only when it
             # actually has a target for that group (or for the whole record).
+            # r6 I1: the beamtime-wide start-time question is not; the group's own start-time question is
             qs = [
                 q for q in qs
                 if q["scope"] == scope
-                or (q["scope"] == "experiment" and (scope in q["per_scope_targets"] or "experiment" in q["per_scope_targets"]))
+                or (q["scope"] == "experiment" and q.get("kind") != STATED_UTC_START_KIND
+                    and (scope in q["per_scope_targets"] or "experiment" in q["per_scope_targets"]))
             ]
             # c10-m: and it leads with the AI suggestion read for THIS group's runs
             qs = [led_by_scope(q, scope) for q in qs]
@@ -2941,7 +3180,7 @@ def answered_question(bundle: Mapping, question_id: str, payload: Mapping | None
     answers: dict[tuple, dict] = {}
     answered = 0
     for t in q["targets"]:
-        if q["kind"] not in VALUE_KINDS:
+        if q["kind"] not in VALUE_KINDS and q["kind"] != STATED_UTC_START_KIND:
             d = _latest_answer_to(bundle, q["kind"], t)
         elif t["kind"] == "candidate":
             c = cand_by_id.get(t["id"])
@@ -2963,9 +3202,17 @@ def answered_question(bundle: Mapping, question_id: str, payload: Mapping | None
         if str(d.get("decided_utc") or "") >= str(a["decided_utc"] or ""):
             a.update(by=(d.get("decided_by") or {}).get("name"), decided_utc=d.get("decided_utc"), decision_id=d.get("decision_id"))
     still_open = (question(open_payload or consolidate(bundle), question_id) is not None
-                  if answered < len(q["targets"]) or q["kind"] not in VALUE_KINDS else False)
+                  if answered < len(q["targets"]) or q["kind"] not in (*VALUE_KINDS, STATED_UTC_START_KIND) else False)
+    current = sorted(answers.values(), key=lambda a: (str(a.get("field") or ""), -a["targets"]))
+    if q["kind"] == STATED_UTC_START_KIND:
+        # r6 I1: each run holds its own instant (one answer per run): a few are shown, all are counted. A later
+        # confirm records only the groups still open; a group's own question changes that group.
+        return {**q, "status": "open" if still_open else "answered", "answered_targets": answered,
+                "current_answers": current[:_STATED_UTC_EXAMPLES], "current_answers_total": len(current),
+                "statement": ("Each group holds its own start time. Confirming this question again records only the "
+                              "groups still open; to change one group, answer that group's own start-time question.")}
     return {**q, "status": "open" if still_open else "answered", "answered_targets": answered,
-            "current_answers": sorted(answers.values(), key=lambda a: (str(a.get("field") or ""), -a["targets"])),
+            "current_answers": current,
             "statement": ("A later `decide --question` on this id replaces these answers (the same checks apply); "
                           "repeating one records nothing new.")}
 
@@ -3020,7 +3267,8 @@ def scanless_groups(bundle: Mapping, groups: Sequence[Mapping]) -> set[str]:
     return out
 
 
-def not_a_measurement_groups(bundle: Mapping, groups: Sequence[Mapping] | None = None) -> dict[str, list[str]]:
+def not_a_measurement_groups(bundle: Mapping, groups: Sequence[Mapping] | None = None,
+                             reports: Mapping[str, Mapping] | None = None) -> dict[str, list[str]]:
     """r5 B4: ``{group_id: [field path]}`` for each live group whose every run is marked NOT a measurement run
     (``run_candidate`` false: a reference standard, an alignment or a calibration scan) and whose record lacks a
     required field nothing in the import can hold an answer for (no candidate or missing value of that field in its
@@ -3035,7 +3283,9 @@ def not_a_measurement_groups(bundle: Mapping, groups: Sequence[Mapping] | None =
             picked.append(g)
     if not picked:
         return {}
-    reports = compositions({**bundle, "record_groups": picked})
+    if reports is None or any(g["group_id"] not in reports for g in picked):
+        # r6 I3: the compositions consolidate already made are reused (the same bundle, unchanged)
+        reports = compositions({**bundle, "record_groups": picked})
     # ONE index, built once (r5 review M3: a scan of every target per group and field was quadratic): each field path
     # to the runs holding a target for it (``None`` for a beamtime-wide one)
     holders: dict[str, set] = {}
@@ -3055,6 +3305,44 @@ def not_a_measurement_groups(bundle: Mapping, groups: Sequence[Mapping] | None =
         if unfillable:
             out[g["group_id"]] = unfillable
     return out
+
+
+def cannot_export_reasons(bundle: Mapping, not_measured: Mapping[str, Sequence[str]] | None = None) -> dict[str, str]:
+    """r6 I2: ``{group_id: cannot_export_reason}`` for every record group that can never export as it stands, in the ONE
+    order ``bundle list <dir> groups`` and ``bundle group`` both say it: ``processing_not_applicable:<code>`` (no ISAAC
+    processing protocol covers its data), else ``no_scans`` (none of its runs lists a scan), else
+    ``not_a_measurement_run`` (:func:`not_a_measurement_groups`). ``not_measured``: that map, when the caller has it."""
+    runs = {r["run_key"]: r for r in bundle.get("runs") or ()}
+    blocked = B.processing_blocked_groups(bundle)
+    if not_measured is None:
+        not_measured = not_a_measurement_groups(bundle)
+    out: dict[str, str] = {}
+    for g in bundle.get("record_groups") or ():
+        members = [runs[k] for k in g.get("member_run_keys") or () if k in runs]
+        na = blocked.get(g["group_id"])
+        if na is not None:
+            out[g["group_id"]] = f"processing_not_applicable:{(na.get('applicability') or {}).get('reason_code')}"
+        elif members and not sum(int(r.get("scan_count") or 0) for r in members):
+            out[g["group_id"]] = "no_scans"
+        elif g["group_id"] in not_measured:
+            out[g["group_id"]] = "not_a_measurement_run"
+    return out
+
+
+def not_a_measurement_reasons(bundle: Mapping, not_measured: Mapping[str, Sequence[str]]) -> tuple[dict[str, str], str]:
+    """r6 I2: ``({group_id: cannot_export_reason}, the words)`` for the groups :func:`not_a_measurement_groups` names, as
+    ``bundle list <dir> groups`` gives each (:func:`cannot_export_reasons`: a group that also lists no scan is said there
+    as ``no_scans``). ONE sentence for ``bundle group`` and ``bundle questions``."""
+    reasons = cannot_export_reasons(bundle, not_measured)
+    by_group = {gid: reasons.get(gid, "not_a_measurement_run") for gid in sorted(not_measured)}
+    by_reason: dict[str, list[str]] = {}
+    for gid, reason in by_group.items():
+        by_reason.setdefault(reason, []).append(gid)
+    said = "; ".join(f"{reason} for {len(ids)}" + (f" ({', '.join(ids[:5])}{'…' if len(ids) > 5 else ''})"
+                                                   if len(by_reason) > 1 else "")
+                     for reason, ids in sorted(by_reason.items(), key=lambda x: x[0] != "not_a_measurement_run"))
+    return by_group, (f"`bundle list <bundle_dir> groups` gives each its cannot_export_reason: {said}"
+                      + (" (no_scans: none of its runs lists a scan)" if "no_scans" in by_reason else ""))
 
 
 #: ``plus_decisions`` for a group that has scans and no processing result yet: nothing can be approved before it.

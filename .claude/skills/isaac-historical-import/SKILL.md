@@ -188,7 +188,7 @@ when a live group's record needs it. Ask 3 to 5 per message, by theme, with prog
    groups differ" (`--only group:<id>` overrides one group). `clock_time_zone` needs the zone the
    instrument clock was set to (an IANA name); never suggest one.
 3. **The template**, for everything the files never state (see below); ask per group only what it leaves.
-4. **Conflicts that affect a record.** `affects_record: false` ones change no record: give their count.
+4. **Conflicts that affect a record.** Ask `stated_utc_start_times` (every group's start at once) first. `affects_record: false` ones change no record: give their count.
 5. **The rest, if they want**: optional questions (`--scope group:<id>` shows what blocks one group).
 
 A deferred question sorts last; do not re-ask it unless they offer. How to put each kind of question

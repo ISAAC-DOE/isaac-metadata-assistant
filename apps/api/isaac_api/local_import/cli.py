@@ -824,12 +824,11 @@ def group_list_extras(bundle: Mapping) -> dict[str, dict]:
     """``{group_id: fields}`` a ``bundle list <dir> groups`` row adds: a few member FILE NAMES (the run's stem,
     the name a scientist recognises), the scan count, the reader (the runs' source type) and, when known,
     ``cannot_export_reason``. File names and counts only — no parser value, so no exposure."""
-    from . import bundle as B
     from . import questions as Q
 
     runs = {r["run_key"]: r for r in bundle.get("runs") or ()}
-    blocked = B.processing_blocked_groups(bundle)
     not_measured = Q.not_a_measurement_groups(bundle)  # r5 B4: said up front, not only once its curve is approved
+    reasons = Q.cannot_export_reasons(bundle, not_measured)  # r6 I2: the one order `bundle group` says them in
     out: dict[str, dict] = {}
     for g in bundle.get("record_groups") or ():
         members = [runs[k] for k in g.get("member_run_keys") or () if k in runs]
@@ -846,14 +845,11 @@ def group_list_extras(bundle: Mapping) -> dict[str, dict]:
         if exported:
             row["exported_file"] = exported[:GROUP_ROW_FILES]
             row["exported_file_note"] = "the scientist's exported/processed file of a run: context, its data not merged"
-        na = blocked.get(g["group_id"])
-        if na is not None:
-            row["cannot_export_reason"] = f"processing_not_applicable:{(na.get('applicability') or {}).get('reason_code')}"
-        elif members and scans == 0:
-            row["cannot_export_reason"] = "no_scans"
-        elif g["group_id"] in not_measured:
-            row["cannot_export_reason"] = "not_a_measurement_run"
-            row["cannot_export_fields"] = not_measured[g["group_id"]]
+        reason = reasons.get(g["group_id"])
+        if reason is not None:
+            row["cannot_export_reason"] = reason
+            if reason == "not_a_measurement_run":
+                row["cannot_export_fields"] = not_measured[g["group_id"]]
         out[g["group_id"]] = row
     return out
 
@@ -1442,7 +1438,7 @@ def _show_consolidated_question(args) -> int:
             # under the id it was asked with, with what its answered targets carry now
             seen = Q.answered_question(bundle, args.id, open_payload=payload)
             if seen is not None and (q is None or seen["answered_targets"]):
-                extra = {k: seen[k] for k in ("status", "answered_targets", "current_answers", "statement")}
+                extra = {k: seen[k] for k in ("status", "answered_targets", "current_answers", "current_answers_total", "statement") if k in seen}
                 q = q or seen
         if q is None:
             raise M.MutationRefused(
@@ -1647,6 +1643,8 @@ def cmd_bundle_questions(args) -> int:
         # r3a L5: a question about runs no live record group holds builds no record: counted, listed on request (or
         # when a run's own scope is asked for); the local questions screen hides them the same way (r3c LOW-3)
         kept, outside = Q.hide_outside_live_groups(kept, scope=args.scope, include=args.include_outside_live_groups)
+        # r6 I1: a per-group question a listed beamtime-wide question answers at once is counted, listed on request
+        kept, folded = Q.fold_answered_at_once(kept, scope=args.scope, include=getattr(args, "each_group", False))
         page = kept[args.offset : args.offset + args.limit]
         minimum = Q.minimum_answers_for_one_group(payload, bundle, scope=args.scope, bundle_dir=Path(args.bundle_dir),
                                                   reports=reports)
@@ -1668,6 +1666,7 @@ def cmd_bundle_questions(args) -> int:
             **_more(len(kept) - args.offset - len(page), args.offset + len(page)),
             **({"skipped_deferred": sum(1 for q in rows if q.get("deferred"))} if args.skip_deferred else {}),
             **Q.hidden_outside_live_groups(outside, "--include-outside-live-groups"),
+            **Q.folded_answered_at_once(folded, "--each-group"),
             "minimum_for_one_group": minimum,
             **({"questions": page} if args.with_targets else _compact_page(page)),
         }
@@ -1737,7 +1736,7 @@ def _compact_question(q: Mapping) -> dict:
     ``per_scope_targets``, an optional-values question's per-field ids, the groups it blocks) are COUNTED, not
     listed — `decide --question` resolves them itself, and they were most of the page. ``--with-targets`` prints
     them in full."""
-    out = {k: v for k, v in q.items() if k not in ("targets", "per_scope_targets", "blocks_group_ids")
+    out = {k: v for k, v in q.items() if k not in ("targets", "per_scope_targets", "blocks_group_ids", "stated_utc_candidates")
            # nothing said by an empty value: left out (the full question, --with-targets, keeps every key)
            and not (k in _COMPACT_DROP_EMPTY and not v)}
     if isinstance(out.get("applies_to"), Mapping) and not out["applies_to"].get("runs_outside_live_groups"):
@@ -2401,6 +2400,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--include-outside-live-groups", action="store_true",
                    help="also list questions whose every target is in a run no live record group holds (a rejected "
                         "group's runs: no record is built from them); by default they are counted, not listed")
+    q.add_argument("--each-group", action="store_true",
+                   help="also list each per-group question a beamtime-wide question answers at once (e.g. the start "
+                        "time); by default they are counted, not listed")
     q.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     q.add_argument("--offset", type=int, default=0)
     q.set_defaults(func=cmd_bundle_questions)

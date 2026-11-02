@@ -532,6 +532,32 @@ def log_full_message(section: str, held: int, adding: int, bound: int) -> str:
 _INTERPRETABLE = ("candidate", "missing_value", "record_group", "source", "run", "processing_result")
 
 
+#: r6 I4: words a reading uses to say the files state NO value. Such a reading is no value: shown to the scientist it
+#: would read "An AI reading suggests 'not stated'", and propose-terms would draft it as a vocabulary term.
+NOTHING_STATED_READINGS = frozenset({
+    "not stated", "none stated", "nothing stated", "not given", "not specified", "unspecified", "not mentioned",
+    "not reported", "not recorded", "not found", "not available", "no value", "not in the files", "not in file",
+    "unknown", "n/a",
+})
+
+
+def nothing_stated_refusal(kind: str, obj: Mapping, value: Any) -> str | None:
+    """r6 I4: why ONE AI reading (``annotate --target``) is refused because it says the files state nothing, or
+    ``None``. A word off a field's list is kept (``propose-terms`` drafts it as a vocabulary request); a reading that
+    says "not stated" is no value, so it is never kept as a suggestion. A value on the field's own list is kept."""
+    if not isinstance(value, str):
+        return None
+    said = re.sub(r"[\s.]+", " ", value.casefold()).strip(" .")
+    if said not in NOTHING_STATED_READINGS:
+        return None
+    path = obj.get("target_field_path") if kind in ("candidate", "missing_value") else None
+    if path and value in (B.allowed_values(path) or ()):
+        return None
+    return (f"{value!r} says the files state no value, so it is not recorded as a reading: it would be shown to the "
+            "scientist as an AI suggestion of a value. When the files state none, record nothing: the question stays "
+            "asked, and the scientist answers it. Say in your report that you found no statement of it.")
+
+
 def annotate(
     bundle_dir: Path,
     *,
@@ -558,6 +584,9 @@ def annotate(
                 f"--source-id {source_id} is not a source of {target_id}; its locators name "
                 f"{', '.join(sorted(named))}. Use one of those, the source `excerpt` printed."
             )
+        refusal = nothing_stated_refusal(kind, obj, value)
+        if refusal is not None:
+            raise MutationRefused(refusal)
         prior = exposures_for(bundle, kind, target_id)
         if blind and not prior:
             is_blind, basis = True, "No CLI command had printed this target's parser value before this reading."
@@ -2143,12 +2172,15 @@ def decide_question(
         resolve = dict(decision=decision, only=only, field=field, positions=positions, only_scopes=only_scopes)
         override = None
         slots_added: list[str] = []
+        asked_now = None  # r6 I1: the question as resolved (open, or answered), for a kind answered its own way
         try:
             if question_id == Q.COUNTER_QUESTION_ID and decision == B.KEEP_APART_DECISION:
                 found = _said_not_counter_keep_apart(bundle, only, field, positions, only_scopes, extra_targets)
                 extra_targets = ()  # r4-c L3: they pinned exactly the candidates found
             else:
-                found, positions = question_targets(Q.consolidate(bundle), question_id, **resolve)
+                open_payload = Q.consolidate(bundle)
+                found, positions = question_targets(open_payload, question_id, **resolve)
+                asked_now = Q.question(open_payload, question_id)
         except MutationRefused as exc:
             # AN ANSWERED QUESTION is resolved too, under the id it was asked with (its answered targets back in:
             # consolidate(include_answered=True)): a later decision replaces an earlier one, a repeat records
@@ -2158,6 +2190,7 @@ def decide_question(
             asked = Q.question(answered, question_id) if answered is not None else None
             if asked is None or asked["kind"] not in Q.RESOLVABLE_WHEN_ANSWERED:
                 raise
+            asked_now = asked
             try:
                 found, positions = question_targets(answered, question_id, **resolve)
             except MutationRefused as again:
@@ -2170,6 +2203,14 @@ def decide_question(
                 found, slots_added, override = got
             if asked["kind"] == "confirm_absorber" and decision == "set_absorber" and only is None:
                 found, kept_overrides = _keep_absorber_overrides(bundle, found)
+        if (asked_now or {}).get("kind") == Q.STATED_UTC_START_KIND:
+            given = [flag for flag, v in (("--value", value), ("--field", field), ("--split-into", split_into),
+                                          ("--merge-with", merge_with), ("--qc-status", qc_status), ("--element", element),
+                                          ("--edge", edge), ("--positions", positions), ("--target", list(extra_targets)),
+                                          ("--same-conditions", same_conditions), ("--as-said", as_said),
+                                          ("--same-reading", same_reading)) if v]
+            return _decide_stated_utc_starts(Path(bundle_dir), bundle, asked_now, found, by=by, orcid=orcid, note=note,
+                                             refused=given, dry_run=dry_run, version=version, with_version=with_version)
         same_members: list[dict] = []
         if same_reading:
             more, same_members = _same_reading_targets(bundle, question_id, only, field, decision, value)
@@ -2243,6 +2284,85 @@ def decide_question(
         if not nothing_to_save(bundle, recorded):
             save_bundle(bundle_dir, bundle)
         return (result, bundle_version(bundle_dir)) if with_version else result
+
+
+def _decide_stated_utc_starts(bundle_dir: Path, bundle: dict, asked: Mapping, found: Sequence[str], *, by: str,
+                              orcid: str | None, note: str | None, refused: Sequence[str], dry_run: bool,
+                              version: str | None, with_version: bool) -> Any:
+    """r6 I1: ``decide --question`` on the beamtime-wide start-time question (``questions.STATED_UTC_START_KIND``),
+    under the caller's lock. ONE scientist decision, recorded as one ``correct`` per start-time disagreement it reaches,
+    each with the UTC instant THAT run's own file states (its ``#E`` reading): each run keeps its own value. A group
+    that already holds an answer of its own keeps it (nothing is replaced); a deferred one is answered. The reply
+    states the reach: how many groups were recorded, and which open start-time groups the question does not reach."""
+    from . import questions as Q
+
+    qid = asked["question_id"]
+    if refused:
+        raise MutationRefused(
+            f"Question {qid} is answered with `--decision confirm` alone (add --only group:<id> for one group): each group "
+            f"gets the UTC instant its own file states, so {', '.join(refused)} is refused. Nothing was recorded.")
+    on = copy.deepcopy(bundle) if dry_run else bundle
+    cand_by_id = {c["candidate_id"]: c for c in on["candidates"]}
+    scope_of = {cid: sc for sc, ids in (asked.get("per_scope_targets") or {}).items() for cid in ids}
+    latest = B._decisions_by_target(on.get("scientist_decisions") or ())
+    recorded: list[dict] = []
+    kept: list[dict] = []
+    for cid in found:
+        cand = cand_by_id.get((asked.get("stated_utc_candidates") or {}).get(cid) or "")
+        if cand is None or cand.get("value") is None:
+            continue  # resolved under this lock from this bundle: never reached
+        group = str(scope_of.get(cid) or "")[len("group:"):] or None
+        prior = latest.get(("conflict", cid))
+        if prior is not None and prior.get("decision") not in B.NEUTRAL_DECISIONS:
+            kept.append({"group_id": group, "conflict_id": cid, "decision_id": prior.get("decision_id"),
+                         "value": prior.get("value"), "same": _same(prior.get("value"), cand["value"])})
+            continue
+        ev = next((e for e in cand.get("evidence") or () if e.get("method") != "ai_interpretation"), None) or {}
+        said = (f"Answered with question {qid} (one decision for the beamtime): the UTC instant this run's own file states "
+                f"({ev.get('locator')}: {(cand.get('observed_literals') or [None])[0]!r}, {cand['candidate_id']}).")
+        r = record_decision(on, target_ids=[cid], decision="correct", value=cand["value"], by=by, orcid=orcid,
+                            note=f"{note} {said}" if note else said)
+        if r.get("recorded"):
+            recorded.append({"group_id": group, "conflict_id": cid, "value": cand["value"],
+                             "candidate_id": cand["candidate_id"]})
+    groups = sorted({x["group_id"] for x in recorded if x["group_id"]})
+    not_reached = list(asked.get("not_reached") or ())
+    verb = "Would record" if dry_run else "Recorded"
+    parts = [f"{verb} the start time of {len(groups)} group(s) ({len(recorded)} run(s)), each the UTC instant its own "
+             f"file states (#E): one decision for the beamtime, {qid}." if recorded else
+             "Nothing new recorded: every group this question reaches already holds a start-time answer."]
+    from collections import Counter
+
+    split = {g: n for g, n in Counter(x["group_id"] for x in recorded if x["group_id"]).items() if n > 1}
+    if split:
+        parts.append(f"In {len(split)} group(s) more than one run got a start ({', '.join(sorted(split)[:5])}"
+                     + ("…" if len(split) > 5 else "") + "): each run keeps its own, and such a group's record carries "
+                     "none of them while they differ (which run's start a merged record takes is left to the protocol "
+                     "review, DEC-89).")
+    if asked.get("answered_before"):
+        parts.append(f"{len(asked['answered_before'])} other group(s) already held a start-time answer of their own and "
+                     "keep it.")
+    differ = [x for x in kept if not x["same"]]
+    if len(kept) > len(differ):
+        parts.append(f"{len(kept) - len(differ)} run(s) already held that same instant.")
+    if differ:
+        parts.append(f"{len(differ)} run(s) hold another start of their own and keep it ("
+                     + ", ".join(str(x["group_id"]) for x in differ[:5]) + ("…" if len(differ) > 5 else "") + ").")
+    if not_reached:
+        parts.append(f"Not reached: {len(not_reached)} group(s) with an open start-time question ("
+                     + "; ".join(f"{x['group_id']}: {x['reason']}" for x in not_reached[:5])
+                     + ("; …" if len(not_reached) > 5 else "") + "). Answer those per group.")
+    result = {"statement": " ".join(parts), "question_id": qid,
+              "recorded_starts": recorded[:Q._STATED_UTC_EXAMPLES], "recorded_starts_total": len(recorded),
+              "groups_recorded": len(groups),
+              # the runs that keep another answer of their own first (bounded: the count says how many held one)
+              "kept_their_own": sorted(kept, key=lambda x: x["same"])[:Q._STATED_UTC_EXAMPLES * 2],
+              "kept_their_own_total": len(kept), "not_reached": not_reached}
+    if dry_run:
+        return {"dry_run": True, "bundle_version": version, "target_ids": list(found), **result}
+    if recorded:
+        save_bundle(bundle_dir, bundle)
+    return (result, bundle_version(bundle_dir)) if with_version else result
 
 
 def _said_not_counter_keep_apart(bundle: Mapping, only: str | None, field: str | None, positions: Sequence[int] | None,
@@ -3895,10 +4015,12 @@ def _regroup(bundle: dict, *, regroup: bool = True, preview: bool = False) -> di
         # r5 B4: said when the groups are made, not only after the curve of one is approved
         shown = ", ".join(sorted(not_records)[:5]) + ("…" if len(not_records) > 5 else "")
         out["not_a_measurement_groups"] = sorted(not_records)
+        # r6 I2: each one's cannot_export_reason as `bundle list <bundle_dir> groups` gives it (Q.cannot_export_reasons):
+        # a group that also lists no scan is said there as no_scans, so both are said here
+        out["cannot_export_reason_by_group"], said = Q.not_a_measurement_reasons(bundle, not_records)
         out["statement"] += (f" {len(not_records)} group(s) hold only runs that are not measurement runs (a reference "
                              f"standard, an alignment or a calibration scan: {shown}). The import asks nothing about "
-                             "their sample or conditions, so they never become records as they stand "
-                             "(cannot_export_reason: not_a_measurement_run in `bundle list <bundle_dir> groups`).")
+                             f"their sample or conditions, so they never become records as they stand. {said}.")
     if split_decision:
         # each split in force: the groups it holds (kept as named), and, said plainly, one applied only now (an older
         # build recorded the split without making them) or one whose lists cannot make groups

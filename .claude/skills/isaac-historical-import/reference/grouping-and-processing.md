@@ -371,7 +371,9 @@ an element/edge already named for the group: approved, proposed, or the group's 
   no ISAAC protocol covers it), or `not_a_measurement_run` (every run is a reference standard, an alignment
   or a calibration scan: the import asks nothing about its sample or conditions, so the fields in
   `cannot_export_fields`, e.g. sample form and environment, have nowhere to hold an answer; its curve can be
-  approved, but it is not a record). `bundle group` says the last one when it makes the groups. The page's
+  approved, but it is not a record). When `bundle group` makes the groups, it names the groups that hold no
+  measurement run and gives each its `cannot_export_reason` exactly as this list does (one that also has no scan
+  is said as `no_scans`). The page's
   `cannot_export` counts them over the whole list. Such a group
   can never become an exportable record as it stands: present it as such, leave it out of a bulk confirm,
   and offer `reject` (it is kept as decision history) or leaving it unconfirmed.

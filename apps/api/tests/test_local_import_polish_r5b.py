@@ -134,9 +134,12 @@ def test_the_question_quotes_the_sentence_asks_and_offers_no_confirm_or_batch(pa
     asked = [q for q in Q.consolidate(b)["questions"]
              if q["target_field_path"] == CELL and gone & {t["id"] for t in q["targets"]}]
     assert len(asked) >= 2
+    # r6 I5: the sentence is quoted once (the first question); the others name that one, and keep it in their hint
+    assert sum(PASSING in q["text"] for q in asked) == 1
     for q in asked:
         assert q["no_value"] is True
-        assert "only in passing" in q["text"] and PASSING in q["text"], q["text"]
+        assert "only in passing" in q["text"], q["text"]
+        assert PASSING in q["text"] or any(h.get("literal") == PASSING for h in q["hints"] if h.get("kind") == "file_literal")
         assert "`flow_cell`" not in q["text"]
         assert "confirm" not in q["allowed_decisions"] and q["confirmable_scopes"] == []
         assert "same_reading_group" not in q  # one passing sentence is never one answer for every group

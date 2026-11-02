@@ -20,7 +20,9 @@ code error can be caught instead of echoed. It is a spot check, never a verifica
 4. Read it. Write down what YOU read (a short value and the quote's locator).
 5. `annotate <bundle> --target <id> --value "<your reading>" --excerpt-locator "<where>" --source-id <src> --model "<model name>" --blind --rationale "<one line>"`.
    `--source-id` must be a source the excerpt showed (a target whose locators name sources refuses
-   any other, exit 2); a target with no source locators takes any known source.
+   any other, exit 2); a target with no source locators takes any known source. If the files state no
+   value, record nothing: a reading like "not stated" or "unknown" is refused (exit 2), because it would be
+   shown as an AI suggestion. The question stays asked; say in your report that no statement was found.
 6. Only after annotating: `reveal <bundle> <id>` and compare (`agrees_with_parser` and `relation`: the same number, the same
    instant written two ways, or the same string agree; anything else differs). For a numeric field, a
    reading given as text (`--value "0.4"` without `--json`) is compared as the number it parses as, and
