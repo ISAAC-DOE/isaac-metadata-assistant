@@ -11,11 +11,13 @@ import { countsSentence, gate0FromDraft, parseTermDraftsFile } from '../lib/term
 /**
  * Schema Proposals: load the drafts file `isaac bundle propose-terms --out` writes, in the
  * browser, and file one draft at a time. What is pinned is BEHAVIOUR: the file is read here and
- * nothing is requested while it is read or while a draft is opened; each term is listed with
- * its field, counts, the scientist's own words where the file has them and the problems it
- * reports; a term the file did not draft cannot be filed; a drafted one opens the form with the
- * description EMPTY and the reviewer notes filled from the file's facts only; and the body sent
- * on save carries the `source` block the server checks. All values are synthetic.
+ * nothing is requested while it is read or while a draft is opened; the terms are listed in three
+ * groups (needs your description, cannot be proposed, nothing needed from you) whose counts the
+ * summary line repeats; each term is listed with its field, counts, the scientist's own words where
+ * the file has them and the problems it reports; a term the file did not draft cannot be filed; a
+ * drafted one opens the form with the description EMPTY and the reviewer notes filled from the
+ * file's facts only, and its row says it is the one in the form; and the body sent on save carries
+ * the `source` block the server checks. All values are synthetic.
  */
 
 const envelope = {
@@ -234,13 +236,41 @@ async function chooseFile(content: string, name = 'drafts.json') {
   fireEvent.change(input, { target: { files: [file] } });
 }
 
+/** Wait until the file has been read and its summary line shown. */
+async function drafts(): Promise<HTMLElement> {
+  return within(loader()).findByText(/Nothing was sent\.$/);
+}
+
+/** One group's list of terms, by its heading ("Needs Your Description (2)"). */
+function groupList(title: RegExp): HTMLElement {
+  return within(loader()).getByRole('list', { name: title });
+}
+
+/** The rows of one group's list (its own items, not the notes listed inside a row). */
+function rowsOf(list: HTMLElement): HTMLElement[] {
+  return Array.from(list.querySelectorAll<HTMLElement>(':scope > li'));
+}
+
 function draftItem(term: string): HTMLElement {
-  const list = within(loader()).getByRole('list', { name: 'Drafts in the file' });
-  const item = within(list)
+  const item = within(loader())
     .getAllByRole('listitem')
-    .find((li) => within(li).queryByRole('heading', { name: term }) !== null);
+    .find((li) => within(li).queryByRole('heading', { level: 4, name: term }) !== null);
   if (!item) throw new Error(`no draft listed for ${term}`);
   return item;
+}
+
+/** DRAFTS_FILE plus a term answered since it was asked for and one no longer found in the bundle. */
+const ANSWER_NOTE = 'Partly answered since it was asked for: an allowed value (`XAS`) now stands for 1 run(s).';
+function fileWithEveryKind() {
+  const file = structuredClone(DRAFTS_FILE);
+  const terms = file.fields[0].terms as unknown as Record<string, unknown>[];
+  terms.push({ ...structuredClone(file.fields[0].terms[0]), term: 'ZZANSWERED', scientist_notes: [],
+    draft: { drafted: false, answered: true, answered_with: ['XAS'], partly_answered: ANSWER_NOTE,
+      reason: 'Answered since it was asked for: SYN reason, so the term is not drafted.' } });
+  terms.push({ ...structuredClone(file.fields[0].terms[0]), term: 'ZZGONE', carried_over: true, current: false, count: 0,
+    // truncated, so the file states no run count and the "Runs: not stated" sentence follows the counts
+    citations: [], citations_total: 0, citations_truncated: true, scientist_notes: [] });
+  return file;
 }
 
 /** The note above the form that says it was opened on a local-import draft. */
@@ -262,11 +292,13 @@ describe('Load drafts from a local import', () => {
     const { calls, sent } = stub();
     renderAt(`${ROUTE}?tab=propose`);
     await chooseFile(JSON.stringify(DRAFTS_FILE));
-    await within(loader()).findByRole('list', { name: 'Drafts in the file' });
+    await drafts();
 
     // The copy says where a saved proposal goes: this build talks to the local server.
     expect(within(loader()).getByText(/the ISAAC server running on this computer/)).toBeInTheDocument();
-    expect(within(loader()).getByText(/does not upload it/)).toBeInTheDocument();
+    expect(within(loader()).getByText(/Nothing leaves your computer/)).toBeInTheDocument();
+    // The lead says what a term proposal is.
+    expect(within(loader()).getByText(/add one word to one list of allowed values/)).toBeInTheDocument();
 
     const xmcd = draftItem('XMCD');
     expect(within(xmcd).getByText('system.technique')).toBeInTheDocument();
@@ -280,6 +312,11 @@ describe('Load drafts from a local import', () => {
     expect(xmcd).not.toHaveTextContent('A bare string nobody is named for.');
     expect(xmcd).not.toHaveTextContent('in an answer: "XMCD"');
     expect(xmcd).toHaveTextContent('logs/synthetic_run_01.txt · line 4 (confirmed by you)');
+    // What it would add, in one sentence.
+    expect(xmcd).toHaveTextContent(
+      "Adds XMCD to system.technique, which is not on the portal's list or the ISAAC schema's list today.",
+    );
+    expect(within(xmcd).getByText('Needs your description')).toBeInTheDocument();
     expect(within(xmcd).getByRole('button', { name: 'Propose This Term' })).toBeInTheDocument();
 
     const simulated = draftItem('simulated');
@@ -290,11 +327,12 @@ describe('Load drafts from a local import', () => {
     const phrase = draftItem('magnetic dichroism');
     expect(phrase).toHaveTextContent('Cannot be proposed from here.');
     expect(phrase).toHaveTextContent('A term is a single word with no spaces.');
+    expect(within(phrase).getByText('Cannot be proposed')).toBeInTheDocument();
     expect(within(phrase).queryByRole('button')).toBeNull();
 
-    await waitFor(() => {
-      expect(screen.getByText(/Read 3 terms from drafts\.json: 2 can be proposed, 1 cannot\. Nothing was sent\./)).toBeInTheDocument();
-    });
+    expect(within(loader()).getByRole('status')).toHaveTextContent(
+      'From the local import synthetic-bundle-0001: 2 need your description · 1 cannot be proposed. Nothing was sent.',
+    );
     expect(calls.filter((c) => !c.startsWith('GET '))).toEqual([]);
     expect(sent).toEqual([]);
   });
@@ -303,7 +341,7 @@ describe('Load drafts from a local import', () => {
     const { calls, sent } = stub();
     renderAt(`${ROUTE}?tab=propose`);
     await chooseFile(JSON.stringify(DRAFTS_FILE));
-    await within(loader()).findByRole('list', { name: 'Drafts in the file' });
+    await drafts();
     fireEvent.click(within(draftItem('XMCD')).getByRole('button', { name: 'Propose This Term' }));
 
     const panel = screen.getByRole('tabpanel', { name: 'Propose a Change' });
@@ -323,7 +361,7 @@ describe('Load drafts from a local import', () => {
       '3 readings (1 confirmed by you, 2 AI readings)',
     );
     expect(within(panel).getByLabelText('What would change')).toHaveValue('');
-    expect(draftNote()).toHaveTextContent(/The description is empty/);
+    expect(draftNote()).toHaveTextContent(/The description is left to you, and it is empty/);
 
     // Nothing was sent by loading the file or opening the draft.
     expect(calls.filter((c) => !c.startsWith('GET '))).toEqual([]);
@@ -369,7 +407,7 @@ describe('Load drafts from a local import', () => {
     }));
     renderAt(`${ROUTE}?tab=propose`);
     await chooseFile(JSON.stringify(DRAFTS_FILE));
-    await within(loader()).findByRole('list', { name: 'Drafts in the file' });
+    await drafts();
     fireEvent.click(within(draftItem('XMCD')).getByRole('button', { name: 'Propose This Term' }));
     await waitFor(() => expect(screen.getByLabelText('New term')).toHaveValue('XMCD'));
     fireEvent.click(screen.getByRole('button', { name: 'Save Proposal' }));
@@ -380,14 +418,14 @@ describe('Load drafts from a local import', () => {
     expect(sent[0].description).toBe('');
     expect(screen.queryByText(/Saved as a draft/)).toBeNull();
     // The draft is still open, so a second try still carries its source.
-    expect(draftNote()).toHaveTextContent(/Opened on a draft from a local import/);
+    expect(draftNote()).toHaveTextContent('Proposing: add XMCD to system.technique (System)');
   });
 
   it('a reviewer note the file has no fact for is empty, named as missing, and required', async () => {
     stub();
     renderAt(`${ROUTE}?tab=propose`);
     await chooseFile(JSON.stringify(DRAFTS_FILE));
-    await within(loader()).findByRole('list', { name: 'Drafts in the file' });
+    await drafts();
     fireEvent.click(within(draftItem('simulated')).getByRole('button', { name: 'Propose This Term' }));
     await waitFor(() => expect(screen.getByLabelText('Category')).toHaveValue('system.domain'));
     const examples = screen.getByLabelText('Examples (required)');
@@ -400,7 +438,7 @@ describe('Load drafts from a local import', () => {
     const { sent } = stub();
     renderAt(`${ROUTE}?tab=propose`);
     await chooseFile(JSON.stringify(DRAFTS_FILE));
-    await within(loader()).findByRole('list', { name: 'Drafts in the file' });
+    await drafts();
     fireEvent.click(within(draftItem('XMCD')).getByRole('button', { name: 'Propose This Term' }));
     await waitFor(() => expect(screen.getByLabelText('New term')).toHaveValue('XMCD'));
     fireEvent.click(screen.getByRole('button', { name: 'Stop Using This Draft' }));
@@ -430,7 +468,7 @@ describe('Load drafts from a local import', () => {
     file.fields[0].terms[0].draft = drafted('System', 'system.technique', 'XAS');
     renderAt(`${ROUTE}?tab=propose`);
     await chooseFile(JSON.stringify(file));
-    await within(loader()).findByRole('list', { name: 'Drafts in the file' });
+    await drafts();
     const item = draftItem('XAS');
     expect(item).toHaveTextContent('Cannot be proposed from here.');
     expect(within(item).queryByRole('button')).toBeNull();
@@ -450,10 +488,12 @@ describe('Load drafts from a local import', () => {
     });
     renderAt(`${ROUTE}?tab=propose`);
     await chooseFile(JSON.stringify(file));
-    await within(loader()).findByRole('list', { name: 'Drafts in the file' });
+    await drafts();
     const item = draftItem('XMCD');
     expect(item).toHaveTextContent('Cannot be proposed from here.');
     expect(item).toHaveTextContent('no longer found in the bundle');
+    expect(within(item).getByText('No longer in the bundle')).toBeInTheDocument();
+    expect(rowsOf(groupList(/^Nothing Needed From You/))).toContain(item);
     expect(within(item).queryByRole('button')).toBeNull();
     expect(calls.filter((c) => !c.startsWith('GET '))).toEqual([]);
   });
@@ -471,7 +511,7 @@ describe('Load drafts from a local import', () => {
         reason: 'Answered since it was asked for: SYN reason, so the term is not drafted.' } });
     renderAt(`${ROUTE}?tab=propose`);
     await chooseFile(JSON.stringify(file));
-    await within(loader()).findByRole('list', { name: 'Drafts in the file' });
+    await drafts();
     const item = draftItem('XMCD');
     expect(item).toHaveTextContent('Since it was asked for');
     // the file's own sentences, word for word; a backticked value is shown as code, not as backticks
@@ -480,6 +520,7 @@ describe('Load drafts from a local import', () => {
     expect(within(item).getAllByText('XAS', { selector: 'code' })).toHaveLength(2);
     expect(item.textContent).not.toContain('`');
     const answered = draftItem('ZZANSWERED');
+    expect(rowsOf(groupList(/^Nothing Needed From You/))).toContain(answered);
     expect(answered).toHaveTextContent('Cannot be proposed from here.');
     expect(answered).toHaveTextContent('so the term is not drafted');
     expect(within(answered).queryByRole('button')).toBeNull();
@@ -496,12 +537,120 @@ describe('an answered term', () => {
       reason: 'Answered since it was asked for: SYN reason, so the term is not drafted.' };
     renderAt(`${ROUTE}?tab=propose`);
     await chooseFile(JSON.stringify(file));
-    await within(loader()).findByRole('list', { name: 'Drafts in the file' });
+    await drafts();
     const item = draftItem('XMCD');
     expect(item).toHaveTextContent('Cannot be proposed from here.');
     expect(item).toHaveTextContent('SYN reason, so the term is not drafted.');
     expect(within(item).queryByRole('button', { name: 'Propose This Term' })).toBeNull();
     expect(calls.filter((c) => !c.startsWith('GET '))).toEqual([]);
+  });
+});
+
+describe('the drafts, grouped', () => {
+  it('lists the terms in three groups, in order, with counts the summary line repeats', async () => {
+    const { calls } = stub();
+    renderAt(`${ROUTE}?tab=propose`);
+    await chooseFile(JSON.stringify(fileWithEveryKind()));
+    await drafts();
+    const headings = within(loader()).getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
+    expect(headings).toEqual(['Needs Your Description (2)', 'Cannot Be Proposed From Here (1)', 'Nothing Needed From You (2)']);
+    const terms = (title: RegExp) =>
+      rowsOf(groupList(title)).map((li) => within(li).getByRole('heading', { level: 4 }).textContent);
+    expect(terms(/^Needs Your Description/)).toEqual(['XMCD', 'simulated']);
+    expect(terms(/^Cannot Be Proposed From Here/)).toEqual(['magnetic dichroism']);
+    expect(terms(/^Nothing Needed From You/)).toEqual(['ZZANSWERED', 'ZZGONE']);
+    // A carried-over term's counts sentence has its own full stop, so none is added before "Runs".
+    expect(draftItem('ZZGONE')).toHaveTextContent('No longer found in the bundle (carried over from an earlier drafts file).');
+    expect(draftItem('ZZGONE')).toHaveTextContent('earlier drafts file). Runs: not stated in the file.');
+    expect(draftItem('ZZGONE').textContent).not.toContain('..');
+    expect(within(loader()).getByRole('status')).toHaveTextContent(
+      'From the local import synthetic-bundle-0001: 2 need your description · 1 cannot be proposed · 2 need nothing from you. Nothing was sent.',
+    );
+    // Only the first group's rows can be opened.
+    expect(within(loader()).getAllByRole('button', { name: 'Propose This Term' })).toHaveLength(2);
+    expect(within(groupList(/^Cannot Be Proposed/)).queryByRole('button')).toBeNull();
+    expect(within(groupList(/^Nothing Needed/)).queryByRole('button')).toBeNull();
+    expect(calls.filter((c) => !c.startsWith('GET '))).toEqual([]);
+  });
+
+  it('leaves out a group with no terms, and the summary says only what is listed', async () => {
+    stub();
+    renderAt(`${ROUTE}?tab=propose`);
+    await chooseFile(JSON.stringify(DRAFTS_FILE));
+    await drafts();
+    expect(within(loader()).queryByRole('heading', { name: /^Nothing Needed From You/ })).toBeNull();
+    expect(within(loader()).getByRole('status')).not.toHaveTextContent('nothing from you');
+  });
+
+  it('an answered term is listed only under Nothing Needed From You, with the file\'s sentences and no button', async () => {
+    stub();
+    renderAt(`${ROUTE}?tab=propose`);
+    await chooseFile(JSON.stringify(fileWithEveryKind()));
+    await drafts();
+    const answered = draftItem('ZZANSWERED');
+    expect(rowsOf(groupList(/^Nothing Needed From You/))).toContain(answered);
+    expect(rowsOf(groupList(/^Needs Your Description/))).not.toContain(answered);
+    expect(rowsOf(groupList(/^Cannot Be Proposed From Here/))).not.toContain(answered);
+    expect(within(answered).getByText('Answered')).toBeInTheDocument();
+    expect(answered).toHaveTextContent('Since it was asked for');
+    expect(answered).toHaveTextContent(ANSWER_NOTE.replace(/`/g, ''));
+    expect(within(answered).getByText('XAS', { selector: 'code' })).toBeInTheDocument();
+    expect(answered).toHaveTextContent('Cannot be proposed from here.');
+    expect(within(answered).queryByRole('button')).toBeNull();
+  });
+
+  it('folds where a term was read under "Where it was read (N)", N being the file\'s own total', async () => {
+    stub();
+    const file = structuredClone(DRAFTS_FILE);
+    file.fields[0].terms[0].citations_total = 40;
+    renderAt(`${ROUTE}?tab=propose`);
+    await chooseFile(JSON.stringify(file));
+    await drafts();
+    const xmcd = draftItem('XMCD');
+    const summary = within(xmcd).getByText('Where it was read (40)');
+    const details = summary.closest('details')!;
+    expect(details).not.toHaveAttribute('open');
+    expect(details).toHaveTextContent('logs/synthetic_run_01.txt · line 4 (confirmed by you)');
+    expect(details).toHaveTextContent('and 38 more');
+    // A term the file cites nothing for says so in plain sight, with nothing to unfold.
+    const simulated = draftItem('simulated');
+    expect(simulated.querySelector('details')).toBeNull();
+    expect(simulated).toHaveTextContent('The file cites nothing for this term.');
+  });
+
+  it('marks the row the form is open on, names it above the form, and moves the mark to the next draft opened', async () => {
+    const { calls, sent } = stub();
+    renderAt(`${ROUTE}?tab=propose`);
+    await chooseFile(JSON.stringify(DRAFTS_FILE));
+    await drafts();
+    expect(within(loader()).queryByText('Being proposed below')).toBeNull();
+
+    fireEvent.click(within(draftItem('XMCD')).getByRole('button', { name: 'Propose This Term' }));
+    await waitFor(() => expect(draftItem('XMCD')).toHaveAttribute('aria-current', 'true'));
+    expect(within(draftItem('XMCD')).getByText('Being proposed below')).toBeInTheDocument();
+    expect(within(draftItem('XMCD')).queryByRole('button', { name: 'Propose This Term' })).toBeNull();
+    expect(draftItem('simulated')).not.toHaveAttribute('aria-current');
+    expect(draftNote()).toHaveTextContent('Proposing: add XMCD to system.technique (System)');
+    expect(draftNote()).toHaveTextContent('at least 20 characters');
+    expect(draftNote()).toHaveTextContent('synthetic-bundle-0001');
+    // What Save does is said once, above it.
+    expect(screen.getByRole('button', { name: 'Save Proposal' })).toHaveAccessibleDescription(
+      'Save keeps this proposal as a draft on this server. It does not send it to the ISAAC portal.',
+    );
+
+    fireEvent.click(within(draftItem('simulated')).getByRole('button', { name: 'Propose This Term' }));
+    await waitFor(() => expect(draftItem('simulated')).toHaveAttribute('aria-current', 'true'));
+    expect(draftItem('XMCD')).not.toHaveAttribute('aria-current');
+    expect(within(draftItem('XMCD')).getByRole('button', { name: 'Propose This Term' })).toBeInTheDocument();
+    expect(within(loader()).getAllByText('Being proposed below')).toHaveLength(1);
+    expect(draftNote()).toHaveTextContent('Proposing: add simulated to system.domain (System)');
+
+    // Stopping the draft clears the mark.
+    fireEvent.click(screen.getByRole('button', { name: 'Stop Using This Draft' }));
+    expect(draftItem('simulated')).not.toHaveAttribute('aria-current');
+    expect(within(loader()).queryByText('Being proposed below')).toBeNull();
+    expect(calls.filter((c) => !c.startsWith('GET '))).toEqual([]);
+    expect(sent).toEqual([]);
   });
 });
 

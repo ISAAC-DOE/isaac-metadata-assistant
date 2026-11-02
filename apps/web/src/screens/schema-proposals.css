@@ -340,7 +340,9 @@
 /* --- drafts from a local import ----------------------------------------------- */
 
 .sp-drafts { display: flex; flex-direction: column; gap: var(--space-sm); }
-.sp-drafts > .sp-h2 { margin: 0; }
+/* Three heading steps inside the loader (its title, a group, a term), one type rung apart, so a term
+   never reads louder than the group it is in. */
+.sp-drafts > .sp-h2 { margin: 0; font-size: var(--font-size-heading-md); }
 .sp-drafts .sp-list { margin-top: var(--space-xs); gap: 0; }
 /* The drafts sit inside the loader's own panel, so each is a row ruled off from the next rather than a
    card inside a card. */
@@ -353,6 +355,91 @@
 }
 /* One label track for every draft, so the values line up from one draft to the next. */
 .sp-draft-facts { grid-template-columns: minmax(7rem, 11rem) minmax(0, 1fr); }
+
+/* The counts line read once the file is in: the same weight as the copy, so it reads as a fact, not an alert. */
+/* (Scoped under .sp-drafts: the panel's own `.sp-notice p` margin would otherwise win.) */
+.sp-drafts .sp-drafts-summary {
+  margin: var(--space-xs) 0 0;
+  max-width: 72ch;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+/* Each group opens with more room above its heading than below it, so the three read as three. */
+.sp-draft-group { display: flex; flex-direction: column; gap: var(--space-xs); margin-top: var(--space-md); }
+.sp-h3 {
+  margin: 0;
+  font-size: var(--font-size-heading-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
+}
+.sp-draft-term { font-size: var(--font-size-body); }
+.sp-draft-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs) var(--space-sm);
+}
+/* A draft's state is a WORD in a chip. "Needs your description" is the expected, honest needs-you state;
+   "Cannot be proposed" is a not-established state, dashed like every other one; a settled term is plain
+   information. None of them is a verdict colour. */
+.sp-chip {
+  padding: var(--space-2xs) var(--space-sm);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-normal);
+  white-space: nowrap;
+}
+.sp-chip-needsyou { color: var(--needsyou-text); background: var(--needsyou-bg); border-color: var(--needsyou-border); }
+.sp-chip-missing { color: var(--missing-text); background: var(--missing-bg); border-color: var(--missing-border); border-style: dashed; }
+.sp-chip-cover { color: var(--cover-text); background: var(--cover-bg); border-color: var(--cover-border); }
+/* The row the form is open on, in the current-selection tint the vocabulary list uses for its current list. */
+.sp-chip-current { color: var(--text-heading); background: var(--action-tint); border-color: var(--action-selected-border); }
+/* A dd lays its text out pre-wrapped; the lines inside one, and a row's own paragraphs, have no margin of
+   their own: the row's gap spaces them. */
+.sp-drafts .sp-draft > p,
+.sp-drafts .sp-draft-line { margin: 0; }
+.sp-drafts .sp-draft-line + .sp-notes,
+.sp-drafts .sp-draft-line + .sp-draft-line { margin-top: var(--space-2xs); }
+.sp-draft-sub { color: var(--text-muted); }
+/* The file's own sentences on what was answered since: a calm tint block, not an accent bar. */
+.sp-why-list dd.sp-draft-since {
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-token);
+  background: var(--cover-bg);
+}
+/* Beside the block (not above it, at a phone width) the label drops by the block's padding to share its first line. */
+@media (min-width: 561px) {
+  .sp-draft-since-label { padding-top: var(--space-xs); }
+}
+/* Where a term was read is the long part of a draft, so it is folded; the summary sits on the label track. */
+.sp-draft-cites > summary {
+  cursor: pointer;
+  width: fit-content;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-strong);
+}
+.sp-draft-cites > summary:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: var(--radius-token);
+}
+.sp-draft-cites[open] > summary { margin-bottom: var(--space-xs); }
+/* A settled term needs nothing, so its row is tighter than one that asks for something. */
+.sp-drafts .sp-draft-settled { padding: var(--space-sm) 0; gap: var(--space-xs); }
+
+/* --- filing from a draft --------------------------------------------------------- */
+
+.sp-filing-title {
+  font-size: var(--font-size-heading-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
+  overflow-wrap: anywhere;
+}
+.sp-notice .sp-filing-title { margin-bottom: var(--space-sm); }
+/* The line on what Save does sits close above the button it is about. */
+.sp-submit { display: flex; flex-direction: column; gap: var(--space-xs); }
 /* At a phone width a label column squeezed the values to a few words a line (and broke a field path in
    two): every such list stacks there, label above value, as Local Imports' lists do. */
 @media (max-width: 560px) {
