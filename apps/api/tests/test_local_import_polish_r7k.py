@@ -51,10 +51,10 @@ def _hint(label, *groups):
 
 def test_a_hint_never_crosses_electrode_or_run_numbers_and_names_the_ones_that_differ():
     A = _A()
-    g0105 = _group("rg-0105", "01_05_SYN_jk1c_after_600mV")
-    g0304 = _group("rg-0304", "03_04_SYN_jk1c_after_600mV")
+    g0105 = _group("rg-0105", "01_05_SYN_zz1c_after_600mV")
+    g0304 = _group("rg-0304", "03_04_SYN_zz1c_after_600mV")
     # the same words under other run numbers is another run: never a hint, however alike
-    assert _hint("merge_01_05_SYN_jk1c_after_600mV_x", g0105, g0304) == ["rg-0105"]
+    assert _hint("merge_01_05_SYN_zz1c_after_600mV_x", g0105, g0304) == ["rg-0105"]
     assert _hint("merge_04_11_SYN_k_1800mV6_8", _group("rg-0404", "04_04_SYN_k_600mV"),
                  _group("rg-0408", "04_08_SYN_k_1200mV"), _group("rg-0411", "04_11_SYN_k_1800mV")) == ["rg-0411"]
     # a merge of runs 03 and 05 still hints the group of run 05 (one number, named by the merge)
@@ -76,9 +76,9 @@ def test_athenas_reference_channels_are_counted_never_listed_or_hinted():
     A = _A()
     from isaac_api.local_import.processing import run as RUN
 
-    groups = [_group("rg-0105", "01_05_SYN_jk1c_600mV"), _group("rg-0304", "03_04_SYN_jk1c_600mV")]
-    ref = _merge("  Ref 01_05_SYN_jk1c_600mV")
-    real = _merge("merge_01_05_SYN_jk1c_600mV_spt")
+    groups = [_group("rg-0105", "01_05_SYN_zz1c_600mV"), _group("rg-0304", "03_04_SYN_zz1c_600mV")]
+    ref = _merge("  Ref 01_05_SYN_zz1c_600mV")
+    real = _merge("merge_01_05_SYN_zz1c_600mV_spt")
     assert A.is_reference_channel(ref) and not A.is_reference_channel(real)
     assert not A.is_reference_channel(_merge("Refined_SYN_x"))  # a word, not Athena's "Ref <name>"
     # review L2: Athena's exact form only (two spaces, "Ref", a space)
@@ -87,12 +87,12 @@ def test_athenas_reference_channels_are_counted_never_listed_or_hinted():
     items = A.unmatched_merges(groups, [ref, real])
     assert [i["athena_label"] for i in items] == [real["label"]]
     refs = A.unmatched_reference_channels(groups, [ref, real])
-    assert [r["athena_label"] for r in refs] == ["Ref 01_05_SYN_jk1c_600mV"]
+    assert [r["athena_label"] for r in refs] == ["Ref 01_05_SYN_zz1c_600mV"]
     line = RUN.unmatched_merges_line(items, reference_channels=len(refs))
     assert "1 more Athena group(s) that match no group are reference channels" in line
     assert RUN.unmatched_merges_line([], reference_channels=3).startswith("Athena: 3 Athena group(s)")
     # a leading "ref" word is no part of a merge's name when its run numbers are read
-    [c] = A.near_name_candidates(_merge("merge_ref_01_05_SYN_jk1c_600mV_b"), groups)
+    [c] = A.near_name_candidates(_merge("merge_ref_01_05_SYN_zz1c_600mV_b"), groups)
     assert c["group_id"] == "rg-0105" and c["same_run_numbers"]
 
 
