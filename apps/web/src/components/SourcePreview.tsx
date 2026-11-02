@@ -46,7 +46,9 @@ export function SourcePreview({
     <section className="preview" aria-label="Source preview">
       <h2 className="preview-prov-title">
         {entry.label}
-        <span className="preview-prov-key">{entry.key}</span>
+        {/* The key only when it adds something: with no human label the two are
+            the same string (declutter, 2026-11-02). */}
+        {entry.key !== entry.label && <span className="preview-prov-key">{entry.key}</span>}
       </h2>
       <p className="preview-prov-text">{provenance}</p>
 

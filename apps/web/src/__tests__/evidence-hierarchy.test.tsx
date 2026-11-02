@@ -296,7 +296,7 @@ describe('S6 · no double margin when the banner and the live-sync note are abse
    * whichever combination is live, exactly one gutter — main's padding-top —
    * separates the TopBar from the first thing with content.
    */
-  it('the wrapper holds only the two transient notices, and `.evclass` follows it directly', async () => {
+  it('the wrapper holds only the two transient notices; the source preview, then `.evclass`, follow it', async () => {
     stubFetchRoutes(evidenceBundleRoutes('demo'));
     const { container, findByText } = renderAt('/record/demo/evidence');
     await findByText('Evidence Support');
@@ -309,8 +309,11 @@ describe('S6 · no double margin when the banner and the live-sync note are abse
         `unexpected child in the inset wrapper: ${child.className}`,
       ).toBe(true);
     }
-    // nothing sits between the wrapper and the first panel
-    expect(inset.nextElementSibling?.classList.contains('evclass')).toBe(true);
+    // RE-PINNED (declutter, 2026-11-02): the selected item's detail is mounted
+    // directly under the tabs and notices, so the rail and detail work as master
+    // and detail; Evidence Support follows it. Nothing else sits between them.
+    expect(inset.nextElementSibling?.classList.contains('preview')).toBe(true);
+    expect(inset.nextElementSibling?.nextElementSibling?.classList.contains('evclass')).toBe(true);
   });
 
   it('CSS source: .evclass declares no top padding, so it never stacks a second gutter', () => {
@@ -325,14 +328,19 @@ describe('S6 · no double margin when the banner and the live-sync note are abse
 // SLICE 7 — readability and hierarchy
 // ===========================================================================
 
-const panel = (stale = false) =>
-  render(
+/** The full list: rows that are Supported sit behind "Show All N" (declutter). */
+const panel = (stale = false) => {
+  const view = render(
     <EvidenceClassificationPanel
       classification={evidenceClassificationResponse}
       stale={stale}
       onRefresh={() => {}}
     />,
   );
+  const all = view.queryByRole('button', { name: /^Show All \d+$/ });
+  if (all) fireEvent.click(all);
+  return view;
+};
 
 describe('S7 · CSS source: four distinguishable levels of typographic hierarchy', () => {
   const sizeOf = (selector: string) => px(ruleFor('classification.css', selector)?.body, 'font-size');
@@ -481,7 +489,9 @@ describe('S7 · field rows separate path · status · explanation · source', ()
 
   it('renders all four parts in one row, in order', () => {
     const { container } = panel();
-    const row = container.querySelector('.evclass-row[data-class="supported"]')!;
+    // A row whose explanation differs from its class default (a supported row's
+    // default sentence is not repeated since the declutter).
+    const row = container.querySelector('.evclass-row[data-class="inferred_candidate"]')!;
     expect(row.querySelector('.evclass-field')?.textContent).toBeTruthy();
     expect(row.querySelector('.chip')).not.toBeNull();
     expect(row.querySelector('.evclass-explanation')?.textContent).toBeTruthy();
@@ -609,14 +619,15 @@ describe('S7 · overflow, wrapping and heading structure', () => {
    * stays a statement about THIS panel and is not coupled to unrelated copy
    * elsewhere on the screen.
    */
-  it('says "a separate axis" once, in the page-level note — never repeated per row', () => {
+  it('says "does not affect export" once, in the page-level note — never repeated per row', () => {
+    // The note was shortened (declutter, 2026-11-02); the discipline is unchanged.
     const { container } = panel();
     const scope = container.querySelector('.evclass')!;
-    const occurrences = (scope.textContent ?? '').match(/a separate axis/g) ?? [];
+    const occurrences = (scope.textContent ?? '').match(/does not affect export/g) ?? [];
     expect(occurrences.length).toBe(1);
-    expect(container.querySelector('.evclass-note')!.textContent).toContain('a separate axis');
+    expect(container.querySelector('.evclass-note')!.textContent).toContain('does not affect export');
     container.querySelectorAll('.evclass-row').forEach((row) => {
-      expect(row.textContent).not.toContain('a separate axis');
+      expect(row.textContent).not.toContain('does not affect export');
     });
   });
 });

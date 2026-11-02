@@ -229,13 +229,6 @@ export function ConflictResolutionPanel({ experimentId }: { experimentId: string
         <h2 className="conflicts-title" id="conflicting-evidence-heading">
           Conflicting Evidence
         </h2>
-        <p className="conflicts-sub">
-          Addresses whose own evidence records more than one different answer, with
-          every competing answer and the citations behind it. Recording a decision
-          says which value you stand behind; it does not change the field’s value,
-          it removes no evidence, and a conflict blocks neither export nor
-          submission.
-        </p>
       </div>
       {/* Keyed on the record, so switching records rebuilds this panel's state
           rather than showing one record's disagreements under another's heading. */}
@@ -437,9 +430,30 @@ function ConflictBrowser({ experimentId }: { experimentId: string }) {
   }, [loaded]);
 
   const runs = runsState.status === 'data' ? runsState.runs : [];
+  /* NOTHING IN CONFLICT AND NOTHING EVER DECIDED: the section is one line
+     (declutter, 2026-11-02). The lead and the counts return with the first
+     conflict or decision; the scope control stays whenever runs exist, so a run's
+     own fields can still be checked. */
+  const quiet =
+    loaded !== null &&
+    loaded.conflicts.length === 0 &&
+    loaded.counts.conflicting_addresses === 0 &&
+    loaded.counts.resolved === 0 &&
+    loaded.counts.stale === 0 &&
+    loaded.counts.deferred === 0;
 
   return (
     <div className="conflicts-browser">
+      {!quiet && (
+        <p className="conflicts-sub">
+          Addresses whose own evidence records more than one different answer, with
+          every competing answer and the citations behind it. Recording a decision
+          says which value you stand behind; it does not change the field’s value,
+          it removes no evidence, and a conflict blocks neither export nor
+          submission.
+        </p>
+      )}
+      {!(quiet && runs.length === 0) && (
       <div className="conflicts-toolbar">
         {runs.length > 0 && (
           <div className="conflicts-control">
@@ -466,10 +480,13 @@ function ConflictBrowser({ experimentId }: { experimentId: string }) {
           is in flight — a live region remounted with its content is never
           announced, and holding the previous scope's numbers is worse than none.
         */}
-        <p className="conflicts-count" aria-live="polite" aria-atomic="true">
-          {list.status === 'loading' ? '' : countLine}
-        </p>
+        {!quiet && (
+          <p className="conflicts-count" aria-live="polite" aria-atomic="true">
+            {list.status === 'loading' ? '' : countLine}
+          </p>
+        )}
       </div>
+      )}
 
       {runsState.status === 'error' && (
         <p className="conflicts-disclosure" role="note">
@@ -545,9 +562,7 @@ function ConflictBrowser({ experimentId }: { experimentId: string }) {
 
           {list.loaded.conflicts.length === 0 ? (
             <p className="conflicts-empty" role="note">
-              No address in this view records two different answers. That is a
-              statement about this record’s evidence only — it is not a validity,
-              completeness or export verdict, and none of those is decided here.
+              {runs.length > 0 ? 'No conflicting evidence in this view.' : 'No conflicting evidence.'}
             </p>
           ) : (
             <ul className="conflicts-list">

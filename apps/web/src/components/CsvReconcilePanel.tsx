@@ -1,6 +1,7 @@
 import './csv-reconcile.css';
 import { useRef, useState } from 'react';
 import { StatusChip } from './StatusChip';
+import { Disclosure } from './Disclosure';
 import { LoadingPanel, BackendDown } from './FetchStates';
 import { Upload } from './icons';
 import { api, ApiError } from '../lib/api';
@@ -191,22 +192,18 @@ export function CsvReconcilePanel({
 
   return (
     <section className="csv-recon" aria-label="CSV reconciliation">
-      <header className="csv-recon-head">
-        <h2 className="csv-recon-title">Reconcile a Campaign Sheet</h2>
-        <p className="csv-recon-sub">
-          Compare a campaign sheet against the current record.
-        </p>
-      </header>
-
-      <div className="csv-recon-banners">
-        <p className="csv-recon-banner csv-recon-banner-strong">
-          CSV values are review evidence — uploading this file does not change the
-          official record.
-        </p>
-        <p className="csv-recon-banner">
-          CSV only — the ISAAC campaign metadata sheet (.csv).
-        </p>
-      </div>
+      {/* A SECONDARY TOOL, BEHIND ONE DISCLOSURE (declutter, 2026-11-02). The lead
+          says what it does; the amber note and the duplicate hint are gone, and
+          "CSV only" is the upload control's own helper text. */}
+      <Disclosure
+        summary="Reconcile a Campaign Sheet"
+        headingLevel={2}
+        className="csv-recon-disclosure"
+      >
+      <p className="csv-recon-sub">
+        Compare a campaign sheet against the current record. It does not change the
+        official record.
+      </p>
 
       {/* The file input is ALWAYS mounted so a re-selection (even the same file)
           fires a change, and the double-activate guard has an element to target. */}
@@ -238,15 +235,14 @@ export function CsvReconcilePanel({
         <div className="csv-recon-drop">
           <button
             type="button"
-            className="btn btn-primary"
+            className="btn btn-secondary"
             onClick={() => inputRef.current?.click()}
           >
             <Upload size={14} strokeWidth={2.2} aria-hidden="true" />
             Upload CSV File
           </button>
           <span className="csv-recon-drop-hint">
-            The file is read locally and sent once for reconciliation; it is never
-            written to the record.
+            CSV only — the ISAAC campaign metadata sheet (.csv).
           </span>
         </div>
       )}
@@ -259,6 +255,7 @@ export function CsvReconcilePanel({
           onGoToComplete={onGoToComplete}
         />
       )}
+      </Disclosure>
     </section>
   );
 }

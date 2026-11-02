@@ -416,6 +416,17 @@ function LoadedEvidence({
           pendingCount={detail.pending_count}
         />
       </div>
+      {/* THE SELECTED ITEM'S DETAIL, DIRECTLY UNDER THE TABS (declutter,
+          2026-11-02): the rail and this pane work as master and detail, so a
+          click on a rail row changes something the reader can see. */}
+      <SourcePreview
+        entry={selected}
+        provenance={provenance}
+        preview={preview}
+        citedLines={citedLines}
+        recordJson={recordJson}
+        sidecarJson={sidecarJson}
+      />
       <EvidenceClassificationPanel
         classification={classification}
         stale={classificationStale}
@@ -439,14 +450,6 @@ function LoadedEvidence({
         experimentId={id}
         version={detail.version}
         onGoToComplete={() => navigate(ROUTES.complete(id))}
-      />
-      <SourcePreview
-        entry={selected}
-        provenance={provenance}
-        preview={preview}
-        citedLines={citedLines}
-        recordJson={recordJson}
-        sidecarJson={sidecarJson}
       />
     </AppShell>
   );

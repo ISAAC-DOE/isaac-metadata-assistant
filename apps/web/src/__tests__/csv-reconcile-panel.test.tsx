@@ -77,9 +77,13 @@ function previewFixture(overrides: Record<string, unknown> = {}) {
 }
 
 function renderPanel(props: Partial<{ version: string; onGoToComplete: () => void }> = {}) {
-  return render(
+  const view = render(
     <CsvReconcilePanel experimentId={EXP} version={props.version ?? VERSION} onGoToComplete={props.onGoToComplete} />,
   );
+  // Behind one "Reconcile a Campaign Sheet" disclosure since the declutter
+  // (2026-11-02), closed on arrival; every test below works on the opened panel.
+  fireEvent.click(view.getByRole('button', { name: 'Reconcile a Campaign Sheet' }));
+  return view;
 }
 
 function fileInput(): HTMLInputElement {
