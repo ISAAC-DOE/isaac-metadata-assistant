@@ -782,9 +782,9 @@ UNUSABLE_CURVE_REASONS = ("edge_step_implausible", "no_edge", "post_edge_not_at_
                           "edge_from_single_scan")
 
 #: r4: a bulk approval (several targets) is refused for a result whose curve carries one of these: each is read and
-#: approved on its own, its sentence said first
-BULK_APPROVE_REVIEW = (("glitch_points_on_edge", "points on the edge the glitch check cannot judge"),
-                       ("glitch_points_from_one_scan", "one scan's glitch on the edge"),
+#: approved on its own, its sentence said first. Plain points on the edge the glitch check cannot judge are NOT among
+#: them: they are common on any sharp edge (white lines) and say nothing is wrong; a curve one scan sets fails its QC
+BULK_APPROVE_REVIEW = (("glitch_points_from_one_scan", "one scan's glitch on the edge"),
                        ("outlier_scans", "an outlier scan"),
                        ("only_scan_with_edge", "the group's only scan with an edge"))
 
