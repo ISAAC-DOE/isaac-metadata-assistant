@@ -2876,7 +2876,7 @@ def process_bundle(
                  "athena_group": entries[row["entry_index"]]["group_name"]})
     matched, m_notes, versions = A.match_with_versions(all_groups, entries, np, ties=ties)
     # r7 K5: the scientist's merges set aside as no group's (params athena_ignore): no longer listed
-    ignored, ignore_rows = A.resolve_ignores(P.athena_ignores(params), entries, all_groups)
+    ignored, ignore_rows = A.resolve_ignores(P.athena_ignores(params), entries, all_groups, tied=ties)
     unmatched = A.unmatched_merges(all_groups, entries, tied=ties, not_this=nots, ignored=ignored)
     # r7 K1: each names the live groups whose Athena groups are in the same project (where the merge was made)
     project_groups(unmatched, all_groups, entries, ties=ties)
@@ -2922,7 +2922,8 @@ def process_bundle(
                                                 processed=processed, stored=bundle.get("processing_results") or (),
                                                 ties=ties),
             # r6 G1: the scientist's merges that match no group by name, with near-name hints (never matched)
-            **({"unmatched_merges": unmatched[:500]} if unmatched else {}),
+            **({"unmatched_merges": unmatched[:UNMATCHED_STORED], "unmatched_merges_total": len(unmatched)}
+               if unmatched else {}),
             **({"athena_match": [{k: v for k, v in r.items() if k != "entry_index"} for r in tie_rows]} if tie_rows else {}),
             **({"athena_match_not": [{k: v for k, v in r.items() if k != "entry_index"} for r in not_rows]}
                if not_rows else {}),
@@ -3448,6 +3449,8 @@ def _why_near(c: Mapping) -> str:
     return "; ".join(why)
 
 
+#: how many unmatched merges processing_results.json keeps (review L5: the true count is stored beside it)
+UNMATCHED_STORED = 500
 #: r7 K1: how many live groups an unmatched merge names as sharing its project (``groups_in_project``)
 _PROJECT_GROUPS_SAID = 10
 

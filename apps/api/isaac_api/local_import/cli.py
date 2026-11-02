@@ -1151,6 +1151,7 @@ def _list_athena_merges(args) -> int:
     processed = isinstance(athena, Mapping)
     athena = athena if processed else {}
     rows = [i for i in athena.get("unmatched_merges") or () if isinstance(i, Mapping)]
+    found = int(athena.get("unmatched_merges_total") or len(rows))  # review L5: the list may be capped
     page = rows[args.offset : args.offset + args.limit]
     refs = athena.get("unmatched_reference_channels") or {}
     payload = {
@@ -1162,6 +1163,8 @@ def _list_athena_merges(args) -> int:
                       "Tie one in a params file's athena_match; set one that is no group's aside in athena_ignore."
                       if processed else "Not processed yet, so no Athena project was read: run `isaac process "
                       "<bundle_dir> --source <folder>` first."),
+        **({"capped": f"{found} merges match no group; the first {len(rows)} are kept and listed"}
+           if found > len(rows) else {}),
         **({"reference_channels_not_listed": refs.get("count")} if refs.get("count") else {}),
         **({"athena_ignore": athena["athena_ignore"]} if athena.get("athena_ignore") else {}),
         "items": [M.unmatched_merge_row(i) for i in page],

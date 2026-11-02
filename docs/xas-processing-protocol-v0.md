@@ -425,7 +425,8 @@ Whether to leave such a scan out is the scientist's call: nothing is dropped for
     `athena_match_not` (same shape) is the scientist's "no": that merge is not that group's.
     `athena_ignore` (r7; `[{"project": …, "athena_group": …}]`) sets aside a merge that is no group's: it is no
     longer listed. It is said once, in the run that passes it. Nothing is matched and no id moves. One that names
-    no Athena group, several, or a merge that matches a group sets nothing aside and says so.
+    no Athena group, several, or a merge that matches a group sets nothing aside and says so. One the same file
+    ties in `athena_match` stays tied ("tied"). A capped list (500 kept) says how many there are.
   - **Bulk approval.** A bulk `decide --decision approve` is refused for any result whose curve carries a sentence
     the scientist must hear: one scan's glitch, an outlier scan, or the only scan with an edge. Plain points on the
     edge the glitch check cannot judge do not stop it: they are common on any sharp edge.
@@ -554,10 +555,12 @@ To say no, name it in `athena_match_not`: it is no longer hinted for that group 
 r7 changes (`isaac.athena.unmatched_merge_hint.run_numbers.v0`, `isaac.athena.reference_channel.v0`):
 
 - A hint never crosses run numbers. When both names start with numbers (electrode and run, `01_05_…`), they must
-  be the same numbers in the same order. A single number may be one the other names (a merge `03_05_…` of runs
+  be the same numbers in the same order, or the shorter list must start with the same number and sit inside the
+  longer (`01_12_13` and `01_12`). A single number may be one the other names (a merge `03_05_…` of runs
   03 and 05 still hints group `05_…`). The same numbers rank first. `differs_in` names the run numbers that differ.
   A leading `Ref` word is no part of the name.
-- Athena names the reference channel it reads beside a sample `"  Ref <name>"`. Such a group is a reference foil,
+- Athena names the reference channel it reads beside a sample `"  Ref <name>"` (exactly: two spaces, `Ref`, a
+  space; every one of 108 real labels has this form). Such a group is a reference foil,
   not a sample merge. It is never listed, hinted or asked about; the summary line counts it. Measured on a real
   BL15-2 beamtime: 77 of 79 "merges that match no group" were reference channels, and their hints sat on 116 of
   153 results. After: 2 merges, hints on 3 results.
@@ -574,9 +577,11 @@ note records the tie, the record's `generated_by.notes` says it, and the params.
 sidecar. Once a group's merge is tied (now, or in its decided result), the group is not hinted or asked
 again, and kept results lose the sentence. A later `process` without that params file says "the params
 file's athena_match for this group was not passed this time". r7: when a params file made the new run, the line on a
-decided result says so: "the params file's exclude_scans leaves X out of the merge", "… athena_match ties …", "a
-params file sets other protocol parameters than that run had (…)", or that one of these was not passed this time.
-"This build" is said only when none of these explains the new id. Measured on BL4-3 MOF-Co: 46 of the
+decided result says so: "the params file's exclude_scans leaves X out of the merge", "… athena_match ties …", "the
+params file sets qc.k", or that one of these was not passed this time. Each run's params.json is read for it: its
+`excluded_scans` and its `changed_from_default`. A parameter that differs while neither run's params file set it is
+the build's doing ("this build added or changed the default of …"), and so are other rule versions ("this build
+processes it under other rules"). The build's reason is said beside a params-file reason, never hidden by it. Measured on BL4-3 MOF-Co: 46 of the
 scientists' 56 merges (27 distinct) matched no group, with typed-short names (`spt2` for `spot2`, `sugar`
 for `sucrose`, `0V` for `m0V`, `postXA`); 12 have near-name hints, naming 13 groups. ISAAC said nothing
 of them before.

@@ -886,11 +886,14 @@ def resolve_ties(ties: Mapping[str, Sequence[Mapping]], entries: Sequence[Mappin
     return by_entry, said
 
 
-def resolve_ignores(items: Sequence[Mapping], entries: Sequence[Mapping], groups: Sequence[Mapping]) -> tuple[set[int], list[dict]]:
+def resolve_ignores(items: Sequence[Mapping], entries: Sequence[Mapping], groups: Sequence[Mapping], *,
+                    tied: Iterable[int] = ()) -> tuple[set[int], list[dict]]:
     """r7 K5: ``({entry index}, what was done with each)`` for a params file's ``athena_ignore``
     (``protocol.athena_ignores``): the scientist's merges that are no group's, set aside so they are no longer listed
     as unmatched. Each names ONE Athena group exactly (project and Athena group name or label, as a tie does); one
-    that names none, several, or a group that is not an unmatched merge sets nothing aside, and says so."""
+    that names none, several, or a group that is not an unmatched merge sets nothing aside, and says so. Review L4: one
+    the same params file ties to a group (``tied``: entry indexes, ``athena_match``) is ``tied``: the tie stands."""
+    tied = set(tied)
     stems = {g["group_id"]: [normalise_name(s) for s in g.get("_stems") or ()] for g in groups if takes_part(g)}
     bases = {gid: base_names(gstems) for gid, gstems in stems.items()}
     out: set[int] = set()
@@ -909,6 +912,10 @@ def resolve_ignores(items: Sequence[Mapping], entries: Sequence[Mapping], groups
             row.update(status="several", statement=(
                 f"The params file's athena_ignore names {grp!r} in {prj}, which fits {len(hit)} Athena groups read: "
                 "nothing was set aside. Name the project by its relative path and the group by its Athena group name."))
+        elif hit[0] in tied:
+            row.update(status="tied", statement=(
+                f"The params file's athena_ignore names {grp!r} in {prj}, which its athena_match ties to a group: the "
+                "tie stands and nothing was set aside."))
         elif _hits(entries[hit[0]], stems, bases) or not is_scientist_merge(entries[hit[0]]):
             row.update(status="not_unmatched", statement=(
                 f"The params file's athena_ignore names {grp!r} in {prj}, which is no merge that matches no group: "
@@ -1129,7 +1136,8 @@ UNMATCHED_HINT_RUN_NUMBERS_RULE_ID = "isaac.athena.unmatched_merge_hint.run_numb
 #: hinted and never asked about; it is counted in the summary line. Measured on a real BL15-2 beamtime: 77 of the 79
 #: "merges that match no group" were these, and their hints sat on 116 of 153 results.
 REFERENCE_CHANNEL_RULE_ID = "isaac.athena.reference_channel.v0"
-_REFERENCE_CHANNEL = re.compile(r"^\s*ref\s+\S", re.IGNORECASE)
+#: Athena's exact form: two spaces, ``Ref``, one space (review L2: every one of 108 real reference-channel labels)
+_REFERENCE_CHANNEL = re.compile(r"^ {2}Ref \S")
 UNMATCHED_HINT_MIN_RATIO = 0.85
 UNMATCHED_HINT_MAX = 3
 _MERGE_TOKEN = re.compile(r"^" + _MERGE_WORD + r"\d*$")
@@ -1188,13 +1196,18 @@ def _lead_numbers(name: str) -> set[int]:
 
 def _run_numbers_compatible(a: Sequence[int], b: Sequence[int]) -> bool:
     """r7 K3: whether two names' leading numbers (in order) can name the same run: either has none; one has a single
-    number that the other names (a merge ``03_05_…`` of runs 03 and 05, a group ``05_…``); or both name the same
-    numbers in the same order (``01_05`` is never ``03_04``, nor ``04_11`` ``04_04``)."""
+    number that the other names (a merge ``03_05_…`` of runs 03 and 05, a group ``05_…``); both name the same numbers
+    in the same order; or (review L3) the lists differ in length, their FIRST numbers (the electrode) agree and the
+    shorter's numbers are all in the longer (``01_12_13`` and ``01_12``). ``01_05`` is never ``03_04``, nor ``04_11``
+    ``04_04``."""
     if not a or not b:
         return True
     if len(a) == 1 or len(b) == 1:
         return a[0] in b if len(a) == 1 else b[0] in a
-    return list(a) == list(b)
+    if len(a) == len(b):
+        return list(a) == list(b)
+    short, long_ = (a, b) if len(a) < len(b) else (b, a)
+    return a[0] == b[0] and set(short) <= set(long_)
 
 
 def _differs_in(a: str, b: str) -> dict:

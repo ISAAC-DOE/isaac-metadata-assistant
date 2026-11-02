@@ -5127,7 +5127,7 @@ def decided_results_on_an_older_run(bundle: Mapping, before: Sequence[Mapping], 
         if was_tied and not tie_now:
             by_params.append("the params file's athena_match for this group was not passed this time, so the Athena "
                              "curve the scientist tied to it is not matched now (pass the same params file to keep the tie)")
-        why = by_params + why
+        why = by_params + why + _build_reasons(old_run, now_run, gid, run, new_run, bundle_dir)
         if not seen.get("rebuilt") and any(_rebuilt(r) for r in new) and not tied_now:
             # r7 K2: said in words; the flag it once carried is gone (r6 G4)
             why.append("the scientist's Athena curve is now made from the project as Athena makes it")
@@ -5153,17 +5153,21 @@ def decided_results_on_an_older_run(bundle: Mapping, before: Sequence[Mapping], 
 C_EXCLUDED = "scans_excluded_by_params_file"
 
 
-def _excluded_by_params(results: Sequence[Mapping]) -> list[str]:
-    """r7 K2: the scans a run's ISAAC result left out by the params file's exclude_scans, by file name (and scan
-    number when the params file named one)."""
+def _excluded_name(i: Mapping, named: str) -> str:
+    name = PurePosixPath(str(i.get("relative_path") or i.get("source_id"))).name
+    return f"{name} scan {i['scan']}" if "#" in named and i.get("scan") is not None else name
+
+
+def _excluded_by_params(results: Sequence[Mapping], params_json: Mapping | None = None) -> list[str]:
+    """r7 K2: the scans a run left out by the params file's exclude_scans, by file name (and scan number when the
+    params file named one). Review L1: read from the run's own params.json (``excluded_scans``) when it is on disk,
+    else from the run's ISAAC result (which a later run may already have replaced)."""
+    if isinstance(params_json, Mapping):
+        return [_excluded_name(x, str(x.get("named_as") or "")) for x in params_json.get("excluded_scans") or ()
+                if isinstance(x, Mapping)]
     isaac = next((r for r in results if r.get("source") == "isaac_protocol"), None)
-    out = []
-    for i in (isaac or {}).get("inputs") or ():
-        if i.get("skip_reason") != C_EXCLUDED:
-            continue
-        name = PurePosixPath(str(i.get("relative_path") or i.get("source_id"))).name
-        out.append(f"{name} scan {i['scan']}" if "#" in str(i.get("excluded_as") or "") else name)
-    return out
+    return [_excluded_name(i, str(i.get("excluded_as") or "")) for i in (isaac or {}).get("inputs") or ()
+            if i.get("skip_reason") == C_EXCLUDED]
 
 
 def _run_params_json(bundle_dir: Path | None, results: Sequence[Mapping], gid: str, run_id: str | None) -> Mapping | None:
@@ -5186,9 +5190,14 @@ def _run_params_json(bundle_dir: Path | None, results: Sequence[Mapping], gid: s
 def _params_file_reasons(old_run: Sequence[Mapping], now_run: Sequence[Mapping], gid: str, run: str | None,
                          new_run: str, bundle_dir: Path | None) -> list[str]:
     """r7 K2: why the params file gives a group a new run: the scans it leaves out now (or left out before and not
-    now) and the protocol parameters that differ between the two runs' params.json. ``[]`` when it did nothing."""
+    now) and the protocol parameters that differ between the two runs' params.json. ``[]`` when it did nothing.
+
+    Review M1: a parameter that differs is read against each run's ``changed_from_default``: in the new run's list,
+    the params file sets it; only in the old run's, the params file that set it was not passed this time; in neither,
+    the build changed its default (or added it): that is the build's reason, said apart (:func:`_build_reasons`)."""
     out = []
-    was, now = _excluded_by_params(old_run), _excluded_by_params(now_run)
+    a, b = _run_params_json(bundle_dir, old_run, gid, run), _run_params_json(bundle_dir, now_run, gid, new_run)
+    was, now = _excluded_by_params(old_run, a), _excluded_by_params(now_run, b)
     added, dropped = [x for x in now if x not in was], [x for x in was if x not in now]
     if added:
         out.append(f"the params file's exclude_scans leaves {', '.join(added[:5])}"
@@ -5197,15 +5206,52 @@ def _params_file_reasons(old_run: Sequence[Mapping], now_run: Sequence[Mapping],
         out.append(f"the params file's exclude_scans that left {', '.join(dropped[:5])}"
                    + (f" and {len(dropped) - 5} more" if len(dropped) > 5 else "")
                    + " out was not passed this time (pass the same params file to keep them out)")
-    a, b = _run_params_json(bundle_dir, old_run, gid, run), _run_params_json(bundle_dir, now_run, gid, new_run)
+    keys = _params_that_differ(a, b)
+    ca, cb = set((a or {}).get("changed_from_default") or ()), set((b or {}).get("changed_from_default") or ())
+    sets_now, not_passed = [k for k in keys if k in cb], [k for k in keys if k not in cb and k in ca]
+    if sets_now:
+        out.append(f"the params file sets {_keys_said(sets_now)}")
+    if not_passed:
+        out.append(f"the params file that set {_keys_said(not_passed)} was not passed this time (pass the same params "
+                   "file to keep it)")
+    return out
+
+
+def _params_that_differ(a: Mapping | None, b: Mapping | None) -> list[str]:
+    """Review M1: the ``section.key`` protocol parameters whose value differs between two runs' params.json (a key
+    in one only counts). ``[]`` when either cannot be read."""
     pa, pb = (a or {}).get("params"), (b or {}).get("params")
-    if isinstance(pa, Mapping) and isinstance(pb, Mapping):
-        keys = sorted(f"{sec}.{k}" for sec in set(pa) | set(pb)
-                      for k in set(pa.get(sec) or {}) | set(pb.get(sec) or {})
-                      if (pa.get(sec) or {}).get(k) != (pb.get(sec) or {}).get(k))
-        if keys:
-            out.append("a params file sets other protocol parameters than that run had ("
-                       + ", ".join(keys[:6]) + (f" and {len(keys) - 6} more" if len(keys) > 6 else "") + ")")
+    if not (isinstance(pa, Mapping) and isinstance(pb, Mapping)):
+        return []
+    miss = object()
+    return sorted(f"{sec}.{k}" for sec in set(pa) | set(pb)
+                  for k in set(pa.get(sec) or {}) | set(pb.get(sec) or {})
+                  if (pa.get(sec) or {}).get(k, miss) != (pb.get(sec) or {}).get(k, miss))
+
+
+def _keys_said(keys: Sequence[str]) -> str:
+    return ", ".join(keys[:6]) + (f" and {len(keys) - 6} more" if len(keys) > 6 else "")
+
+
+def _build_reasons(old_run: Sequence[Mapping], now_run: Sequence[Mapping], gid: str, run: str | None, new_run: str,
+                   bundle_dir: Path | None) -> list[str]:
+    """Review M1/L1b: what THIS BUILD changed for the group: a protocol parameter whose value differs while neither
+    run's params file set it (a default changed, or a parameter was added), and the rule versions the two runs' ISAAC
+    results carry (not hashed). Said even when a params-file reason is said too."""
+    out = []
+    a, b = _run_params_json(bundle_dir, old_run, gid, run), _run_params_json(bundle_dir, now_run, gid, new_run)
+    ca, cb = set((a or {}).get("changed_from_default") or ()), set((b or {}).get("changed_from_default") or ())
+    build = [k for k in _params_that_differ(a, b) if k not in ca and k not in cb]
+    if build:
+        out.append(f"this build added or changed the default of {_keys_said(build)}")
+    rv = lambda rs: next((r.get("rule_versions") for r in rs  # noqa: E731
+                          if r.get("source") == "isaac_protocol" and isinstance(r.get("rule_versions"), Mapping)), None)
+    ra, rb = rv(old_run), rv(now_run)
+    if ra is not None and rb is not None and ra != rb:
+        ia, ib = set(ra.get("rule_ids") or ()), set(rb.get("rule_ids") or ())
+        named = sorted(ib - ia) + sorted(ia - ib)
+        out.append("this build processes it under other rules"
+                   + (f" ({_keys_said(named)})" if named else ""))
     return out
 
 

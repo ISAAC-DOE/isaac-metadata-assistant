@@ -59,6 +59,9 @@ def test_a_hint_never_crosses_electrode_or_run_numbers_and_names_the_ones_that_d
                  _group("rg-0408", "04_08_SYN_k_1200mV"), _group("rg-0411", "04_11_SYN_k_1800mV")) == ["rg-0411"]
     # a merge of runs 03 and 05 still hints the group of run 05 (one number, named by the merge)
     assert _hint("merge_03_05_SYN_pellet", _group("rg-05", "05_SYN_pellet")) == ["rg-05"]
+    # review L3: one more number after the same electrode and run is the same run (01_12_13 / 01_12)
+    assert _hint("merge_01_12_13_SYN_k_2000mV", _group("rg-0112", "01_12_SYN_k_2000mV"),
+                 _group("rg-0212", "02_12_SYN_k_2000mV")) == ["rg-0112"]
     # the same run numbers rank first; a group without a run number is still a likeness hint
     got = _hint("merge_07_SYN_x_dry_spot3", _group("rg-07", "07_SYN_x_dry_spot3b"), _group("rg-nn", "SYN_x_dry_spot3"))
     assert got[0] == "rg-07" and "rg-nn" in got
@@ -78,6 +81,8 @@ def test_athenas_reference_channels_are_counted_never_listed_or_hinted():
     real = _merge("merge_01_05_SYN_jk1c_600mV_spt")
     assert A.is_reference_channel(ref) and not A.is_reference_channel(real)
     assert not A.is_reference_channel(_merge("Refined_SYN_x"))  # a word, not Athena's "Ref <name>"
+    # review L2: Athena's exact form only (two spaces, "Ref", a space)
+    assert not any(A.is_reference_channel(_merge(x)) for x in ("Ref SYN_x", "  ref SYN_x", " Ref SYN_x", "   Ref SYN_x"))
     assert A.near_name_candidates(ref, groups) == []
     items = A.unmatched_merges(groups, [ref, real])
     assert [i["athena_label"] for i in items] == [real["label"]]
@@ -128,7 +133,15 @@ def test_process_replies_with_the_merges_and_bundle_list_pages_them(tmp_path, ca
     assert row["athena_label"] == MERGE and row["near_groups"] and row["projects"] == ["bt/SYN.prj"]
     assert cli.main(["bundle", "list", str(bdir), "athena-merges"]) == 0
     page = json.loads(capsys.readouterr().out)
-    assert page["kind"] == "athena-merges" and page["total"] == 1 and page["items"] == [row]
+    assert page["kind"] == "athena-merges" and page["total"] == 1 and page["items"] == [row] and "capped" not in page
+    # review L5: the true count is stored beside the kept list, and a capped list says so
+    path = bdir / "processing" / "processing_results.json"
+    data = json.loads(path.read_text())
+    assert data["athena"]["unmatched_merges_total"] == 1
+    data["athena"]["unmatched_merges_total"] = 612
+    path.write_text(json.dumps(data))
+    assert cli.main(["bundle", "list", str(bdir), "athena-merges"]) == 0
+    assert json.loads(capsys.readouterr().out)["capped"] == "612 merges match no group; the first 1 are kept and listed"
     # NEGATIVE CONTROL: a bundle never processed lists nothing and says so
     other = tmp_path / "SYN_other"
     from test_local_import_polish_r6g import STEM
@@ -173,6 +186,9 @@ def test_a_merge_set_aside_and_its_copies_are_no_longer_listed():
     line = RUN.athena_ignore_line(rows)
     assert line.startswith("Athena: 1 merge(s) the scientist set aside") and "nothing was set aside" in line
     assert RUN.athena_ignore_line([]) is None
+    # review L4: one the same params file ties to a group is "tied", never set aside
+    got, rows = A.resolve_ignores([{"project": "a.prj", "athena_group": "merge5"}], entries, groups, tied={0: ["rg-a"]})
+    assert got == set() and rows[0]["status"] == "tied" and "the tie stands" in rows[0]["statement"]
 
 
 def test_process_with_athena_ignore_lists_nothing_and_moves_no_id(tmp_path, capsys):
@@ -276,20 +292,75 @@ def test_the_line_says_the_params_file_ties_the_curve_and_drops_the_flag_name():
     assert "(athena_renormalisation_differs)" not in line["statement"]
 
 
-def test_the_line_names_protocol_parameters_a_params_file_changed(tmp_path):
-    from isaac_api.local_import import mutations as M
-
-    for run, k in (("r-a", 3), ("r-b", 5)):
+def _two_runs(tmp_path, a, b):
+    for run, p in (("r-a", a), ("r-b", b)):
         d = tmp_path / "processing" / "g1" / run
         d.mkdir(parents=True)
-        (d / "params.json").write_text(json.dumps({"params": {"qc": {"k": k, "same": 1}, "merge": {"min_points": 9}}}))
-    old, new = _res("proc-g1-r-a-isaac", "r-a"), _res("proc-g1-r-b-isaac", "r-b")
+        (d / "params.json").write_text(json.dumps(p))
+    return _res("proc-g1-r-a-isaac", "r-a"), _res("proc-g1-r-b-isaac", "r-b")
+
+
+@pytest.mark.parametrize("a, b, said", [
+    # the params file sets it now
+    ({"params": {"qc": {"k": 3}}, "changed_from_default": []}, {"params": {"qc": {"k": 5}}, "changed_from_default": ["qc.k"]},
+     "because the params file sets qc.k."),
+    # review M1: it set it before and was not passed this time
+    ({"params": {"qc": {"k": 5}}, "changed_from_default": ["qc.k"]}, {"params": {"qc": {"k": 3}}, "changed_from_default": []},
+     "because the params file that set qc.k was not passed this time"),
+    # review M1: no params file either time: the build changed the default, or added a parameter
+    ({"params": {"qc": {"k": 3}}, "changed_from_default": []}, {"params": {"qc": {"k": 5}}, "changed_from_default": []},
+     "because this build added or changed the default of qc.k."),
+    ({"params": {"qc": {"k": 3}}, "changed_from_default": []},
+     {"params": {"qc": {"k": 3, "new": 1}}, "changed_from_default": []},
+     "because this build added or changed the default of qc.new."),
+])
+def test_a_parameter_is_said_by_who_changed_it(tmp_path, a, b, said):
+    from isaac_api.local_import import mutations as M
+
+    old, new = _two_runs(tmp_path, a, b)
     [line] = M.decided_results_on_an_older_run(_bundle(old["result_id"]), [old], [old], [new], bundle_dir=tmp_path)
-    assert "a params file sets other protocol parameters than that run had (qc.k)" in line["statement"]
-    # without the run folders nothing is guessed: the build is named as before
-    old = _res("proc-g1-r-a-isaac", "r-a")
+    assert said in line["statement"]
+    assert ("params file" in said) != ("this build" in line["statement"])
+
+
+def test_without_the_run_folders_nothing_is_guessed(tmp_path):
+    from isaac_api.local_import import mutations as M
+
+    old, new = _res("proc-g1-r-a-isaac", "r-a"), _res("proc-g1-r-b-isaac", "r-b")
     [line] = M.decided_results_on_an_older_run(_bundle(old["result_id"]), [old], [old], [new])
     assert "changed with this build" in line["statement"]
+
+
+def test_exclusions_are_read_from_each_runs_params_json(tmp_path):
+    from isaac_api.local_import import mutations as M
+
+    # review L1: run r-a's ISAAC result was replaced earlier; its params.json still says what it left out
+    excl = {"params": {"qc": {"k": 3}}, "excluded_scans": [{"relative_path": "d/SYN_x_005.txt", "named_as": "SYN_x_005.txt"}]}
+    for run in ("r-a", "r-c"):
+        d = tmp_path / "processing" / "g1" / run
+        d.mkdir(parents=True)
+        (d / "params.json").write_text(json.dumps(excl))
+    old = _res("proc-g1-r-a-athena", "r-a", source="scientist_athena",
+               inputs=[{"relative_path": "SYN/a.prj", "athena_group": "merge_syn"}])
+    other = _res("proc-g1-r-b-isaac", "r-b", inputs=[{"relative_path": "d/SYN_x_005.txt", "skip_reason": EXCL}])
+    new = _res("proc-g1-r-c-isaac", "r-c", inputs=[{"relative_path": "d/SYN_x_005.txt", "skip_reason": EXCL,
+                                                    "excluded_as": "SYN_x_005.txt"}])
+    [line] = M.decided_results_on_an_older_run(_bundle(old["result_id"]), [old, other], [old], [new], bundle_dir=tmp_path)
+    assert "exclude_scans" not in line["statement"]  # the same scan was left out both times
+
+
+def test_other_rule_versions_are_the_builds_reason_beside_the_params_file():
+    from isaac_api.local_import import mutations as M
+
+    # review L1b: rule versions are not hashed, but a new rule is still the build's doing
+    old = _res("proc-g1-r-a-isaac", "r-a", rule_versions={"rule_ids": ["isaac.syn.a.v0"]},
+               inputs=[{"relative_path": "d/SYN_x_005.txt"}])
+    new = _res("proc-g1-r-b-isaac", "r-b", rule_versions={"rule_ids": ["isaac.syn.a.v0", "isaac.syn.b.v0"]},
+               inputs=[{"relative_path": "d/SYN_x_005.txt", "skip_reason": EXCL, "excluded_as": "SYN_x_005.txt"}])
+    [line] = M.decided_results_on_an_older_run(_bundle(old["result_id"]), [old], [old], [new])
+    said = line["statement"]
+    assert "exclude_scans leaves SYN_x_005.txt out" in said
+    assert "this build processes it under other rules (isaac.syn.b.v0)" in said
 
 
 # --- K4: the chosen version's own plot ----------------------------------------------------------------------------------
