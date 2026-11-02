@@ -422,6 +422,7 @@ Whether to leave such a scan out is the scientist's call: nothing is dropped for
   - **Naming an Athena group for a group** (r6). A params file's `athena_match` (`{group id: [{"project":
     relative path | file name, "athena_group": Athena group name | label}]}`) ties one Athena group to one
     group, exactly. It is for a merge whose name matches no group (§8). Recorded in that group's params.json.
+    `athena_match_not` (same shape) is the scientist's "no": that merge is not that group's.
   - **Bulk approval.** A bulk `decide --decision approve` is refused for any result whose curve carries a sentence
     the scientist must hear: one scan's glitch, an outlier scan, or the only scan with an edge. Plain points on the
     edge the glitch check cannot judge do not stop it: they are common on any sharp edge.
@@ -459,7 +460,8 @@ set says how many of its groups were made each way). When it differs from larch'
 0.01 anywhere, or the step by more than 1 %), that is larch's reproduction, never a fault of the scientist.
 r6: it is said once per bundle, in one summary line, and no longer flagged on each result. Each result still
 records it (`renormalised_from_project`), with the largest difference over the post-edge range
-(`post_edge_difference_from_larch`) and `material` (more than 0.02 of the step there). On BL4-3 MOF-Co the
+(`post_edge_difference_from_larch`) and `material` (more than 0.02 of the step there); the summary line names
+the material results, and `bundle show processing-result` prints the record. On BL4-3 MOF-Co the
 flag was on 16 of 16 Athena results, and 16 of 18 differ by more than 0.02, so a threshold alone would not
 thin it out. Measured on the projects of five real beamtimes
 (1,406 Athena groups): of 799 sample groups with a positive stored step, 763 are current and 36 re-fitted;
@@ -531,18 +533,30 @@ RMS ≤ 0.05) | `differs` | `not_comparable` (< 20 points or < 30 eV overlap). D
 `is_merge`, or a merge word in its name) whose name matches no group is not used. It is never dropped
 silently. `isaac process` lists each one (`athena.unmatched_merges`; the same label and data in several
 projects is one) and says "a merge exists but was not matched" in one summary line. Near names are hints
-only, never a match: a group is a candidate when the merge's name holds the group's run number and shares
-another word with it, or when the two names (without run numbers) are at least 85 % alike. Only the groups
-whose run number it holds are listed when there are any. Each candidate group's results carry the sentence
+only, never a match. A group (not rejected) is a candidate when the merge's name STARTS with the group's
+run number and shares another word with it, or when the two names (without run numbers) are at least 85 %
+alike. A number later in the name (scans `1_4`, a replicate `_2`) is no run number. A likeness is vetoed
+when the names differ in a token with the same letters and other digits (`m200mV` / `m300mV`, `s1` / `s2`):
+that is another sample. Run-number hints come first; they never hide likeness hints. Each hint names the
+words in which the names differ. Each candidate group's results carry the sentence
 (`qc.statements.athena_merge_not_matched`, flag `athena_merge_not_matched`) and ISAAC's own result asks
 `athena_unmatched_merge_for_group`. None of this is in a hashed file, so no id moves. The scientist decides:
 to use a merge, name it in a params file's `athena_match` and process again. It is then that group's
 candidate (match kind `named_by_scientist`), handled like any other: one merge is preferred over the
 per-scan groups beside it, several are versions to choose between. Its run id moves (another curve). A
 copy of it in another project is no longer listed. A tie that names no Athena group, several, or no live
-group ties nothing and says so. Measured on BL4-3 MOF-Co: 46 of the scientists' 56 merges (27 distinct)
-matched no group, with typed-short names (`spt2` for `spot2`, `sugar` for `sucrose`, `0V` for `m0V`,
-`postXA`); 12 have near-name hints, naming 12 groups. ISAAC said nothing of them before.
+group ties nothing and says so; a tie that takes an Athena group from the group its name matched says so.
+To say no, name it in `athena_match_not`: it is no longer hinted for that group (nothing else changes).
+
+A tie is no decision kind of its own. The tied Athena result says it (`athena_match_tie`: project, Athena
+group, the run's params.json; flag `athena_named_by_scientist`). A bulk approval refuses it. Its approval's
+note records the tie, the record's `generated_by.notes` says it, and the params.json is evidence in the
+sidecar. Once a group's merge is tied (now, or in its decided result), the group is not hinted or asked
+again, and kept results lose the sentence. A later `process` without that params file says "the params
+file's athena_match for this group was not passed this time". Measured on BL4-3 MOF-Co: 46 of the
+scientists' 56 merges (27 distinct) matched no group, with typed-short names (`spt2` for `spot2`, `sugar`
+for `sucrose`, `0V` for `m0V`, `postXA`); 12 have near-name hints, naming 13 groups. ISAAC said nothing
+of them before.
 
 ## 9. Outputs and states
 

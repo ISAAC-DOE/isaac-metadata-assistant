@@ -293,15 +293,19 @@ def scan_exclusions(overrides: Mapping | None) -> dict[str, list[str]]:
 #: ISAAC never ties one by a near name. Kept OUT of the resolved params like :data:`EXCLUDE_SCANS_SECTION` (no other
 #: result id moves); only a group it names records it (``params.json`` ``athena_match``).
 ATHENA_MATCH_SECTION = "athena_match"
+#: review LOW 4: the scientist's "no": the same shape, naming an Athena group that is NOT that record group's. It only
+#: stops the near-name hint (and its question) for that group; nothing is matched, no curve or id changes.
+ATHENA_MATCH_NOT_SECTION = "athena_match_not"
 
 
-def athena_match_ties(overrides: Mapping | None) -> dict[str, list[dict]]:
-    """``{group_id: [{"project", "athena_group"}, ...]}`` from a params file's :data:`ATHENA_MATCH_SECTION` (``{}`` when
-    absent). Refused (``ValueError``) when it is not that shape, as an unknown parameter is."""
-    raw = (overrides or {}).get(ATHENA_MATCH_SECTION) if isinstance(overrides, Mapping) else None
+def athena_match_ties(overrides: Mapping | None, section: str = ATHENA_MATCH_SECTION) -> dict[str, list[dict]]:
+    """``{group_id: [{"project", "athena_group"}, ...]}`` from a params file's :data:`ATHENA_MATCH_SECTION` (or
+    ``section``, e.g. :data:`ATHENA_MATCH_NOT_SECTION`; ``{}`` when absent). Refused (``ValueError``) when it is not
+    that shape, as an unknown parameter is."""
+    raw = (overrides or {}).get(section) if isinstance(overrides, Mapping) else None
     if raw is None:
         return {}
-    shape = (f'{ATHENA_MATCH_SECTION} must be {{"<group id>": [{{"project": "<project file>", '
+    shape = (f'{section} must be {{"<group id>": [{{"project": "<project file>", '
              '"athena_group": "<Athena group or label>"}, ...]}')
     if not isinstance(raw, Mapping):
         raise ValueError(shape)
@@ -318,7 +322,7 @@ def athena_match_ties(overrides: Mapping | None) -> dict[str, list[dict]]:
 
 
 #: the params-file sections read apart from the protocol's parameters (never in the resolved params)
-_APART_SECTIONS = (EXCLUDE_SCANS_SECTION, ATHENA_MATCH_SECTION)
+_APART_SECTIONS = (EXCLUDE_SCANS_SECTION, ATHENA_MATCH_SECTION, ATHENA_MATCH_NOT_SECTION)
 
 
 def resolve_params(overrides: Mapping | None = None) -> dict:
@@ -328,6 +332,7 @@ def resolve_params(overrides: Mapping | None = None) -> dict:
     params = copy.deepcopy(DEFAULT_PARAMS)
     scan_exclusions(overrides)
     athena_match_ties(overrides)
+    athena_match_ties(overrides, ATHENA_MATCH_NOT_SECTION)
     overrides = {k: v for k, v in copy.deepcopy(dict(overrides or {})).items() if k not in _APART_SECTIONS}
     cal = overrides.get("calibration")
     if isinstance(cal, Mapping) and "confirmed_reference" in cal:

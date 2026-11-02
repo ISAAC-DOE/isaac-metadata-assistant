@@ -43,7 +43,7 @@ import statistics
 import tempfile
 import warnings
 from pathlib import Path, PurePosixPath
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from .. import bundle as B
 from .. import grouping as G
@@ -2262,6 +2262,7 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
                                               and ATHENA_POST_EDGE_FLAG not in athena_res["review_flags"])
         athena_res["run_id"] = run_id
         athena_res["result_id"] = f"proc-{group['group_id']}-{run_id}-athena"
+        _say_tie(athena_res, athena_entry, files)
         # r3-d: the per-scan sets set aside beside the scientist's merge are listed and said, and a merge that differs
         # from the mean of a set covering every scan of the group is not preferred (after run_id: no id moves)
         aside = _sets_aside(athena_entry, stems, res["inputs"], numbers, stem_of, params, np)
@@ -2304,6 +2305,7 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
                                         and ATHENA_POST_EDGE_FLAG not in vres["review_flags"])
         vres["run_id"] = run_id
         vres["result_id"] = f"proc-{group['group_id']}-{run_id}-athena-v{n:02d}"
+        _say_tie(vres, v, files)
         said = _version_chosen_statement(listed, decision, vres, res)
         made_on = (decision.get("target") or {}).get("id")
         if made_on != res["result_id"]:
@@ -2336,6 +2338,31 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     if not record.exists():
         _write(record, _json_bytes({"results": out}))
     return out
+
+
+#: review M1: an Athena result whose curve the SCIENTIST tied to its group (params athena_match): the review flag, the
+#: statement key and the field that names the tie. A bulk approval refuses it (mutations.BULK_APPROVE_REVIEW), and its
+#: approval records the tie in its note (mutations.decide). Not in a hashed file.
+TIED_FLAG = "athena_named_by_scientist"
+TIE_KEY = "athena_match_tie"
+
+
+def _say_tie(res: dict, entry: Mapping, files: Sequence[Mapping]) -> None:
+    """Review M1: on an Athena result of a TIED curve (match kind ``named_by_scientist``), the tie (project, Athena
+    group, the run's params.json that records it), the flag :data:`TIED_FLAG` and one sentence."""
+    if entry.get("_match_kind") != A.TIED_KIND:
+        return
+    params_file = next((f["relative_path"] for f in files if f.get("role") == "params"), None)
+    tie = {"project": entry["prj_relative_path"], "athena_group": entry["group_name"], "athena_label": entry["label"],
+           "by": f"the scientist's params file ({P.ATHENA_MATCH_SECTION})", "params_file": params_file}
+    res[TIE_KEY] = tie
+    if TIED_FLAG not in res["review_flags"]:
+        res["review_flags"].append(TIED_FLAG)
+    res["qc"].setdefault("statements", {})[TIED_FLAG] = (
+        f"This curve is the scientist's Athena group '{entry['label']}' in {entry['prj_relative_path']}, tied to this "
+        f"group by the scientist's params file ({P.ATHENA_MATCH_SECTION}), not by its name"
+        + (f" (recorded in {params_file})" if params_file else "") + ". Approve it on its own, after the scientist "
+        "confirms the tie; the approval records it.")
 
 
 #: r1-a M3: an approved Athena-version result that is no longer the scientist's latest choice (on that stored result)
@@ -2788,13 +2815,16 @@ def process_bundle(
     # r6 G1: the Athena groups the SCIENTIST named for a group (params athena_match); never a near name
     # (with no Athena group read, each named tie is said as naming nothing)
     ties, tie_rows = A.resolve_ties(P.athena_match_ties(params), entries, all_groups)
+    # review LOW 4: the scientist's "no" (params athena_match_not): that merge is no longer hinted for that group
+    nots, not_rows = A.resolve_ties(P.athena_match_ties(params, P.ATHENA_MATCH_NOT_SECTION), entries, all_groups,
+                                    not_this=True)
     for row in tie_rows:
         if row["status"] == "tied":
             ctx.athena_ties.setdefault(row["group_id"], []).append(
                 {"project": entries[row["entry_index"]]["prj_relative_path"],
                  "athena_group": entries[row["entry_index"]]["group_name"]})
     matched, m_notes, versions = A.match_with_versions(all_groups, entries, np, ties=ties)
-    unmatched = A.unmatched_merges(all_groups, entries, tied=ties)
+    unmatched = A.unmatched_merges(all_groups, entries, tied=ties, not_this=nots)
 
     results, unread_results = [], []
     skipped = set(skip_group_ids or ())
@@ -2837,6 +2867,8 @@ def process_bundle(
             # r6 G1: the scientist's merges that match no group by name, with near-name hints (never matched)
             **({"unmatched_merges": unmatched[:500]} if unmatched else {}),
             **({"athena_match": [{k: v for k, v in r.items() if k != "entry_index"} for r in tie_rows]} if tie_rows else {}),
+            **({"athena_match_not": [{k: v for k, v in r.items() if k != "entry_index"} for r in not_rows]}
+               if not_rows else {}),
         },
         "processing_results": results,
         "unread_acquisition_results": unread_results,
@@ -2845,12 +2877,19 @@ def process_bundle(
     if payload["athena"]["statement"]:
         payload["summary"]["lines"].append(payload["athena"]["statement"])
     kept_notes: list[dict] = []
-    payload["summary"]["lines"].extend(r["statement"] for r in tie_rows if r["status"] != "tied")
+    payload["summary"]["lines"].extend(r["statement"] for r in tie_rows + not_rows
+                                       if r["status"] not in ("tied", "not_this_group") or r.get("also_matches_by_name"))
+    # review M1: a group whose merge is tied now, or was tied in its decided result, is not asked again
+    decided = _decided_ids(bundle)
+    settled = set(ctx.athena_ties) | {
+        r.get("group_id") for r in bundle.get("processing_results") or ()
+        if r.get("source") == "scientist_athena" and B.processing_id(r) in decided
+        and ((r.get("inputs") or [{}])[0] or {}).get("match_kind") == A.TIED_KIND}
     if unmatched:
         line = unmatched_merges_line(unmatched)
         payload["athena"]["unmatched_merges_statement"] = line
         payload["summary"]["lines"].append(line)
-        kept_notes += say_unmatched_merges(results, unmatched)
+    kept_notes += say_unmatched_merges(results, unmatched, settled=settled, stored=bundle.get("processing_results") or ())
     renorm_line = renormalisation_line(results)
     if renorm_line:
         payload["summary"]["lines"].append(renorm_line)
@@ -3196,7 +3235,8 @@ def apply_kept_result_notes(results: Sequence[dict], notes: Sequence[Mapping]) -
     """Apply ``kept_result_notes`` (from :func:`process_bundle`) to the STORED results ``isaac process`` keeps as they
     were (a decided result, a group not processed now): each note's ``add_review_flags`` (no duplicates),
     ``statements`` (into ``qc.statements``) and ``fields`` (set on the result). All outside the hashed files, so no id
-    moves and no decision changes. Returns how many results were changed. Stdlib only (``mutations.process`` calls
+    moves and no decision changes. Review LOW 3: ``remove_review_flags`` and ``remove_statements`` take off a flag and
+    a sentence that no longer hold. Returns how many results were changed. Stdlib only (``mutations.process`` calls
     it on the results it keeps)."""
     by_id: dict[str, list[Mapping]] = {}
     for n in notes or ():
@@ -3210,7 +3250,14 @@ def apply_kept_result_notes(results: Sequence[dict], notes: Sequence[Mapping]) -
         for n in mine:
             flags = r.setdefault("review_flags", [])
             flags.extend(f for f in n.get("add_review_flags") or () if f not in flags)
-            r.setdefault("qc", {}).setdefault("statements", {}).update(dict(n.get("statements") or {}))
+            # review LOW 3: a sentence and flag that no longer hold are taken off (outside the hashed files too)
+            gone = set(n.get("remove_review_flags") or ())
+            if gone:
+                r["review_flags"] = [f for f in flags if f not in gone]
+            said = r.setdefault("qc", {}).setdefault("statements", {})
+            for k in n.get("remove_statements") or ():
+                said.pop(k, None)
+            said.update(dict(n.get("statements") or {}))
             r.update(copy.deepcopy(dict(n.get("fields") or {})))
         changed += 1
     return changed
@@ -3325,6 +3372,11 @@ def _why_near(c: Mapping) -> str:
         why.append("it shares the words " + ", ".join(c["shared_tokens"][:6]))
     if not c.get("shares_run_number"):
         why.append(f"the names are {round(100 * float(c.get('similarity') or 0))} % alike")
+    diff = c.get("differs_in") or {}
+    if diff.get("merge") or diff.get("group"):
+        # review M2: the difference is named plainly, so a likeness is never read as more than it is
+        why.append("they differ in " + (", ".join(diff.get("merge") or ()) or "nothing") + " (the merge) against "
+                   + (", ".join(diff.get("group") or ()) or "nothing") + " (the group)")
     return "; ".join(why)
 
 
@@ -3350,16 +3402,26 @@ def unmatched_merges_line(items: Sequence[Mapping]) -> str:
             "processing_results.json athena.unmatched_merges.")
 
 
-def say_unmatched_merges(results: Sequence[dict], items: Sequence[Mapping]) -> list[dict]:
+def say_unmatched_merges(results: Sequence[dict], items: Sequence[Mapping], *, settled: Iterable[str] = (),
+                         stored: Sequence[Mapping] = ()) -> list[dict]:
     """r6 G1: on each result of a group a merge's near-name hint names (athena.unmatched_merges), the sentence "a merge
     exists but was not matched" with the hint and the tie snippet, the review flag :data:`UNMATCHED_MERGE_KEY` and, on
     ISAAC's own result, a question (:data:`UNMATCHED_MERGE_QUESTION`). Nothing is matched. Returns the notes for the
-    STORED results ``isaac process`` keeps (apply_kept_result_notes): after the run id, so no id moves."""
+    STORED results ``isaac process`` keeps (apply_kept_result_notes): after the run id, so no id moves.
+
+    Review M1: a group in ``settled`` (its merge is tied now, or was tied in its decided result) is not hinted or asked
+    again. Review LOW 3: a ``stored`` result that carries the sentence while its group is no longer hinted (its merge
+    tied, or the scientist said no) gets a note taking the flag and the sentence off."""
+    settled = set(settled)
     by_group: dict[str, list[tuple[Mapping, Mapping]]] = {}
     for item in items:
         for c in item.get("candidates") or ():
-            by_group.setdefault(c["group_id"], []).append((item, c))
-    notes: list[dict] = []
+            if c["group_id"] not in settled:
+                by_group.setdefault(c["group_id"], []).append((item, c))
+    notes: list[dict] = [{"result_id": B.processing_id(r), "remove_review_flags": [UNMATCHED_MERGE_KEY],
+                          "remove_statements": [UNMATCHED_MERGE_KEY]}
+                         for r in stored or () if isinstance(r, Mapping) and r.get("group_id") not in by_group
+                         and UNMATCHED_MERGE_KEY in (r.get("review_flags") or ())]
     for r in results:
         hints = by_group.get(r.get("group_id"))
         if not hints:
@@ -3387,19 +3449,27 @@ def say_unmatched_merges(results: Sequence[dict], items: Sequence[Mapping]) -> l
     return notes
 
 
+_RENORM_IDS_SAID = 20
+
+
 def renormalisation_line(results: Sequence[Mapping]) -> str | None:
     """r6 G4: ONE summary line for every Athena result whose curve differs from larch's reading of its project
-    (``renormalised_from_project``): how many, and how many are material (flagged on the result). ``None`` when none."""
+    (``renormalised_from_project``): how many, and which are material (more than :data:`athena.ATHENA_RENORM_MATERIAL`
+    of the step at the post-edge; named by result id, a few at most). Nothing is flagged on the results. ``None``
+    when none."""
     rows = [r for r in results if r.get("source") == "scientist_athena" and r.get(A.RENORMALISED_KEY)]
     if not rows:
         return None
-    material = sum(1 for r in rows if A.renorm_material(r[A.RENORMALISED_KEY]))
+    big = [B.processing_id(r) for r in rows if A.renorm_material(r[A.RENORMALISED_KEY])]
+    material = len(big)
+    named = (": " + ", ".join(big[:_RENORM_IDS_SAID]) + (f" and {len(big) - _RENORM_IDS_SAID} more" if len(big) > _RENORM_IDS_SAID else "")
+             if big else "")
     n = len([r for r in results if r.get("source") == "scientist_athena"])
     return (f"Athena: for {len(rows)} of the {n} Athena results, larch's own reading of the project gives another "
             "curve than Athena shows. ISAAC used the curve Athena shows (the project's stored values where they still "
             "fit the data, else Athena's own re-fit), so each is the scientist's curve. That is larch's reproduction, "
             f"not the scientist's processing. {material} of them differ by more than {A.ATHENA_RENORM_MATERIAL:g} of the "
-            f"edge step over the post-edge range. Each result records it ({A.RENORMALISED_KEY}); it is said here once, "
+            f"edge step over the post-edge range{named}. Each result records it ({A.RENORMALISED_KEY}); it is said here once, "
             "not flagged on each result.")
 
 

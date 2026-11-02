@@ -287,3 +287,164 @@ def test_the_post_edge_difference_decides_what_is_material():
     assert A._post_edge_gap(X, norm, norm, 100.0, {"nor1": None, "nor2": 90.0}, np) is None
     assert A.renorm_material({"material": False}) is False and A.renorm_material({"x": 1}) is True
     assert A.renorm_material(None) is False
+
+
+# --- review M2: hints that point at the wrong group, or hide the right one ------------------------------------------
+
+
+def _hint(label, *groups):
+    A = _A()
+    return [c["group_id"] for c in A.near_name_candidates({"label": label, "names": [A.normalise_name(label)],
+                                                           "is_merge": True}, list(groups))]
+
+
+def test_hints_count_a_run_number_only_at_the_start_and_veto_other_digits():
+    A = _A()
+    # a number at the end of the merge's name is no run number: the group alike is the hint, never group 02
+    assert _hint("merge_SYNFeO_m300mV_2", _group("rgA", "07_SYNFeO_m300mV"), _group("rgB", "02_SYNFeO_dry")) == ["rgA"]
+    # scans 1-4 named after the sample are no run numbers either
+    assert _hint("merge3_SYNCoS_1_4", _group("rgC", "05_SYNCoS_k9"), _group("rgD", "01_SYNCoS_k9"),
+                 _group("rgE", "04_SYNCoS_k9")) == []
+    # another potential, or another spot, is another sample: vetoed, never a likeness
+    assert _hint("merge_SYNNiO_pH7_m200mV", _group("rgF", "03_SYNNiO_pH7_m300mV")) == []
+    assert _hint("merge_SYNmos2_s1", _group("rgH", "09_SYNmos2_s2")) == []
+    # a typo is not vetoed, and the difference is named
+    [c] = A.near_name_candidates({"label": "merge_SYNmos2_spt2", "names": ["merge_synmos2_spt2"], "is_merge": True},
+                                 [_group("rgJ", "09_SYNmos2_spot2")])
+    assert c["differs_in"] == {"merge": ["spt2"], "group": ["spot2"]}
+    # a run-number hint never hides a likeness hint
+    got = _hint("merge_07_SYN_x_dry_spot3", _group("rg07", "07_SYN_x_wet"), _group("rg08", "08_SYN_x_dry_spot3"))
+    assert got[0] == "rg07" and "rg08" in got
+    # a rejected group is never hinted
+    assert _hint("merge_SYN_x_sample", _group("rgI", "01_SYN_x_sample", status="rejected")) == []
+
+
+def test_a_rejected_group_cannot_be_tied_and_a_tie_says_what_it_takes_from_another_group():
+    T = _proc()
+    A = _A()
+    entries = [_entry(T, "07_SYN_ZZ_pH1_m300mV_023_merged", "SYN.prj", is_merge=True)]  # matches rg-07 by name
+    groups = [*GROUPS, _group("rg-no", "99_SYN_no", status="rejected")]
+    _, rows = A.resolve_ties({"rg-no": [{"project": "SYN.prj", "athena_group": entries[0]["label"]}]}, entries, groups)
+    assert rows[0]["status"] == "no_live_group"
+    by_entry, rows = A.resolve_ties({"rg-12": [{"project": "SYN.prj", "athena_group": entries[0]["label"]}]}, entries, groups)
+    assert by_entry == {0: ["rg-12"]} and rows[0]["also_matches_by_name"] == ["rg-07"]
+    assert "also matches rg-07" in rows[0]["statement"]
+    matched, _, _ = A.match_with_versions(groups, entries, T.np, ties=by_entry)
+    assert list(matched) == ["rg-12"]
+
+
+def test_the_scientists_no_stops_the_hint_for_that_group():
+    T = _proc()
+    A = _A()
+    entries = [_entry(T, "merge4_12_SYN_E2_pH1_m300mV_spt2", "SYN_a.prj", is_merge=True, data="m"),
+               _entry(T, "merge4_12_SYN_E2_pH1_m300mV_spt2", "SYN_b.prj", is_merge=True, data="m")]
+    nots, rows = A.resolve_ties({"rg-12": [{"project": "SYN_a.prj", "athena_group": entries[0]["label"]}]}, entries,
+                                GROUPS, not_this=True)
+    assert rows[0]["status"] == "not_this_group" and "is not rg-12's" in rows[0]["statement"]
+    [item] = A.unmatched_merges(GROUPS, entries, not_this=nots)
+    # still listed (it matches no group), but no longer hinted for rg-12, its copy in SYN_b.prj included
+    assert item["candidates"] == [] and item["not_this_group"] == ["rg-12"]
+
+
+# --- review M1: a tie is recorded where the approval and the record are -------------------------------------------
+
+
+STEM = "12_SYN_ZZ_pellet_040"
+MERGE = "merge4_12_SYN_ZZ_pelet_spt2"
+
+
+def _tie_case(tmp_path):
+    from test_local_import_polish_c2f import _xdac, std_scan
+    from test_local_import_polish_c10m import _prj
+
+    from isaac_api.local_import import cli
+    from isaac_api.local_import import mutations as M
+
+    T = _proc()
+    root = tmp_path / "SYN_beamtime"
+    for k in (1, 2):
+        _xdac(root / "bt" / f"{STEM}_A.00{k}", std_scan(k, i1_positive=True))
+    _prj(root / "bt" / "SYN.prj", [(MERGE, T.GRID, T.mu_edge(T.GRID, 4966.2) * 1e-2)])
+    out = tmp_path / "out"
+    assert cli.main(["import", str(root), "--out", str(out)]) == 0
+    M.group(out)
+    return out, root
+
+
+def _of(bdir, source):
+    from isaac_api.local_import import mutations as M
+
+    return [r for r in M.load(bdir)["processing_results"] if r["source"] == source]
+
+
+def test_a_tied_merge_is_approved_on_its_own_and_its_approval_and_record_say_the_tie(tmp_path, capsys):
+    from isaac_api.local_import import mutations as M
+    from isaac_api.local_import import records as R
+    from isaac_api.local_import.processing import run as RUN
+
+    from test_local_import_records import BY
+
+    bdir, root = _tie_case(tmp_path)
+    first = M.process(bdir, source=str(root))
+    assert any("A merge exists but was not matched" in line for line in first["summary"]["lines"])
+    [isa0] = _of(bdir, "isaac_protocol")
+    assert RUN.UNMATCHED_MERGE_KEY in isa0["review_flags"]
+    gid = isa0["group_id"]
+    params = tmp_path / "SYN_params.json"
+    params.write_text(json.dumps({"athena_match": {gid: [{"project": "bt/SYN.prj", "athena_group": MERGE}]}}))
+    M.process(bdir, source=str(root), params_file=str(params))
+    capsys.readouterr()
+    ath = next(r for r in _of(bdir, "scientist_athena") if r["state"] == "needs_review")
+    assert ath["inputs"][0]["match_kind"] == "named_by_scientist" and RUN.TIED_FLAG in ath["review_flags"]
+    tie = ath[RUN.TIE_KEY]
+    assert tie["project"] == "bt/SYN.prj" and tie["params_file"].endswith("params.json")
+    assert "athena_match" in json.loads((bdir / tie["params_file"]).read_text())
+    # the merge is tied: the group is no longer hinted, and ISAAC's fresh result is not asked again
+    isa = next(r for r in _of(bdir, "isaac_protocol") if r["run_id"] == ath["run_id"])
+    assert RUN.UNMATCHED_MERGE_KEY not in isa["review_flags"]
+    assert not any(q["code"] == RUN.UNMATCHED_MERGE_QUESTION for q in isa.get("questions") or ())
+    # a bulk approval refuses it: it is read and approved on its own
+    with pytest.raises(M.MutationRefused, match="tied to its group by the params file"):
+        M.decide(bdir, target_ids=[ath["result_id"], isa["result_id"]], decision="approve", value=None,
+                 qc_status="valid", **BY)
+    M.decide(bdir, target_ids=[ath["result_id"]], decision="approve", value=None, qc_status="valid", **BY)
+    [d] = [d for d in M.load(bdir)["scientist_decisions"] if (d.get("target") or {}).get("id") == ath["result_id"]]
+    assert f"Athena group '{MERGE}' in bt/SYN.prj was tied to this group by the scientist's params file" in d["note"]
+    group = next(g for g in M.load(bdir)["record_groups"] if g["group_id"] == gid)
+    draft, _ = R.compose_group(M.load(bdir), group, bdir)
+    out = draft["descriptors_outputs"][0]
+    assert f"The scientist tied Athena group '{MERGE}' in SYN.prj to this group" in out["generated_by"]["notes"]
+    assert "bt/" not in out["generated_by"]["notes"]  # the project's file name only in the record
+    ev = out["descriptors"][0]["evidence"]
+    assert any(e.get("source_file") == tie["params_file"] and e.get("locator") == "athena_match" for e in ev)
+    # the next process without the params file says the tie was not passed, and never "no Athena curve"
+    again = M.process(bdir, source=str(root))
+    capsys.readouterr()
+    lines = [x["statement"] for x in again.get("decided_results_on_an_older_run") or ()]
+    [line] = [x for x in lines if ath["result_id"] in x]
+    assert "the params file's athena_match for this group was not passed this time" in line
+    # the group's merge was tied in its decided result: the hint and question are not offered again
+    fresh = [r for r in _of(bdir, "isaac_protocol") if r["run_id"] != ath["run_id"]]
+    assert fresh and not any(RUN.UNMATCHED_MERGE_KEY in r["review_flags"] for r in fresh)
+
+
+def test_a_kept_result_loses_the_sentence_once_its_merge_is_tied():
+    from isaac_api.local_import.processing import run as RUN
+
+    stored = [{"result_id": "proc-g1-r-a-isaac", "group_id": "g1", "review_flags": [RUN.UNMATCHED_MERGE_KEY, "x"],
+               "qc": {"statements": {RUN.UNMATCHED_MERGE_KEY: "SYN said", "other": "kept"}}}]
+    notes = RUN.say_unmatched_merges([], [], stored=stored)
+    assert RUN.apply_kept_result_notes(stored, notes) == 1
+    assert stored[0]["review_flags"] == ["x"] and stored[0]["qc"]["statements"] == {"other": "kept"}
+
+
+def test_show_prints_the_renormalisation_record_and_the_summary_names_material_results():
+    from isaac_api.local_import import cli
+    from isaac_api.local_import.processing import run as RUN
+
+    rec = {"material": True, "post_edge_difference_from_larch": 0.05}
+    r = {"result_id": "proc-g-r-0-athena", "group_id": "g", "source": "scientist_athena", "inputs": [], "steps": [],
+         "renormalised_from_project": rec}
+    assert cli._processing_result_view({"record_groups": []}, r)["renormalised_from_project"] == rec
+    assert "renormalised_from_project" not in cli._processing_result_view({"record_groups": []}, {**r, "renormalised_from_project": None})
+    assert "post-edge range: proc-g-r-0-athena." in RUN.renormalisation_line([r])

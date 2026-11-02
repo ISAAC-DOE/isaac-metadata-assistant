@@ -979,6 +979,19 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
                 if subset:
                     generated_by["notes"] += " " + plain_record_note(subset, r.get("group_id"))
                     used["scan_selection"] = subset
+                tie = r.get("athena_match_tie") if isinstance(r.get("athena_match_tie"), Mapping) else None
+                if tie:
+                    # r6 review M1: an Athena curve the SCIENTIST tied to its group (params athena_match), not one its
+                    # name matched: said in the record (the project's file name only) and the params file that records
+                    # the tie is evidence (sidecar)
+                    tied_in = PurePosixPath(str(tie.get("project") or "")).name or "its project"
+                    generated_by["notes"] += (f" The scientist tied Athena group '{tie.get('athena_label') or tie.get('athena_group')}'"
+                                              f" in {tied_in} to this group by their params file (athena_match); its "
+                                              "name is not the group's scan name.")
+                    if tie.get("params_file"):
+                        evidence.append({"source_type": "document", "source_file": tie["params_file"],
+                                         "locator": "athena_match",
+                                         "quote": f"{tie.get('project')} / {tie.get('athena_group')}"})
                 if ref.get("relative_path"):
                     named = groups or ([str(ref["athena_group"])] if ref.get("athena_group") else [])
                     evidence.append({"source_type": "document", "source_file": ref["relative_path"],

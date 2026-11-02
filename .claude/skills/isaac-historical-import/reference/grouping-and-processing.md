@@ -189,12 +189,16 @@ it finds one. Show per group, in words:
   `athena.unmatched_merges`; on each near group's results `qc.statements.athena_merge_not_matched`, flag
   `athena_merge_not_matched`, question `athena_unmatched_merge_for_group`): the scientist merged in Athena, but the
   merge's name is not a group's scan name, so ISAAC did not use it. Say the line. The near names are hints only:
-  never pick one yourself. Ask the scientist, one merge at a time, which group it is for, if any. Only on their
-  answer, write `{"athena_match": {"<group id>": [{"project": "<project file>", "athena_group": "<Athena label>"}]}}`
+  never pick one yourself. Say how the names differ (the sentence names the words). Ask the scientist, one merge at
+  a time, which group it is for, if any. Only on their answer, write
+  `{"athena_match": {"<group id>": [{"project": "<project file>", "athena_group": "<Athena label>"}]}}`
   to a params file (the sentence gives the exact snippet) and run
-  `<isaac> process <bundle> --source <folder> --params-file <file>`. The merge is then compared and listed for
-  approval like any Athena curve; the group's result id changes. Keep the params file and pass it on every later
-  `process`, or the tie is gone. A tie that names nothing says so in the summary;
+  `<isaac> process <bundle> --source <folder> --params-file <file>`. On a "no", write the same under
+  `athena_match_not`, so the question does not come back. A tied merge is compared and listed for approval like any
+  Athena curve (flag `athena_named_by_scientist`); the group's result id changes. Approve it on its own, after the
+  scientist confirms the tie: a bulk approval refuses it, and the approval's note records the tie. Keep the params
+  file and pass it on every later `process`, or the tie is gone (`process` then says it was not passed). A tie that
+  names nothing says so in the summary;
 - when `process` says why none of the scientist's Athena groups matched (`athena.statement`), say it
   in those words. After `process --group`, it speaks of the groups processed now ("none of the 2 group(s) processed
   now has an Athena match"), counting the project's Athena groups that match other groups (stored results too).

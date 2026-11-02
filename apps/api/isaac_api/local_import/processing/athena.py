@@ -823,13 +823,18 @@ TIED_KIND = "named_by_scientist"
 
 
 def resolve_ties(ties: Mapping[str, Sequence[Mapping]], entries: Sequence[Mapping],
-                 groups: Sequence[Mapping]) -> tuple[dict[int, list[str]], list[dict]]:
+                 groups: Sequence[Mapping], *, not_this: bool = False) -> tuple[dict[int, list[str]], list[dict]]:
     """r6 G1: ``({entry index: [group ids]}, what was done with each named tie)`` for a params file's ``athena_match``
     (``protocol.athena_match_ties``). A tie names ONE Athena group exactly: its project (relative path, or file name)
     AND its Athena group name or label. One that names no group read, several, or no live record group ties nothing,
-    and says so. Never a near name: the scientist's naming is the only way such a group is tied."""
-    live = {g["group_id"] for g in groups if takes_part(g)}
+    and says so. Never a near name: the scientist's naming is the only way such a group is tied. A rejected group is
+    no live group here (review LOW 2). ``not_this``: the rows of ``athena_match_not`` (the scientist's "no": that
+    Athena group is not that record group's), resolved the same way, status ``not_this_group``."""
+    section, done = ("athena_match_not", "set aside") if not_this else ("athena_match", "tied")
+    live = {g["group_id"] for g in groups if hint_eligible(g)}
     known = {g["group_id"] for g in groups}
+    stems = {g["group_id"]: [normalise_name(s) for s in g.get("_stems") or ()] for g in groups if takes_part(g)}
+    bases = {gid: base_names(gstems) for gid, gstems in stems.items()}
     by_entry: dict[int, list[str]] = {}
     said: list[dict] = []
     for gid, items in sorted(ties.items()):
@@ -841,17 +846,27 @@ def resolve_ties(ties: Mapping[str, Sequence[Mapping]], entries: Sequence[Mappin
             row = {"group_id": gid, "project": prj, "athena_group": grp}
             if gid not in live:
                 row["status"] = "no_live_group"
-                row["statement"] = (f"The params file's athena_match names {grp!r} in {prj} for {gid}, which is "
-                                    f"{'no live record group (rejected, merged or split)' if gid in known else 'no record group of this bundle'}: nothing was tied.")
+                row["statement"] = (f"The params file's {section} names {grp!r} in {prj} for {gid}, which is "
+                                    f"{'no live record group (rejected, merged or split)' if gid in known else 'no record group of this bundle'}: nothing was {done}.")
             elif not hit:
                 row["status"] = "not_found"
-                row["statement"] = (f"The params file's athena_match names {grp!r} in {prj} for {gid}, but no Athena "
-                                    "group read has that project and that name or label: nothing was tied. Check both.")
+                row["statement"] = (f"The params file's {section} names {grp!r} in {prj} for {gid}, but no Athena "
+                                    f"group read has that project and that name or label: nothing was {done}. Check both.")
             elif len(hit) > 1:
                 row["status"] = "several"
-                row["statement"] = (f"The params file's athena_match names {grp!r} in {prj} for {gid}, which fits "
-                                    f"{len(hit)} Athena groups read: nothing was tied. Name the project by its relative "
+                row["statement"] = (f"The params file's {section} names {grp!r} in {prj} for {gid}, which fits "
+                                    f"{len(hit)} Athena groups read: nothing was {done}. Name the project by its relative "
                                     "path and the group by its Athena group name.")
+            elif not_this:
+                # review LOW 4: the scientist said this merge is NOT this group's: no hint names it for the group
+                row["status"] = "not_this_group"
+                row["entry_index"] = hit[0]
+                lst = by_entry.setdefault(hit[0], [])
+                if gid not in lst:
+                    lst.append(gid)
+                row["statement"] = (f"The scientist said Athena group {entries[hit[0]]['label']!r} in "
+                                    f"{entries[hit[0]]['prj_relative_path']} is not {gid}'s (params athena_match_not): "
+                                    "it is no longer offered as a hint for that group.")
             else:
                 row["status"] = "tied"
                 row["entry_index"] = hit[0]
@@ -861,6 +876,12 @@ def resolve_ties(ties: Mapping[str, Sequence[Mapping]], entries: Sequence[Mappin
                 row["statement"] = (f"The scientist named Athena group {entries[hit[0]]['label']!r} in "
                                     f"{entries[hit[0]]['prj_relative_path']} as {gid}'s (params athena_match): it is "
                                     "matched to that group by the scientist's naming, not by its name.")
+                # review LOW 5: a tied group that ALSO matches another group by name is now the named group's only
+                others = sorted({h[0] for h in _hits(entries[hit[0]], stems, bases)} - {gid})
+                if others:
+                    row["also_matches_by_name"] = others
+                    row["statement"] += (f" Its name also matches {', '.join(others)}; it is now {gid}'s only, so "
+                                         f"{'that group no longer has' if len(others) == 1 else 'those groups no longer have'} it.")
             said.append(row)
     return by_entry, said
 
@@ -1052,13 +1073,16 @@ def entry_groups(groups: Sequence[Mapping], entries: Sequence[Mapping], *,
 #: A HINT ONLY: it never matches, never selects and never changes a result; the scientist says which group (if any) the
 #: merge is, and ties it by name in a params file (:data:`protocol.ATHENA_MATCH_SECTION`). The merge's own name is its
 #: normalised label (or file name) after its merge word and counter (``merge4_``, ``truncated_merge2_``). A live record
-#: group is a candidate when (a) the leading run number of its base name (``07`` of ``07_x_m300mv``) is one of the
-#: merge name's whole-number tokens AND they share at least one other token, or (b) the two names without their
-#: leading run numbers are at least :data:`UNMATCHED_HINT_MIN_RATIO` alike (difflib ratio, an edit distance). Measured
-#: on a real BL4-3 beamtime: 46 of the scientists' 56 Athena merges matched no group, their names typed shorter or
+#: group (not rejected) is a candidate when (a) the leading run number of its base name (``07`` of ``07_x_m300mv``) is
+#: one of the whole numbers the merge's own name STARTS with (``07_…``, ``03_05_…``; a number later in the name, such
+#: as scans ``1_4``, is not a run number) AND they share at least one other token, or (b) the two names without their
+#: leading run numbers are at least :data:`UNMATCHED_HINT_MIN_RATIO` alike (difflib ratio, an edit distance), unless
+#: (review M2) they differ in a token that holds the same letters with other digits (``m200mv`` / ``m300mv``, ``s1`` /
+#: ``s2``): another potential or spot is another sample, never a typo. Every hint names the tokens in which the
+#: names differ (``differs_in``). (a) hints come first, then (b), best first; neither hides the other. Measured on a
+#: real BL4-3 beamtime: 46 of the scientists' 56 Athena merges matched no group, their names typed shorter or
 #: otherwise than the scan files (``spt2`` for ``spot2``, ``sugar`` for ``sucrose``, ``0V`` for ``m0V``, ``postXA``),
-#: and ISAAC said nothing of them. When any group qualifies by (a), only those are listed (a run number the merge names
-#: is a far stronger hint than a name alike).
+#: and ISAAC said nothing of them.
 UNMATCHED_HINT_RULE_ID = "isaac.athena.unmatched_merge_hint.v0"
 UNMATCHED_HINT_MIN_RATIO = 0.85
 UNMATCHED_HINT_MAX = 3
@@ -1090,22 +1114,52 @@ def _without_lead_numbers(name: str) -> str:
     return "_".join(toks)
 
 
+def _lead_numbers(name: str) -> set[int]:
+    """The whole numbers a name STARTS with (``03_05_x`` -> {3, 5}); none when it starts with a word."""
+    out = set()
+    for t in name.split("_"):
+        if not _WHOLE.match(t):
+            break
+        out.add(int(t))
+    return out
+
+
+def _differs_in(a: str, b: str) -> dict:
+    """The tokens only in ``a`` (the merge's name) and only in ``b`` (the group's), each without its leading numbers."""
+    ta, tb = _without_lead_numbers(a).split("_"), _without_lead_numbers(b).split("_")
+    return {"merge": [t for t in ta if t and t not in tb], "group": [t for t in tb if t and t not in ta]}
+
+
+def _digits_only_difference(diff: Mapping) -> bool:
+    """Review M2: the names differ in a token that holds the same letters with other digits (``m200mv`` / ``m300mv``,
+    ``s1`` / ``s2``): another potential, spot or sample number, never a typo, whatever else differs."""
+    skel = lambda t: re.sub(r"\d+", "#", t)  # noqa: E731
+    theirs = {skel(t) for t in diff["group"] if re.search(r"\d", t)}
+    return any(re.search(r"\d", t) and skel(t) in theirs for t in diff["merge"])
+
+
+def hint_eligible(group: Mapping) -> bool:
+    """A group a hint or a tie may name: it takes part in the match (:func:`takes_part`) and is not rejected (review
+    LOW 2: a rejected group cannot become a record)."""
+    return takes_part(group) and group.get("status") != "rejected"
+
+
 def near_name_candidates(entry: Mapping, groups: Sequence[Mapping]) -> list[dict]:
     """r6 G1 (:data:`UNMATCHED_HINT_RULE_ID`): the live record groups whose names are NEAR the merge's own name, best
-    first, at most :data:`UNMATCHED_HINT_MAX`. Each says why (``shares_run_number``, ``shared_tokens``, ``similarity``).
-    Hints only: nothing is matched."""
+    first, at most :data:`UNMATCHED_HINT_MAX`. Each says why (``shares_run_number``, ``shared_tokens``, ``similarity``,
+    ``differs_in``). Hints only: nothing is matched."""
     import difflib
 
     own = merge_own_name(entry)
     if not own:
         return []
     toks = set(own.split("_")) - {""}
-    numbers = {int(t) for t in toks if _WHOLE.match(t)}
+    numbers = _lead_numbers(own)
     words = {t for t in toks if not _WHOLE.match(t)}
     bare = _without_lead_numbers(own)
     out = []
     for g in groups:
-        if not takes_part(g):
+        if not hint_eligible(g):
             continue
         stems = [normalise_name(x) for x in g.get("_stems") or () if x]
         if not stems:
@@ -1117,26 +1171,28 @@ def near_name_candidates(entry: Mapping, groups: Sequence[Mapping]) -> list[dict
             lead = _lead_number(name)
             by_number = lead is not None and lead in numbers and bool(shared)
             ratio = difflib.SequenceMatcher(None, bare, _without_lead_numbers(name)).ratio() if bare else 0.0
-            if not (by_number or ratio >= UNMATCHED_HINT_MIN_RATIO):
+            diff = _differs_in(own, name)
+            alike = ratio >= UNMATCHED_HINT_MIN_RATIO and not _digits_only_difference(diff)
+            if not (by_number or alike):
                 continue
             key = (by_number, round(ratio, 3), len(shared))
             if best is None or key > best[0]:
                 best = (key, {"group_id": g["group_id"], "group_name": name, "shares_run_number": by_number,
-                              "shared_tokens": shared, "similarity": round(ratio, 3)})
+                              "shared_tokens": shared, "similarity": round(ratio, 3), "differs_in": diff})
         if best is not None:
             out.append(best)
-    if any(key[0] for key, _ in out):
-        # a group whose run number the merge names is a far stronger hint than a name alike: only those are listed
-        out = [kv for kv in out if kv[0][0]]
     out.sort(key=lambda kv: (not kv[0][0], -kv[0][1], -kv[0][2], kv[1]["group_id"]))
     return [c for _, c in out[:UNMATCHED_HINT_MAX]]
 
 
-def unmatched_merges(groups: Sequence[Mapping], entries: Sequence[Mapping], *, tied: Iterable[int] = ()) -> list[dict]:
+def unmatched_merges(groups: Sequence[Mapping], entries: Sequence[Mapping], *, tied: Iterable[int] = (),
+                     not_this: Mapping[int, Sequence[str]] | None = None) -> list[dict]:
     """r6 G1: the scientist's merges (:func:`is_scientist_merge`) that match NO record group by name (no hit at all;
     one that matches several groups has its own note) and that no params file ties to a group (``tied``: entry
     indexes). One item per merge: the same label with the same data in several projects is ONE merge, naming every
-    project. Each item lists its near-name candidates (:func:`near_name_candidates`: hints only, never matched)."""
+    project. Each item lists its near-name candidates (:func:`near_name_candidates`: hints only, never matched), less
+    the groups the scientist said it is not (``not_this``: {entry index: [group ids]}, params ``athena_match_not``,
+    any copy of it)."""
     stems = {g["group_id"]: [normalise_name(s) for s in g.get("_stems") or ()] for g in groups if takes_part(g)}
     bases = {gid: base_names(gstems) for gid, gstems in stems.items()}
     tied = set(tied)
@@ -1156,10 +1212,17 @@ def unmatched_merges(groups: Sequence[Mapping], entries: Sequence[Mapping], *, t
             item = items[key] = {"athena_label": str(e.get("label") or ""), "is_merge": bool(e.get("is_merge")),
                                  "merge_name": merge_own_name(e), "in": [], "_entry": e}
         item["in"].append({"prj_relative_path": e["prj_relative_path"], "athena_group": e["group_name"]})
+    said_no: dict[tuple, set] = {}
+    for i, gids in (not_this or {}).items():
+        if 0 <= i < len(entries):
+            said_no.setdefault(_key(entries[i]), set()).update(gids)
     out = []
-    for item in items.values():
+    for key, item in items.items():
         e = item.pop("_entry")
-        item["candidates"] = near_name_candidates(e, groups)
+        no = said_no.get(key) or set()
+        item["candidates"] = [c for c in near_name_candidates(e, groups) if c["group_id"] not in no]
+        if no:
+            item["not_this_group"] = sorted(no)
         item["hint_rule"] = UNMATCHED_HINT_RULE_ID
         out.append(item)
     out.sort(key=lambda i: (not i["candidates"], i["athena_label"].casefold(), i["in"][0]["prj_relative_path"]))

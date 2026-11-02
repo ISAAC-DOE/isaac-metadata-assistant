@@ -837,7 +837,26 @@ UNUSABLE_CURVE_REASONS = ("edge_step_implausible", "no_edge", "post_edge_not_at_
 #: them: they are common on any sharp edge (white lines) and say nothing is wrong; a curve one scan sets fails its QC
 BULK_APPROVE_REVIEW = (("glitch_points_from_one_scan", "one scan's glitch on the edge"),
                        ("outlier_scans", "an outlier scan"),
-                       ("only_scan_with_edge", "the group's only scan with an edge"))
+                       ("only_scan_with_edge", "the group's only scan with an edge"),
+                       # r6 review M1: a curve tied to its group by the params file, not by its name
+                       ("athena_named_by_scientist", "an Athena curve tied to its group by the params file's "
+                                                     "athena_match, not by its name"))
+
+
+#: ``processing.run.TIE_KEY`` (r6 review M1; not imported: processing is an optional extra).
+C_ATHENA_TIE = "athena_match_tie"
+C_TIED_KIND = "named_by_scientist"
+
+
+def tie_note(obj: Mapping) -> str | None:
+    """r6 review M1: the sentence an approval of a TIED Athena result records in its note: the project, the Athena
+    group, and that the scientist's params file tied it (``athena_match``), else ``None``."""
+    tie = obj.get(C_ATHENA_TIE) if isinstance(obj, Mapping) else None
+    if not isinstance(tie, Mapping):
+        return None
+    return (f"Athena group '{tie.get('athena_label') or tie.get('athena_group')}' in {tie.get('project')} was tied to "
+            "this group by the scientist's params file (athena_match), not by its name"
+            + (f"; recorded in {tie['params_file']}" if tie.get("params_file") else "") + ".")
 
 
 def bulk_approve_problem(obj: Mapping) -> str | None:
@@ -2974,6 +2993,10 @@ def record_decision(
             if kind == "processing_result" and decision == "approve":
                 # AN APPROVAL BINDS TO EXACTLY THIS RESULT'S FILES (and their hashes).
                 entry["approved_files"] = approval_files(obj)
+                tie = tie_note(obj)
+                if tie:
+                    # r6 review M1: a tie is no decision kind of its own: the approval's note records it
+                    entry["note"] = f"{note.strip()} {tie}" if isinstance(note, str) and note.strip() else tie
             if qc_status is not None:
                 # THE PERSON STATES THE QC STATUS; what they were shown is kept beside it.
                 qc = obj.get("qc") or {}
@@ -5026,7 +5049,8 @@ def decided_results_on_an_older_run(bundle: Mapping, before: Sequence[Mapping], 
         if not isinstance(seen, Mapping):
             match, versions = _athena_match_of(before, gid, run)
             seen = {"athena_match": [list(x) for x in match], "athena_versions": versions,
-                    "rebuilt": any(_rebuilt(r) for r in before if r.get("group_id") == gid and r.get("run_id") == run)}
+                    "rebuilt": any(_rebuilt(r) for r in before if r.get("group_id") == gid and r.get("run_id") == run),
+                    "tied": any(_tied(r) for r in [old, *before] if r.get("group_id") == gid and r.get("run_id") == run)}
         new = [r for r in fresh if r.get("group_id") == gid and r.get("run_id") and r.get("run_id") != run]
         if not new:
             continue
@@ -5040,10 +5064,18 @@ def decided_results_on_an_older_run(bundle: Mapping, before: Sequence[Mapping], 
             continue
         why = []
         was = (tuple(tuple(x) for x in seen.get("athena_match") or ()), int(seen.get("athena_versions") or 0))
-        now = _athena_match_of(new, gid, None)
+        # r6 review M1: the new run's results are the fresh ones AND any kept under that run id (a result decided on it
+        # earlier, e.g. rejected): reading the fresh ones alone said "no Athena curve now" while one was kept
+        now_run = [r for r in [*fresh, *keep] if r.get("group_id") == gid and str(r.get("run_id")) == new_run]
+        now = _athena_match_of(now_run, gid, None)
         if was != now:
             why.append("the scientist's Athena curve it is compared with is matched differently now "
                        f"({_said_match(was)} before, {_said_match(now)} now)")
+        was_tied = _tied(old) or bool(seen.get("tied")) or any(
+            _tied(r) for r in before if r.get("group_id") == gid and r.get("run_id") == run)
+        if was_tied and not any(_tied(r) for r in now_run):
+            why.append("the params file's athena_match for this group was not passed this time, so the Athena curve "
+                       "the scientist tied to it is not matched now (pass the same params file to keep the tie)")
         if not seen.get("rebuilt") and any(_rebuilt(r) for r in new):
             why.append("the scientist's Athena curve is now made from the project as Athena makes it "
                        f"({C_ATHENA_RENORM})")
@@ -5074,6 +5106,12 @@ def _said_match(m: tuple) -> str:
 
 #: ``processing.athena.ATHENA_RENORM_FLAG`` (r5 H1; not imported: processing is an optional extra).
 C_ATHENA_RENORM = "athena_renormalisation_differs"
+
+
+def _tied(r: Mapping) -> bool:
+    """r6 review M1: whether a result's Athena curve was tied to its group by the scientist's params file."""
+    return (isinstance(r, Mapping) and r.get("source") == "scientist_athena"
+            and ((r.get("inputs") or [{}])[0] or {}).get("match_kind") == C_TIED_KIND)
 
 
 def _rebuilt(r: Mapping) -> bool:

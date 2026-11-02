@@ -1362,6 +1362,8 @@ def _processing_result_view(bundle: Mapping, r: Mapping) -> dict:
         "comparison": ({"verdict": cmp_.get("verdict"), "flags": cmp_.get("flags"), "athena_ref": cmp_.get("athena_ref"),
                         **({"reason": cmp_["reason"]} if cmp_.get("reason") else {}), "metrics": cmp_.get("metrics")} if cmp_ else None),
         "athena_versions": versions,
+        # r6 review LOW 1 / M1: how larch's reading differs from the curve used, and a tie the scientist made
+        **({k: r[k] for k in ("renormalised_from_project", "athena_match_tie") if r.get(k)}),
         "athena_result_of_record": r.get("athena_result_of_record"),
         "questions": r.get("questions") or [],
         "result_file": f"{run_dir}/result.json" if run_dir else None,
