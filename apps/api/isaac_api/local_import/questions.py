@@ -1631,14 +1631,17 @@ def file_restarts(cf: Mapping) -> list[tuple[str, str]]:
 
 
 def file_restarts_said(cf: Mapping) -> str | None:
-    """r7 J1: ``"its file was started 2 times (#E at line 2: …; line 152: …)"`` for :func:`file_restarts`, or ``None``."""
+    """r7 J1: ``"its file was started 2 times (#E at line 2: …; line 152: …)"`` for :func:`file_restarts`, or ``None``.
+    r7 review: the STARTS are the distinct #E instants; two #E lines with the same epoch are one start."""
     starts = file_restarts(cf)
     if not starts:
         return None
     by_value: dict[str, list[str]] = {}
     for loc, value in starts:
         by_value.setdefault(value, []).append(loc.replace(" header #E", ""))
-    return (f"its file was started {len(starts)} times (#E at "
+    if len(by_value) < 2:
+        return None
+    return (f"its file was started {len(by_value)} times (#E at "
             + "; ".join(f"{' and '.join(locs)}: {value}" for value, locs in by_value.items()) + ")")
 
 
@@ -1728,7 +1731,13 @@ def _stated_utc_start_question(questions: list[dict], bundle: Mapping, group_of:
             + "; ".join(examples) + (f"; and {len(reached) - len(examples)} more." if len(reached) > len(examples) else ".")
             + f" It reaches {n_groups} group(s) ({len(runs)} run(s)).")
     held = {g for q, _ in reached for g in q.get("cannot_export_groups") or ()}
-    if held:
+    # r7 review: when NO group it reaches can become a record, it affects no record (optional, like each of them)
+    none_export = bool(held) and len(held) >= n_groups
+    if none_export:
+        text += (f" None of these {n_groups} groups can become a record as they stand "
+                 "(blocking_basis.record_composer.groups_that_cannot_export): nothing to answer unless one is to "
+                 "become a record.")
+    elif held:
         # r7 J2: how many of them can become a record (the targets are unchanged)
         text += (f" Only {n_groups - len(held)} of these {n_groups} groups can become a record; {len(held)} cannot "
                  "export as they stand (blocking_basis.record_composer.groups_that_cannot_export).")
@@ -1758,10 +1767,13 @@ def _stated_utc_start_question(questions: list[dict], bundle: Mapping, group_of:
     return {
         "question_id": qid,
         "partition": None,
-        "tier": TIER_BLOCKING if any(q.get("blocking") for q, _ in reached) else TIER_CONFLICT,
+        "tier": (TIER_BLOCKING if any(q.get("blocking") for q, _ in reached) else
+                 TIER_OPTIONAL if none_export else TIER_CONFLICT),
         "blocking": any(bool(q.get("blocking")) for q, _ in reached),
-        "affects_record": True,
-        "why": ("One scientist decision for the whole beamtime: a record built from these runs carries the start time "
+        "affects_record": not none_export,
+        "why": ("Not a record: no group it reaches can become a record as it stands. Nothing to answer unless one is "
+                "to become a record." if none_export else
+                "One scientist decision for the whole beamtime: a record built from these runs carries the start time "
                 "you choose, and each group would otherwise be asked on its own."),
         "kind": STATED_UTC_START_KIND,
         "scope": "experiment",
@@ -2150,6 +2162,9 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
 _CANNOT_EXPORT_SHOWN = 20
 #: r7 J2: what each ``cannot_export_reason`` means, in a few words (:data:`cli.CANNOT_EXPORT_NOTE` says it in full).
 _CANNOT_EXPORT_WORDS = {"no_scans": "none of its runs lists a scan",
+                        "processing_not_applicable:no_xas_channel": (
+                            "no energy axis or absorption signal was found in its columns; re-processing with the "
+                            "channels named (`isaac process --params-file`, channels.*) can make it exportable"),
                         "not_a_measurement_run": "every run is a reference standard, an alignment or a calibration scan"}
 
 

@@ -115,7 +115,7 @@ once at the top. `export --full` prints every row; `<records>/isaac-export/index
 Each `exported[]`, `refused[]` and dry-run `records[]` row has a `label`: the group's first member file. Use it
 to name the record to the scientist. In the evidence file, a `#D` local clock time with no zone beside the UTC
 start of record has `relation: not_comparable` (not comparable until the clock's zone is stated), never
-`contradicts`.
+`contradicts`. Once the zone is confirmed, a converted `#D` reading is compared as an instant.
 It exits 1 whenever any group is refused, **even when it wrote records**: read `outcome`, never the exit
 code alone, before telling the scientist what is ready. A record written while a warning still applies lists it
 in `exported[].warnings` ("Written without the potential set-point: …"; the first 5, with `warnings_total`), and

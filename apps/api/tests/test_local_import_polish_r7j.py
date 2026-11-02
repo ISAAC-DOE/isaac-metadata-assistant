@@ -182,8 +182,12 @@ def test_file_restarts_reads_only_the_e_lines_of_one_file():
         {"value": "2100-01-01T00:00:00+00:00", "witnesses": [{"source_id": "s1", "locator": "line 2 header #E"},
                                                              {"source_id": "s1", "locator": "line 40 header #E"}]},
         {"value": "2100-01-01T01:00:00+00:00", "witnesses": [{"source_id": "s1", "locator": "line 90 header #E"}]}]}
-    assert Q.file_restarts_said(cf) == ("its file was started 3 times (#E at line 2 and line 40: "
+    # r7 review: two #E lines with the same instant are one start
+    assert Q.file_restarts_said(cf) == ("its file was started 2 times (#E at line 2 and line 40: "
                                         "2100-01-01T00:00:00+00:00; line 90: 2100-01-01T01:00:00+00:00)")
+    same = copy.deepcopy(cf)
+    same["readings"][1]["value"] = same["readings"][0]["value"]
+    assert Q.file_restarts_said(same) is None
     other = copy.deepcopy(cf)
     other["readings"][1]["witnesses"][0]["source_id"] = "s2"  # two files: not one file restarted
     assert Q.file_restarts(other) == []
@@ -210,7 +214,7 @@ def test_a_group_no_protocol_covers_is_blocked_by_nothing_and_a_batch_says_how_m
     reached = now["applies_to"]["groups"]
     assert now["applies_to"]["groups_that_can_export"] == reached - 1
     assert (f"Only {reached - 1} of the {reached} groups it reaches can become a record; 1 cannot export as they stand "
-            "(processing_not_applicable:no_xas_channel for 1).") in now["text"]
+            "(processing_not_applicable:no_xas_channel for 1 (no energy axis or absorption signal") in now["text"]
     basis = after["blocking_basis"]["record_composer"]
     assert basis["groups_that_cannot_export"] == {gid: "processing_not_applicable:no_xas_channel"}
     assert basis["cannot_export_by_reason"] == {"processing_not_applicable:no_xas_channel": 1}
@@ -371,3 +375,47 @@ def test_the_skill_docs_say_the_r7j_rules():
     for said in ("started more than once", "groups_that_can_export", "not_comparable", "no_scans"):
         assert said in ref, said
     assert len((SKILL / "SKILL.md").read_text(encoding="utf-8").splitlines()) <= 250
+
+
+# --- r7 review -----------------------------------------------------------------------------------------------------
+
+
+def test_the_beamtime_start_question_affects_no_record_when_no_group_it_reaches_can_export(grouped):
+    b = M.load(grouped)
+    beamtime = Q.question(Q.consolidate(b), Q.STATED_UTC_START_QUESTION_ID)
+    assert beamtime["affects_record"] and beamtime["tier"] == Q.TIER_CONFLICT
+    gids = [scope[len("group:"):] for scope in beamtime["per_scope_targets"]]
+    b["processing_results"] = [*b["processing_results"], *(_na(g, B.NA_NO_XAS_CHANNEL) for g in gids)]
+    now = Q.question(Q.consolidate(b), Q.STATED_UTC_START_QUESTION_ID)
+    assert now["targets"] == beamtime["targets"]
+    assert now["affects_record"] is False and now["tier"] == Q.TIER_OPTIONAL and now["why"].startswith("Not a record")
+    assert f"None of these {len(gids)} groups can become a record as they stand" in now["text"]
+
+
+def test_a_no_xas_channel_group_says_named_channels_can_make_it_exportable(grouped):
+    b = M.load(grouped)
+    gid = b["record_groups"][0]["group_id"]
+    b["processing_results"] = [*b["processing_results"], _na(gid, B.NA_NO_XAS_CHANNEL)]
+    payload = Q.consolidate(b)
+    said = "re-processing with the channels named (`isaac process --params-file`, channels.*) can make it exportable"
+    assert said in payload["blocking_basis"]["record_composer"]["cannot_export_statement"]
+    assert any(said in q["text"] for q in payload["questions"] if q.get("cannot_export_groups"))
+    # a group with no scan is not told so
+    other = b["record_groups"][1]["group_id"]
+    b["processing_results"] = [_na(other, B.NA_NO_SCANS)]
+    assert "channels.*" not in Q.consolidate(b)["blocking_basis"]["record_composer"]["cannot_export_statement"]
+
+
+def test_a_local_clock_reading_converted_under_a_confirmed_zone_is_compared(grouped):
+    b = M.load(grouped)
+    clock = copy.deepcopy(next(c for c in b["candidates"] if c["target_field_path"] == START
+                               and c["statement_key"] == "acquisition_timestamp" and c["run_id"] == "run-001"))
+    for e in clock["evidence"]:
+        e["normalization"] = [*(e.get("normalization") or ()),
+                              {"step": B.LOCAL_CLOCK_CONVERT_STEP, "rule_id": "syn", "from": "x", "to": "y"}]
+    later = "2100-01-02T08:00:00Z"
+    assert all(w["relation"] == "contradicts" for w in R._witnesses(clock, later, {"decision": "correct"}, True))
+    assert all(w["relation"] == "contradicts" for w in R._witnesses(clock, later, {"decision": "correct"}, lambda: True))
+    assert all(w["relation"] == R.NOT_COMPARABLE for w in R._witnesses(clock, later, {"decision": "correct"}, False))
+    assert all(w["relation"] == R.NOT_COMPARABLE for w in R._witnesses(clock, later, {"decision": "correct"},
+                                                                       lambda: False))

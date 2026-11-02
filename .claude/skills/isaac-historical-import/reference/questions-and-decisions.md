@@ -40,6 +40,8 @@ group with any `cannot_export_reason`; `blocking_basis.record_composer.groups_th
 groups once, with each one's reason (the first 20; `cannot_export_by_reason` counts them all). A question that reaches some of them says how many of its groups can
 become a record (`applies_to.groups_that_can_export`, and a sentence in its text): say that number, not the reach.
 A disagreement that reaches only such groups affects no record: it is optional, with "Not a record" in its `why`.
+So is the beamtime start-time question when no group it reaches can export. For `processing_not_applicable:no_xas_channel`
+the text says re-processing with the channels named (`isaac process --params-file`, `channels.*`) can make it exportable.
 When only such groups are left, `blocked` says why
 in words and `plus_decisions` never says "approve its processing result" for them. `recommended[]` (never blocking, not counted) names a question
 worth answering for that group, with the warning that explains it (`warnings`): today, a potential the
@@ -128,7 +130,8 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   group: no `#E` line, `#E` readings that disagree, a late first scan, a group with two runs, where the
   scientist says which run's start the record takes, or a file started more than once), and which groups keep an
   answer of their own. A file started more than once (in several sessions) has two or more `#E` lines: "its file
-  was started N times (#E at line 2: …; line 152: …)". Its `#E` question asks which is the start. Its `#D`
+  was started N times (#E at line 2: …; line 152: …)". N counts different instants: two `#E` lines with the same
+  epoch are one start. Its `#E` question asks which is the start. Its `#D`
   question names that one (`asked_by_question`) and needs no answer of its own. A group that cannot become a
   record is left out of `not_reached` (counted in `not_a_record`): nothing to answer for it. Answer
   the groups it does not reach one by one. A record whose runs were given different starts carries none and

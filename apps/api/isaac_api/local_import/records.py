@@ -277,7 +277,8 @@ PASSING_WITNESS_NOTE = ("the notes name the cell here only in passing, in a sent
                         "state the value of record")
 
 
-def _witnesses(candidate: Mapping, value: Any = None, decision: Mapping | None = None) -> list[dict]:
+def _witnesses(candidate: Mapping, value: Any = None, decision: Mapping | None = None,
+               zone_confirmed: Any = None) -> list[dict]:
     """The file's own statements for a composed candidate value, each with its ``relation``.
 
     ``relation`` is ALWAYS carried (``supports`` / ``contradicts`` / ``context``), never dropped. When
@@ -287,7 +288,10 @@ def _witnesses(candidate: Mapping, value: Any = None, decision: Mapping | None =
     ``relation_to_parser_value`` and ``relation`` says whether the quote states the value of record
     (``supports``) or another value (``contradicts``) — a quote of the old value is never presented
     as support for the new one. r7 J4: a local clock time with no zone beside a UTC value of record is
-    ``not_comparable`` (:data:`NOT_COMPARABLE`), never "contradicts"."""
+    ``not_comparable`` (:data:`NOT_COMPARABLE`), never "contradicts". r7 review: once the clock's zone is
+    confirmed and the witness carries its conversion (:data:`bundle.LOCAL_CLOCK_CONVERT_STEP`), the reading IS an
+    instant and is compared as one. ``zone_confirmed``: a zero-argument callable (read only when needed) or a bool;
+    ``None`` trusts the conversion step alone."""
     out = []
     path = candidate.get("target_field_path")
     # the SAME value (same_value: numerically, as an instant, or exactly) is not a replacement
@@ -312,7 +316,8 @@ def _witnesses(candidate: Mapping, value: Any = None, decision: Mapping | None =
         elif replaced:
             entry["relation_to_parser_value"] = e.get("relation")
             entry["relation"] = "supports" if _vouches_for(candidate, e, path, value) else "contradicts"
-            if entry["relation"] == "contradicts" and _zone_less_clock(path, e.get("literal_value"), value):
+            if entry["relation"] == "contradicts" and _zone_less_clock(path, e.get("literal_value"), value) and not (
+                    _converted_with_zone(e) and _zone_said(zone_confirmed)):
                 # r7 J4: a local clock time with no zone is not an instant: it neither supports nor contradicts one
                 entry["relation"] = NOT_COMPARABLE
                 entry["note"] = NOT_COMPARABLE_NOTE
@@ -327,6 +332,18 @@ def _witnesses(candidate: Mapping, value: Any = None, decision: Mapping | None =
 NOT_COMPARABLE = "not_comparable"
 NOT_COMPARABLE_NOTE = ("a local clock time with no time zone: not comparable with the UTC value of record until the "
                        "clock's time zone is stated")
+
+
+def _converted_with_zone(e: Mapping) -> bool:
+    """r7 review: the witness carries a local-clock-to-UTC conversion under a confirmed zone."""
+    return any(isinstance(n, Mapping) and n.get("step") == B.LOCAL_CLOCK_CONVERT_STEP for n in e.get("normalization") or ())
+
+
+def _zone_said(zone_confirmed: Any) -> bool:
+    """Whether the instrument clock's zone is confirmed (``None``: not known here, so the conversion step is trusted)."""
+    if zone_confirmed is None:
+        return True
+    return bool(zone_confirmed() if callable(zone_confirmed) else zone_confirmed)
 
 
 def _zone_less_clock(path: str | None, literal: Any, value: Any) -> bool:
@@ -676,6 +693,14 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
             report["not_composed"].append({id_key: obj[id_key], "path": obj["target_field_path"],
                                            "reason": obj["eligibility_for_official_record"]["reason"]})
 
+    zone_memo: list[bool] = []
+
+    def zone_confirmed() -> bool:
+        # r7 review: read once per composition, and only when a converted #D witness needs it
+        if not zone_memo:
+            zone_memo.append(B.clock_zone_decision(bundle) is not None)
+        return zone_memo[0]
+
     for c in bundle["candidates"]:
         if not c["eligibility_for_official_record"]["eligible"]:
             _confirmed_but_unfit(c, "candidate_id")
@@ -693,7 +718,7 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
             continue
         d = B.candidate_decision(bundle, c, decisions, index["conflict_ids_of"])
         value = B.final_value(c["value"], d, c.get("readings"))
-        witnesses = _witnesses(c, value, d)
+        witnesses = _witnesses(c, value, d, zone_confirmed)
         evidence = witnesses + [_candidate_confirmation(c, d, value, path, witnesses)]
         if B.is_local_clock_start(c) and d.get("decision") == "confirm":
             # The value is the file's local clock time converted under the zone a scientist stated
