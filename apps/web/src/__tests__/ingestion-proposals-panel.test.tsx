@@ -303,7 +303,9 @@ describe('the read states', () => {
     stubFetchRoutes({ [LIST]: { body: page([], { unreadable_entries: 2 }) } });
     renderPanel();
 
-    await screen.findByText(/No proposals yet\./);
+    // The disclosure rides the "No proposals yet" clause, not the call to action
+    // after it (final review, Minor 5).
+    await screen.findByText(/No proposals yet · 2 stored entries/);
     // BOTH surfaces carry it: an empty state is where a reader stops looking, so it
     // cannot be the one place the number is left out.
     const disclosures = screen.getAllByText(

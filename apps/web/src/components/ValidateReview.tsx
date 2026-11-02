@@ -1,4 +1,5 @@
 import './validate-review.css';
+import { LABELS } from '../lib/labels';
 import { useId, useRef, useState } from 'react';
 import { BlockerItems } from './BlockerItems';
 import { Disclosure } from './Disclosure';
@@ -353,7 +354,7 @@ export function ValidateReview({ experimentId }: { experimentId: string }) {
       {/* Named for what it is rather than repeating the button below it
           (declutter, 2026-11-02). */}
       <h2 id={headingId} className="vr-title">
-        Validation
+        {LABELS.validationHeading}
       </h2>
       {/*
         THE SUB-LINE SAYS "EVERY RUN" ONLY WHERE THERE ARE RUNS. A record with no

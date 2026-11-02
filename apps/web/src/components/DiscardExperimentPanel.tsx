@@ -214,6 +214,10 @@ export function DiscardExperimentPanel({
     if (!expanded || open) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      /* Only an Escape meant for THIS menu: focus on its button or inside it. An
+         Escape closing a tip or the Assistant elsewhere leaves the menu alone. */
+      const active = document.activeElement;
+      if (active !== moreRef.current && !menuRef.current?.contains(active)) return;
       e.preventDefault();
       setExpanded(false);
       moreRef.current?.focus();

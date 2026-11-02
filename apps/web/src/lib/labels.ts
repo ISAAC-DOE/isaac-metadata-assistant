@@ -1220,6 +1220,9 @@ export const LABELS = {
   /* The record page's "More" button (declutter, 2026-11-02): Discard lives behind
      it, beside the page title, rather than as a peer of Folder. */
   recordMoreActions: 'More Record Actions',
+  /* The record-level validation section's heading (the button below it is
+     "Validate & Review"; the heading no longer repeats it). */
+  validationHeading: 'Validation',
   discardAction: 'Discard This Record',
   discardDialogTitle: 'Discard This Record?',
   discardWhatGoes:

@@ -872,17 +872,10 @@ function LoadedEvidenceGraph({
         {staleRunsVersion !== null && (
         <p className="evgraph-freshness" data-testid="evgraph-freshness">
           Built from this record at version <code>{graph.freshnessKey.split('|').pop()}</code>.
-          {staleRunsVersion === null ? (
-            ' Nothing here is cached across a version change.'
-          ) : (
-            <>
-              {' '}
-              The run rows are OLDER: they were read at version{' '}
-              <code data-testid="evgraph-freshness-runs">{staleRunsVersion}</code> and a
-              re-read has not landed since. Nothing here is cached across a version
-              change.
-            </>
-          )}
+          {' '}
+          The run rows are OLDER: they were read at version{' '}
+          <code data-testid="evgraph-freshness-runs">{staleRunsVersion}</code> and a re-read
+          has not landed since. Nothing here is cached across a version change.
         </p>
         )}
       </header>

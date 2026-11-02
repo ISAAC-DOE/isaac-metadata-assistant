@@ -239,8 +239,8 @@ export function ConfirmedAnswersPanel({
       </Heading>
       {confirmedTotal > 0 && (
         <p className="confirmed-answers-lead">
-          Values you confirmed. Each can be corrected here unless it holds something this
-          form cannot carry back.
+          Values this record holds. Each can be corrected here unless it holds something
+          this form cannot carry back.
         </p>
       )}
       {confirmedTotal === 0 && (

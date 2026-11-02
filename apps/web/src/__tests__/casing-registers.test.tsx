@@ -1043,7 +1043,6 @@ const HARDCODED_LABEL_SLOT_CEILING: Readonly<Record<string, number>> = {
   'components/StatusBar.tsx': 6,
   'components/StructuredValueEntry.tsx': 9,
   'components/UnmappedNotesPanel.tsx': 9,
-  'components/ValidateReview.tsx': 1,
   'screens/ExperimentsHome.tsx': 4,
   'screens/ExportReadiness.tsx': 1,
   // 'screens/GovernancePage.tsx' was 1: its one literal, the "Data Governance" eyebrow, was cut 2026-11-02.

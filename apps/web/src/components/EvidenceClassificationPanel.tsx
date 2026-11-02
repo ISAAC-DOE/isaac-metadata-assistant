@@ -93,7 +93,7 @@ const CLASS_GUIDANCE: Record<EvidenceClass, { meaning: string; next: string }> =
  * not; any other wording (a derivation, a user confirmation, a partial read) is
  * printed exactly as the server sent it.
  */
-const CLASS_DEFAULT_EXPLANATION: Partial<Record<string, string>> = {
+export const CLASS_DEFAULT_EXPLANATION: Partial<Record<string, string>> = {
   supported: 'Backed by observed evidence.',
 };
 

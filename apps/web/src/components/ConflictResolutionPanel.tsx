@@ -534,9 +534,8 @@ function ConflictBrowser({ experimentId }: { experimentId: string }) {
             <p className="conflicts-disclosure" role="note">
               {list.loaded.unreadable_resolution_entries} recorded{' '}
               {list.loaded.unreadable_resolution_entries === 1 ? 'decision' : 'decisions'}{' '}
-              stored on this record could not be read by this build. They are kept on
-              the record untouched and counted here rather than shown, because saying
-              what one contains would mean inventing it.
+              stored on this record could not be read. They are kept on the record
+              untouched and counted, not described.
             </p>
           )}
 

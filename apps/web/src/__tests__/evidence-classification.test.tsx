@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
-import { EvidenceClassificationPanel } from '../components/EvidenceClassificationPanel';
+import { CLASS_DEFAULT_EXPLANATION, EvidenceClassificationPanel } from '../components/EvidenceClassificationPanel';
 import {
   evidenceBundleRoutes,
   evidenceClassificationResponse,
@@ -50,6 +50,15 @@ describe('P28.5 · EvidenceClassificationPanel (evidence-support axis)', () => {
     if (all) fireEvent.click(all);
     return view;
   };
+
+  it('the suppressed class default is the server’s own supported-by-observation sentence', () => {
+    // Mirrors `evidence_classify._explanation_for_readable`; if the backend wording
+    // drifts, the fixture (which mirrors the backend) and this constant part ways here.
+    const supported = evidenceClassificationResponse.field_results.find(
+      (r) => r.classification === 'supported',
+    )!;
+    expect(CLASS_DEFAULT_EXPLANATION.supported).toBe(supported.explanation);
+  });
 
   it('shows the summary and only the rows that are not Supported, with the rest one click away', () => {
     const { container, getByRole } = panel();

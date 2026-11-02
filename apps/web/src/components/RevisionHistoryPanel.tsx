@@ -103,10 +103,13 @@ export function RevisionHistoryPanel({ experimentId }: { experimentId: string })
      a `?` and a paragraph saying there is nothing to show was an empty section.
      The section appears wherever a history is kept. Reset when the record changes. */
   const [notKept, setNotKept] = useState<string | null>(null);
+  /* The heading waits for the read: it never paints and then vanishes on a
+     deployment that keeps no history (final review, Minor 10). */
+  const [known, setKnown] = useState<string | null>(null);
   if (notKept === experimentId) return null;
   return (
     <section className="revhist-section" aria-labelledby="revision-history-heading">
-      <div className="revhist-head">
+      <div className="revhist-head" hidden={known !== experimentId}>
         <h2 className="revhist-title" id="revision-history-heading">
           Submission History
         </h2>
@@ -126,6 +129,7 @@ export function RevisionHistoryPanel({ experimentId }: { experimentId: string })
         key={experimentId}
         experimentId={experimentId}
         onNotKept={() => setNotKept(experimentId)}
+        onKnown={() => setKnown(experimentId)}
       />
     </section>
   );
@@ -134,9 +138,11 @@ export function RevisionHistoryPanel({ experimentId }: { experimentId: string })
 function RevisionHistoryBrowser({
   experimentId,
   onNotKept,
+  onKnown,
 }: {
   experimentId: string;
   onNotKept: () => void;
+  onKnown: () => void;
 }) {
   const [list, setList] = useState<ListState>({ status: 'loading' });
   const [selection, setSelection] = useState<SelectionState>({ status: 'idle' });
@@ -158,7 +164,8 @@ function RevisionHistoryBrowser({
   useEffect(load, [load]);
   useEffect(() => {
     if (list.status === 'not_kept') onNotKept();
-  }, [list.status, onNotKept]);
+    else if (list.status !== 'loading') onKnown();
+  }, [list.status, onNotKept, onKnown]);
 
   // The last revision clicked is the one shown: an earlier click's answer arriving later is dropped.
   const selectSeq = useRef(0);

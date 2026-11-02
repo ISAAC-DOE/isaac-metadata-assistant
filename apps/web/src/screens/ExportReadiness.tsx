@@ -19,6 +19,7 @@ import { RecordActivityNote } from '../components/RecordActivityNote';
 import { needsCanonicalRefetch } from '../lib/recordChanges';
 import { WorkflowProgressBanner } from '../components/WorkflowProgressBanner';
 import { RevisionHistoryPanel } from '../components/RevisionHistoryPanel';
+import { HelpTip } from '../components/HelpTip';
 import { RunArtifactsPanel } from '../components/RunArtifactsPanel';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Shield, TriangleAlert, Lock, Play } from '../components/icons';
@@ -835,7 +836,10 @@ function LoadedExport({
                   style={{ flex: 'none', color: 'var(--text-slate)' }}
                 />
                 <span>
-                  <strong>Review the sidecar before sharing.</strong>
+                  <strong>Review the sidecar before sharing.</strong>{' '}
+                  <HelpTip subject="the evidence sidecar" label="Why Review the Sidecar">
+                    <span>It can carry source paths, URIs and hashes.</span>
+                  </HelpTip>
                 </span>
               </div>
 

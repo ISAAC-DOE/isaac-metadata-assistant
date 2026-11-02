@@ -172,7 +172,12 @@ describe('the control is reachable', () => {
     fireEvent.click(more);
     expect(more).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('button', { name: LABELS.discardAction })).toBeInTheDocument();
-    // Escape closes the menu and returns focus to the button that opened it.
+    // An Escape meant for something else (focus elsewhere) leaves the menu open…
+    (document.body as HTMLElement).focus();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(more).toHaveAttribute('aria-expanded', 'true');
+    // …and Escape from the menu closes it and returns focus to the button.
+    screen.getByRole('button', { name: LABELS.discardAction }).focus();
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(more).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByRole('button', { name: LABELS.discardAction })).not.toBeInTheDocument();

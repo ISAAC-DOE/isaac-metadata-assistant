@@ -1975,8 +1975,8 @@ function NoteCard({
             ))}
           </select>
           <p className="note-form-hint">
-            This is the server&rsquo;s own list of the paths this build can target with
-            a proposal — a subset of the official schema, not every field it defines.
+            This is the server&rsquo;s own list of the paths a proposal can target — a
+            subset of the official schema, not every field it defines.
           </p>
 
           {proposeFieldPath !== '' && proposeNeedsRun && (

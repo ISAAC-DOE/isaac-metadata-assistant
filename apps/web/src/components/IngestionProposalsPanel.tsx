@@ -671,8 +671,8 @@ function reviewRefusalCopy(err: unknown, action: ApiProposalReviewAction): strin
   if (code === 'no_write_path_for_field') {
     return (
       'The write route that owns this field path refused it, so nothing was written. ' +
-      'That is a limitation of this build and not a statement about the official ISAAC ' +
-      'schema.'
+      'That is a limitation of this application and not a statement about the official ' +
+      'ISAAC schema.'
     );
   }
   if (statusOf(err) === 428) {
@@ -2537,8 +2537,8 @@ function EmptyProposals({
           is explicitly agent documentation (Settings → Connect Your Agent); here the
           three ways in are said plainly, and the facts are unchanged.
         */}
-        No proposals yet. They appear when you finish a capture or propose from a
-        note{disclosure}.{' '}
+        No proposals yet{disclosure}. They appear when you finish a capture or propose
+        from a note.{' '}
         <HelpTip subject="Proposals" label="How Proposals Are Made">
           <span>
             A proposal is a value suggested for a field, waiting for your review. One is

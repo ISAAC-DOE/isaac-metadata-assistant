@@ -344,6 +344,28 @@ describe('A-01 · nothing open is no longer a dead end', () => {
     expect(panel.querySelectorAll('.confirmed-row[data-state="open"]')).toHaveLength(0);
   });
 
+  it('never says "you confirmed" over a value whose evidence is not a user confirmation', async () => {
+    // Final review, Important 2: the lead read "Values you confirmed." directly above a
+    // QC verdict whose only evidence is a spreadsheet row ("From Recorded Evidence").
+    const fromEvidence = structuredAnswers();
+    for (const key of ['series', 'qc', 'descriptor'] as const) {
+      fromEvidence.units[0].answers[key] = {
+        ...(fromEvidence.units[0].answers[key] as object),
+        confirmation: 'from_evidence',
+      } as never;
+    }
+    stubFetchRoutes({
+      ...bundleRoutes('demo'),
+      [`GET ${BASE}/structured-answers`]: { body: fromEvidence },
+    });
+    renderAt('/record/demo');
+    const panel = await screen.findByRole('region', { name: 'Confirmed Answers' });
+    await waitFor(() => expect(panel.querySelectorAll('.confirmed-row').length).toBeGreaterThan(0));
+    const USER_CLAIM = /\byou confirmed\b|confirmed by you/i;
+    expect(USER_CLAIM.test('Values you confirmed.')).toBe(true);
+    expect(panel.textContent ?? '').not.toMatch(USER_CLAIM);
+  });
+
   it('with NOTHING confirmed, the panel is one line that counts what is still open', async () => {
     const none = structuredAnswers();
     for (const key of ['series', 'qc', 'descriptor'] as const) {

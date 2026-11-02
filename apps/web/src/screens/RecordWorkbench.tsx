@@ -2030,7 +2030,9 @@ function NeedsYouBanner({
         aria-hidden="true"
       />
       <div className="needsyou-body">
-        <div className="needsyou-title">{pendingTotal} Fields Need Your Confirmation</div>
+        <div className="needsyou-title">
+          {pendingTotal} {pendingTotal === 1 ? 'Field Needs' : 'Fields Need'} Your Confirmation
+        </div>
         {/* The full banner says it once; the compact reminder is the count and the
             action only (declutter, 2026-11-02). */}
         {!compact && (
