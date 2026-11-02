@@ -110,6 +110,8 @@ export interface LocalMinimumRecommendation {
   only: string | null;
   blocking: false;
   why: string;
+  /** `why` as the page says it: the same sentences, less the command-line instruction. */
+  why_page?: string | null;
 }
 
 export interface LocalProgress {
@@ -147,7 +149,29 @@ export interface LocalProgress {
     statement?: string;
   } | null;
   blocks_export: string[];
+  /** Live groups that can never export as they stand, counted by `cannot_export_reason` (`bundle list <dir> groups`);
+   *  they count toward nothing in `blocks_export`. Absent from an older server. */
+  cannot_export?: { total: number; live_groups: number; by_reason: Record<string, number>; statement: string | null };
+  /** The scientist's own Athena merges that match no record group (`bundle list <dir> athena-merges`), read-only. */
+  athena_merges?: LocalAthenaMerges | null;
   last_validation: { reports: LocalValidationReport[]; statement: string };
+}
+
+/** One of the scientist's Athena merges that matches no record group: a near group is a hint, never a match. */
+export interface LocalAthenaMerge {
+  athena_label: string;
+  projects: string[];
+  athena_group?: string | null;
+  near_groups: { group_id: string; group_name?: string | null; differs_in?: unknown }[];
+  groups_in_project: string[];
+  groups_in_project_more?: number;
+  not_this_group?: string[];
+}
+
+export interface LocalAthenaMerges {
+  total: number;
+  items: LocalAthenaMerge[];
+  statement: string;
 }
 
 export interface ApiLocalBundleProgress {
@@ -230,6 +254,7 @@ export type LocalAnswerKind =
   | 'counter_positions'
   | 'clock_zone'
   | 'absorber'
+  | 'start_times'
   | 'informational'
   | 'other';
 
@@ -256,6 +281,9 @@ export interface LocalQuestionDisplay {
   /** The beamtime question that fills this field for every record (`covered_by`), by id and its own words; the id
    *  is null when it is no question ("an answered beamtime value"). */
   covered_by?: { question_id: string | null; text: string };
+  /** The question and its reason as the page says them: the command line's sentences, less its own instructions. */
+  text?: string | null;
+  why?: string | null;
 }
 
 /** "I don't know" (`defer`): who said it and when; the question is still asked and still counted. */
@@ -288,6 +316,14 @@ export interface LocalQuestion {
   deferred?: LocalDeferral;
   /** The beamtime question (or "an answered beamtime value") that makes this one not blocking. */
   covered_by?: string;
+  /** A per-group start-time question the beamtime-wide one (`stated_utc_start_times`) answers at once; it stays
+   *  answerable on its own. */
+  answered_at_once_by?: string;
+  /** `stated_utc_start_times`: the groups with an open start-time question it does not reach, and why. */
+  not_reached?: { group_id: string; question_id: string; reason: string }[];
+  /** `stated_utc_start_times`: the largest gap from a file's creation to its first scan, and the most left in. */
+  largest_file_to_first_scan_s?: number;
+  max_file_to_first_scan_s?: number;
   display: LocalQuestionDisplay;
 }
 
@@ -667,15 +703,10 @@ export function regroupCommand(bundleName: string): string {
 // --- copy ------------------------------------------------------------------------------------
 
 export const LOCAL_IMPORTS_COPY = {
-  lead:
-    'Import bundles in the folder this server was started with, on this computer. A bundle is what `isaac import` made from a beamtime folder: what the files say, and the questions only you can answer.',
-  boundary:
-    'Nothing on this page is uploaded or sent anywhere. An answer is written into the bundle on this computer, by the same code as `isaac bundle decide`, as a local, unverified statement by the name you type.',
-  notInThisBuild:
-    'Local imports are not part of this build. They are available only when ISAAC runs on your own computer, started for a folder of import bundles.',
-  notOnThisServer:
-    'This server was not started with a folder of import bundles, so there is nothing to show here.',
-  howToStart: 'Start the server for a folder of bundles (see the local development guide):',
+  lead: 'Answer what only you know about each imported beamtime. Every answer is saved into its bundle with your name.',
+  notInThisBuild: 'Local Imports opens when ISAAC is started on your computer with a folder of import bundles.',
+  notOnThisServer: 'No folder of import bundles is open.',
+  howToStart: 'Start ISAAC for a folder of bundles:',
   startCommand:
     'ISAAC_LOCAL_BUNDLES_DIR=<folder of bundles> .venv/bin/uvicorn isaac_api.app:app --app-dir apps/api --host 127.0.0.1 --port 8000',
   overviewTitle: 'Import Progress',
@@ -684,14 +715,12 @@ export const LOCAL_IMPORTS_COPY = {
   backToAll: 'All local imports',
   questionsTitle: 'Questions',
   yourName: 'Your name',
-  yourNameHint:
-    'Recorded with every answer, exactly as the command line’s `--by`. This build does not verify who you are.',
+  yourNameHint: 'Saved with every answer.',
   nameNeeded: 'Type your name before answering: every answer records who gave it.',
   backToQuestion: 'Back to the question',
   jumpLabel: 'Jump to',
   settlesManyTitle: 'Answer Once for the Whole Beamtime',
-  settlesManyLead:
-    'Each of these is asked once and settles many records. Check the groups it applies to before answering for all of them.',
+  settlesManyLead: 'One answer here settles many records. Each is previewed group by group before it is written.',
   suggestedNotConfirmed: 'Suggested — not confirmed',
   noSuggestion: 'No suggestion. No file in this import states it.',
   otherReadings: 'Other readings and hints',
@@ -706,8 +735,7 @@ export const LOCAL_IMPORTS_COPY = {
   previewCancelled: 'Nothing was written.',
   previewIds: 'Technical ids (for the command line)',
   chooseGroup: 'Choose which group this answer is for.',
-  informational:
-    'Nothing to answer here. The files mention this, but ISAAC cannot yet put an answer for it into a record, so it is listed for your information only.',
+  informational: 'For your information: no answer to this can go into a record yet.',
   groupGone: 'The group chosen before is no longer asked about here (it may have been answered). Choose a group.',
   goneElsewhere: 'This question was already answered (perhaps in another window or on the command line). Nothing was written; the questions are being read again.',
   answeredHere: 'Answered:',
@@ -790,8 +818,20 @@ export const LOCAL_IMPORTS_COPY = {
   retry: 'Retry',
   chipBlocks: 'Blocks Export',
   chipOptional: 'Optional',
+  chipAffectsRecord: 'Affects a Record',
   lastValidation: 'Last validation',
   blocksExport: 'What still blocks export',
+  startTimesUse: 'Use Each File’s Creation Time',
+  startTimesExamples: 'For example',
+  startTimesNotReached: 'Not covered here — answer these groups on their own',
+  startTimesEachGroup: 'Answer group by group instead',
+  questionDetails: 'Full wording',
+  runsListed: 'Runs',
+  optionalTitle: 'Optional and for information',
+  optionalLead: 'None of these blocks export.',
+  cannotExport: 'Cannot become records as they stand',
+  athenaMergesTitle: 'Your Athena merges that match no group',
+  validationAllPass: 'Every report passes.',
 } as const;
 
 export const KIND_LABEL: Record<string, string> = {
@@ -802,6 +842,7 @@ export const KIND_LABEL: Record<string, string> = {
   naming_counter_positions: 'Run Counters in File Names',
   clock_time_zone: 'Instrument Clock Time Zone',
   optional_values: 'Optional Values',
+  stated_utc_start_times: 'Start Times',
 };
 
 /** The order kinds are shown in, after the "answer once" section. */
@@ -894,6 +935,41 @@ export function sectionQuestions(questions: LocalQuestion[]): QuestionSection[] 
     if (qs.length) sections.push({ id: `kind-${kind}`, title: KIND_LABEL[kind] ?? kind, questions: qs });
   }
   return sections;
+}
+
+/**
+ * The questions page in the order a person works through it: `main`, the sections that block export or change a
+ * record (tiers 1 and 2), and `optional`, the rest (tier 3: optional values, disagreements no record field holds,
+ * questions for information only), shown folded. A per-group start-time question that a beamtime question on this
+ * page answers at once (`answered_at_once_by`) is not a section entry of its own: it is listed under that question
+ * (`nested`), where it stays answerable. Every question lands exactly once.
+ */
+export function pageSections(questions: LocalQuestion[]): {
+  main: QuestionSection[];
+  optional: QuestionSection[];
+  nested: Map<string, LocalQuestion[]>;
+  order: string[];
+} {
+  const ids = new Set(questions.map((q) => q.question_id));
+  const nested = new Map<string, LocalQuestion[]>();
+  const listed: LocalQuestion[] = [];
+  for (const q of questions) {
+    const parent = q.answered_at_once_by;
+    if (parent && parent !== q.question_id && ids.has(parent)) {
+      nested.set(parent, [...(nested.get(parent) ?? []), q]);
+    } else {
+      listed.push(q);
+    }
+  }
+  const main = sectionQuestions(listed.filter((q) => q.blocking || q.tier <= 2));
+  const optional = sectionQuestions(listed.filter((q) => !(q.blocking || q.tier <= 2))).map((sec) => ({
+    ...sec,
+    id: `optional-${sec.id}`,
+  }));
+  const order = [...main, ...optional].flatMap((sec) =>
+    sec.questions.flatMap((q) => [q.question_id, ...(nested.get(q.question_id) ?? []).map((n) => n.question_id)]),
+  );
+  return { main, optional, nested, order };
 }
 
 /** A value as text, for display only (never sent back). */

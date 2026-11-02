@@ -100,12 +100,17 @@ def test_no_protocol_and_no_scan_are_said_apart_as_bundle_list_groups_says_them(
     assert extras[g2]["cannot_export_reason"] == "no_scans"
     # r7 J8: one code for a group with no scan, before and after `isaac process` records it as not applicable
     assert extras[g3]["cannot_export_reason"] == "no_scans"
-    blocks = LB.progress(grouped, b, {"status": "VALID"})["blocks_export"]
-    assert ("1 group(s) have no applicable processing protocol (no_xas_channel: 1), so they cannot become complete "
-            "records yet.") in blocks, blocks
-    assert ("2 group(s) list no scan (no_scans), so there is nothing to process and they cannot become complete records "
-            "as they stand.") in blocks, blocks
-    # the other six live groups have scans and no result: nothing to approve until `isaac process` runs
+    p = LB.progress(grouped, b, {"status": "VALID"})
+    blocks = p["blocks_export"]
+    # r7 J2: a group that cannot export is said ONCE, by its cannot_export_reason, and counts toward nothing else:
+    # not among the proposed groups to confirm, nor the groups with nothing to approve
+    assert p["cannot_export"]["total"] == 3, p["cannot_export"]
+    assert p["cannot_export"]["by_reason"] == {"no_scans": 2, "processing_not_applicable:no_xas_channel": 1}
+    assert p["cannot_export"]["statement"].startswith("3 of the 9 live group(s) cannot become a record as they stand ("
+                                                      "no_scans for 2 (none of its runs lists a scan), "
+                                                      "processing_not_applicable:no_xas_channel for 1 ("), p["cannot_export"]
+    assert not [s for s in blocks if "no_scans" in s or "no_xas_channel" in s], blocks
+    assert "6 record group(s) are proposed, not confirmed" in " ".join(blocks), blocks
     assert "6 record group(s) have no processing result to approve: run `isaac process` first." in blocks, blocks
 
 

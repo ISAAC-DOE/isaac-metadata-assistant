@@ -263,13 +263,14 @@ def test_progress_counts_only_live_curves_awaiting_a_decision(grouped):
         {"result_id": "p-dead", "group_id": dead, "source": "isaac_protocol", "state": B.STATE_NEEDS_REVIEW, "applicability": ok},
         {"result_id": "p-dead-na", "group_id": dead, "source": "isaac_protocol", "state": B.STATE_NEEDS_REVIEW, "applicability": na},
     ]
-    blocks = LB.progress(grouped, b, {"status": "OK"})["blocks_export"]
+    p = LB.progress(grouped, b, {"status": "OK"})
+    blocks = p["blocks_export"]
     # counted BY GROUP (questions._curve): g1's open curve; g2's not-applicable result says no_scans, so it is
-    # counted as a group with no scan, never as one without a protocol (as `bundle list groups` says it)
+    # a group that cannot export, said once by its cannot_export_reason (as `bundle list groups` says it), never as
+    # one without a protocol, and counted toward nothing in blocks_export (r7 J2)
     assert "1 record group(s) have a processing result awaiting a decision and no approved curve." in blocks, blocks
-    assert ("1 group(s) list no scan (no_scans), so there is nothing to process and they cannot become complete "
-            "records as they stand.") in blocks, blocks
-    assert not [s for s in blocks if "no applicable processing protocol" in s], blocks
+    assert p["cannot_export"]["by_reason"] == {"no_scans": 1}, p["cannot_export"]
+    assert not [s for s in blocks if "no applicable processing protocol" in s or "no_scans" in s], blocks
 
 
 # --- 6. one file statement asked per group ----------------------------------------------------

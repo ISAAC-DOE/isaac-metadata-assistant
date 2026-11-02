@@ -273,3 +273,49 @@
 /* The section jump list above the questions: one wrapped line of links with their counts. */
 .li-jumps { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2xs) var(--space-sm); }
 .li-jumps ul { display: flex; flex-wrap: wrap; gap: var(--space-2xs) var(--space-md); margin: 0; padding: 0; list-style: none; }
+
+/* A question card, compact: one line of facts (field, reach), the reason, then the answer. */
+.li-facts { overflow-wrap: anywhere; }
+.li-why {
+  margin: 0;
+  max-width: 72ch;
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+}
+.li-source { overflow-wrap: anywhere; }
+.li-suggestion-head .li-value { margin: 0; }
+/* "I don't know" and "Reject" are there when needed, never competing with the answer. */
+.li-quiet.btn-secondary {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-secondary);
+}
+.li-quiet.btn-secondary:hover:not(:disabled) { border-color: var(--border); color: var(--text-primary); }
+/* The folded "optional" group and the per-group start-time questions under the beamtime one. */
+.li-optional > summary,
+.li-nested > summary { font-weight: var(--font-weight-semibold); color: var(--text-strong); }
+.li-optional { margin-top: var(--space-md); }
+.li-bundle-head { display: flex; flex-direction: column; gap: var(--space-xs); }
+/* A bundle card's one action sits with its name. */
+.li-card-action { margin-left: auto; }
+/* Your name and the filters: one row of controls above the questions, wrapping on a narrow screen. */
+.li-controls { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-md) var(--space-lg); }
+.li-controls > .li-name { flex: 1 1 18rem; max-width: 26rem; }
+.li-controls > .li-filters { flex: 2 1 22rem; }
+.li-examples li { overflow-wrap: anywhere; }
+
+/* Round-2 overlay fixes. A suggestion is a dashed-ruled row, not a card inside the question card: the dashed rule
+   still says "not confirmed" without boxing it. */
+.li-question .li-suggestion {
+  padding: var(--space-sm) 0 0;
+  border: 0;
+  border-top: 1px dashed var(--border-strong);
+  border-radius: 0;
+  background: none;
+}
+.li-question-text { text-wrap: balance; }
+.li-why { max-width: 65ch; }
+.li-meta,
+.li-hint { max-width: 66ch; }
+.li-progress > .li-h4 { margin-top: var(--space-sm); }
+.li-bundle-head > .li-meta { text-wrap: pretty; }
