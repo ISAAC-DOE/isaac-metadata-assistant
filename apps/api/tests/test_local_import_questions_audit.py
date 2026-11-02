@@ -78,8 +78,9 @@ def test_question_ids_of_the_grouped_corpus_are_pinned(grouped):
     p = Q.consolidate(M.load(grouped))
     # the condition labels (labels.py) are NEW questions beside these; every id here is unchanged
     ids = sorted(q["question_id"] for q in p["questions"] if q["kind"] != L.KIND)
-    assert sorted(q["label"] for q in p["questions"] if q["kind"] == L.KIND) == ["filter", "history", "history",
-                                                                                "sample_id", "tag"]
+    # r8: the follows question is asked whenever a chain was held (informational here: it says why)
+    assert sorted(q["label"] for q in p["questions"] if q["kind"] == L.KIND) == ["filter", "follows", "history",
+                                                                                "history", "sample_id", "tag"]
     assert len(ids) == 114
     assert hashlib.sha1("\n".join(ids).encode()).hexdigest() == "b23cc1074f8eff80bbb9c2b886300d9ebe993405"
     expected = {
@@ -136,10 +137,11 @@ def test_a_valued_candidate_is_still_confirmed(grouped):
 def test_a_question_no_answer_can_reach_the_record_is_informational(grouped):
     p = Q.consolidate(M.load(grouped))
     info = [q for q in p["questions"] if q.get("informational")]
+    # r8: "links" is the follows question that proposes no link and says why each chain was held
     assert {q["target_field_path"] for q in info} == {
         "assets[].uri", "measurement.series[].channels[].name",
-        "measurement.series[].independent_variables[].values", "sample.sample_id"}
-    assert len(info) == p["counts"]["informational"] == 37
+        "measurement.series[].independent_variables[].values", "sample.sample_id", "links"}
+    assert len(info) == p["counts"]["informational"] == 38
     for q in info:
         assert q["blocking"] is False and q["lands_in_record"] is False and q["allowed_decisions"] == []
         assert q["answer_command"].startswith("# nothing to answer")

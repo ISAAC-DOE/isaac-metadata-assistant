@@ -845,6 +845,14 @@ def group_list_extras(bundle: Mapping) -> dict[str, dict]:
         if exported:
             row["exported_file"] = exported[:GROUP_ROW_FILES]
             row["exported_file_note"] = "the scientist's exported/processed file of a run: context, its data not merged"
+        care = [sr.get("condition") for sr in g.get("split_reasons") or ()
+                if isinstance(sr, Mapping) and sr.get("code") == "conflicting_condition"]
+        if care:
+            # r8 MED 6: the group merges scans its files read at different conditions (no reading printed here)
+            row["needs_care"] = {"code": "conflicting_condition", "conditions": sorted({str(c) for c in care}),
+                                 "note": ("it merges scans read at different " + ", ".join(sorted({str(c) for c in care}))
+                                          + f": check it before a bulk confirm (`isaac bundle show <bundle_dir> group "
+                                          f"{g['group_id']}` gives the readings)")}
         reason = reasons.get(g["group_id"])
         if reason is not None:
             row["cannot_export_reason"] = reason
@@ -1474,6 +1482,9 @@ def _question_exposures(page: Sequence[Mapping], bundle: Mapping) -> list[tuple[
     shown = [("candidate", h["candidate_id"]) for q in page for h in q["hints"] if h.get("candidate_id")]
     shown += [("conflict", q["targets"][0]["id"]) for q in page if q["kind"] == "resolve_conflict"]
     shown += [("candidate", cid) for q in page for cid in Q.confirm_value_shown(bundle, q)]
+    # r8: a condition-label question's not_proposed rows quote the readings of the files' disagreements
+    shown += [("conflict", r["conflict_id"]) for q in page if q.get("kind") == "condition_label"
+              for h in q.get("not_proposed") or () for r in h.get("readings") or () if r.get("conflict_id")]
     return list(dict.fromkeys(shown))
 
 
@@ -1495,6 +1506,11 @@ def _show_consolidated_question(args) -> int:
             if seen is not None and (q is None or seen["answered_targets"]):
                 extra = {k: seen[k] for k in ("status", "answered_targets", "current_answers", "current_answers_total", "statement") if k in seen}
                 q = q or seen
+        if q is None:
+            # r8: an answered condition-label question is still shown under its id, with every group it holds
+            from . import labels as L
+
+            q = L.question_by_id(bundle, args.id)
         if q is None:
             raise M.MutationRefused(
                 f"No question with id {args.id!r} in this bundle (`isaac bundle questions <dir>` lists the ids).", code=EXIT_NOT_FOUND)
@@ -1853,7 +1869,9 @@ def cmd_bundle_decide(args) -> int:
             return M.decide_question(
                 Path(args.bundle_dir),
                 question_id=args.question,
-                only=args.only,
+                # r8: several --only answer each named scope with the one decision (all or nothing)
+                only=args.only[0] if args.only and len(args.only) == 1 else None,
+                only_scopes=list(args.only) if args.only and len(args.only) > 1 else None,
                 field=args.field,
                 extra_targets=targets,
                 same_reading=args.same_reading,
@@ -2005,7 +2023,7 @@ def _said_key(text: Any) -> str:
     """A warning or note as said once (``records.group_by_text``): its question id is the one part that differs."""
     from . import records as R
 
-    return R._QUESTION_ID_IN_TEXT.sub("<question id>", str(text))
+    return R.fold_key(text)
 
 
 def _repeated_texts(texts_per_row: Sequence[Sequence[Any]]) -> set[str]:
@@ -2388,7 +2406,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
                    help="a target id; give it once per target to decide several at once (all or nothing)")
     q.add_argument("--targets-file")
     q.add_argument("--question", help="answer a consolidated question: one decision per target, each listed")
-    q.add_argument("--only", help="with --question: only this scope (group:<id> or run:<id>) — a per-group override")
+    q.add_argument("--only", action="append",
+                   help="with --question: only this scope (group:<id> or run:<id>) — a per-group override; give it once "
+                        "per scope to answer several with the one decision (all or nothing)")
     q.add_argument("--field", help="with --question on an optional-values question: the one field being answered")
     q.add_argument("--same-reading", action="store_true",
                    help="with --question on a question that names a same_reading_group: answer every open question of "

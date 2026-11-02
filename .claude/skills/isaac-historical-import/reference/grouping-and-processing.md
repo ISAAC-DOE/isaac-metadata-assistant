@@ -394,7 +394,10 @@ an element/edge already named for the group: approved, proposed, or the group's 
   names. Say so, and ask the scientist to confirm or split.
 - **A groups row** (`bundle list <bundle> groups`) has `files` (the first 3 member stems; `files_more`
   counts the rest), `scans`, `reader` (the runs' source type), `exported_file` when a member is the
-  scientist's exported/processed file of a run (kept as context, its data not merged: say so), and, when known, `cannot_export_reason`:
+  scientist's exported/processed file of a run (kept as context, its data not merged: say so), `needs_care`
+  when the group merges scans its files read at different conditions (`conflicting_condition`, e.g. two filter
+  settings in one file: check it before a bulk confirm; `bundle show <bundle> group <id>` gives the readings),
+  and, when known, `cannot_export_reason`:
   `no_scans` (no run lists a scan: no scan file in a `_dir` folder and no energy scan with data in its SPEC
   file; the same code before and after `isaac process`), `processing_not_applicable:<code>` (e.g. an `.mca` or `xes` file:
   no ISAAC protocol covers it), or `not_a_measurement_run` (every run is a reference standard, an alignment

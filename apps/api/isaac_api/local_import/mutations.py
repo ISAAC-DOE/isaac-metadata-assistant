@@ -2180,15 +2180,18 @@ def decide_question(
                                           ("--qc-status", qc_status), ("--element", element), ("--edge", edge),
                                           ("--positions", positions), ("--target", list(extra_targets)),
                                           ("--same-conditions", same_conditions), ("--as-said", as_said),
-                                          ("--same-reading", same_reading), ("--only (several scopes)", only_scopes)) if v]
+                                          ("--same-reading", same_reading)) if v]
             if given:
                 raise MutationRefused(f"Question {question_id} is answered with --decision (and --value for correct, "
                                       f"--only group:<id> for one group); {', '.join(given)} is refused. Nothing was "
                                       "recorded.")
             on = copy.deepcopy(bundle) if dry_run else bundle
+            if only and only_scopes:
+                raise MutationRefused("Name one scope (--only) or several, not both. Nothing was recorded.")
             try:
-                result = L.decide(on, asked_label, decision=decision, value=value, only=only, by=by, orcid=orcid,
-                                  note=note, same_sample=same_sample)
+                # r8: several --only answer each of those groups with the one value (labels.decide)
+                result = L.decide(on, asked_label, decision=decision, value=value, only=list(only_scopes) if only_scopes else only,
+                                  by=by, orcid=orcid, note=note, same_sample=same_sample)
             except L.LabelRefused as exc:
                 raise MutationRefused(str(exc)) from None
             if dry_run:
@@ -2312,6 +2315,15 @@ def decide_question(
         result = _said_on_list(_with_answered(_with_kept(kept_overrides, reached(bundle, recorded)), bundle, before), as_said)
         if same_members:
             result = _with_same_reading(result, same_members)
+        conflicts = [t for t in params["target_ids"] if str(t).startswith("conf-")]
+        if conflicts and recorded.get("recorded") and decision in ("confirm", "correct"):
+            # MED 5 (r8): a settled reading a condition label is proposed from feeds that label for the group
+            from . import labels as L
+
+            fed = L.feed_from_conflicts(bundle, conflicts, by=by, orcid=orcid, note=note)
+            if fed:
+                result = {**result, "statement": " ".join(x for x in (result.get("statement"), fed["statement"]) if x),
+                          **({"labels_recorded": fed["recorded"]} if fed["recorded"] else {})}
         if not nothing_to_save(bundle, recorded):
             save_bundle(bundle_dir, bundle)
         return (result, bundle_version(bundle_dir)) if with_version else result

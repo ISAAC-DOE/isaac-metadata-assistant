@@ -72,7 +72,9 @@ def _questions(bdir: Path, **kw) -> dict[str, dict]:
     out = {}
     for q in Q.consolidate(M.load(bdir), **kw)["questions"]:
         if q["kind"] == L.KIND:
-            out[q["label"] if q["label"] != "history" else q["partition"]] = q
+            key = q["label"] if q["label"] != "history" else q["partition"]
+            # r8: a label's residual question (the groups it proposed nothing for) is its own key
+            out[f"{key}:{L.RESIDUAL}" if q["partition"] == L.RESIDUAL else key] = q
     return out
 
 
@@ -223,6 +225,8 @@ def test_reject_writes_nothing_and_answers_the_question(bdir):
     _answer(bdir, q["question_id"], "reject")
     assert L.FILTER_PATH not in _draft(bdir, CHAIN[0])[0]["fields"]
     assert "filter" not in _questions(bdir)
+    # r8 MED 4: the group ISAAC proposed nothing for is still asked, under a new id
+    assert _questions(bdir)[f"filter:{L.RESIDUAL}"]["question_id"] == L.question_id("filter", L.RESIDUAL)
 
 
 def test_refusals_say_why_and_record_nothing(bdir):
@@ -385,24 +389,34 @@ def _hold_electrode(b: dict, stem: str) -> str:
 
 def test_m1_a_group_isaac_could_not_place_joins_an_electrode_id_only_when_the_scientist_says_so(bdir):
     b = M.load(bdir)
-    held = _hold_electrode(b, OTHER)
+    held = _hold_electrode(b, CHAIN[2])  # electrode 04 by its own file name, held by a disagreeing reading
     q = _sid_q(b)
-    assert {h["group_id"]: h["reason"] for h in q["not_proposed"]}[held] == "the files' electrode readings disagree"
+    assert {h["group_id"]: h["reason"] for h in q["not_proposed"]}[held].startswith("the files' electrode readings disagree")
     target = f"{FOLDER}:ZZ4-04"
     with pytest.raises(L.LabelRefused, match="--same-sample"):
         _decide(b, "sample_id", "correct", value=target, only=f"group:{held}")
     out = _decide(b, "sample_id", "correct", value=target, only=f"group:{held}", same_sample=True)
     assert out["same_sample"] and "same physical sample" in out["statement"]
     assert "--same-sample" in b["scientist_decisions"][-1]["note"]
-    # the reverse order: the bulk confirm that follows is recorded, and names the held answer
+    # the bulk confirm that follows records the electrode's other groups, and the other electrode its own id
+    _decide(b, "sample_id")
+    assert {_slot_value(b, L.SAMPLE_ID_PATH, s) for s in CHAIN} == {target}
+    assert _slot_value(b, L.SAMPLE_ID_PATH, OTHER) == f"{FOLDER}:ZZ4-05"
+
+
+def test_m1_a_bulk_confirm_names_a_held_group_that_holds_the_id(bdir):
+    b = M.load(bdir)
+    held = _hold_electrode(b, CHAIN[2])
+    target = f"{FOLDER}:ZZ4-04"
+    _decide(b, "sample_id", "correct", value=target, only=f"group:{held}", same_sample=True)
     out = _decide(b, "sample_id")
     assert out["shares_id_with"] and out["shares_id_with"][0]["value"] == target
-    assert {_slot_value(b, L.SAMPLE_ID_PATH, s) for s in (*CHAIN, OTHER)} == {target}
+    assert {_slot_value(b, L.SAMPLE_ID_PATH, s) for s in CHAIN} == {target}
 
 
 def test_m1_after_a_bulk_confirm_a_held_group_still_needs_the_statement(bdir):
     b = M.load(bdir)
-    held = _hold_electrode(b, OTHER)
+    held = _hold_electrode(b, CHAIN[2])
     _decide(b, "sample_id")
     with pytest.raises(L.LabelRefused, match="--same-sample"):
         _decide(b, "sample_id", "correct", value=f"{FOLDER}:ZZ4-04", only=f"group:{held}")
@@ -441,9 +455,13 @@ def test_m3_chains_compare_normalised_conditions(bdir):
 def test_m3_a_stage_with_no_settled_history_holds_the_chain(bdir):
     b = M.load(bdir)
     _group(b, CHAIN[1])["basis"]["conditions"]["cycling_state"]["kind"] = "conflicting"
-    assert not any(p["label"] == "follows" for p in L.proposals(b)), "17 never follows 11 over an unsettled stage"
+    fo = next(p for p in L.proposals(b) if p["label"] == "follows")
+    assert not fo["items"], "17 never follows 11 over an unsettled stage"
     chains, held = L._chains(L._facts(b, Q.live_groups(b)))
     assert not chains and any("no settled history stage" in h["reason"] for h in held)
+    # r8 HIGH 2: the held chain is said, in an informational question
+    q = next(q for q in L.label_questions(b) if q["label"] == "follows")
+    assert q["informational"] and CHAIN[1] in q["text"] and "no settled history stage" in q["text"]
 
 
 def test_l2_an_archive_suffix_is_not_part_of_the_folder_label():

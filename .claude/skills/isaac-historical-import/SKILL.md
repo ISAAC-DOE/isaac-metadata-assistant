@@ -136,7 +136,7 @@ If `<isaac> bundle group --help` fails, say "grouping is not in this build", ski
 4. Page groups with `<isaac> bundle list <bundle> groups --limit 10` and the merge candidates (paging is
    in the reference). Present each in plain words: sample, conditions, how many scans, why runs were split
    ("these two differ in potential"). Say a merge candidate's `caution` before asking about it, and the care
-   flags in words: `merged_despite_engine_reading` (the importer read a difference), `sample_key_basis: name_stem` (no file states the sample).
+   flags in words: `merged_despite_engine_reading` (the importer read a difference), `sample_key_basis: name_stem` (no file states the sample), `needs_care: conflicting_condition` (it merges scans read at different conditions).
 5. Ask the scientist to **confirm, split or merge** each, in batches, with progress. A group that is
    not a result (alignment, a reference foil, a test scan) can be **left out** with `reject`; say it is
    never exported. Several accepted as shown: list each back, then one `--targets-file` confirm; never
@@ -189,7 +189,7 @@ when a live group's record needs it. Ask 3 to 5 per message, by theme, with prog
    instrument clock was set to (an IANA name); never suggest one.
 3. **The template**, for everything the files never state (see below); ask per group only what it leaves.
 4. **Conflicts that affect a record.** Ask `stated_utc_start_times` (every group's start at once) first. `affects_record: false` ones change no record: give their count.
-5. **Condition labels** (`condition_label`, one answer each; see the reference): sample id, filter, history, follows, tag.
+5. **Condition labels** (`condition_label`, one answer each; see the reference): electrode position (only when the files do not say which number is the electrode), sample id, filter, history, follows, tag. Groups ISAAC proposed nothing for stay asked (`not_proposed`); several `--only` answer several groups at once.
    Then the rest, if they want: optional questions (`--scope group:<id>` shows what blocks one group).
 
 A deferred question sorts last; do not re-ask it unless they offer. How to put each kind of question

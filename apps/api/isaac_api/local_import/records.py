@@ -2537,6 +2537,21 @@ def warning_summary(warned: Sequence[Mapping], *, first: Iterable[str] | None = 
 #: A question id as the warnings print it (``Q-`` and ten hex digits): the one part of a start-time note that differs
 #: between records.
 _QUESTION_ID_IN_TEXT = re.compile(r"\bQ-[0-9a-f]{6,}\b")
+#: r8 LOW: the parts of an in-situ note that differ between records: the file names it quotes, and the group its
+#: command names. Folded by code (:func:`fold_key`), with the count, every file name and every quoted token kept.
+_IN_SITU_LEAD = "what it was measured in would be absent from the record"
+_IN_SITU_STATED = re.compile(r"; the file names state (?P<said>.*?) \(quoted, never read as a value\)")
+_IN_SITU_ITEM = re.compile(r"(?P<tok>[^\s,;()]+) \((?P<file>[^()]*)\)")
+_GROUP_ID_IN_TEXT = re.compile(r"\brg-[0-9a-f]{6,}\b")
+
+
+def fold_key(text: Any) -> str:
+    """The text a warning is said once under: its question id as ``<question id>``; an in-situ note also without the
+    file names it quotes and with its group as ``<group id>`` (r8: the same note on ten records was said ten times)."""
+    t = _QUESTION_ID_IN_TEXT.sub("<question id>", str(text))
+    if _IN_SITU_LEAD in t:
+        t = _GROUP_ID_IN_TEXT.sub("<group id>", _IN_SITU_STATED.sub("; the file names state <tokens> (quoted)", t))
+    return t
 
 
 def group_by_text(per_record: Iterable[Iterable[str]]) -> list[dict]:
@@ -2547,23 +2562,34 @@ def group_by_text(per_record: Iterable[Iterable[str]]) -> list[dict]:
     per_record = [list(texts) for texts in per_record]
     seen: dict[str, dict] = {}
     for texts in per_record:
-        for key in dict.fromkeys(_QUESTION_ID_IN_TEXT.sub("<question id>", str(t)) for t in texts):
+        for key in dict.fromkeys(fold_key(t) for t in texts):
             row = seen.setdefault(key, {"text": key, "records": 0, "example_question": None})
             row["records"] += 1
     # the example id: the first one a text names, in the order the records were given
     for texts in per_record:
         for t in texts:
             m = _QUESTION_ID_IN_TEXT.search(str(t))
-            row = seen.get(_QUESTION_ID_IN_TEXT.sub("<question id>", str(t)))
+            row = seen.get(fold_key(t))
             if m and row is not None and row["example_question"] is None:
                 row["example_question"] = m.group(0)
+            said = _IN_SITU_STATED.search(str(t)) if row is not None and _IN_SITU_LEAD in str(t) else None
+            if said:
+                # r8 LOW: the in-situ note, said once, keeps every file name and every token it quotes
+                for item in _IN_SITU_ITEM.finditer(said.group("said")):
+                    row.setdefault("files", [])
+                    row.setdefault("quoted", [])
+                    if item.group("file") not in row["files"]:
+                        row["files"].append(item.group("file"))
+                    if item.group("tok") not in row["quoted"]:
+                        row["quoted"].append(item.group("tok"))
     return sorted(seen.values(), key=lambda r: -r["records"])
 
 
 def grouped_sentence(rows: Sequence[Mapping]) -> str:
     """One sentence for :func:`group_by_text` rows: each text once, with how many records carry it and one example."""
-    return "; ".join(f"{r['text']} ({r['records']} record(s)" + (f", e.g. question {r['example_question']}" if r["example_question"] else "") + ")"
-                     for r in rows)
+    return "; ".join(f"{r['text']} ({r['records']} record(s)" + (f", e.g. question {r['example_question']}" if r["example_question"] else "")
+                     + (f"; the file names state {', '.join(r['quoted'])}, in {', '.join(r['files'])}" if r.get("quoted") else "")
+                     + ")" for r in rows)
 
 
 def warnings_outcome_sentence(rows: Sequence[Mapping]) -> str:
@@ -2707,6 +2733,8 @@ def validate_records(bundle_dir: Path, *, run_portal=None, full: bool = False) -
             not_exportable_omitted=max(0, len(not_exportable) - REASONS_SHOWN),
             reports=f"{VALIDATION_DIR}/<group_id>.json holds each group's full report (every gate, verbatim).",
         )
+    # r8: the condition labels' own warnings (two ready records ISAAC cannot tell apart; a label not proposed)
+    warned = warned + L.record_warnings(bundle, fresh, [g for g, v in verdicts.items() if v == "exportable"])
     out.update(warning_summary(warned, first=[g for g, v in verdicts.items() if v == "exportable"], full=full,
                                where=f"{VALIDATION_DIR}/<group_id>.json lists each group's"))
     if portal_warned:
@@ -3274,7 +3302,7 @@ def name_partial_groups(group_ids: Sequence[str], said_each_record: Sequence[Seq
     for row in by_text:
         if row["records"] < n:
             row["group_ids"] = [g for g, texts in zip(group_ids, said_each_record)
-                                if row["text"] in {_QUESTION_ID_IN_TEXT.sub("<question id>", str(t)) for t in texts}]
+                                if row["text"] in {fold_key(t) for t in texts}]
     for row in portal_rows:
         if row["records"] < n:
             row["group_ids"] = [g for g, ws in portal_warned.items()
