@@ -237,6 +237,36 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   whose readings differ or that have none stay apart. An open-circuit run is never batched with a potential hold, and
   a reference or ex-situ group is never batched in. Each group's own question id still answers it with `--field`.
 
+## Condition labels
+
+Records that grouping keeps apart by condition (electrode, filter, cycling) can otherwise export with one body.
+ISAAC proposes five labels from the readings the grouping used. Each is a `condition_label` question at experiment
+scope. Nothing is written until the scientist answers. Each answer is one
+`<isaac> bundle decide <bundle> --question <Q> --decision confirm --by "<name>"`.
+
+- **Sample id** (`sample.sample_id`). One id per electrode, from the number the grouping reads as the electrode
+  (the second file-name number on BL15-2). Proposed as `<folder>:<sample>-<electrode>`. A sample id names one
+  physical object, on every record of it. Their own convention: `--decision correct --value "{sample}-e{electrode}"`
+  (also `{beamtime}`). One electrode's own id: add `--only group:<id>`; it goes on every group of that electrode.
+  Two electrodes never get one id: that is refused. Not proposed when a counter answer names that position, when
+  the grouping set the number aside, or when one number sits beside two sample names (`not_proposed` says which).
+- **Filter** (`system.configuration.beam_attenuator`, the portal vocabulary's key). Proposed as `filter<n>`, the
+  number the file name and the scan header's `filter` motor state. Their own form: `--value "Al filter {filter}"`.
+- **History** (`context.electrochemistry.notes`). One question per file-name token (`beforeCycling`,
+  `after1500Cycling`). The proposal only splits the token into words ("after 1500 cycling"). Never say what the
+  number means (mV or cycles): ask them, and record their sentence with `--decision correct --value "<sentence>"`.
+  Not `sample.material.provenance`: the portal's list makes that commercial, synthesized, and so on.
+  Groups whose files disagree are asked on their own (`history=unsettled`, `--only group:<id>`).
+- **Follows** (`links`, rel `follows`, basis `same_sample_id`). For one electrode under otherwise equal conditions,
+  each later stage follows the one before, by run number (or by the file-creation instant). Read the pairs back.
+  Confirm or reject; there is no correct. The export writes a link only when both records carry the same sample id.
+- **Tag** (`tags`). One tag for the beamtime, from the folder name, lowercase and hyphenated (at most 64 characters).
+
+A group ISAAC proposed nothing for is in `not_proposed`. Answer it with `--only group:<id> --decision correct
+--value <value>`, or leave it. `reject` records that the label is not written. The answers are kept as per-run
+slots in `missing_values` (their `reason` names the question); they are never shown as other questions.
+The workbook and the template have no column for these: one decide call answers each question.
+
 ## Recording
 
 - **An answer to a consolidated question:** `<isaac> bundle decide <bundle> --question <Q> --decision correct|confirm --value <v> --by "<name>" [--note "..."]`. It records one decision per target, each listed in the reply; read the list back. `--only group:<id>` answers for one group only (a per-group override of an experiment-wide answer); `--field <path>` picks the one field when a question covers several optional fields.

@@ -27,6 +27,7 @@ from pathlib import Path
 
 import pytest
 
+from isaac_api.local_import import labels as L
 from isaac_api.local_import import bundle as B
 from isaac_api.local_import import cli
 from isaac_api.local_import import mutations as M
@@ -87,7 +88,8 @@ def _conflict_q(payload, conflict_id):
 
 
 def test_every_question_id_of_the_synthetic_grouped_bundle_is_unchanged(grouped):
-    ids = sorted(q["question_id"] for q in Q.consolidate(M.load(grouped))["questions"])
+    # the condition labels (labels.py) are new questions beside these: every id here is unchanged
+    ids = sorted(q["question_id"] for q in Q.consolidate(M.load(grouped))["questions"] if q["kind"] != L.KIND)
     assert (len(ids), hashlib.sha256("\n".join(ids).encode()).hexdigest()) == GOLDEN_IDS
 
 

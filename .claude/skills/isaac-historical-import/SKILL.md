@@ -189,7 +189,8 @@ when a live group's record needs it. Ask 3 to 5 per message, by theme, with prog
    instrument clock was set to (an IANA name); never suggest one.
 3. **The template**, for everything the files never state (see below); ask per group only what it leaves.
 4. **Conflicts that affect a record.** Ask `stated_utc_start_times` (every group's start at once) first. `affects_record: false` ones change no record: give their count.
-5. **The rest, if they want**: optional questions (`--scope group:<id>` shows what blocks one group).
+5. **Condition labels** (`condition_label`, one answer each; see the reference): sample id, filter, history, follows, tag.
+   Then the rest, if they want: optional questions (`--scope group:<id>` shows what blocks one group).
 
 A deferred question sorts last; do not re-ask it unless they offer. How to put each kind of question
 is in the reference; in short:
@@ -197,8 +198,7 @@ is in the reference; in short:
 - **Closed lists.** Map their words to one allowed value, say it back ("in situ → `in_situ`,
   right?") and record it only on their yes. A confirm question states the value it records: say it back.
 - **No value yet** (no `confirm` in `allowed_decisions`): never invent one; ask, then `correct --value`.
-- **Not asked**: `informational` questions (mention their count once) and `covered_by` ones (answered
-  by that experiment question; ask per group only if a group differs).
+- **Not asked**: `informational` questions (mention their count once) and `covered_by` ones (answered by that experiment question; ask per group only if a group differs).
 - **Asked again** or **no reading fits**: give the reason, show the allowed values or `utc_readings`, ask.
 - **An answer not on the list**: if no allowed value fits and they keep their own word, run
   `decide … --value "<their exact word>" --as-said` once: it records no decision but keeps their word as a

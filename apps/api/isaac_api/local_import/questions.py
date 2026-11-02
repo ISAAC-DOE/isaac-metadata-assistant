@@ -729,7 +729,11 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         d = decisions.get(("missing_value", m["value_id"]))
         return d is None or d.get("decision") in B.NEUTRAL_DECISIONS
 
+    from .labels import is_label_slot, label_questions
+
     for m in bundle["missing_values"]:
+        if is_label_slot(m):
+            continue  # a condition label's answer: asked and shown by its own question (labels.label_questions)
         again = None
         back = False  # asked here only because it was answered (answered_out)
         if not include_answered and dead_slot(m):
@@ -1452,6 +1456,8 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         beamtime_start = _stated_utc_start_question(questions, bundle, group_of, run_by_id, decisions)
         if beamtime_start is not None:
             questions.append(beamtime_start)
+        # the condition labels (labels.py): new questions, each with its own id; no other question changes
+        questions += label_questions(bundle, decisions=decisions, groups=groups, include_answered=include_answered)
     questions.sort(key=order)
     _quote_passing_once(questions, passing_of)
     for q in questions:

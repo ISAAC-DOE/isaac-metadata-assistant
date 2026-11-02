@@ -22,6 +22,7 @@ import shutil
 
 import pytest
 
+from isaac_api.local_import import labels as L
 from isaac_api.local_import import bundle as B
 from isaac_api.local_import import cli
 from isaac_api.local_import import mutations as M
@@ -81,7 +82,8 @@ def xdc(tmp_path):
 
 
 def _ids(payload) -> list[str]:
-    return sorted(q["question_id"] for q in payload["questions"])
+    # the condition labels (labels.py) are new questions beside these, never one of them
+    return sorted(q["question_id"] for q in payload["questions"] if q["kind"] != L.KIND)
 
 
 def _absorber_argv(bdir, element="Fe", edge="K", *extra):
