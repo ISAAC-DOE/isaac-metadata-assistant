@@ -579,18 +579,20 @@ export const SURFACES: readonly Surface[] = [
    * Registered with the cost `QA-020` states: new cells, measured on the platform
    * that runs them (darwin locally, linux from CI).
    *
-   * Schema Proposals is three `?tab=` panels on one route; all three stay mounted
-   * (hidden, not unmounted), so each tab is its own entry, the same way Settings'
-   * tabs are. The browse and propose gates render only once the vocabulary has
-   * arrived. The Proposals tab has no heading of its own when the server holds no
-   * proposals (the read-only e2e backend holds none), so its gate is the panel's
-   * named region and `app.open`'s loading-panel wait is what keeps the scan off the
-   * skeleton.
+   * Schema Proposals has been ONE PAGE since 2026-11-02 (no tablist): the form, the
+   * proposals beside it, and the whole vocabulary folded below the form. The three ids
+   * are kept so every sweep keyed on them still runs, each now a different way in:
+   * `?tab=browse` (an old link, still honoured) opens the folded vocabulary, so its gate
+   * is the vocabulary's "Which list?" group; the plain page's gate is the form's one
+   * "List" choice; `?tab=proposals` scrolls to the Proposals column, whose named region
+   * is its gate. The first two render only once the vocabulary has arrived; the region
+   * is there from the start, so `app.open`'s loading-panel wait is what keeps the scan
+   * off the skeleton (the read-only e2e backend holds no proposals).
    */
   {
     id: 'schema-proposals',
-    name: 'Schema Proposals — Browse the Vocabulary',
-    path: '/schema-proposals',
+    name: 'Schema Proposals — Browse the Whole Vocabulary (opened)',
+    path: '/schema-proposals?tab=browse',
     scope: 'ordinary',
     ready: { role: 'group', name: 'Which list?' },
   },
@@ -599,7 +601,7 @@ export const SURFACES: readonly Surface[] = [
     name: 'Schema Proposals — Propose a Change',
     path: '/schema-proposals?tab=propose',
     scope: 'ordinary',
-    ready: { role: 'combobox', name: 'Section' },
+    ready: { role: 'combobox', name: 'List' },
   },
   {
     id: 'schema-proposals-list',
@@ -719,14 +721,6 @@ export const TABBED_SURFACES = [
     tabs: ['Overview', 'Build & Verification'],
     panelIdPrefix: 'statistics-tabpanel-',
   },
-  {
-    // Schema Proposals' own tablist (2026-10-29). Hand-rolled in
-    // `SchemaProposals.tsx` rather than `RovingTabs`, which is exactly why the APG
-    // structure, keyboard and deep-link checks above are worth running on it.
-    id: 'schema-proposals',
-    path: '/schema-proposals',
-    tablistName: 'Schema Proposals sections',
-    tabs: ['Browse the Vocabulary', 'Propose a Change', 'Proposals'],
-    panelIdPrefix: 'schema-proposals-panel-',
-  },
+  // Schema Proposals' own tablist (2026-10-29) was removed on 2026-11-02, when the
+  // screen became one page with no tabs; its three surfaces above still catalogue it.
 ] as const;

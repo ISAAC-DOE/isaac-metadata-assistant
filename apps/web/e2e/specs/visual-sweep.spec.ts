@@ -725,7 +725,7 @@ const STATES: readonly VisualState[] = [
    */
   {
     id: 'schema-proposals-browse',
-    what: 'Schema Proposals → Browse the Vocabulary — the portal and schema term lists',
+    what: 'Schema Proposals → Browse the Whole Vocabulary (opened by ?tab=browse) — the portal and schema term lists',
     async reach({ page, app }) {
       await app.open(surface('schema-proposals'));
       const which = page.getByRole('group', { name: 'Which list?' });
@@ -735,12 +735,12 @@ const STATES: readonly VisualState[] = [
   },
   {
     id: 'schema-proposals-propose',
-    what: 'Schema Proposals → Propose a Change — the proposal form, empty',
+    what: 'Schema Proposals → Propose a Change — the one page, the form empty',
     async reach({ page, app }) {
       await app.open(surface('schema-proposals-propose'));
-      const section = page.getByRole('combobox', { name: 'Section' });
-      await expect(section).toBeVisible({ timeout: 20_000 });
-      return section;
+      const list = page.getByRole('combobox', { name: 'List' });
+      await expect(list).toBeVisible({ timeout: 20_000 });
+      return list;
     },
   },
   {

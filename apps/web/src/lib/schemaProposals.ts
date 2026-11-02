@@ -476,7 +476,7 @@ export const STATUS_LABEL: Record<SchemaProposalStatus, string> = {
 
 export const SCHEMA_PROPOSALS_COPY = {
   title: 'Schema Proposals',
-  lead: 'Is a word you need missing from the ISAAC vocabulary? Draft a proposal here.',
+  lead: 'Is a term, a list or a field you need missing from the ISAAC standard? Propose it here.',
   /*
    * THE ONE STATEMENT of what ISAAC does and does not do with a proposal. It appears once, in the
    * page lead, and nowhere else on the screen (`schema-proposals.test.tsx` counts occurrences).
@@ -488,15 +488,24 @@ export const SCHEMA_PROPOSALS_COPY = {
   savedNotice:
     'Saved as a draft on this server \u2014 not sent anywhere. Drafts here are temporary; copy or ' +
     'download the portal payload to send it.',
-  tabBrowse: 'Browse the Vocabulary',
-  tabPropose: 'Propose a Change',
-  tabProposals: 'Proposals',
+  /** The page's three parts: the form's heading, the list's heading, and the folded vocabulary's summary. */
+  proposeTitle: 'Propose a Change',
+  proposalsTitle: 'Proposals',
+  browseTitle: 'Browse the Whole Vocabulary',
   browseLead:
-    'Two lists, side by side, because they are not the same list: the ISAAC portal\'s vocabulary ' +
-    '(a copy taken at one point in time) and the fixed value lists in the record schema this build ' +
-    'validates against. They overlap only in part, and neither is the live portal.',
-  proposeLead:
-    'Say what is missing and where it is used. A reviewer writes the definition from your description.',
+    'The portal\'s vocabulary is a copy taken at one point in time, the record schema\'s fixed lists are ' +
+    'what this build validates records against, and the two overlap only in part.',
+  /*
+   * THE KIND CHOOSER. Each option's title is its accessible name and its hint is its description, so the
+   * hint says what the kind is for in one line and the title stays short. The third is offered only when
+   * the server describes `schema_change`.
+   */
+  kindTerm: 'A term in an existing list',
+  kindTermHint: 'One word a list lacks, for example a technique.',
+  kindList: 'A new list of allowed terms',
+  kindListHint: 'A field that should take a fixed set of words.',
+  kindField: 'A new field in the ISAAC schema',
+  kindFieldHint: 'A change to the schema itself; you get a document for the standard\'s owners, not a portal proposal.',
   /*
    * THE ONE STATEMENT, on the form, that the third type is not a portal proposal. The server's own
    * `schema_change.not_a_portal_proposal` sentence is shown beside it; this says what the export is.
@@ -507,10 +516,7 @@ export const SCHEMA_PROPOSALS_COPY = {
   schemaChangeSaved:
     'Saved as a draft on this server \u2014 not sent anywhere. Drafts here are temporary; copy or ' +
     'download the change-request document to share it with the standard\'s owners.',
-  localImportTitle: 'Load drafts from a local import',
-  localImportLead:
-    'A term proposal asks the standard’s owners to add one word to one list of allowed values; a local ' +
-    'import’s drafts file proposes the words that import found outside those lists.',
+  readyLead: 'Propose one to open it in the form, with the description left to you. Nothing is sent until you save.',
   localImportWhereLocal:
     'Nothing leaves your computer: this page talks to the ISAAC server running on this computer, and a ' +
     'proposal you save is kept there as a draft, not sent anywhere.',

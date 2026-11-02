@@ -499,7 +499,7 @@ export const ROUTES = {
   memory: '/memory',
   governance: '/governance',
   statistics: '/statistics',
-  /** SCHEMA PROPOSALS — drafting proposals to change the official vocabulary. `?tab=browse|propose|proposals`. */
+  /** SCHEMA PROPOSALS — one page: propose a term, list or field; the proposals beside it; the vocabulary folded below. Old `?tab=browse|proposals` links scroll there. */
   schemaProposals: '/schema-proposals',
   /** LOCAL IMPORTS — the import progress overview; `?bundle=<folder name>` opens one bundle's questions. */
   localImports: '/local-imports',

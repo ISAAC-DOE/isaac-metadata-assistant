@@ -15,6 +15,7 @@ import {
   type RouteEntry,
 } from '../test/apiFixtures';
 import {
+  SCHEMA_PROPOSALS_COPY as COPY,
   canProposeTerm,
   categoryKeyOf,
   proposeTermHref,
@@ -221,7 +222,7 @@ function renderAt(path: string) {
 }
 
 const ROUTE = ROUTES.schemaProposals;
-const proposePanel = () => screen.getByRole('tabpanel', { name: 'Propose a Change' });
+const proposePanel = () => screen.getByRole('region', { name: 'Propose a Change' });
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -237,7 +238,8 @@ describe('a new field (schema change request)', () => {
       'GET /api/schema-proposals': list([]),
     });
     const first = renderAt(`${ROUTE}?tab=propose`);
-    await screen.findByRole('radio', { name: /Add a new field to the ISAAC schema/ });
+    const field = await screen.findByRole('radio', { name: COPY.kindField });
+    expect(field).toHaveAccessibleDescription(COPY.kindFieldHint);
     first.unmount();
     // Negative control: a server that predates the type is offered the portal's two only.
     const { schema_change: _drop, ...older } = baseVocabulary;
@@ -247,11 +249,12 @@ describe('a new field (schema change request)', () => {
       'GET /api/schema-proposals': list([]),
     });
     renderAt(`${ROUTE}?tab=propose`);
-    await screen.findByRole('radio', { name: 'Add a term to an existing list' });
-    expect(screen.queryByRole('radio', { name: /Add a new field/ })).toBeNull();
+    await screen.findByRole('radio', { name: COPY.kindTerm });
+    expect(screen.queryByRole('radio', { name: COPY.kindField })).toBeNull();
+    expect(screen.getAllByRole('radio', { name: /^A / })).toHaveLength(2);
   });
 
-  it('says the portal has no such type, lists only the real blocks of the section, and sends the change', async () => {
+  it('says the portal has no such type, lists the real blocks by section, and sends the change with the block\'s section', async () => {
     let sent: Record<string, unknown> | null = null;
     const saved = fieldProposal();
     stubFetchRoutes({
@@ -264,15 +267,20 @@ describe('a new field (schema change request)', () => {
       [`GET /api/schema-proposals/${saved.id}/change-request`]: { body: changeRequest(saved) },
     });
     renderAt(`${ROUTE}?tab=propose`);
-    fireEvent.click(await screen.findByRole('radio', { name: /Add a new field to the ISAAC schema/ }));
+    fireEvent.click(await screen.findByRole('radio', { name: COPY.kindField }));
     const panel = within(proposePanel());
+    // The server's sentence and the screen's own, once, as one quiet paragraph.
     expect(panel.getByText(NOT_PORTAL)).toBeInTheDocument();
-    fireEvent.change(panel.getByLabelText('Section'), { target: { value: 'Context' } });
+    expect(panel.getByText(NOT_PORTAL).closest('p')).toHaveTextContent(COPY.schemaChangeLead);
+    // One choice: no separate Section for a field, and every block grouped by its section.
+    expect(panel.queryByLabelText('Section')).toBeNull();
     const where = panel.getByLabelText('Where in the schema');
-    expect(within(where).getAllByRole('option').map((o) => o.textContent)).toEqual([
-      'Choose a block…',
-      'context',
-      'context.electrochemistry',
+    expect(within(where).getAllByRole('option')[0]).toHaveTextContent('Choose a block…');
+    const groups = Array.from(where.querySelectorAll('optgroup'));
+    expect(groups.map((g) => g.label)).toEqual(['Context', 'System']);
+    expect(groups.map((g) => Array.from(g.querySelectorAll('option')).map((o) => o.textContent))).toEqual([
+      ['context', 'context.electrochemistry'],
+      ['system'],
     ]);
     fireEvent.change(where, { target: { value: '@context.electrochemistry' } });
     expect(panel.getByText(/refuses any key the schema does not declare/)).toBeInTheDocument();
@@ -331,9 +339,8 @@ describe('a new field (schema change request)', () => {
       },
     });
     renderAt(`${ROUTE}?tab=propose`);
-    fireEvent.click(await screen.findByRole('radio', { name: /Add a new field to the ISAAC schema/ }));
+    fireEvent.click(await screen.findByRole('radio', { name: COPY.kindField }));
     const panel = within(proposePanel());
-    fireEvent.change(panel.getByLabelText('Section'), { target: { value: 'Context' } });
     fireEvent.change(panel.getByLabelText('Where in the schema'), { target: { value: '@context' } });
     fireEvent.change(panel.getByLabelText('New field name'), { target: { value: 'buffer_name' } });
     fireEvent.click(panel.getByRole('button', { name: 'Save Proposal' }));
@@ -341,6 +348,8 @@ describe('a new field (schema change request)', () => {
     expect(screen.getByText('SERVER-SAID: choose the kind of value.')).toBeInTheDocument();
     const change = (sent as unknown as { change: Record<string, unknown> }).change;
     expect(change).toEqual({ kind: 'add_field', parent_path: 'context', field_name: 'buffer_name' });
+    // The section sent is the chosen block's own, not one picked separately.
+    expect((sent as unknown as { section: string }).section).toBe('Context');
     // What was typed survives the refusal.
     expect(panel.getByLabelText('New field name')).toHaveValue('buffer_name');
   });
@@ -364,8 +373,9 @@ describe('a new field (schema change request)', () => {
       [`GET /api/schema-proposals/${p.id}/change-request`]: { body: changeRequest(p) },
     });
     renderAt(`${ROUTE}?tab=proposals`);
-    const heading = await screen.findByRole('heading', { name: 'Add the field context.electrochemistry.c_rate to the schema' });
-    const row = within(heading.closest('li') as HTMLElement);
+    const headline = await screen.findByText('Add the field context.electrochemistry.c_rate to the schema');
+    expect(headline.closest('summary')).not.toBeNull();
+    const row = within(headline.closest('li') as HTMLElement);
     expect(row.getByText(/schema change request \(not a portal proposal\)/)).toBeInTheDocument();
     expect(row.getByText('1/h', { exact: false })).toBeInTheDocument();
     expect(row.queryByRole('button', { name: 'Copy Portal Payload' })).toBeNull();
@@ -387,9 +397,11 @@ describe('opening the form from a link', () => {
       'GET /api/schema-proposals': list([]),
     });
     renderAt(proposeTermHref(ROUTE, { category: 'system.technique', term: 'XMCD', from: 'validator' }));
-    const panel = within(await screen.findByRole('tabpanel', { name: 'Propose a Change' }));
-    await waitFor(() => expect(panel.getByLabelText('Category')).toHaveValue('system.technique'));
-    expect(panel.getByLabelText('Section')).toHaveValue('System');
+    const panel = within(await screen.findByRole('region', { name: 'Propose a Change' }));
+    const listSelect = (await panel.findByLabelText('List')) as HTMLSelectElement;
+    await waitFor(() => expect(listSelect).toHaveValue('system.technique'));
+    // The section is the server's own for that list: the chosen option sits in its group.
+    expect(listSelect.selectedOptions[0].closest('optgroup')?.label).toBe('System');
     expect(panel.getByLabelText('New term')).toHaveValue('XMCD');
     expect(panel.getByText(/Opened from the Validator/)).toBeInTheDocument();
     expect(panel.getByLabelText('Examples')).toHaveValue(
@@ -409,9 +421,10 @@ describe('opening the form from a link', () => {
         from: 'validator',
       }),
     );
-    const panel = within(await screen.findByRole('tabpanel', { name: 'Propose a Change' }));
+    const panel = within(await screen.findByRole('region', { name: 'Propose a Change' }));
     await panel.findByText(/is not a term list in the portal vocabulary snapshot, so nothing was filled in/);
     expect(panel.getByLabelText('New term')).toHaveValue('');
+    expect(panel.getByLabelText('List')).toHaveValue('');
     expect(panel.queryByText(/Opened from/)).toBeNull();
   });
 
@@ -421,7 +434,7 @@ describe('opening the form from a link', () => {
       'GET /api/schema-proposals': list([]),
     });
     renderAt(`${ROUTE}?tab=propose&category=system.technique&term=XMCD&from=somewhere`);
-    const panel = within(await screen.findByRole('tabpanel', { name: 'Propose a Change' }));
+    const panel = within(await screen.findByRole('region', { name: 'Propose a Change' }));
     await waitFor(() => expect(panel.getByLabelText('New term')).toHaveValue('XMCD'));
     expect(panel.queryByText(/Opened from/)).toBeNull();
     expect(panel.getByLabelText('Examples')).toHaveValue('');

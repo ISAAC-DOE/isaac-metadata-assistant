@@ -11,14 +11,14 @@ import {
   useState,
   type ChangeEvent,
   type FormEvent,
-  type KeyboardEvent as ReactKeyboardEvent,
+  type RefObject,
 } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
 import { BackendDown, LoadingPanel } from '../components/FetchStates';
-import { Copy, Download } from '../components/icons';
+import { ChevronRight, Copy, Download } from '../components/icons';
 import { InlineCode } from '../components/InlineCode';
 import { LABELS, formatWhen } from '../lib/labels';
 import { api, isHostedBuild } from '../lib/api';
@@ -38,6 +38,7 @@ import {
   portalBodyText,
   canProposeTerm,
   portalSectionFor,
+  portalTermsFor,
   proposalHeadline,
   schemaFieldErrors,
   type ApiSchemaCategory,
@@ -69,8 +70,8 @@ import {
 } from '../lib/termDrafts';
 
 /**
- * SCHEMA PROPOSALS — browse the vocabulary, draft a proposal to change it, and
- * track the drafts.
+ * SCHEMA PROPOSALS — one page to propose a change to the ISAAC standard (a term, a list or a
+ * field), with this server's proposals beside the form and the whole vocabulary folded below it.
  *
  * WHAT THIS SCREEN WILL NOT DO, and each is a claim a test pins by behaviour:
  *
@@ -84,21 +85,17 @@ import {
  *   3. IT DOES NOT PRETEND TO KEEP WHAT THE SERVER MAY LOSE. Every response carries the
  *      server's own statement of how long a proposal lasts, and the screen shows it
  *      beside the proposals and again after saving one.
- *   4. IT NEVER LOSES WHAT YOU TYPED. The three panels stay mounted when you change tab,
- *      and a refused submit leaves every box as it was, with the server's own sentence
- *      beside the box it is about.
+ *   4. IT NEVER LOSES WHAT YOU TYPED. It is one page: the form, the proposals and the
+ *      vocabulary are all mounted at once, so nothing you look at unmounts the form, and a
+ *      refused submit leaves every box as it was, with the server's own sentence beside the
+ *      box it is about.
  */
 
-type TabId = 'browse' | 'propose' | 'proposals';
-const TAB_PARAM = 'tab';
-const TABS: { id: TabId; label: string }[] = [
-  { id: 'browse', label: COPY.tabBrowse },
-  { id: 'propose', label: COPY.tabPropose },
-  { id: 'proposals', label: COPY.tabProposals },
-];
-const isTab = (v: string | null): v is TabId => TABS.some((t) => t.id === v);
-const tabDomId = (id: TabId) => `schema-proposals-tab-${id}`;
-const panelDomId = (id: TabId) => `schema-proposals-panel-${id}`;
+/**
+ * The old `?tab=` links still land somewhere sensible: `browse` opens the folded vocabulary and
+ * scrolls to it, `proposals` scrolls to the list. The page never writes the parameter.
+ */
+const LEGACY_TAB_PARAM = 'tab';
 
 /** A request to open the form on a given section and category, with a counter so asking twice re-applies. */
 interface Prefill {
@@ -109,6 +106,8 @@ interface Prefill {
   term?: string;
   /** Which screen that was (`?from=`); only the names in `PROPOSE_SOURCES` are shown. */
   from?: ProposeSource;
+  /** Move focus to the "New term" box once the form is filled (Browse's contextual button). */
+  focusTerm?: boolean;
   nonce: number;
 }
 
@@ -121,35 +120,32 @@ interface LinkRequest {
 }
 
 export function SchemaProposals() {
-  const [params, setParams] = useSearchParams();
-  const requested = params.get(TAB_PARAM);
-  const tab: TabId = isTab(requested) ? requested : 'browse';
+  const [params] = useSearchParams();
+  const legacyTab = params.get(LEGACY_TAB_PARAM);
 
   const vocabulary = useFetch(() => api.getSchemaVocabulary(), []);
   const [prefill, setPrefill] = useState<Prefill | null>(null);
   /** Bumped whenever a proposal is saved, so the list refetches. */
   const [listVersion, setListVersion] = useState(0);
+  const [browseOpen, setBrowseOpen] = useState(legacyTab === 'browse');
+  const browseRef = useRef<HTMLDetailsElement>(null);
+  const proposalsRef = useRef<HTMLElement>(null);
+  const ids = { propose: useId(), proposals: useId() };
 
-  const selectTab = useCallback(
-    (next: TabId) => {
-      const nextParams = new URLSearchParams(params);
-      nextParams.set(TAB_PARAM, next);
-      setParams(nextParams, { replace: true });
-    },
-    [params, setParams],
-  );
-
-  const startProposal = useCallback(
-    (type: SchemaProposalType, section: string, category: string) => {
-      setPrefill((previous) => ({ type, section, category, nonce: (previous?.nonce ?? 0) + 1 }));
-      selectTab('propose');
-    },
-    [selectTab],
-  );
+  /** Browse's "Propose a New Term for This List": fill the form on that list and put the cursor in "New term". */
+  const proposeTermIn = useCallback((section: string, category: string) => {
+    setPrefill((previous) => ({
+      type: 'add_term',
+      section,
+      category,
+      focusTerm: true,
+      nonce: (previous?.nonce ?? 0) + 1,
+    }));
+  }, []);
 
   /*
    * PROPOSE FROM WHERE THE GAP WAS FOUND. A link from another screen
-   * (`?tab=propose&category=…&term=…&from=…`) opens the form on that list with that term.
+   * (`?category=…&term=…&from=…`) opens the form on that list with that term.
    * The section is looked up in the server's own `proposal_sections`, never taken from the
    * link, and a list the portal has no term list for fills in NOTHING: the form says why.
    */
@@ -188,18 +184,18 @@ export function SchemaProposals() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the link, applied once per link
   }, [link?.key, vocabularyData]);
 
-  function onTabKeyDown(e: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
-    let nextIndex: number | null = null;
-    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') nextIndex = (index + 1) % TABS.length;
-    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') nextIndex = (index - 1 + TABS.length) % TABS.length;
-    else if (e.key === 'Home') nextIndex = 0;
-    else if (e.key === 'End') nextIndex = TABS.length - 1;
-    if (nextIndex === null) return;
-    e.preventDefault();
-    const next = TABS[nextIndex];
-    selectTab(next.id);
-    (document.getElementById(tabDomId(next.id)) as HTMLButtonElement | null)?.focus();
-  }
+  // An old `?tab=` link, honoured once the vocabulary (and so the page's height) is in.
+  const legacyApplied = useRef(false);
+  useEffect(() => {
+    if (legacyApplied.current || vocabulary.status === 'loading') return;
+    legacyApplied.current = true;
+    if (legacyTab === 'browse') {
+      setBrowseOpen(true);
+      window.setTimeout(() => browseRef.current?.scrollIntoView?.({ block: 'start' }), 0);
+    } else if (legacyTab === 'proposals') {
+      window.setTimeout(() => proposalsRef.current?.scrollIntoView?.({ block: 'start' }), 0);
+    }
+  }, [legacyTab, vocabulary.status]);
 
   return (
     <AppShell
@@ -216,69 +212,41 @@ export function SchemaProposals() {
           <p className="sp-boundary">{COPY.boundary}</p>
         </header>
 
-        <div className="section-tabs" role="tablist" aria-label="Schema Proposals sections">
-          {TABS.map((t, i) => {
-            const selected = t.id === tab;
-            return (
-              <button
-                key={t.id}
-                id={tabDomId(t.id)}
-                type="button"
-                role="tab"
-                aria-selected={selected}
-                aria-controls={panelDomId(t.id)}
-                tabIndex={selected ? 0 : -1}
-                className={`section-tab${selected ? ' active' : ''}`}
-                onClick={() => selectTab(t.id)}
-                onKeyDown={(e) => onTabKeyDown(e, i)}
+        <div className="sp-layout">
+          <div className="sp-main">
+            <section className="sp-panel" aria-labelledby={ids.propose}>
+              <h2 className="sp-h2" id={ids.propose}>
+                {COPY.proposeTitle}
+              </h2>
+              {vocabulary.status === 'loading' && <LoadingPanel label="Reading the vocabulary…" />}
+              {vocabulary.status === 'error' && <BackendDown error={vocabulary.error} onRetry={vocabulary.reload} />}
+              {vocabulary.status === 'data' && (
+                <ProposePanel
+                  vocabulary={vocabulary.data}
+                  prefill={prefill}
+                  linkRefused={linkRefused}
+                  onSaved={() => setListVersion((v) => v + 1)}
+                />
+              )}
+            </section>
+
+            {vocabulary.status === 'data' && (
+              <details
+                className="sp-browse sp-fold"
+                ref={browseRef}
+                open={browseOpen}
+                onToggle={(e) => setBrowseOpen(e.currentTarget.open)}
               >
-                {t.label}
-              </button>
-            );
-          })}
-        </div>
+                <summary>
+                  <ChevronRight className="sp-chevron" size={16} strokeWidth={2} aria-hidden="true" />
+                  {COPY.browseTitle}
+                </summary>
+                <BrowsePanel vocabulary={vocabulary.data} onProposeTerm={proposeTermIn} />
+              </details>
+            )}
+          </div>
 
-        {/* All three panels stay mounted and are hidden rather than unmounted, so a half-written
-            proposal survives a trip to Browse. */}
-        <div
-          id={panelDomId('browse')}
-          role="tabpanel"
-          aria-labelledby={tabDomId('browse')}
-          hidden={tab !== 'browse'}
-        >
-          {vocabulary.status === 'loading' && <LoadingPanel label="Reading the vocabulary…" />}
-          {vocabulary.status === 'error' && <BackendDown error={vocabulary.error} onRetry={vocabulary.reload} />}
-          {vocabulary.status === 'data' && (
-            <BrowsePanel vocabulary={vocabulary.data} onPropose={startProposal} />
-          )}
-        </div>
-
-        <div
-          id={panelDomId('propose')}
-          role="tabpanel"
-          aria-labelledby={tabDomId('propose')}
-          hidden={tab !== 'propose'}
-        >
-          {vocabulary.status === 'loading' && <LoadingPanel label="Reading the vocabulary…" />}
-          {vocabulary.status === 'error' && <BackendDown error={vocabulary.error} onRetry={vocabulary.reload} />}
-          {vocabulary.status === 'data' && (
-            <ProposePanel
-              vocabulary={vocabulary.data}
-              prefill={prefill}
-              linkRefused={linkRefused}
-              onSaved={() => setListVersion((v) => v + 1)}
-              onViewProposals={() => selectTab('proposals')}
-            />
-          )}
-        </div>
-
-        <div
-          id={panelDomId('proposals')}
-          role="tabpanel"
-          aria-labelledby={tabDomId('proposals')}
-          hidden={tab !== 'proposals'}
-        >
-          <ProposalsPanel version={listVersion} />
+          <ProposalsPanel version={listVersion} headingId={ids.proposals} sectionRef={proposalsRef} />
         </div>
       </div>
     </AppShell>
@@ -289,10 +257,11 @@ export function SchemaProposals() {
 
 function BrowsePanel({
   vocabulary,
-  onPropose,
+  onProposeTerm,
 }: {
   vocabulary: ApiSchemaVocabulary;
-  onPropose: (type: SchemaProposalType, section: string, category: string) => void;
+  /** Open the form on this portal list, with the cursor in "New term". */
+  onProposeTerm: (section: string, category: string) => void;
 }) {
   const sectionSelectId = useId();
   const sourceName = useId();
@@ -311,7 +280,7 @@ function BrowsePanel({
   const canAddTerm = category !== undefined && termListsHere.has(category.key);
 
   return (
-    <section className="sp-panel sp-panel-wide" aria-label={COPY.tabBrowse}>
+    <div className="sp-browse-body">
       <p className="sp-note">{COPY.browseLead}</p>
 
       <fieldset className="sp-fieldset">
@@ -358,16 +327,17 @@ function BrowsePanel({
 
       {section && section.categories.length === 0 && (
         <p className="sp-note" role="status">
-          This section has no fixed lists of allowed terms in this source. You can still propose a new list for it.
+          This section has no fixed lists of allowed terms in this source. You can still propose a new list for it in
+          the form above.
         </p>
       )}
 
       {section && section.categories.length > 0 && (
         <div className="sp-browse-grid">
           <div>
-            <h2 className="sp-h2" id="sp-categories-heading">
+            <h3 className="sp-h3" id="sp-categories-heading">
               Categories
-            </h2>
+            </h3>
             <ul className="sp-cat-list" aria-labelledby="sp-categories-heading">
               {section.categories.map((c) => {
                 const current = c.key === category?.key;
@@ -390,7 +360,7 @@ function BrowsePanel({
 
           {category && (
             <div>
-              <h2 className="sp-h2">{category.key}</h2>
+              <h3 className="sp-h3 sp-term">{category.key}</h3>
               {category.description && <p className="sp-note">{category.description}</p>}
               {category.kind === 'other' ? (
                 <p className="sp-note">
@@ -418,7 +388,7 @@ function BrowsePanel({
                   <button
                     type="button"
                     className="btn btn-secondary"
-                    onClick={() => onPropose('add_term', section.id, category.key)}
+                    onClick={() => onProposeTerm(section.id, category.key)}
                   >
                     Propose a New Term for This List
                   </button>
@@ -436,31 +406,14 @@ function BrowsePanel({
         </div>
       )}
 
-      {section && (
-        <div className="sp-actions">
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => onPropose('add_category', section.id, '')}
-          >
-            Propose a New List in {section.label}
-          </button>
-          {vocabulary.schema_change && (
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => onPropose('schema_change', section.id, '')}
-            >
-              Propose a New Field in {section.label}
-            </button>
-          )}
-        </div>
-      )}
-    </section>
+    </div>
   );
 }
 
 // --- Propose --------------------------------------------------------------------
+
+/** How many of a list's terms the "Already on the list" hint names before it says how many more. */
+const TERMS_SHOWN = 12;
 
 const GATE0_FIELDS: { key: keyof ApiSchemaProposalGate0; label: string; rows: number; hint: string }[] = [
   {
@@ -494,14 +447,12 @@ function ProposePanel({
   prefill,
   linkRefused,
   onSaved,
-  onViewProposals,
 }: {
   vocabulary: ApiSchemaVocabulary;
   prefill: Prefill | null;
   /** A link named a list the portal has no term list for, so nothing was filled in. */
   linkRefused: string | null;
   onSaved: () => void;
-  onViewProposals: () => void;
 }) {
   const ids = {
     type: useId(),
@@ -519,6 +470,7 @@ function ProposePanel({
     migration: useId(),
     saveHint: useId(),
     filing: useId(),
+    kindHint: useId(),
   };
   const limits = vocabulary.limits;
   const sections = vocabulary.proposal_sections;
@@ -539,6 +491,7 @@ function ProposePanel({
     missing: (keyof ApiSchemaProposalGate0)[];
   } | null>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const termRef = useRef<HTMLInputElement>(null);
   const filingRef = useRef<HTMLDivElement>(null);
   /**
    * The drafts of the loaded file a proposal has been saved from (by `key`), so their rows say so and
@@ -566,12 +519,34 @@ function ProposePanel({
 
   const section = sections.find((s) => s.id === sectionId);
   const listsInSection = useMemo(() => section?.term_lists ?? [], [section]);
-  /** The blocks of the schema in this section a new field could go in, as the server derived them. */
-  const parentsInSection = useMemo(
-    () => (schemaChange?.object_paths ?? []).filter((o) => o.section === sectionId),
-    [schemaChange, sectionId],
-  );
+  /** The sections that have a portal term list, each an <optgroup> of the one "List" choice. */
+  const listGroups = useMemo(() => sections.filter((s) => s.term_lists.length > 0), [sections]);
+  /** A list key in more than one section needs its section in the option's value to stay one choice. */
+  const sharedListKeys = useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const s of sections) for (const key of s.term_lists) seen.set(key, (seen.get(key) ?? 0) + 1);
+    return new Set([...seen].filter(([, n]) => n > 1).map(([key]) => key));
+  }, [sections]);
+  const listValue = (sid: string, key: string) => (sharedListKeys.has(key) ? `${sid}\u001f${key}` : key);
+  /** Every block of the schema a new field could go in, as the server derived them. */
+  const objectPaths = useMemo(() => schemaChange?.object_paths ?? [], [schemaChange]);
+  /** The same blocks, grouped by section for the "Where in the schema" choice. */
+  const pathGroups = useMemo(() => {
+    const groups: { id: string; label: string; paths: typeof objectPaths }[] = [];
+    for (const o of objectPaths) {
+      let g = groups.find((x) => x.id === o.section);
+      if (!g) {
+        g = { id: o.section, label: sections.find((s) => s.id === o.section)?.label ?? o.section, paths: [] };
+        groups.push(g);
+      }
+      g.paths.push(o);
+    }
+    return groups;
+  }, [objectPaths, sections]);
+  const parentsInSection = useMemo(() => objectPaths.filter((o) => o.section === sectionId), [objectPaths, sectionId]);
   const parent = parentsInSection.find((o) => o.path === parentPath) ?? null;
+  /** What the chosen portal list already holds, so a term it has is not proposed again. */
+  const termsOnList = type === 'add_term' && category !== '' ? portalTermsFor(vocabulary, sectionId, category) : null;
   const isField = type === 'schema_change';
   const unitAllowed = valueType === 'number' || valueType === 'integer' || valueType === 'array';
 
@@ -595,6 +570,13 @@ function ProposePanel({
     setErrors([]);
     setTopMessage(null);
     setSaved(null);
+    if (prefill.focusTerm) {
+      // After the form has re-rendered on that list: the box left to fill is brought into view and focused.
+      window.setTimeout(() => {
+        termRef.current?.scrollIntoView?.({ block: 'center' });
+        termRef.current?.focus({ preventScroll: true });
+      }, 0);
+    }
   }, [prefill, schemaChange]);
 
   // The category for "add a term" must be one of the section's lists. Keep it valid when the
@@ -757,11 +739,17 @@ function ProposePanel({
 
   const descriptionCount = description.trim().length;
   const savedIsField = saved?.proposal.proposal_type === 'schema_change';
+  const sectionError = errorFor('section');
+  const reviewerNotesRequired = isField || fromLocalDraft;
+  /** The kinds a reader can choose, in the order they are offered; the third only when the server describes it. */
+  const kinds: { type: SchemaProposalType; title: string; hint: string }[] = [
+    { type: 'add_term', title: COPY.kindTerm, hint: COPY.kindTermHint },
+    { type: 'add_category', title: COPY.kindList, hint: COPY.kindListHint },
+    ...(schemaChange ? [{ type: 'schema_change' as const, title: COPY.kindField, hint: COPY.kindFieldHint }] : []),
+  ];
 
   return (
-    <section className="sp-panel" aria-label={COPY.tabPropose}>
-      <p className="sp-note">{COPY.proposeLead}</p>
-
+    <>
       {linkRefused !== null && (
         <p className="sp-note" role="status">
           The link that opened this form named {linkRefused}, which is not a term list in the portal vocabulary
@@ -787,9 +775,6 @@ function ProposePanel({
             ) : (
               <PortalActions proposalId={saved.proposal.id} />
             )}
-            <button type="button" className="btn btn-secondary" onClick={onViewProposals}>
-              View Proposals
-            </button>
           </div>
         </div>
       )}
@@ -865,89 +850,95 @@ function ProposePanel({
       )}
 
       <form className="sp-form" onSubmit={onSubmit} noValidate>
+        {/*
+          THE ONE CHOICE THAT SHAPES THE REST: each kind is a card whose name is its title alone, and
+          whose one-line hint is its description, so a screen reader hears the name, then what it means.
+        */}
         <fieldset className="sp-fieldset">
           <legend id={ids.type}>What do you want to propose?</legend>
-          <label className="sp-radio">
-            <input
-              type="radio"
-              name="schema-proposal-type"
-              checked={type === 'add_term'}
-              onChange={() => setType('add_term')}
-            />
-            <span>Add a term to an existing list</span>
-          </label>
-          <label className="sp-radio">
-            <input
-              type="radio"
-              name="schema-proposal-type"
-              checked={type === 'add_category'}
-              onChange={() => setType('add_category')}
-            />
-            <span>Add a new list of allowed terms</span>
-          </label>
-          {schemaChange && (
-            <label className="sp-radio">
-              <input
-                type="radio"
-                name="schema-proposal-type"
-                checked={type === 'schema_change'}
-                onChange={() => setType('schema_change')}
-              />
-              <span>Add a new field to the ISAAC schema (a schema change request)</span>
-            </label>
-          )}
+          <div className="sp-kinds">
+            {kinds.map((k) => {
+              const hintId = `${ids.kindHint}-${k.type}`;
+              const selected = type === k.type;
+              return (
+                <label className={`sp-kind${selected ? ' is-selected' : ''}`} key={k.type}>
+                  <input
+                    type="radio"
+                    name="schema-proposal-type"
+                    checked={selected}
+                    onChange={() => setType(k.type)}
+                    aria-describedby={hintId}
+                  />
+                  <span className="sp-kind-text">
+                    <span className="sp-kind-name">{k.title}</span>
+                    <span className="sp-kind-hint" id={hintId} aria-hidden="true">
+                      {k.hint}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
           <FieldError id={`${ids.type}-err`} message={errorFor('proposal_type')} />
         </fieldset>
 
         {isField && schemaChange && (
-          <div className="sp-notice" role="note">
-            <p>{schemaChange.not_a_portal_proposal}</p>
-            <p>{COPY.schemaChangeLead}</p>
-          </div>
+          <p className="sp-note">
+            <span>{schemaChange.not_a_portal_proposal}</span> <span>{COPY.schemaChangeLead}</span>
+          </p>
         )}
-
-        <div className="sp-field">
-          <label htmlFor={ids.section}>Section</label>
-          <select
-            id={ids.section}
-            className="input sp-select"
-            value={sectionId}
-            onChange={(e) => setSectionId(e.target.value)}
-            aria-invalid={errorFor('section') ? true : undefined}
-            aria-describedby={errorFor('section') ? `${ids.section}-err` : undefined}
-          >
-            {sections.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-          <FieldError id={`${ids.section}-err`} message={errorFor('section')} />
-        </div>
 
         {type === 'add_term' && (
           <>
+            {/* One choice, not two: the list, grouped by the section it is in. The section sent is the group's. */}
             <div className="sp-field">
-              <label htmlFor={ids.category}>Category</label>
+              <label htmlFor={ids.category}>List</label>
               <select
                 id={ids.category}
                 className="input sp-select"
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                aria-invalid={errorFor('category') ? true : undefined}
-                aria-describedby={`${ids.category}-hint${errorFor('category') ? ` ${ids.category}-err` : ''}`}
+                value={category === '' ? '' : listValue(sectionId, category)}
+                onChange={(e) => {
+                  const option = e.target.selectedOptions[0];
+                  const sid = option?.dataset.section;
+                  if (!option || option.value === '' || !sid) {
+                    setCategory('');
+                    return;
+                  }
+                  setSectionId(sid);
+                  setCategory(option.dataset.list ?? '');
+                }}
+                aria-invalid={errorFor('category') || sectionError ? true : undefined}
+                aria-describedby={`${ids.category}-hint${errorFor('category') ? ` ${ids.category}-err` : ''}${
+                  sectionError ? ` ${ids.section}-err` : ''
+                }`}
               >
                 <option value="">Choose a list…</option>
-                {listsInSection.map((key) => (
-                  <option key={key} value={key}>
-                    {key}
-                  </option>
+                {listGroups.map((s) => (
+                  <optgroup key={s.id} label={s.label}>
+                    {s.term_lists.map((key) => (
+                      <option key={key} value={listValue(s.id, key)} data-section={s.id} data-list={key}>
+                        {key}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
-              {listsInSection.length === 0 ? (
+              {listGroups.length === 0 ? (
                 <p className="sp-hint" id={`${ids.category}-hint`}>
-                  The portal vocabulary snapshot has no term lists in this section. Choose another section, or propose a
-                  new list.
+                  The portal vocabulary snapshot has no term lists, so there is no list to add a term to. Propose a
+                  new list instead.
+                </p>
+              ) : termsOnList !== null ? (
+                <p className="sp-hint" id={`${ids.category}-hint`}>
+                  Already on the list ({termsOnList.length})
+                  {termsOnList.length === 0 ? (
+                    ': nothing yet.'
+                  ) : (
+                    <>
+                      : <span className="sp-term">{termsOnList.slice(0, TERMS_SHOWN).join(', ')}</span>
+                      {termsOnList.length > TERMS_SHOWN ? ` and ${termsOnList.length - TERMS_SHOWN} more.` : '.'}
+                    </>
+                  )}
                 </p>
               ) : (
                 <span id={`${ids.category}-hint`} className="sr-only">
@@ -955,12 +946,14 @@ function ProposePanel({
                 </span>
               )}
               <FieldError id={`${ids.category}-err`} message={errorFor('category')} />
+              <FieldError id={`${ids.section}-err`} message={sectionError} />
             </div>
 
             <div className="sp-field">
               <label htmlFor={ids.term}>New term</label>
               <input
                 id={ids.term}
+                ref={termRef}
                 className="input input-mono"
                 value={term}
                 maxLength={limits.term_max}
@@ -980,54 +973,91 @@ function ProposePanel({
         )}
 
         {type === 'add_category' && (
-          <div className="sp-field">
-            <label htmlFor={ids.category}>New list key</label>
-            <input
-              id={ids.category}
-              className="input input-mono"
-              value={category}
-              maxLength={limits.category_max}
-              placeholder="for example context.transport.viscosity"
-              autoComplete="off"
-              spellCheck={false}
-              onChange={(e) => setCategory(e.target.value)}
-              aria-invalid={errorFor('category') ? true : undefined}
-              aria-describedby={`${ids.category}-hint${errorFor('category') ? ` ${ids.category}-err` : ''}`}
-            />
-            <p className="sp-hint" id={`${ids.category}-hint`}>
-              A dotted path of field names. It starts with the section&apos;s own block name
-              {section?.block ? ` (${section.block}.)` : ''}.
-            </p>
-            <FieldError id={`${ids.category}-err`} message={errorFor('category')} />
-          </div>
+          <>
+            <div className="sp-field">
+              <label htmlFor={ids.section}>Section</label>
+              <select
+                id={ids.section}
+                className="input sp-select"
+                value={sectionId}
+                onChange={(e) => setSectionId(e.target.value)}
+                aria-invalid={sectionError ? true : undefined}
+                aria-describedby={sectionError ? `${ids.section}-err` : undefined}
+              >
+                {sections.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+              <FieldError id={`${ids.section}-err`} message={sectionError} />
+            </div>
+
+            <div className="sp-field">
+              <label htmlFor={ids.category}>New list key</label>
+              <input
+                id={ids.category}
+                className="input input-mono"
+                value={category}
+                maxLength={limits.category_max}
+                placeholder="for example context.transport.viscosity"
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(e) => setCategory(e.target.value)}
+                aria-invalid={errorFor('category') ? true : undefined}
+                aria-describedby={`${ids.category}-hint${errorFor('category') ? ` ${ids.category}-err` : ''}`}
+              />
+              <p className="sp-hint" id={`${ids.category}-hint`}>
+                A dotted path of field names. It starts with the section&apos;s own block name
+                {section?.block ? ` (${section.block}.)` : ''}.
+              </p>
+              <FieldError id={`${ids.category}-err`} message={errorFor('category')} />
+            </div>
+          </>
         )}
 
         {isField && schemaChange && (
           <>
+            {/* One choice, not two: the block, grouped by section. The section sent is the block's own. */}
             <div className="sp-field">
               <label htmlFor={ids.parent}>Where in the schema</label>
               <select
                 id={ids.parent}
                 className="input sp-select"
                 /* `@` + the path, so the record root (path '') is a choice distinct from "none chosen". */
-                value={parentPath === null ? '' : `@${parentPath}`}
-                onChange={(e) => setParentPath(e.target.value === '' ? null : e.target.value.slice(1))}
+                value={parent === null ? '' : `@${parent.path}`}
+                onChange={(e) => {
+                  if (e.target.value === '') {
+                    setParentPath(null);
+                    return;
+                  }
+                  const path = e.target.value.slice(1);
+                  const chosen = objectPaths.find((o) => o.path === path);
+                  if (chosen) setSectionId(chosen.section);
+                  setParentPath(path);
+                }}
                 aria-required="true"
-                aria-invalid={errorFor('change.parent_path') ? true : undefined}
-                aria-describedby={`${ids.parent}-hint${errorFor('change.parent_path') ? ` ${ids.parent}-err` : ''}`}
+                aria-invalid={errorFor('change.parent_path') || sectionError ? true : undefined}
+                aria-describedby={`${ids.parent}-hint${errorFor('change.parent_path') ? ` ${ids.parent}-err` : ''}${
+                  sectionError ? ` ${ids.section}-err` : ''
+                }`}
               >
                 <option value="">Choose a block…</option>
-                {parentsInSection.map((o) => (
-                  <option key={o.path} value={`@${o.path}`}>
-                    {o.path === '' ? 'The record root' : o.path}
-                  </option>
+                {pathGroups.map((g) => (
+                  <optgroup key={g.id} label={g.label}>
+                    {g.paths.map((o) => (
+                      <option key={o.path} value={`@${o.path}`}>
+                        {o.path === '' ? 'The record root' : o.path}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
               <p className="sp-hint" id={`${ids.parent}-hint`}>
-                {parentsInSection.length === 0
-                  ? 'The ISAAC schema has no block in this section. Choose another section.'
+                {objectPaths.length === 0
+                  ? 'The ISAAC schema declares no block a new field could go in.'
                   : parent === null
-                    ? 'The blocks the ISAAC schema declares in this section.'
+                    ? 'The blocks the ISAAC schema declares, by section.'
                     : `${parent.path === '' ? 'The record root' : parent.path} has ${parent.fields.length} field${
                         parent.fields.length === 1 ? '' : 's'
                       } today: ${parent.fields.join(', ')}. ${
@@ -1037,6 +1067,7 @@ function ProposePanel({
                       }`}
               </p>
               <FieldError id={`${ids.parent}-err`} message={errorFor('change.parent_path')} />
+              <FieldError id={`${ids.section}-err`} message={sectionError} />
             </div>
 
             <div className="sp-field">
@@ -1191,17 +1222,16 @@ function ProposePanel({
           <FieldError id={`${ids.description}-err`} message={errorFor('description')} />
         </div>
 
-        <details className="sp-why" open={isField || from !== null || fromLocalDraft ? true : undefined}>
+        {/* Open when something in it is required, or when a link already filled part of it in. */}
+        <details className="sp-why" open={reviewerNotesRequired || from !== null ? true : undefined}>
           <summary>
-            {isField
-              ? 'Why (for reviewers): the problem is required for a new field'
-              : fromLocalDraft
-                ? 'Why (for reviewers): the examples and records affected are required for a draft from a local import'
-                : 'Why (for reviewers), optional'}
+            <ChevronRight className="sp-chevron" size={16} strokeWidth={2} aria-hidden="true" />
+            {LABELS.headingSpReviewerNotes}
+            <span className="sp-summary-aside">{reviewerNotesRequired ? ' (some required)' : ' (optional)'}</span>
           </summary>
           <p className="sp-hint">
-            Reviewers of changes to the standard look for the problem, who it affects and what would change.
-            These answers travel with your {isField ? 'change request' : 'description'}.
+            Reviewers look for the problem, who it affects and what would change; these notes travel with your{' '}
+            {isField ? 'change request' : 'proposal'}.
           </p>
           {GATE0_FIELDS.map((g) => {
             const fieldId = `${ids.description}-gate0-${g.key}`;
@@ -1275,7 +1305,7 @@ function ProposePanel({
           </div>
         </div>
       </form>
-    </section>
+    </>
   );
 }
 
@@ -1321,27 +1351,11 @@ function whyNotFileable(vocabulary: ApiSchemaVocabulary, d: LocalTermDraft): str
 /** Which group a draft is listed under. */
 type DraftGroup = 'needs' | 'saved' | 'refused' | 'settled';
 
-const DRAFT_GROUPS: { id: DraftGroup; title: string; lead: string }[] = [
-  {
-    id: 'needs',
-    title: 'Needs Your Description',
-    lead: 'The file drafted these. The one thing left to you is a description, in your own words.',
-  },
-  {
-    id: 'saved',
-    title: 'Saved From This File',
-    lead: 'Saved as drafts on this server, so they are not offered again. They are listed under Proposals.',
-  },
-  {
-    id: 'refused',
-    title: 'Cannot Be Proposed From Here',
-    lead: 'The file or this server would refuse these. The reason is on each.',
-  },
-  {
-    id: 'settled',
-    title: 'Nothing Needed From You',
-    lead: 'Answered since it was asked for, or no longer found in the bundle. Kept here for the record.',
-  },
+/** The groups under "Other Terms in the File", in order. The `needs` group is "Ready to Propose", above them. */
+const OTHER_GROUPS: { id: Exclude<DraftGroup, 'needs'>; title: string }[] = [
+  { id: 'saved', title: LABELS.headingSpSavedFromFile },
+  { id: 'refused', title: LABELS.headingSpCannotPropose },
+  { id: 'settled', title: LABELS.headingSpNothingNeeded },
 ];
 
 interface DraftRow {
@@ -1412,15 +1426,18 @@ function LocalDraftsLoader({
   onRead: () => void;
   onUse: (draft: LocalTermDraft, bundleId: string | null) => void;
 }) {
-  const ids = { heading: useId(), input: useId(), hint: useId(), group: useId() };
+  const ids = { input: useId(), hint: useId(), group: useId() };
   const [fileName, setFileName] = useState<string | null>(null);
   const [loaded, setLoaded] = useState<LocalTermDraftsFile | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  /** Closed until wanted; once a file has been read it is opened, and nothing here closes it again. */
+  const [open, setOpen] = useState(false);
 
   async function onFileChange(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = ''; // choosing the same file again reads it again
     if (!file) return;
+    setOpen(true);
     setFileName(file.name);
     setLoaded(null);
     setProblem(null);
@@ -1465,81 +1482,123 @@ function LocalDraftsLoader({
         : {draftsCounts(groups)}
       </>
     );
+  const ready = groups?.needs ?? [];
+  const othersCount = groups ? groups.saved.length + groups.refused.length + groups.settled.length : 0;
+  const readyHeadingId = `${ids.group}-needs`;
 
   return (
-    <section className="sp-notice sp-drafts" aria-labelledby={ids.heading}>
-      <h2 className="sp-h2" id={ids.heading}>
-        {COPY.localImportTitle}
-      </h2>
-      <p>{COPY.localImportLead}</p>
-      <p>{isHostedBuild ? COPY.localImportWhereHosted : COPY.localImportWhereLocal}</p>
-      <div className="sp-field">
-        <label htmlFor={ids.input}>Drafts file (JSON)</label>
-        <input
-          id={ids.input}
-          type="file"
-          accept="application/json,.json"
-          className="sp-file"
-          aria-describedby={ids.hint}
-          onChange={onFileChange}
-        />
-        <p className="sp-hint" id={ids.hint}>
-          The file <code>isaac bundle propose-terms &lt;bundle&gt; --out &lt;file.json&gt;</code> wrote.
-          {fileName ? ` Last chosen: ${fileName}.` : ''}
+    <details className="sp-drafts sp-fold" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary>
+        <ChevronRight className="sp-chevron" size={16} strokeWidth={2} aria-hidden="true" />
+        {LABELS.headingSpDraftsFile}
+      </summary>
+      <div className="sp-drafts-body">
+        <p className="sp-note">{isHostedBuild ? COPY.localImportWhereHosted : COPY.localImportWhereLocal}</p>
+        <div className="sp-field">
+          <label htmlFor={ids.input}>Drafts file (JSON)</label>
+          <input
+            id={ids.input}
+            type="file"
+            accept="application/json,.json"
+            className="sp-file"
+            aria-describedby={ids.hint}
+            onChange={onFileChange}
+          />
+          <p className="sp-hint" id={ids.hint}>
+            The file <code>isaac bundle propose-terms &lt;bundle&gt; --out &lt;file.json&gt;</code> wrote.
+            {fileName ? ` Last chosen: ${fileName}.` : ''}
+          </p>
+        </div>
+        {/* Always in the page, so the screen reader hears it fill; shown once there is something to say. */}
+        <p className={summary ? 'sp-drafts-summary' : 'sr-only'} role="status" aria-live="polite">
+          {summary}
         </p>
+        {problem && (
+          <p className="sp-field-error" role="alert">
+            {problem}
+          </p>
+        )}
+
+        {loaded && ready.length > 0 && (
+          <div className="sp-draft-group">
+            <h3 className="sp-h3" id={readyHeadingId}>
+              {LABELS.headingSpReady} ({ready.length})
+            </h3>
+            <p className="sp-note">{COPY.readyLead}</p>
+            <ul className="sp-list sp-draft-list" aria-labelledby={readyHeadingId}>
+              {ready.map(({ draft }) => (
+                <ReadyDraftItem
+                  key={draft.key}
+                  draft={draft}
+                  isCurrent={draft === current}
+                  focusNonce={returnFocus?.draft === draft ? returnFocus.nonce : null}
+                  onUse={() => onUse(draft, loaded.bundleId)}
+                />
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Everything that asks nothing of the reader now, folded into one place. No buttons in here. */}
+        {loaded && groups && othersCount > 0 && (
+          <details className="sp-draft-others sp-fold">
+            <summary>
+              <ChevronRight className="sp-chevron" size={16} strokeWidth={2} aria-hidden="true" />
+              {LABELS.headingSpOtherTerms} ({othersCount})
+            </summary>
+            {OTHER_GROUPS.map((g) => {
+              const rows = groups[g.id];
+              if (rows.length === 0) return null;
+              const headingId = `${ids.group}-${g.id}`;
+              return (
+                <div className="sp-draft-subgroup" key={g.id}>
+                  <h4 className="sp-h4" id={headingId}>
+                    {g.title}
+                  </h4>
+                  <ul className="sp-list sp-draft-list" aria-labelledby={headingId}>
+                    {rows.map(({ draft, whyNot }) => (
+                      <OtherDraftItem key={draft.key} draft={draft} whyNot={whyNot} group={g.id} />
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
+          </details>
+        )}
       </div>
-      {/* Always in the page, so the screen reader hears it fill; shown once there is something to say. */}
-      <p className={summary ? 'sp-drafts-summary' : 'sr-only'} role="status" aria-live="polite">
-        {summary}
-      </p>
-      {problem && (
-        <p className="sp-field-error" role="alert">
-          {problem}
-        </p>
-      )}
-      {loaded &&
-        groups &&
-        DRAFT_GROUPS.map((g) => {
-          const rows = groups[g.id];
-          if (rows.length === 0) return null;
-          const headingId = `${ids.group}-${g.id}`;
-          return (
-            <div className="sp-draft-group" key={g.id}>
-              <h3 className="sp-h3" id={headingId}>
-                {g.title} ({rows.length})
-              </h3>
-              <p className="sp-note">{g.lead}</p>
-              <ul className="sp-list" aria-labelledby={headingId}>
-                {rows.map(({ draft, whyNot }) => (
-                  <LocalDraftItem
-                    key={draft.key}
-                    draft={draft}
-                    whyNot={whyNot}
-                    group={g.id}
-                    isCurrent={draft === current}
-                    focusNonce={returnFocus?.draft === draft ? returnFocus.nonce : null}
-                    onUse={() => onUse(draft, loaded.bundleId)}
-                  />
-                ))}
-              </ul>
-            </div>
-          );
-        })}
-    </section>
+    </details>
   );
 }
 
-function LocalDraftItem({
+/** The file's own sentences on what was answered since the term was asked for, shown verbatim. */
+function SinceAsked({ draft }: { draft: LocalTermDraft }) {
+  if (draft.answerNotes.length === 0) return null;
+  return (
+    <p className="sp-draft-since">
+      <span className="sp-draft-since-lead">{LABELS.draftFactSinceAsked}:</span>{' '}
+      <InlineCode text={draft.answerNotes.join(' ')} />
+    </p>
+  );
+}
+
+/** What the file reports wrong with a term it drafted (or refused without a reason of its own). */
+function FileProblems({ draft }: { draft: LocalTermDraft }) {
+  if (draft.problems.length === 0 || !(draft.drafted || !draft.reason)) return null;
+  return (
+    <p className="sp-hint">
+      Problems the file reports: <InlineCode text={draft.problems.map((p) => p.message).join(' ')} />
+    </p>
+  );
+}
+
+/** A draft the reader can propose: what it adds, who asked, where it was read, and the one button. */
+function ReadyDraftItem({
   draft,
-  whyNot,
-  group,
   isCurrent,
   focusNonce,
   onUse,
 }: {
   draft: LocalTermDraft;
-  whyNot: string | null;
-  group: DraftGroup;
   isCurrent: boolean;
   /** Set (and changed) when this row's button should take focus back. */
   focusNonce: number | null;
@@ -1553,121 +1612,112 @@ function LocalDraftItem({
   const lists = draft.missingFrom.map((m) => (m === 'portal' ? "the portal's list" : m === 'schema' ? "the ISAAC schema's list" : m));
   const citationsTotal = draft.citationsTotal ?? draft.citations.length;
   const citationsShown = draft.citations.slice(0, 3);
-  const chip =
-    group === 'needs'
-      ? { label: LABELS.chipDraftNeedsDescription, tone: 'needsyou' }
-      : group === 'saved'
-        ? { label: LABELS.chipDraftSaved, tone: 'cover' }
-        : group === 'refused'
-          ? { label: LABELS.chipDraftCannotPropose, tone: 'missing' }
-          : { label: draft.carriedOver ? LABELS.chipDraftNoLongerInBundle : LABELS.chipDraftAnswered, tone: 'cover' };
   return (
-    <li className={`sp-item sp-draft sp-draft-${group}`} aria-current={isCurrent ? 'true' : undefined}>
+    <li className="sp-draft" aria-current={isCurrent ? 'true' : undefined}>
       <div className="sp-draft-head">
-        <h4 className="sp-item-title sp-draft-term">
+        <h4 className="sp-h4">
           <code className="sp-term">{draft.term}</code>
         </h4>
-        <span className={`chip sp-chip-${chip.tone}`}>{chip.label}</span>
+        <span className="sp-draft-path">
+          <span aria-hidden="true">→ </span>
+          <span className="sr-only">for </span>
+          {draft.fieldPath}
+        </span>
       </div>
-      {/* A refusal leads with its reason. A settled term (answered since, or no longer in the bundle) is not
-          refused for a fault, so it says calmly that there is nothing to propose, and its row is shorter. */}
-      {whyNot !== null && (
-        <p className="sp-item-text">
-          <strong>{group === 'settled' ? 'Nothing to propose.' : 'Cannot be proposed from here.'}</strong>{' '}
-          <InlineCode text={whyNot} />
-        </p>
-      )}
-      <dl className="sp-why-list sp-draft-facts">
-        {group !== 'settled' && (
+      <p className="sp-draft-line">
+        Adds <code className="sp-term">{draft.term}</code> to <code className="sp-term">{draft.fieldPath}</code>
+        {lists.length > 0 ? `, which is not on ${lists.join(' or ')} today.` : '.'}
+      </p>
+      <p className="sp-draft-line sp-draft-muted">
+        {/* a counts sentence mostly has no full stop of its own (a carried-over one does); one is added before
+            the runs sentence follows it, never a second */}
+        {counts ? (draft.runs === null && !counts.endsWith('.') ? `${counts}.` : counts) : 'The file gives no count.'}
+        {draft.runs === null ? ' Runs: not stated in the file.' : ''}{' '}
+        {draft.scientistNotes.length > 0 ? (
           <>
-            <dt>What it would add</dt>
-            <dd>
-              Adds <code className="sp-term">{draft.term}</code> to <code className="sp-term">{draft.fieldPath}</code>
-              {lists.length > 0 ? `, which is not on ${lists.join(' or ')} today.` : '.'}
-            </dd>
+            Your words:{' '}
+            {draft.scientistNotes.map((n, i) => (
+              <span key={i}>
+                {i > 0 ? '; ' : ''}
+                <span className="sp-quote">“{n.termAsSaid}”</span>
+                {n.note !== null && (
+                  <>
+                    {', with the note '}
+                    <span className="sp-quote">“{n.note}”</span>
+                  </>
+                )}
+                {` (${noteAttribution(n)})`}
+              </span>
+            ))}
+            .
           </>
+        ) : (
+          'The file holds none of your words for this term.'
         )}
-        <dt>Who asked, and why</dt>
-        <dd>
-          <p className="sp-draft-line">
-            {/* a counts sentence mostly has no full stop of its own (a carried-over one does); one is added before
-                the runs sentence follows it, never a second */}
-            {counts ? (draft.runs === null && !counts.endsWith('.') ? `${counts}.` : counts) : 'The file gives no count.'}
-            {draft.runs === null ? ' Runs: not stated in the file.' : ''}
-          </p>
-          {draft.scientistNotes.length > 0 ? (
-            <>
-              <p className="sp-draft-line sp-draft-sub" aria-hidden="true">
-                Your words:
-              </p>
-              <ul className="sp-notes" aria-label="Your words">
-                {draft.scientistNotes.map((n, i) => (
-                  <li key={i}>
-                    <span className="sp-quote">“{n.termAsSaid}”</span>
-                    {n.note !== null && (
-                      <>
-                        {', with the note '}
-                        <span className="sp-quote">“{n.note}”</span>
-                      </>
-                    )}
-                    {` (${noteAttribution(n)})`}
-                  </li>
-                ))}
-              </ul>
-            </>
-          ) : (
-            <p className="sp-draft-line">
-              <span className="sp-draft-sub">Your words:</span> The file has none for this term.
-            </p>
-          )}
-        </dd>
-        {draft.answerNotes.length > 0 && (
-          <>
-            <dt className="sp-draft-since-label">{LABELS.draftFactSinceAsked}</dt>
-            <dd className="sp-draft-since">
-              <InlineCode text={draft.answerNotes.join(' ')} />
-            </dd>
-          </>
-        )}
-        {draft.citations.length === 0 && (
-          <>
-            <dt>Where it was read</dt>
-            <dd>The file cites nothing for this term.</dd>
-          </>
-        )}
-        {draft.problems.length > 0 && (draft.drafted || !draft.reason) && (
-          <>
-            <dt>Problems the file reports</dt>
-            <dd>
-              <InlineCode text={draft.problems.map((p) => p.message).join(' ')} />
-            </dd>
-          </>
-        )}
-      </dl>
-      {draft.citations.length > 0 && (
+      </p>
+      <SinceAsked draft={draft} />
+      <FileProblems draft={draft} />
+      {draft.citations.length > 0 ? (
         <details className="sp-draft-cites">
-          <summary>Where it was read ({citationsTotal})</summary>
+          <summary>
+            <ChevronRight className="sp-chevron" size={14} strokeWidth={2} aria-hidden="true" />
+            {LABELS.headingSpWhereRead} ({citationsTotal})
+          </summary>
           <p className="sp-item-text">
             {/* "and N more" counts what is not shown: the file's total less the lines above it */}
             {citationsShown.map(citationLine).join('\n') +
               (citationsTotal > citationsShown.length ? `\nand ${citationsTotal - citationsShown.length} more` : '')}
           </p>
         </details>
+      ) : (
+        <p className="sp-hint">The file cites nothing for this term.</p>
       )}
-      {/* A saved draft has its chip and no button: it cannot be filed twice. */}
-      {group === 'needs' &&
-        (isCurrent ? (
-          <div className="sp-actions">
-            <span className="chip sp-chip-current">{LABELS.chipDraftBeingProposed}</span>
-          </div>
+      <div className="sp-actions">
+        {isCurrent ? (
+          <span className="chip sp-chip-current">{LABELS.chipDraftBeingProposed}</span>
         ) : (
-          <div className="sp-actions">
-            <button type="button" className="btn btn-secondary" onClick={onUse} ref={buttonRef}>
-              Propose This Term
-            </button>
-            <span className="sp-hint">Opens the form below with the description empty. Nothing is sent until you save.</span>
-          </div>
-        ))}
+          <button type="button" className="btn btn-secondary" onClick={onUse} ref={buttonRef}>
+            Propose This Term
+          </button>
+        )}
+      </div>
+    </li>
+  );
+}
+
+/**
+ * A draft that asks nothing of the reader now: saved from this file, refused, or settled. One compact
+ * block — the term, then why — and no button: a saved one cannot be filed twice, and the others cannot be
+ * filed from here at all.
+ */
+function OtherDraftItem({
+  draft,
+  whyNot,
+  group,
+}: {
+  draft: LocalTermDraft;
+  whyNot: string | null;
+  group: Exclude<DraftGroup, 'needs'>;
+}) {
+  return (
+    <li className={`sp-draft sp-draft-compact sp-draft-${group}`}>
+      <p className="sp-draft-line">
+        <code className="sp-term sp-draft-term">{draft.term}</code>
+      </p>
+      {/* A refusal leads with its reason. A settled term (answered since, or no longer in the bundle) is not
+          refused for a fault, so it says calmly that there is nothing to propose. */}
+      {group === 'saved' ? (
+        <p className="sp-draft-line sp-draft-muted">Saved as a draft on this server.</p>
+      ) : (
+        whyNot !== null && (
+          <p className="sp-draft-line sp-draft-muted">
+            <strong>{group === 'settled' ? 'Nothing to propose.' : 'Cannot be proposed from here.'}</strong>{' '}
+            <InlineCode text={whyNot} />
+          </p>
+        )
+      )}
+      <SinceAsked draft={draft} />
+      {group === 'refused' && <FileProblems draft={draft} />}
     </li>
   );
 }
@@ -1685,7 +1735,16 @@ function FieldError({ id, message }: { id: string; message: string | undefined }
 
 const PAGE_SIZE = 25;
 
-function ProposalsPanel({ version }: { version: number }) {
+function ProposalsPanel({
+  version,
+  headingId,
+  sectionRef,
+}: {
+  version: number;
+  headingId: string;
+  /** The section itself, so an old `?tab=proposals` link can scroll to it. */
+  sectionRef: RefObject<HTMLElement>;
+}) {
   const first = useFetch(() => api.listSchemaProposals({ limit: PAGE_SIZE, offset: 0 }), [version]);
   const [more, setMore] = useState<ApiSchemaProposal[]>([]);
   const [nextOffset, setNextOffset] = useState<number | null>(null);
@@ -1728,27 +1787,35 @@ function ProposalsPanel({ version }: { version: number }) {
   }
 
   return (
-    <section className="sp-panel" aria-label={COPY.tabProposals}>
+    <section className="sp-proposals" aria-labelledby={headingId} ref={sectionRef}>
+      <div className="sp-proposals-head">
+        <h2 className="sp-h2" id={headingId}>
+          {COPY.proposalsTitle}
+        </h2>
+        {firstData && firstData.total > 0 && (
+          <span className="sp-count" role="status">
+            {firstData.total}
+            <span className="sr-only"> {firstData.total === 1 ? 'proposal' : 'proposals'}, newest first</span>
+          </span>
+        )}
+      </div>
       {first.status === 'loading' && <LoadingPanel label="Loading proposals…" />}
       {first.status === 'error' && <BackendDown error={first.error} onRetry={first.reload} />}
       {firstData && (
         <>
-          <div className="sp-notice">
+          <div className="sp-proposals-facts">
             <p>{firstData.persistence.message}</p>
             <p>
-              {firstData.capacity.pending} of {firstData.capacity.max_pending} pending places used. {firstData.capacity.scope}
+              {firstData.capacity.pending} of {firstData.capacity.max_pending} pending places used. {firstData.capacity.scope}{' '}
+              {COPY.unverifiedAuthor}
             </p>
-            <p>{COPY.unverifiedAuthor}</p>
           </div>
 
           {firstData.total === 0 ? (
-            <p className="sp-note">No proposals on this server yet. Use Propose a Change to draft one.</p>
+            <p className="sp-note">No proposals on this server yet.</p>
           ) : (
             <>
-              <p className="sp-meta" role="status">
-                {firstData.total} {firstData.total === 1 ? 'proposal' : 'proposals'}, newest first.
-              </p>
-              <ul className="sp-list">
+              <ul className="sp-list sp-proposal-list">
                 {[...firstData.proposals, ...more].map((p) => (
                   <ProposalRow
                     key={p.id}
@@ -1791,7 +1858,7 @@ function ProposalRow({
   const [said, setSaid] = useState('');
   const confirmRef = useRef<HTMLButtonElement>(null);
   const withdrawRef = useRef<HTMLButtonElement>(null);
-  const titleRef = useRef<HTMLHeadingElement>(null);
+  const summaryRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (confirming) confirmRef.current?.focus();
@@ -1814,8 +1881,8 @@ function ProposalRow({
       setConfirming(false);
       onChanged(response.proposal);
       setSaid('Withdrawn. The proposal is no longer pending.');
-      // the Withdraw control is gone: focus the proposal itself, whose status now reads Withdrawn
-      requestAnimationFrame(() => titleRef.current?.focus());
+      // the Withdraw control is gone: focus the proposal itself (its summary), whose status now reads Withdrawn
+      requestAnimationFrame(() => summaryRef.current?.focus());
     } catch (err) {
       setConfirming(false);
       setFailure(serverMessageOf(err) ?? 'The proposal could not be withdrawn. Nothing was changed.');
@@ -1829,112 +1896,119 @@ function ProposalRow({
   const gate0 = proposal.gate0;
   return (
     <li className="sp-item">
-      <div className="sp-item-head">
-        <h2 className="sp-item-title" tabIndex={-1} ref={titleRef}>
-          {proposalHeadline(proposal)}
-        </h2>
-        <span className={`sp-status sp-status-${proposal.status}`}>{STATUS_LABEL[proposal.status]}</span>
-      </div>
-      <p className="sp-item-meta">
-        {proposal.section}
-        {` · ${PROPOSAL_KIND_LABEL[proposal.proposal_type] ?? proposal.proposal_type}`}
-        {proposal.proposed_at && (
-          <>
-            {' · drafted '}
-            <time dateTime={proposal.proposed_at} title={proposal.proposed_at}>
-              {formatWhen(proposal.proposed_at) ?? proposal.proposed_at}
-            </time>
-          </>
-        )}
-        {proposal.withdrawn_at && (
-          <>
-            {' · withdrawn '}
-            <time dateTime={proposal.withdrawn_at} title={proposal.withdrawn_at}>
-              {formatWhen(proposal.withdrawn_at) ?? proposal.withdrawn_at}
-            </time>
-          </>
-        )}
-      </p>
-      <p className="sp-item-text">{proposal.description}</p>
-      {proposal.source && (
-        <p className="sp-item-meta">
-          {COPY.localImportFiledFrom}
-          {proposal.source.bundle_id ? ` (${proposal.source.bundle_id})` : ''}
-          {proposal.source.occurrences !== null ? `: ${proposal.source.occurrences} readings` : ''}
-          {proposal.source.runs !== null ? ` in ${proposal.source.runs} runs` : ''}.
-        </p>
-      )}
-      {proposal.proposal_type === 'schema_change' && proposal.change && <ChangeSummary change={proposal.change} />}
-      {gate0 && (
-        <dl className="sp-why-list">
-          {gate0.problem && (
-            <>
-              <dt>The problem</dt>
-              <dd>{gate0.problem}</dd>
-            </>
-          )}
-          {gate0.examples && (
-            <>
-              <dt>Examples</dt>
-              <dd>{gate0.examples}</dd>
-            </>
-          )}
-          {gate0.affected_records_estimate && (
-            <>
-              <dt>Records affected</dt>
-              <dd>{gate0.affected_records_estimate}</dd>
-            </>
-          )}
-          {gate0.flip_list && (
-            <>
-              <dt>What would change</dt>
-              <dd>{gate0.flip_list}</dd>
-            </>
-          )}
-        </dl>
-      )}
-      <p className="sp-item-meta">
-        {proposal.attribution === 'verified' && proposal.proposed_by
-          ? `Proposed by ${proposal.proposed_by}`
-          : 'Author not recorded (not verified).'}
-      </p>
-
-      <div className="sp-actions">
-        {proposal.proposal_type === 'schema_change' ? (
-          <ChangeRequestActions proposalId={proposal.id} />
-        ) : (
-          <PortalActions proposalId={proposal.id} />
-        )}
-        {proposal.status === 'pending' && !confirming && (
-          <button
-            type="button"
-            className="btn btn-secondary"
-            ref={withdrawRef}
-            onClick={() => setConfirming(true)}
-          >
-            Withdraw
-          </button>
-        )}
-        {proposal.status === 'pending' && confirming && (
-          <span className="sp-confirm" role="group" aria-label="Confirm withdrawing this proposal">
-            <span>Withdraw this proposal? This cannot be undone.</span>
-            <button type="button" className="btn btn-danger" ref={confirmRef} onClick={withdraw} disabled={busy}>
-              {busy ? 'Withdrawing…' : 'Confirm Withdraw'}
-            </button>
-            <button type="button" className="btn btn-secondary" onClick={keep} disabled={busy}>
-              Keep It
-            </button>
+      <details className="sp-proposal">
+        <summary ref={summaryRef}>
+          <ChevronRight className="sp-chevron" size={16} strokeWidth={2} aria-hidden="true" />
+          <span className="sp-proposal-sum">
+            <span className="sp-item-headline">{proposalHeadline(proposal)}</span>
+            <span className="sp-proposal-meta">
+              <span className={`sp-status sp-status-${proposal.status}`}>{STATUS_LABEL[proposal.status]}</span>
+              <span className="sp-item-meta">
+                {proposal.section}
+                {` · ${PROPOSAL_KIND_LABEL[proposal.proposal_type] ?? proposal.proposal_type}`}
+                {proposal.proposed_at && (
+                  <>
+                    {' · drafted '}
+                    <time dateTime={proposal.proposed_at} title={proposal.proposed_at}>
+                      {formatWhen(proposal.proposed_at) ?? proposal.proposed_at}
+                    </time>
+                  </>
+                )}
+                {proposal.withdrawn_at && (
+                  <>
+                    {' · withdrawn '}
+                    <time dateTime={proposal.withdrawn_at} title={proposal.withdrawn_at}>
+                      {formatWhen(proposal.withdrawn_at) ?? proposal.withdrawn_at}
+                    </time>
+                  </>
+                )}
+              </span>
+            </span>
           </span>
-        )}
-      </div>
-      {failure && (
-        <p className="sp-field-error" role="alert">
-          {failure}
-        </p>
-      )}
-      <p className="sp-item-meta" role="status" data-testid="sp-row-status">
-        {said}
-      </p>
+        </summary>
+        <div className="sp-proposal-body">
+          <p className="sp-item-text">{proposal.description}</p>
+          {proposal.source && (
+            <p className="sp-item-meta">
+              {COPY.localImportFiledFrom}
+              {proposal.source.bundle_id ? ` (${proposal.source.bundle_id})` : ''}
+              {proposal.source.occurrences !== null ? `: ${proposal.source.occurrences} readings` : ''}
+              {proposal.source.runs !== null ? ` in ${proposal.source.runs} runs` : ''}.
+            </p>
+          )}
+          {proposal.proposal_type === 'schema_change' && proposal.change && <ChangeSummary change={proposal.change} />}
+          {gate0 && (
+            <dl className="sp-why-list">
+              {gate0.problem && (
+                <>
+                  <dt>The problem</dt>
+                  <dd>{gate0.problem}</dd>
+                </>
+              )}
+              {gate0.examples && (
+                <>
+                  <dt>Examples</dt>
+                  <dd>{gate0.examples}</dd>
+                </>
+              )}
+              {gate0.affected_records_estimate && (
+                <>
+                  <dt>Records affected</dt>
+                  <dd>{gate0.affected_records_estimate}</dd>
+                </>
+              )}
+              {gate0.flip_list && (
+                <>
+                  <dt>What would change</dt>
+                  <dd>{gate0.flip_list}</dd>
+                </>
+              )}
+            </dl>
+          )}
+          <p className="sp-item-meta">
+            {proposal.attribution === 'verified' && proposal.proposed_by
+              ? `Proposed by ${proposal.proposed_by}`
+              : 'Author not recorded (not verified).'}
+          </p>
+
+          <div className="sp-actions">
+            {proposal.proposal_type === 'schema_change' ? (
+              <ChangeRequestActions proposalId={proposal.id} />
+            ) : (
+              <PortalActions proposalId={proposal.id} />
+            )}
+            {proposal.status === 'pending' && !confirming && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                ref={withdrawRef}
+                onClick={() => setConfirming(true)}
+              >
+                Withdraw
+              </button>
+            )}
+            {proposal.status === 'pending' && confirming && (
+              <span className="sp-confirm" role="group" aria-label="Confirm withdrawing this proposal">
+                <span>Withdraw this proposal? This cannot be undone.</span>
+                <button type="button" className="btn btn-danger" ref={confirmRef} onClick={withdraw} disabled={busy}>
+                  {busy ? 'Withdrawing…' : 'Confirm Withdraw'}
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={keep} disabled={busy}>
+                  Keep It
+                </button>
+              </span>
+            )}
+          </div>
+          {failure && (
+            <p className="sp-field-error" role="alert">
+              {failure}
+            </p>
+          )}
+          <p className="sp-item-meta" role="status" data-testid="sp-row-status">
+            {said}
+          </p>
+        </div>
+      </details>
     </li>
   );
 }
