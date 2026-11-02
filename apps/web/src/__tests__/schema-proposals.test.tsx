@@ -227,7 +227,7 @@ function readBlob(blob: Blob): Promise<string> {
 }
 
 function fillPropose() {
-  chooseOption('List', 'system.technique');
+  chooseOption('List', 'Technique');
   fireEvent.change(screen.getByLabelText('New term'), { target: { value: 'xmcd_scan' } });
   fireEvent.change(screen.getByLabelText('Description (required)'), {
     target: { value: 'Magnetic dichroism measured with circular polarisation.' },
@@ -380,6 +380,41 @@ describe('Browse', () => {
   });
 });
 
+describe('Browse All Lists, from the form', () => {
+  it('opens Look Up on the chosen list\'s section and list, and puts focus on its Section picker', async () => {
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([]),
+    });
+    renderAt(ROUTE);
+    await screen.findByRole('combobox', { name: 'List' });
+    chooseOption('List', 'Domain');
+    expect(browseDetails()).not.toHaveAttribute('open');
+    const action = within(proposeRegion()).getByRole('button', { name: 'Browse All Lists' });
+    expect(action).toHaveClass('sp-text-btn');
+    fireEvent.click(action);
+    await waitFor(() => expect(browseSection()).toHaveFocus());
+    expect(browseDetails()).toHaveAttribute('open');
+    expect(selectValue(browseSection())).toBe('System');
+    const lists = within(browseDetails()).getByRole('list', { name: 'Lists in System' });
+    expect(within(lists).getByRole('button', { name: /Domain/ })).toHaveAttribute('aria-pressed', 'true');
+    // The form was not touched.
+    expect(selectValue(getSelect('List'))).toBe('system.domain');
+  });
+
+  it('with no list chosen, it just opens Look Up and focuses its Section picker', async () => {
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([]),
+    });
+    renderAt(ROUTE);
+    await screen.findByRole('combobox', { name: 'List' });
+    fireEvent.click(within(proposeRegion()).getByRole('button', { name: 'Browse All Lists' }));
+    await waitFor(() => expect(browseSection()).toHaveFocus());
+    expect(browseDetails()).toHaveAttribute('open');
+  });
+});
+
 describe('Propose a Change', () => {
   it('sends exactly the fields the server takes, and says what saving did and did not do', async () => {
     let sent: Record<string, unknown> | null = null;
@@ -466,7 +501,7 @@ describe('Propose a Change', () => {
     });
     renderAt(`${ROUTE}?tab=propose`);
     await screen.findByLabelText('List');
-    chooseOption('List', 'system.technique');
+    chooseOption('List', 'Technique');
     fireEvent.change(screen.getByLabelText('New term'), { target: { value: 'bad term' } });
     fireEvent.change(screen.getByLabelText('Description (required)'), { target: { value: 'short' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Proposal' }));
@@ -571,15 +606,27 @@ describe('Propose a Change', () => {
     const select = await screen.findByRole('combobox', { name: 'List' });
     // No separate Section choice for a term: the List carries it.
     expect(within(proposeRegion()).queryByLabelText('Section')).toBeNull();
+    // Each list by the name a person uses, as Browse shows it, with its key as the option's description.
     expect(selectGroups(select)).toEqual([
-      { group: 'Record Info (root fields)', options: ['record_type'] },
-      { group: 'System', options: ['system.technique', 'system.domain'] },
+      { group: 'Record Info (root fields)', options: ['Record type'] },
+      { group: 'System', options: ['Technique', 'Domain'] },
     ]);
+    fireEvent.click(select);
+    for (const [name, key] of [['Record type', 'record_type'], ['Technique', 'system.technique'], ['Domain', 'system.domain']]) {
+      expect(screen.getByRole('option', { name })).toHaveAccessibleDescription(key);
+    }
+    fireEvent.keyDown(select, { key: 'Escape' });
     // A themed picker, not the browser's: nothing chosen yet shows the placeholder.
     expect(select.tagName).toBe('BUTTON');
     expect(select).toHaveTextContent('Choose a list…');
-    chooseIn(select, 'record_type');
-    expect(select).toHaveTextContent('record_type');
+    chooseIn(select, 'Record type');
+    expect(select).toHaveTextContent('Record type');
+    // Type-ahead goes by the name too: "d" on the open picker lands on Domain.
+    fireEvent.keyDown(select, { key: 'ArrowDown' });
+    fireEvent.keyDown(select, { key: 'd' });
+    const active = document.getElementById(select.getAttribute('aria-activedescendant') ?? '');
+    expect(active?.querySelector('.select-option-name')?.textContent).toBe('Domain');
+    fireEvent.keyDown(select, { key: 'Escape' });
     fireEvent.change(screen.getByLabelText('New term'), { target: { value: 'simulation' } });
     fireEvent.change(screen.getByLabelText('Description (required)'), {
       target: { value: 'A record that describes a simulation, not a measurement.' },
@@ -607,9 +654,9 @@ describe('Propose a Change', () => {
         .split(' ')
         .map((id) => document.getElementById(id)?.textContent ?? '')
         .join(' ');
-    chooseIn(select, 'system.domain');
+    chooseIn(select, 'Domain');
     expect(describedBy()).toBe('Already on the list (1): experimental.');
-    chooseIn(select, 'system.technique');
+    chooseIn(select, 'Technique');
     expect(describedBy()).toBe(`Already on the list (15): ${many.slice(0, 12).join(', ')} and 3 more.`);
   });
 });
@@ -874,7 +921,7 @@ describe('review fixes', () => {
     const first = renderAt(`${ROUTE}?tab=propose`);
     const options = selectOptions(await screen.findByLabelText('List'));
     // Only the portal's term lists: the schema-only `context.environment` is not one.
-    expect(options).toEqual(['record_type', 'system.technique', 'system.domain']);
+    expect(options).toEqual(['Record type', 'Technique', 'Domain']);
     first.unmount();
     const bare: ApiSchemaVocabulary = {
       ...vocabulary,

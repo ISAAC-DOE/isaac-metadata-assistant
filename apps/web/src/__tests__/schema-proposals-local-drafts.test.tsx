@@ -366,7 +366,7 @@ describe('Load drafts from a local import', () => {
     const panel = screen.getByRole('region', { name: 'Propose a Change' });
     const listSelect = within(panel).getByLabelText('List');
     await waitFor(() => expect(selectValue(listSelect)).toBe('system.technique'));
-    expect(selectGroups(listSelect).find((g) => g.options.includes('system.technique'))?.group).toBe('System');
+    expect(selectGroups(listSelect).find((g) => g.options.includes('Technique'))?.group).toBe('System');
     expect(within(panel).getByLabelText('New term')).toHaveValue('XMCD');
     const description = within(panel).getByLabelText('Description (required)');
     expect(description).toHaveValue('');

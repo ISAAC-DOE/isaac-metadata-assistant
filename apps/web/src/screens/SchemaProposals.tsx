@@ -113,6 +113,13 @@ interface Prefill {
   nonce: number;
 }
 
+/** Open Look Up an Existing List on a section (and a list in it), with focus on its Section picker. */
+interface BrowseRequest {
+  section: string | null;
+  category: string | null;
+  nonce: number;
+}
+
 /** What a `?category=&term=&from=` link asked for, read once per distinct link. */
 interface LinkRequest {
   key: string;
@@ -130,6 +137,12 @@ export function SchemaProposals() {
   /** Bumped whenever a proposal is saved, so the list refetches. */
   const [listVersion, setListVersion] = useState(0);
   const [browseOpen, setBrowseOpen] = useState(legacyTab === 'browse');
+  /** "Browse All Lists" from the form: open Look Up on that list's section (and list), focus its Section picker. */
+  const [browseRequest, setBrowseRequest] = useState<BrowseRequest | null>(null);
+  const openBrowse = useCallback((section: string | null, category: string | null) => {
+    setBrowseOpen(true);
+    setBrowseRequest((previous) => ({ section, category, nonce: (previous?.nonce ?? 0) + 1 }));
+  }, []);
   const browseRef = useRef<HTMLDetailsElement>(null);
   const proposalsRef = useRef<HTMLElement>(null);
   const ids = { propose: useId(), proposals: useId() };
@@ -237,6 +250,7 @@ export function SchemaProposals() {
                   prefill={prefill}
                   linkRefused={linkRefused}
                   onSaved={() => setListVersion((v) => v + 1)}
+                  onBrowseLists={openBrowse}
                 />
               )}
             </section>
@@ -254,7 +268,7 @@ export function SchemaProposals() {
                 <ChevronRight className="sp-chevron" size={16} strokeWidth={2} aria-hidden="true" />
                 {COPY.browseTitle}
               </summary>
-              <BrowsePanel vocabulary={vocabulary.data} onPropose={proposeFromBrowse} />
+              <BrowsePanel vocabulary={vocabulary.data} onPropose={proposeFromBrowse} request={browseRequest} />
             </details>
           )}
           <ProposalsPanel
@@ -285,12 +299,16 @@ function sectionName(label: string): string {
 function BrowsePanel({
   vocabulary,
   onPropose,
+  request,
 }: {
   vocabulary: ApiSchemaVocabulary;
   /** Open the form on this kind and section (and list, for a term), with the cursor in the box left to fill. */
   onPropose: (type: SchemaProposalType, section: string, category: string) => void;
+  /** The form's "Browse All Lists": show this section (and list), then focus the Section picker. */
+  request: BrowseRequest | null;
 }) {
   const ids = { section: useId(), lists: useId(), pane: useId() };
+  const sectionPickerRef = useRef<HTMLButtonElement>(null);
   const [sourceId, setSourceId] = useState<SchemaSourceId>(vocabulary.default_source);
   const source = vocabulary.sources[sourceId];
   const sections = source.sections;
@@ -299,6 +317,23 @@ function BrowsePanel({
   const [categoryKey, setCategoryKey] = useState<string | null>(null);
   const category: ApiSchemaCategory | undefined =
     section?.categories.find((c) => c.key === categoryKey) ?? section?.categories[0];
+
+  useEffect(() => {
+    if (!request) return;
+    // The form's lists are the portal's, so a requested section is looked up in the portal source.
+    const portalHas = request.section !== null && vocabulary.sources.portal.sections.some((s) => s.id === request.section);
+    if (portalHas && request.section !== null) {
+      setSourceId('portal');
+      setSectionId(request.section);
+      setCategoryKey(request.category);
+    }
+    // After the fold has opened and re-rendered on that section: bring the picker into view and focus it.
+    window.setTimeout(() => {
+      sectionPickerRef.current?.scrollIntoView?.({ block: 'center' });
+      sectionPickerRef.current?.focus({ preventScroll: true });
+    }, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- applied once per request
+  }, [request?.nonce]);
   // A new term can join only a list the PORTAL has, because the portal is what checks it.
   const proposalSection = vocabulary.proposal_sections.find((s) => s.id === section?.id);
   const canAddTerm = category !== undefined && (proposalSection?.term_lists ?? []).includes(category.key);
@@ -352,6 +387,7 @@ function BrowsePanel({
         <div className="sp-field sp-browse-section">
           <label htmlFor={ids.section}>Section</label>
           <Select
+            ref={sectionPickerRef}
             id={ids.section}
             value={section?.id ?? ''}
             options={sections.map((s) => ({
@@ -490,12 +526,15 @@ function ProposePanel({
   prefill,
   linkRefused,
   onSaved,
+  onBrowseLists,
 }: {
   vocabulary: ApiSchemaVocabulary;
   prefill: Prefill | null;
   /** A link named a list the portal has no term list for, so nothing was filled in. */
   linkRefused: string | null;
   onSaved: () => void;
+  /** Open Look Up an Existing List, on the chosen list's section when there is one. */
+  onBrowseLists: (section: string | null, category: string | null) => void;
 }) {
   const ids = {
     type: useId(),
@@ -574,10 +613,21 @@ function ProposePanel({
   }, [sections]);
   const listValue = (sid: string, key: string) => (sharedListKeys.has(key) ? `${sid}\u001f${key}` : key);
   /** The List picker's options, grouped by section, and what each one means (its section and its key). */
+  /** A list's human name, as Browse shows it ("Record type"), from the portal's own label for it; else its key. */
+  const listName = useCallback(
+    (sid: string, key: string) => {
+      const label = vocabulary.sources.portal.sections.find((x) => x.id === sid)?.categories.find((c) => c.key === key)?.label;
+      return label ? humanLabel(label) : key;
+    },
+    [vocabulary],
+  );
   const listOptions = useMemo(
-    () => listGroups.flatMap((s) => s.term_lists.map((key) => ({ value: listValue(s.id, key), label: key, group: s.label }))),
+    () =>
+      listGroups.flatMap((s) =>
+        s.term_lists.map((key) => ({ value: listValue(s.id, key), label: listName(s.id, key), detail: key, group: s.label })),
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- listValue depends only on sharedListKeys
-    [listGroups, sharedListKeys],
+    [listGroups, sharedListKeys, listName],
   );
   const listByValue = useMemo(() => {
     const m = new Map<string, { section: string; key: string }>();
@@ -950,6 +1000,7 @@ function ProposePanel({
               <label htmlFor={ids.category}>List</label>
               <Select
                 id={ids.category}
+                className="sp-picker-keys"
                 value={category === '' ? '' : listValue(sectionId, category)}
                 placeholder="Choose a list…"
                 options={listOptions}
@@ -967,28 +1018,40 @@ function ProposePanel({
                   sectionError ? ` ${ids.section}-err` : ''
                 }`}
               />
-              {listGroups.length === 0 ? (
-                <p className="sp-hint" id={`${ids.category}-hint`}>
-                  The portal vocabulary snapshot has no term lists, so there is no list to add a term to. Propose a
-                  new list instead.
-                </p>
-              ) : termsOnList !== null ? (
-                <p className="sp-hint" id={`${ids.category}-hint`}>
-                  Already on the list ({termsOnList.length})
-                  {termsOnList.length === 0 ? (
-                    ': nothing yet.'
-                  ) : (
-                    <>
-                      : <span className="sp-term">{termsOnList.slice(0, TERMS_SHOWN).join(', ')}</span>
-                      {termsOnList.length > TERMS_SHOWN ? ` and ${termsOnList.length - TERMS_SHOWN} more.` : '.'}
-                    </>
-                  )}
-                </p>
-              ) : (
-                <span id={`${ids.category}-hint`} className="sr-only">
-                  The list the new term belongs to.
-                </span>
-              )}
+              {/* The hint, and beside it the way to look the lists over before choosing one. */}
+              <div className="sp-hint-row">
+                {listGroups.length === 0 ? (
+                  <p className="sp-hint" id={`${ids.category}-hint`}>
+                    The portal vocabulary snapshot has no term lists, so there is no list to add a term to. Propose a
+                    new list instead.
+                  </p>
+                ) : termsOnList !== null ? (
+                  <p className="sp-hint" id={`${ids.category}-hint`}>
+                    Already on the list ({termsOnList.length})
+                    {termsOnList.length === 0 ? (
+                      ': nothing yet.'
+                    ) : (
+                      <>
+                        : <span className="sp-term">{termsOnList.slice(0, TERMS_SHOWN).join(', ')}</span>
+                        {termsOnList.length > TERMS_SHOWN ? ` and ${termsOnList.length - TERMS_SHOWN} more.` : '.'}
+                      </>
+                    )}
+                  </p>
+                ) : (
+                  <span id={`${ids.category}-hint`} className="sr-only">
+                    The list the new term belongs to.
+                  </span>
+                )}
+                {listGroups.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn btn-quiet sp-text-btn sp-hint-action"
+                    onClick={() => onBrowseLists(category !== '' ? sectionId : null, category !== '' ? category : null)}
+                  >
+                    Browse All Lists
+                  </button>
+                )}
+              </div>
               <FieldError id={`${ids.category}-err`} message={errorFor('category')} />
               <FieldError id={`${ids.section}-err`} message={sectionError} />
             </div>

@@ -431,7 +431,8 @@ describe('opening the form from a link', () => {
     const listSelect = await panel.findByLabelText('List');
     await waitFor(() => expect(selectValue(listSelect)).toBe('system.technique'));
     // Shown under its section's group.
-    expect(selectGroups(listSelect).find((g) => g.options.includes('system.technique'))?.group).toBe('System');
+    expect(selectGroups(listSelect).find((g) => g.options.includes('Technique'))?.group).toBe('System');
+    expect(listSelect).toHaveTextContent('Technique');
     expect(panel.getByLabelText('New term')).toHaveValue('XMCD');
     expect(panel.getByText(/Opened from the Validator/)).toBeInTheDocument();
     expect(panel.getByLabelText('Examples')).toHaveValue(

@@ -679,3 +679,17 @@ details[open] > summary > .sp-chevron { transform: rotate(90deg); }
 
 /* The chosen list's name heads its pane one step above the list rows beside it. */
 .sp-browse-pane-title > .sp-h3 { font-size: var(--font-size-heading-sm); }
+
+/* The List picker names each list as a person would, with its key beneath in mono (it is an identifier). */
+.sp-picker-keys .select-option-detail { font-family: var(--font-mono); }
+/* The List hint and "Browse All Lists" on one line while there is room; the action wraps below otherwise. */
+.sp-hint-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2xs) var(--space-md);
+  max-width: 40rem;
+}
+.sp-hint-row > .sp-hint { flex: 1 1 18rem; }
+.sp-hint-action { flex: none; margin-left: auto; padding-top: 2px; padding-bottom: 2px; }
