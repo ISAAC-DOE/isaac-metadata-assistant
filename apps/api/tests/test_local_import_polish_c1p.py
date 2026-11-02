@@ -172,10 +172,11 @@ def test_export_with_nothing_exportable_is_compact_and_says_there_is_nothing_to_
     code, out, _ = _run(capsys, "bundle", "export", str(bdir), "--out", str(out_dir))
     reply = json.loads(out)
     assert code == 1 and reply["exported"] == []
-    assert reply["refused_total"] == 7 and len(reply["refused"]) == 3 and reply["refused_omitted"] == 4
+    # r6h H1: every refused row is listed (what every row repeats is said once); only repeated ok rows are cut
+    assert reply["refused_total"] == 7 and len(reply["refused"]) == 7 and "refused_omitted" not in reply
     assert reply["refused_by_reason"]["incomplete"] == 7
     assert reply["missing_required_by_field"]
-    assert "--full" in reply["refused_full_list"]
+    assert reply["refused_every_summary_says"]
     assert "nothing to dry-run" in reply["statement"] and not out_dir.exists()
     code, full, _ = _run(capsys, "bundle", "export", str(bdir), "--out", str(out_dir), "--full")
     assert code == 1 and len(json.loads(full)["refused"]) == 7

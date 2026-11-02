@@ -61,7 +61,7 @@ import operator
 import re
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Container, Mapping, Sequence
+from typing import Any, Container, Iterable, Mapping, Sequence
 
 from . import bundle as B
 from . import suggestions as S
@@ -1395,8 +1395,11 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         # r2-a M3: the open counter question (not deferred) before every other, whatever its tier: confirmed groups
         # cannot be joined later (measured: 28th of 43 in the experiment scope, after 27 blocking questions)
         first = not (q.get("order_critical") and not q.get("deferred"))
-        return (first, q["tier"], bool(q.get("informational")), bool(q.get("deferred")), s, q["target_field_path"] or "",
-                q["question_id"])
+        # r6h H2: within a tier, a disagreement about anything else before the (often many) start-time ones: a macro's
+        # set-point was 40th of 93, behind 39 start-time conflicts
+        start_time = q["kind"] == "resolve_conflict" and (q["target_field_path"] or "").startswith("timestamps.")
+        return (first, q["tier"], start_time, bool(q.get("informational")), bool(q.get("deferred")), s,
+                q["target_field_path"] or "", q["question_id"])
 
     if has_groups:
         reports = compositions(bundle, decision_of=decisions)
@@ -1609,20 +1612,27 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
             q["blocking"] = False
             q["tier"] = TIER_CONFLICT if q["kind"] == "resolve_conflict" and groups_reached else TIER_OPTIONAL
             path = q["target_field_path"] or ""
+            # r6h H2: WHY is read from the groups as composed now: a field they already carry is said first (before:
+            # "no group has a confirmed potentiostatic control mode yet" for groups that had one and a set-point),
+            # and a set-point's why names the control mode they carry
+            modes = _control_modes(path, groups_reached, reports)
             if not groups_reached:
                 q["why"] = _OUTSIDE_LIVE_GROUPS
-            elif (when := _required_when(path)):
-                q["required_when"] = when
-                q["why"] = (f"Not blocking now: a record requires {path} only once {when}, and no record "
-                            "group this question reaches has that yet (what `build-records` and `validate` check). "
-                            "Answer it if you know it; it blocks once that is so.")
             elif all(any(_fills(path, f) or _fills(f, _composer_path(path)) for f in filled[g]) for g in groups_reached):
                 q["why"] = (f"Not blocking: every record group this question reaches already has {path} in the record "
-                            "composed for it now (from another answer, e.g. a beamtime-wide one, or a source). Answer here "
-                            "only with the same thing: two confirmed values that differ fill nothing.")
+                            + ("composed for it now (from an answer or a source). The sources disagree about it: the "
+                               "reading the scientist chooses here is what the record carries." if q["kind"] == "resolve_conflict"
+                               else "composed for it now (from another answer, e.g. a beamtime-wide one, or a source). Answer "
+                               "here only with the same thing: two confirmed values that differ fill nothing.")
+                            + _modes_said(modes))
+            elif (when := _required_when(path)) and _MODE_REQUIRING.get(path) not in modes:
+                q["required_when"] = when
+                q["why"] = (f"Not blocking now: a record requires {path} only once {when}, and no record "
+                            "group this question reaches has that yet (what `build-records` and `validate` check)."
+                            + _modes_said(modes) + " Answer it if you know it; it blocks once that is so.")
             else:
                 q["why"] = (f"Not blocking: the record composer (what `build-records` and `validate` check) does not "
-                            f"require {path} for any record group this question reaches.")
+                            f"require {path} for any record group this question reaches." + _modes_said(modes))
         elif not q["blocking"] and needing:
             changed += 1
             q["blocking"], q["tier"] = True, TIER_BLOCKING
@@ -1641,6 +1651,23 @@ def _agree_with_composer(questions: list[dict], bundle: Mapping, group_of: Mappi
                 q["required_because"] = because
     return {"basis": "records.compose_group: the missing-required list build-records and validate report",
             "live_groups": len(every), "blocking_changed_to_agree": changed}
+
+
+#: r6h H2: the control mode that makes a set-point field required (:data:`_REQUIRED_WHEN`).
+_MODE_REQUIRING = {"context.electrochemistry.potential_setpoint_V": "potentiostatic",
+                   "context.electrochemistry.current_setpoint_mA_cm2": "galvanostatic"}
+
+
+def _control_modes(path: str | None, groups: Iterable[str], reports: Mapping[str, Mapping]) -> list[str]:
+    """r6h H2: the control modes the record groups ``groups`` carry as composed now (``records.compose_group``'s
+    ``control_mode``; ``none confirmed`` for a group with none), for a set-point field only; ``[]`` otherwise."""
+    if path not in _MODE_REQUIRING:
+        return []
+    return sorted({str((reports.get(g) or {}).get("control_mode") or "none confirmed") for g in groups})
+
+
+def _modes_said(modes: Sequence[str]) -> str:
+    return f" The control mode the record group(s) it reaches carry now: {', '.join(modes)}." if modes else ""
 
 
 #: The experiment decisions that answer (or defer) the counter question, latest first wins.
@@ -3151,26 +3178,32 @@ def _recommended(report: Mapping, usable: Sequence[tuple], gid: str) -> list[dic
     """For each of the composer's stated-potential warnings for group ``gid`` (``records``: the file names state a
     potential the record will not carry), the open question to answer for it — RECOMMENDED, never blocking —
     with the warning, its command made the question's (:func:`scoped_answer_command`), as ``why``."""
-    from .records import STATED_POTENTIAL_WARNING, potential_warning_text
+    from .records import IN_SITU_WARNING, STATED_POTENTIAL_WARNING, potential_warning_text
 
     out = []
     # c12-q: a field the composer REQUIRES (a confirmed set-point held back until its scale is answered) is asked in
     # the minimum's blocking ``questions``, never also recommended as "not blocking"
     required = set(_answer_missing(report))
     for w in report.get("warnings") or ():
-        if w.get("code") != STATED_POTENTIAL_WARNING or w["needs"] in required:
+        if w.get("code") not in (STATED_POTENTIAL_WARNING, IN_SITU_WARNING) or w["needs"] in required:
             continue
         # BOTH STEPS when the warning names two (no set-point read and no scale): one recommendation each, the
-        # warning's text (with both commands made the questions') as the why of each
-        steps = [("needs", "targets", "command")] + ([("also_needs", "also_targets", "also_command")] if w.get("also_needs") else [])
+        # warning's text (with both commands made the questions') as the why of each. r6h H3: an in-situ record's
+        # warning names each field it lacks (``fields``): one step each.
+        each = [f for f in w.get("fields") or () if f["path"] not in required]
+        steps = ([(f["path"], f.get("targets") or (), i) for i, f in enumerate(each)] if w.get("fields") else
+                 [(w[need], w.get(tkey) or (), ckey) for need, tkey, ckey in
+                  [("needs", "targets", "command")] + ([("also_needs", "also_targets", "also_command")] if w.get("also_needs") else [])])
         cmds, hits = {}, []
-        for need, tkey, ckey in steps:
-            wanted = set(w.get(tkey) or ())
+        for path, targets, ckey in steps:
+            wanted = set(targets)
             hit = next(((q, field) for _, q, field, _, _ in usable
-                        if field == w[need] and wanted.intersection(dict(_value_paths(q)).get(field, ()))), None)
-            hits.append((w[need], hit))
+                        if field == path and wanted.intersection(dict(_value_paths(q)).get(field, ()))), None)
+            hits.append((path, hit))
             if hit is not None:
                 cmds[ckey] = scoped_answer_command(hit[0], hit[1], gid)
+        if w.get("fields"):
+            cmds = {"fields": [{**f, "command": cmds.get(i, f["command"])} for i, f in enumerate(each)]} if cmds else {}
         why = potential_warning_text({**w, **cmds}) if cmds else w["text"]
         for need, hit in hits:
             if hit is None:
@@ -3365,7 +3398,9 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
         stated = _stated_candidate_ids(rep) if warned else []
         if not need and not plus and not hard and wanted is None:
             done.append(gid)
-            warned_done += [r["why"] for r in warned if r["why"] not in warned_done]
+            for r in warned:  # r6h H3: each why once, also when one warning recommends several questions
+                if r["why"] not in warned_done:
+                    warned_done.append(r["why"])
             stated_done += stated
             continue
         rank = (bool(hard), soft is not None, need + len(plus), n)

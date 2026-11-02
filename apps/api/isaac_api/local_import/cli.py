@@ -1937,30 +1937,121 @@ def cmd_bundle_validate(args) -> int:
     return code
 
 
-#: How many refused groups ``bundle export`` prints in full by default (``--full`` prints all).
-EXPORT_REFUSED_SHOWN = 3
+#: r6h H1: how many REPEATED "ok" rows ``bundle export`` and ``bundle upload --dry-run`` print by default (``--full``
+#: prints every row). A refused, withdrawn, replaced or restored row, and one with something of its own to say, is
+#: always printed in full.
+OK_ROWS_SHOWN = 3
+
+
+def _said_key(text: Any) -> str:
+    """A warning or note as said once (``records.group_by_text``): its question id is the one part that differs."""
+    from . import records as R
+
+    return R._QUESTION_ID_IN_TEXT.sub("<question id>", str(text))
+
+
+def _repeated_texts(texts_per_row: Sequence[Sequence[Any]]) -> set[str]:
+    """The texts (:func:`_said_key`) more than :data:`OK_ROWS_SHOWN` rows carry: what the reply's by-text summary
+    says once with its count. A row carrying any other text (its own, or one only a few rows share) is listed."""
+    counts: dict[str, int] = {}
+    for texts in texts_per_row:
+        for key in {_said_key(t) for t in texts}:
+            counts[key] = counts.get(key, 0) + 1
+    return {k for k, n in counts.items() if n > OK_ROWS_SHOWN}
+
+
+def _lines_every_row_says(summaries: Sequence[Sequence[Any]]) -> list[str]:
+    """The summary lines every one of two or more refused rows carries word for word, in the first row's order."""
+    if len(summaries) < 2:
+        return []
+    common = set.intersection(*({str(x) for x in s} for s in summaries))
+    return [str(x) for x in summaries[0] if str(x) in common]
 
 
 def compact_export(result: Mapping) -> dict:
-    """``bundle export``'s reply without every refused group's full summary: counts by reason, the
-    first :data:`EXPORT_REFUSED_SHOWN` refusals in full, and where the rest are. Measured on a real
-    BL4-3 bundle with nothing exportable: 35 refusals printed 40 KB."""
+    """r6h H1: ``bundle export``'s DEFAULT reply. Every refused, withdrawn, replaced or restored row is listed in
+    full, and so is every record with something of its own to say (a warning no more than :data:`OK_ROWS_SHOWN`
+    records carry, more warnings than a row shows, a refreshed evidence file, an artifact refused). Only the REPEATED "ok" rows (written
+    or unchanged, nothing of their own) are cut to the first :data:`OK_ROWS_SHOWN`; the counts, ``warnings_by_text``
+    and ``portal_warnings`` already say what they carry. ``schemas_used`` (and the rows' one statement) is said once
+    at the top when every row has the same; summary lines every refused row repeats are said once
+    (``refused_every_summary_says``). ``refused_by_reason`` and ``missing_required_by_field`` are always there when a
+    group was refused. Measured on a real BL15-2 bundle: 88 unchanged records printed 169 KB."""
     from . import records as R
 
-    refused = list(result.get("refused") or ())
-    if len(refused) <= EXPORT_REFUSED_SHOWN:
-        return dict(result)
-    by_reason, by_field = R.refusal_counts(refused)
-    out = {k: v for k, v in result.items() if k != "refused"}
-    out.update(
-        refused_total=len(refused),
-        refused_by_reason=by_reason,
-        missing_required_by_field=by_field,
-        refused=refused[:EXPORT_REFUSED_SHOWN],
-        refused_omitted=len(refused) - EXPORT_REFUSED_SHOWN,
-        refused_full_list=("Pass --full to print every refused group's summary, or run `isaac bundle validate "
-                           "<bundle_dir>`: it writes each group's full report to <bundle_dir>/validation/<group_id>.json."),
-    )
+    exported = [dict(r) for r in result.get("exported") or ()]
+    refused = [dict(r) for r in result.get("refused") or ()]
+    top: dict[str, Any] = {}
+    if exported and all("schemas_used" in r for r in exported) and len(
+            {json.dumps(r["schemas_used"], sort_keys=True) for r in exported}) == 1:
+        top["schemas_used"] = exported[0]["schemas_used"]
+        for r in exported:
+            del r["schemas_used"]
+    if exported and all("statement" in r for r in exported) and len({r["statement"] for r in exported}) == 1:
+        top["records_statement"] = exported[0]["statement"]
+        for r in exported:
+            del r["statement"]
+    common = _repeated_texts([r.get("warnings") or () for r in exported])
+
+    def has_its_own(r: Mapping) -> bool:
+        return bool(r.get("export") not in ("new", "unchanged") or r.get("replaces_record_id") or r.get("restored_from_withdrawn")
+                    or r.get("evidence_refreshed") or r.get("withdrawn") or r.get("warnings_omitted")
+                    or any(not isinstance(a, str) for a in r.get("artifacts") or ())
+                    or not {_said_key(t) for t in r.get("warnings") or ()} <= common)
+
+    ok = [r for r in exported if not has_its_own(r)]
+    keep = {id(r) for r in ok[:OK_ROWS_SHOWN]} | {id(r) for r in exported if has_its_own(r)}
+    rows = [r for r in exported if id(r) in keep]
+    shared = _lines_every_row_says([r.get("summary") or () for r in refused])
+    if shared:
+        for r in refused:
+            r["summary"] = [x for x in r.get("summary") or () if str(x) not in set(shared)]
+    out: dict[str, Any] = {}
+    for k, v in result.items():
+        if k == "exported":
+            out.update(top)
+            out["exported"] = rows
+            if len(rows) < len(exported):
+                out.update(
+                    exported_shown=len(rows), exported_omitted=len(exported) - len(rows),
+                    exported_full_list=(
+                        "Each record left out here is ready with nothing of its own to say: written or unchanged, "
+                        "replacing nothing, carrying only warnings many ready records carry (warnings_by_text, "
+                        "portal_warnings, each with its record count). A replaced or restored record, and one with a warning of its own, is always "
+                        "listed. Pass --full for every row; <out>/isaac-export/index.json lists every record id."))
+        elif k == "refused":
+            if refused:
+                by_reason, by_field = R.refusal_counts(refused)
+                out.update(refused_total=len(refused), refused_by_reason=by_reason, missing_required_by_field=by_field)
+                if shared:
+                    out["refused_every_summary_says"] = shared
+            out["refused"] = refused
+        else:
+            out[k] = v
+    return out
+
+
+def compact_upload(plan: Sequence[Mapping]) -> dict:
+    """r6h H1: ``bundle upload --dry-run``'s DEFAULT ``records``: every record that replaces an earlier one, or carries
+    a note no more than :data:`OK_ROWS_SHOWN` records carry, in full; of the rest (the same two requests, only the body size and hash differ)
+    the first :data:`OK_ROWS_SHOWN`; with the counts and the total body size. ``notes_by_text`` says the shared notes."""
+    common = _repeated_texts([p.get("notes") or () for p in plan])
+
+    def has_its_own(p: Mapping) -> bool:
+        return bool(p.get("replaces_record_ids") or not {_said_key(t) for t in p.get("notes") or ()} <= common)
+
+    ok = [p for p in plan if not has_its_own(p)]
+    keep = {id(p) for p in ok[:OK_ROWS_SHOWN]} | {id(p) for p in plan if has_its_own(p)}
+    rows = [p for p in plan if id(p) in keep]
+    out: dict[str, Any] = {"records_total": len(plan),
+                           "body_bytes_total": sum(int((p.get("requests") or [{}])[0].get("body_bytes") or 0) for p in plan)}
+    if len(rows) < len(plan):
+        out.update(records_shown=len(rows), records_omitted=len(plan) - len(rows),
+                   records_full_list=("Each record left out here would be sent the same way as those shown (POST validate, "
+                                      "then POST records only if it publishes); only its body size and sha256 differ, and its "
+                                      "notes are ones many records carry (notes_by_text, with the count). A record that replaces an "
+                                      "earlier one, or has a note of its own, is always listed. Pass --full for every row."))
+    out["records"] = rows
     return out
 
 
@@ -1993,8 +2084,11 @@ def cmd_bundle_upload(args) -> int:
     # r5f L3: the statement leads ("N records, 2 requests each, to <portal>") and says each distinct note and each
     # portal warning once (a note differing only in its question id is one note); a record's own notes stay in `records`
     summary = R.upload_summary(plan, Path(args.records_dir), args.portal_url)
+    # r6h H1: by default the repeated rows are cut to the first few (every replacing record, and every one with a note
+    # of its own, is listed); --full prints every row
     _print({"dry_run": True, "network_calls": 0, "statement": summary["statement"],
-            **{k: v for k, v in summary.items() if k != "statement"}, "records": plan})
+            **{k: v for k, v in summary.items() if k != "statement"},
+            **({"records_total": len(plan), "records": plan} if args.full else compact_upload(plan))})
     return EXIT_OK
 
 
@@ -2359,13 +2453,16 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q = bsub.add_parser("export", help="write official records that pass every gate")
     q.add_argument("bundle_dir")
     q.add_argument("--out", required=True)
-    q.add_argument("--full", action="store_true", help="print every refused group's full summary (default: counts and the first few)")
+    q.add_argument("--full", action="store_true", help="print every exported row in full (default: every refused, withdrawn, "
+                   "replaced row and every row with a warning of its own; of the repeated ones the first few)")
     q.set_defaults(func=cmd_bundle_export)
 
     q = bsub.add_parser("upload", help="DRY RUN ONLY: what would be sent to the portal")
     q.add_argument("records_dir")
     q.add_argument("--dry-run", action="store_true")
     q.add_argument("--portal-url")
+    q.add_argument("--full", action="store_true", help="print every record's requests (default: every replacing record and "
+                   "every one with a note of its own; of the repeated ones the first few)")
     q.set_defaults(func=cmd_bundle_upload)
 
     q = bsub.add_parser("template", help="the ISAAC metadata template: export it, fill it once, import the answers")

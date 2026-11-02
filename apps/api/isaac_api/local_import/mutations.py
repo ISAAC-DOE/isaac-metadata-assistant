@@ -314,6 +314,18 @@ def save_bundle(bundle_dir: Path, bundle: dict) -> None:
               "eligibility_rederived)", file=sys.stderr)
 
 
+def nothing_to_save(bundle: Mapping, result: Mapping) -> bool:
+    """r6h H4: True when a ``decide`` recorded NOTHING (every target's latest decision was already this one: "Nothing new
+    recorded") and the stored bundle needs no upgrade by this build: then nothing is written, so the save (re-derivation,
+    the full schema validation, the write) is skipped and the bundle on disk is exactly as it was, still the one the
+    last write validated. Every call that records something is saved through :func:`save_bundle`, whose validity
+    contract is unchanged; so is a no-op call on a bundle an older build stored (its one-time upgrade is never skipped).
+    A slot a ``--only`` answer added in memory is never written either way when nothing was recorded on it."""
+    if result.get("recorded") or result.get("split_into_groups"):
+        return False
+    return not B.needs_format_upgrade(bundle) and not B.allowed_list_rederivations(bundle)
+
+
 class StaleBundleVersion(MutationRefused):
     """The caller read the bundle at one version and it is now another (a CLI command, or
     another window, wrote it since). Nothing was written; ``current_version`` says what is
@@ -1231,7 +1243,8 @@ def decide(
             raise _keep_refused_answer(bundle_dir, bundle, exc, target_ids=target_ids, by=by, orcid=orcid, note=note,
                                        source={"kind": "decide_answer", "command": "bundle decide", "decision": decision,
                                                "question_id": None, "as_said": True}) from None
-        save_bundle(bundle_dir, bundle)
+        if not nothing_to_save(bundle, result):
+            save_bundle(bundle_dir, bundle)
         return _with_same_ruling_left(_said_on_list(_with_answered(result, bundle, before), as_said), bundle, peers)
 
 
@@ -2227,7 +2240,8 @@ def decide_question(
         result = _said_on_list(_with_answered(_with_kept(kept_overrides, reached(bundle, recorded)), bundle, before), as_said)
         if same_members:
             result = _with_same_reading(result, same_members)
-        save_bundle(bundle_dir, bundle)
+        if not nothing_to_save(bundle, recorded):
+            save_bundle(bundle_dir, bundle)
         return (result, bundle_version(bundle_dir)) if with_version else result
 
 

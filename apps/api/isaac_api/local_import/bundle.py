@@ -301,6 +301,16 @@ def bundle_schema() -> dict:
     return json.loads(SCHEMA_FILE.read_text(encoding="utf-8"))
 
 
+@lru_cache(maxsize=1)
+def bundle_validator():
+    """r6h H4: ONE compiled validator of :func:`bundle_schema` per process (its references resolved once), reused by
+    every :func:`validate_bundle`: a long-running process (the local server, a test run) builds it once. The
+    validation itself is unchanged: every save still checks the whole bundle against the whole schema."""
+    from jsonschema import Draft202012Validator
+
+    return Draft202012Validator(bundle_schema())
+
+
 def _safe_relative(path: object) -> str | None:
     """``path`` if it is a relative path with no ``..`` segment, else ``None``."""
     if not isinstance(path, str) or not path:
@@ -760,15 +770,19 @@ def _clamp_strings(obj: Any, counter: list[int]) -> Any:
 
 
 def _iter_strings(obj: Any) -> Iterable[str]:
-    if isinstance(obj, str):
-        yield obj
-    elif isinstance(obj, list):
-        for v in obj:
-            yield from _iter_strings(v)
-    elif isinstance(obj, dict):
-        for k, v in obj.items():
-            yield k
-            yield from _iter_strings(v)
+    """Every string ``obj`` holds (dict keys too). r6h H4: walked with a stack, not recursive generators (every save
+    walks the whole bundle: a 28 MB one took 0.8 s that way), in no particular order."""
+    stack = [obj]
+    pop, push = stack.pop, stack.extend
+    while stack:
+        o = pop()
+        if isinstance(o, str):
+            yield o
+        elif isinstance(o, dict):
+            yield from o.keys()
+            push(o.values())
+        elif isinstance(o, list):
+            push(o)
 
 
 def encode(bundle: Mapping) -> bytes:
@@ -2123,9 +2137,10 @@ def apply_derivations(bundle: dict) -> dict:
     _derive_local_clock_starts(bundle)
     zone_d = clock_zone_decision(bundle)
     eligible = 0
+    conflict_ids_of = conflict_ids_by_candidate(bundle)  # r6h H4: read once, not once per candidate
     for c in bundle["candidates"]:
         key = ("candidate", c["candidate_id"])
-        d = candidate_decision(bundle, c, decision_of)
+        d = candidate_decision(bundle, c, decision_of, conflict_ids_of)
         state = derive_value_state(c["extracted_state"], decision=d, interpreted=key in interpreted)
         c["value_state"] = state
         c["eligibility_for_official_record"] = eligibility_for_official_record(
@@ -5294,10 +5309,8 @@ def record_rederivation(bundle: dict, stale: Sequence[Mapping], *, to_version: s
 def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None = None) -> list[str]:
     """Every way ``bundle`` breaks the v1 contract. Empty means valid. ``encoded``: :func:`encode` of this same
     ``bundle``, when the caller already has it (the size bound is read from it, so a save encodes once)."""
-    from jsonschema import Draft202012Validator
-
     errors: list[str] = []
-    validator = Draft202012Validator(bundle_schema())
+    validator = bundle_validator()
     for err in sorted(validator.iter_errors(bundle), key=lambda e: list(e.absolute_path)):
         where = "/".join(str(p) for p in err.absolute_path) or "(root)"
         errors.append(f"schema: {where}: {err.message[:300]}")
@@ -5707,7 +5720,7 @@ def _provenance_errors(bundle: Mapping) -> list[str]:
             errors.append(f"state: {cid} records a disagreement yet carries a chosen value")
         if (sb["unresolved_reason"] is not None or (sb["resolved_by_rule"] and c.get("readings"))) and cid not in conflict_for:
             errors.append(f"consistency: {cid} is a disagreement with no conflicts[] entry")
-        decided = candidate_decision(bundle, c, decision_of)
+        decided = candidate_decision(bundle, c, decision_of, conflict_for)  # r6h H4: the index built above
         if c["value"] is not None and (decided is None or decided.get("decision") in NEUTRAL_DECISIONS):
             if json.dumps(c["value"], sort_keys=True) not in witnessed_values(c):
                 errors.append(f"provenance: {cid} carries a value no witness states and no recorded normalisation produced")

@@ -347,7 +347,8 @@ run "$ISAAC" bundle upload "$RECORDS" --dry-run; UP_RC=$RC; cp "$OUT" "$WORK/upl
 if [[ $UP_RC -eq 0 && "$(json <(cat "$OUT") "d['network_calls']" 2>/dev/null)" == "0" ]] && grep -q "Nothing was sent" "$OUT"; then
   report PASS "upload --dry-run" "0 network calls; nothing was sent; the key is not read"; else report FAIL "upload --dry-run" "exit $UP_RC: $(head -c 200 "$OUT" | tr '\n' ' ')"; fi
 if [[ "$WROTE" -gt 0 ]]; then
-  LISTED="$(json "$WORK/upload.json" "len(d['records'])" 2>/dev/null)"
+  # r6h H1: the default lists repeated rows only in part; records_total counts every record that would be sent
+  LISTED="$(json "$WORK/upload.json" "d.get('records_total', len(d['records']))" 2>/dev/null)"
   if [[ "$LISTED" == "$WROTE" ]]; then report PASS "upload --dry-run lists the records" "$LISTED record(s) that would be sent; none was"; else report FAIL "upload --dry-run lists the records" "lists $LISTED of $WROTE"; fi
 fi
 run "$ISAAC" bundle upload "$RECORDS"; expect "upload without --dry-run is refused" 2 "uploads are disabled in this build" || true

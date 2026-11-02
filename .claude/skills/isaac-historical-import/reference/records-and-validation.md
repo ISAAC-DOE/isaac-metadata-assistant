@@ -44,12 +44,18 @@ a set-point while its run's name and header write different numbers warns `poten
 the scientist rules on the header's reading (in a bundle imported before header readings: by recording the
 record's set-point again, the warning's command). Re-importing instead starts with no answers: earlier
 decisions and a filled workbook do not carry over, and ids printed for the old bundle name other things. A name stating open
-circuit (`OCV`) warns until the control mode is confirmed. `athena_version_no_longer_chosen` warns when the
+circuit (`OCV`) warns until the control mode is confirmed. `macro_setpoint_unanswered` (ranked with a value its
+sources disagree about) warns while a macro and a run's file name state other set-points for one measurement and
+nobody has said which is right: the record carries the file's set-point (or none) meanwhile; ask the question the
+warning names (`question_id`). `in_situ_conditions_not_in_record` warns for an in-situ record that carries no
+electrolyte, cell type or control mode (and names its pH when it has none), quoting what the file names state
+(`10MNaOH`): ask each field with its command (`fields`); nothing is filled from a name. `athena_version_no_longer_chosen` warns when the
 approved curve is not the Athena version the scientist chose last (a version approved before they chose
 another, or ISAAC's own curve approved before they chose a version): the record carries the approved curve.
 Its text gives the steps (`isaac process` for the chosen version if needed, reject the old result, approve the
-chosen one) and the way to keep the approved curve instead (approve it again, or choose its version again); ask
-before each. None of these is read as a value. It is not a refusal: the record can still be exportable,
+chosen one) and the way to keep the approved curve instead: for ISAAC's own curve or another Athena curve, reject it
+and then approve it again (approving it again alone records nothing new and leaves the warning); for an Athena
+version, choose that version again. Ask before each. None of these is read as a value. It is not a refusal: the record can still be exportable,
 without the condition that defines it. Say each one to the scientist in words and ask the scale question it names (and the set-point when `also_needs` is set); its command is a template: run it only with their answer. Explain the counts first ("all 78 lack the producing group; 70 wait for a curve
 approval; 5 have no protocol"), then open `validation/<group id>.json` only for a group they leave
 unexplained.
@@ -95,6 +101,14 @@ opens with `outcome` ("N record(s) ready (U unchanged since their export, W writ
 unchanged record keeps its id and is not new; say "nothing new was written" when W is 0) and `records_ready` (N) /
 `records_written` (W: new or replacing records only; before r5 it counted unchanged ones too) /
 `records_unchanged` (U) / `groups_refused`.
+By default the reply lists in full every refused row (`refused`, with `refused_total`, `refused_by_reason` and
+`missing_required_by_field` whenever a group was refused; summary lines every refused row repeats are said once in
+`refused_every_summary_says`), every withdrawn row (`withdrawn`), every replaced or restored record (`exported[]` with
+`replaces_record_id` / `restored_from_withdrawn`) and every record with something of its own to say (a warning not
+every ready record carries, a refreshed evidence file, a refused artifact). Only the repeated "ok" rows are cut to
+the first 3 (`exported_shown`, `exported_omitted`, `exported_full_list`): what they carry is in the counts,
+`warnings_by_text` and `portal_warnings`. `schemas_used` and the rows' one statement (`records_statement`) are said
+once at the top. `export --full` prints every row; `<records>/isaac-export/index.json` lists every record id.
 It exits 1 whenever any group is refused, **even when it wrote records**: read `outcome`, never the exit
 code alone, before telling the scientist what is ready. A record written while a warning still applies lists it
 in `exported[].warnings` ("Written without the potential set-point: …"; the first 5, with `warnings_total`), and
@@ -106,7 +120,7 @@ validator's own warnings (a deprecated `three_electrode` cell type, no data owne
 warns is deprecated out of its dropdown and marks it on the Vocabulary sheet ("deprecated: use …"). Adopt's allowed
 lists, the Disagreements sheet and `bundle questions` (`deprecated_values_by_field`) mark it too, and the import
 preview warns under "Deprecated terms". Its index is
-`<records>/isaac-export/index.json`. Exporting again into the same `--out` reuses each unchanged record's id (`export: unchanged`: the record body is the same; with `evidence_refreshed` when only its evidence file was rewritten, e.g. the same value confirmed again, by someone else, or read from another file — `evidence_changed` says what changed; say so, the record is the same); a record whose body changed gets a new id and the old one is moved to `isaac-export/superseded/` (`export: replaced`); a record whose group is now refused or no longer confirmed is moved to `isaac-export/withdrawn/` (listed under `withdrawn`; if it was uploaded already, the portal still holds it) — say which. Then `upload <records> --dry-run`: its `statement` leads with "N records, 2 requests each, to <portal>", then says each note and each portal warning once (`notes_by_text`, `portal_warnings`, read from the export's index; an older export has none). Summarise records, target
+`<records>/isaac-export/index.json`. Exporting again into the same `--out` reuses each unchanged record's id (`export: unchanged`: the record body is the same; with `evidence_refreshed` when only its evidence file was rewritten, e.g. the same value confirmed again, by someone else, or read from another file — `evidence_changed` says what changed; say so, the record is the same); a record whose body changed gets a new id and the old one is moved to `isaac-export/superseded/` (`export: replaced`); a record whose group is now refused or no longer confirmed is moved to `isaac-export/withdrawn/` (listed under `withdrawn`; if it was uploaded already, the portal still holds it) — say which. Then `upload <records> --dry-run`: its `statement` leads with "N records, 2 requests each, to <portal>", then says each note and each portal warning once (`notes_by_text`, `portal_warnings`, read from the export's index; an older export has none). `records` lists in full every record that replaces an earlier one and every one with a note of its own; of the rest (the same two requests; only the body size and hash differ) the first 3, with `records_total`, `records_omitted`, `body_bytes_total` (`--full` lists every record). Summarise records, target
 endpoints and body sizes, and name each record's `replaces_record_ids` (read its `replaces_statement`: it says where each earlier record is now; one already uploaded stays on the portal). State plainly: nothing was sent, this build cannot send, the key was not
 read. Never ask for or print a portal key. Tell the scientist the records are in `<records>` and
 the portal upload is theirs to do.

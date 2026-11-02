@@ -83,6 +83,11 @@ START_TIME_WARNING = "start_time_left_out"
 #: ``select_athena_version`` names (a version approved before another was chosen, or ISAAC's own result approved before
 #: a version was chosen): the record would carry a curve that is not the result of record. A warning, never a refusal.
 ATHENA_NOT_CHOSEN_WARNING = "athena_version_no_longer_chosen"
+#: r6h H2: a member run's ``macro_setpoint_disagrees`` conflict (a macro and the file name state other set-points for
+#: one measurement) is unanswered: the record goes out with the file's set-point (or none) while that is open.
+MACRO_SETPOINT_WARNING = "macro_setpoint_unanswered"
+#: r6h H3: an in-situ record carries no electrolyte, cell type or control mode (what it was measured in).
+IN_SITU_WARNING = "in_situ_conditions_not_in_record"
 START_TIME_LEFT_OUT = "start time left out: instrument clock zone deferred (question {question})"
 #: c16-r L6: the same, while the clock question has no answer at all (neither a zone nor a defer)
 START_TIME_LEFT_OUT_UNANSWERED = "start time left out: instrument clock zone not answered yet (question {question})"
@@ -1120,11 +1125,17 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
     # (questions._companions_missing, the same entry and why). Appended last, so the questions read the same list.
     report["missing_required"] += Q._companions_missing(report)
 
+    # r6h H2: the control mode the record carries (``questions`` says a set-point's why from it); nothing is read here
+    report["control_mode"] = (fields[B.CONTROL_MODE_PATH].get("value") if _present(fields, B.CONTROL_MODE_PATH) is not None
+                              else None)
     # the conditions a run's names or headers state, of the MEASUREMENT runs only (a context run is asked nothing)
     report["warnings"] = (_stated_potential_warnings(bundle, group, measured_ids, fields, proposals,
                                                      held_by_scale=held_by_companion.get(SETPOINT_PATH, (None,))[0] == SCALE_PATH)
                           + _potential_sources_warnings(bundle, group, measured_ids, fields)
+                          + _macro_setpoint_warnings(bundle, group, measured_ids, fields, index["memo"])
                           + Q.open_circuit_warnings(bundle, group, measured_ids, fields)
+                          + _in_situ_warnings(bundle, group, [r for r in member_runs if r["run_id"] in measured_ids], fields,
+                                              index["memo"])
                           + _start_time_warnings(bundle, group, measured_ids, fields, index["memo"]))
     if chose_other is not None:
         # r5c C1: the record carries an approved result that is not the version the scientist chose last: said at
@@ -1497,6 +1508,142 @@ def _start_time_conflict_warnings(bundle: Mapping, group: Mapping, member_ids: s
     return []
 
 
+def _macro_setpoint_warnings(bundle: Mapping, group: Mapping, member_ids: set, fields: Mapping,
+                             memo: dict | None = None) -> list[dict]:
+    """r6h H2: a :data:`MACRO_SETPOINT_WARNING` (never a refusal) for a record whose member run has an OPEN
+    ``macro_setpoint_disagrees`` conflict (a macro names the measurement with another set-point than its file name):
+    the record carries whatever set-point the run's own answers give (or none), while which one is right is the
+    scientist's open question. Said at build-records, validate and export until the conflict's own question is
+    answered; no value is read from either side here. ``memo``: the composition index's, so the open conflicts are
+    found once per bundle, not once per group."""
+    from . import questions as Q
+
+    memo = {} if memo is None else memo
+    if "open_macro_conflicts" not in memo:
+        memo["open_macro_conflicts"] = [
+            cf for cf in bundle.get("conflicts") or () if cf.get("kind") == B.MACRO_SETPOINT_CONFLICT_KIND
+            and cf.get("run_ids") and cf.get("value_state") in (B.STATE_CONFLICTING, B.STATE_NEEDS_REVIEW)]
+    out = []
+    carried = (fields.get(SETPOINT_PATH) or {}).get("value") if _present(fields, SETPOINT_PATH) is not None else None
+    for cf in memo["open_macro_conflicts"]:
+        if cf["run_ids"][0] not in member_ids or len(cf.get("readings") or ()) < 2:
+            continue
+        qid = Q._qid(f"group:{group['group_id']}", "resolve_conflict", cf["conflict_id"])
+        file_r, macro_r = cf["readings"][0], cf["readings"][1]
+        out.append({"code": MACRO_SETPOINT_WARNING, "group_id": group["group_id"], "path": SETPOINT_PATH,
+                    "needs": SETPOINT_PATH, "targets": [], "conflict_id": cf["conflict_id"], "run_id": cf["run_ids"][0],
+                    "question_id": qid, "file_name_V": file_r.get("value"), "macro_V": macro_r.get("value"),
+                    "file_name": ((file_r.get("witnesses") or [{}])[0] or {}).get("relative_path"),
+                    "macro": ((macro_r.get("witnesses") or [{}])[0] or {}).get("relative_path"), "carried_V": carried,
+                    "command": (f"isaac bundle decide <bundle_dir> --question {qid} --decision confirm --value "
+                                f"<{file_r.get('value')} or {macro_r.get('value')}> --json --by \"<your name>\"")})
+    return [{**w, "text": macro_setpoint_text(w)} for w in out]
+
+
+def macro_setpoint_text(w: Mapping) -> str:
+    """The plain sentence for a :data:`MACRO_SETPOINT_WARNING`, ending with its command (a template: the scientist's
+    answer is the value)."""
+    carried = w.get("carried_V")
+    now = (f"the record carries {_said(carried, SETPOINT_PATH)} now" if isinstance(carried, (int, float))
+           and not isinstance(carried, bool) else "the record carries no set-point now")
+    return (f"the macro {w.get('macro')} states {w.get('macro_V')} V for this "
+            f"measurement and the file name {w.get('file_name')} states {w.get('file_name_V')} V; {now}, and which one is "
+            f"right is unanswered (question {w['question_id']}). Ask the scientist, then: {w['command']}")
+
+
+#: r6h H3: what an in-situ record is measured IN, with the words a sentence names each by.
+IN_SITU_FIELDS = (("context.electrochemistry.electrolyte.name", "electrolyte"),
+                  ("context.electrochemistry.cell_type", "cell type"),
+                  (B.CONTROL_MODE_PATH, "control mode"))
+IN_SITU_PH = ("context.electrochemistry.pH", "pH")
+#: A file-name token that STATES an in-situ condition: a concentration written onto its electrolyte (``10MNaOH``,
+#: ``100mMHClO4``: the formula checked by ``template.electrolyte_formula``), a pH (``pH12``) or open circuit (``OCV``).
+#: Quoted in the warning only; never read as a value.
+_IN_SITU_NAME_TOKENS = (re.compile(r"\d+(?:[p.]\d+)?(?:mM|uM|\u00b5M|M)(?P<formula>[A-Z][A-Za-z0-9()]{2,})"),
+                        re.compile(r"pH\d+(?:[p.]\d+)?", re.IGNORECASE), re.compile(r"OC[VP]", re.IGNORECASE))
+
+
+def _in_situ_statements(member_runs: Sequence[Mapping]) -> list[dict]:
+    """Each in-situ condition a member run's FILE NAME states (:data:`_IN_SITU_NAME_TOKENS`), once per literal, in run
+    order: ``{literal, relative_path, run_id}``. Quoted only."""
+    from . import questions as Q
+    from .template import electrolyte_formula
+
+    out, seen = [], set()
+    for r in member_runs:
+        first = next((sc.get("relative_path") for sc in r.get("scans") or () if sc.get("relative_path")), None) or r.get("stem")
+        for tok in Q._name_tokens(r):
+            m = next((m for p in _IN_SITU_NAME_TOKENS if (m := p.fullmatch(tok))), None)
+            if m is None or tok in seen or ("formula" in m.groupdict() and not electrolyte_formula(m.group("formula"))):
+                continue
+            seen.add(tok)
+            out.append({"literal": tok, "relative_path": first, "run_id": r["run_id"]})
+    return out
+
+
+def _in_situ_warnings(bundle: Mapping, group: Mapping, member_runs: Sequence[Mapping], fields: Mapping,
+                      memo: dict | None = None) -> list[dict]:
+    """r6h H3: an :data:`IN_SITU_WARNING` (never a refusal) for a record whose confirmed environment is ``in_situ``
+    while it carries no electrolyte, cell type or control mode (any of :data:`IN_SITU_FIELDS`; its pH is named too
+    when it carries none): what the measurement was done in would be silently absent. It quotes what the member runs'
+    file names state (``10MNaOH``), never reads a value from them, and names, per field, the open targets whose
+    question asks it (``fields``: ``{path, targets, command}``; ``records.with_question_commands`` makes each command
+    the question's, and the questions' minimum recommends them). ``memo``: the open targets per run and field, read
+    once per composition."""
+    env = _present(fields, "context.environment")
+    if env is None or env.get("value") != "in_situ":
+        return []
+    lacking = [(p, word) for p, word in IN_SITU_FIELDS if _present(fields, p) is None]
+    if not lacking:
+        return []
+    if _present(fields, IN_SITU_PH[0]) is None:
+        lacking.append(IN_SITU_PH)
+    memo = {} if memo is None else memo
+    cands, missing = bundle.get("candidates") or [], bundle.get("missing_values") or []
+    held = memo.get("in_situ_open_targets")
+    # read once per LIST composed from: the whole bundle (validate, export) once; questions.compositions' per-group
+    # view (only its members' rows) once per group. The lists are kept with the index, so an identity is never reused.
+    if held is None or held[0] is not cands or held[1] is not missing:
+        wanted = {p for p, _ in IN_SITU_FIELDS} | {IN_SITU_PH[0]}
+        by: dict[tuple, list[str]] = {}
+        for o in [*cands, *missing]:
+            if o.get("target_field_path") in wanted and o.get("value_state") in (
+                    B.STATE_MISSING, B.STATE_NEEDS_REVIEW, B.STATE_CANDIDATE_EXTRACTED):
+                by.setdefault((o.get("run_id"), o["target_field_path"]), []).append(o.get("candidate_id") or o.get("value_id"))
+        held = memo["in_situ_open_targets"] = (cands, missing, by)
+    by = held[2]
+    rids = [r["run_id"] for r in member_runs]
+    each = []
+    for path, word in lacking:
+        targets = [t for rid in [*rids, None] for t in by.get((rid, path), ())]
+        each.append({"path": path, "word": word, "targets": targets,
+                     "command": f"isaac bundle questions <bundle_dir> --scope group:{group['group_id']}   # answer {path} there"})
+    w = {"code": IN_SITU_WARNING, "group_id": group["group_id"], "path": lacking[0][0], "needs": lacking[0][0],
+         "targets": each[0]["targets"], "command": each[0]["command"], "fields": each,
+         "stated": _in_situ_statements(member_runs)}
+    return [{**w, "text": in_situ_text(w)}]
+
+
+def in_situ_text(w: Mapping) -> str:
+    """The plain sentence for an :data:`IN_SITU_WARNING`, ending with the command(s) that ask each field."""
+    words = [f["word"] for f in w.get("fields") or ()]
+    named = ", ".join(words[:-1]) + f" or {words[-1]}" if len(words) > 1 else (words[0] if words else "")
+    stated = w.get("stated") or ()
+    said = ("; the file names state " + ", ".join(f"{s['literal']} ({s['relative_path']})" for s in stated[:3])
+            + (f" and {len(stated) - 3} more" if len(stated) > 3 else "") + " (quoted, never read as a value)"
+            if stated else "; no file name states them")
+    # each question once, with the fields it asks here (the commands differ only in --field), then the first command
+    asked: dict[str, list[str]] = {}
+    for f in w.get("fields") or ():
+        m = re.search(r"--question (Q-[0-9a-f]+)", f["command"])
+        asked.setdefault(m.group(1) if m else f["command"], []).append(f["word"])
+    where = "; ".join(f"question {k} ({', '.join(v)})" if k.startswith("Q-") else f"{', '.join(v)}: {k}"
+                      for k, v in asked.items())
+    first = (w.get("fields") or [{}])[0].get("command") or w.get("command")
+    return (f"an in-situ record that carries no {named}: what it was measured in would be absent from the record{said}. "
+            f"Ask the scientist ({where}), e.g. {first}")
+
+
 def potential_sources_text(w: Mapping) -> str:
     """The plain sentence for a :data:`POTENTIAL_SOURCES_WARNING`, ending with its command. c16-r M3: "state
     different potentials" only when both name the SAME scale; else they "write different numbers", each one's scale
@@ -1575,6 +1722,10 @@ def potential_warning_text(w: Mapping) -> str:
 
     if w.get("code") == POTENTIAL_SOURCES_WARNING:
         return potential_sources_text(w)
+    if w.get("code") == MACRO_SETPOINT_WARNING:
+        return macro_setpoint_text(w)
+    if w.get("code") == IN_SITU_WARNING:
+        return in_situ_text(w)
     if w.get("code") == ATHENA_NOT_CHOSEN_WARNING:
         return athena_choice_text(w, w["group_id"])
     if w.get("code") == START_TIME_WARNING:
@@ -1620,6 +1771,10 @@ def with_question_commands(bundle: Mapping, warnings: list[dict], payload: Mappi
     for w in warnings:
         cmd = Q.command_for_targets(payload, w.get("targets") or (), w["needs"], w["group_id"]) or w["command"]
         w = {**w, "command": cmd}
+        if w.get("fields"):
+            # r6h H3: one command per field the warning names (an in-situ record's electrolyte, cell type, ...)
+            w["fields"] = [{**f, "command": Q.command_for_targets(payload, f.get("targets") or (), f["path"], w["group_id"])
+                            or f["command"]} for f in w["fields"]]
         if w.get("also_needs"):
             w["also_command"] = (Q.command_for_targets(payload, w.get("also_targets") or (), w["also_needs"], w["group_id"])
                                  or w["also_command"])
@@ -2183,10 +2338,12 @@ WARNINGS_SHOWN = 5
 
 def warning_rank(code: str | None) -> int:
     """r5f M6: how much a warning matters when only the first few are printed: 0 = a stated value left out of the
-    record, or a value its sources disagree about, or a portal warning; 1 = anything else; 2 = the routine start-time
-    note. Only ORDERS the short list: nothing is dropped, and ``--full`` keeps the original order."""
+    record, or a value its sources disagree about (r6h H2: a macro's set-point too), or a portal warning; 1 = anything
+    else; 2 = the routine start-time note. Only ORDERS the short list: nothing is dropped, and ``--full`` keeps the
+    original order."""
     code = str(code or "")
-    if code in (STATED_POTENTIAL_WARNING, POTENTIAL_SOURCES_WARNING, ATHENA_NOT_CHOSEN_WARNING) or code.startswith("portal:"):
+    if code in (STATED_POTENTIAL_WARNING, POTENTIAL_SOURCES_WARNING, ATHENA_NOT_CHOSEN_WARNING,
+                MACRO_SETPOINT_WARNING) or code.startswith("portal:"):
         return 0
     return 2 if code == START_TIME_WARNING else 1
 
@@ -2305,6 +2462,10 @@ def written_without(w: Mapping) -> str:
         return f"Written with a potential its files disagree about: {w['text']}"
     if w.get("code") == START_TIME_WARNING:
         return f"Written without the start time: {w['text']}"
+    if w.get("code") == MACRO_SETPOINT_WARNING:
+        return f"Written with a set-point its macro disagrees about: {w['text']}"
+    if w.get("code") == IN_SITU_WARNING:
+        return f"Written without what it was measured in: {w['text']}"
     if w.get("code") == ATHENA_NOT_CHOSEN_WARNING:
         return f"Written with an approved curve that is not the chosen Athena version: {w['text']}"
     name = WRITTEN_WITHOUT_NAMES.get(w.get("path"), w.get("path") or "a stated condition")

@@ -231,13 +231,13 @@ Read `reference/records-and-validation.md`; explain the verdicts from validate's
 `processing_fix` means its curve needs approval in Step 6). Say each `warnings` item in words
 (only 5 warnings show by default; `validate --full` lists all; the most serious come first: a stated value left out of a record, then a portal warning, then the routine start-time note), and ask the scale question it names (and the set-point
 if `also_needs`, with `also_command`; a missing set-point lists its scale as missing too). `athena_version_no_longer_chosen`: the
-approved curve is not the version they chose last; say its steps. Run a command only with their answer. Never edit a draft or relax a check.
+approved curve is not the version they chose last; say its steps (to keep it: reject, then approve again; approving again alone records nothing). `macro_setpoint_unanswered` and `in_situ_conditions_not_in_record`: ask the question each names. Run a command only with their answer. Never edit a draft or relax a check.
 
 ## Step 9 · Export and dry run
 
 `<isaac> bundle export <bundle> --out <records>` writes only `exportable` records. Read its `outcome`
 ("N record(s) ready (U unchanged…, W written), refused M group(s)"), not its exit code (see `reference/records-and-validation.md`),
-then its refusal counts (`records_ready` = N; `records_written` = W, new or replacing records only).
+then its refusal counts (`records_ready` = N; `records_written` = W, new or replacing records only; `refused_by_reason`, and every refused, withdrawn or replaced row in full; only repeated ok rows are cut to 3, `--full` prints all).
 **If nothing is exportable**, export writes nothing: skip the dry run, say "no record is ready yet", name what
 blocks the nearest group (from Step 8), and go to Step 10. `<isaac> bundle upload <records> --dry-run` shows what
 *would* be sent: summarise it (its `statement` leads with "N records, 2 requests each, to <portal>", and says each note and each portal warning once, with a count) and say **nothing was sent and this build cannot send**. The scientist uploads through the ISAAC portal themselves.
