@@ -28,6 +28,7 @@ from pathlib import Path
 
 _L_LINE = re.compile(r"^#L[ \t]+(.*)$")
 _S_LINE = re.compile(r"^#S\s")
+_ASCII_NUMBER = re.compile(r"[0-9]+")  # `str.isdigit` accepts `²`, which `int` refuses
 _MAX_ROWS = 200_000
 _MAX_BYTES = 64 * 1024 * 1024
 
@@ -100,7 +101,7 @@ def _spec_block(lines: list[str], scan: int, table: ScanTable) -> list[str] | No
     if len(starts) <= 1:
         return lines
     numbers = {i: lines[i].split()[1:2] for i in starts}
-    hits = [i for i in starts if numbers[i] and numbers[i][0].isdigit() and int(numbers[i][0]) == scan]
+    hits = [i for i in starts if numbers[i] and _ASCII_NUMBER.fullmatch(numbers[i][0]) and int(numbers[i][0]) == scan]
     if len(hits) != 1:
         table.error = f"scan_number_repeated:{scan}" if hits else f"scan_not_in_file:{scan}"
         return None

@@ -1672,6 +1672,9 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     tables = []
     exclude = list((getattr(ctx, "exclusions", None) or {}).get(group["group_id"]) or ())
     excluded: list[dict] = []
+    shared_sids: dict[str, int] = {}
+    for s in scans:
+        shared_sids[s.get("source_id")] = shared_sids.get(s.get("source_id"), 0) + 1
     for s in scans:
         entry = {"source_id": s.get("source_id"), "scan": s.get("scan_index"), "relative_path": s.get("relative_path"), "channel": None, "used": False}
         res["inputs"].append(entry)
@@ -1690,9 +1693,14 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         if expected and sha256_file(path) != expected:
             entry["skip_reason"] = "source_hash_mismatch"
             continue
-        # r5d H1: one scan of a file of several `#S` blocks is read at its own block
-        table = (read_scan_file(path, scan=s["scan_index"]) if ctx.scan_reader is read_scan_file
-                 and isinstance(s.get("scan_index"), int) else ctx.scan_reader(path))
+        # r5d H1: one scan of a file of several `#S` blocks (several of the group's scans in one file, or the
+        # run's own SPEC acquisition file) is read at its own block; every other scan file is read as before
+        in_file = s.get("source_id") is not None and (
+            shared_sids.get(s.get("source_id"), 0) > 1
+            or s.get("source_id") == (ctx.runs_by_key.get(s.get("run_key")) or {}).get("acquisition_source_id"))
+        table = (read_scan_file(path, scan=s["scan_index"]) if ctx.scan_reader is read_scan_file and in_file
+                 and isinstance(s.get("scan_index"), int) and not isinstance(s.get("scan_index"), bool)
+                 else ctx.scan_reader(path))
         entry["format"] = table.format_id
         entry["reader_notes"] = table.notes
         if table.error:

@@ -647,6 +647,16 @@ def same_beamline(a: Any, b: Any) -> bool:
     return pa[0] == pb[0] and (pa[1] is None or pb[1] is None or pa[1] == pb[1])
 
 
+#: r5d: a beamline written with a space or underscore before its branch number (``BL6_2``, ``BL15 2``): one
+#: beamline, read as ``BL6-2``. Only a 1-2 digit number on each side, so ``BL152_2019`` stays ``BL152``.
+_SPLIT_BEAMLINE = re.compile(r"(?i)(?<![a-z0-9])(BL\d{1,2})[ _](\d{1,2}[a-z]?)(?![a-z0-9])")
+
+
+def join_split_beamline(text: str) -> str:
+    """``SSRL_BL6_2_2019`` -> ``SSRL_BL6-2_2019`` (:data:`_SPLIT_BEAMLINE`); any other text unchanged."""
+    return _SPLIT_BEAMLINE.sub(r"\1-\2", text)
+
+
 def facility_hint_readings(bundle: Mapping, path: str) -> list[dict]:
     """``[{value, form, source}]``: the beamline (``BL\\d…``) or facility acronym (the word right before such a
     beamline: ``SSRL`` in ``SSRL_BL152``) each facility hint names, with the hint and where it comes from. Nothing
@@ -658,7 +668,7 @@ def facility_hint_readings(bundle: Mapping, path: str) -> list[dict]:
     out: dict[tuple, dict] = {}
     for h in S.facility_hints(bundle):
         literal = str(h.get("literal") or "")
-        tokens = [t for t in re.split(r"[_\s/,;()]+", _DASHES.sub("-", literal)) if t]
+        tokens = [t for t in re.split(r"[_\s/,;()]+", join_split_beamline(_DASHES.sub("-", literal))) if t]
         for i, tok in enumerate(tokens):
             if not _BEAMLINE_TOKEN.fullmatch(tok):
                 continue

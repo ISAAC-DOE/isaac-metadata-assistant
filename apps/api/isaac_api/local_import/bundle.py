@@ -27,7 +27,7 @@ import math
 import re
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Container, Iterable, Mapping, Sequence
 
 FORMAT_ID = "isaac.local-import-bundle"
 #: 1.2.0 (additive): ``processed_outputs[]`` — the scientists' own Athena/Demeter outputs,
@@ -516,8 +516,8 @@ SPEC_FILE_SCANS_RULE_ID = "spec_file_energy_scans_v1"
 #: A `#S` command that is an energy scan (its first word).
 SPEC_ENERGY_SCAN_COMMANDS = frozenset({"gscan"})
 _SPEC_S_LINE = re.compile(r"^#S[ \t]+(\S+)[ \t]*(.*)$")
-#: The largest SPEC file read for its `#S` blocks (the engine's own ceiling for one source).
-MAX_SPEC_FILE_BYTES = 64 * 1024 * 1024
+#: A `#S` number: ASCII digits only (``str.isdigit`` accepts ``²``, which ``int`` refuses).
+_ASCII_NUMBER = re.compile(r"[0-9]+")
 
 
 def spec_file_scans(text: str) -> tuple[list[int], list[dict]]:
@@ -532,7 +532,7 @@ def spec_file_scans(text: str) -> tuple[list[int], list[dict]]:
             blocks.append({"literal": m.group(1), "command": m.group(2).strip(), "rows": 0})
         elif blocks and line.strip() and not line.startswith("#"):
             blocks[-1]["rows"] += 1
-    numbers = [int(b["literal"]) if b["literal"].isdigit() else None for b in blocks]
+    numbers = [int(b["literal"]) if _ASCII_NUMBER.fullmatch(b["literal"]) else None for b in blocks]
     seen: dict[int, int] = {}
     for n in numbers:
         if n is not None:
@@ -556,42 +556,44 @@ def spec_file_scans(text: str) -> tuple[list[int], list[dict]]:
     return scans, left_out
 
 
-def _read_source_bytes(root: Path, rel: str, *, limit: int = MAX_SPEC_FILE_BYTES) -> bytes | None:
-    """The bytes of ``rel`` under the imported folder or ZIP ``root``, or ``None`` (absent, escaping, a link,
-    a nested ZIP member, too large). Never raises."""
-    import zipfile
+def _spec_file_scan_rows(root: Path | None, row: Mapping | None) -> tuple[tuple[list[int], list[dict]] | None, str | None]:
+    """``((scan numbers, left out), None)`` for the SPEC file the walk listed as ``row``, or ``(None, why)``.
 
-    p = PurePosixPath(str(rel or ""))
-    if not rel or p.is_absolute() or ".." in p.parts or "!/" in rel:
-        return None
+    Read through the engine's own reader (``bl15.archive.read_source_text``), so a folder, a ZIP with or without
+    its "compress this folder" wrapper, and a ZIP inside the folder are read exactly as the walk read them, with
+    its refusals and its sha256 check."""
+    if root is None or not row:
+        return None, "the imported folder or ZIP was not given to this build"
+    from ..bl15 import archive
+    from ..bl15.inventory import ArchiveInventory, SourceRecord
+
     try:
-        if root.is_dir():
-            full = root.joinpath(*p.parts)
-            if full.is_symlink() or not full.is_file() or not full.resolve().is_relative_to(root.resolve()):
-                return None
-            return None if full.stat().st_size > limit else full.read_bytes()
-        if zipfile.is_zipfile(root):
-            with zipfile.ZipFile(root) as zf:
-                info = zf.getinfo(rel)
-                return None if info.is_dir() or info.file_size > limit else zf.read(info)
-    except (OSError, KeyError, ValueError, zipfile.BadZipFile):
-        return None
-    return None
+        record = SourceRecord(archive_path=row["archive_path"], basename=row.get("basename") or "",
+                              extension=row.get("extension") or "", size_bytes=int(row.get("size_bytes") or 0),
+                              content_sha256=str(row.get("content_sha256") or ""), parent_dir=row.get("parent_dir") or "",
+                              depth=int(row.get("depth") or 0))
+        text, refusal = archive.read_source_text(ArchiveInventory(root_label="", entries=(record,)), record.archive_path,
+                                                 source_root=root)
+    except Exception as exc:  # never let one unreadable file stop the import
+        return None, f"it could not be read ({type(exc).__name__})"
+    if text is None:
+        return None, f"it could not be read as the walk read it ({refusal})"
+    return spec_file_scans(text), None
 
 
-def _spec_file_scan_rows(root: Path | None, rel: str | None, sha256: str | None) -> tuple[list[int], list[dict]] | None:
-    """:func:`spec_file_scans` of the SPEC file ``rel``, read under ``root`` and checked against the walk's
-    ``sha256``; ``None`` when it cannot be read as walked."""
-    if root is None or not rel:
-        return None
-    data = _read_source_bytes(root, rel)
-    if data is None or (sha256 and hashlib.sha256(data).hexdigest() != sha256):
-        return None
-    return spec_file_scans(data.decode("utf-8", errors="replace"))
+def _exported_copy_of(stem: str, stems: Container[str]) -> str | None:
+    """The run ``stem`` names an exported copy of (``SYN_A.dat`` beside a run ``SYN_A``: grouping's
+    ``exported_file_read_as_acquisition`` rule), else ``None``. Such a copy lists no in-file scans of its own."""
+    from .grouping import _EXPORT_EXT  # local: grouping imports bundle
+
+    m = _EXPORT_EXT.match(str(stem or ""))
+    return m.group("base") if m and m.group("base") in stems and m.group("base") != stem else None
 
 
-def spec_file_scans_statement(numbers: Sequence[int], left_out: Sequence[Mapping]) -> str:
-    """What :data:`SPEC_FILE_SCANS_RULE_ID` did for one run, in words."""
+def spec_file_scans_statement(numbers: Sequence[int], left_out: Sequence[Mapping], why: str | None = None) -> str:
+    """What :data:`SPEC_FILE_SCANS_RULE_ID` did for one run, in words (``why``: its SPEC file was not read)."""
+    if why:
+        return f"No scan file was found in a `<stem>_dir` folder, and its SPEC file was not read for its own scans: {why}."
     said = (f"No scan file was found in a `<stem>_dir` folder, so this run's scans are the {len(numbers)} energy "
             f"scan(s) inside its SPEC file: #S {', '.join(str(n) for n in numbers)}.") if numbers else (
             "No scan file was found in a `<stem>_dir` folder, and its SPEC file holds no energy scan with data rows.")
@@ -3286,7 +3288,9 @@ _FOLDER_BEAMLINE = re.compile(r"(?i)(?<![a-z0-9])BL[-.]?\d+(?:[-.]\d+)?[a-z]?(?!
 
 def _folder_beamline(label: str | None) -> str | None:
     """The first ``BL…`` token of a folder's name (``SSRL_BL152_2019`` -> ``BL152``), else ``None``."""
-    m = _FOLDER_BEAMLINE.search(str(label or "").replace("_", " "))
+    from .template import join_split_beamline
+
+    m = _FOLDER_BEAMLINE.search(join_split_beamline(str(label or "")).replace("_", " "))
     return m.group(0) if m else None
 
 
@@ -3625,7 +3629,8 @@ def build_bundle(
     runs: list[dict] = []
     conflicts_of_run: dict[str, list] = {}
     spec_root = Path(source_root) if source_root is not None else None
-    sha_of = {row["archive_path"]: row.get("content_sha256") for row in manifest}
+    row_of = {row["archive_path"]: row for row in manifest}
+    unit_stems = {u.stem for u in reading.units}
     for ui, u in enumerate(reading.units):
         run_id = run_ids[ui]
         rel = rel_by_path.get(u.acquisition_path) or (rel_list[ui] if ui < len(rel_list) else {})
@@ -3658,17 +3663,24 @@ def build_bundle(
         if (not scans and not scan_count and u.run_candidate and u.source_type == "spec_acquisition"
                 and _safe_relative(u.acquisition_path) and u.acquisition_path in sid_of):
             # r5d H1: no `<stem>_dir` scan file: the energy scans inside the SPEC file are the run's scans
-            found = _spec_file_scan_rows(spec_root, u.acquisition_path, sha_of.get(u.acquisition_path))
+            copy_of = _exported_copy_of(u.stem, unit_stems)
+            found, why = ((None, f"it is named like run {copy_of!r} plus a data-file extension, so it is read as that "
+                                 "run's exported copy (its scans are not listed again)")
+                          if copy_of else _spec_file_scan_rows(spec_root, row_of.get(u.acquisition_path)))
             if found is not None:
                 numbers, left_out = found
                 scans = [{"source_id": sid_of[u.acquisition_path], "relative_path": u.acquisition_path, "scan_index": n}
                          for n in numbers]
                 scan_count = len(scans)
+            else:
+                numbers, left_out = [], []
+            if found is not None or spec_root is not None:
                 other["scans_in_spec_file"] = {
                     "rule_id": SPEC_FILE_SCANS_RULE_ID,
                     "scans": list(numbers),
                     "left_out": left_out[:50],
-                    "statement": spec_file_scans_statement(numbers, left_out),
+                    **({"why": why} if why else {}),
+                    "statement": spec_file_scans_statement(numbers, left_out, why),
                 }
         runs.append(
             {

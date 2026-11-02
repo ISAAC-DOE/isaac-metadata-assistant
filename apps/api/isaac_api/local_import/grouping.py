@@ -235,12 +235,14 @@ def _reading(candidate: Mapping, run: Mapping) -> dict | None:
 def _scan_file_indexes(run: Mapping) -> dict[str, int]:
     out = {}
     for s in run.get("scans") or ():
+        if s.get("source_id") and s.get("source_id") == run.get("acquisition_source_id"):
+            continue  # r5d: a scan inside the SPEC acquisition file itself: that file has no index of its own
         idx = s.get("scan_index")
         if idx is None:
             m = _SCAN_FILE_INDEX.search(str(s.get("relative_path") or ""))
             idx = int(m.group(1)) if m else None
         if s.get("source_id") and idx is not None:
-            # r5d H1: a SPEC file holding several of the run's scans has no one index of its own
+            # r5d H1: a file holding several of the run's scans has no one index of its own
             out[s["source_id"]] = None if s["source_id"] in out else int(idx)
     return {sid: i for sid, i in out.items() if i is not None}
 

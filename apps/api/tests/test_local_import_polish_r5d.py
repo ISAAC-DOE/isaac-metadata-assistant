@@ -130,12 +130,52 @@ def test_a_zip_of_the_folder_lists_the_same_spec_file_scans(tmp_path):
     assert _run(zipped, "SYN_ZZ1_acid_01")["scans"] == _run(folder, "SYN_ZZ1_acid_01")["scans"]
 
 
-def test_a_changed_file_is_not_read_for_its_scans(tmp_path, monkeypatch):
+def test_a_changed_file_is_not_read_for_its_scans_and_says_why(tmp_path):
     root = _folder(tmp_path)
-    real = B._read_source_bytes
-    monkeypatch.setattr(B, "_read_source_bytes", lambda r, rel, **k: (real(r, rel, **k) or b"") + b"\n# changed\n")
+    row = {"archive_path": "SYN_ZZ1_acid_01", "basename": "SYN_ZZ1_acid_01", "extension": "", "parent_dir": "", "depth": 0,
+           "size_bytes": (root / "SYN_ZZ1_acid_01").stat().st_size, "content_sha256": "0" * 64}
+    found, why = B._spec_file_scan_rows(root, row)
+    assert found is None and "could not be read as the walk read it" in why
+    said = B.spec_file_scans_statement([], [], why)
+    assert "its SPEC file was not read for its own scans" in said and why in said
+
+
+def test_an_unreadable_spec_file_is_recorded_with_why(tmp_path, monkeypatch):
+    root = _folder(tmp_path)
+    real = B._spec_file_scan_rows
+    monkeypatch.setattr(B, "_spec_file_scan_rows", lambda r, row: (None, "SYN reason") if row and row["archive_path"] ==
+                        "SYN_ZZ1_acid_01" else real(r, row))
     run = _run(_import(tmp_path, root), "SYN_ZZ1_acid_01")
-    assert run["scans"] == [] and "scans_in_spec_file" not in run["other_relationships"]
+    assert run["scans"] == [] and run["other_relationships"]["scans_in_spec_file"]["why"] == "SYN reason"
+    assert "SYN reason" in run["other_relationships"]["scans_in_spec_file"]["statement"]
+
+
+def test_a_wrapped_zip_with_os_metadata_lists_the_same_spec_file_scans(tmp_path):
+    root = _folder(tmp_path)
+    zpath = tmp_path / "SYN_wrapped.zip"
+    with zipfile.ZipFile(zpath, "w") as zf:
+        for p in sorted(root.rglob("*")):
+            if p.is_file():
+                zf.write(p, f"{root.name}/{p.relative_to(root).as_posix()}")
+        zf.writestr(f"__MACOSX/{root.name}/._SYN_ZZ1_acid_01", b"\x00\x05\x16\x07SYN resource fork")
+    folder, zipped = _import(tmp_path, root, "a"), _import(tmp_path, zpath, "b")
+    want = _run(folder, "SYN_ZZ1_acid_01")["scans"]
+    assert [s["scan_index"] for s in want] == [1, 3, 5]
+    assert _run(zipped, "SYN_ZZ1_acid_01")["scans"] == want
+
+
+def test_a_zip_inside_the_folder_lists_its_spec_file_scans(tmp_path):
+    inner = _folder(tmp_path)
+    outer = tmp_path / "SSRL_BL152_2100-02_SYN"
+    outer.mkdir()
+    with zipfile.ZipFile(outer / "SYN_inner.zip", "w") as zf:
+        for p in sorted(inner.rglob("*")):
+            if p.is_file():
+                zf.write(p, p.relative_to(inner).as_posix())
+    bundle = _import(tmp_path, outer)
+    run = next(r for r in bundle["runs"] if r["stem"] == "SYN_ZZ1_acid_01")
+    assert [s["scan_index"] for s in run["scans"]] == [1, 3, 5]
+    assert run["scans"][0]["relative_path"].endswith("!/SYN_ZZ1_acid_01")
 
 
 def test_the_reader_reads_one_block_of_a_file_of_several(tmp_path):
@@ -274,3 +314,59 @@ def test_a_folder_naming_no_beamline_still_hears_that_the_default_does_not_fit(t
 def test_a_fingerprint_of_the_shown_acquisition_system_is_not_said_twice(tmp_path):
     bundle = _import(tmp_path, _folder(tmp_path, account="specadm", columns=("synmono", "I0", "vortDT", "vortDT2")))
     assert [h["kind"] for h in S.facility_hints(bundle)] == ["acquisition_system", "folder_name"]
+
+
+def test_an_exported_copy_of_a_run_lists_no_scans_and_joins_that_runs_group(tmp_path):
+    from isaac_api.local_import import mutations as M
+
+    root = tmp_path / "SSRL_BL152_2100_SYN"
+    root.mkdir()
+    cols = ("synmono", "I0", "FF1", "FF2", "DTC_FF1")
+    stem = "SYN_A_01"
+    (root / stem).write_text(spec_text(stem, [(1, GSCAN, True, 1.0), (2, GSCAN, True, 1.0)], account="specadm"))
+    (root / f"{stem}_dir").mkdir()
+    for k in (1, 2):
+        (root / f"{stem}_dir" / f"{stem}_{k:03d}.dat").write_text(
+            "\n".join([f"#S {k}  {GSCAN}", "#L " + "  ".join(cols)] + _rows(len(cols))) + "\n")
+    (root / f"{stem}.dat").write_text(spec_text(stem, [(1, GSCAN, True, 1.0)], account="specadm") + "#C SYN exported\n")
+    bundle = _import(tmp_path, root)
+    copy = _run(bundle, f"{stem}.dat")
+    assert copy["scans"] == [] and copy["scan_count"] == 0
+    assert "exported copy" in copy["other_relationships"]["scans_in_spec_file"]["why"]
+    out = tmp_path / "out"
+    M.group(out)
+    [g] = M.load(out)["record_groups"]  # as before r5d: ONE group, the copy joined as the run's exported file
+    assert copy["run_key"] in g["member_run_keys"] and copy["run_key"] in (g.get("context_run_keys") or [])
+    assert [m["kind"] for m in g["merged_despite_engine_reading"]] == ["exported_file_read_as_acquisition"]
+
+
+def test_a_scan_inside_the_acquisition_file_gives_that_file_no_index():
+    from isaac_api.local_import import grouping as G
+
+    run = {"acquisition_source_id": "src-1", "scans": [{"source_id": "src-1", "relative_path": "SYN_A_01", "scan_index": 1}]}
+    assert G._scan_file_indexes(run) == {}
+
+
+def test_a_non_ascii_digit_scan_number_is_named_not_a_crash(tmp_path):
+    text = spec_text("SYN_X", [(1, GSCAN, True, 1.0), ("\u00b2", GSCAN, True, 1.0)])
+    numbers, left_out = B.spec_file_scans(text)
+    assert numbers == [1] and left_out == [{"scan": "\u00b2", "command": "gscan", "why": "its #S number is not a number"}]
+    path = tmp_path / "SYN_sup"
+    path.write_text(text, encoding="utf-8")
+    assert read_scan_file(path, scan=1).error is None
+    assert read_scan_file(path, scan=2).error == "scan_not_in_file:2"
+
+
+@pytest.mark.parametrize("label, value", [("SSRL_BL6_2_2100_SYN", "BL6-2"), ("SSRL_BL15_2_2100_SYN", "BL15-2"),
+                                          ("SSRL_BL152_2100-01_SYN", "BL152"), ("SSRL_BL62c_2100_SYN", "BL62c")])
+def test_a_beamline_split_by_an_underscore_is_one_beamline(label, value):
+    assert B._folder_beamline(label) == value
+    bundle = {"source_root": {"label": label}, "experiment": {"acquisition_system": {}}}
+    assert [r["value"] for r in T.facility_hint_readings(bundle, T.BEAMLINE_PATH)] == [value]
+
+
+def test_the_bl6_2_folder_and_the_bl6_2_fingerprint_do_not_disagree(tmp_path):
+    bundle = _import(tmp_path, _folder(tmp_path, label="SSRL_BL6_2_2100_SYN"))
+    fp = bundle["experiment"]["acquisition_system"]["fingerprint"]
+    assert "disagrees_with_folder_name" not in fp
+    assert not any("disagree" in line for line in T.facility_hint_lines(bundle, T.BEAMLINE_PATH, "62b"))
