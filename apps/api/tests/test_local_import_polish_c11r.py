@@ -210,8 +210,10 @@ def test_a_merged_scan_with_zero_signal_points_is_said_flagged_and_moves_no_id(t
     assert isa["inputs"][2]["diagnostics"]["signal_zero_points"] == GRID.size - k
     assert isa["inputs"][0]["diagnostics"]["signal_zero_points"] == 0
     said = isa["qc"]["statements"]["merged_scan_zero_signal_points"]
-    assert said == (f"01_SYN_ZZ1_003.dat's signal (vortDT) is zero at {GRID.size - k} of {GRID.size} points (from "
-                    f"{GRID[k]:.1f} eV on); it is merged unchanged. A person checks whether the beam was lost.")
+    assert said.startswith(f"01_SYN_ZZ1_003.dat's signal (vortDT) is zero at {GRID.size - k} of {GRID.size} points "
+                           f"(from {GRID[k]:.1f} eV on); it is merged unchanged. A person checks whether the beam was lost. ")
+    # r4-a M6: and how to leave it out (the params file's exact shape and the command)
+    assert f'{{"exclude_scans": {{"{isa["group_id"]}": ["01_SYN_ZZ1_003.dat"]}}}}' in said and "--params-file" in said
     assert RUN.ZERO_SIGNAL_POINTS_FLAG in isa["review_flags"]
     # NOT in qc.json (hashed into the run id): the same data without the sentence gives the same id
     qc = next(f for f in isa["outputs"]["files"] if f["role"] == "qc")

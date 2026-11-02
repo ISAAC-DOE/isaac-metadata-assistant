@@ -34,11 +34,16 @@ RULE_VERSIONS_SINCE_PROTOCOL_VERSION: dict[str, Any] = {
         "isaac.xas.calibration_overrides_stricter_only.v0",
         "isaac.xas.calibration_shift_size_confirmed.v0",
         "isaac.xas.edge_above_noise.v0",
+        "isaac.xas.edge_not_from_single_scan.v0",
         "isaac.xas.edge_step_plausible.v0",
+        "isaac.xas.glitch_points_on_edge.v1",
         "isaac.xas.in_scan_reference_min_scans.v0",
         "isaac.xas.own_signal_shift_confirmed.v0",
         "isaac.xas.post_edge_level.v1",
         "isaac.xas.reference_channel_fallback.v1",
+        "isaac.xas.reference_edges_agree.v0",
+        "isaac.xas.reference_noise_not_degenerate.v0",
+        "isaac.xas.reference_not_at_sample_e0.v0",
         "isaac.xas.skip_signal_all_zero.v0",
         "isaac.xas.stored_normalized_plausible.v0",
         "isaac.xas.zero_signal_runs.v0",
@@ -255,10 +260,37 @@ PROTOCOL_QUESTIONS: list[dict] = [
 ]
 
 
+#: r4-a M6: the params-file section naming scans to leave out of a group's merge, ``{"exclude_scans": {"<group id>":
+#: ["<file name, relative path or source id>[#<scan number>]", ...]}}``. Kept OUT of :data:`DEFAULT_PARAMS` and of the
+#: resolved params (both are hashed into every result's params.json, so a new key there would move every result id):
+#: :func:`scan_exclusions` reads it, and only a group it names records it (``params.json`` ``excluded_scans``).
+EXCLUDE_SCANS_SECTION = "exclude_scans"
+
+
+def scan_exclusions(overrides: Mapping | None) -> dict[str, list[str]]:
+    """``{group_id: [name, ...]}`` from a params file's :data:`EXCLUDE_SCANS_SECTION` (``{}`` when absent). A name may
+    be a single string. Refused (``ValueError``) when it is not that shape, as an unknown parameter is."""
+    raw = (overrides or {}).get(EXCLUDE_SCANS_SECTION) if isinstance(overrides, Mapping) else None
+    if raw is None:
+        return {}
+    shape = f'{EXCLUDE_SCANS_SECTION} must be {{"<group id>": ["<file name or source id>", ...]}}'
+    if not isinstance(raw, Mapping):
+        raise ValueError(shape)
+    out: dict[str, list[str]] = {}
+    for gid, names in raw.items():
+        names = [names] if isinstance(names, str) else names
+        if not isinstance(names, (list, tuple)) or not names or not all(isinstance(n, str) and n.strip() for n in names):
+            raise ValueError(f"{shape}; {gid!r} names {names!r}")
+        out[str(gid)] = list(dict.fromkeys(n.strip() for n in names))
+    return out
+
+
 def resolve_params(overrides: Mapping | None = None) -> dict:
-    """DEFAULT_PARAMS with ``overrides`` (``{section: {key: value}}``) applied. Unknown keys refused."""
+    """DEFAULT_PARAMS with ``overrides`` (``{section: {key: value}}``) applied. Unknown keys refused. The
+    :data:`EXCLUDE_SCANS_SECTION` is checked and left out (:func:`scan_exclusions` reads it)."""
     params = copy.deepcopy(DEFAULT_PARAMS)
-    overrides = copy.deepcopy(dict(overrides or {}))
+    scan_exclusions(overrides)
+    overrides = {k: v for k, v in copy.deepcopy(dict(overrides or {})).items() if k != EXCLUDE_SCANS_SECTION}
     cal = overrides.get("calibration")
     if isinstance(cal, Mapping) and "confirmed_reference" in cal:
         # v0 name. A params file cannot confirm anything: it is read as a PROPOSAL.

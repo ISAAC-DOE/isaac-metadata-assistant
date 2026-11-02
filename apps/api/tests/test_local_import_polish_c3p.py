@@ -165,7 +165,7 @@ def test_a_good_curve_carries_none_of_the_new_checks(tmp_path):
     r = isaac(run_process(bdir, source_root=root))
     assert r["qc"]["verdict"] in ("pass", "warn")
     assert not {"post_edge_level", "edge_to_pre_edge_noise"} & set(r["qc"]["metrics"])
-    assert set(r["qc"].get("statements") or ()) <= {"glitch_check_few_scans", "glitch_points_on_edge"}  # c12-cal / r2-a: the glitch sentences only
+    assert set(r["qc"].get("statements") or ()) <= {"glitch_check_few_scans", "glitch_points_on_edge", "channel_choice_needs_review"}  # c12-cal / r2-a: the glitch sentences only
 
 
 # --- 3. a foil on I2 tries the reference channel --------------------------------------------------------

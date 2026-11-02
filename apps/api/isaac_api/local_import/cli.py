@@ -906,6 +906,7 @@ def _merge_candidate_view(bundle: Mapping, obj: Mapping) -> dict:
     """``bundle show merge-candidate``: what the candidate proposes, its groups' run labels, its caution
     and its reasons by code — no reading's value (those stay in bundle.json), so no exposure."""
     from . import grouping as G
+    from . import questions as Q
 
     shown_keys = ("code", "group_id", "decision_id", "key", "why_unknown", "detail")
     inert = G.merge_candidate_inert(bundle, obj)
@@ -915,10 +916,12 @@ def _merge_candidate_view(bundle: Mapping, obj: Mapping) -> dict:
         "rule_id": obj.get("rule_id"),
         "reason_code": _mc_reason_code(obj),
         "reason_codes": obj.get("reason_codes") or sorted({r.get("code") for r in obj.get("reasons") or () if r.get("code")}),
-        "caution": list(obj.get("caution") or ()),
+        "caution": G.current_caution(bundle, obj),
         "groups": G.merge_candidate_groups(bundle, obj, cap=50),
-        # never asked once it proposes nothing (polish c3): why is said instead
-        "question": None if inert else (obj.get("question") or {}).get("text"),
+        # never asked once it proposes nothing (polish c3): why is said instead; r4-b M2: a not-counter answer given
+        # since the candidate was made adds its caution in front, as the stored ones are
+        "question": None if inert else ("".join(f"CAUTION: {said['statement']} " for said in [G.said_not_counter_caution(bundle, obj)]
+                                                if said) + str((obj.get("question") or {}).get("text") or "")) or None,
         **({"proposes_nothing": inert} if inert else {}),
         "reasons": [{k: r[k] for k in shown_keys if k in r} for r in obj.get("reasons") or ()],
         "kept_apart_by_decision_id": obj.get("kept_apart_by_decision_id"),
@@ -926,7 +929,8 @@ def _merge_candidate_view(bundle: Mapping, obj: Mapping) -> dict:
             f"isaac bundle decide <bundle_dir> --target {(obj.get('group_ids') or ['<group>'])[0]} --decision merge "
             f"--merge-with {' '.join((obj.get('group_ids') or [])[1:]) or '<group>'} --by \"<your name>\"  &&  isaac bundle group <bundle_dir> --regroup",
             f"isaac bundle decide <bundle_dir> --target {obj.get('merge_candidate_id')} --decision keep_apart --by \"<your name>\"",
-        ],
+        ] + ([f"{Q.keep_apart_said_not_counter_command(G.said_not_counter_candidates(bundle))}   # every open candidate whose names differ only at positions "
+              "said not to be counters, this one included"] if G.said_not_counter_caution(bundle, obj) else []),
         "notice": "Readings' values are not printed here; `isaac bundle show <bundle_dir> group <group_id>` prints a group's.",
     }
 
@@ -1080,6 +1084,8 @@ def cmd_bundle_list(args) -> int:
 
         for item, r in zip(items, page):
             item["groups"] = G.merge_candidate_groups(bundle, r)
+            if said := G.said_not_counter_caution(bundle, r):  # r4-b M2: given since the candidate was made
+                item["caution"] = [*item["caution"], said["statement"]]
     if args.kind == "candidates":
         if args.no_values:
             for item in items:

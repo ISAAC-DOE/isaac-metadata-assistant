@@ -777,7 +777,28 @@ def no_curve_refusal(result: Mapping) -> str:
 #: (``no_edge``), or the normalised level after the edge is far from 1 (``post_edge_not_at_1``). ``decide`` refuses
 #: to approve a result failing for one of them and ``validate`` never offers that approval; any other ``fail``
 #: (e.g. ``too_few_points``) stays the scientist's call, approved only with the QC status they state.
-UNUSABLE_CURVE_REASONS = ("edge_step_implausible", "no_edge", "post_edge_not_at_1")
+UNUSABLE_CURVE_REASONS = ("edge_step_implausible", "no_edge", "post_edge_not_at_1",
+                          # r4: one scan sets the merged curve's edge (a spike in one scan): its E0 is not the sample's
+                          "edge_from_single_scan")
+
+#: r4: a bulk approval (several targets) is refused for a result whose curve carries one of these: each is read and
+#: approved on its own, its sentence said first
+BULK_APPROVE_REVIEW = (("glitch_points_on_edge", "points on the edge the glitch check cannot judge"),
+                       ("glitch_points_from_one_scan", "one scan's glitch on the edge"),
+                       ("outlier_scans", "an outlier scan"),
+                       ("only_scan_with_edge", "the group's only scan with an edge"))
+
+
+def bulk_approve_problem(obj: Mapping) -> str | None:
+    """r4: why a processing result must be approved on its own, not in a bulk call (``None`` when it may be)."""
+    qc = obj.get("qc") or {}
+    said = qc.get("statements") or {}
+    flags = set(obj.get("review_flags") or ()) | set(qc.get("reasons") or ())
+    for key, what in BULK_APPROVE_REVIEW:
+        if key in said or key in flags or (key == "outlier_scans" and "outlier_scans_flagged" in flags):
+            sentence = said.get(key) if isinstance(said.get(key), str) else ""
+            return f"{B.processing_id(obj)} carries {what}" + (f": {sentence}" if sentence else ".")
+    return None
 
 
 def unusable_curve_reasons(result: Mapping) -> list[str]:
@@ -1655,6 +1676,120 @@ def _count(n: int, noun: str) -> str:
     return f"{n} {noun}{'' if n == 1 else 's'}"
 
 
+#: r4-b M4: the words for an electrochemical cell or its control, which do not describe a run measured outside one
+CELL_FIELDS = frozenset({"context.electrochemistry.cell_type", "context.electrochemistry.control_mode"})
+_GROUP_IDS_SHOWN = 8
+
+
+def reach_index(bundle: Mapping) -> dict:
+    """r4-c HIGH-2: what :func:`answer_reach` and :func:`misfit_groups` read, built ONCE for an unchanged bundle (a
+    beamtime-wide optional question asks each field, per ``sample=<key>`` partition too, so a rebuild per call is
+    quadratic at thousands of runs): the live groups' member runs, each run's live groups, each target's run, the
+    groups by id, and (on first use) each run's recorded ``context.environment``."""
+    from . import questions as Q
+
+    run_of_key = {r["run_key"]: r["run_id"] for r in bundle.get("runs") or ()}
+    live = [(g["group_id"], [run_of_key[k] for k in g.get("member_run_keys") or () if k in run_of_key])
+            for g in Q.live_groups(bundle)]
+    groups_of_run: dict[str, list[int]] = {}
+    for i, (_gid, members) in enumerate(live):
+        for r in members:
+            groups_of_run.setdefault(r, []).append(i)
+    run_of_target = {(o.get("candidate_id") or o.get("value_id")): o.get("run_id")
+                     for o in [*(bundle.get("candidates") or ()), *(bundle.get("missing_values") or ())]}
+    return {"live": live, "groups_of_run": groups_of_run, "run_of_target": run_of_target, "run_of_key": run_of_key,
+            "group_by_id": {g["group_id"]: g for g in bundle.get("record_groups") or ()}, "env": None}
+
+
+def answer_reach(bundle: Mapping, target_ids: Sequence[str], path: str, index: dict | None = None) -> dict:
+    """r4-b M4: the live record groups and runs an answer on ``target_ids`` for ``path`` reaches: a run's own target
+    fills its run's group; a beamtime-wide one every group, except at a run-only path (``records.RUN_ONLY_PATHS``,
+    DEC-69: it fills none). ``{group_ids, run_ids, groups_total, beamtime_fills_none}``, in the bundle's order.
+    ``index``: the caller's :func:`reach_index` of this same bundle (built here when not given)."""
+    from .records import RUN_ONLY_PATHS
+
+    index = index if index is not None else reach_index(bundle)
+    absent = object()
+    run_ids: set[str] = set()
+    beamtime = False
+    for tid in set(target_ids):
+        rid = index["run_of_target"].get(tid, absent)
+        if rid is absent:
+            continue
+        if rid:
+            run_ids.add(rid)
+        else:
+            beamtime = True
+    live = index["live"]
+    every = beamtime and path not in RUN_ONLY_PATHS
+    touched = range(len(live)) if every else sorted({i for r in run_ids for i in index["groups_of_run"].get(r, ())})
+    groups, runs, seen = [], [], set()
+    for i in touched:
+        gid, members = live[i]
+        mine = members if every else [r for r in members if r in run_ids]
+        if mine:
+            groups.append(gid)
+            runs += [r for r in mine if not (r in seen or seen.add(r))]
+    return {"group_ids": groups, "run_ids": runs, "groups_total": len(live),
+            "beamtime_fills_none": beamtime and path in RUN_ONLY_PATHS}
+
+
+def misfit_groups(bundle: Mapping, path: str, group_ids: Sequence[str], index: dict | None = None) -> list[dict]:
+    """r4-b M4: of ``group_ids``, the groups a word for an electrochemical cell or its control (:data:`CELL_FIELDS`)
+    does not describe: a reference or alignment group (a standard, a foil), or one every run of which is recorded ex
+    situ (a confirmed or eligible ``context.environment``, the beamtime-wide one included). ``[{group_id, why}]``;
+    never a guess: a group with no recorded environment is not listed. ``index``: as for :func:`answer_reach`; the
+    environments are read once into it."""
+    from . import grouping as G
+
+    if path not in CELL_FIELDS or not group_ids:
+        return []
+    index = index if index is not None else reach_index(bundle)
+    if index["env"] is None:
+        env: dict[str | None, set[str]] = {}
+        for rid, _tid, v, _answered in _options_for(bundle, "context.environment"):
+            env.setdefault(rid, set()).add(json.dumps(v))
+        index["env"] = env
+    env, run_of_key = index["env"], index["run_of_key"]
+    out = []
+    for gid in group_ids:
+        g = index["group_by_id"].get(gid) or {}
+        members = [run_of_key[k] for k in g.get("member_run_keys") or () if k in run_of_key]
+        if g.get("role") in (G.ROLE_REFERENCE, G.ROLE_ALIGNMENT):
+            out.append({"group_id": gid, "why": f"a {g['role']} group: a standard or foil, not an electrode in a cell"})
+        elif members and all((env.get(r) or env.get(None)) == {json.dumps("ex_situ")} for r in members):
+            out.append({"group_id": gid, "why": "recorded ex situ: measured outside a cell"})
+    return out
+
+
+def reach_sentence(bundle: Mapping, target_ids: Sequence[str], path: str, *, would: bool = False,
+                   lead: str | None = None) -> tuple[str, dict]:
+    """r4-b M4: the plain sentence (and its detail) for :func:`answer_reach` and :func:`misfit_groups`: the groups and
+    runs an answer for ``path`` reaches, how many the beamtime holds besides (already answered per group, or reached
+    otherwise), and, plainly, any group the word does not describe. ``would``: worded for an answer not recorded;
+    ``lead``: what the sentence opens with (default ``For <path> it reaches``)."""
+    index = reach_index(bundle)
+    r = answer_reach(bundle, target_ids, path, index)
+    gids, n = r["group_ids"], r["groups_total"]
+    verb = "would reach" if would else "reaches"
+    shown = ", ".join(gids[:_GROUP_IDS_SHOWN]) + (", …" if len(gids) > _GROUP_IDS_SHOWN else "")
+    text = (f"{lead or f'For {path} it {verb}'} {len(gids)} of the beamtime's {_count(n, 'record group')} "
+            f"({_count(len(r['run_ids']), 'run')}{': ' + shown if gids else ''})")
+    if r["beamtime_fills_none"]:
+        text += f"; a beamtime-wide {path} fills no record (it is a run-level field), only each run's own answer does"
+    if 0 < len(gids) < n:
+        text += f"; the other {_count(n - len(gids), 'group')} already have their own answer for it, or no target here"
+    text += "."
+    bad = misfit_groups(bundle, path, gids, index)
+    if bad:
+        label = path.rsplit(".", 1)[-1].replace("_", " ")
+        text += (f" Careful: it {'would put' if would else 'puts'} a {label} on {_count(len(bad), 'group')} it does not "
+                 "describe: " + "; ".join(f"{b['group_id']} ({b['why']})" for b in bad[:_GROUP_IDS_SHOWN])
+                 + ("; …" if len(bad) > _GROUP_IDS_SHOWN else "")
+                 + ". Answer only the groups it fits (`--only group:<id>`), and reject it for these.")
+    return text, {**r, "path": path, **({"misfit_groups": bad} if bad else {})}
+
+
 def group_answer_targets(bundle: dict, asked: Mapping, only: str, field: str | None,
                          decision: str) -> tuple[list[str], list[str], dict] | None:
     """``decide --question <Q> --only group:<id>`` for a question that asks its field ONCE for the whole beamtime
@@ -1915,7 +2050,11 @@ def decide_question(
         override = None
         slots_added: list[str] = []
         try:
-            found, positions = question_targets(Q.consolidate(bundle), question_id, **resolve)
+            if question_id == Q.COUNTER_QUESTION_ID and decision == B.KEEP_APART_DECISION:
+                found = _said_not_counter_keep_apart(bundle, only, field, positions, only_scopes, extra_targets)
+                extra_targets = ()  # r4-c L3: they pinned exactly the candidates found
+            else:
+                found, positions = question_targets(Q.consolidate(bundle), question_id, **resolve)
         except MutationRefused as exc:
             # AN ANSWERED QUESTION is resolved too, under the id it was asked with (its answered targets back in:
             # consolidate(include_answered=True)): a later decision replaces an earlier one, a repeat records
@@ -1963,6 +2102,12 @@ def decide_question(
         def reached(on: dict, result: dict) -> dict:
             # read from the bundle the decision was recorded on (a dry run's copy too), its states derived as the
             # save will derive them: what each group's record now takes
+            if override is None and field:
+                # r4-b M4: one field of a question asked for the whole beamtime: the groups and runs THIS answer
+                # reaches (the rest answered per group), never "every record group" for the leftover runs
+                text, detail = reach_sentence(B.apply_derivations(copy.deepcopy(on)), found, field)
+                return {"statement": " ".join(x for x in (result.get("statement"), text) if x), "reach": detail,
+                        **{k: v for k, v in result.items() if k != "statement"}}
             if override is None and not _beamtime_level(on, found):
                 return result
             view = B.apply_derivations(copy.deepcopy(on))
@@ -1986,15 +2131,64 @@ def decide_question(
             if not as_said:
                 raise _not_kept(exc) from None
             slot_runs = [m.get("run_id") for m in bundle.get("missing_values") or () if m["value_id"] in set(slots_added)]
-            raise _keep_refused_answer(bundle_dir, bundle, exc, target_ids=params["target_ids"], by=by, orcid=orcid,
-                                       note=note, slots=slots_added, slot_runs=[r for r in slot_runs if r],
-                                       source={"kind": "decide_answer", "command": "bundle decide", "decision": decision,
-                                               "question_id": question_id, "as_said": True}) from None
+            # r4-b M4: the groups and runs the kept word is for, read before the refusal drops any slot it added
+            where = reach_sentence(bundle, params["target_ids"], field, would=True,
+                                   lead="The request is for the targets this answer named; recorded, it would reach")[0] if field else None
+            kept_exc = _keep_refused_answer(bundle_dir, bundle, exc, target_ids=params["target_ids"], by=by, orcid=orcid,
+                                            note=note, slots=slots_added, slot_runs=[r for r in slot_runs if r],
+                                            source={"kind": "decide_answer", "command": "bundle decide", "decision": decision,
+                                                    "question_id": question_id, "as_said": True})
+            if where:
+                kept_exc = OffListRefused(f"{kept_exc} {where}",
+                                          field_path=exc.field_path, term=exc.term, code=exc.code, problem=exc.problem)
+            raise kept_exc from None
         result = _said_on_list(_with_answered(_with_kept(kept_overrides, reached(bundle, recorded)), bundle, before), as_said)
         if same_members:
             result = _with_same_reading(result, same_members)
         save_bundle(bundle_dir, bundle)
         return (result, bundle_version(bundle_dir)) if with_version else result
+
+
+def _said_not_counter_keep_apart(bundle: Mapping, only: str | None, field: str | None, positions: Sequence[int] | None,
+                                 only_scopes: Sequence[str] | None, pinned: Sequence[str] = ()) -> list[str]:
+    """r4-b M2: ``decide --question <the counter question> --decision keep_apart``: every OPEN merge candidate whose
+    groups' file names differ only at positions a scientist said are not counters (``grouping.said_not_counter_
+    candidates``), kept apart at once. Refused (code 2, so it is never resolved as another question) when there is
+    none, or with a flag that narrows a question's targets.
+
+    r4-c L3: PINNED to the candidates the reply listed (``pinned``: its ``--target`` ids,
+    :func:`questions.keep_apart_said_not_counter_command`): refused, naming what changed, when the open cautioned
+    candidates are no longer exactly those (one decided, a regroup, another not-counter answer since), and when none
+    is given (the reply then lists the ones it would keep apart, in the pinned command)."""
+    from . import grouping as G
+    from . import questions as Q
+
+    if only or field or positions or only_scopes:
+        raise MutationRefused(f"--decision {B.KEEP_APART_DECISION} on question {Q.COUNTER_QUESTION_ID} keeps apart every "
+                              "merge candidate a not-counter answer cautions; it takes no --only, --field or --positions. "
+                              "Nothing was recorded.")
+    found = G.said_not_counter_candidates(bundle)
+    if not found:
+        raise MutationRefused(
+            f"No open merge candidate has file names that differ only at positions said not to be counters, so "
+            f"--decision {B.KEEP_APART_DECISION} on question {Q.COUNTER_QUESTION_ID} has nothing to keep apart (say "
+            f"which positions are not counters first: --decision {B.NOT_COUNTER_DECISION} --positions <n[,m]>; or "
+            "keep one candidate apart: --target <mc-…> --decision keep_apart). Nothing was recorded.")
+    command = Q.keep_apart_said_not_counter_command(found)
+    if not pinned:
+        raise MutationRefused(
+            f"--decision {B.KEEP_APART_DECISION} on question {Q.COUNTER_QUESTION_ID} keeps apart exactly the merge "
+            f"candidates you name with --target, the ones its reply listed; {_count(len(found), 'open merge candidate')} "
+            f"{'is' if len(found) == 1 else 'are'} cautioned now ({', '.join(found)}). To keep them apart: `{command}`. "
+            "Nothing was recorded.")
+    if set(pinned) != set(found):
+        gone, new = sorted(set(pinned) - set(found)), [i for i in found if i not in set(pinned)]
+        raise MutationRefused(
+            f"The merge candidates a not-counter answer cautions changed since that list: "
+            + "; ".join(([f"no longer open and cautioned: {', '.join(gone)}"] if gone else [])
+                        + ([f"cautioned now and not listed: {', '.join(new)}"] if new else []))
+            + f". Nothing was recorded. To keep apart the {_count(len(found), 'candidate')} cautioned now: `{command}`.")
+    return found
 
 
 def _same_reading_targets(bundle: Mapping, question_id: str, only: str | None, field: str | None,
@@ -2203,6 +2397,12 @@ def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, ed
     return positions
 
 
+#: ``keep_apart`` on several merge candidates at once (r4-b M2)
+KEEP_APART_MANY = (
+    "Recorded: for each of these {n} merge candidates, the groups it names are distinct and stay apart. The candidates "
+    "are no longer open merge questions (status kept_apart). No group was changed, confirmed or rejected: confirm (or "
+    "otherwise decide) each group on its own."
+)
 #: What a 1.6.0 capture decision records — and what it does NOT do (DEC-91). Returned by ``decide``.
 CAPTURE_STATEMENTS: Mapping[str, str] = {
     B.KEEP_APART_DECISION: (
@@ -2372,6 +2572,9 @@ def record_decision(
                 problem = approved_sibling_problem(bundle, obj, [o for k, o in planned if k == "processing_result"])
                 if problem is not None:
                     raise MutationRefused(problem)
+                if bulk and (why := bulk_approve_problem(obj)) is not None:
+                    raise MutationRefused(f"{why} Approve this one on its own, after its sentence is read to the "
+                                          "scientist; a bulk approval does not. Nothing was recorded.")
                 if "athena_e0_possibly_fixed" in (obj.get("review_flags") or ()) and not e0_measured:
                     # r1 M5: an Athena E0 shared by groups whose own edges differ may be a fixed setting, not a measure
                     said = next((s for s in (((obj.get("qc") or {}).get("statements") or {}).values())
@@ -2579,6 +2782,24 @@ def record_decision(
         statement = CAPTURE_STATEMENTS.get(decision)
         if statement:
             result["statement"] = statement.format(value=value, positions=", ".join(map(str, positions or ())))
+        kept = [t for kind, t in planned if kind == "merge_candidate"] if decision == B.KEEP_APART_DECISION else []
+        if len(kept) > 1:
+            # r4-b M2: a batch is said as a batch (before: "this merge candidate" for 25 of them)
+            result["statement"] = KEEP_APART_MANY.format(n=len(kept))
+        if decision == B.NOT_COUNTER_DECISION and recorded:
+            # r4-b M2: the open merge candidates whose names differ ONLY at positions now said not to be counters are
+            # named, cautioned (grouping.said_not_counter_caution) and offered one command; none is decided here
+            from . import grouping as G
+            from . import questions as Q
+
+            cautioned = G.said_not_counter_candidates(bundle)
+            if cautioned:
+                result["said_not_counter_merge_candidates"] = cautioned
+                result["statement"] += (
+                    f" {len(cautioned)} open merge candidate(s) have file names that differ only at position(s) you said "
+                    f"are not counters ({', '.join(cautioned[:5])}{', …' if len(cautioned) > 5 else ''}); each now carries "
+                    "that caution and none was decided. To keep them all apart with one command: "
+                    f"`{Q.keep_apart_said_not_counter_command(cautioned)}`.")
         if acknowledged:
             words = " / ".join(dict.fromkeys(t for ts in acknowledged.values() for t in ts))
             result["statement"] = (
@@ -2961,6 +3182,41 @@ def excerpt(bundle: Mapping, target_id: str, *, source: str | None) -> dict:
 
 #: Why ``reveal`` gives no ``agrees_with_parser`` for a reading: there is no parser value to hold it against.
 NO_PARSER_VALUE_NOTE = "the parser holds no value for this target, so there is nothing to compare"
+#: r4-b L4: ``compared_as`` for a reading held against what the file writes, when the parser holds no value
+LITERAL_COMPARED_AS = "observed literal"
+
+
+_NUMBER_IN_TEXT = re.compile(r"[-+]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?")
+
+
+def _found_in_literal(said: str, literal: str) -> bool:
+    """r4-c L1: whether a reading (``said``, trimmed and casefolded) is found in what the file writes: a number is one of
+    the literal's numbers, compared as numbers (``0.1`` is not in ``0.15 V`` nor in ``-0.1 V``; ``400`` is in
+    ``400mV``); other text only on word boundaries (``KOH`` is in ``0.1 M KOH``, ``KO`` is not)."""
+    try:
+        number = float(said) if _NUMBER_IN_TEXT.fullmatch(said) else None
+    except ValueError:
+        number = None
+    if number is not None:
+        return any(float(x) == number for x in _NUMBER_IN_TEXT.findall(literal))
+    return re.search(rf"(?<!\w){re.escape(said)}(?!\w)", literal) is not None
+
+
+def _against_literals(proposed: Any, literals: Sequence[str]) -> dict:
+    """r4-b L4: a blind reading of a target the parser holds NO value for, held against what the file writes there
+    (its ``observed_literals``; before: "nothing to compare"). ``agrees_with_literal``: the reading is that text
+    (trimmed, case aside) or found in it (:func:`_found_in_literal`: on word boundaries, a number as a number);
+    ``False`` when in none. ``agrees_with_parser`` stays ``None``: there is no parser value, and a literal is not one."""
+    said = " ".join(str(proposed).split()).casefold() if proposed is not None else ""
+    shown = ", ".join(repr(x) for x in literals[:3]) + (" …" if len(literals) > 3 else "")
+    same = bool(said) and any(" ".join(x.split()).casefold() == said for x in literals)
+    within = bool(said) and not same and any(_found_in_literal(said, " ".join(x.split()).casefold()) for x in literals)
+    how = ("is the same text as" if same else "is found in" if within else "is not found in")
+    return {"agrees_with_parser": None, "agrees_with_literal": same or within, "compared_as": LITERAL_COMPARED_AS,
+            "comparison_note": (f"the parser holds no value for this target, so the reading {proposed!r} was compared "
+                                f"with what the file writes there: it {how} {shown}")}
+
+
 #: ``compared_as`` for a reading of a scan start time held against the header's local clock time (c8-b).
 LOCAL_CLOCK_COMPARED_AS = "local clock time"
 #: What a ``crosscheck-plan`` item of a scan start time tells the reader to write down (c8-b).
@@ -3083,6 +3339,9 @@ def reveal(bundle_dir: Path, target_id: str) -> dict:
             if got is not None:
                 return got
         if base is None:
+            literals = [str(x) for x in (obj.get("observed_literals") or ()) if str(x).strip()] if kind == "candidate" else []
+            if literals:
+                return _against_literals(proposed, literals)
             return {"agrees_with_parser": None, "comparison_note": NO_PARSER_VALUE_NOTE}
         zone_less = _zone_less_against_instant(path, proposed, base)
         if zone_less is not None:

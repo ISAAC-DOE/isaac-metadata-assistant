@@ -51,7 +51,7 @@ from . import _deps
 from . import athena as A
 from . import core as C
 from . import protocol as P
-from .channels import MODE_TRANSMISSION, ChannelChoice, choose_channels, dead_candidates
+from .channels import MODE_TRANSMISSION, ChannelChoice, choose_channels, dead_candidates, needs_review_statement
 from . import reference as REF
 from .edges import edge_energy
 from .readers import read_scan_file
@@ -392,12 +392,46 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
     too_few = ref_source == REF.IN_SCAN and 0 < len(usable) < REF.MIN_IN_SCAN_REFERENCE_SCANS
     if too_few:
         flags.append(REF.TOO_FEW_FLAG)
+    # r4-a: the reading every reader of the stored step makes (REF.judge): a scan whose pre-edge noise is about zero is
+    # not usable (DEGENERATE_RULE_ID): too few usable scans BLOCK a shift, none is applied even under an approval; usable
+    # edges that spread over more than the reference-spread level are not proposed and an approval of them is applied
+    # only with its size confirmed (SPREAD_RULE_ID, as a group's own edge). What is hashed
+    # (measured edge, spread, computed shift) keeps the earlier rule's values, so a group whose curve does not change
+    # keeps its id; only a group with a NAMED reference (approved, or a params file's) and a degenerate scan reads its
+    # edge from the usable scans alone (its shift would otherwise come from a channel that is not counting).
+    j = REF.judge([r.get("e0_eV") if r else None for r in per_scan], [r.get("snr") if r else None for r in per_scan],
+                  min_snr, ref_source, ctx.params["qc"].get("warn_reference_e0_spread_eV"))
+    blocked = ref_source is not None and not j["proposed"]
+    if j["degenerate"]:
+        flags.append(REF.DEGENERATE_FLAG)
+    if j["disagree"]:
+        flags.append(REF.SPREAD_FLAG)
+    if ref_source == REF.IN_SCAN and 0 < len(j["usable"]) < j["need"] and not too_few:
+        flags.append(REF.TOO_FEW_FLAG)
+    if usable and not j["usable"]:
+        flags.append("reference_edge_not_found")
     measured = spread = None
     if usable:
         e0s = [r["e0_eV"] for r in usable]
         measured = float(np.median(e0s))
         spread = float(max(e0s) - min(e0s))
     ref = approved or proposed
+    if ref and j["degenerate"]:
+        measured = float(np.median(j["usable"])) if j["usable"] else None
+        spread = float(max(j["usable"]) - min(j["usable"])) if j["usable"] else None
+    # r4-a (NEAR_SAMPLE_RULE_ID): an in-scan reference edge at the group's own (uncalibrated) sample E0
+    said: dict = {}
+    near = None
+    if ref_source == REF.IN_SCAN and j["proposed"]:
+        own_e0 = [x["e0_eV"] for x in (C.edge_e0(sa["energy"], sa["mu"], np, ctx.xafs) for sa in scans_data)
+                  if x and x.get("e0_eV") is not None]
+        if own_e0:
+            said["sample_e0_eV"] = float(np.median(own_e0))
+            near = REF.near_sample({"reference_source": ref_source, **said}, float(np.median(j["usable"])))
+            if near is not None:
+                flags.append(REF.NEAR_SAMPLE_FLAG)
+    if j["max_spread_eV"] != REF.DEFAULT_MAX_SPREAD_EV:
+        said["reference_max_spread_eV"] = j["max_spread_eV"]
     tab = tab_src = shift = None
     applied = 0.0
     if not approved and ref_source is not None:
@@ -414,13 +448,23 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
             if abs(shift) > float(cp["max_plausible_shift_eV"]):
                 flags.append("shift_implausible_not_applied")
             elif not approved:
-                if not not_named:  # nothing awaits an approval ISAAC does not propose (flags are not hashed)
+                if not not_named and not blocked and not j["disagree"]:  # nothing awaits an approval ISAAC does not
+                    # propose (flags are not hashed)
                     flags.append("calibration_shift_awaiting_approval")
+            elif blocked:
+                pass  # r4-a: no reference is read (its flags say why); approval_not_applied names the approval
             elif own and not REF.shift_size_confirmed(accepted, shift):
                 # CALIBRANT_RULE_ID: a group's own edge is a calibration only if its sample is a pure element, which
                 # names cannot settle (a chemical standard's edge sits where its chemistry puts it, and moving it onto
                 # a tabulated edge erases that chemical shift): applied only with --accept-shift, whatever the size
                 flags.append(REF.CALIBRANT_NOT_CONFIRMED_FLAG)
+            elif j["disagree"] and not REF.shift_size_confirmed(accepted, shift):
+                # r4-a (SPREAD_RULE_ID): a reference whose usable edges disagree, applied only with --accept-shift
+                flags.append(REF.SPREAD_NOT_CONFIRMED_FLAG)
+            elif near is not None and not REF.shift_size_confirmed(accepted, shift):
+                # r4-a (NEAR_SAMPLE_RULE_ID): the reference channel may be seeing the sample: applied only with its size
+                # confirmed (--accept-shift), whatever the size
+                flags.append(REF.NEAR_SAMPLE_NOT_CONFIRMED_FLAG)
             elif REF.exceeds_warn(shift, ctx.params["qc"]["warn_energy_shift_eV"]) and not REF.shift_size_confirmed(accepted, shift):
                 # c12-cal (REF.SHIFT_SIZE_RULE_ID): a shift above the warning level moves every energy of the record by
                 # that much; it is applied only when the scientist also confirmed its size (--accept-shift). c12-r: the
@@ -439,7 +483,8 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
     confirmed = approved
     basis = approved or proposed
     per_scan_shifts = None
-    if cp.get("align_scans_by_reference") and usable and len(usable) == len(scans_data):
+    # r4-a review: aligned only by usable edges (REF.judge: never a scan whose pre-edge noise is about zero)
+    if cp.get("align_scans_by_reference") and j["usable"] and len(j["usable"]) == len(scans_data):
         per_scan_shifts = [measured - r["e0_eV"] for r in per_scan]  # type: ignore[index]
     return {
         "step": "calibration",
@@ -466,6 +511,8 @@ def _calibration(group: Mapping, stems: Sequence[str], scans_data: list[dict], h
             **({"accepted_shift_eV": float(accepted)} if accepted is not None else {}),
         },
         "flags": flags,
+        # r4-a: written into the outcome by _said_reference, after the hashed copy (no id moves)
+        "said": said,
     }
 
 
@@ -476,13 +523,22 @@ def _said_reference(cal: dict, calibrant: Mapping | None = None) -> dict:
     the step had before these sentences existed, so a group whose curve does not change keeps its result id.
     ``calibrant`` (a reference group's :func:`reference.calibrant_identity`) is said here too, never hashed."""
     hashed = copy.deepcopy(cal["outcome"])
+    cal["outcome"].update(cal.pop("said", None) or {})  # r4-a: the sample E0 and spread level the reading uses
     if calibrant is not None and cal["outcome"].get("reference_source") == REF.OWN_SIGNAL:
         cal["outcome"]["reference_calibrant"] = dict(calibrant)
     said = REF.reading(cal)
     cal["outcome"].update({k: said[k] for k in ("reference_scans_usable", "reference_scans_listed", "reference_min_scans",
                                                 "reference_proposed", "calibration_proposed", "reference_statement")})
-    if said["reference_e0_spread_eV"] is None:
-        cal["outcome"]["reference_e0_spread_eV"] = None
+    cal["outcome"].update({k: said[k] for k in ("reference_scans_degenerate", "reference_edges_disagree",
+                                                "reference_at_sample_e0_eV") if k in said})
+    o = cal["outcome"]
+    passing = REF.judge(o.get("reference_e0_per_scan_eV") or [], o.get("reference_snr_per_scan") or [],
+                        REF.effective_min_snr((cal.get("params") or {}).get("reference_min_edge_snr"), o.get("reference_source")),
+                        o.get("reference_source"))["passing"]
+    if said["reference_e0_spread_eV"] is None and len(passing) < 2:
+        # one usable scan has no spread (c12-cal). r4-a: never nulled for scans the degenerate-noise rule set aside:
+        # the QC verdict reads this value, and qc.json keeps the earlier rule's (an unchanged curve keeps its id)
+        o["reference_e0_spread_eV"] = None
     return hashed
 
 
@@ -498,18 +554,24 @@ def _few_scan_glitch_statement(n_scans: int, flagged: int, params: Mapping) -> s
             f"{flagged} flag{'' if flagged == 1 else 's'} are not by themselves evidence of glitches.")
 
 
-def _glitch_points_on_edge(points: Sequence[tuple[int, float, bool]], e0, names: Sequence[str]) -> dict | None:
+def _glitch_points_on_edge(points: Sequence[tuple[int, float, bool]], e0, names: Sequence[str], *,
+                           one_scan: int = 0) -> dict | None:
     """r2-a: the flagged points on the edge (:func:`core.glitch_points_on_edge`), listed apart and said, or ``None``
     when no flagged point is on the edge (an unaffected result is unchanged). ``names`` are the used scans' file
-    names by scan position. The stored count, flag and verdict are not changed (qc.json is hashed)."""
+    names by scan position. The stored count, flag and verdict are not changed (qc.json is hashed). r4-a:
+    ``one_scan`` of the points given as off the edge lie on it but are one scan's glitches
+    (:func:`core.glitch_points_from_one_scan`): said as counted glitches, never as off the edge."""
     edge = [(s, e) for s, e, on in points if on]
     if not edge:
         return None
-    off = len(points) - len(edge)
+    off = len(points) - len(edge) - one_scan
     shown = ", ".join(f"{e:.3f} eV ({names[s]})" for s, e in edge[:10]) + (f" and {len(edge) - 10} more" if len(edge) > 10 else "")
     e0_said = f" {float(e0):.3f} eV" if e0 is not None else ""
     off_said = (f"The other {off} flagged point{'' if off == 1 else 's'} {'is' if off == 1 else 'are'} off the edge and "
                 "counted as glitches." if off else "No point off the edge is flagged.")
+    if one_scan:
+        off_said += (f" {one_scan} more on the edge {'is' if one_scan == 1 else 'are'} from one scan alone, far beyond "
+                     "the other scans there, and counted as glitches (glitch_points_from_one_scan).")
     return {
         "on_edge": len(edge), "off_edge": off,
         "listed": [{"scan_position": s, "energy_eV": e} for s, e in edge[:200]],
@@ -520,6 +582,71 @@ def _glitch_points_on_edge(points: Sequence[tuple[int, float, bool]], e0, names:
                       f"the steep edge there: {shown}. They are neither counted as glitches nor cleared. {off_said} "
                       "The stored verdict keeps glitches_flagged as it was first written; look at the plot near E0."),
     }
+
+
+def _one_scan_glitch_statement(points: Sequence[tuple[int, float]], names: Sequence[str], e0) -> str:
+    """r4-a: the flagged points on the edge that are one scan's glitches, not the edge
+    (:func:`core.glitch_points_from_one_scan`), by file, said apart from the points the check cannot judge."""
+    by_scan: dict[int, list[float]] = {}
+    for s, e in points:
+        by_scan.setdefault(s, []).append(e)
+    parts = [f"{names[s]} ({_n_points(len(es))}, {min(es):.1f} to {max(es):.1f} eV)" for s, es in sorted(by_scan.items())]
+    e0_said = f" {float(e0):.3f} eV" if e0 is not None else ""
+    n = len(points)
+    return (f"{n} flagged point{'' if n == 1 else 's'} on the edge (near E0{e0_said} or in its steep stretch) "
+            f"{'comes' if n == 1 else 'come'} from one scan alone: {'; '.join(parts[:10])}. There that scan departs from "
+            f"the median of the scans more than {C.GLITCH_ONE_SCAN_FACTOR:g} times as far as any other scan does, and by "
+            f"more than {C.GLITCH_ONE_SCAN_SPAN_FRACTION:.0%} of the median curve's whole range: a glitch in that scan, not "
+            "the edge, so these points are counted as glitches. Look at that scan in the plot and ask the scientist "
+            "whether it belongs in the merge.")
+
+
+def _n_points(n: int) -> str:
+    return f"{n} point{'' if n == 1 else 's'}"
+
+
+#: r4-a: the review flag (and the QC fail reason) of a merged curve one scan's stretch sets (core.SINGLE_SCAN_RULE_ID)
+SINGLE_SCAN_FLAG = "edge_from_single_scan"
+
+
+def _single_scan_statement(dominant: Mapping, names: Sequence[str], group_id: str, excluded_as: str) -> str:
+    """r4-a: the plain sentence for a merged curve whose range one scan's stretch sets (:func:`core.single_scan_dominance`),
+    naming the scan by its file and saying how to leave it out (:func:`exclude_hint`)."""
+    name = names[dominant["scan_position"]]
+    lo, hi = dominant["departs_eV"]
+    where = f"from {lo:.1f} to {hi:.1f} eV" if hi > lo else f"at {lo:.1f} eV"
+    # r4-a review: said by WHERE the scan departs (the others' steepest point is the edge)
+    what = {"edge": "the merged white line, edge step and E0 come from that scan's stretch",
+            "above_edge": ("that stretch lies above the edge, so the merged post-edge, and with it the edge step and the "
+                           "normalised curve, come from that scan there"),
+            "below_edge": ("that stretch lies below the edge, so the merged pre-edge, and with it the edge step and the "
+                           "normalised curve, come from that scan there")}[dominant.get("region") or "edge"]
+    return (f"One scan sets this merged curve: with {name} left out, the merged curve's range (max - min) is "
+            f"{dominant['span_without_scan']:.4g}; with it, {dominant['span_merged']:.4g}, "
+            f"{dominant['ratio']:.3g} times as large (more than {dominant['factor']:g} times is one scan, not a merge). "
+            f"{name} departs from the other scans only {where} "
+            f"({_n_points(dominant['departs_points'])} of {dominant['points']}), measured in each curve's own edge "
+            f"steps; {what}, not from the measurement: this curve is not usable as it is. Ask the "
+            "scientist whether that scan belongs in the merge. " + exclude_hint(group_id, [excluded_as]))
+
+
+#: r4-a review: the statement (and review flag) of a group whose other scans have no edge (core.single_scan_dominance)
+ONLY_EDGE_FLAG = "only_scan_with_edge"
+
+
+def _only_edge_statement(dominant: Mapping, names: Sequence[str]) -> str:
+    """r4-a review: one scan has an edge and the others none: said, never failed, and never "leave it out"."""
+    name = names[dominant["scan_position"]]
+    others = len(names) - 1
+    return (f"{name} is the group's only scan with an edge: the other {_n(others, 'scan')} show no edge (dead, out of "
+            f"the beam or dark counts), so the merged curve is {name}'s, averaged with {'that scan' if others == 1 else 'them'} "
+            f"(its range is {dominant['ratio']:.3g} times theirs). The sentences on zero or missing signal "
+            "(merged_scan_zero_signal_points, outlier_scans) say which scans recorded nothing; ask the scientist "
+            f"whether {'that scan belongs' if others == 1 else 'those scans belong'} in the merge.")
+
+
+def _n(n: int, noun: str) -> str:
+    return f"{n} {noun}{'' if n == 1 else 's'}"
 
 
 def _csv(path: Path, header: Sequence[str], cols: Sequence, np) -> None:
@@ -772,19 +899,109 @@ def _file_name(entry: Mapping) -> str:
     return PurePosixPath(str(entry.get("relative_path") or entry.get("source_id"))).name
 
 
+#: r4-a M6: the skip reason (and review flag, and statement key) of a scan a params file leaves out of the merge
+EXCLUDED_REASON = "scans_excluded_by_params_file"
+
+
+def _excluded_as(entry: Mapping, names: Sequence[str]) -> str | None:
+    """The ``exclude_scans`` name (:data:`protocol.EXCLUDE_SCANS_SECTION`) that names this input, else ``None``: its
+    source id, relative path or file name, optionally with ``#<scan number>`` for one scan of a multi-scan file."""
+    if not names:
+        return None
+    rel = str(entry.get("relative_path") or "")
+    own = {str(entry.get("source_id") or ""), rel, PurePosixPath(rel).name} - {""}
+
+    def _clean(x: str) -> str:
+        x = x.strip()
+        return x[2:] if x.startswith("./") else x
+
+    for name in names:
+        # r4-a review: the whole name first (a file name may hold a '#'), then <name>#<scan> (spaces allowed)
+        if _clean(name) in own:
+            return name
+        if "#" in name:
+            base, _, scan = name.rpartition("#")
+            if (_clean(base) in own and scan.strip() and entry.get("scan") is not None
+                    and scan.strip().lstrip("0") == str(entry["scan"]).lstrip("0")):
+                return name
+    return None
+
+
+def exclusion_name(entry: Mapping, inputs: Sequence[Mapping]) -> str:
+    """How ``exclude_scans`` names one input so that it names that input alone: its file name; its relative path when
+    another input of the group has the same file name in another folder (``day1/x.dat``, ``day2/x.dat``); and
+    ``#<scan>`` when another input shares the file."""
+    name = _file_name(entry)
+    rel = str(entry.get("relative_path") or "")
+    if any(_file_name(i) == name and str(i.get("relative_path") or "") != rel for i in inputs):
+        name = rel or name
+    shared = sum(1 for i in inputs if str(i.get("relative_path") or "") == rel) > 1
+    return f"{name}#{entry['scan']}" if shared and entry.get("scan") is not None else name
+
+
+def exclude_hint(group_id: str, names: Sequence[str]) -> str:
+    """r4-a M6: how to leave named scans out of a group's merge: the params file's exact shape and the command."""
+    one = len(names) == 1
+    listed = ", ".join(json.dumps(n) for n in names)
+    return (f"If the scientist says {'it does' if one else 'they do'} not belong in the merge, re-process the group with a "
+            f"params file {{\"{P.EXCLUDE_SCANS_SECTION}\": {{\"{group_id}\": [{listed}]}}}}: `isaac process "
+            f"<bundle_dir> --source <the beamtime folder you imported> --group {group_id} --params-file <that file>`. "
+            f"That gives a new result without {'it' if one else 'them'} to review; this one stays as it is.")
+
+
+def _exclusion_statement(excluded: Sequence[Mapping], names: Sequence[str], listed: int, used: int) -> str | None:
+    """r4-a M6: which scans the params file left out of this group's merge, and any name that matched none of its
+    scans (``None`` when the params file names none for this group)."""
+    if not names:
+        return None
+    found = {x["named_as"] for x in excluded}
+    missing = [n for n in names if n not in found]
+    said = ""
+    if excluded:
+        k = len(excluded)
+        base = [PurePosixPath(str(x["relative_path"] or x["source_id"])).name for x in excluded]
+        # r4-a review: by relative path when file names repeat across folders
+        shown = [str(x["relative_path"] or x["source_id"]) if base.count(b) > 1 else b for x, b in zip(excluded, base)]
+        files = ", ".join(n + (f" (scan {x['scan']})" if x.get("scan") is not None else "")
+                          for n, x in zip(shown[:10], excluded[:10]))
+        files += f" and {k - 10} more" if k > 10 else ""
+        said = (f"{k} of {listed} listed scans {'was' if k == 1 else 'were'} left out of the merge by the params file "
+                f"({P.EXCLUDE_SCANS_SECTION}): {files}. "
+                + (f"The curve merges {used} scan{'' if used == 1 else 's'}" if used else
+                   "No scan is left, so there is no curve")
+                + "; the group's earlier result, with every scan, stays as it was.")
+    if missing:
+        said += (" " if said else "") + (
+            f"The params file's {P.EXCLUDE_SCANS_SECTION} names {', '.join(repr(n) for n in missing)} for this group, "
+            "which matches none of its scans (a file name, relative path or source id, optionally #<scan>): nothing "
+            "was left out for it. Check the name.")
+    many = {n: [x for x in excluded if x["named_as"] == n] for n in found}
+    for n, xs in many.items():
+        if len(xs) > 1:
+            # r4-a review: one name that left out more than one scan (a file name repeated across folders, or a
+            # multi-scan file named without #<scan>) is said, so it is never more than the scientist meant
+            said += (f" The name {n!r} matched {len(xs)} scans ("
+                     + ", ".join(str(x["relative_path"] or x["source_id"]) + (f" scan {x['scan']}" if x.get("scan") is not None else "")
+                                 for x in xs[:5])
+                     + "); if only one was meant, name it by its relative path, or with #<scan>.")
+    return said
+
+
 #: r3-b M4: a merged scan's point departs from the other scans' median by more than this fraction of that median's span
 OUTLIER_DEPARTS_FRACTION = 0.1
 
 
 def _outlier_scans_statement(scan_flags: Sequence[bool], used_entries: Sequence[Mapping], grid, M, merged,
-                             excluded: bool, np) -> str | None:
+                             excluded: bool, np, *, group_id: str | None = None,
+                             inputs: Sequence[Mapping] = ()) -> str | None:
     """r3-b M4: one plain statement naming each scan the deglitch step flagged as an OUTLIER (its deviation from the
     group's median spectrum is far above the others'), by its FILE, with the energy range where it departs from the
     other scans' median (by more than :data:`OUTLIER_DEPARTS_FRACTION` of that median's span), its signal there as a
     share of theirs, and what merging it did to the merged curve there; it asks whether the scan belongs in the merge.
     ``None`` when no scan is flagged. Measured on a real BL4-3 Ti beamtime: one scan's signal fell to about 0.05 after
     4985 eV and the merge was about 30% low there, said only as a count (``outlier_scans_flagged``). Descriptive only:
-    nothing is skipped or changed for it. Said after the run id (qc.json is hashed), so no result id moves."""
+    nothing is skipped or changed for it. Said after the run id (qc.json is hashed), so no result id moves. r4-a M6:
+    with ``group_id``, how to leave the scans out (:func:`exclude_hint`)."""
     flagged = [k for k, f in enumerate(scan_flags) if f]
     if not flagged:
         return None
@@ -829,8 +1046,10 @@ def _outlier_scans_statement(scan_flags: Sequence[bool], used_entries: Sequence[
         return None
     more = f" {len(parts) - 10} more flagged scan(s) are said in the deglitch step." if len(parts) > 10 else ""
     one = len(flagged) == 1
+    hint = (" " + exclude_hint(group_id, [exclusion_name(used_entries[k], inputs or used_entries) for k in flagged])
+            if group_id and not excluded else "")
     return (" ".join(parts[:10]) + more + f" Ask the scientist whether {'this scan belongs' if one else 'these scans belong'} "
-            "in the merge (a beam loss, a sample that moved or a detector that stopped counting would not).")
+            "in the merge (a beam loss, a sample that moved or a detector that stopped counting would not)." + hint)
 
 
 def _scan_name(entry: Mapping) -> str:
@@ -941,7 +1160,7 @@ def _long_runs(z: Mapping) -> list[tuple[int, int]]:
 
 
 def _zero_signal_points_statement(used_entries: Sequence[Mapping], scans_data: Sequence[Mapping], signal: str | None,
-                                  np) -> str | None:
+                                  np, *, group_id: str | None = None, inputs: Sequence[Mapping] = ()) -> str | None:
     """c11-r: one plain statement naming each MERGED scan whose counts STOP (its signal is exactly zero from some point
     to the scan's last point, a run of at least two points) or, c12-r, DROP OUT FOR A WHILE (a run of zeros at least
     :data:`BEAM_LOSS_MIN_FRACTION` of the scan and :data:`BEAM_LOSS_MIN_POINTS` long, whose counts come back), where
@@ -949,8 +1168,9 @@ def _zero_signal_points_statement(used_entries: Sequence[Mapping], scans_data: S
     otherwise. Shorter runs whose counts come back are counted apart (:func:`_isolated_zero_points_statement`,
     :func:`_short_zero_runs_statement`), never said as a lost beam. Descriptive only: nothing is skipped or changed
     for it (whether such a scan belongs in the merge is the scientist's call, docs/xas-processing-protocol-v0.md).
-    Said in the result, NOT in qc.json (hashed into the run id), so no result id moves."""
-    parts = []
+    Said in the result, NOT in qc.json (hashed into the run id), so no result id moves. r4-a M6: with ``group_id``, how
+    to leave those scans out (:func:`exclude_hint`)."""
+    parts, said_entries = [], []
     for entry, sa, z in _zero_scans(used_entries, scans_data, np):
         trail = z["trailing"] if z["trailing"] >= 2 else 0
         long_runs = _long_runs(z)
@@ -969,10 +1189,13 @@ def _zero_signal_points_statement(used_entries: Sequence[Mapping], scans_data: S
         extra = f", and at {others} other point{'' if others == 1 else 's'}" if others else ""
         parts.append(f"{name}'s {named} is zero at {d.get('signal_zero_points', z['n'])} of "
                      f"{d.get('points_read', z['size'])} points ({'; '.join(where)}{extra}); it is merged unchanged.")
+        said_entries.append(entry)
     if not parts:
         return None
     more = f" {len(parts) - 10} more merged scan(s) are the same." if len(parts) > 10 else ""
-    return " ".join(parts[:10]) + more + " A person checks whether the beam was lost."
+    hint = (" " + exclude_hint(group_id, [exclusion_name(e, inputs or used_entries) for e in said_entries])
+            if group_id else "")
+    return " ".join(parts[:10]) + more + " A person checks whether the beam was lost." + hint
 
 
 def _zero_scans(used_entries: Sequence[Mapping], scans_data: Sequence[Mapping], np) -> list[tuple[Mapping, Mapping, dict]]:
@@ -1342,9 +1565,18 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     if not scans:
         return [_not_applicable(res, B.NA_NO_SCANS, "the group lists no scan", data_states(group, ctx.runs_by_key))]
     tables = []
+    exclude = list((getattr(ctx, "exclusions", None) or {}).get(group["group_id"]) or ())
+    excluded: list[dict] = []
     for s in scans:
         entry = {"source_id": s.get("source_id"), "scan": s.get("scan_index"), "relative_path": s.get("relative_path"), "channel": None, "used": False}
         res["inputs"].append(entry)
+        named = _excluded_as(entry, exclude)
+        if named is not None:
+            # r4-a M6: left out by the params file's exclude_scans, never read (recorded in params.json and said)
+            entry.update(skip_reason=EXCLUDED_REASON, excluded_as=named)
+            excluded.append({"source_id": entry["source_id"], "relative_path": entry["relative_path"],
+                             "scan": entry["scan"], "named_as": named})
+            continue
         path = _resolve_source(ctx.root, s.get("relative_path") or "") if ctx.root else None
         if path is None or not path.is_file():
             entry["skip_reason"] = "source_file_not_found"
@@ -1362,7 +1594,13 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         tables.append((entry, table))
     if not tables:
         causes = sorted({e.get("skip_reason") or "?" for e in res["inputs"]})
-        return [_fail(res, "no_readable_scan", ";".join(causes))]
+        out = _fail(res, "no_readable_scan", ";".join(causes))
+        said = _exclusion_statement(excluded, exclude, len(res["inputs"]), 0)
+        if said:
+            # r4-a review: every scan left out by the params file: said and flagged here too (outside the failure's hash)
+            out["qc"]["statements"] = {EXCLUDED_REASON: said}
+            out["review_flags"].append(EXCLUDED_REASON)
+        return [out]
 
     role = group.get("role", "sample")
     choice = choose_channels(tables[0][1], params=params, role=role, bl15_selection=sel)
@@ -1469,6 +1707,12 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         }
     )
     mg = C.merge(M, dg["point_flags"] if excl else None, dg["scan_flags"] if excl else None, np)
+    # r4-a (C.SINGLE_SCAN_RULE_ID): one scan's stretch that sets the merged curve's range fails the curve; a group whose
+    # other scans have no edge is said, never failed (only_scan_with_edge)
+    found = C.single_scan_dominance(M, grid, np, exclude_points=dg["point_flags"] if excl else None,
+                                    exclude_scans=dg["scan_flags"] if excl else None)
+    dominant = found if found and found["kind"] == "one_scan_sets_merge" else None
+    only_edge = found if found and found["kind"] == "only_scan_with_edge" else None
     ok = np.isfinite(mg["mean"])
     g2, mean = grid[ok], mg["mean"][ok]
     if g2.size < int(params["merge"]["min_points"]):
@@ -1524,6 +1768,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         # only when the check failed (core.edge_checks; absent otherwise, as above)
         **({"post_edge_level": checks["post_edge_not_at_1"]["level"]} if "post_edge_not_at_1" in checks else {}),
         **({"edge_to_pre_edge_noise": checks["no_edge"]["edge_to_noise"]} if "no_edge" in checks else {}),
+        # r4-a: only when one scan sets the merged curve (absent otherwise, as above): the curve fails
+        **({"single_scan_span_ratio": dominant["ratio"]} if dominant else {}),
         **({"post_edge_span_eV": short["post_e0_span_eV"]} if short else {}),
         "pre_edge_noise": nm["pre_edge_noise"],
         "scan_spread": float(np.nanmedian(se) / abs(step)) if (len(scans_data) > 1 and step and np.isfinite(se).any()) else None,
@@ -1540,6 +1786,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         "signal_all_zero_scans": sum(1 for d in diags if d["signal_all_zero"]),
         # c11-a: only when a scan was skipped for a signal of zero at every point (absent otherwise, as above)
         **({"scans_skipped_signal_all_zero": zero_skipped} if zero_skipped else {}),
+        # r4-a M6: only when the params file left scans out (absent otherwise, as above)
+        **({"scans_excluded_by_params_file": len(excluded)} if excluded else {}),
     }
     verdict, reasons = C.qc_verdict(metrics, params)
     res["qc"] = {"metrics": metrics, "verdict": verdict, "reasons": reasons}
@@ -1665,6 +1913,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
                 "channel_choice": res["channel_choice"],
                 "calibration": hashed_cal,
                 "normalize_resolved": nm["resolved_params"],
+                # r4-a M6: only for a group the params file leaves scans out of (absent otherwise: no other id moves)
+                **({"excluded_scans": excluded} if excluded else {}),
             }
         ),
     )
@@ -1713,13 +1963,36 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     few_said = _few_scan_glitch_statement(len(scans_data), dg["flagged_points_total"], params)
     if few_said:
         res["qc"].setdefault("statements", {})["glitch_check_few_scans"] = few_said
+    # r4-a L6: a channel chosen by column-name priority (no selection ISAAC can check) is said, not only flagged
+    if "channel_choice_needs_review" in choice.flags:
+        res["qc"].setdefault("statements", {})["channel_choice_needs_review"] = needs_review_statement(choice)
     # r2-a: flagged points at E0 or where the merged curve is steep are on the edge, not glitches: listed apart,
     # counted and said (after run_id: qc.json is hashed, so no id moves; the stored count, flag and verdict stay)
     clean = C.merge(M, dg["point_flags"], None, np)["mean"]  # review: steepness read without the flagged points
     okc = np.isfinite(clean)
-    on_edge = _glitch_points_on_edge(C.glitch_points_on_edge(dg["point_flags"], grid, grid[okc], clean[okc],
-                                                             nm["e0_eV"], np),
-                                     nm["e0_eV"], [_file_name(e) for e in used_entries])
+    names = [_file_name(e) for e in used_entries]
+    where = C.glitch_points_on_edge(dg["point_flags"], grid, grid[okc], clean[okc], nm["e0_eV"], np)
+    # r4-a (GLITCH_EDGE_RULE_ID v1): a point from one scan alone, far beyond the other scans there, is a glitch even on
+    # the edge: never shielded as "unjudged" (said apart; the stored count, flag and verdict are unchanged)
+    one = C.glitch_points_from_one_scan(dg["point_flags"], grid, M, np)
+    one_on_edge = [(sp, en) for sp, en, at in where if at and (sp, en) in one]
+    on_edge = _glitch_points_on_edge([(sp, en, at and (sp, en) not in one) for sp, en, at in where], nm["e0_eV"], names,
+                                     one_scan=len(one_on_edge))
+    if one_on_edge:
+        res["qc"]["metrics"]["glitch_points_from_one_scan_on_edge"] = len(one_on_edge)
+        res["qc"].setdefault("statements", {})["glitch_points_from_one_scan"] = _one_scan_glitch_statement(
+            one_on_edge, names, nm["e0_eV"])
+        dg_step = next(s_ for s_ in res["steps"] if s_.get("step") == "deglitch")
+        dg_step["outcome"]["flagged_points_from_one_scan_on_edge"] = [{"source_id": pos_sid[sp], "energy_eV": en}
+                                                                      for sp, en in one_on_edge[:200]]
+        dg_step["outcome"]["glitch_edge_rule_id"] = C.GLITCH_EDGE_RULE_ID
+    if dominant:
+        res["review_flags"].append(SINGLE_SCAN_FLAG)
+        res["qc"].setdefault("statements", {})[SINGLE_SCAN_FLAG] = _single_scan_statement(
+            dominant, names, group["group_id"], exclusion_name(used_entries[dominant["scan_position"]], res["inputs"]))
+    if only_edge:
+        res["review_flags"].append(ONLY_EDGE_FLAG)
+        res["qc"].setdefault("statements", {})[ONLY_EDGE_FLAG] = _only_edge_statement(only_edge, names)
     if on_edge:
         res["qc"]["metrics"].update(glitch_points_on_edge=on_edge["on_edge"], glitch_points_off_edge=on_edge["off_edge"])
         res["qc"].setdefault("statements", {})["glitch_points_on_edge"] = on_edge["statement"]
@@ -1727,12 +2000,18 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         dg_step["outcome"]["flagged_points_on_edge"] = [{"source_id": pos_sid[p["scan_position"]], "energy_eV": p["energy_eV"]}
                                                         for p in on_edge["listed"]]
         dg_step["outcome"]["glitch_edge_rule_id"] = C.GLITCH_EDGE_RULE_ID
-    zero_points_said = _zero_signal_points_statement(used_entries, scans_data, _raw_signal(choice), np)
+    exclusion_said = _exclusion_statement(excluded, exclude, len(res["inputs"]), len(scans_data))
+    if exclusion_said:
+        res["qc"].setdefault("statements", {})[EXCLUDED_REASON] = exclusion_said
+        res["review_flags"].append(EXCLUDED_REASON)
+    zero_points_said = _zero_signal_points_statement(used_entries, scans_data, _raw_signal(choice), np,
+                                                     group_id=group["group_id"], inputs=res["inputs"])
     if zero_points_said:
         res["qc"].setdefault("statements", {})["merged_scan_zero_signal_points"] = zero_points_said
         res["review_flags"].append(ZERO_SIGNAL_POINTS_FLAG)
     # r3-b M4: an outlier scan is named, with where it departs and what merging it did (the count alone said nothing)
-    outlier_said = _outlier_scans_statement(dg["scan_flags"], used_entries, grid, M, mg["mean"], excl, np)
+    outlier_said = _outlier_scans_statement(dg["scan_flags"], used_entries, grid, M, mg["mean"], excl, np,
+                                            group_id=group["group_id"], inputs=res["inputs"])
     if outlier_said:
         res["qc"].setdefault("statements", {})["outlier_scans"] = outlier_said
     # c12-cal: zeros whose counts come back are counted in one line (no flag), never said as a lost beam
@@ -2210,6 +2489,7 @@ def process_bundle(
     ctx = _Ctx(bundle=bundle, bundle_dir=bundle_dir, root=root, params=resolved, np=np, xafs=xafs, out_dir=out_dir, sources=sources, runs_by_key=runs_by_key)
     ctx.scan_reader = scan_reader or read_scan_file
     ctx.calibration_approvals = dict(calibration_approvals or {})
+    ctx.exclusions = P.scan_exclusions(params)  # r4-a M6: scans a params file leaves out of a named group's merge
 
     # Athena-first: read every project once, match by name.
     entries, a_notes, projects = [], [], A.find_projects(bundle)
@@ -2245,6 +2525,7 @@ def process_bundle(
             _null_non_finite(r)
         (unread_results if g.get("group_kind") in ("unread_acquisition", "generic_run") else results).extend(out)
 
+    unknown_excl = sorted(set(ctx.exclusions) - {g["group_id"] for g in all_groups})
     fixed_said = possibly_fixed_athena_e0(results, bundle, all_groups, entries)
     processed = {r.get("group_id") for r in results + unread_results}
 
@@ -2280,7 +2561,7 @@ def process_bundle(
         if fixed_said["statement"]:
             payload["summary"]["lines"].append(fixed_said["statement"])
         # r1-a M5: a stored result that stays as it was (decided, or not processed now) is said apart, by its own id
-        payload["summary"]["lines"].extend(k["statement"] for k in fixed_said["kept_results"])
+        payload["summary"]["lines"].extend(kept_fixed_e0_lines(fixed_said["kept_results"], wanted))
     stored_by_id = {B.processing_id(r): r for r in bundle.get("processing_results") or ()}
     for r in results:
         for x in r.get("athena_version_replaces_approved") or ():
@@ -2313,6 +2594,12 @@ def process_bundle(
         # for the STORED results `isaac process` keeps as they were: apply_kept_result_notes (outside the hashed files)
         payload["kept_result_notes"] = kept_notes
     payload["summary"]["lines"].extend(REF.ignored_overrides(resolved))  # c12-r: an ignored override is said once
+    if unknown_excl:
+        # r4-a review: an exclude_scans group id that is no group of this bundle left nothing out
+        payload["summary"]["lines"].append(
+            f"The params file's {P.EXCLUDE_SCANS_SECTION} names {', '.join(repr(g) for g in unknown_excl)}, which "
+            f"{'is' if len(unknown_excl) == 1 else 'are'} no record group of this bundle: nothing was left out for "
+            f"{'it' if len(unknown_excl) == 1 else 'them'}. Check the group id (`isaac bundle list <bundle_dir> groups`).")
     _write(out_dir / RESULTS_FILE, _json_bytes(payload))
     return payload
 
@@ -2549,7 +2836,7 @@ def possibly_fixed_athena_e0(results: list[dict], bundle: Mapping, groups: Seque
                 what = "approved result" if state == B.STATE_SCIENTIST_CONFIRMED else f"stored result ({state})"
                 line = (f"Athena: {what} {pid} carries a possibly fixed Athena E0 ({value:.{FIXED_E0_DECIMALS}f} eV, "
                         f"{why}); ask the scientist whether it was measured.")
-                kept.append({"result_id": pid, "state": state, "statement": line})
+                kept.append({"result_id": pid, "group_id": gid, "state": state, "statement": line})
                 notes.append({"result_id": pid, "rule_id": FIXED_E0_RULE_ID, "add_review_flags": [FIXED_E0_FLAG],
                               "statements": {FIXED_E0_FLAG: (f"{said}. This result was kept as it was decided "
                                                              f"({state}): ask the scientist whether this E0 was measured "
@@ -2577,6 +2864,23 @@ def possibly_fixed_athena_e0(results: list[dict], bundle: Mapping, groups: Seque
                 f"{FIXED_E0_FLAG}); ask the scientist before approving them.")
     return {"rule_id": FIXED_E0_RULE_ID, "results": flagged, "kept_results": kept, "kept_result_notes": notes,
             "statement": line}
+
+
+def kept_fixed_e0_lines(kept: Sequence[Mapping], wanted: set | None) -> list[str]:
+    """The summary lines for STORED results flagged by :func:`possibly_fixed_athena_e0` (``kept_results``): each by
+    its own id; r4-a L1: with ``--group`` (``wanted``), only the named groups' by id and the other groups' in one count
+    line (a real beamtime printed 67 such lines, about other groups, for one named group)."""
+    if wanted is None:
+        return [k["statement"] for k in kept]
+    rest = [k for k in kept if k.get("group_id") not in wanted]
+    lines = [k["statement"] for k in kept if k.get("group_id") in wanted]
+    if rest:
+        groups = len({k.get("group_id") for k in rest})
+        lines.append(f"Athena: {len(rest)} more stored result{'' if len(rest) == 1 else 's'} of {groups} "
+                     f"group{'' if groups == 1 else 's'} not processed now carr{'ies' if len(rest) == 1 else 'y'} a "
+                     f"possibly fixed Athena E0 (flag {FIXED_E0_FLAG}); `isaac bundle list <bundle_dir> processing-results` "
+                     "lists them. Ask the scientist whether each E0 was measured before approving one.")
+    return lines
 
 
 def apply_kept_result_notes(results: Sequence[dict], notes: Sequence[Mapping]) -> int:

@@ -464,12 +464,22 @@ def _qid(*parts: str) -> str:
 
 #: The counter question's id (the grouping step's experiment-wide question; DEC-91: never changes).
 COUNTER_QUESTION_ID = _qid("experiment", "naming_counter_positions", _COUNTER_GQ_ID)
+#: r4-b M2: one command keeps apart every open merge candidate whose names differ only at positions a scientist said
+#: are not counters (``grouping.said_not_counter_candidates``), resolved through the counter question's id
+KEEP_APART_SAID_NOT_COUNTER_COMMAND = (f"isaac bundle decide <bundle_dir> --question {COUNTER_QUESTION_ID} "
+                                       f"--decision {B.KEEP_APART_DECISION} --by \"<your name>\"")
 #: The instrument clock's time-zone question's id (the same inputs as always).
 CLOCK_QUESTION_ID = _qid("experiment", "clock_time_zone", "instrument_clock")
 
 
+def keep_apart_said_not_counter_command(candidate_ids: Sequence[str]) -> str:
+    """r4-c L3: :data:`KEEP_APART_SAID_NOT_COUNTER_COMMAND` pinned to the merge candidates a reply listed (one ``--target``
+    each): run later, it keeps apart exactly those, or is refused, naming what changed, when the cautioned ones differ."""
+    return KEEP_APART_SAID_NOT_COUNTER_COMMAND + "".join(f" --target {i}" for i in candidate_ids)
+
+
 def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, include_answered: bool = False,
-                explain_counter: bool = True) -> dict:
+                explain_counter: bool = True, answered_out: set | None = None) -> dict:
     """``questions.json`` v2 for ``bundle``. Pure: reads the bundle, writes nothing.
 
     ``compositions_out``, when given, receives the composer's report per live group that "blocking" was judged
@@ -485,7 +495,11 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
 
     ``explain_counter=False`` (with ``include_answered``): an answered counter question's text says only
     "Answered." — whether the current groups follow the answer needs a regroup preview (``grouping.propose``),
-    which a caller that only resolves targets (``decide --question``, the template) does not need."""
+    which a caller that only resolves targets (``decide --question``, the template) does not need.
+
+    ``answered_out``, when given (with ``include_answered``), receives the id of each value target that is in the
+    payload ONLY because it was answered (the plain payload does not ask it): what a caller that needs both payloads
+    reads instead of consolidating twice (r4-c HIGH-1, ``template._question_command``)."""
     schema, basis = _target_schema()
     # THE SET-POINT A CONTROL MODE NEEDS (1.5.0): the target schema's conditional rules make the
     # set-point required for some modes, so a run whose mode a file states or a scientist confirmed
@@ -657,18 +671,24 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
 
     for m in bundle["missing_values"]:
         again = None
+        back = False  # asked here only because it was answered (answered_out)
         if not include_answered and dead_slot(m):
             continue
+        if answered_out is not None and include_answered and dead_slot(m):
+            back = True
         if m["value_state"] not in _UNANSWERED:
             again = not_eligible_answer(m, "missing_value")
             if again is None and not (include_answered and m.get("extracted_state", B.STATE_MISSING) in _UNANSWERED
                                       and ("missing_value", m["value_id"]) in decisions):
                 continue
+            back = back or again is None
         path, rid = m["target_field_path"], m["run_id"]
         if rid is not None and group_of and rid not in group_of:
             run = run_by_id.get(rid)
             if run is not None and not run["run_candidate"]:
                 continue
+        if back and answered_out is not None:
+            answered_out.add(m["value_id"])
         blocking = required_for(path, rid)
         partition = None
         if B.is_answer_slot(m):
@@ -712,6 +732,8 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 if not (include_answered and state in (B.STATE_NEEDS_REVIEW, B.STATE_CANDIDATE_EXTRACTED)
                         and B.candidate_decision(bundle, c, decisions) is not None):
                     continue
+                if answered_out is not None:
+                    answered_out.add(c["candidate_id"])
         if not zone_decided and B.is_local_clock_start(c):
             continue  # nothing to confirm until the clock's zone is stated: the zone question asks that
         blocking = required_for(path, c["run_id"])
@@ -723,30 +745,51 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             again=again)
 
     if has_groups:
-        _move_outside_optional_targets(buckets, bundle, group_of, add)
+        _move_outside_optional_targets(buckets, bundle, group_of, add, answered_out)
 
     # M6 (c15c): WHAT A RUN ALREADY HOLDS A SCIENTIST'S DECISION FOR: ``(run_id, composer path) -> [decision]``, from
     # every candidate and missing value of the run whose value a scientist confirmed or corrected (and the record can
     # take), alias-aware as the composer writes it (_composer_path). Built once, and only when a conflict names a run.
-    held_by_run: dict[tuple[str, str], list[tuple[Mapping, Any]]] | None = None
+    # r4-b M1: ...and a BEAMTIME-WIDE decision (a candidate or missing value with no run) reaches every run a live record
+    # group holds (records.compose_group proposes it for every group), except at a run-only path (DEC-69): held under
+    # run None and counted for each such run. With no record groups yet, it reaches every run.
+    from .records import RUN_ONLY_PATHS
+    held_by_run: dict[tuple[str | None, str], list[tuple[Mapping, Any]]] | None = None
+    beamtime_decision_ids: set[str] = set()
 
     def held(run_id: str, path: str) -> list[tuple[Mapping, Any]]:
-        """``[(decision, the value it gives)]`` the run holds for ``path``."""
+        """``[(decision, the value it gives)]`` the run holds for ``path``: its own, then a beamtime-wide one."""
         nonlocal held_by_run
         if held_by_run is None:
             held_by_run = {}
             conflict_ids_of = B.conflict_ids_by_candidate(bundle)
             for kind, objs in (("candidate", bundle["candidates"]), ("missing_value", bundle["missing_values"])):
                 for o in objs:
-                    if (o.get("run_id") is None or not o.get("target_field_path")
-                            or o.get("value_state") != B.STATE_SCIENTIST_CONFIRMED or B.unusable_answer_reason(o, writable)):
+                    if (not o.get("target_field_path") or o.get("value_state") != B.STATE_SCIENTIST_CONFIRMED
+                            or B.unusable_answer_reason(o, writable)
+                            or (o.get("run_id") is None and o["target_field_path"] in RUN_ONLY_PATHS)):
                         continue
                     d = (B.candidate_decision(bundle, o, decisions, conflict_ids_of) if kind == "candidate"
                          else decisions.get(("missing_value", o["value_id"])))
                     if d is not None and d.get("decision") in B.CONFIRMING_DECISIONS:
                         value = B.final_value(o.get("value") if kind == "candidate" else None, d, o.get("readings"))
-                        held_by_run.setdefault((o["run_id"], _composer_path(o["target_field_path"])), []).append((d, value))
-        return held_by_run.get((run_id, _composer_path(path)), [])
+                        held_by_run.setdefault((o.get("run_id"), _composer_path(o["target_field_path"])), []).append((d, value))
+                        if o.get("run_id") is None:
+                            beamtime_decision_ids.add(str(d.get("decision_id")))
+        key = _composer_path(path)
+        beamtime = held_by_run.get((None, key), []) if (run_id in group_of or not has_groups) else []
+        return held_by_run.get((run_id, key), []) + beamtime
+
+    members_by_group: dict[str, list[str]] | None = None
+
+    def members_of(gid: str) -> list[str]:
+        """The runs of live group ``gid`` (each run in the one group ``group_of`` names), built once."""
+        nonlocal members_by_group
+        if members_by_group is None:
+            members_by_group = {}
+            for rid, g in group_of.items():
+                members_by_group.setdefault(g, []).append(rid)
+        return members_by_group.get(gid, [])
 
     covered_conflicts: dict[str, list[str]] = {}
     conflicts_out = []
@@ -754,6 +797,9 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         if (cf["value_state"] not in (B.STATE_CONFLICTING, B.STATE_NEEDS_REVIEW) and cf["conflict_id"] not in conflict_again
                 and not (include_answered and ("conflict", cf["conflict_id"]) in decisions)):
             continue
+        if (answered_out is not None and cf["value_state"] not in (B.STATE_CONFLICTING, B.STATE_NEEDS_REVIEW)
+                and cf["conflict_id"] not in conflict_again):
+            answered_out.add(cf["conflict_id"])
         rids = cf["run_ids"]
         scope = scope_of_run(rids[0]) if rids else "experiment"
         cand = cand_by_id.get(cf.get("candidate_id") or "")
@@ -766,19 +812,29 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             # a decision that IS this conflict's own answer settles it already (it is then not open): not counted here
             own = {"kind": "conflict", "id": cf["conflict_id"]}
             by_run = [[(d, v) for d, v in held(r, path) if d.get("target") != own] for r in rids]
-            # ...and, across several runs, they give ONE value: runs decided differently still disagree
-            agree = len(rids) == 1 or len({json.dumps(v, sort_keys=True, default=str) for ds in by_run for _, v in ds}) == 1
-            if all(by_run) and agree:
+            # ...and every decision reaching its runs gives ONE value (r4-c MED-1: one run too, its own decision against
+            # the beamtime one), counting the other runs of their live groups, whose decisions the record pools with them
+            # (records.compose_group): runs decided differently still disagree, and the record fills nothing
+            mates = [m for g in dict.fromkeys(group_of[r] for r in rids if r in group_of) for m in members_of(g)
+                     if m not in rids]
+            values = {json.dumps(v, sort_keys=True, default=str)
+                      for ds in [*by_run, *(held(m, path) for m in mates)] for d, v in ds if d.get("target") != own}
+            if all(by_run) and len(values) == 1:
                 covered_conflicts[cf["conflict_id"]] = sorted({str(d.get("decision_id")) for ds in by_run for d, _ in ds})
         conflicts_out.append((scope, cf, affects, path, required))
 
     questions: list[dict] = []
+    reach_index: dict | None = None
     for (scope, kind, path, partition), q in buckets.items():
         if kind == "optional_values":
             qid = _qid(scope, kind, partition or "")
             # A number given without --json is stored as text, which the schema's type check
             # then keeps out of the record (bundle.value_problem): say which fields need it.
             numeric_fields = sorted(f for f in q["fields"] if _is_numeric(_node(schema, f)))
+            if scope == "experiment" and has_groups and reach_index is None:
+                from .mutations import reach_index as _reach_index
+                reach_index = _reach_index(bundle)  # r4-c HIGH-2: built once, for every field of every partition
+            field_reach = _optional_field_reach(bundle, q["fields"], reach_index) if scope == "experiment" and has_groups else {}
             questions.append(
                 {
                     "question_id": qid,
@@ -795,8 +851,10 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                                 and (reading := _sample_reading_text(sorted({group_of[r] for r in q["runs"] if r in group_of}),
                                                                      sample_written_of_group)) else "")
                              + (_field_hints_text(fh) if (fh := _optional_field_hints(bundle, q["fields"], ai_hints)) else "")
-                             + _asked_again_text(q["asked_again"], {f: _eligible_values(f) for f in q["fields"]})),
+                             + _asked_again_text(q["asked_again"], {f: _eligible_values(f) for f in q["fields"]})
+                             + _field_reach_text(field_reach)),
                     "asked_again": q["asked_again"],
+                    **({"field_reach": field_reach} if field_reach else {}),
                     "applies_to": {"groups": len({group_of[r] for r in q["runs"] if r in group_of}), "runs": len(q["runs"]), "targets": len(q["targets"]),
                                    "runs_outside_live_groups": outside(q["runs"])},
                     "targets": q["targets"],
@@ -1268,10 +1326,11 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             compositions_out.update(reports)
         basis = {**basis, "record_composer": _agree_with_composer(questions, bundle, group_of, cand_by_id, reports,
                                                                        decision_of=decisions)}
-    _note_shared_evidence(questions, cand_by_id, bundle)
+    reading_said = _note_shared_evidence(questions, cand_by_id, bundle)
     _note_same_reading_groups(questions, cand_by_id, bundle)
+    _note_shared_reading_groups(questions, cand_by_id, bundle, reading_said)
     _mark_deferred(questions, decisions)
-    _covered_by_run_decisions(questions, covered_conflicts)
+    _covered_by_run_decisions(questions, covered_conflicts, beamtime_decision_ids)
     _say_the_one_group(questions)
     questions.sort(key=order)
     for q in questions:
@@ -1286,14 +1345,18 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     }
 
 
-def _covered_by_run_decisions(questions: list[dict], covered: Mapping[str, Sequence[str]]) -> None:
+def _covered_by_run_decisions(questions: list[dict], covered: Mapping[str, Sequence[str]],
+                              beamtime_ids: Container[str] = ()) -> None:
     """M6 (c15c): a run's disagreement whose every run already holds a scientist's decision for its field (a sheet
     ruling, an answer to another question: ``covered``, conflict id -> those decision ids) is settled for the record by
     that decision; the record is composed from it, not from either reading. Unless it still blocks (the composer still
     lacks the field for a group it reaches), it is not a conflict affecting a record: ``affects_record`` false, tier
     optional, ``covered_by_decisions`` naming them, and a plain ``why``, counted apart
     (``conflicts_covered_by_decisions``) and never ``deferred`` (it is not waiting on an answer). Across several runs
-    the decisions must give one value. Its id, scope and targets are unchanged. Runs after :func:`_mark_deferred`."""
+    the decisions must give one value. Its id, scope and targets are unchanged. Runs after :func:`_mark_deferred`.
+
+    r4-b M1: a beamtime-wide decision for the field (``beamtime_ids``) reaches every run a live group holds, so it covers
+    them too (the record is composed from it); a run's own decision that differs still disagrees with it."""
     for q in questions:
         ids = covered.get(q["targets"][0]["id"]) if q["kind"] == "resolve_conflict" and q["targets"] else None
         if not ids or q["blocking"] or not q.get("affects_record"):
@@ -1301,8 +1364,14 @@ def _covered_by_run_decisions(questions: list[dict], covered: Mapping[str, Seque
         runs = q["applies_to"].get("runs") if isinstance(q.get("applies_to"), Mapping) else None
         q.update(tier=TIER_OPTIONAL, affects_record=False, covered_by_decisions=list(ids))
         q.pop("deferred", None)
+        said = f"{', '.join(ids[:5])}{'…' if len(ids) > 5 else ''}"
+        if all(i in beamtime_ids for i in ids):
+            q["why"] = (f"Already decided: the beamtime-wide answer for {q['target_field_path']} ({said}) reaches "
+                        f"{'its run' if runs == 1 else 'each of its runs'}, and the record is composed from that answer, "
+                        "not from either reading. Nothing to ask: to change the value, change that answer.")
+            continue
         q["why"] = (f"Already decided: {'its run holds' if runs == 1 else 'each of its runs holds'} a scientist's decision "
-                    f"for {q['target_field_path']} ({', '.join(ids[:5])}{'…' if len(ids) > 5 else ''}), and the record "
+                    f"for {q['target_field_path']} ({said}), and the record "
                     "is composed from that decision, not from either reading. Nothing to ask: to change the value, change "
                     "that decision.")
 
@@ -1521,8 +1590,8 @@ def _marked_token(stem: str, position: int) -> str | None:
 
 
 def _counter_examples(bundle: Mapping, positions: Sequence[int], ruled: Container[int] = ()) -> dict[int, dict]:
-    """For each asked position: ``differ`` — the names (at most 2) of one merge candidate whose names differ there in
-    a number (what the question is asked for), the token marked — and ``elsewhere``, one name of the bundle where
+    """For each asked position: ``differ`` — two names of one merge candidate that differ ONLY there, in a number (what
+    the question is asked for; r4-b M2: else two such names of the bundle, else none), the token marked — and ``elsewhere``, one name of the bundle where
     that token is not a number (or ``None``). Real names of this bundle, never a pattern. c16-r M5: the last-token
     example is never one whose last token sits at a position in ``ruled`` (already answered). r3a L1: a candidate of
     SAMPLE groups is the example where there is one (an alignment or reference run's names say little about how the
@@ -1548,6 +1617,20 @@ def _counter_examples(bundle: Mapping, positions: Sequence[int], ruled: Containe
                     and toks[0][-1] != toks[1][-1] and all(t[-1].isdigit() for t in toks) and len(toks[0]) not in ruled):
                 out[LAST_POSITION] = {"differ": [_marked_token(x, len(t)) for x, t in zip(stems, toks)], "elsewhere": None}
                 break
+    def only_there(stems: Sequence[str], p: int) -> list[str] | None:
+        # r4-b M2: two names that differ ONLY at position p, in a number there (before: the candidate's first two
+        # names, which could differ at another position too: `[01]_13_…` vs `[03]_12_…` asked about the 1st token)
+        seen: dict[tuple, str] = {}
+        for stem in stems:
+            t = _stem_tokens(stem)
+            if not 1 <= p <= len(t) or not t[p - 1].isdigit():
+                continue
+            key = (len(t), tuple(x for i, x in enumerate(t) if i != p - 1))
+            other = seen.setdefault(key, stem)
+            if other != stem and _stem_tokens(other)[p - 1] != t[p - 1]:
+                return [other, stem]
+        return None
+
     for mc in candidates:
         if not any(r.get("code") == "numeric_name_token_differs" for r in mc.get("reasons") or ()):
             continue
@@ -1557,11 +1640,14 @@ def _counter_examples(bundle: Mapping, positions: Sequence[int], ruled: Containe
             stem = (runs_by_key.get(keys[0]) or {}).get("stem") if keys else None
             if stem and stem not in stems:
                 stems.append(stem)
-        toks = [_stem_tokens(s) for s in stems]
         for p in positions:
-            col = [t[p - 1] for t in toks if 1 <= p <= len(t)]
-            if p not in out and len(stems) >= 2 and len(col) == len(toks) and len(set(col)) > 1 and all(c.isdigit() for c in col):
-                out[p] = {"differ": [_marked_token(s, p) for s in stems[:2]], "elsewhere": None}
+            if p not in out and p != LAST_POSITION and (pair := only_there(stems, p)):
+                out[p] = {"differ": [_marked_token(s, p) for s in pair], "elsewhere": None}
+    # no merge candidate has such a pair: two names of the bundle that do (never a pair differing elsewhere too)
+    every = list(dict.fromkeys(str(r["stem"]) for r in bundle.get("runs") or () if r.get("stem")))
+    for p in positions:
+        if p not in out and p != LAST_POSITION and (pair := only_there(every, p)):
+            out[p] = {"differ": [_marked_token(s, p) for s in pair], "elsewhere": None}
     for p, ex in out.items():
         if p == LAST_POSITION:
             continue  # every name has a last token: there is no "elsewhere" to show
@@ -1828,10 +1914,12 @@ def file_name_readings(bundle: Mapping, run: Mapping, path: str) -> list[dict]:
     return list(out.values())
 
 
-def same_reading_members(bundle: Mapping, q: Mapping, cand_by_id: Mapping[str, Mapping]) -> list[dict]:
+def same_reading_members(bundle: Mapping, q: Mapping, cand_by_id: Mapping[str, Mapping],
+                         runs: Mapping[str, Mapping] | None = None) -> list[dict]:
     """``[{question_id, run_id, file_name}]``: the run (and its first scan file) each of a question's targets is
-    about, as a same-reading group names its members (r3c HIGH)."""
-    runs = {r.get("run_id"): r for r in bundle.get("runs") or ()}
+    about, as a same-reading group names its members (r3c HIGH). ``runs``: the bundle's runs by id, when built."""
+    if runs is None:
+        runs = {r.get("run_id"): r for r in bundle.get("runs") or ()}
     out, seen = [], set()
     for t in q["targets"]:
         c = cand_by_id.get(t["id"]) or {}
@@ -1909,7 +1997,7 @@ def _note_same_reading_groups(questions: list[dict], cand_by_id: Mapping[str, Ma
         lines = list(dict.fromkeys(got for q in members if (got := lines_of(q)) is not None))
         said = (f"the same comment line ({lines[0][0]!r})" if len(lines) == 1 and len(lines[0]) == 1 else
                 f"the same comment lines ({', '.join(map(repr, lines[0]))})" if len(lines) == 1 else "the same reading")
-        named = [m for q in sorted(members, key=lambda q: q["question_id"]) for m in same_reading_members(bundle, q, cand_by_id)]
+        named = [m for q in sorted(members, key=lambda q: q["question_id"]) for m in same_reading_members(bundle, q, cand_by_id, runs)]
         files = list(dict.fromkeys(str(m["file_name"]) for m in named if m["file_name"]))
         shown = ", ".join(files[:SAME_READING_NAMES_SHOWN]) + (
             f", and {len(files) - SAME_READING_NAMES_SHOWN} more" if len(files) > SAME_READING_NAMES_SHOWN else "")
@@ -1927,14 +2015,17 @@ def _note_same_reading_groups(questions: list[dict], cand_by_id: Mapping[str, Ma
                           "columns are the easy path (isaac bundle template export <bundle_dir> --out <file.xlsx>).")
 
 
-def _note_shared_evidence(questions: list[dict], cand_by_id: Mapping[str, Mapping], bundle: Mapping) -> None:
+def _note_shared_evidence(questions: list[dict], cand_by_id: Mapping[str, Mapping], bundle: Mapping) -> dict[str, str]:
     """Per-group ``confirm_value`` questions about one field that rest on the SAME file statement (or the
     same literal reading) name each other (``same_statement_as`` / ``same_reading_as``), so one file line
     asked per group is visibly one statement. And where a BEAMTIME value for that field is open or already
     answered (it fills every record but DEC-69's run-only fields, records.compose_group), the per-group
     question does not block: answering the experiment-wide one fills this group's record too. Ids, scopes
-    and targets are untouched (DEC-91): only text, ``blocking`` and ``tier`` change."""
+    and targets are untouched (DEC-91): only text, ``blocking`` and ``tier`` change. Returns ``{question id: the
+    same-reading sentence added to its text}`` (:func:`_note_shared_reading_groups` words it again when it groups them)."""
     from .records import RUN_ONLY_PATHS
+
+    reading_said: dict[str, str] = {}
 
     def statement(q):
         out = set()
@@ -1976,8 +2067,10 @@ def _note_shared_evidence(questions: list[dict], cand_by_id: Mapping[str, Mappin
         ids = [o["question_id"] for o in qs]
         for q in rest:
             q["same_reading_as"] = [i for i in ids[:_CROSS_REFERENCES + 1] if i != q["question_id"]][:_CROSS_REFERENCES]
-            q["text"] += (f" {len(qs) - 1} other group(s) hold the same reading ({', '.join(sorted(map(repr, lits)))}) for this "
-                          f"field in their own files (same_reading_as names up to {_CROSS_REFERENCES}): if they are the same thing, give each the same answer.")
+            said = (f" {len(qs) - 1} other group(s) hold the same reading ({', '.join(sorted(map(repr, lits)))}) for this "
+                    f"field in their own files (same_reading_as names up to {_CROSS_REFERENCES}): if they are the same thing, give each the same answer.")
+            q["text"] += said
+            reading_said[q["question_id"]] = said
     # a beamtime value for the field: open at experiment scope, or answered and eligible
     run_of = {m["value_id"]: m["run_id"] for m in bundle["missing_values"]}
     run_of.update({cid: c["run_id"] for cid, c in cand_by_id.items()})
@@ -1999,6 +2092,101 @@ def _note_shared_evidence(questions: list[dict], cand_by_id: Mapping[str, Mappin
                        else "included, and one is already answered.")
                     + " Answer here only with the same thing: if this group's answer differs from the beamtime one, the "
                     "record builder fills nothing for this field (two confirmed values that differ fill nothing).")
+    return reading_said
+
+
+def _note_shared_reading_groups(questions: list[dict], cand_by_id: Mapping[str, Mapping], bundle: Mapping,
+                                reading_said: Mapping[str, str]) -> None:
+    """r4-b M3: per-group questions about one field that hold the SAME reading in their own files (``same_reading_as``
+    / ``same_statement_as``, :func:`_note_shared_evidence`: many groups' one sample code for the material name, or one
+    set-point) share a ``same_reading_group``, answered together with ``decide --question <id> --same-reading``, as the
+    comment-line ones of :func:`_note_same_reading_groups` are (which runs first; a question it grouped is left as it
+    is). Nothing is merged: every id, scope, kind and target is unchanged; only ``same_reading_group``,
+    ``same_reading_count``, ``same_reading_members``, ``same_reading_command`` and the text are added. The r3c rule
+    holds: the key holds each run's own FILE-NAME reading of the field (:func:`file_name_readings`), so runs whose file
+    names read the field differently never share a group, and whether the question reaches a live record group.
+    r4-c L2: the key holds each target's FULL list of observed literals, never only its first."""
+    runs = {r.get("run_id"): r for r in bundle.get("runs") or ()}
+
+    def lits_of(q: Mapping) -> frozenset | None:
+        out = set()
+        for t in q["targets"]:
+            lits = (cand_by_id.get(t["id"]) or {}).get("observed_literals")
+            if not lits:
+                return None
+            out.add(tuple(str(x) for x in lits))
+        return frozenset(out) or None
+
+    def name_key(q: Mapping) -> tuple:
+        rids = sorted({(cand_by_id.get(t["id"]) or {}).get("run_id") or "" for t in q["targets"]})
+        return tuple(sorted({repr(r["value"]) for rid in rids if rid in runs
+                             for r in file_name_readings(bundle, runs[rid], q["target_field_path"])}))
+
+    shared: dict[tuple, list[dict]] = {}
+    for q in questions:
+        if q.get("same_reading_group") or not (q.get("same_reading_as") or q.get("same_statement_as")):
+            continue
+        if (lits := lits_of(q)) is not None:
+            shared.setdefault((q["target_field_path"], lits, name_key(q), bool(q.get("outside_live_groups"))), []).append(q)
+    for (path, lits, readings, _), members in shared.items():
+        if len(members) < 2:
+            continue
+        ids = sorted(q["question_id"] for q in members)
+        key = "SR-" + hashlib.sha256("\n".join(ids).encode()).hexdigest()[:10]
+        named = [m for q in sorted(members, key=lambda q: q["question_id"])
+                 for m in same_reading_members(bundle, q, cand_by_id, runs)]
+        files = list(dict.fromkeys(str(m["file_name"]) for m in named if m["file_name"]))
+        shown = ", ".join(files[:SAME_READING_NAMES_SHOWN]) + (
+            f", and {len(files) - SAME_READING_NAMES_SHOWN} more" if len(files) > SAME_READING_NAMES_SHOWN else "")
+        alike = f"; their file names read alike for this field ({', '.join(readings)})" if readings else ""
+        for q in members:
+            command = q["answer_command"].replace(f"--question {q['question_id']} ",
+                                                  f"--question {q['question_id']} {SAME_READING_FLAG} ", 1)
+            q["same_reading_group"], q["same_reading_count"] = key, len(members)
+            q["same_reading_members"], q["same_reading_command"] = named, command
+            said = (f" {len(members)} questions share this reading ({', '.join(sorted({repr(x) for t in lits for x in t}))}, as the files write "
+                    f"it) for this field, one per group (same_reading_group {key}; the files: {shown}{alike}); answer them "
+                    f"together with {command} if it is the same thing for all of them, or each on its own if not.")
+            before = reading_said.get(q["question_id"])
+            q["text"] = q["text"].replace(before, said, 1) if before and before in q["text"] else q["text"] + said
+
+
+def _optional_field_reach(bundle: Mapping, fields: Mapping[str, Sequence[str]], index: dict | None = None) -> dict[str, dict]:
+    """r4-b M4: for each field of an optional question asked for the whole beamtime, the live groups and runs an answer
+    with ``--field`` reaches (``mutations.answer_reach``: the rest already hold their own answer, or no target here),
+    and the groups the word would not describe (``mutations.misfit_groups``). Only the fields an answer reaches LESS
+    than every group with, or that would land on a group it does not describe: ``{field: {groups, groups_total, runs,
+    group_ids, misfit_groups?}}``. ``index``: the caller's ``mutations.reach_index`` of this bundle (r4-c HIGH-2)."""
+    from . import mutations as M
+
+    index = index if index is not None else M.reach_index(bundle)
+    out = {}
+    for f, ids in sorted(fields.items()):
+        r = M.answer_reach(bundle, ids, f, index)
+        bad = M.misfit_groups(bundle, f, r["group_ids"], index)
+        if len(r["group_ids"]) < r["groups_total"] or bad or r["beamtime_fills_none"]:
+            out[f] = {"groups": len(r["group_ids"]), "groups_total": r["groups_total"], "runs": len(r["run_ids"]),
+                      "group_ids": r["group_ids"][:_CROSS_REFERENCES * 5], **({"misfit_groups": bad} if bad else {})}
+    return out
+
+
+def _field_reach_text(field_reach: Mapping[str, Mapping]) -> str:
+    """The sentence for :func:`_optional_field_reach`: per field, what an answer here reaches, and any group it does
+    not fit, said plainly."""
+    if not field_reach:
+        return ""
+    parts = []
+    for f, r in field_reach.items():
+        part = (f"{f} reaches {r['groups']} of {r['groups_total']} group(s) ({r['runs']} run(s)"
+                + (f": {', '.join(r['group_ids'][:8])}{', …' if len(r['group_ids']) > 8 else ''}" if r["group_ids"] else "")
+                + (f"), the other {r['groups_total'] - r['groups']} already answered per group or not asked here"
+                   if r["groups"] < r["groups_total"] else ")"))
+        if r.get("misfit_groups"):
+            part += (f" — careful: it would put a {f.rsplit('.', 1)[-1].replace('_', ' ')} on "
+                     + "; ".join(f"{b['group_id']} ({b['why']})" for b in r["misfit_groups"][:8])
+                     + ", which it does not describe; answer only the groups it fits (--only group:<id>)")
+        parts.append(part)
+    return " An answer here, per field: " + "; ".join(parts) + "."
 
 
 def _ai_hint_index(bundle: Mapping):
@@ -2006,6 +2194,7 @@ def _ai_hint_index(bundle: Mapping):
     each call reads only the interpretations of ``ids`` (in their bundle order, so the output is
     identical), never the whole list again — per question that was quadratic in a large import."""
     interps = list(bundle.get("ai_interpretations") or ())
+    sources = list(bundle.get("sources") or ())  # r4-b L7: a hint names its file by the source's path
     at: dict[Any, list[int]] = {}
     for n, i in enumerate(interps):
         at.setdefault((i.get("target") or {}).get("id"), []).append(n)
@@ -2015,7 +2204,7 @@ def _ai_hint_index(bundle: Mapping):
     def hints(ids: Sequence[str], scopes: Mapping[str, Sequence[str]] | None = None) -> list[dict]:
         wanted = set(ids)
         rows = sorted(n for tid in wanted for n in at.get(tid, ()))
-        out = S.ai_hints({"ai_interpretations": [interps[n] for n in rows]}, wanted) if rows else []
+        out = S.ai_hints({"ai_interpretations": [interps[n] for n in rows], "sources": sources}, wanted) if rows else []
         for i, h in enumerate(out):
             # A READING OF FEWER RUNS THAN THE QUESTION ASKS ABOUT says so: "applies to 82 groups" beside an AI
             # suggestion read from one file must never read as a beamtime-wide reading
@@ -2050,7 +2239,7 @@ def _ai_sentence(ai: Sequence[Mapping]) -> str:
     """The sentence a value question adds for its AI suggestions, led by ``ai[0]``. AN AI READING IS NOT FILE
     EVIDENCE: no parser read this value, so it is never worded as one the files state."""
     top = ai[0]
-    cite = top.get("source_path") or top.get("source_id") or "a file"
+    cite = top.get("source_path") or "a file"  # r4-b L7: the file's name, never its source id
     return (f" An AI reading of the files suggests {top['literal']!r}"
             + (f", {top['read_for']}" if top.get("read_for") else "")
             + " (not file evidence: it needs your "
@@ -2227,9 +2416,13 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_a
         from_files = [(g, s) for g, s in items if s["status"] == "agrees"]
         ai_only = len(items) - len(from_files)
         if not ai_only:
+            own = sum(1 for _, s in items if s['group_specific_statements'])
+            statements = items[0][1]['beamtime_wide_statements']
+            # r4-b L3: the rest counted in groups, the statements apart ("the rest (2, …)" read as two groups of eight)
             text = (f"The files state element {element}, edge {edge} for {len(items)} group(s), and no file disagrees: "
-                    f"{sum(1 for _, s in items if s['group_specific_statements'])} of them from processed outputs linked to their runs, "
-                    f"the rest only from beamtime-wide statements ({items[0][1]['beamtime_wide_statements']}, e.g. an acquisition macro's name). "
+                    f"{own} of them from processed outputs linked to their runs, "
+                    f"the rest only from beamtime-wide statements: {len(items) - own} group(s), from {statements} "
+                    "statement(s) (e.g. an acquisition macro's name). "
                     "Is that the absorber? Answer once, or per group (a reference foil or blank cell may differ).")
         else:
             partial = sum(1 for _, s in items for r in s["ai_readings"] if r.get("read_for"))
@@ -2329,10 +2522,17 @@ def _for_group(q: Mapping, scope: str, report: Mapping | None) -> Mapping | None
     lead = f"{len(q['fields'])} optional field(s) no parser read a value for: {', '.join(sorted(q['fields']))}."
     said = (f"{len(open_fields)} optional field(s) no parser read a value for and this group's record does not carry: "
             f"{', '.join(sorted(open_fields))}.")
-    return {**q, "fields": {f: ids for f, ids in q["fields"].items() if f in open_fields},
+    text = q["text"].replace(lead, said, 1)
+    reach = {}
+    if q.get("field_reach"):  # r4-b M4: the per-field reach, of the fields still open for the group only
+        reach = {f: r for f, r in q["field_reach"].items() if f in open_fields}
+        text = text.replace(_field_reach_text(q["field_reach"]), _field_reach_text(reach), 1)
+    return {**{k: v for k, v in q.items() if k != "field_reach"},
+            "fields": {f: ids for f, ids in q["fields"].items() if f in open_fields},
             "field_allowed_values": {f: a for f, a in (q.get("field_allowed_values") or {}).items() if f in open_fields},
             **({"field_hints": {f: h for f, h in q["field_hints"].items() if f in open_fields}} if q.get("field_hints") else {}),
-            "text": q["text"].replace(lead, said, 1),
+            **({"field_reach": reach} if reach else {}),
+            "text": text,
             "fields_already_in_this_groups_record": len(q["fields"]) - len(open_fields)}
 
 
@@ -3370,13 +3570,17 @@ def _mentions_differ(stated: Sequence[Mapping]) -> bool:
                for m in s.get("mentions") or () for rid in s.get("runs") or ([s["run_id"]] if s.get("run_id") else []))
 
 
-def _move_outside_optional_targets(buckets: dict, bundle: Mapping, group_of: Mapping[str, str], add) -> None:
+def _move_outside_optional_targets(buckets: dict, bundle: Mapping, group_of: Mapping[str, str], add,
+                                   answered_out: set | None = None) -> None:
     """c8-b: an OPTIONAL value of a run no live record group holds (its group rejected, merged or split, or never
     grouped) is asked in THAT RUN's own optional question, never inside an experiment- or group-scope question a
     live group answers (a template's Campaign Info answer filled the live runs, and the question went on listing
     facility_name for 19 rejected alignment runs). That run question is counted under ``outside_live_groups``.
     IDS DO NOT CHANGE OR DISAPPEAR: a question whose targets are ALL outside keeps them (and its id); only a
-    question that keeps at least one target gives the others up. A run's question it moves to may be new."""
+    question that keeps at least one target gives the others up. A run's question it moves to may be new.
+
+    ``answered_out`` (:func:`consolidate`): a question that moves its OPEN targets only because its answered ones keep
+    it (the plain payload, without the answered ones, keeps them and stays open) is noted ``("open", id, field)``."""
     run_of_value = {m["value_id"]: m["run_id"] for m in bundle["missing_values"]}
     for key, q in list(buckets.items()):
         scope, kind, _path, _partition = key
@@ -3389,6 +3593,11 @@ def _move_outside_optional_targets(buckets: dict, bundle: Mapping, group_of: Map
             continue
         moving = set(out_ids)
         field_of = {tid: f for f, ids in q["fields"].items() for tid in ids}
+        if answered_out is not None:
+            open_ids = {t["id"] for t in q["targets"] if t["id"] not in answered_out}
+            if open_ids and open_ids <= moving:
+                qid = _qid(scope, kind, _partition or "")
+                answered_out.update(("open", qid, field_of.get(tid)) for tid in open_ids)
         again_of = {a["target"]["id"]: a for a in q["asked_again"] if (a.get("target") or {}).get("id") in moving}
         q["targets"] = [t for t in q["targets"] if t["id"] not in moving]
         q["target_keys"] = {(t["kind"], t["id"]) for t in q["targets"]}

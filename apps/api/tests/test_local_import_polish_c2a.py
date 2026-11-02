@@ -167,7 +167,7 @@ def test_a_truncated_scan_warns_with_the_counts(tmp_path):
 def test_a_group_with_no_truncated_scan_says_nothing_new(tmp_path):
     bdir, root, _ = make_case(tmp_path, [("01_SYN_ZZ1", [spec_file(fluo_scan(s)) for s in (1, 2)], {"sample_name": "ZZ1"})])
     r = isaac(run_process(bdir, source_root=root))
-    assert set(r["qc"].get("statements") or ()) <= {"glitch_check_few_scans", "glitch_points_on_edge"} and "scan_range_truncated" not in r["review_flags"]  # c12-cal / r2-a: the glitch sentences only
+    assert set(r["qc"].get("statements") or ()) <= {"glitch_check_few_scans", "glitch_points_on_edge", "channel_choice_needs_review"} and "scan_range_truncated" not in r["review_flags"]  # c12-cal / r2-a: the glitch sentences only
     assert "edge_step_implausible" not in r["qc"]["metrics"]
 
 

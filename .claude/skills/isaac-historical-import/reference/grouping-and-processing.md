@@ -81,7 +81,14 @@ it finds one. Show per group, in words:
   when `qc.statements.glitch_points_on_edge` is present (metrics `glitch_points_on_edge` /
   `glitch_points_off_edge`), say that sentence; only the off-edge count is glitches (flagged points within
   5 eV of E0 or in the steep stretch of the edge are unjudged, not cleared: say to look at the plot near E0;
-  the stored verdict is unchanged);
+  the stored verdict is unchanged). A point from ONE scan alone, far beyond the other scans there, is never
+  "unjudged": `qc.statements.glitch_points_from_one_scan` names the scan and counts those points as glitches.
+  **One scan sets the curve** (QC `fail` `edge_from_single_scan`, `qc.statements.edge_from_single_scan`): with
+  that scan left out the merged curve's range shrinks more than 5 times, so its white line, edge step and E0 are
+  that scan's stretch (or, said as such, its post- or pre-edge). Say the sentence, never offer to approve the
+  curve, and ask whether the scan belongs in the merge. **The only scan with an edge** (flag and
+  `qc.statements.only_scan_with_edge`, never a fail): the other scans are dead, dark or out of the beam; say it
+  and ask about those scans, never offer to leave the good one out;
 - **when scans were skipped** (reason `scans_skipped_lacking_chosen_columns`; flag
   `channel_from_a_later_scan` when the first scan was one of them): the used / readable / skipped
   counts in plain words — "14 of 165 scans were used; 150 had different columns (they may be motor
@@ -93,6 +100,9 @@ it finds one. Show per group, in words:
   "the project does not say which scans". An Athena project does not list the scan files it merged, so
   say which of the three it is and, when it is the last, ask the scientist; never infer scans from the
   curve. `scans_used: null` in its metrics means exactly that, not zero scans;
+- **a channel chosen by name** (flag `channel_choice_needs_review`, `qc.statements.channel_choice_needs_review`): the
+  protocol's column-name order chose it, not the BL15-2 selector; say the sentence (the channel, why, the other
+  channels the scan has) and ask the scientist to confirm it is the channel the measurement used;
 - **when the channel fell back** (reason and flag `channel_fallback_transmission_not_positive`: a
   group named as a reference or standard takes transmission first, but I0 or I1 was not positive in
   every scan, so fluorescence was used): say the sentence in `qc.json` → `statements` and ask the
@@ -205,7 +215,8 @@ Ask: approve, reject, or needs changes (with a note):
   not preferred. Say the statement and ask "was this E0 measured from this group's edge, or set?" before approving
   it; approve it only on "measured", with `--e0-measured` (`decide` refuses it without). If it was set, it is not the edge position: offer
   ISAAC's result instead. A result already decided is kept as it is: the summary line "approved result <id> carries
-  a possibly fixed Athena E0" names it; ask the scientist the same question about it.
+  a possibly fixed Athena E0" names it; ask the scientist the same question about it. With `--group`, other groups'
+  stored results are one count line ("N more stored results of M groups not processed now …").
 - **A result with no curve** (no output file, e.g. `no_usable_scan`) cannot be approved; `decide`
   refuses. Say why in words and offer: reject the result; `needs_changes` (the protocol needs a setting
   the scientist chooses; only on their explicit choice re-process with `--params-file`); or leave the
@@ -260,7 +271,15 @@ an element/edge already named for the group: approved, proposed, or the group's 
 - **No reference proposed** (`reference_proposed: false`; flags `reference_edge_not_found`,
   `reference_edge_in_too_few_scans` or `no_reference_available`): say the `reference_statement` ("only 1 of
   16 scans shows a usable reference edge; an in-scan reference needs one in at least 2 scans") and do NOT
-  ask for an element or edge: no shift can be approved, and `approve_calibration` is refused.
+  ask for an element or edge: no shift can be approved, and `approve_calibration` is refused. A scan whose
+  reference edge stands more than 1,000,000 times its pre-edge noise is a channel that is not counting, never
+  usable (flag `reference_noise_degenerate`), and is said the same way.
+- **Usable edges that disagree** (flag `reference_edges_disagree`, `calibration_proposed: false`: they spread
+  over more than 0.5 eV, `qc.warn_reference_e0_spread_eV`, stricter only): not proposed. Say the sentence ("its
+  usable edges spread 6.10 eV (… median 11216.2 eV of 2 scans) …") and ask about the channel (a missing foil, a
+  channel seeing the sample, drift). Only if the scientist says the reference is what they name (a foil drifting
+  between scans), approve with `--accept-shift <the shift shown>`, whatever its size (without it: refused;
+  processing does not apply it, `calibration_reference_spread_not_confirmed`).
 - **A reference group's own edge** (`reference_source: reference_group_own_signal`, not a separate foil channel)
   is a calibration only if its sample is a pure element, and names cannot settle that: a chemical standard is not
   an energy calibrant (its edge sits where its chemistry puts it; "S K" would move a MoS2 standard onto elemental
@@ -284,7 +303,12 @@ an element/edge already named for the group: approved, proposed, or the group's 
   edge the reference measures (`--element Ir`, `--edge L3` style). Never guess it from a file name. Record
   `<isaac> bundle decide <bundle> --target <group id> --decision approve_calibration --element <symbol> --edge <K|L1-L3|M1-M5> --by "<name>"`.
   The reply (or the refusal) says the shift it applies: "the reference edge sits 8.6 eV above Ti K's
-  tabulated 4966.0 eV; approving applies -8.6 eV". Say it to the scientist in those words.
+  tabulated 4966.0 eV; approving applies -8.6 eV", and what it is read from ("the median of 3 usable scans
+  (4974.6 eV, spread 0.20 eV)"). Say it to the scientist in those words. **An in-scan reference edge within
+  0.5 eV of the group's own sample E0** (flag `reference_edge_at_sample_e0`): the channel may be seeing the
+  sample, not a foil. Say the sentence and ask whether the channel holds a reference foil; approving it needs
+  `--accept-shift` whatever the size (without it processing does not apply it,
+  `calibration_reference_at_sample_e0_not_confirmed`).
 - **A shift above the protocol's 2 eV warning level** (`qc.warn_energy_shift_eV`) is refused until the
   scientist also accepts its size: it moves every energy of the record, E0 included, by that much, and can
   erase a chemical shift the study measures. Say the size, ask "apply -8.6 eV to this group?", and only on
@@ -327,7 +351,13 @@ an element/edge already named for the group: approved, proposed, or the group's 
   decisions it would let the regroup combine (`merge_decisions_unblocked`): tell the scientist before
   regrouping. When they say a position is NOT a counter:
   `<isaac> bundle decide <bundle> --target experiment --decision set_not_counter_positions --positions 2 --by "<name>"`
-  (grouping is unchanged; the question drops out). When they say they do not know:
+  (grouping is unchanged; the question drops out). Every open merge candidate whose names differ ONLY at those
+  positions then carries the caution "the scientist said position N is not a counter", and the reply names them
+  (`said_not_counter_merge_candidates`); none is decided. If the scientist agrees they are all distinct, one command
+  keeps them all apart: `<isaac> bundle decide <bundle> --question <counter question id> --decision keep_apart --by "<name>"
+  --target <mc-…> …`, naming each candidate the reply listed (the reply prints it so); it is refused, naming what
+  changed, when the cautioned candidates are no longer exactly those.
+  When they say they do not know:
   `<isaac> bundle decide <bundle> --target experiment --decision defer --by "<name>"` records it; grouping is unchanged, the question stays, marked `deferred`, and a later
   answer supersedes it. Never guess a position for them.
 
@@ -348,3 +378,11 @@ post-edge from 150 eV"), write a JSON file in the notes folder beside the bundle
 keys are refused. Then `<isaac> process <bundle> --source <folder> --group <id> --params-file <file>`. Say back
 exactly what changed; every changed value is recorded on the result. Never use it to pass a QC check:
 a threshold is the protocol's, not a fix.
+
+**Leaving a scan out of a merge**, only when the scientist says it does not belong (a dead scan, a lost beam,
+one scan's spike): the outlier, zero-signal and `edge_from_single_scan` sentences give the exact file,
+`{"exclude_scans": {"<group id>": ["<file name>"]}}` (a relative path or source id works too, and the sentence uses
+the relative path when a file name repeats across folders; `<file>#<scan>` for one scan of a multi-scan file; a
+name that left out more than one scan, or a group id that is no group, is said). Re-process that group with it as above: the new result lists the scan as skipped
+`scans_excluded_by_params_file`, says it (`qc.statements.scans_excluded_by_params_file`, also a name that matched
+no scan), and records it in `params.json` `excluded_scans`; the earlier result stays as it was.

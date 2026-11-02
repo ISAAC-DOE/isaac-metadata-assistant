@@ -82,6 +82,10 @@ START_TIME_WARNING = "start_time_left_out"
 START_TIME_LEFT_OUT = "start time left out: instrument clock zone deferred (question {question})"
 #: c16-r L6: the same, while the clock question has no answer at all (neither a zone nor a defer)
 START_TIME_LEFT_OUT_UNANSWERED = "start time left out: instrument clock zone not answered yet (question {question})"
+#: r4-b L5: the same, for a run whose start-time readings disagree (a SPEC `#D` local time beside its `#E` epoch) and
+#: nobody has settled it: the UTC reading the files give is offered only inside that question
+START_TIME_LEFT_OUT_CONFLICT = ("start time left out: the start-time disagreement is unanswered (question {question}; it "
+                                "offers the UTC reading the files give, e.g. a scan's #E epoch)")
 
 
 @functools.lru_cache(maxsize=512)
@@ -430,7 +434,9 @@ def composition_index(bundle: Mapping, decision_of: Mapping[tuple[str, str], Map
         # read when first needed, then kept: B.required_record_paths(control_mode=...) per mode (it reads the
         # schema file each call), and B.clock_zone_decision (only a confirmed local-clock start time asks for it)
         "required_by_mode": {},
-        "memo": {},
+        # read from the WHOLE bundle here, never lazily inside compose_group: a group is composed from its own
+        # values only, so a lazy read would keep the first group's view for every group
+        "memo": {"local_clock_runs": local_clock_runs(bundle), "open_start_conflicts": open_start_conflicts(bundle)},
     }
 
 
@@ -956,10 +962,11 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
         report["missing_required"].append(need)
     from . import questions as Q  # c8-b: the conditions generic runs' names and headers state (questions.py)
 
-    report["warnings"] = (_stated_potential_warnings(bundle, group, member_ids, fields, proposals)
+    report["warnings"] = (_stated_potential_warnings(bundle, group, member_ids, fields, proposals,
+                                                     held_by_scale=held_by_companion.get(SETPOINT_PATH, (None,))[0] == SCALE_PATH)
                           + _potential_sources_warnings(bundle, group, member_ids, fields)
                           + Q.open_circuit_warnings(bundle, group, member_ids, fields)
-                          + _start_time_warnings(bundle, group, member_ids, fields))
+                          + _start_time_warnings(bundle, group, member_ids, fields, index["memo"]))
     return draft, report
 
 
@@ -1009,7 +1016,7 @@ def _stated_potentials(bundle: Mapping, member_ids: set) -> list[dict]:
 
 
 def _stated_potential_warnings(bundle: Mapping, group: Mapping, member_ids: set, fields: Mapping,
-                               proposals: Mapping[str, list]) -> list[dict]:
+                               proposals: Mapping[str, list], *, held_by_scale: bool = False) -> list[dict]:
     """A WARNING (never a refusal) for a group whose file names state a potential that its record will not carry:
     the condition that defines the record would be silently absent. Why it is absent — no confirmed potential
     scale (a set-point composes only beside one, :data:`bundle.COMPOSES_ONLY_WITH`) or no confirmed set-point —
@@ -1019,14 +1026,16 @@ def _stated_potential_warnings(bundle: Mapping, group: Mapping, member_ids: set,
     that carries a set-point gets none; so does one whose file names state no potential, and so does one whose
     set-point is itself listed as missing (a required value nobody answered: the missing list already says it). A
     confirmed set-point held back until its scale is answered is NOT listed (c12-q: the scale is), so it warns; a
-    ``missing`` placeholder for the scale carries no scale."""
+    ``missing`` placeholder for the scale carries no scale. r4-b L2: ``held_by_scale``: the set-point is confirmed and
+    held back by its scale (some run of the group has none, while another's fills the field), so the SCALE is what is
+    missing, as its ``required_because`` says, never "until the potential set-point is confirmed"."""
     if SETPOINT_PATH in fields:
         return []
     stated = _stated_potentials(bundle, member_ids)
     if not stated:
         return []
     answered = [v for v, _, _ in proposals.get(SETPOINT_PATH, ()) if isinstance(v, (int, float)) and not isinstance(v, bool)]
-    scale_missing = _present(fields, SCALE_PATH) is None
+    scale_missing = _present(fields, SCALE_PATH) is None or held_by_scale
 
     def open_targets(path: str) -> list[str]:
         return [o.get("candidate_id") or o.get("value_id")
@@ -1265,7 +1274,8 @@ def local_clock_runs(bundle: Mapping) -> set[str]:
     return {c["run_id"] for c in bundle.get("candidates") or () if c.get("run_id") is not None and B.is_local_clock_start(c)}
 
 
-def _start_time_warnings(bundle: Mapping, group: Mapping, member_ids: set, fields: Mapping) -> list[dict]:
+def _start_time_warnings(bundle: Mapping, group: Mapping, member_ids: set, fields: Mapping,
+                         memo: dict | None = None) -> list[dict]:
     """A :data:`START_TIME_WARNING` for a record that carries no start time while a member run's scan headers write
     one (``bundle.XDC_START_RULE_ID``) and the latest answer to the clock question is ``defer``: the record goes out
     without it, and says so. c16-r L6: so does one while the clock question has no answer yet (no zone, no defer),
@@ -1273,8 +1283,13 @@ def _start_time_warnings(bundle: Mapping, group: Mapping, member_ids: set, field
     from . import questions as Q
     from .mutations import clock_zone_deferral
 
-    if _present(fields, B.XDC_START_PATH) is not None or not local_clock_runs(bundle) & set(member_ids):
+    if _present(fields, B.XDC_START_PATH) is not None:
         return []
+    memo = {} if memo is None else memo
+    if "local_clock_runs" not in memo:  # r4-c: read once per composition, never once per group
+        memo["local_clock_runs"] = local_clock_runs(bundle)
+    if not memo["local_clock_runs"] & set(member_ids):
+        return _start_time_conflict_warnings(bundle, group, member_ids, memo)
     if clock_zone_deferral(bundle) is not None:
         unanswered = False
     elif B.clock_zone_decision(bundle) is None:
@@ -1285,6 +1300,34 @@ def _start_time_warnings(bundle: Mapping, group: Mapping, member_ids: set, field
     return [{"code": START_TIME_WARNING, "group_id": group["group_id"], "path": B.XDC_START_PATH,
              "needs": B.XDC_START_PATH, "targets": [], "question_id": Q.CLOCK_QUESTION_ID, "text": text,
              "command": B.CLOCK_ZONE_COMMAND, **({"unanswered": True} if unanswered else {})}]
+
+
+def open_start_conflicts(bundle: Mapping) -> list[Mapping]:
+    """The start-time conflicts still open (conflicting or needing review), each naming its run."""
+    start = {c["candidate_id"] for c in bundle.get("candidates") or () if c.get("target_field_path") == B.XDC_START_PATH}
+    return [cf for cf in bundle.get("conflicts") or () if cf.get("run_ids") and (cf.get("candidate_id") or "") in start
+            and cf.get("value_state") in (B.STATE_CONFLICTING, B.STATE_NEEDS_REVIEW)]
+
+
+def _start_time_conflict_warnings(bundle: Mapping, group: Mapping, member_ids: set, memo: dict | None = None) -> list[dict]:
+    """r4-b L5: a :data:`START_TIME_WARNING` for a record that carries no start time because a member run's start-time
+    readings disagree and that disagreement is unanswered (a SPEC beamtime, with no clock-zone question to defer): the
+    record goes out without it and says why, at validate, export, in its evidence file and the upload dry run, as
+    for the deferred clock zone (c16d). Named by the question this group asks it in. ``memo``: the composition
+    index's, so the open start-time disagreements are found once per bundle, not once per group."""
+    from . import questions as Q
+
+    memo = {} if memo is None else memo
+    if "open_start_conflicts" not in memo:
+        memo["open_start_conflicts"] = open_start_conflicts(bundle)
+    for cf in memo["open_start_conflicts"]:
+        if cf["run_ids"][0] in member_ids:
+            qid = Q._qid(f"group:{group['group_id']}", "resolve_conflict", cf["conflict_id"])
+            return [{"code": START_TIME_WARNING, "group_id": group["group_id"], "path": B.XDC_START_PATH,
+                     "needs": B.XDC_START_PATH, "targets": [cf["conflict_id"]], "question_id": qid,
+                     "text": START_TIME_LEFT_OUT_CONFLICT.format(question=qid), "conflict": True,
+                     "command": f"isaac bundle show question <bundle_dir> {qid}"}]
+    return []
 
 
 def potential_sources_text(w: Mapping) -> str:
@@ -1366,7 +1409,8 @@ def potential_warning_text(w: Mapping) -> str:
     if w.get("code") == POTENTIAL_SOURCES_WARNING:
         return potential_sources_text(w)
     if w.get("code") == START_TIME_WARNING:
-        return (START_TIME_LEFT_OUT_UNANSWERED if w.get("unanswered") else START_TIME_LEFT_OUT).format(question=w["question_id"])
+        return (START_TIME_LEFT_OUT_CONFLICT if w.get("conflict") else START_TIME_LEFT_OUT_UNANSWERED if w.get("unanswered")
+                else START_TIME_LEFT_OUT).format(question=w["question_id"])
     if w.get("open_circuit"):
         return Q.open_circuit_text(w)
     extra = Q.stated_potential_notes(w)
@@ -1968,6 +2012,39 @@ def warning_summary(warned: Sequence[Mapping], *, first: Iterable[str] | None = 
     return out
 
 
+def portal_warnings_of(report: Mapping) -> list[dict]:
+    """r4-b M7: the upstream portal validator's own WARNINGS for one record (``portal_check.result.warnings``, kept
+    verbatim in ``validation/<group>.json``), as ``[{code, path, message}]``; ``[]`` when it did not run. A warning
+    never changes the verdict (``publish`` with warnings is still exportable); it is said, not hidden."""
+    pc = report.get("portal_check") or {}
+    if pc.get("status") != "ran":
+        return []
+    out = []
+    for w in (pc.get("result") or {}).get("warnings") or ():
+        if isinstance(w, Mapping):
+            out.append({"code": str(w.get("code") or "PORTAL_WARNING"), "path": w.get("path"),
+                        "message": str(w.get("message") or w.get("code") or "")})
+        else:
+            out.append({"code": "PORTAL_WARNING", "path": None, "message": str(w)})
+    return out
+
+
+def portal_warning_summary(by_group: Mapping[str, Sequence[Mapping]]) -> list[dict]:
+    """r4-b M7: each distinct portal warning ONCE (its code and message), with how many records it is on and the first
+    of their groups: what ``validate`` and ``export`` print instead of the same warning on 78 records."""
+    seen: dict[tuple, dict] = {}
+    for gid, ws in by_group.items():
+        for w in ws:
+            row = seen.setdefault((w["code"], w["message"]), {**w, "records": 0, "group_ids": []})
+            if gid not in row["group_ids"]:
+                row["records"] += 1
+                row["group_ids"].append(gid)
+    return [{**r, "group_ids": r["group_ids"][:REASONS_SHOWN],
+             "text": f"The portal validator warns on {r['records']} record(s) ({r['code']}"
+                     + (f", {r['path']}" if r.get("path") else "") + f"): {r['message']}"}
+            for r in sorted(seen.values(), key=lambda r: (-r["records"], r["code"]))]
+
+
 #: What a warning's ``path`` is called in ``export``'s "Written without …" line (else the path itself).
 WRITTEN_WITHOUT_NAMES = {SETPOINT_PATH: "the potential set-point", B.CONTROL_MODE_PATH: "the open-circuit condition"}
 
@@ -2027,6 +2104,7 @@ def validate_records(bundle_dir: Path, *, run_portal=None, full: bool = False) -
     out_dir = bundle_dir / VALIDATION_DIR
     out_dir.mkdir(exist_ok=True)
     verdicts, stale, not_exportable = {}, [], []
+    portal_warned: dict[str, list[dict]] = {}
     fresh = fresh_compositions(bundle_dir, bundle, test_marker=marked)
     warned = with_question_commands(bundle, [w for _, _, comp in fresh for w in comp.get("warnings") or ()])
     for group_id, draft, composition in fresh:
@@ -2039,6 +2117,8 @@ def validate_records(bundle_dir: Path, *, run_portal=None, full: bool = False) -
         report["warnings"] = [w for w in warned if w["group_id"] == group_id]
         _atomic_write(out_dir / f"{group_id}.json", _json_bytes(report))
         verdicts[group_id] = report["verdict"]
+        if pw := portal_warnings_of(report):
+            portal_warned[group_id] = pw
         if report["verdict"] != "exportable":
             not_exportable.append({"group_id": group_id, "verdict": report["verdict"],
                                    "missing_required": report["missing_required"],
@@ -2061,6 +2141,15 @@ def validate_records(bundle_dir: Path, *, run_portal=None, full: bool = False) -
         )
     out.update(warning_summary(warned, first=[g for g, v in verdicts.items() if v == "exportable"], full=full,
                                where=f"{VALIDATION_DIR}/<group_id>.json lists each group's"))
+    if portal_warned:
+        # r4-b M7: the portal validator's own warnings, each ONCE with its record count (before: only in
+        # validation/<group>.json, "publish (0 error(s), 2 warning(s))", and never said here)
+        said = portal_warning_summary(portal_warned)
+        out["portal_warnings"] = said
+        out["warnings"] = list(out.get("warnings") or ()) + [
+            {"group_id": None, "code": f"portal:{w['code']}", "text": w["text"], "command": None, "records": w["records"]}
+            for w in said]
+        out["warnings_total"] = int(out.get("warnings_total") or 0) + len(said)
     from .propose_terms import pending_vocabulary
 
     pending = pending_vocabulary(bundle, fresh, verdicts)
@@ -2341,6 +2430,7 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     bundle_dir, out = Path(bundle_dir), Path(out)
     bundle = load_validated(bundle_dir)
     exported, refused = [], []
+    portal_warned: dict[str, list[dict]] = {}
     index = _read_export_index(out) if out.is_dir() else {"format": EXPORT_INDEX_FORMAT, "records": []}
     bundle_id = bundle.get("bundle_id")
     prior_of = {(r.get("bundle_id"), r.get("group_id")): r for r in index["records"] if isinstance(r, Mapping)}
@@ -2461,6 +2551,10 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
                "artifacts": artifacts, "schemas_used": report["schemas_used"], "export": status,
                "statement": "Valid for the portal's pinned schema; NOT claimed valid for the website."}
         still = [written_without(w) for w in warned if w["group_id"] == group_id]
+        if pw := portal_warnings_of(report):
+            # r4-b M7: a record the portal validator warns about says so on its row
+            portal_warned[group_id] = pw
+            still += [f"Written with a portal validator warning ({w['code']}): {w['message']}" for w in pw]
         if still:
             # c11-r: capped like every other list (count + the first few); `validate --full` lists every one
             row["warnings"] = still[:WARNINGS_SHOWN]
@@ -2527,6 +2621,12 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         "on_disk_drafts_ignored_because_they_differ": stale,
         "on_disk_drafts_ignored_with_no_confirmed_group": orphans,
     }
+    if portal_warned:
+        # r4-b M7: each portal warning once, with how many of the records written carry it
+        result["portal_warnings"] = portal_warning_summary(portal_warned)
+        result["outcome"] += (" The portal validator warned on written records: "
+                              + "; ".join(f"{w['code']} ({w['records']} record(s))" for w in result["portal_warnings"])
+                              + " (`portal_warnings`).")
     if not exported:
         # SAID PLAINLY: with nothing written there is nothing for `upload --dry-run` to show
         result["statement"] = (

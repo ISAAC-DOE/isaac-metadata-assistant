@@ -92,8 +92,10 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   field carries them (a comment line, a unit spelling). Say how many there are; do not ask each.
 - **A conflict with `covered_by_decisions`** (also `affects_record: false`; counted in
   `conflicts_covered_by_decisions`, not in `optional`): each of its runs already holds the scientist's decision for
-  that field, one value across its runs (e.g. a sheet's Technique ruling), and the record is built from it. Do not
-  ask it again; say how many there are.
+  that field, one value across its runs (e.g. a sheet's Technique ruling, or a beamtime-wide answer, which reaches
+  every run a live group holds), and the record is built from it. Do not ask it again; say how many there are. A run
+  whose own answer differs from the beamtime-wide one, or another run of its group answered otherwise (the record pools
+  them), is not covered: the record fills nothing for that field until they agree.
 - **A conflict no reading of which the field takes** (`readings_that_fit_the_field: 0`; each reading
   hint has `fits_field`): `confirm --value <one reading>` would be refused, so `answer_command` is
   `correct --value <…>`. Start times: the `#D` readings are local clock times with no zone and can never
@@ -119,6 +121,11 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
 - **Sample questions asked once for several groups** name the shared sample reading as the files write it
   ("with the same sample reading (sample name 'ZZ1', sample or electrode number '01', as the files write
   it)"). Say that reading when you ask.
+- **Per-group questions that share a reading** (73 groups' material name `'JK1C'`, one set-point per potential) are
+  kept one per group (each record carries its own answer; their ids never change), but share a `same_reading_group`
+  (`same_reading_count` of them), and the text says "N questions share this reading (…); answer them together with
+  … --same-reading …". Ask once ("are all N the same thing?"); on a yes, run its `same_reading_command`. Runs whose
+  file names read the field differently never share one; answer the others on their own.
 - **No value to confirm.** Text like "What is the technique? The files hold text for it … but no
   value this build can carry", with no `confirm` in `allowed_decisions`, means there is nothing to
   accept. Never invent a value and never confirm one. Ask "What is X?", show the file's text (the
@@ -157,6 +164,11 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   missing until it is answered (the set-point goes in only beside it), so the scale question blocks.
   With neither answered, both are required now and counted together in the minimum (the scale's
   `required_because` says it is asked with the set-point), so the scientist is not asked twice.
+- **An optional field asked for the whole beamtime** whose groups were mostly answered already (a File List): its
+  `field_reach` (and the text, "… reaches 9 of 78 group(s) …, the other 69 already answered per group") says which
+  groups and runs an answer there lands on; the reply to `--field` says the same. Say those groups, not "the whole
+  beamtime". When it says "careful: it would put a cell type on …" (a standard, or a run recorded ex situ), do not
+  answer it there: answer only the groups it fits (`--only group:<id>`).
 
 ## Recording
 
@@ -197,7 +209,9 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   no start time is converted, the question stays under its id, marked `deferred`, and the counter
   question is not touched. Every record of those runs then goes out without its start time, and says
   so: `validate` and `export` warn "start time left out: instrument clock zone deferred (question <Q>)"
-  (while the question is not answered at all: "… not answered yet (question <Q>)"),
+  (while the question is not answered at all: "… not answered yet (question <Q>)"; on a SPEC beamtime, with no
+  clock question, a run whose start-time readings disagree and are unsettled: "start time left out: the start-time
+  disagreement is unanswered (question <Q>; …)", whose question offers the `#E` epoch's UTC reading),
   the record's evidence file keeps that line under `notes`, and `upload --dry-run` repeats it; tell the
   scientist before they export. Once a zone is recorded, `defer` is refused (it would not withdraw the
   zone); to change the zone, state it again.
@@ -288,7 +302,8 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   (one line per cell or column; `--full` for every decision); add `--apply` only after the scientist has seen the preview. Each cell becomes decisions; each note
   cites its cell. Invalid cells (not an allowed value exactly, not a number) record nothing.
 - A cell that disagrees with an earlier decision is a clash and is skipped. Use `--supersede` only
-  when the scientist says the sheet is the newer answer. (A ruling on an adopted sheet's Disagreements row that
+  when the scientist says the sheet is the newer answer. A clash's `clashes_by_cell` command is a `--question`
+  command when the cell's targets are exactly one question's. (A ruling on an adopted sheet's Disagreements row that
   named the value recorded now needs no `--supersede`; see below.)
 - Columns recorded nowhere (no official field, or no target in this bundle) are listed with their
   cells. Tell the scientist; do not move their values into another field.
@@ -324,7 +339,9 @@ and to use it (a sheet you found in the folder is not that; ask first). Never re
    or the acquisition system the scan headers match: what `ISAAC Suggestions` shows) is a row too, kind
    `hint`: compared without `BL` and separators, so `BL15-2`, `BL152` and `15-2` agree and `62b` does not. A
    hint is not a reading; say both and let them rule. The facility's organization is in no hint and is not
-   compared.
+   compared. A Campaign Info value that differs from an answer already RECORDED for the runs it reaches (`SLAC
+   National Accelerator Laboratory` beside a recorded `SLAC`) is a whole-beamtime row too, kind `recorded`: one ruling
+   settles it for every run. A beamline is compared as the hints are, so `SSRL BL15-2` beside a recorded `BL15-2` agrees.
 2. Say the summary: rows matched, cells adopted, their columns not read, unmatched rows and runs (those
    runs get nothing from their File List rows; when it says "Campaign Info still applies to them", their
    Campaign Info answers do reach those runs: say so), and the rows that reach more than one run, with the count (a scan

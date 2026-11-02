@@ -89,24 +89,27 @@ def _to(rep, tid):
 
 def test_an_adopted_campaign_info_answer_is_all_or_nothing_under_supersede(grouped, tmp_path, capsys, ticking):
     """The reviewer's probe: nine runs hold "ZZ Old Source"; adopt; run-001 gets "ZZ Since Source"; import with
-    --supersede. Before, runs 2-9 took their sheet's value and run-001 kept the other, for good."""
+    --supersede. Before, runs 2-9 took their sheet's value and run-001 kept the other, for good. r4-b M5: a Campaign
+    Info value that differs from the one recorded is a whole-beamtime Disagreements row, never an adopted cell; its
+    ruling is gated the same way: all nine or none."""
     tids = _fac_tids(grouped)
     M.decide(grouped, target_ids=tids, decision="correct", value="ZZ Old Source", by=OTHER, orcid=None)
     [s] = _sheets(grouped, tmp_path, 1)
-    _adopt_json(grouped, s, tmp_path / "A.xlsx", capsys)
-    assert FAC_CELL in T._marker(openpyxl.load_workbook(tmp_path / "A.xlsx"))["adopted"]
+    row = _d(_adopt_json(grouped, s, tmp_path / "A.xlsx", capsys), "Facility Name", kind="recorded")
+    assert FAC_CELL not in T._marker(openpyxl.load_workbook(tmp_path / "A.xlsx"))["adopted"]
+    _rule(tmp_path / "A.xlsx", tmp_path / "Ar.xlsx", {row["id"]: "Synthetic Light Source"})
     M.decide(grouped, target_ids=tids[:1], decision="correct", value="ZZ Since Source", by=OTHER, orcid=None)
     n = _on(grouped, tids)
     for _ in range(2):  # and again: nothing flips
-        rep = _imp(grouped, tmp_path / "A.xlsx", capsys, "--supersede")
-        assert not _from_cell(rep, FAC_CELL)
-        stale = {x["target"]["id"]: x for x in rep["stale_rulings"] if x["cell"] == FAC_CELL}
+        rep = _imp(grouped, tmp_path / "Ar.xlsx", capsys, "--supersede")
+        assert not [d for d in rep["decisions"] if d["target"]["id"] in set(tids)]
+        stale = {x["target"]["id"]: x for x in rep["stale_rulings"] if x["target"]["id"] in set(tids)}
         assert set(stale) == set(tids)
         for tid in tids[1:]:
             assert stale[tid]["reason"].startswith(
-                f"this cell reaches 9 targets and is recorded for all of them or none, and {tids[0]} (run-001) was not "
+                f"this ruling reaches 9 targets and is recorded for all of them or none, and {tids[0]} (run-001) was not "
                 "made against the value recorded there now (its own line says why); nothing is recorded for this one "
-                "either. Adopt again, then import with --supersede"), stale[tid]["reason"]
+                "either. Adopt again and rule against what is recorded now"), stale[tid]["reason"]
             # c15b M2: the cell's one command for all nine, never this target's own
             assert stale[tid]["reason"].endswith(CELL_TAIL.format(n=9, key="stale_by_cell"))
     assert _on(grouped, tids) == n  # nothing recorded
@@ -116,13 +119,15 @@ def test_an_adopted_campaign_info_answer_is_all_or_nothing_under_supersede(group
 
 def test_an_adopted_campaign_info_answer_is_recorded_for_all_runs_when_none_changed_since(grouped, tmp_path, capsys,
                                                                                           ticking):
-    """The "all" of all or nothing: with nothing recorded since the adopt, --supersede records it on all nine."""
+    """The "all" of all or nothing: with nothing recorded since the adopt, the row's ruling is recorded on all nine
+    (r4-b M5: the row named the value recorded, so without --supersede)."""
     tids = _fac_tids(grouped)
     M.decide(grouped, target_ids=tids, decision="correct", value="ZZ Old Source", by=OTHER, orcid=None)
     [s] = _sheets(grouped, tmp_path, 1)
-    _adopt_json(grouped, s, tmp_path / "A.xlsx", capsys)
-    rep = _imp(grouped, tmp_path / "A.xlsx", capsys, "--supersede")
-    assert {d["target"]["id"] for d in _from_cell(rep, FAC_CELL)} == set(tids)
+    row = _d(_adopt_json(grouped, s, tmp_path / "A.xlsx", capsys), "Facility Name", kind="recorded")
+    _rule(tmp_path / "A.xlsx", tmp_path / "Ar.xlsx", {row["id"]: "Synthetic Light Source"})
+    rep = _imp(grouped, tmp_path / "Ar.xlsx", capsys)
+    assert {d["target"]["id"] for d in rep["decisions"] if d["target"]["id"] in set(tids)} == set(tids)
     assert {_latest_value(grouped, t) for t in tids} == {"Synthetic Light Source"}
 
 
