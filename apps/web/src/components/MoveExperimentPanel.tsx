@@ -274,7 +274,7 @@ export function MoveExperimentPanel({
                 <button type="submit" className="btn btn-primary" disabled={busy || isStale}>
                   {LABELS.libraryMoveSubmit}
                 </button>
-                <button type="button" className="btn btn-secondary" onClick={close} disabled={busy}>
+                <button type="button" className="btn btn-quiet" onClick={close} disabled={busy}>
                   {LABELS.libraryMoveCancel}
                 </button>
               </div>

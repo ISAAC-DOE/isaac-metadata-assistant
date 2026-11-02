@@ -1159,7 +1159,7 @@ function LoadedExport({
                   <span className="artifact-modal-sub"> · {viewing.runLabel}</span>
                 )}
               </span>
-              <button type="button" className="btn btn-secondary" onClick={closeViewer}>
+              <button type="button" className="btn btn-quiet" onClick={closeViewer}>
                 Close
               </button>
             </div>

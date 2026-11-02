@@ -885,7 +885,7 @@ function AssetCard({
             it is a check of the file at the location above.
           </p>
           <div className="asset-form-actions">
-            <button type="button" className="btn btn-secondary" onClick={close}>
+            <button type="button" className="btn btn-quiet" onClick={close}>
               Close
             </button>
           </div>
@@ -915,7 +915,7 @@ function AssetCard({
             >
               Remove This Reference
             </button>
-            <button type="button" className="btn btn-secondary" onClick={close}>
+            <button type="button" className="btn btn-quiet" onClick={close}>
               Cancel
             </button>
           </div>
@@ -1224,7 +1224,7 @@ function AssetForm({
               ? 'Record This Reference'
               : 'Save Changes'}
         </button>
-        <button type="button" className="btn btn-secondary" onClick={onCancel}>
+        <button type="button" className="btn btn-quiet" onClick={onCancel}>
           Cancel
         </button>
       </div>

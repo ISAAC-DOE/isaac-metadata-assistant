@@ -3258,7 +3258,7 @@ function ProposalCard({
                 </button>
                 <button
                   type="button"
-                  className="btn btn-secondary"
+                  className="btn btn-quiet"
                   disabled={busy}
                   onClick={() => setEditor(null)}
                 >
@@ -3313,7 +3313,7 @@ function ProposalCard({
                 </button>
                 <button
                   type="button"
-                  className="btn btn-secondary"
+                  className="btn btn-quiet"
                   disabled={busy}
                   onClick={() => setEditor(null)}
                 >

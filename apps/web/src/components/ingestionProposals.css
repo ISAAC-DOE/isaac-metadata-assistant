@@ -741,13 +741,6 @@
  * lives inside the form and inside a disclosure — never hover-only, and never
  * hiding a blocking error.
  */
-.new-proposal-lede {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-secondary);
-  max-width: 68ch;
-}
 
 /*
  * THE UNAVAILABLE LABEL IS TEXT, NOT A DISABLED BUTTON. A disabled control invites a
@@ -761,9 +754,10 @@
   color: var(--text-secondary);
 }
 
+/* THE FORM USES THE PANEL'S WIDTH (declutter, 2026-11-02): only its running prose
+   keeps a reading measure, on the paragraphs themselves. */
 .new-proposal-form {
   width: 100%;
-  max-width: 68ch;
 }
 
 .new-proposal-source-modes {

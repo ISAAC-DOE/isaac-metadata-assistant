@@ -700,7 +700,7 @@ export function NewProposalForm({
           >
             {busy ? LABELS.newProposalSubmitBusy : LABELS.newProposalSubmit}
           </button>
-          <button type="button" className="btn btn-secondary" onClick={() => close(true)}>
+          <button type="button" className="btn btn-quiet" onClick={() => close(true)}>
             Cancel
           </button>
         </div>

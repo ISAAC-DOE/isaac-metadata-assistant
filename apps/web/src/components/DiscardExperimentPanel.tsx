@@ -328,7 +328,7 @@ export function DiscardExperimentPanel({
               <button
                 ref={keepRef}
                 type="button"
-                className="btn btn-secondary"
+                className="btn btn-quiet"
                 onClick={close}
                 disabled={busy}
               >

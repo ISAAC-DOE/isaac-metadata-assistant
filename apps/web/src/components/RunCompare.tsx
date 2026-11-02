@@ -656,7 +656,7 @@ function PickingBar({
           filters and paging above all still work, and Compare on any card adds it.
         </span>
       </p>
-      <button type="button" className="btn btn-secondary" onClick={onRemove}>
+      <button type="button" className="btn btn-quiet" onClick={onRemove}>
         Cancel comparison
       </button>
     </div>

@@ -1836,7 +1836,7 @@ function NoteCard({
             </button>
             <button
               type="button"
-              className="btn btn-secondary"
+              className="btn btn-quiet"
               onClick={() => closeForm('map', true)}
             >
               Cancel
@@ -1891,7 +1891,7 @@ function NoteCard({
             </button>
             <button
               type="button"
-              className="btn btn-secondary"
+              className="btn btn-quiet"
               onClick={() => closeForm('edit', true)}
             >
               Cancel
@@ -1935,7 +1935,7 @@ function NoteCard({
             </button>
             <button
               type="button"
-              className="btn btn-secondary"
+              className="btn btn-quiet"
               onClick={() => closeForm('dismiss', true)}
             >
               Cancel
@@ -2117,7 +2117,7 @@ function NoteCard({
             </button>
             <button
               type="button"
-              className="btn btn-secondary"
+              className="btn btn-quiet"
               onClick={() => closeForm('propose', true)}
             >
               Cancel
