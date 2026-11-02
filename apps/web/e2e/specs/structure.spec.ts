@@ -109,6 +109,11 @@ for (const surface of SURFACES) {
         if (st.display === 'none' || st.visibility === 'hidden') continue;
         const r = el.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) continue;
+        // Inside a CLOSED `<details>` Chrome keeps the element's box (content-visibility: hidden on the
+        // details content) but renders none of its text, so `innerText` is "" while the text is there.
+        // Measured (Chrome 152): a folded chip reports a 58×42 box, innerText "", checkVisibility() false.
+        // Not shown is not colour-only: it is checked when its section is opened.
+        if (typeof el.checkVisibility === 'function' && !el.checkVisibility()) continue;
         // Containers are not the thing being tested; only leaf-ish status marks.
         if (el.querySelector('[class*="chip"], [class*="status"], [class*="badge"]')) continue;
         // Correctly decorative elements are not a colour-only-meaning defect —
