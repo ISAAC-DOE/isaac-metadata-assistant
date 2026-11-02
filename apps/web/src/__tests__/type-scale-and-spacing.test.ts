@@ -333,8 +333,14 @@ const CEILING = {
    * retired date badge, the graph toolbar row, the boxed import empty state and the
    * dashed graph selection box went, and their replacements use `--space-*` rungs.
    * Read from the counter.
+   *
+   * -> 2291, 2026-11-02, on current main: PR #306 (the shared `Select` /
+   * `SegmentedControl` and the one-page Schema Proposals) landed five spacing
+   * literals under main's then-ceiling of 2318. Combined with this branch's
+   * deletions the counter reads 2291 — still 27 below main's ceiling. Read from
+   * the counter.
    */
-  spacing: 2286,
+  spacing: 2291,
   /**
    * font-size declarations BELOW the 11px floor: 9.5px ×1, 10px ×14, 10.5px ×84.
    *
