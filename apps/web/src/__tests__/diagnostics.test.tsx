@@ -781,25 +781,28 @@ describe('hosted truthfulness — the Project Memory unavailable state', () => {
     expect(text).not.toMatch(/Graphify graph artifacts/i);
   });
 
-  it('states that the artifacts ARE shipped, which is the verifiable fact', async () => {
+  /*
+   * 2026-11-02 (owner direction: no standing caveat or roadmap prose): the panel is
+   * ONE line — "Project memory is unavailable — no memory graph was found." The
+   * two-conditions paragraph and the "Future path" paragraph are retired. What these
+   * tests now pin is that the one line asserts no cause it cannot know and brings no
+   * retired claim back.
+   */
+  it('is one line that says memory is unavailable', async () => {
     const { text } = await renderUnavailable();
-    expect(text).toMatch(/ships its memory artifacts with the application/i);
-    expect(text).toMatch(/an absent artifact is not the expected state/i);
+    expect(text.trim()).toBe('Project memory is unavailable — no memory graph was found.');
   });
 
-  it('names two possible conditions and asserts neither, having no signal to separate them', async () => {
+  it('asserts no cause it has no signal for', async () => {
     const { text } = await renderUnavailable();
-    expect(text).toMatch(/cannot tell which of two conditions applies/i);
-    expect(text).toMatch(/not included in this build/i);
-    expect(text).toMatch(/configured to read a memory source that is not present/i);
+    expect(text).not.toMatch(/because|was not included|is configured to|misconfigured|not ship/i);
   });
 
-  it('uses the corrected access vocabulary and promises no login-gated service', async () => {
+  it('promises no login-gated service and no future roadmap', async () => {
     const { text } = await renderUnavailable();
     expect(text).not.toMatch(/institution-hosted/i);
     expect(text).not.toMatch(/behind login/i);
-    expect(text).toMatch(/controlled by the deployment where it is operated/i);
-    expect(text).toMatch(/ISAAC manages no accounts or roles/i);
+    expect(text).not.toMatch(/Future path|accounts or roles/i);
   });
 
   it('names no identity product, host or infrastructure component', async () => {

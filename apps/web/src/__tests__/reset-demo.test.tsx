@@ -728,8 +728,14 @@ describe('P26.0b · Reset Worked Example — success refreshes the dashboard', (
     // row count + lifecycle badge distribution instead of by title text.
     await waitFor(() => expect(view.container.querySelectorAll('.exp-row')).toHaveLength(5));
     const queue = within(view.container.querySelector('.queue') as HTMLElement);
+    // Since 2026-11-02 only Exported wears a lifecycle chip; the four drafts carry
+    // theirs in the row's accessible name.
     expect(queue.getAllByText('Exported')).toHaveLength(1);
-    expect(queue.getAllByText('Draft')).toHaveLength(4);
+    expect(
+      [...view.container.querySelectorAll('.exp-row')].filter((r) =>
+        /(, |— )Draft,/.test(r.getAttribute('aria-label') ?? ''),
+      ),
+    ).toHaveLength(4);
     await waitFor(() => expect(view.queryAllByText(/Demo \(demo\/run\)/)).toHaveLength(0));
   });
 
