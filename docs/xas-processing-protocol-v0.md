@@ -398,7 +398,8 @@ Whether to leave such a scan out is the scientist's call: nothing is dropped for
   - **Leaving a scan out.** A params file's `exclude_scans` (`{group id: [file name | relative path | source
     id[#scan]]}`) leaves named scans out of one group's merge (recorded in that group's params.json).
   - **Bulk approval.** A bulk `decide --decision approve` is refused for any result whose curve carries a sentence
-    the scientist must hear: points on the edge, one scan's glitch, an outlier scan, or the only scan with an edge.
+    the scientist must hear: one scan's glitch, an outlier scan, or the only scan with an edge. Plain points on the
+    edge the glitch check cannot judge do not stop it: they are common on any sharp edge.
 * The §7 post-edge level cannot judge a scan ending < 50 eV above E0 (`post_edge_window_too_short`
   warns; its normalised curve is unchecked, its E0 usable).
 

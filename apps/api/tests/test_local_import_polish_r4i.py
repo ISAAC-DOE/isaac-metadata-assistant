@@ -16,9 +16,14 @@ def test_edge_from_single_scan_is_an_unusable_curve():
 
 
 def test_bulk_approve_problem_names_the_sentence():
-    r = {"result_id": "proc-x", "qc": {"statements": {"glitch_points_on_edge": "SYN sentence."}}}
+    r = {"result_id": "proc-x", "qc": {"statements": {"glitch_points_from_one_scan": "SYN sentence."}}}
     assert "SYN sentence." in (M.bulk_approve_problem(r) or "")
     assert M.bulk_approve_problem({"result_id": "proc-y", "qc": {"statements": {}}}) is None
+
+
+def test_plain_points_on_the_edge_do_not_stop_a_bulk_approval():
+    r = {"result_id": "proc-z", "qc": {"statements": {"glitch_points_on_edge": "SYN on-edge sentence."}}}
+    assert M.bulk_approve_problem(r) is None
 
 
 def test_a_bulk_approval_is_refused_for_a_flagged_curve_and_one_at_a_time_is_not(tmp_path, capsys):
