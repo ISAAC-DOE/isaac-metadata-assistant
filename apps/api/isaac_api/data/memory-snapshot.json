@@ -10408,7 +10408,7 @@
       },
       {
         "path": "apps/web/src/components/ArtifactCard.tsx",
-        "sha256": "8bad202fd157d527d7d0eed695e6645e697b9b6ef7d68d609db0bf7368fd1879"
+        "sha256": "cb43eb2fc0efca574d415425a3fd2692a72d1030df83e193eaacc6b4e337b4bd"
       },
       {
         "path": "apps/web/src/components/AssistantPanel.tsx",
@@ -11012,7 +11012,7 @@
       }
     ],
     "served_file_count": 200,
-    "served_manifest_fingerprint": "e5044780d21c1928475d56cb032b5985aa89f0c74bdc8699efa5bf8d4fd9bb3a"
+    "served_manifest_fingerprint": "2f5cf5396ba81dad9b77e2897f13a5489d081c7b7941faa8faddba49cb90b602"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
