@@ -3,7 +3,7 @@ import {
   openAssistantCatalog,
   openAssistantCatalogWhenReady,
 } from '../test/openAssistantCatalog';
-import { render, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, fireEvent, waitFor, within, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
 import { LABELS } from '../lib/labels';
@@ -80,14 +80,14 @@ describe('S4 · Guided Completion (live)', () => {
     // question 1 of 5, live from /pending, verbatim
     expect(await findByText('Answer 5 Questions to Finish This Record')).toBeInTheDocument();
     expect(getByText('What is the sha256 of the processing notebook?')).toBeInTheDocument();
-    expect(getByText('0 / 5')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: '0 of 5 answered' })).toBeInTheDocument();
 
     // type the value and confirm
     fireEvent.change(getByLabelText('Asset Hash'), { target: { value: SHA } });
     fireEvent.click(getByText('Confirm'));
 
     // pending shrank (4 remain, question 2 is current) + answered row with the chip
-    expect(await findByText('1 / 5')).toBeInTheDocument();
+    expect(await screen.findByRole('img', { name: '1 of 5 answered' })).toBeInTheDocument();
     expect(getByText('What is the sha256 of the raw scan file?')).toBeInTheDocument();
     // R1b: `stored X` claimed server state the /answers response never echoes.
     expect(getByText(`you answered ${SHA}`)).toBeInTheDocument();
@@ -153,7 +153,7 @@ describe('S4 · Guided Completion (live)', () => {
 
     // only the explicit Confirm sends it
     fireEvent.click(getByText('Confirm'));
-    await findByText('1 / 5');
+    await screen.findByRole('img', { name: '1 of 5 answered' });
     expect(answerPosts()).toHaveLength(1);
   });
 
@@ -227,8 +227,9 @@ describe('S4 · Guided Completion (live)', () => {
     expect(donePanel).not.toBeNull();
     expect(donePanel.textContent).not.toMatch(/is ready to export/i);
     expect(getByText('Go to Review Export Readiness →')).toBeInTheDocument();
-    // non-zero total (1 question, now answered): the real counter still renders
-    expect(getByText('1 / 1')).toBeInTheDocument();
+    // The resolved state carries no `1 / 1` counter since the declutter: the
+    // heading says it, and the progress bar belongs to the questions.
+    expect(screen.queryByText('1 / 1')).toBeNull();
     const posts = answerPosts();
     expect(posts).toHaveLength(1);
     expect(posts[0].body).toEqual({
@@ -650,12 +651,12 @@ describe('P27.5 · optimistic-concurrency conflict UX', () => {
     // confirm #1 (detail.version is "1.0" from the loaded fixture)
     fireEvent.change(getByLabelText('Asset Hash'), { target: { value: 'aaaa' } });
     fireEvent.click(getByText('Confirm'));
-    await findByText('1 / 5');
+    await screen.findByRole('img', { name: '1 of 5 answered' });
 
     // confirm #2 — question 2 (raw scan) is now current
     fireEvent.change(getByLabelText('Asset Hash'), { target: { value: 'bbbb' } });
     fireEvent.click(getByText('Confirm'));
-    await findByText('2 / 5');
+    await screen.findByRole('img', { name: '2 of 5 answered' });
 
     // first submit echoes the loaded token, second echoes the adopted one
     expect(answerIfMatchHeaders()).toEqual(['"1.0"', '"1.1"']);
@@ -681,7 +682,7 @@ describe('P27.5 · optimistic-concurrency conflict UX', () => {
     // the typed input is preserved (GuidedPrompt was not unmounted)
     expect((getByLabelText('Asset Hash') as HTMLInputElement).value).toBe('staged-value');
     // NOT advanced: still 0/5, no answered "stored" row, question 1 still current
-    expect(getByText('0 / 5')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: '0 of 5 answered' })).toBeInTheDocument();
     expect(queryByText(/^you answered /)).toBeNull();
 
     // Refresh re-fetches current state via the parent useFetch reload

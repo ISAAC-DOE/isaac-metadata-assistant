@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, fireEvent } from '@testing-library/react';
+import { render, fireEvent, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
 import {
@@ -70,7 +70,7 @@ describe('S4 · an answer is shown as confirmed only when the server reported it
       '/record/demo/complete',
     );
     await findByText(NOTEBOOK_Q);
-    expect(getByText('0 / 5')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: '0 of 5 answered' })).toBeInTheDocument();
 
     fireEvent.change(getByLabelText('Asset Hash'), { target: { value: MALFORMED } });
     fireEvent.click(getByText('Confirm'));
@@ -85,7 +85,7 @@ describe('S4 · an answer is shown as confirmed only when the server reported it
 
     // The counter did not move, and the question is STILL the open one — the two
     // must agree, which is precisely what the old behaviour broke.
-    expect(getByText('0 / 5')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: '0 of 5 answered' })).toBeInTheDocument();
     expect(getByText(NOTEBOOK_Q)).toBeInTheDocument();
     expect(getByText('Question 1 of 5')).toBeInTheDocument();
 
@@ -125,7 +125,7 @@ describe('S4 · an answer is shown as confirmed only when the server reported it
     fireEvent.change(getByLabelText('Asset Hash'), { target: { value: GOOD_SHA } });
     fireEvent.click(getByText('Confirm'));
 
-    await findByText('1 / 5');
+    await screen.findByRole('img', { name: '1 of 5 answered' });
     expect(getByText('Confirmed by You')).toBeInTheDocument();
     expect(queryByText(/That answer was not applied/)).toBeNull();
   });
@@ -158,7 +158,7 @@ describe('S4 · an answer is shown as confirmed only when the server reported it
     expect(queryByText('Confirmed by You')).toBeNull();
     // The server's own list is still adopted — it is a fact either way — so the
     // counter reflects it (4 remaining, none answered) rather than being frozen.
-    expect(getByText('0 / 4')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: '0 of 4 answered' })).toBeInTheDocument();
   });
 });
 

@@ -413,7 +413,6 @@ function AnswerRow({
           initialStaged
           confirmLabel={LABELS.actionSave}
           dontKnowLabel={LABELS.actionCancel}
-          hideBlankHint
           onConfirm={onSave}
           onDontKnow={onCancel}
         />

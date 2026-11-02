@@ -41,8 +41,6 @@ interface GuidedPromptProps {
   /** The secondary-action label; defaults to the "I don't know…" copy. Edit mode
    *  passes "Cancel" so the same control abandons the correction with no mutation. */
   dontKnowLabel?: string;
-  /** Hide the "a blank stays blank" completion hint (irrelevant in edit mode). */
-  hideBlankHint?: boolean;
   /**
    * Report every keystroke upward so the caller can hold the staged answer somewhere
    * that OUTLIVES this component.
@@ -107,7 +105,6 @@ export function GuidedPrompt({
   initialStaged = false,
   confirmLabel = LABELS.actionConfirm,
   dontKnowLabel = LABELS.actionDontKnow,
-  hideBlankHint = false,
   onTextChange,
   onStagedChange,
   onDiscardStaged,
@@ -306,9 +303,6 @@ export function GuidedPrompt({
       data-tutorial-anchor={TUTORIAL_ANCHORS.completionQuestion}
     >
       <div className="guided-head">
-        <span className="guided-num" aria-hidden="true">
-          {index + 1}
-        </span>
         <span className="guided-index">
           Question {index + 1} of {total}
         </span>
@@ -318,6 +312,9 @@ export function GuidedPrompt({
             the question's own words. */}
         <span className="guided-path-tip">
           <HelpTip subject={blocker.label} label="Official Field Details" describedBy={questionId}>
+            {/* THE TECHNICAL QUESTION, VERBATIM, lives here since the declutter
+                (2026-11-02): the heading is the field's human name. */}
+            <span className="guided-question-full">{blocker.question}</span>{' '}
             <span>
               Official field: <code className="guided-path">{blocker.path}</code>
             </span>
@@ -339,7 +336,7 @@ export function GuidedPrompt({
       )}
 
       <h2 className="guided-question" id={questionId}>
-        {blocker.question}
+        {blocker.label}
       </h2>
       {blocker.context && <p className="guided-context">{blocker.context}</p>}
 
@@ -392,7 +389,6 @@ export function GuidedPrompt({
       <div className="guided-field">
         {isVerdict ? (
           <>
-            <div className="guided-field-label">{blocker.label}</div>
             <div className="guided-verdict">
               <fieldset className="guided-verdict-set">
                 <legend className="guided-verdict-legend">QC verdict</legend>
@@ -451,7 +447,8 @@ export function GuidedPrompt({
           </>
         ) : structured ? (
           <>
-            <div className="guided-field-label">{blocker.label}</div>
+            {/* The example box sits directly above, so no hint repeats it; only the
+                staged state needs a line (declutter, 2026-11-02). */}
             {demo ? (
               staged ? (
                 <div className="guided-staged" role="status">
@@ -459,11 +456,7 @@ export function GuidedPrompt({
                   Ready to confirm{' '}
                   <span className="mono">{answerValuePreview(blocker.kind, demo.value)}</span>
                 </div>
-              ) : (
-                <p className="guided-structured-hint">
-                  A structured value from the reduced pipeline. Confirm the example value above.
-                </p>
-              )
+              ) : null
             ) : entryKind === 'series' ? (
               <SeriesEntry
                 idPrefix={`entry-${blocker.key}`}
@@ -512,9 +505,10 @@ export function GuidedPrompt({
           </>
         ) : (
           <>
-            <div className="guided-field-label">
-              {blocker.inputType === 'hash' ? LABELS.hashInputLabel : blocker.label}
-            </div>
+            {/* The heading names the field; only a hash needs its own input label. */}
+            {blocker.inputType === 'hash' && (
+              <div className="guided-field-label">{LABELS.hashInputLabel}</div>
+            )}
             <div className="guided-input-row">
               <input
                 className="input input-mono"
@@ -568,9 +562,7 @@ export function GuidedPrompt({
           <CircleHelp size={15} strokeWidth={2} aria-hidden="true" />
           {dontKnowLabel}
         </button>
-        {!hideBlankHint && (
-          <span className="guided-blank">A blank stays blank until you confirm it.</span>
-        )}
+
       </div>
     </section>
   );
